@@ -644,8 +644,8 @@ describe('structuredClone support in redactSensitiveData', () => {
   it('should handle arrays with Date objects', () => {
     const data = {
       events: [
-        { timestamp: new Date('2025-01-10'), password: 'secret1' },
-        { timestamp: new Date('2025-01-11'), apiKey: 'key123' },
+        { createdAt: new Date('2025-01-10'), password: 'secret1' },
+        { createdAt: new Date('2025-01-11'), apiKey: 'key123' },
       ],
     };
 
@@ -653,8 +653,8 @@ describe('structuredClone support in redactSensitiveData', () => {
     const events = redacted.events as Array<Record<string, unknown>>;
     const [event0, event1] = events;
 
-    expect(event0?.timestamp).toEqual(new Date('2025-01-10'));
-    expect(event1?.timestamp).toEqual(new Date('2025-01-11'));
+    expect(event0?.createdAt).toEqual(new Date('2025-01-10'));
+    expect(event1?.createdAt).toEqual(new Date('2025-01-11'));
 
     expect(event0?.password).toEqual({ redacted: true, hadValue: true });
     expect(event1?.apiKey).toEqual({ redacted: true, hadValue: true });
