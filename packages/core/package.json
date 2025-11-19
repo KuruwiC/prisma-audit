@@ -1,0 +1,74 @@
+{
+  "name": "@kuruwic/prisma-audit-core",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Framework-agnostic audit logging core for Prisma",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./testing": {
+      "import": {
+        "types": "./dist/testing/index.d.ts",
+        "default": "./dist/testing/index.js"
+      },
+      "require": {
+        "types": "./dist/testing/index.d.ts",
+        "default": "./dist/testing/index.cjs"
+      }
+    }
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "prisma",
+    "audit",
+    "logging",
+    "typescript",
+    "async-local-storage"
+  ],
+  "author": "kuruwic",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kuruwic/prisma-audit.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@paralleldrive/cuid2": "^3.0.4",
+    "debug": "^4.4.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.3.5",
+    "@kuruwic/prisma-audit-typescript-config": "workspace:*",
+    "@types/debug": "^4.1.12",
+    "@types/node": "^24.10.0",
+    "tsup": "^8.5.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.8"
+  }
+}
