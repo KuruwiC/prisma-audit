@@ -1,0 +1,29 @@
+{
+  "name": "@kuruwic/prisma-audit-examples/hono-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Hono API server with Prisma Audit (SQLite)",
+  "scripts": {
+    "dev": "DATABASE_URL='postgresql://prisma:prisma@localhost:5432/prisma_audit_dev' tsx watch src/index.ts",
+    "start": "DATABASE_URL='postgresql://prisma:prisma@localhost:5432/prisma_audit_dev' node dist/index.js",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.13.7",
+    "@kuruwic/prisma-audit-database": "workspace:*",
+    "hono": "^4.6.0"
+  },
+  "devDependencies": {
+    "@kuruwic/prisma-audit": "workspace:*",
+    "@kuruwic/prisma-audit-core": "workspace:*",
+    "@testcontainers/postgresql": "^11.8.0",
+    "@types/node": "^24.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.8"
+  }
+}
