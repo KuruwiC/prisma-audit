@@ -36,7 +36,7 @@ describe('createBuildLogsStage', () => {
       after: { id: 'post-1', title: 'New Title' },
       changes: null,
       requestContext: null,
-      timestamp: new Date('2025-01-01T00:00:00Z'),
+      createdAt: new Date('2025-01-01T00:00:00Z'),
     };
 
     const mockBuildAuditLog = vi.fn().mockResolvedValue([mainLog]);
@@ -64,7 +64,6 @@ describe('createBuildLogsStage', () => {
       result: { id: 'post-1', title: 'New Title' },
       actorContext: null,
       entityContext: null,
-      aggregateContext: null,
     };
 
     const deps: Pick<
@@ -109,7 +108,7 @@ describe('createBuildLogsStage', () => {
       after: { id: 'post-1', title: 'New Title' },
       changes: null,
       requestContext: null,
-      timestamp: new Date('2025-01-01T00:00:00Z'),
+      createdAt: new Date('2025-01-01T00:00:00Z'),
     };
 
     const nestedLog1: AuditLogData = {
@@ -130,7 +129,7 @@ describe('createBuildLogsStage', () => {
       after: { id: 'comment-1', content: 'First comment' },
       changes: null,
       requestContext: null,
-      timestamp: new Date('2025-01-01T00:00:01Z'),
+      createdAt: new Date('2025-01-01T00:00:01Z'),
     };
 
     const nestedLog2: AuditLogData = {
@@ -151,7 +150,7 @@ describe('createBuildLogsStage', () => {
       after: { id: 'tag-1', name: 'TypeScript' },
       changes: null,
       requestContext: null,
-      timestamp: new Date('2025-01-01T00:00:02Z'),
+      createdAt: new Date('2025-01-01T00:00:02Z'),
     };
 
     const mockBuildAuditLog = vi.fn().mockResolvedValue([mainLog]);
@@ -190,7 +189,6 @@ describe('createBuildLogsStage', () => {
       },
       actorContext: null,
       entityContext: null,
-      aggregateContext: null,
     };
 
     const deps: Pick<
@@ -233,7 +231,7 @@ describe('createBuildLogsStage', () => {
       after: { id: 'post-1', title: 'New Title' },
       changes: { title: { from: 'Old Title', to: 'New Title' } },
       requestContext: null,
-      timestamp: new Date('2025-01-01T00:00:00Z'),
+      createdAt: new Date('2025-01-01T00:00:00Z'),
     };
 
     const mockBuildAuditLog = vi.fn().mockResolvedValue([mainLog]);
@@ -261,7 +259,6 @@ describe('createBuildLogsStage', () => {
       result: { id: 'post-1', title: 'New Title' },
       actorContext: null,
       entityContext: null,
-      aggregateContext: null,
     };
 
     const deps: Pick<
@@ -311,7 +308,7 @@ describe('createBuildLogsStage', () => {
       after: resultData,
       changes: { title: { from: 'Old Title', to: 'New Title' } },
       requestContext: null,
-      timestamp: new Date('2025-01-01T00:00:00Z'),
+      createdAt: new Date('2025-01-01T00:00:00Z'),
     };
 
     const mockBuildAuditLog = vi.fn().mockResolvedValue([mainLog]);
@@ -340,7 +337,6 @@ describe('createBuildLogsStage', () => {
       result: resultData,
       actorContext,
       entityContext,
-      aggregateContext,
     };
 
     const deps: Pick<
@@ -365,7 +361,6 @@ describe('createBuildLogsStage', () => {
     expect(finalResult.result).toBe(resultData);
     expect(finalResult.actorContext).toBe(actorContext);
     expect(finalResult.entityContext).toBe(entityContext);
-    expect(finalResult.aggregateContext).toBe(aggregateContext);
     expect(finalResult.operation).toBe(enrichedContext.operation);
     expect(finalResult.auditContext).toBe(enrichedContext.auditContext);
   });
@@ -397,7 +392,6 @@ describe('createBuildLogsStage', () => {
       result: { id: 'unknown-1', name: 'Test' },
       actorContext: null,
       entityContext: null,
-      aggregateContext: null,
     };
 
     const deps: Pick<

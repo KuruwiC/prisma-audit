@@ -52,7 +52,7 @@ export interface AuditLogInput {
 
   // === Request Context ===
   requestContext: unknown;
-  timestamp: Date;
+  createdAt: Date;
 }
 
 /**
