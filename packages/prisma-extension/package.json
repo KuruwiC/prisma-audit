@@ -1,0 +1,72 @@
+{
+  "name": "@kuruwic/prisma-audit",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Prisma extension for audit logging",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.cjs"
+      }
+    }
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "bench": "vitest bench --run",
+    "bench:watch": "vitest bench"
+  },
+  "keywords": [
+    "prisma",
+    "audit",
+    "logging",
+    "typescript",
+    "extension"
+  ],
+  "author": "kuruwic",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kuruwic/prisma-audit.git"
+  },
+  "peerDependencies": {
+    "@kuruwic/prisma-audit-core": "workspace:^",
+    "@prisma/client": "^5.0.0 || ^6.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.3.5",
+    "@kuruwic/prisma-audit-database": "workspace:*",
+    "@kuruwic/prisma-audit-typescript-config": "workspace:*",
+    "@prisma/client": "^6.19.0",
+    "@types/debug": "^4.1.12",
+    "@types/node": "^24.10.0",
+    "tsup": "^8.5.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.8"
+  },
+  "dependencies": {
+    "@paralleldrive/cuid2": "^3.0.4",
+    "debug": "^4.4.3"
+  }
+}
