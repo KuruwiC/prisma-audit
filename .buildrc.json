@@ -1,0 +1,3 @@
+{
+  "approvedBuilds": ["@prisma/client", "@prisma/engines", "prisma"]
+}
