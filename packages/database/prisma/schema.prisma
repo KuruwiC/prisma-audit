@@ -1,0 +1,369 @@
+// Shared Prisma Schema for Prisma Audit Monorepo
+// Supports both PostgreSQL
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider      = "prisma-client-js"
+  output        = "../generated/client"
+  binaryTargets = ["native", "debian-openssl-1.1.x"]
+}
+
+// ============================================
+// Core Models
+// ============================================
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  password  String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  posts       Post[]
+  comments    Comment[]
+  attachments Attachment[]
+  profile     Profile?
+
+  @@map("users")
+}
+
+model Post {
+  id        String   @id @default(cuid())
+  title     String
+  content   String?
+  published Boolean  @default(false)
+  authorId  String   @map("author_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  author          User             @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  comments        Comment[]
+  postTags        PostTag[]
+  postAttachments PostAttachment[]
+
+  @@map("posts")
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  content   String
+  postId    String   @map("post_id")
+  authorId  String   @map("author_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  post               Post                @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author             User                @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  commentAttachments CommentAttachment[]
+
+  @@index([postId])
+  @@index([authorId])
+  @@map("comments")
+}
+
+model Tag {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  postTags PostTag[]
+
+  @@map("tags")
+}
+
+model PostTag {
+  id        String   @id @default(cuid())
+  postId    String   @map("post_id")
+  tagId     String   @map("tag_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  tag  Tag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, tagId])
+  @@index([postId])
+  @@index([tagId])
+  @@map("post_tags")
+}
+
+// ============================================
+// Profile & Avatar Models (Deep Nesting Example: 1:1:1:1)
+// ============================================
+
+model Profile {
+  id        String   @id @default(cuid())
+  userId    String   @unique @map("user_id")
+  bio       String?
+  website   String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  avatar Avatar?
+
+  @@map("profiles")
+}
+
+model Avatar {
+  id        String   @id @default(cuid())
+  profileId String   @unique @map("profile_id")
+  name      String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  profile     Profile      @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  avatarImage AvatarImage?
+
+  @@map("avatars")
+}
+
+model AvatarImage {
+  id        String   @id @default(cuid())
+  avatarId  String   @unique @map("avatar_id")
+  imageUrl  String   @map("image_url")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  avatar Avatar @relation(fields: [avatarId], references: [id], onDelete: Cascade)
+
+  @@map("avatar_images")
+}
+
+model Attachment {
+  id        String   @id @default(cuid())
+  fileUrl   String   @map("file_url")
+  fileName  String   @map("file_name")
+  ownerId   String   @map("owner_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  owner              User                @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  commentAttachments CommentAttachment[]
+  postAttachments    PostAttachment[]
+
+  @@index([ownerId])
+  @@map("attachments")
+}
+
+model CommentAttachment {
+  id           String   @id @default(cuid())
+  commentId    String   @map("comment_id")
+  attachmentId String   @map("attachment_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  comment    Comment    @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  attachment Attachment @relation(fields: [attachmentId], references: [id], onDelete: Cascade)
+
+  @@unique([commentId, attachmentId])
+  @@index([commentId])
+  @@index([attachmentId])
+  @@map("comment_attachments")
+}
+
+model PostAttachment {
+  id           String   @id @default(cuid())
+  postId       String   @map("post_id")
+  attachmentId String   @map("attachment_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  post       Post       @relation(fields: [postId], references: [id], onDelete: Cascade)
+  attachment Attachment @relation(fields: [attachmentId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, attachmentId])
+  @@index([postId])
+  @@index([attachmentId])
+  @@map("post_attachments")
+}
+
+// ============================================
+// Audit Log Model (Default)
+// ============================================
+
+model AuditLog {
+  id                String   @id @default(cuid())
+  // Actor
+  actorCategory     String   @map("actor_category")
+  actorType         String   @map("actor_type")
+  actorId           String   @map("actor_id")
+  actorContext      Json?    @map("actor_context") // Enriched actor information (email, role, department)
+  // Entity
+  entityCategory    String   @map("entity_category")
+  entityType        String   @map("entity_type")
+  entityId          String   @map("entity_id")
+  entityContext     Json?    @map("entity_context") // Enriched entity information (title, status, authorName)
+  // Aggregate
+  aggregateCategory String   @map("aggregate_category")
+  aggregateType     String   @map("aggregate_type")
+  aggregateId       String   @map("aggregate_id")
+  aggregateContext  Json?    @map("aggregate_context") // Enriched aggregate information (postStatus, publishedAt)
+  // Action
+  action            String
+  before            Json? // State before operation
+  after             Json? // State after operation
+  changes           Json? // Changed fields with old/new values
+  // Request Context
+  requestContext    Json?    @map("request_context") // Request metadata (ipAddress, userAgent, path, method, traceId, sessionId)
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  @@index([aggregateType, aggregateId])
+  @@index([entityType, entityId])
+  @@index([actorId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// ============================================
+// Custom Audit Log Table Example (for testing)
+// ============================================
+
+model Activity {
+  id                String   @id @default(cuid())
+  // Actor
+  actorCategory     String   @map("actor_category")
+  actorType         String   @map("actor_type")
+  actorId           String   @map("actor_id")
+  actorContext      Json?    @map("actor_context")
+  // Entity
+  entityCategory    String   @map("entity_category")
+  entityType        String   @map("entity_type")
+  entityId          String   @map("entity_id")
+  entityContext     Json?    @map("entity_context")
+  // Aggregate
+  aggregateCategory String   @map("aggregate_category")
+  aggregateType     String   @map("aggregate_type")
+  aggregateId       String   @map("aggregate_id")
+  aggregateContext  Json?    @map("aggregate_context")
+  // Action
+  action            String
+  before            Json?
+  after             Json?
+  changes           Json?
+  // Request Context
+  requestContext    Json?    @map("request_context")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  @@index([aggregateType, aggregateId])
+  @@index([entityType, entityId])
+  @@index([actorId])
+  @@index([createdAt])
+  @@map("activities")
+}
+
+// ============================================
+// Normalized Schema (Pattern 1: Entity Normalization)
+// ============================================
+
+model Actor {
+  id         String   @id @default(cuid())
+  category   String
+  type       String
+  externalId String   @map("external_id")
+  context    Json?
+
+  auditEvents AuditEvent[]
+
+  @@unique([category, type, externalId])
+  @@index([type, externalId])
+  @@map("actors")
+}
+
+model Entity {
+  id         String   @id @default(cuid())
+  category   String
+  type       String
+  externalId String   @map("external_id")
+  context    Json?
+
+  auditEvents AuditEvent[]
+
+  @@unique([category, type, externalId])
+  @@index([type, externalId])
+  @@map("entities")
+}
+
+model Aggregate {
+  id         String   @id @default(cuid())
+  category   String
+  type       String
+  externalId String   @map("external_id")
+  context    Json?
+
+  auditEvents AuditEvent[]
+
+  @@unique([category, type, externalId])
+  @@index([type, externalId])
+  @@map("aggregates")
+}
+
+model AuditEvent {
+  id             String   @id @default(cuid())
+  actorId        String   @map("actor_id")
+  entityId       String   @map("entity_id")
+  aggregateId    String   @map("aggregate_id")
+  action         String
+  before         Json?
+  after          Json?
+  changes        Json?
+  requestContext Json?    @map("request_context")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  actor     Actor     @relation(fields: [actorId], references: [id])
+  entity    Entity    @relation(fields: [entityId], references: [id])
+  aggregate Aggregate @relation(fields: [aggregateId], references: [id])
+
+  @@index([actorId])
+  @@index([entityId])
+  @@index([aggregateId])
+  @@index([createdAt])
+  @@map("audit_events")
+}
+
+// ============================================
+// Normalized Schema (Pattern 2: Shared Change Normalization)
+// ============================================
+
+model AuditChange {
+  id             String   @id @default(cuid())
+  entityCategory String   @map("entity_category")
+  entityType     String   @map("entity_type")
+  entityId       String   @map("entity_id")
+  action         String
+  before         Json?
+  after          Json?
+  changes        Json?
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  aggregates AuditAggregate[]
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("audit_changes")
+}
+
+model AuditAggregate {
+  id                String   @id @default(cuid())
+  changeId          String   @map("change_id")
+  actorCategory     String   @map("actor_category")
+  actorType         String   @map("actor_type")
+  actorId           String   @map("actor_id")
+  actorContext      Json?    @map("actor_context")
+  aggregateCategory String   @map("aggregate_category")
+  aggregateType     String   @map("aggregate_type")
+  aggregateId       String   @map("aggregate_id")
+  aggregateContext  Json?    @map("aggregate_context")
+  entityContext     Json?    @map("entity_context")
+  requestContext    Json?    @map("request_context")
+
+  change AuditChange @relation(fields: [changeId], references: [id])
+
+  @@index([changeId])
+  @@index([aggregateType, aggregateId])
+  @@index([actorType, actorId])
+  @@map("audit_aggregates")
+}
