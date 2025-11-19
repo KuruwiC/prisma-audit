@@ -1,0 +1,32 @@
+{
+  "name": "@kuruwic/prisma-audit-integration-tests",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Integration tests for prisma-audit packages",
+  "scripts": {
+    "generate:sqlite": "DATABASE_URL='file:./placeholder.db' prisma generate --schema=prisma/schema.sqlite.prisma",
+    "generate:mysql": "DATABASE_URL='mysql://placeholder:placeholder@localhost:3306/placeholder' prisma generate --schema=prisma/schema.mysql.prisma",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:postgresql": "vitest run",
+    "test:sqlite": "pnpm generate:sqlite && vitest run --config vitest.config.sqlite.ts",
+    "test:mysql": "pnpm generate:mysql && vitest run --config vitest.config.mysql.ts",
+    "test:all-dbs": "pnpm test:postgresql && pnpm test:sqlite && pnpm test:mysql",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@kuruwic/prisma-audit": "workspace:*",
+    "@kuruwic/prisma-audit-core": "workspace:*",
+    "@kuruwic/prisma-audit-database": "workspace:*",
+    "@kuruwic/prisma-audit-typescript-config": "workspace:*",
+    "@prisma/client": "^6.19.0",
+    "@testcontainers/mysql": "^11.8.1",
+    "@testcontainers/postgresql": "^11.8.0",
+    "@types/node": "^24.10.0",
+    "prisma": "^6.19.0",
+    "testcontainers": "^11.8.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.8"
+  }
+}
