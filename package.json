@@ -1,0 +1,56 @@
+{
+  "name": "@kuruwic/prisma-audit-monorepo",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Modern, framework-agnostic audit logging solution for Prisma",
+  "scripts": {
+    "postinstall": "pnpm --filter @kuruwic/prisma-audit-database db:generate",
+    "build": "pnpm --filter @kuruwic/prisma-audit-database build && pnpm -r --filter=!@kuruwic/prisma-audit-database build",
+    "test": "pnpm -r --workspace-concurrency=1 test",
+    "test:watch": "pnpm -r test:watch",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write . && biome format --write .",
+    "lint:fix:unsafe": "biome check --write --unsafe . && biome format --write .",
+    "format": "biome format --write .",
+    "ci": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "db:generate": "pnpm --filter @kuruwic/prisma-audit-database db:generate",
+    "db:push": "pnpm --filter @kuruwic/prisma-audit-database db:push",
+    "db:migrate:dev": "pnpm --filter @kuruwic/prisma-audit-database db:migrate:dev",
+    "db:studio": "pnpm --filter @kuruwic/prisma-audit-database db:studio",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f",
+    "dev": "pnpm dev:hono",
+    "dev:hono": "concurrently -n \"api,web\" -c \"blue,green\" \"pnpm --filter @kuruwic/prisma-audit-examples/hono-api dev\" \"pnpm --filter @kuruwic/prisma-audit-examples/web-client dev\"",
+    "dev:api": "pnpm --filter @kuruwic/prisma-audit-examples/hono-api dev",
+    "dev:web": "pnpm --filter @kuruwic/prisma-audit-examples/web-client dev"
+  },
+  "keywords": [
+    "prisma",
+    "audit",
+    "logging",
+    "typescript",
+    "hono",
+    "nestjs",
+    "express"
+  ],
+  "author": "kuruwic",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kuruwic/prisma-audit.git"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.3.5",
+    "concurrently": "^9.2.1",
+    "tsup": "^8.5.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.8"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "packageManager": "pnpm@10.11.0"
+}
