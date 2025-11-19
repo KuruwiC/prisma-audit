@@ -159,6 +159,11 @@ export type ActorEnricher<TActor = unknown, TContext = unknown, TPrisma = unknow
 export type EntitiesEnricher<TEntity = unknown, TContext = unknown, TPrisma = unknown> = (
   entities: TEntity[],
   prisma: TPrisma,
+  meta: {
+    aggregateType: string;
+    aggregateCategory: string;
+    aggregateId?: string;
+  },
 ) => Promise<TContext[]>;
 
 /**
