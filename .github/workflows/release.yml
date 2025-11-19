@@ -1,0 +1,74 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    name: Build and Release
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: prisma
+          POSTGRES_PASSWORD: prisma
+          POSTGRES_DB: prisma_audit_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm run lint
+
+      - name: Type check
+        run: pnpm typecheck
+
+      - name: Build
+        run: pnpm build
+
+      - name: Run tests
+        env:
+          DATABASE_URL: postgresql://prisma:prisma@localhost:5432/prisma_audit_test
+          NODE_ENV: test
+        run: pnpm test
+
+      - name: Pack packages
+        run: |
+          pnpm --filter @kuruwic/prisma-audit-core pack --pack-destination ../../dist-packages
+          pnpm --filter @kuruwic/prisma-audit-database pack --pack-destination ../../dist-packages
+          pnpm --filter @kuruwic/prisma-audit pack --pack-destination ../../dist-packages
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist-packages/*.tgz
+          generate_release_notes: true
+          draft: false
+          prerelease: false

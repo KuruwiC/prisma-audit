@@ -1,0 +1,62 @@
+name: Performance Benchmark
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: prisma
+          POSTGRES_PASSWORD: prisma
+          POSTGRES_DB: prisma_audit_dev
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Setup database
+        run: pnpm --filter @kuruwic/prisma-audit-database db:push
+        env:
+          DATABASE_URL: postgresql://prisma:prisma@localhost:5432/prisma_audit_dev
+
+      - name: Build packages
+        run: pnpm build
+
+      - name: Run benchmarks
+        run: pnpm --filter @kuruwic/prisma-audit bench
+        env:
+          DATABASE_URL: postgresql://prisma:prisma@localhost:5432/prisma_audit_dev
+
+      - name: Upload results
+        uses: actions/upload-artifact@v5
+        if: always()
+        with:
+          name: benchmark-results
+          path: packages/prisma-extension/benchmark-results.json
+          if-no-files-found: ignore

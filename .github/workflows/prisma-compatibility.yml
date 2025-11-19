@@ -1,0 +1,78 @@
+name: Prisma Version Compatibility
+
+on:
+  push:
+    branches: [main, draft]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 9 * * 1"
+
+jobs:
+  compatibility:
+    name: Prisma ${{ matrix.prisma }} / Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [18, 20, 22]
+        prisma:
+          - "5.0.0"
+          - "5.10.0"
+          - "5.20.0"
+          - "6.0.0"
+          - "latest"
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: prisma
+          POSTGRES_PASSWORD: prisma
+          POSTGRES_DB: prisma_audit_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js ${{ matrix.node }}
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node }}
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Override Prisma version
+        run: |
+          pnpm add -D prisma@${{ matrix.prisma }} --workspace-root
+          pnpm add @prisma/client@${{ matrix.prisma }} --workspace-root
+
+      - name: Build packages
+        run: pnpm build
+
+      - name: Run integration tests
+        env:
+          DATABASE_URL: postgresql://prisma:prisma@localhost:5432/prisma_audit_test
+          NODE_ENV: test
+        run: pnpm --filter @kuruwic/prisma-audit-integration-tests test
+
+      - name: Report compatibility
+        if: always()
+        run: |
+          echo "## Compatibility Report" >> $GITHUB_STEP_SUMMARY
+          echo "- Node.js: ${{ matrix.node }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Prisma: ${{ matrix.prisma }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Status: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
