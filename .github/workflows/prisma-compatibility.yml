@@ -16,9 +16,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: [18, 20, 22]
+        node: [20, 22]
         prisma:
-          - "5.0.0"
           - "5.10.0"
           - "5.20.0"
           - "6.0.0"
@@ -62,6 +61,11 @@ jobs:
 
       - name: Build packages
         run: pnpm build
+
+      - name: Generate additional Prisma Clients
+        run: |
+          pnpm --filter @kuruwic/prisma-audit-integration-tests generate:sqlite
+          pnpm --filter @kuruwic/prisma-audit-integration-tests generate:mysql
 
       - name: Run integration tests
         env:
