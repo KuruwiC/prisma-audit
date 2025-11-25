@@ -2,9 +2,9 @@
  * Smart Constructors Tests
  */
 
-import type { AuditLogInput } from '@kuruwic/prisma-audit-core';
-import { createAuditLogData, failure, success } from '@kuruwic/prisma-audit-core';
 import { describe, expect, it } from 'vitest';
+import type { AuditLogInput } from '../../src/index.js';
+import { createAuditLogData, failure, success } from '../../src/index.js';
 
 describe('Smart Constructors', () => {
   describe('success', () => {

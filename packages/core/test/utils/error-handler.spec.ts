@@ -1,5 +1,5 @@
-import { createErrorHandler, withErrorHandling, withErrorHandlingSync } from '@kuruwic/prisma-audit-core';
 import { describe, expect, it, vi } from 'vitest';
+import { createErrorHandler, withErrorHandling, withErrorHandlingSync } from '../../src/index.js';
 
 describe('createErrorHandler', () => {
   describe('throw strategy', () => {

@@ -2,6 +2,7 @@
  * Branded Types Tests
  */
 
+import { describe, expect, it } from 'vitest';
 import {
   type ActorId,
   createActorId,
@@ -14,8 +15,7 @@ import {
   isEntityId,
   isTraceId,
   unwrapId,
-} from '@kuruwic/prisma-audit-core';
-import { describe, expect, it } from 'vitest';
+} from '../../src/index.js';
 
 describe('Branded Types', () => {
   describe('createActorId', () => {

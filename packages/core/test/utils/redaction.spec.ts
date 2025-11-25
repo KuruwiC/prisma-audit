@@ -1,11 +1,11 @@
+import { describe, expect, it } from 'vitest';
 import {
   createRedactor,
   getDefaultSensitiveFields,
   isSensitiveField,
   type RedactedFieldInfo,
   redactSensitiveData,
-} from '@kuruwic/prisma-audit-core';
-import { describe, expect, it } from 'vitest';
+} from '../../src/index.js';
 
 describe('getDefaultSensitiveFields', () => {
   it('should return default sensitive field patterns', () => {
