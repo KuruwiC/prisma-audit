@@ -5,14 +5,14 @@
  * and can read uncommitted changes.
  */
 
-import { createAuditClient, defineEntity, foreignKey, to } from "@kuruwic/prisma-audit";
-import type { AuditContext } from "@kuruwic/prisma-audit-core";
-import { createAsyncLocalStorageProvider } from "@kuruwic/prisma-audit-core";
-import { Prisma } from "@kuruwic/prisma-audit-database/generated/client";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { cleanDatabase, setupTestDatabase, teardownTestDatabase, type TestContext } from "./helpers/setup.js";
+import { createAuditClient, defineEntity, foreignKey, to } from '@kuruwic/prisma-audit';
+import type { AuditContext } from '@kuruwic/prisma-audit-core';
+import { createAsyncLocalStorageProvider } from '@kuruwic/prisma-audit-core';
+import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { cleanDatabase, setupTestDatabase, type TestContext, teardownTestDatabase } from './helpers/setup.js';
 
-describe("Transaction Enrichment Consistency", () => {
+describe('Transaction Enrichment Consistency', () => {
   let context: TestContext;
 
   beforeAll(async () => {
@@ -27,8 +27,8 @@ describe("Transaction Enrichment Consistency", () => {
     await cleanDatabase(context.prisma);
   });
 
-  describe("Entity enricher should read uncommitted changes within transaction", () => {
-    it("should allow entity enricher to read uncommitted UPDATE within $transaction", async () => {
+  describe('Entity enricher should read uncommitted changes within transaction', () => {
+    it('should allow entity enricher to read uncommitted UPDATE within $transaction', async () => {
       const provider = createAsyncLocalStorageProvider();
       let enrichedEmail: string | undefined;
 
@@ -38,7 +38,7 @@ describe("Transaction Enrichment Consistency", () => {
         basePrisma: context.basePrisma,
         aggregateMapping: {
           User: defineEntity({
-            type: "User",
+            type: 'User',
             entityContext: {
               enricher: async (entities, prismaClient) => {
                 const user = await (prismaClient as typeof context.basePrisma).user.findUnique({
@@ -58,36 +58,36 @@ describe("Transaction Enrichment Consistency", () => {
 
       const user = await context.basePrisma.user.create({
         data: {
-          email: "old@example.com",
-          name: "Test User",
-          password: "secret",
+          email: 'old@example.com',
+          name: 'Test User',
+          password: 'secret',
         },
       });
 
       const auditContext: AuditContext = {
-        actor: { category: "user", type: "User", id: "actor-1" },
+        actor: { category: 'user', type: 'User', id: 'actor-1' },
       };
 
       await provider.runAsync(auditContext, async () => {
         await prisma.user.update({
           where: { id: user.id },
-          data: { email: "new@example.com" },
+          data: { email: 'new@example.com' },
         });
       });
 
-      expect(enrichedEmail).toBe("new@example.com");
+      expect(enrichedEmail).toBe('new@example.com');
 
       const auditLog = await context.basePrisma.auditLog.findFirst({
-        where: { entityType: "User", entityId: user.id, action: "update" },
+        where: { entityType: 'User', entityId: user.id, action: 'update' },
       });
 
       expect(auditLog).toBeDefined();
       expect(auditLog?.entityContext).toBeDefined();
       const entityContext = auditLog?.entityContext as Record<string, unknown>;
-      expect(entityContext.enrichedEmail).toBe("new@example.com");
+      expect(entityContext.enrichedEmail).toBe('new@example.com');
     });
 
-    it("should allow entity enricher to read uncommitted CREATE within $transaction", async () => {
+    it('should allow entity enricher to read uncommitted CREATE within $transaction', async () => {
       const provider = createAsyncLocalStorageProvider();
       let enrichedName: string | undefined;
 
@@ -97,8 +97,8 @@ describe("Transaction Enrichment Consistency", () => {
         basePrisma: context.basePrisma,
         aggregateMapping: {
           Post: defineEntity({
-            type: "Post",
-            aggregates: [to("User", foreignKey("authorId"))],
+            type: 'Post',
+            aggregates: [to('User', foreignKey('authorId'))],
             entityContext: {
               enricher: async (entities, prismaClient) => {
                 const post = await (prismaClient as typeof context.basePrisma).post.findUnique({
@@ -110,7 +110,7 @@ describe("Transaction Enrichment Consistency", () => {
               },
             },
           }),
-          User: defineEntity({ type: "User" }),
+          User: defineEntity({ type: 'User' }),
         },
         performance: {
           awaitWrite: true,
@@ -118,30 +118,30 @@ describe("Transaction Enrichment Consistency", () => {
       });
 
       const user = await context.basePrisma.user.create({
-        data: { email: "author@example.com", name: "Author", password: "secret" },
+        data: { email: 'author@example.com', name: 'Author', password: 'secret' },
       });
 
       const auditContext: AuditContext = {
-        actor: { category: "user", type: "User", id: user.id },
+        actor: { category: 'user', type: 'User', id: user.id },
       };
 
       await provider.runAsync(auditContext, async () => {
         await prisma.post.create({
           data: {
-            title: "New Post Title",
-            content: "Content",
+            title: 'New Post Title',
+            content: 'Content',
             published: true,
             authorId: user.id,
           },
         });
       });
 
-      expect(enrichedName).toBe("New Post Title");
+      expect(enrichedName).toBe('New Post Title');
     });
   });
 
-  describe("Aggregate enricher should read uncommitted changes within transaction", () => {
-    it("should allow aggregate enricher to read uncommitted changes in parent entity", async () => {
+  describe('Aggregate enricher should read uncommitted changes within transaction', () => {
+    it('should allow aggregate enricher to read uncommitted changes in parent entity', async () => {
       const provider = createAsyncLocalStorageProvider();
       let enrichedUserEmail: string | undefined;
 
@@ -151,8 +151,8 @@ describe("Transaction Enrichment Consistency", () => {
         basePrisma: context.basePrisma,
         aggregateMapping: {
           Post: defineEntity({
-            type: "Post",
-            aggregates: [to("User", foreignKey("authorId"))],
+            type: 'Post',
+            aggregates: [to('User', foreignKey('authorId'))],
             aggregateContextMap: {
               User: {
                 enricher: async (aggregates: unknown[], prismaClient: unknown) => {
@@ -205,7 +205,7 @@ describe("Transaction Enrichment Consistency", () => {
               },
             },
           }),
-          User: defineEntity({ type: "User" }),
+          User: defineEntity({ type: 'User' }),
         },
         performance: {
           awaitWrite: true,
@@ -213,41 +213,41 @@ describe("Transaction Enrichment Consistency", () => {
       });
 
       const user = await context.basePrisma.user.create({
-        data: { email: "old-author@example.com", name: "Author", password: "secret" },
+        data: { email: 'old-author@example.com', name: 'Author', password: 'secret' },
       });
 
       const post = await context.basePrisma.post.create({
         data: {
-          title: "Test Post",
-          content: "Content",
+          title: 'Test Post',
+          content: 'Content',
           published: true,
           authorId: user.id,
         },
       });
 
       const auditContext: AuditContext = {
-        actor: { category: "user", type: "User", id: "actor-1" },
+        actor: { category: 'user', type: 'User', id: 'actor-1' },
       };
 
       await provider.runAsync(auditContext, async () => {
         await prisma.$transaction(async (tx) => {
           await tx.user.update({
             where: { id: user.id },
-            data: { email: "new-author@example.com" },
+            data: { email: 'new-author@example.com' },
           });
 
           await tx.post.update({
             where: { id: post.id },
-            data: { title: "Updated Post Title" },
+            data: { title: 'Updated Post Title' },
           });
         });
       });
 
-      expect(enrichedUserEmail).toBe("new-author@example.com");
+      expect(enrichedUserEmail).toBe('new-author@example.com');
 
       const auditLogs = await context.basePrisma.auditLog.findMany({
-        where: { entityType: "Post", entityId: post.id, action: "update" },
-        orderBy: { createdAt: "desc" },
+        where: { entityType: 'Post', entityId: post.id, action: 'update' },
+        orderBy: { createdAt: 'desc' },
       });
 
       expect(auditLogs.length).toBeGreaterThan(0);
@@ -256,15 +256,15 @@ describe("Transaction Enrichment Consistency", () => {
 
       if (auditLog?.aggregateContext) {
         const aggregateContext = auditLog.aggregateContext as Record<string, unknown>;
-        expect(aggregateContext.parentUserEmail).toBe("new-author@example.com");
+        expect(aggregateContext.parentUserEmail).toBe('new-author@example.com');
       } else {
         throw new Error(`aggregateContext is null. Full log: ${JSON.stringify(auditLog, null, 2)}`);
       }
     });
   });
 
-  describe("Actor enricher should read uncommitted changes within transaction", () => {
-    it("should allow actor enricher to read uncommitted changes in actor entity", async () => {
+  describe('Actor enricher should read uncommitted changes within transaction', () => {
+    it('should allow actor enricher to read uncommitted changes in actor entity', async () => {
       const provider = createAsyncLocalStorageProvider();
       let enrichedActorName: string | undefined;
 
@@ -274,16 +274,16 @@ describe("Transaction Enrichment Consistency", () => {
         basePrisma: context.basePrisma,
         aggregateMapping: {
           Post: defineEntity({
-            type: "Post",
-            aggregates: [to("User", foreignKey("authorId"))],
+            type: 'Post',
+            aggregates: [to('User', foreignKey('authorId'))],
           }),
-          User: defineEntity({ type: "User" }),
+          User: defineEntity({ type: 'User' }),
         },
         contextEnricher: {
           actor: {
             enricher: async (actor, prismaClient) => {
               const actorData = actor as { category: string; type: string; id: string };
-              if (actorData.category === "model" && actorData.type === "User") {
+              if (actorData.category === 'model' && actorData.type === 'User') {
                 const user = await (
                   prismaClient as unknown as {
                     user: {
@@ -302,7 +302,7 @@ describe("Transaction Enrichment Consistency", () => {
               }
               return null;
             },
-            onError: "log",
+            onError: 'log',
             fallback: null,
           },
         },
@@ -312,24 +312,24 @@ describe("Transaction Enrichment Consistency", () => {
       });
 
       const actorUser = await context.basePrisma.user.create({
-        data: { email: "actor@example.com", name: "Old Actor Name", password: "secret" },
+        data: { email: 'actor@example.com', name: 'Old Actor Name', password: 'secret' },
       });
 
       const auditContext: AuditContext = {
-        actor: { category: "model", type: "User", id: actorUser.id },
+        actor: { category: 'model', type: 'User', id: actorUser.id },
       };
 
       await provider.runAsync(auditContext, async () => {
         await prisma.$transaction(async (tx) => {
           await tx.user.update({
             where: { id: actorUser.id },
-            data: { name: "New Actor Name" },
+            data: { name: 'New Actor Name' },
           });
 
           await tx.post.create({
             data: {
-              title: "Post by Updated Actor",
-              content: "Content",
+              title: 'Post by Updated Actor',
+              content: 'Content',
               published: true,
               authorId: actorUser.id,
             },
@@ -337,21 +337,21 @@ describe("Transaction Enrichment Consistency", () => {
         });
       });
 
-      expect(enrichedActorName).toBe("New Actor Name");
+      expect(enrichedActorName).toBe('New Actor Name');
 
       const auditLog = await context.basePrisma.auditLog.findFirst({
-        where: { entityType: "Post", action: "create" },
+        where: { entityType: 'Post', action: 'create' },
       });
 
       expect(auditLog).toBeDefined();
       expect(auditLog?.actorContext).toBeDefined();
       const actorContext = auditLog?.actorContext as Record<string, unknown>;
-      expect(actorContext.userName).toBe("New Actor Name");
+      expect(actorContext.userName).toBe('New Actor Name');
     });
   });
 
-  describe("Batch enrichment within transaction", () => {
-    it("should allow batch entity enricher to read all uncommitted creates", async () => {
+  describe('Batch enrichment within transaction', () => {
+    it('should allow batch entity enricher to read all uncommitted creates', async () => {
       const provider = createAsyncLocalStorageProvider();
       const enrichedEmails: string[] = [];
 
@@ -361,14 +361,14 @@ describe("Transaction Enrichment Consistency", () => {
         basePrisma: context.basePrisma,
         aggregateMapping: {
           User: defineEntity({
-            type: "User",
+            type: 'User',
             entityContext: {
               enricher: async (entities, prismaClient) => {
                 const ids = entities.map((e) => (e as { id: string }).id);
                 const users = await (prismaClient as typeof context.basePrisma).user.findMany({
                   where: { id: { in: ids } },
                   select: { id: true, email: true },
-                  orderBy: { email: "asc" },
+                  orderBy: { email: 'asc' },
                 });
                 enrichedEmails.push(...users.map((u: { email: string }) => u.email));
                 return users.map((u: { email: string }) => ({ enrichedEmail: u.email }));
@@ -382,23 +382,23 @@ describe("Transaction Enrichment Consistency", () => {
       });
 
       const auditContext: AuditContext = {
-        actor: { category: "system", type: "System", id: "system" },
+        actor: { category: 'system', type: 'System', id: 'system' },
       };
 
       await provider.runAsync(auditContext, async () => {
         await prisma.user.createMany({
           data: [
-            { email: "user1@example.com", name: "User 1", password: "secret" },
-            { email: "user2@example.com", name: "User 2", password: "secret" },
-            { email: "user3@example.com", name: "User 3", password: "secret" },
+            { email: 'user1@example.com', name: 'User 1', password: 'secret' },
+            { email: 'user2@example.com', name: 'User 2', password: 'secret' },
+            { email: 'user3@example.com', name: 'User 3', password: 'secret' },
           ],
         });
       });
 
       expect(enrichedEmails).toHaveLength(3);
-      expect(enrichedEmails).toContain("user1@example.com");
-      expect(enrichedEmails).toContain("user2@example.com");
-      expect(enrichedEmails).toContain("user3@example.com");
+      expect(enrichedEmails).toContain('user1@example.com');
+      expect(enrichedEmails).toContain('user2@example.com');
+      expect(enrichedEmails).toContain('user3@example.com');
     });
   });
 });

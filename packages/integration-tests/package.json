@@ -7,6 +7,7 @@
   "scripts": {
     "generate:sqlite": "DATABASE_URL='file:./placeholder.db' prisma generate --schema=prisma/schema.sqlite.prisma",
     "generate:mysql": "DATABASE_URL='mysql://placeholder:placeholder@localhost:3306/placeholder' prisma generate --schema=prisma/schema.mysql.prisma",
+    "pretest": "pnpm generate:sqlite && pnpm generate:mysql",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:postgresql": "vitest run",
