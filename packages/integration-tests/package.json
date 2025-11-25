@@ -14,6 +14,7 @@
     "test:sqlite": "pnpm generate:sqlite && vitest run --config vitest.config.sqlite.ts",
     "test:mysql": "pnpm generate:mysql && vitest run --config vitest.config.mysql.ts",
     "test:all-dbs": "pnpm test:postgresql && pnpm test:sqlite && pnpm test:mysql",
+    "pretypecheck": "pnpm generate:sqlite && pnpm generate:mysql",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
