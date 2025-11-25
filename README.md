@@ -61,9 +61,13 @@ await prisma.post.update({
 
 ## Installation
 
+> **Note**: This package is not yet published to npm. You can install it from the GitHub repository.
+
 ```bash
-pnpm add @kuruwic/prisma-audit
+# Install from GitHub
+pnpm add github:kuruwic/prisma-audit#main
 # or npm/yarn
+npm install github:kuruwic/prisma-audit#main
 ```
 
 Requires `AsyncLocalStorage` (Node.js 20+ or compatible runtime). Tested on Node.js only.

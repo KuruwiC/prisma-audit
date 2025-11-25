@@ -4,8 +4,13 @@ Audit logging for Prisma. Tracks who changed what and when.
 
 ## Installation
 
+> **Note**: This package is not yet published to npm. You can install it from the GitHub repository.
+
 ```bash
-pnpm add @kuruwic/prisma-audit
+# Install from GitHub
+pnpm add github:kuruwic/prisma-audit#main
+# or npm/yarn
+npm install github:kuruwic/prisma-audit#main
 ```
 
 ## Quick Start

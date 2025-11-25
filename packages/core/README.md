@@ -4,9 +4,14 @@ Framework-agnostic core for audit logging with Prisma.
 
 ## Installation
 
+> **Note**: This package is not yet published to npm. Install the main package from GitHub.
+
 ```bash
-pnpm add @kuruwic/prisma-audit-core
+# Install from GitHub
+pnpm add github:kuruwic/prisma-audit#main
 ```
+
+This package is included as a dependency of `@kuruwic/prisma-audit`.
 
 ## Usage
 
