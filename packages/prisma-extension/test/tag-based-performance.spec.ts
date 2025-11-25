@@ -3,11 +3,16 @@
  * Tests for awaitWriteIf, samplingIf, and errorHandlerIf functionality
  */
 
-import type { PrismaClient } from '@prisma/client';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 describe('Tag-based Performance Configuration', () => {
-  let basePrisma: PrismaClient;
+  let basePrisma: {
+    $extends: ReturnType<typeof vi.fn>;
+    auditLog: {
+      create: ReturnType<typeof vi.fn>;
+      createMany: ReturnType<typeof vi.fn>;
+    };
+  };
 
   beforeEach(() => {
     // Create a mock Prisma client with minimal setup
@@ -19,7 +24,7 @@ describe('Tag-based Performance Configuration', () => {
         create: vi.fn().mockResolvedValue({}),
         createMany: vi.fn().mockResolvedValue({ count: 0 }),
       },
-    } as unknown as PrismaClient;
+    };
   });
 
   describe('awaitWriteIf', () => {

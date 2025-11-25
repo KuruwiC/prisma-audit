@@ -1,4 +1,3 @@
-import { PrismaClient } from '@prisma/client';
 import { describe, expect, it } from 'vitest';
 import { getModelAccessor } from '../src/utils/model-accessor.js';
 
@@ -27,7 +26,8 @@ const getModelDelegate = (client: unknown, accessor: string): Record<string, unk
 };
 
 describe('getModelAccessor', () => {
-  const prisma = new PrismaClient();
+  // Use a mock object instead of actual PrismaClient
+  const prisma = {} as Record<string, unknown>;
 
   it('should return correct accessor for User model', () => {
     const accessor = getModelAccessor(prisma, 'User');
@@ -46,7 +46,7 @@ describe('getModelAccessor', () => {
   });
 
   it('should handle missing DMMF gracefully', () => {
-    const mockClient = {} as PrismaClient;
+    const mockClient = {} as Record<string, unknown>;
     const accessor = getModelAccessor(mockClient, 'User');
     expect(accessor).toBe('user');
   });
