@@ -141,6 +141,44 @@ describe('Transaction Enrichment Consistency', () => {
   });
 
   describe('Aggregate enricher should read uncommitted changes within transaction', () => {
+    // Helper types for aggregate enricher
+    type PostWithAuthor = { authorId: string };
+    type UserFindManyClient = {
+      user: {
+        findMany: (args: {
+          where: { id: { in: string[] } };
+          select: { id: boolean; email: boolean };
+        }) => Promise<{ id: string; email: string }[]>;
+      };
+    };
+
+    // Helper function to extract unique author IDs from posts
+    const extractAuthorIds = (posts: PostWithAuthor[]): string[] => {
+      const authorIds = new Set<string>();
+      for (const post of posts) {
+        if (post.authorId) {
+          authorIds.add(post.authorId);
+        }
+      }
+      return Array.from(authorIds);
+    };
+
+    // Helper function to fetch users and create a map of id -> email
+    const fetchUserEmailMap = async (prismaClient: unknown, authorIds: string[]): Promise<Map<string, string>> => {
+      const userMap = new Map<string, string>();
+      if (authorIds.length === 0) return userMap;
+
+      const users = await (prismaClient as UserFindManyClient).user.findMany({
+        where: { id: { in: authorIds } },
+        select: { id: true, email: true },
+      });
+
+      for (const user of users) {
+        userMap.set(user.id, user.email);
+      }
+      return userMap;
+    };
+
     it('should allow aggregate enricher to read uncommitted changes in parent entity', async () => {
       const provider = createAsyncLocalStorageProvider();
       let enrichedUserEmail: string | undefined;
@@ -156,45 +194,14 @@ describe('Transaction Enrichment Consistency', () => {
             aggregateContextMap: {
               User: {
                 enricher: async (aggregates: unknown[], prismaClient: unknown) => {
-                  // aggregates contains the child entities (Posts), not the aggregate roots (Users)
-                  const posts = aggregates as { authorId: string }[];
-
-                  // Extract author IDs from posts
-                  const authorIds = new Set<string>();
-                  for (const post of posts) {
-                    if (post.authorId) {
-                      authorIds.add(post.authorId);
-                    }
-                  }
-
-                  // Fetch users explicitly using the transactional prisma client
-                  const userMap = new Map<string, string>();
-                  if (authorIds.size > 0) {
-                    const users = await (
-                      prismaClient as {
-                        user: {
-                          findMany: (args: {
-                            where: { id: { in: string[] } };
-                            select: { id: boolean; email: boolean };
-                          }) => Promise<{ id: string; email: string }[]>;
-                        };
-                      }
-                    ).user.findMany({
-                      where: { id: { in: Array.from(authorIds) } },
-                      select: { id: true, email: true },
-                    });
-
-                    for (const user of users) {
-                      userMap.set(user.id, user.email);
-                    }
-                  }
+                  const posts = aggregates as PostWithAuthor[];
+                  const authorIds = extractAuthorIds(posts);
+                  const userMap = await fetchUserEmailMap(prismaClient, authorIds);
 
                   // Store the first user's email for verification
-                  if (posts.length > 0 && posts[0]) {
-                    const firstEmail = userMap.get(posts[0].authorId);
-                    if (firstEmail) {
-                      enrichedUserEmail = firstEmail;
-                    }
+                  const firstPost = posts[0];
+                  if (firstPost) {
+                    enrichedUserEmail = userMap.get(firstPost.authorId);
                   }
 
                   // Return context for each post's author
