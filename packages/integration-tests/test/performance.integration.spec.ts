@@ -33,7 +33,7 @@ const createAuditedClientWithQueryCounter = (
   auditLogWriteCount: { value: number },
 ) => {
   return createAuditClient(basePrisma, {
-    DbNull: Prisma.DbNull,
+    Prisma,
     provider,
     basePrisma,
     aggregateMapping: testAggregateMapping,
@@ -68,7 +68,7 @@ const createAuditedClientWithRefetchFallback = (
   auditLogWriteCount: { value: number },
 ) => {
   return createAuditClient(basePrisma, {
-    DbNull: Prisma.DbNull,
+    Prisma,
     provider,
     basePrisma,
     aggregateMapping: testAggregateMapping,

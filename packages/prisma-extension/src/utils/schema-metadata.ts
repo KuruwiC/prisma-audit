@@ -10,37 +10,44 @@
 import type { PrismaClientWithDynamicAccess, PrismaNamespace } from '../internal-types.js';
 
 /**
- * Get Prisma namespace from client instance or global scope
+ * Get Prisma namespace from client instance
  *
- * Retrieves the Prisma namespace in the following order:
- * 1. From client's constructor (preferred)
- * 2. From global scope (browser environments)
- * 3. From require('@prisma/client') (Node.js fallback)
+ * Extracts the Prisma namespace from the client's constructor. This approach
+ * works with any generated Prisma client (standard @prisma/client or custom output path)
+ * without requiring @prisma/client as a runtime dependency.
  *
- * @param client - Optional Prisma client instance
+ * @param client - Prisma client instance (required)
  * @returns Prisma namespace object with defineExtension, dmmf, etc.
- * @throws {Error} If @prisma/client is not found
+ * @throws {Error} If Prisma namespace cannot be extracted from the client
  *
  * @example
  * ```typescript
+ * // Works with standard @prisma/client
+ * import { PrismaClient } from '@prisma/client';
  * const prisma = new PrismaClient();
  * const Prisma = getPrisma(prisma);
- * const models = Prisma.dmmf.datamodel.models;
+ *
+ * // Also works with custom output path
+ * import { PrismaClient } from './generated/prisma';
+ * const prisma = new PrismaClient();
+ * const Prisma = getPrisma(prisma);
  * ```
  */
-export const getPrisma = (client?: PrismaClientWithDynamicAccess): PrismaNamespace => {
-  try {
-    if (client) {
-      const clientConstructor = Object.getPrototypeOf(client).constructor;
-      if (clientConstructor && 'Prisma' in clientConstructor) {
-        return clientConstructor.Prisma as PrismaNamespace;
-      }
-    }
+export const getPrisma = (client: PrismaClientWithDynamicAccess): PrismaNamespace => {
+  const clientConstructor = Object.getPrototypeOf(client).constructor;
 
-    return ((globalThis as { Prisma?: unknown }).Prisma ||
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      require('@prisma/client').Prisma) as PrismaNamespace;
-  } catch {
-    throw new Error('[@prisma-audit] @prisma/client not found. Please install it as a peer dependency.');
+  if (clientConstructor && 'Prisma' in clientConstructor) {
+    return clientConstructor.Prisma as PrismaNamespace;
   }
+
+  // Fallback: Check globalThis for edge cases (e.g., browser environments)
+  const globalPrisma = (globalThis as { Prisma?: unknown }).Prisma;
+  if (globalPrisma) {
+    return globalPrisma as PrismaNamespace;
+  }
+
+  throw new Error(
+    '[@prisma-audit] Could not extract Prisma namespace from the provided client. ' +
+      'Ensure you are passing a valid PrismaClient instance to the extension.',
+  );
 };

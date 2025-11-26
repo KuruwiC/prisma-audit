@@ -106,7 +106,8 @@ export type DetectNestedOperationsFn = (
 ) => NestedOperation[];
 
 export interface PreFetchCoordinatorDependencies {
-  readonly getPrisma: (client?: PrismaClientWithDynamicAccess) => PrismaNamespace;
+  /** Prisma namespace extracted from basePrisma at extension initialization */
+  readonly Prisma: PrismaNamespace;
   readonly getNestedOperationConfig: GetOperationConfig;
 }
 
@@ -213,10 +214,10 @@ export const preFetchNestedRecordsBeforeOperation = async (
   args: Record<string, unknown>,
   dependencies: PreFetchCoordinatorDependencies,
 ): Promise<PreFetchResults> => {
-  const { getPrisma, getNestedOperationConfig } = dependencies;
+  const { Prisma, getNestedOperationConfig } = dependencies;
 
   const internalResults: NestedPreFetchResults = new Map();
-  const prismaMetadata = createSchemaMetadataFromDMMF(getPrisma());
+  const prismaMetadata = createSchemaMetadataFromDMMF(Prisma);
 
   const preFetchResultsForDetection = createEmptyPreFetchResults();
   const nestedOperations = detectNestedOperations(prismaMetadata, modelName, args, preFetchResultsForDetection);
@@ -240,7 +241,7 @@ export const preFetchNestedRecordsBeforeOperation = async (
     sortedOperations.map((op) => ({ path: op.path, depth: op.path.split('.').length })),
   );
 
-  const dmmf = getPrisma().dmmf as unknown as PrismaDMMF;
+  const dmmf = Prisma.dmmf as unknown as PrismaDMMF;
 
   if (!dmmf?.datamodel?.models) {
     preFetchLog('DMMF metadata not available, skipping pre-fetch');

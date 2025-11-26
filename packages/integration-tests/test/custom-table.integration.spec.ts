@@ -52,7 +52,7 @@ describe('Custom Audit Log Table', () => {
     const provider = createAsyncLocalStorageProvider();
 
     const prisma = createAuditClient(basePrisma, {
-      DbNull: Prisma.DbNull,
+      Prisma,
       provider,
       basePrisma,
       aggregateMapping: testAggregateMapping,
@@ -67,7 +67,7 @@ describe('Custom Audit Log Table', () => {
     const customPrisma = createAuditClient(customBasePrisma, {
       provider,
       basePrisma: customBasePrisma,
-      DbNull: Prisma.DbNull,
+      Prisma,
       aggregateMapping: testAggregateMapping,
       auditLogModel: 'Activity',
       performance: {

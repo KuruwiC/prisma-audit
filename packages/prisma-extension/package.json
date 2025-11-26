@@ -48,7 +48,12 @@
     "url": "https://github.com/kuruwic/prisma-audit.git"
   },
   "peerDependencies": {
-    "@prisma/client": "^5.10.0 || ^6.0.0 || ^7.0.0"
+    "@prisma/client": "*"
+  },
+  "peerDependenciesMeta": {
+    "@prisma/client": {
+      "optional": true
+    }
   },
   "publishConfig": {
     "access": "public"

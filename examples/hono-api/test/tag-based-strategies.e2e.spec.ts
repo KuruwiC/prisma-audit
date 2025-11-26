@@ -51,7 +51,7 @@ describe('Tag-based Strategies E2E', () => {
           awaitWrite: false,
           awaitWriteIf: awaitWriteIfSpy,
         },
-        DbNull: Prisma.DbNull,
+        Prisma,
       });
       await auditProvider.runAsync(
         {
@@ -98,7 +98,7 @@ describe('Tag-based Strategies E2E', () => {
           awaitWrite: false,
           awaitWriteIf: awaitWriteIfSpy,
         },
-        DbNull: Prisma.DbNull,
+        Prisma,
       });
 
       // Create a user first
@@ -161,7 +161,7 @@ describe('Tag-based Strategies E2E', () => {
           samplingIf: samplingIfSpy,
           awaitWrite: true, // Ensure synchronous for testing
         },
-        DbNull: Prisma.DbNull,
+        Prisma,
       });
 
       // Create multiple users
@@ -218,7 +218,7 @@ describe('Tag-based Strategies E2E', () => {
           samplingIf: samplingIfSpy,
           awaitWrite: true,
         },
-        DbNull: Prisma.DbNull,
+        Prisma,
       });
 
       const user = await basePrisma.user.create({
@@ -283,7 +283,7 @@ describe('Tag-based Strategies E2E', () => {
           errorHandler: 'log',
           errorHandlerIf: errorHandlerIfSpy,
         },
-        DbNull: Prisma.DbNull,
+        Prisma,
       });
 
       expect(prisma).toBeDefined();
@@ -345,7 +345,7 @@ describe('Tag-based Strategies E2E', () => {
           sampling: 1.0,
           samplingIf: samplingIfSpy,
         },
-        DbNull: Prisma.DbNull,
+        Prisma,
       });
 
       await auditProvider.runAsync(
@@ -413,7 +413,7 @@ describe('Tag-based Strategies E2E', () => {
           errorHandler: 'log',
           errorHandlerIf: (_modelName, tags) => (tags.includes('compliance') ? 'throw' : 'log'),
         },
-        DbNull: Prisma.DbNull,
+        Prisma,
       });
 
       await auditProvider.runAsync(

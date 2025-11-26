@@ -63,7 +63,7 @@ export const setupMySQLDatabase = async (): Promise<MySQLTestContext> => {
   const provider = createAsyncLocalStorageProvider();
 
   const prisma = createAuditClient(basePrisma, {
-    DbNull: Prisma.DbNull,
+    Prisma,
     provider,
     basePrisma,
     aggregateMapping: testAggregateMapping,

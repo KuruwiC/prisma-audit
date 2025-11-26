@@ -59,7 +59,7 @@ export const setupSQLiteDatabase = async (): Promise<SQLiteTestContext> => {
   const provider = createAsyncLocalStorageProvider();
 
   const prisma = createAuditClient(basePrisma, {
-    DbNull: Prisma.DbNull,
+    Prisma,
     provider,
     basePrisma,
     aggregateMapping: testAggregateMapping,

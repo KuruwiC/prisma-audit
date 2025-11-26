@@ -85,7 +85,8 @@ export type NestedAuditLogBuilderDependencies = {
   redact: RedactConfig | undefined;
   basePrisma: PrismaClientWithDynamicAccess;
   getNestedOperationConfig: GetNestedOperationConfig;
-  getPrisma: (client?: PrismaClientWithDynamicAccess) => PrismaNamespace;
+  /** Prisma namespace extracted from basePrisma at extension initialization */
+  Prisma: PrismaNamespace;
 };
 
 /**
@@ -119,10 +120,10 @@ export const buildNestedAuditLogs = async (
   deps: NestedAuditLogBuilderDependencies,
 ): Promise<AuditLogData[]> => {
   const nestedPreFetchResults = extractNestedPreFetchResults(preFetchResults);
-  const { aggregateConfig, excludeFields, redact, getNestedOperationConfig, getPrisma } = deps;
+  const { aggregateConfig, excludeFields, redact, getNestedOperationConfig, Prisma } = deps;
   const allNestedLogs: AuditLogData[] = [];
 
-  const prismaMetadata = createSchemaMetadataFromDMMF(getPrisma());
+  const prismaMetadata = createSchemaMetadataFromDMMF(Prisma);
 
   // Detect nested operations, filtering conditional branches using pre-fetch results
   const preFetchResultsForDetection = preFetchResults ?? createEmptyPreFetchResults();

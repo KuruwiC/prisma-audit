@@ -763,7 +763,7 @@ describe('Context Enrichment Integration', () => {
       };
 
       const customPrisma = createAuditClient(customBasePrisma, {
-        DbNull: Prisma.DbNull,
+        Prisma,
         provider: customProvider,
         basePrisma: customBasePrisma,
         aggregateMapping: customAggregateMapping,
@@ -1008,7 +1008,7 @@ describe('Context Enrichment Integration', () => {
       };
 
       const customPrisma = createAuditClient(customBasePrisma, {
-        DbNull: Prisma.DbNull,
+        Prisma,
         provider: customProvider,
         basePrisma: customBasePrisma,
         aggregateMapping: customAggregateMapping,
@@ -1103,7 +1103,7 @@ describe('Context Enrichment Integration', () => {
       };
 
       const customPrisma = createAuditClient(customBasePrisma, {
-        DbNull: Prisma.DbNull,
+        Prisma,
         provider: customProvider,
         basePrisma: customBasePrisma,
         aggregateMapping: customAggregateMapping,
@@ -1162,7 +1162,7 @@ describe('Context Enrichment Integration', () => {
       const actorFallback = { errorOccurred: true };
 
       const customPrisma = createAuditClient(customBasePrisma, {
-        DbNull: Prisma.DbNull,
+        Prisma,
         provider: customProvider,
         basePrisma: customBasePrisma,
         aggregateMapping: testAggregateMapping,
@@ -1330,7 +1330,7 @@ describe('Context Enrichment Integration', () => {
       const customProvider = createAsyncLocalStorageProvider();
 
       const customPrisma = createAuditClient(customBasePrisma, {
-        DbNull: Prisma.DbNull,
+        Prisma,
         provider: customProvider,
         basePrisma: customBasePrisma,
         aggregateMapping: testAggregateMapping,
@@ -1395,7 +1395,7 @@ describe('Context Enrichment Integration', () => {
       const customProvider = createAsyncLocalStorageProvider();
 
       const customPrisma = createAuditClient(customBasePrisma, {
-        DbNull: Prisma.DbNull,
+        Prisma,
         provider: customProvider,
         basePrisma: customBasePrisma,
         aggregateMapping: testAggregateMapping,
@@ -1453,7 +1453,7 @@ describe('Context Enrichment Integration', () => {
       const customProvider = createAsyncLocalStorageProvider();
 
       const customPrisma = createAuditClient(customBasePrisma, {
-        DbNull: Prisma.DbNull,
+        Prisma,
         provider: customProvider,
         basePrisma: customBasePrisma,
         aggregateMapping: testAggregateMapping,
@@ -1511,7 +1511,7 @@ describe('Context Enrichment Integration', () => {
       const customProvider = createAsyncLocalStorageProvider();
 
       const customPrisma = createAuditClient(customBasePrisma, {
-        DbNull: Prisma.DbNull,
+        Prisma,
         provider: customProvider,
         basePrisma: customBasePrisma,
         aggregateMapping: testAggregateMapping,
@@ -1608,7 +1608,7 @@ describe('Context Enrichment Integration', () => {
       };
 
       const customPrisma = createAuditClient(customBasePrisma, {
-        DbNull: Prisma.DbNull,
+        Prisma,
         provider: customProvider,
         basePrisma: customBasePrisma,
         aggregateMapping: customAggregateMapping,
@@ -1692,7 +1692,7 @@ describe('Context Enrichment Integration', () => {
       };
 
       const customPrisma = createAuditClient(customBasePrisma, {
-        DbNull: Prisma.DbNull,
+        Prisma,
         provider: customProvider,
         basePrisma: customBasePrisma,
         aggregateMapping: customAggregateMapping,
@@ -1771,7 +1771,7 @@ describe('Context Enrichment Integration', () => {
       };
 
       const customPrisma = createAuditClient(customBasePrisma, {
-        DbNull: Prisma.DbNull,
+        Prisma,
         provider: customProvider,
         basePrisma: customBasePrisma,
         aggregateMapping: customAggregateMapping,

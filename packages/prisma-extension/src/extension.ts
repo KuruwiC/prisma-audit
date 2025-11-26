@@ -24,7 +24,12 @@ import { createPrismaWriteExecutor } from './adapters/write-executor.js';
 import { buildAuditLog } from './audit-log-builder/index.js';
 import { createPrismaClientManager } from './client-manager/index.js';
 import { getNestedOperationConfig, validateFieldConflicts } from './config/index.js';
-import type { ExtensionParams, PrismaClientWithDynamicAccess, TransactionalPrismaClient } from './internal-types.js';
+import type {
+  ExtensionParams,
+  PrismaClientWithDynamicAccess,
+  PrismaNamespace,
+  TransactionalPrismaClient,
+} from './internal-types.js';
 import { createBatchBuildLogsStage, createBatchEnrichContextsStage } from './lifecycle/batch-stages.js';
 import { buildNestedAuditLogs } from './lifecycle/nested-handlers/index.js';
 import { handleTopLevelOperation, type TopLevelHandlerDependencies } from './lifecycle/operation-handlers/index.js';
@@ -85,9 +90,13 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     contextEnricher,
     auditLogModel: customAuditLogModel,
     DbNull: userProvidedDbNull,
+    Prisma: userProvidedPrisma,
   } = options;
 
-  const DbNull = userProvidedDbNull ?? getPrisma(basePrisma as PrismaClientWithDynamicAccess).DbNull;
+  // Use user-provided Prisma namespace or extract from basePrisma
+  // User-provided is required for Prisma 6.x+ with custom output paths
+  const Prisma = (userProvidedPrisma ?? getPrisma(basePrisma as PrismaClientWithDynamicAccess)) as PrismaNamespace;
+  const DbNull = userProvidedDbNull ?? Prisma.DbNull;
   const auditLogModel = customAuditLogModel ? uncapitalizeFirst(customAuditLogModel) : 'auditLog';
   const excludeFields = diffing?.excludeFields ?? [];
   const redact = security?.redact;
@@ -214,7 +223,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     args: Record<string, unknown>,
   ): Promise<PreFetchResults> => {
     const dependencies: PreFetchCoordinatorDependencies = {
-      getPrisma,
+      Prisma,
       getNestedOperationConfig: getNestedOperationConfigWrapper,
     };
 
@@ -245,7 +254,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
         redact,
         basePrisma: baseClient,
         getNestedOperationConfig: getNestedOperationConfigWrapper,
-        getPrisma,
+        Prisma,
       }),
     aggregateConfig,
     excludeFields,
@@ -324,7 +333,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     clientToUse: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
   ): Promise<unknown> => {
     const dataWithIds = ensureIds(
-      getPrisma(),
+      Prisma,
       operation.model as string,
       (operation.args as { data: Record<string, unknown>[] }).data,
       DEFAULTS.ID_FIELD,
@@ -486,6 +495,5 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     return createTransactionProxy(extendedClient as object, provider);
   };
 
-  const Prisma = getPrisma();
   return Prisma.defineExtension(extensionDefinition);
 };

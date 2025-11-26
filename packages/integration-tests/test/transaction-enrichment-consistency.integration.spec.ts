@@ -33,7 +33,7 @@ describe('Transaction Enrichment Consistency', () => {
       let enrichedEmail: string | undefined;
 
       const prisma = createAuditClient(context.basePrisma, {
-        DbNull: Prisma.DbNull,
+        Prisma,
         provider,
         basePrisma: context.basePrisma,
         aggregateMapping: {
@@ -92,7 +92,7 @@ describe('Transaction Enrichment Consistency', () => {
       let enrichedName: string | undefined;
 
       const prisma = createAuditClient(context.basePrisma, {
-        DbNull: Prisma.DbNull,
+        Prisma,
         provider,
         basePrisma: context.basePrisma,
         aggregateMapping: {
@@ -184,7 +184,7 @@ describe('Transaction Enrichment Consistency', () => {
       let enrichedUserEmail: string | undefined;
 
       const prisma = createAuditClient(context.basePrisma, {
-        DbNull: Prisma.DbNull,
+        Prisma,
         provider,
         basePrisma: context.basePrisma,
         aggregateMapping: {
@@ -276,7 +276,7 @@ describe('Transaction Enrichment Consistency', () => {
       let enrichedActorName: string | undefined;
 
       const prisma = createAuditClient(context.basePrisma, {
-        DbNull: Prisma.DbNull,
+        Prisma,
         provider,
         basePrisma: context.basePrisma,
         aggregateMapping: {
@@ -363,7 +363,7 @@ describe('Transaction Enrichment Consistency', () => {
       const enrichedEmails: string[] = [];
 
       const prisma = createAuditClient(context.basePrisma, {
-        DbNull: Prisma.DbNull,
+        Prisma,
         provider,
         basePrisma: context.basePrisma,
         aggregateMapping: {

@@ -104,7 +104,7 @@ describe('Normalized Writer Helpers', () => {
   describe('Pattern 1: Entity Normalization (createEntityNormalizedWriter)', () => {
     it('should write audit logs to normalized schema (Actor, Entity, Aggregate, AuditEvent)', async () => {
       const prisma = createAuditClient(context.basePrisma, {
-        DbNull: Prisma.DbNull,
+        Prisma,
         provider: context.provider,
         basePrisma: context.basePrisma,
         aggregateMapping: testAggregateMapping,
@@ -169,7 +169,7 @@ describe('Normalized Writer Helpers', () => {
 
     it('should deduplicate actors/entities/aggregates across multiple operations', async () => {
       const prisma = createAuditClient(context.basePrisma, {
-        DbNull: Prisma.DbNull,
+        Prisma,
         provider: context.provider,
         basePrisma: context.basePrisma,
         aggregateMapping: testAggregateMapping,
@@ -212,7 +212,7 @@ describe('Normalized Writer Helpers', () => {
 
     it('should support both lowerCamelCase and UpperCamelCase model names', async () => {
       const prisma = createAuditClient(context.basePrisma, {
-        DbNull: Prisma.DbNull,
+        Prisma,
         provider: context.provider,
         basePrisma: context.basePrisma,
         aggregateMapping: testAggregateMapping,
@@ -246,7 +246,7 @@ describe('Normalized Writer Helpers', () => {
   describe('Pattern 2: Shared Change Normalization (createSharedChangeWriter)', () => {
     it('should write audit logs to shared change schema (AuditChange, AuditAggregate)', async () => {
       const prisma = createAuditClient(context.basePrisma, {
-        DbNull: Prisma.DbNull,
+        Prisma,
         provider: context.provider,
         basePrisma: context.basePrisma,
         aggregateMapping: testAggregateMapping,
@@ -299,7 +299,7 @@ describe('Normalized Writer Helpers', () => {
 
     it('should deduplicate change data when entity belongs to multiple aggregates', async () => {
       const prisma = createAuditClient(context.basePrisma, {
-        DbNull: Prisma.DbNull,
+        Prisma,
         provider: context.provider,
         basePrisma: context.basePrisma,
         aggregateMapping: testAggregateMapping,
@@ -362,7 +362,7 @@ describe('Normalized Writer Helpers', () => {
 
     it('should support both lowerCamelCase and UpperCamelCase model names', async () => {
       const prisma = createAuditClient(context.basePrisma, {
-        DbNull: Prisma.DbNull,
+        Prisma,
         provider: context.provider,
         basePrisma: context.basePrisma,
         aggregateMapping: testAggregateMapping,

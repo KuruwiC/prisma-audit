@@ -155,9 +155,33 @@ export interface PrismaAuditExtensionOptions {
    */
   basePrisma: unknown;
   /**
+   * Prisma namespace from your generated client.
+   *
+   * Required for Prisma 6.x+ when using custom output paths.
+   * For Prisma 5.x or standard @prisma/client, this is extracted automatically.
+   *
+   * @example
+   * ```typescript
+   * import { PrismaClient, Prisma } from './generated/prisma';
+   *
+   * createAuditLogExtension({
+   *   basePrisma: new PrismaClient(),
+   *   Prisma, // Pass the namespace directly
+   *   // ...
+   * });
+   * ```
+   */
+  Prisma?: {
+    defineExtension: unknown;
+    dmmf: unknown;
+    DbNull: unknown;
+  };
+  /**
    * Prisma.DbNull symbol from the generated Prisma Client.
    * Defaults to Prisma.DbNull if not provided.
    * Used for distinguishing SQL NULL from JSON null in JSONB fields.
+   *
+   * @deprecated Use `Prisma` option instead which includes DbNull.
    */
   DbNull?: unknown;
 

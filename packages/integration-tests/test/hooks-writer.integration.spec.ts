@@ -27,7 +27,7 @@ const createAuditedClientWithWriterSpy = (
   } = {},
 ) => {
   return createAuditClient(basePrisma, {
-    DbNull: Prisma.DbNull,
+    Prisma,
     provider,
     basePrisma,
     aggregateMapping: testAggregateMapping,

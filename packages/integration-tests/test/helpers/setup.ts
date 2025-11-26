@@ -105,7 +105,7 @@ export const setupTestDatabase = async (): Promise<TestContext> => {
   const prisma = createAuditClient(basePrisma, {
     provider,
     basePrisma,
-    DbNull: Prisma.DbNull,
+    Prisma,
     aggregateMapping: testAggregateMapping,
     diffing: {
       excludeFields: ['createdAt'],
@@ -185,7 +185,7 @@ export const createTestClients = (
   const prisma = createAuditClient(basePrisma, {
     provider,
     basePrisma,
-    DbNull: Prisma.DbNull,
+    Prisma,
     aggregateMapping: testAggregateMapping,
     diffing: {
       excludeFields: ['createdAt'],

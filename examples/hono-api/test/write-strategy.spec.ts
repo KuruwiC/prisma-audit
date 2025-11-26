@@ -75,7 +75,7 @@ describe('Write Strategy Tests', () => {
         basePrisma: db,
         aggregateMapping: testAggregateMapping,
         performance: { awaitWrite: true },
-        DbNull: Prisma.DbNull,
+        Prisma,
       });
 
       await auditProvider.runAsync(
@@ -122,7 +122,7 @@ describe('Write Strategy Tests', () => {
         basePrisma: db,
         aggregateMapping: testAggregateMapping,
         performance: { awaitWrite: true },
-        DbNull: Prisma.DbNull,
+        Prisma,
       });
 
       await auditProvider.runAsync(
@@ -176,7 +176,7 @@ describe('Write Strategy Tests', () => {
         basePrisma: db,
         aggregateMapping: testAggregateMapping,
         performance: { awaitWrite: false },
-        DbNull: Prisma.DbNull,
+        Prisma,
       });
 
       await auditProvider.runAsync(
@@ -234,7 +234,7 @@ describe('Write Strategy Tests', () => {
         basePrisma: db,
         aggregateMapping: testAggregateMapping,
         performance: { awaitWrite: false },
-        DbNull: Prisma.DbNull,
+        Prisma,
       });
 
       await auditProvider.runAsync(
@@ -292,7 +292,7 @@ describe('Write Strategy Tests', () => {
         basePrisma: db,
         aggregateMapping: testAggregateMapping,
         performance: { awaitWrite: true },
-        DbNull: Prisma.DbNull,
+        Prisma,
       });
 
       await auditProvider.runAsync(
@@ -354,7 +354,7 @@ describe('Write Strategy Tests', () => {
         basePrisma: db,
         aggregateMapping: testAggregateMapping,
         performance: { awaitWrite: true },
-        DbNull: Prisma.DbNull,
+        Prisma,
       });
 
       await auditProvider.runAsync(

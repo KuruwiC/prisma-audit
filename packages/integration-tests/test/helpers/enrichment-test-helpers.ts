@@ -130,7 +130,7 @@ export function createEnrichmentTestContext(options: EnrichmentTestContextOption
   const finalAggregateMapping = aggregateMapping ?? testAggregateMapping;
 
   const customPrisma = createAuditClient(basePrisma, {
-    DbNull: Prisma.DbNull,
+    Prisma,
     provider,
     basePrisma,
     aggregateMapping: finalAggregateMapping,
