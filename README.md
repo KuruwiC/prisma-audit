@@ -155,8 +155,14 @@ model AuditLog {
 ### 2. Create audited client
 
 ```typescript
-import { createAsyncLocalStorageProvider } from "@kuruwic/prisma-audit-core";
-import { createAuditClient, defineAggregateMapping, defineEntity, to, foreignKey } from "@kuruwic/prisma-audit";
+import {
+  createAsyncLocalStorageProvider,
+  createAuditClient,
+  defineAggregateMapping,
+  defineEntity,
+  to,
+  foreignKey,
+} from "@kuruwic/prisma-audit";
 import { PrismaClient } from "@prisma/client";
 
 const auditProvider = createAsyncLocalStorageProvider();
