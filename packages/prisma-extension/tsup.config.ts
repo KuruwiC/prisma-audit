@@ -13,7 +13,7 @@ export default defineConfig({
   sourcemap: true,
   splitting: false,
   treeshake: true,
-  external: ['@prisma/client', '@kuruwic/prisma-audit-core'],
-  noExternal: [],
+  external: ['@prisma/client'],
+  noExternal: ['@kuruwic/prisma-audit-core'],
   skipNodeModulesBundle: true,
 });

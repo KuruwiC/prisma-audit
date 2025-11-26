@@ -54,12 +54,12 @@
     "access": "public"
   },
   "dependencies": {
-    "@kuruwic/prisma-audit-core": "workspace:^",
     "@paralleldrive/cuid2": "^3.0.4",
     "debug": "^4.4.3"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.5",
+    "@kuruwic/prisma-audit-core": "workspace:*",
     "@kuruwic/prisma-audit-database": "workspace:*",
     "@kuruwic/prisma-audit-typescript-config": "workspace:*",
     "@prisma/client": "^6.19.0",

@@ -61,8 +61,6 @@ jobs:
 
       - name: Pack packages
         run: |
-          pnpm --filter @kuruwic/prisma-audit-core pack --pack-destination ../../dist-packages
-          pnpm --filter @kuruwic/prisma-audit-database pack --pack-destination ../../dist-packages
           pnpm --filter @kuruwic/prisma-audit pack --pack-destination ../../dist-packages
 
       - name: Create Release

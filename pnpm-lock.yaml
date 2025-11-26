@@ -231,9 +231,6 @@ importers:
 
   packages/prisma-extension:
     dependencies:
-      '@kuruwic/prisma-audit-core':
-        specifier: workspace:^
-        version: link:../core
       '@paralleldrive/cuid2':
         specifier: ^3.0.4
         version: 3.0.4
@@ -244,6 +241,9 @@ importers:
       '@biomejs/biome':
         specifier: ^2.3.5
         version: 2.3.5
+      '@kuruwic/prisma-audit-core':
+        specifier: workspace:*
+        version: link:../core
       '@kuruwic/prisma-audit-database':
         specifier: workspace:*
         version: link:../database
