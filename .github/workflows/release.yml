@@ -61,12 +61,13 @@ jobs:
 
       - name: Pack packages
         run: |
-          pnpm --filter @kuruwic/prisma-audit pack --pack-destination ../../dist-packages
+          mkdir -p dist-packages
+          pnpm --filter @kuruwic/prisma-audit pack --pack-destination ${{ github.workspace }}/dist-packages
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist-packages/*.tgz
+          files: ${{ github.workspace }}/dist-packages/*.tgz
           generate_release_notes: true
           draft: false
           prerelease: false

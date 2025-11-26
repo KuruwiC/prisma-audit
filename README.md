@@ -1,6 +1,6 @@
 # @kuruwic/prisma-audit
 
-[![Prisma Compatibility](https://github.com/kuruwic/prisma-audit/actions/workflows/prisma-compatibility.yml/badge.svg)](https://github.com/kuruwic/prisma-audit/actions/workflows/prisma-compatibility.yml)
+[![Prisma Compatibility](https://github.com/KuruwiC/prisma-audit/actions/workflows/prisma-compatibility.yml/badge.svg)](https://github.com/KuruwiC/prisma-audit/actions/workflows/prisma-compatibility.yml)
 
 Audit logging for Prisma. Tracks who changed what and when.
 
@@ -65,13 +65,13 @@ await prisma.post.update({
 
 ```bash
 # pnpm (recommended)
-pnpm add https://github.com/kuruwic/prisma-audit/releases/download/v0.1.0/kuruwic-prisma-audit-0.1.0.tgz
+pnpm add https://github.com/KuruwiC/prisma-audit/releases/download/v0.1.0/kuruwic-prisma-audit-0.1.0.tgz
 
 # npm
-npm install https://github.com/kuruwic/prisma-audit/releases/download/v0.1.0/kuruwic-prisma-audit-0.1.0.tgz
+npm install https://github.com/KuruwiC/prisma-audit/releases/download/v0.1.0/kuruwic-prisma-audit-0.1.0.tgz
 
 # yarn
-yarn add https://github.com/kuruwic/prisma-audit/releases/download/v0.1.0/kuruwic-prisma-audit-0.1.0.tgz
+yarn add https://github.com/KuruwiC/prisma-audit/releases/download/v0.1.0/kuruwic-prisma-audit-0.1.0.tgz
 ```
 
 Or add directly to `package.json`:
@@ -79,7 +79,7 @@ Or add directly to `package.json`:
 ```json
 {
   "dependencies": {
-    "@kuruwic/prisma-audit": "https://github.com/kuruwic/prisma-audit/releases/download/v0.1.0/kuruwic-prisma-audit-0.1.0.tgz"
+    "@kuruwic/prisma-audit": "https://github.com/KuruwiC/prisma-audit/releases/download/v0.1.0/kuruwic-prisma-audit-0.1.0.tgz"
   }
 }
 ```
@@ -1085,4 +1085,4 @@ MIT
 ## Links
 
 - [Examples](./examples)
-- [Issues](https://github.com/kuruwic/prisma-audit/issues)
+- [Issues](https://github.com/KuruwiC/prisma-audit/issues)
