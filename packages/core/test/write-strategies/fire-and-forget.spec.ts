@@ -3,10 +3,15 @@
  * TDD Implementation following t-wada's approach
  */
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createActorId, createAggregateId, createEntityId } from '../../src/domain/branded-types.js';
 import type { AuditContext, AuditLogData, WriteFn } from '../../src/index.js';
-import { writeFireAndForget } from '../../src/write-strategies/fire-and-forget.js';
+import {
+  clearPendingWrites,
+  flushPendingWrites,
+  getPendingWriteCount,
+  writeFireAndForget,
+} from '../../src/write-strategies/fire-and-forget.js';
 import type { DbClientManager, WriteExecutor } from '../../src/write-strategies/interfaces.js';
 
 /**
@@ -406,5 +411,173 @@ describe('writeFireAndForget', () => {
       // Both should have been called
       expect(writeFn).toHaveBeenCalledTimes(2);
     });
+  });
+});
+
+describe('flushPendingWrites', () => {
+  beforeEach(() => {
+    clearPendingWrites();
+  });
+
+  afterEach(async () => {
+    await flushPendingWrites();
+    clearPendingWrites();
+  });
+
+  it('should wait for all pending writes to complete', async () => {
+    const writtenLogs: AuditLogData[][] = [];
+    const writeDelay = 50;
+
+    const mockWriteExecutor: WriteExecutor = {
+      write: async (_client, _model, logs) => {
+        await new Promise((resolve) => setTimeout(resolve, writeDelay));
+        writtenLogs.push(logs);
+      },
+    };
+
+    const manager = createMockManager();
+    const context = createMockContext();
+    const handleError = createMockErrorHandler();
+    const logs1 = [createMockLog({ entityId: createEntityId('1') })];
+    const logs2 = [createMockLog({ entityId: createEntityId('2') })];
+
+    writeFireAndForget(logs1, context, manager, 'auditLog', undefined, handleError, mockWriteExecutor);
+    writeFireAndForget(logs2, context, manager, 'auditLog', undefined, handleError, mockWriteExecutor);
+
+    expect(writtenLogs.length).toBe(0);
+
+    await flushPendingWrites();
+    expect(writtenLogs.length).toBe(2);
+  });
+
+  it('should resolve immediately when no pending writes', async () => {
+    await expect(flushPendingWrites()).resolves.toBeUndefined();
+  });
+
+  it('should handle errors in pending writes gracefully', async () => {
+    const handleError = vi.fn();
+    const mockWriteExecutor: WriteExecutor = {
+      write: async () => {
+        throw new Error('Write failed');
+      },
+    };
+
+    const manager = createMockManager();
+    const context = createMockContext();
+    const logs = [createMockLog()];
+
+    writeFireAndForget(logs, context, manager, 'auditLog', undefined, handleError, mockWriteExecutor);
+
+    await flushPendingWrites();
+    expect(handleError).toHaveBeenCalled();
+    expect(getPendingWriteCount()).toBe(0);
+  });
+
+  it('should only wait for writes started before flush call (snapshot behavior)', async () => {
+    const writtenLogs: string[] = [];
+    let resolveFirst: (() => void) | undefined;
+
+    const mockWriteExecutor: WriteExecutor = {
+      write: async (_client, _model, logs) => {
+        const id = (logs[0] as AuditLogData).entityId;
+        if (id === createEntityId('first')) {
+          await new Promise<void>((resolve) => {
+            resolveFirst = resolve;
+          });
+        }
+        writtenLogs.push(String(id));
+      },
+    };
+
+    const manager = createMockManager();
+    const context = createMockContext();
+    const handleError = createMockErrorHandler();
+
+    writeFireAndForget(
+      [createMockLog({ entityId: createEntityId('first') })],
+      context,
+      manager,
+      'auditLog',
+      undefined,
+      handleError,
+      mockWriteExecutor,
+    );
+
+    const flushPromise = flushPendingWrites();
+
+    writeFireAndForget(
+      [createMockLog({ entityId: createEntityId('second') })],
+      context,
+      manager,
+      'auditLog',
+      undefined,
+      handleError,
+      mockWriteExecutor,
+    );
+
+    resolveFirst?.();
+    await flushPromise;
+
+    expect(writtenLogs).toContain('first');
+  });
+});
+
+describe('getPendingWriteCount', () => {
+  beforeEach(() => {
+    clearPendingWrites();
+  });
+
+  afterEach(async () => {
+    await flushPendingWrites();
+    clearPendingWrites();
+  });
+
+  it('should return 0 when no pending writes', () => {
+    expect(getPendingWriteCount()).toBe(0);
+  });
+
+  it('should reflect count during async write', async () => {
+    let resolveWrite: (() => void) | undefined;
+
+    const mockWriteExecutor: WriteExecutor = {
+      write: async () => {
+        await new Promise<void>((resolve) => {
+          resolveWrite = resolve;
+        });
+      },
+    };
+
+    const manager = createMockManager();
+    const context = createMockContext();
+    const handleError = createMockErrorHandler();
+    const logs = [createMockLog()];
+
+    writeFireAndForget(logs, context, manager, 'auditLog', undefined, handleError, mockWriteExecutor);
+
+    expect(getPendingWriteCount()).toBe(1);
+
+    resolveWrite?.();
+    await flushPendingWrites();
+
+    expect(getPendingWriteCount()).toBe(0);
+  });
+
+  it('should decrement after promise settles including on rejection', async () => {
+    const handleError = vi.fn();
+    const mockWriteExecutor: WriteExecutor = {
+      write: async () => {
+        throw new Error('Write failed');
+      },
+    };
+
+    const manager = createMockManager();
+    const context = createMockContext();
+    const logs = [createMockLog()];
+
+    writeFireAndForget(logs, context, manager, 'auditLog', undefined, handleError, mockWriteExecutor);
+
+    await flushPendingWrites();
+
+    expect(getPendingWriteCount()).toBe(0);
   });
 });

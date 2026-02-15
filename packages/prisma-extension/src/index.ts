@@ -122,6 +122,8 @@ export {
   batchEnrichEntityContexts,
   // PreFetch Functions
   buildPreFetchQuery,
+  // Pending Write Tracking
+  clearPendingWrites,
   // Serialization
   convertDatesToISOStrings,
   // Utils - Debug
@@ -166,10 +168,12 @@ export {
   extractNestedRecords,
   failure,
   filterOperationsToPreFetch,
+  flushPendingWrites,
   foreignKey,
   getDefaultSensitiveFields,
   getIdFieldInfo as coreGetIdFieldInfo,
   getIdGenerator as coreGetIdGenerator,
+  getPendingWriteCount,
   getPreFetchedRecord,
   handleAuditError,
   hasOrNot,
@@ -238,7 +242,7 @@ export type {
   NestedPreFetchResults,
   PreparedContext,
 } from './lifecycle/index.js';
-export { runLifecyclePipeline } from './lifecycle/index.js';
+export { flushAllPendingWrites, flushPendingDeferredWrites, runLifecyclePipeline } from './lifecycle/index.js';
 export type {
   AuditLogData,
   AuditLogInput,

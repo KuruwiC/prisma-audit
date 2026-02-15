@@ -37,7 +37,12 @@
 
 export { writeDeferredInTransaction } from './deferred.js';
 export { createWriteStrategySelector } from './factory.js';
-export { writeFireAndForget } from './fire-and-forget.js';
+export {
+  clearPendingWrites,
+  flushPendingWrites,
+  getPendingWriteCount,
+  writeFireAndForget,
+} from './fire-and-forget.js';
 export type { DbClientManager, DefaultWriteFn, WriteExecutor } from './interfaces.js';
 export { writeSynchronously } from './synchronous.js';
 export type {

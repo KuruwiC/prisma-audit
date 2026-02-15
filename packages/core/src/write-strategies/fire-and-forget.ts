@@ -12,6 +12,45 @@ import { createDefaultWriteFn } from './utils.js';
 
 type ErrorHandler = (error: Error, operationDescription: string) => void;
 
+/**
+ * Registry to track pending async writes.
+ * Enables waiting for completion in tests and graceful shutdown.
+ */
+const pendingWrites: Set<Promise<void>> = new Set();
+
+/**
+ * Waits for all pending fire-and-forget writes to complete.
+ *
+ * Note: Only waits for writes that were started before this call.
+ * New writes started after calling flushPendingWrites() are not waited for.
+ *
+ * @example
+ * ```typescript
+ * // In tests
+ * await prisma.user.create({ data: { ... } });
+ * await flushPendingWrites();
+ * const logs = await prisma.auditLog.findMany();
+ * ```
+ */
+export const flushPendingWrites = async (): Promise<void> => {
+  await Promise.all([...pendingWrites]);
+};
+
+/**
+ * Returns the count of pending writes.
+ * Useful for debugging and monitoring.
+ */
+export const getPendingWriteCount = (): number => {
+  return pendingWrites.size;
+};
+
+/**
+ * Clears pending writes registry. For testing only.
+ */
+export const clearPendingWrites = (): void => {
+  pendingWrites.clear();
+};
+
 const createAsyncWriteExecutor = (
   logs: AuditLogData[],
   context: AuditContext,
@@ -28,10 +67,15 @@ const createAsyncWriteExecutor = (
 };
 
 const executeAsyncWrite = (asyncExecutor: () => Promise<void>, errorHandler: ErrorHandler): void => {
-  void asyncExecutor().catch((error) => {
-    const errorObject = error instanceof Error ? error : new Error(String(error));
-    errorHandler(errorObject, 'async audit log write');
-  });
+  const promise = asyncExecutor()
+    .catch((error) => {
+      const errorObject = error instanceof Error ? error : new Error(String(error));
+      errorHandler(errorObject, 'async audit log write');
+    })
+    .finally(() => {
+      pendingWrites.delete(promise);
+    });
+  pendingWrites.add(promise);
 };
 
 /**

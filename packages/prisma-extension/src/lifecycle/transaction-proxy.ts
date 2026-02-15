@@ -10,7 +10,44 @@
  * @module lifecycle/transaction-proxy
  */
 
-import type { AuditContext, AuditContextProvider } from '@kuruwic/prisma-audit-core';
+import { type AuditContext, type AuditContextProvider, flushPendingWrites } from '@kuruwic/prisma-audit-core';
+
+// Re-export flushPendingWrites for internal use - deferred writes are tracked via this module
+export { flushPendingWrites };
+
+/**
+ * Registry to track pending deferred writes from transactions.
+ */
+const pendingDeferredWrites: Set<Promise<void>> = new Set();
+
+/**
+ * Executes a deferred write and tracks it in the pending registry.
+ */
+const executeDeferredWrite = (deferredWrite: () => Promise<void>): void => {
+  const promise = deferredWrite()
+    .catch((err: Error) => {
+      console.error('[@prisma-audit] Deferred write failed:', err);
+    })
+    .finally(() => {
+      pendingDeferredWrites.delete(promise);
+    });
+  pendingDeferredWrites.add(promise);
+};
+
+/**
+ * Waits for all pending deferred writes from transactions to complete.
+ */
+export const flushPendingDeferredWrites = async (): Promise<void> => {
+  await Promise.all([...pendingDeferredWrites]);
+};
+
+/**
+ * Waits for all pending writes (both fire-and-forget and deferred) to complete.
+ */
+export const flushAllPendingWrites = async (): Promise<void> => {
+  await Promise.all([flushPendingWrites(), flushPendingDeferredWrites()]);
+};
+
 import type { TransactionalPrismaClient } from '../internal-types.js';
 
 type OriginalTransactionMethod = (...args: unknown[]) => Promise<unknown>;
@@ -50,9 +87,7 @@ export const createWrappedTransactionCallback = (
 
       if (txContext._deferredWrites && txContext._deferredWrites.length > 0) {
         for (const deferredWrite of txContext._deferredWrites) {
-          void deferredWrite().catch((err: Error) => {
-            console.error('[@prisma-audit] Deferred write failed:', err);
-          });
+          executeDeferredWrite(deferredWrite);
         }
       }
 

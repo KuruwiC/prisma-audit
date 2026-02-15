@@ -192,9 +192,12 @@ export { resolveIncludeRelationsConfig } from './utils/resolve-include-relations
 export { convertDatesToISOStrings } from './utils/serialization.js';
 // Write Strategies - Functions
 export {
+  clearPendingWrites,
   createBaseClientWriteFn,
   createDefaultWriteFn,
   createWriteStrategySelector,
+  flushPendingWrites,
+  getPendingWriteCount,
   writeDeferredInTransaction,
   writeFireAndForget,
   writeSynchronously,

@@ -51,6 +51,8 @@ export {
   createTransactionProxy,
   createTransactionProxyHandler,
   createWrappedTransactionCallback,
+  flushAllPendingWrites,
+  flushPendingDeferredWrites,
 } from './transaction-proxy.js';
 export type {
   BatchEnrichedContext,

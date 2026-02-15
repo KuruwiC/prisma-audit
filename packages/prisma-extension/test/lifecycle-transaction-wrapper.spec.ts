@@ -186,4 +186,103 @@ describe('withOptionalTransaction', () => {
     // Act & Assert
     await expect(wrapper(mockOperationFn)).rejects.toThrow('Transaction failed');
   });
+
+  describe('AsyncLocalStorage context preservation', () => {
+    it('should preserve context across $transaction boundary when getContext is called inside operation', async () => {
+      // Arrange - Simulate AsyncLocalStorage behavior where context is lost
+      // across microtask boundaries unless properly maintained
+      const contextStack: AuditContext[] = [];
+
+      const mockProviderWithStorage = {
+        runAsync: vi.fn(<T>(ctx: AuditContext, fn: () => Promise<T>): Promise<T> => {
+          contextStack.push(ctx);
+          return fn().finally(() => {
+            contextStack.pop();
+          });
+        }) as <T>(context: AuditContext, fn: () => Promise<T>) => Promise<T>,
+        getContext: vi.fn(() => contextStack[contextStack.length - 1]),
+      };
+
+      const mockTxClient = { _isTx: true } as unknown as TransactionalPrismaClient;
+      const mockBasePrismaWithTx = {
+        $transaction: vi.fn(async (fn: (tx: TransactionalPrismaClient) => Promise<unknown>) => {
+          // Simulate Prisma's $transaction - the callback is executed in a new context
+          // The key point: context must be established BEFORE this call
+          // to ensure it's available inside the callback
+          return await fn(mockTxClient);
+        }),
+      } as unknown as PrismaClientWithDynamicAccess;
+
+      const context: AuditContext = { actor: mockActor };
+      const wrapper = withOptionalTransaction(
+        {
+          shouldWrap: true,
+          context,
+          basePrisma: mockBasePrismaWithTx,
+        },
+        mockProviderWithStorage,
+      );
+
+      let contextInsideOperation: AuditContext | undefined;
+
+      // Act
+      await wrapper(async (_txContext, _txClient) => {
+        // This simulates what writeAuditLogs does: provider.getContext()
+        contextInsideOperation = mockProviderWithStorage.getContext();
+        return 'result';
+      });
+
+      // Assert - Context should be available inside operation
+      expect(contextInsideOperation).toBeDefined();
+      expect(contextInsideOperation?.transactionalClient).toBe(mockTxClient);
+      expect(contextInsideOperation?._isInImplicitTransaction).toBe(true);
+    });
+
+    it('should call runAsync before $transaction to establish context early', async () => {
+      // This test verifies the fix: runAsync must be called OUTSIDE $transaction
+      // to ensure context survives the transaction boundary
+      const runAsyncCalls: Array<{ context: AuditContext; phase: string }> = [];
+      let transactionStarted = false;
+
+      const mockProviderTracking = {
+        runAsync: vi.fn(<T>(ctx: AuditContext, fn: () => Promise<T>): Promise<T> => {
+          runAsyncCalls.push({
+            context: ctx,
+            phase: transactionStarted ? 'inside-transaction' : 'before-transaction',
+          });
+          return fn();
+        }) as <T>(context: AuditContext, fn: () => Promise<T>) => Promise<T>,
+      };
+
+      const mockTxClient = { _isTx: true } as unknown as TransactionalPrismaClient;
+      const mockBasePrismaWithTx = {
+        $transaction: vi.fn(async (fn: (tx: TransactionalPrismaClient) => Promise<unknown>) => {
+          transactionStarted = true;
+          const result = await fn(mockTxClient);
+          transactionStarted = false;
+          return result;
+        }),
+      } as unknown as PrismaClientWithDynamicAccess;
+
+      const context: AuditContext = { actor: mockActor };
+      const wrapper = withOptionalTransaction(
+        {
+          shouldWrap: true,
+          context,
+          basePrisma: mockBasePrismaWithTx,
+        },
+        mockProviderTracking,
+      );
+
+      // Act
+      await wrapper(async () => 'result');
+
+      // Assert - At least one runAsync call should happen BEFORE transaction starts
+      // This is the key fix: establishing context before $transaction
+      const beforeTxCalls = runAsyncCalls.filter((call) => call.phase === 'before-transaction');
+      const firstCall = beforeTxCalls[0];
+      expect(firstCall).toBeDefined();
+      expect(firstCall?.context._isInImplicitTransaction).toBe(true);
+    });
+  });
 });

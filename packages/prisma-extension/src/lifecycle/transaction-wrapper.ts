@@ -78,14 +78,20 @@ export const withOptionalTransaction = <T>(
       _isInImplicitTransaction: true,
     };
 
-    return basePrisma.$transaction(async (tx: TransactionalPrismaClient) => {
-      const txContext: AuditContext = {
-        ...implicitTxContext,
-        transactionalClient: tx,
-      };
+    // Establish context BEFORE $transaction to survive microtask boundaries.
+    // Prisma's $transaction may execute its callback in a different microtask
+    // context, which can cause AsyncLocalStorage context to be lost.
+    return provider.runAsync(implicitTxContext, async () => {
+      return basePrisma.$transaction(async (tx: TransactionalPrismaClient) => {
+        const txContext: AuditContext = {
+          ...implicitTxContext,
+          transactionalClient: tx,
+        };
 
-      return provider.runAsync(txContext, async () => {
-        return await operationFn(txContext, tx);
+        // Re-establish context with transactionalClient inside $transaction
+        return provider.runAsync(txContext, async () => {
+          return await operationFn(txContext, tx);
+        });
       });
     });
   };

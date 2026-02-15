@@ -7,12 +7,13 @@ import {
   createAsyncLocalStorageProvider,
   createAuditClient,
   defineEntity,
+  flushAllPendingWrites,
   foreignKey,
+  getPendingWriteCount,
   to,
 } from '@kuruwic/prisma-audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { waitFor } from './test-helpers.js';
 
 const testAggregateMapping: AggregateMapping = {
   User: defineEntity({
@@ -196,21 +197,15 @@ describe('Write Strategy Tests', () => {
           const users = await db.user.findMany();
           expect(users.length).toBe(1);
           expect(users[0].email).toBe('test@example.com');
-          await waitFor(
-            async () =>
-              db.auditLog.findMany({
-                where: {
-                  entityType: 'User',
-                  entityId: user.id,
-                  action: 'create',
-                },
-              }),
-            { timeout: 5000, interval: 50, checkFn: (logs) => logs.length > 0 },
-          );
+
+          await flushAllPendingWrites();
+          expect(getPendingWriteCount()).toBe(0);
+
           const auditLogs = await db.auditLog.findMany({
             where: {
               entityType: 'User',
               entityId: user.id,
+              action: 'create',
             },
           });
           expect(auditLogs.length).toBeGreaterThan(0);
@@ -264,11 +259,11 @@ describe('Write Strategy Tests', () => {
           const posts = await db.post.findMany();
           expect(users.length).toBe(1);
           expect(posts.length).toBe(1);
-          const auditLogs = await waitFor(async () => db.auditLog.findMany(), {
-            timeout: 5000,
-            interval: 50,
-            checkFn: (logs) => logs.length >= 3,
-          });
+
+          await flushAllPendingWrites();
+          expect(getPendingWriteCount()).toBe(0);
+
+          const auditLogs = await db.auditLog.findMany();
           expect(auditLogs.length).toBeGreaterThan(0);
         },
       );
