@@ -98,6 +98,8 @@ export type {
   ResolvedNestedState,
   Result,
   SchemaMetadata,
+  // Serialization Types
+  SerializationConfig,
   SkippedResult,
   TraceId,
   Transaction,
@@ -105,6 +107,7 @@ export type {
   UniqueConstraint,
   UpdateArgs,
   ValidationError,
+  ValueSerializer,
   WriteExecutor,
   WriteFn,
   WriteResult,
@@ -124,8 +127,6 @@ export {
   buildPreFetchQuery,
   // Pending Write Tracking
   clearPendingWrites,
-  // Serialization
-  convertDatesToISOStrings,
   // Utils - Debug
   coreLog,
   // Domain Functions
@@ -209,10 +210,13 @@ export {
   resolveUpdateState,
   resolveUpsertState,
   SUPPORTED_OPERATIONS,
+  safeStringify,
   self,
+  serializeForAuditJson,
   sortByPathDepth,
   success,
   to,
+  UNHANDLED,
   unwrapId,
   validateAggregateMapping,
   withErrorHandling,

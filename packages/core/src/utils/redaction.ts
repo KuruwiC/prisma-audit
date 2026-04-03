@@ -1,3 +1,5 @@
+import { safeStringify } from './serialization.js';
+
 /**
  * PII Redaction Utilities
  *
@@ -82,7 +84,7 @@ const redactChangeObject = (changeObj: {
 }): { old: RedactedFieldInfo | null; new: RedactedFieldInfo | null } => {
   const hadOldValue = changeObj.old != null;
   const hadNewValue = changeObj.new != null;
-  const isDifferent = JSON.stringify(changeObj.old) !== JSON.stringify(changeObj.new);
+  const isDifferent = safeStringify(changeObj.old) !== safeStringify(changeObj.new);
 
   return {
     old: hadOldValue ? ({ redacted: true, hadValue: true } as RedactedFieldInfo) : null,
@@ -182,7 +184,12 @@ export const redactSensitiveData = (data: unknown, config: RedactConfig = {}): u
     );
 
     try {
-      cloned = JSON.parse(JSON.stringify(data));
+      const stringified = safeStringify(data);
+      if (stringified === undefined) {
+        console.warn('[@prisma-audit] Cannot stringify data for redaction fallback. Redaction skipped.');
+        return data;
+      }
+      cloned = JSON.parse(stringified);
     } catch {
       console.warn('[@prisma-audit] Cannot clone data for redaction. Redaction skipped.');
       return data;

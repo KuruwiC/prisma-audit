@@ -1,6 +1,6 @@
 {
   "name": "@kuruwic/prisma-audit-core",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "Framework-agnostic audit logging core for Prisma",
   "main": "./dist/index.cjs",

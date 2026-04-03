@@ -41,6 +41,7 @@ export type {
   EntitiesEnricher,
   GlobalContextEnricherConfig,
   NestedOperationConfig,
+  SerializationConfig,
 } from './config.types.js';
 // Constants
 export type { AuditAction } from './constants.js';
@@ -188,8 +189,9 @@ export {
 // Utils - Relation Configuration
 export { removeRelations } from './utils/remove-relations.js';
 export { resolveIncludeRelationsConfig } from './utils/resolve-include-relations-config.js';
+export type { ValueSerializer } from './utils/serialization.js';
 // Utils - Serialization
-export { convertDatesToISOStrings } from './utils/serialization.js';
+export { safeStringify, serializeForAuditJson, UNHANDLED } from './utils/serialization.js';
 // Write Strategies - Functions
 export {
   clearPendingWrites,

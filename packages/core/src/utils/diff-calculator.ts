@@ -1,3 +1,5 @@
+import { safeStringify } from './serialization.js';
+
 /**
  * Diff calculation utilities for audit logging
  *
@@ -50,10 +52,11 @@ export type DiffCalculator = (
  * Compares two values for equality using JSON serialization
  *
  * @remarks
- * Handles nested objects and arrays but has limitations with special types (Date, Map, Set, etc.)
+ * Uses safeStringify to handle BigInt and other non-JSON-serializable types.
  */
 const areValuesEqual = (oldValue: unknown, newValue: unknown): boolean => {
-  return JSON.stringify(oldValue) === JSON.stringify(newValue);
+  if (oldValue === newValue) return true;
+  return safeStringify(oldValue) === safeStringify(newValue);
 };
 
 /**

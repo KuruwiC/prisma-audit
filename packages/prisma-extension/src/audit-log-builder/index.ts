@@ -7,12 +7,16 @@
  * @module audit-log-builder
  */
 
-import type { AggregateConfigService, AuditContext, LoggableEntity } from '@kuruwic/prisma-audit-core';
+import type {
+  AggregateConfigService,
+  AuditContext,
+  LoggableEntity,
+  SerializationConfig,
+} from '@kuruwic/prisma-audit-core';
 import {
   AUDIT_ACTION,
   applyRelationConfig,
   batchEnrichAggregateContexts,
-  convertDatesToISOStrings,
   createActorId,
   createAggregateId,
   createDiffCalculator,
@@ -22,6 +26,8 @@ import {
   redactSensitiveData,
   resolveAllAggregateRoots,
   resolveBeforeAndAfterStates,
+  serializeForAuditJson,
+  type ValueSerializer,
 } from '@kuruwic/prisma-audit-core';
 import type { PrismaClientManager } from '../client-manager/index.js';
 import type { AuditLogData, PrismaAction } from '../types.js';
@@ -74,46 +80,27 @@ const applyRedactionToStates = (
 };
 
 /**
- * Serialize dates in audit log states for Prisma JSONB compatibility
+ * Serialize all JSON-bound fields in AuditLogData for Prisma JSONB storage
  *
- * @remarks
- * Prisma's Json serializer doesn't call .toJSON() on Date objects, causing
- * serialization as {}. Converts all Dates to ISO strings for proper storage.
+ * Centralizes serialization of all `unknown`-typed fields that end up in Prisma JSON columns.
+ * This prevents BigInt/Date values in any field (states, contexts, request metadata)
+ * from causing JSON.stringify errors at write time.
  *
- * convertDatesToISOStrings returns unknown but preserves the structure of the input.
- * We validate the output type to ensure it matches our expectations.
+ * Fields NOT serialized:
+ * - `createdAt`: DateTime column, Prisma handles natively
+ * - `actorId`/`entityId`/`aggregateId`: branded strings, already JSON-safe
+ * - `*Category`/`*Type`/`action`: plain strings
  */
-const serializeDatesInStates = (
-  beforeData: Record<string, unknown> | null | undefined,
-  afterData: Record<string, unknown> | null | undefined,
-  changes: Record<string, { old: unknown; new: unknown }> | null,
-): [
-  Record<string, unknown> | null | undefined,
-  Record<string, unknown> | null | undefined,
-  Record<string, { old: unknown; new: unknown }> | null,
-] => {
-  const serializedBeforeRaw = convertDatesToISOStrings(beforeData);
-  const serializedAfterRaw = convertDatesToISOStrings(afterData);
-
-  if (!isRecordOrNullish(serializedBeforeRaw) || !isRecordOrNullish(serializedAfterRaw)) {
-    throw new Error('[@prisma-audit] Date serialization produced unexpected type');
-  }
-
-  const serializedBefore = serializedBeforeRaw;
-  const serializedAfter = serializedAfterRaw;
-
-  let serializedChanges: Record<string, { old: unknown; new: unknown }> | null = null;
-  if (changes) {
-    const serializedChangesRaw = convertDatesToISOStrings(changes);
-    if (!isRecordOrNullish(serializedChangesRaw)) {
-      throw new Error('[@prisma-audit] Date serialization of changes produced unexpected type');
-    }
-    // Type assertion justified: convertDatesToISOStrings preserves structure, validated by type guard
-    serializedChanges = serializedChangesRaw as Record<string, { old: unknown; new: unknown }> | null;
-  }
-
-  return [serializedBefore, serializedAfter, serializedChanges];
-};
+const serializeAuditLogData = (log: AuditLogData, customSerializers?: ValueSerializer[]): AuditLogData => ({
+  ...log,
+  before: serializeForAuditJson(log.before, customSerializers),
+  after: serializeForAuditJson(log.after, customSerializers),
+  changes: serializeForAuditJson(log.changes, customSerializers),
+  actorContext: serializeForAuditJson(log.actorContext, customSerializers),
+  entityContext: serializeForAuditJson(log.entityContext, customSerializers),
+  aggregateContext: serializeForAuditJson(log.aggregateContext, customSerializers),
+  requestContext: serializeForAuditJson(log.requestContext, customSerializers),
+});
 
 /**
  * Check if only excluded fields were changed (no meaningful changes)
@@ -252,6 +239,7 @@ export const buildAuditLog = async (
   excludeFields: string[] | undefined,
   redact: RedactConfig | undefined,
   includeRelations?: boolean,
+  serialization?: SerializationConfig,
 ): Promise<AuditLogData[]> => {
   const entityConfig = aggregateConfig.getEntityConfig(modelName);
   if (!entityConfig) {
@@ -291,11 +279,10 @@ export const buildAuditLog = async (
   const shouldIncludeRelations = entityConfig.includeRelations ?? includeRelations ?? false;
   [beforeData, afterData] = applyRelationConfig(beforeData, afterData, shouldIncludeRelations);
 
-  [beforeData, afterData, changes] = serializeDatesInStates(beforeData, afterData, changes);
-
   // Enrich aggregate context per aggregate root (aggregate-aware)
   const aggregateContextCache = new Map<string, unknown>();
   const auditLogs: AuditLogData[] = [];
+  const customSerializers = serialization?.customSerializers;
 
   for (const root of aggregateRoots) {
     // Enrich aggregate context for this specific root
@@ -307,7 +294,7 @@ export const buildAuditLog = async (
       aggregateContextCache,
     );
 
-    const log = buildSingleAuditLog(
+    const rawLog = buildSingleAuditLog(
       root,
       context,
       entityConfig,
@@ -321,7 +308,7 @@ export const buildAuditLog = async (
       aggregateContextForRoot,
     );
 
-    auditLogs.push(log);
+    auditLogs.push(serializeAuditLogData(rawLog, customSerializers));
   }
 
   return auditLogs;

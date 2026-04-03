@@ -5,7 +5,12 @@
  * audit logs for each nested record.
  */
 
-import type { AggregateConfigService, AuditContext, RedactConfig } from '@kuruwic/prisma-audit-core';
+import type {
+  AggregateConfigService,
+  AuditContext,
+  RedactConfig,
+  SerializationConfig,
+} from '@kuruwic/prisma-audit-core';
 import { batchEnrichEntityContexts, nestedLog } from '@kuruwic/prisma-audit-core';
 import { buildAuditLog } from '../../audit-log-builder/index.js';
 import { createPrismaClientManager } from '../../client-manager/index.js';
@@ -31,6 +36,7 @@ export type RecordProcessorDependencies = {
   aggregateConfig: AggregateConfigService;
   excludeFields: string[];
   redact: RedactConfig | undefined;
+  serialization?: SerializationConfig;
   basePrisma: PrismaClientWithDynamicAccess | TransactionalPrismaClient;
   getNestedOperationConfig: GetNestedOperationConfig;
 };
@@ -81,7 +87,7 @@ export const processNestedRecord = async (
   nestedPreFetchResults: NestedPreFetchResults | undefined,
   deps: RecordProcessorDependencies,
 ): Promise<AuditLogData[]> => {
-  const { aggregateConfig, excludeFields, redact, basePrisma, getNestedOperationConfig } = deps;
+  const { aggregateConfig, excludeFields, redact, serialization, basePrisma, getNestedOperationConfig } = deps;
   const allNestedLogs: AuditLogData[] = [];
 
   nestedLog('found %d records for field=%s', recordsInfo.records.length, nestedOp.fieldName);
@@ -136,6 +142,8 @@ export const processNestedRecord = async (
       aggregateConfig,
       excludeFields,
       redact,
+      undefined,
+      serialization,
     );
 
     allNestedLogs.push(...nestedLogs);

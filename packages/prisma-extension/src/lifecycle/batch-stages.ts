@@ -159,6 +159,8 @@ const buildLogsForEntity = async (
     deps.aggregateConfig,
     deps.excludeFields,
     deps.redact,
+    undefined,
+    deps.serialization,
   );
 };
 

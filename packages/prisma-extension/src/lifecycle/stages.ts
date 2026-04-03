@@ -12,6 +12,7 @@ import type {
   LoggableEntity,
   PreFetchResults,
   RedactConfig,
+  SerializationConfig,
 } from '@kuruwic/prisma-audit-core';
 import { AUDIT_ACTION } from '@kuruwic/prisma-audit-core';
 import { createPrismaClientManager, type PrismaClientManager } from '../client-manager/index.js';
@@ -193,6 +194,7 @@ export interface StageDependencies {
     excludeFields: string[] | undefined,
     redact: RedactConfig | undefined,
     includeRelations?: boolean,
+    serialization?: SerializationConfig,
   ) => Promise<AuditLogData[]>;
 
   /**
@@ -249,6 +251,9 @@ export interface StageDependencies {
    * Fields specified here will be redacted/masked in before/after/changes.
    */
   redact?: RedactConfig;
+
+  /** Custom serialization configuration for non-JSON-safe types */
+  serialization?: SerializationConfig;
 
   /**
    * Base Prisma client
@@ -456,7 +461,10 @@ export const createEnrichContextsStage = (
  */
 const buildMainAuditLogs = async (
   context: EnrichedContext,
-  deps: Pick<StageDependencies, 'buildAuditLog' | 'aggregateConfig' | 'excludeFields' | 'redact' | 'basePrisma'>,
+  deps: Pick<
+    StageDependencies,
+    'buildAuditLog' | 'aggregateConfig' | 'excludeFields' | 'redact' | 'serialization' | 'basePrisma'
+  >,
 ): Promise<AuditLogData[]> => {
   const manager = createPrismaClientManager(deps.basePrisma, context.auditContext);
 
@@ -472,6 +480,8 @@ const buildMainAuditLogs = async (
     deps.aggregateConfig,
     deps.excludeFields,
     deps.redact,
+    undefined,
+    deps.serialization,
   );
 };
 
@@ -520,7 +530,13 @@ const buildNestedLogsFromResult = async (
 export const createBuildLogsStage = (
   deps: Pick<
     StageDependencies,
-    'buildAuditLog' | 'buildNestedAuditLogs' | 'aggregateConfig' | 'excludeFields' | 'redact' | 'basePrisma'
+    | 'buildAuditLog'
+    | 'buildNestedAuditLogs'
+    | 'aggregateConfig'
+    | 'excludeFields'
+    | 'redact'
+    | 'serialization'
+    | 'basePrisma'
   >,
 ): ((context: EnrichedContext) => Promise<FinalContext>) => {
   return async (context: EnrichedContext): Promise<FinalContext> => {

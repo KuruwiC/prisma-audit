@@ -1,5 +1,26 @@
+import type { ValueSerializer } from './utils/serialization.js';
+
 /** Error handling strategy for audit logging */
 export type ErrorStrategy = 'throw' | 'log' | 'ignore';
+
+/**
+ * Configuration for custom serialization of non-JSON-safe types in audit log data
+ *
+ * @example
+ * ```typescript
+ * import { UNHANDLED } from '@kuruwic/prisma-audit-core';
+ *
+ * const config: SerializationConfig = {
+ *   customSerializers: [
+ *     (value) => value instanceof Buffer ? value.toString('base64') : UNHANDLED,
+ *   ],
+ * };
+ * ```
+ */
+export interface SerializationConfig {
+  /** Custom serializers applied before built-in converters (BigInt, Date) */
+  customSerializers?: ValueSerializer[];
+}
 
 /** Configuration for PII (Personally Identifiable Information) redaction */
 export interface RedactConfig {
@@ -78,6 +99,9 @@ export interface AuditLogOptions {
 
   /** Whether to include relation objects in before/after states (default: false) */
   includeRelations?: boolean;
+
+  /** Custom serialization for non-JSON-safe types (BigInt, Date are handled by default) */
+  serialization?: SerializationConfig;
 }
 
 // ============================================================================

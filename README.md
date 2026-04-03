@@ -65,13 +65,13 @@ await prisma.post.update({
 
 ```bash
 # pnpm (recommended)
-pnpm add https://github.com/KuruwiC/prisma-audit/releases/download/v0.1.0/kuruwic-prisma-audit-0.1.0.tgz
+pnpm add https://github.com/KuruwiC/prisma-audit/releases/download/v0.1.1/kuruwic-prisma-audit-0.1.1.tgz
 
 # npm
-npm install https://github.com/KuruwiC/prisma-audit/releases/download/v0.1.0/kuruwic-prisma-audit-0.1.0.tgz
+npm install https://github.com/KuruwiC/prisma-audit/releases/download/v0.1.1/kuruwic-prisma-audit-0.1.1.tgz
 
 # yarn
-yarn add https://github.com/KuruwiC/prisma-audit/releases/download/v0.1.0/kuruwic-prisma-audit-0.1.0.tgz
+yarn add https://github.com/KuruwiC/prisma-audit/releases/download/v0.1.1/kuruwic-prisma-audit-0.1.1.tgz
 ```
 
 Or add directly to `package.json`:
@@ -79,7 +79,7 @@ Or add directly to `package.json`:
 ```json
 {
   "dependencies": {
-    "@kuruwic/prisma-audit": "https://github.com/KuruwiC/prisma-audit/releases/download/v0.1.0/kuruwic-prisma-audit-0.1.0.tgz"
+    "@kuruwic/prisma-audit": "https://github.com/KuruwiC/prisma-audit/releases/download/v0.1.1/kuruwic-prisma-audit-0.1.1.tgz"
   }
 }
 ```
@@ -255,6 +255,17 @@ createAuditClient(basePrisma, {
       await defaultWrite(logs); // Write to DB
       await sendToExternalService(logs); // Send elsewhere
     },
+  },
+
+  // Custom serialization for non-JSON-safe types (BigInt and Date handled by default)
+  // import { UNHANDLED } from "@kuruwic/prisma-audit";
+  serialization: {
+    customSerializers: [
+      (value) => {
+        if (value instanceof Buffer) return value.toString("base64");
+        return UNHANDLED; // Fall through to built-in converters
+      },
+    ],
   },
 
   // Enrich context with DB queries
@@ -541,73 +552,6 @@ enricher: async (entities, prisma) => {
     return entities.map(e => ({ data }));
   });
 }
-```
-
-## Performance
-
-### N+1 Query Elimination
-
-The batch-first enricher API eliminates N+1 queries by design.
-
-**Before (N+1 problem):**
-
-```typescript
-// Each post triggers a separate query (100 posts = 100 queries)
-enricher: async (post, prisma) => {
-  const author = await prisma.user.findUnique({
-    where: { id: post.authorId },
-  });
-  return { authorName: author?.name };
-};
-
-// 100 posts → 100 DB queries ❌
-```
-
-**After (batch query):**
-
-```typescript
-// All posts processed in one query
-enricher: async (posts, prisma) => {
-  const authorIds = posts.map((p) => p.authorId).filter(Boolean);
-  const authors = await prisma.user.findMany({
-    where: { id: { in: authorIds } },
-  });
-  const authorMap = new Map(authors.map((a) => [a.id, a]));
-
-  return posts.map((post) => ({
-    authorName: authorMap.get(post.authorId)?.name ?? null,
-  }));
-};
-
-// 100 posts → 1 DB query ✅
-```
-
-**Benchmark Results:**
-
-Operation: `createMany` with 100 Posts + actor/aggregate enrichment
-
-| Metric                       | Old API | New API    | Improvement |
-| ---------------------------- | ------- | ---------- | ----------- |
-| Actor enrichment queries     | 100     | 1 (cached) | 99% ↓       |
-| Aggregate enrichment queries | 100     | 1 (batch)  | 99% ↓       |
-| Total enrichment queries     | 200     | 2          | 99% ↓       |
-
-See integration tests for validation:
-
-- [enrichment.integration.spec.ts](packages/integration-tests/test/enrichment.integration.spec.ts)
-- [performance.integration.spec.ts](packages/integration-tests/test/performance.integration.spec.ts)
-
-### Query Logging
-
-Enable Prisma query logging to verify batch behavior:
-
-```typescript
-const prisma = new PrismaClient({
-  log: ['query'],
-});
-
-// Check console output for query count
-await prisma.post.createMany({ data: [...] });
 ```
 
 ## Limitations

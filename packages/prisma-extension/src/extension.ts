@@ -100,6 +100,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
   const auditLogModel = customAuditLogModel ? uncapitalizeFirst(customAuditLogModel) : 'auditLog';
   const excludeFields = diffing?.excludeFields ?? [];
   const redact = security?.redact;
+  const serialization = options.serialization;
   const sampling = performance?.sampling ?? 1.0;
   const awaitWrite = performance?.awaitWrite ?? true;
   const awaitWriteIf = performance?.awaitWriteIf;
@@ -252,6 +253,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
         aggregateConfig,
         excludeFields,
         redact,
+        serialization,
         basePrisma: baseClient,
         getNestedOperationConfig: getNestedOperationConfigWrapper,
         Prisma,
@@ -259,6 +261,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     aggregateConfig,
     excludeFields,
     redact,
+    serialization,
     basePrisma: baseClient,
     contextEnricher,
   });

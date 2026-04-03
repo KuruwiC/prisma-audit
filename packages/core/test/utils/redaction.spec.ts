@@ -660,3 +660,50 @@ describe('structuredClone support in redactSensitiveData', () => {
     expect(event1?.apiKey).toEqual({ redacted: true, hadValue: true });
   });
 });
+
+describe('BigInt safety in redaction', () => {
+  describe('redactChangeObject (via createRedactor)', () => {
+    it('should not throw when change object contains BigInt values', () => {
+      const redactor = createRedactor();
+      const data = {
+        password: { old: 123n, new: 456n },
+      };
+      expect(() => redactor(data)).not.toThrow();
+    });
+
+    it('should correctly detect different BigInt values in redacted change', () => {
+      const redactor = createRedactor();
+      const data = {
+        password: { old: 100n, new: 200n },
+      };
+      const result = redactor(data) as Record<string, unknown>;
+      const password = result.password as Record<string, unknown>;
+      expect(password.old).toEqual({ redacted: true, hadValue: true });
+      expect(password.new).toEqual({ redacted: true, hadValue: true, isDifferent: true });
+    });
+
+    it('should correctly detect equal BigInt values in redacted change', () => {
+      const redactor = createRedactor();
+      const data = {
+        password: { old: 100n, new: 100n },
+      };
+      const result = redactor(data) as Record<string, unknown>;
+      const password = result.password as Record<string, unknown>;
+      expect(password.old).toEqual({ redacted: true, hadValue: true });
+      expect(password.new).toEqual({ redacted: true, hadValue: true, isDifferent: false });
+    });
+  });
+
+  describe('redactSensitiveData JSON fallback with BigInt', () => {
+    it('should not throw when structuredClone fails and data contains BigInt', () => {
+      const data = {
+        id: 123n,
+        callback: () => 'test',
+        password: 'secret',
+      };
+      expect(() => redactSensitiveData(data)).not.toThrow();
+      const result = redactSensitiveData(data) as Record<string, unknown>;
+      expect(result.password).toEqual({ redacted: true, hadValue: true });
+    });
+  });
+});

@@ -10,6 +10,7 @@ import type {
   NestedRecordInfo,
   PreFetchResults,
   RedactConfig,
+  SerializationConfig,
 } from '@kuruwic/prisma-audit-core';
 import {
   createEmptyPreFetchResults,
@@ -83,6 +84,7 @@ export type NestedAuditLogBuilderDependencies = {
   aggregateConfig: AggregateConfigService;
   excludeFields: string[];
   redact: RedactConfig | undefined;
+  serialization?: SerializationConfig;
   basePrisma: PrismaClientWithDynamicAccess;
   getNestedOperationConfig: GetNestedOperationConfig;
   /** Prisma namespace extracted from basePrisma at extension initialization */
@@ -120,7 +122,7 @@ export const buildNestedAuditLogs = async (
   deps: NestedAuditLogBuilderDependencies,
 ): Promise<AuditLogData[]> => {
   const nestedPreFetchResults = extractNestedPreFetchResults(preFetchResults);
-  const { aggregateConfig, excludeFields, redact, getNestedOperationConfig, Prisma } = deps;
+  const { aggregateConfig, excludeFields, redact, serialization, getNestedOperationConfig, Prisma } = deps;
   const allNestedLogs: AuditLogData[] = [];
 
   const prismaMetadata = createSchemaMetadataFromDMMF(Prisma);
@@ -205,6 +207,7 @@ export const buildNestedAuditLogs = async (
         aggregateConfig,
         excludeFields,
         redact,
+        serialization,
         basePrisma: prismaClient,
       };
       const deleteLogs = await handleNestedDelete(
@@ -226,6 +229,7 @@ export const buildNestedAuditLogs = async (
       aggregateConfig,
       excludeFields,
       redact,
+      serialization,
       basePrisma: prismaClient,
       getNestedOperationConfig,
     };

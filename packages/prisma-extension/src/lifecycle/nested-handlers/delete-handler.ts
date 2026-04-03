@@ -5,7 +5,12 @@
  * retrieving pre-fetched before states, and generating audit logs.
  */
 
-import type { AggregateConfigService, AuditContext, RedactConfig } from '@kuruwic/prisma-audit-core';
+import type {
+  AggregateConfigService,
+  AuditContext,
+  RedactConfig,
+  SerializationConfig,
+} from '@kuruwic/prisma-audit-core';
 import { AUDIT_ACTION, batchEnrichEntityContexts, nestedLog } from '@kuruwic/prisma-audit-core';
 import { buildAuditLog } from '../../audit-log-builder/index.js';
 import { createPrismaClientManager } from '../../client-manager/index.js';
@@ -37,6 +42,7 @@ export type DeleteHandlerDependencies = {
   aggregateConfig: AggregateConfigService;
   excludeFields: string[];
   redact: RedactConfig | undefined;
+  serialization?: SerializationConfig;
   basePrisma: PrismaClientWithDynamicAccess | TransactionalPrismaClient;
 };
 
@@ -71,7 +77,7 @@ export const handleNestedDelete = async (
   nestedPreFetchResults: NestedPreFetchResults | undefined,
   deps: DeleteHandlerDependencies,
 ): Promise<AuditLogData[]> => {
-  const { aggregateConfig, excludeFields, redact, basePrisma } = deps;
+  const { aggregateConfig, excludeFields, redact, serialization, basePrisma } = deps;
 
   nestedLog('delete operation detected, extracting ID from operation data');
 
@@ -120,6 +126,8 @@ export const handleNestedDelete = async (
     aggregateConfig,
     excludeFields,
     redact,
+    undefined,
+    serialization,
   );
 
   return nestedLogs;

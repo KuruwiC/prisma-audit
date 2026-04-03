@@ -199,6 +199,8 @@ export interface PrismaAuditExtensionOptions {
   contextEnricher?: GlobalContextEnricherConfig;
   nestedOperations?: NestedOperationsConfig;
   onAuditErrorHandler?: OnAuditErrorHandler;
+  /** Custom serialization for non-JSON-safe types (BigInt, Date are handled by default) */
+  serialization?: import('@kuruwic/prisma-audit-core').SerializationConfig;
 }
 
 /**
