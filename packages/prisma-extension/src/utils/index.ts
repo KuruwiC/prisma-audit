@@ -14,8 +14,15 @@ export {
   uncapitalizeFirst,
 } from './extension-utils.js';
 
-// ID generation
-export { ensureIds } from './id-generator.js';
+// ID generation and primary key utilities
+export {
+  buildEntityMap,
+  buildPKWhereClause,
+  ensureIds,
+  extractPrimaryKey,
+  findManyByPKs,
+  getPrimaryKeyFields,
+} from './id-generator.js';
 
 // Include injection
 export { injectDeepInclude } from './include-injection.js';

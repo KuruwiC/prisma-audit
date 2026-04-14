@@ -110,8 +110,6 @@ export interface HooksConfig {
   writer?: AuditLogWriter;
   /** Error handler for audit log failures */
   errorHandler?: import('@kuruwic/prisma-audit-core').ErrorHandler | import('@kuruwic/prisma-audit-core').ErrorStrategy;
-  /** Dynamic error handling strategy based on model name and tags */
-  errorHandlerIf?: (modelName: string, tags: string[]) => import('@kuruwic/prisma-audit-core').ErrorStrategy;
 }
 
 /**
@@ -176,14 +174,6 @@ export interface PrismaAuditExtensionOptions {
     dmmf: unknown;
     DbNull: unknown;
   };
-  /**
-   * Prisma.DbNull symbol from the generated Prisma Client.
-   * Defaults to Prisma.DbNull if not provided.
-   * Used for distinguishing SQL NULL from JSON null in JSONB fields.
-   *
-   * @deprecated Use `Prisma` option instead which includes DbNull.
-   */
-  DbNull?: unknown;
 
   /**
    * Prisma model name for storing audit logs (PascalCase).

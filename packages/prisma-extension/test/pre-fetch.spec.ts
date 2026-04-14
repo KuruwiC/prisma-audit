@@ -5,12 +5,10 @@
 
 import { describe, expect, it } from 'vitest';
 import {
-  buildPreFetchQuery,
   executePreFetch,
   getUniqueConstraints,
   hasOrNot,
   matchesUniqueConstraint,
-  type ParsedWhereClause,
   parseWhereClause,
   preFetchBeforeState,
 } from '../src/utils/pre-fetch.js';
@@ -275,57 +273,6 @@ describe('parseWhereClause', () => {
     const where = { id: 'user-1' };
     const parsed = parseWhereClause(Prisma, 'User', where);
     expect(parsed.originalWhere).toEqual(where);
-  });
-});
-
-describe('buildPreFetchQuery', () => {
-  it('should build findUnique query', () => {
-    const parsed: ParsedWhereClause = {
-      type: 'findUnique',
-      where: { id: 'user-1' },
-      originalWhere: { id: 'user-1' },
-    };
-    const query = buildPreFetchQuery(parsed);
-    expect(query).toEqual({
-      type: 'findUnique',
-      where: { id: 'user-1' },
-    });
-  });
-
-  it('should build findMany query', () => {
-    const parsed: ParsedWhereClause = {
-      type: 'findMany',
-      where: { name: 'John' },
-      originalWhere: { name: 'John' },
-    };
-    const query = buildPreFetchQuery(parsed);
-    expect(query).toEqual({
-      type: 'findMany',
-      where: { name: 'John' },
-    });
-  });
-
-  it('should build composite key findUnique query', () => {
-    const parsed: ParsedWhereClause = {
-      type: 'findUnique',
-      where: {
-        firstName_lastName: {
-          firstName: 'John',
-          lastName: 'Doe',
-        },
-      },
-      originalWhere: { firstName: 'John', lastName: 'Doe' },
-    };
-    const query = buildPreFetchQuery(parsed);
-    expect(query).toEqual({
-      type: 'findUnique',
-      where: {
-        firstName_lastName: {
-          firstName: 'John',
-          lastName: 'Doe',
-        },
-      },
-    });
   });
 });
 

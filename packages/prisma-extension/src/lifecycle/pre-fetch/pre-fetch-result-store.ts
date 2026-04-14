@@ -9,6 +9,8 @@
  * - Level 2: `entityId` (e.g., '123', '__default__') → { before: Record | null }
  */
 
+import { ENTITY_IDENTITY_DEFAULT, extractEntityIdentity } from '../../utils/id-generator.js';
+
 /**
  * Default key used when entity ID is not available
  */
@@ -100,28 +102,30 @@ export const storePreFetchResult = (
 };
 
 /**
- * Extracts entity ID from record or returns default key
+ * Extracts entity identity from record using PK fields, or returns default key
  *
- * @param record - Record to extract ID from
- * @returns Entity ID as string, or PRE_FETCH_DEFAULT_KEY if not found
+ * @param record - Record to extract identity from
+ * @param pkFields - Primary key field names. When omitted, falls back to ['id'] for backward compatibility.
+ * @returns Entity identity as string, or PRE_FETCH_DEFAULT_KEY if PK fields are missing
  *
  * @example
  * ```typescript
- * const id = extractEntityIdOrDefault({ id: 123, name: 'test' });
+ * extractEntityIdOrDefault({ id: 123, name: 'test' });
  * // Returns: '123'
  *
- * const id = extractEntityIdOrDefault({ name: 'test' });
+ * extractEntityIdOrDefault({ tenantId: 'a', userId: '1' }, ['tenantId', 'userId']);
+ * // Returns: '["a","1"]'
+ *
+ * extractEntityIdOrDefault({ name: 'test' });
  * // Returns: '__default__'
  * ```
  */
-export const extractEntityIdOrDefault = (record: unknown): string => {
+export const extractEntityIdOrDefault = (record: unknown, pkFields?: string[]): string => {
   if (!record || typeof record !== 'object') {
     return PRE_FETCH_DEFAULT_KEY;
   }
 
-  if ('id' in record && (typeof record.id === 'string' || typeof record.id === 'number')) {
-    return String(record.id);
-  }
-
-  return PRE_FETCH_DEFAULT_KEY;
+  const fields = pkFields ?? ['id'];
+  const identity = extractEntityIdentity(record as Record<string, unknown>, fields);
+  return identity === ENTITY_IDENTITY_DEFAULT ? PRE_FETCH_DEFAULT_KEY : identity;
 };

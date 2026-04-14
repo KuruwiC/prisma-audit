@@ -1,5 +1,6 @@
 import type { AggregateMapping } from '@kuruwic/prisma-audit-core';
 import {
+  batchResolveIds,
   defineEntity,
   foreignKey,
   normalizeId,
@@ -351,5 +352,51 @@ describe('validateAggregateMapping', () => {
     } as unknown as AggregateMapping;
 
     expect(() => validateAggregateMapping(mapping)).toThrow('idResolver is required');
+  });
+});
+
+describe('batchResolveIds', () => {
+  it('should resolve single entity via fallback', async () => {
+    const resolver = batchResolveIds(async (entities: { id: string }[]) => {
+      return entities.map((e) => `resolved-${e.id}`);
+    });
+    const result = await resolver({ id: 'a' }, null);
+    expect(result).toBe('resolved-a');
+  });
+
+  it('should propagate batchResolve via to()', () => {
+    const resolver = batchResolveIds(async (entities: { id: string }[]) => {
+      return entities.map((e) => e.id);
+    });
+    const root = to('User', resolver);
+    expect(root.batchResolve).toBeDefined();
+    expect(root.requiresDbAccess).toBeUndefined();
+  });
+
+  it('should handle null/skip in batch results', async () => {
+    const resolver = batchResolveIds(async (entities: { id: string }[]) => {
+      return entities.map((e) => (e.id === 'skip' ? null : `resolved-${e.id}`));
+    });
+    const root = to('User', resolver);
+    if (!root.batchResolve) throw new Error('Expected batchResolve to be set');
+    const results = await root.batchResolve([{ id: 'a' }, { id: 'skip' }, { id: 'c' }], null);
+    expect(results).toEqual(['resolved-a', null, 'resolved-c']);
+  });
+});
+
+describe('to - resolver metadata propagation', () => {
+  it('should set requiresDbAccess for resolveId', () => {
+    const root = to(
+      'User',
+      resolveId(async (entity: { id: string }) => entity.id),
+    );
+    expect(root.requiresDbAccess).toBe(true);
+    expect(root.batchResolve).toBeUndefined();
+  });
+
+  it('should not set requiresDbAccess or batchResolve for foreignKey', () => {
+    const root = to('User', foreignKey('authorId'));
+    expect(root.batchResolve).toBeUndefined();
+    expect(root.requiresDbAccess).toBeUndefined();
   });
 });

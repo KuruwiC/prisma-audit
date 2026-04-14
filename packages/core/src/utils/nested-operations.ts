@@ -808,29 +808,89 @@ const shouldSkipRefetch = (operation: NestedOperationKeyword): boolean => {
   return skipOperations.includes(operation as (typeof skipOperations)[number]);
 };
 
-/** @internal Extract ID from entity entry */
-const extractIdFromEntry = (
+/** @internal Resolve PK field names from SchemaMetadata */
+const getPrimaryKeyFieldsFromMetadata = (schemaMetadata: SchemaMetadata, modelName: string): string[] => {
+  const constraints = schemaMetadata.getUniqueConstraints(modelName);
+  const pk = constraints.find((c) => c.type === 'primaryKey');
+  if (pk && pk.fields.length > 0) return pk.fields;
+
+  const fields = schemaMetadata.getAllFields(modelName);
+  const idField = fields.find((f) => f.isId);
+  if (idField) return [idField.name];
+
+  return ['id'];
+};
+
+/** @internal Build WHERE clause for PK-based refetch */
+const buildPkWhereClause = (pkFields: string[], pks: Record<string, unknown>[]): Record<string, unknown> => {
+  if (pkFields.length === 1) {
+    const field = pkFields[0] as string;
+    return { [field]: { in: pks.map((pk) => pk[field]) } };
+  }
+  return {
+    OR: pks.map((pk) => {
+      const condition: Record<string, unknown> = {};
+      for (const field of pkFields) {
+        condition[field] = pk[field];
+      }
+      return condition;
+    }),
+  };
+};
+
+/** @internal Deserialize a composite entity ID string into PK fields */
+const deserializeEntityId = (entityId: string, pkFields: string[]): Record<string, unknown> | null => {
+  if (entityId === '__default__') return null;
+
+  if (pkFields.length === 1) {
+    return { [pkFields[0] as string]: entityId };
+  }
+  try {
+    const parsed: unknown = JSON.parse(entityId);
+    if (!Array.isArray(parsed) || parsed.length !== pkFields.length) return null;
+    const pk: Record<string, unknown> = {};
+    for (let i = 0; i < pkFields.length; i++) {
+      pk[pkFields[i] as string] = parsed[i];
+    }
+    return pk;
+  } catch {
+    // Composite PK but not valid JSON — cannot reconstruct
+    return null;
+  }
+};
+
+/** @internal Extract PK values from a record */
+const extractPkFromRecord = (record: Record<string, unknown>, pkFields: string[]): Record<string, unknown> | null => {
+  const pk: Record<string, unknown> = {};
+  for (const field of pkFields) {
+    if (!(field in record)) return null;
+    pk[field] = record[field];
+  }
+  return pk;
+};
+
+/** @internal Extract PK values from a pre-fetch entry */
+const extractPkFromEntry = (
   entityId: string,
   preFetchResult: { before: Record<string, unknown> | null },
-): string | null => {
+  pkFields: string[],
+): Record<string, unknown> | null => {
   if (entityId !== '__default__') {
-    return entityId;
+    return deserializeEntityId(entityId, pkFields);
   }
 
   const record = preFetchResult.before;
-  if (record && typeof record === 'object' && 'id' in record) {
-    return String(record.id);
-  }
-
-  return null;
+  if (!record || typeof record !== 'object') return null;
+  return extractPkFromRecord(record, pkFields);
 };
 
-/** @internal Extract IDs to refetch from pre-fetch results */
-const extractIdsToRefetch = (
+/** @internal Extract PKs to refetch from pre-fetch results */
+const extractPksToRefetch = (
   fieldMap: Map<string, { before: Record<string, unknown> | null }>,
   _path: string,
-): string[] => {
-  const idsToRefetch: string[] = [];
+  pkFields: string[],
+): Record<string, unknown>[] => {
+  const pksToRefetch: Record<string, unknown>[] = [];
 
   for (const [entityId, preFetchResult] of fieldMap.entries()) {
     if (!preFetchResult.before) {
@@ -838,23 +898,24 @@ const extractIdsToRefetch = (
       continue;
     }
 
-    const extractedId = extractIdFromEntry(entityId, preFetchResult);
-    if (extractedId) {
-      idsToRefetch.push(extractedId);
-      nestedLog('Queuing entityId=%s for refetch', extractedId);
+    const extractedPk = extractPkFromEntry(entityId, preFetchResult, pkFields);
+    if (extractedPk) {
+      pksToRefetch.push(extractedPk);
+      nestedLog('Queuing entity for refetch: pk=%O', extractedPk);
     } else {
-      nestedLog('Skipping __default__ entry (no ID extractable from record)');
+      nestedLog('Skipping entry (no PK extractable from record)');
     }
   }
 
-  return idsToRefetch;
+  return pksToRefetch;
 };
 
 /** @internal Execute refetch query for nested records */
 const executeRefetchQuery = async (
   client: DbClient,
   relationField: { name: string; relatedModel: string; isList: boolean },
-  idsToRefetch: string[],
+  pksToRefetch: Record<string, unknown>[],
+  pkFields: string[],
 ): Promise<unknown[]> => {
   const modelDelegate = relationField.relatedModel.charAt(0).toLowerCase() + relationField.relatedModel.slice(1);
 
@@ -864,15 +925,10 @@ const executeRefetchQuery = async (
     return [];
   }
 
-  nestedLog('Executing findMany for modelDelegate=%s with IDs=%O', modelDelegate, idsToRefetch);
+  const where = buildPkWhereClause(pkFields, pksToRefetch);
+  nestedLog('Executing findMany for modelDelegate=%s with where=%O', modelDelegate, where);
 
-  const refetchedRecords = await model.findMany({
-    where: {
-      id: {
-        in: idsToRefetch,
-      },
-    },
-  });
+  const refetchedRecords = await model.findMany({ where });
 
   nestedLog('Refetch completed: found %d records for modelDelegate=%s', refetchedRecords?.length ?? 0, modelDelegate);
 
@@ -882,6 +938,7 @@ const executeRefetchQuery = async (
 /** @internal Process a single nested operation for refetch */
 const processNestedOperationForRefetch = async (
   client: DbClient,
+  schemaMetadata: SchemaMetadata,
   nestedOp: NestedOperationInfo,
   nestedPreFetchResults: Map<string, Map<string, { before: Record<string, unknown> | null }>>,
   relationFields: { name: string; relatedModel: string; isList: boolean }[],
@@ -904,13 +961,14 @@ const processNestedOperationForRefetch = async (
 
   nestedLog('Found pre-fetch results for path=%s, entityCount=%d', nestedOp.path, fieldMap.size);
 
-  const idsToRefetch = extractIdsToRefetch(fieldMap, nestedOp.path);
-  if (idsToRefetch.length === 0) {
-    nestedLog('No IDs to refetch for path=%s, skipping', nestedOp.path);
+  const pkFields = getPrimaryKeyFieldsFromMetadata(schemaMetadata, nestedOp.relatedModel);
+  const pksToRefetch = extractPksToRefetch(fieldMap, nestedOp.path, pkFields);
+  if (pksToRefetch.length === 0) {
+    nestedLog('No PKs to refetch for path=%s, skipping', nestedOp.path);
     return;
   }
 
-  nestedLog('Will refetch %d records for path=%s using IDs=%O', idsToRefetch.length, nestedOp.path, idsToRefetch);
+  nestedLog('Will refetch %d records for path=%s using PKs=%O', pksToRefetch.length, nestedOp.path, pksToRefetch);
 
   const relationField = relationFields.find((f) => f.name === nestedOp.fieldName);
   if (!relationField) {
@@ -919,7 +977,7 @@ const processNestedOperationForRefetch = async (
   }
 
   try {
-    const refetchedRecords = await executeRefetchQuery(client, relationField, idsToRefetch);
+    const refetchedRecords = await executeRefetchQuery(client, relationField, pksToRefetch, pkFields);
 
     if (refetchedRecords.length > 0) {
       nestedRecords.push({
@@ -977,7 +1035,14 @@ export const refetchNestedRecords = async (
   }
 
   for (const nestedOp of nestedOperations) {
-    await processNestedOperationForRefetch(client, nestedOp, nestedPreFetchResults, relationFields, nestedRecords);
+    await processNestedOperationForRefetch(
+      client,
+      schemaMetadata,
+      nestedOp,
+      nestedPreFetchResults,
+      relationFields,
+      nestedRecords,
+    );
   }
 
   return nestedRecords;

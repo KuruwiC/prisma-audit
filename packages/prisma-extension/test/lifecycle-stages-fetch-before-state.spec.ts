@@ -68,7 +68,7 @@ describe('createFetchBeforeStateStage', () => {
       { action: AUDIT_ACTION.DELETE, args: { where: { id: 'post-1' } } },
     ])('should fetch beforeState for $action when fetchBeforeOperation is true', async ({ action, args }) => {
       const beforeState = { id: 'post-1', title: 'Old Title' };
-      const fetchBeforeState = vi.fn().mockResolvedValue(beforeState);
+      const fetchBeforeState = vi.fn().mockResolvedValue({ _tag: 'found', data: beforeState });
       const preFetchNestedRecordsBeforeOperation = vi.fn().mockResolvedValue(new Map());
       const getNestedOperationConfig = vi.fn().mockReturnValue({ fetchBeforeOperation: true });
 
@@ -113,7 +113,7 @@ describe('createFetchBeforeStateStage', () => {
     it('should always fetch beforeState (forced)', async () => {
       // Arrange
       const beforeState = { id: 'post-1', title: 'Existing Title' };
-      const fetchBeforeState = vi.fn().mockResolvedValue(beforeState);
+      const fetchBeforeState = vi.fn().mockResolvedValue({ _tag: 'found', data: beforeState });
       const preFetchNestedRecordsBeforeOperation = vi.fn().mockResolvedValue(new Map());
       const getNestedOperationConfig = vi.fn();
 
@@ -142,7 +142,7 @@ describe('createFetchBeforeStateStage', () => {
 
     it('should return null if record does not exist (upsert will create)', async () => {
       // Arrange
-      const fetchBeforeState = vi.fn().mockResolvedValue(null);
+      const fetchBeforeState = vi.fn().mockResolvedValue({ _tag: 'notFound' });
       const preFetchNestedRecordsBeforeOperation = vi.fn().mockResolvedValue(new Map());
       const getNestedOperationConfig = vi.fn();
 
@@ -174,7 +174,7 @@ describe('createFetchBeforeStateStage', () => {
       const nestedPreFetchResults = new Map([
         ['tags', new Map([['tag-1', { before: { id: 'tag-1', name: 'TypeScript' } }]])],
       ]);
-      const fetchBeforeState = vi.fn().mockResolvedValue(null);
+      const fetchBeforeState = vi.fn().mockResolvedValue({ _tag: 'notFound' });
       const preFetchNestedRecordsBeforeOperation = vi.fn().mockResolvedValue(nestedPreFetchResults);
       const getNestedOperationConfig = vi.fn().mockReturnValue({ fetchBeforeOperation: false });
 
@@ -205,7 +205,7 @@ describe('createFetchBeforeStateStage', () => {
     it('should handle empty nested pre-fetch results', async () => {
       // Arrange
       const emptyResults = new Map();
-      const fetchBeforeState = vi.fn().mockResolvedValue(null);
+      const fetchBeforeState = vi.fn().mockResolvedValue({ _tag: 'notFound' });
       const preFetchNestedRecordsBeforeOperation = vi.fn().mockResolvedValue(emptyResults);
       const getNestedOperationConfig = vi.fn();
 
@@ -240,7 +240,7 @@ describe('createFetchBeforeStateStage', () => {
         ['tags', new Map([['tag-1', { before: { id: 'tag-1', name: 'TypeScript' } }]])],
       ]);
 
-      const fetchBeforeState = vi.fn().mockResolvedValue(beforeState);
+      const fetchBeforeState = vi.fn().mockResolvedValue({ _tag: 'found', data: beforeState });
       const preFetchNestedRecordsBeforeOperation = vi.fn().mockResolvedValue(nestedPreFetchResults);
       const getNestedOperationConfig = vi.fn().mockReturnValue({ fetchBeforeOperation: true });
 

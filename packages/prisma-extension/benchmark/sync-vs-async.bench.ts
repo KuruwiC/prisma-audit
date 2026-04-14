@@ -16,7 +16,7 @@ describe('Sync vs Async Write Mode', () => {
         User: defineEntity({ type: 'User', idField: 'id', aggregate: self }),
       },
       basePrisma: basePrismaSync,
-      DbNull: Prisma.DbNull,
+      Prisma,
       writeMode: 'sync',
     }),
   );
@@ -29,7 +29,7 @@ describe('Sync vs Async Write Mode', () => {
         User: defineEntity({ type: 'User', idField: 'id', aggregate: self }),
       },
       basePrisma: basePrismaAsync,
-      DbNull: Prisma.DbNull,
+      Prisma,
       writeMode: 'async',
     }),
   );

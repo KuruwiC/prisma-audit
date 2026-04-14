@@ -15,10 +15,24 @@ import type {
   SerializationConfig,
 } from '@kuruwic/prisma-audit-core';
 import { AUDIT_ACTION } from '@kuruwic/prisma-audit-core';
+import type { ResolvedAggregateData } from '../audit-log-builder/index.js';
 import { createPrismaClientManager, type PrismaClientManager } from '../client-manager/index.js';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../internal-types.js';
 import type { AuditLogData, PrismaAction } from '../types.js';
-import type { EnrichedContext, ExecutedContext, FinalContext, InitialContext, PreparedContext } from './types.js';
+import { createSchemaMetadataFromDMMF, getPrisma } from '../utils/schema-metadata.js';
+import {
+  batchEnrichAggregateContextsByType,
+  buildAggregateDataForEntity,
+  resolveAndFilterSurvivors,
+} from './batch-aggregate-resolver.js';
+import type {
+  BeforeStateResult,
+  EnrichedContext,
+  ExecutedContext,
+  FinalContext,
+  InitialContext,
+  PreparedContext,
+} from './types.js';
 
 /**
  * Stage dependencies interface
@@ -101,7 +115,7 @@ export interface StageDependencies {
     modelName: string,
     action: PrismaAction,
     args: Record<string, unknown>,
-  ) => Promise<Record<string, unknown> | null>;
+  ) => Promise<BeforeStateResult>;
 
   /**
    * Pre-fetch nested records before operation execution
@@ -162,24 +176,32 @@ export interface StageDependencies {
   ) => Promise<unknown[]>;
 
   /**
+   * Batch enrich aggregate contexts for multiple entities.
+   *
+   * Same pattern as batchEnrichEntityContexts — one call per aggregateType.
+   */
+  batchEnrichAggregateContexts: (
+    entities: Record<string, unknown>[],
+    entityConfig: LoggableEntity,
+    basePrisma: unknown,
+    meta: {
+      aggregateType: string;
+      aggregateCategory: string;
+      aggregateId?: string;
+    },
+  ) => Promise<(unknown | null)[]>;
+
+  /**
    * Build audit log data for an entity
    *
-   * This function:
-   * 1. Resolves aggregate roots for the entity
-   * 2. Resolves entity ID using idResolver
-   * 3. Determines actual action and before/after states
-   * 4. Calculates field-level changes (before redaction)
-   * 5. Applies redaction to sensitive data
-   * 6. Enriches aggregate context per aggregate root (aggregate-aware)
-   * 7. Builds audit log for each aggregate root
+   * Aggregate roots and contexts are resolved externally and passed in,
+   * following the same pattern as actor and entity enrichment.
    *
    * Returns an empty array if:
    * - Entity config not found
    * - No aggregate roots found
    * - ID resolution fails
    * - Only excluded fields changed (for updates)
-   *
-   * NOTE: aggregateContext parameter removed. Now enriched internally per aggregate root.
    */
   buildAuditLog: (
     entity: Record<string, unknown>,
@@ -193,8 +215,10 @@ export interface StageDependencies {
     aggregateConfig: AggregateConfigService,
     excludeFields: string[] | undefined,
     redact: RedactConfig | undefined,
+    aggregateData: ResolvedAggregateData,
     includeRelations?: boolean,
     serialization?: SerializationConfig,
+    relationFieldNames?: Set<string>,
   ) => Promise<AuditLogData[]>;
 
   /**
@@ -314,6 +338,13 @@ const shouldFetchBeforeState = (
  * 3. Skips fetch for create operations (beforeState = null)
  * 4. Pre-fetches nested records before operation execution
  *
+ * **TOCTOU note for upsert**: There is an inherent time gap between fetching
+ * the before-state (findUnique) and executing the upsert. When `awaitWrite=true`,
+ * both run inside the same transaction, mitigating this gap. When `awaitWrite=false`,
+ * concurrent operations may cause the audited action (create vs update) to diverge
+ * from what actually happened. This is an accepted trade-off because Prisma does not
+ * expose which branch of an upsert was executed.
+ *
  * @example
  * ```typescript
  * const stage = createFetchBeforeStateStage({
@@ -341,7 +372,14 @@ export const createFetchBeforeStateStage = (
 
     let beforeState: Record<string, unknown> | null = null;
     if (shouldFetchBeforeState(action, modelName, deps.getNestedOperationConfig)) {
-      beforeState = await deps.fetchBeforeState(clientToUse, modelName, toPrismaAction(action), operationArgs);
+      const result = await deps.fetchBeforeState(clientToUse, modelName, toPrismaAction(action), operationArgs);
+      if (result._tag === 'found') {
+        beforeState = result.data;
+      } else if (result._tag === 'error') {
+        // Error already dispatched to onAuditErrorHandler via fetchBeforeState.
+        // For upsert, action will default to 'create' — a known
+        // degraded-accuracy trade-off when the DB is unreachable.
+      }
     }
 
     const nestedPreFetchResults = await deps.preFetchNestedRecordsBeforeOperation(
@@ -392,8 +430,8 @@ export const createExecuteOperationStage = (): ((context: PreparedContext) => Pr
  * 2. Gets entity config via aggregateConfig.getEntityConfig
  * 3. Enriches entity context via batchEnrichEntityContexts (if entity config exists)
  *
- * NOTE: aggregateContext is no longer enriched at this stage. It is now enriched
- * per aggregate root inside buildAuditLog for aggregate-aware context.
+ * Aggregate context enrichment is handled separately in the build-logs stage
+ * via resolveAggregateData, following the same pre-resolution pattern.
  *
  * @example
  * ```typescript
@@ -453,9 +491,9 @@ export const createEnrichContextsStage = (
 /**
  * Build main audit logs for an entity
  *
- * Creates a Prisma client manager and calls buildAuditLog with all required parameters.
- *
- * NOTE: aggregateContext parameter removed. Now enriched internally per aggregate root.
+ * Follows the same 2-phase pattern as batch-stages:
+ * Phase 1: Resolve aggregate roots
+ * Phase 2: Enrich aggregate contexts per aggregateType
  *
  * @internal
  */
@@ -467,12 +505,43 @@ const buildMainAuditLogs = async (
   >,
 ): Promise<AuditLogData[]> => {
   const manager = createPrismaClientManager(deps.basePrisma, context.auditContext);
+  const modelName = getModelName(context.operation.model);
+  const entity = toResultRecord(context.result);
+
+  const entityConfig = deps.aggregateConfig.getEntityConfig(modelName);
+  if (!entityConfig) {
+    return [];
+  }
+
+  // Phase 1: Resolve aggregate roots (reuses batch resolver with 1-element array)
+  const survivors = await resolveAndFilterSurvivors([entity], entityConfig, manager.activeClient);
+  if (survivors.length === 0) {
+    return [];
+  }
+
+  // Phase 2: Batch-enrich aggregate contexts grouped by type
+  const aggregateContextMap = await batchEnrichAggregateContextsByType(survivors, entityConfig, manager.activeClient);
+
+  const survivor = survivors[0];
+  if (!survivor) {
+    return [];
+  }
+  const aggregateData = buildAggregateDataForEntity(survivor.entityIndex, survivor.aggregateRoots, aggregateContextMap);
+
+  let relationFields: Set<string> | undefined;
+  try {
+    const Prisma = getPrisma(deps.basePrisma as PrismaClientWithDynamicAccess);
+    const metadata = createSchemaMetadataFromDMMF(Prisma);
+    relationFields = new Set(metadata.getRelationFields(modelName).map((f) => f.name));
+  } catch {
+    // Prisma namespace not available — fall back to heuristic relation detection
+  }
 
   return deps.buildAuditLog(
-    toResultRecord(context.result),
+    entity,
     toPrismaAction(context.operation.action),
     context.auditContext,
-    getModelName(context.operation.model),
+    modelName,
     manager,
     context.actorContext,
     context.entityContext,
@@ -480,8 +549,10 @@ const buildMainAuditLogs = async (
     deps.aggregateConfig,
     deps.excludeFields,
     deps.redact,
+    aggregateData,
     undefined,
     deps.serialization,
+    relationFields,
   );
 };
 

@@ -394,8 +394,15 @@ describe('hooks.writer Coverage (Phase 2)', () => {
         });
       });
 
-      // Wait for async write to complete (fire and forget)
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      // Poll for async write to complete (fire and forget)
+      const maxWait = 5000;
+      const interval = 50;
+      let elapsed = 0;
+      while (elapsed < maxWait) {
+        if (asyncContext.writerSpy.callCount > 0) break;
+        await new Promise((resolve) => setTimeout(resolve, interval));
+        elapsed += interval;
+      }
 
       // Verify: hooks.writer was called
       expect(asyncContext.writerSpy.callCount).toBeGreaterThan(0);

@@ -11,6 +11,7 @@ import type {
   AggregateConfigService,
   AuditContext,
   LoggableEntity,
+  ResolvedId,
   SerializationConfig,
 } from '@kuruwic/prisma-audit-core';
 import {
@@ -31,6 +32,52 @@ import {
 } from '@kuruwic/prisma-audit-core';
 import type { PrismaClientManager } from '../client-manager/index.js';
 import type { AuditLogData, PrismaAction } from '../types.js';
+
+/**
+ * Pre-resolved aggregate data for an entity.
+ *
+ * Separates aggregate resolution from audit log construction,
+ * enabling batch optimization at the caller level.
+ */
+export type ResolvedAggregateData = {
+  readonly aggregateRoots: ResolvedId[];
+  /** Keyed by composite root identity: `aggregateType:aggregateId` */
+  readonly aggregateContexts: Map<string, unknown>;
+};
+
+/** Composite key for aggregate context: root identity = type + id */
+export const aggregateContextKey = (aggregateType: string, aggregateId: string): string =>
+  `${aggregateType}:${aggregateId}`;
+
+/**
+ * Resolve aggregate roots and enrich aggregate contexts for a single entity.
+ *
+ * Used by single-operation and nested-operation callers.
+ * Batch callers should resolve roots and enrich contexts in bulk instead.
+ */
+export const resolveAggregateData = async (
+  entity: Record<string, unknown>,
+  entityConfig: LoggableEntity,
+  prisma: unknown,
+): Promise<ResolvedAggregateData> => {
+  const aggregateRoots = await resolveAllAggregateRoots(entity, entityConfig, prisma);
+
+  const aggregateContexts = new Map<string, unknown>();
+  for (const root of aggregateRoots) {
+    const cacheKey = aggregateContextKey(root.aggregateType, root.aggregateId);
+    if (!aggregateContexts.has(cacheKey)) {
+      const meta = {
+        aggregateType: root.aggregateType,
+        aggregateCategory: root.aggregateCategory,
+        aggregateId: root.aggregateId,
+      };
+      const [enrichedContext] = await batchEnrichAggregateContexts([entity], entityConfig, prisma, meta);
+      aggregateContexts.set(cacheKey, enrichedContext);
+    }
+  }
+
+  return { aggregateRoots, aggregateContexts };
+};
 
 /**
  * Type guard to ensure redaction result is a record or null/undefined
@@ -121,48 +168,6 @@ const shouldSkipAuditLog = (
 };
 
 /**
- * Enrich aggregate context for a specific aggregate root
- *
- * Uses caching to prevent N+1 queries when the same aggregate root is referenced multiple times.
- *
- * @param entity - Entity record
- * @param entityConfig - Entity configuration
- * @param root - Aggregate root info (aggregateType, aggregateCategory, aggregateId)
- * @param prisma - Prisma client
- * @param cache - Cache map for storing enriched contexts
- * @returns Enriched aggregate context for the specific root
- * @internal
- */
-const enrichAggregateContextForRoot = async (
-  entity: Record<string, unknown>,
-  entityConfig: LoggableEntity,
-  root: { aggregateType: string; aggregateCategory: string; aggregateId: string },
-  prisma: unknown,
-  cache: Map<string, unknown>,
-): Promise<unknown> => {
-  const cacheKey = `${root.aggregateType}:${root.aggregateId}`;
-
-  // Cache hit
-  if (cache.has(cacheKey)) {
-    return cache.get(cacheKey);
-  }
-
-  // Enrich aggregate context for this specific root
-  const meta = {
-    aggregateType: root.aggregateType,
-    aggregateCategory: root.aggregateCategory,
-    aggregateId: root.aggregateId,
-  };
-
-  const [enrichedContext] = await batchEnrichAggregateContexts([entity], entityConfig, prisma, meta);
-
-  // Cache store
-  cache.set(cacheKey, enrichedContext);
-
-  return enrichedContext;
-};
-
-/**
  * Build a single audit log entry for an aggregate root
  */
 const buildSingleAuditLog = (
@@ -215,16 +220,13 @@ const buildSingleAuditLog = (
  * 2. Determine actual action and before/after states
  * 3. Calculate field-level changes (pre-redaction)
  * 4. Apply redaction and relation config
- * 5. Enrich aggregate context per aggregate root (aggregate-aware)
- * 6. Build audit log for each aggregate root
+ * 5. Build audit log for each aggregate root using pre-resolved aggregate contexts
  *
  * Returns empty array if:
  * - Entity config not found
  * - No aggregate roots found
  * - ID resolution fails
  * - Only excluded fields changed (updates only)
- *
- * NOTE: aggregateContext parameter removed. Now enriched internally per aggregate root.
  */
 export const buildAuditLog = async (
   entity: Record<string, unknown>,
@@ -238,15 +240,17 @@ export const buildAuditLog = async (
   aggregateConfig: AggregateConfigService,
   excludeFields: string[] | undefined,
   redact: RedactConfig | undefined,
+  aggregateData: ResolvedAggregateData,
   includeRelations?: boolean,
   serialization?: SerializationConfig,
+  relationFieldNames?: Set<string>,
 ): Promise<AuditLogData[]> => {
   const entityConfig = aggregateConfig.getEntityConfig(modelName);
   if (!entityConfig) {
     return [];
   }
 
-  const aggregateRoots = await resolveAllAggregateRoots(entity, entityConfig, manager.activeClient);
+  const { aggregateRoots, aggregateContexts } = aggregateData;
   if (aggregateRoots.length === 0) {
     return [];
   }
@@ -277,22 +281,14 @@ export const buildAuditLog = async (
   }
 
   const shouldIncludeRelations = entityConfig.includeRelations ?? includeRelations ?? false;
-  [beforeData, afterData] = applyRelationConfig(beforeData, afterData, shouldIncludeRelations);
+  [beforeData, afterData] = applyRelationConfig(beforeData, afterData, shouldIncludeRelations, relationFieldNames);
 
-  // Enrich aggregate context per aggregate root (aggregate-aware)
-  const aggregateContextCache = new Map<string, unknown>();
   const auditLogs: AuditLogData[] = [];
   const customSerializers = serialization?.customSerializers;
 
   for (const root of aggregateRoots) {
-    // Enrich aggregate context for this specific root
-    const aggregateContextForRoot = await enrichAggregateContextForRoot(
-      entity,
-      entityConfig,
-      root,
-      manager.activeClient,
-      aggregateContextCache,
-    );
+    const aggregateContextForRoot =
+      aggregateContexts.get(aggregateContextKey(root.aggregateType, root.aggregateId)) ?? null;
 
     const rawLog = buildSingleAuditLog(
       root,

@@ -76,22 +76,6 @@ const createMockErrorHandler = (): ErrorHandler => vi.fn();
 
 describe('writeDeferredInTransaction', () => {
   describe('basic functionality', () => {
-    it('should return immediately without writing logs', () => {
-      const writeFn = vi.fn().mockResolvedValue(undefined);
-      const manager = createMockManager();
-      const executor = createMockExecutor(writeFn);
-      const logs = [createMockLog()];
-      const context = createMockContext();
-      const handleError = createMockErrorHandler();
-
-      const result = writeDeferredInTransaction(logs, context, manager, 'auditLog', undefined, handleError, executor);
-
-      // Should return immediately
-      expect(result).toBeDefined();
-      // Should not write yet
-      expect(writeFn).not.toHaveBeenCalled();
-    });
-
     it('should return Deferred WriteResult', () => {
       const manager = createMockManager();
       const executor = createMockExecutor();
@@ -106,24 +90,6 @@ describe('writeDeferredInTransaction', () => {
         queuedAt: expect.any(Date),
         execute: expect.any(Function),
       });
-    });
-
-    it('should have queuedAt timestamp close to current time', () => {
-      const manager = createMockManager();
-      const executor = createMockExecutor();
-      const logs = [createMockLog()];
-      const context = createMockContext();
-      const handleError = createMockErrorHandler();
-      const before = new Date();
-
-      const result = writeDeferredInTransaction(logs, context, manager, 'auditLog', undefined, handleError, executor);
-
-      const after = new Date();
-      expect(result._tag).toBe('Deferred');
-      if (result._tag === 'Deferred') {
-        expect(result.queuedAt.getTime()).toBeGreaterThanOrEqual(before.getTime());
-        expect(result.queuedAt.getTime()).toBeLessThanOrEqual(after.getTime());
-      }
     });
   });
 
@@ -160,6 +126,24 @@ describe('writeDeferredInTransaction', () => {
         await result.execute();
         expect(writeFn).toHaveBeenCalledTimes(1);
         expect(writeFn).toHaveBeenCalledWith(manager.baseClient, 'auditLog', logs);
+      }
+    });
+
+    it('should call writer even with empty logs array', async () => {
+      const writeFn = vi.fn().mockResolvedValue(undefined);
+      const manager = createMockManager();
+      const executor = createMockExecutor(writeFn);
+      const logs: AuditLogData[] = [];
+      const context = createMockContext();
+      const handleError = createMockErrorHandler();
+
+      const result = writeDeferredInTransaction(logs, context, manager, 'auditLog', undefined, handleError, executor);
+
+      if (result._tag === 'Deferred') {
+        await result.execute();
+        // Unlike synchronous and fire-and-forget, deferred does not guard against empty logs
+        expect(writeFn).toHaveBeenCalledTimes(1);
+        expect(writeFn).toHaveBeenCalledWith(manager.baseClient, 'auditLog', []);
       }
     });
 
@@ -221,22 +205,6 @@ describe('writeDeferredInTransaction', () => {
 
       expect(contextWithDeferred._deferredWrites).toHaveLength(2);
       expect(contextWithDeferred._deferredWrites[0]).toBe(existingExecute);
-    });
-
-    it('should create _deferredWrites array if not exists', () => {
-      const manager = createMockManager();
-      const executor = createMockExecutor();
-      const logs = [createMockLog()];
-      const context = createMockContext();
-      const handleError = createMockErrorHandler();
-
-      writeDeferredInTransaction(logs, context, manager, 'auditLog', undefined, handleError, executor);
-
-      const contextWithDeferred = context as AuditContext & {
-        _deferredWrites?: Array<() => Promise<void>>;
-      };
-      expect(contextWithDeferred._deferredWrites).toBeDefined();
-      expect(Array.isArray(contextWithDeferred._deferredWrites)).toBe(true);
     });
 
     it('should add function that executes logs when called', async () => {

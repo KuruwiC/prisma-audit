@@ -8,7 +8,7 @@
 
 import { preFetchLog } from '@kuruwic/prisma-audit-core';
 import type { NestedPreFetchResults } from './pre-fetch-result-store.js';
-import { PRE_FETCH_DEFAULT_KEY } from './pre-fetch-result-store.js';
+import { extractEntityIdOrDefault } from './pre-fetch-result-store.js';
 
 export interface DMMFRelationField {
   relationFromFields?: string[];
@@ -134,6 +134,7 @@ export const resolveEffectiveParentWhere = (
   nestedOp: NestedOperation,
   parentWhere: Record<string, unknown>,
   preFetchResults: NestedPreFetchResults,
+  relationToField?: string,
 ): Record<string, unknown> => {
   if (!nestedOp.path.includes('.')) {
     return parentWhere;
@@ -150,11 +151,16 @@ export const resolveEffectiveParentWhere = (
   }
 
   const parentRecord = Array.from(parentResults.values())[0]?.before;
-  if (!parentRecord || typeof parentRecord !== 'object' || !('id' in parentRecord)) {
+  if (!parentRecord || typeof parentRecord !== 'object') {
     return parentWhere;
   }
 
-  const effectiveWhere = { id: parentRecord.id };
+  const toField = relationToField ?? 'id';
+  if (!(toField in parentRecord)) {
+    return parentWhere;
+  }
+
+  const effectiveWhere = { [toField]: parentRecord[toField] };
   preFetchLog('1:1 using parent pre-fetch result: parentWhere=%O', effectiveWhere);
   return effectiveWhere;
 };
@@ -209,12 +215,12 @@ export const fetchParentRecordIfNeeded = async (
 
   preFetchLog('1:1 fetched parent record: %s', parentRecord ? 'found' : 'null');
 
-  if (!parentRecord || typeof parentRecord !== 'object' || !('id' in parentRecord)) {
-    preFetchLog('1:1 parent record not found or has no id field, skipping');
+  if (!parentRecord || typeof parentRecord !== 'object' || !(relationToField in parentRecord)) {
+    preFetchLog('1:1 parent record not found or missing field %s, skipping', relationToField);
     return null;
   }
 
-  const result = { id: parentRecord.id };
+  const result = { [relationToField]: parentRecord[relationToField] };
   preFetchLog('1:1 using fetched parent record ID: parentWhere=%O', result);
   return result;
 };
@@ -261,6 +267,7 @@ export const preFetchOneToOneRelation = async (
   dmmf: PrismaDMMF,
   preFetchResults: NestedPreFetchResults,
   prismaClient: Record<string, ModelClientWithFindFirst>,
+  pkFields?: string[],
 ): Promise<PreFetchOneToOneResult | null> => {
   const [relationFromField, relationToField] = determineRelationFields(
     isOwningSide,
@@ -278,7 +285,7 @@ export const preFetchOneToOneRelation = async (
     return null;
   }
 
-  let effectiveParentWhere = resolveEffectiveParentWhere(nestedOp, parentWhere, preFetchResults);
+  let effectiveParentWhere = resolveEffectiveParentWhere(nestedOp, parentWhere, preFetchResults, relationToField);
 
   const fetchedParentWhere = await fetchParentRecordIfNeeded(
     relationToField,
@@ -304,7 +311,7 @@ export const preFetchOneToOneRelation = async (
 
   preFetchLog('1:1 beforeRecord: %s', beforeRecord ? 'found' : 'null');
 
-  const entityId = beforeRecord && 'id' in beforeRecord ? String(beforeRecord.id) : PRE_FETCH_DEFAULT_KEY;
+  const entityId = extractEntityIdOrDefault(beforeRecord, pkFields);
 
   return { entityId, beforeRecord };
 };

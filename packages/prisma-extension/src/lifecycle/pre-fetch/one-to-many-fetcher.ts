@@ -7,8 +7,9 @@
  */
 
 import { preFetchLog } from '@kuruwic/prisma-audit-core';
+
 import type { NestedPreFetchResults } from './pre-fetch-result-store.js';
-import { PRE_FETCH_DEFAULT_KEY, storePreFetchResult } from './pre-fetch-result-store.js';
+import { extractEntityIdOrDefault, PRE_FETCH_DEFAULT_KEY, storePreFetchResult } from './pre-fetch-result-store.js';
 
 export interface NestedOperation {
   operation: string;
@@ -20,6 +21,7 @@ export interface NestedOperation {
 
 export interface ModelClientWithFindFirst {
   findFirst: (args: { where: Record<string, unknown> }) => Promise<Record<string, unknown> | null>;
+  findMany?: (args: { where: Record<string, unknown> }) => Promise<Record<string, unknown>[]>;
   [key: string]: unknown;
 }
 
@@ -74,17 +76,26 @@ export const extractWhereClause = (
 export const extractEntityId = (
   beforeRecord: Record<string, unknown> | null,
   whereClause: Record<string, unknown> | null,
+  pkFields?: string[],
 ): string => {
-  if (beforeRecord && 'id' in beforeRecord) {
-    return String(beforeRecord.id);
+  if (beforeRecord) {
+    const id = extractEntityIdOrDefault(beforeRecord, pkFields);
+    if (id !== PRE_FETCH_DEFAULT_KEY) return id;
   }
 
-  if (whereClause && 'id' in whereClause) {
-    return String(whereClause.id);
+  if (whereClause) {
+    const id = extractEntityIdOrDefault(whereClause, pkFields);
+    if (id !== PRE_FETCH_DEFAULT_KEY) return id;
   }
 
   return PRE_FETCH_DEFAULT_KEY;
 };
+
+// NOTE: deleteMany prefetch using findMany is intentionally NOT implemented here.
+// The where clause in nested deleteMany is not scoped to the parent relation
+// (e.g., { published: false } would match all unpublished posts, not just the parent's).
+// Prisma handles parent scoping internally, but findMany would over-fetch.
+// This requires parent FK scoping infrastructure to implement correctly.
 
 /**
  * Pre-fetches 1:N relation records before operation execution
@@ -108,6 +119,7 @@ export const preFetchOneToManyRelation = async (
   nestedOp: NestedOperation,
   relatedModelClient: ModelClientWithFindFirst,
   preFetchResults: NestedPreFetchResults,
+  pkFields?: string[],
 ): Promise<void> => {
   const opData = nestedOp.data;
 
@@ -137,7 +149,7 @@ export const preFetchOneToManyRelation = async (
     preFetchLog('1:N where clause: field=%s where=%O', nestedOp.fieldName, whereClause);
 
     const beforeRecord = await relatedModelClient.findFirst({ where: whereClause });
-    const entityId = extractEntityId(beforeRecord, whereClause);
+    const entityId = extractEntityId(beforeRecord, whereClause, pkFields);
 
     storePreFetchResult(preFetchResults, nestedOp.path, entityId, beforeRecord);
 

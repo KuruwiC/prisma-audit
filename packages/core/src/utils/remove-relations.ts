@@ -1,21 +1,14 @@
-const isRelationObject = (value: unknown): boolean => {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) && 'id' in value;
-};
-
-const isRelationArray = (value: unknown): boolean => {
-  return Array.isArray(value) && value.length > 0 && isRelationObject(value[0]);
+const isObjectValue = (value: unknown): value is Record<string, unknown> => {
+  return typeof value === 'object' && value !== null && !Array.isArray(value) && !(value instanceof Date);
 };
 
 const processObjectEntry = <T>(
   key: string,
   value: unknown,
-  removeRelations: (obj: T) => T,
+  recurse: (obj: T) => T,
+  relationFieldNames: Set<string> | undefined,
 ): [string, unknown] | null => {
-  if (isRelationObject(value)) {
-    return null;
-  }
-
-  if (isRelationArray(value)) {
+  if (relationFieldNames?.has(key)) {
     return null;
   }
 
@@ -23,12 +16,12 @@ const processObjectEntry = <T>(
     return [key, value];
   }
 
-  if (value && typeof value === 'object' && !Array.isArray(value)) {
-    return [key, removeRelations(value as T)];
+  if (isObjectValue(value)) {
+    return [key, recurse(value as T)];
   }
 
   if (Array.isArray(value)) {
-    return [key, value.map(removeRelations)];
+    return [key, value.map(recurse)];
   }
 
   return [key, value];
@@ -37,30 +30,31 @@ const processObjectEntry = <T>(
 /**
  * Remove relation objects from audit log states
  *
- * Recursively removes nested relations while preserving scalar fields and foreign keys.
- * Used to reduce audit log size when full relation objects aren't needed.
+ * When `relationFieldNames` is provided, removes fields by name (precise).
+ * When not provided, no relation removal is performed — data is returned as-is
+ * to avoid false positives from heuristic detection.
+ *
+ * @param obj - Object to strip relations from
+ * @param relationFieldNames - Relation field names from SchemaMetadata. Only
+ *   these fields are removed. When undefined, no fields are removed.
  *
  * @example
  * ```typescript
- * const input = {
- *   id: "comment-1",
- *   postId: "post-1",
- *   content: "Hello",
- *   post: { id: "post-1", title: "..." },
- *   author: { id: "user-1", name: "..." }
- * };
+ * // With field names (precise removal)
+ * removeRelations(input, new Set(['post', 'author']));
  *
+ * // Without field names (no removal)
  * removeRelations(input);
- * // => { id: "comment-1", postId: "post-1", content: "Hello" }
+ * // => input (unchanged)
  * ```
  */
-export const removeRelations = <T>(obj: T): T => {
+export const removeRelations = <T>(obj: T, relationFieldNames?: Set<string>): T => {
   if (!obj || typeof obj !== 'object') {
     return obj;
   }
 
   if (Array.isArray(obj)) {
-    return obj.map(removeRelations) as T;
+    return obj.map((item) => removeRelations(item)) as T;
   }
 
   if (obj instanceof Date) {
@@ -68,10 +62,11 @@ export const removeRelations = <T>(obj: T): T => {
   }
 
   const result = {} as Record<string, unknown>;
+  const recurse = (v: T) => removeRelations(v);
 
   for (const key of Object.keys(obj)) {
     const value = (obj as Record<string, unknown>)[key];
-    const entry = processObjectEntry(key, value, removeRelations);
+    const entry = processObjectEntry(key, value, recurse, relationFieldNames);
 
     if (entry !== null) {
       const [entryKey, entryValue] = entry;

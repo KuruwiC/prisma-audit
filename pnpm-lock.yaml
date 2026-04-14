@@ -231,11 +231,8 @@ importers:
 
   packages/prisma-extension:
     dependencies:
-      '@paralleldrive/cuid2':
-        specifier: ^3.0.4
-        version: 3.0.4
       debug:
-        specifier: ^4.4.3
+        specifier: ^4.4.0
         version: 4.4.3
     devDependencies:
       '@biomejs/biome':

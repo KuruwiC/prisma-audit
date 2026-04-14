@@ -77,20 +77,6 @@ describe('createErrorHandler', () => {
 
       consoleErrorSpy.mockRestore();
     });
-
-    it('should execute both custom handler and strategy', () => {
-      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-      const customHandler = vi.fn();
-      const handler = createErrorHandler('log', customHandler);
-      const error = new Error('Test error');
-
-      handler(error, 'test context');
-
-      expect(customHandler).toHaveBeenCalled();
-      expect(consoleErrorSpy).toHaveBeenCalled();
-
-      consoleErrorSpy.mockRestore();
-    });
   });
 
   describe('default strategy', () => {

@@ -1,7 +1,7 @@
 /** Enrichment module types */
 
 /** Error handling strategy for enricher failures: 'fail', 'log', or custom function */
-export type EnricherErrorStrategy = 'fail' | 'log' | ((error: Error) => unknown);
+export type EnricherErrorStrategy = 'fail' | 'log' | 'skip' | ((error: Error) => unknown);
 
 /**
  * Enricher configuration with error handling and fallback support

@@ -10,7 +10,7 @@ import type { DbClientManager, WriteExecutor } from './interfaces.js';
 import type { WriteFn, WriteResult } from './types.js';
 import { createBaseClientWriteFn } from './utils.js';
 
-type ErrorHandler = (error: Error, operationDescription: string) => void;
+type ErrorHandler = (error: Error, operationDescription: string) => void | Promise<void>;
 
 const createDeferredExecutor = (
   logs: AuditLogData[],
@@ -28,7 +28,7 @@ const createDeferredExecutor = (
       }
     } catch (error) {
       const errorObject = error instanceof Error ? error : new Error(String(error));
-      errorHandler(errorObject, 'deferred audit log write');
+      await errorHandler(errorObject, 'deferred audit log write');
     }
   };
 };

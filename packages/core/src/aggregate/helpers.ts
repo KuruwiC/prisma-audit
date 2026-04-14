@@ -14,12 +14,30 @@ import type {
   AggregateIdResolver,
   AggregateMapping,
   AggregateRoot,
+  BatchAggregateIdResolver,
   GetModelType,
   LoggableEntity,
   ResolvedId,
   TypedAggregateMapping,
 } from './types.js';
 import { DEFAULT_ENTITY_CATEGORY } from './types.js';
+
+// ============================================================================
+// Resolver Metadata (WeakMap-based, no type assertions needed)
+// ============================================================================
+
+const batchResolverRegistry = new WeakMap<AggregateIdResolver, BatchAggregateIdResolver>();
+const asyncResolverRegistry = new WeakSet<AggregateIdResolver>();
+
+/** Check if a resolver was created by resolveId() (performs DB queries) */
+export function isAsyncResolver(resolver: AggregateIdResolver): boolean {
+  return asyncResolverRegistry.has(resolver);
+}
+
+/** Get the batch resolver attached by batchResolveIds(), if any */
+export function getRegisteredBatchResolver(resolver: AggregateIdResolver): BatchAggregateIdResolver | undefined {
+  return batchResolverRegistry.get(resolver);
+}
 
 // ============================================================================
 // Type Definitions
@@ -223,7 +241,64 @@ export const foreignKey = (foreignKeyField: string | IdTransformer): AggregateId
 export const resolveId = <TEntity = unknown, TDbClient = unknown>(
   resolverFn: (entity: TEntity, dbClient: TDbClient) => Promise<string | null | undefined>,
 ): AggregateIdResolver => {
-  return resolverFn as unknown as AggregateIdResolver;
+  const resolver: AggregateIdResolver = async (
+    entity: unknown,
+    dbClient: unknown,
+  ): Promise<string | null | undefined> => {
+    return resolverFn(entity as TEntity, dbClient as TDbClient);
+  };
+  asyncResolverRegistry.add(resolver);
+  return resolver;
+};
+
+/**
+ * Create a batch ID resolver for N+1 prevention in aggregate resolution.
+ *
+ * Use this instead of `resolveId` when the aggregate root cannot be determined
+ * from the entity's own fields (e.g., reverse FK lookups) and the entity may
+ * be inserted/updated in batches.
+ *
+ * The resolver receives all entities at once and must return an array of the
+ * same length and order. Each element is a string ID (logged), null, or
+ * undefined (both skip logging for that entity).
+ *
+ * @template TEntity - Entity type
+ * @template TDbClient - Database client type
+ * @param resolverFn - Batch resolver function
+ * @returns An AggregateIdResolver. The batch function is registered internally via WeakMap and propagated to AggregateRoot.batchResolve by to().
+ *
+ * @example Reverse FK lookup
+ * ```typescript
+ * to('User', batchResolveIds<Post, PrismaClient>(async (posts, prisma) => {
+ *   const users = await prisma.user.findMany({
+ *     where: { OR: posts.map(p => ({ post1Id: p.id })) },
+ *     select: { id: true, post1Id: true },
+ *   });
+ *   const postToUser = new Map(users.flatMap(u =>
+ *     u.post1Id ? [[u.post1Id, u.id]] : []
+ *   ));
+ *   return posts.map(p => postToUser.get(p.id) ?? null);
+ * }))
+ * ```
+ */
+export const batchResolveIds = <TEntity = unknown, TDbClient = unknown>(
+  resolverFn: (entities: TEntity[], dbClient: TDbClient) => Promise<(string | null | undefined)[]>,
+): AggregateIdResolver => {
+  const batchFn: BatchAggregateIdResolver = async (
+    entities: unknown[],
+    dbClient: unknown,
+  ): Promise<(string | null | undefined)[]> => {
+    return resolverFn(entities as TEntity[], dbClient as TDbClient);
+  };
+  const singleResolver: AggregateIdResolver = async (
+    entity: unknown,
+    dbClient: unknown,
+  ): Promise<string | null | undefined> => {
+    const results = await batchFn([entity], dbClient);
+    return results[0] ?? null;
+  };
+  batchResolverRegistry.set(singleResolver, batchFn);
+  return singleResolver;
 };
 
 /**
@@ -285,11 +360,20 @@ export function to<TAggregateName extends string = string>(
   resolver: AggregateIdResolver | ((entity: unknown, dbClient: unknown) => Promise<string | null | undefined>),
   category?: string,
 ): AggregateRoot {
-  return {
+  const typedResolver = resolver as AggregateIdResolver;
+  const root: AggregateRoot = {
     category: category ?? DEFAULT_ENTITY_CATEGORY,
     type,
-    resolve: resolver as AggregateIdResolver,
+    resolve: typedResolver,
   };
+  const batchFn = getRegisteredBatchResolver(typedResolver);
+  if (batchFn) {
+    root.batchResolve = batchFn;
+  }
+  if (isAsyncResolver(typedResolver)) {
+    root.requiresDbAccess = true;
+  }
+  return root;
 }
 
 // ============================================================================

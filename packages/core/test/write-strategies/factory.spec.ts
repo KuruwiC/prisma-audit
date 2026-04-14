@@ -85,19 +85,6 @@ const mockExecutor: WriteExecutor = {
 const mockWriter: WriteFn = vi.fn().mockResolvedValue(undefined);
 
 describe('createWriteStrategySelector', () => {
-  it('should return a function', () => {
-    const config: WriteStrategyConfig = {
-      awaitWrite: false,
-      aggregateConfig: {
-        getEntityConfig: () => undefined,
-      },
-    };
-
-    const selector = createWriteStrategySelector(config, mockExecutor);
-
-    expect(typeof selector).toBe('function');
-  });
-
   describe('Global awaitWrite: true', () => {
     it('should return synchronous strategy when awaitWrite is true', async () => {
       const config: WriteStrategyConfig = {
@@ -249,38 +236,6 @@ describe('createWriteStrategySelector', () => {
       expect(result._tag).toBe('Immediate');
     });
 
-    it('should use synchronous strategy when awaitWriteIf returns true and no transaction', async () => {
-      const config: WriteStrategyConfig = {
-        awaitWrite: false,
-        awaitWriteIf: (_modelName, tags) => tags.includes('critical'),
-        aggregateConfig: {
-          getEntityConfig: (modelName) => {
-            if (modelName === 'Payment') {
-              return { tags: ['critical'] };
-            }
-            return undefined;
-          },
-        },
-      };
-
-      const selector = createWriteStrategySelector(config, mockExecutor);
-      const strategy = selector(mockContext, 'Payment');
-
-      const result = await strategy(
-        mockLogs,
-        mockContext,
-        mockManager,
-        'auditLog',
-        mockWriter,
-        mockHandleError,
-        mockExecutor,
-      );
-
-      // awaitWriteIf returns true → synchronous strategy
-      expect(result._tag).toBe('Immediate');
-      expect(result).toHaveProperty('createdAt');
-    });
-
     it('should use deferred strategy when awaitWriteIf returns false and in transaction', async () => {
       const config: WriteStrategyConfig = {
         awaitWrite: false,
@@ -311,6 +266,38 @@ describe('createWriteStrategySelector', () => {
       // awaitWriteIf returns false + in transaction → deferred strategy
       expect(result._tag).toBe('Deferred');
       expect(result).toHaveProperty('execute');
+    });
+
+    it('should use synchronous strategy even in transaction when awaitWriteIf returns true', async () => {
+      const config: WriteStrategyConfig = {
+        awaitWrite: false,
+        awaitWriteIf: (_modelName, tags) => tags.includes('critical'),
+        aggregateConfig: {
+          getEntityConfig: (modelName) => {
+            if (modelName === 'Payment') {
+              return { tags: ['critical'] };
+            }
+            return undefined;
+          },
+        },
+      };
+
+      const selector = createWriteStrategySelector(config, mockExecutor);
+      const strategy = selector(mockTransactionalContext, 'Payment');
+
+      const result = await strategy(
+        mockLogs,
+        mockTransactionalContext,
+        mockManager,
+        'auditLog',
+        mockWriter,
+        mockHandleError,
+        mockExecutor,
+      );
+
+      // awaitWriteIf returns true → synchronous (not deferred), even in transaction
+      expect(result._tag).toBe('Immediate');
+      expect(result).toHaveProperty('createdAt');
     });
   });
 
@@ -392,63 +379,6 @@ describe('createWriteStrategySelector', () => {
       // No awaitWriteIf → uses global awaitWrite: true → synchronous strategy
       expect(result._tag).toBe('Immediate');
       expect(result).toHaveProperty('createdAt');
-    });
-  });
-
-  describe('Error handler propagation', () => {
-    it('should pass error handler to deferred strategy', async () => {
-      const config: WriteStrategyConfig = {
-        awaitWrite: false,
-        aggregateConfig: {
-          getEntityConfig: () => undefined,
-        },
-      };
-
-      const selector = createWriteStrategySelector(config, mockExecutor);
-      const strategy = selector(mockTransactionalContext, 'User');
-
-      const customErrorHandler = vi.fn();
-      const result = await strategy(
-        mockLogs,
-        mockTransactionalContext,
-        mockManager,
-        'auditLog',
-        mockWriter,
-        customErrorHandler,
-        mockExecutor,
-      );
-
-      // Deferred strategy should receive error handler
-      expect(result._tag).toBe('Deferred');
-      if (result._tag === 'Deferred') {
-        expect(typeof result.execute).toBe('function');
-      }
-    });
-
-    it('should pass error handler to fire-and-forget strategy', async () => {
-      const config: WriteStrategyConfig = {
-        awaitWrite: false,
-        aggregateConfig: {
-          getEntityConfig: () => undefined,
-        },
-      };
-
-      const selector = createWriteStrategySelector(config, mockExecutor);
-      const strategy = selector(mockContext, 'User');
-
-      const customErrorHandler = vi.fn();
-      const result = await strategy(
-        mockLogs,
-        mockContext,
-        mockManager,
-        'auditLog',
-        mockWriter,
-        customErrorHandler,
-        mockExecutor,
-      );
-
-      // Fire-and-forget strategy should receive error handler
-      expect(result._tag).toBe('Immediate');
     });
   });
 });

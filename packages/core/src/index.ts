@@ -6,6 +6,7 @@ export { createAggregateConfig, isAggregateConfigService } from './aggregate/con
 // Aggregate Helpers
 export type { DefineEntityOptions, IdTransformer } from './aggregate/helpers.js';
 export {
+  batchResolveIds,
   defineAggregateMapping,
   defineEntity,
   foreignKey,
@@ -23,6 +24,7 @@ export type {
   AggregateMapping,
   AggregateResolutionContext,
   AggregateRoot,
+  BatchAggregateIdResolver,
   CapitalizedModelNames,
   GetModelDelegate,
   GetModelType,
@@ -35,7 +37,6 @@ export { DEFAULT_ENTITY_CATEGORY } from './aggregate/types.js';
 // Config Types
 export type {
   ActorEnricher,
-  AuditLogOptions,
   ContextEnricherConfig,
   EnrichmentErrorStrategy,
   EntitiesEnricher,

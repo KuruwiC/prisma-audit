@@ -74,33 +74,11 @@ const createMockLog = (overrides: Partial<AuditLogData> = {}): AuditLogData => (
 });
 
 describe('createDefaultWriteFn', () => {
-  it('should return a function', () => {
-    const manager = createMockManager();
-    const executor = createMockExecutor();
-
-    const writeFn = createDefaultWriteFn(manager, 'auditLog', executor);
-
-    expect(typeof writeFn).toBe('function');
-  });
-
   it('should write logs using executor.write with activeClient', async () => {
     const writeFn = vi.fn().mockResolvedValue(undefined);
     const manager = createMockManager('auditLog');
     const executor = createMockExecutor(writeFn);
     const logs = [createMockLog()];
-
-    const write = createDefaultWriteFn(manager, 'auditLog', executor);
-    await write(logs);
-
-    expect(writeFn).toHaveBeenCalledTimes(1);
-    expect(writeFn).toHaveBeenCalledWith(manager.activeClient, 'auditLog', logs);
-  });
-
-  it('should use executor for multiple logs', async () => {
-    const writeFn = vi.fn().mockResolvedValue(undefined);
-    const manager = createMockManager('auditLog');
-    const executor = createMockExecutor(writeFn);
-    const logs = [createMockLog({ entityId: createEntityId('1') }), createMockLog({ entityId: createEntityId('2') })];
 
     const write = createDefaultWriteFn(manager, 'auditLog', executor);
     await write(logs);
@@ -124,15 +102,6 @@ describe('createDefaultWriteFn', () => {
 });
 
 describe('createBaseClientWriteFn', () => {
-  it('should return a function', () => {
-    const manager = createMockManager();
-    const executor = createMockExecutor();
-
-    const writeFn = createBaseClientWriteFn(manager, 'auditLog', executor);
-
-    expect(typeof writeFn).toBe('function');
-  });
-
   it('should write logs using executor.write with baseClient', async () => {
     const writeFn = vi.fn().mockResolvedValue(undefined);
     const manager = createMockManager('auditLog');
@@ -144,24 +113,6 @@ describe('createBaseClientWriteFn', () => {
 
     expect(writeFn).toHaveBeenCalledTimes(1);
     expect(writeFn).toHaveBeenCalledWith(manager.baseClient, 'auditLog', logs);
-  });
-
-  it('should use baseClient instead of activeClient', async () => {
-    const baseWrite = vi.fn().mockResolvedValue(undefined);
-
-    const manager: DbClientManager = {
-      baseClient: { auditLog: {} } as never,
-      activeClient: { auditLog: {} } as never,
-    };
-
-    const executor = createMockExecutor(baseWrite);
-    const logs = [createMockLog()];
-
-    const write = createBaseClientWriteFn(manager, 'auditLog', executor);
-    await write(logs);
-
-    expect(baseWrite).toHaveBeenCalledTimes(1);
-    expect(baseWrite).toHaveBeenCalledWith(manager.baseClient, 'auditLog', logs);
   });
 
   it('should work with custom audit log model name', async () => {

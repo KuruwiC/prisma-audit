@@ -920,6 +920,20 @@ Applies when `awaitWrite: false` (async mode).
   - Errors are handled by `errorHandler`
   - Main operation continues even if audit log fails
 
+### Concurrency Considerations
+
+#### Upsert Action Accuracy
+
+When `awaitWrite: true` (default), the before-state fetch and the upsert operation run inside the same transaction, so the audited action (`create` vs `update`) accurately reflects what happened.
+
+When `awaitWrite: false`, there is a time gap between the before-state fetch and the upsert execution. Concurrent operations during this gap may cause the audited action to diverge from the actual database operation. This is an inherent limitation because Prisma does not expose which branch of an upsert was executed.
+
+#### Batch Operations (updateMany / deleteMany)
+
+When `awaitWrite: true`, batch operations (updateMany, deleteMany) are wrapped in a transaction. The before-state fetch, the mutation, and the after-state fetch all see a consistent snapshot, ensuring accurate audit logs.
+
+When `awaitWrite: false` and no user-provided transaction exists, these operations run without transaction isolation. The audit log is best-effort in this case.
+
 ### Context Enrichment (`contextEnricher`)
 
 Add additional metadata to audit logs via database queries.

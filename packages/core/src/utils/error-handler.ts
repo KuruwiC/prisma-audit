@@ -27,7 +27,7 @@
  */
 export type ErrorStrategy = 'throw' | 'log' | 'ignore';
 
-export type ErrorHandler = (error: Error, context: string) => void;
+export type ErrorHandler = (error: Error, context: string) => void | Promise<void>;
 
 /**
  * Safely executes a custom error handler
@@ -37,7 +37,15 @@ export type ErrorHandler = (error: Error, context: string) => void;
  */
 const executeCustomHandler = (customHandler: ErrorHandler, error: Error, context: string): void => {
   try {
-    customHandler(error, context);
+    const result = customHandler(error, context);
+    if (result && typeof (result as Promise<void>).catch === 'function') {
+      (result as Promise<void>).catch((handlerError) => {
+        console.error(
+          '[@prisma-audit] Error in async custom error handler:',
+          handlerError instanceof Error ? handlerError.message : String(handlerError),
+        );
+      });
+    }
   } catch (handlerError) {
     console.error(
       '[@prisma-audit] Error in custom error handler:',
@@ -129,9 +137,9 @@ export const withErrorHandling = <T>(
   errorHandler: ErrorHandler,
   context: string,
 ): Promise<T | undefined> => {
-  return fn().catch((thrownValue: unknown) => {
+  return fn().catch(async (thrownValue: unknown) => {
     const error = normalizeError(thrownValue);
-    errorHandler(error, context);
+    await errorHandler(error, context);
     return undefined;
   });
 };
@@ -146,7 +154,15 @@ export const withErrorHandlingSync = <T>(fn: () => T, errorHandler: ErrorHandler
     return fn();
   } catch (thrownValue: unknown) {
     const error = normalizeError(thrownValue);
-    errorHandler(error, context);
+    const result = errorHandler(error, context);
+    if (result && typeof (result as Promise<void>).catch === 'function') {
+      (result as Promise<void>).catch((handlerError) => {
+        console.error(
+          '[@prisma-audit] Error in async error handler (sync context):',
+          handlerError instanceof Error ? handlerError.message : String(handlerError),
+        );
+      });
+    }
     return undefined;
   }
 };

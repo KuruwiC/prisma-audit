@@ -12,7 +12,7 @@ import type { DbClientManager, WriteExecutor } from './interfaces.js';
 import { writeSynchronously } from './synchronous.js';
 import type { WriteFn, WriteResult, WriteStrategyConfig } from './types.js';
 
-type ErrorHandler = (error: Error, operationDescription: string) => void;
+type ErrorHandler = (error: Error, operationDescription: string) => void | Promise<void>;
 
 type StrategyFunction = (
   logs: AuditLogData[],

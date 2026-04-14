@@ -19,7 +19,12 @@ export interface DMMFField {
   name: string;
   kind: string;
   type: string;
-  isList: boolean;
+  isList?: boolean;
+  isRequired?: boolean;
+  isUnique?: boolean;
+  isId?: boolean;
+  hasDefaultValue?: boolean;
+  default?: unknown;
   relationName?: string;
   relationFromFields?: string[];
   relationToFields?: string[];
@@ -31,6 +36,15 @@ export interface DMMFField {
 export interface DMMFModel {
   name: string;
   fields: DMMFField[];
+  primaryKey?: {
+    name: string | null;
+    fields: string[];
+  };
+  uniqueFields?: string[][];
+  uniqueIndexes?: Array<{
+    name: string | null;
+    fields: string[];
+  }>;
 }
 
 // ============================================================================

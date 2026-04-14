@@ -1,22 +1,38 @@
 /**
  * Nested Delete Operation Handler
  *
- * Handles delete and deleteMany nested operations by extracting entity IDs,
- * retrieving pre-fetched before states, and generating audit logs.
+ * Collects delete targets from pre-fetched before states.
+ * Falls back to extracting entity ID from operation data when prefetch is unavailable.
+ * Enrichment and audit log building are handled by the batch pipeline in audit-log-builder.ts.
  */
 
-import type {
-  AggregateConfigService,
-  AuditContext,
-  RedactConfig,
-  SerializationConfig,
-} from '@kuruwic/prisma-audit-core';
-import { AUDIT_ACTION, batchEnrichEntityContexts, nestedLog } from '@kuruwic/prisma-audit-core';
-import { buildAuditLog } from '../../audit-log-builder/index.js';
-import { createPrismaClientManager } from '../../client-manager/index.js';
-import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../internal-types.js';
-import type { AuditLogData } from '../../types.js';
+import { AUDIT_ACTION, nestedLog } from '@kuruwic/prisma-audit-core';
+
 import { extractDeleteOperationEntityId } from '../../utils/extension-utils.js';
+import type { CollectedNestedRecord } from './collected-record.js';
+
+/** Build a minimal entity record from a serialized entityId and PK field names */
+const buildMinimalEntity = (entityId: string, pkFields?: string[]): Record<string, unknown> => {
+  if (entityId === '__default__') return {};
+
+  const fields = pkFields ?? ['id'];
+  if (fields.length === 1) {
+    return { [fields[0] as string]: entityId };
+  }
+  try {
+    const parsed: unknown = JSON.parse(entityId);
+    if (Array.isArray(parsed) && parsed.length === fields.length) {
+      const entity: Record<string, unknown> = {};
+      for (let i = 0; i < fields.length; i++) {
+        entity[fields[i] as string] = parsed[i];
+      }
+      return entity;
+    }
+  } catch {
+    // Composite PK but not valid JSON — cannot reconstruct fully
+  }
+  return { [fields[0] as string]: entityId };
+};
 
 /**
  * Nested operation information
@@ -36,99 +52,64 @@ export type NestedOperationInfo = {
 export type NestedPreFetchResults = Map<string, Map<string, { before: Record<string, unknown> | null }>>;
 
 /**
- * Dependencies required for handling nested delete operations
+ * Collect delete targets from pre-fetched results or operation data.
+ *
+ * Priority:
+ *   1. Use pre-fetched before states (has full record data)
+ *   2. Fallback: extract entity ID from nestedOp.data (minimal record only)
+ *
+ * @returns Collected records ready for batch enrichment and audit log building
  */
-export type DeleteHandlerDependencies = {
-  aggregateConfig: AggregateConfigService;
-  excludeFields: string[];
-  redact: RedactConfig | undefined;
-  serialization?: SerializationConfig;
-  basePrisma: PrismaClientWithDynamicAccess | TransactionalPrismaClient;
-};
-
-/**
- * Handles delete/deleteMany nested operations
- *
- * Processes nested delete by extracting entity ID, retrieving pre-fetched before state,
- * enriching entity context, and building audit logs.
- *
- * NOTE: aggregateContext is no longer enriched here. It is now enriched per aggregate root
- * inside buildAuditLog for aggregate-aware context.
- *
- * @param nestedOp - Nested operation information
- * @param context - Audit context
- * @param actorContext - Pre-enriched actor context
- * @param nestedPreFetchResults - Pre-fetched before states
- * @param deps - Dependencies (aggregateConfig, excludeFields, redact, basePrisma)
- * @returns Audit logs for deleted records
- *
- * @example
- * ```typescript
- * const logs = await handleNestedDelete(
- *   { operation: 'delete', fieldName: 'posts', relatedModel: 'Post', data: { id: 1 }, path: 'posts' },
- *   context, actorContext, preFetchResults, deps
- * );
- * ```
- */
-export const handleNestedDelete = async (
+export const collectDeleteRecords = (
   nestedOp: NestedOperationInfo,
-  context: AuditContext,
-  actorContext: unknown,
   nestedPreFetchResults: NestedPreFetchResults | undefined,
-  deps: DeleteHandlerDependencies,
-): Promise<AuditLogData[]> => {
-  const { aggregateConfig, excludeFields, redact, serialization, basePrisma } = deps;
+  pkFields?: string[],
+): CollectedNestedRecord[] => {
+  nestedLog('delete operation detected, collecting targets');
 
-  nestedLog('delete operation detected, extracting ID from operation data');
+  const pathMap = nestedPreFetchResults?.get(nestedOp.path);
 
-  const entityId = extractDeleteOperationEntityId(nestedOp.data);
+  // Use pre-fetched results when available
+  if (pathMap && pathMap.size > 0) {
+    const collected: CollectedNestedRecord[] = [];
+
+    for (const [entityId, preFetchResult] of pathMap) {
+      if (entityId === '__default__' && pathMap.size > 1) {
+        continue;
+      }
+
+      const beforeState = preFetchResult.before;
+      // Use beforeState as entity when available, otherwise build from entityId + pkFields
+      const entity: Record<string, unknown> = beforeState ?? buildMinimalEntity(entityId, pkFields);
+
+      collected.push({
+        entity,
+        action: AUDIT_ACTION.DELETE,
+        beforeState,
+        relatedModel: nestedOp.relatedModel,
+      });
+
+      nestedLog('collected delete target from prefetch: path=%s entityId=%s', nestedOp.path, entityId);
+    }
+
+    return collected;
+  }
+
+  // Fallback: extract ID from operation data when prefetch is unavailable
+  nestedLog('no pre-fetch results for path=%s, falling back to operation data', nestedOp.path);
+
+  const entityId = extractDeleteOperationEntityId(nestedOp.data, pkFields);
   if (!entityId) {
+    nestedLog('could not extract entity ID from delete operation data');
     return [];
   }
 
-  let beforeState: Record<string, unknown> | null = null;
-
-  const pathMap = nestedPreFetchResults?.get(nestedOp.path);
-  const preFetchResult = pathMap?.get(entityId) || pathMap?.get('__default__');
-
-  if (preFetchResult !== undefined) {
-    beforeState = preFetchResult.before;
-  }
-
-  const minimalRecord = { id: entityId };
-  const nestedEntityConfig = aggregateConfig.getEntityConfig(nestedOp.relatedModel);
-
-  // Enrich entity context (shared across all aggregates)
-  const tempMeta = {
-    aggregateType: nestedOp.relatedModel,
-    aggregateCategory: 'model',
-  };
-
-  const [nestedEntityContext] = nestedEntityConfig
-    ? await batchEnrichEntityContexts(
-        [minimalRecord as Record<string, unknown>],
-        nestedEntityConfig,
-        basePrisma,
-        tempMeta,
-      )
-    : [null];
-
-  const manager = createPrismaClientManager(basePrisma, context);
-  const nestedLogs = await buildAuditLog(
-    minimalRecord as Record<string, unknown>,
-    AUDIT_ACTION.DELETE,
-    context,
-    nestedOp.relatedModel,
-    manager,
-    actorContext,
-    nestedEntityContext,
-    beforeState,
-    aggregateConfig,
-    excludeFields,
-    redact,
-    undefined,
-    serialization,
-  );
-
-  return nestedLogs;
+  return [
+    {
+      entity: buildMinimalEntity(entityId, pkFields),
+      action: AUDIT_ACTION.DELETE,
+      beforeState: null,
+      relatedModel: nestedOp.relatedModel,
+    },
+  ];
 };

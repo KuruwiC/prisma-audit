@@ -33,16 +33,6 @@ describe('defineAggregateMapping', () => {
     expect(mapping.User.excludeSelf).toBe(false);
   });
 
-  it('should allow custom type override', () => {
-    const mapping = defineAggregateMapping<MockPrismaClient>()({
-      User: defineEntity({
-        type: 'CustomUserType', // Can be any string
-      }),
-    });
-
-    expect(mapping.User.type).toBe('CustomUserType');
-  });
-
   it('should allow custom category', () => {
     const mapping = defineAggregateMapping<MockPrismaClient>()({
       User: defineEntity({

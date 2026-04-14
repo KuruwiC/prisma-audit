@@ -186,13 +186,15 @@ export const redactSensitiveData = (data: unknown, config: RedactConfig = {}): u
     try {
       const stringified = safeStringify(data);
       if (stringified === undefined) {
-        console.warn('[@prisma-audit] Cannot stringify data for redaction fallback. Redaction skipped.');
-        return data;
+        console.warn('[@prisma-audit] Cannot stringify data for redaction fallback. Applying redaction in-place.');
+        const redactor = createRedactor(config);
+        return redactor(data);
       }
       cloned = JSON.parse(stringified);
     } catch {
-      console.warn('[@prisma-audit] Cannot clone data for redaction. Redaction skipped.');
-      return data;
+      console.warn('[@prisma-audit] Cannot clone data for redaction. Applying redaction in-place.');
+      const redactor = createRedactor(config);
+      return redactor(data);
     }
   }
 

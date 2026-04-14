@@ -264,11 +264,10 @@ describe('createEnrichContextsStage', () => {
     // Act
     const enrichedResult: EnrichedContext = await stage(executedContext);
 
-    // Assert
-    expect(enrichedResult.beforeState).toBe(beforeState);
-    expect(enrichedResult.nestedPreFetchResults).toBe(nestedPreFetchResults);
-    expect(enrichedResult.result).toBe(result);
-    expect(enrichedResult.operation).toBe(executedContext.operation);
-    expect(enrichedResult.auditContext).toBe(executedContext.auditContext);
+    // Assert - result should contain all properties from input context
+    expect(enrichedResult).toMatchObject(executedContext);
+    // Stage should additionally add actorContext and entityContext
+    expect(enrichedResult).toHaveProperty('actorContext');
+    expect(enrichedResult).toHaveProperty('entityContext');
   });
 });

@@ -14,6 +14,18 @@ import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '.
 import type { AuditLogData, OperationContext } from '../types.js';
 
 /**
+ * Result of fetching before-state for an entity.
+ *
+ * Distinguishes between "record not found" and "fetch failed" so that
+ * callers (e.g. upsert action resolution) do not misclassify DB errors
+ * as "record does not exist".
+ */
+export type BeforeStateResult =
+  | { readonly _tag: 'found'; readonly data: Record<string, unknown> }
+  | { readonly _tag: 'notFound' }
+  | { readonly _tag: 'error'; readonly error: Error };
+
+/**
  * Initial context at pipeline start
  *
  * Created when a Prisma operation is intercepted. Contains minimal information to begin
@@ -59,8 +71,8 @@ export interface ExecutedContext extends PreparedContext {
  * Includes enriched contextual information for actor and entity. Enrichment adds
  * human-readable or computed metadata not present in raw data.
  *
- * NOTE: aggregateContext is no longer enriched at this stage. It is now enriched
- * per aggregate root inside buildAuditLog for aggregate-aware context.
+ * Aggregate context is resolved separately in the build-logs stage via
+ * resolveAggregateData, enabling batch optimization per aggregateType.
  */
 export interface EnrichedContext extends ExecutedContext {
   /** Enriched actor context (role, department, email) */

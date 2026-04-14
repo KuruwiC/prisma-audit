@@ -37,7 +37,7 @@ export type {
   AuditErrorPhase,
   AuditLogData as CoreAuditLogData,
   AuditLogInput as CoreAuditLogInput,
-  AuditLogOptions,
+  BatchAggregateIdResolver,
   CapitalizedModelNames,
   ContextEnricherConfig,
   // Interfaces
@@ -123,6 +123,8 @@ export {
   // Enrichment Functions
   batchEnrichAggregateContexts,
   batchEnrichEntityContexts,
+  // Aggregate Functions
+  batchResolveIds,
   // PreFetch Functions
   buildPreFetchQuery,
   // Pending Write Tracking
@@ -131,7 +133,6 @@ export {
   coreLog,
   // Domain Functions
   createActorId,
-  // Aggregate Functions
   createAggregateConfig,
   createAggregateId,
   // Context Provider

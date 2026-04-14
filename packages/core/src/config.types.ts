@@ -26,25 +26,6 @@ export interface SerializationConfig {
 export interface RedactConfig {
   /** Field names to redact (in addition to default sensitive fields) */
   fields?: string[];
-  /** Custom transformer function for redacting values */
-  transformer?: (field: string, value: unknown) => unknown;
-}
-
-/** Phase of audit operation where error occurred */
-export type AuditErrorPhase = 'pre-fetch' | 'log-write' | 'diff-generation';
-
-/** Context information for audit error handling */
-export interface AuditErrorContext {
-  /** Phase where the error occurred */
-  phase: AuditErrorPhase;
-  /** Model name being audited */
-  modelName: string;
-  /** Operation being performed */
-  operation: string;
-  /** Operation parameters */
-  params: unknown;
-  /** Original error */
-  error: Error;
 }
 
 /** Configuration for nested operation audit behavior */
@@ -71,37 +52,6 @@ export interface NestedOperationConfig {
    * ```
    */
   fetchBeforeOperation?: boolean;
-}
-
-/** Options for configuring audit logging behavior */
-export interface AuditLogOptions {
-  /** Name of the audit log model in Prisma schema (default: 'auditLog') */
-  auditLogModel?: string;
-  /** Error handling strategy: 'throw', 'log', or 'ignore' (default: 'log') */
-  onAuditError?: ErrorStrategy;
-  /** Custom error handler function called in addition to the onAuditError strategy */
-  errorHandler?: (error: Error, context: string) => void;
-  /** PII redaction configuration */
-  redact?: RedactConfig;
-  /** Sampling rate for audit logs (0.0 to 1.0, default: 1.0) */
-  sampling?: number;
-  /** List of model names to exclude from audit logging */
-  excludeModels?: string[];
-
-  /** Global defaults for nested operations */
-  nestedOperations?: {
-    update?: NestedOperationConfig;
-    delete?: NestedOperationConfig;
-  };
-
-  /** Custom error handler for audit operations */
-  onAuditErrorHandler?: (context: AuditErrorContext) => void | Promise<void>;
-
-  /** Whether to include relation objects in before/after states (default: false) */
-  includeRelations?: boolean;
-
-  /** Custom serialization for non-JSON-safe types (BigInt, Date are handled by default) */
-  serialization?: SerializationConfig;
 }
 
 // ============================================================================
@@ -144,6 +94,11 @@ export type EnrichmentErrorStrategy = 'fail' | 'log' | ((error: Error) => unknow
 export type ActorEnricher<TActor = unknown, TContext = unknown, TPrisma = unknown> = (
   actor: TActor,
   prisma: TPrisma,
+  meta?: {
+    aggregateType: string;
+    aggregateCategory: string;
+    aggregateId?: string;
+  },
 ) => Promise<TContext>;
 
 /**

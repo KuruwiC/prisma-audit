@@ -256,60 +256,6 @@ describe('Tag-based Strategies E2E', () => {
     });
   });
 
-  describe('errorHandlerIf with database operations', () => {
-    it('should verify errorHandlerIf callback can be configured', async () => {
-      // This test verifies that errorHandlerIf can be configured
-      // The actual error handling logic is tested in unit tests
-
-      const aggregateMapping = defineAggregateMapping<PrismaClient>()({
-        User: defineEntity({
-          type: 'User',
-          excludeFields: ['updatedAt'],
-        }),
-      });
-
-      const errorHandlerIfSpy = vi.fn((_modelName: string, tags: string[]) => {
-        return tags.includes('compliance') ? ('throw' as const) : ('log' as const);
-      });
-
-      const prisma = createAuditClient(basePrisma, {
-        provider: auditProvider,
-        basePrisma,
-        aggregateMapping,
-        performance: {
-          awaitWrite: true,
-        },
-        hooks: {
-          errorHandler: 'log',
-          errorHandlerIf: errorHandlerIfSpy,
-        },
-        Prisma,
-      });
-
-      expect(prisma).toBeDefined();
-
-      await auditProvider.runAsync(
-        {
-          actor: { category: 'user', type: 'User', id: 'test-actor' },
-        },
-        async () => {
-          const user = await prisma.user.create({
-            data: {
-              email: 'test-user@example.com',
-              name: 'Test User',
-            },
-          });
-          expect(user).toBeDefined();
-        },
-      );
-
-      const auditLogs = await basePrisma.auditLog.findMany({
-        where: { entityType: 'User' },
-      });
-      expect(auditLogs.length).toBeGreaterThan(0);
-    });
-  });
-
   describe('Combined tag-based strategies in transactions', () => {
     it('should apply different strategies to different models in same transaction', async () => {
       const aggregateMapping = defineAggregateMapping<PrismaClient>()({
@@ -411,7 +357,6 @@ describe('Tag-based Strategies E2E', () => {
         },
         hooks: {
           errorHandler: 'log',
-          errorHandlerIf: (_modelName, tags) => (tags.includes('compliance') ? 'throw' : 'log'),
         },
         Prisma,
       });

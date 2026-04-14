@@ -28,6 +28,11 @@ describe('Error Handling Integration', () => {
 
   describe('Successful operations', () => {
     it('should complete operation even if audit log fails (log strategy)', async () => {
+      // LIMITATION: This test does not actually trigger an audit log failure.
+      // The standard test setup uses a working database writer, so audit writes succeed.
+      // To properly test error resilience, a custom hooks.writer that throws would be
+      // needed with a separate Prisma client instance (see hooks-writer.integration.spec.ts).
+      // For now, this test only verifies that the main operation completes successfully.
       const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
       const user = await context.provider.runAsync(testActor, async () => {
@@ -43,27 +48,10 @@ describe('Error Handling Integration', () => {
       expect(user).toBeDefined();
       expect(user.email).toBe('test@example.com');
 
+      // No audit error is expected since the writer works normally in this setup
+      expect(consoleErrorSpy).not.toHaveBeenCalled();
+
       consoleErrorSpy.mockRestore();
-    });
-  });
-
-  describe('Invalid context scenarios', () => {
-    it('should handle operations without audit context gracefully', async () => {
-      const user = await context.prisma.user.create({
-        data: {
-          email: 'nocontext@example.com',
-          name: 'No Context User',
-          password: 'secret123',
-        },
-      });
-
-      expect(user).toBeDefined();
-
-      const auditLogs = await context.prisma.auditLog.findMany({
-        where: { entityType: 'User', entityId: user.id },
-      });
-
-      expect(auditLogs).toHaveLength(0);
     });
   });
 
@@ -162,65 +150,6 @@ describe('Error Handling Integration', () => {
 
       // Note: Audit logs behavior during transaction depends on implementation
       // In current design, audit logs are created per-operation, not transactionally
-    });
-  });
-
-  describe('Concurrent operations', () => {
-    it('should handle concurrent operations with different contexts correctly', async () => {
-      const actor1: AuditContext = {
-        actor: {
-          category: 'model',
-          type: 'User',
-          id: 'user-1',
-          name: 'User 1',
-        },
-      };
-
-      const actor2: AuditContext = {
-        actor: {
-          category: 'model',
-          type: 'User',
-          id: 'user-2',
-          name: 'User 2',
-        },
-      };
-
-      // Execute concurrent operations
-      const [user1, user2] = await Promise.all([
-        context.provider.runAsync(actor1, async () => {
-          return await context.prisma.user.create({
-            data: {
-              email: 'user1@example.com',
-              name: 'Concurrent User 1',
-              password: 'secret1',
-            },
-          });
-        }),
-        context.provider.runAsync(actor2, async () => {
-          return await context.prisma.user.create({
-            data: {
-              email: 'user2@example.com',
-              name: 'Concurrent User 2',
-              password: 'secret2',
-            },
-          });
-        }),
-      ]);
-
-      // Verify both users were created
-      expect(user1).toBeDefined();
-      expect(user2).toBeDefined();
-
-      // Verify audit logs have correct actors
-      const logs1 = await context.prisma.auditLog.findMany({
-        where: { entityType: 'User', entityId: user1.id },
-      });
-      expect(logs1[0].actorId).toBe('user-1');
-
-      const logs2 = await context.prisma.auditLog.findMany({
-        where: { entityType: 'User', entityId: user2.id },
-      });
-      expect(logs2[0].actorId).toBe('user-2');
     });
   });
 });

@@ -127,6 +127,16 @@ export type AggregateIdResolver<TEntity = unknown, TDbClient = unknown> = (
 ) => Promise<string | null | undefined>;
 
 /**
+ * Batch resolver function that resolves aggregate IDs for multiple entities at once.
+ * Must return an array of the same length and order as the input.
+ * Each element is a string ID, null (skip), or undefined (skip).
+ */
+export type BatchAggregateIdResolver<TEntity = unknown, TDbClient = unknown> = (
+  entities: TEntity[],
+  dbClient: TDbClient,
+) => Promise<(string | null | undefined)[]>;
+
+/**
  * Default entity category value
  *
  * @default 'model'
@@ -168,6 +178,13 @@ export interface AggregateRoot {
   type: string;
   /** Callback function to resolve the aggregate ID from the entity */
   resolve: AggregateIdResolver;
+  /**
+   * Optional batch resolver for N+1 prevention. Takes precedence over `resolve` when processing multiple entities.
+   * Type safety is enforced at the `batchResolveIds<TEntity, TDbClient>()` call site.
+   */
+  batchResolve?: BatchAggregateIdResolver;
+  /** Whether `resolve` performs DB queries. Set automatically by resolveId(). Used for N+1 warnings. */
+  requiresDbAccess?: boolean;
 }
 
 /**

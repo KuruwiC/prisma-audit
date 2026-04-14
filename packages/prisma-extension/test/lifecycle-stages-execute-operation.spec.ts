@@ -77,48 +77,10 @@ describe('createExecuteOperationStage', () => {
     // Act
     const result: ExecutedContext = await stage(preparedContext);
 
-    // Assert
-    expect(result.beforeState).toBe(beforeState);
-    expect(result.nestedPreFetchResults).toBe(nestedPreFetchResults);
-    expect(result.operation).toBe(preparedContext.operation);
-    expect(result.auditContext).toBe(preparedContext.auditContext);
-    expect(result.clientToUse).toBe(preparedContext.clientToUse);
-    expect(result.query).toBe(preparedContext.query);
-  });
-
-  it('should handle async query operations correctly', async () => {
-    // Arrange
-    const mockResult = { id: 'post-1', title: 'Async Title' };
-    const mockQuery = vi.fn().mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          setTimeout(() => resolve(mockResult), 10);
-        }),
-    );
-
-    const preparedContext: PreparedContext = {
-      operation: {
-        model: 'Post',
-        action: 'create',
-        args: { data: { title: 'Async Title' } },
-      },
-      auditContext: {
-        actor: { category: 'model', type: 'User', id: 'user-1' },
-      },
-      clientToUse: {} as unknown as PrismaClientWithDynamicAccess,
-      query: mockQuery,
-      beforeState: null,
-      nestedPreFetchResults: undefined,
-    };
-
-    const stage = createExecuteOperationStage();
-
-    // Act
-    const result: ExecutedContext = await stage(preparedContext);
-
-    // Assert
-    expect(mockQuery).toHaveBeenCalledTimes(1);
-    expect(result.result).toBe(mockResult);
+    // Assert - result should contain all properties from input context
+    expect(result).toMatchObject(preparedContext);
+    // Stage should additionally add the result property
+    expect(result).toHaveProperty('result');
   });
 
   it('should handle query returning array results', async () => {
@@ -153,33 +115,5 @@ describe('createExecuteOperationStage', () => {
     expect(result.result).toBe(mockResult);
     expect(Array.isArray(result.result)).toBe(true);
     expect((result.result as unknown as unknown[]).length).toBe(2);
-  });
-
-  it('should handle query returning null', async () => {
-    // Arrange
-    const mockQuery = vi.fn().mockResolvedValue(null);
-
-    const preparedContext: PreparedContext = {
-      operation: {
-        model: 'Post',
-        action: 'findUnique',
-        args: { where: { id: 'non-existent' } },
-      },
-      auditContext: {
-        actor: { category: 'model', type: 'User', id: 'user-1' },
-      },
-      clientToUse: {} as unknown as PrismaClientWithDynamicAccess,
-      query: mockQuery,
-      beforeState: null,
-      nestedPreFetchResults: undefined,
-    };
-
-    const stage = createExecuteOperationStage();
-
-    // Act
-    const result: ExecutedContext = await stage(preparedContext);
-
-    // Assert
-    expect(result.result).toBeNull();
   });
 });

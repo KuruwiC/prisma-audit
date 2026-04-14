@@ -79,27 +79,8 @@ const createMockContext = (): AuditContext => ({
  */
 const createMockErrorHandler = (): ErrorHandler => vi.fn();
 
-/**
- * Helper to wait for async operations
- */
-const waitForAsync = () => new Promise((resolve) => setTimeout(resolve, 10));
-
 describe('writeFireAndForget', () => {
   describe('basic functionality', () => {
-    it('should return immediately without blocking', () => {
-      const manager = createMockManager();
-      const executor = createMockExecutor();
-      const logs = [createMockLog()];
-      const context = createMockContext();
-      const handleError = createMockErrorHandler();
-
-      const result = writeFireAndForget(logs, context, manager, 'auditLog', undefined, handleError, executor);
-
-      // Should return immediately
-      expect(result).toBeDefined();
-      expect(result._tag).toBe('Immediate');
-    });
-
     it('should return Immediate WriteResult', () => {
       const manager = createMockManager();
       const executor = createMockExecutor();
@@ -113,24 +94,6 @@ describe('writeFireAndForget', () => {
         _tag: 'Immediate',
         createdAt: expect.any(Date),
       });
-    });
-
-    it('should have timestamp close to current time', () => {
-      const manager = createMockManager();
-      const executor = createMockExecutor();
-      const logs = [createMockLog()];
-      const context = createMockContext();
-      const handleError = createMockErrorHandler();
-      const before = new Date();
-
-      const result = writeFireAndForget(logs, context, manager, 'auditLog', undefined, handleError, executor);
-
-      const after = new Date();
-      expect(result._tag).toBe('Immediate');
-      if (result._tag === 'Immediate') {
-        expect(result.createdAt.getTime()).toBeGreaterThanOrEqual(before.getTime());
-        expect(result.createdAt.getTime()).toBeLessThanOrEqual(after.getTime());
-      }
     });
   });
 
@@ -146,7 +109,7 @@ describe('writeFireAndForget', () => {
       writeFireAndForget(logs, context, manager, 'auditLog', undefined, handleError, executor);
 
       // Wait for async execution
-      await waitForAsync();
+      await flushPendingWrites();
 
       // Should have been called
       expect(writeFn).toHaveBeenCalledTimes(1);
@@ -163,7 +126,7 @@ describe('writeFireAndForget', () => {
 
       writeFireAndForget(logs, context, manager, 'auditLog', undefined, handleError, executor);
 
-      await waitForAsync();
+      await flushPendingWrites();
 
       expect(writeFn).toHaveBeenCalledTimes(1);
       expect(writeFn).toHaveBeenCalledWith(manager.activeClient, 'auditLog', logs);
@@ -179,7 +142,7 @@ describe('writeFireAndForget', () => {
 
       writeFireAndForget(logs, context, manager, 'auditLog', undefined, handleError, executor);
 
-      await waitForAsync();
+      await flushPendingWrites();
 
       expect(writeFn).not.toHaveBeenCalled();
     });
@@ -197,7 +160,7 @@ describe('writeFireAndForget', () => {
 
       writeFireAndForget(logs, context, manager, 'auditLog', customWriter, handleError, executor);
 
-      await waitForAsync();
+      await flushPendingWrites();
 
       expect(customWriter).toHaveBeenCalledTimes(1);
       expect(customWriter).toHaveBeenCalledWith(logs, context, expect.any(Function));
@@ -218,7 +181,7 @@ describe('writeFireAndForget', () => {
 
       writeFireAndForget(logs, context, manager, 'auditLog', customWriter, handleError, executor);
 
-      await waitForAsync();
+      await flushPendingWrites();
 
       expect(customWriter).toHaveBeenCalledTimes(1);
       expect(writeFn).toHaveBeenCalledTimes(1);
@@ -239,7 +202,7 @@ describe('writeFireAndForget', () => {
 
       writeFireAndForget(originalLogs, context, manager, 'auditLog', customWriter, handleError, executor);
 
-      await waitForAsync();
+      await flushPendingWrites();
 
       expect(writeFn).toHaveBeenCalledWith(manager.activeClient, 'auditLog', [
         expect.objectContaining({ entityId: createEntityId('2') }),
@@ -248,22 +211,6 @@ describe('writeFireAndForget', () => {
   });
 
   describe('default writer', () => {
-    it('should use default writer when no custom writer provided', async () => {
-      const writeFn = vi.fn().mockResolvedValue(undefined);
-      const manager = createMockManager();
-      const executor = createMockExecutor(writeFn);
-      const logs = [createMockLog()];
-      const context = createMockContext();
-      const handleError = createMockErrorHandler();
-
-      writeFireAndForget(logs, context, manager, 'auditLog', undefined, handleError, executor);
-
-      await waitForAsync();
-
-      expect(writeFn).toHaveBeenCalledTimes(1);
-      expect(writeFn).toHaveBeenCalledWith(manager.activeClient, 'auditLog', logs);
-    });
-
     it('should use manager.activeClient for default writes', async () => {
       const baseWriteFn = vi.fn().mockResolvedValue(undefined);
       const activeWriteFn = vi.fn().mockResolvedValue(undefined);
@@ -280,7 +227,7 @@ describe('writeFireAndForget', () => {
 
       writeFireAndForget(logs, context, manager, 'auditLog', undefined, handleError, executor);
 
-      await waitForAsync();
+      await flushPendingWrites();
 
       expect(activeWriteFn).toHaveBeenCalledTimes(1);
       expect(baseWriteFn).not.toHaveBeenCalled();
@@ -299,7 +246,7 @@ describe('writeFireAndForget', () => {
 
       writeFireAndForget(logs, context, manager, 'auditLog', undefined, handleError, executor);
 
-      await waitForAsync();
+      await flushPendingWrites();
 
       expect(handleError).toHaveBeenCalledTimes(1);
       expect(handleError).toHaveBeenCalledWith(error, 'async audit log write');
@@ -316,7 +263,7 @@ describe('writeFireAndForget', () => {
 
       writeFireAndForget(logs, context, manager, 'auditLog', customWriter, handleError, executor);
 
-      await waitForAsync();
+      await flushPendingWrites();
 
       expect(handleError).toHaveBeenCalledTimes(1);
       expect(handleError).toHaveBeenCalledWith(error, 'async audit log write');
@@ -333,7 +280,7 @@ describe('writeFireAndForget', () => {
 
       writeFireAndForget(logs, context, manager, 'auditLog', undefined, handleError, executor);
 
-      await waitForAsync();
+      await flushPendingWrites();
 
       expect(handleError).toHaveBeenCalledTimes(1);
       expect(handleError).toHaveBeenCalledWith(expect.any(Error), 'async audit log write');
@@ -355,7 +302,7 @@ describe('writeFireAndForget', () => {
         writeFireAndForget(logs, context, manager, 'auditLog', undefined, handleError, executor);
       }).not.toThrow();
 
-      await waitForAsync();
+      await flushPendingWrites();
     });
   });
 
@@ -370,7 +317,7 @@ describe('writeFireAndForget', () => {
 
       writeFireAndForget(logs, context, manager, 'customAuditLog', undefined, handleError, executor);
 
-      await waitForAsync();
+      await flushPendingWrites();
 
       expect(writeFn).toHaveBeenCalledTimes(1);
       expect(writeFn).toHaveBeenCalledWith(manager.activeClient, 'customAuditLog', logs);
@@ -378,22 +325,6 @@ describe('writeFireAndForget', () => {
   });
 
   describe('non-blocking behavior', () => {
-    it('should return synchronously with Immediate result', () => {
-      const manager = createMockManager();
-      const executor = createMockExecutor();
-      const logs = [createMockLog()];
-      const context = createMockContext();
-      const handleError = createMockErrorHandler();
-
-      const result = writeFireAndForget(logs, context, manager, 'auditLog', undefined, handleError, executor);
-
-      // Should return immediately
-      expect(result._tag).toBe('Immediate');
-      if (result._tag === 'Immediate') {
-        expect(result.createdAt).toBeInstanceOf(Date);
-      }
-    });
-
     it('should allow multiple fire-and-forget writes to execute in parallel', async () => {
       const writeFn = vi.fn().mockResolvedValue(undefined);
       const manager = createMockManager();
@@ -406,7 +337,7 @@ describe('writeFireAndForget', () => {
       writeFireAndForget(logs1, context, manager, 'auditLog', undefined, handleError, executor);
       writeFireAndForget(logs2, context, manager, 'auditLog', undefined, handleError, executor);
 
-      await waitForAsync();
+      await flushPendingWrites();
 
       // Both should have been called
       expect(writeFn).toHaveBeenCalledTimes(2);

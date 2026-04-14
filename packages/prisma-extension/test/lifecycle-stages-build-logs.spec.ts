@@ -41,12 +41,19 @@ describe('createBuildLogsStage', () => {
 
     const mockBuildAuditLog = vi.fn().mockResolvedValue([mainLog]);
     const mockBuildNestedAuditLogs = vi.fn().mockResolvedValue([]);
+    const mockEntityConfig = {
+      category: 'content',
+      type: 'Post',
+      idResolver: vi.fn().mockResolvedValue('post-1'),
+      aggregates: [],
+    };
     const mockAggregateConfig = {
-      getEntityConfig: vi.fn(),
+      getEntityConfig: vi.fn().mockReturnValue(mockEntityConfig),
       isLoggable: vi.fn(),
       getAllLoggableModels: vi.fn(),
       getMapping: vi.fn(),
     };
+    const mockBatchEnrichAggregateContexts = vi.fn().mockResolvedValue([null]);
 
     const enrichedContext: EnrichedContext = {
       operation: {
@@ -68,9 +75,15 @@ describe('createBuildLogsStage', () => {
 
     const deps: Pick<
       StageDependencies,
-      'buildAuditLog' | 'buildNestedAuditLogs' | 'aggregateConfig' | 'excludeFields' | 'basePrisma'
+      | 'buildAuditLog'
+      | 'batchEnrichAggregateContexts'
+      | 'buildNestedAuditLogs'
+      | 'aggregateConfig'
+      | 'excludeFields'
+      | 'basePrisma'
     > = {
       buildAuditLog: mockBuildAuditLog,
+      batchEnrichAggregateContexts: mockBatchEnrichAggregateContexts,
       buildNestedAuditLogs: mockBuildNestedAuditLogs,
       aggregateConfig: mockAggregateConfig,
       excludeFields: [],
@@ -155,12 +168,19 @@ describe('createBuildLogsStage', () => {
 
     const mockBuildAuditLog = vi.fn().mockResolvedValue([mainLog]);
     const mockBuildNestedAuditLogs = vi.fn().mockResolvedValue([nestedLog1, nestedLog2]);
+    const mockEntityConfig = {
+      category: 'content',
+      type: 'Post',
+      idResolver: vi.fn().mockResolvedValue('post-1'),
+      aggregates: [],
+    };
     const mockAggregateConfig = {
-      getEntityConfig: vi.fn(),
+      getEntityConfig: vi.fn().mockReturnValue(mockEntityConfig),
       isLoggable: vi.fn(),
       getAllLoggableModels: vi.fn(),
       getMapping: vi.fn(),
     };
+    const mockBatchEnrichAggregateContexts = vi.fn().mockResolvedValue([null]);
 
     const enrichedContext: EnrichedContext = {
       operation: {
@@ -193,9 +213,15 @@ describe('createBuildLogsStage', () => {
 
     const deps: Pick<
       StageDependencies,
-      'buildAuditLog' | 'buildNestedAuditLogs' | 'aggregateConfig' | 'excludeFields' | 'basePrisma'
+      | 'buildAuditLog'
+      | 'batchEnrichAggregateContexts'
+      | 'buildNestedAuditLogs'
+      | 'aggregateConfig'
+      | 'excludeFields'
+      | 'basePrisma'
     > = {
       buildAuditLog: mockBuildAuditLog,
+      batchEnrichAggregateContexts: mockBatchEnrichAggregateContexts,
       buildNestedAuditLogs: mockBuildNestedAuditLogs,
       aggregateConfig: mockAggregateConfig,
       excludeFields: [],
@@ -209,76 +235,6 @@ describe('createBuildLogsStage', () => {
 
     // Assert
     expect(result.logs).toEqual([mainLog, nestedLog1, nestedLog2]);
-  });
-
-  it('should handle empty nested logs', async () => {
-    // Arrange
-    const mainLog: AuditLogData = {
-      actorCategory: 'model',
-      actorType: 'User',
-      actorId: createActorId('user-1'),
-      actorContext: null,
-      entityCategory: 'content',
-      entityType: 'Post',
-      entityId: createEntityId('post-1'),
-      entityContext: null,
-      aggregateCategory: 'content',
-      aggregateType: 'Post',
-      aggregateId: createAggregateId('post-1'),
-      aggregateContext: null,
-      action: 'update',
-      before: { id: 'post-1', title: 'Old Title' },
-      after: { id: 'post-1', title: 'New Title' },
-      changes: { title: { from: 'Old Title', to: 'New Title' } },
-      requestContext: null,
-      createdAt: new Date('2025-01-01T00:00:00Z'),
-    };
-
-    const mockBuildAuditLog = vi.fn().mockResolvedValue([mainLog]);
-    const mockBuildNestedAuditLogs = vi.fn().mockResolvedValue([]);
-    const mockAggregateConfig = {
-      getEntityConfig: vi.fn(),
-      isLoggable: vi.fn(),
-      getAllLoggableModels: vi.fn(),
-      getMapping: vi.fn(),
-    };
-
-    const enrichedContext: EnrichedContext = {
-      operation: {
-        model: 'Post',
-        action: 'update',
-        args: { where: { id: 'post-1' }, data: { title: 'New Title' } },
-      },
-      auditContext: {
-        actor: { category: 'model', type: 'User', id: 'user-1' },
-      },
-      clientToUse: {} as unknown as PrismaClientWithDynamicAccess,
-      query: vi.fn(),
-      beforeState: { id: 'post-1', title: 'Old Title' },
-      nestedPreFetchResults: undefined,
-      result: { id: 'post-1', title: 'New Title' },
-      actorContext: null,
-      entityContext: null,
-    };
-
-    const deps: Pick<
-      StageDependencies,
-      'buildAuditLog' | 'buildNestedAuditLogs' | 'aggregateConfig' | 'excludeFields' | 'basePrisma'
-    > = {
-      buildAuditLog: mockBuildAuditLog,
-      buildNestedAuditLogs: mockBuildNestedAuditLogs,
-      aggregateConfig: mockAggregateConfig,
-      excludeFields: [],
-      basePrisma: {} as unknown as PrismaClientWithDynamicAccess,
-    };
-
-    const stage = createBuildLogsStage(deps);
-
-    // Act
-    const result: FinalContext = await stage(enrichedContext);
-
-    // Assert
-    expect(result.logs).toEqual([mainLog]);
   });
 
   it('should preserve all properties from EnrichedContext', async () => {
@@ -313,12 +269,19 @@ describe('createBuildLogsStage', () => {
 
     const mockBuildAuditLog = vi.fn().mockResolvedValue([mainLog]);
     const mockBuildNestedAuditLogs = vi.fn().mockResolvedValue([]);
+    const mockEntityConfig = {
+      category: 'content',
+      type: 'Post',
+      idResolver: vi.fn().mockResolvedValue('post-1'),
+      aggregates: [],
+    };
     const mockAggregateConfig = {
-      getEntityConfig: vi.fn(),
+      getEntityConfig: vi.fn().mockReturnValue(mockEntityConfig),
       isLoggable: vi.fn(),
       getAllLoggableModels: vi.fn(),
       getMapping: vi.fn(),
     };
+    const mockBatchEnrichAggregateContexts = vi.fn().mockResolvedValue([null]);
 
     const enrichedContext: EnrichedContext = {
       operation: {
@@ -341,9 +304,15 @@ describe('createBuildLogsStage', () => {
 
     const deps: Pick<
       StageDependencies,
-      'buildAuditLog' | 'buildNestedAuditLogs' | 'aggregateConfig' | 'excludeFields' | 'basePrisma'
+      | 'buildAuditLog'
+      | 'batchEnrichAggregateContexts'
+      | 'buildNestedAuditLogs'
+      | 'aggregateConfig'
+      | 'excludeFields'
+      | 'basePrisma'
     > = {
       buildAuditLog: mockBuildAuditLog,
+      batchEnrichAggregateContexts: mockBatchEnrichAggregateContexts,
       buildNestedAuditLogs: mockBuildNestedAuditLogs,
       aggregateConfig: mockAggregateConfig,
       excludeFields: [],
@@ -355,26 +324,29 @@ describe('createBuildLogsStage', () => {
     // Act
     const finalResult: FinalContext = await stage(enrichedContext);
 
-    // Assert
-    expect(finalResult.beforeState).toBe(beforeState);
-    expect(finalResult.nestedPreFetchResults).toBe(nestedPreFetchResults);
-    expect(finalResult.result).toBe(resultData);
-    expect(finalResult.actorContext).toBe(actorContext);
-    expect(finalResult.entityContext).toBe(entityContext);
-    expect(finalResult.operation).toBe(enrichedContext.operation);
-    expect(finalResult.auditContext).toBe(enrichedContext.auditContext);
+    // Assert - result should contain all properties from input context
+    expect(finalResult).toMatchObject(enrichedContext);
+    // Stage should additionally add logs
+    expect(finalResult).toHaveProperty('logs');
   });
 
   it('should handle empty main log array', async () => {
     // Arrange
     const mockBuildAuditLog = vi.fn().mockResolvedValue([]);
     const mockBuildNestedAuditLogs = vi.fn().mockResolvedValue([]);
+    const mockEntityConfig = {
+      category: 'content',
+      type: 'Post',
+      idResolver: vi.fn().mockResolvedValue('post-1'),
+      aggregates: [],
+    };
     const mockAggregateConfig = {
-      getEntityConfig: vi.fn(),
+      getEntityConfig: vi.fn().mockReturnValue(mockEntityConfig),
       isLoggable: vi.fn(),
       getAllLoggableModels: vi.fn(),
       getMapping: vi.fn(),
     };
+    const mockBatchEnrichAggregateContexts = vi.fn().mockResolvedValue([null]);
 
     const enrichedContext: EnrichedContext = {
       operation: {
@@ -396,9 +368,15 @@ describe('createBuildLogsStage', () => {
 
     const deps: Pick<
       StageDependencies,
-      'buildAuditLog' | 'buildNestedAuditLogs' | 'aggregateConfig' | 'excludeFields' | 'basePrisma'
+      | 'buildAuditLog'
+      | 'batchEnrichAggregateContexts'
+      | 'buildNestedAuditLogs'
+      | 'aggregateConfig'
+      | 'excludeFields'
+      | 'basePrisma'
     > = {
       buildAuditLog: mockBuildAuditLog,
+      batchEnrichAggregateContexts: mockBatchEnrichAggregateContexts,
       buildNestedAuditLogs: mockBuildNestedAuditLogs,
       aggregateConfig: mockAggregateConfig,
       excludeFields: [],

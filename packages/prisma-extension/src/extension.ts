@@ -12,6 +12,7 @@
 import type { AuditContext, PreFetchResults } from '@kuruwic/prisma-audit-core';
 import {
   AUDIT_ACTION,
+  batchEnrichAggregateContexts,
   batchEnrichEntityContexts,
   createAggregateConfig,
   createErrorHandler,
@@ -46,11 +47,16 @@ import {
   type StageDependencies,
 } from './lifecycle/stages.js';
 import { createTransactionProxy } from './lifecycle/transaction-proxy.js';
-import type { BatchFinalContext, BatchInitialContext } from './lifecycle/types.js';
+import { withOptionalTransaction } from './lifecycle/transaction-wrapper.js';
+import type { BatchFinalContext, BatchInitialContext, BeforeStateResult } from './lifecycle/types.js';
 import type { AuditLogData, OperationContext, PrismaAction, PrismaAuditExtensionOptions } from './types.js';
 import {
+  buildEntityMap,
   ensureIds,
+  extractPrimaryKey,
+  findManyByPKs,
   getModelAccessor,
+  getPrimaryKeyFields,
   getPrisma,
   injectDeepInclude,
   isAuditableAction,
@@ -89,14 +95,14 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     hooks,
     contextEnricher,
     auditLogModel: customAuditLogModel,
-    DbNull: userProvidedDbNull,
     Prisma: userProvidedPrisma,
+    onAuditErrorHandler,
   } = options;
 
   // Use user-provided Prisma namespace or extract from basePrisma
   // User-provided is required for Prisma 6.x+ with custom output paths
   const Prisma = (userProvidedPrisma ?? getPrisma(basePrisma as PrismaClientWithDynamicAccess)) as PrismaNamespace;
-  const DbNull = userProvidedDbNull ?? Prisma.DbNull;
+  const DbNull = Prisma.DbNull;
   const auditLogModel = customAuditLogModel ? uncapitalizeFirst(customAuditLogModel) : 'auditLog';
   const excludeFields = diffing?.excludeFields ?? [];
   const redact = security?.redact;
@@ -121,6 +127,18 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
 
   const handleError =
     typeof errorHandlerConfig === 'function' ? errorHandlerConfig : createErrorHandler(errorHandlerConfig);
+
+  const dispatchAuditError = async (
+    phase: 'pre-fetch' | 'log-write' | 'diff-generation',
+    modelName: string,
+    operation: string,
+    params: unknown,
+    error: Error,
+  ): Promise<void> => {
+    if (onAuditErrorHandler) {
+      await onAuditErrorHandler({ phase, modelName, operation, params, error });
+    }
+  };
 
   validateFieldConflicts(excludeFields, redact, aggregateMapping);
 
@@ -167,11 +185,20 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
 
       const manager = createPrismaClientManager(baseClient, context);
       const strategy = strategySelector(context, modelName);
-      const result = await strategy(logs, context, manager, auditLogModel, writer, handleError, writeExecutor);
+
+      const writeErrorHandler: typeof handleError = async (error, errorContext) => {
+        await dispatchAuditError('log-write', modelName, 'write', logs, error);
+        await handleError(error, errorContext);
+      };
+
+      const result = await strategy(logs, context, manager, auditLogModel, writer, writeErrorHandler, writeExecutor);
 
       handleWriteResult(result);
-    } catch (error) {
-      handleError(error instanceof Error ? error : new Error(String(error)), 'audit log write');
+    } catch (caughtError) {
+      const error = caughtError instanceof Error ? caughtError : new Error(String(caughtError));
+      const modelName = logs[0]?.entityType ?? 'unknown';
+      await dispatchAuditError('log-write', modelName, 'write', logs, error);
+      await handleError(error, 'audit log write');
       throw error;
     }
   };
@@ -189,29 +216,56 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     return typeof value === 'object' && value !== null && !Array.isArray(value);
   };
 
+  const hasArrayData = (args: unknown): boolean =>
+    typeof args === 'object' && args !== null && 'data' in args && Array.isArray((args as { data: unknown }).data);
+
+  const executeFallbackAction = async (
+    clientToUse: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
+    modelName: string,
+    operation: OperationContext,
+  ): Promise<unknown> => {
+    const modelAccessor = getModelAccessor(clientToUse, modelName);
+    const delegate = clientToUse[modelAccessor] as Record<string, unknown>;
+    const actionFn = delegate[operation.action as string] as (args: unknown) => Promise<unknown>;
+    return actionFn(operation.args);
+  };
+
+  const requiresBeforeState = (action: PrismaAction): boolean =>
+    action === AUDIT_ACTION.UPDATE || action === AUDIT_ACTION.DELETE || action === AUDIT_ACTION.UPSERT;
+
+  const findExistingRecord = async (
+    prismaClient: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
+    modelName: string,
+    where: unknown,
+  ): Promise<BeforeStateResult> => {
+    const modelAccessor = getModelAccessor(prismaClient, modelName);
+    const modelClient = prismaClient[modelAccessor];
+
+    if (!hasFindUnique(modelClient)) {
+      return { _tag: 'notFound' };
+    }
+
+    const result = await modelClient.findUnique({ where });
+    return isRecord(result) ? { _tag: 'found', data: result } : { _tag: 'notFound' };
+  };
+
   const fetchBeforeState = async (
     prismaClient: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
     modelName: string,
     action: PrismaAction,
     args: Record<string, unknown>,
-  ): Promise<Record<string, unknown> | null> => {
-    if (
-      (action === AUDIT_ACTION.UPDATE || action === AUDIT_ACTION.DELETE || action === AUDIT_ACTION.UPSERT) &&
-      args.where
-    ) {
-      try {
-        const modelAccessor = getModelAccessor(prismaClient, modelName);
-        const modelClient = prismaClient[modelAccessor];
-
-        if (hasFindUnique(modelClient)) {
-          const result = await modelClient.findUnique({ where: args.where });
-          return isRecord(result) ? result : null;
-        }
-      } catch {
-        return null;
-      }
+  ): Promise<BeforeStateResult> => {
+    if (!requiresBeforeState(action) || !args.where) {
+      return { _tag: 'notFound' };
     }
-    return null;
+
+    try {
+      return await findExistingRecord(prismaClient, modelName, args.where);
+    } catch (caughtError) {
+      const error = caughtError instanceof Error ? caughtError : new Error(String(caughtError));
+      await dispatchAuditError('pre-fetch', modelName, action, args, error);
+      return { _tag: 'error', error };
+    }
   };
 
   /**
@@ -238,6 +292,9 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     enrichActorContext,
     batchEnrichEntityContexts: (entities, config, prisma, meta) => {
       return batchEnrichEntityContexts(entities, config, prisma, meta);
+    },
+    batchEnrichAggregateContexts: (entities, config, prisma, meta) => {
+      return batchEnrichAggregateContexts(entities, config, prisma, meta);
     },
     buildAuditLog,
     buildNestedAuditLogs: (
@@ -292,6 +349,10 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
       provider,
       awaitWrite,
       awaitWriteIf,
+      onPipelineError: async (error: Error) => {
+        const modelName = operation.model ?? 'unknown';
+        await dispatchAuditError('diff-generation', modelName, operation.action as string, operation.args, error);
+      },
     };
 
     return handleTopLevelOperation(operation, context, baseClient, query, handlerDeps);
@@ -331,13 +392,13 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
   const handleCreateMany = async (
     operation: OperationContext,
     context: AuditContext,
-    query: (args: unknown) => Promise<unknown>,
     baseClient: PrismaClientWithDynamicAccess,
     clientToUse: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
   ): Promise<unknown> => {
+    const modelName = operation.model as string;
     const dataWithIds = ensureIds(
       Prisma,
-      operation.model as string,
+      modelName,
       (operation.args as { data: Record<string, unknown>[] }).data,
       DEFAULTS.ID_FIELD,
     );
@@ -347,13 +408,16 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
       data: dataWithIds,
     };
 
-    const result = await query(argsWithIds);
+    const modelAccessor = getModelAccessor(clientToUse, modelName);
+    const delegate = clientToUse[modelAccessor] as Record<string, unknown>;
+    const createManyFn = delegate.createMany as (args: unknown) => Promise<unknown>;
+    const result = await createManyFn(argsWithIds);
 
     const batchInitialContext: BatchInitialContext = {
       operation,
       auditContext: context,
       clientToUse,
-      query,
+      query: createManyFn,
       entities: dataWithIds,
     };
 
@@ -364,44 +428,69 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
   const handleUpdateOrDeleteMany = async (
     operation: OperationContext,
     context: AuditContext,
-    query: (args: unknown) => Promise<unknown>,
     baseClient: PrismaClientWithDynamicAccess,
     clientToUse: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
     action: PrismaAction,
   ): Promise<unknown> => {
-    const entityConfig = aggregateConfig.getEntityConfig(operation.model as string);
+    const modelName = operation.model as string;
+    const entityConfig = aggregateConfig.getEntityConfig(modelName);
     if (!entityConfig) {
       throw new Error(
-        `No entity configuration found for model: ${operation.model}. ` +
+        `No entity configuration found for model: ${modelName}. ` +
           `Batch operations require entity configuration to be defined.`,
       );
     }
 
-    const modelAccessor = getModelAccessor(clientToUse, operation.model as string);
+    const modelAccessor = getModelAccessor(clientToUse, modelName);
     const modelDelegate = clientToUse[modelAccessor];
 
     if (!hasFindMany(modelDelegate)) {
-      throw new Error(
-        `Model ${operation.model} does not have findMany operation. This is required for batch operations.`,
-      );
+      throw new Error(`Model ${modelName} does not have findMany operation. This is required for batch operations.`);
     }
+
+    const pkFields = getPrimaryKeyFields(Prisma, modelName);
 
     const whereClause =
       operation.args && typeof operation.args === 'object' && 'where' in operation.args ? operation.args.where : {};
 
     const beforeEntities = await modelDelegate.findMany({ where: whereClause || {} });
-    const result = await query(operation.args);
 
-    const afterEntities =
-      action === AUDIT_ACTION.UPDATE_MANY ? await modelDelegate.findMany({ where: whereClause || {} }) : beforeEntities;
+    // Execute mutation via model delegate (not query()) so it participates in the transaction
+    const delegate = modelDelegate as unknown as Record<string, unknown>;
+    const actionName = action === AUDIT_ACTION.UPDATE_MANY ? 'updateMany' : 'deleteMany';
+    const mutationFn = delegate[actionName] as (args: unknown) => Promise<unknown>;
+    const result = await mutationFn(operation.args);
+
+    let entities: Record<string, unknown>[];
+    let pairedBeforeStates: Array<Record<string, unknown> | null>;
+
+    if (action === AUDIT_ACTION.UPDATE_MANY && beforeEntities.length > 0) {
+      // Re-fetch by PK (not original WHERE) to handle WHERE-field mutations
+      const beforeMap = buildEntityMap(beforeEntities, pkFields);
+      const afterEntities = await findManyByPKs(
+        modelDelegate as { findMany: (args: { where: Record<string, unknown> }) => Promise<Record<string, unknown>[]> },
+        pkFields,
+        beforeEntities,
+      );
+
+      entities = afterEntities;
+      pairedBeforeStates = afterEntities.map((entity) => {
+        const pk = extractPrimaryKey(entity, pkFields);
+        return beforeMap.get(pk) ?? null;
+      });
+    } else {
+      // deleteMany: before = entities (no after state)
+      entities = beforeEntities;
+      pairedBeforeStates = beforeEntities.map((e) => e);
+    }
 
     const batchInitialContext: BatchInitialContext = {
       operation,
       auditContext: context,
       clientToUse,
-      query,
-      entities: afterEntities,
-      beforeStates: beforeEntities,
+      query: mutationFn,
+      entities,
+      beforeStates: pairedBeforeStates,
     };
 
     await runBatchPipeline(batchInitialContext, baseClient);
@@ -411,34 +500,49 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
   const handleBatchOperation = async (
     operation: OperationContext,
     context: AuditContext,
-    query: (args: unknown) => Promise<unknown>,
     baseClient: PrismaClientWithDynamicAccess,
   ): Promise<unknown> => {
-    try {
-      const action = operation.action as PrismaAction;
-      const clientToUse = (context.transactionalClient ?? baseClient) as
-        | PrismaClientWithDynamicAccess
-        | TransactionalPrismaClient;
+    const modelName = operation.model as string;
+    const entityConfig = modelName ? aggregateConfig.getEntityConfig(modelName) : undefined;
+    const shouldAwaitForModel =
+      awaitWriteIf && entityConfig?.tags && modelName ? awaitWriteIf(modelName, entityConfig.tags) : awaitWrite;
 
-      if (
-        action === AUDIT_ACTION.CREATE_MANY &&
-        operation.args &&
-        typeof operation.args === 'object' &&
-        'data' in operation.args &&
-        Array.isArray((operation.args as { data: unknown }).data)
-      ) {
-        return handleCreateMany(operation, context, query, baseClient, clientToUse);
+    const dispatchBatchAction = async (
+      txContext: AuditContext,
+      clientToUse: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
+    ): Promise<unknown> => {
+      const action = operation.action as PrismaAction;
+
+      if (action === AUDIT_ACTION.CREATE_MANY && hasArrayData(operation.args)) {
+        return handleCreateMany(operation, txContext, baseClient, clientToUse);
       }
 
       if ((action === AUDIT_ACTION.UPDATE_MANY || action === AUDIT_ACTION.DELETE_MANY) && operation.model) {
-        return handleUpdateOrDeleteMany(operation, context, query, baseClient, clientToUse, action);
+        return handleUpdateOrDeleteMany(operation, txContext, baseClient, clientToUse, action);
       }
 
-      return query(operation.args);
-    } catch (error) {
-      handleError(error instanceof Error ? error : new Error(String(error)), `batch operation: ${operation.action}`);
-      throw error;
-    }
+      return executeFallbackAction(clientToUse, modelName, operation);
+    };
+
+    const executeBatch = async (
+      txContext: AuditContext,
+      clientToUse: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
+    ): Promise<unknown> => {
+      try {
+        return await dispatchBatchAction(txContext, clientToUse);
+      } catch (caughtError) {
+        const error = caughtError instanceof Error ? caughtError : new Error(String(caughtError));
+        await handleError(error, `batch operation: ${operation.action}`);
+        throw error;
+      }
+    };
+
+    const wrapper = withOptionalTransaction(
+      { shouldWrap: shouldAwaitForModel, context, basePrisma: baseClient },
+      provider,
+    );
+
+    return wrapper(executeBatch);
   };
 
   const extensionDefinition = (baseClient: PrismaClientWithDynamicAccess) => {
@@ -483,7 +587,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
                 operation === AUDIT_ACTION.UPDATE_MANY ||
                 operation === AUDIT_ACTION.DELETE_MANY
               ) {
-                return handleBatchOperation(operationContext, processingContext, query, baseClient);
+                return handleBatchOperation(operationContext, processingContext, baseClient);
               }
 
               return handleSingleOperation(operationContext, processingContext, baseClient, (modifiedArgs) =>

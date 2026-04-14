@@ -653,8 +653,8 @@ describe('Context Enrichment Integration', () => {
         await customPrisma.user.deleteMany({ where: { id: { in: userIds } } });
       });
 
-      // For 3 users, each is its own aggregate root: 3 aggregate enricher calls
-      expect(aggregateEnricher).toHaveBeenCalledTimes(3);
+      // All 3 users share aggregateType "User" → enricher called once with all 3 entities
+      expect(aggregateEnricher).toHaveBeenCalledTimes(1);
       const auditLogs = await customBasePrisma.auditLog.findMany({
         where: { actorId: 'delete-agg-batch-actor', action: 'delete' },
       });
@@ -1803,8 +1803,8 @@ describe('Context Enrichment Integration', () => {
         });
       });
 
-      // For 3 users, each is its own aggregate root: 3 aggregate enricher calls
-      expect(aggregateEnricherCallCount).toBe(3);
+      // All 3 users share aggregateType "User" → enricher called once with all 3 entities
+      expect(aggregateEnricherCallCount).toBe(1);
       const auditLogs = await customBasePrisma.auditLog.findMany({
         where: { actorId: 'aggregate-batch-actor' },
       });
@@ -1816,6 +1816,179 @@ describe('Context Enrichment Integration', () => {
         expect(aggregateContext.aggregateType).toBe('User');
         expect(aggregateContext.aggregateId).toBeDefined();
       }
+
+      await customBasePrisma.$disconnect();
+    });
+  });
+
+  describe('[Batch Optimization] Aggregate enricher should be batched per aggregateType', () => {
+    it('should call aggregate enricher once per aggregateType for createMany (same aggregateType)', async () => {
+      let aggregateEnricherCallCount = 0;
+      const receivedEntityCounts: number[] = [];
+
+      const customBasePrisma = new (await import('@kuruwic/prisma-audit-database/generated/client')).PrismaClient({
+        datasources: { db: { url: context.databaseUrl } },
+      });
+      const customProvider = createAsyncLocalStorageProvider();
+
+      const customAggregateMapping: AggregateMapping = {
+        User: defineEntity({
+          type: 'User',
+          excludeFields: ['updatedAt'],
+          aggregateContextMap: {
+            User: {
+              enricher: async (entities: unknown[], _prisma: unknown, meta: unknown) => {
+                aggregateEnricherCallCount++;
+                receivedEntityCounts.push((entities as unknown[]).length);
+                return (entities as Record<string, unknown>[]).map((entity) => ({
+                  aggregateType: (meta as { aggregateType: string }).aggregateType,
+                  aggregateId: entity.id as string,
+                }));
+              },
+            },
+          },
+        }),
+        Profile: defineEntity({
+          type: 'Profile',
+          aggregates: [to('User', foreignKey('userId'))],
+        }),
+        Post: defineEntity({
+          type: 'Post',
+          aggregates: [to('User', foreignKey('authorId'))],
+        }),
+        Comment: defineEntity({
+          type: 'Comment',
+          aggregates: [to('Post', foreignKey('postId')), to('User', foreignKey('authorId'))],
+        }),
+      };
+
+      const customPrisma = createAuditClient(customBasePrisma, {
+        Prisma,
+        provider: customProvider,
+        basePrisma: customBasePrisma,
+        aggregateMapping: customAggregateMapping,
+        contextEnricher: {
+          actor: {
+            enricher: async (actor: unknown) => ({
+              name: (actor as { name?: string }).name,
+            }),
+            onError: 'log',
+            fallback: null,
+          },
+        },
+        performance: {
+          awaitWrite: true,
+        },
+      });
+
+      const actor: AuditContext = {
+        actor: { category: 'model', type: 'User', id: 'batch-agg-opt-actor' },
+      };
+      await customProvider.runAsync(actor, async () => {
+        await customPrisma.user.createMany({
+          data: [
+            { email: 'batch-opt-1@example.com', name: 'User 1', password: 'pass1' },
+            { email: 'batch-opt-2@example.com', name: 'User 2', password: 'pass2' },
+            { email: 'batch-opt-3@example.com', name: 'User 3', password: 'pass3' },
+          ],
+        });
+      });
+
+      // All 3 users share aggregateType "User" → enricher called once with all 3 entities
+      expect(aggregateEnricherCallCount).toBe(1);
+      expect(receivedEntityCounts).toEqual([3]);
+
+      const auditLogs = await customBasePrisma.auditLog.findMany({
+        where: { actorId: 'batch-agg-opt-actor' },
+      });
+      expect(auditLogs).toHaveLength(3);
+      for (const log of auditLogs) {
+        expect(log.aggregateContext).toBeDefined();
+        const aggregateContext = log.aggregateContext as Record<string, unknown>;
+        expect(aggregateContext.aggregateType).toBe('User');
+      }
+
+      await customBasePrisma.$disconnect();
+    });
+
+    it('should call aggregate enricher once per distinct aggregateType for createMany (multiple aggregateTypes)', async () => {
+      const enricherCallsByType: Record<string, number> = {};
+
+      const customBasePrisma = new (await import('@kuruwic/prisma-audit-database/generated/client')).PrismaClient({
+        datasources: { db: { url: context.databaseUrl } },
+      });
+      const customProvider = createAsyncLocalStorageProvider();
+
+      const sharedEnricher = async (entities: unknown[], _prisma: unknown, meta: unknown) => {
+        const aggregateType = (meta as { aggregateType: string }).aggregateType;
+        enricherCallsByType[aggregateType] = (enricherCallsByType[aggregateType] || 0) + 1;
+        return (entities as Record<string, unknown>[]).map((entity) => ({
+          aggregateType,
+          entityId: entity.id as string,
+        }));
+      };
+
+      const customAggregateMapping: AggregateMapping = {
+        User: defineEntity({
+          type: 'User',
+          excludeFields: ['updatedAt'],
+        }),
+        Profile: defineEntity({
+          type: 'Profile',
+          aggregates: [to('User', foreignKey('userId'))],
+        }),
+        Post: defineEntity({
+          type: 'Post',
+          aggregates: [to('User', foreignKey('authorId'))],
+          excludeFields: ['updatedAt'],
+        }),
+        Comment: defineEntity({
+          type: 'Comment',
+          aggregates: [to('Post', foreignKey('postId')), to('User', foreignKey('authorId'))],
+          aggregateContextMap: {
+            '*': {
+              enricher: sharedEnricher,
+            },
+          },
+        }),
+      };
+
+      const customPrisma = createAuditClient(customBasePrisma, {
+        Prisma,
+        provider: customProvider,
+        basePrisma: customBasePrisma,
+        aggregateMapping: customAggregateMapping,
+        performance: {
+          awaitWrite: true,
+        },
+      });
+
+      // Create prerequisite data
+      const author = await customBasePrisma.user.create({
+        data: { email: 'batch-author@example.com', name: 'Author', password: 'pass' },
+      });
+      const post = await customBasePrisma.post.create({
+        data: { title: 'Test Post', authorId: author.id },
+      });
+
+      const actor: AuditContext = {
+        actor: { category: 'model', type: 'User', id: 'batch-agg-multi-actor' },
+      };
+      await customProvider.runAsync(actor, async () => {
+        await customPrisma.comment.createMany({
+          data: [
+            { content: 'Comment 1', postId: post.id, authorId: author.id },
+            { content: 'Comment 2', postId: post.id, authorId: author.id },
+            { content: 'Comment 3', postId: post.id, authorId: author.id },
+          ],
+        });
+      });
+
+      // Comment has 3 aggregateTypes: Comment (self), Post, User
+      // Each aggregateType should be called exactly once regardless of entity count
+      expect(enricherCallsByType.Comment).toBe(1);
+      expect(enricherCallsByType.Post).toBe(1);
+      expect(enricherCallsByType.User).toBe(1);
 
       await customBasePrisma.$disconnect();
     });

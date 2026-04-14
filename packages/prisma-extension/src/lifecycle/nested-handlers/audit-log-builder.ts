@@ -1,7 +1,11 @@
 /**
  * Nested Audit Log Builder
  *
- * Builds audit logs for nested operations using two-phase detection strategy.
+ * Builds audit logs for nested operations using a batch pipeline:
+ *   Phase 1 (collect): Gather all nested records, resolve action/beforeState
+ *   Phase 2 (group):   Group collected records by relatedModel
+ *   Phase 3 (enrich):  Batch entity + aggregate enrichment per model group
+ *   Phase 4 (build):   Construct audit logs with pre-computed enrichment results
  */
 
 import type {
@@ -13,22 +17,35 @@ import type {
   SerializationConfig,
 } from '@kuruwic/prisma-audit-core';
 import {
+  batchEnrichEntityContexts,
   createEmptyPreFetchResults,
   detectNestedOperations,
   extractNestedRecords,
   type NestedOperationInfo,
   refetchNestedRecords,
 } from '@kuruwic/prisma-audit-core';
+
+import { buildAuditLog } from '../../audit-log-builder/index.js';
+import { createPrismaClientManager } from '../../client-manager/index.js';
 import type {
   PrismaClientWithDynamicAccess,
   PrismaNamespace,
   TransactionalPrismaClient,
 } from '../../internal-types.js';
 import type { AuditLogData } from '../../types.js';
+import { getPrimaryKeyFields } from '../../utils/id-generator.js';
 import { createSchemaMetadataFromDMMF } from '../../utils/nested-operations.js';
+import {
+  batchEnrichAggregateContextsByType,
+  buildAggregateDataForEntity,
+  resolveAndFilterSurvivors,
+} from '../batch-aggregate-resolver.js';
 import { PRE_FETCH_INTERNAL_RESULTS } from '../pre-fetch/coordinator.js';
-import type { DeleteHandlerDependencies, NestedPreFetchResults } from './delete-handler.js';
-import { handleNestedDelete } from './delete-handler.js';
+import { extractEntityIdOrDefault } from '../pre-fetch/pre-fetch-result-store.js';
+import type { CollectedNestedRecord } from './collected-record.js';
+import { collectDeleteRecords, type NestedPreFetchResults } from './delete-handler.js';
+import { collectNestedRecords } from './record-processor.js';
+import type { GetNestedOperationConfig } from './state-resolver.js';
 
 /**
  * Extract internal NestedPreFetchResults from PreFetchResults
@@ -36,8 +53,6 @@ import { handleNestedDelete } from './delete-handler.js';
  * Uses Symbol-attached internal structure to preserve multiple entityIds per path,
  * which is essential for array operations like `connectOrCreate: [...]`.
  *
- * @param preFetchResults - PreFetchResults with potentially attached internal results
- * @returns Nested Map structure (path → entityId → { before })
  * @internal
  */
 const extractNestedPreFetchResults = (
@@ -47,35 +62,23 @@ const extractNestedPreFetchResults = (
     return undefined;
   }
 
-  // Primary: Extract Symbol-attached internal results (preserves all entityIds)
   const internalResults = (preFetchResults as unknown as Record<symbol, unknown>)[PRE_FETCH_INTERNAL_RESULTS];
   if (internalResults && internalResults instanceof Map) {
     return internalResults as NestedPreFetchResults;
   }
 
-  // Fallback: Convert flat structure for backward compatibility (loses multi-entity information)
+  // Fallback: Convert flat structure for backward compatibility
   const nestedResults: NestedPreFetchResults = new Map();
 
   for (const [path, record] of preFetchResults) {
     const entityMap = new Map<string, { before: Record<string, unknown> | null }>();
-
-    // Use actual record ID when available, otherwise use placeholder for null records (create operations)
-    if (record && typeof record === 'object' && 'id' in record) {
-      const recordId = String(record.id);
-      entityMap.set(recordId, { before: record as Record<string, unknown> });
-    } else {
-      entityMap.set('__default__', { before: record });
-    }
-
+    const entityId = extractEntityIdOrDefault(record);
+    entityMap.set(entityId, { before: record as Record<string, unknown> | null });
     nestedResults.set(path, entityMap);
   }
 
   return nestedResults;
 };
-
-import type { RecordProcessorDependencies } from './record-processor.js';
-import { processNestedRecord } from './record-processor.js';
-import type { GetNestedOperationConfig } from './state-resolver.js';
 
 /**
  * Dependencies required for building nested audit logs
@@ -87,29 +90,203 @@ export type NestedAuditLogBuilderDependencies = {
   serialization?: SerializationConfig;
   basePrisma: PrismaClientWithDynamicAccess;
   getNestedOperationConfig: GetNestedOperationConfig;
-  /** Prisma namespace extracted from basePrisma at extension initialization */
   Prisma: PrismaNamespace;
 };
 
+// ============================================================================
+// Phase 1: Collect all nested records
+// ============================================================================
+
+const collectAllNestedRecords = (
+  nestedOperations: readonly NestedOperationInfo[],
+  nestedRecordsInfo: readonly NestedRecordInfo[],
+  nestedPreFetchResults: NestedPreFetchResults | undefined,
+  getNestedOperationConfig: GetNestedOperationConfig,
+  Prisma: PrismaNamespace,
+): CollectedNestedRecord[] => {
+  const allCollected: CollectedNestedRecord[] = [];
+  const processedPaths = new Set<string>();
+
+  for (const nestedOp of nestedOperations) {
+    if (processedPaths.has(nestedOp.path)) {
+      continue;
+    }
+    processedPaths.add(nestedOp.path);
+
+    let pkFields: string[] | undefined;
+    try {
+      pkFields = getPrimaryKeyFields(Prisma, nestedOp.relatedModel);
+    } catch {
+      // Model not found in DMMF — fall back to ['id']
+    }
+
+    if (nestedOp.operation === 'delete' || nestedOp.operation === 'deleteMany') {
+      const deleteRecords = collectDeleteRecords(nestedOp, nestedPreFetchResults, pkFields);
+      allCollected.push(...deleteRecords);
+      continue;
+    }
+
+    const allRecordsForPath = nestedRecordsInfo.filter((info) => info.path === nestedOp.path);
+
+    const recordsInfo =
+      allRecordsForPath.length > 0 && allRecordsForPath[0]
+        ? {
+            fieldName: allRecordsForPath[0].fieldName,
+            records: allRecordsForPath.flatMap((info) => info.records),
+            path: allRecordsForPath[0].path,
+          }
+        : undefined;
+
+    if (!recordsInfo) {
+      continue;
+    }
+
+    const regularRecords = collectNestedRecords(
+      nestedOp,
+      recordsInfo,
+      nestedPreFetchResults,
+      getNestedOperationConfig,
+      pkFields,
+    );
+    allCollected.push(...regularRecords);
+  }
+
+  return allCollected;
+};
+
+// ============================================================================
+// Phase 2: Group collected records by relatedModel
+// ============================================================================
+
+interface ModelGroup {
+  modelName: string;
+  records: { collectedIndex: number; record: CollectedNestedRecord }[];
+}
+
+const groupByModel = (collected: CollectedNestedRecord[]): ModelGroup[] => {
+  const groups = new Map<string, ModelGroup>();
+
+  for (let i = 0; i < collected.length; i++) {
+    const record = collected[i];
+    if (!record) continue;
+
+    let group = groups.get(record.relatedModel);
+    if (!group) {
+      group = { modelName: record.relatedModel, records: [] };
+      groups.set(record.relatedModel, group);
+    }
+    group.records.push({ collectedIndex: i, record });
+  }
+
+  return Array.from(groups.values());
+};
+
+// ============================================================================
+// Phase 3+4: Batch enrich and build per model group
+// ============================================================================
+
+const enrichAndBuildForModelGroup = async (
+  group: ModelGroup,
+  context: AuditContext,
+  actorContext: unknown,
+  basePrisma: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
+  deps: Pick<
+    NestedAuditLogBuilderDependencies,
+    'aggregateConfig' | 'excludeFields' | 'redact' | 'serialization' | 'Prisma'
+  >,
+): Promise<AuditLogData[]> => {
+  const { aggregateConfig, excludeFields, redact, serialization, Prisma } = deps;
+  const entityConfig = aggregateConfig.getEntityConfig(group.modelName);
+  const nestedMetadata = createSchemaMetadataFromDMMF(Prisma);
+  const relationFields = new Set(nestedMetadata.getRelationFields(group.modelName).map((f) => f.name));
+  const entities = group.records.map((r) => r.record.entity);
+
+  // Batch entity context enrichment (1 call per model)
+  let entityContexts: (unknown | null)[];
+  if (entityConfig) {
+    const tempMeta = {
+      aggregateType: group.modelName,
+      aggregateCategory: 'model',
+    };
+    entityContexts = await batchEnrichEntityContexts(entities, entityConfig, basePrisma, tempMeta);
+  } else {
+    entityContexts = entities.map(() => null);
+  }
+
+  // Batch aggregate resolution + enrichment
+  const manager = createPrismaClientManager(basePrisma, context);
+  let aggregateContextMap = new Map<string, unknown>();
+  let survivors: {
+    entityIndex: number;
+    entity: Record<string, unknown>;
+    aggregateRoots: import('@kuruwic/prisma-audit-core').ResolvedId[];
+  }[] = [];
+
+  if (entityConfig) {
+    survivors = await resolveAndFilterSurvivors(entities, entityConfig, manager.activeClient);
+
+    if (survivors.length > 0) {
+      aggregateContextMap = await batchEnrichAggregateContextsByType(survivors, entityConfig, manager.activeClient);
+    }
+  }
+
+  // Build audit logs for survivors
+  const survivorIndexSet = new Set(survivors.map((s) => s.entityIndex));
+  const allLogs: AuditLogData[] = [];
+
+  for (const survivor of survivors) {
+    const groupRecord = group.records[survivor.entityIndex];
+    if (!groupRecord) continue;
+
+    const aggregateData = buildAggregateDataForEntity(
+      survivor.entityIndex,
+      survivor.aggregateRoots,
+      aggregateContextMap,
+    );
+
+    const logs = await buildAuditLog(
+      groupRecord.record.entity,
+      groupRecord.record.action,
+      context,
+      group.modelName,
+      manager,
+      actorContext,
+      entityContexts[survivor.entityIndex] ?? null,
+      groupRecord.record.beforeState,
+      aggregateConfig,
+      excludeFields,
+      redact,
+      aggregateData,
+      undefined,
+      serialization,
+      relationFields,
+    );
+
+    allLogs.push(...logs);
+  }
+
+  // Non-survivor records with no aggregate roots produce no audit logs
+  // (consistent with batch-stages.ts behavior)
+  const skippedCount = entities.length - survivorIndexSet.size;
+  if (skippedCount > 0) {
+    // Records without aggregate roots are silently skipped
+  }
+
+  return allLogs;
+};
+
+// ============================================================================
+// Public API
+// ============================================================================
+
 /**
- * Build audit logs for nested records using two-phase detection strategy
+ * Build audit logs for nested records using batch pipeline.
  *
- * Uses pre-fetch results to filter conditional operations (upsert/connectOrCreate) to only
- * the branch that actually executed, preventing duplicate or phantom audit logs.
- *
- * Extraction Strategy:
- * - Primary: Extract from operation result (atomic, requires `include`)
- * - Fallback: Re-fetch using pre-fetch IDs (non-atomic, may capture concurrent changes)
- *
- * @param modelName - Parent model name
- * @param args - Operation arguments for detecting nested operations
- * @param result - Operation result containing nested records (if included)
- * @param context - Audit context
- * @param prismaClient - Prisma client for enrichment and refetch
- * @param actorContext - Pre-enriched actor context shared across nested logs
- * @param preFetchResults - Pre-fetched before states for filtering conditional branches
- * @param deps - Dependencies (aggregateConfig, excludeFields, redact, basePrisma, getNestedOperationConfig, getPrisma)
- * @returns Audit logs for nested records
+ * Pipeline:
+ *   1. Detect nested operations and extract/refetch records
+ *   2. Collect all records (resolve action, beforeState, skip connect)
+ *   3. Group by relatedModel
+ *   4. Per group: batch entity enrichment → batch aggregate resolution → batch aggregate enrichment → build logs
  */
 export const buildNestedAuditLogs = async (
   modelName: string,
@@ -123,48 +300,26 @@ export const buildNestedAuditLogs = async (
 ): Promise<AuditLogData[]> => {
   const nestedPreFetchResults = extractNestedPreFetchResults(preFetchResults);
   const { aggregateConfig, excludeFields, redact, serialization, getNestedOperationConfig, Prisma } = deps;
-  const allNestedLogs: AuditLogData[] = [];
 
   const prismaMetadata = createSchemaMetadataFromDMMF(Prisma);
 
-  // Detect nested operations, filtering conditional branches using pre-fetch results
+  // Detect nested operations
   const preFetchResultsForDetection = preFetchResults ?? createEmptyPreFetchResults();
   const nestedOperations = detectNestedOperations(prismaMetadata, modelName, args, preFetchResultsForDetection);
 
   if (nestedOperations.length === 0) {
-    return allNestedLogs;
+    return [];
   }
 
+  // Extract/refetch nested records
   let nestedRecordsInfo = extractNestedRecords(prismaMetadata, modelName, result);
 
-  /**
-   * Identify operations missing from extraction (requires refetch fallback)
-   */
-  const detectMissingOperations = (
-    nestedOperations: readonly NestedOperationInfo[],
-    extractedRecords: readonly NestedRecordInfo[],
-  ): NestedOperationInfo[] => {
-    return nestedOperations.filter((op) => {
-      const hasRecord = extractedRecords.some((record) => record.path === op.path);
-      return !hasRecord;
-    });
-  };
+  const missingOperations = nestedOperations.filter((op) => {
+    const hasRecord = nestedRecordsInfo.some((record) => record.path === op.path);
+    return !hasRecord;
+  });
 
-  /**
-   * Refetch missing records using pre-fetch IDs (fallback when `include` not used)
-   */
-  const handleMissingOperationsRefetch = async (
-    missingOperations: NestedOperationInfo[],
-    currentRecords: NestedRecordInfo[],
-  ): Promise<NestedRecordInfo[]> => {
-    if (missingOperations.length === 0) {
-      return currentRecords;
-    }
-
-    if (!nestedPreFetchResults || nestedPreFetchResults.size === 0) {
-      return currentRecords;
-    }
-
+  if (missingOperations.length > 0 && nestedPreFetchResults && nestedPreFetchResults.size > 0) {
     const refetchedRecords = await refetchNestedRecords(
       prismaClient as never,
       prismaMetadata as never,
@@ -172,77 +327,37 @@ export const buildNestedAuditLogs = async (
       nestedPreFetchResults,
       missingOperations,
     );
+    nestedRecordsInfo = [...nestedRecordsInfo, ...refetchedRecords];
+  }
 
-    return [...currentRecords, ...refetchedRecords];
-  };
+  // Phase 1: Collect all nested records
+  const allCollected = collectAllNestedRecords(
+    nestedOperations,
+    nestedRecordsInfo,
+    nestedPreFetchResults,
+    getNestedOperationConfig,
+    Prisma,
+  );
 
-  const missingOperations = detectMissingOperations(nestedOperations, nestedRecordsInfo);
-  nestedRecordsInfo = await handleMissingOperationsRefetch(missingOperations, nestedRecordsInfo);
+  if (allCollected.length === 0) {
+    return [];
+  }
 
-  // Deduplicate processing: one audit log per unique path
-  const processedPaths = new Set<string>();
+  // Phase 2: Group by relatedModel
+  const modelGroups = groupByModel(allCollected);
 
-  for (const nestedOp of nestedOperations) {
-    if (processedPaths.has(nestedOp.path)) {
-      continue;
-    }
-    processedPaths.add(nestedOp.path);
-
-    const allRecordsForPath = nestedRecordsInfo.filter((info) => info.path === nestedOp.path);
-
-    // Aggregate all records for the same path (handles array operations)
-    const recordsInfo: NestedRecordInfo | undefined =
-      allRecordsForPath.length > 0 && allRecordsForPath[0]
-        ? {
-            fieldName: allRecordsForPath[0].fieldName,
-            relatedModel: allRecordsForPath[0].relatedModel,
-            isList: allRecordsForPath[0].isList,
-            path: allRecordsForPath[0].path,
-            records: allRecordsForPath.flatMap((info) => info.records),
-          }
-        : undefined;
-
-    if (nestedOp.operation === 'delete' || nestedOp.operation === 'deleteMany') {
-      const deleteHandlerDeps: DeleteHandlerDependencies = {
-        aggregateConfig,
-        excludeFields,
-        redact,
-        serialization,
-        basePrisma: prismaClient,
-      };
-      const deleteLogs = await handleNestedDelete(
-        nestedOp,
-        context,
-        actorContext,
-        nestedPreFetchResults,
-        deleteHandlerDeps,
-      );
-      allNestedLogs.push(...deleteLogs);
-      continue;
-    }
-
-    if (!recordsInfo) {
-      continue;
-    }
-
-    const recordProcessorDeps: RecordProcessorDependencies = {
+  // Phase 3+4: Batch enrich and build per model group
+  const allLogs: AuditLogData[] = [];
+  for (const group of modelGroups) {
+    const logs = await enrichAndBuildForModelGroup(group, context, actorContext, prismaClient, {
       aggregateConfig,
       excludeFields,
       redact,
       serialization,
-      basePrisma: prismaClient,
-      getNestedOperationConfig,
-    };
-    const regularLogs = await processNestedRecord(
-      nestedOp,
-      recordsInfo,
-      context,
-      actorContext,
-      nestedPreFetchResults,
-      recordProcessorDeps,
-    );
-    allNestedLogs.push(...regularLogs);
+      Prisma,
+    });
+    allLogs.push(...logs);
   }
 
-  return allNestedLogs;
+  return allLogs;
 };

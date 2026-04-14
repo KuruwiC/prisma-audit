@@ -22,13 +22,14 @@ export const applyRelationConfig = (
   beforeData: Record<string, unknown> | null | undefined,
   afterData: Record<string, unknown> | null | undefined,
   includeRelations: boolean,
+  relationFieldNames?: Set<string>,
 ): [Record<string, unknown> | null, Record<string, unknown> | null] => {
   if (includeRelations) {
     return [beforeData ?? null, afterData ?? null];
   }
 
-  const processedBefore = beforeData ? removeRelations(beforeData) : null;
-  const processedAfter = afterData ? removeRelations(afterData) : null;
+  const processedBefore = beforeData ? removeRelations(beforeData, relationFieldNames) : null;
+  const processedAfter = afterData ? removeRelations(afterData, relationFieldNames) : null;
 
   return [processedBefore, processedAfter];
 };

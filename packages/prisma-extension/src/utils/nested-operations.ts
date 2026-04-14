@@ -7,7 +7,7 @@
  * @module nested-operations
  */
 
-import type { DbClient, PreFetchResults, SchemaMetadata } from '@kuruwic/prisma-audit-core';
+import type { DbClient, PreFetchResults } from '@kuruwic/prisma-audit-core';
 import {
   detectNestedDeletes as coreDetectNestedDeletes,
   detectNestedOperations as coreDetectNestedOperations,
@@ -22,6 +22,10 @@ import {
   type NestedOperationKeyword,
   type NestedRecordInfo,
 } from '@kuruwic/prisma-audit-core';
+
+import { createSchemaMetadataFromDMMF, type PrismaWithDMMF } from './schema-metadata.js';
+
+export { createSchemaMetadataFromDMMF };
 
 // Re-export core types and constants
 export type { NestedOperationInfo, NestedOperationKeyword, NestedRecordInfo };
@@ -44,31 +48,6 @@ export interface RelationFieldInfo {
 }
 
 /**
- * Prisma DMMF (Data Model Meta Format) type definitions
- */
-interface PrismaDMMFField {
-  name: string;
-  kind: string;
-  type: string;
-  relationName?: string;
-  isList?: boolean;
-  isRequired?: boolean;
-}
-
-interface PrismaDMMFModel {
-  name: string;
-  fields: PrismaDMMFField[];
-}
-
-interface PrismaNamespace {
-  dmmf?: {
-    datamodel?: {
-      models?: PrismaDMMFModel[];
-    };
-  };
-}
-
-/**
  * Prisma Client with dynamic model access
  */
 interface PrismaClientWithModels {
@@ -79,58 +58,13 @@ interface PrismaClientWithModels {
 }
 
 /**
- * Create schema metadata adapter from Prisma DMMF
- *
- * @param Prisma - Prisma namespace with DMMF
- * @returns SchemaMetadata implementation
- */
-export const createSchemaMetadataFromDMMF = (Prisma: PrismaNamespace): SchemaMetadata => {
-  return {
-    getUniqueConstraints: () => {
-      return [];
-    },
-    getRelationFields: (modelName: string) => {
-      try {
-        const dmmf = Prisma.dmmf;
-        if (!dmmf?.datamodel?.models) {
-          return [];
-        }
-
-        const model = dmmf.datamodel.models.find((m) => m.name === modelName);
-        if (!model) {
-          return [];
-        }
-
-        const relationFields = model.fields.filter((f) => f.kind === 'object');
-
-        return relationFields.map((field) => ({
-          name: field.name,
-          relatedModel: field.type,
-          isList: field.isList ?? false,
-          isRequired: field.isRequired ?? false,
-          relationName: field.relationName,
-        }));
-      } catch {
-        return [];
-      }
-    },
-    getAllFields: () => {
-      return [];
-    },
-    getFieldMetadata: () => {
-      return undefined;
-    },
-  };
-};
-
-/**
  * Get all relation fields for a given model from Prisma DMMF
  *
  * @param Prisma - Prisma namespace with DMMF
  * @param modelName - Model name (PascalCase)
  * @returns Array of relation field information
  */
-export const getRelationFields = (Prisma: PrismaNamespace, modelName: string): RelationFieldInfo[] => {
+export const getRelationFields = (Prisma: PrismaWithDMMF, modelName: string): RelationFieldInfo[] => {
   const schemaMetadata = createSchemaMetadataFromDMMF(Prisma);
   return schemaMetadata.getRelationFields(modelName);
 };
@@ -143,7 +77,7 @@ export const getRelationFields = (Prisma: PrismaNamespace, modelName: string): R
  * @param fieldName - Field name to check
  * @returns True if the field is a relation field
  */
-export const isRelationField = (Prisma: PrismaNamespace, modelName: string, fieldName: string): boolean => {
+export const isRelationField = (Prisma: PrismaWithDMMF, modelName: string, fieldName: string): boolean => {
   const schemaMetadata = createSchemaMetadataFromDMMF(Prisma);
   return coreIsRelationField(schemaMetadata, modelName, fieldName);
 };
@@ -159,7 +93,7 @@ export const isRelationField = (Prisma: PrismaNamespace, modelName: string, fiel
  * @returns Array of detected nested operations
  */
 export const detectNestedOperations = (
-  Prisma: PrismaNamespace,
+  Prisma: PrismaWithDMMF,
   modelName: string,
   args: Record<string, unknown>,
   preFetchResults: PreFetchResults = createEmptyPreFetchResults(),
@@ -177,7 +111,7 @@ export const detectNestedOperations = (
  * @returns Array of nested record information
  */
 export const extractNestedRecords = (
-  Prisma: PrismaNamespace,
+  Prisma: PrismaWithDMMF,
   modelName: string,
   result: unknown,
 ): NestedRecordInfo[] => {
@@ -196,7 +130,7 @@ export const extractNestedRecords = (
  * @returns Array of nested record information with re-fetched after state
  */
 export const refetchNestedRecords = async (
-  Prisma: PrismaNamespace,
+  Prisma: PrismaWithDMMF,
   prismaClient: PrismaClientWithModels,
   modelName: string,
   nestedPreFetchResults: Map<string, Map<string, { before: Record<string, unknown> | null }>> | undefined,
@@ -221,7 +155,7 @@ export const refetchNestedRecords = async (
  * @returns Array of detected nested update operations
  */
 export const detectNestedUpdates = (
-  Prisma: PrismaNamespace,
+  Prisma: PrismaWithDMMF,
   modelName: string,
   args: Record<string, unknown>,
 ): NestedOperationInfo[] => {
@@ -238,7 +172,7 @@ export const detectNestedUpdates = (
  * @returns Array of detected nested delete operations
  */
 export const detectNestedDeletes = (
-  Prisma: PrismaNamespace,
+  Prisma: PrismaWithDMMF,
   modelName: string,
   args: Record<string, unknown>,
 ): NestedOperationInfo[] => {
@@ -255,7 +189,7 @@ export const detectNestedDeletes = (
  * @returns Array of detected nested upsert operations
  */
 export const detectNestedUpserts = (
-  Prisma: PrismaNamespace,
+  Prisma: PrismaWithDMMF,
   modelName: string,
   args: Record<string, unknown>,
 ): NestedOperationInfo[] => {

@@ -1,21 +1,15 @@
 /**
  * Nested Record Processor
  *
- * Processes regular nested operations (create/update/upsert) by generating
- * audit logs for each nested record.
+ * Collects nested records (create/update/upsert) by resolving action and before state.
+ * Enrichment and audit log building are handled by the batch pipeline in audit-log-builder.ts.
  */
 
-import type {
-  AggregateConfigService,
-  AuditContext,
-  RedactConfig,
-  SerializationConfig,
-} from '@kuruwic/prisma-audit-core';
-import { batchEnrichEntityContexts, nestedLog } from '@kuruwic/prisma-audit-core';
-import { buildAuditLog } from '../../audit-log-builder/index.js';
-import { createPrismaClientManager } from '../../client-manager/index.js';
-import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../internal-types.js';
-import type { AuditLogData, PrismaAction } from '../../types.js';
+import { nestedLog } from '@kuruwic/prisma-audit-core';
+
+import type { PrismaAction } from '../../types.js';
+import { extractEntityIdentity } from '../../utils/id-generator.js';
+import type { CollectedNestedRecord } from './collected-record.js';
 import type { NestedOperationInfo, NestedPreFetchResults } from './delete-handler.js';
 import type { GetNestedOperationConfig } from './state-resolver.js';
 import { resolveNestedOperationState } from './state-resolver.js';
@@ -30,80 +24,41 @@ export type NestedRecordsInfo = {
 };
 
 /**
- * Dependencies required for processing nested records
- */
-export type RecordProcessorDependencies = {
-  aggregateConfig: AggregateConfigService;
-  excludeFields: string[];
-  redact: RedactConfig | undefined;
-  serialization?: SerializationConfig;
-  basePrisma: PrismaClientWithDynamicAccess | TransactionalPrismaClient;
-  getNestedOperationConfig: GetNestedOperationConfig;
-};
-
-/**
  * Checks if nested record should be skipped for audit logging
  *
  * Skips when action is 'connect' (connectOrCreate to existing record or connect operation).
- *
- * @param action - Resolved action
- * @returns True if audit log should be skipped
  */
 export const shouldSkipNestedRecord = (action: PrismaAction): boolean => {
   return action === ('connect' as PrismaAction);
 };
 
 /**
- * Process regular nested operations (create/update/upsert)
+ * Collect nested records for create/update/upsert operations.
  *
- * Processes nested records by resolving action/before state, skipping 'connect' operations,
- * enriching entity contexts, and building audit logs.
+ * Resolves action and before state for each record, skipping 'connect' operations.
+ * Does NOT perform enrichment or build audit logs — that is the caller's responsibility.
  *
- * NOTE: aggregateContext is no longer enriched here. It is now enriched per aggregate root
- * inside buildAuditLog for aggregate-aware context.
- *
- * @param nestedOp - Nested operation information
- * @param recordsInfo - Nested records to process
- * @param context - Audit context
- * @param actorContext - Pre-enriched actor context
- * @param nestedPreFetchResults - Pre-fetched before states
- * @param deps - Dependencies (aggregateConfig, excludeFields, redact, basePrisma, getNestedOperationConfig)
- * @returns Audit logs for nested records
- *
- * @example
- * ```typescript
- * const logs = await processNestedRecord(
- *   { operation: 'create', fieldName: 'posts', relatedModel: 'Post', path: 'posts' },
- *   { fieldName: 'posts', records: [{ id: 1, title: 'New Post' }], path: 'posts' },
- *   context, actorContext, preFetchResults, deps
- * );
- * ```
+ * @returns Collected records ready for batch enrichment
  */
-export const processNestedRecord = async (
+export const collectNestedRecords = (
   nestedOp: NestedOperationInfo,
   recordsInfo: NestedRecordsInfo,
-  context: AuditContext,
-  actorContext: unknown,
   nestedPreFetchResults: NestedPreFetchResults | undefined,
-  deps: RecordProcessorDependencies,
-): Promise<AuditLogData[]> => {
-  const { aggregateConfig, excludeFields, redact, serialization, basePrisma, getNestedOperationConfig } = deps;
-  const allNestedLogs: AuditLogData[] = [];
+  getNestedOperationConfig: GetNestedOperationConfig,
+  pkFields?: string[],
+): CollectedNestedRecord[] => {
+  const collected: CollectedNestedRecord[] = [];
 
-  nestedLog('found %d records for field=%s', recordsInfo.records.length, nestedOp.fieldName);
+  nestedLog('collecting %d records for field=%s', recordsInfo.records.length, nestedOp.fieldName);
 
-  // Generate audit logs for each nested record
   for (const record of recordsInfo.records) {
     if (!record || typeof record !== 'object') {
       nestedLog('invalid record: %o', record);
       continue;
     }
 
-    // At this point, record is guaranteed to be an object (not null, not primitive)
-    // We can safely treat it as Record<string, unknown>
     const recordObj = record as Record<string, unknown>;
-
-    const entityId = 'id' in recordObj ? String(recordObj.id) : '__default__';
+    const entityId = extractEntityIdentity(recordObj, pkFields ?? ['id']);
 
     const { action, beforeState } = resolveNestedOperationState(
       nestedOp,
@@ -117,37 +72,13 @@ export const processNestedRecord = async (
       continue;
     }
 
-    const nestedEntityConfig = aggregateConfig.getEntityConfig(nestedOp.relatedModel);
-
-    // Enrich entity context (shared across all aggregates)
-    const tempMeta = {
-      aggregateType: nestedOp.relatedModel,
-      aggregateCategory: 'model',
-    };
-
-    const [nestedEntityContext] = nestedEntityConfig
-      ? await batchEnrichEntityContexts([recordObj], nestedEntityConfig, basePrisma, tempMeta)
-      : [null];
-
-    const manager = createPrismaClientManager(basePrisma, context);
-    const nestedLogs = await buildAuditLog(
-      recordObj,
+    collected.push({
+      entity: recordObj,
       action,
-      context,
-      nestedOp.relatedModel,
-      manager,
-      actorContext,
-      nestedEntityContext,
       beforeState,
-      aggregateConfig,
-      excludeFields,
-      redact,
-      undefined,
-      serialization,
-    );
-
-    allNestedLogs.push(...nestedLogs);
+      relatedModel: nestedOp.relatedModel,
+    });
   }
 
-  return allNestedLogs;
+  return collected;
 };

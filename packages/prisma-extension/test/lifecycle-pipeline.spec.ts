@@ -50,23 +50,6 @@ describe('runLifecyclePipeline', () => {
         doubled: 84,
       });
     });
-
-    it('should call the stage function once', async () => {
-      // Arrange
-      const initialContext = { value: 1 };
-      const stageFn = vi.fn(async (ctx: unknown) => ({
-        ...(ctx as Record<string, unknown>),
-        processed: true,
-      }));
-      const stages: ReadonlyArray<LifecycleStage<unknown, unknown>> = [stageFn];
-
-      // Act
-      await runLifecyclePipeline(initialContext, stages);
-
-      // Assert
-      expect(stageFn).toHaveBeenCalledTimes(1);
-      expect(stageFn).toHaveBeenCalledWith(initialContext);
-    });
   });
 
   describe('Multiple stages composition', () => {
@@ -188,32 +171,6 @@ describe('runLifecyclePipeline', () => {
       expect(stage1).toHaveBeenCalledTimes(1);
       expect(stage2).toHaveBeenCalledTimes(1);
       expect(stage3).not.toHaveBeenCalled(); // Should not be called
-    });
-  });
-
-  describe('Async behavior', () => {
-    it('should handle async stages correctly', async () => {
-      // Arrange
-      const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-      const stage1 = async (ctx: unknown) => {
-        await delay(10);
-        return { ...(ctx as Record<string, unknown>), step1: true };
-      };
-
-      const stage2 = async (ctx: unknown) => {
-        await delay(10);
-        return { ...(ctx as Record<string, unknown>), step2: true };
-      };
-
-      const initialContext = { value: 1 };
-      const stages: ReadonlyArray<LifecycleStage<unknown, unknown>> = [stage1, stage2];
-
-      // Act
-      const result = await runLifecyclePipeline(initialContext, stages);
-
-      // Assert
-      expect(result).toEqual({ value: 1, step1: true, step2: true });
     });
   });
 });

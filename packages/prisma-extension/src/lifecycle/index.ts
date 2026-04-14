@@ -9,20 +9,19 @@
  */
 
 export type {
-  DeleteHandlerDependencies,
+  CollectedNestedRecord,
   GetNestedOperationConfig,
   NestedAuditLogBuilderDependencies,
   NestedOperationConfig,
   NestedOperationInfo,
   NestedPreFetchResults,
   NestedRecordsInfo,
-  RecordProcessorDependencies,
   ResolvedState,
 } from './nested-handlers/index.js';
 export {
   buildNestedAuditLogs,
-  handleNestedDelete,
-  processNestedRecord,
+  collectDeleteRecords,
+  collectNestedRecords,
   resolveNestedOperationState,
   shouldSkipNestedRecord,
 } from './nested-handlers/index.js';

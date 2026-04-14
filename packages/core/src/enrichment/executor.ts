@@ -8,20 +8,27 @@ import { ENRICHMENT_TIMEOUTS } from '../constants.js';
 import type { EnricherConfig, EnricherErrorStrategy } from './types.js';
 
 /**
- * Create a timeout promise that rejects after specified milliseconds
+ * Execute a promise with a timeout that is properly cleaned up
  *
+ * @param promise - The promise to race against the timeout
  * @param timeoutMs - Timeout duration in milliseconds
- * @returns Promise that rejects with timeout error
- *
- * @remarks
- * Creates a "dangling promise" when used with Promise.race. The timeout
- * will fire even if the main promise completes first. Consider AbortController
- * for future enhancement to properly cancel operations.
+ * @returns The resolved value of the promise
+ * @throws Error('Enricher timeout') if the timeout fires first
  *
  * @internal
  */
-const createTimeoutPromise = (timeoutMs: number): Promise<never> => {
-  return new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Enricher timeout')), timeoutMs));
+const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number): Promise<T> => {
+  let timeoutId: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error('Enricher timeout')), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+  }
 };
 
 /**
@@ -84,9 +91,6 @@ const handleEnricherError = <TContext>(
  * - 'log': Log warning and use fallback value
  * - Custom function: Execute custom error handler and use its return value or fallback
  *
- * Uses Promise.race for timeout, which creates a dangling timeout timer that will fire
- * even if the enricher completes first.
- *
  * @example
  * ```typescript
  * const result = await executeEnricherSafely(
@@ -104,7 +108,7 @@ export const executeEnricherSafely = async <TInput, TContext>(
   config: EnricherConfig<TInput, TContext> | undefined,
   input: TInput,
   prisma: unknown,
-  timeoutMs = ENRICHMENT_TIMEOUTS.DEFAULT,
+  timeoutMs: number = ENRICHMENT_TIMEOUTS.DEFAULT,
   meta: {
     aggregateType: string;
     aggregateCategory: string;
@@ -116,8 +120,7 @@ export const executeEnricherSafely = async <TInput, TContext>(
   }
 
   try {
-    const enrichedContext = await Promise.race([config.enricher(input, prisma, meta), createTimeoutPromise(timeoutMs)]);
-    return enrichedContext;
+    return await withTimeout(config.enricher(input, prisma, meta), timeoutMs);
   } catch (unknownError) {
     const error = unknownError instanceof Error ? unknownError : new Error(String(unknownError));
     const errorStrategy = config.onError ?? 'fail';
@@ -198,8 +201,6 @@ const handleBatchEnricherError = <TContext>(
  * - 'log': Log warning and return array of nulls/fallbacks
  * - Custom function: Execute custom error handler and use its return value or fallbacks
  *
- * Uses Promise.race for timeout, which creates a dangling timeout timer.
- *
  * @example
  * ```typescript
  * const results = await executeBatchEnricherSafely(
@@ -218,7 +219,7 @@ export const executeBatchEnricherSafely = async <TInput, TContext>(
   config: EnricherConfig<TInput[], (TContext | null)[]> | undefined,
   inputs: TInput[],
   prisma: unknown,
-  timeoutMs = ENRICHMENT_TIMEOUTS.BATCH,
+  timeoutMs: number = ENRICHMENT_TIMEOUTS.BATCH,
   meta: {
     aggregateType: string;
     aggregateCategory: string;
@@ -230,10 +231,12 @@ export const executeBatchEnricherSafely = async <TInput, TContext>(
   }
 
   try {
-    const enrichedContexts = await Promise.race([
-      config.enricher(inputs, prisma, meta),
-      createTimeoutPromise(timeoutMs),
-    ]);
+    const enrichedContexts = await withTimeout(config.enricher(inputs, prisma, meta), timeoutMs);
+    if (enrichedContexts.length !== inputs.length) {
+      throw new Error(
+        `Batch enricher returned ${enrichedContexts.length} results for ${inputs.length} inputs (expected same length)`,
+      );
+    }
     return enrichedContexts;
   } catch (unknownError) {
     const error = unknownError instanceof Error ? unknownError : new Error(String(unknownError));

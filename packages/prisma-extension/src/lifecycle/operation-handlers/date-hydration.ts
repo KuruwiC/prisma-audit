@@ -9,8 +9,30 @@
  */
 
 import { AUDIT_ACTION, coreLog } from '@kuruwic/prisma-audit-core';
+
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../internal-types.js';
 import type { OperationContext } from '../../types.js';
+import { getPrimaryKeyFields } from '../../utils/id-generator.js';
+import type { PrismaWithDMMF } from '../../utils/schema-metadata.js';
+
+/** Build WHERE clause from result record using PK fields */
+const buildCreateWhereClause = (
+  resultRecord: Record<string, unknown>,
+  modelName: string,
+  Prisma?: PrismaWithDMMF,
+): Record<string, unknown> | null => {
+  let pkFields: string[] = ['id'];
+  if (Prisma) {
+    try {
+      pkFields = getPrimaryKeyFields(Prisma, modelName);
+    } catch {
+      // Model not in DMMF — fall back to ['id']
+    }
+  }
+  const allPresent = pkFields.every((f) => f in resultRecord && resultRecord[f] != null);
+  if (!allPresent) return null;
+  return Object.fromEntries(pkFields.map((f) => [f, resultRecord[f]]));
+};
 
 /**
  * Re-fetch operation result to ensure proper Date hydration
@@ -30,6 +52,7 @@ export const refetchForDateHydration = async (
   result: unknown,
   operation: OperationContext,
   clientToUse: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
+  Prisma?: PrismaWithDMMF,
 ): Promise<unknown> => {
   if (
     operation.action !== AUDIT_ACTION.CREATE &&
@@ -51,10 +74,7 @@ export const refetchForDateHydration = async (
     let whereClause: Record<string, unknown> | null = null;
 
     if (operation.action === AUDIT_ACTION.CREATE) {
-      const resultRecord = result as Record<string, unknown>;
-      if (resultRecord.id !== undefined) {
-        whereClause = { id: resultRecord.id };
-      }
+      whereClause = buildCreateWhereClause(result as Record<string, unknown>, operation.model as string, Prisma);
     } else if (operation.action === AUDIT_ACTION.UPDATE || operation.action === AUDIT_ACTION.UPSERT) {
       const args = operation.args as { where?: Record<string, unknown> };
       if (args.where) {

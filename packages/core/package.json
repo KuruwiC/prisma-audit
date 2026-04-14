@@ -1,6 +1,6 @@
 {
   "name": "@kuruwic/prisma-audit-core",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "description": "Framework-agnostic audit logging core for Prisma",
   "main": "./dist/index.cjs",
@@ -54,6 +54,10 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/kuruwic/prisma-audit.git"
+  },
+  "homepage": "https://github.com/kuruwic/prisma-audit#readme",
+  "bugs": {
+    "url": "https://github.com/kuruwic/prisma-audit/issues"
   },
   "publishConfig": {
     "access": "public"

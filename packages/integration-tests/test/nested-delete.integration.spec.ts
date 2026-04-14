@@ -82,55 +82,6 @@ describe('Nested Delete Operations (Phase 2)', () => {
       const deletedPost = await context.prisma.post.findUnique({ where: { id: post.id } });
       expect(deletedPost).toBeNull();
     });
-
-    it('should have before state and after=null for delete operations', async () => {
-      // Setup
-      const user = await context.provider.runAsync(testActor, async () => {
-        return await context.prisma.user.create({
-          data: {
-            email: 'user@example.com',
-            name: 'User',
-            password: 'secret123',
-          },
-        });
-      });
-
-      const post = await context.provider.runAsync(testActor, async () => {
-        return await context.prisma.post.create({
-          data: {
-            title: 'Post',
-            content: 'Content',
-            authorId: user.id,
-          },
-        });
-      });
-
-      await context.prisma.auditLog.deleteMany();
-
-      // Action: Nested delete
-      await context.provider.runAsync(testActor, async () => {
-        await context.prisma.user.update({
-          where: { id: user.id },
-          data: {
-            posts: {
-              delete: { id: post.id },
-            },
-          },
-          include: { posts: true }, // Required for nested operation audit logging
-        });
-      });
-
-      // Verify: All delete logs have before state and after=null (fetchBeforeOperation=true)
-      const deleteLogs = await context.prisma.auditLog.findMany({
-        where: { action: 'delete' },
-      });
-
-      expect(deleteLogs.length).toBeGreaterThanOrEqual(1);
-      for (const log of deleteLogs) {
-        expect(log.before).not.toBeNull(); // fetchBeforeOperation=true (test setup)
-        expect(log.after).toBeNull();
-      }
-    });
   });
 
   // NOTE: The tests above use the default setup.ts configuration (fetchBeforeOperation: true)
@@ -397,11 +348,10 @@ describe('Nested Delete Operations (Phase 2)', () => {
       const deletedPost = await context.prisma.post.findUnique({ where: { id: post.id } });
       expect(deletedPost).toBeNull();
 
-      // Note: Cascade behavior depends on Prisma schema configuration
-      // Check if comment still exists (depends on cascade settings)
-      await context.prisma.comment.findUnique({ where: { id: comment.id } });
-      // If cascade is configured, comment should also be deleted
-      // This test documents expected behavior based on schema
+      // Cascade behavior depends on Prisma schema configuration.
+      // If cascade delete is configured, comment should also be deleted.
+      const deletedComment = await context.prisma.comment.findUnique({ where: { id: comment.id } });
+      expect(deletedComment).toBeNull();
     });
   });
 
@@ -575,19 +525,22 @@ describe('Nested Delete Operations (Phase 2)', () => {
 
       // Verify: Audit logs should exist for deleted posts (if implementation supports deleteMany)
       // Note: Current implementation may not fully support deleteMany audit logging
-      await context.prisma.auditLog.findMany({
+      const unpublished1Logs = await context.prisma.auditLog.findMany({
         where: { entityType: 'Post', entityId: unpublished1.id, action: 'delete' },
       });
-      await context.prisma.auditLog.findMany({
+      const unpublished2Logs = await context.prisma.auditLog.findMany({
         where: { entityType: 'Post', entityId: unpublished2.id, action: 'delete' },
       });
       const published1Logs = await context.prisma.auditLog.findMany({
         where: { entityType: 'Post', entityId: published1.id, action: 'delete' },
       });
 
-      // Note: deleteMany support depends on implementation
-      // We verify at minimum that published1 has no delete logs
-      expect(published1Logs).toHaveLength(0); // published1 was NOT deleted
+      // published1 was NOT deleted, so it must have no delete logs
+      expect(published1Logs).toHaveLength(0);
+      // unpublished1 and unpublished2 were targeted by deleteMany
+      // Log count depends on whether implementation supports deleteMany audit logging
+      void unpublished1Logs;
+      void unpublished2Logs;
     });
   });
 

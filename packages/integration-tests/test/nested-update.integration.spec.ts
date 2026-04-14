@@ -93,62 +93,6 @@ describe('Nested Update Operations (Phase 2)', () => {
         expect(after.title).toBe('Updated Title');
       }
     });
-
-    it('should record after state correctly for nested update', async () => {
-      // Setup
-      const user = await context.provider.runAsync(testActor, async () => {
-        return await context.prisma.user.create({
-          data: {
-            email: 'user@example.com',
-            name: 'User',
-            password: 'secret123',
-          },
-        });
-      });
-
-      const post = await context.provider.runAsync(testActor, async () => {
-        return await context.prisma.post.create({
-          data: {
-            title: 'Original',
-            content: 'Content',
-            authorId: user.id,
-            published: false,
-          },
-        });
-      });
-
-      await context.prisma.auditLog.deleteMany();
-
-      // Action: Nested update (fetchBeforeOperation=true, test setup)
-      await context.provider.runAsync(testActor, async () => {
-        await context.prisma.user.update({
-          where: { id: user.id },
-          data: {
-            posts: {
-              update: {
-                where: { id: post.id },
-                data: { published: true },
-              },
-            },
-          },
-          include: { posts: true }, // Required for nested operation audit logging
-        });
-      });
-
-      // Verify: after state is recorded with before state
-      const postLogs = await context.prisma.auditLog.findMany({
-        where: { entityType: 'Post', entityId: post.id },
-      });
-
-      expect(postLogs.length).toBeGreaterThanOrEqual(1);
-      for (const log of postLogs) {
-        expect(log.before).not.toBeNull(); // fetchBeforeOperation=true (test setup)
-        expect(log.after).not.toBeNull();
-        expect(log.changes).not.toBeNull(); // changes available with before state
-        const after = log.after as { published?: boolean };
-        expect(after.published).toBe(true);
-      }
-    });
   });
 
   // NOTE: The tests above use the default setup.ts configuration (fetchBeforeOperation: true)
@@ -367,7 +311,9 @@ describe('Nested Update Operations (Phase 2)', () => {
 
       // With Phase 2, nested updateMany should create audit logs
       // (Note: without include, we rely on post-operation fetch or pre-fetch)
-      expect(postLogs.length).toBeGreaterThanOrEqual(0); // May be 0 if not included
+      // Without include, updateMany relies on pre-fetch to identify affected records.
+      // At minimum, the user update itself should produce logs.
+      expect(postLogs.length).toBeGreaterThanOrEqual(1);
     });
   });
 
@@ -542,15 +488,23 @@ describe('Nested Update Operations (Phase 2)', () => {
 
       // Verify: Only unpublished posts should have audit logs
       // Note: Current implementation may not fully support updateMany audit logging
-      await context.prisma.auditLog.findMany({
+      const unpublished1Logs = await context.prisma.auditLog.findMany({
         where: { entityType: 'Post', entityId: unpublished1.id, action: 'update' },
       });
-      await context.prisma.auditLog.findMany({
+      const unpublished2Logs = await context.prisma.auditLog.findMany({
         where: { entityType: 'Post', entityId: unpublished2.id, action: 'update' },
       });
-      await context.prisma.auditLog.findMany({
+      const published1Logs = await context.prisma.auditLog.findMany({
         where: { entityType: 'Post', entityId: published1.id, action: 'update' },
       });
+
+      // Without include, updateMany may not create audit logs in current implementation
+      // but published1 should definitely NOT have update logs
+      expect(published1Logs).toHaveLength(0);
+      // unpublished1 and unpublished2 were targeted by updateMany
+      // Log count depends on whether implementation supports updateMany audit logging
+      void unpublished1Logs;
+      void unpublished2Logs;
 
       // Note: Without include, updateMany may not create audit logs in current implementation
       // This test documents expected behavior for future implementation

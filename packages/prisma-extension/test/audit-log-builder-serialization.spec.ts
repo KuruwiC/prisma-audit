@@ -8,7 +8,7 @@
 import type { LoggableEntity } from '@kuruwic/prisma-audit-core';
 import { UNHANDLED } from '@kuruwic/prisma-audit-core';
 import { describe, expect, it, vi } from 'vitest';
-import { buildAuditLog } from '../src/audit-log-builder/index.js';
+import { buildAuditLog, type ResolvedAggregateData } from '../src/audit-log-builder/index.js';
 import type { PrismaClientManager } from '../src/client-manager/index.js';
 import type { AuditLogData } from '../src/types.js';
 
@@ -34,6 +34,11 @@ const createManager = (): PrismaClientManager => ({
   activeClient: {} as never,
 });
 
+const createSelfAggregateData = (entityId: string): ResolvedAggregateData => ({
+  aggregateRoots: [{ aggregateCategory: 'model', aggregateType: 'Transaction', aggregateId: entityId }],
+  aggregateContexts: new Map([['Transaction', null]]),
+});
+
 describe('buildAuditLog serialization', () => {
   it('should serialize BigInt in before/after fields', async () => {
     const entity = { id: 'tx-1', amount: 100n, status: 'completed' };
@@ -51,6 +56,7 @@ describe('buildAuditLog serialization', () => {
       createAggregateConfig(),
       undefined,
       undefined,
+      createSelfAggregateData('tx-1'),
       undefined,
       undefined,
     );
@@ -90,6 +96,7 @@ describe('buildAuditLog serialization', () => {
       createAggregateConfig(),
       undefined,
       undefined,
+      createSelfAggregateData('tx-1'),
       undefined,
       undefined,
     );
@@ -123,6 +130,7 @@ describe('buildAuditLog serialization', () => {
       createAggregateConfig(),
       undefined,
       undefined,
+      createSelfAggregateData('tx-1'),
       undefined,
       undefined,
     );
@@ -149,6 +157,7 @@ describe('buildAuditLog serialization', () => {
       createAggregateConfig(),
       undefined,
       undefined,
+      createSelfAggregateData('tx-1'),
       undefined,
       {
         customSerializers: [

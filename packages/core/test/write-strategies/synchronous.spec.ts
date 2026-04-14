@@ -159,19 +159,6 @@ describe('writeSynchronously', () => {
   });
 
   describe('default writer', () => {
-    it('should use default writer when no custom writer provided', async () => {
-      const writeFn = vi.fn().mockResolvedValue(undefined);
-      const manager = createMockManager();
-      const executor = createMockExecutor(writeFn);
-      const logs = [createMockLog()];
-      const context = createMockContext();
-
-      await writeSynchronously(logs, context, manager, 'auditLog', undefined, executor);
-
-      expect(writeFn).toHaveBeenCalledTimes(1);
-      expect(writeFn).toHaveBeenCalledWith(manager.activeClient, 'auditLog', logs);
-    });
-
     it('should use manager.activeClient for default writes', async () => {
       const activeWriteFn = vi.fn().mockResolvedValue(undefined);
 
@@ -204,23 +191,6 @@ describe('writeSynchronously', () => {
         _tag: 'Immediate',
         createdAt: expect.any(Date),
       });
-    });
-
-    it('should have timestamp close to current time', async () => {
-      const manager = createMockManager();
-      const executor = createMockExecutor();
-      const logs = [createMockLog()];
-      const context = createMockContext();
-      const before = new Date();
-
-      const result = await writeSynchronously(logs, context, manager, 'auditLog', undefined, executor);
-
-      const after = new Date();
-      expect(result._tag).toBe('Immediate');
-      if (result._tag === 'Immediate') {
-        expect(result.createdAt.getTime()).toBeGreaterThanOrEqual(before.getTime());
-        expect(result.createdAt.getTime()).toBeLessThanOrEqual(after.getTime());
-      }
     });
   });
 

@@ -10,7 +10,7 @@ import type { DbClientManager, WriteExecutor } from './interfaces.js';
 import type { WriteFn, WriteResult } from './types.js';
 import { createDefaultWriteFn } from './utils.js';
 
-type ErrorHandler = (error: Error, operationDescription: string) => void;
+type ErrorHandler = (error: Error, operationDescription: string) => void | Promise<void>;
 
 /**
  * Registry to track pending async writes.
@@ -68,9 +68,16 @@ const createAsyncWriteExecutor = (
 
 const executeAsyncWrite = (asyncExecutor: () => Promise<void>, errorHandler: ErrorHandler): void => {
   const promise = asyncExecutor()
-    .catch((error) => {
+    .catch(async (error) => {
       const errorObject = error instanceof Error ? error : new Error(String(error));
-      errorHandler(errorObject, 'async audit log write');
+      try {
+        await errorHandler(errorObject, 'async audit log write');
+      } catch (handlerError) {
+        console.error(
+          '[@prisma-audit] Error in async write error handler:',
+          handlerError instanceof Error ? handlerError.message : String(handlerError),
+        );
+      }
     })
     .finally(() => {
       pendingWrites.delete(promise);

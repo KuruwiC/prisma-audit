@@ -253,7 +253,7 @@ describe('Transaction Enrichment Consistency', () => {
       expect(enrichedUserEmail).toBe('new-author@example.com');
 
       const auditLogs = await context.basePrisma.auditLog.findMany({
-        where: { entityType: 'Post', entityId: post.id, action: 'update' },
+        where: { entityType: 'Post', entityId: post.id, action: 'update', aggregateType: 'User' },
         orderBy: { createdAt: 'desc' },
       });
 

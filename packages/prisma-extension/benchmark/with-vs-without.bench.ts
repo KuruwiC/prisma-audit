@@ -16,7 +16,7 @@ describe('With vs Without Audit', () => {
         User: defineEntity({ type: 'User', idField: 'id', aggregate: self }),
       },
       basePrisma,
-      DbNull: Prisma.DbNull,
+      Prisma,
       writeMode: 'async',
     }),
   );

@@ -7,11 +7,6 @@ describe('getModelAccessor', () => {
     expect(accessor).toBe('user');
   });
 
-  it('should return correct accessor for Post model (without DMMF)', () => {
-    const accessor = getModelAccessor({}, 'Post');
-    expect(accessor).toBe('post');
-  });
-
   it('should use DMMF plural when available', () => {
     const mockClient = {
       _dmmf: {

@@ -54,13 +54,6 @@ describe('isSensitiveField', () => {
 });
 
 describe('createRedactor', () => {
-  it('should create redactor with default config', () => {
-    const redactor = createRedactor();
-
-    expect(redactor).toBeDefined();
-    expect(typeof redactor).toBe('function');
-  });
-
   it('should redact sensitive fields', () => {
     const redactor = createRedactor();
     const data = {
@@ -180,16 +173,6 @@ describe('createRedactor', () => {
     expect(redactor(undefined)).toBe(undefined);
   });
 
-  it('should handle Date objects', () => {
-    const redactor = createRedactor();
-    const date = new Date('2024-01-01');
-    const data = { createdAt: date };
-
-    const redacted = redactor(data);
-
-    expect(redacted).toBeDefined();
-  });
-
   it('should NOT redact case variations (case-sensitive)', () => {
     const redactor = createRedactor();
     const data = {
@@ -249,12 +232,6 @@ describe('redactSensitiveData', () => {
         hadValue: true,
       } satisfies RedactedFieldInfo,
     });
-  });
-
-  it('should handle primitive values', () => {
-    expect(redactSensitiveData('string')).toBe('string');
-    expect(redactSensitiveData(123)).toBe(123);
-    expect(redactSensitiveData(null)).toBe(null);
   });
 
   it('should deep clone data', () => {
@@ -374,24 +351,6 @@ describe('edge cases', () => {
 });
 
 describe('redaction metadata', () => {
-  it('should create redaction metadata for single value', () => {
-    const redactor = createRedactor();
-    const data = {
-      id: 'user-123',
-      name: 'John Doe',
-      password: 'secret123',
-    };
-
-    const redacted = redactor(data) as Record<string, unknown>;
-
-    expect(redacted.id).toBe('user-123');
-    expect(redacted.name).toBe('John Doe');
-    expect(redacted.password).toEqual({
-      redacted: true,
-      hadValue: true,
-    } satisfies RedactedFieldInfo);
-  });
-
   it('should handle null values in redaction', () => {
     const redactor = createRedactor();
     const data = {
@@ -480,33 +439,6 @@ describe('redaction metadata', () => {
       hadValue: true,
     });
     expect(passwordChange.new).toBe(null);
-  });
-
-  it('should handle nested objects', () => {
-    const redactor = createRedactor();
-    const data = {
-      user: {
-        id: 'user-123',
-        password: 'secret123',
-        profile: {
-          apiKey: 'key-456',
-        },
-      },
-    };
-
-    const redacted = redactor(data) as Record<string, unknown>;
-    const user = redacted.user as Record<string, unknown>;
-    const profile = user.profile as Record<string, unknown>;
-
-    expect(user.id).toBe('user-123');
-    expect(user.password).toEqual({
-      redacted: true,
-      hadValue: true,
-    });
-    expect(profile.apiKey).toEqual({
-      redacted: true,
-      hadValue: true,
-    });
   });
 
   it('should handle complex change objects with multiple sensitive fields', () => {

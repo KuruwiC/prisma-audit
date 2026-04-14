@@ -8,7 +8,9 @@
  */
 
 import { SUPPORTED_OPERATIONS } from '@kuruwic/prisma-audit-core';
+
 import type { PrismaAction } from '../types.js';
+import { ENTITY_IDENTITY_DEFAULT, extractEntityIdentity } from './id-generator.js';
 
 /**
  * Converts PascalCase to camelCase
@@ -70,19 +72,22 @@ export const isAuditableAction = (operation: string): operation is PrismaAction 
  * // => undefined
  * ```
  */
-export const extractDeleteOperationEntityId = (data: unknown): string | undefined => {
+export const extractDeleteOperationEntityId = (data: unknown, pkFields?: string[]): string | undefined => {
   if (!data || typeof data !== 'object') {
     return undefined;
   }
 
-  if ('id' in data) {
-    return String(data.id);
-  }
+  const fields = pkFields ?? ['id'];
+  const record = data as Record<string, unknown>;
 
-  if ('where' in data) {
-    const where = data.where as Record<string, unknown>;
-    if (where && 'id' in where) {
-      return String(where.id);
+  const identity = extractEntityIdentity(record, fields);
+  if (identity !== ENTITY_IDENTITY_DEFAULT) return identity;
+
+  if ('where' in record) {
+    const where = record.where as Record<string, unknown>;
+    if (where) {
+      const whereIdentity = extractEntityIdentity(where, fields);
+      if (whereIdentity !== ENTITY_IDENTITY_DEFAULT) return whereIdentity;
     }
   }
 

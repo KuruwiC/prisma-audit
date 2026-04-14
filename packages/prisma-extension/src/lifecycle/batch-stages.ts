@@ -8,10 +8,24 @@
  */
 
 import { AUDIT_ACTION } from '@kuruwic/prisma-audit-core';
+
+import type { ResolvedAggregateData } from '../audit-log-builder/index.js';
 import { createPrismaClientManager } from '../client-manager/index.js';
+import type { PrismaClientWithDynamicAccess } from '../internal-types.js';
 import type { AuditLogData, PrismaAction } from '../types.js';
+import { createSchemaMetadataFromDMMF, getPrisma } from '../utils/schema-metadata.js';
+import {
+  batchEnrichAggregateContextsByType,
+  buildAggregateDataForEntity,
+  resetBatchResolveWarnings,
+  resolveAndFilterSurvivors,
+  type SurvivorEntity,
+} from './batch-aggregate-resolver.js';
 import type { StageDependencies } from './stages.js';
 import type { BatchEnrichedContext, BatchFinalContext, BatchInitialContext, LifecycleStage } from './types.js';
+
+export { resetBatchResolveWarnings };
+export type { SurvivorEntity };
 
 /**
  * Maps batch operations to singular equivalents for audit log generation.
@@ -29,9 +43,6 @@ const BATCH_TO_SINGULAR_ACTION: Record<string, PrismaAction> = {
  *
  * If entity configuration exists, enriches entity contexts using batch enrichment.
  * Otherwise returns null contexts for all entities.
- *
- * NOTE: aggregateContext is no longer enriched at this stage. It is now enriched
- * per aggregate root inside buildAuditLog for aggregate-aware context.
  *
  * @internal
  */
@@ -69,8 +80,8 @@ const enrichBatchContexts = async (
  * Enriches actor and entity contexts for all entities in a batch operation.
  * Optimizes database queries by performing batch enrichment (N entities → 1 query per enricher).
  *
- * NOTE: aggregateContext is no longer enriched at this stage. It is now enriched
- * per aggregate root inside buildAuditLog for aggregate-aware context.
+ * Aggregate context enrichment is handled in createBatchBuildLogsStage,
+ * where entities are grouped by aggregateType for batch enrichment.
  *
  * Pipeline: BatchInitialContext → BatchEnrichedContext
  *
@@ -125,7 +136,7 @@ const mapBatchActionToSingular = (batchAction: string): PrismaAction => {
 /**
  * Builds audit logs for a single entity in a batch operation.
  *
- * NOTE: aggregateContext parameter removed. Now enriched internally per aggregate root.
+ * Receives pre-computed ResolvedAggregateData from the batch stage.
  *
  * @internal
  */
@@ -135,6 +146,7 @@ const buildLogsForEntity = async (
   singularAction: PrismaAction,
   manager: ReturnType<typeof createPrismaClientManager>,
   deps: StageDependencies,
+  aggregateData: ResolvedAggregateData,
 ): Promise<AuditLogData[]> => {
   const { operation, auditContext, entities, beforeStates, actorContext, entityContexts } = context;
 
@@ -146,6 +158,15 @@ const buildLogsForEntity = async (
   const beforeState = beforeStates?.[entityIndex] ?? null;
   const entityContext = entityContexts[entityIndex] ?? null;
   const modelName = operation.model as string;
+
+  let relationFields: Set<string> | undefined;
+  try {
+    const Prisma = getPrisma(deps.basePrisma as PrismaClientWithDynamicAccess);
+    const metadata = createSchemaMetadataFromDMMF(Prisma);
+    relationFields = new Set(metadata.getRelationFields(modelName).map((f) => f.name));
+  } catch {
+    // Prisma namespace not available — fall back to heuristic relation detection
+  }
 
   return deps.buildAuditLog(
     entity as Record<string, unknown>,
@@ -159,47 +180,61 @@ const buildLogsForEntity = async (
     deps.aggregateConfig,
     deps.excludeFields,
     deps.redact,
+    aggregateData,
     undefined,
     deps.serialization,
+    relationFields,
   );
 };
 
 /**
  * Creates batch build logs stage.
  *
- * Generates audit log entries for all entities in a batch operation.
- * Each entity receives its own audit log with enriched contexts from the previous stage.
+ * Resolves aggregate roots and enriches aggregate contexts in batch before
+ * building audit logs, following the same pattern as actor and entity enrichment.
  *
  * Pipeline: BatchEnrichedContext → BatchFinalContext
- *
- * @param deps - Stage dependencies
- * @returns Lifecycle stage function
- *
- * @example
- * ```typescript
- * const buildLogsStage = createBatchBuildLogsStage(stageDependencies);
- * const finalContext = await buildLogsStage(batchEnrichedContext);
- * ```
  */
 export const createBatchBuildLogsStage = (
   deps: StageDependencies,
 ): LifecycleStage<BatchEnrichedContext, BatchFinalContext> => {
   return async (context: BatchEnrichedContext): Promise<BatchFinalContext> => {
     const { operation, auditContext, entities } = context;
-
+    const modelName = operation.model as string;
     const singularAction = mapBatchActionToSingular(operation.action as string);
     const manager = createPrismaClientManager(deps.basePrisma, auditContext);
+    const entityConfig = deps.aggregateConfig.getEntityConfig(modelName);
 
+    // Phase 1: Resolve aggregate roots and filter out entities with zero roots
+    const survivors = entityConfig
+      ? await resolveAndFilterSurvivors(entities as Record<string, unknown>[], entityConfig, manager.activeClient)
+      : [];
+
+    // Phase 2: Batch-enrich aggregate contexts (only for survivors)
+    const aggregateContextMap =
+      survivors.length > 0 && entityConfig
+        ? await batchEnrichAggregateContextsByType(survivors, entityConfig, manager.activeClient)
+        : new Map<string, unknown>();
+
+    // Phase 3: Build audit logs only for survivors
     const allLogs: AuditLogData[] = [];
-    for (let entityIndex = 0; entityIndex < entities.length; entityIndex++) {
-      const logs = await buildLogsForEntity(entityIndex, context, singularAction, manager, deps);
+    for (const survivor of survivors) {
+      const aggregateData = buildAggregateDataForEntity(
+        survivor.entityIndex,
+        survivor.aggregateRoots,
+        aggregateContextMap,
+      );
+      const logs = await buildLogsForEntity(
+        survivor.entityIndex,
+        context,
+        singularAction,
+        manager,
+        deps,
+        aggregateData,
+      );
       allLogs.push(...logs);
     }
 
-    return {
-      ...context,
-      logs: allLogs,
-      result: undefined,
-    };
+    return { ...context, logs: allLogs, result: undefined };
   };
 };

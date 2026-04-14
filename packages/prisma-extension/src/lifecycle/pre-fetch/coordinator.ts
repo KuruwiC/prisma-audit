@@ -20,6 +20,7 @@ import type {
   PrismaNamespace,
   TransactionalPrismaClient,
 } from '../../internal-types.js';
+import { getPrimaryKeyFields } from '../../utils/id-generator.js';
 import { createSchemaMetadataFromDMMF } from '../../utils/nested-operations.js';
 import { preFetchOneToManyRelation } from './one-to-many-fetcher.js';
 import { preFetchOneToOneRelation } from './one-to-one-fetcher.js';
@@ -250,6 +251,18 @@ export const preFetchNestedRecordsBeforeOperation = async (
 
   const topLevelModel = dmmf.datamodel.models.find((m) => m.name === modelName);
 
+  const pkFieldsCache = new Map<string, string[]>();
+  const resolvePkFields = (relatedModel: string): string[] | undefined => {
+    if (pkFieldsCache.has(relatedModel)) return pkFieldsCache.get(relatedModel);
+    try {
+      const fields = getPrimaryKeyFields(Prisma, relatedModel);
+      pkFieldsCache.set(relatedModel, fields);
+      return fields;
+    } catch {
+      return undefined;
+    }
+  };
+
   for (const nestedOp of sortedOperations) {
     try {
       const relatedModelLowerCase = nestedOp.relatedModel.charAt(0).toLowerCase() + nestedOp.relatedModel.slice(1);
@@ -269,6 +282,7 @@ export const preFetchNestedRecordsBeforeOperation = async (
       }
 
       const { isOneToOne, isOwningSide } = categorizeRelationType(field);
+      const pkFields = resolvePkFields(nestedOp.relatedModel);
 
       preFetchLog(
         'processing field: field=%s operation=%s isOneToOne=%s isOwningSide=%s',
@@ -289,6 +303,7 @@ export const preFetchNestedRecordsBeforeOperation = async (
           dmmf,
           internalResults,
           prismaClient,
+          pkFields,
         );
       } else {
         await preFetchOneToManyRelation(
@@ -298,8 +313,10 @@ export const preFetchNestedRecordsBeforeOperation = async (
           },
           relatedModelClient as {
             findFirst: (args: { where: Record<string, unknown> }) => Promise<Record<string, unknown> | null>;
+            findMany?: (args: { where: Record<string, unknown> }) => Promise<Record<string, unknown>[]>;
           },
           internalResults,
+          pkFields,
         );
       }
     } catch (error) {
@@ -324,9 +341,10 @@ const handleOneToOneRelation = async (
   dmmf: PrismaDMMF,
   preFetchResults: NestedPreFetchResults,
   prismaClient: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
+  pkFields?: string[],
 ): Promise<void> => {
   if (nestedOp.operation === 'connectOrCreate') {
-    await handleConnectOrCreate(nestedOp, relatedModelClient, preFetchResults);
+    await handleConnectOrCreate(nestedOp, relatedModelClient, preFetchResults, pkFields);
   } else {
     await handleOtherOneToOneOperations(
       nestedOp,
@@ -338,6 +356,7 @@ const handleOneToOneRelation = async (
       dmmf,
       preFetchResults,
       prismaClient,
+      pkFields,
     );
   }
 };
@@ -346,6 +365,7 @@ const handleConnectOrCreate = async (
   nestedOp: NestedOperation,
   relatedModelClient: unknown,
   preFetchResults: NestedPreFetchResults,
+  pkFields?: string[],
 ): Promise<void> => {
   const opData = nestedOp.data as Record<string, unknown> | undefined;
   const whereClause = opData?.where;
@@ -366,9 +386,9 @@ const handleConnectOrCreate = async (
 
   const beforeRecord = await modelClient.findFirst({ where: whereClause });
 
-  let entityId = extractEntityIdOrDefault(beforeRecord);
-  if (entityId === PRE_FETCH_DEFAULT_KEY && 'id' in whereClause) {
-    entityId = String((whereClause as { id: unknown }).id);
+  let entityId = extractEntityIdOrDefault(beforeRecord, pkFields);
+  if (entityId === PRE_FETCH_DEFAULT_KEY) {
+    entityId = extractEntityIdOrDefault(whereClause, pkFields);
   }
 
   storePreFetchResult(preFetchResults, nestedOp.path, entityId, beforeRecord as Record<string, unknown> | null);
@@ -386,6 +406,7 @@ const handleOtherOneToOneOperations = async (
   dmmf: PrismaDMMF,
   preFetchResults: NestedPreFetchResults,
   prismaClient: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
+  pkFields?: string[],
 ): Promise<void> => {
   if (!args.where || typeof args.where !== 'object') {
     preFetchLog('1:1 relation: no where clause, skipping');
@@ -422,6 +443,7 @@ const handleOtherOneToOneOperations = async (
         findFirst: (args: { where: Record<string, unknown> }) => Promise<Record<string, unknown> | null>;
       }
     >,
+    pkFields,
   );
 
   if (result) {

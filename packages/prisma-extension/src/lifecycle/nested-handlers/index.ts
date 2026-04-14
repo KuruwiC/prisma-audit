@@ -7,15 +7,16 @@
 export type { NestedAuditLogBuilderDependencies } from './audit-log-builder.js';
 export { buildNestedAuditLogs } from './audit-log-builder.js';
 
+export type { CollectedNestedRecord } from './collected-record.js';
+
 export type {
-  DeleteHandlerDependencies,
   NestedOperationInfo,
   NestedPreFetchResults,
 } from './delete-handler.js';
-export { handleNestedDelete } from './delete-handler.js';
+export { collectDeleteRecords } from './delete-handler.js';
 
-export type { NestedRecordsInfo, RecordProcessorDependencies } from './record-processor.js';
-export { processNestedRecord, shouldSkipNestedRecord } from './record-processor.js';
+export type { NestedRecordsInfo } from './record-processor.js';
+export { collectNestedRecords, shouldSkipNestedRecord } from './record-processor.js';
 
 export type {
   GetNestedOperationConfig,
