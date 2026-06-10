@@ -12,7 +12,7 @@
  * @module normalized-writer
  */
 
-import type { AuditContext } from '@kuruwic/prisma-audit-core';
+import { type AuditContext, getRuntimeContext } from '@kuruwic/prisma-audit-core';
 import type { AuditLogData, AuditLogWriter } from '../types.js';
 
 /**
@@ -371,11 +371,6 @@ const createAuditEvents = async (
  * });
  * ```
  */
-/**
- * Base Prisma client type with transaction support
- *
- * @internal
- */
 type PrismaClientWithTransaction = {
   $transaction: <T>(fn: (tx: TransactionClient) => Promise<T>) => Promise<T>;
 };
@@ -383,7 +378,7 @@ type PrismaClientWithTransaction = {
 export const createEntityNormalizedWriter = (schema: NormalizedSchema, basePrisma: unknown): AuditLogWriter => {
   return async (
     logs: AuditLogData[],
-    context: AuditContext,
+    _context: AuditContext,
     _defaultWrite: (logs: AuditLogData[]) => Promise<void>,
   ) => {
     if (logs.length === 0) {
@@ -400,8 +395,9 @@ export const createEntityNormalizedWriter = (schema: NormalizedSchema, basePrism
       await createAuditEvents(tx, schema.eventModel, logs, actorMap, entityMap, aggregateMap);
     };
 
-    if (context.transactionalClient) {
-      await writeWithinTransaction(context.transactionalClient as TransactionClient);
+    const transactionalClient = getRuntimeContext()?.transaction?.client;
+    if (transactionalClient) {
+      await writeWithinTransaction(transactionalClient as TransactionClient);
     } else {
       const prismaClient = basePrisma as PrismaClientWithTransaction;
       await prismaClient.$transaction(writeWithinTransaction);
@@ -467,19 +463,15 @@ const groupLogsByChange = (logs: AuditLogData[]): Map<string, AuditLogData[]> =>
 export const createSharedChangeWriter = (schema: SharedChangeSchema, basePrisma: unknown): AuditLogWriter => {
   return async (
     logs: AuditLogData[],
-    context: AuditContext,
+    _context: AuditContext,
     _defaultWrite: (logs: AuditLogData[]) => Promise<void>,
   ) => {
     if (logs.length === 0) {
       return;
     }
 
-    // Group logs by entity change
     const changeGroups = groupLogsByChange(logs);
 
-    /**
-     * Create a change record from representative log
-     */
     const createChangeRecord = async (
       changeModel: { create: (args: { data: unknown }) => Promise<{ id: string }> },
       representativeLog: AuditLogData,
@@ -498,9 +490,6 @@ export const createSharedChangeWriter = (schema: SharedChangeSchema, basePrisma:
       });
     };
 
-    /**
-     * Create aggregate records for a change
-     */
     const createAggregateRecords = async (
       aggregateModel: { create: (args: { data: unknown }) => Promise<unknown> },
       changeId: string,
@@ -525,9 +514,6 @@ export const createSharedChangeWriter = (schema: SharedChangeSchema, basePrisma:
       }
     };
 
-    /**
-     * Process change groups and create records
-     */
     const processChangeGroups = async (
       changeModel: { create: (args: { data: unknown }) => Promise<{ id: string }> },
       aggregateModel: { create: (args: { data: unknown }) => Promise<unknown> },
@@ -544,9 +530,6 @@ export const createSharedChangeWriter = (schema: SharedChangeSchema, basePrisma:
       }
     };
 
-    /**
-     * Write logic to be executed within transaction
-     */
     const writeWithinTransaction = async (tx: TransactionClient) => {
       const capitalizedChangeModel = capitalizeModelName(schema.changeModel);
       const capitalizedAggregateModel = capitalizeModelName(schema.aggregateModel);
@@ -569,12 +552,10 @@ export const createSharedChangeWriter = (schema: SharedChangeSchema, basePrisma:
       );
     };
 
-    // Execute within appropriate context
-    if (context.transactionalClient) {
-      // Already in a transaction - use the transactional client directly
-      await writeWithinTransaction(context.transactionalClient as TransactionClient);
+    const transactionalClient = getRuntimeContext()?.transaction?.client;
+    if (transactionalClient) {
+      await writeWithinTransaction(transactionalClient as TransactionClient);
     } else {
-      // Not in a transaction - wrap in transaction using basePrisma
       const prismaClient = basePrisma as PrismaClientWithTransaction;
       await prismaClient.$transaction(writeWithinTransaction);
     }

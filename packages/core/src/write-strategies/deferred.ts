@@ -5,6 +5,7 @@
  */
 
 import type { AuditLogData } from '../domain/audit-log-types.js';
+import { getRuntimeContext } from '../runtime-context.js';
 import type { AuditContext } from '../types.js';
 import type { DbClientManager, WriteExecutor } from './interfaces.js';
 import type { WriteFn, WriteResult } from './types.js';
@@ -33,16 +34,17 @@ const createDeferredExecutor = (
   };
 };
 
-const enqueueDeferredWrite = (context: AuditContext, executor: () => Promise<void>): void => {
-  const contextWithQueue = context as AuditContext & {
-    _deferredWrites?: Array<() => Promise<void>>;
-  };
+const enqueueDeferredWrite = (executor: () => Promise<void>): void => {
+  const transaction = getRuntimeContext()?.transaction;
 
-  if (!contextWithQueue._deferredWrites) {
-    contextWithQueue._deferredWrites = [];
+  // The deferred strategy is only selected when a transaction scope exists, and
+  // the scope owner always provides the queue. Absence means no owner would ever
+  // drain it, so enqueueing would silently drop the write — stay a no-op instead.
+  if (!transaction) {
+    return;
   }
 
-  contextWithQueue._deferredWrites.push(executor);
+  transaction.deferredWrites.push(executor);
 };
 
 /**
@@ -77,7 +79,7 @@ export const writeDeferredInTransaction = (
   const baseClientWriteFn = createBaseClientWriteFn(manager, auditLogModelName, writeExecutor);
   const deferredExecutor = createDeferredExecutor(logs, context, baseClientWriteFn, customWriter, errorHandler);
 
-  enqueueDeferredWrite(context, deferredExecutor);
+  enqueueDeferredWrite(deferredExecutor);
 
   return {
     _tag: 'Deferred',

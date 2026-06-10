@@ -92,6 +92,9 @@ export type {
   EnricherErrorStrategy,
   EntityEnricherConfig,
 } from './enrichment/types.js';
+// Global Singleton (dual-package hazard mitigation)
+/** @internal */
+export { getGlobalSingleton } from './global-singleton.js';
 // Interfaces
 export type {
   CreateArgs,
@@ -106,6 +109,11 @@ export type {
   UniqueConstraint,
   UpdateArgs,
 } from './interfaces/index.js';
+// Runtime Context (library-owned infrastructure state)
+/** @internal */
+export type { AuditRuntimeContext, AuditTransactionScope } from './runtime-context.js';
+/** @internal */
+export { getRuntimeContext, runWithRuntimeContext } from './runtime-context.js';
 // State Resolution
 export { applyRelationConfig } from './state-resolution/apply-relation-config.js';
 export { resolveBeforeAndAfterStates } from './state-resolution/index.js';

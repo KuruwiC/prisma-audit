@@ -13,8 +13,9 @@ import type { AuditLogData } from '../domain/audit-log-types.js';
  *
  * @example
  * ```typescript
+ * // The transactional client is provided by the library-owned runtime context.
  * const manager: DbClientManager = {
- *   activeClient: transactionalClient ?? baseClient,
+ *   activeClient: getRuntimeContext()?.transaction?.client ?? baseClient,
  *   baseClient: baseClient,
  * };
  * ```

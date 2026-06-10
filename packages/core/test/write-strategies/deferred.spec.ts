@@ -1,22 +1,12 @@
-/**
- * Deferred Write Strategy Tests
- * TDD Implementation following t-wada's approach
- */
-
 import { describe, expect, it, vi } from 'vitest';
 import { createActorId, createAggregateId, createEntityId } from '../../src/domain/branded-types.js';
 import type { AuditContext, AuditLogData, WriteFn } from '../../src/index.js';
+import { getRuntimeContext, runWithRuntimeContext } from '../../src/runtime-context.js';
 import { writeDeferredInTransaction } from '../../src/write-strategies/deferred.js';
 import type { DbClientManager, WriteExecutor } from '../../src/write-strategies/interfaces.js';
 
-/**
- * Mock error handler
- */
 type ErrorHandler = (error: Error, operation: string) => void;
 
-/**
- * Create mock DbClientManager
- */
 const createMockManager = (): DbClientManager => {
   return {
     baseClient: { auditLog: {} } as never,
@@ -24,18 +14,12 @@ const createMockManager = (): DbClientManager => {
   } as unknown as DbClientManager;
 };
 
-/**
- * Create mock WriteExecutor
- */
 const createMockExecutor = (writeFn?: ReturnType<typeof vi.fn>): WriteExecutor => {
   return {
     write: (writeFn ?? vi.fn().mockResolvedValue(undefined)) as WriteExecutor['write'],
   };
 };
 
-/**
- * Create mock audit log data
- */
 const createMockLog = (overrides: Partial<AuditLogData> = {}): AuditLogData => ({
   actorCategory: 'User',
   actorType: 'User',
@@ -58,9 +42,6 @@ const createMockLog = (overrides: Partial<AuditLogData> = {}): AuditLogData => (
   ...overrides,
 });
 
-/**
- * Create mock audit context
- */
 const createMockContext = (): AuditContext => ({
   actor: {
     category: 'User',
@@ -69,10 +50,12 @@ const createMockContext = (): AuditContext => ({
   },
 });
 
-/**
- * Create mock error handler
- */
 const createMockErrorHandler = (): ErrorHandler => vi.fn();
+
+// Run fn inside a runtime frame marking an active transaction scope, so the
+// deferred strategy enqueues into the library-owned runtime store.
+const inTransaction = <T>(fn: () => T): T =>
+  runWithRuntimeContext({ transaction: { client: {}, deferredWrites: [] } }, fn);
 
 describe('writeDeferredInTransaction', () => {
   describe('basic functionality', () => {
@@ -171,40 +154,42 @@ describe('writeDeferredInTransaction', () => {
     });
   });
 
-  describe('context._deferredWrites queue', () => {
-    it('should add execute function to context._deferredWrites', () => {
+  describe('runtime deferredWrites queue', () => {
+    it('should add execute function to the runtime deferredWrites queue', () => {
       const manager = createMockManager();
       const executor = createMockExecutor();
       const logs = [createMockLog()];
       const context = createMockContext();
       const handleError = createMockErrorHandler();
 
-      writeDeferredInTransaction(logs, context, manager, 'auditLog', undefined, handleError, executor);
+      const deferredWrites = inTransaction(() => {
+        writeDeferredInTransaction(logs, context, manager, 'auditLog', undefined, handleError, executor);
+        return getRuntimeContext()?.transaction?.deferredWrites;
+      });
 
-      const contextWithDeferred = context as AuditContext & {
-        _deferredWrites?: Array<() => Promise<void>>;
-      };
-      expect(contextWithDeferred._deferredWrites).toBeDefined();
-      expect(contextWithDeferred._deferredWrites).toHaveLength(1);
-      expect(typeof contextWithDeferred._deferredWrites?.[0]).toBe('function');
+      expect(deferredWrites).toBeDefined();
+      expect(deferredWrites).toHaveLength(1);
+      expect(typeof deferredWrites?.[0]).toBe('function');
     });
 
-    it('should append to existing _deferredWrites array', () => {
+    it('should append to an existing runtime deferredWrites array', () => {
       const manager = createMockManager();
       const executor = createMockExecutor();
       const logs = [createMockLog()];
       const existingExecute = vi.fn().mockResolvedValue(undefined);
       const context = createMockContext();
-      const contextWithDeferred = context as AuditContext & {
-        _deferredWrites?: Array<() => Promise<void>>;
-      };
-      contextWithDeferred._deferredWrites = [existingExecute];
       const handleError = createMockErrorHandler();
 
-      writeDeferredInTransaction(logs, context, manager, 'auditLog', undefined, handleError, executor);
+      const deferredWrites = runWithRuntimeContext(
+        { transaction: { client: {}, deferredWrites: [existingExecute] } },
+        () => {
+          writeDeferredInTransaction(logs, context, manager, 'auditLog', undefined, handleError, executor);
+          return getRuntimeContext()?.transaction?.deferredWrites;
+        },
+      );
 
-      expect(contextWithDeferred._deferredWrites).toHaveLength(2);
-      expect(contextWithDeferred._deferredWrites[0]).toBe(existingExecute);
+      expect(deferredWrites).toHaveLength(2);
+      expect(deferredWrites?.[0]).toBe(existingExecute);
     });
 
     it('should add function that executes logs when called', async () => {
@@ -215,16 +200,48 @@ describe('writeDeferredInTransaction', () => {
       const context = createMockContext();
       const handleError = createMockErrorHandler();
 
-      writeDeferredInTransaction(logs, context, manager, 'auditLog', undefined, handleError, executor);
-
-      const contextWithDeferred = context as AuditContext & {
-        _deferredWrites?: Array<() => Promise<void>>;
-      };
-      const deferredWrite = contextWithDeferred._deferredWrites?.[0];
+      const deferredWrite = inTransaction(() => {
+        writeDeferredInTransaction(logs, context, manager, 'auditLog', undefined, handleError, executor);
+        return getRuntimeContext()?.transaction?.deferredWrites?.[0];
+      });
 
       expect(writeFn).not.toHaveBeenCalled();
       await deferredWrite?.();
       expect(writeFn).toHaveBeenCalledTimes(1);
+    });
+
+    it('should be a no-op when there is no runtime frame', () => {
+      const manager = createMockManager();
+      const executor = createMockExecutor();
+      const logs = [createMockLog()];
+      const context = createMockContext();
+      const handleError = createMockErrorHandler();
+
+      // Without an active transaction scope the strategy would not normally be
+      // selected; enqueueing must not throw and the returned executor still works.
+      const result = writeDeferredInTransaction(logs, context, manager, 'auditLog', undefined, handleError, executor);
+
+      expect(result._tag).toBe('Deferred');
+      expect(getRuntimeContext()?.transaction).toBeUndefined();
+    });
+
+    it('should be a no-op and create no queue when the frame has no transaction scope', () => {
+      const manager = createMockManager();
+      const executor = createMockExecutor();
+      const logs = [createMockLog()];
+      const context = createMockContext();
+      const handleError = createMockErrorHandler();
+
+      // A frame exists but no transaction scope owns a queue. Enqueueing must not
+      // fabricate an orphaned queue that nobody would ever drain; it stays a no-op.
+      const result = runWithRuntimeContext({ isProcessingAuditLog: true }, () =>
+        writeDeferredInTransaction(logs, context, manager, 'auditLog', undefined, handleError, executor),
+      );
+
+      expect(result._tag).toBe('Deferred');
+      runWithRuntimeContext({ isProcessingAuditLog: true }, () => {
+        expect(getRuntimeContext()?.transaction).toBeUndefined();
+      });
     });
   });
 
@@ -412,13 +429,13 @@ describe('writeDeferredInTransaction', () => {
       const context = createMockContext();
       const handleError = createMockErrorHandler();
 
-      writeDeferredInTransaction(logs1, context, manager, 'auditLog', undefined, handleError, executor);
-      writeDeferredInTransaction(logs2, context, manager, 'auditLog', undefined, handleError, executor);
+      const deferredWrites = inTransaction(() => {
+        writeDeferredInTransaction(logs1, context, manager, 'auditLog', undefined, handleError, executor);
+        writeDeferredInTransaction(logs2, context, manager, 'auditLog', undefined, handleError, executor);
+        return getRuntimeContext()?.transaction?.deferredWrites;
+      });
 
-      const contextWithDeferred = context as AuditContext & {
-        _deferredWrites?: Array<() => Promise<void>>;
-      };
-      expect(contextWithDeferred._deferredWrites).toHaveLength(2);
+      expect(deferredWrites).toHaveLength(2);
     });
 
     it('should execute all queued writes in order', async () => {
@@ -438,13 +455,13 @@ describe('writeDeferredInTransaction', () => {
       const executor1 = createMockExecutor();
       const executor2 = createMockExecutor();
 
-      writeDeferredInTransaction(logs, context, manager, 'auditLog', writer1, handleError, executor1);
-      writeDeferredInTransaction(logs, context, manager, 'auditLog', writer2, handleError, executor2);
+      const deferredWrites = inTransaction(() => {
+        writeDeferredInTransaction(logs, context, manager, 'auditLog', writer1, handleError, executor1);
+        writeDeferredInTransaction(logs, context, manager, 'auditLog', writer2, handleError, executor2);
+        return getRuntimeContext()?.transaction?.deferredWrites ?? [];
+      });
 
-      const contextWithDeferred = context as AuditContext & {
-        _deferredWrites?: Array<() => Promise<void>>;
-      };
-      for (const execute of contextWithDeferred._deferredWrites ?? []) {
+      for (const execute of deferredWrites) {
         await execute();
       }
 

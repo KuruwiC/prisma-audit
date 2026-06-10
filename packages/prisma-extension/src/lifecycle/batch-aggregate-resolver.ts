@@ -9,11 +9,17 @@
  */
 
 import type { AggregateRoot, BatchAggregateIdResolver, LoggableEntity, ResolvedId } from '@kuruwic/prisma-audit-core';
-import { batchEnrichAggregateContexts, coreLog, normalizeId, resolveAggregateId } from '@kuruwic/prisma-audit-core';
+import {
+  batchEnrichAggregateContexts,
+  coreLog,
+  getGlobalSingleton,
+  normalizeId,
+  resolveAggregateId,
+} from '@kuruwic/prisma-audit-core';
 import type { ResolvedAggregateData } from '../audit-log-builder/index.js';
 
 const BATCH_RESOLVE_WARNING_THRESHOLD = 5;
-const warnedAggregateTypes = new Set<string>();
+const warnedAggregateTypes = getGlobalSingleton('batch-aggregate-resolver-warned-types', () => new Set<string>());
 
 /** @internal Reset warning state. Exported for testing only. */
 export function resetBatchResolveWarnings(): void {

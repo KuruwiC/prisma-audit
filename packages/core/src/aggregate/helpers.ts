@@ -9,6 +9,7 @@
  * @packageDocumentation
  */
 
+import { getGlobalSingleton } from '../global-singleton.js';
 import { coreLog } from '../utils/debug.js';
 import type {
   AggregateIdResolver,
@@ -26,8 +27,14 @@ import { DEFAULT_ENTITY_CATEGORY } from './types.js';
 // Resolver Metadata (WeakMap-based, no type assertions needed)
 // ============================================================================
 
-const batchResolverRegistry = new WeakMap<AggregateIdResolver, BatchAggregateIdResolver>();
-const asyncResolverRegistry = new WeakSet<AggregateIdResolver>();
+const batchResolverRegistry = getGlobalSingleton(
+  'aggregate-batch-resolver-registry',
+  () => new WeakMap<AggregateIdResolver, BatchAggregateIdResolver>(),
+);
+const asyncResolverRegistry = getGlobalSingleton(
+  'aggregate-async-resolver-registry',
+  () => new WeakSet<AggregateIdResolver>(),
+);
 
 /** Check if a resolver was created by resolveId() (performs DB queries) */
 export function isAsyncResolver(resolver: AggregateIdResolver): boolean {

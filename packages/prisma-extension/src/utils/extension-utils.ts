@@ -7,7 +7,7 @@
  * @module extension-utils
  */
 
-import { SUPPORTED_OPERATIONS } from '@kuruwic/prisma-audit-core';
+import { type AuditContext, getRuntimeContext, SUPPORTED_OPERATIONS } from '@kuruwic/prisma-audit-core';
 
 import type { PrismaAction } from '../types.js';
 import { ENTITY_IDENTITY_DEFAULT, extractEntityIdentity } from './id-generator.js';
@@ -95,14 +95,13 @@ export const extractDeleteOperationEntityId = (data: unknown, pkFields?: string[
 };
 
 /**
- * Checks if context indicates we're in a recursive audit log write
+ * Checks if the library-owned runtime context indicates we're in a recursive audit log write
  *
- * @param context - Audit context
  * @returns True if currently processing an audit log
  * @internal
  */
-const isProcessingAuditLog = (context: { _isProcessingAuditLog?: boolean } | undefined): boolean => {
-  return context?._isProcessingAuditLog === true;
+const isProcessingAuditLog = (): boolean => {
+  return getRuntimeContext()?.isProcessingAuditLog === true;
 };
 
 /**
@@ -163,7 +162,7 @@ const shouldSample = (samplingRate: number): boolean => {
  * self-reference prevention, loggability check, and sampling check.
  *
  * @param modelName - The model name
- * @param context - Audit context
+ * @param context - App-owned audit context (absence skips auditing)
  * @param auditLogModel - The audit log model name (lowercase)
  * @param isLoggable - Function to check if model is loggable
  * @param sampling - Global sampling rate (0-1)
@@ -186,7 +185,7 @@ const shouldSample = (samplingRate: number): boolean => {
  */
 export const shouldAuditModel = (
   modelName: string | undefined,
-  context: { _isProcessingAuditLog?: boolean } | undefined,
+  context: AuditContext | undefined,
   auditLogModel: string,
   isLoggable: (modelName: string) => boolean,
   sampling: number,
@@ -197,7 +196,7 @@ export const shouldAuditModel = (
     return false;
   }
 
-  if (isProcessingAuditLog(context)) {
+  if (isProcessingAuditLog()) {
     return false;
   }
 

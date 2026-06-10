@@ -2,9 +2,10 @@
  * Transaction Wrapper Tests
  */
 
-import type { AuditContext } from '@kuruwic/prisma-audit-core';
+import { type AuditContext, getRuntimeContext, runWithRuntimeContext } from '@kuruwic/prisma-audit-core';
 import { describe, expect, it, vi } from 'vitest';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../src/internal-types.js';
+import { flushAllPendingWrites } from '../src/lifecycle/transaction-proxy.js';
 import { withOptionalTransaction } from '../src/lifecycle/transaction-wrapper.js';
 
 describe('withOptionalTransaction', () => {
@@ -43,13 +44,10 @@ describe('withOptionalTransaction', () => {
     expect(mockBasePrisma.$transaction).not.toHaveBeenCalled();
   });
 
-  it('should execute directly when transactionalClient exists', async () => {
+  it('should execute directly when a transactional client exists in the runtime context', async () => {
     // Arrange
     const mockTxClient = {} as TransactionalPrismaClient;
-    const context: AuditContext = {
-      actor: mockActor,
-      transactionalClient: mockTxClient,
-    };
+    const context: AuditContext = { actor: mockActor };
     const wrapper = withOptionalTransaction(
       {
         shouldWrap: true,
@@ -61,8 +59,10 @@ describe('withOptionalTransaction', () => {
 
     const mockOperationFn = vi.fn(async () => 'result');
 
-    // Act
-    const result = await wrapper(mockOperationFn);
+    // Act - drive transaction state via the library-owned runtime store
+    const result = await runWithRuntimeContext({ transaction: { client: mockTxClient, deferredWrites: [] } }, () =>
+      wrapper(mockOperationFn),
+    );
 
     // Assert
     expect(result).toBe('result');
@@ -72,10 +72,7 @@ describe('withOptionalTransaction', () => {
 
   it('should execute directly when already in implicit transaction', async () => {
     // Arrange
-    const context: AuditContext = {
-      actor: mockActor,
-      _isInImplicitTransaction: true,
-    };
+    const context: AuditContext = { actor: mockActor };
     const wrapper = withOptionalTransaction(
       {
         shouldWrap: true,
@@ -88,7 +85,7 @@ describe('withOptionalTransaction', () => {
     const mockOperationFn = vi.fn(async () => 'result');
 
     // Act
-    const result = await wrapper(mockOperationFn);
+    const result = await runWithRuntimeContext({ isInImplicitTransaction: true }, () => wrapper(mockOperationFn));
 
     // Assert
     expect(result).toBe('result');
@@ -116,7 +113,9 @@ describe('withOptionalTransaction', () => {
       mockProvider,
     );
 
-    const mockOperationFn = vi.fn(async (_txContext: AuditContext, _txClient: TransactionalPrismaClient) => {
+    let runtimeInsideOperation: ReturnType<typeof getRuntimeContext>;
+    const mockOperationFn = vi.fn(async (_context: AuditContext, _txClient: TransactionalPrismaClient) => {
+      runtimeInsideOperation = getRuntimeContext();
       return 'tx-result';
     });
 
@@ -128,15 +127,10 @@ describe('withOptionalTransaction', () => {
     expect(mockBasePrismaWithTx.$transaction).toHaveBeenCalled();
     expect(mockProvider.runAsync).toHaveBeenCalled();
 
-    // Verify operationFn was called with txContext and txClient
-    expect(mockOperationFn).toHaveBeenCalledWith(
-      expect.objectContaining({
-        actor: mockActor,
-        _isInImplicitTransaction: true,
-        transactionalClient: mockTxClient,
-      }),
-      mockTxClient,
-    );
+    // operationFn receives the app-owned context; transaction state lives in the runtime store
+    expect(mockOperationFn).toHaveBeenCalledWith(context, mockTxClient);
+    expect(runtimeInsideOperation?.transaction?.client).toBe(mockTxClient);
+    expect(runtimeInsideOperation?.isInImplicitTransaction).toBe(true);
   });
 
   it('should propagate errors from operation function', async () => {
@@ -188,7 +182,7 @@ describe('withOptionalTransaction', () => {
   });
 
   describe('AsyncLocalStorage context preservation', () => {
-    it('should preserve context across $transaction boundary when getContext is called inside operation', async () => {
+    it('should expose the transactional client via the runtime store inside the operation', async () => {
       // Arrange - Simulate AsyncLocalStorage behavior where context is lost
       // across microtask boundaries unless properly maintained
       const contextStack: AuditContext[] = [];
@@ -223,44 +217,42 @@ describe('withOptionalTransaction', () => {
         mockProviderWithStorage,
       );
 
-      let contextInsideOperation: AuditContext | undefined;
+      let appContextInsideOperation: AuditContext | undefined;
+      let runtimeInsideOperation: ReturnType<typeof getRuntimeContext>;
 
       // Act
-      await wrapper(async (_txContext, _txClient) => {
-        // This simulates what writeAuditLogs does: provider.getContext()
-        contextInsideOperation = mockProviderWithStorage.getContext();
+      await wrapper(async (_context, _txClient) => {
+        // This simulates what writeAuditLogs does: read both stores inside the operation
+        appContextInsideOperation = mockProviderWithStorage.getContext();
+        runtimeInsideOperation = getRuntimeContext();
         return 'result';
       });
 
-      // Assert - Context should be available inside operation
-      expect(contextInsideOperation).toBeDefined();
-      expect(contextInsideOperation?.transactionalClient).toBe(mockTxClient);
-      expect(contextInsideOperation?._isInImplicitTransaction).toBe(true);
+      // Assert - App context is available, and the transactional state lives in the runtime store
+      expect(appContextInsideOperation).toEqual(context);
+      expect(runtimeInsideOperation?.transaction?.client).toBe(mockTxClient);
+      expect(runtimeInsideOperation?.isInImplicitTransaction).toBe(true);
     });
 
-    it('should call runAsync before $transaction to establish context early', async () => {
-      // This test verifies the fix: runAsync must be called OUTSIDE $transaction
-      // to ensure context survives the transaction boundary
-      const runAsyncCalls: Array<{ context: AuditContext; phase: string }> = [];
-      let transactionStarted = false;
+    it('should establish the runtime transaction flag before $transaction', async () => {
+      // This test verifies the fix: the implicit-transaction runtime frame must be
+      // established OUTSIDE $transaction so it survives the transaction boundary.
+      // The flag is read at the $transaction boundary, which is the production-relevant
+      // observation point (the outer runAsync wraps the runWithRuntimeContext that sets it).
+      let flagAtTransactionStart: boolean | undefined;
 
       const mockProviderTracking = {
-        runAsync: vi.fn(<T>(ctx: AuditContext, fn: () => Promise<T>): Promise<T> => {
-          runAsyncCalls.push({
-            context: ctx,
-            phase: transactionStarted ? 'inside-transaction' : 'before-transaction',
-          });
-          return fn();
-        }) as <T>(context: AuditContext, fn: () => Promise<T>) => Promise<T>,
+        runAsync: vi.fn(<T>(_ctx: AuditContext, fn: () => Promise<T>): Promise<T> => fn()) as <T>(
+          context: AuditContext,
+          fn: () => Promise<T>,
+        ) => Promise<T>,
       };
 
       const mockTxClient = { _isTx: true } as unknown as TransactionalPrismaClient;
       const mockBasePrismaWithTx = {
         $transaction: vi.fn(async (fn: (tx: TransactionalPrismaClient) => Promise<unknown>) => {
-          transactionStarted = true;
-          const result = await fn(mockTxClient);
-          transactionStarted = false;
-          return result;
+          flagAtTransactionStart = getRuntimeContext()?.isInImplicitTransaction;
+          return fn(mockTxClient);
         }),
       } as unknown as PrismaClientWithDynamicAccess;
 
@@ -277,12 +269,81 @@ describe('withOptionalTransaction', () => {
       // Act
       await wrapper(async () => 'result');
 
-      // Assert - At least one runAsync call should happen BEFORE transaction starts
-      // This is the key fix: establishing context before $transaction
-      const beforeTxCalls = runAsyncCalls.filter((call) => call.phase === 'before-transaction');
-      const firstCall = beforeTxCalls[0];
-      expect(firstCall).toBeDefined();
-      expect(firstCall?.context._isInImplicitTransaction).toBe(true);
+      // Assert - The implicit-transaction flag is already set when $transaction runs
+      expect(flagAtTransactionStart).toBe(true);
+    });
+  });
+
+  describe('deferred-write draining', () => {
+    it('drains a deferred write enqueued by operationFn after the wrapper resolves (after commit)', async () => {
+      // Edge case the wrapper previously dropped: a nested deferred strategy enqueues onto the
+      // runtime queue inside the implicit transaction, and the wrapper must drain it post-commit.
+      const provider = {
+        runAsync: vi.fn(<T>(_ctx: AuditContext, fn: () => Promise<T>): Promise<T> => fn()) as <T>(
+          context: AuditContext,
+          fn: () => Promise<T>,
+        ) => Promise<T>,
+      };
+
+      const mockTxClient = { _isTx: true } as unknown as TransactionalPrismaClient;
+      const mockBasePrismaWithTx = {
+        $transaction: vi.fn(async (fn: (tx: TransactionalPrismaClient) => Promise<unknown>) => fn(mockTxClient)),
+      } as unknown as PrismaClientWithDynamicAccess;
+
+      const context: AuditContext = { actor: mockActor };
+      const wrapper = withOptionalTransaction(
+        { shouldWrap: true, context, basePrisma: mockBasePrismaWithTx },
+        provider,
+      );
+
+      const deferredWrite = vi.fn(async () => {});
+
+      // Act
+      await wrapper(async () => {
+        // Mirror core's deferred strategy: enqueue onto the runtime-store queue.
+        getRuntimeContext()?.transaction?.deferredWrites?.push(deferredWrite);
+        return 'result';
+      });
+      await flushAllPendingWrites();
+
+      // Assert - the wrapper drained the queue after $transaction resolved
+      expect(deferredWrite).toHaveBeenCalledTimes(1);
+    });
+
+    it('discards enqueued deferred writes when $transaction rejects (rollback)', async () => {
+      const provider = {
+        runAsync: vi.fn(<T>(_ctx: AuditContext, fn: () => Promise<T>): Promise<T> => fn()) as <T>(
+          context: AuditContext,
+          fn: () => Promise<T>,
+        ) => Promise<T>,
+      };
+
+      const deferredWrite = vi.fn(async () => {});
+      const mockTxClient = { _isTx: true } as unknown as TransactionalPrismaClient;
+      const txError = new Error('transaction rolled back');
+      const mockBasePrismaWithTx = {
+        $transaction: vi.fn(async (fn: (tx: TransactionalPrismaClient) => Promise<unknown>) => {
+          // Run the callback (which enqueues), then simulate the commit failing.
+          await fn(mockTxClient);
+          throw txError;
+        }),
+      } as unknown as PrismaClientWithDynamicAccess;
+
+      const context: AuditContext = { actor: mockActor };
+      const wrapper = withOptionalTransaction(
+        { shouldWrap: true, context, basePrisma: mockBasePrismaWithTx },
+        provider,
+      );
+
+      // Act & Assert - error propagates and the locally-owned queue is discarded unrun
+      await expect(
+        wrapper(async () => {
+          getRuntimeContext()?.transaction?.deferredWrites?.push(deferredWrite);
+          return 'result';
+        }),
+      ).rejects.toThrow('transaction rolled back');
+      await flushAllPendingWrites();
+      expect(deferredWrite).not.toHaveBeenCalled();
     });
   });
 });

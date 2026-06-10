@@ -214,7 +214,7 @@ const enrichAndBuildForModelGroup = async (
   }
 
   // Batch aggregate resolution + enrichment
-  const manager = createPrismaClientManager(basePrisma, context);
+  const manager = createPrismaClientManager(basePrisma);
   let aggregateContextMap = new Map<string, unknown>();
   let survivors: {
     entityIndex: number;
@@ -269,7 +269,6 @@ const enrichAndBuildForModelGroup = async (
   // (consistent with batch-stages.ts behavior)
   const skippedCount = entities.length - survivorIndexSet.size;
   if (skippedCount > 0) {
-    // Records without aggregate roots are silently skipped
   }
 
   return allLogs;

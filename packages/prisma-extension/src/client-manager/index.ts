@@ -8,13 +8,14 @@
  * - baseClient: Non-transactional client
  * - activeClient: Transactional client (if inside $transaction) or baseClient
  *
- * The activeClient automatically resolves to context.transactionalClient when available,
- * ensuring read operations see uncommitted changes within the same transaction.
+ * The activeClient resolves to the transactional client tracked on the library-owned
+ * runtime context when available, ensuring read operations and audit writes see uncommitted
+ * changes within the same transaction.
  *
  * @module client-manager
  */
 
-import type { AuditContext } from '@kuruwic/prisma-audit-core';
+import { getRuntimeContext } from '@kuruwic/prisma-audit-core';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../internal-types.js';
 
 /**
@@ -34,21 +35,20 @@ export interface PrismaClientManager {
  * Create a Prisma Client Manager
  *
  * @remarks
- * Automatically detects transaction context via `context.transactionalClient`.
- * Centralizes logic: `activeClient = context.transactionalClient ?? baseClient`
+ * Detects the active transaction via the library-owned runtime context.
+ * Centralizes logic: `activeClient = getRuntimeContext()?.transaction?.client ?? baseClient`
  *
  * @example
  * ```typescript
- * const manager = createPrismaClientManager(basePrisma, context);
+ * const manager = createPrismaClientManager(basePrisma);
  * const user = await manager.activeClient.user.findUnique({ where: { id: userId } });
  * ```
  */
 export const createPrismaClientManager = (
   baseClient: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
-  context: AuditContext,
 ): PrismaClientManager => {
   const activeClient: PrismaClientWithDynamicAccess | TransactionalPrismaClient =
-    (context.transactionalClient as TransactionalPrismaClient | undefined) ?? baseClient;
+    (getRuntimeContext()?.transaction?.client as TransactionalPrismaClient | undefined) ?? baseClient;
 
   return {
     baseClient,

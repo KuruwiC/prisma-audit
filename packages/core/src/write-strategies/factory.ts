@@ -5,6 +5,7 @@
  */
 
 import type { AuditLogData } from '../domain/audit-log-types.js';
+import { getRuntimeContext } from '../runtime-context.js';
 import type { AuditContext } from '../types.js';
 import { writeDeferredInTransaction } from './deferred.js';
 import { writeFireAndForget } from './fire-and-forget.js';
@@ -39,8 +40,8 @@ const shouldAwaitWrite = (config: WriteStrategyConfig, modelName: string): boole
   return config.awaitWrite;
 };
 
-const isInTransaction = (context: AuditContext): boolean => {
-  return context.transactionalClient !== undefined;
+const isInTransaction = (): boolean => {
+  return getRuntimeContext()?.transaction !== undefined;
 };
 
 /**
@@ -61,7 +62,9 @@ export const createWriteStrategySelector = (
   config: WriteStrategyConfig,
   writeExecutor: WriteExecutor,
 ): ((context: AuditContext, modelName: string) => StrategyFunction) => {
-  return (context: AuditContext, modelName: string): StrategyFunction => {
+  // The context parameter is retained for a stable selector signature;
+  // transaction state is read from the library-owned runtime store.
+  return (_context: AuditContext, modelName: string): StrategyFunction => {
     const shouldAwait = shouldAwaitWrite(config, modelName);
 
     if (shouldAwait) {
@@ -69,7 +72,7 @@ export const createWriteStrategySelector = (
         writeSynchronously(logs, ctx, manager, model, writer, writeExecutor);
     }
 
-    if (isInTransaction(context)) {
+    if (isInTransaction()) {
       return (logs, ctx, manager, model, writer, handleError) =>
         writeDeferredInTransaction(logs, ctx, manager, model, writer, handleError, writeExecutor);
     }

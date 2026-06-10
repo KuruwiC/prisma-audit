@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createAsyncLocalStorageProvider } from '../src/context-provider.js';
-import type { AuditContext } from '../src/types.js';
+import { getRuntimeContext, runWithRuntimeContext } from '../src/runtime-context.js';
+import type { AuditActor, AuditContext } from '../src/types.js';
 
 describe('createAsyncLocalStorageProvider', () => {
   it('should return undefined when no context is set', () => {
@@ -245,6 +246,184 @@ describe('createAsyncLocalStorageProvider', () => {
       ]);
 
       expect(results).toEqual(['user-1', 'user-2']);
+    });
+  });
+
+  describe('withActor', () => {
+    const otherActor: AuditActor = { category: 'system', type: 'Admin', id: 'admin-456' };
+
+    it('should override only the actor and preserve request metadata', () => {
+      const provider = createAsyncLocalStorageProvider();
+
+      const context: AuditContext = {
+        actor: { category: 'model', type: 'User', id: 'user-123' },
+        request: { ipAddress: '192.168.1.1', traceId: 'trace-1' },
+      };
+
+      provider.run(context, () => {
+        provider.withActor(otherActor, () => {
+          const ctx = provider.getContext();
+          expect(ctx?.actor).toEqual(otherActor);
+          expect(ctx?.request).toEqual(context.request);
+        });
+      });
+    });
+
+    it('should restore the outer context after withActor returns', () => {
+      const provider = createAsyncLocalStorageProvider();
+
+      const context: AuditContext = {
+        actor: { category: 'model', type: 'User', id: 'user-123' },
+        request: { traceId: 'trace-1' },
+      };
+
+      provider.run(context, () => {
+        provider.withActor(otherActor, () => {
+          expect(provider.getContext()?.actor).toEqual(otherActor);
+        });
+
+        expect(provider.getContext()).toEqual(context);
+      });
+    });
+
+    it('should work with no outer context', () => {
+      const provider = createAsyncLocalStorageProvider();
+
+      provider.withActor(otherActor, () => {
+        const ctx = provider.getContext();
+        expect(ctx?.actor).toEqual(otherActor);
+        expect(ctx?.request).toBeUndefined();
+      });
+
+      expect(provider.getContext()).toBeUndefined();
+    });
+
+    it('should support nested withActor calls', () => {
+      const provider = createAsyncLocalStorageProvider();
+
+      const context: AuditContext = {
+        actor: { category: 'model', type: 'User', id: 'user-123' },
+        request: { traceId: 'trace-1' },
+      };
+
+      const innerActor: AuditActor = { category: 'external', type: 'Webhook', id: 'hook-1' };
+
+      provider.run(context, () => {
+        provider.withActor(otherActor, () => {
+          expect(provider.getContext()?.actor).toEqual(otherActor);
+
+          provider.withActor(innerActor, () => {
+            const ctx = provider.getContext();
+            expect(ctx?.actor).toEqual(innerActor);
+            // Request metadata is carried through every nesting level.
+            expect(ctx?.request).toEqual(context.request);
+          });
+
+          expect(provider.getContext()?.actor).toEqual(otherActor);
+        });
+      });
+    });
+
+    it('should pass through the return value', async () => {
+      const provider = createAsyncLocalStorageProvider();
+
+      // withActor always returns a Promise; await it to get the resolved value.
+      const result = await provider.withActor(otherActor, () => 'value');
+
+      expect(result).toBe('value');
+    });
+
+    it('should preserve runtime infrastructure state set via runWithRuntimeContext', () => {
+      const provider = createAsyncLocalStorageProvider();
+      const txClient = { id: 'tx' };
+
+      const context: AuditContext = {
+        actor: { category: 'model', type: 'User', id: 'user-123' },
+        request: { traceId: 'trace-1' },
+      };
+
+      provider.run(context, () => {
+        runWithRuntimeContext({ transaction: { client: txClient, deferredWrites: [] } }, () => {
+          provider.withActor(otherActor, () => {
+            // App context actor is re-attributed...
+            expect(provider.getContext()?.actor).toEqual(otherActor);
+            // ...while the library-owned runtime store is untouched.
+            expect(getRuntimeContext()?.transaction?.client).toBe(txClient);
+          });
+        });
+      });
+    });
+
+    // Regression: lazy thenables (e.g. PrismaPromise) only invoke their pipeline
+    // when .then is called. The async wrapper in withActor ensures .then is called
+    // INSIDE the overridden scope, so the actor read at that point is actor2, not
+    // the outer actor.
+    it('plain arrow returning a lazy thenable resolves under the overridden actor', async () => {
+      const provider = createAsyncLocalStorageProvider();
+      const seen: string[] = [];
+
+      // Mimics PrismaPromise: records the active actor when .then is invoked.
+      const lazyOp = () => ({
+        then(onFulfilled: (v: unknown) => unknown) {
+          seen.push(provider.getContext()?.actor.id ?? 'none');
+          return Promise.resolve().then(() => onFulfilled(undefined));
+        },
+      });
+
+      const outerActor = { category: 'model' as const, type: 'User', id: 'outer-user' };
+      const actor2 = { category: 'system' as const, type: 'Admin', id: 'actor-2' };
+      const outerCtx: AuditContext = { actor: outerActor };
+
+      await provider.runAsync(outerCtx, async () => {
+        // Plain arrow — would have captured 'outer-user' with the old sync implementation.
+        await provider.withActor(actor2, () => lazyOp() as unknown as Promise<unknown>);
+      });
+
+      // The lazy op must have seen actor2, not the outer actor.
+      expect(seen).toEqual(['actor-2']);
+    });
+
+    it('plain arrow returning a lazy thenable inside runAsync resolves under the overridden context', async () => {
+      const provider = createAsyncLocalStorageProvider();
+      const seen: string[] = [];
+
+      const lazyOp = () => ({
+        then(onFulfilled: (v: unknown) => unknown) {
+          seen.push(provider.getContext()?.actor.id ?? 'none');
+          return Promise.resolve().then(() => onFulfilled(undefined));
+        },
+      });
+
+      const actor2 = { category: 'system' as const, type: 'Admin', id: 'actor-2' };
+      const ctx2: AuditContext = { actor: actor2 };
+
+      // runAsync with a plain arrow returning a lazy thenable — the async wrapper
+      // settles the value inside the overridden context scope.
+      await provider.runAsync(ctx2, () => lazyOp() as unknown as Promise<unknown>);
+
+      expect(seen).toEqual(['actor-2']);
+    });
+
+    it('should keep runtime state intact under plain runAsync partial replacement', async () => {
+      const provider = createAsyncLocalStorageProvider();
+      const txClient = { id: 'tx' };
+
+      const context: AuditContext = {
+        actor: { category: 'model', type: 'User', id: 'user-123' },
+        request: { traceId: 'trace-1' },
+      };
+
+      await provider.runAsync(context, async () => {
+        await runWithRuntimeContext({ transaction: { client: txClient, deferredWrites: [] } }, async () => {
+          // A full replacement of the app context (different actor) must not
+          // disturb the separately-stored transactional client.
+          await provider.runAsync({ actor: otherActor }, async () => {
+            expect(provider.getContext()?.actor).toEqual(otherActor);
+            expect(provider.getContext()?.request).toBeUndefined();
+            expect(getRuntimeContext()?.transaction?.client).toBe(txClient);
+          });
+        });
+      });
     });
   });
 });

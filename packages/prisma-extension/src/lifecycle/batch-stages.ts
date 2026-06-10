@@ -188,10 +188,10 @@ export const createBatchBuildLogsStage = (
   deps: StageDependencies,
 ): LifecycleStage<BatchEnrichedContext, BatchFinalContext> => {
   return async (context: BatchEnrichedContext): Promise<BatchFinalContext> => {
-    const { operation, auditContext, entities } = context;
+    const { operation, entities } = context;
     const modelName = operation.model as string;
     const singularAction = mapBatchActionToSingular(operation.action as string);
-    const manager = createPrismaClientManager(deps.basePrisma, auditContext);
+    const manager = createPrismaClientManager(deps.basePrisma);
     const entityConfig = deps.aggregateConfig.getEntityConfig(modelName);
 
     // Phase 1: Resolve aggregate roots and filter out entities with zero roots

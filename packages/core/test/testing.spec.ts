@@ -126,6 +126,78 @@ describe('createMockAuditContext', () => {
     });
   });
 
+  describe('withActor', () => {
+    it('should override only the actor and preserve request metadata', async () => {
+      const mock = createMockAuditContext();
+
+      const context: AuditContext = {
+        actor: { category: 'model', type: 'User', id: 'user-123' },
+        request: { traceId: 'trace-1' },
+      };
+
+      mock.setContext(context);
+
+      // withActor is async; await ensures assertions run before the context is restored.
+      await mock.provider.withActor({ category: 'system', type: 'Admin', id: 'admin-456' }, () => {
+        const ctx = mock.provider.getContext();
+        expect(ctx?.actor).toEqual({ category: 'system', type: 'Admin', id: 'admin-456' });
+        expect(ctx?.request).toEqual(context.request);
+      });
+
+      expect(mock.getContext()).toEqual(context);
+    });
+
+    it('should work with no current context', async () => {
+      const mock = createMockAuditContext();
+
+      await mock.provider.withActor({ category: 'system', type: 'Admin', id: 'admin-456' }, () => {
+        const ctx = mock.provider.getContext();
+        expect(ctx?.actor).toEqual({ category: 'system', type: 'Admin', id: 'admin-456' });
+        expect(ctx?.request).toBeUndefined();
+      });
+
+      expect(mock.getContext()).toBeUndefined();
+    });
+
+    it('should pass through the return value', async () => {
+      const mock = createMockAuditContext();
+
+      // withActor always returns a Promise; await it to get the resolved value.
+      const result = await mock.provider.withActor(
+        { category: 'system', type: 'Admin', id: 'admin-456' },
+        () => 'value',
+      );
+
+      expect(result).toBe('value');
+    });
+
+    // Regression: the mock's withActor must await fn's return value inside the
+    // overridden scope, matching the real ALS provider's async wrapper semantics.
+    // A plain arrow returning a lazy thenable must resolve under actor2, not the
+    // outer actor that was set before withActor was called.
+    it('plain arrow returning a lazy thenable resolves under the overridden actor', async () => {
+      const mock = createMockAuditContext();
+      const seen: string[] = [];
+
+      mock.setContext({ actor: { category: 'model', type: 'User', id: 'outer-user' } });
+
+      const actor2 = { category: 'system' as const, type: 'Admin', id: 'actor-2' };
+
+      // Mimics PrismaPromise: records the active actor when .then is invoked.
+      const lazyOp = () => ({
+        then(onFulfilled: (v: unknown) => unknown) {
+          seen.push(mock.provider.getContext()?.actor.id ?? 'none');
+          return Promise.resolve().then(() => onFulfilled(undefined));
+        },
+      });
+
+      await mock.provider.withActor(actor2, () => lazyOp() as unknown as Promise<unknown>);
+
+      // The lazy op must have seen actor2 because await fn() runs inside the override.
+      expect(seen).toEqual(['actor-2']);
+    });
+  });
+
   it.each([
     [
       'run',

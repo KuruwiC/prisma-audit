@@ -1,4 +1,4 @@
-import type { AuditContext, AuditContextProvider } from '../types.js';
+import type { AuditActor, AuditContext, AuditContextProvider } from '../types.js';
 
 /**
  * Controller interface for managing mock audit context
@@ -77,6 +77,17 @@ export const createMockAuditContext = (): MockContextController => {
     runAsync: async <T>(context: AuditContext, fn: () => Promise<T>): Promise<T> => {
       const prev = currentContext;
       currentContext = context;
+      try {
+        return await fn();
+      } finally {
+        currentContext = prev;
+      }
+    },
+    // Async like the real provider: the override must stay active until fn's
+    // return value settles, so lazy thenables resolve under the right actor.
+    withActor: async <T>(actor: AuditActor, fn: () => T | Promise<T>): Promise<T> => {
+      const prev = currentContext;
+      currentContext = { ...currentContext, actor };
       try {
         return await fn();
       } finally {

@@ -35,12 +35,6 @@ import type {
 } from './types.js';
 
 /**
- * Stage dependencies interface
- *
- * Encapsulates all dependencies required by the lifecycle pipeline stages,
- * enabling dependency injection for testing and maintaining separation of concerns.
- */
-/**
  * Type-safe helpers for Prisma operation data
  *
  * These functions explicitly handle the dynamic nature of Prisma operations
@@ -504,7 +498,7 @@ const buildMainAuditLogs = async (
     'buildAuditLog' | 'aggregateConfig' | 'excludeFields' | 'redact' | 'serialization' | 'basePrisma'
   >,
 ): Promise<AuditLogData[]> => {
-  const manager = createPrismaClientManager(deps.basePrisma, context.auditContext);
+  const manager = createPrismaClientManager(deps.basePrisma);
   const modelName = getModelName(context.operation.model);
   const entity = toResultRecord(context.result);
 

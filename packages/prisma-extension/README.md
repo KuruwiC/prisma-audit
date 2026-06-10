@@ -99,6 +99,45 @@ import { createAsyncLocalStorageProvider } from '@kuruwic/prisma-audit';
 const provider = createAsyncLocalStorageProvider();
 ```
 
+The `AuditContextProvider` interface exposes the following methods:
+
+| Method | Description |
+|---|---|
+| `getContext()` | Returns the current `AuditContext`, or `undefined` if not set |
+| `useContext()` | Returns the current `AuditContext`, throws if not set |
+| `run(context, fn)` | Runs `fn` synchronously under the given context |
+| `runAsync(context, fn)` | Runs `fn` asynchronously under the given context |
+| `withActor(actor, fn)` | Runs `fn` with only the actor overridden (see below) |
+
+##### Actor Override (`withActor`)
+
+Use `provider.withActor` to re-attribute writes to a different actor mid-flow while keeping the current request metadata and all library-internal transaction state intact.
+
+```typescript
+await prisma.$transaction(async (tx) => {
+  // Create the admin user — attributed to the system actor from the outer context.
+  const adminUser = await tx.adminUser.create({
+    data: { email: 'admin@example.com', role: 'admin' },
+  });
+
+  // The next write is attributed to the newly created admin user.
+  // Request metadata (ipAddress, etc.) from the outer context is preserved.
+  // The write still runs inside the same transaction and can reference
+  // the uncommitted adminUser row without FK violations.
+  // A plain arrow returning the Prisma promise directly is fine.
+  await provider.withActor(
+    { category: 'user', type: 'AdminUser', id: adminUser.id },
+    () => tx.adminProfile.create({
+      data: { adminUserId: adminUser.id, bio: 'Initial profile' },
+    }),
+  );
+});
+```
+
+`withActor` is safe to call inside `$transaction` callbacks — it only swaps the `actor` field in the app context store. The library's internal transaction scope (deferred-write queue, transactional client) is stored separately and is never affected. Replacing the full app context via `runAsync` inside a `$transaction` callback does not detach writes from the transaction either, because the transaction scope is always library-owned.
+
+Common use cases: pre-auth login flows, impersonation, system→user handoff.
+
 #### `aggregateMapping`
 **Type:** `AggregateMapping<PrismaClient>`
 
@@ -175,7 +214,7 @@ const basePrisma = new PrismaClient();
 
 **Infinite recursion prevention:**
 The extension prevents infinite recursion through:
-- `_isProcessingAuditLog` flag to skip nested interceptions
+- An internal processing flag to skip nested interceptions
 - Skipping audit logging for the `auditLog` model itself
 - Using non-extended client for deferred writes
 
@@ -713,15 +752,15 @@ Defers audit log write until after transaction commits successfully.
 - Avoids "transaction already closed" errors
 
 **Behavior:**
-- Writes queued in `context._deferredWrites`
+- Writes queued on the library-owned transaction scope (not on the app context)
 - Executed after successful transaction commit using `basePrisma`
-- Rolled back (not executed) if transaction fails
+- Discarded if transaction rolls back
 
 **Example:**
 ```typescript
 await prisma.$transaction(async (tx) => {
   await tx.user.create({ data: { email: 'test@example.com' } });
-  // Audit log queued in context._deferredWrites
+  // Audit log queued in the library-owned transaction scope
   // Not written yet - transaction still open
 });
 // Transaction committed successfully
@@ -814,8 +853,8 @@ Strategy Selector Factory
     ↓
 Select Strategy:
 ├─ Synchronous (if shouldAwait === true)
-├─ Deferred (if transactionalClient && shouldAwait === false)
-└─ Fire-and-Forget (if !transactionalClient && shouldAwait === false)
+├─ Deferred (if inside transaction scope && shouldAwait === false)
+└─ Fire-and-Forget (if no transaction scope && shouldAwait === false)
 ```
 
 **Source Files** (in `@kuruwic/prisma-audit-core`):

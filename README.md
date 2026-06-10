@@ -50,6 +50,8 @@ No decorators, no wrapper functions, no code changes. Attach the extension once 
 
 Audit logs and data operations share the same transaction by default. If the operation fails, the audit log rolls back too — no orphaned or inconsistent log entries.
 
+App context (actor, request metadata) and library transaction state (transactional client, deferred-write queue) live in separate AsyncLocalStorage stores. Establishing a fresh context via `runAsync` or `run` inside a `$transaction` callback never detaches writes from the transaction.
+
 ### DDD Aggregate Tracking
 
 Model your domain with aggregate roots. When a child entity (e.g., OrderItem) changes, the log automatically references its parent aggregate (Order), enabling queries like "show all changes related to Order #123".
@@ -78,7 +80,7 @@ Branded types (`ActorId`, `EntityId`, `AggregateId`) prevent ID mix-ups at compi
 > **Note**: This package is not yet published to npm. Install from GitHub Releases.
 
 ```bash
-pnpm add https://github.com/KuruwiC/prisma-audit/releases/download/v0.1.3/kuruwic-prisma-audit-0.1.3.tgz
+pnpm add https://github.com/KuruwiC/prisma-audit/releases/download/v0.1.4/kuruwic-prisma-audit-0.1.4.tgz
 ```
 
 **Requirements:** Node.js 20+ (AsyncLocalStorage), Prisma 5.10+
@@ -319,6 +321,35 @@ app.use((req, res, next) => {
   );
 });
 ```
+
+## Actor Override
+
+Use `provider.withActor` to re-attribute writes to a different actor mid-flow while keeping the current request metadata and transaction state intact. This is the official API for scenarios such as pre-auth login flows, impersonation, or any system→user handoff.
+
+```typescript
+await prisma.$transaction(async (tx) => {
+  // Create the admin user — attributed to the system actor from the outer context
+  const adminUser = await tx.adminUser.create({
+    data: { email: "admin@example.com", role: "admin" },
+  });
+
+  // The next write is attributed to the newly created admin user.
+  // Request metadata (ipAddress, etc.) from the outer context is preserved.
+  // The write still runs inside the same transaction and can reference
+  // the uncommitted adminUser row without FK violations.
+  // A plain arrow returning the Prisma promise directly is fine: withActor
+  // settles the return value inside the overridden scope.
+  await provider.withActor(
+    { category: "user", type: "AdminUser", id: adminUser.id },
+    () =>
+      tx.adminProfile.create({
+        data: { adminUserId: adminUser.id, bio: "Initial profile" },
+      }),
+  );
+});
+```
+
+`withActor` is safe to call inside `$transaction` callbacks — it only swaps the `actor` field in the app context store; the library's internal transaction state is stored separately and is never affected.
 
 ## Context Enrichment
 

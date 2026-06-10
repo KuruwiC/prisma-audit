@@ -5,6 +5,7 @@
  */
 
 import type { AuditLogData } from '../domain/audit-log-types.js';
+import { getGlobalSingleton } from '../global-singleton.js';
 import type { AuditContext } from '../types.js';
 import type { DbClientManager, WriteExecutor } from './interfaces.js';
 import type { WriteFn, WriteResult } from './types.js';
@@ -16,7 +17,10 @@ type ErrorHandler = (error: Error, operationDescription: string) => void | Promi
  * Registry to track pending async writes.
  * Enables waiting for completion in tests and graceful shutdown.
  */
-const pendingWrites: Set<Promise<void>> = new Set();
+const pendingWrites: Set<Promise<void>> = getGlobalSingleton(
+  'fire-and-forget-pending-writes',
+  () => new Set<Promise<void>>(),
+);
 
 /**
  * Waits for all pending fire-and-forget writes to complete.

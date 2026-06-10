@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
-import type { AuditContext, AuditContextProvider } from './types.js';
+import type { AuditActor, AuditContext, AuditContextProvider } from './types.js';
 
 /**
  * Create an AsyncLocalStorage-based audit context provider
@@ -47,6 +47,34 @@ export const createAsyncLocalStorageProvider = (): AuditContextProvider => {
 
     run: <T>(context: AuditContext, fn: () => T): T => storage.run(context, fn),
 
-    runAsync: <T>(context: AuditContext, fn: () => Promise<T>): Promise<T> => storage.run(context, fn),
+    // The async wrapper settles fn's return value INSIDE the context scope.
+    // Lazy thenables (e.g. Prisma query promises) only execute when awaited;
+    // without the wrapper that await would happen after storage.run has exited,
+    // and the operation would silently run under the outer context.
+    runAsync: <T>(context: AuditContext, fn: () => Promise<T>): Promise<T> =>
+      storage.run(context, async () => await fn()),
+
+    /**
+     * Re-attribute the current flow to a different actor while preserving the
+     * rest of the app context (request metadata). Library-internal transaction
+     * state lives in a separate store, so this is safe inside $transaction
+     * callbacks: the transactional client and deferred-write queue are untouched.
+     *
+     * @example
+     * ```typescript
+     * await prisma.$transaction(async () => {
+     *   const parent = await prisma.parent.create({ data: { name: 'root' } });
+     *   // Child write is attributed to a different actor, yet still runs in the
+     *   // same transaction and can reference the uncommitted parent row.
+     *   await provider.withActor(otherActor, () =>
+     *     prisma.child.create({ data: { parentId: parent.id } }),
+     *   );
+     * });
+     * ```
+     */
+    // Same async wrapper as runAsync: lazy Prisma promises returned from fn
+    // must settle inside the overridden scope or the override would not apply.
+    withActor: <T>(actor: AuditActor, fn: () => T | Promise<T>): Promise<T> =>
+      storage.run({ ...storage.getStore(), actor }, async () => await fn()),
   };
 };

@@ -41,7 +41,6 @@ export interface AuditActor {
 
 /**
  * Context information for audit logging
- * @template TClient - Type of the transactional Prisma client (inferred automatically)
  *
  * @example
  * ```typescript
@@ -61,7 +60,7 @@ export interface AuditActor {
  * };
  * ```
  */
-export interface AuditContext<TClient = unknown> {
+export interface AuditContext {
   /** The actor who performed the action */
   actor: AuditActor;
 
@@ -77,28 +76,6 @@ export interface AuditContext<TClient = unknown> {
    * Supports custom fields based on protocol requirements.
    */
   request?: Record<string, unknown>;
-
-  /** @internal Prevent infinite recursion when writing audit logs */
-  _isProcessingAuditLog?: boolean;
-
-  /**
-   * @internal Flag indicating we're inside an implicit transaction wrapper
-   * Used to prevent re-wrapping operations in nested transactions
-   */
-  _isInImplicitTransaction?: boolean;
-
-  /**
-   * @internal Transactional Prisma client (set automatically by $transaction interceptor)
-   * When present, all audit log writes will use this client to ensure
-   * they are part of the same transaction as the main operation.
-   */
-  transactionalClient?: TClient;
-
-  /**
-   * @internal Deferred write queue for async audit logs within transactions
-   * Contains write operations that should only execute after transaction commit
-   */
-  _deferredWrites?: Array<() => Promise<void>>;
 }
 
 /**
@@ -122,6 +99,11 @@ export interface AuditContextProvider {
 
   /**
    * Run a synchronous function with the given audit context
+   *
+   * Do not return lazy thenables (e.g. a Prisma query promise) from `fn`:
+   * they execute when awaited, which happens after this synchronous scope
+   * has exited, so the context would not apply. Use `runAsync` for those.
+   *
    * @param context - The audit context to set
    * @param fn - The function to run
    * @returns The return value of the function
@@ -130,9 +112,24 @@ export interface AuditContextProvider {
 
   /**
    * Run an asynchronous function with the given audit context
+   *
+   * The returned value is settled inside the context scope, so `fn` may
+   * return a lazy thenable (e.g. a Prisma query promise) directly.
+   *
    * @param context - The audit context to set
    * @param fn - The async function to run
    * @returns A promise that resolves to the return value of the function
    */
   runAsync<T>(context: AuditContext, fn: () => Promise<T>): Promise<T>;
+
+  /**
+   * Run fn with only the actor overridden; the rest of the current context
+   * (request metadata) and all library-internal transaction state are preserved.
+   * Safe to call inside $transaction callbacks — this is the official way to
+   * re-attribute writes to a different actor mid-flow.
+   *
+   * Like `runAsync`, the returned value is settled inside the overridden
+   * scope, so `fn` may return a lazy Prisma query promise directly.
+   */
+  withActor<T>(actor: AuditActor, fn: () => T | Promise<T>): Promise<T>;
 }

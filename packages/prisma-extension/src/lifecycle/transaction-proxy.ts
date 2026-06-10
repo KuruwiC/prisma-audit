@@ -4,26 +4,43 @@
  * Wraps Prisma's `$transaction` method to inject audit logging capabilities. Intercepts
  * transaction calls to ensure audit logs are written atomically within transactions.
  *
- * Features: Interactive transaction support, deferred write management, rollback safety,
- * sequential transaction pass-through.
+ * The transaction scope (transactional client + deferred-write queue) is propagated on the
+ * library-owned runtime context (separate from the app-owned audit context), so an actor
+ * override inside the callback cannot drop them.
+ *
+ * Deferred writes execute strictly AFTER commit (the queue is drained once `$transaction`
+ * resolves), in both the explicit-`$transaction` path here and the implicit-wrapper path in
+ * transaction-wrapper.ts. On rollback the queue is discarded unrun.
  *
  * @module lifecycle/transaction-proxy
  */
 
-import { type AuditContext, type AuditContextProvider, flushPendingWrites } from '@kuruwic/prisma-audit-core';
+import {
+  type AuditContext,
+  type AuditContextProvider,
+  flushPendingWrites,
+  getGlobalSingleton,
+  runWithRuntimeContext,
+} from '@kuruwic/prisma-audit-core';
 
-// Re-export flushPendingWrites for internal use - deferred writes are tracked via this module
 export { flushPendingWrites };
 
 /**
  * Registry to track pending deferred writes from transactions.
  */
-const pendingDeferredWrites: Set<Promise<void>> = new Set();
+const pendingDeferredWrites: Set<Promise<void>> = getGlobalSingleton(
+  'transaction-proxy-pending-deferred-writes',
+  () => new Set<Promise<void>>(),
+);
 
 /**
  * Executes a deferred write and tracks it in the pending registry.
+ *
+ * Single tracker feeding `pendingDeferredWrites`, so `flushPendingDeferredWrites` /
+ * `flushAllPendingWrites` cover every drain — both the explicit-`$transaction` path here and
+ * the implicit-wrapper path in transaction-wrapper.ts.
  */
-const executeDeferredWrite = (deferredWrite: () => Promise<void>): void => {
+export const executeDeferredWrite = (deferredWrite: () => Promise<void>): void => {
   const promise = deferredWrite()
     .catch((err: Error) => {
       console.error('[@prisma-audit] Deferred write failed:', err);
@@ -60,52 +77,51 @@ export type TransactionProxyDependencies = {
 };
 
 /**
- * Creates a wrapped transaction callback that injects transactional client into audit context
+ * Creates a wrapped transaction callback that injects the transactional client into the
+ * library-owned runtime context.
  *
- * Wraps user callback to create transaction-aware context, execute callback, execute deferred
- * writes after commit, and clear deferred writes on rollback.
+ * The transactional client and the deferred-write queue live in the runtime store (separate
+ * from the app-owned audit context), so re-attributing the actor mid-transaction via
+ * `runAsync` / `withActor` never drops them.
+ *
+ * The caller owns `deferredWrites` and is responsible for draining it AFTER the transaction
+ * commits, so audit logs never persist for a transaction whose commit subsequently fails. The
+ * callback clears the array at the start of each invocation (defensive against callback
+ * re-invocation) and never drains itself.
  *
  * @param callback - User's transaction callback
- * @param context - Current audit context
+ * @param context - Current audit context (app-owned: actor + request metadata)
  * @param provider - Audit context provider
+ * @param deferredWrites - Caller-owned queue; the wrapped callback clears and fills it, the caller drains it post-commit
  * @returns Wrapped callback handling transaction context
  */
 export const createWrappedTransactionCallback = (
   callback: (tx: TransactionalPrismaClient) => Promise<unknown>,
   context: AuditContext,
   provider: AuditContextProvider,
+  deferredWrites: Array<() => Promise<void>>,
 ): ((txClient: TransactionalPrismaClient) => Promise<unknown>) => {
   return async (txClient: TransactionalPrismaClient): Promise<unknown> => {
-    const txContext = {
-      ...context,
-      transactionalClient: txClient,
-      _deferredWrites: [] as Array<() => Promise<void>>,
-    } as AuditContext & { _deferredWrites: Array<() => Promise<void>> };
+    // Defensive against callback re-invocation: start each run with an empty queue.
+    deferredWrites.length = 0;
 
-    try {
-      const result = await provider.runAsync(txContext, () => callback(txClient));
-
-      if (txContext._deferredWrites && txContext._deferredWrites.length > 0) {
-        for (const deferredWrite of txContext._deferredWrites) {
-          executeDeferredWrite(deferredWrite);
-        }
-      }
-
-      return result;
-    } catch (error) {
-      if (txContext._deferredWrites) {
-        txContext._deferredWrites = [];
-      }
-      throw error;
-    }
+    // Re-establish BOTH stores inside the tx callback to survive microtask boundaries.
+    return provider.runAsync(context, () =>
+      runWithRuntimeContext({ transaction: { client: txClient, deferredWrites } }, () => callback(txClient)),
+    );
   };
 };
 
 /**
  * Creates a transaction proxy handler that intercepts $transaction calls
  *
- * Wraps Prisma's `$transaction` to inject transactional client into audit context for
- * interactive transactions. Sequential transactions (array-style) pass through unchanged.
+ * Wraps Prisma's `$transaction` to inject the transactional client into the library-owned
+ * runtime context for interactive transactions. Sequential transactions (array-style) pass through unchanged.
+ *
+ * Deferred writes are drained strictly AFTER `$transaction` resolves (i.e. after commit), so an
+ * audit log never persists for a transaction whose commit subsequently fails. On rejection the
+ * locally-owned queue is discarded with the thrown error (no drain). This matches the
+ * implicit-wrapper path in transaction-wrapper.ts.
  *
  * @param deps - Dependencies for transaction proxy
  * @returns Async function handling $transaction calls
@@ -126,12 +142,19 @@ export const createTransactionProxyHandler = (
       const callback = args[0] as (tx: TransactionalPrismaClient) => Promise<unknown>;
       const options = args[1] as Record<string, unknown> | undefined;
 
-      const wrappedCallback = createWrappedTransactionCallback(callback, context, provider);
+      const deferredWrites: Array<() => Promise<void>> = [];
+      const wrappedCallback = createWrappedTransactionCallback(callback, context, provider, deferredWrites);
 
-      if (options) {
-        return originalTransaction.apply(target, [wrappedCallback, options]);
+      const transactionArgs = options ? [wrappedCallback, options] : [wrappedCallback];
+      // Drain only after $transaction resolves (after commit). On rejection the error
+      // propagates and the locally-owned queue is discarded unrun.
+      const result = await originalTransaction.apply(target, transactionArgs);
+
+      for (const deferredWrite of deferredWrites) {
+        executeDeferredWrite(deferredWrite);
       }
-      return originalTransaction.apply(target, [wrappedCallback]);
+
+      return result;
     }
 
     return originalTransaction.apply(target, args);

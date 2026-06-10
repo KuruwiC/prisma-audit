@@ -1,19 +1,13 @@
-/**
- * Write Strategy Factory Tests
- * Tests for the createWriteStrategySelector factory function
- */
-
 import { describe, expect, it, vi } from 'vitest';
 import { createActorId, createAggregateId, createEntityId } from '../../src/domain/branded-types.js';
 import type { AuditContext, AuditLogData, WriteFn } from '../../src/index.js';
+import { runWithRuntimeContext } from '../../src/runtime-context.js';
 import { createWriteStrategySelector } from '../../src/write-strategies/factory.js';
 import type { DbClientManager, WriteExecutor } from '../../src/write-strategies/interfaces.js';
 import type { WriteStrategyConfig } from '../../src/write-strategies/types.js';
 
-// Mock error handler
 const mockHandleError = vi.fn();
 
-// Mock logs
 const mockLogs: AuditLogData[] = [
   {
     actorCategory: 'model',
@@ -37,7 +31,6 @@ const mockLogs: AuditLogData[] = [
   },
 ];
 
-// Mock context (non-transactional)
 const mockContext: AuditContext = {
   actor: {
     category: 'model',
@@ -49,7 +42,8 @@ const mockContext: AuditContext = {
   },
 };
 
-// Mock transactional context
+// The transactional context has the same shape as the plain one; the difference
+// is driven via runWithRuntimeContext, not the context object itself.
 const mockTransactionalContext: AuditContext = {
   actor: {
     category: 'model',
@@ -59,10 +53,12 @@ const mockTransactionalContext: AuditContext = {
   request: {
     requestId: 'req-123',
   },
-  transactionalClient: {} as never,
 };
 
-// Mock DbClientManager
+// Marks an active transaction in the library-owned runtime store.
+const inTransaction = <T>(fn: () => T): T =>
+  runWithRuntimeContext({ transaction: { client: {}, deferredWrites: [] } }, fn);
+
 const mockManager: DbClientManager = {
   baseClient: {
     auditLog: {
@@ -76,12 +72,10 @@ const mockManager: DbClientManager = {
   } as never,
 };
 
-// Mock WriteExecutor
 const mockExecutor: WriteExecutor = {
   write: vi.fn().mockResolvedValue(undefined),
 };
 
-// Mock WriteFn
 const mockWriter: WriteFn = vi.fn().mockResolvedValue(undefined);
 
 describe('createWriteStrategySelector', () => {
@@ -123,17 +117,19 @@ describe('createWriteStrategySelector', () => {
       };
 
       const selector = createWriteStrategySelector(config, mockExecutor);
-      const strategy = selector(mockTransactionalContext, 'User');
 
-      const result = await strategy(
-        mockLogs,
-        mockTransactionalContext,
-        mockManager,
-        'auditLog',
-        mockWriter,
-        mockHandleError,
-        mockExecutor,
-      );
+      const result = await inTransaction(async () => {
+        const strategy = selector(mockTransactionalContext, 'User');
+        return strategy(
+          mockLogs,
+          mockTransactionalContext,
+          mockManager,
+          'auditLog',
+          mockWriter,
+          mockHandleError,
+          mockExecutor,
+        );
+      });
 
       // Deferred strategy returns Deferred result
       expect(result._tag).toBe('Deferred');
@@ -251,17 +247,19 @@ describe('createWriteStrategySelector', () => {
       };
 
       const selector = createWriteStrategySelector(config, mockExecutor);
-      const strategy = selector(mockTransactionalContext, 'User');
 
-      const result = await strategy(
-        mockLogs,
-        mockTransactionalContext,
-        mockManager,
-        'auditLog',
-        mockWriter,
-        mockHandleError,
-        mockExecutor,
-      );
+      const result = await inTransaction(async () => {
+        const strategy = selector(mockTransactionalContext, 'User');
+        return strategy(
+          mockLogs,
+          mockTransactionalContext,
+          mockManager,
+          'auditLog',
+          mockWriter,
+          mockHandleError,
+          mockExecutor,
+        );
+      });
 
       // awaitWriteIf returns false + in transaction → deferred strategy
       expect(result._tag).toBe('Deferred');
@@ -283,17 +281,19 @@ describe('createWriteStrategySelector', () => {
       };
 
       const selector = createWriteStrategySelector(config, mockExecutor);
-      const strategy = selector(mockTransactionalContext, 'Payment');
 
-      const result = await strategy(
-        mockLogs,
-        mockTransactionalContext,
-        mockManager,
-        'auditLog',
-        mockWriter,
-        mockHandleError,
-        mockExecutor,
-      );
+      const result = await inTransaction(async () => {
+        const strategy = selector(mockTransactionalContext, 'Payment');
+        return strategy(
+          mockLogs,
+          mockTransactionalContext,
+          mockManager,
+          'auditLog',
+          mockWriter,
+          mockHandleError,
+          mockExecutor,
+        );
+      });
 
       // awaitWriteIf returns true → synchronous (not deferred), even in transaction
       expect(result._tag).toBe('Immediate');

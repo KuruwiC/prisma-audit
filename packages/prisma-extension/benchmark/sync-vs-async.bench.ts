@@ -1,4 +1,4 @@
-import { createAsyncLocalStorageProvider } from '@kuruwic/prisma-audit-core';
+import { createAsyncLocalStorageProvider, runWithRuntimeContext } from '@kuruwic/prisma-audit-core';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database';
 import { beforeAll, bench, describe } from 'vitest';
 import { createAuditLogExtension, defineEntity, self } from '../src/index.js';
@@ -39,34 +39,26 @@ describe('Sync vs Async Write Mode', () => {
   });
 
   bench('Sync mode - create 100 users', async () => {
-    await contextProvider.runAsync(
-      {
-        actor: { id: 'benchmark-user', category: 'system' },
-        transactionalClient: prismaSync,
-      },
-      async () => {
+    await contextProvider.runAsync({ actor: { id: 'benchmark-user', category: 'system' } }, () =>
+      runWithRuntimeContext({ transaction: { client: prismaSync, deferredWrites: [] } }, async () => {
         for (let i = 0; i < 100; i++) {
           await prismaSync.user.create({
             data: { email: `sync${i}@example.com`, name: `Sync ${i}` },
           });
         }
-      },
+      }),
     );
   });
 
   bench('Async mode - create 100 users', async () => {
-    await contextProvider.runAsync(
-      {
-        actor: { id: 'benchmark-user', category: 'system' },
-        transactionalClient: prismaAsync,
-      },
-      async () => {
+    await contextProvider.runAsync({ actor: { id: 'benchmark-user', category: 'system' } }, () =>
+      runWithRuntimeContext({ transaction: { client: prismaAsync, deferredWrites: [] } }, async () => {
         for (let i = 0; i < 100; i++) {
           await prismaAsync.user.create({
             data: { email: `async${i}@example.com`, name: `Async ${i}` },
           });
         }
-      },
+      }),
     );
   });
 });

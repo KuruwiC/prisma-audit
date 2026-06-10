@@ -5,8 +5,9 @@
  * Handles transaction wrapping when necessary while avoiding double-wrapping.
  */
 
-import type { AuditContext } from '@kuruwic/prisma-audit-core';
+import { type AuditContext, getRuntimeContext, runWithRuntimeContext } from '@kuruwic/prisma-audit-core';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../internal-types.js';
+import { executeDeferredWrite } from './transaction-proxy.js';
 
 /**
  * Transaction wrapper configuration.
@@ -49,49 +50,53 @@ export interface TransactionWrapperConfig {
  * ```
  *
  * @remarks
- * Wraps transaction if `shouldWrap` is true AND no existing transactional client
- * AND not already in an implicit transaction. Otherwise executes directly.
+ * Wraps transaction if `shouldWrap` is true AND no transaction scope is present in the
+ * runtime context AND not already in an implicit transaction. Otherwise executes directly.
+ * `operationFn` receives the app-owned audit context; the transactional client is propagated
+ * via the library-owned runtime context and passed as the `txClient` argument.
  */
 export const withOptionalTransaction = <T>(
   config: TransactionWrapperConfig,
   provider: { runAsync: <R>(context: AuditContext, fn: () => Promise<R>) => Promise<R> },
 ): ((
   operationFn: (
-    txContext: AuditContext,
+    context: AuditContext,
     txClient: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
   ) => Promise<T>,
 ) => Promise<T>) => {
   const { shouldWrap, context, basePrisma } = config;
 
   return async (operationFn) => {
-    const needsWrapping = shouldWrap && !context.transactionalClient && !context._isInImplicitTransaction;
+    const runtime = getRuntimeContext();
+    const needsWrapping = shouldWrap && !runtime?.transaction && !runtime?.isInImplicitTransaction;
 
     if (!needsWrapping) {
-      const clientToUse = (context.transactionalClient ?? basePrisma) as
+      const clientToUse = (runtime?.transaction?.client ?? basePrisma) as
         | PrismaClientWithDynamicAccess
         | TransactionalPrismaClient;
       return await operationFn(context, clientToUse);
     }
 
-    const implicitTxContext: AuditContext = {
-      ...context,
-      _isInImplicitTransaction: true,
-    };
-
-    // Establish context BEFORE $transaction to survive microtask boundaries.
+    // Establish BOTH stores BEFORE $transaction to survive microtask boundaries.
     // Prisma's $transaction may execute its callback in a different microtask
     // context, which can cause AsyncLocalStorage context to be lost.
-    return provider.runAsync(implicitTxContext, async () => {
-      return basePrisma.$transaction(async (tx: TransactionalPrismaClient) => {
-        const txContext: AuditContext = {
-          ...implicitTxContext,
-          transactionalClient: tx,
-        };
-
-        // Re-establish context with transactionalClient inside $transaction
-        return provider.runAsync(txContext, async () => {
-          return await operationFn(txContext, tx);
+    return provider.runAsync(context, async () => {
+      return runWithRuntimeContext({ isInImplicitTransaction: true }, async () => {
+        // Caller-owned queue, seeded into the runtime store so a nested deferred strategy
+        // (e.g. mixed awaitWriteIf) has somewhere to enqueue. Drained AFTER commit; on throw
+        // the local array is discarded unrun.
+        const deferredWrites: Array<() => Promise<void>> = [];
+        const result = await basePrisma.$transaction(async (tx: TransactionalPrismaClient) => {
+          return provider.runAsync(context, async () => {
+            return runWithRuntimeContext({ transaction: { client: tx, deferredWrites } }, async () => {
+              return await operationFn(context, tx);
+            });
+          });
         });
+        for (const deferredWrite of deferredWrites) {
+          executeDeferredWrite(deferredWrite);
+        }
+        return result;
       });
     });
   };

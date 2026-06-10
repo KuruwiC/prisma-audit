@@ -33,7 +33,7 @@ export interface OperationExecutorDependencies {
  * Orchestrates: query function creation → pipeline execution → Date hydration → audit log writes
  *
  * @param operation - Operation context (model, action, args)
- * @param txContext - Audit context (may contain transactional client)
+ * @param txContext - App-owned audit context (actor + request metadata)
  * @param clientToUse - Prisma client (base or transactional)
  * @param deps - Dependencies (stages, write function, base client)
  * @returns Operation result

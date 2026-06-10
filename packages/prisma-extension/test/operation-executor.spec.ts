@@ -15,7 +15,6 @@ const createMockOperation = () => ({
 
 const createMockContext = () => ({
   actor: { category: 'system', type: 'User', id: 'user-1' },
-  _isProcessingAuditLog: true,
 });
 
 const createMockClient = () => ({

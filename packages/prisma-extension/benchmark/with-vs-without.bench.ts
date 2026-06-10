@@ -1,4 +1,4 @@
-import { createAsyncLocalStorageProvider } from '@kuruwic/prisma-audit-core';
+import { createAsyncLocalStorageProvider, runWithRuntimeContext } from '@kuruwic/prisma-audit-core';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database';
 import { beforeAll, bench, describe } from 'vitest';
 import { createAuditLogExtension, defineEntity, self } from '../src/index.js';
@@ -32,14 +32,10 @@ describe('With vs Without Audit', () => {
   });
 
   bench('With Audit - findMany (100 records)', async () => {
-    await contextProvider.runAsync(
-      {
-        actor: { id: 'benchmark-user', category: 'system' },
-        transactionalClient: prismaWithAudit,
-      },
-      async () => {
+    await contextProvider.runAsync({ actor: { id: 'benchmark-user', category: 'system' } }, () =>
+      runWithRuntimeContext({ transaction: { client: prismaWithAudit, deferredWrites: [] } }, async () => {
         await prismaWithAudit.user.findMany();
-      },
+      }),
     );
   });
 
@@ -50,16 +46,12 @@ describe('With vs Without Audit', () => {
   });
 
   bench('With Audit (async) - create single', async () => {
-    await contextProvider.runAsync(
-      {
-        actor: { id: 'benchmark-user', category: 'system' },
-        transactionalClient: prismaWithAudit,
-      },
-      async () => {
+    await contextProvider.runAsync({ actor: { id: 'benchmark-user', category: 'system' } }, () =>
+      runWithRuntimeContext({ transaction: { client: prismaWithAudit, deferredWrites: [] } }, async () => {
         await prismaWithAudit.user.create({
           data: { email: 'test@example.com', name: 'Test User' },
         });
-      },
+      }),
     );
   });
 });

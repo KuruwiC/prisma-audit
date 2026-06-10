@@ -19,6 +19,8 @@ import {
   createWriteStrategySelector,
   DEFAULTS,
   enrichActorContext,
+  getRuntimeContext,
+  runWithRuntimeContext,
   type WriteResult,
 } from '@kuruwic/prisma-audit-core';
 import { createPrismaWriteExecutor } from './adapters/write-executor.js';
@@ -184,7 +186,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
         return;
       }
 
-      const manager = createPrismaClientManager(baseClient, context);
+      const manager = createPrismaClientManager(baseClient);
       const strategy = strategySelector(context, modelName);
 
       const writeErrorHandler: typeof handleError = async (error, errorContext) => {
@@ -670,7 +672,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
 
             const context = provider.getContext();
 
-            if (context?._isProcessingAuditLog) {
+            if (getRuntimeContext()?.isProcessingAuditLog) {
               return query(args);
             }
 
@@ -685,12 +687,9 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
             // Inject deep include for nested write operations (3+ levels)
             const argsWithInclude = injectDeepInclude(args);
 
-            const processingContext: AuditContext = {
-              ...(context as AuditContext),
-              _isProcessingAuditLog: true,
-            };
-
-            return provider.runAsync(processingContext, async () => {
+            // Mark the re-entrancy guard on the library-owned runtime store; the app context
+            // stays untouched so downstream code keeps the caller's actor and request metadata.
+            return runWithRuntimeContext({ isProcessingAuditLog: true }, async () => {
               const operationContext: OperationContext = {
                 model,
                 action: operation,
@@ -698,10 +697,10 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
               };
 
               if (isBatchOperation(operation)) {
-                return handleBatchOperation(operationContext, processingContext, baseClient);
+                return handleBatchOperation(operationContext, context as AuditContext, baseClient);
               }
 
-              return handleSingleOperation(operationContext, processingContext, baseClient, (modifiedArgs) =>
+              return handleSingleOperation(operationContext, context as AuditContext, baseClient, (modifiedArgs) =>
                 query(modifiedArgs ?? argsWithInclude),
               );
             });
