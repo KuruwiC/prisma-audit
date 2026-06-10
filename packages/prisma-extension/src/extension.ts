@@ -60,6 +60,7 @@ import {
   getPrisma,
   injectDeepInclude,
   isAuditableAction,
+  isBatchOperation,
   shouldAuditModel,
   uncapitalizeFirst,
 } from './utils/index.js';
@@ -216,9 +217,6 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     return typeof value === 'object' && value !== null && !Array.isArray(value);
   };
 
-  const hasArrayData = (args: unknown): boolean =>
-    typeof args === 'object' && args !== null && 'data' in args && Array.isArray((args as { data: unknown }).data);
-
   const executeFallbackAction = async (
     clientToUse: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
     modelName: string,
@@ -371,6 +369,21 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     );
   };
 
+  // `updateManyAndReturn` is unavailable on connectors like MySQL. When present, we can
+  // pin the audited rows to the ones the database actually updated under `limit` (debt #2).
+  const hasUpdateManyAndReturn = (
+    value: unknown,
+  ): value is {
+    updateManyAndReturn: (args: unknown) => Promise<Record<string, unknown>[]>;
+  } => {
+    return (
+      typeof value === 'object' &&
+      value !== null &&
+      'updateManyAndReturn' in value &&
+      typeof (value as { updateManyAndReturn: unknown }).updateManyAndReturn === 'function'
+    );
+  };
+
   const runBatchPipeline = async (
     batchInitialContext: BatchInitialContext,
     baseClient: PrismaClientWithDynamicAccess,
@@ -396,12 +409,11 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     clientToUse: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
   ): Promise<unknown> => {
     const modelName = operation.model as string;
-    const dataWithIds = ensureIds(
-      Prisma,
-      modelName,
-      (operation.args as { data: Record<string, unknown>[] }).data,
-      DEFAULTS.ID_FIELD,
-    );
+
+    // Normalize single-object data to an array so `data: {...}` is logged like `data: [...]` (debt #1)
+    const rawData = (operation.args as { data: unknown }).data;
+    const dataArray = Array.isArray(rawData) ? rawData : [rawData as Record<string, unknown>];
+    const dataWithIds = ensureIds(Prisma, modelName, dataArray, DEFAULTS.ID_FIELD);
 
     const argsWithIds = {
       ...operation.args,
@@ -410,14 +422,16 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
 
     const modelAccessor = getModelAccessor(clientToUse, modelName);
     const delegate = clientToUse[modelAccessor] as Record<string, unknown>;
-    const createManyFn = delegate.createMany as (args: unknown) => Promise<unknown>;
-    const result = await createManyFn(argsWithIds);
+    // Call the real action so createManyAndReturn keeps returning the row array (not {count})
+    const actionName = operation.action as string;
+    const createFn = delegate[actionName] as (args: unknown) => Promise<unknown>;
+    const result = await createFn(argsWithIds);
 
     const batchInitialContext: BatchInitialContext = {
       operation,
       auditContext: context,
       clientToUse,
-      query: createManyFn,
+      query: createFn,
       entities: dataWithIds,
     };
 
@@ -425,14 +439,11 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     return result;
   };
 
-  const handleUpdateOrDeleteMany = async (
-    operation: OperationContext,
-    context: AuditContext,
-    baseClient: PrismaClientWithDynamicAccess,
+  // Resolve and validate the model delegate used by batch update/delete handling.
+  const resolveBatchModelDelegate = (
     clientToUse: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
-    action: PrismaAction,
-  ): Promise<unknown> => {
-    const modelName = operation.model as string;
+    modelName: string,
+  ): { findMany: (args: { where: unknown }) => Promise<Record<string, unknown>[]> } => {
     const entityConfig = aggregateConfig.getEntityConfig(modelName);
     if (!entityConfig) {
       throw new Error(
@@ -448,36 +459,135 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
       throw new Error(`Model ${modelName} does not have findMany operation. This is required for batch operations.`);
     }
 
+    return modelDelegate;
+  };
+
+  // Pair each after-row with its before-state by primary key.
+  const pairEntitiesByPrimaryKey = (
+    afterEntities: Record<string, unknown>[],
+    beforeEntities: Record<string, unknown>[],
+    pkFields: string[],
+  ): {
+    entities: Record<string, unknown>[];
+    pairedBeforeStates: Array<Record<string, unknown> | null>;
+  } => {
+    const beforeMap = buildEntityMap(beforeEntities, pkFields);
+    return {
+      entities: afterEntities,
+      pairedBeforeStates: afterEntities.map((entity) => beforeMap.get(extractPrimaryKey(entity, pkFields)) ?? null),
+    };
+  };
+
+  // Re-fetch updated rows by PK (not original WHERE) to handle WHERE-field mutations,
+  // pairing each after-state with its before-state.
+  const pairUpdatedEntitiesWithBefore = async (
+    modelDelegate: { findMany: (args: { where: Record<string, unknown> }) => Promise<Record<string, unknown>[]> },
+    beforeEntities: Record<string, unknown>[],
+    pkFields: string[],
+  ): Promise<{
+    entities: Record<string, unknown>[];
+    pairedBeforeStates: Array<Record<string, unknown> | null>;
+  }> => {
+    const afterEntities = await findManyByPKs(modelDelegate, pkFields, beforeEntities);
+    return pairEntitiesByPrimaryKey(afterEntities, beforeEntities, pkFields);
+  };
+
+  // Audit a `limit`-bounded update by routing it through `updateManyAndReturn`, whose return value
+  // is the exact set of updated rows. This pins before/after to those rows and sidesteps debt #2's
+  // count desync. Only used when the connector supports updateManyAndReturn (see caller guard).
+  const handleLimitedUpdateMany = async (
+    operation: OperationContext,
+    context: AuditContext,
+    baseClient: PrismaClientWithDynamicAccess,
+    clientToUse: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
+    action: PrismaAction,
+    modelDelegate: {
+      findMany: (args: { where: unknown }) => Promise<Record<string, unknown>[]>;
+      updateManyAndReturn: (args: unknown) => Promise<Record<string, unknown>[]>;
+    },
+    pkFields: string[],
+    whereClause: unknown,
+  ): Promise<unknown> => {
+    const beforeEntities = await modelDelegate.findMany({ where: whereClause || {} });
+    const updatedRows = await modelDelegate.updateManyAndReturn(operation.args);
+    const paired = pairEntitiesByPrimaryKey(updatedRows, beforeEntities, pkFields);
+
+    const batchInitialContext: BatchInitialContext = {
+      operation,
+      auditContext: context,
+      clientToUse,
+      query: modelDelegate.updateManyAndReturn as (args: unknown) => Promise<unknown>,
+      entities: paired.entities,
+      beforeStates: paired.pairedBeforeStates,
+    };
+    await runBatchPipeline(batchInitialContext, baseClient);
+
+    // Preserve each action's contract: updateMany returns { count }, updateManyAndReturn the rows.
+    return action === AUDIT_ACTION.UPDATE_MANY_AND_RETURN ? updatedRows : { count: updatedRows.length };
+  };
+
+  const handleUpdateOrDeleteMany = async (
+    operation: OperationContext,
+    context: AuditContext,
+    baseClient: PrismaClientWithDynamicAccess,
+    clientToUse: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
+    action: PrismaAction,
+  ): Promise<unknown> => {
+    const modelName = operation.model as string;
+    const modelDelegate = resolveBatchModelDelegate(clientToUse, modelName);
+
     const pkFields = getPrimaryKeyFields(Prisma, modelName);
 
-    const whereClause =
-      operation.args && typeof operation.args === 'object' && 'where' in operation.args ? operation.args.where : {};
+    const args = isRecord(operation.args) ? operation.args : {};
+    const whereClause = args.where;
+    const limitClause = typeof args.limit === 'number' ? args.limit : undefined;
 
-    const beforeEntities = await modelDelegate.findMany({ where: whereClause || {} });
+    const isUpdate = action === AUDIT_ACTION.UPDATE_MANY || action === AUDIT_ACTION.UPDATE_MANY_AND_RETURN;
 
-    // Execute mutation via model delegate (not query()) so it participates in the transaction
+    // `updateMany({ limit })` and a separate `findMany({ take })` are not guaranteed to select the
+    // same rows, so pre-limiting the before fetch desyncs before/after counts (debt #2). When the
+    // connector supports `updateManyAndReturn`, audit through it for exact-row fidelity. MySQL and
+    // other connectors without it fall through to the best-effort `take: limit` path below.
+    if (isUpdate && limitClause !== undefined && hasUpdateManyAndReturn(modelDelegate)) {
+      return handleLimitedUpdateMany(
+        operation,
+        context,
+        baseClient,
+        clientToUse,
+        action,
+        modelDelegate as typeof modelDelegate & {
+          updateManyAndReturn: (args: unknown) => Promise<Record<string, unknown>[]>;
+        },
+        pkFields,
+        whereClause,
+      );
+    }
+
+    // Propagate `limit` to the before fetch so before/after counts match the actually-updated rows
+    // on connectors without updateManyAndReturn (best-effort; exact row match is not guaranteed).
+    const beforeEntities = await modelDelegate.findMany({
+      where: whereClause || {},
+      ...(limitClause !== undefined ? { take: limitClause } : {}),
+    });
+
+    // Execute mutation via model delegate (not query()) so it participates in the transaction.
+    // Use the real action name so updateManyAndReturn is not misrouted to deleteMany.
     const delegate = modelDelegate as unknown as Record<string, unknown>;
-    const actionName = action === AUDIT_ACTION.UPDATE_MANY ? 'updateMany' : 'deleteMany';
+    const actionName = operation.action as string;
     const mutationFn = delegate[actionName] as (args: unknown) => Promise<unknown>;
     const result = await mutationFn(operation.args);
 
     let entities: Record<string, unknown>[];
     let pairedBeforeStates: Array<Record<string, unknown> | null>;
 
-    if (action === AUDIT_ACTION.UPDATE_MANY && beforeEntities.length > 0) {
-      // Re-fetch by PK (not original WHERE) to handle WHERE-field mutations
-      const beforeMap = buildEntityMap(beforeEntities, pkFields);
-      const afterEntities = await findManyByPKs(
+    if (isUpdate && beforeEntities.length > 0) {
+      const paired = await pairUpdatedEntitiesWithBefore(
         modelDelegate as { findMany: (args: { where: Record<string, unknown> }) => Promise<Record<string, unknown>[]> },
-        pkFields,
         beforeEntities,
+        pkFields,
       );
-
-      entities = afterEntities;
-      pairedBeforeStates = afterEntities.map((entity) => {
-        const pk = extractPrimaryKey(entity, pkFields);
-        return beforeMap.get(pk) ?? null;
-      });
+      entities = paired.entities;
+      pairedBeforeStates = paired.pairedBeforeStates;
     } else {
       // deleteMany: before = entities (no after state)
       entities = beforeEntities;
@@ -513,11 +623,16 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     ): Promise<unknown> => {
       const action = operation.action as PrismaAction;
 
-      if (action === AUDIT_ACTION.CREATE_MANY && hasArrayData(operation.args)) {
+      if (action === AUDIT_ACTION.CREATE_MANY || action === AUDIT_ACTION.CREATE_MANY_AND_RETURN) {
         return handleCreateMany(operation, txContext, baseClient, clientToUse);
       }
 
-      if ((action === AUDIT_ACTION.UPDATE_MANY || action === AUDIT_ACTION.DELETE_MANY) && operation.model) {
+      if (
+        (action === AUDIT_ACTION.UPDATE_MANY ||
+          action === AUDIT_ACTION.UPDATE_MANY_AND_RETURN ||
+          action === AUDIT_ACTION.DELETE_MANY) &&
+        operation.model
+      ) {
         return handleUpdateOrDeleteMany(operation, txContext, baseClient, clientToUse, action);
       }
 
@@ -582,11 +697,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
                 args: argsWithInclude as Record<string, unknown>,
               };
 
-              if (
-                operation === AUDIT_ACTION.CREATE_MANY ||
-                operation === AUDIT_ACTION.UPDATE_MANY ||
-                operation === AUDIT_ACTION.DELETE_MANY
-              ) {
+              if (isBatchOperation(operation)) {
                 return handleBatchOperation(operationContext, processingContext, baseClient);
               }
 

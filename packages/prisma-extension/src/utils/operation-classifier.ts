@@ -7,14 +7,15 @@
  * @module utils/operation-classifier
  */
 
-import { AUDIT_ACTION } from '@kuruwic/prisma-audit-core';
+import { AUDIT_ACTION, BATCH_OPERATIONS, SINGLE_OPERATIONS } from '@kuruwic/prisma-audit-core';
 import type { PrismaAction } from '../types.js';
 
 /**
  * Checks if an operation is a batch operation
  *
- * Batch operations (createMany, updateMany, deleteMany) process multiple records
- * and have different handling requirements compared to single-record operations.
+ * Batch operations (createMany, updateMany, deleteMany, createManyAndReturn,
+ * updateManyAndReturn) process multiple records and have different handling
+ * requirements compared to single-record operations.
  *
  * @example
  * ```typescript
@@ -22,10 +23,10 @@ import type { PrismaAction } from '../types.js';
  * isBatchOperation('create');     // => false
  * ```
  */
-export const isBatchOperation = (action: string): action is 'createMany' | 'updateMany' | 'deleteMany' => {
-  return (
-    action === AUDIT_ACTION.CREATE_MANY || action === AUDIT_ACTION.UPDATE_MANY || action === AUDIT_ACTION.DELETE_MANY
-  );
+export const isBatchOperation = (
+  action: string,
+): action is 'createMany' | 'updateMany' | 'deleteMany' | 'createManyAndReturn' | 'updateManyAndReturn' => {
+  return BATCH_OPERATIONS.has(action as PrismaAction);
 };
 
 /**
@@ -40,12 +41,7 @@ export const isBatchOperation = (action: string): action is 'createMany' | 'upda
  * ```
  */
 export const isSingleOperation = (action: string): action is 'create' | 'update' | 'upsert' | 'delete' => {
-  return (
-    action === AUDIT_ACTION.CREATE ||
-    action === AUDIT_ACTION.UPDATE ||
-    action === AUDIT_ACTION.UPSERT ||
-    action === AUDIT_ACTION.DELETE
-  );
+  return SINGLE_OPERATIONS.has(action as PrismaAction);
 };
 
 /**
@@ -67,6 +63,7 @@ export const requiresBeforeState = (action: PrismaAction): boolean => {
     action === AUDIT_ACTION.UPSERT ||
     action === AUDIT_ACTION.DELETE ||
     action === AUDIT_ACTION.UPDATE_MANY ||
+    action === AUDIT_ACTION.UPDATE_MANY_AND_RETURN ||
     action === AUDIT_ACTION.DELETE_MANY
   );
 };

@@ -46,7 +46,14 @@ export type {
 } from './config.types.js';
 // Constants
 export type { AuditAction } from './constants.js';
-export { AUDIT_ACTION, DEFAULTS, SUPPORTED_OPERATIONS } from './constants.js';
+export {
+  AUDIT_ACTION,
+  BATCH_OPERATIONS,
+  BATCH_TO_SINGULAR_ACTION,
+  DEFAULTS,
+  SINGLE_OPERATIONS,
+  SUPPORTED_OPERATIONS,
+} from './constants.js';
 // Context Provider
 export { createAsyncLocalStorageProvider } from './context-provider.js';
 // Domain - Audit Log Types

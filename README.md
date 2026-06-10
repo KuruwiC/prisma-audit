@@ -67,7 +67,7 @@ Branded types (`ActorId`, `EntityId`, `AggregateId`) prevent ID mix-ups at compi
 | Category          | Features                                                                                                                       |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | **Core**          | Automatic create/update/delete logging, field-level diff tracking, before/after state capture                                  |
-| **Operations**    | Batch operations (createMany, updateMany, deleteMany), nested operations at all depths, smart upsert/connectOrCreate detection |
+| **Operations**    | Batch operations (createMany, updateMany, deleteMany, createManyAndReturn, updateManyAndReturn), nested operations at all depths (including nested createMany), smart upsert/connectOrCreate detection |
 | **Architecture**  | DDD aggregate root mapping, AsyncLocalStorage context propagation, 6-stage lifecycle pipeline                                  |
 | **Performance**   | 3 write strategies (sync/deferred/fire-and-forget), probabilistic sampling, batch context enrichment (N+1 free)                |
 | **Security**      | Automatic PII redaction (passwords, tokens, SSN, etc.), configurable sensitive field detection                                 |
@@ -78,7 +78,7 @@ Branded types (`ActorId`, `EntityId`, `AggregateId`) prevent ID mix-ups at compi
 > **Note**: This package is not yet published to npm. Install from GitHub Releases.
 
 ```bash
-pnpm add https://github.com/KuruwiC/prisma-audit/releases/download/v0.1.2/kuruwic-prisma-audit-0.1.2.tgz
+pnpm add https://github.com/KuruwiC/prisma-audit/releases/download/v0.1.3/kuruwic-prisma-audit-0.1.3.tgz
 ```
 
 **Requirements:** Node.js 20+ (AsyncLocalStorage), Prisma 5.10+

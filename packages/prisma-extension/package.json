@@ -1,6 +1,6 @@
 {
   "name": "@kuruwic/prisma-audit",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "type": "module",
   "description": "Prisma extension for audit logging",
   "main": "./dist/index.cjs",

@@ -76,8 +76,22 @@ export const createPrismaHarness = (
       return (await callDelegate(getDelegate(prisma, model), 'createMany', { data })) as { count: number };
     },
 
+    async createManyAndReturn(model, data) {
+      return (await callDelegate(getDelegate(prisma, model), 'createManyAndReturn', { data })) as Record<
+        string,
+        unknown
+      >[];
+    },
+
     async updateMany(model, where, data) {
       return (await callDelegate(getDelegate(prisma, model), 'updateMany', { where, data })) as { count: number };
+    },
+
+    async updateManyAndReturn(model, where, data) {
+      return (await callDelegate(getDelegate(prisma, model), 'updateManyAndReturn', { where, data })) as Record<
+        string,
+        unknown
+      >[];
     },
 
     async deleteMany(model, where) {
@@ -170,8 +184,17 @@ const createTransactionalHarness = (tx: PrismaClient, provider: AuditContextProv
     async createMany(model, data) {
       return (await callDelegate(getTxDelegate(model), 'createMany', { data })) as { count: number };
     },
+    async createManyAndReturn(model, data) {
+      return (await callDelegate(getTxDelegate(model), 'createManyAndReturn', { data })) as Record<string, unknown>[];
+    },
     async updateMany(model, where, data) {
       return (await callDelegate(getTxDelegate(model), 'updateMany', { where, data })) as { count: number };
+    },
+    async updateManyAndReturn(model, where, data) {
+      return (await callDelegate(getTxDelegate(model), 'updateManyAndReturn', { where, data })) as Record<
+        string,
+        unknown
+      >[];
     },
     async deleteMany(model, where) {
       return (await callDelegate(getTxDelegate(model), 'deleteMany', { where })) as { count: number };

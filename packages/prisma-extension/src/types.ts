@@ -196,7 +196,16 @@ export interface PrismaAuditExtensionOptions {
 /**
  * Prisma operation actions
  */
-export type PrismaAction = 'create' | 'update' | 'upsert' | 'delete' | 'createMany' | 'updateMany' | 'deleteMany';
+export type PrismaAction =
+  | 'create'
+  | 'update'
+  | 'upsert'
+  | 'delete'
+  | 'createMany'
+  | 'updateMany'
+  | 'deleteMany'
+  | 'createManyAndReturn'
+  | 'updateManyAndReturn';
 
 /**
  * Prisma operation context

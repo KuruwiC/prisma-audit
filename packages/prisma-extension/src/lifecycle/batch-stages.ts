@@ -7,7 +7,7 @@
  * @module lifecycle/batch-stages
  */
 
-import { AUDIT_ACTION } from '@kuruwic/prisma-audit-core';
+import { BATCH_TO_SINGULAR_ACTION } from '@kuruwic/prisma-audit-core';
 
 import type { ResolvedAggregateData } from '../audit-log-builder/index.js';
 import { createPrismaClientManager } from '../client-manager/index.js';
@@ -26,17 +26,6 @@ import type { BatchEnrichedContext, BatchFinalContext, BatchInitialContext, Life
 
 export { resetBatchResolveWarnings };
 export type { SurvivorEntity };
-
-/**
- * Maps batch operations to singular equivalents for audit log generation.
- *
- * @internal
- */
-const BATCH_TO_SINGULAR_ACTION: Record<string, PrismaAction> = {
-  [AUDIT_ACTION.CREATE_MANY]: AUDIT_ACTION.CREATE,
-  [AUDIT_ACTION.UPDATE_MANY]: AUDIT_ACTION.UPDATE,
-  [AUDIT_ACTION.DELETE_MANY]: AUDIT_ACTION.DELETE,
-} as const;
 
 /**
  * Enriches entity contexts for all entities in a batch.
@@ -126,7 +115,7 @@ export const createBatchEnrichContextsStage = (
  * @internal
  */
 const mapBatchActionToSingular = (batchAction: string): PrismaAction => {
-  const singularAction = BATCH_TO_SINGULAR_ACTION[batchAction];
+  const singularAction = BATCH_TO_SINGULAR_ACTION[batchAction as keyof typeof BATCH_TO_SINGULAR_ACTION];
   if (!singularAction) {
     throw new Error(`Unknown batch action: ${batchAction}`);
   }

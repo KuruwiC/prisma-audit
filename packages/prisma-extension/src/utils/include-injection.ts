@@ -17,7 +17,7 @@
  */
 interface NestedOperation {
   path: string[];
-  operation: 'create' | 'update' | 'upsert' | 'connectOrCreate' | 'delete' | 'deleteMany';
+  operation: 'create' | 'createMany' | 'update' | 'upsert' | 'connectOrCreate' | 'delete' | 'deleteMany';
   fieldName: string;
 }
 
@@ -60,7 +60,7 @@ const analyzeConnectOrCreateData = (nestedData: Record<string, unknown>, path: s
  * @internal
  */
 const processWriteOperation = (
-  op: 'create' | 'update' | 'upsert' | 'connectOrCreate' | 'delete' | 'deleteMany',
+  op: 'create' | 'createMany' | 'update' | 'upsert' | 'connectOrCreate' | 'delete' | 'deleteMany',
   key: string,
   value: Record<string, unknown>,
   path: string[],
@@ -101,7 +101,7 @@ export const analyzeNestedWriteOperations = (data: unknown, path: string[] = [])
   }
 
   const operations: NestedOperation[] = [];
-  const writeOps = ['create', 'update', 'upsert', 'connectOrCreate', 'delete', 'deleteMany'] as const;
+  const writeOps = ['create', 'createMany', 'update', 'upsert', 'connectOrCreate', 'delete', 'deleteMany'] as const;
 
   for (const [key, value] of Object.entries(data)) {
     if (!value || typeof value !== 'object') {

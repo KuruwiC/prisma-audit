@@ -489,6 +489,178 @@ describe('CRUD Operations Integration', () => {
         expect(log.entityId.length).toBeGreaterThan(0);
       }
     });
+
+    it('should create audit logs for createManyAndReturn returning records', async () => {
+      const users = await context.provider.runAsync(testActor, async () => {
+        return await context.prisma.user.createManyAndReturn({
+          data: [
+            { email: 'mr1@example.com', name: 'MR 1', password: 'secret1' },
+            { email: 'mr2@example.com', name: 'MR 2', password: 'secret2' },
+          ],
+        });
+      });
+
+      expect(Array.isArray(users)).toBe(true);
+      expect(users).toHaveLength(2);
+      for (const u of users) expect(u.id).toBeTruthy();
+
+      const logs = await context.prisma.auditLog.findMany({
+        where: { entityType: 'User', action: 'create' },
+      });
+      const emails = logs.map((l: { after: unknown }) => (l.after as Record<string, unknown>)?.email).sort();
+      expect(emails).toEqual(['mr1@example.com', 'mr2@example.com']);
+    });
+
+    it('should create audit logs for updateManyAndReturn with before/after', async () => {
+      // Create multiple users
+      const created = await context.provider.runAsync(testActor, async () => {
+        return await context.prisma.user.createManyAndReturn({
+          data: [
+            { email: 'umr-int1@example.com', name: 'Original', password: 'secret1' },
+            { email: 'umr-int2@example.com', name: 'Original', password: 'secret2' },
+          ],
+        });
+      });
+      const ids = created.map((u: { id: string }) => u.id);
+
+      // Bulk update name and return updated records
+      const updated = await context.provider.runAsync(testActor, async () => {
+        return await context.prisma.user.updateManyAndReturn({
+          where: { id: { in: ids } },
+          data: { name: 'Updated' },
+        });
+      });
+
+      expect(Array.isArray(updated)).toBe(true);
+      expect(updated).toHaveLength(2);
+      for (const u of updated) expect(u.name).toBe('Updated');
+
+      const updateLogs = await context.prisma.auditLog.findMany({
+        where: { entityType: 'User', action: 'update' },
+      });
+      expect(updateLogs).toHaveLength(2);
+
+      for (const log of updateLogs) {
+        const before = log.before as Record<string, unknown>;
+        const after = log.after as Record<string, unknown>;
+        expect(before).not.toBeNull();
+        expect(after).not.toBeNull();
+        expect(before.name).toBe('Original');
+        expect(after.name).toBe('Updated');
+
+        const changes = log.changes as Record<string, { old: unknown; new: unknown }>;
+        expect(changes).toHaveProperty('name');
+        expect(changes.name).toEqual({ old: 'Original', new: 'Updated' });
+      }
+    });
+
+    it('should create audit log for createMany with single object data', async () => {
+      await context.provider.runAsync(testActor, async () => {
+        // Pass a single object instead of an array
+        await context.prisma.user.createMany({
+          data: { email: 'single@example.com', name: 'Single', password: 'x' },
+        });
+      });
+
+      const logs = await context.prisma.auditLog.findMany({
+        where: { entityType: 'User', action: 'create' },
+      });
+      expect(logs).toHaveLength(1);
+    });
+
+    it('should create audit log for createManyAndReturn with single object data', async () => {
+      const rows = await context.provider.runAsync(testActor, async () =>
+        context.prisma.user.createManyAndReturn({
+          data: { email: 'single2@example.com', name: 'Single2', password: 'x' },
+        }),
+      );
+
+      expect(Array.isArray(rows)).toBe(true);
+      expect(rows).toHaveLength(1);
+
+      const logs = await context.prisma.auditLog.findMany({
+        where: { entityType: 'User', action: 'create' },
+      });
+      expect(logs).toHaveLength(1);
+      expect((logs[0].after as Record<string, unknown>).email).toBe('single2@example.com');
+    });
+
+    // On connectors with updateManyAndReturn (PostgreSQL here), a limited update is audited via
+    // updateManyAndReturn so the audited rows are exactly the ones the DB updated (debt #2 fix).
+    it('should record audit logs matching the limit on updateMany with limit', async () => {
+      // Create 3 users
+      const created = await context.provider.runAsync(testActor, async () => {
+        return await context.prisma.user.createManyAndReturn({
+          data: [
+            { email: 'lim1@example.com', name: 'Original', password: 'x' },
+            { email: 'lim2@example.com', name: 'Original', password: 'x' },
+            { email: 'lim3@example.com', name: 'Original', password: 'x' },
+          ],
+        });
+      });
+      const ids = created.map((u: { id: string }) => u.id);
+
+      // Update at most 2 of them
+      const result = await context.provider.runAsync(testActor, async () => {
+        return await context.prisma.user.updateMany({
+          where: { id: { in: ids } },
+          data: { name: 'Limited' },
+          limit: 2,
+        });
+      });
+
+      expect(result.count).toBe(2);
+
+      // Audit logs should match the actual number of updated rows (limit), not the full where set.
+      const updateLogs = await context.prisma.auditLog.findMany({
+        where: { entityType: 'User', action: 'update' },
+      });
+      expect(updateLogs).toHaveLength(2);
+      for (const log of updateLogs) {
+        const before = log.before as Record<string, unknown>;
+        const after = log.after as Record<string, unknown>;
+        expect(before.name).toBe('Original');
+        expect(after.name).toBe('Limited');
+      }
+    });
+
+    it('should record audit logs matching the limit on updateManyAndReturn with limit', async () => {
+      const created = await context.provider.runAsync(testActor, async () => {
+        return await context.prisma.user.createManyAndReturn({
+          data: [
+            { email: 'limr1@example.com', name: 'Original', password: 'x' },
+            { email: 'limr2@example.com', name: 'Original', password: 'x' },
+            { email: 'limr3@example.com', name: 'Original', password: 'x' },
+          ],
+        });
+      });
+      const ids = created.map((u: { id: string }) => u.id);
+
+      const updated = await context.provider.runAsync(testActor, async () => {
+        return await context.prisma.user.updateManyAndReturn({
+          where: { id: { in: ids } },
+          data: { name: 'Limited' },
+          limit: 2,
+        });
+      });
+
+      expect(updated).toHaveLength(2);
+      for (const u of updated) expect(u.name).toBe('Limited');
+      const updatedIds = new Set(updated.map((u: { id: string }) => u.id));
+
+      const updateLogs = await context.prisma.auditLog.findMany({
+        where: { entityType: 'User', action: 'update' },
+      });
+      expect(updateLogs).toHaveLength(2);
+      // Logged entities must be exactly the rows actually updated under the limit.
+      expect(new Set(updateLogs.map((log: { entityId: string }) => log.entityId))).toEqual(updatedIds);
+      for (const log of updateLogs) {
+        const before = log.before as Record<string, unknown>;
+        const after = log.after as Record<string, unknown>;
+        expect(before.name).toBe('Original');
+        expect(after.name).toBe('Limited');
+      }
+    });
   });
 
   describe('Without audit context', () => {
@@ -590,6 +762,44 @@ describe('CRUD Operations Integration', () => {
         expect(postLog.actorCategory).toBe('model');
         expect(postLog.actorType).toBe('User');
         expect(postLog.actorId).toBe('test-user-1');
+      }
+    });
+
+    it('should create audit logs for nested createMany', async () => {
+      const user = await context.provider.runAsync(testActor, async () => {
+        return await context.prisma.user.create({
+          data: {
+            email: 'nested-createmany@example.com',
+            name: 'Nested CreateMany Parent',
+            password: 'secret123',
+            posts: {
+              createMany: {
+                data: [
+                  { title: 'NCM Post 1', content: 'c1' },
+                  { title: 'NCM Post 2', content: 'c2' },
+                ],
+              },
+            },
+          },
+        });
+      });
+
+      // Each nested-created Post resolves 2 aggregate roots (Post itself + User author),
+      // matching the nested `create` behavior verified above.
+      const postLogs = await context.prisma.auditLog.findMany({
+        where: { entityType: 'Post', action: 'create' },
+      });
+      expect(postLogs).toHaveLength(4);
+
+      const postEntityIds = new Set(postLogs.map((log: { entityId: string }) => log.entityId));
+      expect(postEntityIds.size).toBe(2);
+
+      const aggregateTypes = [...new Set(postLogs.map((log: { aggregateType: string }) => log.aggregateType))].sort();
+      expect(aggregateTypes).toEqual(['Post', 'User']);
+
+      const userAggLogs = postLogs.filter((log: { aggregateType: string }) => log.aggregateType === 'User');
+      for (const log of userAggLogs) {
+        expect(log.aggregateId).toBe(user.id);
       }
     });
   });

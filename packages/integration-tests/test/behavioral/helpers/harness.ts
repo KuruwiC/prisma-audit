@@ -66,7 +66,15 @@ export interface AuditTestHarness {
 
   createMany(model: string, data: Record<string, unknown>[]): Promise<{ count: number }>;
 
+  createManyAndReturn(model: string, data: Record<string, unknown>[]): Promise<Record<string, unknown>[]>;
+
   updateMany(model: string, where: Record<string, unknown>, data: Record<string, unknown>): Promise<{ count: number }>;
+
+  updateManyAndReturn(
+    model: string,
+    where: Record<string, unknown>,
+    data: Record<string, unknown>,
+  ): Promise<Record<string, unknown>[]>;
 
   deleteMany(model: string, where: Record<string, unknown>): Promise<{ count: number }>;
 
