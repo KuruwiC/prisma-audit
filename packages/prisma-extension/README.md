@@ -173,11 +173,11 @@ const aggregateMapping = defineAggregateMapping<PrismaClient>()({
   AuditLog: defineEntity({
     type: 'AuditEvent',      // Custom entityType
     category: 'system',      // Custom category
-    excludeSelf: true,       // Don't create self aggregate
+    self: false,             // Don't create self aggregate
   }),
   PostTag: defineEntity({
     type: 'PostTag',
-    excludeSelf: true,       // Join table - only log aggregates
+    self: false,             // Join table - only log aggregates
     aggregates: [
       to('Post', foreignKey('postId')),
       to('Tag', foreignKey('tagId')),
@@ -189,7 +189,7 @@ const aggregateMapping = defineAggregateMapping<PrismaClient>()({
 This allows you to:
 - Use custom names in `entityType`/`aggregateType` fields (e.g., `"UserAccount"` instead of `"User"`)
 - Categorize entities with custom `category` values (e.g., `"identity"`, `"system"`, `"business"`)
-- Control which entities create self aggregates with `excludeSelf`
+- Control which entities create self aggregates with `self: false`
 
 #### `basePrisma`
 **Type:** `PrismaClient`
@@ -1019,51 +1019,52 @@ Enrich actor information with database data.
 }
 ```
 
-#### `entity`
-**Type:** `(entity: EntityInfo, prisma: PrismaClient) => Promise<object | null>`
+#### Entity / aggregate context
 
-Enrich entity information.
-
-```typescript
-{
-  contextEnricher: {
-    entity: async (entity, prisma) => {
-      if (entity.type === 'Post') {
-        const post = await prisma.post.findUnique({
-          where: { id: entity.id },
-          select: { title: true, status: true },
-        });
-        return { title: post?.title, status: post?.status };
-      }
-      return null;
-    },
-  }
-}
-```
-
-#### `aggregate`
-**Type:** `(aggregate: AggregateInfo, prisma: PrismaClient) => Promise<object | null>`
-
-Enrich aggregate root information.
+Entity and aggregate contexts are configured per entity in the aggregate mapping (not in `contextEnricher`), using three orthogonal batch-first hooks:
 
 ```typescript
-{
-  contextEnricher: {
-    aggregate: async (aggregate, prisma) => {
-      if (aggregate.type === 'User') {
-        const user = await prisma.user.findUnique({
-          where: { id: aggregate.id },
-          select: { name: true, status: true },
+const aggregateMapping = defineAggregateMapping<PrismaClient>()({
+  User: defineEntity({
+    type: 'User',
+    // Root-side: applied whenever ANY log projects onto a User aggregate.
+    // Receives the unique aggregate IDs involved in the operation.
+    aggregateContext: {
+      enricher: async (userIds, prisma) => {
+        const users = await prisma.user.findMany({
+          where: { id: { in: userIds } },
+          select: { id: true, name: true },
         });
-        return { name: user?.name, status: user?.status };
-      }
-      return null;
+        const byId = new Map(users.map((u) => [u.id, u]));
+        return userIds.map((id) => ({ userName: byId.get(id)?.name ?? null }));
+      },
     },
-  }
-}
+  }),
+  Post: defineEntity({
+    type: 'Post',
+    // Entity-log context: stored in AuditLog.entityContext.
+    context: {
+      enricher: async (posts, prisma) =>
+        posts.map((post) => ({ title: post.title })),
+    },
+    aggregates: [
+      // Projection-side: context specific to "Post projected onto User".
+      // The enricher receives the WRITTEN rows (posts), and meta.aggregateIds[i]
+      // is the aggregate ID resolved for row i.
+      to('User', foreignKey('authorId'), {
+        context: {
+          enricher: async (posts, prisma, meta) =>
+            posts.map((post) => ({ postTitle: post.title })),
+        },
+      }),
+    ],
+  }),
+});
 ```
 
-**⚠️ Performance Note:** Enrichers execute database queries for each audit log entry. Use sparingly or implement caching.
+The stored `aggregateContext` is the shallow merge of the root-side and projection-side results (projection keys win). The self aggregate log can be enriched via `self: { context: { ... } }`.
+
+**⚠️ Performance Note:** Enrichers execute database queries per operation (batched, N+1 free). Root-side enrichers run once per aggregate type with unique IDs.
 
 ### Nested Operations (`nestedOperations`)
 
@@ -1268,10 +1269,11 @@ Each stage transforms the context by adding new properties:
 3. **Enrich Contexts** (`ExecutedContext` → `EnrichedContext`)
    - Enriches actor information (role, department, email)
    - Enriches entity context (title, status, metadata)
-   - Enriches aggregate context (aggregate-level metadata)
-   - Adds `actorContext`, `entityContext`, `aggregateContext` properties
+   - Adds `actorContext`, `entityContext` properties
 
 4. **Build Logs** (`EnrichedContext` → `FinalContext`)
+   - Resolves aggregate roots and enriches aggregate contexts
+     (root-side `aggregateContext` merged with projection-side `to(..., { context })`)
    - Constructs main audit log entry
    - Constructs nested audit logs (if applicable)
    - Calculates field-level changes and applies redaction

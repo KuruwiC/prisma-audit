@@ -9,86 +9,42 @@ import { expect, vi } from 'vitest';
 import { testAggregateMapping } from './setup.js';
 
 export interface EntityEnricherConfig<TEntity = unknown, TContext = unknown> {
-  enrichFn: (
-    entities: TEntity[],
-    prisma: PrismaClient,
-    meta: {
-      aggregateType: string;
-      aggregateCategory: string;
-      aggregateId?: string;
-    },
-  ) => TContext[] | Promise<TContext[]>;
+  enrichFn: (entities: TEntity[], prisma: PrismaClient) => TContext[] | Promise<TContext[]>;
   onError?: 'log' | 'fail';
   fallback?: TContext | null;
 }
 
 export function createEntityEnricher<TEntity = unknown, TContext = unknown>(
   config: EntityEnricherConfig<TEntity, TContext>,
-): Mock<
-  (
-    entities: TEntity[],
-    prisma: PrismaClient,
-    meta: {
-      aggregateType: string;
-      aggregateCategory: string;
-      aggregateId?: string;
-    },
-  ) => Promise<TContext[]>
-> {
-  return vi.fn(
-    async (
-      entities: TEntity[],
-      prisma: PrismaClient,
-      meta: {
-        aggregateType: string;
-        aggregateCategory: string;
-        aggregateId?: string;
-      },
-    ): Promise<TContext[]> => {
-      const result = await config.enrichFn(entities, prisma, meta);
-      return result;
-    },
-  );
+): Mock<(entities: TEntity[], prisma: PrismaClient) => Promise<TContext[]>> {
+  return vi.fn(async (entities: TEntity[], prisma: PrismaClient): Promise<TContext[]> => {
+    const result = await config.enrichFn(entities, prisma);
+    return result;
+  });
 }
 
-export interface AggregateEnricherConfig<TAggregate = unknown, TContext = unknown> {
+export interface ProjectionEnrichmentMeta {
+  aggregateType: string;
+  aggregateCategory: string;
+  aggregateIds: string[];
+}
+
+export interface AggregateEnricherConfig<TEntity = unknown, TContext = unknown> {
   enrichFn: (
-    aggregates: TAggregate[],
+    entities: TEntity[],
     prisma: PrismaClient,
-    meta: {
-      aggregateType: string;
-      aggregateCategory: string;
-      aggregateId?: string;
-    },
+    meta: ProjectionEnrichmentMeta,
   ) => TContext[] | Promise<TContext[]>;
   onError?: 'log' | 'fail';
   fallback?: TContext | null;
 }
 
-export function createAggregateEnricher<TAggregate = unknown, TContext = unknown>(
-  config: AggregateEnricherConfig<TAggregate, TContext>,
-): Mock<
-  (
-    aggregates: TAggregate[],
-    prisma: PrismaClient,
-    meta: {
-      aggregateType: string;
-      aggregateCategory: string;
-      aggregateId?: string;
-    },
-  ) => Promise<TContext[]>
-> {
+export function createAggregateEnricher<TEntity = unknown, TContext = unknown>(
+  config: AggregateEnricherConfig<TEntity, TContext>,
+): Mock<(entities: TEntity[], prisma: PrismaClient, meta: ProjectionEnrichmentMeta) => Promise<TContext[]>> {
   return vi.fn(
-    async (
-      aggregates: TAggregate[],
-      prisma: PrismaClient,
-      meta: {
-        aggregateType: string;
-        aggregateCategory: string;
-        aggregateId?: string;
-      },
-    ): Promise<TContext[]> => {
-      const result = await config.enrichFn(aggregates, prisma, meta);
+    async (entities: TEntity[], prisma: PrismaClient, meta: ProjectionEnrichmentMeta): Promise<TContext[]> => {
+      const result = await config.enrichFn(entities, prisma, meta);
       return result;
     },
   );
@@ -150,7 +106,7 @@ export function createEnrichmentTestContext(options: EnrichmentTestContextOption
 
 export function createCommentEntityEnricher() {
   return createEntityEnricher<Record<string, unknown>, { commentContent: string }>({
-    enrichFn: (entities, _prisma, _meta) => {
+    enrichFn: (entities, _prisma) => {
       return entities.map((entity) => ({
         commentContent: entity.content as string,
       }));
@@ -170,7 +126,7 @@ export function createCommentAggregateEnricher() {
 
 export function createProfileEntityEnricher() {
   return createEntityEnricher<Record<string, unknown>, { profileBio: string | null }>({
-    enrichFn: (entities, _prisma, _meta) => {
+    enrichFn: (entities, _prisma) => {
       return entities.map((entity) => ({
         profileBio: entity.bio as string | null,
       }));
@@ -204,17 +160,20 @@ export function createCommentAggregateMapping(
     }),
     Comment: defineEntity({
       type: 'Comment',
-      aggregates: [to('Post', foreignKey('postId')), to('User', foreignKey('authorId'))],
-      entityContext: {
+      aggregates: [
+        to('Post', foreignKey('postId'), {
+          context: {
+            enricher: aggregateEnricher as unknown as (input: unknown[], prisma: unknown) => Promise<unknown[]>,
+          },
+        }),
+        to('User', foreignKey('authorId'), {
+          context: {
+            enricher: aggregateEnricher as unknown as (input: unknown[], prisma: unknown) => Promise<unknown[]>,
+          },
+        }),
+      ],
+      context: {
         enricher: entityEnricher as unknown as (input: unknown[], prisma: unknown) => Promise<unknown[]>,
-      },
-      aggregateContextMap: {
-        Post: {
-          enricher: aggregateEnricher as unknown as (input: unknown[], prisma: unknown) => Promise<unknown[]>,
-        },
-        User: {
-          enricher: aggregateEnricher as unknown as (input: unknown[], prisma: unknown) => Promise<unknown[]>,
-        },
       },
     }),
   };
@@ -236,14 +195,15 @@ export function createProfileAggregateMapping(
     }),
     Profile: defineEntity({
       type: 'Profile',
-      aggregates: [to('User', foreignKey('userId'))],
-      entityContext: {
+      aggregates: [
+        to('User', foreignKey('userId'), {
+          context: {
+            enricher: aggregateEnricher as unknown as (input: unknown[], prisma: unknown) => Promise<unknown[]>,
+          },
+        }),
+      ],
+      context: {
         enricher: entityEnricher as unknown as (input: unknown[], prisma: unknown) => Promise<unknown[]>,
-      },
-      aggregateContextMap: {
-        User: {
-          enricher: aggregateEnricher as unknown as (input: unknown[], prisma: unknown) => Promise<unknown[]>,
-        },
       },
     }),
   };
@@ -294,7 +254,7 @@ export function createErrorThrowingEnricher(errorMessage = 'Simulated enricher e
 
 export function createUserEntityEnricher() {
   return createEntityEnricher<Record<string, unknown>, { enrichedEmail: string }>({
-    enrichFn: (entities, _prisma, _meta) => {
+    enrichFn: (entities, _prisma) => {
       return entities.map((entity) => ({
         enrichedEmail: (entity.email as string)?.toUpperCase(),
       }));
@@ -304,10 +264,10 @@ export function createUserEntityEnricher() {
 
 export function createUserAggregateEnricher() {
   return createAggregateEnricher<Record<string, unknown>, { aggregateType: string; aggregateId: string }>({
-    enrichFn: (aggregates, _prisma, meta) => {
-      return aggregates.map((aggregate) => ({
+    enrichFn: (entities, _prisma, meta) => {
+      return entities.map((entity, i) => ({
         aggregateType: meta.aggregateType,
-        aggregateId: (meta.aggregateId || aggregate.id) as string,
+        aggregateId: (meta.aggregateIds[i] ?? entity.id) as string,
       }));
     },
   });
@@ -320,7 +280,7 @@ export function createUserEntityAggregateMapping(
     User: defineEntity({
       type: 'User',
       excludeFields: ['updatedAt'],
-      entityContext: {
+      context: {
         enricher: entityEnricher as unknown as (input: unknown[], prisma: unknown) => Promise<unknown[]>,
       },
     }),
@@ -346,8 +306,8 @@ export function createUserAggregateAggregateMapping(
     User: defineEntity({
       type: 'User',
       excludeFields: ['updatedAt'],
-      aggregateContextMap: {
-        User: {
+      self: {
+        context: {
           enricher: aggregateEnricher as unknown as (input: unknown[], prisma: unknown) => Promise<unknown[]>,
         },
       },

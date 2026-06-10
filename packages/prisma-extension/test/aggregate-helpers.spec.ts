@@ -5,13 +5,13 @@ import {
   foreignKey,
   normalizeId,
   resolveAggregateId,
-  resolveAllAggregateRoots,
   resolveId,
   self,
   to,
   validateAggregateMapping,
 } from '@kuruwic/prisma-audit-core';
 import { describe, expect, it } from 'vitest';
+import { resolveAndFilterSurvivors } from '../src/lifecycle/batch-aggregate-resolver.js';
 
 describe('normalizeId', () => {
   it('should convert primitive types to string', () => {
@@ -129,12 +129,21 @@ describe('Resolver helper functions', () => {
 
     it('should create aggregate root with custom category', () => {
       const resolver = self();
-      const aggregateRoot = to('AuditLog', resolver, 'system');
+      const aggregateRoot = to('AuditLog', resolver, { category: 'system' });
       expect(aggregateRoot).toEqual({
         category: 'system',
         type: 'AuditLog',
         resolve: resolver,
       });
+    });
+
+    it('should attach projection context enricher', () => {
+      const resolver = self();
+      const context = {
+        enricher: async (rows: Record<string, unknown>[]) => rows.map(() => ({})),
+      };
+      const aggregateRoot = to('User', resolver, { context });
+      expect(aggregateRoot.context).toBe(context);
     });
   });
 });
@@ -149,7 +158,7 @@ describe('defineEntity', () => {
     expect(entity.type).toBe('User');
     expect(entity.idResolver).toBeDefined();
     expect(entity.aggregates).toHaveLength(0);
-    expect(entity.excludeSelf).toBe(false);
+    expect(entity.self).toBeUndefined();
   });
 
   it('should create entity with custom id resolver', () => {
@@ -172,15 +181,27 @@ describe('defineEntity', () => {
     expect(entity.aggregates[0]?.type).toBe('User');
   });
 
-  it('should support excludeSelf option', () => {
+  it('should support self: false option', () => {
     const entity = defineEntity({
       type: 'PostTag',
-      excludeSelf: true,
+      self: false,
       aggregates: [to('Post', foreignKey('postId')), to('Tag', foreignKey('tagId'))],
     });
 
-    expect(entity.excludeSelf).toBe(true);
+    expect(entity.self).toBe(false);
     expect(entity.aggregates).toHaveLength(2);
+  });
+
+  it('should support self projection with context enricher', () => {
+    const selfContext = {
+      enricher: async (rows: Record<string, unknown>[]) => rows.map(() => ({})),
+    };
+    const entity = defineEntity({
+      type: 'Post',
+      self: { context: selfContext },
+    });
+
+    expect(entity.self).toEqual({ context: selfContext });
   });
 
   it('should support system category', () => {
@@ -235,17 +256,18 @@ describe('resolveAggregateId', () => {
   });
 });
 
-describe('resolveAllAggregateRoots', () => {
-  it('should resolve all aggregate roots with direct id only', async () => {
+describe('resolveAndFilterSurvivors (aggregate root resolution)', () => {
+  it('should resolve the self aggregate root by default', async () => {
     const entity = defineEntity({
       type: 'User',
     });
     const data = { id: 'user-123', name: 'John' };
     const mockPrisma = {};
 
-    const result = await resolveAllAggregateRoots(data, entity, mockPrisma);
+    const survivors = await resolveAndFilterSurvivors([data], entity, mockPrisma);
 
-    expect(result).toEqual([
+    expect(survivors).toHaveLength(1);
+    expect(survivors[0]?.aggregateRoots).toEqual([
       {
         aggregateCategory: 'model',
         aggregateType: 'User',
@@ -254,7 +276,7 @@ describe('resolveAllAggregateRoots', () => {
     ]);
   });
 
-  it('should resolve multiple aggregate roots', async () => {
+  it('should resolve self and declared aggregate roots', async () => {
     const entity = defineEntity({
       type: 'Post',
       aggregates: [to('User', foreignKey('authorId'))],
@@ -266,22 +288,25 @@ describe('resolveAllAggregateRoots', () => {
     };
     const mockPrisma = {};
 
-    const result = await resolveAllAggregateRoots(data, entity, mockPrisma);
+    const survivors = await resolveAndFilterSurvivors([data], entity, mockPrisma);
 
-    expect(result).toHaveLength(2);
-    expect(result[0]).toEqual({
+    const roots = survivors[0]?.aggregateRoots ?? [];
+    expect(roots).toHaveLength(2);
+    expect(roots[0]).toMatchObject({
       aggregateCategory: 'model',
       aggregateType: 'Post',
       aggregateId: 'post-456',
     });
-    expect(result[1]).toEqual({
+    // Roots produced by to() declarations carry their source projection
+    expect(roots[1]).toMatchObject({
       aggregateCategory: 'model',
       aggregateType: 'User',
       aggregateId: 'user-123',
+      source: entity.aggregates[0],
     });
   });
 
-  it('should skip failed id resolutions', async () => {
+  it('should skip failed id resolutions (null FK)', async () => {
     const entity = defineEntity({
       type: 'Post',
       aggregates: [to('User', foreignKey('authorId'))],
@@ -290,10 +315,10 @@ describe('resolveAllAggregateRoots', () => {
     const data = { id: 'post-456', title: 'Test' }; // Missing authorId
     const mockPrisma = {};
 
-    const result = await resolveAllAggregateRoots(data, entity, mockPrisma);
+    const survivors = await resolveAndFilterSurvivors([data], entity, mockPrisma);
 
     // Only Post itself should be resolved
-    expect(result).toEqual([
+    expect(survivors[0]?.aggregateRoots).toEqual([
       {
         aggregateCategory: 'model',
         aggregateType: 'Post',
@@ -302,22 +327,38 @@ describe('resolveAllAggregateRoots', () => {
     ]);
   });
 
-  it('should respect excludeSelf option', async () => {
+  it('should respect self: false option', async () => {
     const entity = defineEntity({
       type: 'PostTag',
-      excludeSelf: true,
+      self: false,
       aggregates: [to('Post', foreignKey('postId')), to('Tag', foreignKey('tagId'))],
     });
 
     const data = { id: 'pt-123', postId: 'post-456', tagId: 'tag-789' };
     const mockPrisma = {};
 
-    const result = await resolveAllAggregateRoots(data, entity, mockPrisma);
+    const survivors = await resolveAndFilterSurvivors([data], entity, mockPrisma);
 
     // Should not include self (PostTag)
-    expect(result).toHaveLength(2);
-    expect(result[0]?.aggregateType).toBe('Post');
-    expect(result[1]?.aggregateType).toBe('Tag');
+    const roots = survivors[0]?.aggregateRoots ?? [];
+    expect(roots).toHaveLength(2);
+    expect(roots[0]?.aggregateType).toBe('Post');
+    expect(roots[1]?.aggregateType).toBe('Tag');
+  });
+
+  it('should filter out entities with no aggregate roots', async () => {
+    const entity = defineEntity({
+      type: 'PostTag',
+      self: false,
+      aggregates: [to('Post', foreignKey('postId'))],
+    });
+
+    const data = { id: 'pt-123', postId: null };
+    const mockPrisma = {};
+
+    const survivors = await resolveAndFilterSurvivors([data], entity, mockPrisma);
+
+    expect(survivors).toEqual([]);
   });
 });
 
@@ -352,6 +393,24 @@ describe('validateAggregateMapping', () => {
     } as unknown as AggregateMapping;
 
     expect(() => validateAggregateMapping(mapping)).toThrow('idResolver is required');
+  });
+
+  it('should throw when two entities share the same category and type', () => {
+    const mapping: AggregateMapping = {
+      User: defineEntity({ type: 'User' }),
+      Account: defineEntity({ type: 'User' }),
+    };
+
+    expect(() => validateAggregateMapping(mapping)).toThrow('share the same category/type "model:User"');
+  });
+
+  it('should allow the same type under different categories', () => {
+    const mapping: AggregateMapping = {
+      User: defineEntity({ type: 'User' }),
+      ExternalUser: defineEntity({ type: 'User', category: 'external' }),
+    };
+
+    expect(() => validateAggregateMapping(mapping)).not.toThrow();
   });
 });
 

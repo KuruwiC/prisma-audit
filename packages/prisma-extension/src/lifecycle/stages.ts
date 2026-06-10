@@ -21,8 +21,8 @@ import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '.
 import type { AuditLogData, PrismaAction } from '../types.js';
 import { createSchemaMetadataFromDMMF, getPrisma } from '../utils/schema-metadata.js';
 import {
-  batchEnrichAggregateContextsByType,
   buildAggregateDataForEntity,
+  enrichAggregateContexts,
   resolveAndFilterSurvivors,
 } from './batch-aggregate-resolver.js';
 import type {
@@ -153,37 +153,14 @@ export interface StageDependencies {
   /**
    * Batch enrich entity contexts for multiple entities
    *
-   * Adds additional context data to entities (e.g., title, status, author name).
-   * Priority resolution: entityContext > context (from LoggableEntity config).
-   *
-   * NOTE: Now requires meta parameter for aggregate-aware enrichment.
+   * Adds additional context data to entities (e.g., title, status, author name)
+   * using the entity's `context` enricher.
    */
   batchEnrichEntityContexts: (
     entities: Record<string, unknown>[],
     entityConfig: LoggableEntity,
     basePrisma: unknown,
-    meta: {
-      aggregateType: string;
-      aggregateCategory: string;
-      aggregateId?: string;
-    },
   ) => Promise<unknown[]>;
-
-  /**
-   * Batch enrich aggregate contexts for multiple entities.
-   *
-   * Same pattern as batchEnrichEntityContexts — one call per aggregateType.
-   */
-  batchEnrichAggregateContexts: (
-    entities: Record<string, unknown>[],
-    entityConfig: LoggableEntity,
-    basePrisma: unknown,
-    meta: {
-      aggregateType: string;
-      aggregateCategory: string;
-      aggregateId?: string;
-    },
-  ) => Promise<(unknown | null)[]>;
 
   /**
    * Build audit log data for an entity
@@ -425,7 +402,7 @@ export const createExecuteOperationStage = (): ((context: PreparedContext) => Pr
  * 3. Enriches entity context via batchEnrichEntityContexts (if entity config exists)
  *
  * Aggregate context enrichment is handled separately in the build-logs stage
- * via resolveAggregateData, following the same pre-resolution pattern.
+ * via enrichAggregateContexts, following the same pre-resolution pattern.
  *
  * @example
  * ```typescript
@@ -458,18 +435,10 @@ export const createEnrichContextsStage = (
     let entityContext: unknown | null = null;
 
     if (entityConfig) {
-      // NOTE: entityContext is shared across all aggregates, so we pass
-      // temporary meta information (actual aggregate info is not needed here)
-      const tempMeta = {
-        aggregateType: modelName,
-        aggregateCategory: 'model',
-      };
-
       const enrichedContexts = await deps.batchEnrichEntityContexts(
         [toResultRecord(result)],
         entityConfig,
         clientToUse,
-        tempMeta,
       );
       entityContext = enrichedContexts[0] ?? null;
     }
@@ -513,14 +482,23 @@ const buildMainAuditLogs = async (
     return [];
   }
 
-  // Phase 2: Batch-enrich aggregate contexts grouped by type
-  const aggregateContextMap = await batchEnrichAggregateContextsByType(survivors, entityConfig, manager.activeClient);
+  // Phase 2: Batch-enrich aggregate contexts (root-side + projection-side, merged)
+  const aggregateContextLookup = await enrichAggregateContexts(
+    survivors,
+    entityConfig,
+    manager.activeClient,
+    deps.aggregateConfig.getEntityConfigByType,
+  );
 
   const survivor = survivors[0];
   if (!survivor) {
     return [];
   }
-  const aggregateData = buildAggregateDataForEntity(survivor.entityIndex, survivor.aggregateRoots, aggregateContextMap);
+  const aggregateData = buildAggregateDataForEntity(
+    survivor.entityIndex,
+    survivor.aggregateRoots,
+    aggregateContextLookup,
+  );
 
   let relationFields: Set<string> | undefined;
   try {

@@ -39,7 +39,7 @@ describe('Transaction Enrichment Consistency', () => {
         aggregateMapping: {
           User: defineEntity({
             type: 'User',
-            entityContext: {
+            context: {
               enricher: async (entities, prismaClient) => {
                 const user = await (prismaClient as typeof context.basePrisma).user.findUnique({
                   where: { id: (entities[0] as { id: string }).id },
@@ -99,7 +99,7 @@ describe('Transaction Enrichment Consistency', () => {
           Post: defineEntity({
             type: 'Post',
             aggregates: [to('User', foreignKey('authorId'))],
-            entityContext: {
+            context: {
               enricher: async (entities, prismaClient) => {
                 const post = await (prismaClient as typeof context.basePrisma).post.findUnique({
                   where: { id: (entities[0] as { id: string }).id },
@@ -190,27 +190,28 @@ describe('Transaction Enrichment Consistency', () => {
         aggregateMapping: {
           Post: defineEntity({
             type: 'Post',
-            aggregates: [to('User', foreignKey('authorId'))],
-            aggregateContextMap: {
-              User: {
-                enricher: async (aggregates: unknown[], prismaClient: unknown) => {
-                  const posts = aggregates as PostWithAuthor[];
-                  const authorIds = extractAuthorIds(posts);
-                  const userMap = await fetchUserEmailMap(prismaClient, authorIds);
+            aggregates: [
+              to('User', foreignKey('authorId'), {
+                context: {
+                  enricher: async (rows, prismaClient: unknown) => {
+                    const posts = rows as PostWithAuthor[];
+                    const authorIds = extractAuthorIds(posts);
+                    const userMap = await fetchUserEmailMap(prismaClient, authorIds);
 
-                  // Store the first user's email for verification
-                  const firstPost = posts[0];
-                  if (firstPost) {
-                    enrichedUserEmail = userMap.get(firstPost.authorId);
-                  }
+                    // Store the first user's email for verification
+                    const firstPost = posts[0];
+                    if (firstPost) {
+                      enrichedUserEmail = userMap.get(firstPost.authorId);
+                    }
 
-                  // Return context for each post's author
-                  return posts.map((post) => ({
-                    parentUserEmail: userMap.get(post.authorId) ?? null,
-                  }));
+                    // Return context for each post's author
+                    return posts.map((post) => ({
+                      parentUserEmail: userMap.get(post.authorId) ?? null,
+                    }));
+                  },
                 },
-              },
-            },
+              }),
+            ],
           }),
           User: defineEntity({ type: 'User' }),
         },
@@ -369,7 +370,7 @@ describe('Transaction Enrichment Consistency', () => {
         aggregateMapping: {
           User: defineEntity({
             type: 'User',
-            entityContext: {
+            context: {
               enricher: async (entities, prismaClient) => {
                 const ids = entities.map((e) => (e as { id: string }).id);
                 const users = await (prismaClient as typeof context.basePrisma).user.findMany({

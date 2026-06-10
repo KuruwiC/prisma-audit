@@ -7,17 +7,10 @@
  * @module audit-log-builder
  */
 
-import type {
-  AggregateConfigService,
-  AuditContext,
-  LoggableEntity,
-  ResolvedId,
-  SerializationConfig,
-} from '@kuruwic/prisma-audit-core';
+import type { AggregateConfigService, AuditContext, ResolvedId, SerializationConfig } from '@kuruwic/prisma-audit-core';
 import {
   AUDIT_ACTION,
   applyRelationConfig,
-  batchEnrichAggregateContexts,
   createActorId,
   createAggregateId,
   createDiffCalculator,
@@ -25,7 +18,6 @@ import {
   normalizeId,
   type RedactConfig,
   redactSensitiveData,
-  resolveAllAggregateRoots,
   resolveBeforeAndAfterStates,
   serializeForAuditJson,
   type ValueSerializer,
@@ -48,36 +40,6 @@ export type ResolvedAggregateData = {
 /** Composite key for aggregate context: root identity = type + id */
 export const aggregateContextKey = (aggregateType: string, aggregateId: string): string =>
   `${aggregateType}:${aggregateId}`;
-
-/**
- * Resolve aggregate roots and enrich aggregate contexts for a single entity.
- *
- * Used by single-operation and nested-operation callers.
- * Batch callers should resolve roots and enrich contexts in bulk instead.
- */
-export const resolveAggregateData = async (
-  entity: Record<string, unknown>,
-  entityConfig: LoggableEntity,
-  prisma: unknown,
-): Promise<ResolvedAggregateData> => {
-  const aggregateRoots = await resolveAllAggregateRoots(entity, entityConfig, prisma);
-
-  const aggregateContexts = new Map<string, unknown>();
-  for (const root of aggregateRoots) {
-    const cacheKey = aggregateContextKey(root.aggregateType, root.aggregateId);
-    if (!aggregateContexts.has(cacheKey)) {
-      const meta = {
-        aggregateType: root.aggregateType,
-        aggregateCategory: root.aggregateCategory,
-        aggregateId: root.aggregateId,
-      };
-      const [enrichedContext] = await batchEnrichAggregateContexts([entity], entityConfig, prisma, meta);
-      aggregateContexts.set(cacheKey, enrichedContext);
-    }
-  }
-
-  return { aggregateRoots, aggregateContexts };
-};
 
 /**
  * Type guard to ensure redaction result is a record or null/undefined

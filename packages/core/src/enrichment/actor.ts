@@ -44,11 +44,5 @@ export const enrichActorContext = async (
     return null;
   }
 
-  // Actor enrichment uses fixed meta values
-  const meta = {
-    aggregateType: 'Actor',
-    aggregateCategory: 'system',
-  };
-
-  return await executeEnricherSafely(actorEnricherConfig, auditContext.actor, basePrisma, undefined, meta);
+  return await executeEnricherSafely(actorEnricherConfig, auditContext.actor, basePrisma);
 };

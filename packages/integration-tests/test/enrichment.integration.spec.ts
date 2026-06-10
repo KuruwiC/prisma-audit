@@ -401,7 +401,7 @@ describe('Context Enrichment Integration', () => {
       const commentLog = deleteLogs[0];
       if (!commentLog) throw new Error('Comment log not found');
 
-      // aggregateContextMap enriches based on aggregate roots (Post, User), not the entity itself (Comment)
+      // to() projection contexts enrich the aggregate logs (Post, User); the entity log carries entityContext
       expect(commentLog.entityContext).toBeDefined();
       expect((commentLog.entityContext as Record<string, unknown>).commentContent).toBe('Test Comment');
 
@@ -471,7 +471,7 @@ describe('Context Enrichment Integration', () => {
       const profileLog = deleteLogs[0];
       if (!profileLog) throw new Error('Profile log not found');
 
-      // aggregateContextMap enriches based on aggregate root (User), not the entity itself (Profile)
+      // to() projection context enriches the aggregate log (User); the entity log carries entityContext
       expect(profileLog.entityContext).toBeDefined();
       expect((profileLog.entityContext as Record<string, unknown>).profileBio).toBe('Test Bio');
 
@@ -737,8 +737,8 @@ describe('Context Enrichment Integration', () => {
         Comment: defineEntity({
           type: 'Comment',
           aggregates: [to('Post', foreignKey('postId')), to('User', foreignKey('authorId'))],
-          entityContext: {
-            enricher: async (entities: unknown[], prisma: unknown, _meta) => {
+          context: {
+            enricher: async (entities: unknown[], prisma: unknown) => {
               entityEnricherCallCount++;
 
               if (!isPrismaClientValid(prisma)) {
@@ -808,12 +808,9 @@ describe('Context Enrichment Integration', () => {
       const beforeState = { id: comment.id, content: comment.content, postId, authorId };
       const commentEntity = customAggregateMapping.Comment;
       if (!commentEntity) throw new Error('Comment entity not found in aggregate mapping');
-      const enricher = commentEntity.entityContext?.enricher;
+      const enricher = commentEntity.context?.enricher;
       if (!enricher) throw new Error('Enricher not configured');
-      const enrichedContext = await enricher([beforeState], customBasePrisma, {
-        aggregateType: 'Comment',
-        aggregateCategory: 'model',
-      });
+      const enrichedContext = await enricher([beforeState], customBasePrisma);
       expect(enrichedContext).toHaveLength(1);
       const firstContext = enrichedContext[0] as {
         postTitle: string | null;
@@ -839,7 +836,7 @@ describe('Context Enrichment Integration', () => {
         Profile: defineEntity({
           type: 'Profile',
           aggregates: [to('User', foreignKey('userId'))],
-          entityContext: {
+          context: {
             enricher: async (entities: unknown[], _prisma: unknown) => {
               entityEnricherCallCount++;
 
@@ -862,12 +859,9 @@ describe('Context Enrichment Integration', () => {
       };
       const profileEntity = customAggregateMapping.Profile;
       if (!profileEntity) throw new Error('Profile entity not found in aggregate mapping');
-      const enricher = profileEntity.entityContext?.enricher;
+      const enricher = profileEntity.context?.enricher;
       if (!enricher) throw new Error('Enricher not configured');
-      const enrichedContext = await enricher([], customBasePrisma, {
-        aggregateType: 'Profile',
-        aggregateCategory: 'model',
-      });
+      const enrichedContext = await enricher([], customBasePrisma);
 
       expect(enrichedContext).toEqual([]);
       expect(entityEnricherCallCount).toBe(1);
@@ -935,8 +929,8 @@ describe('Context Enrichment Integration', () => {
         Comment: defineEntity({
           type: 'Comment',
           aggregates: [to('Post', foreignKey('postId')), to('User', foreignKey('authorId'))],
-          entityContext: {
-            enricher: async (entities: unknown[], prisma: unknown, _meta) => {
+          context: {
+            enricher: async (entities: unknown[], prisma: unknown) => {
               entityEnricherCallCount++;
 
               if (!Array.isArray(entities)) {
@@ -957,18 +951,18 @@ describe('Context Enrichment Integration', () => {
       };
       const commentEntity = customAggregateMapping.Comment;
       if (!commentEntity) throw new Error('Comment entity not found in aggregate mapping');
-      const enricher = commentEntity.entityContext?.enricher;
+      const enricher = commentEntity.context?.enricher;
       if (!enricher) throw new Error('Enricher not configured');
-      const result1 = await enricher([null, undefined, 'invalid', 123], customBasePrisma, {
-        aggregateType: 'Comment',
-        aggregateCategory: 'model',
-      });
+      const result1 = await enricher(
+        [null, undefined, 'invalid', 123] as unknown as Record<string, unknown>[],
+        customBasePrisma,
+      );
       expect(result1).toHaveLength(4);
       expect(result1.every((r) => (r as { postTitle: string | null }).postTitle === null)).toBe(true);
-      const result2 = await enricher([{ postId: 'valid-id' }, null, { noPostId: true }], customBasePrisma, {
-        aggregateType: 'Comment',
-        aggregateCategory: 'model',
-      });
+      const result2 = await enricher(
+        [{ postId: 'valid-id' }, null, { noPostId: true }] as unknown as Record<string, unknown>[],
+        customBasePrisma,
+      );
       expect(result2).toHaveLength(3);
       expect(result2.every((r) => (r as { postTitle: string | null }).postTitle === null)).toBe(true);
       expect(entityEnricherCallCount).toBeGreaterThanOrEqual(2);
@@ -997,8 +991,8 @@ describe('Context Enrichment Integration', () => {
         Comment: defineEntity({
           type: 'Comment',
           aggregates: [to('Post', foreignKey('postId')), to('User', foreignKey('authorId'))],
-          entityContext: {
-            enricher: async (_entities: unknown[], _prisma: unknown, _meta) => {
+          context: {
+            enricher: async (_entities: unknown[], _prisma: unknown) => {
               throw new Error('Simulated enricher error');
             },
             onError: 'log',
@@ -1075,29 +1069,32 @@ describe('Context Enrichment Integration', () => {
         }),
         Comment: defineEntity({
           type: 'Comment',
-          aggregates: [to('Post', foreignKey('postId')), to('User', foreignKey('authorId'))],
-          entityContext: {
-            enricher: async (_entities: unknown[], _prisma: unknown, _meta: unknown) => {
+          aggregates: [
+            to('Post', foreignKey('postId'), {
+              context: {
+                enricher: async (_rows: unknown[], _prisma: unknown, _meta: unknown) => {
+                  throw new Error('Simulated aggregate enricher error');
+                },
+                onError: 'log',
+                fallback: undefined,
+              },
+            }),
+            to('User', foreignKey('authorId'), {
+              context: {
+                enricher: async (_rows: unknown[], _prisma: unknown, _meta: unknown) => {
+                  throw new Error('Simulated aggregate enricher error');
+                },
+                onError: 'log',
+                fallback: undefined,
+              },
+            }),
+          ],
+          context: {
+            enricher: async (_entities: unknown[], _prisma: unknown) => {
               throw new Error('Simulated entity enricher error');
             },
             onError: 'log',
             fallback: undefined,
-          },
-          aggregateContextMap: {
-            Post: {
-              enricher: async (_aggregates: unknown[], _prisma: unknown, _meta: unknown) => {
-                throw new Error('Simulated aggregate enricher error');
-              },
-              onError: 'log',
-              fallback: undefined,
-            },
-            User: {
-              enricher: async (_aggregates: unknown[], _prisma: unknown, _meta: unknown) => {
-                throw new Error('Simulated aggregate enricher error');
-              },
-              onError: 'log',
-              fallback: undefined,
-            },
           },
         }),
       };
@@ -1584,8 +1581,8 @@ describe('Context Enrichment Integration', () => {
         User: defineEntity({
           type: 'User',
           excludeFields: ['updatedAt'],
-          entityContext: {
-            enricher: async (entities: unknown[], _prisma: unknown, _meta) => {
+          context: {
+            enricher: async (entities: unknown[], _prisma: unknown) => {
               entityEnricherCallCount++;
               return (entities as Record<string, unknown>[]).map((entity) => ({
                 enrichedEmail: (entity.email as string)?.toUpperCase(),
@@ -1668,8 +1665,8 @@ describe('Context Enrichment Integration', () => {
         User: defineEntity({
           type: 'User',
           excludeFields: ['updatedAt'],
-          entityContext: {
-            enricher: async (entities: unknown[], _prisma: unknown, _meta) => {
+          context: {
+            enricher: async (entities: unknown[], _prisma: unknown) => {
               entityEnricherCallCount++;
               return (entities as Record<string, unknown>[]).map((entity) => ({
                 enrichedName: (entity.name as string)?.toUpperCase(),
@@ -1744,13 +1741,13 @@ describe('Context Enrichment Integration', () => {
         User: defineEntity({
           type: 'User',
           excludeFields: ['updatedAt'],
-          aggregateContextMap: {
-            User: {
-              enricher: async (aggregates: unknown[], _prisma: unknown, meta: unknown) => {
+          self: {
+            context: {
+              enricher: async (rows, _prisma, meta) => {
                 aggregateEnricherCallCount++;
-                return (aggregates as Record<string, unknown>[]).map((aggregate) => ({
-                  aggregateType: (meta as { aggregateType: string }).aggregateType,
-                  aggregateId: ((meta as { aggregateId?: string }).aggregateId || aggregate.id) as string,
+                return rows.map((_row, i) => ({
+                  aggregateType: meta.aggregateType,
+                  aggregateId: meta.aggregateIds[i],
                 }));
               },
             },
@@ -1835,14 +1832,14 @@ describe('Context Enrichment Integration', () => {
         User: defineEntity({
           type: 'User',
           excludeFields: ['updatedAt'],
-          aggregateContextMap: {
-            User: {
-              enricher: async (entities: unknown[], _prisma: unknown, meta: unknown) => {
+          self: {
+            context: {
+              enricher: async (rows, _prisma, meta) => {
                 aggregateEnricherCallCount++;
-                receivedEntityCounts.push((entities as unknown[]).length);
-                return (entities as Record<string, unknown>[]).map((entity) => ({
-                  aggregateType: (meta as { aggregateType: string }).aggregateType,
-                  aggregateId: entity.id as string,
+                receivedEntityCounts.push(rows.length);
+                return rows.map((row) => ({
+                  aggregateType: meta.aggregateType,
+                  aggregateId: row.id as string,
                 }));
               },
             },
@@ -1919,14 +1916,20 @@ describe('Context Enrichment Integration', () => {
       });
       const customProvider = createAsyncLocalStorageProvider();
 
-      const sharedEnricher = async (entities: unknown[], _prisma: unknown, meta: unknown) => {
-        const aggregateType = (meta as { aggregateType: string }).aggregateType;
+      const sharedEnricher = async (
+        rows: Record<string, unknown>[],
+        _prisma: unknown,
+        meta: { aggregateType: string; aggregateCategory: string; aggregateIds: string[] },
+      ) => {
+        const aggregateType = meta.aggregateType;
         enricherCallsByType[aggregateType] = (enricherCallsByType[aggregateType] || 0) + 1;
-        return (entities as Record<string, unknown>[]).map((entity) => ({
+        return rows.map((row) => ({
           aggregateType,
-          entityId: entity.id as string,
+          entityId: row.id as string,
         }));
       };
+      // One shared projection context attached to every aggregate target (self, Post, User)
+      const sharedContext = { enricher: sharedEnricher };
 
       const customAggregateMapping: AggregateMapping = {
         User: defineEntity({
@@ -1944,12 +1947,11 @@ describe('Context Enrichment Integration', () => {
         }),
         Comment: defineEntity({
           type: 'Comment',
-          aggregates: [to('Post', foreignKey('postId')), to('User', foreignKey('authorId'))],
-          aggregateContextMap: {
-            '*': {
-              enricher: sharedEnricher,
-            },
-          },
+          aggregates: [
+            to('Post', foreignKey('postId'), { context: sharedContext }),
+            to('User', foreignKey('authorId'), { context: sharedContext }),
+          ],
+          self: { context: sharedContext },
         }),
       };
 
@@ -1989,6 +1991,218 @@ describe('Context Enrichment Integration', () => {
       expect(enricherCallsByType.Comment).toBe(1);
       expect(enricherCallsByType.Post).toBe(1);
       expect(enricherCallsByType.User).toBe(1);
+
+      await customBasePrisma.$disconnect();
+    });
+  });
+
+  describe('[Aggregate Context] Root-side aggregateContext and projection merge semantics', () => {
+    it('should apply root-side aggregateContext to self logs and child-projected logs', async () => {
+      const customBasePrisma = new (await import('@kuruwic/prisma-audit-database/generated/client')).PrismaClient({
+        datasources: { db: { url: context.databaseUrl } },
+      });
+      const customProvider = createAsyncLocalStorageProvider();
+
+      const customAggregateMapping: AggregateMapping = {
+        User: defineEntity({
+          type: 'User',
+          excludeFields: ['updatedAt'],
+          aggregateContext: {
+            enricher: async (userIds, _prisma) => userIds.map((id) => ({ rootUserId: id, source: 'root' })),
+          },
+        }),
+        Post: defineEntity({
+          type: 'Post',
+          aggregates: [to('User', foreignKey('authorId'))],
+        }),
+      };
+
+      const customPrisma = createAuditClient(customBasePrisma, {
+        Prisma,
+        provider: customProvider,
+        basePrisma: customBasePrisma,
+        aggregateMapping: customAggregateMapping,
+        performance: { awaitWrite: true },
+      });
+
+      const actor: AuditContext = {
+        actor: { category: 'model', type: 'User', id: 'root-agg-ctx-actor' },
+      };
+
+      const { user, post } = await customProvider.runAsync(actor, async () => {
+        const user = await customPrisma.user.create({
+          data: { email: 'root-ctx@example.com', name: 'Root Ctx User', password: 'pass' },
+        });
+        const post = await customPrisma.post.create({
+          data: { title: 'Root Ctx Post', content: 'Content', authorId: user.id },
+        });
+        return { user, post };
+      });
+
+      // Self log: User create projected onto itself gets the root-side context
+      const userSelfLogs = await customBasePrisma.auditLog.findMany({
+        where: { entityType: 'User', entityId: user.id, aggregateType: 'User', action: 'create' },
+      });
+      expect(userSelfLogs).toHaveLength(1);
+      expect(userSelfLogs[0]?.aggregateContext).toEqual({ rootUserId: user.id, source: 'root' });
+
+      // Child-projected log: Post create projected onto User gets the same root-side context
+      const postUserLogs = await customBasePrisma.auditLog.findMany({
+        where: { entityType: 'Post', entityId: post.id, aggregateType: 'User', action: 'create' },
+      });
+      expect(postUserLogs).toHaveLength(1);
+      expect(postUserLogs[0]?.aggregateContext).toEqual({ rootUserId: user.id, source: 'root' });
+
+      // Post self log: Post root has no aggregateContext and no projection context
+      const postSelfLogs = await customBasePrisma.auditLog.findMany({
+        where: { entityType: 'Post', entityId: post.id, aggregateType: 'Post', action: 'create' },
+      });
+      expect(postSelfLogs).toHaveLength(1);
+      expect(postSelfLogs[0]?.aggregateContext).toBeNull();
+
+      await customBasePrisma.$disconnect();
+    });
+
+    it('should merge projection context over root-side aggregateContext (projection keys win)', async () => {
+      const customBasePrisma = new (await import('@kuruwic/prisma-audit-database/generated/client')).PrismaClient({
+        datasources: { db: { url: context.databaseUrl } },
+      });
+      const customProvider = createAsyncLocalStorageProvider();
+
+      const customAggregateMapping: AggregateMapping = {
+        User: defineEntity({
+          type: 'User',
+          excludeFields: ['updatedAt'],
+          aggregateContext: {
+            enricher: async (userIds, _prisma) => userIds.map(() => ({ source: 'root', rootOnly: true })),
+          },
+        }),
+        Post: defineEntity({
+          type: 'Post',
+          aggregates: [
+            to('User', foreignKey('authorId'), {
+              context: {
+                enricher: async (posts, _prisma, _meta) => posts.map(() => ({ source: 'projection' })),
+              },
+            }),
+          ],
+        }),
+      };
+
+      const customPrisma = createAuditClient(customBasePrisma, {
+        Prisma,
+        provider: customProvider,
+        basePrisma: customBasePrisma,
+        aggregateMapping: customAggregateMapping,
+        performance: { awaitWrite: true },
+      });
+
+      const actor: AuditContext = {
+        actor: { category: 'model', type: 'User', id: 'merge-precedence-actor' },
+      };
+
+      const { user, post } = await customProvider.runAsync(actor, async () => {
+        const user = await customPrisma.user.create({
+          data: { email: 'merge@example.com', name: 'Merge User', password: 'pass' },
+        });
+        const post = await customPrisma.post.create({
+          data: { title: 'Merge Post', content: 'Content', authorId: user.id },
+        });
+        return { user, post };
+      });
+
+      // Projection-provided key overrides the root-side key; root-only keys are preserved
+      const postUserLogs = await customBasePrisma.auditLog.findMany({
+        where: { entityType: 'Post', entityId: post.id, aggregateType: 'User', action: 'create' },
+      });
+      expect(postUserLogs).toHaveLength(1);
+      expect(postUserLogs[0]?.aggregateContext).toEqual({ source: 'projection', rootOnly: true });
+
+      // User self log has no projection context → root-side context only
+      const userSelfLogs = await customBasePrisma.auditLog.findMany({
+        where: { entityType: 'User', entityId: user.id, aggregateType: 'User', action: 'create' },
+      });
+      expect(userSelfLogs).toHaveLength(1);
+      expect(userSelfLogs[0]?.aggregateContext).toEqual({ source: 'root', rootOnly: true });
+
+      await customBasePrisma.$disconnect();
+    });
+
+    it('should pass aggregateIds aligned with the written rows to to() projection enrichers', async () => {
+      const customBasePrisma = new (await import('@kuruwic/prisma-audit-database/generated/client')).PrismaClient({
+        datasources: { db: { url: context.databaseUrl } },
+      });
+      const customProvider = createAsyncLocalStorageProvider();
+
+      const receivedCalls: { rows: Record<string, unknown>[]; aggregateIds: string[] }[] = [];
+
+      const customAggregateMapping: AggregateMapping = {
+        User: defineEntity({
+          type: 'User',
+          excludeFields: ['updatedAt'],
+        }),
+        Post: defineEntity({
+          type: 'Post',
+          aggregates: [
+            to('User', foreignKey('authorId'), {
+              context: {
+                enricher: async (rows, _prisma, meta) => {
+                  receivedCalls.push({ rows, aggregateIds: meta.aggregateIds });
+                  return rows.map((_row, i) => ({ authorIdFromMeta: meta.aggregateIds[i] }));
+                },
+              },
+            }),
+          ],
+        }),
+      };
+
+      const customPrisma = createAuditClient(customBasePrisma, {
+        Prisma,
+        provider: customProvider,
+        basePrisma: customBasePrisma,
+        aggregateMapping: customAggregateMapping,
+        performance: { awaitWrite: true },
+      });
+
+      const userA = await customBasePrisma.user.create({
+        data: { email: 'align-a@example.com', name: 'Align A', password: 'pass' },
+      });
+      const userB = await customBasePrisma.user.create({
+        data: { email: 'align-b@example.com', name: 'Align B', password: 'pass' },
+      });
+
+      const actor: AuditContext = {
+        actor: { category: 'model', type: 'User', id: 'aligned-ids-actor' },
+      };
+      await customProvider.runAsync(actor, async () => {
+        await customPrisma.post.createMany({
+          data: [
+            { title: 'Aligned 1', content: 'Content', authorId: userA.id },
+            { title: 'Aligned 2', content: 'Content', authorId: userB.id },
+            { title: 'Aligned 3', content: 'Content', authorId: userA.id },
+          ],
+        });
+      });
+
+      // One batched call per aggregateType; aggregateIds[i] corresponds to rows[i]
+      expect(receivedCalls).toHaveLength(1);
+      const call = receivedCalls[0];
+      if (!call) throw new Error('Projection enricher was not called');
+      expect(call.rows).toHaveLength(3);
+      expect(call.aggregateIds).toHaveLength(call.rows.length);
+      for (let i = 0; i < call.rows.length; i++) {
+        expect(call.aggregateIds[i]).toBe(call.rows[i]?.authorId);
+      }
+
+      // Each stored log's aggregateContext matches its own aggregateId
+      const postUserLogs = await customBasePrisma.auditLog.findMany({
+        where: { entityType: 'Post', aggregateType: 'User', action: 'create', actorId: 'aligned-ids-actor' },
+      });
+      expect(postUserLogs).toHaveLength(3);
+      for (const log of postUserLogs) {
+        const aggregateContext = log.aggregateContext as Record<string, unknown>;
+        expect(aggregateContext.authorIdFromMeta).toBe(log.aggregateId);
+      }
 
       await customBasePrisma.$disconnect();
     });

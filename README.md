@@ -80,7 +80,7 @@ Branded types (`ActorId`, `EntityId`, `AggregateId`) prevent ID mix-ups at compi
 > **Note**: This package is not yet published to npm. Install from GitHub Releases.
 
 ```bash
-pnpm add https://github.com/KuruwiC/prisma-audit/releases/download/v0.1.4/kuruwic-prisma-audit-0.1.4.tgz
+pnpm add https://github.com/KuruwiC/prisma-audit/releases/download/v0.1.5/kuruwic-prisma-audit-0.1.5.tgz
 ```
 
 **Requirements:** Node.js 20+ (AsyncLocalStorage), Prisma 5.10+
@@ -376,9 +376,9 @@ contextEnricher: {
 },
 ```
 
-### Entity / Aggregate Context
+### Entity Context
 
-Batch enrichers receive an array of entities and must return contexts in the same order and length:
+The `context` enricher receives the written rows in batch and must return contexts in the same order and length. The result is stored in the log's `entityContext`:
 
 ```typescript
 Post: defineEntity({
@@ -403,7 +403,52 @@ Post: defineEntity({
 }),
 ```
 
-For different metadata in entity vs aggregate contexts, use `entityContext` and `aggregateContextMap` instead of `context`.
+### Aggregate Context
+
+The log's `aggregateContext` is composed from two layers, merged per log entry (projection keys win):
+
+**Root-side — `aggregateContext` on the root entity.** Defined once, applied whenever _any_ entity (the root itself or a child) projects onto this root. The enricher receives the unique aggregate IDs involved in the operation:
+
+```typescript
+User: defineEntity({
+  type: "User",
+  aggregateContext: {
+    enricher: async (userIds, prisma) => {
+      const users = await prisma.user.findMany({
+        where: { id: { in: userIds } },
+        select: { id: true, name: true },
+      });
+      const byId = new Map(users.map((u) => [u.id, u]));
+      return userIds.map((id) => ({ userName: byId.get(id)?.name ?? null }));
+    },
+  },
+}),
+```
+
+**Projection-side — `context` on the `to()` declaration.** Specific to one projection; the enricher receives the _written_ rows (not the root rows), with `meta.aggregateIds[i]` holding the aggregate ID resolved for row `i`:
+
+```typescript
+PostTag: defineEntity({
+  type: "PostTag",
+  self: false, // join table — no self aggregate log
+  aggregates: [
+    to("Post", foreignKey("postId"), {
+      context: {
+        enricher: async (postTags, prisma, meta) =>
+          postTags.map((pt) => ({ tagId: pt.tagId })), // Post-perspective context
+      },
+    }),
+    to("Tag", foreignKey("tagId"), {
+      context: {
+        enricher: async (postTags, prisma, meta) =>
+          postTags.map((pt) => ({ postId: pt.postId })), // Tag-perspective context
+      },
+    }),
+  ],
+}),
+```
+
+The self aggregate log (enabled by default) can be enriched the same way via `self: { context: { ... } }`.
 
 ## Aggregate Mapping
 

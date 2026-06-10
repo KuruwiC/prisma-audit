@@ -36,9 +36,10 @@ import type { AuditLogData } from '../../types.js';
 import { getPrimaryKeyFields } from '../../utils/id-generator.js';
 import { createSchemaMetadataFromDMMF } from '../../utils/nested-operations.js';
 import {
-  batchEnrichAggregateContextsByType,
   buildAggregateDataForEntity,
+  enrichAggregateContexts,
   resolveAndFilterSurvivors,
+  type SurvivorEntity,
 } from '../batch-aggregate-resolver.js';
 import { PRE_FETCH_INTERNAL_RESULTS } from '../pre-fetch/coordinator.js';
 import { extractEntityIdOrDefault } from '../pre-fetch/pre-fetch-result-store.js';
@@ -204,34 +205,31 @@ const enrichAndBuildForModelGroup = async (
   // Batch entity context enrichment (1 call per model)
   let entityContexts: (unknown | null)[];
   if (entityConfig) {
-    const tempMeta = {
-      aggregateType: group.modelName,
-      aggregateCategory: 'model',
-    };
-    entityContexts = await batchEnrichEntityContexts(entities, entityConfig, basePrisma, tempMeta);
+    entityContexts = await batchEnrichEntityContexts(entities, entityConfig, basePrisma);
   } else {
     entityContexts = entities.map(() => null);
   }
 
   // Batch aggregate resolution + enrichment
   const manager = createPrismaClientManager(basePrisma);
-  let aggregateContextMap = new Map<string, unknown>();
-  let survivors: {
-    entityIndex: number;
-    entity: Record<string, unknown>;
-    aggregateRoots: import('@kuruwic/prisma-audit-core').ResolvedId[];
-  }[] = [];
+  let aggregateContextLookup = new Map<string, unknown>();
+  let survivors: SurvivorEntity[] = [];
 
   if (entityConfig) {
     survivors = await resolveAndFilterSurvivors(entities, entityConfig, manager.activeClient);
 
     if (survivors.length > 0) {
-      aggregateContextMap = await batchEnrichAggregateContextsByType(survivors, entityConfig, manager.activeClient);
+      aggregateContextLookup = await enrichAggregateContexts(
+        survivors,
+        entityConfig,
+        manager.activeClient,
+        aggregateConfig.getEntityConfigByType,
+      );
     }
   }
 
-  // Build audit logs for survivors
-  const survivorIndexSet = new Set(survivors.map((s) => s.entityIndex));
+  // Build audit logs for survivors; non-survivor records with no aggregate
+  // roots produce no audit logs (consistent with batch-stages.ts behavior)
   const allLogs: AuditLogData[] = [];
 
   for (const survivor of survivors) {
@@ -241,7 +239,7 @@ const enrichAndBuildForModelGroup = async (
     const aggregateData = buildAggregateDataForEntity(
       survivor.entityIndex,
       survivor.aggregateRoots,
-      aggregateContextMap,
+      aggregateContextLookup,
     );
 
     const logs = await buildAuditLog(
@@ -263,12 +261,6 @@ const enrichAndBuildForModelGroup = async (
     );
 
     allLogs.push(...logs);
-  }
-
-  // Non-survivor records with no aggregate roots produce no audit logs
-  // (consistent with batch-stages.ts behavior)
-  const skippedCount = entities.length - survivorIndexSet.size;
-  if (skippedCount > 0) {
   }
 
   return allLogs;

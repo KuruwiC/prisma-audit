@@ -22,14 +22,21 @@
 
 // Actor enrichment
 export { enrichActorContext } from './actor.js';
-// Batch enrichment for entities and aggregates
-export { batchEnrichAggregateContexts, batchEnrichEntityContexts } from './batch.js';
+// Batch enrichment for entity, projection, and root-side aggregate contexts
+export {
+  batchEnrichEntityContexts,
+  batchEnrichProjectionContexts,
+  batchEnrichRootAggregateContexts,
+} from './batch.js';
 // Core executor for safe enricher execution
 export { executeBatchEnricherSafely, executeEnricherSafely } from './executor.js';
 // Type definitions
 export type {
   ActorEnricherConfig,
+  AggregateContextEnricherConfig,
   EnricherConfig,
   EnricherErrorStrategy,
   EntityEnricherConfig,
+  ProjectionEnricherConfig,
+  ProjectionEnrichmentMeta,
 } from './types.js';

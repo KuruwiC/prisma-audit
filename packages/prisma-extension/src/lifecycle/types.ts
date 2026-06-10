@@ -72,7 +72,7 @@ export interface ExecutedContext extends PreparedContext {
  * human-readable or computed metadata not present in raw data.
  *
  * Aggregate context is resolved separately in the build-logs stage via
- * resolveAggregateData, enabling batch optimization per aggregateType.
+ * enrichAggregateContexts, enabling batch optimization per projection.
  */
 export interface EnrichedContext extends ExecutedContext {
   /** Enriched actor context (role, department, email) */

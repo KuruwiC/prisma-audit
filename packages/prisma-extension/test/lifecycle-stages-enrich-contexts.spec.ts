@@ -1,5 +1,5 @@
 /**
- * Tests for Enrich Contexts Stage (Task 2.6)
+ * Tests for the enrich-contexts stage
  *
  * This stage is responsible for:
  * 1. Enriching actor context via enrichActorContext
@@ -7,8 +7,8 @@
  * 3. Enriching entity context via batchEnrichEntityContexts (if entity config exists)
  * 4. Adding all enriched contexts to the context
  *
- * NOTE: aggregateContext is no longer enriched at this stage. It is now enriched
- * per aggregate root inside buildAuditLog for aggregate-aware context.
+ * Aggregate context is not enriched here; it is enriched per aggregate root
+ * in the build-logs stage via enrichAggregateContexts.
  */
 
 import type { LoggableEntity } from '@kuruwic/prisma-audit-core';
@@ -122,7 +122,6 @@ describe('createEnrichContextsStage', () => {
       [executedContext.result],
       mockEntityConfig,
       executedContext.clientToUse,
-      { aggregateType: 'Post', aggregateCategory: 'model' },
     );
     expect(result.actorContext).toBe(mockActorContext);
     expect(result.entityContext).toBe(mockEntityContext);

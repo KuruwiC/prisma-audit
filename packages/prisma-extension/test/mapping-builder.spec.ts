@@ -30,7 +30,7 @@ describe('defineAggregateMapping', () => {
     expect(mapping.User.type).toBe('User');
     expect(mapping.User.category).toBe('model');
     expect(mapping.User.aggregates).toEqual([]);
-    expect(mapping.User.excludeSelf).toBe(false);
+    expect(mapping.User.self).toBeUndefined();
   });
 
   it('should allow custom category', () => {
@@ -91,15 +91,15 @@ describe('defineAggregateMapping', () => {
     expect(mapping.User.excludeFields).toEqual(['updatedAt', 'password']);
   });
 
-  it('should support excludeSelf', () => {
+  it('should support disabling the self projection', () => {
     const mapping = defineAggregateMapping<MockPrismaClient>()({
       User: defineEntity({
         type: 'User',
-        excludeSelf: true,
+        self: false,
       }),
     });
 
-    expect(mapping.User.excludeSelf).toBe(true);
+    expect(mapping.User.self).toBe(false);
   });
 
   it('should support multiple aggregates', () => {

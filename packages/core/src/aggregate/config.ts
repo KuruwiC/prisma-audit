@@ -44,6 +44,19 @@ export interface AggregateConfigService {
   getEntityConfig: (modelName: string) => LoggableEntity | undefined;
 
   /**
+   * Get entity configuration by its aggregate identity (category + type)
+   *
+   * Used to find the root entity's config (e.g. its `aggregateContext`
+   * enricher) when another entity projects onto it. Uniqueness of
+   * (category, type) pairs is enforced by validateAggregateMapping.
+   *
+   * @param type - Aggregate type (case-sensitive, as declared in defineEntity)
+   * @param category - Aggregate category (as declared in defineEntity / to())
+   * @returns Entity configuration or undefined if no entity declares this identity
+   */
+  getEntityConfigByType: (type: string, category: string) => LoggableEntity | undefined;
+
+  /**
    * Check if a model is configured for audit logging
    *
    * @param modelName - Model name (case-insensitive)
@@ -93,17 +106,23 @@ export const createAggregateConfig = (mapping: AggregateMapping): AggregateConfi
 
   const configByNormalizedName: Record<string, LoggableEntity> = {};
   const originalNameByNormalizedName: Map<string, string> = new Map();
+  const configByRootIdentity: Map<string, LoggableEntity> = new Map();
 
   for (const [originalModelName, entityConfig] of Object.entries(mapping)) {
     const normalizedModelName = originalModelName.toLowerCase();
     configByNormalizedName[normalizedModelName] = entityConfig;
     originalNameByNormalizedName.set(normalizedModelName, originalModelName);
+    configByRootIdentity.set(`${entityConfig.category}:${entityConfig.type}`, entityConfig);
   }
 
   return {
     getEntityConfig: (modelName: string): LoggableEntity | undefined => {
       const normalizedModelName = modelName.toLowerCase();
       return configByNormalizedName[normalizedModelName];
+    },
+
+    getEntityConfigByType: (type: string, category: string): LoggableEntity | undefined => {
+      return configByRootIdentity.get(`${category}:${type}`);
     },
 
     isLoggable: (modelName: string): boolean => {
@@ -146,6 +165,7 @@ export const isAggregateConfigService = (value: unknown): value is AggregateConf
 
   return (
     typeof possibleService.getEntityConfig === 'function' &&
+    typeof possibleService.getEntityConfigByType === 'function' &&
     typeof possibleService.isLoggable === 'function' &&
     typeof possibleService.getAllLoggableModels === 'function' &&
     typeof possibleService.getMapping === 'function'

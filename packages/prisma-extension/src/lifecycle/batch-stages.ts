@@ -15,8 +15,8 @@ import type { PrismaClientWithDynamicAccess } from '../internal-types.js';
 import type { AuditLogData, PrismaAction } from '../types.js';
 import { createSchemaMetadataFromDMMF, getPrisma } from '../utils/schema-metadata.js';
 import {
-  batchEnrichAggregateContextsByType,
   buildAggregateDataForEntity,
+  enrichAggregateContexts,
   resetBatchResolveWarnings,
   resolveAndFilterSurvivors,
   type SurvivorEntity,
@@ -40,27 +40,12 @@ const enrichBatchContexts = async (
   entityConfig: ReturnType<StageDependencies['aggregateConfig']['getEntityConfig']>,
   clientToUse: unknown,
   batchEnrichEntityContexts: StageDependencies['batchEnrichEntityContexts'],
-  modelName: string,
 ): Promise<ReadonlyArray<unknown | null>> => {
   if (!entityConfig) {
     return entities.map(() => null);
   }
 
-  // NOTE: entityContext is shared across all aggregates, so we pass
-  // temporary meta information (actual aggregate info is not needed here)
-  const tempMeta = {
-    aggregateType: modelName,
-    aggregateCategory: 'model',
-  };
-
-  const entityContexts = await batchEnrichEntityContexts(
-    entities as Record<string, unknown>[],
-    entityConfig,
-    clientToUse,
-    tempMeta,
-  );
-
-  return entityContexts;
+  return await batchEnrichEntityContexts(entities as Record<string, unknown>[], entityConfig, clientToUse);
 };
 
 /**
@@ -70,7 +55,7 @@ const enrichBatchContexts = async (
  * Optimizes database queries by performing batch enrichment (N entities → 1 query per enricher).
  *
  * Aggregate context enrichment is handled in createBatchBuildLogsStage,
- * where entities are grouped by aggregateType for batch enrichment.
+ * where entities are grouped by projection declaration for batch enrichment.
  *
  * Pipeline: BatchInitialContext → BatchEnrichedContext
  *
@@ -98,7 +83,6 @@ export const createBatchEnrichContextsStage = (
       entityConfig,
       clientToUse,
       deps.batchEnrichEntityContexts,
-      modelName,
     );
 
     return {
@@ -200,9 +184,14 @@ export const createBatchBuildLogsStage = (
       : [];
 
     // Phase 2: Batch-enrich aggregate contexts (only for survivors)
-    const aggregateContextMap =
+    const aggregateContextLookup =
       survivors.length > 0 && entityConfig
-        ? await batchEnrichAggregateContextsByType(survivors, entityConfig, manager.activeClient)
+        ? await enrichAggregateContexts(
+            survivors,
+            entityConfig,
+            manager.activeClient,
+            deps.aggregateConfig.getEntityConfigByType,
+          )
         : new Map<string, unknown>();
 
     // Phase 3: Build audit logs only for survivors
@@ -211,7 +200,7 @@ export const createBatchBuildLogsStage = (
       const aggregateData = buildAggregateDataForEntity(
         survivor.entityIndex,
         survivor.aggregateRoots,
-        aggregateContextMap,
+        aggregateContextLookup,
       );
       const logs = await buildLogsForEntity(
         survivor.entityIndex,

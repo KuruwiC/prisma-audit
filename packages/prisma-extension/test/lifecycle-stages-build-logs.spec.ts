@@ -1,5 +1,5 @@
 /**
- * Tests for Build Logs Stage (Task 2.7)
+ * Tests for the build-logs stage
  *
  * This stage is responsible for:
  * 1. Building main audit log via buildAuditLog
@@ -49,11 +49,11 @@ describe('createBuildLogsStage', () => {
     };
     const mockAggregateConfig = {
       getEntityConfig: vi.fn().mockReturnValue(mockEntityConfig),
+      getEntityConfigByType: vi.fn().mockReturnValue(undefined),
       isLoggable: vi.fn(),
       getAllLoggableModels: vi.fn(),
       getMapping: vi.fn(),
     };
-    const mockBatchEnrichAggregateContexts = vi.fn().mockResolvedValue([null]);
 
     const enrichedContext: EnrichedContext = {
       operation: {
@@ -75,15 +75,9 @@ describe('createBuildLogsStage', () => {
 
     const deps: Pick<
       StageDependencies,
-      | 'buildAuditLog'
-      | 'batchEnrichAggregateContexts'
-      | 'buildNestedAuditLogs'
-      | 'aggregateConfig'
-      | 'excludeFields'
-      | 'basePrisma'
+      'buildAuditLog' | 'buildNestedAuditLogs' | 'aggregateConfig' | 'excludeFields' | 'basePrisma'
     > = {
       buildAuditLog: mockBuildAuditLog,
-      batchEnrichAggregateContexts: mockBatchEnrichAggregateContexts,
       buildNestedAuditLogs: mockBuildNestedAuditLogs,
       aggregateConfig: mockAggregateConfig,
       excludeFields: [],
@@ -176,11 +170,11 @@ describe('createBuildLogsStage', () => {
     };
     const mockAggregateConfig = {
       getEntityConfig: vi.fn().mockReturnValue(mockEntityConfig),
+      getEntityConfigByType: vi.fn().mockReturnValue(undefined),
       isLoggable: vi.fn(),
       getAllLoggableModels: vi.fn(),
       getMapping: vi.fn(),
     };
-    const mockBatchEnrichAggregateContexts = vi.fn().mockResolvedValue([null]);
 
     const enrichedContext: EnrichedContext = {
       operation: {
@@ -213,15 +207,9 @@ describe('createBuildLogsStage', () => {
 
     const deps: Pick<
       StageDependencies,
-      | 'buildAuditLog'
-      | 'batchEnrichAggregateContexts'
-      | 'buildNestedAuditLogs'
-      | 'aggregateConfig'
-      | 'excludeFields'
-      | 'basePrisma'
+      'buildAuditLog' | 'buildNestedAuditLogs' | 'aggregateConfig' | 'excludeFields' | 'basePrisma'
     > = {
       buildAuditLog: mockBuildAuditLog,
-      batchEnrichAggregateContexts: mockBatchEnrichAggregateContexts,
       buildNestedAuditLogs: mockBuildNestedAuditLogs,
       aggregateConfig: mockAggregateConfig,
       excludeFields: [],
@@ -277,11 +265,11 @@ describe('createBuildLogsStage', () => {
     };
     const mockAggregateConfig = {
       getEntityConfig: vi.fn().mockReturnValue(mockEntityConfig),
+      getEntityConfigByType: vi.fn().mockReturnValue(undefined),
       isLoggable: vi.fn(),
       getAllLoggableModels: vi.fn(),
       getMapping: vi.fn(),
     };
-    const mockBatchEnrichAggregateContexts = vi.fn().mockResolvedValue([null]);
 
     const enrichedContext: EnrichedContext = {
       operation: {
@@ -304,15 +292,9 @@ describe('createBuildLogsStage', () => {
 
     const deps: Pick<
       StageDependencies,
-      | 'buildAuditLog'
-      | 'batchEnrichAggregateContexts'
-      | 'buildNestedAuditLogs'
-      | 'aggregateConfig'
-      | 'excludeFields'
-      | 'basePrisma'
+      'buildAuditLog' | 'buildNestedAuditLogs' | 'aggregateConfig' | 'excludeFields' | 'basePrisma'
     > = {
       buildAuditLog: mockBuildAuditLog,
-      batchEnrichAggregateContexts: mockBatchEnrichAggregateContexts,
       buildNestedAuditLogs: mockBuildNestedAuditLogs,
       aggregateConfig: mockAggregateConfig,
       excludeFields: [],
@@ -342,11 +324,11 @@ describe('createBuildLogsStage', () => {
     };
     const mockAggregateConfig = {
       getEntityConfig: vi.fn().mockReturnValue(mockEntityConfig),
+      getEntityConfigByType: vi.fn().mockReturnValue(undefined),
       isLoggable: vi.fn(),
       getAllLoggableModels: vi.fn(),
       getMapping: vi.fn(),
     };
-    const mockBatchEnrichAggregateContexts = vi.fn().mockResolvedValue([null]);
 
     const enrichedContext: EnrichedContext = {
       operation: {
@@ -368,15 +350,9 @@ describe('createBuildLogsStage', () => {
 
     const deps: Pick<
       StageDependencies,
-      | 'buildAuditLog'
-      | 'batchEnrichAggregateContexts'
-      | 'buildNestedAuditLogs'
-      | 'aggregateConfig'
-      | 'excludeFields'
-      | 'basePrisma'
+      'buildAuditLog' | 'buildNestedAuditLogs' | 'aggregateConfig' | 'excludeFields' | 'basePrisma'
     > = {
       buildAuditLog: mockBuildAuditLog,
-      batchEnrichAggregateContexts: mockBatchEnrichAggregateContexts,
       buildNestedAuditLogs: mockBuildNestedAuditLogs,
       aggregateConfig: mockAggregateConfig,
       excludeFields: [],

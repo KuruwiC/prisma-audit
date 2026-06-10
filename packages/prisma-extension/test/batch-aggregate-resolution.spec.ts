@@ -50,13 +50,7 @@ function createMockDeps(
   entityConfig: LoggableEntity | undefined,
 ): Pick<
   StageDependencies,
-  | 'buildAuditLog'
-  | 'batchEnrichAggregateContexts'
-  | 'aggregateConfig'
-  | 'excludeFields'
-  | 'basePrisma'
-  | 'redact'
-  | 'serialization'
+  'buildAuditLog' | 'aggregateConfig' | 'excludeFields' | 'basePrisma' | 'redact' | 'serialization'
 > {
   const mockBuildAuditLog = vi
     .fn()
@@ -84,6 +78,7 @@ function createMockDeps(
 
   const mockAggregateConfig: AggregateConfigService = {
     getEntityConfig: vi.fn().mockReturnValue(entityConfig),
+    getEntityConfigByType: vi.fn().mockReturnValue(undefined),
     isLoggable: vi.fn().mockReturnValue(!!entityConfig),
     getAllLoggableModels: vi.fn().mockReturnValue(entityConfig ? ['Post'] : []),
     getMapping: vi.fn().mockReturnValue({}),
@@ -91,7 +86,6 @@ function createMockDeps(
 
   return {
     buildAuditLog: mockBuildAuditLog,
-    batchEnrichAggregateContexts: vi.fn().mockResolvedValue([null]),
     aggregateConfig: mockAggregateConfig,
     excludeFields: [],
     basePrisma: {} as unknown as PrismaClientWithDynamicAccess,
@@ -126,7 +120,7 @@ describe('Batch Aggregate Resolution', () => {
     it('should skip entities with no aggregate roots', async () => {
       const entityConfig = defineEntity({
         type: 'Post',
-        excludeSelf: true,
+        self: false,
         aggregates: [to('User', foreignKey('authorId'))],
       });
 

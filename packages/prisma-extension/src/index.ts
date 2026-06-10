@@ -20,6 +20,7 @@ export type {
   ActorId,
   // Aggregate Types
   AggregateConfigService,
+  AggregateContextEnricherConfig,
   AggregateId,
   AggregateIdResolver,
   AggregateMapping,
@@ -39,7 +40,6 @@ export type {
   AuditLogInput as CoreAuditLogInput,
   BatchAggregateIdResolver,
   CapitalizedModelNames,
-  ContextEnricherConfig,
   // Interfaces
   CreateArgs,
   DbClient,
@@ -55,7 +55,6 @@ export type {
   EnricherConfig,
   EnricherErrorStrategy,
   EnrichmentErrorStrategy,
-  EntitiesEnricher,
   EntityEnricherConfig,
   EntityId,
   ErrorHandler,
@@ -88,6 +87,8 @@ export type {
   PreFetchResult,
   PreFetchResults,
   PrismaModelNames,
+  ProjectionEnricherConfig,
+  ProjectionEnrichmentMeta,
   // Redaction Types
   RedactConfig,
   RedactedFieldInfo,
@@ -98,9 +99,11 @@ export type {
   ResolvedNestedState,
   Result,
   SchemaMetadata,
+  SelfProjectionConfig,
   // Serialization Types
   SerializationConfig,
   SkippedResult,
+  ToOptions,
   TraceId,
   Transaction,
   TypedAggregateMapping,
@@ -121,8 +124,9 @@ export {
   // State Resolution
   applyRelationConfig,
   // Enrichment Functions
-  batchEnrichAggregateContexts,
   batchEnrichEntityContexts,
+  batchEnrichProjectionContexts,
+  batchEnrichRootAggregateContexts,
   // Aggregate Functions
   batchResolveIds,
   // PreFetch Functions
@@ -201,7 +205,6 @@ export {
   // Relation Configuration
   removeRelations,
   resolveAggregateId,
-  resolveAllAggregateRoots,
   resolveBeforeAndAfterStates,
   resolveConnectOrCreateState,
   resolveCreateState,

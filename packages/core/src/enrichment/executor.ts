@@ -104,23 +104,19 @@ const handleEnricherError = <TContext>(
  * );
  * ```
  */
-export const executeEnricherSafely = async <TInput, TContext>(
-  config: EnricherConfig<TInput, TContext> | undefined,
+export const executeEnricherSafely = async <TInput, TContext, TMeta = void>(
+  config: EnricherConfig<TInput, TContext, unknown, TMeta> | undefined,
   input: TInput,
   prisma: unknown,
   timeoutMs: number = ENRICHMENT_TIMEOUTS.DEFAULT,
-  meta: {
-    aggregateType: string;
-    aggregateCategory: string;
-    aggregateId?: string;
-  },
+  meta?: TMeta,
 ): Promise<TContext | null> => {
   if (!config?.enricher) {
     return null;
   }
 
   try {
-    return await withTimeout(config.enricher(input, prisma, meta), timeoutMs);
+    return await withTimeout(config.enricher(input, prisma, meta as TMeta), timeoutMs);
   } catch (unknownError) {
     const error = unknownError instanceof Error ? unknownError : new Error(String(unknownError));
     const errorStrategy = config.onError ?? 'fail';
@@ -215,23 +211,19 @@ const handleBatchEnricherError = <TContext>(
  * // returns: [{ roles: ['user'] }, { roles: ['user'] }] or [null, null] on error
  * ```
  */
-export const executeBatchEnricherSafely = async <TInput, TContext>(
-  config: EnricherConfig<TInput[], (TContext | null)[]> | undefined,
+export const executeBatchEnricherSafely = async <TInput, TContext, TMeta = void>(
+  config: EnricherConfig<TInput[], (TContext | null)[], unknown, TMeta> | undefined,
   inputs: TInput[],
   prisma: unknown,
   timeoutMs: number = ENRICHMENT_TIMEOUTS.BATCH,
-  meta: {
-    aggregateType: string;
-    aggregateCategory: string;
-    aggregateId?: string;
-  },
+  meta?: TMeta,
 ): Promise<(TContext | null)[]> => {
   if (!config?.enricher) {
     return inputs.map(() => null);
   }
 
   try {
-    const enrichedContexts = await withTimeout(config.enricher(inputs, prisma, meta), timeoutMs);
+    const enrichedContexts = await withTimeout(config.enricher(inputs, prisma, meta as TMeta), timeoutMs);
     if (enrichedContexts.length !== inputs.length) {
       throw new Error(
         `Batch enricher returned ${enrichedContexts.length} results for ${inputs.length} inputs (expected same length)`,

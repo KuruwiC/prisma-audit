@@ -643,7 +643,7 @@ describe('Hono + Prisma Audit E2E Tests', () => {
       );
 
       // Verify audit logs for PostTag contain enriched aggregate context
-      // Note: PostTag uses excludeSelf: true, so no entity log is created for PostTag itself
+      // Note: PostTag uses self: false, so no self aggregate log is created for PostTag itself
       // Only aggregate logs (Tag and Post) are created with enriched aggregateContext
       const postTagLogs = await testPrisma.auditLog.findMany({
         where: {
@@ -655,7 +655,7 @@ describe('Hono + Prisma Audit E2E Tests', () => {
 
       expect(postTagLogs.length).toBeGreaterThan(0);
 
-      // With excludeSelf: true, PostTag should NOT have itself as aggregate root
+      // With self: false, PostTag should NOT have itself as aggregate root
       const aggregateTypes = postTagLogs.map((log: AuditLog) => log.aggregateType);
       expect(aggregateTypes).not.toContain('PostTag'); // Self excluded
       expect(aggregateTypes).toContain('Tag');
@@ -901,7 +901,7 @@ describe('Hono + Prisma Audit E2E Tests', () => {
         expect(actions.some((action: string) => action === 'create' || action === 'update')).toBe(true);
       }
 
-      // Verify PostTag audit logs (with excludeSelf: true, should not have PostTag aggregate)
+      // Verify PostTag audit logs (with self: false, should not have PostTag aggregate)
       for (const postTag of postTags) {
         const postTagLogs = await testPrisma.auditLog.findMany({
           where: {
@@ -911,7 +911,7 @@ describe('Hono + Prisma Audit E2E Tests', () => {
         });
         expect(postTagLogs.length).toBeGreaterThan(0);
         const aggregateTypes = postTagLogs.map((log: AuditLog) => log.aggregateType);
-        expect(aggregateTypes).not.toContain('PostTag'); // excludeSelf
+        expect(aggregateTypes).not.toContain('PostTag'); // self: false
         expect(aggregateTypes).toContain('Post');
         expect(aggregateTypes).toContain('Tag');
       }
@@ -1211,8 +1211,8 @@ describe('Hono + Prisma Audit E2E Tests', () => {
     });
   });
 
-  describe('preloadedParent Automatic Fallback', () => {
-    it('should resolve aggregate root using preloaded data when available', async () => {
+  describe('Aggregate root resolution via foreign key', () => {
+    it('should resolve the User aggregate root when the author relation is preloaded', async () => {
       // Create user and post
       const user = await testPrisma.user.create({
         data: { email: 'author@example.com', name: 'Author' },
@@ -1251,11 +1251,11 @@ describe('Hono + Prisma Audit E2E Tests', () => {
       });
 
       const aggregateTypes = logs.map((log: AuditLog) => log.aggregateType);
-      expect(aggregateTypes).toContain('User'); // Should resolve from preloaded data
+      expect(aggregateTypes).toContain('User'); // Resolved via foreignKey('authorId')
       expect(aggregateTypes).toContain('Post'); // Self
     });
 
-    it('should automatically fallback to foreign key when relation is not preloaded', async () => {
+    it('should resolve the User aggregate root when the relation is not preloaded', async () => {
       // Create user
       const user = await testPrisma.user.create({
         data: { email: 'author2@example.com', name: 'Author 2' },
@@ -1283,7 +1283,7 @@ describe('Hono + Prisma Audit E2E Tests', () => {
         },
       );
 
-      // Verify audit logs created with User aggregate root (via automatic fallback)
+      // Verify audit logs created with User aggregate root
       const logs = await testPrisma.auditLog.findMany({
         where: {
           entityType: 'Post',

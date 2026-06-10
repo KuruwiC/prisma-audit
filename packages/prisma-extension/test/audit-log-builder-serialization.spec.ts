@@ -23,6 +23,7 @@ const createAggregateConfig = (entityConfig?: LoggableEntity) => {
   const config = entityConfig ?? createEntityConfig();
   return {
     getEntityConfig: vi.fn().mockReturnValue(config),
+    getEntityConfigByType: vi.fn().mockReturnValue(undefined),
     isLoggable: vi.fn().mockReturnValue(true),
     getAllLoggableModels: vi.fn().mockReturnValue(['Transaction']),
     getMapping: vi.fn(),

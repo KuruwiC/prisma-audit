@@ -18,7 +18,7 @@ import type {
   BatchAggregateIdResolver,
   GetModelType,
   LoggableEntity,
-  ResolvedId,
+  SelfProjectionConfig,
   TypedAggregateMapping,
 } from './types.js';
 import { DEFAULT_ENTITY_CATEGORY } from './types.js';
@@ -309,7 +309,22 @@ export const batchResolveIds = <TEntity = unknown, TDbClient = unknown>(
 };
 
 /**
- * Define an aggregate root with type safety
+ * Options for a `to()` projection declaration
+ */
+export type ToOptions = {
+  /** Aggregate category (default: DEFAULT_ENTITY_CATEGORY) */
+  category?: string;
+  /**
+   * Projection-specific context enricher.
+   * Receives the written entity rows (NOT the aggregate root rows);
+   * `meta.aggregateIds[i]` is the aggregate ID resolved for row i.
+   * Merged over the root entity's `aggregateContext` (projection keys win).
+   */
+  context?: import('../enrichment/types.js').ProjectionEnricherConfig;
+};
+
+/**
+ * Define an aggregate root projection with type safety
  *
  * @template TAggregateName - The aggregate type name (for type safety when used with database client)
  * @template TEntity - Entity type (automatically inferred from resolver function)
@@ -317,12 +332,22 @@ export const batchResolveIds = <TEntity = unknown, TDbClient = unknown>(
  *
  * @param type - Aggregate type name (should be a valid model name)
  * @param resolver - ID resolution function (can be AggregateIdResolver or typed resolver function)
- * @param category - Aggregate category (default: DEFAULT_ENTITY_CATEGORY)
+ * @param options - Projection options: custom category, projection-specific context enricher
  * @returns AggregateRoot configuration
  *
  * @example Basic usage with foreignKey
  * ```typescript
  * to('User', foreignKey('authorId'))
+ * ```
+ *
+ * @example With projection-specific context (enricher receives the WRITTEN rows, e.g. postTags)
+ * ```typescript
+ * to('Post', foreignKey('postId'), {
+ *   context: {
+ *     enricher: async (postTags, client, meta) =>
+ *       postTags.map((pt, i) => ({ tagId: pt.tagId, postId: meta.aggregateIds[i] })),
+ *   },
+ * })
  * ```
  *
  * @example With resolveId helper (explicit types)
@@ -335,44 +360,37 @@ export const batchResolveIds = <TEntity = unknown, TDbClient = unknown>(
  * }))
  * ```
  *
- * @example Direct function (type inference from context)
- * ```typescript
- * // When used inside defineEntity<DbClient, 'attachment'>()
- * to('Post', async (attachment, client) => {
- *   // attachment is inferred as Attachment type
- *   // client is inferred as DbClient type
- *   return attachment.postAttachments?.[0]?.postId ?? null;
- * })
- * ```
- *
  * @example With custom category
  * ```typescript
- * to('ExternalSystem', foreignKey('systemId'), 'external')
+ * to('ExternalSystem', foreignKey('systemId'), { category: 'external' })
  * ```
  */
 // Overload 1: Accept typed resolver function directly
 export function to<TAggregateName extends string = string, TEntity = unknown, TDbClient = unknown>(
   type: TAggregateName,
   resolver: (entity: TEntity, dbClient: TDbClient) => Promise<string | null | undefined>,
-  category?: string,
+  options?: ToOptions,
 ): AggregateRoot;
 // Overload 2: Accept AggregateIdResolver (from helpers like foreignKey, self, resolveId)
 export function to<TAggregateName extends string = string>(
   type: TAggregateName,
   resolver: AggregateIdResolver,
-  category?: string,
+  options?: ToOptions,
 ): AggregateRoot;
 export function to<TAggregateName extends string = string>(
   type: TAggregateName,
   resolver: AggregateIdResolver | ((entity: unknown, dbClient: unknown) => Promise<string | null | undefined>),
-  category?: string,
+  options?: ToOptions,
 ): AggregateRoot {
   const typedResolver = resolver as AggregateIdResolver;
   const root: AggregateRoot = {
-    category: category ?? DEFAULT_ENTITY_CATEGORY,
+    category: options?.category ?? DEFAULT_ENTITY_CATEGORY,
     type,
     resolve: typedResolver,
   };
+  if (options?.context) {
+    root.context = options.context;
+  }
   const batchFn = getRegisteredBatchResolver(typedResolver);
   if (batchFn) {
     root.batchResolve = batchFn;
@@ -402,21 +420,23 @@ export type DefineEntityOptions<TDbClient = unknown, TModelName extends string =
   idResolver?: AggregateIdResolver<GetModelType<TDbClient, TModelName>, TDbClient>;
   /** Aggregate roots this entity belongs to. Use helpers: to(), foreignKey(), resolveId() */
   aggregates?: AggregateRoot[];
-  /** Skip logging self aggregate (useful for join tables) */
-  excludeSelf?: boolean;
+  /**
+   * Self-projection configuration (default: included).
+   * `false` skips the self aggregate log (useful for join tables);
+   * `{ context }` enriches the self aggregate log with the entity's own rows.
+   */
+  self?: SelfProjectionConfig;
   /** Fields to exclude when calculating changes for this entity */
   excludeFields?: string[];
 
-  /** Unified context enrichment for both entity and aggregate logs */
-  context?: import('../enrichment/types.js').EnricherConfig<unknown[], unknown[], unknown>;
-  /** Entity-specific context enrichment (takes priority over context) */
-  entityContext?: import('../enrichment/types.js').EnricherConfig<unknown[], unknown[], unknown>;
+  /** Entity-log context enrichment, stored in AuditLog.entityContext */
+  context?: import('../enrichment/types.js').EntityEnricherConfig;
   /**
-   * Aggregate-specific context enrichment map keyed by aggregateType.
-   * First parameter of enricher is the aggregate root entities (e.g., Posts, Users), not the current entity.
-   * Priority: aggregateContextMap[aggregateType] > aggregateContextMap['*'] > context
+   * Root-side aggregate context enrichment. Applied whenever ANY entity
+   * (self or child) projects onto this entity as its aggregate root.
+   * The enricher receives the unique aggregate IDs involved in the operation.
    */
-  aggregateContextMap?: Record<string, import('../enrichment/types.js').EnricherConfig<unknown[], unknown[], unknown>>;
+  aggregateContext?: import('../enrichment/types.js').AggregateContextEnricherConfig;
   /** Tags for tag-based configuration rules */
   tags?: string[];
   /** Per-entity nested operation settings */
@@ -479,11 +499,10 @@ export const defineEntity = <TDbClient = unknown, TModelName extends string = st
     type,
     idResolver,
     aggregates = [],
-    excludeSelf = false,
+    self: selfProjection,
     excludeFields,
     context,
-    entityContext,
-    aggregateContextMap,
+    aggregateContext,
     tags,
     nestedOperations,
   } = options;
@@ -493,13 +512,10 @@ export const defineEntity = <TDbClient = unknown, TModelName extends string = st
     type,
     idResolver: (idResolver ?? self('id')) as AggregateIdResolver,
     aggregates,
-    excludeSelf,
+    self: selfProjection,
     excludeFields,
-    context: context as import('../enrichment/types.js').EnricherConfig<unknown[], unknown[]> | undefined,
-    entityContext: entityContext as import('../enrichment/types.js').EnricherConfig<unknown[], unknown[]> | undefined,
-    aggregateContextMap: aggregateContextMap as
-      | Record<string, import('../enrichment/types.js').EnricherConfig<unknown[], unknown[]>>
-      | undefined,
+    context,
+    aggregateContext,
     tags,
     nestedOperations,
   };
@@ -549,71 +565,6 @@ export const resolveAggregateId = async (
   }
 };
 
-/**
- * Resolve all aggregate IDs for an entity
- *
- * Resolves both the entity's self aggregate (unless excluded) and all configured aggregate relationships. Failed resolutions are silently skipped.
- *
- * @param entity - Entity instance to resolve aggregates for
- * @param config - Loggable entity configuration containing aggregates and self config
- * @param dbClient - Database client for database queries
- * @returns Array of successfully resolved aggregate IDs with their categories and types
- *
- * @example
- * ```typescript
- * const commentConfig: LoggableEntity = {
- *   type: 'Comment',
- *   idResolver: self('id'),
- *   aggregates: [
- *     to('Post', foreignKey('postId')),
- *     to('User', foreignKey('authorId'))
- *   ]
- * };
- *
- * const comment = { id: 'c1', postId: 'p1', authorId: 'u1' };
- * const resolved = await resolveAllAggregateRoots(comment, commentConfig, client);
- * ```
- */
-export const resolveAllAggregateRoots = async (
-  entity: unknown,
-  config: LoggableEntity,
-  dbClient: unknown,
-): Promise<ResolvedId[]> => {
-  const resolvedAggregates: ResolvedId[] = [];
-
-  if (!config.excludeSelf) {
-    const selfAggregateRoot: AggregateRoot = {
-      category: config.category,
-      type: config.type,
-      resolve: config.idResolver,
-    };
-
-    const selfId = await resolveAggregateId(entity, selfAggregateRoot, dbClient);
-
-    if (selfId !== null) {
-      resolvedAggregates.push({
-        aggregateCategory: config.category,
-        aggregateType: config.type,
-        aggregateId: selfId,
-      });
-    }
-  }
-
-  for (const aggregateRoot of config.aggregates) {
-    const aggregateId = await resolveAggregateId(entity, aggregateRoot, dbClient);
-
-    if (aggregateId !== null) {
-      resolvedAggregates.push({
-        aggregateCategory: aggregateRoot.category,
-        aggregateType: aggregateRoot.type,
-        aggregateId,
-      });
-    }
-  }
-
-  return resolvedAggregates;
-};
-
 // ============================================================================
 // Mapping Configuration Helpers
 // ============================================================================
@@ -652,7 +603,7 @@ export const resolveAllAggregateRoots = async (
  *   AuditLog: defineEntity({
  *     type: 'AuditLog',
  *     category: 'system',
- *     excludeSelf: true
+ *     self: false
  *   }),
  * });
  * ```
@@ -689,6 +640,7 @@ export const defineAggregateMapping =
  */
 export const validateAggregateMapping = (mapping: AggregateMapping): void => {
   const validationErrors: string[] = [];
+  const entityNameByRootKey = new Map<string, string>();
 
   for (const [entityName, entityConfig] of Object.entries(mapping)) {
     if (!entityConfig.type) {
@@ -697,6 +649,20 @@ export const validateAggregateMapping = (mapping: AggregateMapping): void => {
 
     if (!entityConfig.idResolver) {
       validationErrors.push(`Entity "${entityName}": idResolver is required`);
+    }
+
+    // Duplicate (category, type) pairs would make root-side aggregateContext
+    // lookups ambiguous, so they are rejected at configuration time.
+    if (entityConfig.type) {
+      const rootKey = `${entityConfig.category ?? DEFAULT_ENTITY_CATEGORY}:${entityConfig.type}`;
+      const existingEntityName = entityNameByRootKey.get(rootKey);
+      if (existingEntityName !== undefined) {
+        validationErrors.push(
+          `Entities "${existingEntityName}" and "${entityName}" share the same category/type "${rootKey}"`,
+        );
+      } else {
+        entityNameByRootKey.set(rootKey, entityName);
+      }
     }
   }
 

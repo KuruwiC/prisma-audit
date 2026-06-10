@@ -481,9 +481,41 @@ const aggregateMapping = defineAggregateMapping<PrismaClient>()({
   }),
   Post: defineEntity<PrismaClient, 'post'>({
     type: 'Post',
-    aggregates: [to('User', foreignKey('authorId'))],
-    entityContext: {
-      enricher: async (posts: unknown[], _prisma: unknown, _meta) => {
+    aggregates: [
+      to('User', foreignKey('authorId'), {
+        context: {
+          enricher: async (posts: unknown[]) => {
+            if (!Array.isArray(posts)) return [];
+            return posts.map((post) => {
+              if (!hasObjectProperty(post, 'author')) {
+                return { name: null };
+              }
+
+              const author = post.author;
+              const email = extractNullableString(author, 'email');
+              const name = extractNullableString(author, 'name');
+              const displayName = name || (email ? email.split('@')[0] : null);
+
+              return { name: displayName };
+            });
+          },
+          onError: 'log',
+        },
+      }),
+    ],
+    self: {
+      context: {
+        enricher: async (posts: unknown[]) => {
+          if (!Array.isArray(posts)) return [];
+          return posts.map((post) => ({
+            name: extractNullableString(post, 'title'),
+          }));
+        },
+        onError: 'log',
+      },
+    },
+    context: {
+      enricher: async (posts: unknown[], _prisma: unknown) => {
         if (!Array.isArray(posts)) return [];
 
         return posts.map((post) => ({
@@ -493,74 +525,48 @@ const aggregateMapping = defineAggregateMapping<PrismaClient>()({
       },
       onError: 'log',
     },
-    aggregateContextMap: {
-      Post: {
-        enricher: async (posts: unknown[]) => {
-          if (!Array.isArray(posts)) return [];
-          return posts.map((post) => ({
-            name: extractNullableString(post, 'title'),
-          }));
-        },
-        onError: 'log',
-      },
-      User: {
-        enricher: async (posts: unknown[]) => {
-          if (!Array.isArray(posts)) return [];
-          return posts.map((post) => {
-            if (!hasObjectProperty(post, 'author')) {
-              return { name: null };
-            }
-
-            const author = post.author;
-            const email = extractNullableString(author, 'email');
-            const name = extractNullableString(author, 'name');
-            const displayName = name || (email ? email.split('@')[0] : null);
-
-            return { name: displayName };
-          });
-        },
-        onError: 'log',
-      },
-    },
   }),
   Comment: defineEntity<PrismaClient, 'comment'>({
     type: 'Comment',
-    aggregates: [to('Post', foreignKey('postId')), to('User', foreignKey('authorId'))],
-    entityContext: {
-      enricher: async (comments: unknown[], prisma: unknown, _meta) => {
+    aggregates: [
+      to('Post', foreignKey('postId'), {
+        context: {
+          enricher: async (comments: unknown[]) => {
+            if (!Array.isArray(comments)) return [];
+            return comments.map((comment) => {
+              if (hasObjectProperty(comment, 'post')) {
+                return { name: extractNullableString(comment.post, 'title') };
+              }
+              return { name: null };
+            });
+          },
+          onError: 'log',
+        },
+      }),
+      to('User', foreignKey('authorId'), {
+        context: {
+          enricher: async (comments: unknown[]) => {
+            if (!Array.isArray(comments)) return [];
+            return comments.map((comment) => {
+              if (hasObjectProperty(comment, 'author')) {
+                const author = comment.author;
+                const email = extractNullableString(author, 'email');
+                const name = extractNullableString(author, 'name');
+                const displayName = name || (email ? email.split('@')[0] : null);
+                return { name: displayName };
+              }
+              return { name: null };
+            });
+          },
+          onError: 'log',
+        },
+      }),
+    ],
+    context: {
+      enricher: async (comments: unknown[], prisma: unknown) => {
         return await enrichCommentContext(comments, prisma);
       },
       onError: 'log',
-    },
-    aggregateContextMap: {
-      Post: {
-        enricher: async (comments: unknown[]) => {
-          if (!Array.isArray(comments)) return [];
-          return comments.map((comment) => {
-            if (hasObjectProperty(comment, 'post')) {
-              return { name: extractNullableString(comment.post, 'title') };
-            }
-            return { name: null };
-          });
-        },
-        onError: 'log',
-      },
-      User: {
-        enricher: async (comments: unknown[]) => {
-          if (!Array.isArray(comments)) return [];
-          return comments.map((comment) => {
-            if (hasObjectProperty(comment, 'author')) {
-              const author = comment.author;
-              const email = extractNullableString(author, 'email');
-              const name = extractNullableString(author, 'name');
-              const displayName = name || (email ? email.split('@')[0] : null);
-              return { name: displayName };
-            }
-            return { name: null };
-          });
-        },
-        onError: 'log',
-      },
     },
   }),
   Tag: defineEntity({
@@ -568,124 +574,218 @@ const aggregateMapping = defineAggregateMapping<PrismaClient>()({
   }),
   PostTag: defineEntity<PrismaClient, 'postTag'>({
     type: 'PostTag',
-    excludeSelf: true,
-    aggregates: [to('Tag', foreignKey('tagId')), to('Post', foreignKey('postId'))],
-    entityContext: {
-      enricher: async (postTags: unknown[], prisma: unknown, _meta) => {
+    self: false,
+    aggregates: [
+      to('Tag', foreignKey('tagId'), {
+        context: {
+          enricher: async (postTags: unknown[], _prisma: unknown) => {
+            if (!Array.isArray(postTags)) return [];
+            if (!isPrismaClient(_prisma)) return [];
+
+            // Collect tagIds that need to be fetched
+            const tagIds = new Set<string>();
+            for (const pt of postTags) {
+              if (typeof pt !== 'object' || pt === null) continue;
+              if (!hasObjectProperty(pt, 'tag')) {
+                const tagId = extractString(pt, 'tagId');
+                if (tagId) tagIds.add(tagId);
+              }
+            }
+
+            // Fetch missing tags
+            const tagMap = new Map<string, { name: string | null }>();
+            if (tagIds.size > 0) {
+              const tags = await _prisma.tag.findMany({
+                where: { id: { in: Array.from(tagIds) } },
+                select: { id: true, name: true },
+              });
+              for (const tag of tags) {
+                tagMap.set(tag.id, { name: tag.name });
+              }
+            }
+
+            return postTags.map((pt) => {
+              if (typeof pt !== 'object' || pt === null) {
+                return { name: null };
+              }
+
+              const tag = hasObjectProperty(pt, 'tag')
+                ? pt.tag
+                : (() => {
+                    const tagId = extractString(pt, 'tagId');
+                    return tagId ? (tagMap.get(tagId) ?? null) : null;
+                  })();
+
+              return { name: extractNullableString(tag, 'name') };
+            });
+          },
+          onError: 'log',
+        },
+      }),
+      to('Post', foreignKey('postId'), {
+        context: {
+          enricher: async (postTags: unknown[], _prisma: unknown) => {
+            if (!Array.isArray(postTags)) return [];
+            if (!isPrismaClient(_prisma)) return [];
+
+            // Collect postIds that need to be fetched
+            const postIds = new Set<string>();
+            for (const pt of postTags) {
+              if (typeof pt !== 'object' || pt === null) continue;
+              if (!hasObjectProperty(pt, 'post')) {
+                const postId = extractString(pt, 'postId');
+                if (postId) postIds.add(postId);
+              }
+            }
+
+            // Fetch missing posts
+            const postMap = new Map<string, { title: string | null }>();
+            if (postIds.size > 0) {
+              const posts = await _prisma.post.findMany({
+                where: { id: { in: Array.from(postIds) } },
+                select: { id: true, title: true },
+              });
+              for (const post of posts) {
+                postMap.set(post.id, { title: post.title });
+              }
+            }
+
+            return postTags.map((pt) => {
+              if (typeof pt !== 'object' || pt === null) {
+                return { name: null };
+              }
+
+              const post = hasObjectProperty(pt, 'post')
+                ? pt.post
+                : (() => {
+                    const postId = extractString(pt, 'postId');
+                    return postId ? (postMap.get(postId) ?? null) : null;
+                  })();
+
+              return { name: extractNullableString(post, 'title') };
+            });
+          },
+          onError: 'log',
+        },
+      }),
+    ],
+    context: {
+      enricher: async (postTags: unknown[], prisma: unknown) => {
         return await enrichPostTagContext(postTags, prisma);
       },
       onError: 'log',
-    },
-    aggregateContextMap: {
-      Tag: {
-        enricher: async (postTags: unknown[], _prisma: unknown) => {
-          if (!Array.isArray(postTags)) return [];
-          if (!isPrismaClient(_prisma)) return [];
-
-          // Collect tagIds that need to be fetched
-          const tagIds = new Set<string>();
-          for (const pt of postTags) {
-            if (typeof pt !== 'object' || pt === null) continue;
-            if (!hasObjectProperty(pt, 'tag')) {
-              const tagId = extractString(pt, 'tagId');
-              if (tagId) tagIds.add(tagId);
-            }
-          }
-
-          // Fetch missing tags
-          const tagMap = new Map<string, { name: string | null }>();
-          if (tagIds.size > 0) {
-            const tags = await _prisma.tag.findMany({
-              where: { id: { in: Array.from(tagIds) } },
-              select: { id: true, name: true },
-            });
-            for (const tag of tags) {
-              tagMap.set(tag.id, { name: tag.name });
-            }
-          }
-
-          return postTags.map((pt) => {
-            if (typeof pt !== 'object' || pt === null) {
-              return { name: null };
-            }
-
-            const tag = hasObjectProperty(pt, 'tag')
-              ? pt.tag
-              : (() => {
-                  const tagId = extractString(pt, 'tagId');
-                  return tagId ? (tagMap.get(tagId) ?? null) : null;
-                })();
-
-            return { name: extractNullableString(tag, 'name') };
-          });
-        },
-        onError: 'log',
-      },
-      Post: {
-        enricher: async (postTags: unknown[], _prisma: unknown) => {
-          if (!Array.isArray(postTags)) return [];
-          if (!isPrismaClient(_prisma)) return [];
-
-          // Collect postIds that need to be fetched
-          const postIds = new Set<string>();
-          for (const pt of postTags) {
-            if (typeof pt !== 'object' || pt === null) continue;
-            if (!hasObjectProperty(pt, 'post')) {
-              const postId = extractString(pt, 'postId');
-              if (postId) postIds.add(postId);
-            }
-          }
-
-          // Fetch missing posts
-          const postMap = new Map<string, { title: string | null }>();
-          if (postIds.size > 0) {
-            const posts = await _prisma.post.findMany({
-              where: { id: { in: Array.from(postIds) } },
-              select: { id: true, title: true },
-            });
-            for (const post of posts) {
-              postMap.set(post.id, { title: post.title });
-            }
-          }
-
-          return postTags.map((pt) => {
-            if (typeof pt !== 'object' || pt === null) {
-              return { name: null };
-            }
-
-            const post = hasObjectProperty(pt, 'post')
-              ? pt.post
-              : (() => {
-                  const postId = extractString(pt, 'postId');
-                  return postId ? (postMap.get(postId) ?? null) : null;
-                })();
-
-            return { name: extractNullableString(post, 'title') };
-          });
-        },
-        onError: 'log',
-      },
     },
   }),
   Attachment: defineEntity<PrismaClient, 'attachment'>({
     type: 'Attachment',
     aggregates: [
-      to('User', foreignKey('ownerId')),
+      to('User', foreignKey('ownerId'), {
+        context: {
+          enricher: async (attachments: unknown[], prisma: unknown) => {
+            if (!Array.isArray(attachments)) return [];
+            if (!isPrismaClient(prisma)) return attachments.map(() => ({ name: null }));
+
+            const ownerIds = new Set<string>();
+            for (const attachment of attachments) {
+              if (typeof attachment !== 'object' || attachment === null) continue;
+              if (!hasObjectProperty(attachment, 'owner')) {
+                const ownerId = extractString(attachment, 'ownerId');
+                if (ownerId) ownerIds.add(ownerId);
+              }
+            }
+
+            const ownerMap = new Map<string, { name: string | null; email: string }>();
+            if (ownerIds.size > 0) {
+              const owners = await prisma.user.findMany({
+                where: { id: { in: Array.from(ownerIds) } },
+                select: { id: true, name: true, email: true },
+              });
+              for (const owner of owners) {
+                ownerMap.set(owner.id, { name: owner.name, email: owner.email });
+              }
+            }
+
+            return attachments.map((attachment) => {
+              if (typeof attachment !== 'object' || attachment === null) {
+                return { name: null };
+              }
+
+              const owner = hasObjectProperty(attachment, 'owner')
+                ? attachment.owner
+                : (() => {
+                    const ownerId = extractString(attachment, 'ownerId');
+                    return ownerId ? (ownerMap.get(ownerId) ?? null) : null;
+                  })();
+
+              const ownerEmail = extractNullableString(owner, 'email');
+              const ownerName = extractNullableString(owner, 'name');
+              const displayName = ownerName || (ownerEmail ? ownerEmail.split('@')[0] : null);
+
+              return { name: displayName };
+            });
+          },
+          onError: 'log',
+        },
+      }),
       to(
         'Post',
         resolveId(async (attachment: { postAttachments?: Array<{ postId: string }> }) => {
           return attachment.postAttachments?.[0]?.postId ?? null;
         }),
+        {
+          context: {
+            enricher: async (attachments: unknown[], prisma: unknown) => {
+              if (!Array.isArray(attachments)) return [];
+              if (!isPrismaClient(prisma)) return attachments.map(() => ({ name: null }));
+
+              // Collect postIds that need to be fetched (assuming 1:1 relationship with first postAttachment)
+              const postIds = collectAttachmentPostIds(attachments);
+
+              // Fetch missing posts in batch
+              const postMap = new Map<string, { title: string | null }>();
+              if (postIds.size > 0) {
+                const posts = await prisma.post.findMany({
+                  where: { id: { in: Array.from(postIds) } },
+                  select: { id: true, title: true },
+                });
+                for (const post of posts) {
+                  postMap.set(post.id, { title: post.title });
+                }
+              }
+
+              return attachments.map((attachment) => mapAttachmentToPostContext(attachment, postMap));
+            },
+            onError: 'log',
+          },
+        },
       ),
       to(
         'Comment',
         resolveId(async (attachment: { commentAttachments?: Array<{ commentId: string }> }) => {
           return attachment.commentAttachments?.[0]?.commentId ?? null;
         }),
+        {
+          context: {
+            enricher: async (attachments: unknown[]) => {
+              if (!Array.isArray(attachments)) return [];
+
+              return attachments.map((attachment) => {
+                if (hasObjectProperty(attachment, 'commentAttachments')) {
+                  const commentAttachments = attachment.commentAttachments as Array<{
+                    comment?: { content: string };
+                  }>;
+                  return { name: commentAttachments[0]?.comment?.content ?? null };
+                }
+                return { name: null };
+              });
+            },
+            onError: 'log',
+          },
+        },
       ),
     ],
-    entityContext: {
-      enricher: async (attachments: unknown[], _prisma: unknown, _meta) => {
+    context: {
+      enricher: async (attachments: unknown[], _prisma: unknown) => {
         if (!Array.isArray(attachments)) return [];
 
         return attachments.map((attachment) => ({
@@ -695,98 +795,70 @@ const aggregateMapping = defineAggregateMapping<PrismaClient>()({
       },
       onError: 'log',
     },
-    aggregateContextMap: {
-      User: {
-        enricher: async (attachments: unknown[], prisma: unknown) => {
-          if (!Array.isArray(attachments)) return [];
-          if (!isPrismaClient(prisma)) return attachments.map(() => ({ name: null }));
-
-          const ownerIds = new Set<string>();
-          for (const attachment of attachments) {
-            if (typeof attachment !== 'object' || attachment === null) continue;
-            if (!hasObjectProperty(attachment, 'owner')) {
-              const ownerId = extractString(attachment, 'ownerId');
-              if (ownerId) ownerIds.add(ownerId);
-            }
-          }
-
-          const ownerMap = new Map<string, { name: string | null; email: string }>();
-          if (ownerIds.size > 0) {
-            const owners = await prisma.user.findMany({
-              where: { id: { in: Array.from(ownerIds) } },
-              select: { id: true, name: true, email: true },
-            });
-            for (const owner of owners) {
-              ownerMap.set(owner.id, { name: owner.name, email: owner.email });
-            }
-          }
-
-          return attachments.map((attachment) => {
-            if (typeof attachment !== 'object' || attachment === null) {
-              return { name: null };
-            }
-
-            const owner = hasObjectProperty(attachment, 'owner')
-              ? attachment.owner
-              : (() => {
-                  const ownerId = extractString(attachment, 'ownerId');
-                  return ownerId ? (ownerMap.get(ownerId) ?? null) : null;
-                })();
-
-            const ownerEmail = extractNullableString(owner, 'email');
-            const ownerName = extractNullableString(owner, 'name');
-            const displayName = ownerName || (ownerEmail ? ownerEmail.split('@')[0] : null);
-
-            return { name: displayName };
-          });
-        },
-        onError: 'log',
-      },
-      Post: {
-        enricher: async (attachments: unknown[], prisma: unknown) => {
-          if (!Array.isArray(attachments)) return [];
-          if (!isPrismaClient(prisma)) return attachments.map(() => ({ name: null }));
-
-          // Collect postIds that need to be fetched (assuming 1:1 relationship with first postAttachment)
-          const postIds = collectAttachmentPostIds(attachments);
-
-          // Fetch missing posts in batch
-          const postMap = new Map<string, { title: string | null }>();
-          if (postIds.size > 0) {
-            const posts = await prisma.post.findMany({
-              where: { id: { in: Array.from(postIds) } },
-              select: { id: true, title: true },
-            });
-            for (const post of posts) {
-              postMap.set(post.id, { title: post.title });
-            }
-          }
-
-          return attachments.map((attachment) => mapAttachmentToPostContext(attachment, postMap));
-        },
-        onError: 'log',
-      },
-      Comment: {
-        enricher: async (attachments: unknown[]) => {
-          if (!Array.isArray(attachments)) return [];
-
-          return attachments.map((attachment) => {
-            if (hasObjectProperty(attachment, 'commentAttachments')) {
-              const commentAttachments = attachment.commentAttachments as Array<{ comment?: { content: string } }>;
-              return { name: commentAttachments[0]?.comment?.content ?? null };
-            }
-            return { name: null };
-          });
-        },
-        onError: 'log',
-      },
-    },
   }),
   Profile: defineEntity<PrismaClient, 'profile'>({
     type: 'Profile',
-    aggregates: [to('User', foreignKey('userId'))],
-    entityContext: {
-      enricher: async (profiles: unknown[], _prisma: unknown, _meta) => {
+    aggregates: [
+      to('User', foreignKey('userId'), {
+        context: {
+          enricher: async (profiles: unknown[], prisma: unknown) => {
+            if (!Array.isArray(profiles)) return [];
+
+            const missingUserIds = new Set<string>();
+
+            for (const profile of profiles) {
+              if (typeof profile !== 'object' || profile === null) continue;
+
+              const hasUser = hasObjectProperty(profile, 'user');
+
+              if (!hasUser) {
+                const userId = extractString(profile, 'userId');
+                if (userId) missingUserIds.add(userId);
+              }
+            }
+
+            if (!isPrismaClient(prisma)) {
+              return profiles.map(() => ({ name: null }));
+            }
+
+            const userMap = new Map<string, { name: string | null; email: string | null }>();
+
+            if (missingUserIds.size > 0) {
+              const users = await prisma.user.findMany({
+                where: { id: { in: Array.from(missingUserIds) } },
+                select: { id: true, name: true, email: true },
+              });
+
+              for (const user of users) {
+                userMap.set(user.id, { name: user.name, email: user.email });
+              }
+            }
+
+            return profiles.map((profile) => {
+              if (typeof profile !== 'object' || profile === null) {
+                return { name: null };
+              }
+
+              const user = hasObjectProperty(profile, 'user')
+                ? profile.user
+                : (() => {
+                    const userId = extractString(profile, 'userId');
+                    return userId ? (userMap.get(userId) ?? null) : null;
+                  })();
+
+              const name = extractNullableString(user, 'name');
+              const email = extractNullableString(user, 'email');
+              const displayName = name || (email ? email.split('@')[0] : null);
+
+              return { name: displayName };
+            });
+          },
+          onError: 'log',
+        },
+      }),
+    ],
+    context: {
+      enricher: async (profiles: unknown[], _prisma: unknown) => {
         if (!Array.isArray(profiles)) return [];
 
         return profiles.map((profile) => ({
@@ -794,63 +866,6 @@ const aggregateMapping = defineAggregateMapping<PrismaClient>()({
         }));
       },
       onError: 'log',
-    },
-    aggregateContextMap: {
-      User: {
-        enricher: async (profiles: unknown[], prisma: unknown) => {
-          if (!Array.isArray(profiles)) return [];
-
-          const missingUserIds = new Set<string>();
-
-          for (const profile of profiles) {
-            if (typeof profile !== 'object' || profile === null) continue;
-
-            const hasUser = hasObjectProperty(profile, 'user');
-
-            if (!hasUser) {
-              const userId = extractString(profile, 'userId');
-              if (userId) missingUserIds.add(userId);
-            }
-          }
-
-          if (!isPrismaClient(prisma)) {
-            return profiles.map(() => ({ name: null }));
-          }
-
-          const userMap = new Map<string, { name: string | null; email: string | null }>();
-
-          if (missingUserIds.size > 0) {
-            const users = await prisma.user.findMany({
-              where: { id: { in: Array.from(missingUserIds) } },
-              select: { id: true, name: true, email: true },
-            });
-
-            for (const user of users) {
-              userMap.set(user.id, { name: user.name, email: user.email });
-            }
-          }
-
-          return profiles.map((profile) => {
-            if (typeof profile !== 'object' || profile === null) {
-              return { name: null };
-            }
-
-            const user = hasObjectProperty(profile, 'user')
-              ? profile.user
-              : (() => {
-                  const userId = extractString(profile, 'userId');
-                  return userId ? (userMap.get(userId) ?? null) : null;
-                })();
-
-            const name = extractNullableString(user, 'name');
-            const email = extractNullableString(user, 'email');
-            const displayName = name || (email ? email.split('@')[0] : null);
-
-            return { name: displayName };
-          });
-        },
-        onError: 'log',
-      },
     },
   }),
   Avatar: defineEntity<PrismaClient, 'avatar'>({
@@ -871,23 +886,23 @@ const aggregateMapping = defineAggregateMapping<PrismaClient>()({
           }
           return null;
         }),
+        {
+          context: {
+            enricher: async (avatars: unknown[], prisma: unknown) => {
+              if (!Array.isArray(avatars)) return [];
+
+              return await enrichAvatarContext(avatars, prisma);
+            },
+            onError: 'log',
+          },
+        },
       ),
     ],
-    entityContext: {
-      enricher: async (avatars: unknown[], prisma: unknown, _meta) => {
+    context: {
+      enricher: async (avatars: unknown[], prisma: unknown) => {
         return await enrichAvatarContext(avatars, prisma);
       },
       onError: 'log',
-    },
-    aggregateContextMap: {
-      User: {
-        enricher: async (avatars: unknown[], prisma: unknown) => {
-          if (!Array.isArray(avatars)) return [];
-
-          return await enrichAvatarContext(avatars, prisma);
-        },
-        onError: 'log',
-      },
     },
   }),
   AvatarImage: defineEntity<PrismaClient, 'avatarImage'>({
@@ -911,23 +926,23 @@ const aggregateMapping = defineAggregateMapping<PrismaClient>()({
           }
           return avatar.profile.userId;
         }),
+        {
+          context: {
+            enricher: async (avatarImages: unknown[], prisma: unknown) => {
+              if (!Array.isArray(avatarImages)) return [];
+
+              return await enrichAvatarImageContext(avatarImages, prisma);
+            },
+            onError: 'log',
+          },
+        },
       ),
     ],
-    entityContext: {
-      enricher: async (avatarImages: unknown[], prisma: unknown, _meta) => {
+    context: {
+      enricher: async (avatarImages: unknown[], prisma: unknown) => {
         return await enrichAvatarImageContext(avatarImages, prisma);
       },
       onError: 'log',
-    },
-    aggregateContextMap: {
-      User: {
-        enricher: async (avatarImages: unknown[], prisma: unknown) => {
-          if (!Array.isArray(avatarImages)) return [];
-
-          return await enrichAvatarImageContext(avatarImages, prisma);
-        },
-        onError: 'log',
-      },
     },
   }),
 });

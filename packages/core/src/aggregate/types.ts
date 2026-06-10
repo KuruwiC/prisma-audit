@@ -9,7 +9,11 @@
  * @packageDocumentation
  */
 
-import type { EnricherConfig } from '../enrichment/types.js';
+import type {
+  AggregateContextEnricherConfig,
+  EntityEnricherConfig,
+  ProjectionEnricherConfig,
+} from '../enrichment/types.js';
 
 // ============================================================================
 // Type Utilities - Generic Client Type Inference
@@ -185,7 +189,21 @@ export interface AggregateRoot {
   batchResolve?: BatchAggregateIdResolver;
   /** Whether `resolve` performs DB queries. Set automatically by resolveId(). Used for N+1 warnings. */
   requiresDbAccess?: boolean;
+  /**
+   * Projection-specific context enricher for this projection.
+   * Receives the written entity rows (NOT the aggregate root rows).
+   * Merged over the root entity's `aggregateContext` (projection keys win).
+   */
+  context?: ProjectionEnricherConfig;
 }
+
+/**
+ * Self-projection configuration
+ *
+ * - `false` disables the self aggregate log (useful for join tables)
+ * - An object includes the self aggregate log; `context` enriches it with the entity's own rows
+ */
+export type SelfProjectionConfig = false | { context?: ProjectionEnricherConfig };
 
 /**
  * Loggable entity configuration
@@ -219,13 +237,18 @@ export interface LoggableEntity {
   idResolver: AggregateIdResolver;
   /** List of aggregate roots this entity belongs to */
   aggregates: AggregateRoot[];
-  /** Whether to exclude the self aggregate from logging (default: false) */
-  excludeSelf?: boolean;
+  /**
+   * Self-projection configuration (default: included, no projection context)
+   *
+   * Set to `false` to skip the self aggregate log (useful for join tables).
+   * Provide `{ context }` to enrich the self aggregate log with the entity's own rows.
+   */
+  self?: SelfProjectionConfig;
   /** Field names to exclude from change tracking */
   excludeFields?: string[];
 
   /**
-   * Unified context enrichment for both entity and aggregate logs
+   * Entity-log context enrichment, stored in AuditLog.entityContext
    *
    * @example
    * ```typescript
@@ -246,27 +269,28 @@ export interface LoggableEntity {
    * })
    * ```
    */
-  context?: EnricherConfig<unknown[], unknown[], unknown>;
+  context?: EntityEnricherConfig;
 
-  /** Entity-specific context enrichment (advanced) */
-  entityContext?: EnricherConfig<unknown[], unknown[], unknown>;
   /**
-   * Aggregate-specific context enrichment map
-   * Allows different enrichers per aggregateType
-   * Priority: aggregateContextMap[aggregateType] > aggregateContextMap['*'] > context
+   * Root-side aggregate context enrichment, applied whenever ANY entity
+   * (this entity itself or a child) projects onto this entity as its
+   * aggregate root. Receives the unique aggregate IDs involved in the
+   * operation; results are merged under projection-specific contexts.
    *
    * @example
    * ```typescript
-   * PostTag: defineEntity({
-   *   aggregateContextMap: {
-   *     Post: { enricher: async (postTags) => { ... } },
-   *     Tag: { enricher: async (postTags) => { ... } },
-   *     '*': { enricher: async (postTags) => { ... } } // fallback
+   * User: defineEntity({
+   *   aggregateContext: {
+   *     enricher: async (userIds, client) => {
+   *       const users = await client.user.findMany({ where: { id: { in: userIds } } });
+   *       const byId = new Map(users.map(u => [u.id, u]));
+   *       return userIds.map(id => ({ userName: byId.get(id)?.name ?? null }));
+   *     },
    *   }
    * })
    * ```
    */
-  aggregateContextMap?: Record<string, EnricherConfig<unknown[], unknown[], unknown>>;
+  aggregateContext?: AggregateContextEnricherConfig;
   /** Tags for tag-based configuration and filtering */
   tags?: string[];
   /** Per-entity nested operation settings */

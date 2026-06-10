@@ -12,7 +12,6 @@
 import type { AuditContext, PreFetchResults } from '@kuruwic/prisma-audit-core';
 import {
   AUDIT_ACTION,
-  batchEnrichAggregateContexts,
   batchEnrichEntityContexts,
   createAggregateConfig,
   createErrorHandler,
@@ -290,11 +289,8 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     preFetchNestedRecordsBeforeOperation: preFetchNestedRecordsBeforeOperationWrapper,
     getNestedOperationConfig: getNestedOperationConfigWrapper,
     enrichActorContext,
-    batchEnrichEntityContexts: (entities, config, prisma, meta) => {
-      return batchEnrichEntityContexts(entities, config, prisma, meta);
-    },
-    batchEnrichAggregateContexts: (entities, config, prisma, meta) => {
-      return batchEnrichAggregateContexts(entities, config, prisma, meta);
+    batchEnrichEntityContexts: (entities, config, prisma) => {
+      return batchEnrichEntityContexts(entities, config, prisma);
     },
     buildAuditLog,
     buildNestedAuditLogs: (

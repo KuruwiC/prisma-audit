@@ -4,7 +4,7 @@
 export type { AggregateConfigService } from './aggregate/config.js';
 export { createAggregateConfig, isAggregateConfigService } from './aggregate/config.js';
 // Aggregate Helpers
-export type { DefineEntityOptions, IdTransformer } from './aggregate/helpers.js';
+export type { DefineEntityOptions, IdTransformer, ToOptions } from './aggregate/helpers.js';
 export {
   batchResolveIds,
   defineAggregateMapping,
@@ -12,7 +12,6 @@ export {
   foreignKey,
   normalizeId,
   resolveAggregateId,
-  resolveAllAggregateRoots,
   resolveId,
   self,
   to,
@@ -31,15 +30,14 @@ export type {
   LoggableEntity,
   PrismaModelNames,
   ResolvedId,
+  SelfProjectionConfig,
   TypedAggregateMapping,
 } from './aggregate/types.js';
 export { DEFAULT_ENTITY_CATEGORY } from './aggregate/types.js';
 // Config Types
 export type {
   ActorEnricher,
-  ContextEnricherConfig,
   EnrichmentErrorStrategy,
-  EntitiesEnricher,
   GlobalContextEnricherConfig,
   NestedOperationConfig,
   SerializationConfig,
@@ -83,14 +81,21 @@ export type { Result, ValidationError } from './domain/smart-constructors.js';
 export { createAuditLogData, failure, success } from './domain/smart-constructors.js';
 // Enrichment - Functions
 export { enrichActorContext } from './enrichment/actor.js';
-export { batchEnrichAggregateContexts, batchEnrichEntityContexts } from './enrichment/batch.js';
+export {
+  batchEnrichEntityContexts,
+  batchEnrichProjectionContexts,
+  batchEnrichRootAggregateContexts,
+} from './enrichment/batch.js';
 export { executeBatchEnricherSafely, executeEnricherSafely } from './enrichment/executor.js';
 // Enrichment - Types
 export type {
   ActorEnricherConfig,
+  AggregateContextEnricherConfig,
   EnricherConfig,
   EnricherErrorStrategy,
   EntityEnricherConfig,
+  ProjectionEnricherConfig,
+  ProjectionEnrichmentMeta,
 } from './enrichment/types.js';
 // Global Singleton (dual-package hazard mitigation)
 /** @internal */
