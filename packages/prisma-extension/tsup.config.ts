@@ -14,6 +14,16 @@ export default defineConfig({
   splitting: false,
   treeshake: true,
   external: ['@prisma/client'],
-  noExternal: ['@kuruwic/prisma-audit-core', '@paralleldrive/cuid2', '@noble/hashes', 'bignumber.js', 'error-causes'],
+  noExternal: [
+    '@kuruwic/prisma-audit-core',
+    '@paralleldrive/cuid2',
+    '@noble/hashes',
+    '@bugsnag/cuid',
+    // @bugsnag/cuid resolves its fingerprint via a package subpath import
+    /^#fingerprint$/,
+    'uuid',
+    'bignumber.js',
+    'error-causes',
+  ],
   skipNodeModulesBundle: true,
 });

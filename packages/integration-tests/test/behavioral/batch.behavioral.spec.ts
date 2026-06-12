@@ -141,6 +141,39 @@ describe('Batch Operations (Behavioral)', () => {
     });
   });
 
+  describe('ID format fidelity for @default(uuid(7))', () => {
+    const UUID_V7_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+    it('createMany injects UUID v7 IDs into rows and audit logs', async () => {
+      const h = getHarness();
+      await h.runWithContext(actor, () =>
+        h.createMany('UuidV7Item', [{ label: 'v7-batch-1' }, { label: 'v7-batch-2' }]),
+      );
+
+      const logs = await h.readAuditLogs({ entityType: 'UuidV7Item', action: 'create' });
+      expect(logs).toHaveLength(2);
+      for (const log of logs) {
+        expect(log.entityId).toMatch(UUID_V7_RE);
+        expect((log.after as Record<string, unknown>)?.id).toBe(log.entityId);
+      }
+    });
+
+    it('createManyAndReturn returns rows with UUID v7 IDs matching audit logs', async () => {
+      const h = getHarness();
+      const rows = await h.runWithContext(actor, () =>
+        h.createManyAndReturn('UuidV7Item', [{ label: 'v7-return-1' }, { label: 'v7-return-2' }]),
+      );
+
+      expect(rows).toHaveLength(2);
+      for (const row of rows) {
+        expect(row.id).toMatch(UUID_V7_RE);
+      }
+
+      const logs = await h.readAuditLogs({ entityType: 'UuidV7Item', action: 'create' });
+      expect(logs.map((l) => l.entityId).sort()).toEqual(rows.map((r) => r.id as string).sort());
+    });
+  });
+
   describe('updateManyAndReturn', () => {
     it('should return the updated records', async () => {
       const h = getHarness();

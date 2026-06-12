@@ -973,6 +973,25 @@ When `awaitWrite: true`, batch operations (updateMany, deleteMany) are wrapped i
 
 When `awaitWrite: false` and no user-provided transaction exists, these operations run without transaction isolation. The audit log is best-effort in this case.
 
+#### Batch Creates (createMany / createManyAndReturn)
+
+`createManyAndReturn` (without `select` / `omit`) delegates ID generation entirely to Prisma: audit logs are built from the rows Prisma actually created. Any `@default` works — including database-generated ones like `autoincrement()` — and logs stay accurate under `skipDuplicates` (skipped rows produce no logs).
+
+`createMany` only returns `{ count }`, so the extension pre-generates IDs client-side and injects them into `data`, matching the format the schema declares:
+
+| Schema default | Injected format |
+| --- | --- |
+| `cuid()` / `cuid(1)` | CUID v1 |
+| `cuid(2)` | CUID v2 |
+| `uuid()` / `uuid(4)` | UUID v4 |
+| `uuid(7)` | UUID v7 |
+
+Database-generated defaults (`autoincrement()`, `dbgenerated()`) cannot be pre-generated, so `createMany` on such models throws. Use `createManyAndReturn` or individual `create` calls instead.
+
+Known limitation: with `createMany` + `skipDuplicates`, rows skipped by the database still produce audit logs, because the extension cannot observe which rows were skipped. `createManyAndReturn` does not have this limitation.
+
+`createManyAndReturn` with `select` / `omit` falls back to client-side ID injection, since the narrowed rows may not include the fields aggregate resolvers need.
+
 ### Context Enrichment (`contextEnricher`)
 
 Add additional metadata to audit logs via database queries.

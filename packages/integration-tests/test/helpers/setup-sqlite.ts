@@ -14,17 +14,22 @@ export interface SQLiteTestContext {
   prisma: ReturnType<typeof createAuditClient>;
   provider: AuditContextProvider;
   databaseUrl: string;
+  /** Absolute path of the SQLite file backing this test run */
+  databaseFile: string;
 }
 
 export const setupSQLiteDatabase = async (): Promise<SQLiteTestContext> => {
   console.log('Setting up in-memory SQLite database...');
 
-  const databaseUrl = `file:./test-${Date.now()}.db?busy_timeout=30000&journal_mode=WAL`;
+  const integrationTestsPath = join(Dirname, '../..');
+  // Relative `file:` URLs resolve against the schema directory, not the cwd,
+  // so build an absolute path to keep setup and teardown pointing at the same file.
+  const databaseFile = join(integrationTestsPath, 'prisma', `test-${Date.now()}.db`);
+  const databaseUrl = `file:${databaseFile}?busy_timeout=30000&journal_mode=WAL`;
 
   process.env.DATABASE_URL = databaseUrl;
 
   console.log('Pushing Prisma schema to SQLite...');
-  const integrationTestsPath = join(Dirname, '../..');
   const schemaPath = join(integrationTestsPath, 'prisma/schema.sqlite.prisma');
 
   try {
@@ -92,7 +97,7 @@ export const setupSQLiteDatabase = async (): Promise<SQLiteTestContext> => {
 
   console.log('SQLite database setup complete');
 
-  return { prisma, provider, databaseUrl };
+  return { prisma, provider, databaseUrl, databaseFile };
 };
 
 export const teardownSQLiteDatabase = async (context: SQLiteTestContext): Promise<void> => {
@@ -105,15 +110,12 @@ export const teardownSQLiteDatabase = async (context: SQLiteTestContext): Promis
   }
 
   try {
-    const { unlinkSync, existsSync, readdirSync } = await import('node:fs');
-    const files = readdirSync('.').filter((f) => f.startsWith('test-') && f.endsWith('.db'));
-    for (const file of files) {
+    const { unlinkSync, existsSync } = await import('node:fs');
+    // WAL mode leaves -wal/-shm companions next to the database file
+    for (const suffix of ['', '-journal', '-wal', '-shm']) {
+      const file = `${context.databaseFile}${suffix}`;
       if (existsSync(file)) {
         unlinkSync(file);
-      }
-      const journalFile = `${file}-journal`;
-      if (existsSync(journalFile)) {
-        unlinkSync(journalFile);
       }
     }
   } catch (error) {

@@ -368,7 +368,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
   };
 
   // `updateManyAndReturn` is unavailable on connectors like MySQL. When present, we can
-  // pin the audited rows to the ones the database actually updated under `limit` (debt #2).
+  // pin the audited rows to the ones the database actually updated under `limit`.
   const hasUpdateManyAndReturn = (
     value: unknown,
   ): value is {
@@ -407,30 +407,40 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     clientToUse: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
   ): Promise<unknown> => {
     const modelName = operation.model as string;
-
-    // Normalize single-object data to an array so `data: {...}` is logged like `data: [...]` (debt #1)
-    const rawData = (operation.args as { data: unknown }).data;
-    const dataArray = Array.isArray(rawData) ? rawData : [rawData as Record<string, unknown>];
-    const dataWithIds = ensureIds(Prisma, modelName, dataArray, DEFAULTS.ID_FIELD);
-
-    const argsWithIds = {
-      ...operation.args,
-      data: dataWithIds,
-    };
+    const args = operation.args as { data: unknown; select?: unknown; omit?: unknown };
 
     const modelAccessor = getModelAccessor(clientToUse, modelName);
     const delegate = clientToUse[modelAccessor] as Record<string, unknown>;
     // Call the real action so createManyAndReturn keeps returning the row array (not {count})
     const actionName = operation.action as string;
     const createFn = delegate[actionName] as (args: unknown) => Promise<unknown>;
-    const result = await createFn(argsWithIds);
+
+    let result: unknown;
+    let entities: Record<string, unknown>[];
+
+    if (actionName === AUDIT_ACTION.CREATE_MANY_AND_RETURN && args.select == null && args.omit == null) {
+      // Rely entirely on Prisma's own ID generation and audit the rows it
+      // actually created. This supports database-generated defaults
+      // (autoincrement, dbgenerated) and stays correct under skipDuplicates.
+      result = await createFn(operation.args);
+      entities = (Array.isArray(result) ? result : []) as Record<string, unknown>[];
+    } else {
+      // createMany returns only { count }, and select/omit narrow returned rows
+      // below what aggregate resolvers may need — both leave client-side ID
+      // injection as the only way for audit logs to record the created IDs.
+      // Normalize single-object data to an array so `data: {...}` is logged like `data: [...]`
+      const rawData = args.data;
+      const dataArray = Array.isArray(rawData) ? rawData : [rawData as Record<string, unknown>];
+      entities = ensureIds(Prisma, modelName, dataArray, DEFAULTS.ID_FIELD);
+      result = await createFn({ ...operation.args, data: entities });
+    }
 
     const batchInitialContext: BatchInitialContext = {
       operation,
       auditContext: context,
       clientToUse,
       query: createFn,
-      entities: dataWithIds,
+      entities,
     };
 
     await runBatchPipeline(batchInitialContext, baseClient);
@@ -491,8 +501,9 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
   };
 
   // Audit a `limit`-bounded update by routing it through `updateManyAndReturn`, whose return value
-  // is the exact set of updated rows. This pins before/after to those rows and sidesteps debt #2's
-  // count desync. Only used when the connector supports updateManyAndReturn (see caller guard).
+  // is the exact set of updated rows. This pins before/after to those rows and avoids the count
+  // desync a separately-limited before fetch allows. Only used when the connector supports
+  // updateManyAndReturn (see caller guard).
   const handleLimitedUpdateMany = async (
     operation: OperationContext,
     context: AuditContext,
@@ -543,7 +554,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     const isUpdate = action === AUDIT_ACTION.UPDATE_MANY || action === AUDIT_ACTION.UPDATE_MANY_AND_RETURN;
 
     // `updateMany({ limit })` and a separate `findMany({ take })` are not guaranteed to select the
-    // same rows, so pre-limiting the before fetch desyncs before/after counts (debt #2). When the
+    // same rows, so pre-limiting the before fetch desyncs before/after counts. When the
     // connector supports `updateManyAndReturn`, audit through it for exact-row fidelity. MySQL and
     // other connectors without it fall through to the best-effort `take: limit` path below.
     if (isUpdate && limitClause !== undefined && hasUpdateManyAndReturn(modelDelegate)) {

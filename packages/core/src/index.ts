@@ -171,8 +171,8 @@ export {
   withErrorHandlingSync,
 } from './utils/error-handler.js';
 // Utils - ID Generator
-export type { IdFieldInfo, IdGenerator } from './utils/id-generator.js';
-export { ensureIds, getIdFieldInfo, getIdGenerator, ID_GENERATORS } from './utils/id-generator.js';
+export type { IdFieldInfo, IdGenerator, IdGeneratorFactory } from './utils/id-generator.js';
+export { ensureIds, getIdFieldInfo, getIdGenerator, ID_GENERATOR_FACTORIES } from './utils/id-generator.js';
 // Utils - Nested Operations
 export type {
   NestedOperationInfo,

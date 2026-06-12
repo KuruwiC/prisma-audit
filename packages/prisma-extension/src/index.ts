@@ -184,7 +184,7 @@ export {
   handleAuditError,
   hasOrNot,
   hasPreFetchedRecord,
-  ID_GENERATORS as CORE_ID_GENERATORS,
+  ID_GENERATOR_FACTORIES as CORE_ID_GENERATOR_FACTORIES,
   IdValidationError,
   isActorId,
   isAggregateConfigService,
@@ -265,8 +265,8 @@ export type {
   SecurityConfig,
 } from './types.js';
 
-export type { IdFieldInfo, IdGenerator } from './utils/id-generator.js';
-export { ensureIds, getIdFieldInfo, getIdGenerator, ID_GENERATORS } from './utils/id-generator.js';
+export type { IdFieldInfo, IdGenerator, IdGeneratorFactory } from './utils/id-generator.js';
+export { ensureIds, getIdFieldInfo, getIdGenerator, ID_GENERATOR_FACTORIES } from './utils/id-generator.js';
 
 export {
   extractDeleteOperationEntityId,

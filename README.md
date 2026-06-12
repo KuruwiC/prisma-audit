@@ -80,7 +80,7 @@ Branded types (`ActorId`, `EntityId`, `AggregateId`) prevent ID mix-ups at compi
 > **Note**: This package is not yet published to npm. Install from GitHub Releases.
 
 ```bash
-pnpm add https://github.com/KuruwiC/prisma-audit/releases/download/v0.1.5/kuruwic-prisma-audit-0.1.5.tgz
+pnpm add https://github.com/KuruwiC/prisma-audit/releases/download/v0.1.6/kuruwic-prisma-audit-0.1.6.tgz
 ```
 
 **Requirements:** Node.js 20+ (AsyncLocalStorage), Prisma 5.10+

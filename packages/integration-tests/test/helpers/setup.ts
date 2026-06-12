@@ -56,6 +56,12 @@ export const testAggregateMapping: AggregateMapping = {
     type: 'CommentAttachment',
     aggregates: [to('Comment', foreignKey('commentId')), to('Attachment', foreignKey('attachmentId'))],
   }),
+  UuidV7Item: defineEntity({
+    type: 'UuidV7Item',
+  }),
+  AutoIncItem: defineEntity({
+    type: 'AutoIncItem',
+  }),
 };
 
 export interface TestContext {

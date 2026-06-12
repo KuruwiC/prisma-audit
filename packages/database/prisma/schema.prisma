@@ -182,6 +182,29 @@ model PostAttachment {
 }
 
 // ============================================
+// UUID v7 ID Model (createMany ID injection format verification)
+// ============================================
+
+model UuidV7Item {
+  id        String   @id @default(uuid(7))
+  label     String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("uuid_v7_items")
+}
+
+// ============================================
+// Auto-increment ID Model (Prisma-generated ID verification for createManyAndReturn)
+// ============================================
+
+model AutoIncItem {
+  id    Int    @id @default(autoincrement())
+  label String
+
+  @@map("auto_inc_items")
+}
+
+// ============================================
 // Audit Log Model (Default)
 // ============================================
 

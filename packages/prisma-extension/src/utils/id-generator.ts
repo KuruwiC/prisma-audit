@@ -11,16 +11,17 @@ import {
   ensureIds as coreEnsureIds,
   getIdFieldInfo as coreGetIdFieldInfo,
   getIdGenerator,
-  ID_GENERATORS,
+  ID_GENERATOR_FACTORIES,
   type IdFieldInfo,
   type IdGenerator,
+  type IdGeneratorFactory,
 } from '@kuruwic/prisma-audit-core';
 
 import { createSchemaMetadataFromDMMF, type PrismaWithDMMF } from './schema-metadata.js';
 
 // Re-export core types and functions
-export type { IdGenerator, IdFieldInfo };
-export { ID_GENERATORS, getIdGenerator };
+export type { IdGenerator, IdGeneratorFactory, IdFieldInfo };
+export { ID_GENERATOR_FACTORIES, getIdGenerator };
 
 /**
  * Get ID field information from Prisma DMMF

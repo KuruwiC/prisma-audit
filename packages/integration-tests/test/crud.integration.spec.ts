@@ -586,7 +586,7 @@ describe('CRUD Operations Integration', () => {
     });
 
     // On connectors with updateManyAndReturn (PostgreSQL here), a limited update is audited via
-    // updateManyAndReturn so the audited rows are exactly the ones the DB updated (debt #2 fix).
+    // updateManyAndReturn so the audited rows are exactly the ones the DB updated.
     it('should record audit logs matching the limit on updateMany with limit', async () => {
       // Create 3 users
       const created = await context.provider.runAsync(testActor, async () => {
