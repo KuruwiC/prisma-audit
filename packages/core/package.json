@@ -3,7 +3,6 @@
   "version": "0.1.6",
   "type": "module",
   "description": "Framework-agnostic audit logging core for Prisma",
-  "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -11,20 +10,12 @@
       "import": {
         "types": "./dist/index.d.ts",
         "default": "./dist/index.js"
-      },
-      "require": {
-        "types": "./dist/index.d.ts",
-        "default": "./dist/index.cjs"
       }
     },
     "./testing": {
       "import": {
         "types": "./dist/testing/index.d.ts",
         "default": "./dist/testing/index.js"
-      },
-      "require": {
-        "types": "./dist/testing/index.d.ts",
-        "default": "./dist/testing/index.cjs"
       }
     }
   },
@@ -34,7 +25,7 @@
     "README.md"
   ],
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=20.19.0"
   },
   "scripts": {
     "build": "tsup",

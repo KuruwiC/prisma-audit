@@ -3,7 +3,6 @@
   "version": "0.1.6",
   "type": "module",
   "description": "Prisma extension for audit logging",
-  "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -11,10 +10,6 @@
       "import": {
         "types": "./dist/index.d.ts",
         "default": "./dist/index.js"
-      },
-      "require": {
-        "types": "./dist/index.d.ts",
-        "default": "./dist/index.cjs"
       }
     }
   },
@@ -24,7 +19,7 @@
     "README.md"
   ],
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=20.19.0"
   },
   "scripts": {
     "build": "tsup",
@@ -63,11 +58,11 @@
     "access": "public"
   },
   "dependencies": {
+    "@kuruwic/prisma-audit-core": "workspace:*",
     "debug": "^4.4.0"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.5",
-    "@kuruwic/prisma-audit-core": "workspace:*",
     "@kuruwic/prisma-audit-database": "workspace:*",
     "@kuruwic/prisma-audit-typescript-config": "workspace:*",
     "@prisma/client": "^6.19.0",
