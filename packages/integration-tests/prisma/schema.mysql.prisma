@@ -45,6 +45,7 @@ model Post {
   comments        Comment[]
   postTags        PostTag[]
   postAttachments PostAttachment[]
+  postLikes       PostLike[]
 
   @@map("posts")
 }
@@ -179,6 +180,24 @@ model PostAttachment {
   @@index([postId])
   @@index([attachmentId])
   @@map("post_attachments")
+}
+
+// ============================================
+// Post Like Model (Composite Primary Key Example)
+// ============================================
+
+model PostLike {
+  postId    String   @map("post_id")
+  userId    String   @map("user_id")
+  note      String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@id([postId, userId])
+  @@index([postId])
+  @@index([userId])
+  @@map("post_likes")
 }
 
 // ============================================

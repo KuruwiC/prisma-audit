@@ -128,6 +128,7 @@ export const teardownSQLiteDatabase = async (context: SQLiteTestContext): Promis
 export const cleanSQLiteDatabase = async (prisma: ReturnType<typeof createAuditClient>): Promise<void> => {
   await prisma.commentAttachment.deleteMany();
   await prisma.postAttachment.deleteMany();
+  await prisma.postLike.deleteMany();
   await prisma.avatarImage.deleteMany();
   await prisma.avatar.deleteMany();
   await prisma.profile.deleteMany();

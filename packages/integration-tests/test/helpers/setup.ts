@@ -45,6 +45,18 @@ export const testAggregateMapping: AggregateMapping = {
     type: 'PostAttachment',
     aggregates: [to('Post', foreignKey('postId')), to('Attachment', foreignKey('attachmentId'))],
   }),
+  // Composite primary key (`@@id([postId, userId])`, no single `id` field) — the default
+  // idResolver (`self('id')`) cannot resolve it, so entityId is derived explicitly to match
+  // the serialized-composite-key format `getPrimaryKeyFields`/`extractPrimaryKey` produce from
+  // the schema's declared `@@id` field order.
+  PostLike: defineEntity({
+    type: 'PostLike',
+    idResolver: async (entity) => {
+      const record = entity as { postId: string; userId: string };
+      return JSON.stringify([record.postId, record.userId]);
+    },
+    aggregates: [to('Post', foreignKey('postId'))],
+  }),
   CommentAttachment: defineEntity({
     type: 'CommentAttachment',
     aggregates: [to('Comment', foreignKey('commentId')), to('Attachment', foreignKey('attachmentId'))],
