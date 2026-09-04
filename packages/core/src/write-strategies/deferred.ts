@@ -7,18 +7,15 @@
 import type { AuditLogData } from '../domain/audit-log-types.js';
 import { getRuntimeContext } from '../runtime-context.js';
 import type { AuditContext } from '../types.js';
-import type { DbClientManager, WriteExecutor } from './interfaces.js';
-import type { WriteFn, WriteResult } from './types.js';
+import type { WriteErrorHandler, WriteFn, WriteResult, WriteStrategyInput } from './types.js';
 import { createBaseClientWriteFn } from './utils.js';
-
-type ErrorHandler = (error: Error, operationDescription: string) => void | Promise<void>;
 
 const createDeferredExecutor = (
   logs: AuditLogData[],
   context: AuditContext,
   baseClientWriteFn: (logsToWrite: AuditLogData[]) => Promise<void>,
   customWriter: WriteFn | undefined,
-  errorHandler: ErrorHandler,
+  errorHandler: WriteErrorHandler,
 ): (() => Promise<void>) => {
   return async (): Promise<void> => {
     try {
@@ -59,25 +56,19 @@ const enqueueDeferredWrite = (executor: () => Promise<void>): void => {
  *
  * @example
  * ```typescript
- * const result = writeDeferredInTransaction(
- *   logs, context, manager, 'auditLog',
- *   customWriter, errorHandler, writeExecutor
- * );
+ * const result = writeDeferredInTransaction({
+ *   logs, context, manager, auditLogModel: 'auditLog',
+ *   writer: customWriter, handleError, writeExecutor,
+ * });
  * await result.execute(); // Execute after commit
  * ```
  */
-export const writeDeferredInTransaction = (
-  logs: AuditLogData[],
-  context: AuditContext,
-  manager: DbClientManager,
-  auditLogModelName: string,
-  customWriter: WriteFn | undefined,
-  errorHandler: ErrorHandler,
-  writeExecutor: WriteExecutor,
-): WriteResult => {
+export const writeDeferredInTransaction = (input: WriteStrategyInput): WriteResult => {
+  const { logs, context, manager, auditLogModel, writer, handleError, writeExecutor } = input;
+
   const queuedAt = new Date();
-  const baseClientWriteFn = createBaseClientWriteFn(manager, auditLogModelName, writeExecutor);
-  const deferredExecutor = createDeferredExecutor(logs, context, baseClientWriteFn, customWriter, errorHandler);
+  const baseClientWriteFn = createBaseClientWriteFn(manager, auditLogModel, writeExecutor);
+  const deferredExecutor = createDeferredExecutor(logs, context, baseClientWriteFn, writer, handleError);
 
   enqueueDeferredWrite(deferredExecutor);
 

@@ -30,8 +30,8 @@
  * };
  *
  * const selector = createWriteStrategySelector(config, writeExecutor);
- * const strategy = selector(context, 'User');
- * await strategy(logs, context, manager, 'auditLog', writer, handleError, writeExecutor);
+ * const strategy = selector('User');
+ * await strategy({ logs, context, manager, auditLogModel: 'auditLog', writer, handleError, writeExecutor });
  * ```
  */
 
@@ -49,9 +49,11 @@ export type {
   DeferredResult,
   ImmediateResult,
   SkippedResult,
+  WriteErrorHandler,
   WriteFn,
   WriteResult,
   WriteStrategy,
   WriteStrategyConfig,
+  WriteStrategyInput,
 } from './types.js';
 export { createBaseClientWriteFn, createDefaultWriteFn } from './utils.js';

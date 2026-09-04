@@ -6,7 +6,7 @@
 
 import type { AuditLogData } from '../domain/audit-log-types.js';
 import type { AuditContext } from '../types.js';
-import type { DbClientManager, DefaultWriteFn } from './interfaces.js';
+import type { DbClientManager, DefaultWriteFn, WriteExecutor } from './interfaces.js';
 
 export interface ImmediateResult {
   _tag: 'Immediate';
@@ -71,6 +71,39 @@ export type WriteStrategy = (
   auditLogModel: string,
   writer?: WriteFn,
 ) => Promise<WriteResult>;
+
+/**
+ * Error handler invoked when a write strategy fails to persist audit logs.
+ */
+export type WriteErrorHandler = (error: Error, operationDescription: string) => void | Promise<void>;
+
+/**
+ * Shared input for every write strategy implementation (synchronous, deferred,
+ * fire-and-forget). Replaces the positional parameters those functions used to take.
+ *
+ * @example
+ * ```typescript
+ * const input: WriteStrategyInput = {
+ *   logs,
+ *   context,
+ *   manager,
+ *   auditLogModel: 'auditLog',
+ *   writer: undefined,
+ *   handleError,
+ *   writeExecutor,
+ * };
+ * const result = await writeSynchronously(input);
+ * ```
+ */
+export interface WriteStrategyInput {
+  logs: AuditLogData[];
+  context: AuditContext;
+  manager: DbClientManager;
+  auditLogModel: string;
+  writer?: WriteFn;
+  handleError: WriteErrorHandler;
+  writeExecutor: WriteExecutor;
+}
 
 /**
  * Configuration for write strategy selection

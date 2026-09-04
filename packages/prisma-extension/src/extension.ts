@@ -186,14 +186,22 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
       }
 
       const manager = createPrismaClientManager(baseClient);
-      const strategy = strategySelector(context, modelName);
+      const strategy = strategySelector(modelName);
 
       const writeErrorHandler: typeof handleError = async (error, errorContext) => {
         await dispatchAuditError('log-write', modelName, 'write', logs, error);
         await handleError(error, errorContext);
       };
 
-      const result = await strategy(logs, context, manager, auditLogModel, writer, writeErrorHandler, writeExecutor);
+      const result = await strategy({
+        logs,
+        context,
+        manager,
+        auditLogModel,
+        writer,
+        handleError: writeErrorHandler,
+        writeExecutor,
+      });
 
       handleWriteResult(result);
     } catch (caughtError) {

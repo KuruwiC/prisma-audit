@@ -4,26 +4,14 @@
  * @module write-strategies/factory
  */
 
-import type { AuditLogData } from '../domain/audit-log-types.js';
 import { getRuntimeContext } from '../runtime-context.js';
-import type { AuditContext } from '../types.js';
 import { writeDeferredInTransaction } from './deferred.js';
 import { writeFireAndForget } from './fire-and-forget.js';
-import type { DbClientManager, WriteExecutor } from './interfaces.js';
+import type { WriteExecutor } from './interfaces.js';
 import { writeSynchronously } from './synchronous.js';
-import type { WriteFn, WriteResult, WriteStrategyConfig } from './types.js';
+import type { WriteResult, WriteStrategyConfig, WriteStrategyInput } from './types.js';
 
-type ErrorHandler = (error: Error, operationDescription: string) => void | Promise<void>;
-
-type StrategyFunction = (
-  logs: AuditLogData[],
-  context: AuditContext,
-  manager: DbClientManager,
-  auditLogModel: string,
-  writer: WriteFn | undefined,
-  handleError: ErrorHandler,
-  writeExecutor: WriteExecutor,
-) => Promise<WriteResult> | WriteResult;
+type StrategyFunction = (input: WriteStrategyInput) => Promise<WriteResult> | WriteResult;
 
 /**
  * Determine if write should be awaited
@@ -54,30 +42,25 @@ const isInTransaction = (): boolean => {
  * @example
  * ```typescript
  * const selector = createWriteStrategySelector(config, writeExecutor);
- * const strategy = selector(context, 'User');
- * await strategy(logs, context, manager, 'auditLog', writer, handleError, writeExecutor);
+ * const strategy = selector('User');
+ * await strategy({ logs, context, manager, auditLogModel: 'auditLog', writer, handleError, writeExecutor });
  * ```
  */
 export const createWriteStrategySelector = (
   config: WriteStrategyConfig,
   writeExecutor: WriteExecutor,
-): ((context: AuditContext, modelName: string) => StrategyFunction) => {
-  // The context parameter is retained for a stable selector signature;
-  // transaction state is read from the library-owned runtime store.
-  return (_context: AuditContext, modelName: string): StrategyFunction => {
+): ((modelName: string) => StrategyFunction) => {
+  return (modelName: string): StrategyFunction => {
     const shouldAwait = shouldAwaitWrite(config, modelName);
 
     if (shouldAwait) {
-      return (logs, ctx, manager, model, writer, _handleError) =>
-        writeSynchronously(logs, ctx, manager, model, writer, writeExecutor);
+      return (input) => writeSynchronously({ ...input, writeExecutor });
     }
 
     if (isInTransaction()) {
-      return (logs, ctx, manager, model, writer, handleError) =>
-        writeDeferredInTransaction(logs, ctx, manager, model, writer, handleError, writeExecutor);
+      return (input) => writeDeferredInTransaction({ ...input, writeExecutor });
     }
 
-    return (logs, ctx, manager, model, writer, handleError) =>
-      writeFireAndForget(logs, ctx, manager, model, writer, handleError, writeExecutor);
+    return (input) => writeFireAndForget({ ...input, writeExecutor });
   };
 };

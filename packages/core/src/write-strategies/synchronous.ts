@@ -6,8 +6,7 @@
 
 import type { AuditLogData } from '../domain/audit-log-types.js';
 import type { AuditContext } from '../types.js';
-import type { DbClientManager, WriteExecutor } from './interfaces.js';
-import type { WriteFn, WriteResult } from './types.js';
+import type { WriteFn, WriteResult, WriteStrategyInput } from './types.js';
 import { createDefaultWriteFn } from './utils.js';
 
 const executeWriteOperation = async (
@@ -34,20 +33,15 @@ const executeWriteOperation = async (
  *
  * @example
  * ```typescript
- * const result = await writeSynchronously(
- *   logs, context, manager, 'auditLog',
- *   undefined, writeExecutor
- * );
+ * const result = await writeSynchronously({
+ *   logs, context, manager, auditLogModel: 'auditLog',
+ *   writer: undefined, handleError, writeExecutor,
+ * });
  * ```
  */
-export const writeSynchronously = async (
-  logs: AuditLogData[],
-  context: AuditContext,
-  manager: DbClientManager,
-  auditLogModelName: string,
-  customWriter: WriteFn | undefined,
-  writeExecutor: WriteExecutor,
-): Promise<WriteResult> => {
+export const writeSynchronously = async (input: WriteStrategyInput): Promise<WriteResult> => {
+  const { logs, context, manager, auditLogModel, writer, writeExecutor } = input;
+
   if (logs.length === 0) {
     return {
       _tag: 'Immediate',
@@ -55,9 +49,9 @@ export const writeSynchronously = async (
     };
   }
 
-  const defaultWriteFn = createDefaultWriteFn(manager, auditLogModelName, writeExecutor);
+  const defaultWriteFn = createDefaultWriteFn(manager, auditLogModel, writeExecutor);
 
-  await executeWriteOperation(logs, context, defaultWriteFn, customWriter);
+  await executeWriteOperation(logs, context, defaultWriteFn, writer);
 
   return {
     _tag: 'Immediate',

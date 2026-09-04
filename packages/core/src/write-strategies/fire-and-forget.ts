@@ -7,11 +7,8 @@
 import type { AuditLogData } from '../domain/audit-log-types.js';
 import { getGlobalSingleton } from '../global-singleton.js';
 import type { AuditContext } from '../types.js';
-import type { DbClientManager, WriteExecutor } from './interfaces.js';
-import type { WriteFn, WriteResult } from './types.js';
+import type { WriteErrorHandler, WriteFn, WriteResult, WriteStrategyInput } from './types.js';
 import { createDefaultWriteFn } from './utils.js';
-
-type ErrorHandler = (error: Error, operationDescription: string) => void | Promise<void>;
 
 /**
  * Registry to track pending async writes.
@@ -70,7 +67,7 @@ const createAsyncWriteExecutor = (
   };
 };
 
-const executeAsyncWrite = (asyncExecutor: () => Promise<void>, errorHandler: ErrorHandler): void => {
+const executeAsyncWrite = (asyncExecutor: () => Promise<void>, errorHandler: WriteErrorHandler): void => {
   const promise = asyncExecutor()
     .catch(async (error) => {
       const errorObject = error instanceof Error ? error : new Error(String(error));
@@ -101,21 +98,15 @@ const executeAsyncWrite = (asyncExecutor: () => Promise<void>, errorHandler: Err
  *
  * @example
  * ```typescript
- * const result = writeFireAndForget(
- *   logs, context, manager, 'auditLog',
- *   undefined, errorHandler, writeExecutor
- * );
+ * const result = writeFireAndForget({
+ *   logs, context, manager, auditLogModel: 'auditLog',
+ *   writer: undefined, handleError, writeExecutor,
+ * });
  * ```
  */
-export const writeFireAndForget = (
-  logs: AuditLogData[],
-  context: AuditContext,
-  manager: DbClientManager,
-  auditLogModelName: string,
-  customWriter: WriteFn | undefined,
-  errorHandler: ErrorHandler,
-  writeExecutor: WriteExecutor,
-): WriteResult => {
+export const writeFireAndForget = (input: WriteStrategyInput): WriteResult => {
+  const { logs, context, manager, auditLogModel, writer, handleError, writeExecutor } = input;
+
   if (logs.length === 0) {
     return {
       _tag: 'Immediate',
@@ -123,10 +114,10 @@ export const writeFireAndForget = (
     };
   }
 
-  const defaultWriteFn = createDefaultWriteFn(manager, auditLogModelName, writeExecutor);
-  const asyncExecutor = createAsyncWriteExecutor(logs, context, defaultWriteFn, customWriter);
+  const defaultWriteFn = createDefaultWriteFn(manager, auditLogModel, writeExecutor);
+  const asyncExecutor = createAsyncWriteExecutor(logs, context, defaultWriteFn, writer);
 
-  executeAsyncWrite(asyncExecutor, errorHandler);
+  executeAsyncWrite(asyncExecutor, handleError);
 
   return {
     _tag: 'Immediate',

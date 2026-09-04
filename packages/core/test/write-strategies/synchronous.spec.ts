@@ -66,6 +66,14 @@ const createMockContext = (): AuditContext => ({
   },
 });
 
+/**
+ * Mock error handler.
+ *
+ * writeSynchronously receives it as part of the shared context object but does
+ * not call it — write errors propagate to the caller instead.
+ */
+const mockHandleError = vi.fn();
+
 describe('writeSynchronously', () => {
   describe('basic functionality', () => {
     it('should write logs immediately and wait for completion', async () => {
@@ -75,7 +83,15 @@ describe('writeSynchronously', () => {
       const logs = [createMockLog()];
       const context = createMockContext();
 
-      const result = await writeSynchronously(logs, context, manager, 'auditLog', undefined, executor);
+      const result = await writeSynchronously({
+        logs,
+        context,
+        manager,
+        auditLogModel: 'auditLog',
+        writer: undefined,
+        handleError: mockHandleError,
+        writeExecutor: executor,
+      });
 
       expect(writeFn).toHaveBeenCalledTimes(1);
       expect(result).toBeDefined();
@@ -88,7 +104,15 @@ describe('writeSynchronously', () => {
       const logs = [createMockLog({ entityId: createEntityId('1') }), createMockLog({ entityId: createEntityId('2') })];
       const context = createMockContext();
 
-      await writeSynchronously(logs, context, manager, 'auditLog', undefined, executor);
+      await writeSynchronously({
+        logs,
+        context,
+        manager,
+        auditLogModel: 'auditLog',
+        writer: undefined,
+        handleError: mockHandleError,
+        writeExecutor: executor,
+      });
 
       expect(writeFn).toHaveBeenCalledTimes(1);
       expect(writeFn).toHaveBeenCalledWith(manager.activeClient, 'auditLog', logs);
@@ -101,7 +125,15 @@ describe('writeSynchronously', () => {
       const logs: AuditLogData[] = [];
       const context = createMockContext();
 
-      await writeSynchronously(logs, context, manager, 'auditLog', undefined, executor);
+      await writeSynchronously({
+        logs,
+        context,
+        manager,
+        auditLogModel: 'auditLog',
+        writer: undefined,
+        handleError: mockHandleError,
+        writeExecutor: executor,
+      });
 
       expect(writeFn).not.toHaveBeenCalled();
     });
@@ -116,7 +148,15 @@ describe('writeSynchronously', () => {
       const logs = [createMockLog()];
       const context = createMockContext();
 
-      await writeSynchronously(logs, context, manager, 'auditLog', customWriter, executor);
+      await writeSynchronously({
+        logs,
+        context,
+        manager,
+        auditLogModel: 'auditLog',
+        writer: customWriter,
+        handleError: mockHandleError,
+        writeExecutor: executor,
+      });
 
       expect(customWriter).toHaveBeenCalledTimes(1);
       expect(customWriter).toHaveBeenCalledWith(logs, context, expect.any(Function));
@@ -134,7 +174,15 @@ describe('writeSynchronously', () => {
         await defaultWrite(logs);
       });
 
-      await writeSynchronously(logs, context, manager, 'auditLog', customWriter, executor);
+      await writeSynchronously({
+        logs,
+        context,
+        manager,
+        auditLogModel: 'auditLog',
+        writer: customWriter,
+        handleError: mockHandleError,
+        writeExecutor: executor,
+      });
 
       expect(customWriter).toHaveBeenCalledTimes(1);
       expect(writeFn).toHaveBeenCalledTimes(1);
@@ -152,7 +200,15 @@ describe('writeSynchronously', () => {
         await defaultWrite(modifiedLogs);
       });
 
-      await writeSynchronously(originalLogs, context, manager, 'auditLog', customWriter, executor);
+      await writeSynchronously({
+        logs: originalLogs,
+        context,
+        manager,
+        auditLogModel: 'auditLog',
+        writer: customWriter,
+        handleError: mockHandleError,
+        writeExecutor: executor,
+      });
 
       expect(writeFn).toHaveBeenCalledWith(manager.activeClient, 'auditLog', [
         expect.objectContaining({ entityId: createEntityId('2') }),
@@ -173,7 +229,15 @@ describe('writeSynchronously', () => {
       const logs = [createMockLog()];
       const context = createMockContext();
 
-      await writeSynchronously(logs, context, manager, 'auditLog', undefined, executor);
+      await writeSynchronously({
+        logs,
+        context,
+        manager,
+        auditLogModel: 'auditLog',
+        writer: undefined,
+        handleError: mockHandleError,
+        writeExecutor: executor,
+      });
 
       expect(activeWriteFn).toHaveBeenCalledTimes(1);
       expect(activeWriteFn).toHaveBeenCalledWith(manager.activeClient, 'auditLog', logs);
@@ -187,7 +251,15 @@ describe('writeSynchronously', () => {
       const logs = [createMockLog()];
       const context = createMockContext();
 
-      const result = await writeSynchronously(logs, context, manager, 'auditLog', undefined, executor);
+      const result = await writeSynchronously({
+        logs,
+        context,
+        manager,
+        auditLogModel: 'auditLog',
+        writer: undefined,
+        handleError: mockHandleError,
+        writeExecutor: executor,
+      });
 
       expect(result).toMatchObject({
         _tag: 'Immediate',
@@ -205,9 +277,17 @@ describe('writeSynchronously', () => {
       const logs = [createMockLog()];
       const context = createMockContext();
 
-      await expect(writeSynchronously(logs, context, manager, 'auditLog', undefined, executor)).rejects.toThrow(
-        'Database write failed',
-      );
+      await expect(
+        writeSynchronously({
+          logs,
+          context,
+          manager,
+          auditLogModel: 'auditLog',
+          writer: undefined,
+          handleError: mockHandleError,
+          writeExecutor: executor,
+        }),
+      ).rejects.toThrow('Database write failed');
     });
 
     it('should propagate errors from custom writer', async () => {
@@ -218,9 +298,17 @@ describe('writeSynchronously', () => {
       const logs = [createMockLog()];
       const context = createMockContext();
 
-      await expect(writeSynchronously(logs, context, manager, 'auditLog', customWriter, executor)).rejects.toThrow(
-        'Custom writer failed',
-      );
+      await expect(
+        writeSynchronously({
+          logs,
+          context,
+          manager,
+          auditLogModel: 'auditLog',
+          writer: customWriter,
+          handleError: mockHandleError,
+          writeExecutor: executor,
+        }),
+      ).rejects.toThrow('Custom writer failed');
     });
   });
 
@@ -232,7 +320,15 @@ describe('writeSynchronously', () => {
       const logs = [createMockLog()];
       const context = createMockContext();
 
-      await writeSynchronously(logs, context, manager, 'customAuditLog', undefined, executor);
+      await writeSynchronously({
+        logs,
+        context,
+        manager,
+        auditLogModel: 'customAuditLog',
+        writer: undefined,
+        handleError: mockHandleError,
+        writeExecutor: executor,
+      });
 
       expect(writeFn).toHaveBeenCalledTimes(1);
       expect(writeFn).toHaveBeenCalledWith(manager.activeClient, 'customAuditLog', logs);

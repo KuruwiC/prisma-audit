@@ -90,17 +90,17 @@ describe('createWriteStrategySelector', () => {
       };
 
       const selector = createWriteStrategySelector(config, mockExecutor);
-      const strategy = selector(mockContext, 'User');
+      const strategy = selector('User');
 
-      const result = await strategy(
-        mockLogs,
-        mockContext,
-        mockManager,
-        'auditLog',
-        mockWriter,
-        mockHandleError,
-        mockExecutor,
-      );
+      const result = await strategy({
+        logs: mockLogs,
+        context: mockContext,
+        manager: mockManager,
+        auditLogModel: 'auditLog',
+        writer: mockWriter,
+        handleError: mockHandleError,
+        writeExecutor: mockExecutor,
+      });
 
       // Synchronous strategy returns Immediate result
       expect(result._tag).toBe('Immediate');
@@ -120,16 +120,16 @@ describe('createWriteStrategySelector', () => {
       const selector = createWriteStrategySelector(config, mockExecutor);
 
       const result = await inTransaction(async () => {
-        const strategy = selector(mockTransactionalContext, 'User');
-        return strategy(
-          mockLogs,
-          mockTransactionalContext,
-          mockManager,
-          'auditLog',
-          mockWriter,
-          mockHandleError,
-          mockExecutor,
-        );
+        const strategy = selector('User');
+        return strategy({
+          logs: mockLogs,
+          context: mockTransactionalContext,
+          manager: mockManager,
+          auditLogModel: 'auditLog',
+          writer: mockWriter,
+          handleError: mockHandleError,
+          writeExecutor: mockExecutor,
+        });
       });
 
       // Deferred strategy returns Deferred result
@@ -151,17 +151,17 @@ describe('createWriteStrategySelector', () => {
       };
 
       const selector = createWriteStrategySelector(config, mockExecutor);
-      const strategy = selector(mockContext, 'User');
+      const strategy = selector('User');
 
-      const result = await strategy(
-        mockLogs,
-        mockContext,
-        mockManager,
-        'auditLog',
-        mockWriter,
-        mockHandleError,
-        mockExecutor,
-      );
+      const result = await strategy({
+        logs: mockLogs,
+        context: mockContext,
+        manager: mockManager,
+        auditLogModel: 'auditLog',
+        writer: mockWriter,
+        handleError: mockHandleError,
+        writeExecutor: mockExecutor,
+      });
 
       // Fire-and-forget strategy returns Immediate result (non-blocking)
       expect(result._tag).toBe('Immediate');
@@ -185,17 +185,17 @@ describe('createWriteStrategySelector', () => {
       };
 
       const selector = createWriteStrategySelector(config, mockExecutor);
-      const strategy = selector(mockContext, 'Payment');
+      const strategy = selector('Payment');
 
-      const result = await strategy(
-        mockLogs,
-        mockContext,
-        mockManager,
-        'auditLog',
-        mockWriter,
-        mockHandleError,
-        mockExecutor,
-      );
+      const result = await strategy({
+        logs: mockLogs,
+        context: mockContext,
+        manager: mockManager,
+        auditLogModel: 'auditLog',
+        writer: mockWriter,
+        handleError: mockHandleError,
+        writeExecutor: mockExecutor,
+      });
 
       // awaitWriteIf returns true for 'critical' tag → synchronous strategy
       expect(result._tag).toBe('Immediate');
@@ -217,17 +217,17 @@ describe('createWriteStrategySelector', () => {
       };
 
       const selector = createWriteStrategySelector(config, mockExecutor);
-      const strategy = selector(mockContext, 'User');
+      const strategy = selector('User');
 
-      const result = await strategy(
-        mockLogs,
-        mockContext,
-        mockManager,
-        'auditLog',
-        mockWriter,
-        mockHandleError,
-        mockExecutor,
-      );
+      const result = await strategy({
+        logs: mockLogs,
+        context: mockContext,
+        manager: mockManager,
+        auditLogModel: 'auditLog',
+        writer: mockWriter,
+        handleError: mockHandleError,
+        writeExecutor: mockExecutor,
+      });
 
       // awaitWriteIf returns false → falls back to awaitWrite: false → fire-and-forget
       expect(result._tag).toBe('Immediate');
@@ -250,16 +250,16 @@ describe('createWriteStrategySelector', () => {
       const selector = createWriteStrategySelector(config, mockExecutor);
 
       const result = await inTransaction(async () => {
-        const strategy = selector(mockTransactionalContext, 'User');
-        return strategy(
-          mockLogs,
-          mockTransactionalContext,
-          mockManager,
-          'auditLog',
-          mockWriter,
-          mockHandleError,
-          mockExecutor,
-        );
+        const strategy = selector('User');
+        return strategy({
+          logs: mockLogs,
+          context: mockTransactionalContext,
+          manager: mockManager,
+          auditLogModel: 'auditLog',
+          writer: mockWriter,
+          handleError: mockHandleError,
+          writeExecutor: mockExecutor,
+        });
       });
 
       // awaitWriteIf returns false + in transaction → deferred strategy
@@ -284,16 +284,16 @@ describe('createWriteStrategySelector', () => {
       const selector = createWriteStrategySelector(config, mockExecutor);
 
       const result = await inTransaction(async () => {
-        const strategy = selector(mockTransactionalContext, 'Payment');
-        return strategy(
-          mockLogs,
-          mockTransactionalContext,
-          mockManager,
-          'auditLog',
-          mockWriter,
-          mockHandleError,
-          mockExecutor,
-        );
+        const strategy = selector('Payment');
+        return strategy({
+          logs: mockLogs,
+          context: mockTransactionalContext,
+          manager: mockManager,
+          auditLogModel: 'auditLog',
+          writer: mockWriter,
+          handleError: mockHandleError,
+          writeExecutor: mockExecutor,
+        });
       });
 
       // awaitWriteIf returns true → synchronous (not deferred), even in transaction
@@ -313,17 +313,17 @@ describe('createWriteStrategySelector', () => {
       };
 
       const selector = createWriteStrategySelector(config, mockExecutor);
-      const strategy = selector(mockContext, 'UnknownModel');
+      const strategy = selector('UnknownModel');
 
-      const result = await strategy(
-        mockLogs,
-        mockContext,
-        mockManager,
-        'auditLog',
-        mockWriter,
-        mockHandleError,
-        mockExecutor,
-      );
+      const result = await strategy({
+        logs: mockLogs,
+        context: mockContext,
+        manager: mockManager,
+        auditLogModel: 'auditLog',
+        writer: mockWriter,
+        handleError: mockHandleError,
+        writeExecutor: mockExecutor,
+      });
 
       // No entity config → falls back to awaitWrite: false → fire-and-forget
       expect(result._tag).toBe('Immediate');
@@ -339,17 +339,17 @@ describe('createWriteStrategySelector', () => {
       };
 
       const selector = createWriteStrategySelector(config, mockExecutor);
-      const strategy = selector(mockContext, 'User');
+      const strategy = selector('User');
 
-      const result = await strategy(
-        mockLogs,
-        mockContext,
-        mockManager,
-        'auditLog',
-        mockWriter,
-        mockHandleError,
-        mockExecutor,
-      );
+      const result = await strategy({
+        logs: mockLogs,
+        context: mockContext,
+        manager: mockManager,
+        auditLogModel: 'auditLog',
+        writer: mockWriter,
+        handleError: mockHandleError,
+        writeExecutor: mockExecutor,
+      });
 
       // awaitWriteIf returns false (empty tags) → falls back to awaitWrite: false → fire-and-forget
       expect(result._tag).toBe('Immediate');
@@ -365,17 +365,17 @@ describe('createWriteStrategySelector', () => {
       };
 
       const selector = createWriteStrategySelector(config, mockExecutor);
-      const strategy = selector(mockContext, 'User');
+      const strategy = selector('User');
 
-      const result = await strategy(
-        mockLogs,
-        mockContext,
-        mockManager,
-        'auditLog',
-        mockWriter,
-        mockHandleError,
-        mockExecutor,
-      );
+      const result = await strategy({
+        logs: mockLogs,
+        context: mockContext,
+        manager: mockManager,
+        auditLogModel: 'auditLog',
+        writer: mockWriter,
+        handleError: mockHandleError,
+        writeExecutor: mockExecutor,
+      });
 
       // No awaitWriteIf → uses global awaitWrite: true → synchronous strategy
       expect(result._tag).toBe('Immediate');

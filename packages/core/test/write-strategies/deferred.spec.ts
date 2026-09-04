@@ -68,7 +68,15 @@ describe('writeDeferredInTransaction', () => {
       const context = createMockContext();
       const handleError = createMockErrorHandler();
 
-      const result = writeDeferredInTransaction(logs, context, manager, 'auditLog', undefined, handleError, executor);
+      const result = writeDeferredInTransaction({
+        logs,
+        context,
+        manager,
+        auditLogModel: 'auditLog',
+        writer: undefined,
+        handleError,
+        writeExecutor: executor,
+      });
 
       expect(result).toMatchObject({
         _tag: 'Deferred',
@@ -87,7 +95,15 @@ describe('writeDeferredInTransaction', () => {
       const context = createMockContext();
       const handleError = createMockErrorHandler();
 
-      const result = writeDeferredInTransaction(logs, context, manager, 'auditLog', undefined, handleError, executor);
+      const result = writeDeferredInTransaction({
+        logs,
+        context,
+        manager,
+        auditLogModel: 'auditLog',
+        writer: undefined,
+        handleError,
+        writeExecutor: executor,
+      });
 
       expect(result._tag).toBe('Deferred');
       if (result._tag === 'Deferred') {
@@ -105,7 +121,15 @@ describe('writeDeferredInTransaction', () => {
       const context = createMockContext();
       const handleError = createMockErrorHandler();
 
-      const result = writeDeferredInTransaction(logs, context, manager, 'auditLog', undefined, handleError, executor);
+      const result = writeDeferredInTransaction({
+        logs,
+        context,
+        manager,
+        auditLogModel: 'auditLog',
+        writer: undefined,
+        handleError,
+        writeExecutor: executor,
+      });
 
       if (result._tag === 'Deferred') {
         await result.execute();
@@ -122,7 +146,15 @@ describe('writeDeferredInTransaction', () => {
       const context = createMockContext();
       const handleError = createMockErrorHandler();
 
-      const result = writeDeferredInTransaction(logs, context, manager, 'auditLog', undefined, handleError, executor);
+      const result = writeDeferredInTransaction({
+        logs,
+        context,
+        manager,
+        auditLogModel: 'auditLog',
+        writer: undefined,
+        handleError,
+        writeExecutor: executor,
+      });
 
       if (result._tag === 'Deferred') {
         await result.execute();
@@ -145,7 +177,15 @@ describe('writeDeferredInTransaction', () => {
       const context = createMockContext();
       const handleError = createMockErrorHandler();
 
-      const result = writeDeferredInTransaction(logs, context, manager, 'auditLog', undefined, handleError, executor);
+      const result = writeDeferredInTransaction({
+        logs,
+        context,
+        manager,
+        auditLogModel: 'auditLog',
+        writer: undefined,
+        handleError,
+        writeExecutor: executor,
+      });
 
       if (result._tag === 'Deferred') {
         await result.execute();
@@ -165,7 +205,15 @@ describe('writeDeferredInTransaction', () => {
       const handleError = createMockErrorHandler();
 
       const deferredWrites = inTransaction(() => {
-        writeDeferredInTransaction(logs, context, manager, 'auditLog', undefined, handleError, executor);
+        writeDeferredInTransaction({
+          logs,
+          context,
+          manager,
+          auditLogModel: 'auditLog',
+          writer: undefined,
+          handleError,
+          writeExecutor: executor,
+        });
         return getRuntimeContext()?.transaction?.deferredWrites;
       });
 
@@ -185,7 +233,15 @@ describe('writeDeferredInTransaction', () => {
       const deferredWrites = runWithRuntimeContext(
         { transaction: { client: {}, deferredWrites: [existingExecute] } },
         () => {
-          writeDeferredInTransaction(logs, context, manager, 'auditLog', undefined, handleError, executor);
+          writeDeferredInTransaction({
+            logs,
+            context,
+            manager,
+            auditLogModel: 'auditLog',
+            writer: undefined,
+            handleError,
+            writeExecutor: executor,
+          });
           return getRuntimeContext()?.transaction?.deferredWrites;
         },
       );
@@ -203,7 +259,15 @@ describe('writeDeferredInTransaction', () => {
       const handleError = createMockErrorHandler();
 
       const deferredWrite = inTransaction(() => {
-        writeDeferredInTransaction(logs, context, manager, 'auditLog', undefined, handleError, executor);
+        writeDeferredInTransaction({
+          logs,
+          context,
+          manager,
+          auditLogModel: 'auditLog',
+          writer: undefined,
+          handleError,
+          writeExecutor: executor,
+        });
         return getRuntimeContext()?.transaction?.deferredWrites?.[0];
       });
 
@@ -221,7 +285,15 @@ describe('writeDeferredInTransaction', () => {
 
       // Without an active transaction scope the strategy would not normally be
       // selected; enqueueing must not throw and the returned executor still works.
-      const result = writeDeferredInTransaction(logs, context, manager, 'auditLog', undefined, handleError, executor);
+      const result = writeDeferredInTransaction({
+        logs,
+        context,
+        manager,
+        auditLogModel: 'auditLog',
+        writer: undefined,
+        handleError,
+        writeExecutor: executor,
+      });
 
       expect(result._tag).toBe('Deferred');
       expect(getRuntimeContext()?.transaction).toBeUndefined();
@@ -237,7 +309,15 @@ describe('writeDeferredInTransaction', () => {
       // A frame exists but no transaction scope owns a queue. Enqueueing must not
       // fabricate an orphaned queue that nobody would ever drain; it stays a no-op.
       const result = runWithRuntimeContext({ isProcessingAuditLog: true }, () =>
-        writeDeferredInTransaction(logs, context, manager, 'auditLog', undefined, handleError, executor),
+        writeDeferredInTransaction({
+          logs,
+          context,
+          manager,
+          auditLogModel: 'auditLog',
+          writer: undefined,
+          handleError,
+          writeExecutor: executor,
+        }),
       );
 
       expect(result._tag).toBe('Deferred');
@@ -257,15 +337,15 @@ describe('writeDeferredInTransaction', () => {
       const context = createMockContext();
       const handleError = createMockErrorHandler();
 
-      const result = writeDeferredInTransaction(
+      const result = writeDeferredInTransaction({
         logs,
         context,
         manager,
-        'auditLog',
-        customWriter,
+        auditLogModel: 'auditLog',
+        writer: customWriter,
         handleError,
-        executor,
-      );
+        writeExecutor: executor,
+      });
 
       if (result._tag === 'Deferred') {
         await result.execute();
@@ -293,15 +373,15 @@ describe('writeDeferredInTransaction', () => {
         await defaultWrite(logs);
       });
 
-      const result = writeDeferredInTransaction(
+      const result = writeDeferredInTransaction({
         logs,
         context,
         manager,
-        'auditLog',
-        customWriter,
+        auditLogModel: 'auditLog',
+        writer: customWriter,
         handleError,
-        executor,
-      );
+        writeExecutor: executor,
+      });
 
       if (result._tag === 'Deferred') {
         await result.execute();
@@ -322,7 +402,15 @@ describe('writeDeferredInTransaction', () => {
       const context = createMockContext();
       const handleError = vi.fn();
 
-      const result = writeDeferredInTransaction(logs, context, manager, 'auditLog', undefined, handleError, executor);
+      const result = writeDeferredInTransaction({
+        logs,
+        context,
+        manager,
+        auditLogModel: 'auditLog',
+        writer: undefined,
+        handleError,
+        writeExecutor: executor,
+      });
 
       if (result._tag === 'Deferred') {
         await result.execute();
@@ -340,15 +428,15 @@ describe('writeDeferredInTransaction', () => {
       const context = createMockContext();
       const handleError = vi.fn();
 
-      const result = writeDeferredInTransaction(
+      const result = writeDeferredInTransaction({
         logs,
         context,
         manager,
-        'auditLog',
-        customWriter,
+        auditLogModel: 'auditLog',
+        writer: customWriter,
         handleError,
-        executor,
-      );
+        writeExecutor: executor,
+      });
 
       if (result._tag === 'Deferred') {
         await result.execute();
@@ -366,7 +454,15 @@ describe('writeDeferredInTransaction', () => {
       const context = createMockContext();
       const handleError = vi.fn();
 
-      const result = writeDeferredInTransaction(logs, context, manager, 'auditLog', undefined, handleError, executor);
+      const result = writeDeferredInTransaction({
+        logs,
+        context,
+        manager,
+        auditLogModel: 'auditLog',
+        writer: undefined,
+        handleError,
+        writeExecutor: executor,
+      });
 
       if (result._tag === 'Deferred') {
         await result.execute();
@@ -386,7 +482,15 @@ describe('writeDeferredInTransaction', () => {
       const context = createMockContext();
       const handleError = vi.fn();
 
-      const result = writeDeferredInTransaction(logs, context, manager, 'auditLog', undefined, handleError, executor);
+      const result = writeDeferredInTransaction({
+        logs,
+        context,
+        manager,
+        auditLogModel: 'auditLog',
+        writer: undefined,
+        handleError,
+        writeExecutor: executor,
+      });
 
       if (result._tag === 'Deferred') {
         // Should not throw
@@ -404,15 +508,15 @@ describe('writeDeferredInTransaction', () => {
       const context = createMockContext();
       const handleError = createMockErrorHandler();
 
-      const result = writeDeferredInTransaction(
+      const result = writeDeferredInTransaction({
         logs,
         context,
         manager,
-        'customAuditLog',
-        undefined,
+        auditLogModel: 'customAuditLog',
+        writer: undefined,
         handleError,
-        executor,
-      );
+        writeExecutor: executor,
+      });
 
       if (result._tag === 'Deferred') {
         await result.execute();
@@ -432,8 +536,24 @@ describe('writeDeferredInTransaction', () => {
       const handleError = createMockErrorHandler();
 
       const deferredWrites = inTransaction(() => {
-        writeDeferredInTransaction(logs1, context, manager, 'auditLog', undefined, handleError, executor);
-        writeDeferredInTransaction(logs2, context, manager, 'auditLog', undefined, handleError, executor);
+        writeDeferredInTransaction({
+          logs: logs1,
+          context,
+          manager,
+          auditLogModel: 'auditLog',
+          writer: undefined,
+          handleError,
+          writeExecutor: executor,
+        });
+        writeDeferredInTransaction({
+          logs: logs2,
+          context,
+          manager,
+          auditLogModel: 'auditLog',
+          writer: undefined,
+          handleError,
+          writeExecutor: executor,
+        });
         return getRuntimeContext()?.transaction?.deferredWrites;
       });
 
@@ -458,8 +578,24 @@ describe('writeDeferredInTransaction', () => {
       const executor2 = createMockExecutor();
 
       const deferredWrites = inTransaction(() => {
-        writeDeferredInTransaction(logs, context, manager, 'auditLog', writer1, handleError, executor1);
-        writeDeferredInTransaction(logs, context, manager, 'auditLog', writer2, handleError, executor2);
+        writeDeferredInTransaction({
+          logs,
+          context,
+          manager,
+          auditLogModel: 'auditLog',
+          writer: writer1,
+          handleError,
+          writeExecutor: executor1,
+        });
+        writeDeferredInTransaction({
+          logs,
+          context,
+          manager,
+          auditLogModel: 'auditLog',
+          writer: writer2,
+          handleError,
+          writeExecutor: executor2,
+        });
         return getRuntimeContext()?.transaction?.deferredWrites ?? [];
       });
 

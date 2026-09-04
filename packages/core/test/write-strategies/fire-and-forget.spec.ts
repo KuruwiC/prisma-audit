@@ -90,7 +90,15 @@ describe('writeFireAndForget', () => {
       const context = createMockContext();
       const handleError = createMockErrorHandler();
 
-      const result = writeFireAndForget(logs, context, manager, 'auditLog', undefined, handleError, executor);
+      const result = writeFireAndForget({
+        logs,
+        context,
+        manager,
+        auditLogModel: 'auditLog',
+        writer: undefined,
+        handleError,
+        writeExecutor: executor,
+      });
 
       expect(result).toMatchObject({
         _tag: 'Immediate',
@@ -108,7 +116,15 @@ describe('writeFireAndForget', () => {
       const context = createMockContext();
       const handleError = createMockErrorHandler();
 
-      writeFireAndForget(logs, context, manager, 'auditLog', undefined, handleError, executor);
+      writeFireAndForget({
+        logs,
+        context,
+        manager,
+        auditLogModel: 'auditLog',
+        writer: undefined,
+        handleError,
+        writeExecutor: executor,
+      });
 
       // Wait for async execution
       await flushPendingWrites();
@@ -126,7 +142,15 @@ describe('writeFireAndForget', () => {
       const context = createMockContext();
       const handleError = createMockErrorHandler();
 
-      writeFireAndForget(logs, context, manager, 'auditLog', undefined, handleError, executor);
+      writeFireAndForget({
+        logs,
+        context,
+        manager,
+        auditLogModel: 'auditLog',
+        writer: undefined,
+        handleError,
+        writeExecutor: executor,
+      });
 
       await flushPendingWrites();
 
@@ -142,7 +166,15 @@ describe('writeFireAndForget', () => {
       const context = createMockContext();
       const handleError = createMockErrorHandler();
 
-      writeFireAndForget(logs, context, manager, 'auditLog', undefined, handleError, executor);
+      writeFireAndForget({
+        logs,
+        context,
+        manager,
+        auditLogModel: 'auditLog',
+        writer: undefined,
+        handleError,
+        writeExecutor: executor,
+      });
 
       await flushPendingWrites();
 
@@ -160,7 +192,15 @@ describe('writeFireAndForget', () => {
       const context = createMockContext();
       const handleError = createMockErrorHandler();
 
-      writeFireAndForget(logs, context, manager, 'auditLog', customWriter, handleError, executor);
+      writeFireAndForget({
+        logs,
+        context,
+        manager,
+        auditLogModel: 'auditLog',
+        writer: customWriter,
+        handleError,
+        writeExecutor: executor,
+      });
 
       await flushPendingWrites();
 
@@ -181,7 +221,15 @@ describe('writeFireAndForget', () => {
         await defaultWrite(logs);
       });
 
-      writeFireAndForget(logs, context, manager, 'auditLog', customWriter, handleError, executor);
+      writeFireAndForget({
+        logs,
+        context,
+        manager,
+        auditLogModel: 'auditLog',
+        writer: customWriter,
+        handleError,
+        writeExecutor: executor,
+      });
 
       await flushPendingWrites();
 
@@ -202,7 +250,15 @@ describe('writeFireAndForget', () => {
         await defaultWrite(modifiedLogs);
       });
 
-      writeFireAndForget(originalLogs, context, manager, 'auditLog', customWriter, handleError, executor);
+      writeFireAndForget({
+        logs: originalLogs,
+        context,
+        manager,
+        auditLogModel: 'auditLog',
+        writer: customWriter,
+        handleError,
+        writeExecutor: executor,
+      });
 
       await flushPendingWrites();
 
@@ -227,7 +283,15 @@ describe('writeFireAndForget', () => {
       const context = createMockContext();
       const handleError = createMockErrorHandler();
 
-      writeFireAndForget(logs, context, manager, 'auditLog', undefined, handleError, executor);
+      writeFireAndForget({
+        logs,
+        context,
+        manager,
+        auditLogModel: 'auditLog',
+        writer: undefined,
+        handleError,
+        writeExecutor: executor,
+      });
 
       await flushPendingWrites();
 
@@ -246,7 +310,15 @@ describe('writeFireAndForget', () => {
       const context = createMockContext();
       const handleError = vi.fn();
 
-      writeFireAndForget(logs, context, manager, 'auditLog', undefined, handleError, executor);
+      writeFireAndForget({
+        logs,
+        context,
+        manager,
+        auditLogModel: 'auditLog',
+        writer: undefined,
+        handleError,
+        writeExecutor: executor,
+      });
 
       await flushPendingWrites();
 
@@ -263,7 +335,15 @@ describe('writeFireAndForget', () => {
       const context = createMockContext();
       const handleError = vi.fn();
 
-      writeFireAndForget(logs, context, manager, 'auditLog', customWriter, handleError, executor);
+      writeFireAndForget({
+        logs,
+        context,
+        manager,
+        auditLogModel: 'auditLog',
+        writer: customWriter,
+        handleError,
+        writeExecutor: executor,
+      });
 
       await flushPendingWrites();
 
@@ -280,7 +360,15 @@ describe('writeFireAndForget', () => {
       const context = createMockContext();
       const handleError = vi.fn();
 
-      writeFireAndForget(logs, context, manager, 'auditLog', undefined, handleError, executor);
+      writeFireAndForget({
+        logs,
+        context,
+        manager,
+        auditLogModel: 'auditLog',
+        writer: undefined,
+        handleError,
+        writeExecutor: executor,
+      });
 
       await flushPendingWrites();
 
@@ -301,7 +389,15 @@ describe('writeFireAndForget', () => {
 
       // Should not throw
       expect(() => {
-        writeFireAndForget(logs, context, manager, 'auditLog', undefined, handleError, executor);
+        writeFireAndForget({
+          logs,
+          context,
+          manager,
+          auditLogModel: 'auditLog',
+          writer: undefined,
+          handleError,
+          writeExecutor: executor,
+        });
       }).not.toThrow();
 
       await flushPendingWrites();
@@ -317,7 +413,15 @@ describe('writeFireAndForget', () => {
       const context = createMockContext();
       const handleError = createMockErrorHandler();
 
-      writeFireAndForget(logs, context, manager, 'customAuditLog', undefined, handleError, executor);
+      writeFireAndForget({
+        logs,
+        context,
+        manager,
+        auditLogModel: 'customAuditLog',
+        writer: undefined,
+        handleError,
+        writeExecutor: executor,
+      });
 
       await flushPendingWrites();
 
@@ -336,8 +440,24 @@ describe('writeFireAndForget', () => {
       const context = createMockContext();
       const handleError = createMockErrorHandler();
 
-      writeFireAndForget(logs1, context, manager, 'auditLog', undefined, handleError, executor);
-      writeFireAndForget(logs2, context, manager, 'auditLog', undefined, handleError, executor);
+      writeFireAndForget({
+        logs: logs1,
+        context,
+        manager,
+        auditLogModel: 'auditLog',
+        writer: undefined,
+        handleError,
+        writeExecutor: executor,
+      });
+      writeFireAndForget({
+        logs: logs2,
+        context,
+        manager,
+        auditLogModel: 'auditLog',
+        writer: undefined,
+        handleError,
+        writeExecutor: executor,
+      });
 
       await flushPendingWrites();
 
@@ -374,8 +494,24 @@ describe('flushPendingWrites', () => {
     const logs1 = [createMockLog({ entityId: createEntityId('1') })];
     const logs2 = [createMockLog({ entityId: createEntityId('2') })];
 
-    writeFireAndForget(logs1, context, manager, 'auditLog', undefined, handleError, mockWriteExecutor);
-    writeFireAndForget(logs2, context, manager, 'auditLog', undefined, handleError, mockWriteExecutor);
+    writeFireAndForget({
+      logs: logs1,
+      context,
+      manager,
+      auditLogModel: 'auditLog',
+      writer: undefined,
+      handleError,
+      writeExecutor: mockWriteExecutor,
+    });
+    writeFireAndForget({
+      logs: logs2,
+      context,
+      manager,
+      auditLogModel: 'auditLog',
+      writer: undefined,
+      handleError,
+      writeExecutor: mockWriteExecutor,
+    });
 
     expect(writtenLogs.length).toBe(0);
 
@@ -399,7 +535,15 @@ describe('flushPendingWrites', () => {
     const context = createMockContext();
     const logs = [createMockLog()];
 
-    writeFireAndForget(logs, context, manager, 'auditLog', undefined, handleError, mockWriteExecutor);
+    writeFireAndForget({
+      logs,
+      context,
+      manager,
+      auditLogModel: 'auditLog',
+      writer: undefined,
+      handleError,
+      writeExecutor: mockWriteExecutor,
+    });
 
     await flushPendingWrites();
     expect(handleError).toHaveBeenCalled();
@@ -426,27 +570,27 @@ describe('flushPendingWrites', () => {
     const context = createMockContext();
     const handleError = createMockErrorHandler();
 
-    writeFireAndForget(
-      [createMockLog({ entityId: createEntityId('first') })],
+    writeFireAndForget({
+      logs: [createMockLog({ entityId: createEntityId('first') })],
       context,
       manager,
-      'auditLog',
-      undefined,
+      auditLogModel: 'auditLog',
+      writer: undefined,
       handleError,
-      mockWriteExecutor,
-    );
+      writeExecutor: mockWriteExecutor,
+    });
 
     const flushPromise = flushPendingWrites();
 
-    writeFireAndForget(
-      [createMockLog({ entityId: createEntityId('second') })],
+    writeFireAndForget({
+      logs: [createMockLog({ entityId: createEntityId('second') })],
       context,
       manager,
-      'auditLog',
-      undefined,
+      auditLogModel: 'auditLog',
+      writer: undefined,
       handleError,
-      mockWriteExecutor,
-    );
+      writeExecutor: mockWriteExecutor,
+    });
 
     resolveFirst?.();
     await flushPromise;
@@ -485,7 +629,15 @@ describe('getPendingWriteCount', () => {
     const handleError = createMockErrorHandler();
     const logs = [createMockLog()];
 
-    writeFireAndForget(logs, context, manager, 'auditLog', undefined, handleError, mockWriteExecutor);
+    writeFireAndForget({
+      logs,
+      context,
+      manager,
+      auditLogModel: 'auditLog',
+      writer: undefined,
+      handleError,
+      writeExecutor: mockWriteExecutor,
+    });
 
     expect(getPendingWriteCount()).toBe(1);
 
@@ -507,7 +659,15 @@ describe('getPendingWriteCount', () => {
     const context = createMockContext();
     const logs = [createMockLog()];
 
-    writeFireAndForget(logs, context, manager, 'auditLog', undefined, handleError, mockWriteExecutor);
+    writeFireAndForget({
+      logs,
+      context,
+      manager,
+      auditLogModel: 'auditLog',
+      writer: undefined,
+      handleError,
+      writeExecutor: mockWriteExecutor,
+    });
 
     await flushPendingWrites();
 
