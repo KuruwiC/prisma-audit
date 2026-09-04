@@ -521,4 +521,35 @@ describe('Nested ConnectOrCreate Operations (Phase 2)', () => {
       expect(tagLogs.length).toBeGreaterThanOrEqual(1);
     });
   });
+
+  describe('Nested Create via Auto-Injection (no include)', () => {
+    it('should create an audit log for a nested Post create inside a top-level User update without an include clause', async () => {
+      const user = await context.provider.runAsync(testActor, async () => {
+        return await context.prisma.user.create({
+          data: { email: 'nested-create-no-include@example.com', name: 'Nested Create User', password: 'secret123' },
+        });
+      });
+
+      await context.prisma.auditLog.deleteMany();
+
+      await context.provider.runAsync(testActor, async () => {
+        await context.prisma.user.update({
+          where: { id: user.id },
+          data: {
+            name: 'Nested Create User Updated',
+            posts: { create: [{ title: 'Auto-injected Post', content: 'nc' }] },
+          },
+          // No include clause — the extension must auto-inject one to detect the nested create
+        });
+      });
+
+      const post = await context.prisma.post.findFirst({ where: { title: 'Auto-injected Post' } });
+      expect(post).not.toBeNull();
+
+      const postLogs = await context.prisma.auditLog.findMany({
+        where: { entityType: 'Post', action: 'create', entityId: post?.id },
+      });
+      expect(postLogs.length).toBeGreaterThanOrEqual(1);
+    });
+  });
 });
