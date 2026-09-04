@@ -91,6 +91,47 @@ export const extractEntityId = (
   return PRE_FETCH_DEFAULT_KEY;
 };
 
+/**
+ * Flattens Prisma's compound-unique WHERE wrapper into the individual scalar fields
+ * `findFirst` actually accepts.
+ *
+ * A nested `update`/`upsert`/`delete` targeting a composite primary key (`@@id([a, b])`)
+ * can only address the row through Prisma's compound-unique shape
+ * `{ a_b: { a: ..., b: ... } }` — that's the only unique identifier Prisma generates for it.
+ * But `a_b` is a key of `<Model>WhereUniqueInput`, not `<Model>WhereInput`: `findFirst`'s
+ * filter type exposes only the individual scalar fields. Passed straight through, Prisma
+ * throws `PrismaClientValidationError: Unknown argument`.
+ *
+ * `pkFields` (the DMMF-derived primary key field names, in schema declaration order) is
+ * enough to reconstruct Prisma's default compound-unique key name (`pkFields.join('_')`) —
+ * that's the only PK information available on this call path. A composite key declared with
+ * an explicit custom name (`@@id([a, b], name: "custom")`) generates a differently-named
+ * compound-unique key that this cannot recognize, because that name isn't threaded through
+ * to this function; such a where clause is left untouched here and `findFirst` still fails
+ * for it, but the caller now treats that failure as an unresolved identity (dropped and
+ * reported) rather than fabricating one — see `buildMinimalEntity` in
+ * `lifecycle/nested-handlers/delete-handler.ts`.
+ */
+export const flattenCompoundUniqueWhere = (
+  whereClause: Record<string, unknown>,
+  pkFields?: string[],
+): Record<string, unknown> => {
+  if (!pkFields || pkFields.length <= 1) return whereClause;
+
+  const keys = Object.keys(whereClause);
+  const compoundKeyName = pkFields.join('_');
+  if (keys.length !== 1 || keys[0] !== compoundKeyName) return whereClause;
+
+  const compoundValue = whereClause[compoundKeyName];
+  if (!compoundValue || typeof compoundValue !== 'object' || Array.isArray(compoundValue)) return whereClause;
+
+  const compoundRecord = compoundValue as Record<string, unknown>;
+  const hasAllPkFields = pkFields.every((field) => field in compoundRecord);
+  if (!hasAllPkFields) return whereClause;
+
+  return compoundRecord;
+};
+
 // NOTE: deleteMany prefetch using findMany is intentionally NOT implemented here.
 // The where clause in nested deleteMany is not scoped to the parent relation
 // (e.g., { published: false } would match all unpublished posts, not just the parent's).
@@ -148,8 +189,10 @@ export const preFetchOneToManyRelation = async (
 
     preFetchLog('1:N where clause: field=%s where=%O', nestedOp.fieldName, whereClause);
 
-    const beforeRecord = await relatedModelClient.findFirst({ where: whereClause });
-    const entityId = extractEntityId(beforeRecord, whereClause, pkFields);
+    const findFirstWhere = flattenCompoundUniqueWhere(whereClause, pkFields);
+
+    const beforeRecord = await relatedModelClient.findFirst({ where: findFirstWhere });
+    const entityId = extractEntityId(beforeRecord, findFirstWhere, pkFields);
 
     storePreFetchResult(preFetchResults, nestedOp.path, entityId, beforeRecord);
 
