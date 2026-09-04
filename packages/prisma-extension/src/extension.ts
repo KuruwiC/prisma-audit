@@ -62,6 +62,7 @@ import {
   injectDeepInclude,
   isAuditableAction,
   isBatchOperation,
+  requiresBeforeState,
   shouldAuditModel,
   uncapitalizeFirst,
 } from './utils/index.js';
@@ -272,9 +273,6 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     return actionFn(operation.args);
   };
 
-  const requiresBeforeState = (action: PrismaAction): boolean =>
-    action === AUDIT_ACTION.UPDATE || action === AUDIT_ACTION.DELETE || action === AUDIT_ACTION.UPSERT;
-
   const findExistingRecord = async (
     prismaClient: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
     modelName: string,
@@ -297,6 +295,13 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     action: PrismaAction,
     args: Record<string, unknown>,
   ): Promise<BeforeStateResult> => {
+    // `requiresBeforeState` (utils/operation-classifier.ts) also lists the batch
+    // actions (updateMany/updateManyAndReturn/deleteMany), but this function is
+    // only ever called from the single-record pipeline (createFetchBeforeStateStage,
+    // reached via handleSingleOperation): `$allOperations` routes batch actions to
+    // handleBatchOperation — which captures before-state itself via findMany, not
+    // this findUnique-based path — before handleSingleOperation ever runs. So the
+    // extra actions in the predicate are unreachable here, not a behavior change.
     if (!requiresBeforeState(action) || !args.where) {
       return { _tag: 'notFound' };
     }
@@ -347,6 +352,12 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
           basePrisma: baseClient,
           getNestedOperationConfig: getNestedOperationConfigWrapper,
           Prisma,
+          // A broken composite entityId is never turned into a partial/guessed key
+          // (see collectDeleteRecords); report it through the same read-only
+          // notification channel as every other audit failure phase instead.
+          onUnresolvedDeleteEntityId: ({ relatedModel, entityId, pkFields, error }) => {
+            void dispatchAuditError('diff-generation', relatedModel, 'delete', { entityId, pkFields }, error);
+          },
         },
       }),
     aggregateConfig,

@@ -44,7 +44,11 @@ import {
 import { PRE_FETCH_INTERNAL_RESULTS } from '../pre-fetch/coordinator.js';
 import { extractEntityIdOrDefault } from '../pre-fetch/pre-fetch-result-store.js';
 import type { CollectedNestedRecord } from './collected-record.js';
-import { collectDeleteRecords, type NestedPreFetchResults } from './delete-handler.js';
+import {
+  collectDeleteRecords,
+  type NestedPreFetchResults,
+  type UnresolvedDeleteEntityIdReporter,
+} from './delete-handler.js';
 import { collectNestedRecords } from './record-processor.js';
 import type { GetNestedOperationConfig } from './state-resolver.js';
 
@@ -92,6 +96,13 @@ export type NestedAuditLogBuilderDependencies = {
   basePrisma: PrismaClientWithDynamicAccess;
   getNestedOperationConfig: GetNestedOperationConfig;
   Prisma: PrismaNamespace;
+  /**
+   * Notified when a nested delete's composite entityId cannot be reconstructed
+   * (see `collectDeleteRecords`), instead of that entry being recorded with a
+   * partial/guessed key. Optional so existing callers keep working unchanged;
+   * when omitted, the unresolved entry is still skipped, just not reported.
+   */
+  onUnresolvedDeleteEntityId?: UnresolvedDeleteEntityIdReporter;
 };
 
 // ============================================================================
@@ -104,6 +115,7 @@ const collectAllNestedRecords = (
   nestedPreFetchResults: NestedPreFetchResults | undefined,
   getNestedOperationConfig: GetNestedOperationConfig,
   Prisma: PrismaNamespace,
+  onUnresolvedDeleteEntityId: UnresolvedDeleteEntityIdReporter | undefined,
 ): CollectedNestedRecord[] => {
   const allCollected: CollectedNestedRecord[] = [];
   const processedPaths = new Set<string>();
@@ -122,7 +134,7 @@ const collectAllNestedRecords = (
     }
 
     if (nestedOp.operation === 'delete' || nestedOp.operation === 'deleteMany') {
-      const deleteRecords = collectDeleteRecords(nestedOp, nestedPreFetchResults, pkFields);
+      const deleteRecords = collectDeleteRecords(nestedOp, nestedPreFetchResults, pkFields, onUnresolvedDeleteEntityId);
       allCollected.push(...deleteRecords);
       continue;
     }
@@ -301,6 +313,7 @@ export const buildNestedAuditLogs = async (input: BuildNestedAuditLogsInput): Pr
   const { modelName, args, result, context, prismaClient, actorContext, preFetchResults, deps } = input;
   const nestedPreFetchResults = extractNestedPreFetchResults(preFetchResults);
   const { aggregateConfig, excludeFields, redact, serialization, getNestedOperationConfig, Prisma } = deps;
+  const onUnresolvedDeleteEntityId = deps.onUnresolvedDeleteEntityId;
 
   const prismaMetadata = createSchemaMetadataFromDMMF(Prisma);
 
@@ -338,6 +351,7 @@ export const buildNestedAuditLogs = async (input: BuildNestedAuditLogsInput): Pr
     nestedPreFetchResults,
     getNestedOperationConfig,
     Prisma,
+    onUnresolvedDeleteEntityId,
   );
 
   if (allCollected.length === 0) {

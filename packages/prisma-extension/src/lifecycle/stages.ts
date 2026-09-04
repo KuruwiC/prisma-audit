@@ -293,6 +293,13 @@ const shouldFetchBeforeState = (
  * from what actually happened. This is an accepted trade-off because Prisma does not
  * expose which branch of an upsert was executed.
  *
+ * **Fetch failure vs "not found"**: `beforeState` collapses both outcomes to `null`,
+ * but `beforeStateResult` (the full {@link BeforeStateResult}) keeps them apart.
+ * Consumers that resolve the upsert action from `beforeState === null` must use
+ * `beforeStateResult` instead when they cannot tell a failed fetch from a genuinely
+ * absent record — see `buildMainAuditLogs`, which skips the audit entry for that case
+ * rather than recording a failed fetch as `action: 'create'`.
+ *
  * @example
  * ```typescript
  * const stage = createFetchBeforeStateStage({
@@ -319,15 +326,17 @@ export const createFetchBeforeStateStage = (
     const operationArgs = toArgsRecord(args);
 
     let beforeState: Record<string, unknown> | null = null;
+    let beforeStateResult: BeforeStateResult = { _tag: 'notFound' };
     if (shouldFetchBeforeState(action, modelName, deps.getNestedOperationConfig)) {
-      const result = await deps.fetchBeforeState(clientToUse, modelName, toPrismaAction(action), operationArgs);
-      if (result._tag === 'found') {
-        beforeState = result.data;
-      } else if (result._tag === 'error') {
-        // Error already dispatched to onAuditErrorHandler via fetchBeforeState.
-        // For upsert, action will default to 'create' — a known
-        // degraded-accuracy trade-off when the DB is unreachable.
+      beforeStateResult = await deps.fetchBeforeState(clientToUse, modelName, toPrismaAction(action), operationArgs);
+      if (beforeStateResult._tag === 'found') {
+        beforeState = beforeStateResult.data;
       }
+      // 'notFound' and 'error' both leave beforeState as null; beforeStateResult
+      // preserves the distinction (error already dispatched to onAuditErrorHandler
+      // via fetchBeforeState) for consumers — e.g. buildMainAuditLogs's upsert
+      // handling below — that must not treat a failed fetch as "record does not
+      // exist" and default the action to 'create'.
     }
 
     const nestedPreFetchResults = await deps.preFetchNestedRecordsBeforeOperation(
@@ -339,6 +348,7 @@ export const createFetchBeforeStateStage = (
     return {
       ...context,
       beforeState,
+      beforeStateResult,
       nestedPreFetchResults,
     };
   };
@@ -450,6 +460,17 @@ const buildMainAuditLogs = async (
 
   const entityConfig = deps.aggregateConfig.getEntityConfig(modelName);
   if (!entityConfig) {
+    return [];
+  }
+
+  // An upsert whose before-state fetch failed cannot be reliably classified as
+  // create vs update: resolveBeforeAndAfterStates (core) treats before === null as
+  // "record did not exist" and resolves the action to 'create', which is exactly
+  // what a failed fetch cannot tell apart from an actual absence. Recording it as
+  // 'create' would misrepresent what may have been an update to a real row, so the
+  // entry is skipped rather than guessed. The failure itself was already reported
+  // to onAuditErrorHandler by fetchBeforeState.
+  if (context.operation.action === AUDIT_ACTION.UPSERT && context.beforeStateResult._tag === 'error') {
     return [];
   }
 

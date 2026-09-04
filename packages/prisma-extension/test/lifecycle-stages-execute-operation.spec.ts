@@ -30,6 +30,7 @@ describe('createExecuteOperationStage', () => {
       clientToUse: {} as unknown as PrismaClientWithDynamicAccess,
       query: mockQuery,
       beforeState: null,
+      beforeStateResult: { _tag: 'notFound' },
       nestedPreFetchResults: undefined,
     };
 
@@ -69,6 +70,7 @@ describe('createExecuteOperationStage', () => {
       clientToUse: {} as unknown as PrismaClientWithDynamicAccess,
       query: mockQuery,
       beforeState,
+      beforeStateResult: { _tag: 'found', data: beforeState },
       nestedPreFetchResults,
     };
 
@@ -103,6 +105,7 @@ describe('createExecuteOperationStage', () => {
       clientToUse: {} as unknown as PrismaClientWithDynamicAccess,
       query: mockQuery,
       beforeState: null,
+      beforeStateResult: { _tag: 'notFound' },
       nestedPreFetchResults: undefined,
     };
 

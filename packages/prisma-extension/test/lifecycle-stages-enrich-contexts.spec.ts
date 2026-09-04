@@ -37,6 +37,7 @@ describe('createEnrichContextsStage', () => {
       clientToUse: {} as unknown as PrismaClientWithDynamicAccess,
       query: vi.fn(),
       beforeState: null,
+      beforeStateResult: { _tag: 'notFound' },
       nestedPreFetchResults: undefined,
       result: { id: 'post-1', title: 'New Title' },
     };
@@ -93,6 +94,7 @@ describe('createEnrichContextsStage', () => {
       clientToUse: {} as unknown as PrismaClientWithDynamicAccess,
       query: vi.fn(),
       beforeState: null,
+      beforeStateResult: { _tag: 'notFound' },
       nestedPreFetchResults: undefined,
       result: { id: 'post-1', title: 'New Title' },
     };
@@ -145,6 +147,7 @@ describe('createEnrichContextsStage', () => {
       clientToUse: {} as unknown as PrismaClientWithDynamicAccess,
       query: vi.fn(),
       beforeState: null,
+      beforeStateResult: { _tag: 'notFound' },
       nestedPreFetchResults: undefined,
       result: { id: 'unknown-1', name: 'Test' },
     };
@@ -191,6 +194,7 @@ describe('createEnrichContextsStage', () => {
       clientToUse: {} as unknown as PrismaClientWithDynamicAccess,
       query: vi.fn(),
       beforeState: null,
+      beforeStateResult: { _tag: 'notFound' },
       nestedPreFetchResults: undefined,
       result: { id: 'post-1', title: 'New Title' },
     };
@@ -240,6 +244,7 @@ describe('createEnrichContextsStage', () => {
       clientToUse: {} as unknown as PrismaClientWithDynamicAccess,
       query: vi.fn(),
       beforeState,
+      beforeStateResult: { _tag: 'found', data: beforeState },
       nestedPreFetchResults,
       result,
     };

@@ -49,8 +49,20 @@ export interface InitialContext {
  * nested operations.
  */
 export interface PreparedContext extends InitialContext {
-  /** State before operation (null for create) */
+  /**
+   * State before operation (null for create, and also for both `notFound` and
+   * `error` outcomes of the fetch below — this field alone cannot tell those two
+   * apart). Consumers that must not misread a failed fetch as "record does not
+   * exist" (e.g. upsert action resolution) should branch on `beforeStateResult`
+   * instead.
+   */
   beforeState: Record<string, unknown> | null;
+  /**
+   * Full outcome of the before-state fetch. For actions that skip the fetch
+   * entirely (e.g. create), this is `{ _tag: 'notFound' }`, matching `beforeState`
+   * being `null`.
+   */
+  beforeStateResult: BeforeStateResult;
   /** Pre-fetched nested operation states (path → record | null) */
   nestedPreFetchResults: PreFetchResults | undefined;
 }

@@ -67,6 +67,7 @@ describe('createBuildLogsStage', () => {
       clientToUse: {} as unknown as PrismaClientWithDynamicAccess,
       query: vi.fn(),
       beforeState: null,
+      beforeStateResult: { _tag: 'notFound' },
       nestedPreFetchResults: undefined,
       result: { id: 'post-1', title: 'New Title' },
       actorContext: null,
@@ -194,6 +195,7 @@ describe('createBuildLogsStage', () => {
       clientToUse: {} as unknown as PrismaClientWithDynamicAccess,
       query: vi.fn(),
       beforeState: null,
+      beforeStateResult: { _tag: 'notFound' },
       nestedPreFetchResults: undefined,
       result: {
         id: 'post-1',
@@ -284,6 +286,7 @@ describe('createBuildLogsStage', () => {
       clientToUse: {} as unknown as PrismaClientWithDynamicAccess,
       query: vi.fn(),
       beforeState,
+      beforeStateResult: { _tag: 'found', data: beforeState },
       nestedPreFetchResults,
       result: resultData,
       actorContext,
@@ -342,6 +345,7 @@ describe('createBuildLogsStage', () => {
       clientToUse: {} as unknown as PrismaClientWithDynamicAccess,
       query: vi.fn(),
       beforeState: null,
+      beforeStateResult: { _tag: 'notFound' },
       nestedPreFetchResults: undefined,
       result: { id: 'unknown-1', name: 'Test' },
       actorContext: null,
@@ -365,6 +369,92 @@ describe('createBuildLogsStage', () => {
     const result: FinalContext = await stage(enrichedContext);
 
     // Assert
+    expect(result.logs).toEqual([]);
+  });
+
+  it('should skip the main log for an upsert whose before-state fetch failed, instead of defaulting to create', async () => {
+    // Arrange — buildAuditLog would otherwise resolve this to action: 'create'
+    // (resolveBeforeAndAfterStates treats before === null as "record did not
+    // exist"), which would misrepresent a failed fetch as a genuine absence.
+    const mockBuildAuditLog = vi.fn().mockResolvedValue([
+      {
+        actorCategory: 'model',
+        actorType: 'User',
+        actorId: createActorId('user-1'),
+        actorContext: null,
+        entityCategory: 'content',
+        entityType: 'Post',
+        entityId: createEntityId('post-1'),
+        entityContext: null,
+        aggregateCategory: 'content',
+        aggregateType: 'Post',
+        aggregateId: createAggregateId('post-1'),
+        aggregateContext: null,
+        action: 'create',
+        before: null,
+        after: { id: 'post-1', title: 'Updated Title' },
+        changes: null,
+        requestContext: null,
+        createdAt: new Date('2025-01-01T00:00:00Z'),
+      },
+    ]);
+    const mockBuildNestedAuditLogs = vi.fn().mockResolvedValue([]);
+    const mockEntityConfig = {
+      category: 'content',
+      type: 'Post',
+      idResolver: vi.fn().mockResolvedValue('post-1'),
+      aggregates: [],
+    };
+    const mockAggregateConfig = {
+      getEntityConfig: vi.fn().mockReturnValue(mockEntityConfig),
+      getEntityConfigByType: vi.fn().mockReturnValue(undefined),
+      isLoggable: vi.fn(),
+      getAllLoggableModels: vi.fn(),
+      getMapping: vi.fn(),
+    };
+
+    const enrichedContext: EnrichedContext = {
+      operation: {
+        model: 'Post',
+        action: 'upsert',
+        args: {
+          where: { id: 'post-1' },
+          create: { title: 'Created Title' },
+          update: { title: 'Updated Title' },
+        },
+      },
+      auditContext: {
+        actor: { category: 'model', type: 'User', id: 'user-1' },
+      },
+      clientToUse: {} as unknown as PrismaClientWithDynamicAccess,
+      query: vi.fn(),
+      beforeState: null,
+      beforeStateResult: { _tag: 'error', error: new Error('simulated before-state fetch failure') },
+      nestedPreFetchResults: undefined,
+      result: { id: 'post-1', title: 'Updated Title' },
+      actorContext: null,
+      entityContext: null,
+    };
+
+    const deps: Pick<
+      StageDependencies,
+      'buildAuditLog' | 'buildNestedAuditLogs' | 'aggregateConfig' | 'excludeFields' | 'basePrisma'
+    > = {
+      buildAuditLog: mockBuildAuditLog,
+      buildNestedAuditLogs: mockBuildNestedAuditLogs,
+      aggregateConfig: mockAggregateConfig,
+      excludeFields: [],
+      basePrisma: {} as unknown as PrismaClientWithDynamicAccess,
+    };
+
+    const stage = createBuildLogsStage(deps);
+
+    // Act
+    const result: FinalContext = await stage(enrichedContext);
+
+    // Assert — no main log entry at all, and buildAuditLog (which would have
+    // resolved the action to 'create') is never even called.
+    expect(mockBuildAuditLog).not.toHaveBeenCalled();
     expect(result.logs).toEqual([]);
   });
 });

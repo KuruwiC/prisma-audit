@@ -11,8 +11,18 @@ import { AUDIT_ACTION, nestedLog } from '@kuruwic/prisma-audit-core';
 import { extractDeleteOperationEntityId } from '../../utils/extension-utils.js';
 import type { CollectedNestedRecord } from './collected-record.js';
 
-/** Build a minimal entity record from a serialized entityId and PK field names */
-const buildMinimalEntity = (entityId: string, pkFields?: string[]): Record<string, unknown> => {
+/**
+ * Build a minimal entity record from a serialized entityId and PK field names.
+ *
+ * Returns `null` when a composite entityId cannot be reconstructed to its full key
+ * (not valid JSON, or the parsed array length does not match `pkFields`). This
+ * mirrors the core sibling `deserializeEntityId` in
+ * `packages/core/src/utils/nested-operations.ts` (used to build WHERE clauses),
+ * which also returns `null` instead of a partial key — a `{ [firstField]: entityId }`
+ * guess here would look like a valid, complete identity to anyone reading the audit
+ * log, when in fact most of the composite key is unknown.
+ */
+const buildMinimalEntity = (entityId: string, pkFields?: string[]): Record<string, unknown> | null => {
   if (entityId === '__default__') return {};
 
   const fields = pkFields ?? ['id'];
@@ -29,9 +39,45 @@ const buildMinimalEntity = (entityId: string, pkFields?: string[]): Record<strin
       return entity;
     }
   } catch {
-    // Composite PK but not valid JSON — cannot reconstruct fully
+    // Composite PK but not valid JSON — cannot reconstruct
   }
-  return { [fields[0] as string]: entityId };
+  return null;
+};
+
+/**
+ * Notification for a nested delete whose composite entityId could not be
+ * reconstructed. Mirrors the shape `onAuditErrorHandler` expects (see
+ * `dispatchAuditError` in extension.ts) so callers can forward it unchanged.
+ */
+export interface UnresolvedDeleteEntityId {
+  relatedModel: string;
+  entityId: string;
+  pkFields: string[];
+  error: Error;
+}
+
+export type UnresolvedDeleteEntityIdReporter = (info: UnresolvedDeleteEntityId) => void;
+
+/** Notify `onUnresolvedEntityId` (if provided) that an entityId could not be reconstructed. */
+const reportUnresolvedEntityId = (
+  relatedModel: string,
+  entityId: string,
+  pkFields: string[] | undefined,
+  onUnresolvedEntityId: UnresolvedDeleteEntityIdReporter | undefined,
+): void => {
+  if (!onUnresolvedEntityId) return;
+
+  const fields = pkFields ?? ['id'];
+  onUnresolvedEntityId({
+    relatedModel,
+    entityId,
+    pkFields: fields,
+    error: new Error(
+      `[@prisma-audit] Cannot reconstruct composite primary key for entityId="${entityId}" ` +
+        `(model=${relatedModel}, pkFields=[${fields.join(', ')}]). Skipping this delete's audit log entry ` +
+        'instead of recording a partial/guessed key.',
+    ),
+  });
 };
 
 /**
@@ -58,12 +104,17 @@ export type NestedPreFetchResults = Map<string, Map<string, { before: Record<str
  *   1. Use pre-fetched before states (has full record data)
  *   2. Fallback: extract entity ID from nestedOp.data (minimal record only)
  *
+ * A composite entityId that cannot be reconstructed (see `buildMinimalEntity`) is
+ * never recorded as a partial/guessed key: that record is skipped and, if
+ * `onUnresolvedEntityId` is provided, reported through it instead.
+ *
  * @returns Collected records ready for batch enrichment and audit log building
  */
 export const collectDeleteRecords = (
   nestedOp: NestedOperationInfo,
   nestedPreFetchResults: NestedPreFetchResults | undefined,
   pkFields?: string[],
+  onUnresolvedEntityId?: UnresolvedDeleteEntityIdReporter,
 ): CollectedNestedRecord[] => {
   nestedLog('delete operation detected, collecting targets');
 
@@ -80,7 +131,17 @@ export const collectDeleteRecords = (
 
       const beforeState = preFetchResult.before;
       // Use beforeState as entity when available, otherwise build from entityId + pkFields
-      const entity: Record<string, unknown> = beforeState ?? buildMinimalEntity(entityId, pkFields);
+      const entity = beforeState ?? buildMinimalEntity(entityId, pkFields);
+
+      if (entity === null) {
+        nestedLog(
+          'cannot reconstruct composite primary key for entityId=%s (path=%s); skipping delete audit entry',
+          entityId,
+          nestedOp.path,
+        );
+        reportUnresolvedEntityId(nestedOp.relatedModel, entityId, pkFields, onUnresolvedEntityId);
+        continue;
+      }
 
       collected.push({
         entity,
@@ -104,9 +165,20 @@ export const collectDeleteRecords = (
     return [];
   }
 
+  const entity = buildMinimalEntity(entityId, pkFields);
+  if (entity === null) {
+    nestedLog(
+      'cannot reconstruct composite primary key for entityId=%s (path=%s); skipping delete audit entry',
+      entityId,
+      nestedOp.path,
+    );
+    reportUnresolvedEntityId(nestedOp.relatedModel, entityId, pkFields, onUnresolvedEntityId);
+    return [];
+  }
+
   return [
     {
-      entity: buildMinimalEntity(entityId, pkFields),
+      entity,
       action: AUDIT_ACTION.DELETE,
       beforeState: null,
       relatedModel: nestedOp.relatedModel,
