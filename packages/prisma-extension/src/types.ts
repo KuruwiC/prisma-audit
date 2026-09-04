@@ -108,7 +108,19 @@ export type EnrichmentResolver<TEntity = unknown, TPrisma = unknown> = (
 export interface HooksConfig {
   /** Custom audit log writer */
   writer?: AuditLogWriter;
-  /** Error handler for audit log failures */
+  /**
+   * Error handler for audit log failures.
+   *
+   * This is the ONLY thing that decides whether a failed audit-log write also fails the
+   * caller's own database operation — {@link OnAuditErrorHandler} is a separate, read-only
+   * notification channel and never affects that outcome.
+   *
+   * A strategy string (`'throw'` re-throws and fails the operation, `'log'` logs to the
+   * console and lets the operation succeed, `'ignore'` does neither) or a custom function —
+   * whose own throw (fails the operation) or normal return (lets it succeed) decides instead.
+   *
+   * @default 'throw'
+   */
   errorHandler?: import('@kuruwic/prisma-audit-core').ErrorHandler | import('@kuruwic/prisma-audit-core').ErrorStrategy;
 }
 
@@ -124,6 +136,11 @@ export interface NestedOperationsConfig {
 
 /**
  * Audit error handler callback
+ *
+ * A structured, read-only notification channel invoked for every audit failure phase
+ * (`pre-fetch`, `log-write`, `diff-generation`) — for observability (logging, monitoring,
+ * alerting). It never decides whether the caller's own database operation fails; that is
+ * controlled exclusively by {@link HooksConfig.errorHandler}.
  */
 export type OnAuditErrorHandler = (context: {
   phase: 'pre-fetch' | 'log-write' | 'diff-generation';

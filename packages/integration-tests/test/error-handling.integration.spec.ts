@@ -1,6 +1,72 @@
-import type { AuditContext } from '@kuruwic/prisma-audit-core';
+import type { PrismaAuditExtensionOptions } from '@kuruwic/prisma-audit';
+import { createAuditClient } from '@kuruwic/prisma-audit';
+import type { AuditContext, ErrorHandler, ErrorStrategy } from '@kuruwic/prisma-audit-core';
+import { createAsyncLocalStorageProvider } from '@kuruwic/prisma-audit-core';
+import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanDatabase, setupTestDatabase, type TestContext, teardownTestDatabase } from './helpers/setup.js';
+import {
+  cleanDatabase,
+  setupTestDatabase,
+  type TestContext,
+  teardownTestDatabase,
+  testAggregateMapping,
+} from './helpers/setup.js';
+
+/** Message thrown by the failing `hooks.writer` used to simulate an audit-log write failure. */
+const AUDIT_WRITE_FAILURE_MESSAGE = 'simulated audit log write failure';
+
+interface FailingWriterClientOptions {
+  errorHandler?: ErrorStrategy | ErrorHandler;
+  onAuditErrorHandler?: PrismaAuditExtensionOptions['onAuditErrorHandler'];
+}
+
+/**
+ * Builds an audited client whose `hooks.writer` always throws, so every audit-log
+ * write fails on purpose (see hooks-writer.integration.spec.ts for the base pattern).
+ * Each scenario gets its own Prisma client so the `errorHandler` strategy under test
+ * cannot leak into other scenarios.
+ */
+const createFailingWriterClient = (databaseUrl: string, options: FailingWriterClientOptions) => {
+  const basePrisma = new PrismaClient({
+    datasources: { db: { url: databaseUrl } },
+  });
+  const provider = createAsyncLocalStorageProvider();
+
+  const prisma = createAuditClient(basePrisma, {
+    Prisma,
+    provider,
+    basePrisma,
+    aggregateMapping: testAggregateMapping,
+    diffing: {
+      excludeFields: ['createdAt'],
+    },
+    security: {
+      redact: {
+        fields: [],
+      },
+    },
+    performance: {
+      awaitWrite: true,
+    },
+    hooks: {
+      writer: async () => {
+        throw new Error(AUDIT_WRITE_FAILURE_MESSAGE);
+      },
+      ...(options.errorHandler !== undefined ? { errorHandler: options.errorHandler } : {}),
+    },
+    ...(options.onAuditErrorHandler ? { onAuditErrorHandler: options.onAuditErrorHandler } : {}),
+  });
+
+  return { basePrisma, provider, prisma };
+};
+
+const disconnectScenario = async (scenario: {
+  prisma: { $disconnect: () => Promise<void> };
+  basePrisma: { $disconnect: () => Promise<void> };
+}): Promise<void> => {
+  await scenario.prisma.$disconnect();
+  await scenario.basePrisma.$disconnect();
+};
 
 describe('Error Handling Integration', () => {
   let context: TestContext;
@@ -26,32 +92,224 @@ describe('Error Handling Integration', () => {
     },
   };
 
-  describe('Successful operations', () => {
-    it('should complete operation even if audit log fails (log strategy)', async () => {
-      // LIMITATION: This test does not actually trigger an audit log failure.
-      // The standard test setup uses a working database writer, so audit writes succeed.
-      // To properly test error resilience, a custom hooks.writer that throws would be
-      // needed with a separate Prisma client instance (see hooks-writer.integration.spec.ts).
-      // For now, this test only verifies that the main operation completes successfully.
-      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+  describe('Audit-log write failures — error strategy contract', () => {
+    // Every scenario below drives a real audit-log write failure via a `hooks.writer`
+    // that always throws (see hooks-writer.integration.spec.ts for the base pattern),
+    // then observes whether the caller's own `user.create` succeeds or fails, whether
+    // anything is logged to the console, and whether `onAuditErrorHandler` was notified.
 
-      const user = await context.provider.runAsync(testActor, async () => {
-        return await context.prisma.user.create({
-          data: {
-            email: 'test@example.com',
-            name: 'John Doe',
-            password: 'secret123',
-          },
+    it("errorHandler: 'ignore' — commits the caller's row and stays silent", async () => {
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const onAuditErrorHandler = vi.fn();
+      const scenario = createFailingWriterClient(context.databaseUrl, { errorHandler: 'ignore', onAuditErrorHandler });
+
+      try {
+        const user = await scenario.provider.runAsync(testActor, async () =>
+          scenario.prisma.user.create({
+            data: { email: 'ignore-strategy@example.com', name: 'Ignore User', password: 'secret123' },
+          }),
+        );
+
+        expect(user.email).toBe('ignore-strategy@example.com');
+
+        const persisted = await context.basePrisma.user.findUnique({
+          where: { email: 'ignore-strategy@example.com' },
         });
+        expect(persisted).not.toBeNull();
+
+        expect(consoleErrorSpy).not.toHaveBeenCalled();
+
+        expect(onAuditErrorHandler).toHaveBeenCalledWith(
+          expect.objectContaining({
+            phase: 'log-write',
+            modelName: 'User',
+            error: expect.objectContaining({ message: AUDIT_WRITE_FAILURE_MESSAGE }),
+          }),
+        );
+      } finally {
+        consoleErrorSpy.mockRestore();
+        await disconnectScenario(scenario);
+      }
+    });
+
+    it("errorHandler: 'log' — commits the caller's row and reports the error to the console", async () => {
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const onAuditErrorHandler = vi.fn();
+      const scenario = createFailingWriterClient(context.databaseUrl, { errorHandler: 'log', onAuditErrorHandler });
+
+      try {
+        const user = await scenario.provider.runAsync(testActor, async () =>
+          scenario.prisma.user.create({
+            data: { email: 'log-strategy@example.com', name: 'Log User', password: 'secret123' },
+          }),
+        );
+
+        expect(user.email).toBe('log-strategy@example.com');
+
+        const persisted = await context.basePrisma.user.findUnique({
+          where: { email: 'log-strategy@example.com' },
+        });
+        expect(persisted).not.toBeNull();
+
+        expect(consoleErrorSpy).toHaveBeenCalledWith(
+          '[@prisma-audit] Error in audit log write:',
+          AUDIT_WRITE_FAILURE_MESSAGE,
+        );
+
+        expect(onAuditErrorHandler).toHaveBeenCalledWith(
+          expect.objectContaining({
+            phase: 'log-write',
+            modelName: 'User',
+            error: expect.objectContaining({ message: AUDIT_WRITE_FAILURE_MESSAGE }),
+          }),
+        );
+      } finally {
+        consoleErrorSpy.mockRestore();
+        await disconnectScenario(scenario);
+      }
+    });
+
+    it("errorHandler: 'throw' — fails the caller's operation and rolls back the row", async () => {
+      const onAuditErrorHandler = vi.fn();
+      const scenario = createFailingWriterClient(context.databaseUrl, { errorHandler: 'throw', onAuditErrorHandler });
+
+      try {
+        await expect(
+          scenario.provider.runAsync(testActor, async () =>
+            scenario.prisma.user.create({
+              data: { email: 'throw-strategy@example.com', name: 'Throw User', password: 'secret123' },
+            }),
+          ),
+        ).rejects.toThrow(AUDIT_WRITE_FAILURE_MESSAGE);
+
+        const persisted = await context.basePrisma.user.findUnique({
+          where: { email: 'throw-strategy@example.com' },
+        });
+        expect(persisted).toBeNull();
+
+        expect(onAuditErrorHandler).toHaveBeenCalledWith(
+          expect.objectContaining({
+            phase: 'log-write',
+            modelName: 'User',
+            error: expect.objectContaining({ message: AUDIT_WRITE_FAILURE_MESSAGE }),
+          }),
+        );
+      } finally {
+        await disconnectScenario(scenario);
+      }
+    });
+
+    it('default (no errorHandler configured) — behaves like throw', async () => {
+      const onAuditErrorHandler = vi.fn();
+      const scenario = createFailingWriterClient(context.databaseUrl, { onAuditErrorHandler });
+
+      try {
+        await expect(
+          scenario.provider.runAsync(testActor, async () =>
+            scenario.prisma.user.create({
+              data: { email: 'default-strategy@example.com', name: 'Default User', password: 'secret123' },
+            }),
+          ),
+        ).rejects.toThrow(AUDIT_WRITE_FAILURE_MESSAGE);
+
+        const persisted = await context.basePrisma.user.findUnique({
+          where: { email: 'default-strategy@example.com' },
+        });
+        expect(persisted).toBeNull();
+
+        expect(onAuditErrorHandler).toHaveBeenCalledWith(
+          expect.objectContaining({
+            phase: 'log-write',
+            modelName: 'User',
+            error: expect.objectContaining({ message: AUDIT_WRITE_FAILURE_MESSAGE }),
+          }),
+        );
+      } finally {
+        await disconnectScenario(scenario);
+      }
+    });
+
+    it('custom errorHandler function — is invoked and its own (non-throwing) decision lets the operation succeed', async () => {
+      const customErrorHandler = vi.fn();
+      const onAuditErrorHandler = vi.fn();
+      const scenario = createFailingWriterClient(context.databaseUrl, {
+        errorHandler: customErrorHandler,
+        onAuditErrorHandler,
       });
 
-      expect(user).toBeDefined();
-      expect(user.email).toBe('test@example.com');
+      try {
+        const user = await scenario.provider.runAsync(testActor, async () =>
+          scenario.prisma.user.create({
+            data: { email: 'custom-nonthrow@example.com', name: 'Custom User', password: 'secret123' },
+          }),
+        );
 
-      // No audit error is expected since the writer works normally in this setup
-      expect(consoleErrorSpy).not.toHaveBeenCalled();
+        expect(user.email).toBe('custom-nonthrow@example.com');
 
-      consoleErrorSpy.mockRestore();
+        const persisted = await context.basePrisma.user.findUnique({
+          where: { email: 'custom-nonthrow@example.com' },
+        });
+        expect(persisted).not.toBeNull();
+
+        expect(customErrorHandler).toHaveBeenCalledWith(
+          expect.objectContaining({ message: AUDIT_WRITE_FAILURE_MESSAGE }),
+          'audit log write',
+        );
+
+        expect(onAuditErrorHandler).toHaveBeenCalledWith(
+          expect.objectContaining({
+            phase: 'log-write',
+            modelName: 'User',
+            error: expect.objectContaining({ message: AUDIT_WRITE_FAILURE_MESSAGE }),
+          }),
+        );
+      } finally {
+        await disconnectScenario(scenario);
+      }
+    });
+
+    it('custom errorHandler function — is invoked and its own (throwing) decision fails the operation', async () => {
+      const CUSTOM_HANDLER_FAILURE_MESSAGE = 'custom handler decided to fail';
+      const customErrorHandler = vi.fn(() => {
+        throw new Error(CUSTOM_HANDLER_FAILURE_MESSAGE);
+      });
+      const onAuditErrorHandler = vi.fn();
+      const scenario = createFailingWriterClient(context.databaseUrl, {
+        errorHandler: customErrorHandler,
+        onAuditErrorHandler,
+      });
+
+      try {
+        await expect(
+          scenario.provider.runAsync(testActor, async () =>
+            scenario.prisma.user.create({
+              data: { email: 'custom-throw@example.com', name: 'Custom Throw User', password: 'secret123' },
+            }),
+          ),
+        ).rejects.toThrow(CUSTOM_HANDLER_FAILURE_MESSAGE);
+
+        const persisted = await context.basePrisma.user.findUnique({
+          where: { email: 'custom-throw@example.com' },
+        });
+        expect(persisted).toBeNull();
+
+        expect(customErrorHandler).toHaveBeenCalledWith(
+          expect.objectContaining({ message: AUDIT_WRITE_FAILURE_MESSAGE }),
+          'audit log write',
+        );
+
+        // The original audit-write failure is still reported, even though the custom
+        // handler replaced it with a different error for the caller.
+        expect(onAuditErrorHandler).toHaveBeenCalledWith(
+          expect.objectContaining({
+            phase: 'log-write',
+            modelName: 'User',
+            error: expect.objectContaining({ message: AUDIT_WRITE_FAILURE_MESSAGE }),
+          }),
+        );
+      } finally {
+        await disconnectScenario(scenario);
+      }
     });
   });
 
