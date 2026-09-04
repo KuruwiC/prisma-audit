@@ -242,23 +242,23 @@ const enrichAndBuildForModelGroup = async (
       aggregateContextLookup,
     );
 
-    const logs = await buildAuditLog(
-      groupRecord.record.entity,
-      groupRecord.record.action,
+    const logs = await buildAuditLog({
+      entity: groupRecord.record.entity,
+      action: groupRecord.record.action,
       context,
-      group.modelName,
+      modelName: group.modelName,
       manager,
       actorContext,
-      entityContexts[survivor.entityIndex] ?? null,
-      groupRecord.record.beforeState,
+      entityContext: entityContexts[survivor.entityIndex] ?? null,
+      before: groupRecord.record.beforeState,
       aggregateConfig,
       excludeFields,
       redact,
       aggregateData,
-      undefined,
+      includeRelations: undefined,
       serialization,
-      relationFields,
-    );
+      relationFieldNames: relationFields,
+    });
 
     allLogs.push(...logs);
   }
@@ -271,6 +271,25 @@ const enrichAndBuildForModelGroup = async (
 // ============================================================================
 
 /**
+ * Operation-level input shared by {@link buildNestedAuditLogs} and the
+ * `StageDependencies.buildNestedAuditLogs` dependency it is wired up as
+ * (the dependency omits `deps`, which the caller binds via closure).
+ */
+export interface BuildNestedAuditLogsParams {
+  modelName: string;
+  args: Record<string, unknown>;
+  result: unknown;
+  context: AuditContext;
+  prismaClient: PrismaClientWithDynamicAccess | TransactionalPrismaClient;
+  actorContext: unknown;
+  preFetchResults?: PreFetchResults;
+}
+
+export interface BuildNestedAuditLogsInput extends BuildNestedAuditLogsParams {
+  deps: NestedAuditLogBuilderDependencies;
+}
+
+/**
  * Build audit logs for nested records using batch pipeline.
  *
  * Pipeline:
@@ -279,16 +298,8 @@ const enrichAndBuildForModelGroup = async (
  *   3. Group by relatedModel
  *   4. Per group: batch entity enrichment → batch aggregate resolution → batch aggregate enrichment → build logs
  */
-export const buildNestedAuditLogs = async (
-  modelName: string,
-  args: Record<string, unknown>,
-  result: unknown,
-  context: AuditContext,
-  prismaClient: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
-  actorContext: unknown,
-  preFetchResults: PreFetchResults | undefined,
-  deps: NestedAuditLogBuilderDependencies,
-): Promise<AuditLogData[]> => {
+export const buildNestedAuditLogs = async (input: BuildNestedAuditLogsInput): Promise<AuditLogData[]> => {
+  const { modelName, args, result, context, prismaClient, actorContext, preFetchResults, deps } = input;
   const nestedPreFetchResults = extractNestedPreFetchResults(preFetchResults);
   const { aggregateConfig, excludeFields, redact, serialization, getNestedOperationConfig, Prisma } = deps;
 

@@ -45,22 +45,22 @@ describe('buildAuditLog serialization', () => {
     const entity = { id: 'tx-1', amount: 100n, status: 'completed' };
     const before = { id: 'tx-1', amount: 50n, status: 'pending' };
 
-    const logs = await buildAuditLog(
+    const logs = await buildAuditLog({
       entity,
-      'update',
-      { actor: { category: 'model', type: 'User', id: 'user-1' } },
-      'Transaction',
-      createManager(),
-      null,
-      null,
+      action: 'update',
+      context: { actor: { category: 'model', type: 'User', id: 'user-1' } },
+      modelName: 'Transaction',
+      manager: createManager(),
+      actorContext: null,
+      entityContext: null,
       before,
-      createAggregateConfig(),
-      undefined,
-      undefined,
-      createSelfAggregateData('tx-1'),
-      undefined,
-      undefined,
-    );
+      aggregateConfig: createAggregateConfig(),
+      excludeFields: undefined,
+      redact: undefined,
+      aggregateData: createSelfAggregateData('tx-1'),
+      includeRelations: undefined,
+      serialization: undefined,
+    });
 
     expect(logs.length).toBeGreaterThan(0);
     const log = logs[0] as AuditLogData;
@@ -82,25 +82,25 @@ describe('buildAuditLog serialization', () => {
     const actorContext = { walletId: 999n };
     const entityContext = { blockNumber: 12345n };
 
-    const logs = await buildAuditLog(
+    const logs = await buildAuditLog({
       entity,
-      'create',
-      {
+      action: 'create',
+      context: {
         actor: { category: 'model', type: 'User', id: 'user-1' },
         request: { traceId: 42n },
       },
-      'Transaction',
-      createManager(),
+      modelName: 'Transaction',
+      manager: createManager(),
       actorContext,
       entityContext,
-      null,
-      createAggregateConfig(),
-      undefined,
-      undefined,
-      createSelfAggregateData('tx-1'),
-      undefined,
-      undefined,
-    );
+      before: null,
+      aggregateConfig: createAggregateConfig(),
+      excludeFields: undefined,
+      redact: undefined,
+      aggregateData: createSelfAggregateData('tx-1'),
+      includeRelations: undefined,
+      serialization: undefined,
+    });
 
     expect(logs.length).toBeGreaterThan(0);
     const log = logs[0] as AuditLogData;
@@ -119,22 +119,22 @@ describe('buildAuditLog serialization', () => {
     const entity = { id: 'tx-1', name: 'test' };
     const actorContext = { lastLogin: new Date('2025-06-01T00:00:00.000Z') };
 
-    const logs = await buildAuditLog(
+    const logs = await buildAuditLog({
       entity,
-      'create',
-      { actor: { category: 'model', type: 'User', id: 'user-1' } },
-      'Transaction',
-      createManager(),
+      action: 'create',
+      context: { actor: { category: 'model', type: 'User', id: 'user-1' } },
+      modelName: 'Transaction',
+      manager: createManager(),
       actorContext,
-      null,
-      null,
-      createAggregateConfig(),
-      undefined,
-      undefined,
-      createSelfAggregateData('tx-1'),
-      undefined,
-      undefined,
-    );
+      entityContext: null,
+      before: null,
+      aggregateConfig: createAggregateConfig(),
+      excludeFields: undefined,
+      redact: undefined,
+      aggregateData: createSelfAggregateData('tx-1'),
+      includeRelations: undefined,
+      serialization: undefined,
+    });
 
     expect(logs.length).toBeGreaterThan(0);
     const log = logs[0] as AuditLogData;
@@ -146,21 +146,21 @@ describe('buildAuditLog serialization', () => {
     const entity = { id: 'tx-1', name: 'test' };
     const actorContext = { data: new Uint8Array([1, 2, 3]) };
 
-    const logs = await buildAuditLog(
+    const logs = await buildAuditLog({
       entity,
-      'create',
-      { actor: { category: 'model', type: 'User', id: 'user-1' } },
-      'Transaction',
-      createManager(),
+      action: 'create',
+      context: { actor: { category: 'model', type: 'User', id: 'user-1' } },
+      modelName: 'Transaction',
+      manager: createManager(),
       actorContext,
-      null,
-      null,
-      createAggregateConfig(),
-      undefined,
-      undefined,
-      createSelfAggregateData('tx-1'),
-      undefined,
-      {
+      entityContext: null,
+      before: null,
+      aggregateConfig: createAggregateConfig(),
+      excludeFields: undefined,
+      redact: undefined,
+      aggregateData: createSelfAggregateData('tx-1'),
+      includeRelations: undefined,
+      serialization: {
         customSerializers: [
           (value: unknown) => {
             if (value instanceof Uint8Array) return `bytes:${value.length}`;
@@ -168,7 +168,7 @@ describe('buildAuditLog serialization', () => {
           },
         ],
       },
-    );
+    });
 
     expect(logs.length).toBeGreaterThan(0);
     const log = logs[0] as AuditLogData;

@@ -33,7 +33,7 @@ import type {
   TransactionalPrismaClient,
 } from './internal-types.js';
 import { createBatchBuildLogsStage, createBatchEnrichContextsStage } from './lifecycle/batch-stages.js';
-import { buildNestedAuditLogs } from './lifecycle/nested-handlers/index.js';
+import { type BuildNestedAuditLogsParams, buildNestedAuditLogs } from './lifecycle/nested-handlers/index.js';
 import { handleTopLevelOperation, type TopLevelHandlerDependencies } from './lifecycle/operation-handlers/index.js';
 import { runLifecyclePipeline } from './lifecycle/pipeline.js';
 import {
@@ -65,6 +65,25 @@ import {
   shouldAuditModel,
   uncapitalizeFirst,
 } from './utils/index.js';
+
+/**
+ * Input for the internal `handleLimitedUpdateMany` helper, which audits a
+ * `limit`-bounded `updateMany`/`updateManyAndReturn` by routing it through
+ * `updateManyAndReturn` so before/after pin to the exact rows updated.
+ */
+export interface HandleLimitedUpdateManyInput {
+  operation: OperationContext;
+  context: AuditContext;
+  baseClient: PrismaClientWithDynamicAccess;
+  clientToUse: PrismaClientWithDynamicAccess | TransactionalPrismaClient;
+  action: PrismaAction;
+  modelDelegate: {
+    findMany: (args: { where: unknown }) => Promise<Record<string, unknown>[]>;
+    updateManyAndReturn: (args: unknown) => Promise<Record<string, unknown>[]>;
+  };
+  pkFields: string[];
+  whereClause: unknown;
+}
 
 /**
  * Creates the Prisma Client Extension for automatic audit logging
@@ -145,15 +164,15 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
   validateFieldConflicts(excludeFields, redact, aggregateMapping);
 
   const shouldAudit = (modelName: string | undefined, context: AuditContext | undefined): boolean => {
-    return shouldAuditModel(
+    return shouldAuditModel({
       modelName,
       context,
       auditLogModel,
-      aggregateConfig.isLoggable,
+      isLoggable: aggregateConfig.isLoggable,
       sampling,
       samplingIf,
-      aggregateConfig.getEntityConfig,
-    );
+      getEntityConfig: aggregateConfig.getEntityConfig,
+    });
   };
 
   const getNestedOperationConfigWrapper = (modelName: string, operation: string): { fetchBeforeOperation: boolean } => {
@@ -301,23 +320,18 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
       return batchEnrichEntityContexts(entities, config, prisma);
     },
     buildAuditLog,
-    buildNestedAuditLogs: (
-      modelName: string,
-      args: Record<string, unknown>,
-      result: unknown,
-      context: AuditContext,
-      prismaClient: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
-      actorContext: unknown,
-      preFetchResults?: PreFetchResults,
-    ) =>
-      buildNestedAuditLogs(modelName, args, result, context, prismaClient, actorContext, preFetchResults, {
-        aggregateConfig,
-        excludeFields,
-        redact,
-        serialization,
-        basePrisma: baseClient,
-        getNestedOperationConfig: getNestedOperationConfigWrapper,
-        Prisma,
+    buildNestedAuditLogs: (params: BuildNestedAuditLogsParams) =>
+      buildNestedAuditLogs({
+        ...params,
+        deps: {
+          aggregateConfig,
+          excludeFields,
+          redact,
+          serialization,
+          basePrisma: baseClient,
+          getNestedOperationConfig: getNestedOperationConfigWrapper,
+          Prisma,
+        },
       }),
     aggregateConfig,
     excludeFields,
@@ -512,19 +526,8 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
   // is the exact set of updated rows. This pins before/after to those rows and avoids the count
   // desync a separately-limited before fetch allows. Only used when the connector supports
   // updateManyAndReturn (see caller guard).
-  const handleLimitedUpdateMany = async (
-    operation: OperationContext,
-    context: AuditContext,
-    baseClient: PrismaClientWithDynamicAccess,
-    clientToUse: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
-    action: PrismaAction,
-    modelDelegate: {
-      findMany: (args: { where: unknown }) => Promise<Record<string, unknown>[]>;
-      updateManyAndReturn: (args: unknown) => Promise<Record<string, unknown>[]>;
-    },
-    pkFields: string[],
-    whereClause: unknown,
-  ): Promise<unknown> => {
+  const handleLimitedUpdateMany = async (input: HandleLimitedUpdateManyInput): Promise<unknown> => {
+    const { operation, context, baseClient, clientToUse, action, modelDelegate, pkFields, whereClause } = input;
     const beforeEntities = await modelDelegate.findMany({ where: whereClause || {} });
     const updatedRows = await modelDelegate.updateManyAndReturn(operation.args);
     const paired = pairEntitiesByPrimaryKey(updatedRows, beforeEntities, pkFields);
@@ -566,18 +569,18 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     // connector supports `updateManyAndReturn`, audit through it for exact-row fidelity. MySQL and
     // other connectors without it fall through to the best-effort `take: limit` path below.
     if (isUpdate && limitClause !== undefined && hasUpdateManyAndReturn(modelDelegate)) {
-      return handleLimitedUpdateMany(
+      return handleLimitedUpdateMany({
         operation,
         context,
         baseClient,
         clientToUse,
         action,
-        modelDelegate as typeof modelDelegate & {
+        modelDelegate: modelDelegate as typeof modelDelegate & {
           updateManyAndReturn: (args: unknown) => Promise<Record<string, unknown>[]>;
         },
         pkFields,
         whereClause,
-      );
+      });
     }
 
     // Propagate `limit` to the before fetch so before/after counts match the actually-updated rows

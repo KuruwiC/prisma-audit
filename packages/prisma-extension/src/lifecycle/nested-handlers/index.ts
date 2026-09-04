@@ -4,7 +4,11 @@
  * Handlers for nested write operations in audit logging.
  */
 
-export type { NestedAuditLogBuilderDependencies } from './audit-log-builder.js';
+export type {
+  BuildNestedAuditLogsInput,
+  BuildNestedAuditLogsParams,
+  NestedAuditLogBuilderDependencies,
+} from './audit-log-builder.js';
 export { buildNestedAuditLogs } from './audit-log-builder.js';
 
 export type { CollectedNestedRecord } from './collected-record.js';

@@ -15,8 +15,8 @@ import type {
   SerializationConfig,
 } from '@kuruwic/prisma-audit-core';
 import { AUDIT_ACTION } from '@kuruwic/prisma-audit-core';
-import type { ResolvedAggregateData } from '../audit-log-builder/index.js';
-import { createPrismaClientManager, type PrismaClientManager } from '../client-manager/index.js';
+import type { BuildAuditLogInput } from '../audit-log-builder/index.js';
+import { createPrismaClientManager } from '../client-manager/index.js';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../internal-types.js';
 import type { AuditLogData, PrismaAction } from '../types.js';
 import { createSchemaMetadataFromDMMF, getPrisma } from '../utils/schema-metadata.js';
@@ -25,6 +25,7 @@ import {
   enrichAggregateContexts,
   resolveAndFilterSurvivors,
 } from './batch-aggregate-resolver.js';
+import type { BuildNestedAuditLogsParams } from './nested-handlers/index.js';
 import type {
   BeforeStateResult,
   EnrichedContext,
@@ -174,23 +175,7 @@ export interface StageDependencies {
    * - ID resolution fails
    * - Only excluded fields changed (for updates)
    */
-  buildAuditLog: (
-    entity: Record<string, unknown>,
-    action: PrismaAction,
-    context: AuditContext,
-    modelName: string,
-    manager: PrismaClientManager,
-    actorContext: unknown,
-    entityContext: unknown,
-    before: Record<string, unknown> | null | undefined,
-    aggregateConfig: AggregateConfigService,
-    excludeFields: string[] | undefined,
-    redact: RedactConfig | undefined,
-    aggregateData: ResolvedAggregateData,
-    includeRelations?: boolean,
-    serialization?: SerializationConfig,
-    relationFieldNames?: Set<string>,
-  ) => Promise<AuditLogData[]>;
+  buildAuditLog: (input: BuildAuditLogInput) => Promise<AuditLogData[]>;
 
   /**
    * Build audit logs for nested records
@@ -210,15 +195,7 @@ export interface StageDependencies {
    * - Refetch may happen outside user's transaction
    * - For best consistency, use `include` in your operations
    */
-  buildNestedAuditLogs: (
-    modelName: string,
-    args: Record<string, unknown>,
-    result: unknown,
-    context: AuditContext,
-    prismaClient: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
-    actorContext: unknown,
-    preFetchResults?: PreFetchResults,
-  ) => Promise<AuditLogData[]>;
+  buildNestedAuditLogs: (input: BuildNestedAuditLogsParams) => Promise<AuditLogData[]>;
 
   /**
    * Aggregate configuration service
@@ -509,23 +486,23 @@ const buildMainAuditLogs = async (
     // Prisma namespace not available — fall back to heuristic relation detection
   }
 
-  return deps.buildAuditLog(
+  return deps.buildAuditLog({
     entity,
-    toPrismaAction(context.operation.action),
-    context.auditContext,
+    action: toPrismaAction(context.operation.action),
+    context: context.auditContext,
     modelName,
     manager,
-    context.actorContext,
-    context.entityContext,
-    context.beforeState,
-    deps.aggregateConfig,
-    deps.excludeFields,
-    deps.redact,
+    actorContext: context.actorContext,
+    entityContext: context.entityContext,
+    before: context.beforeState,
+    aggregateConfig: deps.aggregateConfig,
+    excludeFields: deps.excludeFields,
+    redact: deps.redact,
     aggregateData,
-    undefined,
-    deps.serialization,
-    relationFields,
-  );
+    includeRelations: undefined,
+    serialization: deps.serialization,
+    relationFieldNames: relationFields,
+  });
 };
 
 /**
@@ -540,15 +517,15 @@ const buildNestedLogsFromResult = async (
   context: EnrichedContext,
   deps: Pick<StageDependencies, 'buildNestedAuditLogs'>,
 ): Promise<AuditLogData[]> => {
-  return deps.buildNestedAuditLogs(
-    getModelName(context.operation.model),
-    toArgsRecord(context.operation.args),
-    context.result,
-    context.auditContext,
-    context.clientToUse,
-    context.actorContext,
-    context.nestedPreFetchResults,
-  );
+  return deps.buildNestedAuditLogs({
+    modelName: getModelName(context.operation.model),
+    args: toArgsRecord(context.operation.args),
+    result: context.result,
+    context: context.auditContext,
+    prismaClient: context.clientToUse,
+    actorContext: context.actorContext,
+    preFetchResults: context.nestedPreFetchResults,
+  });
 };
 
 /**

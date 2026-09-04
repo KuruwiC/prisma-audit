@@ -141,23 +141,23 @@ const buildLogsForEntity = async (
     // Prisma namespace not available — fall back to heuristic relation detection
   }
 
-  return deps.buildAuditLog(
-    entity as Record<string, unknown>,
-    singularAction,
-    auditContext,
+  return deps.buildAuditLog({
+    entity: entity as Record<string, unknown>,
+    action: singularAction,
+    context: auditContext,
     modelName,
     manager,
     actorContext,
     entityContext,
-    beforeState,
-    deps.aggregateConfig,
-    deps.excludeFields,
-    deps.redact,
+    before: beforeState,
+    aggregateConfig: deps.aggregateConfig,
+    excludeFields: deps.excludeFields,
+    redact: deps.redact,
     aggregateData,
-    undefined,
-    deps.serialization,
-    relationFields,
-  );
+    includeRelations: undefined,
+    serialization: deps.serialization,
+    relationFieldNames: relationFields,
+  });
 };
 
 /**

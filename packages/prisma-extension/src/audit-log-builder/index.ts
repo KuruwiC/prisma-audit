@@ -130,21 +130,39 @@ const shouldSkipAuditLog = (
 };
 
 /**
+ * Input for {@link buildSingleAuditLog}
+ */
+export interface BuildSingleAuditLogInput {
+  root: { aggregateCategory: string; aggregateType: string; aggregateId: string };
+  context: AuditContext;
+  entityConfig: { category: string; type: string };
+  entityId: string;
+  actualAction: PrismaAction;
+  beforeData: Record<string, unknown> | null | undefined;
+  afterData: Record<string, unknown> | null | undefined;
+  changes: Record<string, { old: unknown; new: unknown }> | null;
+  actorContext: unknown;
+  entityContext: unknown;
+  aggregateContext: unknown;
+}
+
+/**
  * Build a single audit log entry for an aggregate root
  */
-const buildSingleAuditLog = (
-  root: { aggregateCategory: string; aggregateType: string; aggregateId: string },
-  context: AuditContext,
-  entityConfig: { category: string; type: string },
-  entityId: string,
-  actualAction: PrismaAction,
-  beforeData: Record<string, unknown> | null | undefined,
-  afterData: Record<string, unknown> | null | undefined,
-  changes: Record<string, { old: unknown; new: unknown }> | null,
-  actorContext: unknown,
-  entityContext: unknown,
-  aggregateContext: unknown,
-): AuditLogData => {
+const buildSingleAuditLog = (input: BuildSingleAuditLogInput): AuditLogData => {
+  const {
+    root,
+    context,
+    entityConfig,
+    entityId,
+    actualAction,
+    beforeData,
+    afterData,
+    changes,
+    actorContext,
+    entityContext,
+    aggregateContext,
+  } = input;
   const requestContext = context.request || null;
 
   return {
@@ -190,23 +208,43 @@ const buildSingleAuditLog = (
  * - ID resolution fails
  * - Only excluded fields changed (updates only)
  */
-export const buildAuditLog = async (
-  entity: Record<string, unknown>,
-  action: PrismaAction,
-  context: AuditContext,
-  modelName: string,
-  manager: PrismaClientManager,
-  actorContext: unknown,
-  entityContext: unknown,
-  before: Record<string, unknown> | null | undefined,
-  aggregateConfig: AggregateConfigService,
-  excludeFields: string[] | undefined,
-  redact: RedactConfig | undefined,
-  aggregateData: ResolvedAggregateData,
-  includeRelations?: boolean,
-  serialization?: SerializationConfig,
-  relationFieldNames?: Set<string>,
-): Promise<AuditLogData[]> => {
+export interface BuildAuditLogInput {
+  entity: Record<string, unknown>;
+  action: PrismaAction;
+  context: AuditContext;
+  modelName: string;
+  manager: PrismaClientManager;
+  actorContext: unknown;
+  entityContext: unknown;
+  before: Record<string, unknown> | null | undefined;
+  aggregateConfig: AggregateConfigService;
+  excludeFields: string[] | undefined;
+  redact: RedactConfig | undefined;
+  aggregateData: ResolvedAggregateData;
+  includeRelations?: boolean;
+  serialization?: SerializationConfig;
+  relationFieldNames?: Set<string>;
+}
+
+export const buildAuditLog = async (input: BuildAuditLogInput): Promise<AuditLogData[]> => {
+  const {
+    entity,
+    action,
+    context,
+    modelName,
+    manager,
+    actorContext,
+    entityContext,
+    before,
+    aggregateConfig,
+    excludeFields,
+    redact,
+    aggregateData,
+    includeRelations,
+    serialization,
+    relationFieldNames,
+  } = input;
+
   const entityConfig = aggregateConfig.getEntityConfig(modelName);
   if (!entityConfig) {
     return [];
@@ -252,7 +290,7 @@ export const buildAuditLog = async (
     const aggregateContextForRoot =
       aggregateContexts.get(aggregateContextKey(root.aggregateType, root.aggregateId)) ?? null;
 
-    const rawLog = buildSingleAuditLog(
+    const rawLog = buildSingleAuditLog({
       root,
       context,
       entityConfig,
@@ -263,8 +301,8 @@ export const buildAuditLog = async (
       changes,
       actorContext,
       entityContext,
-      aggregateContextForRoot,
-    );
+      aggregateContext: aggregateContextForRoot,
+    });
 
     auditLogs.push(serializeAuditLogData(rawLog, customSerializers));
   }

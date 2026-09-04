@@ -16,6 +16,7 @@ import {
   to,
 } from '@kuruwic/prisma-audit-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { BuildAuditLogInput } from '../src/audit-log-builder/index.js';
 import type { PrismaClientWithDynamicAccess } from '../src/internal-types.js';
 import { createBatchBuildLogsStage, resetBatchResolveWarnings } from '../src/lifecycle/batch-stages.js';
 import type { StageDependencies } from '../src/lifecycle/stages.js';
@@ -52,29 +53,12 @@ function createMockDeps(
   StageDependencies,
   'buildAuditLog' | 'aggregateConfig' | 'excludeFields' | 'basePrisma' | 'redact' | 'serialization'
 > {
-  const mockBuildAuditLog = vi
-    .fn()
-    .mockImplementation(
-      (
-        _entity,
-        _action,
-        _ctx,
-        _model,
-        _mgr,
-        _actor,
-        _entityCtx,
-        _before,
-        _aggConfig,
-        _exclude,
-        _redact,
-        aggregateData,
-      ) => {
-        const roots = aggregateData?.aggregateRoots ?? [];
-        return roots.map((r: { aggregateType: string; aggregateId: string }) =>
-          createMockLog({ aggregateType: r.aggregateType, aggregateId: createAggregateId(r.aggregateId) }),
-        );
-      },
+  const mockBuildAuditLog = vi.fn().mockImplementation(({ aggregateData }: BuildAuditLogInput) => {
+    const roots = aggregateData?.aggregateRoots ?? [];
+    return roots.map((r: { aggregateType: string; aggregateId: string }) =>
+      createMockLog({ aggregateType: r.aggregateType, aggregateId: createAggregateId(r.aggregateId) }),
     );
+  });
 
   const mockAggregateConfig: AggregateConfigService = {
     getEntityConfig: vi.fn().mockReturnValue(entityConfig),

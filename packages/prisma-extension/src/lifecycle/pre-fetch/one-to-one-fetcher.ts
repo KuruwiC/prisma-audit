@@ -226,49 +226,69 @@ export const fetchParentRecordIfNeeded = async (
 };
 
 /**
+ * Input for {@link preFetchOneToOneRelation}
+ */
+export interface PreFetchOneToOneRelationInput {
+  /** Nested operation metadata */
+  nestedOp: NestedOperation;
+  /** DMMF field metadata */
+  field: DMMFRelationField;
+  /** Whether this is the owning side of the relation */
+  isOwningSide: boolean;
+  /** Parent where clause */
+  parentWhere: Record<string, unknown>;
+  /** Prisma client for the related model */
+  relatedModelClient: ModelClientWithFindUnique;
+  /** Parent model name */
+  parentModelName: string;
+  /** Prisma DMMF */
+  dmmf: PrismaDMMF;
+  /** Pre-fetched records (for deeply nested operations) */
+  preFetchResults: NestedPreFetchResults;
+  /** Full Prisma client to fetch parent records if needed */
+  prismaClient: Record<string, ModelClientWithFindFirst>;
+  pkFields?: string[];
+}
+
+/**
  * Pre-fetches 1:1 relation record before operation execution
  *
  * Captures "before" state for one-to-one relations with support for deeply nested operations.
  *
- * @param nestedOp - Nested operation metadata
- * @param field - DMMF field metadata
- * @param isOwningSide - Whether this is the owning side of the relation
- * @param parentWhere - Parent where clause
- * @param relatedModelClient - Prisma client for the related model
- * @param parentModelName - Parent model name
- * @param dmmf - Prisma DMMF
- * @param preFetchResults - Pre-fetched records (for deeply nested operations)
- * @param prismaClient - Full Prisma client to fetch parent records if needed
  * @returns Pre-fetch result with entityId and beforeRecord, or null if fetch failed
  *
  * @example
  * ```typescript
- * const result = await preFetchOneToOneRelation(
+ * const result = await preFetchOneToOneRelation({
  *   nestedOp,
- *   profileField,
- *   true,
- *   { id: 1 },
- *   prismaClient.profile,
- *   'User',
+ *   field: profileField,
+ *   isOwningSide: true,
+ *   parentWhere: { id: 1 },
+ *   relatedModelClient: prismaClient.profile,
+ *   parentModelName: 'User',
  *   dmmf,
  *   preFetchResults,
- *   prismaClient
- * );
+ *   prismaClient,
+ * });
  * // Returns: { entityId: '123', beforeRecord: { id: 123, ... } } or null
  * ```
  */
 export const preFetchOneToOneRelation = async (
-  nestedOp: NestedOperation,
-  field: DMMFRelationField,
-  isOwningSide: boolean,
-  parentWhere: Record<string, unknown>,
-  relatedModelClient: ModelClientWithFindUnique,
-  parentModelName: string,
-  dmmf: PrismaDMMF,
-  preFetchResults: NestedPreFetchResults,
-  prismaClient: Record<string, ModelClientWithFindFirst>,
-  pkFields?: string[],
+  input: PreFetchOneToOneRelationInput,
 ): Promise<PreFetchOneToOneResult | null> => {
+  const {
+    nestedOp,
+    field,
+    isOwningSide,
+    parentWhere,
+    relatedModelClient,
+    parentModelName,
+    dmmf,
+    preFetchResults,
+    prismaClient,
+    pkFields,
+  } = input;
+
   const [relationFromField, relationToField] = determineRelationFields(
     isOwningSide,
     field,

@@ -293,18 +293,18 @@ export const preFetchNestedRecordsBeforeOperation = async (
       );
 
       if (isOneToOne) {
-        await handleOneToOneRelation(
+        await handleOneToOneRelation({
           nestedOp,
           field,
           isOwningSide,
           args,
           relatedModelClient,
-          parentModel?.name || modelName,
+          parentModelName: parentModel?.name || modelName,
           dmmf,
-          internalResults,
+          preFetchResults: internalResults,
           prismaClient,
           pkFields,
-        );
+        });
       } else {
         await preFetchOneToManyRelation(
           {
@@ -331,33 +331,32 @@ export const preFetchNestedRecordsBeforeOperation = async (
   return flatResults;
 };
 
-const handleOneToOneRelation = async (
-  nestedOp: NestedOperation,
-  field: DMMFField,
-  isOwningSide: boolean,
-  args: Record<string, unknown>,
-  relatedModelClient: unknown,
-  parentModelName: string,
-  dmmf: PrismaDMMF,
-  preFetchResults: NestedPreFetchResults,
-  prismaClient: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
-  pkFields?: string[],
-): Promise<void> => {
+/**
+ * Shared input for the 1:1 pre-fetch call chain
+ * (`handleOneToOneRelation` -> `handleOtherOneToOneOperations`), which have identical shapes.
+ */
+export interface HandleOneToOneRelationInput {
+  nestedOp: NestedOperation;
+  field: DMMFField;
+  isOwningSide: boolean;
+  args: Record<string, unknown>;
+  relatedModelClient: unknown;
+  parentModelName: string;
+  dmmf: PrismaDMMF;
+  preFetchResults: NestedPreFetchResults;
+  prismaClient: PrismaClientWithDynamicAccess | TransactionalPrismaClient;
+  pkFields?: string[];
+}
+
+export type HandleOtherOneToOneOperationsInput = HandleOneToOneRelationInput;
+
+const handleOneToOneRelation = async (input: HandleOneToOneRelationInput): Promise<void> => {
+  const { nestedOp, relatedModelClient, preFetchResults, pkFields } = input;
+
   if (nestedOp.operation === 'connectOrCreate') {
     await handleConnectOrCreate(nestedOp, relatedModelClient, preFetchResults, pkFields);
   } else {
-    await handleOtherOneToOneOperations(
-      nestedOp,
-      field,
-      isOwningSide,
-      args,
-      relatedModelClient,
-      parentModelName,
-      dmmf,
-      preFetchResults,
-      prismaClient,
-      pkFields,
-    );
+    await handleOtherOneToOneOperations(input);
   }
 };
 
@@ -396,55 +395,67 @@ const handleConnectOrCreate = async (
   preFetchLog('1:1 connectOrCreate added to map: path=%s entityId=%s', nestedOp.path, entityId);
 };
 
-const handleOtherOneToOneOperations = async (
-  nestedOp: NestedOperation,
-  field: DMMFField,
-  isOwningSide: boolean,
-  args: Record<string, unknown>,
-  relatedModelClient: unknown,
-  parentModelName: string,
-  dmmf: PrismaDMMF,
-  preFetchResults: NestedPreFetchResults,
-  prismaClient: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
-  pkFields?: string[],
-): Promise<void> => {
+const handleOtherOneToOneOperations = async (input: HandleOtherOneToOneOperationsInput): Promise<void> => {
+  const {
+    nestedOp,
+    field,
+    isOwningSide,
+    args,
+    relatedModelClient,
+    parentModelName,
+    dmmf,
+    preFetchResults,
+    prismaClient,
+    pkFields,
+  } = input;
+
   if (!args.where || typeof args.where !== 'object') {
     preFetchLog('1:1 relation: no where clause, skipping');
     return;
   }
 
-  const result = await preFetchOneToOneRelation(
+  // `dmmf`/`prismaClient` are typed against this module's own DMMF/client shapes, which don't
+  // structurally overlap with one-to-one-fetcher's local equivalents. Route through `unknown` in
+  // two steps (rather than a single `as unknown as`) to satisfy the type-safety lint while keeping
+  // the exact same cast the pre-existing positional call made.
+  const dmmfAsUnknown: unknown = dmmf;
+  const dmmfForFetch = dmmfAsUnknown as {
+    datamodel: {
+      models: Array<{
+        name: string;
+        fields: Array<{
+          name?: string;
+          kind?: string;
+          type?: string;
+          relationFromFields?: string[];
+          relationToFields?: string[];
+        }>;
+      }>;
+    };
+  };
+
+  const prismaClientAsUnknown: unknown = prismaClient;
+  const prismaClientForFetch = prismaClientAsUnknown as Record<
+    string,
+    {
+      findFirst: (args: { where: Record<string, unknown> }) => Promise<Record<string, unknown> | null>;
+    }
+  >;
+
+  const result = await preFetchOneToOneRelation({
     nestedOp,
     field,
     isOwningSide,
-    args.where as Record<string, unknown>,
-    relatedModelClient as {
+    parentWhere: args.where as Record<string, unknown>,
+    relatedModelClient: relatedModelClient as {
       findUnique: (args: { where: Record<string, unknown> }) => Promise<Record<string, unknown> | null>;
     },
     parentModelName,
-    dmmf as unknown as {
-      datamodel: {
-        models: Array<{
-          name: string;
-          fields: Array<{
-            name?: string;
-            kind?: string;
-            type?: string;
-            relationFromFields?: string[];
-            relationToFields?: string[];
-          }>;
-        }>;
-      };
-    },
+    dmmf: dmmfForFetch,
     preFetchResults,
-    prismaClient as unknown as Record<
-      string,
-      {
-        findFirst: (args: { where: Record<string, unknown> }) => Promise<Record<string, unknown> | null>;
-      }
-    >,
+    prismaClient: prismaClientForFetch,
     pkFields,
-  );
+  });
 
   if (result) {
     storePreFetchResult(preFetchResults, nestedOp.path, result.entityId, result.beforeRecord);

@@ -466,17 +466,38 @@ const processTopLevelUpsertBranches = (
   return operations;
 };
 
+/**
+ * Shared scan state for the nested-operation detection call chain
+ * (`processDataSource` -> `processRelationFieldKeywords` -> `processKeywordOperation`).
+ * `processedOps` and `nestedOperations` are accumulators mutated in place as the scan descends.
+ */
+export interface NestedOperationScanContext {
+  schemaMetadata: SchemaMetadata;
+  currentPath: string;
+  preFetchResults: PreFetchResults;
+  processedOps: Set<string>;
+  nestedOperations: NestedOperationInfo[];
+}
+
+export interface ProcessKeywordOperationInput extends NestedOperationScanContext {
+  relationField: { name: string; relatedModel: string; isList: boolean };
+  keyword: NestedOperationKeyword;
+  nestedData: unknown;
+}
+
 /** @internal Process a single keyword operation on a relation field */
-const processKeywordOperation = (
-  schemaMetadata: SchemaMetadata,
-  relationField: { name: string; relatedModel: string; isList: boolean },
-  keyword: NestedOperationKeyword,
-  nestedData: unknown,
-  currentPath: string,
-  preFetchResults: PreFetchResults,
-  processedOps: Set<string>,
-  nestedOperations: NestedOperationInfo[],
-): void => {
+const processKeywordOperation = (input: ProcessKeywordOperationInput): void => {
+  const {
+    schemaMetadata,
+    relationField,
+    keyword,
+    nestedData,
+    currentPath,
+    preFetchResults,
+    processedOps,
+    nestedOperations,
+  } = input;
+
   // Create unique key for this operation to avoid duplicates
   const opKey = `${relationField.name}:${keyword}:${relationField.name}`;
 
@@ -506,23 +527,23 @@ const processKeywordOperation = (
   nestedOperations.push(...deepOps);
 };
 
+export interface ProcessRelationFieldKeywordsInput extends NestedOperationScanContext {
+  relationField: { name: string; relatedModel: string; isList: boolean };
+  fieldValue: Record<string, unknown>;
+}
+
 /** @internal Process all keywords for a relation field */
-const processRelationFieldKeywords = (
-  schemaMetadata: SchemaMetadata,
-  relationField: { name: string; relatedModel: string; isList: boolean },
-  fieldValue: Record<string, unknown>,
-  currentPath: string,
-  preFetchResults: PreFetchResults,
-  processedOps: Set<string>,
-  nestedOperations: NestedOperationInfo[],
-): void => {
+const processRelationFieldKeywords = (input: ProcessRelationFieldKeywordsInput): void => {
+  const { schemaMetadata, relationField, fieldValue, currentPath, preFetchResults, processedOps, nestedOperations } =
+    input;
+
   for (const keyword of NESTED_OPERATION_KEYWORDS) {
     const nestedData = fieldValue[keyword];
     if (nestedData === undefined) {
       continue;
     }
 
-    processKeywordOperation(
+    processKeywordOperation({
       schemaMetadata,
       relationField,
       keyword,
@@ -531,20 +552,19 @@ const processRelationFieldKeywords = (
       preFetchResults,
       processedOps,
       nestedOperations,
-    );
+    });
   }
 };
 
+export interface ProcessDataSourceInput extends NestedOperationScanContext {
+  relationFields: { name: string; relatedModel: string; isList: boolean }[];
+  data: Record<string, unknown>;
+}
+
 /** @internal Process a single data source for nested operations */
-const processDataSource = (
-  schemaMetadata: SchemaMetadata,
-  relationFields: { name: string; relatedModel: string; isList: boolean }[],
-  data: Record<string, unknown>,
-  currentPath: string,
-  preFetchResults: PreFetchResults,
-  processedOps: Set<string>,
-  nestedOperations: NestedOperationInfo[],
-): void => {
+const processDataSource = (input: ProcessDataSourceInput): void => {
+  const { schemaMetadata, relationFields, data, currentPath, preFetchResults, processedOps, nestedOperations } = input;
+
   for (const relationField of relationFields) {
     const fieldValue = data[relationField.name];
 
@@ -552,15 +572,15 @@ const processDataSource = (
       continue;
     }
 
-    processRelationFieldKeywords(
+    processRelationFieldKeywords({
       schemaMetadata,
       relationField,
-      fieldValue as Record<string, unknown>,
+      fieldValue: fieldValue as Record<string, unknown>,
       currentPath,
       preFetchResults,
       processedOps,
       nestedOperations,
-    );
+    });
   }
 };
 
@@ -628,7 +648,7 @@ export const detectNestedOperations = (
 
   // Process each data source
   for (const data of dataSources) {
-    processDataSource(
+    processDataSource({
       schemaMetadata,
       relationFields,
       data,
@@ -636,7 +656,7 @@ export const detectNestedOperations = (
       preFetchResults,
       processedOps,
       nestedOperations,
-    );
+    });
   }
 
   return nestedOperations;

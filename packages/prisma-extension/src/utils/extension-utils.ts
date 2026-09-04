@@ -161,37 +161,34 @@ const shouldSample = (samplingRate: number): boolean => {
  * Applies checks in order: input validation, recursion prevention,
  * self-reference prevention, loggability check, and sampling check.
  *
- * @param modelName - The model name
- * @param context - App-owned audit context (absence skips auditing)
- * @param auditLogModel - The audit log model name (lowercase)
- * @param isLoggable - Function to check if model is loggable
- * @param sampling - Global sampling rate (0-1)
- * @param samplingIf - Tag-based sampling function
- * @param getEntityConfig - Function to get entity config
  * @returns True if audit should be applied
  *
  * @example
  * ```typescript
- * const should = shouldAuditModel(
- *   'User',
+ * const should = shouldAuditModel({
+ *   modelName: 'User',
  *   context,
- *   'auditLog',
- *   (m) => aggregateMapping.has(m),
- *   1.0,
- *   undefined,
- *   (m) => entityConfigs.get(m)
- * );
+ *   auditLogModel: 'auditLog',
+ *   isLoggable: (m) => aggregateMapping.has(m),
+ *   sampling: 1.0,
+ *   samplingIf: undefined,
+ *   getEntityConfig: (m) => entityConfigs.get(m),
+ * });
  * ```
  */
-export const shouldAuditModel = (
-  modelName: string | undefined,
-  context: AuditContext | undefined,
-  auditLogModel: string,
-  isLoggable: (modelName: string) => boolean,
-  sampling: number,
-  samplingIf: ((modelName: string, tags: string[]) => number) | undefined,
-  getEntityConfig: (modelName: string) => { tags?: string[] } | undefined,
-): boolean => {
+export interface ShouldAuditModelInput {
+  modelName: string | undefined;
+  context: AuditContext | undefined;
+  auditLogModel: string;
+  isLoggable: (modelName: string) => boolean;
+  sampling: number;
+  samplingIf: ((modelName: string, tags: string[]) => number) | undefined;
+  getEntityConfig: (modelName: string) => { tags?: string[] } | undefined;
+}
+
+export const shouldAuditModel = (input: ShouldAuditModelInput): boolean => {
+  const { modelName, context, auditLogModel, isLoggable, sampling, samplingIf, getEntityConfig } = input;
+
   if (!modelName || !context) {
     return false;
   }
