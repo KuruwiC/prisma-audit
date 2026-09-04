@@ -7,8 +7,7 @@ import { createAuditClient, defineEntity, foreignKey, to } from '@kuruwic/prisma
 import type { AuditContext, AuditContextProvider } from '@kuruwic/prisma-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/prisma-audit-core';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
-import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, inject, it } from 'vitest';
 import { cleanDatabase, type TestContext } from './helpers/setup.js';
 
 const testAggregateMapping: AggregateMapping = {
@@ -100,28 +99,7 @@ describe('Performance Benchmarks', () => {
   let context: TestContext & { queryCount: { value: number } };
 
   beforeAll(async () => {
-    const { PostgreSqlContainer } = await import('@testcontainers/postgresql');
-    const { execSync } = await import('node:child_process');
-    const { dirname, join } = await import('node:path');
-    const { fileURLToPath } = await import('node:url');
-
-    const Filename = fileURLToPath(import.meta.url);
-    const Dirname = dirname(Filename);
-
-    console.log('Starting PostgreSQL container for performance tests...');
-    const container = await new PostgreSqlContainer('postgres:16-alpine').withExposedPorts(5432).start();
-
-    const databaseUrl = container.getConnectionUri();
-    console.log('PostgreSQL container started');
-
-    const databasePackagePath = join(Dirname, '../../database');
-    const schemaPath = join(databasePackagePath, 'prisma/schema.prisma');
-
-    execSync(`npx prisma db push --schema=${schemaPath} --skip-generate`, {
-      cwd: databasePackagePath,
-      stdio: 'inherit',
-      env: { ...process.env, DATABASE_URL: databaseUrl },
-    });
+    const databaseUrl = inject('databaseUrl');
 
     const basePrisma = new PrismaClient({
       datasources: { db: { url: databaseUrl } },
@@ -133,36 +111,20 @@ describe('Performance Benchmarks', () => {
     const prisma = createAuditedClientWithQueryCounter(basePrisma, provider, queryCount);
 
     context = {
-      container,
       prisma,
       basePrisma,
       provider,
       databaseUrl,
       queryCount,
     };
-
-    console.log('Performance test database setup complete');
-  }, 60000);
+  });
 
   afterAll(async () => {
-    console.log('Tearing down performance test database...');
-    if (context) {
-      try {
-        if (context.prisma) {
-          await context.prisma.$disconnect();
-        }
-      } catch (error) {
-        console.error('Error disconnecting Prisma:', error);
-      }
-      try {
-        if (context.container) {
-          await context.container.stop();
-        }
-      } catch (error) {
-        console.error('Error stopping container:', error);
-      }
+    try {
+      await context.prisma.$disconnect();
+    } catch (error) {
+      console.error('Error disconnecting Prisma:', error);
     }
-    console.log('Performance test database teardown complete');
   });
 
   beforeEach(async () => {
@@ -488,25 +450,7 @@ describe('Refetch Fallback Mechanism', () => {
   let context: TestContext & { queryCount: { value: number } };
 
   beforeAll(async () => {
-    const { PostgreSqlContainer } = await import('@testcontainers/postgresql');
-    const { execSync } = await import('node:child_process');
-    const { dirname, join } = await import('node:path');
-    const { fileURLToPath } = await import('node:url');
-
-    const Filename = fileURLToPath(import.meta.url);
-    const Dirname = dirname(Filename);
-
-    const container = await new PostgreSqlContainer('postgres:16-alpine').withExposedPorts(5432).start();
-    const databaseUrl = container.getConnectionUri();
-
-    const databasePackagePath = join(Dirname, '../../database');
-    const schemaPath = join(databasePackagePath, 'prisma/schema.prisma');
-
-    execSync(`npx prisma db push --schema=${schemaPath} --skip-generate`, {
-      cwd: databasePackagePath,
-      stdio: 'inherit',
-      env: { ...process.env, DATABASE_URL: databaseUrl },
-    });
+    const databaseUrl = inject('databaseUrl');
 
     const basePrisma = new PrismaClient({
       datasources: { db: { url: databaseUrl } },
@@ -520,12 +464,11 @@ describe('Refetch Fallback Mechanism', () => {
     const prisma = createAuditedClientWithRefetchFallback(basePrisma, provider, queryCount);
 
     context = {
-      container: container as StartedPostgreSqlContainer,
       prisma,
       basePrisma,
       provider,
       queryCount,
-      databaseUrl: databaseUrl,
+      databaseUrl,
     };
   });
 
@@ -533,17 +476,10 @@ describe('Refetch Fallback Mechanism', () => {
     if (context?.prisma) {
       await context.prisma.$disconnect();
     }
-    if (context?.container) {
-      await context.container.stop();
-    }
   });
 
   beforeEach(async () => {
-    await context.prisma.auditLog.deleteMany({});
-    await context.prisma.post.deleteMany({});
-    await context.prisma.profile.deleteMany({});
-    await context.prisma.user.deleteMany({});
-
+    await cleanDatabase(context.prisma);
     context.queryCount.value = 0;
   });
 

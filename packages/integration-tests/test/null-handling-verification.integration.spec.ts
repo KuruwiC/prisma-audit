@@ -16,7 +16,7 @@ describe('NULL Handling Verification', () => {
 
   beforeAll(async () => {
     context = await setupTestDatabase();
-  }, 60000);
+  });
 
   afterAll(async () => {
     await teardownTestDatabase(context);

@@ -11,7 +11,7 @@ describe('PII Redaction Integration', () => {
 
   beforeAll(async () => {
     context = await setupTestDatabase();
-  }, 60000);
+  });
 
   afterAll(async () => {
     await teardownTestDatabase(context);

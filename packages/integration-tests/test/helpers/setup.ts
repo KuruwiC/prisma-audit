@@ -1,16 +1,9 @@
-import { execSync } from 'node:child_process';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import type { AggregateMapping } from '@kuruwic/prisma-audit';
 import { createAuditClient, defineEntity, foreignKey, to } from '@kuruwic/prisma-audit';
 import type { AuditContextProvider } from '@kuruwic/prisma-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/prisma-audit-core';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
-import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
-import { afterAll, afterEach, beforeAll, beforeEach } from 'vitest';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+import { afterAll, afterEach, beforeAll, beforeEach, inject } from 'vitest';
 
 export const testAggregateMapping: AggregateMapping = {
   User: defineEntity({
@@ -65,7 +58,6 @@ export const testAggregateMapping: AggregateMapping = {
 };
 
 export interface TestContext {
-  container: StartedPostgreSqlContainer;
   prisma: ReturnType<typeof createAuditClient>;
   basePrisma: PrismaClient;
   provider: AuditContextProvider;
@@ -73,115 +65,29 @@ export interface TestContext {
 }
 
 export interface SharedTestContext {
-  container: StartedPostgreSqlContainer;
   databaseUrl: string;
 }
 
+/**
+ * Builds audit + base Prisma clients against the database URL provided by the
+ * shared global-setup container (see test/global-setup.ts). Does not start any
+ * infrastructure — the container and schema push happen exactly once for the run.
+ */
 export const setupTestDatabase = async (): Promise<TestContext> => {
-  console.log('Starting PostgreSQL container...');
-  const container = await new PostgreSqlContainer('postgres:16-alpine').withExposedPorts(5432).start();
-
-  const databaseUrl = container.getConnectionUri();
-  console.log('PostgreSQL container started');
-
-  process.env.DATABASE_URL = databaseUrl;
-
-  console.log('Pushing Prisma schema to database...');
-  const databasePackagePath = join(__dirname, '../../../database');
-  const schemaPath = join(databasePackagePath, 'prisma/schema.prisma');
-
-  try {
-    execSync(`npx prisma db push --schema=${schemaPath}`, {
-      cwd: databasePackagePath,
-      stdio: 'inherit',
-      env: { ...process.env, DATABASE_URL: databaseUrl },
-    });
-  } catch (error) {
-    console.error('DB push failed:', error);
-    await container.stop();
-    throw error;
-  }
-
-  const basePrisma = new PrismaClient({
-    datasources: { db: { url: databaseUrl } },
-  });
-
-  const provider = createAsyncLocalStorageProvider();
-
-  const prisma = createAuditClient(basePrisma, {
-    provider,
-    basePrisma,
-    Prisma,
-    aggregateMapping: testAggregateMapping,
-    diffing: {
-      excludeFields: ['createdAt'],
-    },
-    security: {
-      redact: {
-        fields: [],
-      },
-    },
-    performance: {
-      awaitWrite: true,
-    },
-    nestedOperations: {
-      update: { fetchBeforeOperation: true },
-      delete: { fetchBeforeOperation: true },
-    },
-    contextEnricher: {
-      actor: {
-        enricher: async (actor: unknown) => ({
-          name: (actor as { name?: string }).name,
-          role: (actor as { role?: string }).role,
-        }),
-        onError: 'log',
-        fallback: null,
-      },
-    },
-  });
-
-  console.log('Test database setup complete');
-
-  return { container, prisma, basePrisma, provider, databaseUrl };
+  const databaseUrl = inject('databaseUrl');
+  return createTestClients(databaseUrl);
 };
 
 /**
- * Initializes PostgreSQL container without creating Prisma clients.
+ * Reads the shared database URL without creating Prisma clients.
  * Clients should be instantiated per-test in beforeEach to prevent forking issues.
  */
 export const setupTestContainer = async (): Promise<SharedTestContext> => {
-  console.log('Starting PostgreSQL container...');
-  const container = await new PostgreSqlContainer('postgres:16-alpine').withExposedPorts(5432).start();
-
-  const databaseUrl = container.getConnectionUri();
-  console.log('PostgreSQL container started');
-
-  process.env.DATABASE_URL = databaseUrl;
-
-  console.log('Pushing Prisma schema to database...');
-  const databasePackagePath = join(__dirname, '../../../database');
-  const schemaPath = join(databasePackagePath, 'prisma/schema.prisma');
-
-  try {
-    execSync(`npx prisma db push --schema=${schemaPath}`, {
-      cwd: databasePackagePath,
-      stdio: 'inherit',
-      env: { ...process.env, DATABASE_URL: databaseUrl },
-    });
-  } catch (error) {
-    console.error('DB push failed:', error);
-    await container.stop();
-    throw error;
-  }
-
-  console.log('Test container setup complete');
-
-  return { container, databaseUrl };
+  const databaseUrl = inject('databaseUrl');
+  return { databaseUrl };
 };
 
-export const createTestClients = (
-  databaseUrl: string,
-): Omit<TestContext, 'container' | 'databaseUrl'> & { databaseUrl: string } => {
+export const createTestClients = (databaseUrl: string): TestContext => {
   const basePrisma = new PrismaClient({
     datasources: { db: { url: databaseUrl } },
   });
@@ -232,36 +138,24 @@ export const cleanupTestClients = async (context: Pick<TestContext, 'prisma' | '
   }
 };
 
+/**
+ * Disconnects the test clients. The PostgreSQL container is shared across the
+ * whole run and is stopped once in global teardown, not per spec file.
+ */
 export const teardownTestDatabase = async (context: TestContext): Promise<void> => {
-  console.log('Tearing down test database...');
-
   try {
     await context.prisma.$disconnect();
     await context.basePrisma.$disconnect();
   } catch (error) {
     console.error('Error disconnecting Prisma:', error);
   }
-
-  try {
-    await context.container.stop();
-  } catch (error) {
-    console.error('Error stopping container:', error);
-  }
-
-  console.log('Test database teardown complete');
 };
 
-export const teardownTestContainer = async (context: SharedTestContext): Promise<void> => {
-  console.log('Stopping PostgreSQL container...');
-
-  try {
-    await context.container.stop();
-  } catch (error) {
-    console.error('Error stopping container:', error);
-  }
-
-  console.log('Test container stopped');
-};
+/**
+ * No-op: kept for API compatibility. The shared container is stopped once in
+ * global teardown (see test/global-setup.ts), not per spec file.
+ */
+export const teardownTestContainer = async (_context: SharedTestContext): Promise<void> => {};
 
 /**
  * Truncates all tables in the database, resetting sequences and handling foreign key constraints.
@@ -310,15 +204,10 @@ export const setupTestLifecycle = () => {
 
   beforeAll(async () => {
     sharedContext = await setupTestContainer();
-  }, 60000);
+  });
 
   beforeEach(async () => {
-    const clients = createTestClients(sharedContext.databaseUrl);
-    testContext = {
-      ...clients,
-      container: sharedContext.container,
-      databaseUrl: sharedContext.databaseUrl,
-    };
+    testContext = createTestClients(sharedContext.databaseUrl);
 
     await testContext.prisma.$connect();
     await testContext.basePrisma.$connect();

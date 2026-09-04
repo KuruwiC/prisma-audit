@@ -7,7 +7,7 @@ describe('Deep Nested Upsert Operations (Profile → Avatar → AvatarImage)', (
 
   beforeAll(async () => {
     context = await setupTestDatabase();
-  }, 60000);
+  });
 
   afterAll(async () => {
     await teardownTestDatabase(context);

@@ -3,7 +3,7 @@ import { createAuditClient, defineEntity, foreignKey, to } from '@kuruwic/prisma
 import type { AuditContext } from '@kuruwic/prisma-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/prisma-audit-core';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, inject, it } from 'vitest';
 import { cleanDatabase, type TestContext, teardownTestDatabase } from './helpers/setup.js';
 
 const testAggregateMapping: AggregateMapping = {
@@ -22,28 +22,7 @@ describe('Custom Audit Log Table', () => {
   let customContext: TestContext & { customPrisma: ReturnType<typeof createAuditClient> };
 
   beforeAll(async () => {
-    const { PostgreSqlContainer } = await import('@testcontainers/postgresql');
-    const { execSync } = await import('node:child_process');
-    const { dirname, join } = await import('node:path');
-    const { fileURLToPath } = await import('node:url');
-
-    const Filename = fileURLToPath(import.meta.url);
-    const Dirname = dirname(Filename);
-
-    console.log('Starting PostgreSQL container for custom table tests...');
-    const container = await new PostgreSqlContainer('postgres:16-alpine').withExposedPorts(5432).start();
-
-    const databaseUrl = container.getConnectionUri();
-    console.log('PostgreSQL container started');
-
-    const databasePackagePath = join(Dirname, '../../database');
-    const schemaPath = join(databasePackagePath, 'prisma/schema.prisma');
-
-    execSync(`npx prisma db push --schema=${schemaPath} --skip-generate`, {
-      cwd: databasePackagePath,
-      stdio: 'inherit',
-      env: { ...process.env, DATABASE_URL: databaseUrl },
-    });
+    const databaseUrl = inject('databaseUrl');
 
     const basePrisma = new PrismaClient({
       datasources: { db: { url: databaseUrl } },
@@ -82,7 +61,6 @@ describe('Custom Audit Log Table', () => {
     });
 
     context = {
-      container,
       prisma,
       basePrisma,
       provider,
@@ -93,9 +71,7 @@ describe('Custom Audit Log Table', () => {
       ...context,
       customPrisma,
     };
-
-    console.log('Custom table test database setup complete');
-  }, 60000);
+  });
 
   afterAll(async () => {
     await teardownTestDatabase(context);

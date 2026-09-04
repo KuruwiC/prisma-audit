@@ -14,7 +14,7 @@ import {
 import type { AuditContext } from '@kuruwic/prisma-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/prisma-audit-core';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, inject, it } from 'vitest';
 import { cleanDatabase, type TestContext, teardownTestDatabase } from './helpers/setup.js';
 
 const testAggregateMapping: AggregateMapping = {
@@ -36,28 +36,7 @@ describe('Normalized Writer Helpers', () => {
   let context: TestContext;
 
   beforeAll(async () => {
-    const { PostgreSqlContainer } = await import('@testcontainers/postgresql');
-    const { execSync } = await import('node:child_process');
-    const { dirname, join } = await import('node:path');
-    const { fileURLToPath } = await import('node:url');
-
-    const Filename = fileURLToPath(import.meta.url);
-    const Dirname = dirname(Filename);
-
-    console.log('Starting PostgreSQL container for normalized writer tests...');
-    const container = await new PostgreSqlContainer('postgres:16-alpine').withExposedPorts(5432).start();
-
-    const databaseUrl = container.getConnectionUri();
-    console.log('PostgreSQL container started');
-
-    const databasePackagePath = join(Dirname, '../../database');
-    const schemaPath = join(databasePackagePath, 'prisma/schema.prisma');
-
-    execSync(`npx prisma db push --schema=${schemaPath} --skip-generate`, {
-      cwd: databasePackagePath,
-      stdio: 'inherit',
-      env: { ...process.env, DATABASE_URL: databaseUrl },
-    });
+    const databaseUrl = inject('databaseUrl');
 
     const basePrisma = new PrismaClient({
       datasources: { db: { url: databaseUrl } },
@@ -66,15 +45,12 @@ describe('Normalized Writer Helpers', () => {
     const provider = createAsyncLocalStorageProvider();
 
     context = {
-      container,
       prisma: basePrisma as never,
       basePrisma,
       provider,
       databaseUrl,
     };
-
-    console.log('Normalized writer test database setup complete');
-  }, 60000);
+  });
 
   afterAll(async () => {
     await teardownTestDatabase(context);

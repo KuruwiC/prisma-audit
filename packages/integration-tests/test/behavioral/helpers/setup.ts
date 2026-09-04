@@ -41,15 +41,10 @@ export const setupBehavioralTests = () => {
 
   beforeAll(async () => {
     sharedContext = await setupTestContainer();
-  }, 60000);
+  });
 
   beforeEach(async () => {
-    const clients = createTestClients(sharedContext.databaseUrl);
-    testContext = {
-      ...clients,
-      container: sharedContext.container,
-      databaseUrl: sharedContext.databaseUrl,
-    };
+    testContext = createTestClients(sharedContext.databaseUrl);
 
     await testContext.prisma.$connect();
     await testContext.basePrisma.$connect();
