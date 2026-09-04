@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { AuditLogData } from '../../src/domain/audit-log-types.js';
 import { createActorId, createAggregateId, createEntityId } from '../../src/domain/branded-types.js';
-import type { AuditContext, AuditLogData, WriteFn } from '../../src/index.js';
 import { runWithRuntimeContext } from '../../src/runtime-context.js';
+import type { AuditContext } from '../../src/types.js';
 import { createWriteStrategySelector } from '../../src/write-strategies/factory.js';
 import type { DbClientManager, WriteExecutor } from '../../src/write-strategies/interfaces.js';
-import type { WriteStrategyConfig } from '../../src/write-strategies/types.js';
+import type { WriteFn, WriteStrategyConfig } from '../../src/write-strategies/types.js';
 
 const mockHandleError = vi.fn();
 

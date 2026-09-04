@@ -87,20 +87,6 @@ export const resolveUpdateState = (
 };
 
 /**
- * Resolves action and states for delete operation.
- *
- * @param preFetchResult - Pre-fetched before state
- * @returns Resolved state with delete action and null after state
- */
-export const resolveDeleteState = (preFetchResult: NestedPreFetchResult | undefined): ResolvedNestedState => {
-  return {
-    action: AUDIT_ACTION.DELETE,
-    before: preFetchResult?.before ?? null,
-    after: null,
-  };
-};
-
-/**
  * Resolves action and states for create operation.
  *
  * @param afterRecord - Record state after operation

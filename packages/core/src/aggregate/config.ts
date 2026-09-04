@@ -139,35 +139,3 @@ export const createAggregateConfig = (mapping: AggregateMapping): AggregateConfi
     },
   };
 };
-
-/**
- * Type guard to check if a value is an AggregateConfigService
- *
- * @param value - The value to check
- * @returns True if the value is an AggregateConfigService
- *
- * @example
- * ```typescript
- * const service = createAggregateConfig(mapping);
- *
- * if (isAggregateConfigService(service)) {
- *   // TypeScript now knows service is AggregateConfigService
- *   const config = service.getEntityConfig('User');
- * }
- * ```
- */
-export const isAggregateConfigService = (value: unknown): value is AggregateConfigService => {
-  if (!value || typeof value !== 'object') {
-    return false;
-  }
-
-  const possibleService = value as Record<string, unknown>;
-
-  return (
-    typeof possibleService.getEntityConfig === 'function' &&
-    typeof possibleService.getEntityConfigByType === 'function' &&
-    typeof possibleService.isLoggable === 'function' &&
-    typeof possibleService.getAllLoggableModels === 'function' &&
-    typeof possibleService.getMapping === 'function'
-  );
-};

@@ -2,8 +2,8 @@
  * Tests for Type-safe Aggregate Mapping Builder
  */
 
+import { defineAggregateMapping, defineEntity, foreignKey, resolveId, to } from '@kuruwic/prisma-audit-core';
 import { describe, expect, it } from 'vitest';
-import { defineAggregateMapping, defineEntity, foreignKey, resolveId, to } from '../src/index.js';
 
 // Mock PrismaClient type for testing
 interface MockPrismaClient {

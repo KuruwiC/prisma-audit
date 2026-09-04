@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createErrorHandler, withErrorHandling, withErrorHandlingSync } from '../../src/index.js';
+import { createErrorHandler, withErrorHandling, withErrorHandlingSync } from '../../src/utils/error-handler.js';
 
 describe('createErrorHandler', () => {
   describe('throw strategy', () => {

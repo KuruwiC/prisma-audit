@@ -9,12 +9,8 @@
 
 import type { DbClient, PreFetchResults } from '@kuruwic/prisma-audit-core';
 import {
-  detectNestedDeletes as coreDetectNestedDeletes,
   detectNestedOperations as coreDetectNestedOperations,
-  detectNestedUpdates as coreDetectNestedUpdates,
-  detectNestedUpserts as coreDetectNestedUpserts,
   extractNestedRecords as coreExtractNestedRecords,
-  isRelationField as coreIsRelationField,
   refetchNestedRecords as coreRefetchNestedRecords,
   createEmptyPreFetchResults,
   NESTED_OPERATION_KEYWORDS,
@@ -67,19 +63,6 @@ interface PrismaClientWithModels {
 export const getRelationFields = (Prisma: PrismaWithDMMF, modelName: string): RelationFieldInfo[] => {
   const schemaMetadata = createSchemaMetadataFromDMMF(Prisma);
   return schemaMetadata.getRelationFields(modelName);
-};
-
-/**
- * Check if a field is a relation field (Prisma adapter)
- *
- * @param Prisma - Prisma namespace with DMMF
- * @param modelName - Model name (PascalCase)
- * @param fieldName - Field name to check
- * @returns True if the field is a relation field
- */
-export const isRelationField = (Prisma: PrismaWithDMMF, modelName: string, fieldName: string): boolean => {
-  const schemaMetadata = createSchemaMetadataFromDMMF(Prisma);
-  return coreIsRelationField(schemaMetadata, modelName, fieldName);
 };
 
 /**
@@ -144,55 +127,4 @@ export const refetchNestedRecords = async (
     nestedPreFetchResults,
     nestedOperations,
   );
-};
-
-/**
- * Detect nested update operations in Prisma operation args (Prisma adapter)
- *
- * @param Prisma - Prisma namespace with DMMF
- * @param modelName - Model name (PascalCase)
- * @param args - Prisma operation args
- * @returns Array of detected nested update operations
- */
-export const detectNestedUpdates = (
-  Prisma: PrismaWithDMMF,
-  modelName: string,
-  args: Record<string, unknown>,
-): NestedOperationInfo[] => {
-  const schemaMetadata = createSchemaMetadataFromDMMF(Prisma);
-  return coreDetectNestedUpdates(schemaMetadata, modelName, args);
-};
-
-/**
- * Detect nested delete operations in Prisma operation args (Prisma adapter)
- *
- * @param Prisma - Prisma namespace with DMMF
- * @param modelName - Model name (PascalCase)
- * @param args - Prisma operation args
- * @returns Array of detected nested delete operations
- */
-export const detectNestedDeletes = (
-  Prisma: PrismaWithDMMF,
-  modelName: string,
-  args: Record<string, unknown>,
-): NestedOperationInfo[] => {
-  const schemaMetadata = createSchemaMetadataFromDMMF(Prisma);
-  return coreDetectNestedDeletes(schemaMetadata, modelName, args);
-};
-
-/**
- * Detect nested upsert operations in Prisma operation args (Prisma adapter)
- *
- * @param Prisma - Prisma namespace with DMMF
- * @param modelName - Model name (PascalCase)
- * @param args - Prisma operation args
- * @returns Array of detected nested upsert operations
- */
-export const detectNestedUpserts = (
-  Prisma: PrismaWithDMMF,
-  modelName: string,
-  args: Record<string, unknown>,
-): NestedOperationInfo[] => {
-  const schemaMetadata = createSchemaMetadataFromDMMF(Prisma);
-  return coreDetectNestedUpserts(schemaMetadata, modelName, args);
 };

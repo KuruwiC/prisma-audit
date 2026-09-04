@@ -4,8 +4,8 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
+import type { AuditLogData } from '../../src/domain/audit-log-types.js';
 import { createActorId, createAggregateId, createEntityId } from '../../src/domain/branded-types.js';
-import type { AuditLogData } from '../../src/index.js';
 import type { DbClientManager, WriteExecutor } from '../../src/write-strategies/interfaces.js';
 import { createBaseClientWriteFn, createDefaultWriteFn } from '../../src/write-strategies/utils.js';
 

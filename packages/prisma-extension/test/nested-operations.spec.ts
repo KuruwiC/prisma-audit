@@ -2,16 +2,19 @@
  * Unit tests for nested operations utilities
  */
 
-import { createEmptyPreFetchResults } from '@kuruwic/prisma-audit-core';
-import { describe, expect, it } from 'vitest';
 import {
+  createEmptyPreFetchResults,
   detectNestedDeletes,
-  detectNestedOperations,
   detectNestedUpdates,
   detectNestedUpserts,
+  isRelationField,
+} from '@kuruwic/prisma-audit-core';
+import { describe, expect, it } from 'vitest';
+import {
+  createSchemaMetadataFromDMMF,
+  detectNestedOperations,
   extractNestedRecords,
   getRelationFields,
-  isRelationField,
 } from '../src/utils/nested-operations.js';
 
 describe('getRelationFields', () => {
@@ -133,23 +136,23 @@ describe('isRelationField', () => {
   };
 
   it('should return true for relation fields', () => {
-    expect(isRelationField(Prisma, 'User', 'posts')).toBe(true);
+    expect(isRelationField(createSchemaMetadataFromDMMF(Prisma), 'User', 'posts')).toBe(true);
   });
 
   it('should return false for scalar fields', () => {
-    expect(isRelationField(Prisma, 'User', 'email')).toBe(false);
+    expect(isRelationField(createSchemaMetadataFromDMMF(Prisma), 'User', 'email')).toBe(false);
   });
 
   it('should return false for JSON fields (no false positive)', () => {
-    expect(isRelationField(Prisma, 'User', 'metadata')).toBe(false);
+    expect(isRelationField(createSchemaMetadataFromDMMF(Prisma), 'User', 'metadata')).toBe(false);
   });
 
   it('should return false for non-existent fields', () => {
-    expect(isRelationField(Prisma, 'User', 'nonexistent')).toBe(false);
+    expect(isRelationField(createSchemaMetadataFromDMMF(Prisma), 'User', 'nonexistent')).toBe(false);
   });
 
   it('should return false for non-existent model', () => {
-    expect(isRelationField(Prisma, 'NonExistent', 'posts')).toBe(false);
+    expect(isRelationField(createSchemaMetadataFromDMMF(Prisma), 'NonExistent', 'posts')).toBe(false);
   });
 });
 
@@ -608,12 +611,12 @@ describe('detectNestedUpdates', () => {
       },
     };
 
-    const updateOps = detectNestedUpdates(Prisma, 'User', updateArgs);
+    const updateOps = detectNestedUpdates(createSchemaMetadataFromDMMF(Prisma), 'User', updateArgs);
     expect(updateOps).toHaveLength(1);
     expect(updateOps[0]?.operation).toBe('update');
     expect(updateOps[0]?.fieldName).toBe('posts');
 
-    const updateManyOps = detectNestedUpdates(Prisma, 'User', updateManyArgs);
+    const updateManyOps = detectNestedUpdates(createSchemaMetadataFromDMMF(Prisma), 'User', updateManyArgs);
     expect(updateManyOps).toHaveLength(1);
     expect(updateManyOps[0]?.operation).toBe('updateMany');
   });
@@ -629,13 +632,13 @@ describe('detectNestedUpdates', () => {
       },
     };
 
-    const operations = detectNestedUpdates(Prisma, 'User', args);
+    const operations = detectNestedUpdates(createSchemaMetadataFromDMMF(Prisma), 'User', args);
     expect(operations).toHaveLength(0);
   });
 
   it('should return empty array when no data field exists', () => {
     const args = { where: { id: 'user-id' } };
-    const operations = detectNestedUpdates(Prisma, 'User', args);
+    const operations = detectNestedUpdates(createSchemaMetadataFromDMMF(Prisma), 'User', args);
     expect(operations).toEqual([]);
   });
 });
@@ -678,11 +681,11 @@ describe('detectNestedDeletes', () => {
       },
     };
 
-    const deleteOps = detectNestedDeletes(Prisma, 'User', deleteArgs);
+    const deleteOps = detectNestedDeletes(createSchemaMetadataFromDMMF(Prisma), 'User', deleteArgs);
     expect(deleteOps).toHaveLength(1);
     expect(deleteOps[0]?.operation).toBe('delete');
 
-    const deleteManyOps = detectNestedDeletes(Prisma, 'User', deleteManyArgs);
+    const deleteManyOps = detectNestedDeletes(createSchemaMetadataFromDMMF(Prisma), 'User', deleteManyArgs);
     expect(deleteManyOps).toHaveLength(1);
     expect(deleteManyOps[0]?.operation).toBe('deleteMany');
   });
@@ -698,7 +701,7 @@ describe('detectNestedDeletes', () => {
       },
     };
 
-    const operations = detectNestedDeletes(Prisma, 'User', args);
+    const operations = detectNestedDeletes(createSchemaMetadataFromDMMF(Prisma), 'User', args);
     expect(operations).toHaveLength(0);
   });
 });
@@ -734,7 +737,7 @@ describe('detectNestedUpserts', () => {
       },
     };
 
-    const operations = detectNestedUpserts(Prisma, 'User', args);
+    const operations = detectNestedUpserts(createSchemaMetadataFromDMMF(Prisma), 'User', args);
 
     expect(operations).toHaveLength(1);
     expect(operations[0]?.operation).toBe('upsert');
@@ -757,7 +760,7 @@ describe('detectNestedUpserts', () => {
       },
     };
 
-    const operations = detectNestedUpserts(Prisma, 'User', args);
+    const operations = detectNestedUpserts(createSchemaMetadataFromDMMF(Prisma), 'User', args);
 
     expect(operations).toHaveLength(1);
     expect(operations[0]?.operation).toBe('upsert');

@@ -134,14 +134,6 @@ export type OnAuditErrorHandler = (context: {
 }) => void | Promise<void>;
 
 /**
- * Minimum Prisma client interface constraint
- */
-export type PrismaClientBase = {
-  $transaction: <T>(fn: (tx: unknown) => Promise<T>) => Promise<T>;
-  [modelName: string]: unknown;
-};
-
-/**
  * Prisma Extension configuration options
  */
 export interface PrismaAuditExtensionOptions {

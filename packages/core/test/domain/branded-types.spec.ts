@@ -15,7 +15,7 @@ import {
   isEntityId,
   isTraceId,
   unwrapId,
-} from '../../src/index.js';
+} from '../../src/domain/branded-types.js';
 
 describe('Branded Types', () => {
   describe('createActorId', () => {

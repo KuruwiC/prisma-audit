@@ -3,8 +3,8 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import type { AuditLogInput } from '../../src/index.js';
-import { createAuditLogData, failure, success } from '../../src/index.js';
+import type { AuditLogInput } from '../../src/domain/audit-log-types.js';
+import { createAuditLogData, failure, success } from '../../src/domain/smart-constructors.js';
 
 describe('Smart Constructors', () => {
   describe('success', () => {

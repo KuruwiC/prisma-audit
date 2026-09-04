@@ -49,7 +49,3 @@ export const hasPreFetchedRecord = (results: PreFetchResults, path: PreFetchPath
   const record = results.get(path);
   return record !== null && record !== undefined;
 };
-
-export const getPreFetchedRecord = (results: PreFetchResults, path: PreFetchPath): PreFetchedRecord | undefined => {
-  return results.get(path);
-};

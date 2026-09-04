@@ -5,7 +5,7 @@ import {
   isSensitiveField,
   type RedactedFieldInfo,
   redactSensitiveData,
-} from '../../src/index.js';
+} from '../../src/utils/redaction.js';
 
 describe('getDefaultSensitiveFields', () => {
   it('should return default sensitive field patterns', () => {

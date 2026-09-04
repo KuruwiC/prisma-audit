@@ -8,226 +8,38 @@
  */
 
 // ============================================================================
-// Re-export all @kuruwic/prisma-audit-core functionality
+// Re-export selected @kuruwic/prisma-audit-core functionality
 // ============================================================================
 
 export type {
-  // Config Types
-  ActorEnricher,
-  // Enrichment Types
-  ActorEnricherConfig,
-  // Domain Types
   ActorId,
-  // Aggregate Types
-  AggregateConfigService,
-  AggregateContextEnricherConfig,
   AggregateId,
-  AggregateIdResolver,
   AggregateMapping,
-  AggregateResolutionContext,
-  AggregateRoot,
-  AnyBrandedId,
-  // Constants
-  AuditAction,
-  AuditActor,
   AuditContext,
   AuditContextProvider,
-  // Error Handler Types
-  AuditErrorContext,
-  AuditErrorHandler,
-  AuditErrorPhase,
-  AuditLogData as CoreAuditLogData,
-  AuditLogInput as CoreAuditLogInput,
-  BatchAggregateIdResolver,
-  CapitalizedModelNames,
-  // Interfaces
-  CreateArgs,
-  DbClient,
-  // Write Strategies
-  DbClientManager,
-  DefaultWriteFn,
-  DeferredResult,
-  DefineEntityOptions,
-  DeleteArgs,
-  // Diff Calculator
-  DiffCalculator,
-  DiffResult,
-  EnricherConfig,
-  EnricherErrorStrategy,
-  EnrichmentErrorStrategy,
-  EntityEnricherConfig,
   EntityId,
-  ErrorHandler,
-  ErrorStrategy,
-  FieldChange,
-  FieldMetadata,
-  FindArgs,
-  GetModelDelegate,
-  GetModelType,
-  GetOperationConfig,
-  GlobalContextEnricherConfig,
-  // ID Generator (from core)
-  IdFieldInfo as CoreIdFieldInfo,
-  IdGenerator as CoreIdGenerator,
-  IdTransformer,
-  ImmediateResult,
-  LoggableEntity,
-  ModelDelegate,
-  NestedOperationConfig,
-  // Nested Operations
-  NestedOperationInfo,
-  NestedOperationKeyword,
-  // PreFetch Types
-  NestedPreFetchResult,
-  NestedRecordInfo,
-  OperationPreFetchConfig,
-  ParsedWhereClause,
-  PreFetchedRecord,
-  PreFetchPath,
-  PreFetchResult,
-  PreFetchResults,
-  PrismaModelNames,
-  ProjectionEnricherConfig,
-  ProjectionEnrichmentMeta,
-  // Redaction Types
-  RedactConfig,
-  RedactedFieldInfo,
-  RedactMaskFn,
-  Redactor,
-  RelationField,
-  ResolvedId,
-  ResolvedNestedState,
   Result,
-  SchemaMetadata,
-  SelfProjectionConfig,
-  // Serialization Types
-  SerializationConfig,
-  SkippedResult,
-  ToOptions,
   TraceId,
-  Transaction,
-  TypedAggregateMapping,
-  UniqueConstraint,
-  UpdateArgs,
   ValidationError,
-  ValueSerializer,
-  WriteExecutor,
-  WriteFn,
-  WriteResult,
-  WriteStrategy,
-  WriteStrategyConfig,
 } from '@kuruwic/prisma-audit-core';
 
 export {
-  // Constants
-  AUDIT_ACTION,
-  // State Resolution
-  applyRelationConfig,
-  // Enrichment Functions
-  batchEnrichEntityContexts,
-  batchEnrichProjectionContexts,
-  batchEnrichRootAggregateContexts,
-  // Aggregate Functions
-  batchResolveIds,
-  // PreFetch Functions
-  buildPreFetchQuery,
-  // Pending Write Tracking
-  clearPendingWrites,
-  // Utils - Debug
-  coreLog,
-  // Domain Functions
   createActorId,
-  createAggregateConfig,
   createAggregateId,
-  // Context Provider
   createAsyncLocalStorageProvider,
   createAuditLogData,
-  // Write Strategies
-  createBaseClientWriteFn,
-  createDefaultWriteFn,
-  // Utils - Diff Calculator
-  createDiffCalculator,
-  createEmptyPreFetchResults,
   createEntityId,
-  // Error Handler
-  createErrorHandler,
-  // Redaction
-  createRedactor,
-  createTraceId,
-  createWriteStrategySelector,
-  DEFAULT_ENTITY_CATEGORY,
-  DEFAULTS,
-  defaultAuditErrorHandler,
   defineAggregateMapping,
   defineEntity,
-  // Nested Operations
-  detectNestedDeletes,
-  detectNestedOperations,
-  detectNestedUpdates,
-  detectNestedUpserts,
-  enrichActorContext,
-  // Utils - ID Generator (from core)
-  ensureIds as coreEnsureIds,
-  executeBatchEnricherSafely,
-  executeEnricherSafely,
-  executePreFetch,
-  extractNestedRecords,
-  failure,
-  filterOperationsToPreFetch,
-  flushPendingWrites,
   foreignKey,
-  getDefaultSensitiveFields,
-  getIdFieldInfo as coreGetIdFieldInfo,
-  getIdGenerator as coreGetIdGenerator,
   getPendingWriteCount,
-  getPreFetchedRecord,
-  handleAuditError,
-  hasOrNot,
-  hasPreFetchedRecord,
-  ID_GENERATOR_FACTORIES as CORE_ID_GENERATOR_FACTORIES,
   IdValidationError,
   isActorId,
-  isAggregateConfigService,
   isAggregateId,
   isEntityId,
-  isRelationField,
-  isSensitiveField,
-  isTraceId,
-  matchesUniqueConstraint,
-  NESTED_OPERATION_KEYWORDS,
-  nestedLog,
-  normalizeId,
-  parseWhereClause,
-  preFetchBeforeState,
-  preFetchLog,
-  redactSensitiveData,
-  refetchNestedRecords,
-  // Relation Configuration
-  removeRelations,
-  resolveAggregateId,
-  resolveBeforeAndAfterStates,
-  resolveConnectOrCreateState,
-  resolveCreateState,
-  resolveDeleteState,
   resolveId,
-  resolveIncludeRelationsConfig,
-  resolveUpdateState,
-  resolveUpsertState,
-  SUPPORTED_OPERATIONS,
-  safeStringify,
-  self,
-  serializeForAuditJson,
-  sortByPathDepth,
-  success,
   to,
-  UNHANDLED,
   unwrapId,
-  validateAggregateMapping,
-  withErrorHandling,
-  withErrorHandlingSync,
-  writeDeferredInTransaction,
-  writeFireAndForget,
-  writeSynchronously,
 } from '@kuruwic/prisma-audit-core';
 
 // ============================================================================
@@ -235,51 +47,8 @@ export {
 // ============================================================================
 export type { PrismaClientWithAudit } from './client-factory.js';
 export { createAuditClient, defineConfig } from './client-factory.js';
-export type { GetNestedOperationConfigDependencies } from './config/index.js';
-export { getNestedOperationConfig, validateFieldConflicts } from './config/index.js';
-export { createAuditLogExtension } from './extension.js';
-export type {
-  BatchEnrichedContext,
-  BatchFinalContext,
-  BatchInitialContext,
-  EnrichedContext,
-  ExecutedContext,
-  FinalContext,
-  InitialContext,
-  LifecycleStage,
-  NestedPreFetchResults,
-  PreparedContext,
-} from './lifecycle/index.js';
-export { flushAllPendingWrites, flushPendingDeferredWrites, runLifecyclePipeline } from './lifecycle/index.js';
-export type {
-  AuditLogData,
-  AuditLogInput,
-  AuditLogWriter,
-  DiffingConfig,
-  EnrichmentResolver,
-  HooksConfig,
-  OperationContext,
-  PerformanceConfig,
-  PrismaAction,
-  PrismaAuditExtensionOptions,
-  SecurityConfig,
-} from './types.js';
-
-export type { IdFieldInfo, IdGenerator, IdGeneratorFactory } from './utils/id-generator.js';
-export { ensureIds, getIdFieldInfo, getIdGenerator, ID_GENERATOR_FACTORIES } from './utils/id-generator.js';
-
-export {
-  extractDeleteOperationEntityId,
-  getPrisma,
-  injectDeepInclude,
-  isAuditableAction,
-  isBatchOperation,
-  isSingleOperation,
-  isWriteOperation,
-  requiresBeforeState,
-  shouldAuditModel,
-  uncapitalizeFirst,
-} from './utils/index.js';
+export { flushAllPendingWrites, runLifecyclePipeline } from './lifecycle/index.js';
+export type { AuditLogData, AuditLogInput, AuditLogWriter, PrismaAuditExtensionOptions } from './types.js';
 
 export type { NormalizedSchema, SharedChangeSchema } from './utils/normalized-writer.js';
 export { createEntityNormalizedWriter, createSharedChangeWriter } from './utils/normalized-writer.js';

@@ -2,9 +2,8 @@
 
 // Aggregate Config
 export type { AggregateConfigService } from './aggregate/config.js';
-export { createAggregateConfig, isAggregateConfigService } from './aggregate/config.js';
+export { createAggregateConfig } from './aggregate/config.js';
 // Aggregate Helpers
-export type { DefineEntityOptions, IdTransformer, ToOptions } from './aggregate/helpers.js';
 export {
   batchResolveIds,
   defineAggregateMapping,
@@ -19,31 +18,15 @@ export {
 } from './aggregate/helpers.js';
 // Aggregate Types
 export type {
-  AggregateIdResolver,
   AggregateMapping,
-  AggregateResolutionContext,
   AggregateRoot,
   BatchAggregateIdResolver,
-  CapitalizedModelNames,
-  GetModelDelegate,
-  GetModelType,
   LoggableEntity,
-  PrismaModelNames,
   ResolvedId,
-  SelfProjectionConfig,
-  TypedAggregateMapping,
 } from './aggregate/types.js';
-export { DEFAULT_ENTITY_CATEGORY } from './aggregate/types.js';
 // Config Types
-export type {
-  ActorEnricher,
-  EnrichmentErrorStrategy,
-  GlobalContextEnricherConfig,
-  NestedOperationConfig,
-  SerializationConfig,
-} from './config.types.js';
+export type { GlobalContextEnricherConfig, SerializationConfig } from './config.types.js';
 // Constants
-export type { AuditAction } from './constants.js';
 export {
   AUDIT_ACTION,
   BATCH_OPERATIONS,
@@ -60,7 +43,6 @@ export type { AuditLogData, AuditLogInput } from './domain/audit-log-types.js';
 export type {
   ActorId,
   AggregateId,
-  AnyBrandedId,
   EntityId,
   TraceId,
 } from './domain/branded-types.js';
@@ -68,17 +50,15 @@ export {
   createActorId,
   createAggregateId,
   createEntityId,
-  createTraceId,
   IdValidationError,
   isActorId,
   isAggregateId,
   isEntityId,
-  isTraceId,
   unwrapId,
 } from './domain/branded-types.js';
 // Domain - Smart Constructors
 export type { Result, ValidationError } from './domain/smart-constructors.js';
-export { createAuditLogData, failure, success } from './domain/smart-constructors.js';
+export { createAuditLogData } from './domain/smart-constructors.js';
 // Enrichment - Functions
 export { enrichActorContext } from './enrichment/actor.js';
 export {
@@ -86,90 +66,50 @@ export {
   batchEnrichProjectionContexts,
   batchEnrichRootAggregateContexts,
 } from './enrichment/batch.js';
-export { executeBatchEnricherSafely, executeEnricherSafely } from './enrichment/executor.js';
 // Enrichment - Types
-export type {
-  ActorEnricherConfig,
-  AggregateContextEnricherConfig,
-  EnricherConfig,
-  EnricherErrorStrategy,
-  EntityEnricherConfig,
-  ProjectionEnricherConfig,
-  ProjectionEnrichmentMeta,
-} from './enrichment/types.js';
+export type { ProjectionEnrichmentMeta } from './enrichment/types.js';
 // Global Singleton (dual-package hazard mitigation)
-/** @internal */
+//
+// Required by @kuruwic/prisma-audit's own implementation across the package
+// boundary (client-manager, transaction-wrapper, extension-utils,
+// normalized-writer), so it stays part of the public surface even though it
+// is not meant for direct end-user use.
 export { getGlobalSingleton } from './global-singleton.js';
 // Interfaces
-export type {
-  CreateArgs,
-  DbClient,
-  DeleteArgs,
-  FieldMetadata,
-  FindArgs,
-  ModelDelegate,
-  RelationField,
-  SchemaMetadata,
-  Transaction,
-  UniqueConstraint,
-  UpdateArgs,
-} from './interfaces/index.js';
+export type { DbClient, SchemaMetadata, UniqueConstraint } from './interfaces/index.js';
 // Runtime Context (library-owned infrastructure state)
-/** @internal */
-export type { AuditRuntimeContext, AuditTransactionScope } from './runtime-context.js';
-/** @internal */
+//
+// Required by @kuruwic/prisma-audit's own implementation across the package
+// boundary (transaction-wrapper, normalized-writer, client-manager,
+// extension-utils), so it stays part of the public surface even though it
+// is not meant for direct end-user use.
 export { getRuntimeContext, runWithRuntimeContext } from './runtime-context.js';
 // State Resolution
 export { applyRelationConfig } from './state-resolution/apply-relation-config.js';
 export { resolveBeforeAndAfterStates } from './state-resolution/index.js';
-export type {
-  NestedPreFetchResult,
-  ResolvedNestedState,
-} from './state-resolution/nested-state-resolver.js';
+export type { NestedPreFetchResult } from './state-resolution/nested-state-resolver.js';
 export {
   resolveConnectOrCreateState,
   resolveCreateState,
-  resolveDeleteState,
   resolveUpdateState,
   resolveUpsertState,
 } from './state-resolution/nested-state-resolver.js';
-export type {
-  GetOperationConfig,
-  OperationPreFetchConfig,
-} from './state-resolution/pre-fetch-coordinator.js';
 export {
   filterOperationsToPreFetch,
   sortByPathDepth,
 } from './state-resolution/pre-fetch-coordinator.js';
 // Types - PreFetch
-export type { PreFetchedRecord, PreFetchPath, PreFetchResults } from './types/pre-fetch.js';
-export {
-  createEmptyPreFetchResults,
-  getPreFetchedRecord,
-  hasPreFetchedRecord,
-} from './types/pre-fetch.js';
+export type { PreFetchResults } from './types/pre-fetch.js';
+export { createEmptyPreFetchResults } from './types/pre-fetch.js';
 // Types
 export type { AuditActor, AuditContext, AuditContextProvider } from './types.js';
 // Utils - Debug
 export { coreLog, nestedLog, preFetchLog } from './utils/debug.js';
 // Utils - Diff Calculator
-export type { DiffCalculator, DiffResult, FieldChange } from './utils/diff-calculator.js';
 export { createDiffCalculator } from './utils/diff-calculator.js';
 // Utils - Error Handler
-export type {
-  AuditErrorContext,
-  AuditErrorHandler,
-  AuditErrorPhase,
-  ErrorHandler,
-  ErrorStrategy,
-} from './utils/error-handler.js';
-export {
-  createErrorHandler,
-  defaultAuditErrorHandler,
-  handleAuditError,
-  withErrorHandling,
-  withErrorHandlingSync,
-} from './utils/error-handler.js';
+export type { ErrorHandler, ErrorStrategy } from './utils/error-handler.js';
+export { createErrorHandler } from './utils/error-handler.js';
 // Utils - ID Generator
 export type { IdFieldInfo, IdGenerator, IdGeneratorFactory } from './utils/id-generator.js';
 export { ensureIds, getIdFieldInfo, getIdGenerator, ID_GENERATOR_FACTORIES } from './utils/id-generator.js';
@@ -189,55 +129,12 @@ export {
   NESTED_OPERATION_KEYWORDS,
   refetchNestedRecords,
 } from './utils/nested-operations.js';
-// Utils - Pre-fetch
-export type { ParsedWhereClause, PreFetchResult } from './utils/pre-fetch.js';
-export {
-  buildPreFetchQuery,
-  executePreFetch,
-  hasOrNot,
-  matchesUniqueConstraint,
-  parseWhereClause,
-  preFetchBeforeState,
-} from './utils/pre-fetch.js';
 // Utils - Redaction
-export type { RedactConfig, RedactedFieldInfo, RedactMaskFn, Redactor } from './utils/redaction.js';
-export {
-  createRedactor,
-  getDefaultSensitiveFields,
-  isSensitiveField,
-  redactSensitiveData,
-} from './utils/redaction.js';
-// Utils - Relation Configuration
-export { removeRelations } from './utils/remove-relations.js';
-export { resolveIncludeRelationsConfig } from './utils/resolve-include-relations-config.js';
-export type { ValueSerializer } from './utils/serialization.js';
+export type { RedactConfig } from './utils/redaction.js';
+export { redactSensitiveData } from './utils/redaction.js';
 // Utils - Serialization
-export { safeStringify, serializeForAuditJson, UNHANDLED } from './utils/serialization.js';
-// Write Strategies - Functions
-export {
-  clearPendingWrites,
-  createBaseClientWriteFn,
-  createDefaultWriteFn,
-  createWriteStrategySelector,
-  flushPendingWrites,
-  getPendingWriteCount,
-  writeDeferredInTransaction,
-  writeFireAndForget,
-  writeSynchronously,
-} from './write-strategies/index.js';
-// Write Strategies - Interfaces
-export type {
-  DbClientManager,
-  DefaultWriteFn,
-  WriteExecutor,
-} from './write-strategies/interfaces.js';
-// Write Strategies - Types
-export type {
-  DeferredResult,
-  ImmediateResult,
-  SkippedResult,
-  WriteFn,
-  WriteResult,
-  WriteStrategy,
-  WriteStrategyConfig,
-} from './write-strategies/types.js';
+export type { ValueSerializer } from './utils/serialization.js';
+export { serializeForAuditJson, UNHANDLED } from './utils/serialization.js';
+// Write Strategies
+export type { WriteExecutor, WriteFn, WriteResult } from './write-strategies/index.js';
+export { createWriteStrategySelector, flushPendingWrites, getPendingWriteCount } from './write-strategies/index.js';

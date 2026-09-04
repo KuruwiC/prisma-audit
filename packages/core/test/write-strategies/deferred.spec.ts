@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { AuditLogData } from '../../src/domain/audit-log-types.js';
 import { createActorId, createAggregateId, createEntityId } from '../../src/domain/branded-types.js';
-import type { AuditContext, AuditLogData, WriteFn } from '../../src/index.js';
 import { getRuntimeContext, runWithRuntimeContext } from '../../src/runtime-context.js';
+import type { AuditContext } from '../../src/types.js';
 import { writeDeferredInTransaction } from '../../src/write-strategies/deferred.js';
 import type { DbClientManager, WriteExecutor } from '../../src/write-strategies/interfaces.js';
+import type { WriteFn } from '../../src/write-strategies/types.js';
 
 type ErrorHandler = (error: Error, operation: string) => void;
 
