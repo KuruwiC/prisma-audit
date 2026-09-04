@@ -5,14 +5,13 @@
  * Swap createPrismaHarness with a Drizzle harness to run the same tests on Drizzle.
  */
 
-import { afterAll, afterEach, beforeAll, beforeEach } from 'vitest';
+import { afterEach, beforeAll, beforeEach } from 'vitest';
 import {
   cleanupTestClients,
   createTestClients,
+  getSharedTestContext,
   type SharedTestContext,
-  setupTestContainer,
   type TestContext,
-  teardownTestContainer,
 } from '../../helpers/setup.js';
 import type { AuditTestHarness } from './harness.js';
 import { createPrismaHarness } from './prisma-harness.js';
@@ -40,7 +39,7 @@ export const setupBehavioralTests = () => {
   let harness: AuditTestHarness;
 
   beforeAll(async () => {
-    sharedContext = await setupTestContainer();
+    sharedContext = await getSharedTestContext();
   });
 
   beforeEach(async () => {
@@ -55,10 +54,6 @@ export const setupBehavioralTests = () => {
 
   afterEach(async () => {
     await cleanupTestClients(testContext);
-  });
-
-  afterAll(async () => {
-    await teardownTestContainer(sharedContext);
   });
 
   return {

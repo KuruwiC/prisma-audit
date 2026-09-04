@@ -52,7 +52,6 @@ export type {
   WriteErrorHandler,
   WriteFn,
   WriteResult,
-  WriteStrategy,
   WriteStrategyConfig,
   WriteStrategyInput,
 } from './types.js';

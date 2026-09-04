@@ -2,7 +2,7 @@ import type { AuditContext } from '@kuruwic/prisma-audit-core';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { cleanDatabase, setupTestDatabase, type TestContext, teardownTestDatabase } from './helpers/setup.js';
 
-describe('Nested ConnectOrCreate Operations (Phase 2)', () => {
+describe('Nested ConnectOrCreate Operations', () => {
   let context: TestContext;
 
   beforeAll(async () => {

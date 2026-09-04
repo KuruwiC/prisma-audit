@@ -163,6 +163,7 @@ const buildSingleAuditLog = (input: BuildSingleAuditLogInput): AuditLogData => {
     entityContext,
     aggregateContext,
   } = input;
+
   const requestContext = context.request || null;
 
   return {

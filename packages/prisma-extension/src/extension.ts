@@ -88,13 +88,18 @@ export interface HandleLimitedUpdateManyInput {
 /**
  * Creates the Prisma Client Extension for automatic audit logging
  *
+ * @remarks
+ * Most callers should use {@link createAuditClient} instead, which applies this
+ * extension via `prisma.$extends()` and returns a typed client. This function is
+ * the lower-level primitive `createAuditClient` builds on.
+ *
  * @returns Prisma Client Extension definition (use with `prisma.$extends()`)
  * @throws {Error} If configuration contains conflicts or peer dependency missing
  *
  * @example
  * ```typescript
  * import { PrismaClient } from '@prisma/client';
- * import { createAuditLogExtension } from '@kuruwic/prisma-audit';
+ * import { createAuditLogExtension } from './extension.js';
  *
  * const extension = createAuditLogExtension({
  *   provider: auditContextProvider,
@@ -528,6 +533,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
   // updateManyAndReturn (see caller guard).
   const handleLimitedUpdateMany = async (input: HandleLimitedUpdateManyInput): Promise<unknown> => {
     const { operation, context, baseClient, clientToUse, action, modelDelegate, pkFields, whereClause } = input;
+
     const beforeEntities = await modelDelegate.findMany({ where: whereClause || {} });
     const updatedRows = await modelDelegate.updateManyAndReturn(operation.args);
     const paired = pairEntitiesByPrimaryKey(updatedRows, beforeEntities, pkFields);

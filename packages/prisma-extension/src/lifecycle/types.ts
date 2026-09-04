@@ -92,7 +92,7 @@ export interface FinalContext extends EnrichedContext {
 }
 
 // =============================================================================
-// Batch Operation Contexts (Phase 5)
+// Batch Operation Contexts
 // =============================================================================
 
 /**

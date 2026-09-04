@@ -14,8 +14,6 @@
  * - Primary keys: `@id` or `@@id`
  * - Unique fields: `@unique`
  * - Unique indexes: `@@unique([field1, field2])`
- *
- * @since Phase 2
  */
 
 import type { DbClient, SchemaMetadata, UniqueConstraint } from '../interfaces/index.js';

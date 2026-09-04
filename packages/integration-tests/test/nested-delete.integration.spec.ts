@@ -2,7 +2,7 @@ import type { AuditContext } from '@kuruwic/prisma-audit-core';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { cleanDatabase, setupTestDatabase, type TestContext, teardownTestDatabase } from './helpers/setup.js';
 
-describe('Nested Delete Operations (Phase 2)', () => {
+describe('Nested Delete Operations', () => {
   let context: TestContext;
 
   beforeAll(async () => {
@@ -292,7 +292,7 @@ describe('Nested Delete Operations (Phase 2)', () => {
         where: { entityType: 'Post', action: 'delete' },
       });
 
-      // With Phase 2, nested deleteMany may create audit logs if records can be identified
+      // Nested deleteMany may create audit logs if records can be identified.
       expect(deleteLogs.length).toBeGreaterThanOrEqual(0);
     });
   });

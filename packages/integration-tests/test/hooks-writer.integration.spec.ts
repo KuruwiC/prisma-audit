@@ -59,7 +59,7 @@ const createAuditedClientWithWriterSpy = (
   });
 };
 
-describe('hooks.writer Coverage (Phase 2)', () => {
+describe('hooks.writer Coverage', () => {
   let context: TestContext & {
     writerSpy: { callCount: number; calls: Array<{ logCount: number; contextId: string }> };
   };

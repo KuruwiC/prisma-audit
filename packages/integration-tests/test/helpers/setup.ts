@@ -3,7 +3,7 @@ import { createAuditClient, defineEntity, foreignKey, to } from '@kuruwic/prisma
 import type { AuditContextProvider } from '@kuruwic/prisma-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/prisma-audit-core';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
-import { afterAll, afterEach, beforeAll, beforeEach, inject } from 'vitest';
+import { afterEach, beforeAll, beforeEach, inject } from 'vitest';
 
 export const testAggregateMapping: AggregateMapping = {
   User: defineEntity({
@@ -82,7 +82,7 @@ export const setupTestDatabase = async (): Promise<TestContext> => {
  * Reads the shared database URL without creating Prisma clients.
  * Clients should be instantiated per-test in beforeEach to prevent forking issues.
  */
-export const setupTestContainer = async (): Promise<SharedTestContext> => {
+export const getSharedTestContext = async (): Promise<SharedTestContext> => {
   const databaseUrl = inject('databaseUrl');
   return { databaseUrl };
 };
@@ -152,12 +152,6 @@ export const teardownTestDatabase = async (context: TestContext): Promise<void> 
 };
 
 /**
- * No-op: kept for API compatibility. The shared container is stopped once in
- * global teardown (see test/global-setup.ts), not per spec file.
- */
-export const teardownTestContainer = async (_context: SharedTestContext): Promise<void> => {};
-
-/**
  * Truncates all tables in the database, resetting sequences and handling foreign key constraints.
  * Migration tables are preserved.
  */
@@ -203,7 +197,7 @@ export const setupTestLifecycle = () => {
   let testContext: TestContext;
 
   beforeAll(async () => {
-    sharedContext = await setupTestContainer();
+    sharedContext = await getSharedTestContext();
   });
 
   beforeEach(async () => {
@@ -216,10 +210,6 @@ export const setupTestLifecycle = () => {
 
   afterEach(async () => {
     await cleanupTestClients(testContext);
-  });
-
-  afterAll(async () => {
-    await teardownTestContainer(sharedContext);
   });
 
   return {

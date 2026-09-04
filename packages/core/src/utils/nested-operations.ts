@@ -122,15 +122,15 @@ const processUpsertOperation = (
   const createData = upsertData.create;
   const updateData = upsertData.update;
 
-  // Phase 1 (empty preFetchResults): Explore BOTH branches
-  // Phase 2 (populated preFetchResults): Explore only executing branch
-  const isPhase1 = preFetchResults.size === 0;
+  // Discovery pass (empty preFetchResults): explore BOTH branches
+  // Filtered pass (populated preFetchResults): explore only the executing branch
+  const isDiscoveryPass = preFetchResults.size === 0;
   const recordExists = hasPreFetchedRecord(preFetchResults, currentPath);
 
   const deeplyNestedOps: NestedOperationInfo[] = [];
 
-  // Explore UPDATE branch if: Phase 1 OR (Phase 2 and record exists)
-  if (isPhase1 || recordExists) {
+  // Explore UPDATE branch if: discovery pass, or filtered pass and the record exists
+  if (isDiscoveryPass || recordExists) {
     if (typeof updateData === 'object' && updateData !== null) {
       const updateOps = detectDeeplyNestedOperations(
         schemaMetadata,
@@ -144,8 +144,8 @@ const processUpsertOperation = (
     }
   }
 
-  // Explore CREATE branch if: Phase 1 OR (Phase 2 and record doesn't exist)
-  if (isPhase1 || !recordExists) {
+  // Explore CREATE branch if: discovery pass, or filtered pass and the record doesn't exist
+  if (isDiscoveryPass || !recordExists) {
     if (typeof createData === 'object' && createData !== null) {
       const createOps = detectDeeplyNestedOperations(
         schemaMetadata,
@@ -280,7 +280,7 @@ const processRelationField = (
  * - Record exists: Only explore UPDATE branch
  * - Record missing: Only explore CREATE branch
  *
- * @param preFetchResults - Empty = explore all branches (Phase 1), Populated = filter by existence (Phase 2)
+ * @param preFetchResults - Empty = discovery pass (explore all branches), populated = filtered pass (by existence)
  * @internal
  */
 const detectDeeplyNestedOperations = (
@@ -326,8 +326,8 @@ const addDataFieldIfPresent = (args: Record<string, unknown>, dataSources: Recor
   }
 };
 
-/** @internal Add create/update branches for Phase 1 */
-const addPhase1Branches = (args: Record<string, unknown>, dataSources: Record<string, unknown>[]): void => {
+/** @internal Add both the create and update branches (discovery pass) */
+const addBothBranches = (args: Record<string, unknown>, dataSources: Record<string, unknown>[]): void => {
   if (args.create && typeof args.create === 'object') {
     dataSources.push(args.create as Record<string, unknown>);
   }
@@ -336,8 +336,8 @@ const addPhase1Branches = (args: Record<string, unknown>, dataSources: Record<st
   }
 };
 
-/** @internal Add update or create branch for Phase 2 */
-const addPhase2Branch = (args: Record<string, unknown>, dataSources: Record<string, unknown>[]): void => {
+/** @internal Add only the branch that matches record existence (filtered pass) */
+const addExecutingBranch = (args: Record<string, unknown>, dataSources: Record<string, unknown>[]): void => {
   if (args.update && typeof args.update === 'object') {
     dataSources.push(args.update as Record<string, unknown>);
   } else if (args.create && typeof args.create === 'object') {
@@ -354,11 +354,11 @@ const extractDataSources = (
 
   addDataFieldIfPresent(args, dataSources);
 
-  const isPhase1 = preFetchResults.size === 0;
-  if (isPhase1) {
-    addPhase1Branches(args, dataSources);
+  const isDiscoveryPass = preFetchResults.size === 0;
+  if (isDiscoveryPass) {
+    addBothBranches(args, dataSources);
   } else {
-    addPhase2Branch(args, dataSources);
+    addExecutingBranch(args, dataSources);
   }
 
   return dataSources;
@@ -430,11 +430,11 @@ const processTopLevelUpsertBranches = (
   const createData = upsertData.create;
   const updateData = upsertData.update;
 
-  const isPhase1 = preFetchResults.size === 0;
+  const isDiscoveryPass = preFetchResults.size === 0;
   const recordExists = hasPreFetchedRecord(preFetchResults, relationField.name);
 
-  // Explore UPDATE branch if: Phase 1 OR (Phase 2 and record exists)
-  if (isPhase1 || recordExists) {
+  // Explore UPDATE branch if: discovery pass, or filtered pass and the record exists
+  if (isDiscoveryPass || recordExists) {
     if (typeof updateData === 'object' && updateData !== null) {
       const updateOps = detectDeeplyNestedOperations(
         schemaMetadata,
@@ -448,8 +448,8 @@ const processTopLevelUpsertBranches = (
     }
   }
 
-  // Explore CREATE branch if: Phase 1 OR (Phase 2 and record doesn't exist)
-  if (isPhase1 || !recordExists) {
+  // Explore CREATE branch if: discovery pass, or filtered pass and the record doesn't exist
+  if (isDiscoveryPass || !recordExists) {
     if (typeof createData === 'object' && createData !== null) {
       const createOps = detectDeeplyNestedOperations(
         schemaMetadata,
@@ -590,20 +590,20 @@ const processDataSource = (input: ProcessDataSourceInput): void => {
  * Main entry point for detecting all nested write operations (create, update, delete, upsert, connectOrCreate)
  * at any depth level. Supports deeply nested operations like `postTags.create.tag.connectOrCreate`.
  *
- * **Two-Phase Strategy:**
- * - Phase 1 (empty preFetchResults): Explores ALL branches to discover records needing pre-fetch
- * - Phase 2 (populated preFetchResults): Filters upsert branches based on record existence
+ * **Two-Pass Strategy:**
+ * - Discovery pass (empty preFetchResults): Explores ALL branches to discover records needing pre-fetch
+ * - Filtered pass (populated preFetchResults): Filters upsert branches based on record existence
  *
  * **Path Format:**
  * - Top-level: `"posts"`
  * - Nested: `"postTags.tag"`
  * - Deep: `"author.profile.avatar"`
  *
- * @param preFetchResults - Empty for Phase 1 (explore all), populated for Phase 2 (filter branches)
+ * @param preFetchResults - Empty for the discovery pass (explore all), populated for the filtered pass
  *
  * @example
  * ```typescript
- * // Phase 1: Pre-fetch detection
+ * // Discovery pass: pre-fetch detection
  * const ops = detectNestedOperations(schemaMetadata, 'User', {
  *   data: {
  *     profile: {
@@ -616,7 +616,7 @@ const processDataSource = (input: ProcessDataSourceInput): void => {
  * }, new Map());
  * // Result: Operations from BOTH create and update branches
  *
- * // Phase 2: With pre-fetched data
+ * // Filtered pass: with pre-fetched data
  * const preFetchResults = new Map([['profile', { id: '1', bio: 'Old' }]]);
  * const ops = detectNestedOperations(schemaMetadata, 'User', { data: {...} }, preFetchResults);
  * // Result: Operations from ONLY update branch (record exists)

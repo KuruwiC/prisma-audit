@@ -1,7 +1,8 @@
-import { createAsyncLocalStorageProvider, runWithRuntimeContext } from '@kuruwic/prisma-audit-core';
+import { createAsyncLocalStorageProvider, runWithRuntimeContext, self } from '@kuruwic/prisma-audit-core';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database';
 import { beforeAll, bench, describe } from 'vitest';
-import { createAuditLogExtension, defineEntity, self } from '../src/index.js';
+import { createAuditLogExtension } from '../src/extension.js';
+import { defineEntity } from '../src/index.js';
 import { seedBenchmarkData, setupBenchmarkDb } from './setup.js';
 
 describe('With vs Without Audit', () => {

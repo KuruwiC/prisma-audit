@@ -2,7 +2,7 @@ import type { AuditContext } from '@kuruwic/prisma-audit-core';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { cleanDatabase, setupTestDatabase, type TestContext, teardownTestDatabase } from './helpers/setup.js';
 
-describe('Nested Update Operations (Phase 2)', () => {
+describe('Nested Update Operations', () => {
   let context: TestContext;
 
   beforeAll(async () => {
@@ -309,10 +309,9 @@ describe('Nested Update Operations (Phase 2)', () => {
         where: { entityType: 'Post', action: 'update' },
       });
 
-      // With Phase 2, nested updateMany should create audit logs
-      // (Note: without include, we rely on post-operation fetch or pre-fetch)
-      // Without include, updateMany relies on pre-fetch to identify affected records.
-      // At minimum, the user update itself should produce logs.
+      // Nested updateMany should create audit logs. Without include, updateMany
+      // relies on pre-fetch to identify affected records; at minimum, the user
+      // update itself should produce logs.
       expect(postLogs.length).toBeGreaterThanOrEqual(1);
     });
   });

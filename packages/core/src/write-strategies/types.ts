@@ -30,7 +30,7 @@ export interface SkippedResult {
  *
  * @example
  * ```typescript
- * const result = await writeStrategy(logs, context, manager, 'auditLog');
+ * const result = await writeStrategy(input);
  *
  * switch (result._tag) {
  *   case 'Immediate':
@@ -64,14 +64,6 @@ export type WriteResult = ImmediateResult | DeferredResult | SkippedResult;
  */
 export type WriteFn = (logs: AuditLogData[], context: AuditContext, defaultWrite: DefaultWriteFn) => Promise<void>;
 
-export type WriteStrategy = (
-  logs: AuditLogData[],
-  context: AuditContext,
-  manager: DbClientManager,
-  auditLogModel: string,
-  writer?: WriteFn,
-) => Promise<WriteResult>;
-
 /**
  * Error handler invoked when a write strategy fails to persist audit logs.
  */
@@ -79,7 +71,7 @@ export type WriteErrorHandler = (error: Error, operationDescription: string) => 
 
 /**
  * Shared input for every write strategy implementation (synchronous, deferred,
- * fire-and-forget). Replaces the positional parameters those functions used to take.
+ * fire-and-forget).
  *
  * @example
  * ```typescript

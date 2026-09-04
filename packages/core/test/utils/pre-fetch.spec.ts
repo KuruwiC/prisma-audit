@@ -1,10 +1,5 @@
 /**
  * Unit tests for pre-fetch logic (core)
- *
- * Ported from the now-deleted prisma-extension DMMF adapter wrapper
- * (`packages/prisma-extension/src/utils/pre-fetch.ts`), which had no
- * consumer beyond this coverage and simply delegated to these core
- * functions via a DMMF-derived SchemaMetadata.
  */
 
 import { describe, expect, it } from 'vitest';
