@@ -31,7 +31,7 @@
  *     composite-key row that does not exist, and the `fetchBeforeOperation: false`
  *     configuration. In both cases no fabricated entityId is ever recorded — either
  *     the write fails before any log is built, or the pre-fetch result is skipped and
- *     reported through `onUnresolvedEntityId` rather than persisted as a guess (see
+ *     reported through `onUnresolvedDeleteEntityId` rather than persisted as a guess (see
  *     `buildMinimalEntity` in `lifecycle/nested-handlers/delete-handler.ts`).
  */
 
@@ -71,18 +71,23 @@ describe('Composite Primary Key (PostLike)', () => {
     await cleanDatabase(context.prisma);
   });
 
+  const createUserAndPost = async () => {
+    const user = await context.provider.runAsync(testActor, async () => {
+      return await context.prisma.user.create({
+        data: { email: 'liker@example.com', name: 'Liker', password: 'secret123' },
+      });
+    });
+    const post = await context.provider.runAsync(testActor, async () => {
+      return await context.prisma.post.create({
+        data: { title: 'Likeable Post', content: 'content', authorId: user.id },
+      });
+    });
+    return { user, post };
+  };
+
   describe('top-level create / update', () => {
     it('records the correct serialized composite entityId when creating a row', async () => {
-      const user = await context.provider.runAsync(testActor, async () => {
-        return await context.prisma.user.create({
-          data: { email: 'liker@example.com', name: 'Liker', password: 'secret123' },
-        });
-      });
-      const post = await context.provider.runAsync(testActor, async () => {
-        return await context.prisma.post.create({
-          data: { title: 'Likeable Post', content: 'content', authorId: user.id },
-        });
-      });
+      const { user, post } = await createUserAndPost();
       await context.prisma.auditLog.deleteMany();
 
       const like = await context.provider.runAsync(testActor, async () => {
@@ -114,16 +119,7 @@ describe('Composite Primary Key (PostLike)', () => {
     });
 
     it('records the correct serialized composite entityId and real before state when updating a row', async () => {
-      const user = await context.provider.runAsync(testActor, async () => {
-        return await context.prisma.user.create({
-          data: { email: 'liker@example.com', name: 'Liker', password: 'secret123' },
-        });
-      });
-      const post = await context.provider.runAsync(testActor, async () => {
-        return await context.prisma.post.create({
-          data: { title: 'Likeable Post', content: 'content', authorId: user.id },
-        });
-      });
+      const { user, post } = await createUserAndPost();
       await context.provider.runAsync(testActor, async () => {
         return await context.prisma.postLike.create({
           data: { postId: post.id, userId: user.id, note: 'first' },
@@ -153,16 +149,7 @@ describe('Composite Primary Key (PostLike)', () => {
 
   describe('nested delete from Post', () => {
     it('records the real composite entityId, real before state, and delete action for an existing composite-key row', async () => {
-      const user = await context.provider.runAsync(testActor, async () => {
-        return await context.prisma.user.create({
-          data: { email: 'liker@example.com', name: 'Liker', password: 'secret123' },
-        });
-      });
-      const post = await context.provider.runAsync(testActor, async () => {
-        return await context.prisma.post.create({
-          data: { title: 'Likeable Post', content: 'content', authorId: user.id },
-        });
-      });
+      const { user, post } = await createUserAndPost();
       await context.provider.runAsync(testActor, async () => {
         return await context.prisma.postLike.create({
           data: { postId: post.id, userId: user.id, note: 'to-delete' },
@@ -210,16 +197,7 @@ describe('Composite Primary Key (PostLike)', () => {
       // single-field PK model: Prisma requires the nested delete target to exist and
       // throws (P2025) before the write executes, so no audit log — fabricated or
       // otherwise — is ever persisted for it.
-      const user = await context.provider.runAsync(testActor, async () => {
-        return await context.prisma.user.create({
-          data: { email: 'liker@example.com', name: 'Liker', password: 'secret123' },
-        });
-      });
-      const post = await context.provider.runAsync(testActor, async () => {
-        return await context.prisma.post.create({
-          data: { title: 'Likeable Post', content: 'content', authorId: user.id },
-        });
-      });
+      const { user, post } = await createUserAndPost();
       await context.prisma.auditLog.deleteMany();
 
       const deletePromise = context.provider.runAsync(testActor, async () => {
@@ -240,7 +218,7 @@ describe('Composite Primary Key (PostLike)', () => {
   /**
    * `collectDeleteRecords`'s defensive branch — reconstructing a composite entityId
    * from a serialized JSON key and returning `null` (dropping the record, reporting
-   * it via `onUnresolvedEntityId`) when that JSON is malformed or the wrong length —
+   * it via `onUnresolvedDeleteEntityId`) when that JSON is malformed or the wrong length —
    * cannot be forced through the public client. Every producer that writes an
    * entityId key into the nested pre-fetch map (`extractEntityIdentity`, via
    * `storePreFetchResult`) emits either a well-formed `JSON.stringify` of exactly
@@ -257,7 +235,7 @@ describe('Composite Primary Key (PostLike)', () => {
    * shape (e.g. the related model's query erroring for some other cause), and the
    * coordinator falls back to it. `buildMinimalEntity` treats `'__default__'` the same
    * way it treats a malformed composite JSON key: it returns `null`, so the record is
-   * dropped and `onUnresolvedEntityId` is notified — never a fabricated `{}` entity.
+   * dropped and `onUnresolvedDeleteEntityId` is notified — never a fabricated `{}` entity.
    * With pre-fetch skipped entirely (this describe block), the code never reaches
    * `buildMinimalEntity` for this delete at all — `extractDeleteOperationEntityId`'s
    * fallback returns `undefined` for the compound-key `where` shape, and

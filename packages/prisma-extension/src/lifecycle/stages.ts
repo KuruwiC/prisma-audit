@@ -332,11 +332,9 @@ export const createFetchBeforeStateStage = (
       if (beforeStateResult._tag === 'found') {
         beforeState = beforeStateResult.data;
       }
-      // 'notFound' and 'error' both leave beforeState as null; beforeStateResult
-      // preserves the distinction (error already dispatched to onAuditErrorHandler
-      // via fetchBeforeState) for consumers — e.g. buildMainAuditLogs's upsert
-      // handling below — that must not treat a failed fetch as "record does not
-      // exist" and default the action to 'create'.
+      // The fetch failure itself was already dispatched to onAuditErrorHandler by
+      // fetchBeforeState; see the "Fetch failure vs 'not found'" note above for why
+      // beforeStateResult (not beforeState) carries that distinction downstream.
     }
 
     const nestedPreFetchResults = await deps.preFetchNestedRecordsBeforeOperation(

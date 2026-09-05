@@ -122,12 +122,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
   const awaitWriteIf = performance?.awaitWriteIf;
   const samplingIf = performance?.samplingIf;
   const writer = hooks?.writer;
-  // Defaults to 'throw' rather than the 'log' the strategy itself considers lenient: until
-  // writeAuditLogs stopped re-throwing unconditionally (see below), every audit failure
-  // failed the caller's operation regardless of the configured strategy, so 'throw' is the
-  // default that preserves that long-standing effective behavior for callers who never set
-  // this option. Callers who want a failed audit write to no longer fail their own operation
-  // must opt in with 'log' or 'ignore'.
+  // A failed audit write fails the caller's operation unless they opt out with 'log' or 'ignore'.
   const errorHandlerConfig = hooks?.errorHandler ?? 'throw';
 
   const aggregateConfig = createAggregateConfig(aggregateMapping);
@@ -141,11 +136,9 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     writeExecutor,
   );
 
-  // `handleError` is the SOLE decider of whether an audit failure fails the caller's own
-  // operation: it throws (propagating to the caller) or returns normally (letting the
-  // operation succeed) per the configured strategy/custom function. `dispatchAuditError`
-  // below is a separate, structured notification channel (`onAuditErrorHandler`) — it never
-  // influences control flow, so it can be observed without ever changing the outcome.
+  // `handleError` decides whether an audit failure fails the caller's operation: it throws,
+  // or it returns normally. `dispatchAuditError` below is a notification channel only and
+  // never influences control flow.
   const handleError =
     typeof errorHandlerConfig === 'function' ? errorHandlerConfig : createErrorHandler(errorHandlerConfig);
 
@@ -192,16 +185,12 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
    * Writes audit logs via the configured write strategy.
    *
    * @remarks
-   * Whether a write failure here fails the caller's own operation is decided entirely by
-   * `handleError` below (see the `hooks.errorHandler` construction above): it throws to
-   * propagate, or returns normally to let the operation succeed. This function must NOT
-   * re-throw on its own after `handleError` returns — doing so would fail the caller's
-   * operation regardless of the configured strategy, defeating 'log' and 'ignore' entirely.
+   * Only the synchronous strategy (the `awaitWrite: true` default) reaches the `catch` below:
+   * it awaits the write directly and has no error handling of its own. The deferred and
+   * fire-and-forget strategies catch internally and invoke `writeErrorHandler` themselves,
+   * after the write has already been queued or detached.
    *
-   * The synchronous strategy (the `awaitWrite: true` default) awaits the write directly and
-   * has no error handling of its own, so a failure lands in the `catch` below. The deferred
-   * and fire-and-forget strategies catch internally and invoke `writeErrorHandler` themselves
-   * (after the write has already been queued/detached), so they never reach this `catch`.
+   * `handleError` is what decides whether a failure propagates to the caller.
    */
   const writeAuditLogs = async (logs: AuditLogData[], baseClient: PrismaClientWithDynamicAccess): Promise<void> => {
     if (logs.length === 0) {
@@ -241,10 +230,6 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
       const error = caughtError instanceof Error ? caughtError : new Error(String(caughtError));
       const modelName = logs[0]?.entityType ?? 'unknown';
       await dispatchAuditError('log-write', modelName, 'write', logs, error);
-      // `handleError` alone decides the outcome: it throws for 'throw' (or a custom handler
-      // that itself throws), which propagates from here unchanged. For 'log'/'ignore' (or a
-      // custom handler that returns normally) it does not throw, and this function must
-      // resolve normally rather than re-throw the original error.
       await handleError(error, 'audit log write');
     }
   };
@@ -295,13 +280,9 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     action: PrismaAction,
     args: Record<string, unknown>,
   ): Promise<BeforeStateResult> => {
-    // `requiresBeforeState` (utils/operation-classifier.ts) also lists the batch
-    // actions (updateMany/updateManyAndReturn/deleteMany), but this function is
-    // only ever called from the single-record pipeline (createFetchBeforeStateStage,
-    // reached via handleSingleOperation): `$allOperations` routes batch actions to
-    // handleBatchOperation — which captures before-state itself via findMany, not
-    // this findUnique-based path — before handleSingleOperation ever runs. So the
-    // extra actions in the predicate are unreachable here, not a behavior change.
+    // `requiresBeforeState` also lists the batch actions, which cannot reach this
+    // findUnique-based path: `$allOperations` routes them to handleBatchOperation,
+    // which captures their before-state with findMany instead.
     if (!requiresBeforeState(action) || !args.where) {
       return { _tag: 'notFound' };
     }

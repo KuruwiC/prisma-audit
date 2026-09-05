@@ -67,13 +67,13 @@ describe('collectDeleteRecords — composite primary key reconstruction', () => 
   it('reports the unresolved entityId via the provided callback instead of silently dropping it', () => {
     const brokenEntityId = 'not-json';
     const preFetchResults: NestedPreFetchResults = new Map([['items', new Map([[brokenEntityId, { before: null }]])]]);
-    const onUnresolvedEntityId = vi.fn();
+    const onUnresolvedDeleteEntityId = vi.fn();
 
-    const collected = collectDeleteRecords(nestedOp, preFetchResults, pkFields, onUnresolvedEntityId);
+    const collected = collectDeleteRecords(nestedOp, preFetchResults, pkFields, onUnresolvedDeleteEntityId);
 
     expect(collected).toEqual([]);
-    expect(onUnresolvedEntityId).toHaveBeenCalledTimes(1);
-    expect(onUnresolvedEntityId).toHaveBeenCalledWith(
+    expect(onUnresolvedDeleteEntityId).toHaveBeenCalledTimes(1);
+    expect(onUnresolvedDeleteEntityId).toHaveBeenCalledWith(
       expect.objectContaining({
         relatedModel: 'OrderItem',
         entityId: brokenEntityId,

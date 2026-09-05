@@ -64,17 +64,17 @@ export interface UnresolvedDeleteEntityId {
 
 export type UnresolvedDeleteEntityIdReporter = (info: UnresolvedDeleteEntityId) => void;
 
-/** Notify `onUnresolvedEntityId` (if provided) that an entityId could not be resolved. */
+/** Notify `onUnresolvedDeleteEntityId` (if provided) that an entityId could not be resolved. */
 const reportUnresolvedEntityId = (
   relatedModel: string,
   entityId: string,
   pkFields: string[] | undefined,
-  onUnresolvedEntityId: UnresolvedDeleteEntityIdReporter | undefined,
+  onUnresolvedDeleteEntityId: UnresolvedDeleteEntityIdReporter | undefined,
 ): void => {
-  if (!onUnresolvedEntityId) return;
+  if (!onUnresolvedDeleteEntityId) return;
 
   const fields = pkFields ?? ['id'];
-  onUnresolvedEntityId({
+  onUnresolvedDeleteEntityId({
     relatedModel,
     entityId,
     pkFields: fields,
@@ -112,7 +112,7 @@ export type NestedPreFetchResults = Map<string, Map<string, { before: Record<str
  *
  * An entityId that cannot be resolved to a full primary key (see `buildMinimalEntity`)
  * is never recorded as a partial/guessed or empty identity: that record is skipped
- * and, if `onUnresolvedEntityId` is provided, reported through it instead.
+ * and, if `onUnresolvedDeleteEntityId` is provided, reported through it instead.
  *
  * @returns Collected records ready for batch enrichment and audit log building
  */
@@ -120,7 +120,7 @@ export const collectDeleteRecords = (
   nestedOp: NestedOperationInfo,
   nestedPreFetchResults: NestedPreFetchResults | undefined,
   pkFields?: string[],
-  onUnresolvedEntityId?: UnresolvedDeleteEntityIdReporter,
+  onUnresolvedDeleteEntityId?: UnresolvedDeleteEntityIdReporter,
 ): CollectedNestedRecord[] => {
   nestedLog('delete operation detected, collecting targets');
 
@@ -145,7 +145,7 @@ export const collectDeleteRecords = (
           entityId,
           nestedOp.path,
         );
-        reportUnresolvedEntityId(nestedOp.relatedModel, entityId, pkFields, onUnresolvedEntityId);
+        reportUnresolvedEntityId(nestedOp.relatedModel, entityId, pkFields, onUnresolvedDeleteEntityId);
         continue;
       }
 
@@ -178,7 +178,7 @@ export const collectDeleteRecords = (
       entityId,
       nestedOp.path,
     );
-    reportUnresolvedEntityId(nestedOp.relatedModel, entityId, pkFields, onUnresolvedEntityId);
+    reportUnresolvedEntityId(nestedOp.relatedModel, entityId, pkFields, onUnresolvedDeleteEntityId);
     return [];
   }
 
