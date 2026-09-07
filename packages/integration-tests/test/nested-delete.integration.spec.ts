@@ -287,13 +287,18 @@ describe('Nested Delete Operations', () => {
       expect(remainingPosts).toHaveLength(1);
       expect(remainingPosts[0].title).toBe('Published');
 
-      // Verify: Audit logs for deleted posts
+      // Verify: no audit log is fabricated for the deleted posts
       const deleteLogs = await context.prisma.auditLog.findMany({
         where: { entityType: 'Post', action: 'delete' },
       });
 
-      // Nested deleteMany may create audit logs if records can be identified.
-      expect(deleteLogs.length).toBeGreaterThanOrEqual(0);
+      // Nested `deleteMany`'s WHERE (`{ published: false }`) is a `ScalarWhereInput`, not
+      // scoped to this parent's posts, so it is never pre-fetched (see the comment on
+      // `filterOperationsToPreFetch` in `@kuruwic/prisma-audit-core`). With no pre-fetched
+      // before-state and no PK-shaped fallback data on the operation itself, no audit log
+      // entry is produced for the deleted drafts — even though the write itself deleted them
+      // correctly (asserted via `remainingPosts` above).
+      expect(deleteLogs).toHaveLength(0);
     });
   });
 
@@ -523,8 +528,7 @@ describe('Nested Delete Operations', () => {
       expect(finalPublished1).not.toBeNull(); // Still exists
       expect(finalPublished1?.title).toBe('Published 1');
 
-      // Verify: Audit logs should exist for deleted posts (if implementation supports deleteMany)
-      // Note: Current implementation may not fully support deleteMany audit logging
+      // Verify: no audit log is fabricated for any of the posts
       const unpublished1Logs = await context.prisma.auditLog.findMany({
         where: { entityType: 'Post', entityId: unpublished1.id, action: 'delete' },
       });
@@ -535,12 +539,15 @@ describe('Nested Delete Operations', () => {
         where: { entityType: 'Post', entityId: published1.id, action: 'delete' },
       });
 
-      // published1 was NOT deleted, so it must have no delete logs
+      // published1 was never targeted, so it must have no delete logs regardless.
       expect(published1Logs).toHaveLength(0);
-      // unpublished1 and unpublished2 were targeted by deleteMany
-      // Log count depends on whether implementation supports deleteMany audit logging
-      void unpublished1Logs;
-      void unpublished2Logs;
+      // Nested `deleteMany` is never pre-fetched (its WHERE isn't scoped to this parent's
+      // posts — see the comment on `filterOperationsToPreFetch` in
+      // `@kuruwic/prisma-audit-core`). unpublished1 and unpublished2 were genuinely deleted by
+      // this `deleteMany` (asserted via `finalUnpublished1`/`finalUnpublished2` above), but
+      // that deterministically produces zero audit log entries for them.
+      expect(unpublished1Logs).toHaveLength(0);
+      expect(unpublished2Logs).toHaveLength(0);
     });
   });
 

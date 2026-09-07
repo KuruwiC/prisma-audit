@@ -304,13 +304,22 @@ describe('Nested Update Operations', () => {
         });
       });
 
-      // Verify: Audit logs for updated posts
+      // Verify: no audit log is fabricated for the affected posts
       const postLogs = await context.prisma.auditLog.findMany({
         where: { entityType: 'Post', action: 'update' },
       });
 
-      // Without include, nested updateMany relies on pre-fetch to identify the affected posts.
-      expect(postLogs.length).toBeGreaterThanOrEqual(1);
+      // Nested `updateMany`'s WHERE (`{ published: false }`) is a `ScalarWhereInput`, not
+      // scoped to this parent's posts — Prisma applies that scoping internally when it runs
+      // the write, but pre-fetch has no equivalent, so it is never attempted for `updateMany`
+      // (see the comment on `filterOperationsToPreFetch` in `@kuruwic/prisma-audit-core`).
+      // Without `include`, there is no other source of before/after data for the affected
+      // posts, so no audit log entry is produced for them. (This test previously asserted
+      // `toBeGreaterThanOrEqual(1)`: pre-fetch used to run `findFirst({ where: { published:
+      // false } })` against the whole `Post` table and store whichever row it happened to
+      // return as the "before" state — real row data, but not necessarily one of *this*
+      // user's posts. Recording that arbitrary row was worse than recording nothing.)
+      expect(postLogs).toHaveLength(0);
     });
   });
 
@@ -483,8 +492,7 @@ describe('Nested Update Operations', () => {
         });
       });
 
-      // Verify: Only unpublished posts should have audit logs
-      // Note: Current implementation may not fully support updateMany audit logging
+      // Verify: no audit log is fabricated for any of the posts
       const unpublished1Logs = await context.prisma.auditLog.findMany({
         where: { entityType: 'Post', entityId: unpublished1.id, action: 'update' },
       });
@@ -495,17 +503,19 @@ describe('Nested Update Operations', () => {
         where: { entityType: 'Post', entityId: published1.id, action: 'update' },
       });
 
-      // Without include, updateMany may not create audit logs in current implementation
-      // but published1 should definitely NOT have update logs
+      // published1 was never targeted, so it must have no update logs regardless.
       expect(published1Logs).toHaveLength(0);
-      // unpublished1 and unpublished2 were targeted by updateMany
-      // Log count depends on whether implementation supports updateMany audit logging
-      void unpublished1Logs;
-      void unpublished2Logs;
+      // Nested `updateMany` is never pre-fetched (its WHERE isn't scoped to this parent's
+      // posts — see the comment on `filterOperationsToPreFetch` in
+      // `@kuruwic/prisma-audit-core`), and without `include` there is no other source of
+      // before/after data. unpublished1 and unpublished2 were genuinely updated by this
+      // `updateMany` (asserted via `finalUnpublished1`/`finalUnpublished2` below), but that
+      // deterministically produces zero audit log entries for them.
+      expect(unpublished1Logs).toHaveLength(0);
+      expect(unpublished2Logs).toHaveLength(0);
 
-      // Note: Without include, updateMany may not create audit logs in current implementation
-      // This test documents expected behavior for future implementation
-      // For now, we just verify that published1 was NOT updated
+      // Verify: the write itself is unaffected by pre-fetch being skipped — only unpublished
+      // posts were actually updated.
       const finalPublished1 = await context.prisma.post.findUnique({
         where: { id: published1.id },
       });

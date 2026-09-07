@@ -47,11 +47,6 @@ export interface ModelClientWithFindUnique {
   [key: string]: unknown;
 }
 
-export interface ModelClientWithFindFirst {
-  findFirst: (args: { where: Record<string, unknown> }) => Promise<Record<string, unknown> | null>;
-  [key: string]: unknown;
-}
-
 export interface PreFetchOneToOneResult {
   entityId: string;
   beforeRecord: Record<string, unknown> | null;
@@ -192,7 +187,7 @@ export const fetchParentRecordIfNeeded = async (
   effectiveParentWhere: Record<string, unknown>,
   parentWhere: Record<string, unknown>,
   parentModelName: string,
-  prismaClient: Record<string, ModelClientWithFindFirst>,
+  prismaClient: Record<string, ModelClientWithFindUnique>,
 ): Promise<Record<string, unknown> | null> => {
   if (relationToField in effectiveParentWhere) {
     return effectiveParentWhere;
@@ -206,12 +201,14 @@ export const fetchParentRecordIfNeeded = async (
   const parentModelLowerCase = parentModelName.charAt(0).toLowerCase() + parentModelName.slice(1);
   const parentModelClient = prismaClient[parentModelLowerCase];
 
-  if (!parentModelClient || typeof parentModelClient !== 'object' || !('findFirst' in parentModelClient)) {
+  if (!parentModelClient || typeof parentModelClient !== 'object' || !('findUnique' in parentModelClient)) {
     preFetchLog('1:1 parent model client not found for model=%s, skipping', parentModelName);
     return null;
   }
 
-  const parentRecord = await parentModelClient.findFirst({ where: parentWhere });
+  // `parentWhere` is the top-level operation's `where` clause — a `<ParentModel>WhereUniqueInput`
+  // — so `findUnique` accepts it natively, including a composite-key compound-unique shape.
+  const parentRecord = await parentModelClient.findUnique({ where: parentWhere });
 
   preFetchLog('1:1 fetched parent record: %s', parentRecord ? 'found' : 'null');
 
@@ -246,7 +243,7 @@ export interface PreFetchOneToOneRelationInput {
   /** Pre-fetched records (for deeply nested operations) */
   preFetchResults: NestedPreFetchResults;
   /** Full Prisma client to fetch parent records if needed */
-  prismaClient: Record<string, ModelClientWithFindFirst>;
+  prismaClient: Record<string, ModelClientWithFindUnique>;
   pkFields?: string[];
 }
 

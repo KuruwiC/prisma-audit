@@ -191,6 +191,110 @@ describe('Composite Primary Key (PostLike)', () => {
     });
   });
 
+  /**
+   * `connectOrCreate` on `postLikes` (a to-many relation from `Post`) is handled by
+   * `preFetchOneToManyRelation` (`lifecycle/pre-fetch/one-to-many-fetcher.ts`) — the one
+   * pre-fetch site whose composite-key handling was already partially patched before this
+   * unit's `findUnique` rewrite (via `flattenCompoundUniqueWhere`, now deleted). These tests
+   * cover both branches through the public client: the row does not exist yet (create path)
+   * and the row already exists (connect path), both addressed through the compound-unique
+   * WHERE shape `{ postId_userId: { postId, userId } }`.
+   *
+   * The other two sites this unit changed to `findUnique` —
+   * `coordinator.ts`'s `handleConnectOrCreate` and `one-to-one-fetcher.ts`'s
+   * `fetchParentRecordIfNeeded` — only run for a *to-one* relation (a nested `connectOrCreate`
+   * on a singular relation field, or a 1:1 parent whose own `where` needs completing). No
+   * model in this fixture has a to-one relation pointing at a composite-key model — `PostLike`
+   * is only ever the many side (`Post.postLikes: PostLike[]`) — so neither site can be
+   * exercised against a composite key through the public client. Both are still covered
+   * against single-field-PK models by the rest of the integration suite (e.g.
+   * `nested-connect-or-create.integration.spec.ts`'s `Profile` connectOrCreate tests, which go
+   * through `handleConnectOrCreate`).
+   */
+  describe('nested connectOrCreate from Post', () => {
+    it('creates a new composite-key row and records the real composite entityId with action=create', async () => {
+      const { user, post } = await createUserAndPost();
+      await context.prisma.auditLog.deleteMany();
+
+      await context.provider.runAsync(testActor, async () => {
+        await context.prisma.post.update({
+          where: { id: post.id },
+          data: {
+            postLikes: {
+              connectOrCreate: {
+                where: { postId_userId: { postId: post.id, userId: user.id } },
+                // `postId` is implied by the parent `Post` being updated — Prisma's nested
+                // create input for this relation (`PostLikeCreateWithoutPostInput`) omits it.
+                create: { userId: user.id, note: 'connect-or-create-new' },
+              },
+            },
+          },
+          include: { postLikes: true },
+        });
+      });
+
+      const created = await context.prisma.postLike.findUnique({
+        where: { postId_userId: { postId: post.id, userId: user.id } },
+      });
+      expect(created).not.toBeNull();
+      expect(created?.note).toBe('connect-or-create-new');
+
+      const realEntityId = compositeEntityId(post.id, user.id);
+      const createLogs = await context.prisma.auditLog.findMany({
+        where: { entityType: 'PostLike', entityId: realEntityId, action: 'create' },
+        orderBy: { aggregateType: 'asc' },
+      });
+
+      expect(createLogs).toHaveLength(2);
+      const selfLog = createLogs.find((log: { aggregateType: string }) => log.aggregateType === 'PostLike');
+      const postAggregateLog = createLogs.find((log: { aggregateType: string }) => log.aggregateType === 'Post');
+      expect(selfLog).toBeDefined();
+      expect(postAggregateLog?.aggregateId).toBe(post.id);
+      for (const log of createLogs) {
+        expect(log.before).toBeNull();
+        expect(log.after).toMatchObject({ postId: post.id, userId: user.id, note: 'connect-or-create-new' });
+      }
+    });
+
+    it('connects an existing composite-key row via its compound-unique WHERE instead of failing or creating a duplicate', async () => {
+      const { user, post } = await createUserAndPost();
+      await context.provider.runAsync(testActor, async () => {
+        return await context.prisma.postLike.create({
+          data: { postId: post.id, userId: user.id, note: 'already-liked' },
+        });
+      });
+      await context.prisma.auditLog.deleteMany();
+
+      await context.provider.runAsync(testActor, async () => {
+        await context.prisma.post.update({
+          where: { id: post.id },
+          data: {
+            postLikes: {
+              connectOrCreate: {
+                where: { postId_userId: { postId: post.id, userId: user.id } },
+                create: { userId: user.id, note: 'should-not-be-created' },
+              },
+            },
+          },
+          include: { postLikes: true },
+        });
+      });
+
+      // Connect path: the existing row is untouched, no duplicate is created — this requires
+      // pre-fetch to have resolved the compound-unique WHERE via `findUnique` to the real
+      // existing row rather than treating it as not-found.
+      const allLikes = await context.prisma.postLike.findMany({ where: { postId: post.id, userId: user.id } });
+      expect(allLikes).toHaveLength(1);
+      expect(allLikes[0]?.note).toBe('already-liked');
+
+      const realEntityId = compositeEntityId(post.id, user.id);
+      const createLogs = await context.prisma.auditLog.findMany({
+        where: { entityType: 'PostLike', entityId: realEntityId, action: 'create' },
+      });
+      expect(createLogs).toHaveLength(0);
+    });
+  });
+
   describe('unresolvable entityId — public client boundary', () => {
     it('deleting a nested composite-key row that does not exist throws and writes no audit log', async () => {
       // Mirrors nested-delete.integration.spec.ts's "no matching records" case for a

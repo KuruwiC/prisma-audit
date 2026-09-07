@@ -14,6 +14,7 @@ import {
   type PreFetchResults,
   preFetchLog,
   sortByPathDepth,
+  type UniqueConstraint,
 } from '@kuruwic/prisma-audit-core';
 import type {
   PrismaClientWithDynamicAccess,
@@ -22,8 +23,13 @@ import type {
 } from '../../internal-types.js';
 import { getPrimaryKeyFields } from '../../utils/id-generator.js';
 import { createSchemaMetadataFromDMMF } from '../../utils/nested-operations.js';
-import { preFetchOneToManyRelation } from './one-to-many-fetcher.js';
-import { type PreFetchOneToOneRelationInput, preFetchOneToOneRelation } from './one-to-one-fetcher.js';
+import { getUniqueConstraints } from '../../utils/schema-metadata.js';
+import { preFetchOneToManyRelation, unwrapCompoundWhere } from './one-to-many-fetcher.js';
+import {
+  type ModelClientWithFindUnique,
+  type PreFetchOneToOneRelationInput,
+  preFetchOneToOneRelation,
+} from './one-to-one-fetcher.js';
 import {
   extractEntityIdOrDefault,
   type NestedPreFetchResults,
@@ -264,6 +270,23 @@ export const preFetchNestedRecordsBeforeOperation = async (
     }
   };
 
+  // Only needed to unwrap a composite-key `findUnique` WHERE (`{ a_b: { a, b } }`) back into
+  // its scalar fields — `getPrimaryKeyFields` only has the field list, not the DMMF-declared
+  // compound-unique key name (which differs from `fields.join('_')` when `@@id([...], name:
+  // "custom")` is used). `getUniqueConstraints` reads that name straight off the DMMF.
+  const pkNameCache = new Map<string, string | null | undefined>();
+  const resolvePkName = (relatedModel: string): string | null | undefined => {
+    if (pkNameCache.has(relatedModel)) return pkNameCache.get(relatedModel);
+    const primaryKey = getUniqueConstraints(Prisma, relatedModel).find((c) => c.type === 'primaryKey');
+    pkNameCache.set(relatedModel, primaryKey?.name);
+    return primaryKey?.name;
+  };
+  const resolvePkConstraint = (relatedModel: string): UniqueConstraint | undefined => {
+    const fields = resolvePkFields(relatedModel);
+    if (!fields) return undefined;
+    return { type: 'primaryKey', fields, name: fields.length > 1 ? resolvePkName(relatedModel) : undefined };
+  };
+
   for (const nestedOp of sortedOperations) {
     try {
       const relatedModelLowerCase = nestedOp.relatedModel.charAt(0).toLowerCase() + nestedOp.relatedModel.slice(1);
@@ -283,7 +306,7 @@ export const preFetchNestedRecordsBeforeOperation = async (
       }
 
       const { isOneToOne, isOwningSide } = categorizeRelationType(field);
-      const pkFields = resolvePkFields(nestedOp.relatedModel);
+      const pkConstraint = resolvePkConstraint(nestedOp.relatedModel);
 
       preFetchLog(
         'processing field: field=%s operation=%s isOneToOne=%s isOwningSide=%s',
@@ -304,7 +327,7 @@ export const preFetchNestedRecordsBeforeOperation = async (
           dmmf,
           preFetchResults: internalResults,
           prismaClient,
-          pkFields,
+          pkConstraint,
         });
       } else {
         await preFetchOneToManyRelation(
@@ -312,12 +335,9 @@ export const preFetchNestedRecordsBeforeOperation = async (
             ...nestedOp,
             data: nestedOp.data as Record<string, unknown> | Record<string, unknown>[] | undefined,
           },
-          relatedModelClient as {
-            findFirst: (args: { where: Record<string, unknown> }) => Promise<Record<string, unknown> | null>;
-            findMany?: (args: { where: Record<string, unknown> }) => Promise<Record<string, unknown>[]>;
-          },
+          relatedModelClient as ModelClientWithFindUnique,
           internalResults,
-          pkFields,
+          pkConstraint,
         );
       }
     } catch (error) {
@@ -346,14 +366,14 @@ interface HandleOneToOneRelationInput {
   dmmf: PrismaDMMF;
   preFetchResults: NestedPreFetchResults;
   prismaClient: PrismaClientWithDynamicAccess | TransactionalPrismaClient;
-  pkFields?: string[];
+  pkConstraint?: UniqueConstraint;
 }
 
 const handleOneToOneRelation = async (input: HandleOneToOneRelationInput): Promise<void> => {
-  const { nestedOp, relatedModelClient, preFetchResults, pkFields } = input;
+  const { nestedOp, relatedModelClient, preFetchResults, pkConstraint } = input;
 
   if (nestedOp.operation === 'connectOrCreate') {
-    await handleConnectOrCreate(nestedOp, relatedModelClient, preFetchResults, pkFields);
+    await handleConnectOrCreate(nestedOp, relatedModelClient, preFetchResults, pkConstraint);
   } else {
     await handleOtherOneToOneOperations(input);
   }
@@ -363,7 +383,7 @@ const handleConnectOrCreate = async (
   nestedOp: NestedOperation,
   relatedModelClient: unknown,
   preFetchResults: NestedPreFetchResults,
-  pkFields?: string[],
+  pkConstraint?: UniqueConstraint,
 ): Promise<void> => {
   const opData = nestedOp.data as Record<string, unknown> | undefined;
   const whereClause = opData?.where;
@@ -374,19 +394,22 @@ const handleConnectOrCreate = async (
   }
 
   const modelClient = relatedModelClient as {
-    findFirst?: (args: { where: unknown }) => Promise<unknown>;
+    findUnique?: (args: { where: unknown }) => Promise<unknown>;
   };
 
-  if (!modelClient.findFirst) {
-    preFetchLog('connectOrCreate: findFirst not available, skipping');
+  if (!modelClient.findUnique) {
+    preFetchLog('connectOrCreate: findUnique not available, skipping');
     return;
   }
 
-  const beforeRecord = await modelClient.findFirst({ where: whereClause });
+  // `whereClause` is a `<Model>WhereUniqueInput` — `findUnique` accepts it natively, including
+  // a composite-key compound-unique shape.
+  const beforeRecord = await modelClient.findUnique({ where: whereClause });
 
-  let entityId = extractEntityIdOrDefault(beforeRecord, pkFields);
+  let entityId = extractEntityIdOrDefault(beforeRecord, pkConstraint?.fields);
   if (entityId === PRE_FETCH_DEFAULT_KEY) {
-    entityId = extractEntityIdOrDefault(whereClause, pkFields);
+    const unwrapped = unwrapCompoundWhere(whereClause as Record<string, unknown>, pkConstraint);
+    entityId = extractEntityIdOrDefault(unwrapped, pkConstraint?.fields);
   }
 
   storePreFetchResult(preFetchResults, nestedOp.path, entityId, beforeRecord as Record<string, unknown> | null);
@@ -405,7 +428,7 @@ const handleOtherOneToOneOperations = async (input: HandleOneToOneRelationInput)
     dmmf,
     preFetchResults,
     prismaClient,
-    pkFields,
+    pkConstraint,
   } = input;
 
   if (!args.where || typeof args.where !== 'object') {
@@ -428,7 +451,7 @@ const handleOtherOneToOneOperations = async (input: HandleOneToOneRelationInput)
     dmmf,
     preFetchResults,
     prismaClient: prismaClientAsUnknown as PreFetchOneToOneRelationInput['prismaClient'],
-    pkFields,
+    pkFields: pkConstraint?.fields,
   });
 
   if (result) {

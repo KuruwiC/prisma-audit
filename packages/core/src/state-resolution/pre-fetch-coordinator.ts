@@ -17,6 +17,16 @@ export type GetOperationConfig = (modelName: string, operation: string) => Opera
  * Upsert and connectOrCreate always require pre-fetch.
  * Update and delete operations require pre-fetch only if configured.
  *
+ * `updateMany` / `deleteMany` are never pre-fetched. Their WHERE clause is a
+ * `ScalarWhereInput`, not a `WhereUniqueInput`, and it is not scoped to the parent relation
+ * (e.g. a nested `posts: { updateMany: { where: { published: false } } } }` matches every
+ * unpublished post table-wide, not just the parent's). Prisma applies that parent-relation
+ * scoping internally when it executes the write; pre-fetch has no equivalent scoping, so a
+ * `findFirst`/`findMany` here could return a row belonging to a different parent entirely.
+ * Recording that as the "before" state would be worse than recording nothing, so these two
+ * operations are always skipped — implementing this correctly would require threading the
+ * parent's foreign key into the WHERE clause, which this pipeline does not do.
+ *
  * @param operations - Array of detected nested operations
  * @param getConfig - Function to retrieve operation configuration
  * @returns Array of operations that require pre-fetching
@@ -34,12 +44,12 @@ export const filterOperationsToPreFetch = (
       return true;
     }
 
-    if (op.operation === 'update' || op.operation === 'updateMany') {
+    if (op.operation === 'update') {
       const config = getConfig(op.relatedModel, 'update');
       return config.fetchBeforeOperation;
     }
 
-    if (op.operation === 'delete' || op.operation === 'deleteMany') {
+    if (op.operation === 'delete') {
       const config = getConfig(op.relatedModel, 'delete');
       return config.fetchBeforeOperation;
     }

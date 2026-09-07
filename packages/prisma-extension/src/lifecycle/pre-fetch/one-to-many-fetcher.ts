@@ -6,8 +6,10 @@
  * @module lifecycle/pre-fetch/one-to-many-fetcher
  */
 
+import type { UniqueConstraint } from '@kuruwic/prisma-audit-core';
 import { preFetchLog } from '@kuruwic/prisma-audit-core';
 
+import type { ModelClientWithFindUnique } from './one-to-one-fetcher.js';
 import type { NestedPreFetchResults } from './pre-fetch-result-store.js';
 import { extractEntityIdOrDefault, PRE_FETCH_DEFAULT_KEY, storePreFetchResult } from './pre-fetch-result-store.js';
 
@@ -17,12 +19,6 @@ export interface NestedOperation {
   relatedModel: string;
   data: Record<string, unknown> | Record<string, unknown>[] | undefined;
   path: string;
-}
-
-export interface ModelClientWithFindFirst {
-  findFirst: (args: { where: Record<string, unknown> }) => Promise<Record<string, unknown> | null>;
-  findMany?: (args: { where: Record<string, unknown> }) => Promise<Record<string, unknown>[]>;
-  [key: string]: unknown;
 }
 
 /**
@@ -42,7 +38,10 @@ export const extractWhereClause = (
   operation: string,
   singleOpData: Record<string, unknown>,
 ): Record<string, unknown> | undefined => {
-  if (operation === 'upsert' || operation === 'update' || operation === 'updateMany') {
+  // `updateMany`/`deleteMany` never reach this function — `filterOperationsToPreFetch`
+  // (`@kuruwic/prisma-audit-core`) excludes them before pre-fetch runs at all. See the
+  // comment there for why.
+  if (operation === 'upsert' || operation === 'update') {
     return singleOpData.where as Record<string, unknown> | undefined;
   }
 
@@ -50,7 +49,7 @@ export const extractWhereClause = (
     return singleOpData.where as Record<string, unknown> | undefined;
   }
 
-  if (operation === 'delete' || operation === 'deleteMany') {
+  if (operation === 'delete') {
     return singleOpData;
   }
 
@@ -58,12 +57,35 @@ export const extractWhereClause = (
 };
 
 /**
+ * Unwraps Prisma's compound-unique WHERE wrapper (`{ a_b: { a, b } }`) into the flat
+ * scalar record needed to derive an entityId from a WHERE clause.
+ *
+ * `findUnique` requires a composite primary key to be addressed through a single
+ * generated key on `<Model>WhereUniqueInput` — `pkConstraint.name` when the key has an
+ * explicit name (`@@id([a, b], name: "custom")`), or `fields.join('_')` (Prisma's default
+ * naming) otherwise. A single-field PK, or a WHERE clause that isn't wrapped this way, is
+ * returned unchanged.
+ */
+export const unwrapCompoundWhere = (
+  whereClause: Record<string, unknown>,
+  pkConstraint?: UniqueConstraint,
+): Record<string, unknown> => {
+  if (!pkConstraint || pkConstraint.fields.length <= 1) return whereClause;
+
+  const compoundKey = pkConstraint.name ?? pkConstraint.fields.join('_');
+  return (whereClause[compoundKey] as Record<string, unknown> | undefined) ?? whereClause;
+};
+
+/**
  * Extracts entity ID from record or where clause
  *
- * Priority: beforeRecord.id > whereClause.id > PRE_FETCH_DEFAULT_KEY
+ * Priority: beforeRecord's PK fields > whereClause's PK fields (unwrapped from Prisma's
+ * compound-unique shape when `pkConstraint` describes a composite key) > PRE_FETCH_DEFAULT_KEY
  *
  * @param beforeRecord - Fetched record (may be null)
  * @param whereClause - Where clause used for fetch
+ * @param pkConstraint - The related model's primary key (fields + DMMF name), used to
+ *   unwrap a compound-unique WHERE clause before reading its fields
  * @returns Entity ID as string
  *
  * @example
@@ -76,15 +98,16 @@ export const extractWhereClause = (
 export const extractEntityId = (
   beforeRecord: Record<string, unknown> | null,
   whereClause: Record<string, unknown> | null,
-  pkFields?: string[],
+  pkConstraint?: UniqueConstraint,
 ): string => {
   if (beforeRecord) {
-    const id = extractEntityIdOrDefault(beforeRecord, pkFields);
+    const id = extractEntityIdOrDefault(beforeRecord, pkConstraint?.fields);
     if (id !== PRE_FETCH_DEFAULT_KEY) return id;
   }
 
   if (whereClause) {
-    const id = extractEntityIdOrDefault(whereClause, pkFields);
+    const unwrapped = unwrapCompoundWhere(whereClause, pkConstraint);
+    const id = extractEntityIdOrDefault(unwrapped, pkConstraint?.fields);
     if (id !== PRE_FETCH_DEFAULT_KEY) return id;
   }
 
@@ -92,60 +115,22 @@ export const extractEntityId = (
 };
 
 /**
- * Flattens Prisma's compound-unique WHERE wrapper into the individual scalar fields
- * `findFirst` actually accepts.
- *
- * A nested `update`/`upsert`/`delete` targeting a composite primary key (`@@id([a, b])`)
- * can only address the row through Prisma's compound-unique shape
- * `{ a_b: { a: ..., b: ... } }` — that's the only unique identifier Prisma generates for it.
- * But `a_b` is a key of `<Model>WhereUniqueInput`, not `<Model>WhereInput`: `findFirst`'s
- * filter type exposes only the individual scalar fields. Passed straight through, Prisma
- * throws `PrismaClientValidationError: Unknown argument`.
- *
- * `pkFields` (the DMMF-derived primary key field names, in schema declaration order) is
- * enough to reconstruct Prisma's default compound-unique key name (`pkFields.join('_')`) —
- * that's the only PK information available on this call path. A composite key declared with
- * an explicit custom name (`@@id([a, b], name: "custom")`) generates a differently-named
- * compound-unique key that this cannot recognize, because that name isn't threaded through
- * to this function; such a where clause is left untouched here and `findFirst` still fails
- * for it, but the caller now treats that failure as an unresolved identity (dropped and
- * reported) rather than fabricating one — see `buildMinimalEntity` in
- * `lifecycle/nested-handlers/delete-handler.ts`.
- */
-export const flattenCompoundUniqueWhere = (
-  whereClause: Record<string, unknown>,
-  pkFields?: string[],
-): Record<string, unknown> => {
-  if (!pkFields || pkFields.length <= 1) return whereClause;
-
-  const keys = Object.keys(whereClause);
-  const compoundKeyName = pkFields.join('_');
-  if (keys.length !== 1 || keys[0] !== compoundKeyName) return whereClause;
-
-  const compoundValue = whereClause[compoundKeyName];
-  if (!compoundValue || typeof compoundValue !== 'object' || Array.isArray(compoundValue)) return whereClause;
-
-  const compoundRecord = compoundValue as Record<string, unknown>;
-  const hasAllPkFields = pkFields.every((field) => field in compoundRecord);
-  if (!hasAllPkFields) return whereClause;
-
-  return compoundRecord;
-};
-
-// NOTE: deleteMany prefetch using findMany is intentionally NOT implemented here.
-// The where clause in nested deleteMany is not scoped to the parent relation
-// (e.g., { published: false } would match all unpublished posts, not just the parent's).
-// Prisma handles parent scoping internally, but findMany would over-fetch.
-// This requires parent FK scoping infrastructure to implement correctly.
-
-/**
  * Pre-fetches 1:N relation records before operation execution
  *
  * Captures "before" state for one-to-many relations. Handles single and array operations.
  *
+ * `update` / `upsert` / `delete` / `connectOrCreate` WHERE clauses are all
+ * `<Model>WhereUniqueInput` — `findUnique` accepts them natively, including Prisma's
+ * compound-unique shape for composite primary keys (`{ a_b: { a, b } }`, or a custom name
+ * from `@@id([a, b], name: "custom")`), so no runtime WHERE-shape handling is needed here.
+ *
+ * `updateMany` / `deleteMany` never reach this function — see the comment on
+ * `filterOperationsToPreFetch` in `@kuruwic/prisma-audit-core` for why.
+ *
  * @param nestedOp - Nested operation metadata
  * @param relatedModelClient - Prisma client for the related model
  * @param preFetchResults - Nested Map to store fetched results
+ * @param pkConstraint - The related model's primary key (fields + DMMF name)
  *
  * @example
  * ```typescript
@@ -158,9 +143,9 @@ export const flattenCompoundUniqueWhere = (
  */
 export const preFetchOneToManyRelation = async (
   nestedOp: NestedOperation,
-  relatedModelClient: ModelClientWithFindFirst,
+  relatedModelClient: ModelClientWithFindUnique,
   preFetchResults: NestedPreFetchResults,
-  pkFields?: string[],
+  pkConstraint?: UniqueConstraint,
 ): Promise<void> => {
   const opData = nestedOp.data;
 
@@ -189,10 +174,8 @@ export const preFetchOneToManyRelation = async (
 
     preFetchLog('1:N where clause: field=%s where=%O', nestedOp.fieldName, whereClause);
 
-    const findFirstWhere = flattenCompoundUniqueWhere(whereClause, pkFields);
-
-    const beforeRecord = await relatedModelClient.findFirst({ where: findFirstWhere });
-    const entityId = extractEntityId(beforeRecord, findFirstWhere, pkFields);
+    const beforeRecord = await relatedModelClient.findUnique({ where: whereClause });
+    const entityId = extractEntityId(beforeRecord, whereClause, pkConstraint);
 
     storePreFetchResult(preFetchResults, nestedOp.path, entityId, beforeRecord);
 
