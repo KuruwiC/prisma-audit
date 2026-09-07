@@ -6,6 +6,9 @@
  * @module utils
  */
 
+// Caller-mutation error tagging
+export { isCallerMutationError, runCallerMutation } from './caller-mutation-error.js';
+
 // Extension utilities
 export {
   extractDeleteOperationEntityId,

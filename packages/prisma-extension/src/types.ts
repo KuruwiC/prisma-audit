@@ -174,7 +174,7 @@ export type AuditErrorObserver = (context: AuditErrorContext) => void | Promise<
  * receives the same {@link AuditErrorContext} the observer receives and RETURNS one of
  * those three strings — never throws. Returning (instead of throwing) is what keeps
  * conditional failure unambiguous: a policy function that threw would raise the same
- * "which channel actually decides" question this type replaces.
+ * "which channel actually decides" question that a return-only contract avoids.
  *
  * **Only the `log-write` phase is policy-gated** — it is the only failure that happens
  * before the caller's operation has necessarily finished, so it is the only one "fail

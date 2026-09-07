@@ -198,8 +198,7 @@ describe('Error Handling Integration', () => {
     });
 
     it("default (no errorHandling.policy configured) — behaves like 'log', not 'throw'", async () => {
-      // An audit library must not break the caller's write by default — see ErrorPolicy's
-      // JSDoc. This is the behaviour change from the previous default error-handling strategy.
+      // An audit library must not break the caller's write by default — see ErrorPolicy's JSDoc.
       const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       const onError = vi.fn();
       const scenario = createFailingWriterClient(context.databaseUrl, { errorHandling: { onError } });

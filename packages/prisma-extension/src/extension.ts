@@ -69,7 +69,9 @@ import {
   injectDeepInclude,
   isAuditableAction,
   isBatchOperation,
+  isCallerMutationError,
   requiresBeforeState,
+  runCallerMutation,
   shouldAuditModel,
   uncapitalizeFirst,
 } from './utils/index.js';
@@ -90,43 +92,6 @@ interface HandleLimitedUpdateManyInput {
   pkFields: string[];
   whereClause: unknown;
 }
-
-/**
- * Tags an error as coming from the caller's own database mutation (a real `create`,
- * `update`, or `delete` on their data — e.g. a unique constraint violation), as
- * opposed to the audit-support work around it (before-fetch, after-refetch,
- * `runBatchPipeline`, the lifecycle pipeline's enrich/build stages). Both
- * `executeBatch` (below) and `executeAuditedOperation` (the single-operation path,
- * see `lifecycle/operation-handlers/operation-executor.ts`) use this pair to let
- * such an error propagate untouched instead of routing it through the audit
- * observer or policy — see the "Stop reporting the caller's own failure as an
- * audit failure" note on `executeBatch`'s catch.
- *
- * Module-level (not per-`createAuditLogExtension`-call) because the tag carries no
- * per-instance state — one process-wide private symbol is simpler than threading it
- * through every extension instance's closure, and every instance still agrees on
- * the same tag.
- */
-const CALLER_MUTATION_ERROR = Symbol('callerMutationError');
-
-/** See {@link CALLER_MUTATION_ERROR}. */
-export const runCallerMutation = async <T>(fn: () => Promise<T>): Promise<T> => {
-  try {
-    return await fn();
-  } catch (caughtError) {
-    if (caughtError instanceof Error) {
-      (caughtError as Error & { [CALLER_MUTATION_ERROR]?: true })[CALLER_MUTATION_ERROR] = true;
-    }
-    throw caughtError;
-  }
-};
-
-/** See {@link CALLER_MUTATION_ERROR}. */
-export const isCallerMutationError = (error: unknown): boolean => {
-  return (
-    error instanceof Error && (error as Error & { [CALLER_MUTATION_ERROR]?: true })[CALLER_MUTATION_ERROR] === true
-  );
-};
 
 /**
  * Creates the Prisma Client Extension for automatic audit logging

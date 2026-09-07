@@ -13,8 +13,9 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { listTarballs } from './lib/tarballs.mjs';
 
 const PACKAGE_TO_IMPORT = '@kuruwic/prisma-audit';
 const EXPECTED_EXPORT = 'createAuditClient';
@@ -29,10 +30,7 @@ function main() {
   const tarballDir = path.resolve(tarballDirArg);
   const workDir = path.resolve(workDirArg);
 
-  const tarballs = readdirSync(tarballDir)
-    .filter((file) => file.endsWith('.tgz'))
-    .map((file) => path.join(tarballDir, file))
-    .sort();
+  const tarballs = listTarballs(tarballDir);
 
   if (tarballs.length === 0) {
     console.error(`No tarballs found in ${tarballDir}`);

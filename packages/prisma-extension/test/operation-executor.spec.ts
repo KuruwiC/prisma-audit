@@ -5,8 +5,8 @@
  * to onPipelineError, while write errors are handled separately.
  */
 import { describe, expect, it, vi } from 'vitest';
-import { runCallerMutation } from '../src/extension.js';
 import { executeAuditedOperation } from '../src/lifecycle/operation-handlers/operation-executor.js';
+import { runCallerMutation } from '../src/utils/caller-mutation-error.js';
 
 const createMockOperation = () => ({
   model: 'User',

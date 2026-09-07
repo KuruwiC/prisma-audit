@@ -12,8 +12,9 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readdirSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
 import path from 'node:path';
+import { listTarballs } from './lib/tarballs.mjs';
 
 function listWorkspacePackages() {
   const output = execFileSync('pnpm', ['ls', '-r', '--json', '--depth', '-1'], {
@@ -47,10 +48,7 @@ function main() {
     });
   }
 
-  const tarballs = readdirSync(absDestDir)
-    .filter((file) => file.endsWith('.tgz'))
-    .map((file) => path.join(absDestDir, file))
-    .sort();
+  const tarballs = listTarballs(absDestDir);
 
   for (const tarball of tarballs) {
     console.log(tarball);

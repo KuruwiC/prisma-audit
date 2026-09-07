@@ -314,11 +314,7 @@ describe('Nested Update Operations', () => {
       // the write, but pre-fetch has no equivalent, so it is never attempted for `updateMany`
       // (see the comment on `filterOperationsToPreFetch` in `@kuruwic/prisma-audit-core`).
       // Without `include`, there is no other source of before/after data for the affected
-      // posts, so no audit log entry is produced for them. (This test previously asserted
-      // `toBeGreaterThanOrEqual(1)`: pre-fetch used to run `findFirst({ where: { published:
-      // false } })` against the whole `Post` table and store whichever row it happened to
-      // return as the "before" state — real row data, but not necessarily one of *this*
-      // user's posts. Recording that arbitrary row was worse than recording nothing.)
+      // posts, so no audit log entry is produced for them.
       expect(postLogs).toHaveLength(0);
     });
   });

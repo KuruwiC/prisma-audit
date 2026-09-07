@@ -193,14 +193,12 @@ describe('Composite Primary Key (PostLike)', () => {
 
   /**
    * `connectOrCreate` on `postLikes` (a to-many relation from `Post`) is handled by
-   * `preFetchOneToManyRelation` (`lifecycle/pre-fetch/one-to-many-fetcher.ts`) — the one
-   * pre-fetch site whose composite-key handling was already partially patched before this
-   * unit's `findUnique` rewrite (via `flattenCompoundUniqueWhere`, now deleted). These tests
+   * `preFetchOneToManyRelation` (`lifecycle/pre-fetch/one-to-many-fetcher.ts`). These tests
    * cover both branches through the public client: the row does not exist yet (create path)
    * and the row already exists (connect path), both addressed through the compound-unique
    * WHERE shape `{ postId_userId: { postId, userId } }`.
    *
-   * The other two sites this unit changed to `findUnique` —
+   * The other two pre-fetch sites that resolve a WHERE clause via `findUnique` —
    * `coordinator.ts`'s `handleConnectOrCreate` and `one-to-one-fetcher.ts`'s
    * `fetchParentRecordIfNeeded` — only run for a *to-one* relation (a nested `connectOrCreate`
    * on a singular relation field, or a 1:1 parent whose own `where` needs completing). No

@@ -8,9 +8,9 @@
  */
 
 import type { AuditContext } from '@kuruwic/prisma-audit-core';
-import { isCallerMutationError, runCallerMutation } from '../../extension.js';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../internal-types.js';
 import type { AuditLogData, OperationContext } from '../../types.js';
+import { isCallerMutationError, runCallerMutation } from '../../utils/caller-mutation-error.js';
 import { getPrisma, type PrismaWithDMMF } from '../../utils/schema-metadata.js';
 import { runLifecyclePipeline } from '../pipeline.js';
 import type { FinalContext, InitialContext } from '../types.js';

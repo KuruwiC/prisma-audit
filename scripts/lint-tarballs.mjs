@@ -13,8 +13,8 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { readdirSync } from 'node:fs';
 import path from 'node:path';
+import { listTarballs } from './lib/tarballs.mjs';
 
 const PUBLINT_VERSION = '0.3.24';
 const ATTW_VERSION = '0.18.5';
@@ -27,10 +27,7 @@ function main() {
   }
 
   const tarballDir = path.resolve(tarballDirArg);
-  const tarballs = readdirSync(tarballDir)
-    .filter((file) => file.endsWith('.tgz'))
-    .map((file) => path.join(tarballDir, file))
-    .sort();
+  const tarballs = listTarballs(tarballDir);
 
   if (tarballs.length === 0) {
     console.error(`No tarballs found in ${tarballDir}`);
