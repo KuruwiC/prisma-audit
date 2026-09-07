@@ -1,0 +1,17 @@
+{
+  "$schema": "https://unpkg.com/@changesets/config@4.0.0/schema.json",
+  "changelog": "@changesets/cli/changelog",
+  "commit": false,
+  "fixed": [["@kuruwic/prisma-audit-core", "@kuruwic/prisma-audit"]],
+  "linked": [],
+  "access": "public",
+  "baseBranch": "main",
+  "updateInternalDependencies": "patch",
+  "ignore": [
+    "@kuruwic/prisma-audit-database",
+    "@kuruwic/prisma-audit-integration-tests",
+    "@kuruwic/prisma-audit-typescript-config",
+    "@kuruwic/prisma-audit-examples/hono-api",
+    "@kuruwic/prisma-audit-examples/web-client"
+  ]
+}

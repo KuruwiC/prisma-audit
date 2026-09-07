@@ -38,7 +38,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 22
           cache: 'pnpm'
 
       - name: Install dependencies
@@ -59,10 +59,11 @@ jobs:
           NODE_ENV: test
         run: pnpm test
 
-      - name: Pack packages
-        run: |
-          mkdir -p dist-packages
-          pnpm --filter @kuruwic/prisma-audit pack --pack-destination ${{ github.workspace }}/dist-packages
+      - name: Pack publishable packages
+        run: node scripts/pack-publishable.mjs ${{ github.workspace }}/dist-packages
+
+      - name: List packed tarballs
+        run: ls -la ${{ github.workspace }}/dist-packages
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
@@ -71,3 +72,15 @@ jobs:
           generate_release_notes: true
           draft: false
           prerelease: false
+          body: |
+            **Installation**
+
+            This release attaches one tarball per publishable package. `@kuruwic/prisma-audit` depends on
+            `@kuruwic/prisma-audit-core`, so install every attached tarball together, e.g.:
+
+            ```sh
+            npm install ./kuruwic-prisma-audit-core-<version>.tgz ./kuruwic-prisma-audit-<version>.tgz
+            ```
+
+            Installing only the `@kuruwic/prisma-audit` tarball will fail to resolve its
+            `@kuruwic/prisma-audit-core` dependency.

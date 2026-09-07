@@ -1,6 +1,7 @@
 {
   "name": "@kuruwic/prisma-audit-database",
   "version": "0.1.0",
+  "private": true,
   "type": "module",
   "description": "Shared Prisma database schema and client for prisma-audit monorepo",
   "license": "MIT",
@@ -31,9 +32,6 @@
     "LICENSE",
     "README.md"
   ],
-  "publishConfig": {
-    "access": "public"
-  },
   "scripts": {
     "build": "tsup && tsc",
     "dev": "tsup --watch",

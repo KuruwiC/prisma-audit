@@ -58,7 +58,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@kuruwic/prisma-audit-core": "workspace:*",
+    "@kuruwic/prisma-audit-core": "workspace:^",
     "debug": "^4.4.0"
   },
   "devDependencies": {
