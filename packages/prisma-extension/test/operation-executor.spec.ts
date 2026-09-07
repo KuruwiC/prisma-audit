@@ -5,6 +5,7 @@
  * to onPipelineError, while write errors are handled separately.
  */
 import { describe, expect, it, vi } from 'vitest';
+import { runCallerMutation } from '../src/extension.js';
 import { executeAuditedOperation } from '../src/lifecycle/operation-handlers/operation-executor.js';
 
 const createMockOperation = () => ({
@@ -127,5 +128,36 @@ describe('executeAuditedOperation phase-aware error dispatch', () => {
     await expect(
       executeAuditedOperation(createMockOperation(), createMockContext() as never, createMockClient() as never, deps),
     ).rejects.toThrow('stage failed');
+  });
+
+  it('should propagate a caller-mutation error untouched, without calling onPipelineError', async () => {
+    // Simulates the real execute-operation stage: it runs the caller's own mutation
+    // through `runCallerMutation`, tagging whatever it throws (e.g. a unique constraint
+    // violation) as the caller's own failure rather than an audit-stage failure.
+    const callerError = new Error('Unique constraint failed on the fields: (`email`)');
+    const failingStage = vi.fn().mockImplementation(async () => {
+      return runCallerMutation(async () => {
+        throw callerError;
+      });
+    });
+    const onPipelineError = vi.fn();
+
+    const deps = {
+      lifecycleStages: [failingStage],
+      writeAuditLogs: vi.fn(),
+      basePrisma: {} as never,
+      onPipelineError,
+    };
+
+    const resultPromise = executeAuditedOperation(
+      createMockOperation(),
+      createMockContext() as never,
+      createMockClient() as never,
+      deps,
+    );
+
+    // Not wrapped, not a different object, message unchanged — the exact error Prisma threw.
+    await expect(resultPromise).rejects.toBe(callerError);
+    expect(onPipelineError).not.toHaveBeenCalled();
   });
 });

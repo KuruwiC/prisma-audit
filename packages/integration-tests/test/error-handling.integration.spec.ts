@@ -474,6 +474,63 @@ describe('Error Handling Integration', () => {
         await basePrisma.$disconnect();
       }
     });
+
+    it('a single-record create unique constraint violation propagates raw, without reaching the audit observer or policy', async () => {
+      // `executeAuditedOperation` (operation-executor.ts) runs the caller's own `create`
+      // inside the lifecycle pipeline's execute-operation stage, alongside audit-support
+      // work (fetch-before-state, enrich, build). Only the audit-support work is an audit
+      // failure — the caller's own database error (a unique constraint violation here) must
+      // never reach `onError` or `policy`, and its message must reach the caller exactly as
+      // Prisma threw it, not rewritten as `[@prisma-audit] Audited operation failed for
+      // model ...`. Uses a normal (non-failing) writer so the only failure in play is the
+      // caller's own.
+      const basePrisma = new PrismaClient({ datasources: { db: { url: context.databaseUrl } } });
+      const provider = createAsyncLocalStorageProvider();
+      const onError = vi.fn();
+      const policy = vi.fn((_context: AuditErrorContext) => 'ignore' as const);
+      const prisma = createAuditClient(basePrisma, {
+        Prisma,
+        provider,
+        basePrisma,
+        aggregateMapping: testAggregateMapping,
+        performance: { awaitWrite: true },
+        errorHandling: { policy, onError },
+      });
+
+      try {
+        const email = 'single-collision@example.com';
+        await provider.runAsync(testActor, async () =>
+          prisma.user.create({
+            data: { email, name: 'First User', password: 'secret123' },
+          }),
+        );
+        // The setup create above must not itself trip the observer/policy.
+        onError.mockClear();
+        policy.mockClear();
+
+        const duplicateCreate = provider.runAsync(testActor, async () =>
+          prisma.user.create({
+            data: { email, name: 'Duplicate User', password: 'secret456' },
+          }),
+        );
+
+        await expect(duplicateCreate).rejects.toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
+        await expect(duplicateCreate).rejects.toMatchObject({
+          code: 'P2002',
+          message: expect.not.stringContaining('[@prisma-audit]'),
+        });
+
+        const users = await context.basePrisma.user.findMany({ where: { email } });
+        expect(users).toHaveLength(1);
+        expect(users[0]?.name).toBe('First User');
+
+        expect(onError).not.toHaveBeenCalled();
+        expect(policy).not.toHaveBeenCalled();
+      } finally {
+        await prisma.$disconnect();
+        await basePrisma.$disconnect();
+      }
+    });
   });
 
   describe('Transaction rollback', () => {

@@ -8,6 +8,7 @@
  */
 
 import type { AuditContext } from '@kuruwic/prisma-audit-core';
+import { isCallerMutationError, runCallerMutation } from '../../extension.js';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../internal-types.js';
 import type { AuditLogData, OperationContext } from '../../types.js';
 import { getPrisma, type PrismaWithDMMF } from '../../utils/schema-metadata.js';
@@ -53,7 +54,9 @@ export const executeAuditedOperation = async (
       throw new Error(`Model "${operation.model}" or action "${action}" not found`);
     }
 
-    return (modelDelegate[action] as (args: unknown) => Promise<unknown>)(args);
+    // This is the caller's own database mutation, not audit-support work — tag any
+    // failure so the catch below can tell it apart from a fetch/enrich/build failure.
+    return runCallerMutation(() => (modelDelegate[action] as (args: unknown) => Promise<unknown>)(args));
   };
 
   const initialContext: InitialContext = {
@@ -71,11 +74,25 @@ export const executeAuditedOperation = async (
     );
   } catch (caughtError) {
     const error = caughtError instanceof Error ? caughtError : new Error(String(caughtError));
+
+    if (isCallerMutationError(error)) {
+      // The caller's own database operation failed on its own terms (e.g. a unique
+      // constraint violation) — not an audit failure. Propagate it untouched: not
+      // reported to the observer, not passed through the policy, message unchanged.
+      throw error;
+    }
+
     if (deps.onPipelineError) {
       await deps.onPipelineError(error);
     }
-    error.message = `[@prisma-audit] Audited operation failed for model "${operation.model}" and action "${operation.action}": ${error.message}`;
-    throw error;
+
+    // A genuine audit-stage failure (fetch-before-state / enrich / build). Keep the
+    // original error as `cause` instead of mutating its `message` in place, since the
+    // caller may hold their own reference to that same error object.
+    throw new Error(
+      `[@prisma-audit] Audited operation failed for model "${operation.model}" and action "${operation.action}": ${error.message}`,
+      { cause: error },
+    );
   }
 
   let prismaNamespace: PrismaWithDMMF | undefined;

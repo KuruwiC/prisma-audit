@@ -26,7 +26,7 @@ const testAggregateMapping: AggregateMapping = {
 };
 
 /** Create audit client with audit log write counter using hooks.writer */
-const createAuditedClientWithQueryCounter = (
+const createAuditedClientWithAuditLogWriteCounter = (
   basePrisma: PrismaClient,
   provider: AuditContextProvider,
   auditLogWriteCount: { value: number },
@@ -96,7 +96,7 @@ const createAuditedClientWithRefetchFallback = (
 };
 
 describe('Performance Benchmarks', () => {
-  let context: TestContext & { queryCount: { value: number } };
+  let context: TestContext & { auditLogWriteCount: { value: number } };
 
   beforeAll(async () => {
     const databaseUrl = inject('databaseUrl');
@@ -106,16 +106,16 @@ describe('Performance Benchmarks', () => {
     });
 
     const provider = createAsyncLocalStorageProvider();
-    const queryCount = { value: 0 };
+    const auditLogWriteCount = { value: 0 };
 
-    const prisma = createAuditedClientWithQueryCounter(basePrisma, provider, queryCount);
+    const prisma = createAuditedClientWithAuditLogWriteCounter(basePrisma, provider, auditLogWriteCount);
 
     context = {
       prisma,
       basePrisma,
       provider,
       databaseUrl,
-      queryCount,
+      auditLogWriteCount,
     };
   });
 
@@ -128,9 +128,9 @@ describe('Performance Benchmarks', () => {
   });
 
   beforeEach(async () => {
-    context.queryCount.value = 0;
+    context.auditLogWriteCount.value = 0;
     await cleanDatabase(context.prisma);
-    context.queryCount.value = 0;
+    context.auditLogWriteCount.value = 0;
   });
 
   const testActor: AuditContext = {
@@ -143,7 +143,7 @@ describe('Performance Benchmarks', () => {
   };
 
   describe('Baseline Performance', () => {
-    it('should execute N queries for N nested creates', async () => {
+    it('should write N audit log rows for N nested creates', async () => {
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.user.create({
           data: {
@@ -162,14 +162,14 @@ describe('Performance Benchmarks', () => {
         });
       });
 
-      console.log(`Nested create: ${context.queryCount.value} audit logs`);
-      expect(context.queryCount.value).toBeGreaterThan(0);
-      expect(context.queryCount.value).toBe(7);
+      console.log(`Nested create: ${context.auditLogWriteCount.value} audit logs`);
+      expect(context.auditLogWriteCount.value).toBeGreaterThan(0);
+      expect(context.auditLogWriteCount.value).toBe(7);
     });
   });
 
   describe('fetchBeforeOperation: false', () => {
-    it('should minimize queries for nested update without pre-fetch', async () => {
+    it('should minimize audit log writes for nested update without pre-fetch', async () => {
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -188,7 +188,7 @@ describe('Performance Benchmarks', () => {
         });
       });
 
-      context.queryCount.value = 0;
+      context.auditLogWriteCount.value = 0;
 
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.user.update({
@@ -205,12 +205,12 @@ describe('Performance Benchmarks', () => {
         });
       });
 
-      console.log(`Nested update (no pre-fetch): ${context.queryCount.value} audit logs`);
-      expect(context.queryCount.value).toBeGreaterThan(0);
-      expect(context.queryCount.value).toBe(7);
+      console.log(`Nested update (no pre-fetch): ${context.auditLogWriteCount.value} audit logs`);
+      expect(context.auditLogWriteCount.value).toBeGreaterThan(0);
+      expect(context.auditLogWriteCount.value).toBe(7);
     });
 
-    it('should minimize queries for nested delete without pre-fetch', async () => {
+    it('should minimize audit log writes for nested delete without pre-fetch', async () => {
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -229,7 +229,7 @@ describe('Performance Benchmarks', () => {
         });
       });
 
-      context.queryCount.value = 0;
+      context.auditLogWriteCount.value = 0;
 
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.user.update({
@@ -243,9 +243,9 @@ describe('Performance Benchmarks', () => {
         });
       });
 
-      console.log(`Nested delete (no pre-fetch): ${context.queryCount.value} audit logs`);
-      expect(context.queryCount.value).toBeGreaterThan(0);
-      expect(context.queryCount.value).toBe(1);
+      console.log(`Nested delete (no pre-fetch): ${context.auditLogWriteCount.value} audit logs`);
+      expect(context.auditLogWriteCount.value).toBeGreaterThan(0);
+      expect(context.auditLogWriteCount.value).toBe(1);
     });
   });
 
@@ -255,7 +255,7 @@ describe('Performance Benchmarks', () => {
       const results: { count: number; auditLogs: number }[] = [];
 
       for (const count of counts) {
-        context.queryCount.value = 0;
+        context.auditLogWriteCount.value = 0;
 
         await context.provider.runAsync(testActor, async () => {
           await context.prisma.user.create({
@@ -274,9 +274,9 @@ describe('Performance Benchmarks', () => {
           });
         });
 
-        results.push({ count, auditLogs: context.queryCount.value });
+        results.push({ count, auditLogs: context.auditLogWriteCount.value });
         console.log(
-          `${count} nested creates: ${context.queryCount.value} audit logs (1 user + ${count} posts + ${count} aggregate logs)`,
+          `${count} nested creates: ${context.auditLogWriteCount.value} audit logs (1 user + ${count} posts + ${count} aggregate logs)`,
         );
       }
 
@@ -308,7 +308,7 @@ describe('Performance Benchmarks', () => {
         });
       });
 
-      context.queryCount.value = 0;
+      context.auditLogWriteCount.value = 0;
 
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.user.update({
@@ -325,9 +325,9 @@ describe('Performance Benchmarks', () => {
         });
       });
 
-      console.log(`updateMany (20 posts): ${context.queryCount.value} audit logs`);
-      expect(context.queryCount.value).toBeGreaterThan(0);
-      expect(context.queryCount.value).toBe(41);
+      console.log(`updateMany (20 posts): ${context.auditLogWriteCount.value} audit logs`);
+      expect(context.auditLogWriteCount.value).toBeGreaterThan(0);
+      expect(context.auditLogWriteCount.value).toBe(41);
     });
   });
 
@@ -347,7 +347,7 @@ describe('Performance Benchmarks', () => {
         });
       });
 
-      context.queryCount.value = 0;
+      context.auditLogWriteCount.value = 0;
 
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.user.update({
@@ -361,10 +361,10 @@ describe('Performance Benchmarks', () => {
         });
       });
 
-      const auditLogsNoTx = context.queryCount.value;
+      const auditLogsNoTx = context.auditLogWriteCount.value;
       console.log(`Without transaction: ${auditLogsNoTx} audit logs`);
 
-      context.queryCount.value = 0;
+      context.auditLogWriteCount.value = 0;
 
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.$transaction(async (tx: typeof context.prisma) => {
@@ -380,7 +380,7 @@ describe('Performance Benchmarks', () => {
         });
       });
 
-      const auditLogsWithTx = context.queryCount.value;
+      const auditLogsWithTx = context.auditLogWriteCount.value;
       console.log(`With transaction: ${auditLogsWithTx} audit logs`);
 
       expect(auditLogsNoTx).toBeGreaterThan(0);
@@ -401,7 +401,7 @@ describe('Performance Benchmarks', () => {
         });
       });
 
-      context.queryCount.value = 0;
+      context.auditLogWriteCount.value = 0;
 
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.user.update({
@@ -415,13 +415,13 @@ describe('Performance Benchmarks', () => {
         });
       });
 
-      const auditLogsCreate = context.queryCount.value;
+      const auditLogsCreate = context.auditLogWriteCount.value;
       console.log(`Create with include: ${auditLogsCreate} audit logs`);
 
       const post = await context.prisma.post.findFirst({ where: { authorId: user.id } });
       if (!post) throw new Error('Post not found');
 
-      context.queryCount.value = 0;
+      context.auditLogWriteCount.value = 0;
 
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.user.update({
@@ -435,7 +435,7 @@ describe('Performance Benchmarks', () => {
         });
       });
 
-      const auditLogsUpdate = context.queryCount.value;
+      const auditLogsUpdate = context.auditLogWriteCount.value;
       console.log(`Update without pre-fetch: ${auditLogsUpdate} audit logs`);
 
       expect(auditLogsCreate).toBeGreaterThan(0);
@@ -447,7 +447,7 @@ describe('Performance Benchmarks', () => {
 });
 
 describe('Refetch Fallback Mechanism', () => {
-  let context: TestContext & { queryCount: { value: number } };
+  let context: TestContext & { auditLogWriteCount: { value: number } };
 
   beforeAll(async () => {
     const databaseUrl = inject('databaseUrl');
@@ -459,15 +459,15 @@ describe('Refetch Fallback Mechanism', () => {
     await basePrisma.$connect();
 
     const provider = createAsyncLocalStorageProvider();
-    const queryCount = { value: 0 };
+    const auditLogWriteCount = { value: 0 };
 
-    const prisma = createAuditedClientWithRefetchFallback(basePrisma, provider, queryCount);
+    const prisma = createAuditedClientWithRefetchFallback(basePrisma, provider, auditLogWriteCount);
 
     context = {
       prisma,
       basePrisma,
       provider,
-      queryCount,
+      auditLogWriteCount,
       databaseUrl,
     };
   });
@@ -480,7 +480,7 @@ describe('Refetch Fallback Mechanism', () => {
 
   beforeEach(async () => {
     await cleanDatabase(context.prisma);
-    context.queryCount.value = 0;
+    context.auditLogWriteCount.value = 0;
   });
 
   const testActor: AuditContext = {
@@ -510,7 +510,7 @@ describe('Refetch Fallback Mechanism', () => {
 
       const postId = user.posts[0].id;
 
-      context.queryCount.value = 0;
+      context.auditLogWriteCount.value = 0;
 
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.user.update({
@@ -523,7 +523,7 @@ describe('Refetch Fallback Mechanism', () => {
         });
       });
 
-      const auditLogsWithRefetch = context.queryCount.value;
+      const auditLogsWithRefetch = context.auditLogWriteCount.value;
       console.log(`Update without include (refetch fallback): ${auditLogsWithRefetch} audit logs`);
 
       expect(auditLogsWithRefetch).toBeGreaterThan(0);
@@ -561,7 +561,7 @@ describe('Refetch Fallback Mechanism', () => {
 
       const postId = user.posts[0].id;
 
-      context.queryCount.value = 0;
+      context.auditLogWriteCount.value = 0;
 
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.user.update({
@@ -575,7 +575,7 @@ describe('Refetch Fallback Mechanism', () => {
         });
       });
 
-      const auditLogsWithInclude = context.queryCount.value;
+      const auditLogsWithInclude = context.auditLogWriteCount.value;
       console.log(`Update with include (no refetch): ${auditLogsWithInclude} audit logs`);
 
       expect(auditLogsWithInclude).toBe(3);
