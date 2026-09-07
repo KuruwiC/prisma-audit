@@ -18,7 +18,7 @@
  * the JS-level `findUnique` method, so it is unaffected.
  */
 
-import type { PrismaAuditExtensionOptions } from '@kuruwic/prisma-audit';
+import type { AuditErrorObserver } from '@kuruwic/prisma-audit';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import type { AuditContext } from '@kuruwic/prisma-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/prisma-audit-core';
@@ -32,8 +32,6 @@ const testActor: AuditContext = {
 
 const FAILURE_MESSAGE = 'simulated before-state fetch failure';
 
-type OnAuditErrorHandler = NonNullable<PrismaAuditExtensionOptions['onAuditErrorHandler']>;
-
 describe('upsert — before-state fetch failure', () => {
   let shared: SharedTestContext;
 
@@ -41,7 +39,7 @@ describe('upsert — before-state fetch failure', () => {
     shared = await getSharedTestContext();
   });
 
-  const createClient = (databaseUrl: string, onAuditErrorHandler: OnAuditErrorHandler) => {
+  const createClient = (databaseUrl: string, onError: AuditErrorObserver) => {
     const rawBasePrisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
 
     // One-shot fault: the next `post.findUnique` call throws, everything else
@@ -74,17 +72,17 @@ describe('upsert — before-state fetch failure', () => {
       aggregateMapping: testAggregateMapping,
       diffing: { excludeFields: ['createdAt'] },
       security: { redact: { fields: [] } },
-      onAuditErrorHandler,
+      errorHandling: { onError },
     });
     return { basePrisma, rawBasePrisma, provider, prisma, armFindUniqueFailure };
   };
 
   let scenario: ReturnType<typeof createClient>;
-  let onAuditErrorHandler: ReturnType<typeof vi.fn<OnAuditErrorHandler>>;
+  let onError: ReturnType<typeof vi.fn<AuditErrorObserver>>;
 
   beforeEach(async () => {
-    onAuditErrorHandler = vi.fn<OnAuditErrorHandler>();
-    scenario = createClient(shared.databaseUrl, onAuditErrorHandler);
+    onError = vi.fn<AuditErrorObserver>();
+    scenario = createClient(shared.databaseUrl, onError);
     await scenario.basePrisma.auditLog.deleteMany();
     await scenario.basePrisma.post.deleteMany();
     await scenario.basePrisma.user.deleteMany();
@@ -123,8 +121,8 @@ describe('upsert — before-state fetch failure', () => {
     const rowCount = await basePrisma.post.count({ where: { authorId: user.id } });
     expect(rowCount).toBe(1);
 
-    // The failure was reported through the existing read-only notification channel.
-    expect(onAuditErrorHandler).toHaveBeenCalledWith(
+    // The failure was reported through the read-only observer.
+    expect(onError).toHaveBeenCalledWith(
       expect.objectContaining({
         phase: 'pre-fetch',
         modelName: 'Post',

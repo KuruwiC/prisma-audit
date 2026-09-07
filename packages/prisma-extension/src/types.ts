@@ -12,6 +12,7 @@ import type {
   AuditContextProvider,
   AuditLogData as CoreAuditLogData,
   WriteFn as CoreWriteFn,
+  ErrorStrategy,
   GlobalContextEnricherConfig,
 } from '@kuruwic/prisma-audit-core';
 
@@ -108,20 +109,6 @@ export type EnrichmentResolver<TEntity = unknown, TPrisma = unknown> = (
 export interface HooksConfig {
   /** Custom audit log writer */
   writer?: AuditLogWriter;
-  /**
-   * Error handler for audit log failures.
-   *
-   * This is the ONLY thing that decides whether a failed audit-log write also fails the
-   * caller's own database operation — {@link OnAuditErrorHandler} is a separate, read-only
-   * notification channel and never affects that outcome.
-   *
-   * A strategy string (`'throw'` re-throws and fails the operation, `'log'` logs to the
-   * console and lets the operation succeed, `'ignore'` does neither) or a custom function —
-   * whose own throw (fails the operation) or normal return (lets it succeed) decides instead.
-   *
-   * @default 'throw'
-   */
-  errorHandler?: import('@kuruwic/prisma-audit-core').ErrorHandler | import('@kuruwic/prisma-audit-core').ErrorStrategy;
 }
 
 /**
@@ -135,20 +122,91 @@ export interface NestedOperationsConfig {
 }
 
 /**
- * Audit error handler callback
+ * The stage of the audit pipeline a failure occurred in. Each value carries a different
+ * consequence for the reader of the audit trail:
  *
- * A structured, read-only notification channel invoked for every audit failure phase
- * (`pre-fetch`, `log-write`, `diff-generation`) — for observability (logging, monitoring,
- * alerting). It never decides whether the caller's own database operation fails; that is
- * controlled exclusively by {@link HooksConfig.errorHandler}.
+ * - `pre-fetch`: fetching the before-state (for update / delete / upsert) failed. The
+ *   caller's operation continues; the audit log records the before-state as unknown
+ *   rather than guessing.
+ * - `log-write`: persisting the audit log entry itself failed. This is the only phase
+ *   {@link ErrorHandlingConfig.policy} decides the outcome of — see there for exactly
+ *   what "decides" means once the write is queued or detached.
+ * - `diff-generation`: building the audit log entry (enrichment, aggregate resolution,
+ *   redaction, batch pipeline) failed, after the underlying operation already ran.
+ * - `entity-id-resolution`: a nested delete's primary key could not be reconstructed
+ *   from the fetched or serialized entityId. That record's audit log entry is skipped
+ *   rather than recorded with a partial or fabricated identity.
  */
-export type OnAuditErrorHandler = (context: {
-  phase: 'pre-fetch' | 'log-write' | 'diff-generation';
+export type AuditErrorPhase = 'pre-fetch' | 'log-write' | 'diff-generation' | 'entity-id-resolution';
+
+/**
+ * Structured context describing a single audit-pipeline failure. Passed to both
+ * {@link ErrorHandlingConfig.onError} (the observer) and, when
+ * {@link ErrorHandlingConfig.policy} is a function, to the policy resolver — the same
+ * shape either way, so a handler that forwards failures to Sentry or similar does not
+ * need to know which of the two invoked it.
+ */
+export interface AuditErrorContext {
+  phase: AuditErrorPhase;
   modelName: string;
   operation: string;
   params: unknown;
   error: Error;
-}) => void | Promise<void>;
+}
+
+/**
+ * Observer notified of every audit-pipeline failure — for logging, monitoring, or
+ * alerting (e.g. reporting to Sentry).
+ *
+ * Read-only: it NEVER affects whether the caller's own database operation succeeds or
+ * fails. It always runs inside a try/catch; a handler that throws (synchronously or by
+ * returning a rejected promise) has that failure logged to the console and otherwise
+ * ignored. Use {@link ErrorHandlingConfig.policy} to control the caller's operation.
+ */
+export type AuditErrorObserver = (context: AuditErrorContext) => void | Promise<void>;
+
+/**
+ * Decides whether a failed audit-log write also fails the caller's own database
+ * operation.
+ *
+ * A strategy string (`'throw'` re-throws and fails the operation, `'log'` logs to the
+ * console and lets the operation succeed, `'ignore'` does neither), or a function that
+ * receives the same {@link AuditErrorContext} the observer receives and RETURNS one of
+ * those three strings — never throws. Returning (instead of throwing) is what keeps
+ * conditional failure unambiguous: a policy function that threw would raise the same
+ * "which channel actually decides" question this type replaces.
+ *
+ * **Only the `log-write` phase is policy-gated** — it is the only failure that happens
+ * before the caller's operation has necessarily finished, so it is the only one "fail
+ * the operation" can meaningfully apply to.
+ *
+ * **`awaitWrite: false` (deferred / fire-and-forget writes):** once the audit-log write
+ * has been queued (inside a transaction) or detached (outside one), the caller has
+ * already received its result — there is nothing left to fail. `'throw'` fails the
+ * caller only while the caller is still waiting on the write (the `awaitWrite: true`
+ * default); once the write has been queued or detached, `'throw'` logs instead, exactly
+ * like `'log'`.
+ */
+export type ErrorPolicy = ErrorStrategy | ((context: AuditErrorContext) => ErrorStrategy | Promise<ErrorStrategy>);
+
+/**
+ * Audit-failure observation and policy configuration.
+ *
+ * Kept separate from {@link HooksConfig} because `hooks` replaces behaviour (the
+ * writer), while this section only observes failures and decides one thing — whether
+ * the caller's write fails alongside them.
+ */
+export interface ErrorHandlingConfig {
+  /** Observer notified of every audit-pipeline failure. See {@link AuditErrorObserver}. */
+  onError?: AuditErrorObserver;
+  /**
+   * Decides whether a failed audit-log write fails the caller's operation.
+   * See {@link ErrorPolicy}.
+   *
+   * @default 'log'
+   */
+  policy?: ErrorPolicy;
+}
 
 /**
  * Prisma Extension configuration options
@@ -197,7 +255,8 @@ export interface PrismaAuditExtensionOptions {
   hooks?: HooksConfig;
   contextEnricher?: GlobalContextEnricherConfig;
   nestedOperations?: NestedOperationsConfig;
-  onAuditErrorHandler?: OnAuditErrorHandler;
+  /** Audit-failure observation and policy. See {@link ErrorHandlingConfig}. */
+  errorHandling?: ErrorHandlingConfig;
   /** Custom serialization for non-JSON-safe types (BigInt, Date are handled by default) */
   serialization?: import('@kuruwic/prisma-audit-core').SerializationConfig;
 }

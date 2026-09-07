@@ -50,7 +50,14 @@ import {
 import { createTransactionProxy } from './lifecycle/transaction-proxy.js';
 import { withOptionalTransaction } from './lifecycle/transaction-wrapper.js';
 import type { BatchFinalContext, BatchInitialContext, BeforeStateResult } from './lifecycle/types.js';
-import type { AuditLogData, OperationContext, PrismaAction, PrismaAuditExtensionOptions } from './types.js';
+import type {
+  AuditErrorContext,
+  AuditLogData,
+  ErrorPolicy,
+  OperationContext,
+  PrismaAction,
+  PrismaAuditExtensionOptions,
+} from './types.js';
 import {
   buildEntityMap,
   ensureIds,
@@ -106,7 +113,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     contextEnricher,
     auditLogModel: customAuditLogModel,
     Prisma: userProvidedPrisma,
-    onAuditErrorHandler,
+    errorHandling,
   } = options;
 
   // Use user-provided Prisma namespace or extract from basePrisma
@@ -122,8 +129,9 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
   const awaitWriteIf = performance?.awaitWriteIf;
   const samplingIf = performance?.samplingIf;
   const writer = hooks?.writer;
-  // A failed audit write fails the caller's operation unless they opt out with 'log' or 'ignore'.
-  const errorHandlerConfig = hooks?.errorHandler ?? 'throw';
+  const onError = errorHandling?.onError;
+  // An audit library must not break the caller's write by default.
+  const policyConfig: ErrorPolicy = errorHandling?.policy ?? 'log';
 
   const aggregateConfig = createAggregateConfig(aggregateMapping);
   const writeExecutor = createPrismaWriteExecutor(DbNull);
@@ -136,22 +144,40 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     writeExecutor,
   );
 
-  // `handleError` decides whether an audit failure fails the caller's operation: it throws,
-  // or it returns normally. `dispatchAuditError` below is a notification channel only and
-  // never influences control flow.
-  const handleError =
-    typeof errorHandlerConfig === 'function' ? errorHandlerConfig : createErrorHandler(errorHandlerConfig);
-
-  const dispatchAuditError = async (
-    phase: 'pre-fetch' | 'log-write' | 'diff-generation',
-    modelName: string,
-    operation: string,
-    params: unknown,
-    error: Error,
-  ): Promise<void> => {
-    if (onAuditErrorHandler) {
-      await onAuditErrorHandler({ phase, modelName, operation, params, error });
+  /**
+   * Notifies the observer of an audit failure. Read-only — this NEVER affects whether
+   * the caller's own database operation succeeds or fails. Always invoked inside a
+   * try/catch: a handler that throws (sync or async) is logged to the console and
+   * otherwise ignored, so a broken observer can never behave differently depending on
+   * which phase failed.
+   */
+  const notifyObserver = async (context: AuditErrorContext): Promise<void> => {
+    if (!onError) return;
+    try {
+      await onError(context);
+    } catch (observerError) {
+      console.error(
+        '[@prisma-audit] Error in error-handling observer:',
+        observerError instanceof Error ? observerError.message : String(observerError),
+      );
     }
+  };
+
+  /**
+   * Resolves and applies the error policy for a single `log-write` failure: 'throw'
+   * re-throws (failing the caller's operation while it is still waiting on the write —
+   * see the write-mode honesty note on {@link ErrorPolicy}), 'log' logs to the console
+   * and lets it succeed, 'ignore' does neither.
+   */
+  const applyErrorPolicy = async (context: AuditErrorContext, logLabel: string): Promise<void> => {
+    const strategy = typeof policyConfig === 'function' ? await policyConfig(context) : policyConfig;
+    createErrorHandler(strategy)(context.error, logLabel);
+  };
+
+  /** Notifies the observer, then applies the error policy. See {@link applyErrorPolicy}. */
+  const reportAuditFailure = async (context: AuditErrorContext, logLabel: string): Promise<void> => {
+    await notifyObserver(context);
+    await applyErrorPolicy(context, logLabel);
   };
 
   validateFieldConflicts(excludeFields, redact, aggregateMapping);
@@ -188,9 +214,11 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
    * Only the synchronous strategy (the `awaitWrite: true` default) reaches the `catch` below:
    * it awaits the write directly and has no error handling of its own. The deferred and
    * fire-and-forget strategies catch internally and invoke `writeErrorHandler` themselves,
-   * after the write has already been queued or detached.
+   * after the write has already been queued or detached — both wrap that call so a `'throw'`
+   * policy can never escape as an unhandled rejection once the write is no longer awaited by
+   * the caller; see the write-mode honesty note on {@link ErrorPolicy}.
    *
-   * `handleError` is what decides whether a failure propagates to the caller.
+   * `reportAuditFailure` is what decides whether a failure propagates to the caller.
    */
   const writeAuditLogs = async (logs: AuditLogData[], baseClient: PrismaClientWithDynamicAccess): Promise<void> => {
     if (logs.length === 0) {
@@ -211,9 +239,11 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
       const manager = createPrismaClientManager(baseClient);
       const strategy = strategySelector(modelName);
 
-      const writeErrorHandler: typeof handleError = async (error, errorContext) => {
-        await dispatchAuditError('log-write', modelName, 'write', logs, error);
-        await handleError(error, errorContext);
+      const writeErrorHandler = async (error: Error, operationDescription: string): Promise<void> => {
+        await reportAuditFailure(
+          { phase: 'log-write', modelName, operation: 'write', params: logs, error },
+          operationDescription,
+        );
       };
 
       const result = await strategy({
@@ -229,8 +259,10 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     } catch (caughtError) {
       const error = caughtError instanceof Error ? caughtError : new Error(String(caughtError));
       const modelName = logs[0]?.entityType ?? 'unknown';
-      await dispatchAuditError('log-write', modelName, 'write', logs, error);
-      await handleError(error, 'audit log write');
+      await reportAuditFailure(
+        { phase: 'log-write', modelName, operation: 'write', params: logs, error },
+        'audit log write',
+      );
     }
   };
 
@@ -255,7 +287,9 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     const modelAccessor = getModelAccessor(clientToUse, modelName);
     const delegate = clientToUse[modelAccessor] as Record<string, unknown>;
     const actionFn = delegate[operation.action as string] as (args: unknown) => Promise<unknown>;
-    return actionFn(operation.args);
+    // The whole call is the caller's own operation — there is no audit-support work
+    // around it to distinguish from.
+    return runCallerMutation(() => actionFn(operation.args));
   };
 
   const findExistingRecord = async (
@@ -291,7 +325,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
       return await findExistingRecord(prismaClient, modelName, args.where);
     } catch (caughtError) {
       const error = caughtError instanceof Error ? caughtError : new Error(String(caughtError));
-      await dispatchAuditError('pre-fetch', modelName, action, args, error);
+      await notifyObserver({ phase: 'pre-fetch', modelName, operation: action, params: args, error });
       return { _tag: 'error', error };
     }
   };
@@ -334,10 +368,17 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
           getNestedOperationConfig: getNestedOperationConfigWrapper,
           Prisma,
           // A broken composite entityId is never turned into a partial/guessed key
-          // (see collectDeleteRecords); report it through the same read-only
-          // notification channel as every other audit failure phase instead.
+          // (see collectDeleteRecords); report it through the same observer as every
+          // other audit failure, under its own phase — this is neither a pre-fetch nor
+          // a diff-generation failure, it is the entityId itself being unresolvable.
           onUnresolvedDeleteEntityId: ({ relatedModel, entityId, pkFields, error }) => {
-            void dispatchAuditError('diff-generation', relatedModel, 'delete', { entityId, pkFields }, error);
+            void notifyObserver({
+              phase: 'entity-id-resolution',
+              modelName: relatedModel,
+              operation: 'delete',
+              params: { entityId, pkFields },
+              error,
+            });
           },
         },
       }),
@@ -377,7 +418,13 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
       awaitWriteIf,
       onPipelineError: async (error: Error) => {
         const modelName = operation.model ?? 'unknown';
-        await dispatchAuditError('diff-generation', modelName, operation.action as string, operation.args, error);
+        await notifyObserver({
+          phase: 'diff-generation',
+          modelName,
+          operation: operation.action as string,
+          params: operation.args,
+          error,
+        });
       },
     };
 
@@ -430,6 +477,33 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     await writeAuditLogs([...batchFinalContext.logs], baseClient);
   };
 
+  /**
+   * Tags an error as coming from the caller's own database mutation (a real `create`,
+   * `update`, or `delete` on their data — e.g. a unique constraint violation), as
+   * opposed to the audit-support work around it (before-fetch, after-refetch,
+   * `runBatchPipeline`). `executeBatch`'s catch uses this to let such an error
+   * propagate untouched instead of routing it through the audit observer or policy —
+   * see the "Stop reporting the caller's own failure as an audit failure" note there.
+   */
+  const CALLER_MUTATION_ERROR = Symbol('callerMutationError');
+
+  const runCallerMutation = async <T>(fn: () => Promise<T>): Promise<T> => {
+    try {
+      return await fn();
+    } catch (caughtError) {
+      if (caughtError instanceof Error) {
+        (caughtError as Error & { [CALLER_MUTATION_ERROR]?: true })[CALLER_MUTATION_ERROR] = true;
+      }
+      throw caughtError;
+    }
+  };
+
+  const isCallerMutationError = (error: unknown): boolean => {
+    return (
+      error instanceof Error && (error as Error & { [CALLER_MUTATION_ERROR]?: true })[CALLER_MUTATION_ERROR] === true
+    );
+  };
+
   const handleCreateMany = async (
     operation: OperationContext,
     context: AuditContext,
@@ -452,7 +526,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
       // Rely entirely on Prisma's own ID generation and audit the rows it
       // actually created. This supports database-generated defaults
       // (autoincrement, dbgenerated) and stays correct under skipDuplicates.
-      result = await createFn(operation.args);
+      result = await runCallerMutation(() => createFn(operation.args));
       entities = (Array.isArray(result) ? result : []) as Record<string, unknown>[];
     } else {
       // createMany returns only { count }, and select/omit narrow returned rows
@@ -462,7 +536,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
       const rawData = args.data;
       const dataArray = Array.isArray(rawData) ? rawData : [rawData as Record<string, unknown>];
       entities = ensureIds(Prisma, modelName, dataArray, DEFAULTS.ID_FIELD);
-      result = await createFn({ ...operation.args, data: entities });
+      result = await runCallerMutation(() => createFn({ ...operation.args, data: entities }));
     }
 
     const batchInitialContext: BatchInitialContext = {
@@ -538,7 +612,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     const { operation, context, baseClient, clientToUse, action, modelDelegate, pkFields, whereClause } = input;
 
     const beforeEntities = await modelDelegate.findMany({ where: whereClause || {} });
-    const updatedRows = await modelDelegate.updateManyAndReturn(operation.args);
+    const updatedRows = await runCallerMutation(() => modelDelegate.updateManyAndReturn(operation.args));
     const paired = pairEntitiesByPrimaryKey(updatedRows, beforeEntities, pkFields);
 
     const batchInitialContext: BatchInitialContext = {
@@ -602,7 +676,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     const delegate = modelDelegate as unknown as Record<string, unknown>;
     const actionName = operation.action as string;
     const mutationFn = delegate[actionName] as (args: unknown) => Promise<unknown>;
-    const result = await mutationFn(operation.args);
+    const result = await runCallerMutation(() => mutationFn(operation.args));
 
     let entities: Record<string, unknown>[];
     let pairedBeforeStates: Array<Record<string, unknown> | null>;
@@ -673,8 +747,24 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
       try {
         return await dispatchBatchAction(txContext, clientToUse);
       } catch (caughtError) {
+        if (isCallerMutationError(caughtError)) {
+          // The caller's own database operation failed on its own terms (e.g. a unique
+          // constraint violation) — not an audit failure. Propagate it untouched,
+          // without routing it through the audit observer or policy.
+          throw caughtError;
+        }
+
         const error = caughtError instanceof Error ? caughtError : new Error(String(caughtError));
-        await handleError(error, `batch operation: ${operation.action}`);
+        await reportAuditFailure(
+          {
+            phase: 'diff-generation',
+            modelName,
+            operation: operation.action as string,
+            params: operation.args,
+            error,
+          },
+          `batch operation: ${operation.action}`,
+        );
         throw error;
       }
     };

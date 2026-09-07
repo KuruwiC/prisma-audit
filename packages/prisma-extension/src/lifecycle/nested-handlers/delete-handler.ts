@@ -52,8 +52,8 @@ const buildMinimalEntity = (entityId: string, pkFields?: string[]): Record<strin
 
 /**
  * Notification for a nested delete whose entityId could not be resolved to a
- * primary key. Mirrors the shape `onAuditErrorHandler` expects (see
- * `dispatchAuditError` in extension.ts) so callers can forward it unchanged.
+ * primary key. Mirrors the structured context the error-handling observer expects
+ * (see `notifyObserver` in extension.ts) so callers can forward it unchanged.
  */
 export interface UnresolvedDeleteEntityId {
   relatedModel: string;

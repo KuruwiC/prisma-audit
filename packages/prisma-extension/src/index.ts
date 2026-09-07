@@ -48,7 +48,17 @@ export {
 export type { PrismaClientWithAudit } from './client-factory.js';
 export { createAuditClient, defineConfig } from './client-factory.js';
 export { flushAllPendingWrites, runLifecyclePipeline } from './lifecycle/index.js';
-export type { AuditLogData, AuditLogInput, AuditLogWriter, PrismaAuditExtensionOptions } from './types.js';
+export type {
+  AuditErrorContext,
+  AuditErrorObserver,
+  AuditErrorPhase,
+  AuditLogData,
+  AuditLogInput,
+  AuditLogWriter,
+  ErrorHandlingConfig,
+  ErrorPolicy,
+  PrismaAuditExtensionOptions,
+} from './types.js';
 
 export type { NormalizedSchema, SharedChangeSchema } from './utils/normalized-writer.js';
 export { createEntityNormalizedWriter, createSharedChangeWriter } from './utils/normalized-writer.js';

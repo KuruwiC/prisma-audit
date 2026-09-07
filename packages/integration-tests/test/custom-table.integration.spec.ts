@@ -52,10 +52,10 @@ describe('Custom Audit Log Table', () => {
       performance: {
         awaitWrite: true,
       },
-      hooks: {
-        errorHandler: (error, operation) => {
-          console.error(`[Custom Table Test] Audit error in ${operation}:`, error);
-          throw error;
+      errorHandling: {
+        policy: (context) => {
+          console.error(`[Custom Table Test] Audit error in ${context.phase}:`, context.error);
+          return 'throw';
         },
       },
     });

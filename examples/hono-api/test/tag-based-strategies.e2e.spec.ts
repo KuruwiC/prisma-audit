@@ -355,8 +355,8 @@ describe('Tag-based Strategies E2E', () => {
           sampling: 0.5,
           samplingIf: (_modelName, tags) => (tags.includes('financial') ? 1.0 : 0.5),
         },
-        hooks: {
-          errorHandler: 'log',
+        errorHandling: {
+          policy: 'log',
         },
         Prisma,
       });

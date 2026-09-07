@@ -332,8 +332,8 @@ export const createFetchBeforeStateStage = (
       if (beforeStateResult._tag === 'found') {
         beforeState = beforeStateResult.data;
       }
-      // The fetch failure itself was already dispatched to onAuditErrorHandler by
-      // fetchBeforeState; see the "Fetch failure vs 'not found'" note above for why
+      // The fetch failure itself was already reported to the error-handling observer
+      // by fetchBeforeState; see the "Fetch failure vs 'not found'" note above for why
       // beforeStateResult (not beforeState) carries that distinction downstream.
     }
 
@@ -467,7 +467,7 @@ const buildMainAuditLogs = async (
   // what a failed fetch cannot tell apart from an actual absence. Recording it as
   // 'create' would misrepresent what may have been an update to a real row, so the
   // entry is skipped rather than guessed. The failure itself was already reported
-  // to onAuditErrorHandler by fetchBeforeState.
+  // to the error-handling observer by fetchBeforeState.
   if (context.operation.action === AUDIT_ACTION.UPSERT && context.beforeStateResult._tag === 'error') {
     return [];
   }

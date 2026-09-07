@@ -26,7 +26,17 @@ const createDeferredExecutor = (
       }
     } catch (error) {
       const errorObject = error instanceof Error ? error : new Error(String(error));
-      await errorHandler(errorObject, 'deferred audit log write');
+      // A 'throw' policy has nothing left to fail once the write has been queued and
+      // the caller has moved on — mirrors the equivalent guard in fire-and-forget.ts so
+      // neither detached strategy can turn a throwing handler into an unhandled rejection.
+      try {
+        await errorHandler(errorObject, 'deferred audit log write');
+      } catch (handlerError) {
+        console.error(
+          '[@prisma-audit] Error in deferred write error handler:',
+          handlerError instanceof Error ? handlerError.message : String(handlerError),
+        );
+      }
     }
   };
 };

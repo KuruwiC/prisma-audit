@@ -497,6 +497,43 @@ describe('writeDeferredInTransaction', () => {
         await expect(result.execute()).resolves.toBeUndefined();
       }
     });
+
+    it('should not let a throwing error handler escape execute() (e.g. a "throw" policy)', async () => {
+      // Once the write has been queued, the caller has already moved on — there is
+      // nothing left for a throwing handler (a 'throw' policy) to fail. execute() must
+      // still resolve, and the handler's throw is reported to the console instead of
+      // becoming an unhandled rejection when the deferred queue is drained.
+      const writeError = new Error('Database write failed');
+      const writeFn = vi.fn().mockRejectedValue(writeError);
+      const handlerError = new Error('handler decided to throw');
+      const manager = createMockManager();
+      const executor = createMockExecutor(writeFn);
+      const logs = [createMockLog()];
+      const context = createMockContext();
+      const handleError = vi.fn().mockRejectedValue(handlerError);
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const result = writeDeferredInTransaction({
+        logs,
+        context,
+        manager,
+        auditLogModel: 'auditLog',
+        writer: undefined,
+        handleError,
+        writeExecutor: executor,
+      });
+
+      if (result._tag === 'Deferred') {
+        await expect(result.execute()).resolves.toBeUndefined();
+        expect(handleError).toHaveBeenCalledWith(writeError, 'deferred audit log write');
+        expect(consoleErrorSpy).toHaveBeenCalledWith(
+          '[@prisma-audit] Error in deferred write error handler:',
+          handlerError.message,
+        );
+      }
+
+      consoleErrorSpy.mockRestore();
+    });
   });
 
   describe('custom audit log model name', () => {
