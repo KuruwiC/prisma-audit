@@ -56,8 +56,8 @@ export type {
   AuditLogInput,
   AuditLogWriter,
   ErrorHandlingConfig,
-  ErrorPolicy,
   PrismaAuditExtensionOptions,
+  WriteFailurePolicy,
 } from './types.js';
 
 export type { NormalizedSchema, SharedChangeSchema } from './utils/normalized-writer.js';

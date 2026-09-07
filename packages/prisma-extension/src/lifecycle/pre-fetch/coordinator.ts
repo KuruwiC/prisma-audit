@@ -354,7 +354,7 @@ export const preFetchNestedRecordsBeforeOperation = async (
 
 /**
  * Shared input for the 1:1 pre-fetch call chain
- * (`handleOneToOneRelation` -> `handleOtherOneToOneOperations`), which have identical shapes.
+ * (`handleOneToOneRelation` -> `handleOtherOneToOneOperations`), which pass it through unchanged.
  */
 interface HandleOneToOneRelationInput {
   nestedOp: NestedOperation;

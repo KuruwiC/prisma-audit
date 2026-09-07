@@ -120,8 +120,6 @@ export interface BatchInitialContext {
   auditContext: AuditContext;
   /** Prisma client (base or transactional) */
   clientToUse: PrismaClientWithDynamicAccess | TransactionalPrismaClient;
-  /** Query function to execute batch operation */
-  query: (args: unknown) => Promise<unknown>;
   /** Entities to process (with IDs for createMany, fetched for updateMany/deleteMany) */
   entities: ReadonlyArray<Record<string, unknown>>;
   /** Before states for each entity (updateMany/deleteMany only) */

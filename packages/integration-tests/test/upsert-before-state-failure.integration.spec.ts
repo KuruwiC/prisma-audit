@@ -72,7 +72,7 @@ describe('upsert — before-state fetch failure', () => {
       aggregateMapping: testAggregateMapping,
       diffing: { excludeFields: ['createdAt'] },
       security: { redact: { fields: [] } },
-      errorHandling: { onError },
+      errorHandling: { observer: onError },
     });
     return { basePrisma, rawBasePrisma, provider, prisma, armFindUniqueFailure };
   };

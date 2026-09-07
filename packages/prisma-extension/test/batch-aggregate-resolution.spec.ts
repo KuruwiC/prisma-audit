@@ -83,7 +83,6 @@ function createBatchContext(entities: Record<string, unknown>[]): BatchEnrichedC
     operation: { model: 'Post', action: 'createMany', args: { data: entities } },
     auditContext: { actor: { category: 'model', type: 'User', id: 'user-1' } },
     clientToUse: {} as never,
-    query: (() => Promise.resolve()) as never,
     entities,
     beforeStates: undefined,
     actorContext: null,

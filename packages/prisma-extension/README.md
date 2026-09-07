@@ -205,7 +205,7 @@ const basePrisma = new PrismaClient();
 **Transaction behavior:**
 - **Sync mode** (`awaitWrite: true`, default):
   - Audit logs written using transaction client (`tx`)
-  - Atomicity (operation + audit both succeed/fail) is available, but opt-in: with the default `errorHandling.policy: 'log'` an audit-log write failure is logged and the operation still succeeds; set `errorHandling.policy: 'throw'` to fail the transaction together with the audit write
+  - Atomicity (operation + audit both succeed/fail) is available, but opt-in: with the default `errorHandling.writeFailurePolicy: 'log'` an audit-log write failure is logged and the operation still succeeds; set `errorHandling.writeFailurePolicy: 'throw'` to fail the transaction together with the audit write
   - **Default behavior**: Ensures complete audit trails with all changes tracked
 - **Async mode** (`awaitWrite: false`):
   - Audit logs written using `basePrisma` **after** transaction commits
@@ -683,7 +683,7 @@ Controls whether audit log writes are synchronous or asynchronous.
 
 **Options:**
 - `true` (default): Synchronous writes within transaction
-  - ✅ Atomicity is available (`errorHandling.policy: 'throw'` fails the operation together with the audit write); the default policy (`'log'`) lets the operation succeed instead
+  - ✅ Atomicity is available (`errorHandling.writeFailurePolicy: 'throw'` fails the operation together with the audit write); the default policy (`'log'`) lets the operation succeed instead
   - ✅ Complete and accurate audit trails with tracking of all changes
   - ✅ Suitable for compliance-sensitive operations
   - ⚠️ Slightly slower for high-throughput scenarios
@@ -738,8 +738,8 @@ createAuditClient(prisma, {
 
 **Behavior:**
 - Writes executed synchronously within the same transaction
-- Whether the operation fails when the audit log write fails is controlled by `errorHandling.policy` (default `'log'`: the operation still succeeds) — see "Error Handling (`errorHandling`)" below
-- Guarantees atomicity when `errorHandling.policy: 'throw'` is set
+- Whether the operation fails when the audit log write fails is controlled by `errorHandling.writeFailurePolicy` (default `'log'`: the operation still succeeds) — see "Error Handling (`errorHandling`)" below
+- Guarantees atomicity when `errorHandling.writeFailurePolicy: 'throw'` is set
 - Ensures complete and accurate audit trail with all changes tracked
 
 #### 2. Deferred Strategy (inside transactions)
@@ -780,7 +780,7 @@ Writes audit logs asynchronously without blocking the main operation. **Opt into
 **Behavior:**
 - Returns immediately without waiting for write to complete
 - Writes execute in background
-- The caller's operation has already returned by the time a write failure is known, so `errorHandling.policy: 'throw'` cannot fail it — it logs instead, exactly like `'log'`. See "Error Handling (`errorHandling`)" below.
+- The caller's operation has already returned by the time a write failure is known, so `errorHandling.writeFailurePolicy: 'throw'` cannot fail it — it logs instead, exactly like `'log'`. See "Error Handling (`errorHandling`)" below.
 
 **Example:**
 ```typescript
@@ -789,7 +789,7 @@ createAuditClient(prisma, {
     awaitWrite: false, // Opt into performance optimization
   },
   errorHandling: {
-    onError: (context) => {
+    observer: (context) => {
       console.error(`Audit log error in ${context.phase}:`, context.error);
       // Send to monitoring service
     },
@@ -929,27 +929,27 @@ Customize how audit logs are written.
 
 Two independent options, both receiving the same structured failure context (`{ phase, modelName, operation, params, error }`):
 
-- **`onError`** — an observer notified of *every* audit-pipeline failure (`pre-fetch`, `log-write`, `diff-generation`, `entity-id-resolution`). Read-only: it is always invoked inside a try/catch, so a handler that itself throws is logged to the console and otherwise ignored — it can never affect whether the caller's own database operation succeeds.
-- **`policy`** — decides whether a failed audit-log **write** also fails the caller's own operation. `'throw' | 'log' | 'ignore'`, or a function that receives the same context and *returns* one of those three strings (never throws — a return value keeps conditional failure unambiguous).
+- **`observer`** — notified of *every* audit-pipeline failure (`pre-fetch`, `log-write`, `diff-generation`, `entity-id-resolution`). Read-only: it is always invoked inside a try/catch, so a handler that itself throws is logged to the console and otherwise ignored — it can never affect whether the caller's own database operation succeeds.
+- **`writeFailurePolicy`** — decides whether a failed audit-log **write** also fails the caller's own operation. `'throw' | 'log' | 'ignore'`, or a function that receives the same context and *returns* one of those three strings (never throws — a return value keeps conditional failure unambiguous).
 
 ```typescript
 {
   errorHandling: {
-    onError: (context) => {
+    observer: (context) => {
       console.error(`Audit error in ${context.phase}:`, context.error);
       Sentry.captureException(context.error, { extra: context });
     },
-    policy: 'log', // default
+    writeFailurePolicy: 'log', // default
   }
 }
 ```
 
-**`policy` values:**
+**`writeFailurePolicy` values:**
 - `'throw'`: re-throw (fails the operation) — see the write-mode caveat below
 - `'log'`: log to console and let the operation succeed (**default**)
 - `'ignore'`: do neither
 
-**Only the `log-write` phase is policy-gated.** `pre-fetch` and `diff-generation` / `entity-id-resolution` failures never fail the caller's operation on their own — they degrade gracefully instead (e.g. an upsert whose before-state fetch failed skips its main log entry rather than mislabeling it `create`); `onError` still hears about all of them.
+**Only the `log-write` phase is policy-gated.** `pre-fetch` and `entity-id-resolution` failures never fail the caller's operation — they degrade gracefully instead (e.g. an upsert whose before-state fetch failed skips its main log entry rather than mislabeling it `create`). `diff-generation` failures are different: they always propagate to the caller as a thrown error, regardless of `writeFailurePolicy` — building the audit log entry (enrichment, aggregate resolution, redaction, batch pipeline) has already failed by the time `writeFailurePolicy` could apply, so there is nothing for it to decide. `observer` hears about all four phases either way.
 
 **`awaitWrite: false` (deferred / fire-and-forget writes):** once the audit-log write has been queued (inside a transaction) or detached (outside one), the caller has already received its result — there is nothing left to fail. `'throw'` fails the caller only while it is still waiting on the write (the `awaitWrite: true` default); once the write is queued or detached, `'throw'` logs instead, exactly like `'log'`.
 
@@ -958,7 +958,7 @@ Two independent options, both receiving the same structured failure context (`{ 
   performance: { awaitWrite: false },
   errorHandling: {
     // 'throw' here can only ever log — the caller already moved on.
-    policy: 'throw',
+    writeFailurePolicy: 'throw',
   },
 }
 ```
@@ -1235,7 +1235,7 @@ export default defineConfig({
 
   // Error observation and policy
   errorHandling: {
-    onError: (context) => {
+    observer: (context) => {
       console.error(`Audit error in ${context.phase}:`, context.error);
     },
   },

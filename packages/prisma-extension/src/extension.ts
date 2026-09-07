@@ -53,10 +53,10 @@ import type { BatchFinalContext, BatchInitialContext, BeforeStateResult } from '
 import type {
   AuditErrorContext,
   AuditLogData,
-  ErrorPolicy,
   OperationContext,
   PrismaAction,
   PrismaAuditExtensionOptions,
+  WriteFailurePolicy,
 } from './types.js';
 import {
   buildEntityMap,
@@ -91,6 +91,17 @@ interface HandleLimitedUpdateManyInput {
   };
   pkFields: string[];
   whereClause: unknown;
+}
+
+/**
+ * Output shared by every batch-dispatch path (`handleCreateMany`,
+ * `handleLimitedUpdateMany`, `handleUpdateOrDeleteMany`, and the fallback action):
+ * the caller's own operation result, plus the audit logs built for it, still unwritten.
+ * `executeBatch` writes `logs` itself, once, outside its own try/catch.
+ */
+export interface BatchActionResult {
+  result: unknown;
+  logs: AuditLogData[];
 }
 
 /**
@@ -131,9 +142,9 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
   const awaitWriteIf = performance?.awaitWriteIf;
   const samplingIf = performance?.samplingIf;
   const writer = hooks?.writer;
-  const onError = errorHandling?.onError;
+  const observer = errorHandling?.observer;
   // An audit library must not break the caller's write by default.
-  const policyConfig: ErrorPolicy = errorHandling?.policy ?? 'log';
+  const writeFailurePolicyConfig: WriteFailurePolicy = errorHandling?.writeFailurePolicy ?? 'log';
 
   const aggregateConfig = createAggregateConfig(aggregateMapping);
   const writeExecutor = createPrismaWriteExecutor(DbNull);
@@ -154,9 +165,9 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
    * which phase failed.
    */
   const notifyObserver = async (context: AuditErrorContext): Promise<void> => {
-    if (!onError) return;
+    if (!observer) return;
     try {
-      await onError(context);
+      await observer(context);
     } catch (observerError) {
       console.error(
         '[@prisma-audit] Error in error-handling observer:',
@@ -166,20 +177,31 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
   };
 
   /**
-   * Resolves and applies the error policy for a single `log-write` failure: 'throw'
-   * re-throws (failing the caller's operation while it is still waiting on the write —
-   * see the write-mode honesty note on {@link ErrorPolicy}), 'log' logs to the console
-   * and lets it succeed, 'ignore' does neither.
+   * Resolves and applies the write-failure policy for a single `log-write` failure:
+   * 'throw' re-throws (failing the caller's operation while it is still waiting on the
+   * write — see the write-mode honesty note on {@link WriteFailurePolicy}), 'log' logs
+   * to the console and lets it succeed, 'ignore' does neither.
    */
-  const applyErrorPolicy = async (context: AuditErrorContext, logLabel: string): Promise<void> => {
-    const strategy = typeof policyConfig === 'function' ? await policyConfig(context) : policyConfig;
+  const applyWriteFailurePolicy = async (context: AuditErrorContext, logLabel: string): Promise<void> => {
+    const strategy =
+      typeof writeFailurePolicyConfig === 'function'
+        ? await writeFailurePolicyConfig(context)
+        : writeFailurePolicyConfig;
     createErrorHandler(strategy)(context.error, logLabel);
   };
 
-  /** Notifies the observer, then applies the error policy. See {@link applyErrorPolicy}. */
+  /**
+   * Notifies the observer, then applies the write-failure policy. See
+   * {@link applyWriteFailurePolicy}.
+   *
+   * Only ever called for `log-write` failures — see {@link writeAuditLogs}, the sole
+   * caller. Every other phase (`pre-fetch`, `diff-generation`, `entity-id-resolution`)
+   * calls `notifyObserver` directly and never routes through the policy, which is what
+   * makes {@link WriteFailurePolicy}'s "only `log-write` is policy-gated" contract hold.
+   */
   const reportAuditFailure = async (context: AuditErrorContext, logLabel: string): Promise<void> => {
     await notifyObserver(context);
-    await applyErrorPolicy(context, logLabel);
+    await applyWriteFailurePolicy(context, logLabel);
   };
 
   validateFieldConflicts(excludeFields, redact, aggregateMapping);
@@ -218,7 +240,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
    * fire-and-forget strategies catch internally and invoke `writeErrorHandler` themselves,
    * after the write has already been queued or detached — both wrap that call so a `'throw'`
    * policy can never escape as an unhandled rejection once the write is no longer awaited by
-   * the caller; see the write-mode honesty note on {@link ErrorPolicy}.
+   * the caller; see the write-mode honesty note on {@link WriteFailurePolicy}.
    *
    * `reportAuditFailure` is what decides whether a failure propagates to the caller.
    */
@@ -466,10 +488,16 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     );
   };
 
+  /**
+   * Runs the batch enrich/build stages and returns the resulting audit logs, unwritten.
+   * The caller (`dispatchBatchAction`'s branches) pairs these logs with the batch's
+   * operation result; `executeBatch` is the one place that actually writes them, once
+   * outside its own try/catch — see the double-report note there.
+   */
   const runBatchPipeline = async (
     batchInitialContext: BatchInitialContext,
     baseClient: PrismaClientWithDynamicAccess,
-  ): Promise<void> => {
+  ): Promise<AuditLogData[]> => {
     const stageDependencies = createStageDependencies(baseClient);
     const batchStages = [
       createBatchEnrichContextsStage(stageDependencies),
@@ -481,7 +509,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
       batchStages,
     );
 
-    await writeAuditLogs([...batchFinalContext.logs], baseClient);
+    return [...batchFinalContext.logs];
   };
 
   const handleCreateMany = async (
@@ -489,7 +517,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     context: AuditContext,
     baseClient: PrismaClientWithDynamicAccess,
     clientToUse: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
-  ): Promise<unknown> => {
+  ): Promise<BatchActionResult> => {
     const modelName = operation.model as string;
     const args = operation.args as { data: unknown; select?: unknown; omit?: unknown };
 
@@ -523,12 +551,11 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
       operation,
       auditContext: context,
       clientToUse,
-      query: createFn,
       entities,
     };
 
-    await runBatchPipeline(batchInitialContext, baseClient);
-    return result;
+    const logs = await runBatchPipeline(batchInitialContext, baseClient);
+    return { result, logs };
   };
 
   // Resolve and validate the model delegate used by batch update/delete handling.
@@ -588,7 +615,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
   // is the exact set of updated rows. This pins before/after to those rows and avoids the count
   // desync a separately-limited before fetch allows. Only used when the connector supports
   // updateManyAndReturn (see caller guard).
-  const handleLimitedUpdateMany = async (input: HandleLimitedUpdateManyInput): Promise<unknown> => {
+  const handleLimitedUpdateMany = async (input: HandleLimitedUpdateManyInput): Promise<BatchActionResult> => {
     const { operation, context, baseClient, clientToUse, action, modelDelegate, pkFields, whereClause } = input;
 
     const beforeEntities = await modelDelegate.findMany({ where: whereClause || {} });
@@ -599,14 +626,14 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
       operation,
       auditContext: context,
       clientToUse,
-      query: modelDelegate.updateManyAndReturn as (args: unknown) => Promise<unknown>,
       entities: paired.entities,
       beforeStates: paired.pairedBeforeStates,
     };
-    await runBatchPipeline(batchInitialContext, baseClient);
+    const logs = await runBatchPipeline(batchInitialContext, baseClient);
 
     // Preserve each action's contract: updateMany returns { count }, updateManyAndReturn the rows.
-    return action === AUDIT_ACTION.UPDATE_MANY_AND_RETURN ? updatedRows : { count: updatedRows.length };
+    const result = action === AUDIT_ACTION.UPDATE_MANY_AND_RETURN ? updatedRows : { count: updatedRows.length };
+    return { result, logs };
   };
 
   const handleUpdateOrDeleteMany = async (
@@ -615,7 +642,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     baseClient: PrismaClientWithDynamicAccess,
     clientToUse: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
     action: PrismaAction,
-  ): Promise<unknown> => {
+  ): Promise<BatchActionResult> => {
     const modelName = operation.model as string;
     const modelDelegate = resolveBatchModelDelegate(clientToUse, modelName);
 
@@ -679,13 +706,12 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
       operation,
       auditContext: context,
       clientToUse,
-      query: mutationFn,
       entities,
       beforeStates: pairedBeforeStates,
     };
 
-    await runBatchPipeline(batchInitialContext, baseClient);
-    return result;
+    const logs = await runBatchPipeline(batchInitialContext, baseClient);
+    return { result, logs };
   };
 
   const handleBatchOperation = async (
@@ -701,7 +727,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     const dispatchBatchAction = async (
       txContext: AuditContext,
       clientToUse: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
-    ): Promise<unknown> => {
+    ): Promise<BatchActionResult> => {
       const action = operation.action as PrismaAction;
 
       if (action === AUDIT_ACTION.CREATE_MANY || action === AUDIT_ACTION.CREATE_MANY_AND_RETURN) {
@@ -717,15 +743,25 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
         return handleUpdateOrDeleteMany(operation, txContext, baseClient, clientToUse, action);
       }
 
-      return executeFallbackAction(clientToUse, modelName, operation);
+      const result = await executeFallbackAction(clientToUse, modelName, operation);
+      return { result, logs: [] };
     };
 
+    // `dispatchBatchAction` runs audit-support work (before-fetch, after-refetch,
+    // enrich/build) around the caller's own mutation, but never writes the audit logs
+    // it builds — it returns them instead. This keeps `writeAuditLogs` OUTSIDE this
+    // try/catch, matching `executeAuditedOperation` (operation-executor.ts): if it were
+    // called from inside the try, a `writeFailurePolicy: 'throw'` write failure would
+    // report `log-write` once from inside `writeAuditLogs`, then get caught right here
+    // and reported a second time as `diff-generation` before being rethrown — the same
+    // failure notified to the observer twice under two different phases.
     const executeBatch = async (
       txContext: AuditContext,
       clientToUse: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
     ): Promise<unknown> => {
+      let dispatchResult: BatchActionResult;
       try {
-        return await dispatchBatchAction(txContext, clientToUse);
+        dispatchResult = await dispatchBatchAction(txContext, clientToUse);
       } catch (caughtError) {
         if (isCallerMutationError(caughtError)) {
           // The caller's own database operation failed on its own terms (e.g. a unique
@@ -735,18 +771,22 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
         }
 
         const error = caughtError instanceof Error ? caughtError : new Error(String(caughtError));
-        await reportAuditFailure(
-          {
-            phase: 'diff-generation',
-            modelName,
-            operation: operation.action as string,
-            params: operation.args,
-            error,
-          },
-          `batch operation: ${operation.action}`,
-        );
+        // Observer-only, like `executeAuditedOperation`'s `onPipelineError` — a
+        // `diff-generation` failure always propagates to the caller, so there is
+        // nothing here for `writeFailurePolicy` to decide (see `WriteFailurePolicy`'s
+        // "only `log-write` is policy-gated" contract).
+        await notifyObserver({
+          phase: 'diff-generation',
+          modelName,
+          operation: operation.action as string,
+          params: operation.args,
+          error,
+        });
         throw error;
       }
+
+      await writeAuditLogs(dispatchResult.logs, baseClient);
+      return dispatchResult.result;
     };
 
     const wrapper = withOptionalTransaction(

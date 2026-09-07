@@ -94,12 +94,15 @@ describe('Error Handling Integration', () => {
     // Every scenario below drives a real audit-log write failure via a `hooks.writer`
     // that always throws (see hooks-writer.integration.spec.ts for the base pattern),
     // then observes whether the caller's own `user.create` succeeds or fails, whether
-    // anything is logged to the console, and whether the observer (`onError`) was notified.
+    // anything is logged to the console, and whether the observer (`errorHandling.observer`,
+    // held here in the local `onError` mock) was notified.
 
-    it("policy: 'ignore' — commits the caller's row and stays silent", async () => {
+    it("writeFailurePolicy: 'ignore' — commits the caller's row and stays silent", async () => {
       const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       const onError = vi.fn();
-      const scenario = createFailingWriterClient(context.databaseUrl, { errorHandling: { policy: 'ignore', onError } });
+      const scenario = createFailingWriterClient(context.databaseUrl, {
+        errorHandling: { writeFailurePolicy: 'ignore', observer: onError },
+      });
 
       try {
         const user = await scenario.provider.runAsync(testActor, async () =>
@@ -130,10 +133,12 @@ describe('Error Handling Integration', () => {
       }
     });
 
-    it("policy: 'log' — commits the caller's row and reports the error to the console", async () => {
+    it("writeFailurePolicy: 'log' — commits the caller's row and reports the error to the console", async () => {
       const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       const onError = vi.fn();
-      const scenario = createFailingWriterClient(context.databaseUrl, { errorHandling: { policy: 'log', onError } });
+      const scenario = createFailingWriterClient(context.databaseUrl, {
+        errorHandling: { writeFailurePolicy: 'log', observer: onError },
+      });
 
       try {
         const user = await scenario.provider.runAsync(testActor, async () =>
@@ -167,9 +172,11 @@ describe('Error Handling Integration', () => {
       }
     });
 
-    it("policy: 'throw' — fails the caller's operation and rolls back the row", async () => {
+    it("writeFailurePolicy: 'throw' — fails the caller's operation and rolls back the row", async () => {
       const onError = vi.fn();
-      const scenario = createFailingWriterClient(context.databaseUrl, { errorHandling: { policy: 'throw', onError } });
+      const scenario = createFailingWriterClient(context.databaseUrl, {
+        errorHandling: { writeFailurePolicy: 'throw', observer: onError },
+      });
 
       try {
         await expect(
@@ -197,11 +204,11 @@ describe('Error Handling Integration', () => {
       }
     });
 
-    it("default (no errorHandling.policy configured) — behaves like 'log', not 'throw'", async () => {
-      // An audit library must not break the caller's write by default — see ErrorPolicy's JSDoc.
+    it("default (no errorHandling.writeFailurePolicy configured) — behaves like 'log', not 'throw'", async () => {
+      // An audit library must not break the caller's write by default — see WriteFailurePolicy's JSDoc.
       const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       const onError = vi.fn();
-      const scenario = createFailingWriterClient(context.databaseUrl, { errorHandling: { onError } });
+      const scenario = createFailingWriterClient(context.databaseUrl, { errorHandling: { observer: onError } });
 
       try {
         const user = await scenario.provider.runAsync(testActor, async () =>
@@ -235,11 +242,13 @@ describe('Error Handling Integration', () => {
       }
     });
 
-    it("policy function — returning 'ignore' is invoked with the failure context and lets the operation succeed", async () => {
+    it("writeFailurePolicy function — returning 'ignore' is invoked with the failure context and lets the operation succeed", async () => {
       const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       const onError = vi.fn();
       const policy = vi.fn((_context: AuditErrorContext) => 'ignore' as const);
-      const scenario = createFailingWriterClient(context.databaseUrl, { errorHandling: { policy, onError } });
+      const scenario = createFailingWriterClient(context.databaseUrl, {
+        errorHandling: { writeFailurePolicy: policy, observer: onError },
+      });
 
       try {
         const user = await scenario.provider.runAsync(testActor, async () =>
@@ -280,10 +289,12 @@ describe('Error Handling Integration', () => {
       }
     });
 
-    it("policy function — returning 'throw' fails the operation with the original audit-write error", async () => {
+    it("writeFailurePolicy function — returning 'throw' fails the operation with the original audit-write error", async () => {
       const onError = vi.fn();
       const policy = vi.fn((_context: AuditErrorContext) => 'throw' as const);
-      const scenario = createFailingWriterClient(context.databaseUrl, { errorHandling: { policy, onError } });
+      const scenario = createFailingWriterClient(context.databaseUrl, {
+        errorHandling: { writeFailurePolicy: policy, observer: onError },
+      });
 
       try {
         await expect(
@@ -330,7 +341,9 @@ describe('Error Handling Integration', () => {
       const onError = vi.fn(() => {
         throw new Error(OBSERVER_FAILURE_MESSAGE);
       });
-      const scenario = createFailingWriterClient(context.databaseUrl, { errorHandling: { policy: 'ignore', onError } });
+      const scenario = createFailingWriterClient(context.databaseUrl, {
+        errorHandling: { writeFailurePolicy: 'ignore', observer: onError },
+      });
 
       try {
         const user = await scenario.provider.runAsync(testActor, async () =>
@@ -360,6 +373,225 @@ describe('Error Handling Integration', () => {
       } finally {
         consoleErrorSpy.mockRestore();
         await disconnectScenario(scenario);
+      }
+    });
+  });
+
+  describe('Batch operations — error policy contract', () => {
+    // Regression coverage for the batch double-report bug: `executeBatch`'s catch used
+    // to call `reportAuditFailure` (observer + policy) around the whole
+    // `dispatchBatchAction`, including the `writeAuditLogs` call that `runBatchPipeline`
+    // used to make from inside that same try. So a single `log-write` failure was
+    // reported once by `writeAuditLogs` itself (correctly, as `log-write`), then a
+    // second time by `executeBatch`'s catch after the policy's `'throw'`/rethrow bubbled
+    // back up — mislabeled `diff-generation`, even though nothing about diff generation
+    // had failed. `writeAuditLogs` is now called OUTSIDE `executeBatch`'s try/catch (see
+    // `dispatchBatchAction` and `executeBatch` in extension.ts), so a batch `log-write`
+    // failure is reported exactly once, matching the single-operation path
+    // (`executeAuditedOperation` in operation-executor.ts) it was inconsistent with.
+
+    // Both tests below need `writeFailurePolicy: 'throw'` specifically: 'log' and
+    // 'ignore' never re-throw, so a `log-write` failure never reaches `executeBatch`'s
+    // catch at all under those policies — the double-report only happens once the
+    // policy's rethrow bubbles the same failure back up through `runBatchPipeline` to
+    // `dispatchBatchAction`, which is exactly what 'throw' does.
+
+    it("a failing hooks.writer on a batch operation (createMany) notifies the observer exactly once, with phase: 'log-write'", async () => {
+      const onError = vi.fn();
+      const scenario = createFailingWriterClient(context.databaseUrl, {
+        errorHandling: { writeFailurePolicy: 'throw', observer: onError },
+      });
+
+      try {
+        await expect(
+          scenario.provider.runAsync(testActor, async () =>
+            scenario.prisma.user.createMany({
+              data: [
+                { email: 'batch-log-write-a@example.com', name: 'Batch Log Write A', password: 'secret123' },
+                { email: 'batch-log-write-b@example.com', name: 'Batch Log Write B', password: 'secret123' },
+              ],
+            }),
+          ),
+        ).rejects.toThrow(AUDIT_WRITE_FAILURE_MESSAGE);
+
+        // Rolled back together with the transaction the batch write ran in.
+        const persisted = await context.basePrisma.user.findMany({
+          where: { email: { in: ['batch-log-write-a@example.com', 'batch-log-write-b@example.com'] } },
+        });
+        expect(persisted).toHaveLength(0);
+
+        expect(onError).toHaveBeenCalledTimes(1);
+        expect(onError).toHaveBeenCalledWith(
+          expect.objectContaining({
+            phase: 'log-write',
+            modelName: 'User',
+            error: expect.objectContaining({ message: AUDIT_WRITE_FAILURE_MESSAGE }),
+          }),
+        );
+      } finally {
+        await disconnectScenario(scenario);
+      }
+    });
+
+    it("a failing hooks.writer on a batch operation (updateMany) notifies the observer exactly once, with phase: 'log-write'", async () => {
+      const onError = vi.fn();
+      const scenario = createFailingWriterClient(context.databaseUrl, {
+        errorHandling: { writeFailurePolicy: 'throw', observer: onError },
+      });
+
+      try {
+        // Seed directly through the raw (non-audited) base client — the audited client's
+        // writer always fails, so any audited write here (even under the same 'throw'
+        // policy under test) would itself reject before there is anything to update.
+        const [userA, userB] = await Promise.all([
+          scenario.basePrisma.user.create({
+            data: { email: 'batch-update-log-write-a@example.com', name: 'A', password: 'secret123' },
+          }),
+          scenario.basePrisma.user.create({
+            data: { email: 'batch-update-log-write-b@example.com', name: 'B', password: 'secret123' },
+          }),
+        ]);
+
+        await expect(
+          scenario.provider.runAsync(testActor, async () =>
+            scenario.prisma.user.updateMany({
+              where: { id: { in: [userA.id, userB.id] } },
+              data: { name: 'Updated' },
+            }),
+          ),
+        ).rejects.toThrow(AUDIT_WRITE_FAILURE_MESSAGE);
+
+        // Rolled back together with the transaction the batch write ran in.
+        const stillOriginal = await context.basePrisma.user.findMany({
+          where: { id: { in: [userA.id, userB.id] } },
+          select: { name: true },
+        });
+        expect(stillOriginal.map((u) => u.name).sort()).toEqual(['A', 'B']);
+
+        expect(onError).toHaveBeenCalledTimes(1);
+        expect(onError).toHaveBeenCalledWith(
+          expect.objectContaining({
+            phase: 'log-write',
+            modelName: 'User',
+            error: expect.objectContaining({ message: AUDIT_WRITE_FAILURE_MESSAGE }),
+          }),
+        );
+      } finally {
+        await disconnectScenario(scenario);
+      }
+    });
+
+    it("writeFailurePolicy: 'ignore' on a batch operation (updateMany) lets the caller's operation succeed", async () => {
+      // Before the fix, `executeBatch`'s catch unconditionally rethrew after reporting
+      // the failure — regardless of what the policy decided — because it could not tell
+      // a `log-write` failure surfacing from inside `runBatchPipeline` apart from a
+      // genuine `diff-generation` failure. So `writeFailurePolicy: 'ignore'` could not
+      // actually let a batch operation's own audit-log write failure through.
+      const onError = vi.fn();
+      const scenario = createFailingWriterClient(context.databaseUrl, {
+        errorHandling: { writeFailurePolicy: 'ignore', observer: onError },
+      });
+
+      try {
+        const [userA, userB] = await scenario.provider.runAsync(testActor, async () => [
+          await scenario.prisma.user.create({
+            data: { email: 'batch-ignore-a@example.com', name: 'Batch Ignore A', password: 'secret123' },
+          }),
+          await scenario.prisma.user.create({
+            data: { email: 'batch-ignore-b@example.com', name: 'Batch Ignore B', password: 'secret123' },
+          }),
+        ]);
+        onError.mockClear();
+
+        const updateResult = await scenario.provider.runAsync(testActor, async () =>
+          scenario.prisma.user.updateMany({
+            where: { id: { in: [userA.id, userB.id] } },
+            data: { name: 'Batch Ignore Updated' },
+          }),
+        );
+
+        expect(updateResult.count).toBe(2);
+
+        const updated = await context.basePrisma.user.findMany({
+          where: { id: { in: [userA.id, userB.id] } },
+          select: { name: true },
+        });
+        expect(updated.map((u) => u.name)).toEqual(['Batch Ignore Updated', 'Batch Ignore Updated']);
+
+        expect(onError).toHaveBeenCalledWith(
+          expect.objectContaining({
+            phase: 'log-write',
+            modelName: 'User',
+            error: expect.objectContaining({ message: AUDIT_WRITE_FAILURE_MESSAGE }),
+          }),
+        );
+      } finally {
+        await disconnectScenario(scenario);
+      }
+    });
+
+    it('an audit-stage (diff-generation) failure on the batch path still propagates to the caller, regardless of writeFailurePolicy', async () => {
+      // Corrects the contract text fixed alongside the double-report bug: `diff-generation`
+      // is never policy-gated, unlike `log-write` (see `AuditErrorPhase` / `WriteFailurePolicy`
+      // in types.ts). Trigger a genuine diff-generation failure — an actor-context enricher
+      // that throws, `onError: 'fail'` by default — rather than a log-write failure or the
+      // caller's own database error, and confirm it propagates even under
+      // `writeFailurePolicy: 'ignore'`, and that the policy function is never consulted.
+      const ENRICHER_FAILURE_MESSAGE = 'actor enricher is broken';
+      const basePrisma = new PrismaClient({ datasources: { db: { url: context.databaseUrl } } });
+      const provider = createAsyncLocalStorageProvider();
+      const onError = vi.fn();
+      const policy = vi.fn((_context: AuditErrorContext) => 'ignore' as const);
+      const prisma = createAuditClient(basePrisma, {
+        Prisma,
+        provider,
+        basePrisma,
+        aggregateMapping: testAggregateMapping,
+        performance: { awaitWrite: true },
+        errorHandling: { writeFailurePolicy: policy, observer: onError },
+        contextEnricher: {
+          actor: {
+            enricher: async () => {
+              throw new Error(ENRICHER_FAILURE_MESSAGE);
+            },
+          },
+        },
+      });
+
+      try {
+        // Seeded through the shared, unbroken test client so setup itself does not trip
+        // the broken enricher configured on `prisma` above.
+        const user = await context.provider.runAsync(testActor, async () =>
+          context.prisma.user.create({
+            data: { email: 'diff-gen-batch@example.com', name: 'Diff Gen User', password: 'secret123' },
+          }),
+        );
+
+        await expect(
+          provider.runAsync(testActor, async () =>
+            prisma.user.updateMany({
+              where: { id: user.id },
+              data: { name: 'Should Not Persist' },
+            }),
+          ),
+        ).rejects.toThrow(ENRICHER_FAILURE_MESSAGE);
+
+        // Rolled back together with the transaction the batch path runs in.
+        const persisted = await context.basePrisma.user.findUnique({ where: { id: user.id } });
+        expect(persisted?.name).toBe('Diff Gen User');
+
+        expect(onError).toHaveBeenCalledWith(
+          expect.objectContaining({
+            phase: 'diff-generation',
+            modelName: 'User',
+            error: expect.objectContaining({ message: ENRICHER_FAILURE_MESSAGE }),
+          }),
+        );
+        // Not policy-gated: the write-failure policy is never consulted for this phase.
+        expect(policy).not.toHaveBeenCalled();
+      } finally {
+        await prisma.$disconnect();
+        await basePrisma.$disconnect();
       }
     });
   });
@@ -432,7 +664,7 @@ describe('Error Handling Integration', () => {
         basePrisma,
         aggregateMapping: testAggregateMapping,
         performance: { awaitWrite: true },
-        errorHandling: { policy, onError },
+        errorHandling: { writeFailurePolicy: policy, observer: onError },
       });
 
       try {
@@ -493,7 +725,7 @@ describe('Error Handling Integration', () => {
         basePrisma,
         aggregateMapping: testAggregateMapping,
         performance: { awaitWrite: true },
-        errorHandling: { policy, onError },
+        errorHandling: { writeFailurePolicy: policy, observer: onError },
       });
 
       try {

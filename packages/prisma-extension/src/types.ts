@@ -129,22 +129,25 @@ export interface NestedOperationsConfig {
  *   caller's operation continues; the audit log records the before-state as unknown
  *   rather than guessing.
  * - `log-write`: persisting the audit log entry itself failed. This is the only phase
- *   {@link ErrorHandlingConfig.policy} decides the outcome of — see there for exactly
- *   what "decides" means once the write is queued or detached.
+ *   {@link ErrorHandlingConfig.writeFailurePolicy} decides the outcome of — see there
+ *   for exactly what "decides" means once the write is queued or detached.
  * - `diff-generation`: building the audit log entry (enrichment, aggregate resolution,
- *   redaction, batch pipeline) failed, after the underlying operation already ran.
+ *   redaction, batch pipeline) failed, after the underlying operation already ran. This
+ *   phase is NOT policy-gated: it always propagates to the caller as a thrown error,
+ *   regardless of {@link ErrorHandlingConfig.writeFailurePolicy}.
  * - `entity-id-resolution`: a nested delete's primary key could not be reconstructed
- *   from the fetched or serialized entityId. That record's audit log entry is skipped
- *   rather than recorded with a partial or fabricated identity.
+ *   from the fetched or serialized entityId. The caller's operation continues; that
+ *   record's audit log entry is skipped rather than recorded with a partial or
+ *   fabricated identity.
  */
 export type AuditErrorPhase = 'pre-fetch' | 'log-write' | 'diff-generation' | 'entity-id-resolution';
 
 /**
  * Structured context describing a single audit-pipeline failure. Passed to both
- * {@link ErrorHandlingConfig.onError} (the observer) and, when
- * {@link ErrorHandlingConfig.policy} is a function, to the policy resolver — the same
- * shape either way, so a handler that forwards failures to Sentry or similar does not
- * need to know which of the two invoked it.
+ * {@link ErrorHandlingConfig.observer} (the observer) and, when
+ * {@link ErrorHandlingConfig.writeFailurePolicy} is a function, to the policy resolver —
+ * the same shape either way, so a handler that forwards failures to Sentry or similar
+ * does not need to know which of the two invoked it.
  */
 export interface AuditErrorContext {
   phase: AuditErrorPhase;
@@ -161,7 +164,8 @@ export interface AuditErrorContext {
  * Read-only: it NEVER affects whether the caller's own database operation succeeds or
  * fails. It always runs inside a try/catch; a handler that throws (synchronously or by
  * returning a rejected promise) has that failure logged to the console and otherwise
- * ignored. Use {@link ErrorHandlingConfig.policy} to control the caller's operation.
+ * ignored. Use {@link ErrorHandlingConfig.writeFailurePolicy} to control the caller's
+ * operation.
  */
 export type AuditErrorObserver = (context: AuditErrorContext) => void | Promise<void>;
 
@@ -187,7 +191,9 @@ export type AuditErrorObserver = (context: AuditErrorContext) => void | Promise<
  * default); once the write has been queued or detached, `'throw'` logs instead, exactly
  * like `'log'`.
  */
-export type ErrorPolicy = ErrorStrategy | ((context: AuditErrorContext) => ErrorStrategy | Promise<ErrorStrategy>);
+export type WriteFailurePolicy =
+  | ErrorStrategy
+  | ((context: AuditErrorContext) => ErrorStrategy | Promise<ErrorStrategy>);
 
 /**
  * Audit-failure observation and policy configuration.
@@ -198,14 +204,14 @@ export type ErrorPolicy = ErrorStrategy | ((context: AuditErrorContext) => Error
  */
 export interface ErrorHandlingConfig {
   /** Observer notified of every audit-pipeline failure. See {@link AuditErrorObserver}. */
-  onError?: AuditErrorObserver;
+  observer?: AuditErrorObserver;
   /**
    * Decides whether a failed audit-log write fails the caller's operation.
-   * See {@link ErrorPolicy}.
+   * See {@link WriteFailurePolicy}.
    *
    * @default 'log'
    */
-  policy?: ErrorPolicy;
+  writeFailurePolicy?: WriteFailurePolicy;
 }
 
 /**

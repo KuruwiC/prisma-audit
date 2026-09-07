@@ -53,7 +53,7 @@ describe('Custom Audit Log Table', () => {
         awaitWrite: true,
       },
       errorHandling: {
-        policy: (context) => {
+        writeFailurePolicy: (context) => {
           console.error(`[Custom Table Test] Audit error in ${context.phase}:`, context.error);
           return 'throw';
         },
