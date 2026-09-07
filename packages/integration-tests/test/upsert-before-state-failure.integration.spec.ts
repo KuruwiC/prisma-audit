@@ -39,7 +39,7 @@ describe('upsert — before-state fetch failure', () => {
     sharedDatabaseUrl = await getSharedDatabaseUrl();
   });
 
-  const createClient = (databaseUrl: string, onError: AuditErrorObserver) => {
+  const createClient = (databaseUrl: string, observer: AuditErrorObserver) => {
     const rawBasePrisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
 
     // One-shot fault: the next `post.findUnique` call throws, everything else
@@ -72,17 +72,17 @@ describe('upsert — before-state fetch failure', () => {
       aggregateMapping: testAggregateMapping,
       diffing: { excludeFields: ['createdAt'] },
       security: { redact: { fields: [] } },
-      errorHandling: { observer: onError },
+      errorHandling: { observer },
     });
     return { basePrisma, rawBasePrisma, provider, prisma, armFindUniqueFailure };
   };
 
   let scenario: ReturnType<typeof createClient>;
-  let onError: ReturnType<typeof vi.fn<AuditErrorObserver>>;
+  let observer: ReturnType<typeof vi.fn<AuditErrorObserver>>;
 
   beforeEach(async () => {
-    onError = vi.fn<AuditErrorObserver>();
-    scenario = createClient(sharedDatabaseUrl, onError);
+    observer = vi.fn<AuditErrorObserver>();
+    scenario = createClient(sharedDatabaseUrl, observer);
     await scenario.basePrisma.auditLog.deleteMany();
     await scenario.basePrisma.post.deleteMany();
     await scenario.basePrisma.user.deleteMany();
@@ -122,7 +122,7 @@ describe('upsert — before-state fetch failure', () => {
     expect(rowCount).toBe(1);
 
     // The failure was reported through the read-only observer.
-    expect(onError).toHaveBeenCalledWith(
+    expect(observer).toHaveBeenCalledWith(
       expect.objectContaining({
         phase: 'pre-fetch',
         modelName: 'Post',

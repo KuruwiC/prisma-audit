@@ -140,7 +140,7 @@ export const createTestClients = (databaseUrl: string): TestContext => {
  * Disconnects the test clients. The PostgreSQL container is shared across the
  * whole run and is stopped once in global teardown.
  */
-export const disposeTestContext = async (context: Pick<TestContext, 'prisma' | 'basePrisma'>): Promise<void> => {
+export const disposeTestContext = async (context: TestContext): Promise<void> => {
   try {
     await context.prisma.$disconnect();
     await context.basePrisma.$disconnect();

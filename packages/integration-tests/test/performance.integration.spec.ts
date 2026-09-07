@@ -169,7 +169,7 @@ describe('Performance Benchmarks', () => {
   });
 
   describe('fetchBeforeOperation: false', () => {
-    it('should minimize audit log writes for nested update without pre-fetch', async () => {
+    it('should minimize audit log rows for nested update without pre-fetch', async () => {
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -210,7 +210,7 @@ describe('Performance Benchmarks', () => {
       expect(context.auditLogRowCount.value).toBe(7);
     });
 
-    it('should minimize audit log writes for nested delete without pre-fetch', async () => {
+    it('should minimize audit log rows for nested delete without pre-fetch', async () => {
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {

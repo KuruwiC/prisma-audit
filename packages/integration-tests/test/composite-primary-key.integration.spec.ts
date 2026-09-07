@@ -34,11 +34,12 @@
  *     `buildMinimalEntity` in `lifecycle/nested-handlers/delete-handler.ts`).
  */
 
+import type { AuditErrorObserver } from '@kuruwic/prisma-audit';
 import { createAuditClient, defineEntity, foreignKey, to } from '@kuruwic/prisma-audit';
 import type { AggregateMapping, AuditContext } from '@kuruwic/prisma-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/prisma-audit-core';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   cleanDatabase,
   createTestContext,
@@ -337,8 +338,9 @@ describe('Composite Primary Key (PostLike)', () => {
    * dropped and `onUnresolvedDeleteEntityId` is notified — never a fabricated `{}` entity.
    * With pre-fetch skipped entirely (this describe block), the code never reaches
    * `buildMinimalEntity` for this delete at all — `extractDeleteOperationEntityId`'s
-   * fallback returns `undefined` for the compound-key `where` shape, and
-   * `collectDeleteRecords` returns `[]`, so no log is written either way.
+   * fallback returns `undefined` for the compound-key `where` shape. `collectDeleteRecords`
+   * reports that through `onUnresolvedDeleteEntityId` the same way, then returns `[]`, so
+   * no log is written either way.
    */
   describe('nested delete from Post (fetchBeforeOperation: false)', () => {
     let sharedDatabaseUrl: string;
@@ -353,9 +355,10 @@ describe('Composite Primary Key (PostLike)', () => {
       await scenario?.prisma.$disconnect();
     });
 
-    it('writes no audit log at all (not even a fabricated one) when pre-fetch is skipped', async () => {
+    it('writes no audit log at all (not even a fabricated one) when pre-fetch is skipped, and reports the unresolved entityId to the observer', async () => {
       const basePrisma = new PrismaClient({ datasources: { db: { url: sharedDatabaseUrl } } });
       const provider = createAsyncLocalStorageProvider();
+      const observer = vi.fn<AuditErrorObserver>();
       const mappingWithoutPreFetch: AggregateMapping = {
         ...testAggregateMapping,
         PostLike: defineEntity({
@@ -377,6 +380,7 @@ describe('Composite Primary Key (PostLike)', () => {
         security: { redact: { fields: [] } },
         performance: { awaitWrite: true },
         nestedOperations: { delete: { fetchBeforeOperation: false } },
+        errorHandling: { observer },
       });
       scenario = { basePrisma, prisma };
 
@@ -415,6 +419,21 @@ describe('Composite Primary Key (PostLike)', () => {
         where: { entityType: 'PostLike', action: 'delete' },
       });
       expect(deleteLogs).toHaveLength(0);
+
+      // The dropped entry is not silent: `collectDeleteRecords` reports it through
+      // `onUnresolvedDeleteEntityId`, which the extension forwards to `errorHandling.observer`
+      // as `phase: 'entity-id-resolution'` — the same channel a malformed composite entityId
+      // uses, so a caller with no observer configured has no way to learn the delete's audit
+      // entry was dropped.
+      expect(observer).toHaveBeenCalledWith(
+        expect.objectContaining({
+          phase: 'entity-id-resolution',
+          modelName: 'PostLike',
+          operation: 'delete',
+          params: expect.objectContaining({ pkFields: ['postId', 'userId'] }),
+          error: expect.any(Error),
+        }),
+      );
     });
   });
 });

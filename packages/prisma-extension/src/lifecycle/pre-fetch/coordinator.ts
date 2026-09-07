@@ -123,10 +123,10 @@ export interface PreFetchCoordinatorDependencies {
    * for that path is recorded as unresolved (the `'__default__'` sentinel) and the
    * caller's own operation continues — mirrors the top-level equivalent,
    * `fetchBeforeState` in extension.ts, which reports the same failure class through
-   * the same observer. Optional so tests / internal callers that don't need this
-   * signal can omit it; the failure is otherwise only visible via `preFetchLog`.
+   * the same observer. Optional: when omitted, the failure is visible only via
+   * `preFetchLog`.
    */
-  readonly observer?: AuditErrorObserver;
+  readonly onPreFetchFailure?: AuditErrorObserver;
 }
 
 /**
@@ -204,18 +204,18 @@ export const categorizeRelationType = (
 
 /**
  * Reports a single nested operation's pre-fetch failure through the optional
- * observer (see {@link PreFetchCoordinatorDependencies.observer}). A no-op when no
- * observer is configured.
+ * `onPreFetchFailure` callback (see {@link PreFetchCoordinatorDependencies.onPreFetchFailure}).
+ * A no-op when no callback is configured.
  */
 const reportNestedPreFetchFailure = async (
-  observer: AuditErrorObserver | undefined,
+  onPreFetchFailure: AuditErrorObserver | undefined,
   nestedOp: NestedOperation,
   error: unknown,
 ): Promise<void> => {
-  if (!observer) return;
+  if (!onPreFetchFailure) return;
 
   const reportedError = error instanceof Error ? error : new Error(String(error));
-  await observer({
+  await onPreFetchFailure({
     phase: 'pre-fetch',
     modelName: nestedOp.relatedModel,
     operation: nestedOp.operation,
@@ -254,7 +254,7 @@ export const preFetchNestedRecordsBeforeOperation = async (
   args: Record<string, unknown>,
   dependencies: PreFetchCoordinatorDependencies,
 ): Promise<PreFetchResults> => {
-  const { Prisma, getNestedOperationConfig, observer } = dependencies;
+  const { Prisma, getNestedOperationConfig, onPreFetchFailure } = dependencies;
 
   const internalResults: NestedPreFetchResults = new Map();
   const prismaMetadata = createSchemaMetadataFromDMMF(Prisma);
@@ -375,7 +375,7 @@ export const preFetchNestedRecordsBeforeOperation = async (
     } catch (error) {
       storePreFetchResult(internalResults, nestedOp.path, PRE_FETCH_DEFAULT_KEY, null);
       preFetchLog('pre-fetch failed: path=%s error=%o', nestedOp.path, error);
-      await reportNestedPreFetchFailure(observer, nestedOp, error);
+      await reportNestedPreFetchFailure(onPreFetchFailure, nestedOp, error);
     }
   }
 

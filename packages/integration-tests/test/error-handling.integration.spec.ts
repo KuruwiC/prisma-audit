@@ -94,14 +94,13 @@ describe('Error Handling Integration', () => {
     // Every scenario below drives a real audit-log write failure via a `hooks.writer`
     // that always throws (see hooks-writer.integration.spec.ts for the base pattern),
     // then observes whether the caller's own `user.create` succeeds or fails, whether
-    // anything is logged to the console, and whether the observer (`errorHandling.observer`,
-    // held here in the local `onError` mock) was notified.
+    // anything is logged to the console, and whether the observer was notified.
 
     it("writeFailurePolicy: 'ignore' — commits the caller's row and stays silent", async () => {
       const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-      const onError = vi.fn();
+      const observer = vi.fn();
       const scenario = createFailingWriterClient(context.databaseUrl, {
-        errorHandling: { writeFailurePolicy: 'ignore', observer: onError },
+        errorHandling: { writeFailurePolicy: 'ignore', observer },
       });
 
       try {
@@ -120,7 +119,7 @@ describe('Error Handling Integration', () => {
 
         expect(consoleErrorSpy).not.toHaveBeenCalled();
 
-        expect(onError).toHaveBeenCalledWith(
+        expect(observer).toHaveBeenCalledWith(
           expect.objectContaining({
             phase: 'log-write',
             modelName: 'User',
@@ -135,9 +134,9 @@ describe('Error Handling Integration', () => {
 
     it("writeFailurePolicy: 'log' — commits the caller's row and reports the error to the console", async () => {
       const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-      const onError = vi.fn();
+      const observer = vi.fn();
       const scenario = createFailingWriterClient(context.databaseUrl, {
-        errorHandling: { writeFailurePolicy: 'log', observer: onError },
+        errorHandling: { writeFailurePolicy: 'log', observer },
       });
 
       try {
@@ -159,7 +158,7 @@ describe('Error Handling Integration', () => {
           AUDIT_WRITE_FAILURE_MESSAGE,
         );
 
-        expect(onError).toHaveBeenCalledWith(
+        expect(observer).toHaveBeenCalledWith(
           expect.objectContaining({
             phase: 'log-write',
             modelName: 'User',
@@ -173,9 +172,9 @@ describe('Error Handling Integration', () => {
     });
 
     it("writeFailurePolicy: 'throw' — fails the caller's operation and rolls back the row", async () => {
-      const onError = vi.fn();
+      const observer = vi.fn();
       const scenario = createFailingWriterClient(context.databaseUrl, {
-        errorHandling: { writeFailurePolicy: 'throw', observer: onError },
+        errorHandling: { writeFailurePolicy: 'throw', observer },
       });
 
       try {
@@ -192,7 +191,7 @@ describe('Error Handling Integration', () => {
         });
         expect(persisted).toBeNull();
 
-        expect(onError).toHaveBeenCalledWith(
+        expect(observer).toHaveBeenCalledWith(
           expect.objectContaining({
             phase: 'log-write',
             modelName: 'User',
@@ -207,8 +206,8 @@ describe('Error Handling Integration', () => {
     it("default (no errorHandling.writeFailurePolicy configured) — behaves like 'log', not 'throw'", async () => {
       // An audit library must not break the caller's write by default — see WriteFailurePolicy's JSDoc.
       const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-      const onError = vi.fn();
-      const scenario = createFailingWriterClient(context.databaseUrl, { errorHandling: { observer: onError } });
+      const observer = vi.fn();
+      const scenario = createFailingWriterClient(context.databaseUrl, { errorHandling: { observer } });
 
       try {
         const user = await scenario.provider.runAsync(testActor, async () =>
@@ -229,7 +228,7 @@ describe('Error Handling Integration', () => {
           AUDIT_WRITE_FAILURE_MESSAGE,
         );
 
-        expect(onError).toHaveBeenCalledWith(
+        expect(observer).toHaveBeenCalledWith(
           expect.objectContaining({
             phase: 'log-write',
             modelName: 'User',
@@ -244,10 +243,10 @@ describe('Error Handling Integration', () => {
 
     it("writeFailurePolicy function — returning 'ignore' is invoked with the failure context and lets the operation succeed", async () => {
       const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-      const onError = vi.fn();
+      const observer = vi.fn();
       const policy = vi.fn((_context: AuditErrorContext) => 'ignore' as const);
       const scenario = createFailingWriterClient(context.databaseUrl, {
-        errorHandling: { writeFailurePolicy: policy, observer: onError },
+        errorHandling: { writeFailurePolicy: policy, observer },
       });
 
       try {
@@ -276,7 +275,7 @@ describe('Error Handling Integration', () => {
         );
 
         // The observer is notified independently of what the policy function returned.
-        expect(onError).toHaveBeenCalledWith(
+        expect(observer).toHaveBeenCalledWith(
           expect.objectContaining({
             phase: 'log-write',
             modelName: 'User',
@@ -290,10 +289,10 @@ describe('Error Handling Integration', () => {
     });
 
     it("writeFailurePolicy function — returning 'throw' fails the operation with the original audit-write error", async () => {
-      const onError = vi.fn();
+      const observer = vi.fn();
       const policy = vi.fn((_context: AuditErrorContext) => 'throw' as const);
       const scenario = createFailingWriterClient(context.databaseUrl, {
-        errorHandling: { writeFailurePolicy: policy, observer: onError },
+        errorHandling: { writeFailurePolicy: policy, observer },
       });
 
       try {
@@ -320,7 +319,7 @@ describe('Error Handling Integration', () => {
           }),
         );
 
-        expect(onError).toHaveBeenCalledWith(
+        expect(observer).toHaveBeenCalledWith(
           expect.objectContaining({
             phase: 'log-write',
             modelName: 'User',
@@ -334,15 +333,15 @@ describe('Error Handling Integration', () => {
 
     it("a throwing observer never affects the caller's operation — it is caught and logged instead", async () => {
       // The observer is read-only by construction: every invocation is wrapped in its
-      // own try/catch, so a broken onError callback cannot change whether the caller's
+      // own try/catch, so a broken observer callback cannot change whether the caller's
       // write succeeds (unlike the policy, which is the only thing that can).
       const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       const OBSERVER_FAILURE_MESSAGE = 'observer callback is broken';
-      const onError = vi.fn(() => {
+      const observer = vi.fn(() => {
         throw new Error(OBSERVER_FAILURE_MESSAGE);
       });
       const scenario = createFailingWriterClient(context.databaseUrl, {
-        errorHandling: { writeFailurePolicy: 'ignore', observer: onError },
+        errorHandling: { writeFailurePolicy: 'ignore', observer },
       });
 
       try {
@@ -359,7 +358,7 @@ describe('Error Handling Integration', () => {
         });
         expect(persisted).not.toBeNull();
 
-        expect(onError).toHaveBeenCalledWith(
+        expect(observer).toHaveBeenCalledWith(
           expect.objectContaining({
             phase: 'log-write',
             error: expect.objectContaining({ message: AUDIT_WRITE_FAILURE_MESSAGE }),
@@ -378,28 +377,23 @@ describe('Error Handling Integration', () => {
   });
 
   describe('Batch operations — error policy contract', () => {
-    // Regression coverage for the batch double-report bug: `executeBatch`'s catch used
-    // to call `reportAuditFailure` (observer + policy) around the whole
-    // `dispatchBatchAction`, including the `writeAuditLogs` call that `runBatchPipeline`
-    // used to make from inside that same try. So a single `log-write` failure was
-    // reported once by `writeAuditLogs` itself (correctly, as `log-write`), then a
-    // second time by `executeBatch`'s catch after the policy's `'throw'`/rethrow bubbled
-    // back up — mislabeled `diff-generation`, even though nothing about diff generation
-    // had failed. `writeAuditLogs` is now called OUTSIDE `executeBatch`'s try/catch (see
-    // `dispatchBatchAction` and `executeBatch` in extension.ts), so a batch `log-write`
-    // failure is reported exactly once, matching the single-operation path
-    // (`executeAuditedOperation` in operation-executor.ts) it was inconsistent with.
+    // A batch operation's own `log-write` failure notifies the observer exactly
+    // once, with `phase: 'log-write'` — the same as the single-operation path
+    // (`executeAuditedOperation` in operation-executor.ts). Under
+    // `writeFailurePolicy: 'throw'`, that failure rolls the caller's rows back
+    // with it.
 
-    // Both tests below need `writeFailurePolicy: 'throw'` specifically: 'log' and
-    // 'ignore' never re-throw, so a `log-write` failure never reaches `executeBatch`'s
-    // catch at all under those policies — the double-report only happens once the
-    // policy's rethrow bubbles the same failure back up through `runBatchPipeline` to
-    // `dispatchBatchAction`, which is exactly what 'throw' does.
+    // The next two tests use `writeFailurePolicy: 'throw'` specifically: it is the
+    // only policy that re-throws the `log-write` failure out of `writeAuditLogs`,
+    // so it is the one policy under which the once-only guarantee has to hold
+    // end to end — the failure must propagate through `runBatchPipeline` and
+    // `dispatchBatchAction` back to the caller without being reported a second
+    // time along the way.
 
     it("a failing hooks.writer on a batch operation (createMany) notifies the observer exactly once, with phase: 'log-write'", async () => {
-      const onError = vi.fn();
+      const observer = vi.fn();
       const scenario = createFailingWriterClient(context.databaseUrl, {
-        errorHandling: { writeFailurePolicy: 'throw', observer: onError },
+        errorHandling: { writeFailurePolicy: 'throw', observer },
       });
 
       try {
@@ -420,8 +414,8 @@ describe('Error Handling Integration', () => {
         });
         expect(persisted).toHaveLength(0);
 
-        expect(onError).toHaveBeenCalledTimes(1);
-        expect(onError).toHaveBeenCalledWith(
+        expect(observer).toHaveBeenCalledTimes(1);
+        expect(observer).toHaveBeenCalledWith(
           expect.objectContaining({
             phase: 'log-write',
             modelName: 'User',
@@ -434,9 +428,9 @@ describe('Error Handling Integration', () => {
     });
 
     it("a failing hooks.writer on a batch operation (updateMany) notifies the observer exactly once, with phase: 'log-write'", async () => {
-      const onError = vi.fn();
+      const observer = vi.fn();
       const scenario = createFailingWriterClient(context.databaseUrl, {
-        errorHandling: { writeFailurePolicy: 'throw', observer: onError },
+        errorHandling: { writeFailurePolicy: 'throw', observer },
       });
 
       try {
@@ -468,8 +462,8 @@ describe('Error Handling Integration', () => {
         });
         expect(stillOriginal.map((u) => u.name).sort()).toEqual(['A', 'B']);
 
-        expect(onError).toHaveBeenCalledTimes(1);
-        expect(onError).toHaveBeenCalledWith(
+        expect(observer).toHaveBeenCalledTimes(1);
+        expect(observer).toHaveBeenCalledWith(
           expect.objectContaining({
             phase: 'log-write',
             modelName: 'User',
@@ -482,14 +476,12 @@ describe('Error Handling Integration', () => {
     });
 
     it("writeFailurePolicy: 'ignore' on a batch operation (updateMany) lets the caller's operation succeed", async () => {
-      // Before the fix, `executeBatch`'s catch unconditionally rethrew after reporting
-      // the failure — regardless of what the policy decided — because it could not tell
-      // a `log-write` failure surfacing from inside `runBatchPipeline` apart from a
-      // genuine `diff-generation` failure. So `writeFailurePolicy: 'ignore'` could not
-      // actually let a batch operation's own audit-log write failure through.
-      const onError = vi.fn();
+      // `writeFailurePolicy: 'ignore'` lets a batch operation's own `log-write`
+      // failure through without affecting the caller's operation, the same as the
+      // single-operation path.
+      const observer = vi.fn();
       const scenario = createFailingWriterClient(context.databaseUrl, {
-        errorHandling: { writeFailurePolicy: 'ignore', observer: onError },
+        errorHandling: { writeFailurePolicy: 'ignore', observer },
       });
 
       try {
@@ -501,7 +493,7 @@ describe('Error Handling Integration', () => {
             data: { email: 'batch-ignore-b@example.com', name: 'Batch Ignore B', password: 'secret123' },
           }),
         ]);
-        onError.mockClear();
+        observer.mockClear();
 
         const updateResult = await scenario.provider.runAsync(testActor, async () =>
           scenario.prisma.user.updateMany({
@@ -518,7 +510,7 @@ describe('Error Handling Integration', () => {
         });
         expect(updated.map((u) => u.name)).toEqual(['Batch Ignore Updated', 'Batch Ignore Updated']);
 
-        expect(onError).toHaveBeenCalledWith(
+        expect(observer).toHaveBeenCalledWith(
           expect.objectContaining({
             phase: 'log-write',
             modelName: 'User',
@@ -531,16 +523,16 @@ describe('Error Handling Integration', () => {
     });
 
     it('an audit-stage (diff-generation) failure on the batch path still propagates to the caller, regardless of writeFailurePolicy', async () => {
-      // Corrects the contract text fixed alongside the double-report bug: `diff-generation`
-      // is never policy-gated, unlike `log-write` (see `AuditErrorPhase` / `WriteFailurePolicy`
-      // in types.ts). Trigger a genuine diff-generation failure — an actor-context enricher
-      // that throws, `onError: 'fail'` by default — rather than a log-write failure or the
-      // caller's own database error, and confirm it propagates even under
-      // `writeFailurePolicy: 'ignore'`, and that the policy function is never consulted.
+      // `diff-generation` is never policy-gated, unlike `log-write` (see
+      // `AuditErrorPhase` / `WriteFailurePolicy` in types.ts): it propagates to the
+      // caller even under `writeFailurePolicy: 'ignore'`, and the policy function is
+      // never consulted. Trigger a genuine diff-generation failure — an
+      // actor-context enricher that throws, `onError: 'fail'` by default — rather
+      // than a log-write failure or the caller's own database error.
       const ENRICHER_FAILURE_MESSAGE = 'actor enricher is broken';
       const basePrisma = new PrismaClient({ datasources: { db: { url: context.databaseUrl } } });
       const provider = createAsyncLocalStorageProvider();
-      const onError = vi.fn();
+      const observer = vi.fn();
       const policy = vi.fn((_context: AuditErrorContext) => 'ignore' as const);
       const prisma = createAuditClient(basePrisma, {
         Prisma,
@@ -548,7 +540,7 @@ describe('Error Handling Integration', () => {
         basePrisma,
         aggregateMapping: testAggregateMapping,
         performance: { awaitWrite: true },
-        errorHandling: { writeFailurePolicy: policy, observer: onError },
+        errorHandling: { writeFailurePolicy: policy, observer },
         contextEnricher: {
           actor: {
             enricher: async () => {
@@ -580,7 +572,7 @@ describe('Error Handling Integration', () => {
         const persisted = await context.basePrisma.user.findUnique({ where: { id: user.id } });
         expect(persisted?.name).toBe('Diff Gen User');
 
-        expect(onError).toHaveBeenCalledWith(
+        expect(observer).toHaveBeenCalledWith(
           expect.objectContaining({
             phase: 'diff-generation',
             modelName: 'User',
@@ -651,12 +643,12 @@ describe('Error Handling Integration', () => {
       // `handleUpdateOrDeleteMany` calls the caller's own `updateMany` in the middle of
       // audit-support work (before-fetch, after-refetch, runBatchPipeline). Only the
       // audit-support work is an audit failure — the caller's own database error must
-      // never be reported to `onError` or routed through `policy`. Uses a normal
+      // never be reported to `observer` or routed through `policy`. Uses a normal
       // (non-failing) writer so the only failure in play is the caller's own — the setup
       // creates below must not themselves trip the observer.
       const basePrisma = new PrismaClient({ datasources: { db: { url: context.databaseUrl } } });
       const provider = createAsyncLocalStorageProvider();
-      const onError = vi.fn();
+      const observer = vi.fn();
       const policy = vi.fn((_context: AuditErrorContext) => 'ignore' as const);
       const prisma = createAuditClient(basePrisma, {
         Prisma,
@@ -664,7 +656,7 @@ describe('Error Handling Integration', () => {
         basePrisma,
         aggregateMapping: testAggregateMapping,
         performance: { awaitWrite: true },
-        errorHandling: { writeFailurePolicy: policy, observer: onError },
+        errorHandling: { writeFailurePolicy: policy, observer },
       });
 
       try {
@@ -677,7 +669,7 @@ describe('Error Handling Integration', () => {
           }),
         ]);
         // The setup creates above must not themselves trip the observer/policy.
-        onError.mockClear();
+        observer.mockClear();
         policy.mockClear();
 
         await expect(
@@ -698,7 +690,7 @@ describe('Error Handling Integration', () => {
           ['batch-collision-a@example.com', 'batch-collision-b@example.com'].sort(),
         );
 
-        expect(onError).not.toHaveBeenCalled();
+        expect(observer).not.toHaveBeenCalled();
         expect(policy).not.toHaveBeenCalled();
       } finally {
         await prisma.$disconnect();
@@ -711,13 +703,13 @@ describe('Error Handling Integration', () => {
       // inside the lifecycle pipeline's execute-operation stage, alongside audit-support
       // work (fetch-before-state, enrich, build). Only the audit-support work is an audit
       // failure — the caller's own database error (a unique constraint violation here) must
-      // never reach `onError` or `policy`, and its message must reach the caller exactly as
+      // never reach `observer` or `policy`, and its message must reach the caller exactly as
       // Prisma threw it, not rewritten as `[@prisma-audit] Audited operation failed for
       // model ...`. Uses a normal (non-failing) writer so the only failure in play is the
       // caller's own.
       const basePrisma = new PrismaClient({ datasources: { db: { url: context.databaseUrl } } });
       const provider = createAsyncLocalStorageProvider();
-      const onError = vi.fn();
+      const observer = vi.fn();
       const policy = vi.fn((_context: AuditErrorContext) => 'ignore' as const);
       const prisma = createAuditClient(basePrisma, {
         Prisma,
@@ -725,7 +717,7 @@ describe('Error Handling Integration', () => {
         basePrisma,
         aggregateMapping: testAggregateMapping,
         performance: { awaitWrite: true },
-        errorHandling: { writeFailurePolicy: policy, observer: onError },
+        errorHandling: { writeFailurePolicy: policy, observer },
       });
 
       try {
@@ -736,7 +728,7 @@ describe('Error Handling Integration', () => {
           }),
         );
         // The setup create above must not itself trip the observer/policy.
-        onError.mockClear();
+        observer.mockClear();
         policy.mockClear();
 
         const duplicateCreate = provider.runAsync(testActor, async () =>
@@ -755,7 +747,7 @@ describe('Error Handling Integration', () => {
         expect(users).toHaveLength(1);
         expect(users[0]?.name).toBe('First User');
 
-        expect(onError).not.toHaveBeenCalled();
+        expect(observer).not.toHaveBeenCalled();
         expect(policy).not.toHaveBeenCalled();
       } finally {
         await prisma.$disconnect();

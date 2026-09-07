@@ -3,20 +3,18 @@
  *
  * `preFetchNestedRecordsBeforeOperation` (`lifecycle/pre-fetch/coordinator.ts`) wraps
  * each nested operation's pre-fetch in a per-operation try/catch that falls back to
- * the `'__default__'` sentinel on failure. The top-level equivalent
- * (`fetchBeforeState` in extension.ts) reports the same failure class through
- * `errorHandling.observer` with `phase: 'pre-fetch'` — but the nested catch used to
- * only log via `preFetchLog`, so a nested `update`/`delete` whose pre-fetch query
- * failed lost its before-state with no notification at all.
+ * the `'__default__'` sentinel on failure. It reports the failure through
+ * `errorHandling.observer` with `phase: 'pre-fetch'`, matching the top-level
+ * equivalent (`fetchBeforeState` in extension.ts): a nested `update`/`delete` whose
+ * pre-fetch query fails keeps that notification even though it loses its before-state.
  *
  * The second scenario below drives the same underlying failure through a nested
  * *delete array*: when the pre-fetch for one item in the array throws, the items
  * after it are never individually pre-fetched, and the `'__default__'` sentinel
  * ends up sharing the pre-fetch results map with the item(s) that already
  * succeeded. `collectDeleteRecords` (`lifecycle/nested-handlers/delete-handler.ts`)
- * used to special-case that combination (`entityId === '__default__' &&
- * pathMap.size > 1`) and drop it with a bare `continue`, silently, instead of
- * reporting it the same way an unresolved entityId is reported everywhere else.
+ * treats that combination like every other unresolved entityId: the entry is
+ * skipped and reported through `onUnresolvedDeleteEntityId`, never dropped silently.
  *
  * Both failures are injected the same way as
  * `upsert-before-state-failure.integration.spec.ts`: a plain Prisma Client
@@ -56,7 +54,7 @@ describe('nested pre-fetch failures — observer notification', () => {
    * the same delegate) also calls `comment.findUnique`. `armFault` resets the call
    * counter to zero, so those setup calls never consume the armed call numbers.
    */
-  const createClient = (databaseUrl: string, onError: AuditErrorObserver) => {
+  const createClient = (databaseUrl: string, observer: AuditErrorObserver) => {
     const rawBasePrisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
 
     let callCount = 0;
@@ -86,7 +84,7 @@ describe('nested pre-fetch failures — observer notification', () => {
       aggregateMapping: testAggregateMapping,
       diffing: { excludeFields: ['createdAt'] },
       security: { redact: { fields: [] } },
-      errorHandling: { observer: onError },
+      errorHandling: { observer },
     });
 
     const armFault = (callNumbersToFail: Set<number>, message: string): void => {
@@ -100,8 +98,8 @@ describe('nested pre-fetch failures — observer notification', () => {
 
   it("a nested update's pre-fetch failure notifies the observer with phase: 'pre-fetch', and the caller's operation still succeeds", async () => {
     const FAILURE_MESSAGE = 'simulated nested pre-fetch failure (update)';
-    const onError = vi.fn<AuditErrorObserver>();
-    const { rawBasePrisma, basePrisma, provider, prisma, armFault } = createClient(sharedDatabaseUrl, onError);
+    const observer = vi.fn<AuditErrorObserver>();
+    const { rawBasePrisma, basePrisma, provider, prisma, armFault } = createClient(sharedDatabaseUrl, observer);
 
     try {
       await basePrisma.auditLog.deleteMany();
@@ -122,7 +120,7 @@ describe('nested pre-fetch failures — observer notification', () => {
       // Arm the fault only now: the nested update's own pre-fetch is the very next
       // `comment.findUnique` call.
       armFault(new Set([1]), FAILURE_MESSAGE);
-      onError.mockClear();
+      observer.mockClear();
 
       const updatedPost = await provider.runAsync(testActor, async () =>
         prisma.post.update({
@@ -142,7 +140,7 @@ describe('nested pre-fetch failures — observer notification', () => {
       const persistedComment = await basePrisma.comment.findUnique({ where: { id: comment.id } });
       expect(persistedComment?.content).toBe('Updated Comment');
 
-      expect(onError).toHaveBeenCalledWith(
+      expect(observer).toHaveBeenCalledWith(
         expect.objectContaining({
           phase: 'pre-fetch',
           modelName: 'Comment',
@@ -158,8 +156,8 @@ describe('nested pre-fetch failures — observer notification', () => {
 
   it('a nested delete array whose pre-fetch fails partway reports both the pre-fetch failure and the resulting unresolved entry, without dropping either silently', async () => {
     const FAILURE_MESSAGE = 'simulated nested pre-fetch failure (delete #2)';
-    const onError = vi.fn<AuditErrorObserver>();
-    const { rawBasePrisma, basePrisma, provider, prisma, armFault } = createClient(sharedDatabaseUrl, onError);
+    const observer = vi.fn<AuditErrorObserver>();
+    const { rawBasePrisma, basePrisma, provider, prisma, armFault } = createClient(sharedDatabaseUrl, observer);
 
     try {
       await basePrisma.auditLog.deleteMany();
@@ -186,7 +184,7 @@ describe('nested pre-fetch failures — observer notification', () => {
       // Arm the fault only now: the delete array's pre-fetch loop is the next set of
       // `comment.findUnique` calls, one per item in order.
       armFault(new Set([2]), FAILURE_MESSAGE);
-      onError.mockClear();
+      observer.mockClear();
 
       // Pre-fetch processes the array in order: c1's `findUnique` (call #1) succeeds,
       // c2's (call #2) is the injected failure, and c3's is never attempted — the
@@ -210,7 +208,7 @@ describe('nested pre-fetch failures — observer notification', () => {
       expect(remaining).toBe(0);
 
       // The pre-fetch failure itself, from coordinator.ts's per-operation catch.
-      expect(onError).toHaveBeenCalledWith(
+      expect(observer).toHaveBeenCalledWith(
         expect.objectContaining({
           phase: 'pre-fetch',
           modelName: 'Comment',
@@ -222,7 +220,7 @@ describe('nested pre-fetch failures — observer notification', () => {
       // The consequence inside collectDeleteRecords: the resulting `'__default__'`
       // entry (added by the same catch, alongside c1's already-resolved entry) is
       // reported instead of being silently skipped.
-      expect(onError).toHaveBeenCalledWith(
+      expect(observer).toHaveBeenCalledWith(
         expect.objectContaining({
           phase: 'entity-id-resolution',
           modelName: 'Comment',

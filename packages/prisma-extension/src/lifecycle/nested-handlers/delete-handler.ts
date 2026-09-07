@@ -110,7 +110,8 @@ export type NestedPreFetchResults = Map<string, Map<string, { before: Record<str
  *   1. Use pre-fetched before states (has full record data)
  *   2. Fallback: extract entity ID from nestedOp.data (minimal record only)
  *
- * An entityId that cannot be resolved to a full primary key (see `buildMinimalEntity`)
+ * An entityId that cannot be resolved to a full primary key (see `buildMinimalEntity`) —
+ * including the case where no entityId can be extracted from the operation data at all —
  * is never recorded as a partial/guessed or empty identity: that record is skipped
  * and, if `onUnresolvedDeleteEntityId` is provided, reported through it instead.
  *
@@ -164,6 +165,12 @@ export const collectDeleteRecords = (
   const entityId = extractDeleteOperationEntityId(nestedOp.data, pkFields);
   if (!entityId) {
     nestedLog('could not extract entity ID from delete operation data');
+    // There is no raw entityId to report here — extraction found nothing at all,
+    // not a corrupted one. Report it with the same `'__default__'` sentinel
+    // `buildMinimalEntity` already uses for "identity could not be determined" (as
+    // opposed to a real-but-malformed serialized key), so the observer can tell
+    // this apart from the malformed-composite-key case above.
+    reportUnresolvedEntityId(nestedOp.relatedModel, '__default__', pkFields, onUnresolvedDeleteEntityId);
     return [];
   }
 

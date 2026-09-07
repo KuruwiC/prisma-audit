@@ -366,7 +366,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     const dependencies: PreFetchCoordinatorDependencies = {
       Prisma,
       getNestedOperationConfig: getNestedOperationConfigWrapper,
-      observer: notifyObserver,
+      onPreFetchFailure: notifyObserver,
     };
 
     return preFetchNestedRecordsBeforeOperation(prismaClient, modelName, args, dependencies);
@@ -493,7 +493,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
    * Runs the batch enrich/build stages and returns the resulting audit logs, unwritten.
    * The caller (`dispatchBatchAction`'s branches) pairs these logs with the batch's
    * operation result; `executeBatch` is the one place that actually writes them, once
-   * outside its own try/catch — see the double-report note there.
+   * outside its own try/catch — see the phase-contract note on `executeBatch`.
    */
   const runBatchPipeline = async (
     batchInitialContext: BatchInitialContext,
@@ -750,12 +750,10 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
 
     // `dispatchBatchAction` runs audit-support work (before-fetch, after-refetch,
     // enrich/build) around the caller's own mutation, but never writes the audit logs
-    // it builds — it returns them instead. This keeps `writeAuditLogs` OUTSIDE this
-    // try/catch, matching `executeAuditedOperation` (operation-executor.ts): if it were
-    // called from inside the try, a `writeFailurePolicy: 'throw'` write failure would
-    // report `log-write` once from inside `writeAuditLogs`, then get caught right here
-    // and reported a second time as `diff-generation` before being rethrown — the same
-    // failure notified to the observer twice under two different phases.
+    // it builds — it returns them instead, matching `executeAuditedOperation`
+    // (operation-executor.ts). `writeAuditLogs` must stay outside this try/catch: it
+    // reports `log-write` failures itself, and this catch would re-report the same
+    // failure as `diff-generation` if it ran inside.
     const executeBatch = async (
       txContext: AuditContext,
       clientToUse: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
