@@ -131,10 +131,6 @@ export const collectDeleteRecords = (
     const collected: CollectedNestedRecord[] = [];
 
     for (const [entityId, preFetchResult] of pathMap) {
-      if (entityId === '__default__' && pathMap.size > 1) {
-        continue;
-      }
-
       const beforeState = preFetchResult.before;
       // Use beforeState as entity when available, otherwise build from entityId + pkFields
       const entity = beforeState ?? buildMinimalEntity(entityId, pkFields);

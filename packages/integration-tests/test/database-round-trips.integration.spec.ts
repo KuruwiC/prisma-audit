@@ -8,10 +8,10 @@
  * Prisma's query event API (`log: [{ emit: 'event', level: 'query' }]` +
  * `$on('query', ...)`), so such a regression shows up here.
  *
- * Every expected count below was read off a real run against the current
- * implementation (see the per-scenario comments for what each statement is), not
- * guessed. If a legitimate change moves a count, this file's numbers — and their
- * comments — must be updated to describe the new sequence, not loosened.
+ * Each count below is the exact statement sequence the implementation issues for
+ * that scenario; the per-scenario comments enumerate those statements. A change
+ * that moves a count must update the number and its comments to describe the new
+ * sequence — never loosen the assertion instead.
  */
 import type { AggregateMapping } from '@kuruwic/prisma-audit';
 import { createAuditClient, defineEntity, foreignKey, to } from '@kuruwic/prisma-audit';

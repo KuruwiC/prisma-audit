@@ -99,8 +99,8 @@ export type NestedAuditLogBuilderDependencies = {
   /**
    * Notified when a nested delete's composite entityId cannot be reconstructed
    * (see `collectDeleteRecords`), instead of that entry being recorded with a
-   * partial/guessed key. Optional so existing callers keep working unchanged;
-   * when omitted, the unresolved entry is still skipped, just not reported.
+   * partial/guessed key. Optional: when omitted, the unresolved entry is still
+   * skipped, just not reported.
    */
   onUnresolvedDeleteEntityId?: UnresolvedDeleteEntityIdReporter;
 };

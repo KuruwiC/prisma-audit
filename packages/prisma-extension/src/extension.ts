@@ -366,6 +366,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     const dependencies: PreFetchCoordinatorDependencies = {
       Prisma,
       getNestedOperationConfig: getNestedOperationConfigWrapper,
+      observer: notifyObserver,
     };
 
     return preFetchNestedRecordsBeforeOperation(prismaClient, modelName, args, dependencies);

@@ -21,6 +21,7 @@ import type {
   PrismaNamespace,
   TransactionalPrismaClient,
 } from '../../internal-types.js';
+import type { AuditErrorObserver } from '../../types.js';
 import { getPrimaryKeyFields } from '../../utils/id-generator.js';
 import { createSchemaMetadataFromDMMF } from '../../utils/nested-operations.js';
 import { getUniqueConstraints } from '../../utils/schema-metadata.js';
@@ -117,6 +118,15 @@ export interface PreFetchCoordinatorDependencies {
   /** Prisma namespace extracted from basePrisma at extension initialization */
   readonly Prisma: PrismaNamespace;
   readonly getNestedOperationConfig: GetOperationConfig;
+  /**
+   * Notified when a single nested operation's pre-fetch query fails. The before-state
+   * for that path is recorded as unresolved (the `'__default__'` sentinel) and the
+   * caller's own operation continues — mirrors the top-level equivalent,
+   * `fetchBeforeState` in extension.ts, which reports the same failure class through
+   * the same observer. Optional so tests / internal callers that don't need this
+   * signal can omit it; the failure is otherwise only visible via `preFetchLog`.
+   */
+  readonly observer?: AuditErrorObserver;
 }
 
 /**
@@ -193,6 +203,28 @@ export const categorizeRelationType = (
 };
 
 /**
+ * Reports a single nested operation's pre-fetch failure through the optional
+ * observer (see {@link PreFetchCoordinatorDependencies.observer}). A no-op when no
+ * observer is configured.
+ */
+const reportNestedPreFetchFailure = async (
+  observer: AuditErrorObserver | undefined,
+  nestedOp: NestedOperation,
+  error: unknown,
+): Promise<void> => {
+  if (!observer) return;
+
+  const reportedError = error instanceof Error ? error : new Error(String(error));
+  await observer({
+    phase: 'pre-fetch',
+    modelName: nestedOp.relatedModel,
+    operation: nestedOp.operation,
+    params: nestedOp.data,
+    error: reportedError,
+  });
+};
+
+/**
  * Pre-fetches nested records before operation execution
  *
  * Implements the discovery pass of the two-pass nested-operation detection used for accurate audit logging.
@@ -222,7 +254,7 @@ export const preFetchNestedRecordsBeforeOperation = async (
   args: Record<string, unknown>,
   dependencies: PreFetchCoordinatorDependencies,
 ): Promise<PreFetchResults> => {
-  const { Prisma, getNestedOperationConfig } = dependencies;
+  const { Prisma, getNestedOperationConfig, observer } = dependencies;
 
   const internalResults: NestedPreFetchResults = new Map();
   const prismaMetadata = createSchemaMetadataFromDMMF(Prisma);
@@ -343,6 +375,7 @@ export const preFetchNestedRecordsBeforeOperation = async (
     } catch (error) {
       storePreFetchResult(internalResults, nestedOp.path, PRE_FETCH_DEFAULT_KEY, null);
       preFetchLog('pre-fetch failed: path=%s error=%o', nestedOp.path, error);
+      await reportNestedPreFetchFailure(observer, nestedOp, error);
     }
   }
 
