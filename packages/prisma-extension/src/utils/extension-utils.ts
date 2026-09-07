@@ -7,9 +7,14 @@
  * @module extension-utils
  */
 
-import { type AuditContext, getRuntimeContext, SUPPORTED_OPERATIONS } from '@kuruwic/prisma-audit-core';
-
+import {
+  type AuditContext,
+  getRuntimeContext,
+  SUPPORTED_OPERATIONS,
+  type UniqueConstraint,
+} from '@kuruwic/prisma-audit-core';
 import type { PrismaAction } from '../types.js';
+import { unwrapCompoundWhere } from './compound-where.js';
 import { ENTITY_IDENTITY_DEFAULT, extractEntityIdentity } from './id-generator.js';
 
 /**
@@ -54,8 +59,15 @@ export const isAuditableAction = (operation: string): operation is PrismaAction 
 /**
  * Extracts entity ID from delete operation data
  *
- * Handles both direct ID format (`{ id: '123' }`) and WHERE clause format
- * (`{ where: { id: '123' } }`).
+ * Handles direct ID format (`{ id: '123' }`), WHERE clause format
+ * (`{ where: { id: '456' } }`), and — for a composite primary key — Prisma's
+ * compound-unique shape (`{ postId_userId: { postId, userId } }`, wrapped directly or
+ * under `where`), unwrapped via the shared `unwrapCompoundWhere` the pre-fetch path also uses
+ * already uses to read it. Only Prisma's default compound-key name (`pkFields.join('_')`)
+ * can be reconstructed this way, since this function only has `pkFields`, not a full
+ * `UniqueConstraint` with a possible explicit `name` — a compound key declared with an
+ * explicit custom name (`@@id([a, b], name: "custom")`) stays unsupported on this
+ * fallback path (see `unwrapCompoundWhere`'s own doc comment).
  *
  * @param data - The delete operation data
  * @returns Entity ID if found, undefined otherwise
@@ -68,6 +80,9 @@ export const isAuditableAction = (operation: string): operation is PrismaAction 
  * extractDeleteOperationEntityId({ where: { id: '456' } });
  * // => '456'
  *
+ * extractDeleteOperationEntityId({ postId_userId: { postId: 'p1', userId: 'u1' } }, ['postId', 'userId']);
+ * // => '["p1","u1"]'
+ *
  * extractDeleteOperationEntityId({ where: { email: 'user@example.com' } });
  * // => undefined
  * ```
@@ -78,15 +93,16 @@ export const extractDeleteOperationEntityId = (data: unknown, pkFields?: string[
   }
 
   const fields = pkFields ?? ['id'];
+  const pkConstraint: UniqueConstraint = { type: 'primaryKey', fields };
   const record = data as Record<string, unknown>;
 
-  const identity = extractEntityIdentity(record, fields);
+  const identity = extractEntityIdentity(unwrapCompoundWhere(record, pkConstraint), fields);
   if (identity !== ENTITY_IDENTITY_DEFAULT) return identity;
 
   if ('where' in record) {
     const where = record.where as Record<string, unknown>;
     if (where) {
-      const whereIdentity = extractEntityIdentity(where, fields);
+      const whereIdentity = extractEntityIdentity(unwrapCompoundWhere(where, pkConstraint), fields);
       if (whereIdentity !== ENTITY_IDENTITY_DEFAULT) return whereIdentity;
     }
   }

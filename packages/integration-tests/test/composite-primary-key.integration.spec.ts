@@ -26,12 +26,15 @@
  *     that WHERE to `findUnique`, which accepts the compound-unique shape natively;
  *     `unwrapCompoundWhere` then flattens it to derive the composite entityId from the
  *     WHERE when the row itself was not found.
+ *   - `fetchBeforeOperation: false`: with pre-fetch skipped, `extractDeleteOperationEntityId`
+ *     (`utils/extension-utils.ts`) unwraps the same compound-unique WHERE shape via
+ *     `unwrapCompoundWhere`, so the real composite entityId is still recorded from the
+ *     WHERE clause alone — no `findUnique` round-trip needed for this fixture's
+ *     default-named `@@id([postId, userId])`.
  *   - the boundary where identity genuinely cannot be resolved: deleting a
- *     composite-key row that does not exist, and the `fetchBeforeOperation: false`
- *     configuration. In both cases no fabricated entityId is ever recorded — either
- *     the write fails before any log is built, or the pre-fetch result is skipped and
- *     reported through `onUnresolvedDeleteEntityId` rather than persisted as a guess (see
- *     `buildMinimalEntity` in `lifecycle/nested-handlers/delete-handler.ts`).
+ *     composite-key row that does not exist. No fabricated entityId is ever recorded —
+ *     the write fails before any log is built (see `buildMinimalEntity` in
+ *     `lifecycle/nested-handlers/delete-handler.ts` for the general "never guess" rule).
  */
 
 import type { AuditErrorObserver } from '@kuruwic/prisma-audit';
@@ -330,17 +333,12 @@ describe('Composite Primary Key (PostLike)', () => {
    * `packages/prisma-extension/test/delete-handler.spec.ts` covers it directly, by
    * constructing the `NestedPreFetchResults` map by hand.
    *
-   * The `'__default__'` sentinel path itself *is* still reachable through the public
-   * client — a pre-fetch call can fail for reasons unrelated to the composite-key WHERE
-   * shape (e.g. the related model's query erroring for some other cause), and the
-   * coordinator falls back to it. `buildMinimalEntity` treats `'__default__'` the same
-   * way it treats a malformed composite JSON key: it returns `null`, so the record is
-   * dropped and `onUnresolvedDeleteEntityId` is notified — never a fabricated `{}` entity.
-   * With pre-fetch skipped entirely (this describe block), the code never reaches
-   * `buildMinimalEntity` for this delete at all — `extractDeleteOperationEntityId`'s
-   * fallback returns `undefined` for the compound-key `where` shape. `collectDeleteRecords`
-   * reports that through `onUnresolvedDeleteEntityId` the same way, then returns `[]`, so
-   * no log is written either way.
+   * With pre-fetch skipped entirely (this describe block), `collectDeleteRecords` falls
+   * back to `extractDeleteOperationEntityId` (`utils/extension-utils.ts`) against
+   * `nestedOp.data` directly — for this nested `delete`, that is the compound-unique
+   * WHERE shape `{ postId_userId: { postId, userId } }` itself. `unwrapCompoundWhere`
+   * flattens it the same way the pre-fetch path does, so the real composite entityId is
+   * still resolved and recorded — no fabricated entry, and no dropped one either.
    */
   describe('nested delete from Post (fetchBeforeOperation: false)', () => {
     let sharedDatabaseUrl: string;
@@ -355,7 +353,7 @@ describe('Composite Primary Key (PostLike)', () => {
       await scenario?.prisma.$disconnect();
     });
 
-    it('writes no audit log at all (not even a fabricated one) when pre-fetch is skipped, and reports the unresolved entityId to the observer', async () => {
+    it('records the real composite entityId from the WHERE clause alone, and does not report it as unresolved', async () => {
       const basePrisma = new PrismaClient({ datasources: { db: { url: sharedDatabaseUrl } } });
       const provider = createAsyncLocalStorageProvider();
       const observer = vi.fn<AuditErrorObserver>();
@@ -415,25 +413,30 @@ describe('Composite Primary Key (PostLike)', () => {
       });
       expect(stillExists).toBeNull();
 
+      // The real composite entityId is recorded — reconstructed from the compound-unique
+      // WHERE clause alone, without a pre-fetch round-trip. `beforeState` is `null` (no
+      // `findUnique` ran), matching what `fetchBeforeOperation: false` promises. Same
+      // self + Post-aggregate projection as the "nested delete from Post" test above
+      // (with pre-fetch enabled) — both logs share the real entityId.
+      const realEntityId = compositeEntityId(post.id, user.id);
       const deleteLogs = await basePrisma.auditLog.findMany({
-        where: { entityType: 'PostLike', action: 'delete' },
+        where: { entityType: 'PostLike', entityId: realEntityId, action: 'delete' },
+        orderBy: { aggregateType: 'asc' },
       });
-      expect(deleteLogs).toHaveLength(0);
+      expect(deleteLogs).toHaveLength(2);
+      const selfLog = deleteLogs.find((log: { aggregateType: string }) => log.aggregateType === 'PostLike');
+      const postAggregateLog = deleteLogs.find((log: { aggregateType: string }) => log.aggregateType === 'Post');
+      expect(selfLog).toBeDefined();
+      expect(postAggregateLog?.aggregateId).toBe(post.id);
+      for (const log of deleteLogs) {
+        expect(log.before).toBeNull();
+        expect(log.after).toBeNull();
+      }
 
-      // The dropped entry is not silent: `collectDeleteRecords` reports it through
-      // `onUnresolvedDeleteEntityId`, which the extension forwards to `errorHandling.observer`
-      // as `phase: 'entity-id-resolution'` — the same channel a malformed composite entityId
-      // uses, so a caller with no observer configured has no way to learn the delete's audit
-      // entry was dropped.
-      expect(observer).toHaveBeenCalledWith(
-        expect.objectContaining({
-          phase: 'entity-id-resolution',
-          modelName: 'PostLike',
-          operation: 'delete',
-          params: expect.objectContaining({ pkFields: ['postId', 'userId'] }),
-          error: expect.any(Error),
-        }),
-      );
+      // No fabricated identity, but also no false "unresolved" report: the entityId was
+      // genuinely resolved from the WHERE clause, so `onUnresolvedDeleteEntityId` (and by
+      // extension `errorHandling.observer`) is never reached for this delete.
+      expect(observer).not.toHaveBeenCalled();
     });
   });
 });

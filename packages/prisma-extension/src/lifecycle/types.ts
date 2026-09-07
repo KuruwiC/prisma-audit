@@ -16,13 +16,17 @@ import type { AuditLogData, OperationContext } from '../types.js';
 /**
  * Result of fetching before-state for an entity.
  *
- * Distinguishes between "record not found" and "fetch failed" so that
- * callers (e.g. upsert action resolution) do not misclassify DB errors
- * as "record does not exist".
+ * Distinguishes "record not found" from "fetch failed" from "fetch was never
+ * attempted" so that callers (e.g. upsert action resolution) do not misclassify a DB
+ * error, or a deliberately skipped fetch, as "record does not exist". `notRequested` is
+ * the outcome for actions that skip the fetch entirely — `create`, and `update`/`delete`
+ * with `fetchBeforeOperation: false` — where "found" was never distinguished from "not
+ * found" in the first place, because no fetch ever ran.
  */
 export type BeforeStateResult =
   | { readonly _tag: 'found'; readonly data: Record<string, unknown> }
   | { readonly _tag: 'notFound' }
+  | { readonly _tag: 'notRequested' }
   | { readonly _tag: 'error'; readonly error: Error };
 
 /**
@@ -50,17 +54,17 @@ export interface InitialContext {
  */
 export interface PreparedContext extends InitialContext {
   /**
-   * State before operation (null for create, and also for both `notFound` and
-   * `error` outcomes of the fetch below — this field alone cannot tell those two
-   * apart). Consumers that must not misread a failed fetch as "record does not
-   * exist" (e.g. upsert action resolution) should branch on `beforeStateResult`
-   * instead.
+   * State before operation (null for create, and also for `notRequested`,
+   * `notFound`, and `error` outcomes of the fetch below — this field alone cannot
+   * tell those apart). Consumers that must not misread a skipped or failed fetch as
+   * "record does not exist" (e.g. upsert action resolution) should branch on
+   * `beforeStateResult` instead.
    */
   beforeState: Record<string, unknown> | null;
   /**
    * Full outcome of the before-state fetch. For actions that skip the fetch
-   * entirely (e.g. create), this is `{ _tag: 'notFound' }`, matching `beforeState`
-   * being `null`.
+   * entirely (e.g. create, or update/delete with `fetchBeforeOperation: false`),
+   * this is `{ _tag: 'notRequested' }`, matching `beforeState` being `null`.
    */
   beforeStateResult: BeforeStateResult;
   /** Pre-fetched nested operation states (path → record | null) */

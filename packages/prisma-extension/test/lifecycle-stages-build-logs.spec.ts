@@ -457,4 +457,86 @@ describe('createBuildLogsStage', () => {
     expect(mockBuildAuditLog).not.toHaveBeenCalled();
     expect(result.logs).toEqual([]);
   });
+
+  it('builds the main log normally for a create whose before-state fetch was never requested (not the same as a failed fetch)', async () => {
+    // Arrange — `beforeStateResult: { _tag: 'notRequested' }` is what a `create`
+    // (which always skips the fetch) produces. Unlike `{ _tag: 'error' }`, this must
+    // NOT skip the main log entry — a skipped fetch and a failed fetch are different
+    // outcomes, and only the latter is unresolvable enough to warrant dropping the entry.
+    const mainLog: AuditLogData = {
+      actorCategory: 'model',
+      actorType: 'User',
+      actorId: createActorId('user-1'),
+      actorContext: null,
+      entityCategory: 'content',
+      entityType: 'Post',
+      entityId: createEntityId('post-1'),
+      entityContext: null,
+      aggregateCategory: 'content',
+      aggregateType: 'Post',
+      aggregateId: createAggregateId('post-1'),
+      aggregateContext: null,
+      action: 'create',
+      before: null,
+      after: { id: 'post-1', title: 'New Title' },
+      changes: null,
+      requestContext: null,
+      createdAt: new Date('2025-01-01T00:00:00Z'),
+    };
+    const mockBuildAuditLog = vi.fn().mockResolvedValue([mainLog]);
+    const mockBuildNestedAuditLogs = vi.fn().mockResolvedValue([]);
+    const mockEntityConfig = {
+      category: 'content',
+      type: 'Post',
+      idResolver: vi.fn().mockResolvedValue('post-1'),
+      aggregates: [],
+    };
+    const mockAggregateConfig = {
+      getEntityConfig: vi.fn().mockReturnValue(mockEntityConfig),
+      getEntityConfigByType: vi.fn().mockReturnValue(undefined),
+      isLoggable: vi.fn(),
+      getAllLoggableModels: vi.fn(),
+      getMapping: vi.fn(),
+    };
+    const clientStub: PrismaClientWithDynamicAccess = Object.create(null);
+
+    const enrichedContext: EnrichedContext = {
+      operation: {
+        model: 'Post',
+        action: 'create',
+        args: { data: { title: 'New Title' } },
+      },
+      auditContext: {
+        actor: { category: 'model', type: 'User', id: 'user-1' },
+      },
+      clientToUse: clientStub,
+      query: vi.fn(),
+      beforeState: null,
+      beforeStateResult: { _tag: 'notRequested' },
+      nestedPreFetchResults: undefined,
+      result: { id: 'post-1', title: 'New Title' },
+      actorContext: null,
+      entityContext: null,
+    };
+
+    const deps: Pick<
+      StageDependencies,
+      'buildAuditLog' | 'buildNestedAuditLogs' | 'aggregateConfig' | 'excludeFields' | 'basePrisma'
+    > = {
+      buildAuditLog: mockBuildAuditLog,
+      buildNestedAuditLogs: mockBuildNestedAuditLogs,
+      aggregateConfig: mockAggregateConfig,
+      excludeFields: [],
+      basePrisma: clientStub,
+    };
+
+    const stage = createBuildLogsStage(deps);
+
+    // Act
+    const result: FinalContext = await stage(enrichedContext);
+
+    // Assert — the main log is built exactly as it would be for `{ _tag: 'notFound' }`.
+    expect(mockBuildAuditLog).toHaveBeenCalledTimes(1);
+    expect(result.logs).toEqual([mainLog]);
+  });
 });

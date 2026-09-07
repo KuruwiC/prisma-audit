@@ -26,11 +26,11 @@ const nestedOp: NestedOperationInfo = {
 const pkFields = ['tenantId', 'itemId'];
 
 describe('collectDeleteRecords — composite primary key reconstruction', () => {
-  it('does not fabricate a partial-key entity when the composite entityId is not valid JSON', () => {
+  it('does not fabricate a partial-key entity when the composite entityId is not valid JSON', async () => {
     const brokenEntityId = 'not-json';
     const preFetchResults: NestedPreFetchResults = new Map([['items', new Map([[brokenEntityId, { before: null }]])]]);
 
-    const collected = collectDeleteRecords(nestedOp, preFetchResults, pkFields);
+    const collected = await collectDeleteRecords(nestedOp, preFetchResults, pkFields);
 
     // A `{ tenantId: 'not-json' }` guess would look like a
     // complete, valid identity to anyone reading the audit log, when in fact the
@@ -39,20 +39,20 @@ describe('collectDeleteRecords — composite primary key reconstruction', () => 
     expect(collected).toEqual([]);
   });
 
-  it('does not fabricate a partial-key entity when the parsed JSON array length does not match pkFields', () => {
+  it('does not fabricate a partial-key entity when the parsed JSON array length does not match pkFields', async () => {
     const brokenEntityId = JSON.stringify(['tenant-1']); // missing itemId
     const preFetchResults: NestedPreFetchResults = new Map([['items', new Map([[brokenEntityId, { before: null }]])]]);
 
-    const collected = collectDeleteRecords(nestedOp, preFetchResults, pkFields);
+    const collected = await collectDeleteRecords(nestedOp, preFetchResults, pkFields);
 
     expect(collected).toEqual([]);
   });
 
-  it('still reconstructs the entity when the composite entityId is well-formed JSON', () => {
+  it('still reconstructs the entity when the composite entityId is well-formed JSON', async () => {
     const goodEntityId = JSON.stringify(['tenant-1', 'item-1']);
     const preFetchResults: NestedPreFetchResults = new Map([['items', new Map([[goodEntityId, { before: null }]])]]);
 
-    const collected = collectDeleteRecords(nestedOp, preFetchResults, pkFields);
+    const collected = await collectDeleteRecords(nestedOp, preFetchResults, pkFields);
 
     expect(collected).toEqual([
       {
@@ -64,12 +64,12 @@ describe('collectDeleteRecords — composite primary key reconstruction', () => 
     ]);
   });
 
-  it('reports the unresolved entityId via the provided callback instead of silently dropping it', () => {
+  it('reports the unresolved entityId via the provided callback instead of silently dropping it', async () => {
     const brokenEntityId = 'not-json';
     const preFetchResults: NestedPreFetchResults = new Map([['items', new Map([[brokenEntityId, { before: null }]])]]);
-    const onUnresolvedDeleteEntityId = vi.fn();
+    const onUnresolvedDeleteEntityId = vi.fn().mockResolvedValue(undefined);
 
-    const collected = collectDeleteRecords(nestedOp, preFetchResults, pkFields, onUnresolvedDeleteEntityId);
+    const collected = await collectDeleteRecords(nestedOp, preFetchResults, pkFields, onUnresolvedDeleteEntityId);
 
     expect(collected).toEqual([]);
     expect(onUnresolvedDeleteEntityId).toHaveBeenCalledTimes(1);
@@ -83,11 +83,27 @@ describe('collectDeleteRecords — composite primary key reconstruction', () => 
     );
   });
 
-  it('still reconstructs a single-field entityId unchanged (non-composite models are unaffected)', () => {
+  it('awaits the reporter callback before returning, rather than firing it and forgetting it', async () => {
+    const brokenEntityId = 'not-json';
+    const preFetchResults: NestedPreFetchResults = new Map([['items', new Map([[brokenEntityId, { before: null }]])]]);
+    let reporterResolved = false;
+    const onUnresolvedDeleteEntityId = vi.fn().mockImplementation(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      reporterResolved = true;
+    });
+
+    await collectDeleteRecords(nestedOp, preFetchResults, pkFields, onUnresolvedDeleteEntityId);
+
+    // If `collectDeleteRecords` only fired the callback without awaiting it, this
+    // assertion would run before the callback's own microtask/timer resolved.
+    expect(reporterResolved).toBe(true);
+  });
+
+  it('still reconstructs a single-field entityId unchanged (non-composite models are unaffected)', async () => {
     const singleFieldOp: NestedOperationInfo = { ...nestedOp, path: 'comments' };
     const preFetchResults: NestedPreFetchResults = new Map([['comments', new Map([['comment-1', { before: null }]])]]);
 
-    const collected = collectDeleteRecords(singleFieldOp, preFetchResults, ['id']);
+    const collected = await collectDeleteRecords(singleFieldOp, preFetchResults, ['id']);
 
     expect(collected).toEqual([
       {
@@ -97,5 +113,64 @@ describe('collectDeleteRecords — composite primary key reconstruction', () => 
         relatedModel: 'OrderItem',
       },
     ]);
+  });
+});
+
+describe('collectDeleteRecords — nested deleteMany has no single-row identity to resolve', () => {
+  // Nested `deleteMany` (e.g. `posts: { deleteMany: { where: { published: false } } }`) is
+  // deliberately never pre-fetched (see the "Exception" note on `collectDeleteRecords`), so
+  // an ordinary filter WHERE reaches the fallback with nothing pre-fetched and no PK fields
+  // present in `nestedOp.data`. That is a designed limitation, not an identity resolution
+  // failure — it must not be reported through `onUnresolvedDeleteEntityId`.
+  const deleteManyOp: NestedOperationInfo = {
+    operation: 'deleteMany',
+    fieldName: 'posts',
+    relatedModel: 'Post',
+    data: { published: false },
+    path: 'posts',
+  };
+
+  it('produces no audit entry and does not notify the observer for an ordinary filter WHERE', async () => {
+    const onUnresolvedDeleteEntityId = vi.fn().mockResolvedValue(undefined);
+
+    const collected = await collectDeleteRecords(deleteManyOp, undefined, ['id'], onUnresolvedDeleteEntityId);
+
+    expect(collected).toEqual([]);
+    expect(onUnresolvedDeleteEntityId).not.toHaveBeenCalled();
+  });
+
+  it('still extracts an identity and yields an entry when the WHERE names a PK field directly', async () => {
+    const deleteManyByIdOp: NestedOperationInfo = { ...deleteManyOp, data: { id: 'post-1' } };
+    const onUnresolvedDeleteEntityId = vi.fn().mockResolvedValue(undefined);
+
+    const collected = await collectDeleteRecords(deleteManyByIdOp, undefined, ['id'], onUnresolvedDeleteEntityId);
+
+    expect(collected).toEqual([
+      {
+        entity: { id: 'post-1' },
+        action: 'delete',
+        beforeState: null,
+        relatedModel: 'Post',
+      },
+    ]);
+    expect(onUnresolvedDeleteEntityId).not.toHaveBeenCalled();
+  });
+
+  it('a single delete (not deleteMany) whose identity cannot be resolved still notifies, as before', async () => {
+    const singleDeleteOp: NestedOperationInfo = { ...deleteManyOp, operation: 'delete' };
+    const onUnresolvedDeleteEntityId = vi.fn().mockResolvedValue(undefined);
+
+    const collected = await collectDeleteRecords(singleDeleteOp, undefined, ['id'], onUnresolvedDeleteEntityId);
+
+    expect(collected).toEqual([]);
+    expect(onUnresolvedDeleteEntityId).toHaveBeenCalledTimes(1);
+    expect(onUnresolvedDeleteEntityId).toHaveBeenCalledWith(
+      expect.objectContaining({
+        relatedModel: 'Post',
+        entityId: '__default__',
+        pkFields: ['id'],
+        error: expect.any(Error),
+      }),
+    );
   });
 });

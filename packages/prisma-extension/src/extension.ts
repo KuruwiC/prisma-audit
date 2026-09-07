@@ -9,7 +9,7 @@
  * @see {@link PrismaAuditExtensionOptions}
  */
 
-import type { AuditContext, PreFetchResults } from '@kuruwic/prisma-audit-core';
+import type { AuditContext, ErrorStrategy, PreFetchResults } from '@kuruwic/prisma-audit-core';
 import {
   AUDIT_ACTION,
   batchEnrichEntityContexts,
@@ -181,12 +181,34 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
    * 'throw' re-throws (failing the caller's operation while it is still waiting on the
    * write — see the write-mode honesty note on {@link WriteFailurePolicy}), 'log' logs
    * to the console and lets it succeed, 'ignore' does neither.
+   *
+   * A policy *function*'s contract says it must return one of those three strings and
+   * never throw (see {@link WriteFailurePolicy}), but nothing enforced that contract —
+   * an actually-throwing policy function would escape this `catch` block and fail the
+   * caller's own database operation, regardless of what the policy would have decided.
+   * That is never acceptable for something that is supposed to be caller-safe by
+   * construction, so a throw here falls back to `'log'`: it is the one strategy that
+   * cannot itself fail the caller's operation (unlike `'throw'`) while still surfacing
+   * the underlying `log-write` failure instead of silently swallowing it (unlike
+   * `'ignore'`) — the same "safe by default" choice already made for the config-level
+   * default (see `writeFailurePolicyConfig` above). The broken policy function itself is
+   * reported to the console, mirroring how `notifyObserver` reports a broken observer.
    */
   const applyWriteFailurePolicy = async (context: AuditErrorContext, logLabel: string): Promise<void> => {
-    const strategy =
-      typeof writeFailurePolicyConfig === 'function'
-        ? await writeFailurePolicyConfig(context)
-        : writeFailurePolicyConfig;
+    let strategy: ErrorStrategy;
+    if (typeof writeFailurePolicyConfig === 'function') {
+      try {
+        strategy = await writeFailurePolicyConfig(context);
+      } catch (policyError) {
+        console.error(
+          "[@prisma-audit] Error in writeFailurePolicy function; falling back to 'log':",
+          policyError instanceof Error ? policyError.message : String(policyError),
+        );
+        strategy = 'log';
+      }
+    } else {
+      strategy = writeFailurePolicyConfig;
+    }
     createErrorHandler(strategy)(context.error, logLabel);
   };
 
@@ -396,8 +418,8 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
           // (see collectDeleteRecords); report it through the same observer as every
           // other audit failure, under its own phase — this is neither a pre-fetch nor
           // a diff-generation failure, it is the entityId itself being unresolvable.
-          onUnresolvedDeleteEntityId: ({ relatedModel, entityId, pkFields, error }) => {
-            void notifyObserver({
+          onUnresolvedDeleteEntityId: async ({ relatedModel, entityId, pkFields, error }) => {
+            await notifyObserver({
               phase: 'entity-id-resolution',
               modelName: relatedModel,
               operation: 'delete',

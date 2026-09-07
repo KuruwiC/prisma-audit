@@ -293,12 +293,12 @@ const shouldFetchBeforeState = (
  * from what actually happened. This is an accepted trade-off because Prisma does not
  * expose which branch of an upsert was executed.
  *
- * **Fetch failure vs "not found"**: `beforeState` collapses both outcomes to `null`,
- * but `beforeStateResult` (the full {@link BeforeStateResult}) keeps them apart.
- * Consumers that resolve the upsert action from `beforeState === null` must use
- * `beforeStateResult` instead when they cannot tell a failed fetch from a genuinely
- * absent record — see `buildMainAuditLogs`, which skips the audit entry for that case
- * rather than recording a failed fetch as `action: 'create'`.
+ * **Fetch failure vs "not found" vs "not requested"**: `beforeState` collapses all
+ * three outcomes to `null`, but `beforeStateResult` (the full {@link BeforeStateResult})
+ * keeps them apart. Consumers that resolve the upsert action from `beforeState === null`
+ * must use `beforeStateResult` instead when they cannot tell a failed or skipped fetch
+ * from a genuinely absent record — see `buildMainAuditLogs`, which skips the audit entry
+ * for the failed-fetch case rather than recording it as `action: 'create'`.
  *
  * @example
  * ```typescript
@@ -326,15 +326,20 @@ export const createFetchBeforeStateStage = (
     const operationArgs = toArgsRecord(args);
 
     let beforeState: Record<string, unknown> | null = null;
-    let beforeStateResult: BeforeStateResult = { _tag: 'notFound' };
+    // 'notRequested' — not 'notFound' — is the default: nothing has been looked up yet,
+    // and for actions that skip the fetch entirely (create; update/delete with
+    // `fetchBeforeOperation: false`) nothing ever will be. See the "not found" vs "not
+    // requested" note above for why this distinction matters downstream.
+    let beforeStateResult: BeforeStateResult = { _tag: 'notRequested' };
     if (shouldFetchBeforeState(action, modelName, deps.getNestedOperationConfig)) {
       beforeStateResult = await deps.fetchBeforeState(clientToUse, modelName, toPrismaAction(action), operationArgs);
       if (beforeStateResult._tag === 'found') {
         beforeState = beforeStateResult.data;
       }
       // The fetch failure itself was already reported to the error-handling observer
-      // by fetchBeforeState; see the "Fetch failure vs 'not found'" note above for why
-      // beforeStateResult (not beforeState) carries that distinction downstream.
+      // by fetchBeforeState; see the "Fetch failure vs 'not found' vs 'not requested'"
+      // note above for why beforeStateResult (not beforeState) carries that distinction
+      // downstream.
     }
 
     const nestedPreFetchResults = await deps.preFetchNestedRecordsBeforeOperation(
@@ -461,15 +466,36 @@ const buildMainAuditLogs = async (
     return [];
   }
 
-  // An upsert whose before-state fetch failed cannot be reliably classified as
-  // create vs update: resolveBeforeAndAfterStates (core) treats before === null as
-  // "record did not exist" and resolves the action to 'create', which is exactly
-  // what a failed fetch cannot tell apart from an actual absence. Recording it as
-  // 'create' would misrepresent what may have been an update to a real row, so the
-  // entry is skipped rather than guessed. The failure itself was already reported
-  // to the error-handling observer by fetchBeforeState.
-  if (context.operation.action === AUDIT_ACTION.UPSERT && context.beforeStateResult._tag === 'error') {
-    return [];
+  // Exhaustive switch over every `BeforeStateResult` outcome (see its JSDoc) rather
+  // than a single `if` on `'error'`, so a future variant added to the union cannot be
+  // silently forgotten here — the `never` check in `default` would fail to compile.
+  //
+  // Only 'error' changes anything, and only for `upsert`: an upsert whose before-state
+  // fetch failed cannot be reliably classified as create vs update.
+  // resolveBeforeAndAfterStates (core) treats before === null as "record did not
+  // exist" and resolves the action to 'create', which is exactly what a failed fetch
+  // cannot tell apart from an actual absence. Recording it as 'create' would
+  // misrepresent what may have been an update to a real row, so the entry is skipped
+  // rather than guessed. The failure itself was already reported to the
+  // error-handling observer by fetchBeforeState. `upsert` always requests the fetch
+  // (see `shouldFetchBeforeState`), so 'notRequested' cannot co-occur with it in
+  // practice — 'found' / 'notFound' / 'notRequested' all fall through unchanged for
+  // every action, exactly as this code did before `beforeStateResult` distinguished
+  // "not requested" from "not found".
+  switch (context.beforeStateResult._tag) {
+    case 'found':
+    case 'notFound':
+    case 'notRequested':
+      break;
+    case 'error':
+      if (context.operation.action === AUDIT_ACTION.UPSERT) {
+        return [];
+      }
+      break;
+    default: {
+      const exhaustiveCheck: never = context.beforeStateResult;
+      console.error(`[@prisma-audit] Unhandled BeforeStateResult tag: ${JSON.stringify(exhaustiveCheck)}`);
+    }
   }
 
   // Phase 1: Resolve aggregate roots (reuses batch resolver with 1-element array)

@@ -331,6 +331,70 @@ describe('Error Handling Integration', () => {
       }
     });
 
+    it("a throwing writeFailurePolicy function never fails the caller's operation — it falls back to 'log' instead", async () => {
+      // The policy function's contract says it must return 'throw' | 'log' | 'ignore' and
+      // never throw (see WriteFailurePolicy's JSDoc). A policy that throws anyway must not
+      // get to decide anything — unlike the observer (always read-only), the policy is the
+      // one thing that can fail the caller's operation, so letting its own bug propagate
+      // would be worse than the audit-write failure it was supposed to be deciding about.
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const POLICY_FAILURE_MESSAGE = 'writeFailurePolicy function is broken';
+      const observer = vi.fn();
+      const policy = vi.fn((_context: AuditErrorContext) => {
+        throw new Error(POLICY_FAILURE_MESSAGE);
+      });
+      const scenario = createFailingWriterClient(context.databaseUrl, {
+        errorHandling: { writeFailurePolicy: policy, observer },
+      });
+
+      try {
+        const user = await scenario.provider.runAsync(testActor, async () =>
+          scenario.prisma.user.create({
+            data: { email: 'policy-fn-throws@example.com', name: 'Policy Fn Broken User', password: 'secret123' },
+          }),
+        );
+
+        expect(user.email).toBe('policy-fn-throws@example.com');
+
+        const persisted = await context.basePrisma.user.findUnique({
+          where: { email: 'policy-fn-throws@example.com' },
+        });
+        expect(persisted).not.toBeNull();
+
+        expect(policy).toHaveBeenCalledWith(
+          expect.objectContaining({
+            phase: 'log-write',
+            modelName: 'User',
+            error: expect.objectContaining({ message: AUDIT_WRITE_FAILURE_MESSAGE }),
+          }),
+        );
+
+        // The broken policy function itself is reported to the console...
+        expect(consoleErrorSpy).toHaveBeenCalledWith(
+          "[@prisma-audit] Error in writeFailurePolicy function; falling back to 'log':",
+          POLICY_FAILURE_MESSAGE,
+        );
+        // ...and the fallback ('log') also reports the original audit-write failure it
+        // was supposed to decide about.
+        expect(consoleErrorSpy).toHaveBeenCalledWith(
+          '[@prisma-audit] Error in audit log write:',
+          AUDIT_WRITE_FAILURE_MESSAGE,
+        );
+
+        // The observer is notified independently of the policy function's own failure.
+        expect(observer).toHaveBeenCalledWith(
+          expect.objectContaining({
+            phase: 'log-write',
+            modelName: 'User',
+            error: expect.objectContaining({ message: AUDIT_WRITE_FAILURE_MESSAGE }),
+          }),
+        );
+      } finally {
+        consoleErrorSpy.mockRestore();
+        await disconnectScenario(scenario);
+      }
+    });
+
     it("a throwing observer never affects the caller's operation — it is caught and logged instead", async () => {
       // The observer is read-only by construction: every invocation is wrapped in its
       // own try/catch, so a broken observer callback cannot change whether the caller's

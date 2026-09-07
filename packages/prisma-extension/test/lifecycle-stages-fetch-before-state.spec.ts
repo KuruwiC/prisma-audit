@@ -59,6 +59,9 @@ describe('createFetchBeforeStateStage', () => {
       expect(result.beforeState).toBe(null);
       expect(fetchBeforeState).not.toHaveBeenCalled();
       expect(getNestedOperationConfig).not.toHaveBeenCalled();
+      // 'notRequested', not 'notFound': the fetch was never attempted for create, so
+      // this must not read as "we looked and there was no row".
+      expect(result.beforeStateResult).toEqual({ _tag: 'notRequested' });
     });
   });
 
@@ -106,6 +109,9 @@ describe('createFetchBeforeStateStage', () => {
       expect(result.beforeState).toBe(null);
       expect(getNestedOperationConfig).toHaveBeenCalledWith('Post', action);
       expect(fetchBeforeState).not.toHaveBeenCalled();
+      // 'notRequested', not 'notFound': `fetchBeforeOperation: false` means the fetch
+      // was skipped by configuration, not that a fetch ran and found nothing.
+      expect(result.beforeStateResult).toEqual({ _tag: 'notRequested' });
     });
   });
 

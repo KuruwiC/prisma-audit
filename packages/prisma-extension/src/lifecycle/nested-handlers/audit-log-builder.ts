@@ -109,14 +109,14 @@ export type NestedAuditLogBuilderDependencies = {
 // Phase 1: Collect all nested records
 // ============================================================================
 
-const collectAllNestedRecords = (
+const collectAllNestedRecords = async (
   nestedOperations: readonly NestedOperationInfo[],
   nestedRecordsInfo: readonly NestedRecordInfo[],
   nestedPreFetchResults: NestedPreFetchResults | undefined,
   getNestedOperationConfig: GetNestedOperationConfig,
   Prisma: PrismaNamespace,
   onUnresolvedDeleteEntityId: UnresolvedDeleteEntityIdReporter | undefined,
-): CollectedNestedRecord[] => {
+): Promise<CollectedNestedRecord[]> => {
   const allCollected: CollectedNestedRecord[] = [];
   const processedPaths = new Set<string>();
 
@@ -134,7 +134,12 @@ const collectAllNestedRecords = (
     }
 
     if (nestedOp.operation === 'delete' || nestedOp.operation === 'deleteMany') {
-      const deleteRecords = collectDeleteRecords(nestedOp, nestedPreFetchResults, pkFields, onUnresolvedDeleteEntityId);
+      const deleteRecords = await collectDeleteRecords(
+        nestedOp,
+        nestedPreFetchResults,
+        pkFields,
+        onUnresolvedDeleteEntityId,
+      );
       allCollected.push(...deleteRecords);
       continue;
     }
@@ -345,7 +350,7 @@ export const buildNestedAuditLogs = async (input: BuildNestedAuditLogsInput): Pr
   }
 
   // Phase 1: Collect all nested records
-  const allCollected = collectAllNestedRecords(
+  const allCollected = await collectAllNestedRecords(
     nestedOperations,
     nestedRecordsInfo,
     nestedPreFetchResults,

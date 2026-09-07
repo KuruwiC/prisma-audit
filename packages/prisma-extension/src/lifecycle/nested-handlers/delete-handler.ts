@@ -62,19 +62,24 @@ export interface UnresolvedDeleteEntityId {
   error: Error;
 }
 
-export type UnresolvedDeleteEntityIdReporter = (info: UnresolvedDeleteEntityId) => void;
+export type UnresolvedDeleteEntityIdReporter = (info: UnresolvedDeleteEntityId) => Promise<void>;
 
-/** Notify `onUnresolvedDeleteEntityId` (if provided) that an entityId could not be resolved. */
-const reportUnresolvedEntityId = (
+/**
+ * Notify `onUnresolvedDeleteEntityId` (if provided) that an entityId could not be
+ * resolved. Awaited by every caller rather than fired-and-forgotten, so the reporter
+ * (which in practice forwards to the async error-handling observer) is never lost in a
+ * short-lived runtime.
+ */
+const reportUnresolvedEntityId = async (
   relatedModel: string,
   entityId: string,
   pkFields: string[] | undefined,
   onUnresolvedDeleteEntityId: UnresolvedDeleteEntityIdReporter | undefined,
-): void => {
+): Promise<void> => {
   if (!onUnresolvedDeleteEntityId) return;
 
   const fields = pkFields ?? ['id'];
-  onUnresolvedDeleteEntityId({
+  await onUnresolvedDeleteEntityId({
     relatedModel,
     entityId,
     pkFields: fields,
@@ -115,14 +120,29 @@ export type NestedPreFetchResults = Map<string, Map<string, { before: Record<str
  * is never recorded as a partial/guessed or empty identity: that record is skipped
  * and, if `onUnresolvedDeleteEntityId` is provided, reported through it instead.
  *
+ * **Exception — nested `deleteMany` with no extractable entityId.** Nested `deleteMany`
+ * is deliberately never pre-fetched: its WHERE is a `ScalarWhereInput` that Prisma scopes
+ * to the parent relation internally at write time, so reading it directly (pre-fetch, or
+ * this fallback's `extractDeleteOperationEntityId`) has no parent-scoped equivalent and
+ * would risk matching other parents' rows (see `filterOperationsToPreFetch` in
+ * `@kuruwic/prisma-audit-core`). An ordinary filter WHERE (e.g. `{ published: false }`)
+ * therefore has no single row identity to resolve at all — that is not the same as a
+ * `delete`'s identity resolution genuinely failing (a real row whose PK we could not
+ * read), and reporting it as one would flag every ordinary nested `deleteMany` call as
+ * an audit failure. `nestedOp.operation` is what tells the two apart: when the fallback
+ * finds no entityId AND the operation is `deleteMany`, this is logged for debugging only
+ * and never reported through `onUnresolvedDeleteEntityId`. A `deleteMany` whose WHERE
+ * happens to name PK fields directly (e.g. `{ id: 'x' }`) still resolves an entityId and
+ * is unaffected by this exception — see the fallback branch below.
+ *
  * @returns Collected records ready for batch enrichment and audit log building
  */
-export const collectDeleteRecords = (
+export const collectDeleteRecords = async (
   nestedOp: NestedOperationInfo,
   nestedPreFetchResults: NestedPreFetchResults | undefined,
   pkFields?: string[],
   onUnresolvedDeleteEntityId?: UnresolvedDeleteEntityIdReporter,
-): CollectedNestedRecord[] => {
+): Promise<CollectedNestedRecord[]> => {
   nestedLog('delete operation detected, collecting targets');
 
   const pathMap = nestedPreFetchResults?.get(nestedOp.path);
@@ -142,7 +162,7 @@ export const collectDeleteRecords = (
           entityId,
           nestedOp.path,
         );
-        reportUnresolvedEntityId(nestedOp.relatedModel, entityId, pkFields, onUnresolvedDeleteEntityId);
+        await reportUnresolvedEntityId(nestedOp.relatedModel, entityId, pkFields, onUnresolvedDeleteEntityId);
         continue;
       }
 
@@ -164,13 +184,24 @@ export const collectDeleteRecords = (
 
   const entityId = extractDeleteOperationEntityId(nestedOp.data, pkFields);
   if (!entityId) {
+    if (nestedOp.operation === 'deleteMany') {
+      // No identity was ever expected here — see the "Exception" note above. This is
+      // not a resolution failure, so it is not reported through
+      // `onUnresolvedDeleteEntityId`; a debug log is all that is warranted.
+      nestedLog(
+        'nested deleteMany has no single-row identity to resolve (path=%s); no audit entry, no observer notification',
+        nestedOp.path,
+      );
+      return [];
+    }
+
     nestedLog('could not extract entity ID from delete operation data');
     // There is no raw entityId to report here — extraction found nothing at all,
     // not a corrupted one. Report it with the same `'__default__'` sentinel
     // `buildMinimalEntity` already uses for "identity could not be determined" (as
     // opposed to a real-but-malformed serialized key), so the observer can tell
     // this apart from the malformed-composite-key case above.
-    reportUnresolvedEntityId(nestedOp.relatedModel, '__default__', pkFields, onUnresolvedDeleteEntityId);
+    await reportUnresolvedEntityId(nestedOp.relatedModel, '__default__', pkFields, onUnresolvedDeleteEntityId);
     return [];
   }
 
@@ -181,7 +212,7 @@ export const collectDeleteRecords = (
       entityId,
       nestedOp.path,
     );
-    reportUnresolvedEntityId(nestedOp.relatedModel, entityId, pkFields, onUnresolvedDeleteEntityId);
+    await reportUnresolvedEntityId(nestedOp.relatedModel, entityId, pkFields, onUnresolvedDeleteEntityId);
     return [];
   }
 

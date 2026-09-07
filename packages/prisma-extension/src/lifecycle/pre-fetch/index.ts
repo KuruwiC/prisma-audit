@@ -22,7 +22,6 @@ export {
   extractWhereClause,
   type NestedOperation,
   preFetchOneToManyRelation,
-  unwrapCompoundWhere,
 } from './one-to-many-fetcher.js';
 
 export {

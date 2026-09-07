@@ -22,10 +22,11 @@ import type {
   TransactionalPrismaClient,
 } from '../../internal-types.js';
 import type { AuditErrorObserver } from '../../types.js';
+import { unwrapCompoundWhere } from '../../utils/compound-where.js';
 import { getPrimaryKeyFields } from '../../utils/id-generator.js';
 import { createSchemaMetadataFromDMMF } from '../../utils/nested-operations.js';
 import { getUniqueConstraints } from '../../utils/schema-metadata.js';
-import { preFetchOneToManyRelation, unwrapCompoundWhere } from './one-to-many-fetcher.js';
+import { preFetchOneToManyRelation } from './one-to-many-fetcher.js';
 import {
   type ModelClientWithFindUnique,
   type PreFetchOneToOneRelationInput,
