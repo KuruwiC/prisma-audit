@@ -1,6 +1,6 @@
 import type { AuditContext } from '@kuruwic/prisma-audit-core';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { cleanDatabase, setupTestDatabase, type TestContext, teardownTestDatabase } from './helpers/setup.js';
+import { cleanDatabase, createTestContext, disposeTestContext, type TestContext } from './helpers/setup.js';
 
 describe('Before/After Field Validation', () => {
   let context: TestContext;
@@ -14,11 +14,11 @@ describe('Before/After Field Validation', () => {
   };
 
   beforeAll(async () => {
-    context = await setupTestDatabase();
+    context = await createTestContext();
   });
 
   afterAll(async () => {
-    await teardownTestDatabase(context);
+    await disposeTestContext(context);
   });
 
   beforeEach(async () => {

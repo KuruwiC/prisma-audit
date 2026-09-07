@@ -9,7 +9,7 @@ import { createActorId, createAggregateId, createEntityId } from '../../src/doma
 import type { AuditContext } from '../../src/types.js';
 import type { DbClientManager, WriteExecutor } from '../../src/write-strategies/interfaces.js';
 import { writeSynchronously } from '../../src/write-strategies/synchronous.js';
-import type { WriteFn } from '../../src/write-strategies/types.js';
+import type { WriteErrorHandler, WriteFn } from '../../src/write-strategies/types.js';
 
 /**
  * Create mock DbClientManager
@@ -70,7 +70,7 @@ const createMockContext = (): AuditContext => ({
  * Mock error handler. writeSynchronously receives it as `handleError` in its input
  * but never calls it: write errors propagate to the caller instead.
  */
-const mockHandleError = vi.fn();
+const mockHandleError: WriteErrorHandler = vi.fn();
 
 describe('writeSynchronously', () => {
   describe('basic functionality', () => {

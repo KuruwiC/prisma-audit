@@ -21,9 +21,9 @@ import {
 } from './helpers/enrichment-test-helpers.js';
 import {
   cleanDatabase,
-  setupTestDatabase,
+  createTestContext,
+  disposeTestContext,
   type TestContext,
-  teardownTestDatabase,
   testAggregateMapping,
 } from './helpers/setup.js';
 
@@ -39,11 +39,11 @@ describe('Context Enrichment Integration', () => {
   let context: TestContext;
 
   beforeAll(async () => {
-    context = await setupTestDatabase();
+    context = await createTestContext();
   });
 
   afterAll(async () => {
-    await teardownTestDatabase(context);
+    await disposeTestContext(context);
   });
 
   beforeEach(async () => {

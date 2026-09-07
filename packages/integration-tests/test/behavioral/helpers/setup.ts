@@ -6,13 +6,7 @@
  */
 
 import { afterEach, beforeAll, beforeEach } from 'vitest';
-import {
-  cleanupTestClients,
-  createTestClients,
-  getSharedTestContext,
-  type SharedTestContext,
-  type TestContext,
-} from '../../helpers/setup.js';
+import { createTestClients, disposeTestContext, getSharedDatabaseUrl, type TestContext } from '../../helpers/setup.js';
 import type { AuditTestHarness } from './harness.js';
 import { createPrismaHarness } from './prisma-harness.js';
 
@@ -34,16 +28,16 @@ export type { AuditLogFilter, AuditLogRecord, AuditTestHarness } from './harness
  * ```
  */
 export const setupBehavioralTests = () => {
-  let sharedContext: SharedTestContext;
+  let sharedDatabaseUrl: string;
   let testContext: TestContext;
   let harness: AuditTestHarness;
 
   beforeAll(async () => {
-    sharedContext = await getSharedTestContext();
+    sharedDatabaseUrl = await getSharedDatabaseUrl();
   });
 
   beforeEach(async () => {
-    testContext = createTestClients(sharedContext.databaseUrl);
+    testContext = createTestClients(sharedDatabaseUrl);
 
     await testContext.prisma.$connect();
     await testContext.basePrisma.$connect();
@@ -53,7 +47,7 @@ export const setupBehavioralTests = () => {
   });
 
   afterEach(async () => {
-    await cleanupTestClients(testContext);
+    await disposeTestContext(testContext);
   });
 
   return {

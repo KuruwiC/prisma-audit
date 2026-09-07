@@ -24,7 +24,7 @@ import type { AuditContext } from '@kuruwic/prisma-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/prisma-audit-core';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { getSharedTestContext, type SharedTestContext, testAggregateMapping } from './helpers/setup.js';
+import { getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
 
 const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'upsert-before-state-actor' },
@@ -33,10 +33,10 @@ const testActor: AuditContext = {
 const FAILURE_MESSAGE = 'simulated before-state fetch failure';
 
 describe('upsert — before-state fetch failure', () => {
-  let shared: SharedTestContext;
+  let sharedDatabaseUrl: string;
 
   beforeAll(async () => {
-    shared = await getSharedTestContext();
+    sharedDatabaseUrl = await getSharedDatabaseUrl();
   });
 
   const createClient = (databaseUrl: string, onError: AuditErrorObserver) => {
@@ -82,7 +82,7 @@ describe('upsert — before-state fetch failure', () => {
 
   beforeEach(async () => {
     onError = vi.fn<AuditErrorObserver>();
-    scenario = createClient(shared.databaseUrl, onError);
+    scenario = createClient(sharedDatabaseUrl, onError);
     await scenario.basePrisma.auditLog.deleteMany();
     await scenario.basePrisma.post.deleteMany();
     await scenario.basePrisma.user.deleteMany();

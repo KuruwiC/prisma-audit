@@ -6,9 +6,9 @@ import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/c
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   cleanDatabase,
-  setupTestDatabase,
+  createTestContext,
+  disposeTestContext,
   type TestContext,
-  teardownTestDatabase,
   testAggregateMapping,
 } from './helpers/setup.js';
 
@@ -70,11 +70,11 @@ describe('Error Handling Integration', () => {
   let context: TestContext;
 
   beforeAll(async () => {
-    context = await setupTestDatabase();
+    context = await createTestContext();
   });
 
   afterAll(async () => {
-    await teardownTestDatabase(context);
+    await disposeTestContext(context);
   });
 
   beforeEach(async () => {

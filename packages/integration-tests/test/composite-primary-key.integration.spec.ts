@@ -1,7 +1,7 @@
 /**
  * Integration Test: composite primary key audit behavior (`PostLike`)
  *
- * `PostLike` is the first fixture model with a genuine composite primary key
+ * `PostLike` is the fixture model with a genuine composite primary key
  * (`@@id([postId, userId])`, no single `id` field). It exists so composite-key
  * entityId handling can be exercised through the public audit client instead of
  * only through the white-box unit test in
@@ -21,12 +21,11 @@
  *     resolution, no nested-operation involvement).
  *   - nested delete of a `PostLike` row through its `Post` relation. Prisma's only
  *     nested-delete syntax for a composite key is the compound-unique shape
- *     `{ postId_userId: { postId, userId } }`, which is a key of
- *     `PostLikeWhereUniqueInput`, not the `PostLikeWhereInput` that `findFirst`
- *     accepts. `preFetchOneToManyRelation` (`lifecycle/pre-fetch/one-to-many-fetcher.ts`)
- *     flattens that wrapper to the individual scalar fields before calling
- *     `findFirst`, so the real row — and its real composite key — is found instead
- *     of the pre-fetch call throwing `PrismaClientValidationError`.
+ *     `{ postId_userId: { postId, userId } }`, a key of `PostLikeWhereUniqueInput`.
+ *     `preFetchOneToManyRelation` (`lifecycle/pre-fetch/one-to-many-fetcher.ts`) passes
+ *     that WHERE to `findUnique`, which accepts the compound-unique shape natively;
+ *     `unwrapCompoundWhere` then flattens it to derive the composite entityId from the
+ *     WHERE when the row itself was not found.
  *   - the boundary where identity genuinely cannot be resolved: deleting a
  *     composite-key row that does not exist, and the `fetchBeforeOperation: false`
  *     configuration. In both cases no fabricated entityId is ever recorded — either
@@ -42,11 +41,10 @@ import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/c
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   cleanDatabase,
-  getSharedTestContext,
-  type SharedTestContext,
-  setupTestDatabase,
+  createTestContext,
+  disposeTestContext,
+  getSharedDatabaseUrl,
   type TestContext,
-  teardownTestDatabase,
   testAggregateMapping,
 } from './helpers/setup.js';
 
@@ -60,11 +58,11 @@ describe('Composite Primary Key (PostLike)', () => {
   let context: TestContext;
 
   beforeAll(async () => {
-    context = await setupTestDatabase();
+    context = await createTestContext();
   });
 
   afterAll(async () => {
-    await teardownTestDatabase(context);
+    await disposeTestContext(context);
   });
 
   beforeEach(async () => {
@@ -329,8 +327,7 @@ describe('Composite Primary Key (PostLike)', () => {
    * against a hypothetical bug in a different producer, not a state reachable from
    * real Prisma operations — which is exactly why
    * `packages/prisma-extension/test/delete-handler.spec.ts` covers it directly, by
-   * constructing the `NestedPreFetchResults` map by hand. It stays as-is; this file
-   * does not attempt to reproduce it.
+   * constructing the `NestedPreFetchResults` map by hand.
    *
    * The `'__default__'` sentinel path itself *is* still reachable through the public
    * client — a pre-fetch call can fail for reasons unrelated to the composite-key WHERE
@@ -344,11 +341,11 @@ describe('Composite Primary Key (PostLike)', () => {
    * `collectDeleteRecords` returns `[]`, so no log is written either way.
    */
   describe('nested delete from Post (fetchBeforeOperation: false)', () => {
-    let shared: SharedTestContext;
+    let sharedDatabaseUrl: string;
     let scenario: { basePrisma: PrismaClient; prisma: ReturnType<typeof createAuditClient> } | undefined;
 
     beforeAll(async () => {
-      shared = await getSharedTestContext();
+      sharedDatabaseUrl = await getSharedDatabaseUrl();
     });
 
     afterAll(async () => {
@@ -357,7 +354,7 @@ describe('Composite Primary Key (PostLike)', () => {
     });
 
     it('writes no audit log at all (not even a fabricated one) when pre-fetch is skipped', async () => {
-      const basePrisma = new PrismaClient({ datasources: { db: { url: shared.databaseUrl } } });
+      const basePrisma = new PrismaClient({ datasources: { db: { url: sharedDatabaseUrl } } });
       const provider = createAsyncLocalStorageProvider();
       const mappingWithoutPreFetch: AggregateMapping = {
         ...testAggregateMapping,

@@ -4,7 +4,7 @@ import type { AuditContext } from '@kuruwic/prisma-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/prisma-audit-core';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, inject, it } from 'vitest';
-import { cleanDatabase, type TestContext, teardownTestDatabase } from './helpers/setup.js';
+import { cleanDatabase, disposeTestContext, type TestContext } from './helpers/setup.js';
 
 const testAggregateMapping: AggregateMapping = {
   User: defineEntity({
@@ -74,7 +74,7 @@ describe('Custom Audit Log Table', () => {
   });
 
   afterAll(async () => {
-    await teardownTestDatabase(context);
+    await disposeTestContext(context);
   });
 
   beforeEach(async () => {

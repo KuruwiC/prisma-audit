@@ -14,12 +14,7 @@ import {
   writeFireAndForget,
 } from '../../src/write-strategies/fire-and-forget.js';
 import type { DbClientManager, WriteExecutor } from '../../src/write-strategies/interfaces.js';
-import type { WriteFn } from '../../src/write-strategies/types.js';
-
-/**
- * Mock error handler
- */
-type ErrorHandler = (error: Error, operation: string) => void;
+import type { WriteErrorHandler, WriteFn } from '../../src/write-strategies/types.js';
 
 /**
  * Create mock DbClientManager
@@ -79,7 +74,7 @@ const createMockContext = (): AuditContext => ({
 /**
  * Create mock error handler
  */
-const createMockErrorHandler = (): ErrorHandler => vi.fn();
+const createMockErrorHandler = (): WriteErrorHandler => vi.fn();
 
 describe('writeFireAndForget', () => {
   describe('basic functionality', () => {

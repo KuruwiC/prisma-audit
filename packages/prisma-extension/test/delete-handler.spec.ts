@@ -32,7 +32,7 @@ describe('collectDeleteRecords — composite primary key reconstruction', () => 
 
     const collected = collectDeleteRecords(nestedOp, preFetchResults, pkFields);
 
-    // A `{ tenantId: 'not-json' }` guess (the old behavior) would look like a
+    // A `{ tenantId: 'not-json' }` guess would look like a
     // complete, valid identity to anyone reading the audit log, when in fact the
     // itemId half of the key is unknown. Skipping the entry is the only option
     // that does not assert a wrong identity.

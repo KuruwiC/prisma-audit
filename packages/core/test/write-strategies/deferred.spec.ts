@@ -5,9 +5,7 @@ import { getRuntimeContext, runWithRuntimeContext } from '../../src/runtime-cont
 import type { AuditContext } from '../../src/types.js';
 import { writeDeferredInTransaction } from '../../src/write-strategies/deferred.js';
 import type { DbClientManager, WriteExecutor } from '../../src/write-strategies/interfaces.js';
-import type { WriteFn } from '../../src/write-strategies/types.js';
-
-type ErrorHandler = (error: Error, operation: string) => void;
+import type { WriteErrorHandler, WriteFn } from '../../src/write-strategies/types.js';
 
 const createMockManager = (): DbClientManager => {
   return {
@@ -52,7 +50,7 @@ const createMockContext = (): AuditContext => ({
   },
 });
 
-const createMockErrorHandler = (): ErrorHandler => vi.fn();
+const createMockErrorHandler = (): WriteErrorHandler => vi.fn();
 
 // Run fn inside a runtime frame marking an active transaction scope, so the
 // deferred strategy enqueues into the library-owned runtime store.

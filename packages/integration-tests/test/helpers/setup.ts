@@ -76,16 +76,12 @@ export interface TestContext {
   databaseUrl: string;
 }
 
-export interface SharedTestContext {
-  databaseUrl: string;
-}
-
 /**
  * Builds audit + base Prisma clients against the database URL provided by the
  * shared global-setup container (see test/global-setup.ts). Does not start any
  * infrastructure — the container and schema push happen exactly once for the run.
  */
-export const setupTestDatabase = async (): Promise<TestContext> => {
+export const createTestContext = async (): Promise<TestContext> => {
   const databaseUrl = inject('databaseUrl');
   return createTestClients(databaseUrl);
 };
@@ -94,9 +90,8 @@ export const setupTestDatabase = async (): Promise<TestContext> => {
  * Reads the shared database URL without creating Prisma clients.
  * Clients should be instantiated per-test in beforeEach to prevent forking issues.
  */
-export const getSharedTestContext = async (): Promise<SharedTestContext> => {
-  const databaseUrl = inject('databaseUrl');
-  return { databaseUrl };
+export const getSharedDatabaseUrl = async (): Promise<string> => {
+  return inject('databaseUrl');
 };
 
 export const createTestClients = (databaseUrl: string): TestContext => {
@@ -141,25 +136,16 @@ export const createTestClients = (databaseUrl: string): TestContext => {
   return { prisma, basePrisma, provider, databaseUrl };
 };
 
-export const cleanupTestClients = async (context: Pick<TestContext, 'prisma' | 'basePrisma'>): Promise<void> => {
+/**
+ * Disconnects the test clients. The PostgreSQL container is shared across the
+ * whole run and is stopped once in global teardown.
+ */
+export const disposeTestContext = async (context: Pick<TestContext, 'prisma' | 'basePrisma'>): Promise<void> => {
   try {
     await context.prisma.$disconnect();
     await context.basePrisma.$disconnect();
   } catch (error) {
     console.error('Error disconnecting Prisma clients:', error);
-  }
-};
-
-/**
- * Disconnects the test clients. The PostgreSQL container is shared across the
- * whole run and is stopped once in global teardown.
- */
-export const teardownTestDatabase = async (context: TestContext): Promise<void> => {
-  try {
-    await context.prisma.$disconnect();
-    await context.basePrisma.$disconnect();
-  } catch (error) {
-    console.error('Error disconnecting Prisma:', error);
   }
 };
 
@@ -205,15 +191,15 @@ export const cleanDatabase = async (prisma: PrismaClient | ReturnType<typeof cre
  * ```
  */
 export const setupTestLifecycle = () => {
-  let sharedContext: SharedTestContext;
+  let sharedDatabaseUrl: string;
   let testContext: TestContext;
 
   beforeAll(async () => {
-    sharedContext = await getSharedTestContext();
+    sharedDatabaseUrl = await getSharedDatabaseUrl();
   });
 
   beforeEach(async () => {
-    testContext = createTestClients(sharedContext.databaseUrl);
+    testContext = createTestClients(sharedDatabaseUrl);
 
     await testContext.prisma.$connect();
     await testContext.basePrisma.$connect();
@@ -221,7 +207,7 @@ export const setupTestLifecycle = () => {
   });
 
   afterEach(async () => {
-    await cleanupTestClients(testContext);
+    await disposeTestContext(testContext);
   });
 
   return {

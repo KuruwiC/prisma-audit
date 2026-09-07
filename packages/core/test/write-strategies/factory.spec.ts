@@ -5,9 +5,9 @@ import { runWithRuntimeContext } from '../../src/runtime-context.js';
 import type { AuditContext } from '../../src/types.js';
 import { createWriteStrategySelector } from '../../src/write-strategies/factory.js';
 import type { DbClientManager, WriteExecutor } from '../../src/write-strategies/interfaces.js';
-import type { WriteFn, WriteStrategyConfig } from '../../src/write-strategies/types.js';
+import type { WriteErrorHandler, WriteFn, WriteStrategyConfig } from '../../src/write-strategies/types.js';
 
-const mockHandleError = vi.fn();
+const mockHandleError: WriteErrorHandler = vi.fn();
 
 const mockLogs: AuditLogData[] = [
   {
