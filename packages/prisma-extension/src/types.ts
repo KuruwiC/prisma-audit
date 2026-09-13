@@ -126,9 +126,8 @@ export interface NestedOperationsConfig {
  * consequence for the caller's operation and the audit trail:
  *
  * - `pre-fetch`: fetching the before-state (for update / delete / upsert) failed. The
- *   caller's operation continues; the entry is recorded without a before-state rather than
- *   a guessed one, and a top-level `upsert` entry, whose create-vs-update action depends on
- *   it, is skipped.
+ *   caller's operation continues; the entry is recorded without a before-state, and a
+ *   top-level `upsert` entry, whose create-vs-update action depends on it, is skipped.
  * - `log-write`: persisting the audit log entry itself failed. This is the only phase whose
  *   outcome {@link ErrorHandlingConfig.writeFailurePolicy} decides — see
  *   {@link WriteFailurePolicy} for writes that are queued or detached.
