@@ -99,7 +99,7 @@ interface HandleLimitedUpdateManyInput {
  * the caller's own operation result, plus the audit logs built for it, still unwritten.
  * `executeBatch` writes `logs` itself, once, outside its own try/catch.
  */
-export interface BatchActionResult {
+interface BatchActionResult {
   result: unknown;
   logs: AuditLogData[];
 }
