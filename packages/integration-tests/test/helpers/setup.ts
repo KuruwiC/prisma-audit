@@ -140,7 +140,7 @@ export const cleanupTestClients = async (context: Pick<TestContext, 'prisma' | '
 
 /**
  * Disconnects the test clients. The PostgreSQL container is shared across the
- * whole run and is stopped once in global teardown, not per spec file.
+ * whole run and is stopped once in global teardown.
  */
 export const teardownTestDatabase = async (context: TestContext): Promise<void> => {
   try {

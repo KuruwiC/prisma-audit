@@ -26,7 +26,7 @@ const Dirname = dirname(Filename);
 // Bounds image pull + container start + readiness wait together: testcontainers'
 // `withStartupTimeout` only bounds the readiness wait, not a slow or stuck image pull.
 const CONTAINER_START_TIMEOUT_MS = 120_000;
-// The schema push itself is small; this is a generous margin, not an estimate.
+// The schema push itself is small; this is a generous margin.
 const DB_PUSH_TIMEOUT_MS = 60_000;
 
 let container: StartedPostgreSqlContainer | undefined;
