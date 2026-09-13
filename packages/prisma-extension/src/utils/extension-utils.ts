@@ -155,6 +155,16 @@ const shouldSample = (samplingRate: number): boolean => {
   return Math.random() < samplingRate;
 };
 
+export interface ShouldAuditModelInput {
+  modelName: string | undefined;
+  context: AuditContext | undefined;
+  auditLogModel: string;
+  isLoggable: (modelName: string) => boolean;
+  sampling: number;
+  samplingIf: ((modelName: string, tags: string[]) => number) | undefined;
+  getEntityConfig: (modelName: string) => { tags?: string[] } | undefined;
+}
+
 /**
  * Determines if audit logging should be applied to a model and operation
  *
@@ -176,16 +186,6 @@ const shouldSample = (samplingRate: number): boolean => {
  * });
  * ```
  */
-export interface ShouldAuditModelInput {
-  modelName: string | undefined;
-  context: AuditContext | undefined;
-  auditLogModel: string;
-  isLoggable: (modelName: string) => boolean;
-  sampling: number;
-  samplingIf: ((modelName: string, tags: string[]) => number) | undefined;
-  getEntityConfig: (modelName: string) => { tags?: string[] } | undefined;
-}
-
 export const shouldAuditModel = (input: ShouldAuditModelInput): boolean => {
   const { modelName, context, auditLogModel, isLoggable, sampling, samplingIf, getEntityConfig } = input;
 

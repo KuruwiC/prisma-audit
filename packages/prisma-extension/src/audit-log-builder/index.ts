@@ -192,23 +192,6 @@ const buildSingleAuditLog = (input: BuildSingleAuditLogInput): AuditLogData => {
   };
 };
 
-/**
- * Build audit log data for an entity
- *
- * @remarks
- * Processing flow:
- * 1. Resolve aggregate roots and entity ID
- * 2. Determine actual action and before/after states
- * 3. Calculate field-level changes (pre-redaction)
- * 4. Apply redaction and relation config
- * 5. Build audit log for each aggregate root using pre-resolved aggregate contexts
- *
- * Returns empty array if:
- * - Entity config not found
- * - No aggregate roots found
- * - ID resolution fails
- * - Only excluded fields changed (updates only)
- */
 export interface BuildAuditLogInput {
   entity: Record<string, unknown>;
   action: PrismaAction;
@@ -227,6 +210,23 @@ export interface BuildAuditLogInput {
   relationFieldNames?: Set<string>;
 }
 
+/**
+ * Build audit log data for an entity
+ *
+ * @remarks
+ * Processing flow:
+ * 1. Resolve aggregate roots and entity ID
+ * 2. Determine actual action and before/after states
+ * 3. Calculate field-level changes (pre-redaction)
+ * 4. Apply redaction and relation config
+ * 5. Build audit log for each aggregate root using pre-resolved aggregate contexts
+ *
+ * Returns empty array if:
+ * - Entity config not found
+ * - No aggregate roots found
+ * - ID resolution fails
+ * - Only excluded fields changed (updates only)
+ */
 export const buildAuditLog = async (input: BuildAuditLogInput): Promise<AuditLogData[]> => {
   const {
     entity,
