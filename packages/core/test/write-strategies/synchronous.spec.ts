@@ -67,10 +67,8 @@ const createMockContext = (): AuditContext => ({
 });
 
 /**
- * Mock error handler.
- *
- * writeSynchronously receives it as part of the shared context object but does
- * not call it — write errors propagate to the caller instead.
+ * Mock error handler. writeSynchronously receives it as `handleError` in its input
+ * but never calls it: write errors propagate to the caller instead.
  */
 const mockHandleError = vi.fn();
 

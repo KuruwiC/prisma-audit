@@ -65,27 +65,13 @@ export type WriteResult = ImmediateResult | DeferredResult | SkippedResult;
 export type WriteFn = (logs: AuditLogData[], context: AuditContext, defaultWrite: DefaultWriteFn) => Promise<void>;
 
 /**
- * Error handler invoked when a write strategy fails to persist audit logs.
+ * Receives write failures from the deferred and fire-and-forget strategies, which write after the
+ * triggering call has returned. The synchronous strategy propagates write errors to the caller instead.
  */
 export type WriteErrorHandler = (error: Error, operationDescription: string) => void | Promise<void>;
 
 /**
- * Shared input for every write strategy implementation (synchronous, deferred,
- * fire-and-forget).
- *
- * @example
- * ```typescript
- * const input: WriteStrategyInput = {
- *   logs,
- *   context,
- *   manager,
- *   auditLogModel: 'auditLog',
- *   writer: undefined,
- *   handleError,
- *   writeExecutor,
- * };
- * const result = await writeSynchronously(input);
- * ```
+ * Shared input for every write strategy implementation (synchronous, deferred, fire-and-forget).
  */
 export interface WriteStrategyInput {
   logs: AuditLogData[];

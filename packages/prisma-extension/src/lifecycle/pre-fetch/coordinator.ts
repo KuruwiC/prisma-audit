@@ -45,7 +45,8 @@ export interface PreFetchResultsWithInternal extends PreFetchResults {
  * Transforms: `path → entityId → { before }` to `path → record | null`
  *
  * IMPORTANT: For paths with multiple entities, only __default__ or first entity is preserved.
- * This is acceptable for detection (Phase 1) but NOT for audit log building (Phase 2).
+ * This is acceptable for the filtered detection pass, which only checks whether a record exists per path,
+ * but NOT for audit log building, which reads every entity from PRE_FETCH_INTERNAL_RESULTS.
  *
  * @param internalResults - Nested Map structure from pre-fetch execution
  * @returns Flat path-based Map for nested operation detection
@@ -188,7 +189,7 @@ export const categorizeRelationType = (
 /**
  * Pre-fetches nested records before operation execution
  *
- * Implements Phase 1 of two-phase detection strategy for accurate audit logging.
+ * Implements the discovery pass of the two-pass nested-operation detection used for accurate audit logging.
  * Explores all possible branches using empty PreFetchResults for initial detection.
  *
  * IMPORTANT: Must be called BEFORE operation executes to capture original state.

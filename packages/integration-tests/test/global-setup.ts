@@ -23,9 +23,8 @@ declare module 'vitest' {
 const Filename = fileURLToPath(import.meta.url);
 const Dirname = dirname(Filename);
 
-// Covers image pull + container start + readiness wait, none of which are
-// bounded by testcontainers' own `withStartupTimeout` (that option only covers
-// the readiness-wait phase, not a slow/stuck image pull).
+// Bounds image pull + container start + readiness wait together: testcontainers'
+// `withStartupTimeout` only bounds the readiness wait, not a slow or stuck image pull.
 const CONTAINER_START_TIMEOUT_MS = 120_000;
 // The schema push itself is small; this is a generous margin, not an estimate.
 const DB_PUSH_TIMEOUT_MS = 60_000;

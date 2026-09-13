@@ -336,7 +336,7 @@ const addBothBranches = (args: Record<string, unknown>, dataSources: Record<stri
   }
 };
 
-/** @internal Add only the branch that matches record existence (filtered pass) */
+/** @internal Add only the update branch, or the create branch when there is no update (filtered pass) */
 const addExecutingBranch = (args: Record<string, unknown>, dataSources: Record<string, unknown>[]): void => {
   if (args.update && typeof args.update === 'object') {
     dataSources.push(args.update as Record<string, unknown>);

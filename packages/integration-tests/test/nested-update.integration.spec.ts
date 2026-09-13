@@ -309,9 +309,7 @@ describe('Nested Update Operations', () => {
         where: { entityType: 'Post', action: 'update' },
       });
 
-      // Nested updateMany should create audit logs. Without include, updateMany
-      // relies on pre-fetch to identify affected records; at minimum, the user
-      // update itself should produce logs.
+      // Without include, nested updateMany relies on pre-fetch to identify the affected posts.
       expect(postLogs.length).toBeGreaterThanOrEqual(1);
     });
   });

@@ -67,9 +67,7 @@ import {
 } from './utils/index.js';
 
 /**
- * Input for the internal `handleLimitedUpdateMany` helper, which audits a
- * `limit`-bounded `updateMany`/`updateManyAndReturn` by routing it through
- * `updateManyAndReturn` so before/after pin to the exact rows updated.
+ * Input for the `handleLimitedUpdateMany` helper defined inside {@link createAuditLogExtension}.
  */
 interface HandleLimitedUpdateManyInput {
   operation: OperationContext;
@@ -89,26 +87,11 @@ interface HandleLimitedUpdateManyInput {
  * Creates the Prisma Client Extension for automatic audit logging
  *
  * @remarks
- * Most callers should use {@link createAuditClient} instead, which applies this
- * extension via `prisma.$extends()` and returns a typed client. This function is
- * the lower-level primitive `createAuditClient` builds on.
+ * Internal extension factory, not exported from the package entry: `createAuditClient`
+ * applies it via `prisma.$extends()` and returns the typed client.
  *
  * @returns Prisma Client Extension definition (use with `prisma.$extends()`)
  * @throws {Error} If configuration contains conflicts or peer dependency missing
- *
- * @example
- * ```typescript
- * import { PrismaClient } from '@prisma/client';
- * import { createAuditLogExtension } from './extension.js';
- *
- * const extension = createAuditLogExtension({
- *   provider: auditContextProvider,
- *   basePrisma: new PrismaClient(),
- *   aggregateMapping: { ... },
- * });
- *
- * const prisma = basePrisma.$extends(extension);
- * ```
  */
 export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) => {
   const {

@@ -70,19 +70,15 @@ export {
 export type { ProjectionEnrichmentMeta } from './enrichment/types.js';
 // Global Singleton (dual-package hazard mitigation)
 //
-// Required by @kuruwic/prisma-audit's own implementation across the package
-// boundary (client-manager, transaction-wrapper, extension-utils,
-// normalized-writer), so it stays part of the public surface even though it
-// is not meant for direct end-user use.
+// Exported because @kuruwic/prisma-audit imports it across the package boundary;
+// end users are not meant to call it directly.
 export { getGlobalSingleton } from './global-singleton.js';
 // Interfaces
 export type { DbClient, SchemaMetadata, UniqueConstraint } from './interfaces/index.js';
 // Runtime Context (library-owned infrastructure state)
 //
-// Required by @kuruwic/prisma-audit's own implementation across the package
-// boundary (transaction-wrapper, normalized-writer, client-manager,
-// extension-utils), so it stays part of the public surface even though it
-// is not meant for direct end-user use.
+// Exported because @kuruwic/prisma-audit imports it across the package boundary;
+// end users are not meant to call it directly.
 export { getRuntimeContext, runWithRuntimeContext } from './runtime-context.js';
 // State Resolution
 export { applyRelationConfig } from './state-resolution/apply-relation-config.js';
