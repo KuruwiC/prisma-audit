@@ -9,6 +9,7 @@
 import { AUDIT_ACTION, nestedLog } from '@kuruwic/prisma-audit-core';
 
 import { extractDeleteOperationEntityId } from '../../utils/extension-utils.js';
+import { PRE_FETCH_DEFAULT_KEY } from '../pre-fetch/pre-fetch-result-store.js';
 import type { CollectedNestedRecord } from './collected-record.js';
 
 /**
@@ -16,7 +17,7 @@ import type { CollectedNestedRecord } from './collected-record.js';
  *
  * Returns `null` when the row's identity could not be resolved at all, rather than a
  * partial or empty guess:
- *   - `entityId === '__default__'` — pre-fetch never determined a primary key for this
+ *   - `entityId === PRE_FETCH_DEFAULT_KEY` — pre-fetch never determined a primary key for this
  *     row (pre-fetch failed, or the WHERE clause exposed no recognizable PK fields). An
  *     empty `{}` here would look like a valid, complete identity to anyone reading the
  *     audit log — the idResolver would read missing fields off it and serialize a
@@ -29,7 +30,7 @@ import type { CollectedNestedRecord } from './collected-record.js';
  *     composite key is actually unknown.
  */
 const buildMinimalEntity = (entityId: string, pkFields?: string[]): Record<string, unknown> | null => {
-  if (entityId === '__default__') return null;
+  if (entityId === PRE_FETCH_DEFAULT_KEY) return null;
 
   const fields = pkFields ?? ['id'];
   if (fields.length === 1) {
@@ -197,11 +198,11 @@ export const collectDeleteRecords = async (
 
     nestedLog('could not extract entity ID from delete operation data');
     // There is no raw entityId to report here — extraction found nothing at all,
-    // not a corrupted one. Report it with the same `'__default__'` sentinel
+    // not a corrupted one. Report it with the same `PRE_FETCH_DEFAULT_KEY` sentinel
     // `buildMinimalEntity` already uses for "identity could not be determined" (as
     // opposed to a real-but-malformed serialized key), so the observer can tell
     // this apart from the malformed-composite-key case above.
-    await reportUnresolvedEntityId(nestedOp.relatedModel, '__default__', pkFields, onUnresolvedDeleteEntityId);
+    await reportUnresolvedEntityId(nestedOp.relatedModel, PRE_FETCH_DEFAULT_KEY, pkFields, onUnresolvedDeleteEntityId);
     return [];
   }
 
