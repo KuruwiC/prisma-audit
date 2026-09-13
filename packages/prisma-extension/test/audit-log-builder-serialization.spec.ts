@@ -58,8 +58,6 @@ describe('buildAuditLog serialization', () => {
       excludeFields: undefined,
       redact: undefined,
       aggregateData: createSelfAggregateData('tx-1'),
-      includeRelations: undefined,
-      serialization: undefined,
     });
 
     expect(logs.length).toBeGreaterThan(0);
@@ -98,8 +96,6 @@ describe('buildAuditLog serialization', () => {
       excludeFields: undefined,
       redact: undefined,
       aggregateData: createSelfAggregateData('tx-1'),
-      includeRelations: undefined,
-      serialization: undefined,
     });
 
     expect(logs.length).toBeGreaterThan(0);
@@ -132,8 +128,6 @@ describe('buildAuditLog serialization', () => {
       excludeFields: undefined,
       redact: undefined,
       aggregateData: createSelfAggregateData('tx-1'),
-      includeRelations: undefined,
-      serialization: undefined,
     });
 
     expect(logs.length).toBeGreaterThan(0);
@@ -159,7 +153,6 @@ describe('buildAuditLog serialization', () => {
       excludeFields: undefined,
       redact: undefined,
       aggregateData: createSelfAggregateData('tx-1'),
-      includeRelations: undefined,
       serialization: {
         customSerializers: [
           (value: unknown) => {

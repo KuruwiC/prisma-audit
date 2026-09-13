@@ -255,7 +255,6 @@ const enrichAndBuildForModelGroup = async (
       excludeFields,
       redact,
       aggregateData,
-      includeRelations: undefined,
       serialization,
       relationFieldNames: relationFields,
     });

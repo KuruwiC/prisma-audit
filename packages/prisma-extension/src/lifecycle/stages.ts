@@ -499,7 +499,6 @@ const buildMainAuditLogs = async (
     excludeFields: deps.excludeFields,
     redact: deps.redact,
     aggregateData,
-    includeRelations: undefined,
     serialization: deps.serialization,
     relationFieldNames: relationFields,
   });
