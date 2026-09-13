@@ -122,32 +122,33 @@ export interface NestedOperationsConfig {
 }
 
 /**
- * The stage of the audit pipeline a failure occurred in. Each value carries a different
- * consequence for the reader of the audit trail:
+ * The stage of the audit pipeline a failure occurred in. Each value has a different
+ * consequence for the caller's operation and the audit trail:
  *
  * - `pre-fetch`: fetching the before-state (for update / delete / upsert) failed. The
- *   caller's operation continues; the audit log records the before-state as unknown
- *   rather than guessing.
- * - `log-write`: persisting the audit log entry itself failed. This is the only phase
- *   {@link ErrorHandlingConfig.writeFailurePolicy} decides the outcome of — see there
- *   for exactly what "decides" means once the write is queued or detached.
- * - `diff-generation`: building the audit log entry (enrichment, aggregate resolution,
- *   redaction, batch pipeline) failed, after the underlying operation already ran. This
- *   phase is NOT policy-gated: it always propagates to the caller as a thrown error,
- *   regardless of {@link ErrorHandlingConfig.writeFailurePolicy}.
- * - `entity-id-resolution`: a nested delete's primary key could not be reconstructed
- *   from the fetched or serialized entityId. The caller's operation continues; that
- *   record's audit log entry is skipped rather than recorded with a partial or
- *   fabricated identity.
+ *   caller's operation continues; the entry is recorded without a before-state rather than
+ *   a guessed one, and a top-level `upsert` entry, whose create-vs-update action depends on
+ *   it, is skipped.
+ * - `log-write`: persisting the audit log entry itself failed. This is the only phase whose
+ *   outcome {@link ErrorHandlingConfig.writeFailurePolicy} decides — see
+ *   {@link WriteFailurePolicy} for writes that are queued or detached.
+ * - `diff-generation`: other audit-support work around the caller's operation failed —
+ *   building the entry (enrichment, aggregate resolution, redaction) or, for batch
+ *   operations, fetching the affected rows before or after the mutation. This phase is NOT
+ *   policy-gated: it always propagates to the caller as a thrown error, regardless of
+ *   {@link ErrorHandlingConfig.writeFailurePolicy}.
+ * - `entity-id-resolution`: a nested delete's primary key could not be resolved, from
+ *   either the pre-fetched entityId or the operation data. The caller's operation
+ *   continues; that record's audit log entry is skipped rather than recorded with a
+ *   partial or fabricated identity.
  */
 export type AuditErrorPhase = 'pre-fetch' | 'log-write' | 'diff-generation' | 'entity-id-resolution';
 
 /**
- * Structured context describing a single audit-pipeline failure. Passed to both
- * {@link ErrorHandlingConfig.observer} (the observer) and, when
- * {@link ErrorHandlingConfig.writeFailurePolicy} is a function, to the policy resolver —
- * the same shape either way, so a handler that forwards failures to Sentry or similar
- * does not need to know which of the two invoked it.
+ * Structured context describing a single audit-pipeline failure. Passed in the same shape
+ * to {@link ErrorHandlingConfig.observer} and, when it is a function, to
+ * {@link ErrorHandlingConfig.writeFailurePolicy}, so a handler that forwards failures to
+ * Sentry or similar does not need to know which of the two invoked it.
  */
 export interface AuditErrorContext {
   phase: AuditErrorPhase;
@@ -176,20 +177,16 @@ export type AuditErrorObserver = (context: AuditErrorContext) => void | Promise<
  * A strategy string (`'throw'` re-throws and fails the operation, `'log'` logs to the
  * console and lets the operation succeed, `'ignore'` does neither), or a function that
  * receives the same {@link AuditErrorContext} the observer receives and RETURNS one of
- * those three strings — never throws. Returning (instead of throwing) is what keeps
- * conditional failure unambiguous: a policy function that threw would raise the same
- * "which channel actually decides" question that a return-only contract avoids.
+ * those three strings. The function must not throw; if it does, its error is logged to
+ * the console and `'log'` applies.
  *
- * **Only the `log-write` phase is policy-gated** — it is the only failure that happens
- * before the caller's operation has necessarily finished, so it is the only one "fail
- * the operation" can meaningfully apply to.
+ * **Only the `log-write` phase is policy-gated** — every other {@link AuditErrorPhase} has
+ * a fixed outcome.
  *
- * **`awaitWrite: false` (deferred / fire-and-forget writes):** once the audit-log write
- * has been queued (inside a transaction) or detached (outside one), the caller has
- * already received its result — there is nothing left to fail. `'throw'` fails the
- * caller only while the caller is still waiting on the write (the `awaitWrite: true`
- * default); once the write has been queued or detached, `'throw'` logs instead, exactly
- * like `'log'`.
+ * **`awaitWrite: false` (deferred / fire-and-forget writes):** `'throw'` fails the caller
+ * only while the caller is still waiting on the write (the `awaitWrite: true` default).
+ * Once the write has been queued (inside a transaction) or detached (outside one), the
+ * caller has already received its result, so `'throw'` logs instead, like `'log'`.
  */
 export type WriteFailurePolicy =
   | ErrorStrategy
@@ -198,9 +195,9 @@ export type WriteFailurePolicy =
 /**
  * Audit-failure observation and policy configuration.
  *
- * Kept separate from {@link HooksConfig} because `hooks` replaces behaviour (the
- * writer), while this section only observes failures and decides one thing — whether
- * the caller's write fails alongside them.
+ * Separate from {@link HooksConfig}, which replaces behaviour (the writer): this section
+ * only observes failures and decides whether a failed audit-log write also fails the
+ * caller's operation.
  */
 export interface ErrorHandlingConfig {
   /** Observer notified of every audit-pipeline failure. See {@link AuditErrorObserver}. */

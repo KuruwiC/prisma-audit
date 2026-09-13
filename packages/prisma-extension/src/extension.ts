@@ -94,10 +94,8 @@ interface HandleLimitedUpdateManyInput {
 }
 
 /**
- * Output shared by every batch-dispatch path (`handleCreateMany`,
- * `handleLimitedUpdateMany`, `handleUpdateOrDeleteMany`, and the fallback action):
- * the caller's own operation result, plus the audit logs built for it, still unwritten.
- * `executeBatch` writes `logs` itself, once, outside its own try/catch.
+ * A batch-dispatch path's output: the caller's operation result and the audit logs built
+ * for it, unwritten — `executeBatch` writes `logs` outside its try/catch.
  */
 interface BatchActionResult {
   result: unknown;
@@ -158,11 +156,8 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
   );
 
   /**
-   * Notifies the observer of an audit failure. Read-only — this NEVER affects whether
-   * the caller's own database operation succeeds or fails. Always invoked inside a
-   * try/catch: a handler that throws (sync or async) is logged to the console and
-   * otherwise ignored, so a broken observer can never behave differently depending on
-   * which phase failed.
+   * Notifies the observer of an audit failure. An observer that throws (sync or async) is
+   * logged to the console and ignored, so it never affects the caller's own database operation.
    */
   const notifyObserver = async (context: AuditErrorContext): Promise<void> => {
     if (!observer) return;
@@ -178,21 +173,11 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
 
   /**
    * Resolves and applies the write-failure policy for a single `log-write` failure:
-   * 'throw' re-throws (failing the caller's operation while it is still waiting on the
-   * write — see the write-mode honesty note on {@link WriteFailurePolicy}), 'log' logs
-   * to the console and lets it succeed, 'ignore' does neither.
+   * 'throw' re-throws (failing the caller's operation only while it is still waiting on the
+   * write — see {@link WriteFailurePolicy}), 'log' logs to the console, 'ignore' does neither.
    *
-   * A policy *function*'s contract says it must return one of those three strings and
-   * never throw (see {@link WriteFailurePolicy}), but nothing enforced that contract —
-   * an actually-throwing policy function would escape this `catch` block and fail the
-   * caller's own database operation, regardless of what the policy would have decided.
-   * That is never acceptable for something that is supposed to be caller-safe by
-   * construction, so a throw here falls back to `'log'`: it is the one strategy that
-   * cannot itself fail the caller's operation (unlike `'throw'`) while still surfacing
-   * the underlying `log-write` failure instead of silently swallowing it (unlike
-   * `'ignore'`) — the same "safe by default" choice already made for the config-level
-   * default (see `writeFailurePolicyConfig` above). The broken policy function itself is
-   * reported to the console, mirroring how `notifyObserver` reports a broken observer.
+   * A policy function that throws falls back to `'log'`: unlike `'throw'` it cannot fail the
+   * caller's operation, and unlike `'ignore'` it still surfaces the `log-write` failure.
    */
   const applyWriteFailurePolicy = async (context: AuditErrorContext, logLabel: string): Promise<void> => {
     let strategy: ErrorStrategy;
@@ -213,13 +198,9 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
   };
 
   /**
-   * Notifies the observer, then applies the write-failure policy. See
-   * {@link applyWriteFailurePolicy}.
-   *
-   * Only ever called for `log-write` failures — see {@link writeAuditLogs}, the sole
-   * caller. Every other phase (`pre-fetch`, `diff-generation`, `entity-id-resolution`)
-   * calls `notifyObserver` directly and never routes through the policy, which is what
-   * makes {@link WriteFailurePolicy}'s "only `log-write` is policy-gated" contract hold.
+   * Only {@link writeAuditLogs} calls this. Every other phase (`pre-fetch`, `diff-generation`,
+   * `entity-id-resolution`) calls `notifyObserver` directly, which is what keeps
+   * {@link WriteFailurePolicy}'s "only `log-write` is policy-gated" contract true.
    */
   const reportWriteFailure = async (context: AuditErrorContext, logLabel: string): Promise<void> => {
     await notifyObserver(context);
@@ -257,14 +238,11 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
    * Writes audit logs via the configured write strategy.
    *
    * @remarks
-   * Only the synchronous strategy (the `awaitWrite: true` default) reaches the `catch` below:
-   * it awaits the write directly and has no error handling of its own. The deferred and
-   * fire-and-forget strategies catch internally and invoke `writeErrorHandler` themselves,
-   * after the write has already been queued or detached — both wrap that call so a `'throw'`
-   * policy can never escape as an unhandled rejection once the write is no longer awaited by
-   * the caller; see the write-mode honesty note on {@link WriteFailurePolicy}.
-   *
-   * `reportWriteFailure` is what decides whether a failure propagates to the caller.
+   * A write failure of the synchronous strategy (the `awaitWrite: true` default) surfaces in
+   * the `catch` below, since that strategy has no error handling of its own. The deferred and
+   * fire-and-forget strategies call `writeErrorHandler` themselves after the write was queued
+   * or detached, and catch and log anything it throws, so a `'throw'` policy cannot become an
+   * unhandled rejection (see {@link WriteFailurePolicy}).
    */
   const writeAuditLogs = async (logs: AuditLogData[], baseClient: PrismaClientWithDynamicAccess): Promise<void> => {
     if (logs.length === 0) {
@@ -333,8 +311,8 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     const modelAccessor = getModelAccessor(clientToUse, modelName);
     const delegate = clientToUse[modelAccessor] as Record<string, unknown>;
     const actionFn = delegate[operation.action as string] as (args: unknown) => Promise<unknown>;
-    // The whole call is the caller's own operation — there is no audit-support work
-    // around it to distinguish from.
+    // No audit-support work runs here, so any failure is the caller's own; the tag lets
+    // `executeBatch` rethrow it untouched instead of reporting it as `diff-generation`.
     return runCallerMutation(() => actionFn(operation.args));
   };
 
@@ -414,10 +392,10 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
           basePrisma: baseClient,
           getNestedOperationConfig: getNestedOperationConfigWrapper,
           Prisma,
-          // A broken composite entityId is never turned into a partial/guessed key
-          // (see collectDeleteRecords); report it through the same observer as every
-          // other audit failure, under its own phase — this is neither a pre-fetch nor
-          // a diff-generation failure, it is the entityId itself being unresolvable.
+          // A nested delete whose primary key cannot be resolved is skipped rather than
+          // recorded under a partial or fabricated identity (see collectDeleteRecords). It is
+          // reported under its own phase: the record's identity is what failed, not a
+          // pre-fetch or diff generation.
           onUnresolvedDeleteEntityId: async ({ relatedModel, entityId, pkFields, error }) => {
             await notifyObserver({
               phase: 'entity-id-resolution',
@@ -463,11 +441,9 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
       provider,
       awaitWrite,
       awaitWriteIf,
-      // `executeAuditedOperation` (operation-executor.ts) only reaches this callback for a
-      // genuine audit-stage failure (fetch-before-state / enrich / build) — it detects the
-      // caller's own mutation error via `isCallerMutationError` and rethrows that untouched
-      // before ever calling here, so this observer notification never fires for the caller's
-      // own database error.
+      // `executeAuditedOperation` (operation-executor.ts) rethrows the caller's own mutation
+      // error (see `isCallerMutationError`) before calling this, so only audit-stage failures
+      // (fetch-before-state / enrich / build) reach the observer here.
       onPipelineError: async (error: Error) => {
         const modelName = operation.model ?? 'unknown';
         await notifyObserver({
@@ -512,10 +488,8 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
   };
 
   /**
-   * Runs the batch enrich/build stages and returns the resulting audit logs, unwritten.
-   * The caller (`dispatchBatchAction`'s branches) pairs these logs with the batch's
-   * operation result; `executeBatch` is the one place that actually writes them, once
-   * outside its own try/catch — see the phase-contract note on `executeBatch`.
+   * Runs the batch enrich/build stages and returns the resulting audit logs unwritten;
+   * `executeBatch` writes them outside its try/catch (see the note above `executeBatch`).
    */
   const runBatchPipeline = async (
     batchInitialContext: BatchInitialContext,
@@ -771,11 +745,10 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     };
 
     // `dispatchBatchAction` runs audit-support work (before-fetch, after-refetch,
-    // enrich/build) around the caller's own mutation, but never writes the audit logs
-    // it builds — it returns them instead, matching `executeAuditedOperation`
-    // (operation-executor.ts). `writeAuditLogs` must stay outside this try/catch: it
-    // reports `log-write` failures itself, and this catch would re-report the same
-    // failure as `diff-generation` if it ran inside.
+    // enrich/build) around the caller's own mutation and returns the logs it builds
+    // unwritten, as `executeAuditedOperation` (operation-executor.ts) does. `writeAuditLogs`
+    // must stay outside this try/catch: it reports `log-write` failures itself, and a
+    // `'throw'` policy's rethrow would otherwise be re-reported here as `diff-generation`.
     const executeBatch = async (
       txContext: AuditContext,
       clientToUse: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
@@ -792,10 +765,8 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
         }
 
         const error = caughtError instanceof Error ? caughtError : new Error(String(caughtError));
-        // Observer-only, like `executeAuditedOperation`'s `onPipelineError` — a
-        // `diff-generation` failure always propagates to the caller, so there is
-        // nothing here for `writeFailurePolicy` to decide (see `WriteFailurePolicy`'s
-        // "only `log-write` is policy-gated" contract).
+        // Observer-only, like `executeAuditedOperation`'s `onPipelineError`: a `diff-generation`
+        // failure always propagates to the caller, so `writeFailurePolicy` has nothing to decide.
         await notifyObserver({
           phase: 'diff-generation',
           modelName,
