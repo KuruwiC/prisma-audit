@@ -61,13 +61,11 @@ export const isAuditableAction = (operation: string): operation is PrismaAction 
  *
  * Handles direct ID format (`{ id: '123' }`), WHERE clause format
  * (`{ where: { id: '456' } }`), and — for a composite primary key — Prisma's
- * compound-unique shape (`{ postId_userId: { postId, userId } }`, wrapped directly or
- * under `where`), unwrapped via the shared `unwrapCompoundWhere` the pre-fetch path also uses
- * already uses to read it. Only Prisma's default compound-key name (`pkFields.join('_')`)
- * can be reconstructed this way, since this function only has `pkFields`, not a full
- * `UniqueConstraint` with a possible explicit `name` — a compound key declared with an
- * explicit custom name (`@@id([a, b], name: "custom")`) stays unsupported on this
- * fallback path (see `unwrapCompoundWhere`'s own doc comment).
+ * compound-unique shape (`{ postId_userId: { postId, userId } }`, directly or under
+ * `where`), unwrapped with the same `unwrapCompoundWhere` the pre-fetch path uses. Only
+ * Prisma's default compound-key name (`pkFields.join('_')`) is recognized: this function
+ * receives `pkFields`, not the constraint's explicit `name`, so a key declared as
+ * `@@id([a, b], name: "custom")` is not unwrapped on this fallback path.
  *
  * @param data - The delete operation data
  * @returns Entity ID if found, undefined otherwise

@@ -97,10 +97,10 @@ export type NestedAuditLogBuilderDependencies = {
   getNestedOperationConfig: GetNestedOperationConfig;
   Prisma: PrismaNamespace;
   /**
-   * Notified when a nested delete's composite entityId cannot be reconstructed
-   * (see `collectDeleteRecords`), instead of that entry being recorded with a
-   * partial/guessed key. Optional: when omitted, the unresolved entry is still
-   * skipped, just not reported.
+   * Notified when a nested delete's primary key cannot be resolved (see
+   * `collectDeleteRecords`); that entry is skipped instead of being recorded with a
+   * partial or guessed key. Optional: when omitted, the entry is still skipped, just
+   * not reported.
    */
   onUnresolvedDeleteEntityId?: UnresolvedDeleteEntityIdReporter;
 };

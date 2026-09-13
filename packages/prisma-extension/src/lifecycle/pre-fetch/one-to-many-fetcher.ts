@@ -37,9 +37,8 @@ export const extractWhereClause = (
   operation: string,
   singleOpData: Record<string, unknown>,
 ): Record<string, unknown> | undefined => {
-  // `updateMany`/`deleteMany` never reach this function — `filterOperationsToPreFetch`
-  // (`@kuruwic/prisma-audit-core`) excludes them before pre-fetch runs at all. See the
-  // comment there for why.
+  // No `updateMany`/`deleteMany` branch: `filterOperationsToPreFetch` (`@kuruwic/prisma-audit-core`)
+  // excludes them before pre-fetch runs; see its JSDoc for why.
   if (operation === 'upsert' || operation === 'update') {
     return singleOpData.where as Record<string, unknown> | undefined;
   }
@@ -99,12 +98,10 @@ export const extractEntityId = (
  * Captures "before" state for one-to-many relations. Handles single and array operations.
  *
  * `update` / `upsert` / `delete` / `connectOrCreate` WHERE clauses are all
- * `<Model>WhereUniqueInput` — `findUnique` accepts them natively, including Prisma's
+ * `<Model>WhereUniqueInput`, so they go to `findUnique` as-is — including Prisma's
  * compound-unique shape for composite primary keys (`{ a_b: { a, b } }`, or a custom name
- * from `@@id([a, b], name: "custom")`), so no runtime WHERE-shape handling is needed here.
- *
- * `updateMany` / `deleteMany` never reach this function — see the comment on
- * `filterOperationsToPreFetch` in `@kuruwic/prisma-audit-core` for why.
+ * from `@@id([a, b], name: "custom")`). Only entityId derivation unwraps that shape (see
+ * `extractEntityId`).
  *
  * @param nestedOp - Nested operation metadata
  * @param relatedModelClient - Prisma client for the related model

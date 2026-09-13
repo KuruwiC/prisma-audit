@@ -19,9 +19,8 @@ import type { AuditLogData, OperationContext } from '../types.js';
  * Distinguishes "record not found" from "fetch failed" from "fetch was never
  * attempted" so that callers (e.g. upsert action resolution) do not misclassify a DB
  * error, or a deliberately skipped fetch, as "record does not exist". `notRequested` is
- * the outcome for actions that skip the fetch entirely — `create`, and `update`/`delete`
- * with `fetchBeforeOperation: false` — where "found" was never distinguished from "not
- * found" in the first place, because no fetch ever ran.
+ * the outcome for actions that skip the fetch entirely: `create`, and `update`/`delete`
+ * with `fetchBeforeOperation: false`.
  */
 export type BeforeStateResult =
   | { readonly _tag: 'found'; readonly data: Record<string, unknown> }
@@ -54,18 +53,12 @@ export interface InitialContext {
  */
 export interface PreparedContext extends InitialContext {
   /**
-   * State before operation (null for create, and also for `notRequested`,
-   * `notFound`, and `error` outcomes of the fetch below — this field alone cannot
-   * tell those apart). Consumers that must not misread a skipped or failed fetch as
-   * "record does not exist" (e.g. upsert action resolution) should branch on
-   * `beforeStateResult` instead.
+   * State before operation; `null` unless `beforeStateResult` is `found`, so it cannot tell a
+   * skipped or failed fetch from a missing record. Consumers that must not misread those as
+   * "record does not exist" (e.g. upsert action resolution) branch on `beforeStateResult`.
    */
   beforeState: Record<string, unknown> | null;
-  /**
-   * Full outcome of the before-state fetch. For actions that skip the fetch
-   * entirely (e.g. create, or update/delete with `fetchBeforeOperation: false`),
-   * this is `{ _tag: 'notRequested' }`, matching `beforeState` being `null`.
-   */
+  /** Full outcome of the before-state fetch; see {@link BeforeStateResult}. */
   beforeStateResult: BeforeStateResult;
   /** Pre-fetched nested operation states (path → record | null) */
   nestedPreFetchResults: PreFetchResults | undefined;

@@ -77,8 +77,8 @@ export const executeAuditedOperation = async (
 
     if (isCallerMutationError(error)) {
       // The caller's own database operation failed on its own terms (e.g. a unique
-      // constraint violation) — not an audit failure. Propagate it untouched: not
-      // reported to the observer, not passed through the policy, message unchanged.
+      // constraint violation), not an audit failure: rethrow it as-is, without calling
+      // `onPipelineError` or wrapping the message.
       throw error;
     }
 
@@ -86,9 +86,8 @@ export const executeAuditedOperation = async (
       await deps.onPipelineError(error);
     }
 
-    // A genuine audit-stage failure (fetch-before-state / enrich / build). Keep the
-    // original error as `cause` instead of mutating its `message` in place, since the
-    // caller may hold their own reference to that same error object.
+    // An audit-stage failure (fetch-before-state / enrich / build). Wrap it with `cause`
+    // rather than editing its `message`: the caller may hold a reference to the same error.
     throw new Error(
       `[@prisma-audit] Audited operation failed for model "${operation.model}" and action "${operation.action}": ${error.message}`,
       { cause: error },

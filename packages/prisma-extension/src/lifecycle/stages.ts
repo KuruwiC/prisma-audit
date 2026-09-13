@@ -294,11 +294,10 @@ const shouldFetchBeforeState = (
  * expose which branch of an upsert was executed.
  *
  * **Fetch failure vs "not found" vs "not requested"**: `beforeState` collapses all
- * three outcomes to `null`, but `beforeStateResult` (the full {@link BeforeStateResult})
- * keeps them apart. Consumers that resolve the upsert action from `beforeState === null`
- * must use `beforeStateResult` instead when they cannot tell a failed or skipped fetch
- * from a genuinely absent record — see `buildMainAuditLogs`, which skips the audit entry
- * for the failed-fetch case rather than recording it as `action: 'create'`.
+ * three outcomes to `null`; `beforeStateResult` (the full {@link BeforeStateResult})
+ * keeps them apart. Anything that must not treat a failed or skipped fetch as an absent
+ * record reads `beforeStateResult` — see `buildMainAuditLogs`, which skips an upsert's
+ * audit entry when the fetch failed rather than recording it as `action: 'create'`.
  *
  * @example
  * ```typescript
@@ -326,20 +325,14 @@ export const createFetchBeforeStateStage = (
     const operationArgs = toArgsRecord(args);
 
     let beforeState: Record<string, unknown> | null = null;
-    // 'notRequested' — not 'notFound' — is the default: nothing has been looked up yet,
-    // and for actions that skip the fetch entirely (create; update/delete with
-    // `fetchBeforeOperation: false`) nothing ever will be. See the "not found" vs "not
-    // requested" note above for why this distinction matters downstream.
+    // Stays 'notRequested' (not 'notFound') when `shouldFetchBeforeState` skips the fetch.
     let beforeStateResult: BeforeStateResult = { _tag: 'notRequested' };
     if (shouldFetchBeforeState(action, modelName, deps.getNestedOperationConfig)) {
       beforeStateResult = await deps.fetchBeforeState(clientToUse, modelName, toPrismaAction(action), operationArgs);
       if (beforeStateResult._tag === 'found') {
         beforeState = beforeStateResult.data;
       }
-      // The fetch failure itself was already reported to the error-handling observer
-      // by fetchBeforeState; see the "Fetch failure vs 'not found' vs 'not requested'"
-      // note above for why beforeStateResult (not beforeState) carries that distinction
-      // downstream.
+      // An 'error' result was already reported to the observer by fetchBeforeState.
     }
 
     const nestedPreFetchResults = await deps.preFetchNestedRecordsBeforeOperation(
@@ -466,22 +459,15 @@ const buildMainAuditLogs = async (
     return [];
   }
 
-  // Exhaustive switch over every `BeforeStateResult` outcome (see its JSDoc) rather
-  // than a single `if` on `'error'`, so a future variant added to the union cannot be
-  // silently forgotten here — the `never` check in `default` would fail to compile.
+  // Exhaustive switch so a new `BeforeStateResult` variant fails to compile at the
+  // `never` check instead of being silently ignored.
   //
-  // Only 'error' changes anything, and only for `upsert`: an upsert whose before-state
-  // fetch failed cannot be reliably classified as create vs update.
-  // resolveBeforeAndAfterStates (core) treats before === null as "record did not
-  // exist" and resolves the action to 'create', which is exactly what a failed fetch
-  // cannot tell apart from an actual absence. Recording it as 'create' would
-  // misrepresent what may have been an update to a real row, so the entry is skipped
-  // rather than guessed. The failure itself was already reported to the
-  // error-handling observer by fetchBeforeState. `upsert` always requests the fetch
-  // (see `shouldFetchBeforeState`), so 'notRequested' cannot co-occur with it in
-  // practice — 'found' / 'notFound' / 'notRequested' all fall through unchanged for
-  // every action, exactly as this code did before `beforeStateResult` distinguished
-  // "not requested" from "not found".
+  // Only 'error' on an `upsert` changes anything. resolveBeforeAndAfterStates (core)
+  // resolves an upsert with no before-state to 'create', and a failed fetch cannot tell
+  // an absent row from an existing one, so the entry is skipped rather than risk logging
+  // an update as a create. fetchBeforeState already reported the failure to the observer.
+  // `upsert` always requests the fetch (see `shouldFetchBeforeState`), so it never sees
+  // 'notRequested'; 'found' / 'notFound' / 'notRequested' fall through for every action.
   switch (context.beforeStateResult._tag) {
     case 'found':
     case 'notFound':

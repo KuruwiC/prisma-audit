@@ -121,7 +121,7 @@ export interface PreFetchCoordinatorDependencies {
   readonly getNestedOperationConfig: GetOperationConfig;
   /**
    * Notified when a single nested operation's pre-fetch query fails. The before-state
-   * for that path is recorded as unresolved (the `'__default__'` sentinel) and the
+   * for that path is recorded as unresolved (the `PRE_FETCH_DEFAULT_KEY` sentinel) and the
    * caller's own operation continues — mirrors the top-level equivalent,
    * `fetchBeforeState` in extension.ts, which reports the same failure class through
    * the same observer. Optional: when omitted, the failure is visible only via

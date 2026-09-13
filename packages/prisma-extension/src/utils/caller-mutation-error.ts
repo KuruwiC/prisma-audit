@@ -1,22 +1,19 @@
 /**
- * Tags an error as coming from the caller's own database mutation (a real `create`,
- * `update`, or `delete` on their data — e.g. a unique constraint violation), as
- * opposed to the audit-support work around it (before-fetch, after-refetch,
- * `runBatchPipeline`, the lifecycle pipeline's enrich/build stages). `extension.ts`'s
- * `executeBatch` and `executeAuditedOperation` (`lifecycle/operation-handlers/operation-executor.ts`,
- * the single-operation path) both use this pair to let such an error propagate
- * untouched instead of routing it through the audit observer or policy.
+ * Tags an error as coming from the caller's own database mutation (e.g. a unique
+ * constraint violation), as opposed to the audit-support work around it (before-fetch,
+ * after-refetch, `runBatchPipeline`, the lifecycle pipeline's enrich/build stages).
+ * `executeBatch` (`extension.ts`) and `executeAuditedOperation`
+ * (`lifecycle/operation-handlers/operation-executor.ts`, the single-operation path) use
+ * this pair to let such an error propagate untouched instead of routing it through the
+ * audit observer or policy.
  *
- * Module-scoped (not per-`createAuditLogExtension`-call) because the tag carries no
- * per-instance state — one process-wide private symbol is simpler than threading it
- * through every extension instance's closure, and every instance still agrees on the
- * same tag.
+ * The symbol is module-scoped because the tag carries no per-extension-instance state.
  *
  * @module utils/caller-mutation-error
  */
 const CALLER_MUTATION_ERROR = Symbol('callerMutationError');
 
-/** Runs `fn`, tagging any error it throws as {@link CALLER_MUTATION_ERROR}. */
+/** Runs `fn`, tagging any `Error` it throws; a non-`Error` throw is rethrown untagged. */
 export const runCallerMutation = async <T>(fn: () => Promise<T>): Promise<T> => {
   try {
     return await fn();

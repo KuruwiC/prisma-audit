@@ -206,8 +206,8 @@ export const fetchParentRecordIfNeeded = async (
     return null;
   }
 
-  // `parentWhere` is the top-level operation's `where` clause — a `<ParentModel>WhereUniqueInput`
-  // — so `findUnique` accepts it natively, including a composite-key compound-unique shape.
+  // `parentWhere` is the top-level operation's `where` (a `WhereUniqueInput`), which
+  // `findUnique` accepts as-is, including a composite-key compound-unique shape.
   const parentRecord = await parentModelClient.findUnique({ where: parentWhere });
 
   preFetchLog('1:1 fetched parent record: %s', parentRecord ? 'found' : 'null');
