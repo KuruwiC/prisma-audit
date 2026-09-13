@@ -106,7 +106,7 @@ const processCreateOperation = (
   );
 };
 
-/** @internal Process upsert operation - explore branches based on phase and record existence */
+/** @internal Process upsert operation - explore branches based on the pass (discovery/filtered) and record existence */
 const processUpsertOperation = (
   schemaMetadata: SchemaMetadata,
   relationField: { name: string; relatedModel: string; isList: boolean },
@@ -327,7 +327,7 @@ const addDataFieldIfPresent = (args: Record<string, unknown>, dataSources: Recor
 };
 
 /** @internal Add both the create and update branches (discovery pass) */
-const addBothBranches = (args: Record<string, unknown>, dataSources: Record<string, unknown>[]): void => {
+const addCreateAndUpdateBranches = (args: Record<string, unknown>, dataSources: Record<string, unknown>[]): void => {
   if (args.create && typeof args.create === 'object') {
     dataSources.push(args.create as Record<string, unknown>);
   }
@@ -337,7 +337,7 @@ const addBothBranches = (args: Record<string, unknown>, dataSources: Record<stri
 };
 
 /** @internal Add only the update branch, or the create branch when there is no update (filtered pass) */
-const addExecutingBranch = (args: Record<string, unknown>, dataSources: Record<string, unknown>[]): void => {
+const addUpdateOrCreateBranch = (args: Record<string, unknown>, dataSources: Record<string, unknown>[]): void => {
   if (args.update && typeof args.update === 'object') {
     dataSources.push(args.update as Record<string, unknown>);
   } else if (args.create && typeof args.create === 'object') {
@@ -356,9 +356,9 @@ const extractDataSources = (
 
   const isDiscoveryPass = preFetchResults.size === 0;
   if (isDiscoveryPass) {
-    addBothBranches(args, dataSources);
+    addCreateAndUpdateBranches(args, dataSources);
   } else {
-    addExecutingBranch(args, dataSources);
+    addUpdateOrCreateBranch(args, dataSources);
   }
 
   return dataSources;
