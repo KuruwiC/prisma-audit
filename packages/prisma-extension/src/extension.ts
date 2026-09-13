@@ -563,9 +563,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
         baseClient,
         clientToUse,
         action,
-        modelDelegate: modelDelegate as typeof modelDelegate & {
-          updateManyAndReturn: (args: unknown) => Promise<Record<string, unknown>[]>;
-        },
+        modelDelegate: modelDelegate as HandleLimitedUpdateManyInput['modelDelegate'],
         pkFields,
         whereClause,
       });

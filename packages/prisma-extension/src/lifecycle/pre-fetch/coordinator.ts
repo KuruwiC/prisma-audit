@@ -413,10 +413,9 @@ const handleOtherOneToOneOperations = async (input: HandleOneToOneRelationInput)
     return;
   }
 
-  // This module's DMMF and client types do not structurally overlap with the ones
-  // one-to-one-fetcher declares, so both values are widened to `unknown` before being
-  // narrowed to the fetcher's input types.
-  const dmmfAsUnknown: unknown = dmmf;
+  // PrismaClientWithDynamicAccess's `unknown` index signature does not fit the fetcher's
+  // per-model client record, so the client is widened to `unknown` before being narrowed
+  // to the fetcher's input type.
   const prismaClientAsUnknown: unknown = prismaClient;
 
   const result = await preFetchOneToOneRelation({
@@ -426,7 +425,7 @@ const handleOtherOneToOneOperations = async (input: HandleOneToOneRelationInput)
     parentWhere: args.where as Record<string, unknown>,
     relatedModelClient: relatedModelClient as PreFetchOneToOneRelationInput['relatedModelClient'],
     parentModelName,
-    dmmf: dmmfAsUnknown as PreFetchOneToOneRelationInput['dmmf'],
+    dmmf,
     preFetchResults,
     prismaClient: prismaClientAsUnknown as PreFetchOneToOneRelationInput['prismaClient'],
     pkFields,
