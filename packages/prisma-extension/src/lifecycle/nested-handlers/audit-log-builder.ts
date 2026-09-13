@@ -317,8 +317,15 @@ export interface BuildNestedAuditLogsInput extends BuildNestedAuditLogsParams {
 export const buildNestedAuditLogs = async (input: BuildNestedAuditLogsInput): Promise<AuditLogData[]> => {
   const { modelName, args, result, context, prismaClient, actorContext, preFetchResults, deps } = input;
   const nestedPreFetchResults = extractNestedPreFetchResults(preFetchResults);
-  const { aggregateConfig, excludeFields, redact, serialization, getNestedOperationConfig, Prisma } = deps;
-  const onUnresolvedDeleteEntityId = deps.onUnresolvedDeleteEntityId;
+  const {
+    aggregateConfig,
+    excludeFields,
+    redact,
+    serialization,
+    getNestedOperationConfig,
+    Prisma,
+    onUnresolvedDeleteEntityId,
+  } = deps;
 
   const prismaMetadata = createSchemaMetadataFromDMMF(Prisma);
 
