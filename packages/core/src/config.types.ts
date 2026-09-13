@@ -1,6 +1,6 @@
 import type { ValueSerializer } from './utils/serialization.js';
 
-/** Error handling strategy for audit logging. Canonical definition lives in `./utils/error-handler.js`. */
+/** Error handling strategy for audit logging */
 export type { ErrorStrategy } from './utils/error-handler.js';
 
 /**

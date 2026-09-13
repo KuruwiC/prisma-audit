@@ -26,9 +26,9 @@ const createDeferredExecutor = (
       }
     } catch (error) {
       const errorObject = error instanceof Error ? error : new Error(String(error));
-      // A 'throw' policy has nothing left to fail once the write has been queued and
-      // the caller has moved on — mirrors the equivalent guard in fire-and-forget.ts so
-      // neither detached strategy can turn a throwing handler into an unhandled rejection.
+      // The write runs after commit, when the caller has already returned, so a 'throw'
+      // policy has nothing left to fail. Contain the handler's error, as fire-and-forget.ts
+      // does, so the executor never rejects.
       try {
         await errorHandler(errorObject, 'deferred audit log write');
       } catch (handlerError) {
