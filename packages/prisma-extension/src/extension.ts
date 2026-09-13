@@ -221,7 +221,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
    * calls `notifyObserver` directly and never routes through the policy, which is what
    * makes {@link WriteFailurePolicy}'s "only `log-write` is policy-gated" contract hold.
    */
-  const reportAuditFailure = async (context: AuditErrorContext, logLabel: string): Promise<void> => {
+  const reportWriteFailure = async (context: AuditErrorContext, logLabel: string): Promise<void> => {
     await notifyObserver(context);
     await applyWriteFailurePolicy(context, logLabel);
   };
@@ -264,7 +264,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
    * policy can never escape as an unhandled rejection once the write is no longer awaited by
    * the caller; see the write-mode honesty note on {@link WriteFailurePolicy}.
    *
-   * `reportAuditFailure` is what decides whether a failure propagates to the caller.
+   * `reportWriteFailure` is what decides whether a failure propagates to the caller.
    */
   const writeAuditLogs = async (logs: AuditLogData[], baseClient: PrismaClientWithDynamicAccess): Promise<void> => {
     if (logs.length === 0) {
@@ -286,7 +286,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
       const strategy = strategySelector(modelName);
 
       const writeErrorHandler = async (error: Error, operationDescription: string): Promise<void> => {
-        await reportAuditFailure(
+        await reportWriteFailure(
           { phase: 'log-write', modelName, operation: 'write', params: logs, error },
           operationDescription,
         );
@@ -305,7 +305,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     } catch (caughtError) {
       const error = caughtError instanceof Error ? caughtError : new Error(String(caughtError));
       const modelName = logs[0]?.entityType ?? 'unknown';
-      await reportAuditFailure(
+      await reportWriteFailure(
         { phase: 'log-write', modelName, operation: 'write', params: logs, error },
         'audit log write',
       );
