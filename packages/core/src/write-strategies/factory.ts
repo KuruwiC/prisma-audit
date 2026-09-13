@@ -11,7 +11,10 @@ import type { WriteExecutor } from './interfaces.js';
 import { writeSynchronously } from './synchronous.js';
 import type { WriteResult, WriteStrategyConfig, WriteStrategyInput } from './types.js';
 
-type StrategyFunction = (input: WriteStrategyInput) => Promise<WriteResult> | WriteResult;
+/**
+ * A selected write strategy. The write executor is bound by the selector, so callers omit it.
+ */
+type StrategyFunction = (input: Omit<WriteStrategyInput, 'writeExecutor'>) => Promise<WriteResult> | WriteResult;
 
 /**
  * Determine if write should be awaited
@@ -43,7 +46,7 @@ const isInTransaction = (): boolean => {
  * ```typescript
  * const selector = createWriteStrategySelector(config, writeExecutor);
  * const strategy = selector('User');
- * await strategy({ logs, context, manager, auditLogModel: 'auditLog', writer, handleError, writeExecutor });
+ * await strategy({ logs, context, manager, auditLogModel: 'auditLog', writer, handleError });
  * ```
  */
 export const createWriteStrategySelector = (

@@ -224,7 +224,6 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
         auditLogModel,
         writer,
         handleError: writeErrorHandler,
-        writeExecutor,
       });
 
       handleWriteResult(result);

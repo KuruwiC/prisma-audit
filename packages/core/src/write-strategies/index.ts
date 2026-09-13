@@ -31,7 +31,7 @@
  *
  * const selector = createWriteStrategySelector(config, writeExecutor);
  * const strategy = selector('User');
- * await strategy({ logs, context, manager, auditLogModel: 'auditLog', writer, handleError, writeExecutor });
+ * await strategy({ logs, context, manager, auditLogModel: 'auditLog', writer, handleError });
  * ```
  */
 

@@ -99,7 +99,6 @@ describe('createWriteStrategySelector', () => {
         auditLogModel: 'auditLog',
         writer: mockWriter,
         handleError: mockHandleError,
-        writeExecutor: mockExecutor,
       });
 
       // Synchronous strategy returns Immediate result
@@ -128,7 +127,6 @@ describe('createWriteStrategySelector', () => {
           auditLogModel: 'auditLog',
           writer: mockWriter,
           handleError: mockHandleError,
-          writeExecutor: mockExecutor,
         });
       });
 
@@ -160,7 +158,6 @@ describe('createWriteStrategySelector', () => {
         auditLogModel: 'auditLog',
         writer: mockWriter,
         handleError: mockHandleError,
-        writeExecutor: mockExecutor,
       });
 
       // Fire-and-forget strategy returns Immediate result (non-blocking)
@@ -194,7 +191,6 @@ describe('createWriteStrategySelector', () => {
         auditLogModel: 'auditLog',
         writer: mockWriter,
         handleError: mockHandleError,
-        writeExecutor: mockExecutor,
       });
 
       // awaitWriteIf returns true for 'critical' tag → synchronous strategy
@@ -226,7 +222,6 @@ describe('createWriteStrategySelector', () => {
         auditLogModel: 'auditLog',
         writer: mockWriter,
         handleError: mockHandleError,
-        writeExecutor: mockExecutor,
       });
 
       // awaitWriteIf returns false → falls back to awaitWrite: false → fire-and-forget
@@ -258,7 +253,6 @@ describe('createWriteStrategySelector', () => {
           auditLogModel: 'auditLog',
           writer: mockWriter,
           handleError: mockHandleError,
-          writeExecutor: mockExecutor,
         });
       });
 
@@ -292,7 +286,6 @@ describe('createWriteStrategySelector', () => {
           auditLogModel: 'auditLog',
           writer: mockWriter,
           handleError: mockHandleError,
-          writeExecutor: mockExecutor,
         });
       });
 
@@ -322,7 +315,6 @@ describe('createWriteStrategySelector', () => {
         auditLogModel: 'auditLog',
         writer: mockWriter,
         handleError: mockHandleError,
-        writeExecutor: mockExecutor,
       });
 
       // No entity config → falls back to awaitWrite: false → fire-and-forget
@@ -348,7 +340,6 @@ describe('createWriteStrategySelector', () => {
         auditLogModel: 'auditLog',
         writer: mockWriter,
         handleError: mockHandleError,
-        writeExecutor: mockExecutor,
       });
 
       // awaitWriteIf returns false (empty tags) → falls back to awaitWrite: false → fire-and-forget
@@ -374,7 +365,6 @@ describe('createWriteStrategySelector', () => {
         auditLogModel: 'auditLog',
         writer: mockWriter,
         handleError: mockHandleError,
-        writeExecutor: mockExecutor,
       });
 
       // No awaitWriteIf → uses global awaitWrite: true → synchronous strategy
