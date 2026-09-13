@@ -52,10 +52,10 @@ describe('extractDeleteOperationEntityId', () => {
     });
 
     it('an explicitly-named compound key (not pkFields.join("_")) stays unsupported on this fallback path', () => {
-      // `unwrapCompoundWhere` can only reconstruct Prisma's *default* compound-key name
-      // (`pkFields.join('_')`) from `pkFields` alone — a `@@id([...], name: "custom")`
-      // key is not resolvable here (see its own doc comment). The WHERE clause under a
-      // custom name is left unwrapped, so no PK fields are found directly on it.
+      // `extractDeleteOperationEntityId` has only `pkFields`, not the constraint's explicit
+      // `name`, so it unwraps only Prisma's default compound-key name (`pkFields.join('_')`).
+      // A WHERE clause under a `@@id([...], name: "custom")` key is left unwrapped, so no PK
+      // fields are found directly on it.
       const data = { customCompoundKeyName: { postId: 'post-3', userId: 'user-3' } };
 
       expect(extractDeleteOperationEntityId(data, pkFields)).toBeUndefined();
