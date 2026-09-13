@@ -471,7 +471,7 @@ const processTopLevelUpsertBranches = (
  * (`processDataSource` -> `processRelationFieldKeywords` -> `processKeywordOperation`).
  * `processedOps` and `nestedOperations` are accumulators mutated in place as the scan descends.
  */
-export interface NestedOperationScanContext {
+interface NestedOperationScanContext {
   schemaMetadata: SchemaMetadata;
   currentPath: string;
   preFetchResults: PreFetchResults;
@@ -479,7 +479,7 @@ export interface NestedOperationScanContext {
   nestedOperations: NestedOperationInfo[];
 }
 
-export interface ProcessKeywordOperationInput extends NestedOperationScanContext {
+interface ProcessKeywordOperationInput extends NestedOperationScanContext {
   relationField: { name: string; relatedModel: string; isList: boolean };
   keyword: NestedOperationKeyword;
   nestedData: unknown;
@@ -527,7 +527,7 @@ const processKeywordOperation = (input: ProcessKeywordOperationInput): void => {
   nestedOperations.push(...deepOps);
 };
 
-export interface ProcessRelationFieldKeywordsInput extends NestedOperationScanContext {
+interface ProcessRelationFieldKeywordsInput extends NestedOperationScanContext {
   relationField: { name: string; relatedModel: string; isList: boolean };
   fieldValue: Record<string, unknown>;
 }
@@ -556,7 +556,7 @@ const processRelationFieldKeywords = (input: ProcessRelationFieldKeywordsInput):
   }
 };
 
-export interface ProcessDataSourceInput extends NestedOperationScanContext {
+interface ProcessDataSourceInput extends NestedOperationScanContext {
   relationFields: { name: string; relatedModel: string; isList: boolean }[];
   data: Record<string, unknown>;
 }

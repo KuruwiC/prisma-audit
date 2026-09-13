@@ -132,7 +132,7 @@ const shouldSkipAuditLog = (
 /**
  * Input for {@link buildSingleAuditLog}
  */
-export interface BuildSingleAuditLogInput {
+interface BuildSingleAuditLogInput {
   root: { aggregateCategory: string; aggregateType: string; aggregateId: string };
   context: AuditContext;
   entityConfig: { category: string; type: string };

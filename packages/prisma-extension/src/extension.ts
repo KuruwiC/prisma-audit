@@ -71,7 +71,7 @@ import {
  * `limit`-bounded `updateMany`/`updateManyAndReturn` by routing it through
  * `updateManyAndReturn` so before/after pin to the exact rows updated.
  */
-export interface HandleLimitedUpdateManyInput {
+interface HandleLimitedUpdateManyInput {
   operation: OperationContext;
   context: AuditContext;
   baseClient: PrismaClientWithDynamicAccess;

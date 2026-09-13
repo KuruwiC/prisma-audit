@@ -335,7 +335,7 @@ export const preFetchNestedRecordsBeforeOperation = async (
  * Shared input for the 1:1 pre-fetch call chain
  * (`handleOneToOneRelation` -> `handleOtherOneToOneOperations`), which have identical shapes.
  */
-export interface HandleOneToOneRelationInput {
+interface HandleOneToOneRelationInput {
   nestedOp: NestedOperation;
   field: DMMFField;
   isOwningSide: boolean;
@@ -347,8 +347,6 @@ export interface HandleOneToOneRelationInput {
   prismaClient: PrismaClientWithDynamicAccess | TransactionalPrismaClient;
   pkFields?: string[];
 }
-
-export type HandleOtherOneToOneOperationsInput = HandleOneToOneRelationInput;
 
 const handleOneToOneRelation = async (input: HandleOneToOneRelationInput): Promise<void> => {
   const { nestedOp, relatedModelClient, preFetchResults, pkFields } = input;
@@ -395,7 +393,7 @@ const handleConnectOrCreate = async (
   preFetchLog('1:1 connectOrCreate added to map: path=%s entityId=%s', nestedOp.path, entityId);
 };
 
-const handleOtherOneToOneOperations = async (input: HandleOtherOneToOneOperationsInput): Promise<void> => {
+const handleOtherOneToOneOperations = async (input: HandleOneToOneRelationInput): Promise<void> => {
   const {
     nestedOp,
     field,
