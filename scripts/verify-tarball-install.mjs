@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
- * Installs every packed tarball together, in a directory outside the
- * workspace, using only the public npm registry as a fallback source. This
- * reproduces exactly what an end user does after `npm install @kuruwic/...`
- * and catches a tarball that declares a dependency on a workspace package
- * which was never published (the bug this check exists for).
+ * Installs every packed tarball together into `<work-dir>`, with the public npm
+ * registry as the only other source, the way an end user installs
+ * `@kuruwic/...` packages. A tarball that depends on a workspace package left
+ * out of the publish set fails to install. Keep `<work-dir>` outside the
+ * workspace so imports cannot resolve through the workspace's node_modules.
  *
  * After install, it imports the `@kuruwic/prisma-audit` entry point and
  * asserts a known export is present, so a broken `exports` map fails too.

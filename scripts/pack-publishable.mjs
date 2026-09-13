@@ -3,9 +3,8 @@
  * Packs every publishable (non-private) workspace package into a destination
  * directory, mirroring what a real `pnpm -r publish` would ship.
  *
- * The publish set is derived from `pnpm ls -r --json` rather than a
- * hardcoded package list, so it keeps working as packages are renamed,
- * added, or marked private.
+ * The publish set is read from `pnpm ls -r --json` at run time, so renamed,
+ * added, or newly private packages need no change here.
  *
  * Usage: node scripts/pack-publishable.mjs <destination-dir>
  * Prints the absolute path of each produced tarball to stdout, one per line.

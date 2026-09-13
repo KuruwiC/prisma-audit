@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
  * Runs publint and @arethetypeswrong/cli (attw) against every tarball in a
- * directory, so a hand-written `exports` map with no test coverage still
- * gets checked before a release ships.
+ * directory, checking the packed `exports` map and type declarations as a
+ * consumer resolves them rather than as the workspace does.
  *
- * Both packages here are ESM-only by design (no `require` condition), so
+ * The publishable packages are ESM-only by design (no `require` condition), so
  * attw runs under its `esm-only` profile: the node10/CJS resolution checks
  * it would otherwise report do not apply to a package that never claims to
  * support `require()`.
