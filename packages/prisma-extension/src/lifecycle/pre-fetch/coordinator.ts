@@ -23,7 +23,7 @@ import type {
 import { getPrimaryKeyFields } from '../../utils/id-generator.js';
 import { createSchemaMetadataFromDMMF } from '../../utils/nested-operations.js';
 import { preFetchOneToManyRelation } from './one-to-many-fetcher.js';
-import { preFetchOneToOneRelation } from './one-to-one-fetcher.js';
+import { type PreFetchOneToOneRelationInput, preFetchOneToOneRelation } from './one-to-one-fetcher.js';
 import {
   extractEntityIdOrDefault,
   type NestedPreFetchResults,
@@ -412,46 +412,22 @@ const handleOtherOneToOneOperations = async (input: HandleOneToOneRelationInput)
     return;
   }
 
-  // `dmmf`/`prismaClient` are typed against this module's own DMMF/client shapes, which don't
-  // structurally overlap with one-to-one-fetcher's local equivalents. Route through `unknown` in
-  // two steps (rather than a single `as unknown as`) to satisfy the type-safety lint while keeping
-  // the exact same cast the pre-existing positional call made.
+  // This module's DMMF and client types do not structurally overlap with the ones
+  // one-to-one-fetcher declares, so both values are widened to `unknown` before being
+  // narrowed to the fetcher's input types.
   const dmmfAsUnknown: unknown = dmmf;
-  const dmmfForFetch = dmmfAsUnknown as {
-    datamodel: {
-      models: Array<{
-        name: string;
-        fields: Array<{
-          name?: string;
-          kind?: string;
-          type?: string;
-          relationFromFields?: string[];
-          relationToFields?: string[];
-        }>;
-      }>;
-    };
-  };
-
   const prismaClientAsUnknown: unknown = prismaClient;
-  const prismaClientForFetch = prismaClientAsUnknown as Record<
-    string,
-    {
-      findFirst: (args: { where: Record<string, unknown> }) => Promise<Record<string, unknown> | null>;
-    }
-  >;
 
   const result = await preFetchOneToOneRelation({
     nestedOp,
     field,
     isOwningSide,
     parentWhere: args.where as Record<string, unknown>,
-    relatedModelClient: relatedModelClient as {
-      findUnique: (args: { where: Record<string, unknown> }) => Promise<Record<string, unknown> | null>;
-    },
+    relatedModelClient: relatedModelClient as PreFetchOneToOneRelationInput['relatedModelClient'],
     parentModelName,
-    dmmf: dmmfForFetch,
+    dmmf: dmmfAsUnknown as PreFetchOneToOneRelationInput['dmmf'],
     preFetchResults,
-    prismaClient: prismaClientForFetch,
+    prismaClient: prismaClientAsUnknown as PreFetchOneToOneRelationInput['prismaClient'],
     pkFields,
   });
 
