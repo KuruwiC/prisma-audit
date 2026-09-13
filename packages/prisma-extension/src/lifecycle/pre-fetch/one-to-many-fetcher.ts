@@ -6,8 +6,7 @@
  * @module lifecycle/pre-fetch/one-to-many-fetcher
  */
 
-import type { UniqueConstraint } from '@kuruwic/prisma-audit-core';
-import { preFetchLog } from '@kuruwic/prisma-audit-core';
+import { preFetchLog, type UniqueConstraint } from '@kuruwic/prisma-audit-core';
 import { unwrapCompoundWhere } from '../../utils/compound-where.js';
 import type { ModelClientWithFindUnique } from './one-to-one-fetcher.js';
 import type { NestedPreFetchResults } from './pre-fetch-result-store.js';
