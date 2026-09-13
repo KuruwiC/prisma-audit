@@ -497,10 +497,9 @@ describe('writeDeferredInTransaction', () => {
     });
 
     it('should not let a throwing error handler escape execute() (e.g. a "throw" policy)', async () => {
-      // Once the write has been queued, the caller has already moved on — there is
-      // nothing left for a throwing handler (a 'throw' policy) to fail. execute() must
-      // still resolve, and the handler's throw is reported to the console instead of
-      // becoming an unhandled rejection when the deferred queue is drained.
+      // A throwing error handler has nothing left to fail once the write is queued, so
+      // execute() must still resolve — the handler's error is logged instead of becoming
+      // an unhandled rejection when the deferred queue drains.
       const writeError = new Error('Database write failed');
       const writeFn = vi.fn().mockRejectedValue(writeError);
       const handlerError = new Error('handler decided to throw');

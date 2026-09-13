@@ -156,7 +156,7 @@ describe('collectDeleteRecords — nested deleteMany has no single-row identity 
     expect(onUnresolvedDeleteEntityId).not.toHaveBeenCalled();
   });
 
-  it('a single delete (not deleteMany) whose identity cannot be resolved still notifies, as before', async () => {
+  it('reports a single delete (not deleteMany) whose identity cannot be resolved through the callback', async () => {
     const singleDeleteOp: NestedOperationInfo = { ...deleteManyOp, operation: 'delete' };
     const onUnresolvedDeleteEntityId = vi.fn().mockResolvedValue(undefined);
 

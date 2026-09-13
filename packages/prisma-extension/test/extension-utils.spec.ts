@@ -2,12 +2,11 @@
  * Unit tests for `extractDeleteOperationEntityId` (extension-utils.ts)
  *
  * Focus: composite-key entityId extraction on the fallback (no-pre-fetch) path.
- * `unwrapCompoundWhere` (utils/compound-where.ts) lets the pre-fetch path read
- * Prisma's compound-unique WHERE shape (`{ postId_userId: { postId, userId } }`) for a
- * composite primary key. `extractDeleteOperationEntityId` did not reuse it, so with
- * `nestedOperations.delete.fetchBeforeOperation: false` a composite-key nested delete
- * found no identity and its audit entry was dropped, even though the caller handed us
- * every primary-key field in the WHERE clause.
+ * `extractDeleteOperationEntityId` reuses `unwrapCompoundWhere` (utils/compound-where.ts)
+ * to read Prisma's compound-unique WHERE shape (`{ postId_userId: { postId, userId } }`),
+ * so a composite-key nested delete still resolves an identity from the primary-key
+ * fields named in the WHERE clause even when `nestedOperations.delete.fetchBeforeOperation`
+ * is `false` and no pre-fetched before-state is available.
  */
 
 import { describe, expect, it } from 'vitest';
