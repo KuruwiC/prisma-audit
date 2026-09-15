@@ -535,8 +535,8 @@ const buildMainAuditLogs = async (
  * audit logs for each nested entity.
  *
  * For a top-level upsert, only the nested writes of the branch that executed are audited. When the
- * before-state fetch failed that branch is unknown, so the nested entries are skipped, as the main
- * entry is in `buildMainAuditLogs` (fetchBeforeState already reported the failure).
+ * before-state fetch failed or was not requested that branch is unknown, so the nested entries are
+ * skipped, as the main entry is in `buildMainAuditLogs` (fetchBeforeState reports a failed fetch).
  *
  * @internal
  */

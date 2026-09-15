@@ -8,7 +8,7 @@
  *
  * @example
  * ```typescript
- * // Re-throw (see ErrorStrategy for when this fails the caller's operation)
+ * // Re-throw
  * const strictHandler = createErrorHandler('throw');
  *
  * // Log and continue

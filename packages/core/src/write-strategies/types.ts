@@ -82,7 +82,7 @@ export interface WriteStrategyInput {
   writeExecutor: WriteExecutor;
 }
 
-/** A strategy returned by the `createWriteStrategySelector` selector, which binds `writeExecutor` */
+/** A strategy returned by the selector that `createWriteStrategySelector` creates; the selector binds `writeExecutor` */
 export type WriteStrategy = (input: Omit<WriteStrategyInput, 'writeExecutor'>) => Promise<WriteResult> | WriteResult;
 
 /**
