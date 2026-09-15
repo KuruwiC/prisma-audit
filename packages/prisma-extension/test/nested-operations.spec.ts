@@ -2,14 +2,19 @@
  * Unit tests for nested operations utilities
  */
 
-import type { NestedDetectionPass, UpsertBranch } from '@kuruwic/prisma-audit-core';
+import {
+  detectNestedOperations,
+  extractNestedRecords,
+  type NestedDetectionPass,
+  type UpsertBranch,
+} from '@kuruwic/prisma-audit-core';
 import { describe, expect, it } from 'vitest';
-import { detectNestedOperations, extractNestedRecords, getRelationFields } from '../src/utils/nested-operations.js';
+import { createSchemaMetadataFromDMMF } from '../src/utils/schema-metadata.js';
 
 describe('getRelationFields', () => {
   it('should return empty array if Prisma.dmmf is not available', () => {
     const Prisma = {};
-    const fields = getRelationFields(Prisma, 'User');
+    const fields = createSchemaMetadataFromDMMF(Prisma).getRelationFields('User');
     expect(fields).toEqual([]);
   });
 
@@ -21,7 +26,7 @@ describe('getRelationFields', () => {
         },
       },
     };
-    const fields = getRelationFields(Prisma, 'Post');
+    const fields = createSchemaMetadataFromDMMF(Prisma).getRelationFields('Post');
     expect(fields).toEqual([]);
   });
 
@@ -57,7 +62,7 @@ describe('getRelationFields', () => {
       },
     };
 
-    const fields = getRelationFields(Prisma, 'User');
+    const fields = createSchemaMetadataFromDMMF(Prisma).getRelationFields('User');
 
     expect(fields).toHaveLength(2);
     expect(fields).toEqual([
@@ -96,7 +101,7 @@ describe('getRelationFields', () => {
       },
     };
 
-    const fields = getRelationFields(Prisma, 'User');
+    const fields = createSchemaMetadataFromDMMF(Prisma).getRelationFields('User');
 
     expect(fields).toHaveLength(1);
     expect(fields[0]?.name).toBe('posts');
@@ -138,7 +143,9 @@ describe('detectNestedOperations', () => {
       },
     };
 
-    const operations = detectNestedOperations(Prisma, 'User', args, { kind: 'discovery' });
+    const operations = detectNestedOperations(createSchemaMetadataFromDMMF(Prisma), 'User', args, {
+      kind: 'discovery',
+    });
 
     expect(operations).toHaveLength(1);
     expect(operations[0]).toEqual({
@@ -169,7 +176,9 @@ describe('detectNestedOperations', () => {
       },
     };
 
-    const operations = detectNestedOperations(Prisma, 'User', args, { kind: 'discovery' });
+    const operations = detectNestedOperations(createSchemaMetadataFromDMMF(Prisma), 'User', args, {
+      kind: 'discovery',
+    });
 
     expect(operations).toHaveLength(1);
     expect(operations[0]?.operation).toBe('createMany');
@@ -188,7 +197,9 @@ describe('detectNestedOperations', () => {
       },
     };
 
-    const operations = detectNestedOperations(Prisma, 'User', args, { kind: 'discovery' });
+    const operations = detectNestedOperations(createSchemaMetadataFromDMMF(Prisma), 'User', args, {
+      kind: 'discovery',
+    });
 
     expect(operations).toHaveLength(2);
     expect(operations.find((op) => op.fieldName === 'posts')).toBeDefined();
@@ -208,7 +219,9 @@ describe('detectNestedOperations', () => {
       },
     };
 
-    const operations = detectNestedOperations(Prisma, 'User', args, { kind: 'discovery' });
+    const operations = detectNestedOperations(createSchemaMetadataFromDMMF(Prisma), 'User', args, {
+      kind: 'discovery',
+    });
     expect(operations).toHaveLength(0);
   });
 
@@ -219,7 +232,9 @@ describe('detectNestedOperations', () => {
       },
     };
 
-    const operations = detectNestedOperations(Prisma, 'User', args, { kind: 'discovery' });
+    const operations = detectNestedOperations(createSchemaMetadataFromDMMF(Prisma), 'User', args, {
+      kind: 'discovery',
+    });
     expect(operations).toEqual([]);
   });
 
@@ -228,7 +243,9 @@ describe('detectNestedOperations', () => {
       where: { id: 'user-id' },
     };
 
-    const operations = detectNestedOperations(Prisma, 'User', args, { kind: 'discovery' });
+    const operations = detectNestedOperations(createSchemaMetadataFromDMMF(Prisma), 'User', args, {
+      kind: 'discovery',
+    });
     expect(operations).toEqual([]);
   });
 
@@ -242,7 +259,9 @@ describe('detectNestedOperations', () => {
       },
     };
 
-    const operations = detectNestedOperations(Prisma, 'User', args, { kind: 'discovery' });
+    const operations = detectNestedOperations(createSchemaMetadataFromDMMF(Prisma), 'User', args, {
+      kind: 'discovery',
+    });
 
     expect(operations).toHaveLength(1);
     expect(operations[0]?.operation).toBe('connect');
@@ -261,7 +280,9 @@ describe('detectNestedOperations', () => {
       },
     };
 
-    const operations = detectNestedOperations(Prisma, 'User', args, { kind: 'discovery' });
+    const operations = detectNestedOperations(createSchemaMetadataFromDMMF(Prisma), 'User', args, {
+      kind: 'discovery',
+    });
 
     expect(operations).toHaveLength(1);
     expect(operations[0]?.operation).toBe('connectOrCreate');
@@ -280,7 +301,9 @@ describe('detectNestedOperations', () => {
       },
     };
 
-    const operations = detectNestedOperations(Prisma, 'User', args, { kind: 'discovery' });
+    const operations = detectNestedOperations(createSchemaMetadataFromDMMF(Prisma), 'User', args, {
+      kind: 'discovery',
+    });
 
     expect(operations).toHaveLength(1);
     expect(operations[0]?.operation).toBe('update');
@@ -301,7 +324,9 @@ describe('detectNestedOperations', () => {
       },
     };
 
-    const operations = detectNestedOperations(Prisma, 'User', args, { kind: 'discovery' });
+    const operations = detectNestedOperations(createSchemaMetadataFromDMMF(Prisma), 'User', args, {
+      kind: 'discovery',
+    });
 
     expect(operations).toHaveLength(1);
     expect(operations[0]?.operation).toBe('updateMany');
@@ -317,7 +342,9 @@ describe('detectNestedOperations', () => {
       },
     };
 
-    const operations = detectNestedOperations(Prisma, 'User', args, { kind: 'discovery' });
+    const operations = detectNestedOperations(createSchemaMetadataFromDMMF(Prisma), 'User', args, {
+      kind: 'discovery',
+    });
 
     expect(operations).toHaveLength(1);
     expect(operations[0]?.operation).toBe('delete');
@@ -333,7 +360,9 @@ describe('detectNestedOperations', () => {
       },
     };
 
-    const operations = detectNestedOperations(Prisma, 'User', args, { kind: 'discovery' });
+    const operations = detectNestedOperations(createSchemaMetadataFromDMMF(Prisma), 'User', args, {
+      kind: 'discovery',
+    });
 
     expect(operations).toHaveLength(1);
     expect(operations[0]?.operation).toBe('deleteMany');
@@ -352,7 +381,9 @@ describe('detectNestedOperations', () => {
       },
     };
 
-    const operations = detectNestedOperations(Prisma, 'User', args, { kind: 'discovery' });
+    const operations = detectNestedOperations(createSchemaMetadataFromDMMF(Prisma), 'User', args, {
+      kind: 'discovery',
+    });
 
     expect(operations).toHaveLength(1);
     expect(operations[0]?.operation).toBe('upsert');
@@ -380,7 +411,9 @@ describe('detectNestedOperations', () => {
       },
     };
 
-    const operations = detectNestedOperations(Prisma, 'User', args, { kind: 'discovery' });
+    const operations = detectNestedOperations(createSchemaMetadataFromDMMF(Prisma), 'User', args, {
+      kind: 'discovery',
+    });
 
     expect(operations).toHaveLength(4);
     expect(operations.find((op) => op.operation === 'create')).toBeDefined();
@@ -419,7 +452,7 @@ describe('extractNestedRecords', () => {
       ],
     };
 
-    const nestedRecords = extractNestedRecords(Prisma, 'User', result);
+    const nestedRecords = extractNestedRecords(createSchemaMetadataFromDMMF(Prisma), 'User', result);
 
     expect(nestedRecords).toHaveLength(1);
     expect(nestedRecords[0]).toEqual({
@@ -441,7 +474,7 @@ describe('extractNestedRecords', () => {
       profile: { id: 'profile-id', bio: 'Bio text', userId: 'user-id' },
     };
 
-    const nestedRecords = extractNestedRecords(Prisma, 'User', result);
+    const nestedRecords = extractNestedRecords(createSchemaMetadataFromDMMF(Prisma), 'User', result);
 
     expect(nestedRecords).toHaveLength(1);
     expect(nestedRecords[0]).toEqual({
@@ -461,7 +494,7 @@ describe('extractNestedRecords', () => {
       profile: { id: 'profile-id', bio: 'Bio text', userId: 'user-id' },
     };
 
-    const nestedRecords = extractNestedRecords(Prisma, 'User', result);
+    const nestedRecords = extractNestedRecords(createSchemaMetadataFromDMMF(Prisma), 'User', result);
 
     expect(nestedRecords).toHaveLength(2);
     expect(nestedRecords.find((r) => r.fieldName === 'posts')).toBeDefined();
@@ -474,18 +507,18 @@ describe('extractNestedRecords', () => {
       email: 'user@example.com',
     };
 
-    const nestedRecords = extractNestedRecords(Prisma, 'User', result);
+    const nestedRecords = extractNestedRecords(createSchemaMetadataFromDMMF(Prisma), 'User', result);
     expect(nestedRecords).toEqual([]);
   });
 
   it('should return empty array if result is not an object', () => {
-    const nestedRecords1 = extractNestedRecords(Prisma, 'User', null);
+    const nestedRecords1 = extractNestedRecords(createSchemaMetadataFromDMMF(Prisma), 'User', null);
     expect(nestedRecords1).toEqual([]);
 
-    const nestedRecords2 = extractNestedRecords(Prisma, 'User', undefined);
+    const nestedRecords2 = extractNestedRecords(createSchemaMetadataFromDMMF(Prisma), 'User', undefined);
     expect(nestedRecords2).toEqual([]);
 
-    const nestedRecords3 = extractNestedRecords(Prisma, 'User', 'string');
+    const nestedRecords3 = extractNestedRecords(createSchemaMetadataFromDMMF(Prisma), 'User', 'string');
     expect(nestedRecords3).toEqual([]);
   });
 
@@ -496,7 +529,7 @@ describe('extractNestedRecords', () => {
       posts: [],
     };
 
-    const nestedRecords = extractNestedRecords(Prisma, 'User', result);
+    const nestedRecords = extractNestedRecords(createSchemaMetadataFromDMMF(Prisma), 'User', result);
 
     // Empty arrays should not be included in the result
     expect(nestedRecords).toEqual([]);
@@ -509,7 +542,7 @@ describe('extractNestedRecords', () => {
       profile: null,
     };
 
-    const nestedRecords = extractNestedRecords(Prisma, 'User', result);
+    const nestedRecords = extractNestedRecords(createSchemaMetadataFromDMMF(Prisma), 'User', result);
 
     // Null relations should not be included
     expect(nestedRecords).toEqual([]);
@@ -582,13 +615,23 @@ describe('detectNestedOperations with upsert branch filtering', () => {
     operations.map((op) => `${op.path}:${op.operation}`);
 
   it('should detect only the update branch when the upserted record existed', () => {
-    const operations = detectNestedOperations(Prisma, 'User', profileUpsertArgs, executedPass(['profile']));
+    const operations = detectNestedOperations(
+      createSchemaMetadataFromDMMF(Prisma),
+      'User',
+      profileUpsertArgs,
+      executedPass(['profile']),
+    );
 
     expect(operationKeys(operations)).toEqual(['profile:upsert', 'profile.avatar:update']);
   });
 
   it('should detect only the create branch when the upserted record did not exist', () => {
-    const operations = detectNestedOperations(Prisma, 'User', profileUpsertArgs, executedPass([]));
+    const operations = detectNestedOperations(
+      createSchemaMetadataFromDMMF(Prisma),
+      'User',
+      profileUpsertArgs,
+      executedPass([]),
+    );
 
     expect(operationKeys(operations)).toEqual(['profile:upsert', 'profile.avatar:create']);
   });
@@ -623,7 +666,12 @@ describe('detectNestedOperations with upsert branch filtering', () => {
     };
 
     // Profile exists but avatar does not
-    const operations = detectNestedOperations(Prisma, 'User', args, executedPass(['profile']));
+    const operations = detectNestedOperations(
+      createSchemaMetadataFromDMMF(Prisma),
+      'User',
+      args,
+      executedPass(['profile']),
+    );
 
     // Profile upsert (takes its update branch, since it exists) recurses into that
     // branch's data and finds the nested avatar upsert (reported once, regardless of
@@ -632,7 +680,9 @@ describe('detectNestedOperations with upsert branch filtering', () => {
   });
 
   it('should detect both branches in the discovery pass', () => {
-    const operations = detectNestedOperations(Prisma, 'User', profileUpsertArgs, { kind: 'discovery' });
+    const operations = detectNestedOperations(createSchemaMetadataFromDMMF(Prisma), 'User', profileUpsertArgs, {
+      kind: 'discovery',
+    });
 
     expect(operationKeys(operations)).toEqual(['profile:upsert', 'profile.avatar:update', 'profile.avatar:create']);
   });
@@ -703,7 +753,7 @@ describe('detectNestedOperations with upsert branch filtering', () => {
 
     // All records exist (update path for all upserts)
     const operations = detectNestedOperations(
-      Prisma,
+      createSchemaMetadataFromDMMF(Prisma),
       'User',
       args,
       executedPass(['profile', 'profile.avatar', 'profile.avatar.avatarImage']),
@@ -751,7 +801,9 @@ describe('detectNestedOperations top-level upsert branches', () => {
   };
 
   const detectedOperations = (pass: NestedDetectionPass) =>
-    detectNestedOperations(Prisma, 'User', args, pass).map((op) => `${op.path}:${op.operation}`);
+    detectNestedOperations(createSchemaMetadataFromDMMF(Prisma), 'User', args, pass).map(
+      (op) => `${op.path}:${op.operation}`,
+    );
 
   it('scans both branches in the discovery pass', () => {
     expect(detectedOperations({ kind: 'discovery' })).toEqual(['profile:create', 'profile:update']);
@@ -822,7 +874,9 @@ describe('detectNestedOperations inside nested updates', () => {
   ];
 
   const detectedOperations = (args: Record<string, unknown>, pass: NestedDetectionPass) =>
-    detectNestedOperations(Prisma, 'User', args, pass).map((op) => `${op.path}:${op.operation}`);
+    detectNestedOperations(createSchemaMetadataFromDMMF(Prisma), 'User', args, pass).map(
+      (op) => `${op.path}:${op.operation}`,
+    );
 
   describe.each(passes)('%s pass', (_name, pass) => {
     it('detects a write inside a to-one update given as the update data', () => {
