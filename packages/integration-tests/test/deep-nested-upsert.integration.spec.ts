@@ -130,8 +130,10 @@ describe('Deep Nested Upsert Operations (Profile → Avatar → AvatarImage)', (
         },
       });
 
-      expect(avatarImageLogs.length).toBeGreaterThanOrEqual(1);
-      expect(avatarImageLogs.length).toBeLessThanOrEqual(2); // At most one per aggregate root: AvatarImage, Avatar
+      // One log per aggregate root: AvatarImage self-projects (aggregateType:
+      // 'AvatarImage') and also projects onto its Avatar aggregate (aggregateType:
+      // 'Avatar', via `to('Avatar', foreignKey('avatarId'))`).
+      expect(avatarImageLogs).toHaveLength(2);
 
       // Verify audit log content
       const log = avatarImageLogs[0];
@@ -236,7 +238,10 @@ describe('Deep Nested Upsert Operations (Profile → Avatar → AvatarImage)', (
         },
       });
 
-      expect(avatarImageLogs.length).toBeGreaterThanOrEqual(1);
+      // One log per aggregate root: AvatarImage self-projects (aggregateType:
+      // 'AvatarImage') and also projects onto its Avatar aggregate (aggregateType:
+      // 'Avatar', via `to('Avatar', foreignKey('avatarId'))`).
+      expect(avatarImageLogs).toHaveLength(2);
       const log = avatarImageLogs[0];
       expect(log.action).toBe('create');
       expect(log.before).toBeNull(); // Create always has null 'before'
@@ -373,9 +378,10 @@ describe('Deep Nested Upsert Operations (Profile → Avatar → AvatarImage)', (
         },
       });
 
-      // At most one log per aggregate root: AvatarImage itself and its Avatar
-      expect(avatarImageLogs.length).toBeGreaterThanOrEqual(1);
-      expect(avatarImageLogs.length).toBeLessThanOrEqual(2);
+      // One log per aggregate root: AvatarImage self-projects (aggregateType:
+      // 'AvatarImage') and also projects onto its Avatar aggregate (aggregateType:
+      // 'Avatar', via `to('Avatar', foreignKey('avatarId'))`).
+      expect(avatarImageLogs).toHaveLength(2);
 
       // Verify audit log content
       const log = avatarImageLogs[0];
@@ -517,7 +523,10 @@ describe('Deep Nested Upsert Operations (Profile → Avatar → AvatarImage)', (
         },
       });
 
-      expect(avatarImageLogs.length).toBeGreaterThanOrEqual(1);
+      // One log per aggregate root: AvatarImage self-projects (aggregateType:
+      // 'AvatarImage') and also projects onto its Avatar aggregate (aggregateType:
+      // 'Avatar', via `to('Avatar', foreignKey('avatarId'))`).
+      expect(avatarImageLogs).toHaveLength(2);
       const log = avatarImageLogs[0];
       expect(log.action).toBe('update');
       expect(log.before).not.toBeNull();
