@@ -64,7 +64,7 @@ export {
 } from './enrichment/batch.js';
 // Enrichment - Types
 export type { ProjectionEnrichmentMeta } from './enrichment/types.js';
-// Global Singleton (dual-package hazard mitigation)
+// Global Singleton (survives multiple copies of this package loaded in one process)
 //
 // Exported because @kuruwic/prisma-audit imports it across the package boundary;
 // end users are not meant to call it directly.

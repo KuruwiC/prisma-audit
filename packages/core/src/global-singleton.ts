@@ -1,7 +1,7 @@
 /**
- * Returns a process-wide singleton, surviving dual-package loading (ESM + CJS
- * builds of this package would otherwise each get their own module instance,
- * splitting AsyncLocalStorage stores and pending-write registries).
+ * Returns a process-wide singleton, surviving multiple copies of this package loaded
+ * in one process (each copy would otherwise get its own module instance, splitting
+ * AsyncLocalStorage stores and pending-write registries).
  * @internal
  */
 export const getGlobalSingleton = <T>(key: string, create: () => T): T => {
