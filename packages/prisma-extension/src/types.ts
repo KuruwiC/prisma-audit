@@ -96,14 +96,6 @@ export interface PerformanceConfig {
 }
 
 /**
- * Resolves additional context data for audit logs
- */
-export type EnrichmentResolver<TEntity = unknown, TPrisma = unknown> = (
-  entity: TEntity,
-  prisma: TPrisma,
-) => Promise<unknown>;
-
-/**
  * Lifecycle hooks configuration
  */
 export interface HooksConfig {
