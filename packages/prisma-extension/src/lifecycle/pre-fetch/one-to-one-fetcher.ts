@@ -8,9 +8,10 @@
  * @module lifecycle/pre-fetch/one-to-one-fetcher
  */
 
-import { type EntityIdentityKey, type NestedPreFetchResults, preFetchLog } from '@kuruwic/prisma-audit-core';
+import { type EntityIdentityKey, preFetchLog } from '@kuruwic/prisma-audit-core';
 import type { DMMFField, DMMFModel } from '../../internal-types.js';
 import type { PreFetchModelClient, PreFetchRecord } from './model-client.js';
+import { type ResolveParentRowsInput, resolveParentRows } from './parent-rows.js';
 import { extractEntityIdOrUnresolved } from './pre-fetch-result-store.js';
 
 /** The related row holds the parent row's `parentFields[i]` value in `relatedFields[i]`. */
@@ -23,11 +24,6 @@ export interface PreFetchOneToOneResult {
   entityId: EntityIdentityKey;
   beforeRecord: PreFetchRecord | null;
 }
-
-const isRecord = (value: unknown): value is PreFetchRecord => typeof value === 'object' && value !== null;
-
-const isKeyValue = (value: unknown): boolean =>
-  typeof value === 'string' || typeof value === 'number' || typeof value === 'bigint';
 
 const pairLinkFields = (
   relationName: string,
@@ -75,52 +71,10 @@ export const resolveToOneRelationLink = (field: DMMFField, relatedModel: DMMFMod
   return pairLinkFields(relationName, owningField.relationToFields, owningField.relationFromFields);
 };
 
-export interface ResolveParentRowsInput {
-  path: string;
-  parentFields: readonly string[];
-  topLevelWhere: unknown;
-  topLevelModelClient: PreFetchModelClient | undefined;
-  /** Read for the parent path's rows, so operations must be pre-fetched shallowest path first */
-  preFetchResults: NestedPreFetchResults;
-}
-
-/**
- * Returns the rows the nested operation at `path` is nested under: for a deeper path, every row
- * that exists at the parent path; for a direct child, the top-level row, keyed from `where`
- * without a query when `where` names every key field with a plain value.
- */
-const resolveParentRows = async (input: ResolveParentRowsInput): Promise<PreFetchRecord[]> => {
-  const { path, parentFields, topLevelWhere, topLevelModelClient, preFetchResults } = input;
-
-  const separatorIndex = path.lastIndexOf('.');
-  if (separatorIndex !== -1) {
-    const parentPath = path.slice(0, separatorIndex);
-    const parentEntries = preFetchResults.get(parentPath)?.values() ?? [];
-    return Array.from(parentEntries, (entry) => entry.before).filter(isRecord);
-  }
-
-  if (!isRecord(topLevelWhere)) {
-    return [];
-  }
-
-  if (parentFields.every((fieldName) => isKeyValue(topLevelWhere[fieldName]))) {
-    return [Object.fromEntries(parentFields.map((fieldName) => [fieldName, topLevelWhere[fieldName]]))];
-  }
-
-  if (!topLevelModelClient) {
-    throw new Error(`[@prisma-audit] No model client to read the parent key of nested path "${path}"`);
-  }
-
-  const select: Record<string, true> = Object.fromEntries(parentFields.map((fieldName) => [fieldName, true]));
-  const parentRow = await topLevelModelClient.findUnique({ where: topLevelWhere, select });
-  preFetchLog('1:1 fetched top-level parent key: path=%s found=%s', path, parentRow !== null);
-  return parentRow ? [parentRow] : [];
-};
-
 export interface PreFetchOneToOneRelationInput extends Omit<ResolveParentRowsInput, 'parentFields'> {
   link: ToOneRelationLink;
   relatedModelClient: PreFetchModelClient;
-  pkFields?: string[];
+  pkFields: string[];
 }
 
 /**

@@ -82,27 +82,27 @@ export const storePreFetchResult = (
  * Extracts entity identity from record using PK fields, or returns `UNRESOLVED_ENTITY_ID`
  *
  * @param record - Record to extract identity from
- * @param pkFields - Primary key field names. Defaults to ['id'].
+ * @param pkFields - Primary key field names
  * @returns Serialized entity identity, or `UNRESOLVED_ENTITY_ID` if PK fields are missing
  *
  * @example
  * ```typescript
- * extractEntityIdOrUnresolved({ id: 123, name: 'test' });
+ * extractEntityIdOrUnresolved({ id: 123, name: 'test' }, ['id']);
  * // Returns: '123'
  *
  * extractEntityIdOrUnresolved({ tenantId: 'a', userId: '1' }, ['tenantId', 'userId']);
  * // Returns: '["a","1"]'
  *
- * extractEntityIdOrUnresolved({ name: 'test' });
+ * extractEntityIdOrUnresolved({ name: 'test' }, ['id']);
  * // Returns: UNRESOLVED_ENTITY_ID
  * ```
  */
-export const extractEntityIdOrUnresolved = (record: unknown, pkFields?: string[]): EntityIdentityKey => {
+export const extractEntityIdOrUnresolved = (record: unknown, pkFields: string[]): EntityIdentityKey => {
   if (!record || typeof record !== 'object') {
     return UNRESOLVED_ENTITY_ID;
   }
 
-  return extractEntityIdentity(record as Record<string, unknown>, pkFields ?? ['id']);
+  return extractEntityIdentity(record as Record<string, unknown>, pkFields);
 };
 
 /**
@@ -111,24 +111,25 @@ export const extractEntityIdOrUnresolved = (record: unknown, pkFields?: string[]
  *
  * @example
  * ```typescript
- * extractEntityId({ id: 123 }, null);               // Returns: '123'
- * extractEntityId(null, { id: 456 });               // Returns: '456'
- * extractEntityId(null, { email: 'test@example' }); // Returns: UNRESOLVED_ENTITY_ID
+ * const pk: UniqueConstraint = { type: 'primaryKey', fields: ['id'] };
+ * extractEntityId({ id: 123 }, null, pk);               // Returns: '123'
+ * extractEntityId(null, { id: 456 }, pk);               // Returns: '456'
+ * extractEntityId(null, { email: 'test@example' }, pk); // Returns: UNRESOLVED_ENTITY_ID
  * ```
  */
 export const extractEntityId = (
   beforeRecord: Record<string, unknown> | null,
   whereClause: Record<string, unknown> | null,
-  pkConstraint?: UniqueConstraint,
+  pkConstraint: UniqueConstraint,
 ): EntityIdentityKey => {
   if (beforeRecord) {
-    const id = extractEntityIdOrUnresolved(beforeRecord, pkConstraint?.fields);
+    const id = extractEntityIdOrUnresolved(beforeRecord, pkConstraint.fields);
     if (id !== UNRESOLVED_ENTITY_ID) return id;
   }
 
   if (whereClause) {
     const unwrapped = unwrapCompoundWhere(whereClause, pkConstraint);
-    const id = extractEntityIdOrUnresolved(unwrapped, pkConstraint?.fields);
+    const id = extractEntityIdOrUnresolved(unwrapped, pkConstraint.fields);
     if (id !== UNRESOLVED_ENTITY_ID) return id;
   }
 

@@ -1,120 +1,130 @@
 /**
  * One-to-Many Relation Pre-fetch Module
  *
- * Provides pre-fetch logic for 1:N relations in Prisma operations.
+ * Captures the before-state of the rows a nested `update` / `upsert` / `delete` on a to-many
+ * relation targets. Prisma applies such an operation only to a row related to the parent row, so
+ * a row that matches the unique WHERE under another parent is not its target.
  *
  * @module lifecycle/pre-fetch/one-to-many-fetcher
  */
 
-import { type NestedPreFetchResults, preFetchLog, type UniqueConstraint } from '@kuruwic/prisma-audit-core';
-import type { PreFetchModelClient } from './model-client.js';
+import { preFetchLog, type UniqueConstraint } from '@kuruwic/prisma-audit-core';
+import type { DMMFField, DMMFModel } from '../../internal-types.js';
+import type { PreFetchModelClient, PreFetchRecord } from './model-client.js';
+import { type ResolveParentRowsInput, resolveParentRows, targetWhereClauses } from './parent-rows.js';
 import { extractEntityId, storePreFetchResult } from './pre-fetch-result-store.js';
 
-export interface NestedOperation {
-  operation: string;
-  fieldName: string;
-  relatedModel: string;
-  data: Record<string, unknown> | Record<string, unknown>[] | undefined;
-  path: string;
+/** A related row belongs to the parent row when `backField` matches the parent's `parentFields`. */
+export interface ToManyRelationScope {
+  readonly backField: string;
+  /** `some` when the back field is a list (implicit many-to-many), else `is` */
+  readonly filter: 'is' | 'some';
+  readonly parentFields: readonly string[];
 }
 
 /**
- * Extracts where clause from operation data
+ * Resolves the scope of `field`, a to-many relation field declared on `parentModelName`: the
+ * related model's field with the same `relationName` points back to the parent, which is
+ * identified by its primary key.
  *
- * @param operation - Operation type (e.g., 'upsert', 'update', 'delete')
- * @param singleOpData - Single operation data
- * @returns Where clause object or undefined if not applicable
- *
- * @example
- * ```typescript
- * const where = extractWhereClause('update', { where: { id: 1 }, data: {...} });
- * // Returns: { id: 1 }
- * ```
+ * @throws Error when the DMMF gives no relation name or no back-relation field
  */
-const extractWhereClause = (
-  operation: string,
-  singleOpData: Record<string, unknown>,
-): Record<string, unknown> | undefined => {
-  // No `updateMany`/`deleteMany` branch: `filterOperationsToPreFetch` (`@kuruwic/prisma-audit-core`)
-  // excludes them before pre-fetch runs; see its JSDoc for why.
-  if (operation === 'upsert' || operation === 'update') {
-    return singleOpData.where as Record<string, unknown> | undefined;
+export const resolveToManyRelationScope = (
+  field: DMMFField,
+  parentModelName: string,
+  relatedModel: DMMFModel | undefined,
+  parentPkFields: readonly string[],
+): ToManyRelationScope => {
+  const { relationName } = field;
+  if (!relationName) {
+    throw new Error(`[@prisma-audit] Relation field "${field.name}" has no relation name in the DMMF`);
   }
 
-  if (operation === 'connectOrCreate') {
-    return singleOpData.where as Record<string, unknown> | undefined;
+  const backField = relatedModel?.fields.find(
+    (candidate) =>
+      candidate.kind === 'object' &&
+      candidate.relationName === relationName &&
+      !(relatedModel.name === parentModelName && candidate.name === field.name),
+  );
+  if (!backField) {
+    throw new Error(`[@prisma-audit] Relation "${relationName}" has no back-relation field on model "${field.type}"`);
   }
 
-  if (operation === 'delete') {
-    return singleOpData;
-  }
-
-  return undefined;
+  return { backField: backField.name, filter: backField.isList ? 'some' : 'is', parentFields: parentPkFields };
 };
 
+const scopeWhereToParent = (
+  where: PreFetchRecord,
+  scope: ToManyRelationScope,
+  parentKey: PreFetchRecord,
+): PreFetchRecord => {
+  const existingAnd = where.AND;
+  const and = existingAnd === undefined ? [] : Array.isArray(existingAnd) ? existingAnd : [existingAnd];
+  return { ...where, AND: [...and, { [scope.backField]: { [scope.filter]: parentKey } }] };
+};
+
+export interface PreFetchOneToManyRelationInput extends Omit<ResolveParentRowsInput, 'parentFields'> {
+  operation: string;
+  data: unknown;
+  scope: ToManyRelationScope;
+  relatedModelClient: PreFetchModelClient;
+  /** The related model's primary key (fields + DMMF name) */
+  pkConstraint: UniqueConstraint;
+  /** Parent keys named by the WHERE of parent-path operations that were not pre-fetched */
+  parentKeysFromWhere: readonly PreFetchRecord[];
+}
+
 /**
- * Pre-fetches 1:N relation records before operation execution
+ * Pre-fetches the row each target WHERE of a nested to-many `update` / `upsert` / `delete` names
+ * under one of its parent rows.
  *
- * Captures "before" state for one-to-many relations. Handles single and array operations.
- *
- * `update` / `upsert` / `delete` / `connectOrCreate` WHERE clauses are all
- * `<Model>WhereUniqueInput`, so they go to `findUnique` as-is — including Prisma's
- * compound-unique shape for composite primary keys (`{ a_b: { a, b } }`, or a custom name
- * from `@@id([a, b], name: "custom")`). Only entityId derivation unwraps that shape (see
- * `extractEntityId`).
- *
- * @param nestedOp - Nested operation metadata
- * @param relatedModelClient - Prisma client for the related model
- * @param preFetchResults - Nested Map to store fetched results
- * @param pkConstraint - The related model's primary key (fields + DMMF name)
- *
- * @example
- * ```typescript
- * await preFetchOneToManyRelation(
- *   { operation: 'update', fieldName: 'posts', relatedModel: 'Post', ... },
- *   prismaClient.post,
- *   preFetchResults
- * );
- * ```
+ * The WHERE is a `<Model>WhereUniqueInput`, so it goes to `findUnique` with the back-relation
+ * filter added under `AND` — including Prisma's compound-unique shape for composite primary keys
+ * (`{ a_b: { a, b } }`, or a custom name from `@@id([a, b], name: "custom")`). Only entityId
+ * derivation unwraps that shape (see `extractEntityId`). Parent rows are tried in turn until one
+ * holds the row; when no parent row exists, nothing is queried or stored.
  */
-export const preFetchOneToManyRelation = async (
-  nestedOp: NestedOperation,
-  relatedModelClient: PreFetchModelClient,
-  preFetchResults: NestedPreFetchResults,
-  pkConstraint?: UniqueConstraint,
-): Promise<void> => {
-  const opData = nestedOp.data;
+export const preFetchOneToManyRelation = async (input: PreFetchOneToManyRelationInput): Promise<void> => {
+  const { path, operation, data, scope, relatedModelClient, pkConstraint, parentKeysFromWhere, preFetchResults } =
+    input;
 
-  preFetchLog(
-    '1:N opData: field=%s type=%s info=%s',
-    nestedOp.fieldName,
-    typeof opData,
-    Array.isArray(opData) ? `array[${opData.length}]` : opData ? 'object' : 'undefined',
-  );
-
-  if (!opData) {
-    preFetchLog('1:N no operation data for field=%s', nestedOp.fieldName);
+  const whereClauses = targetWhereClauses(operation, data);
+  if (whereClauses.length === 0) {
+    preFetchLog('1:N no target where clause: path=%s operation=%s', path, operation);
     return;
   }
 
-  const operations = Array.isArray(opData) ? opData : [opData];
-  preFetchLog('1:N processing %d operation(s) for field=%s', operations.length, nestedOp.fieldName);
+  const parentRows = [
+    ...(await resolveParentRows({ ...input, parentFields: scope.parentFields })),
+    ...parentKeysFromWhere,
+  ];
+  preFetchLog('1:N parent rows: path=%s count=%d', path, parentRows.length);
 
-  for (const singleOpData of operations) {
-    const whereClause = extractWhereClause(nestedOp.operation, singleOpData);
+  if (parentRows.length === 0) {
+    return;
+  }
 
-    if (!whereClause) {
-      preFetchLog('1:N no valid where clause: field=%s whereClause=%o', nestedOp.fieldName, whereClause);
-      continue;
+  for (const where of whereClauses) {
+    let beforeRecord: PreFetchRecord | null = null;
+
+    for (const parentRow of parentRows) {
+      const parentKey = Object.fromEntries(scope.parentFields.map((fieldName) => [fieldName, parentRow[fieldName]]));
+      if (Object.values(parentKey).some((value) => value === null || value === undefined)) {
+        continue;
+      }
+
+      const scopedWhere = scopeWhereToParent(where, scope, parentKey);
+      preFetchLog('1:N scoped where: path=%s where=%O', path, scopedWhere);
+
+      beforeRecord = await relatedModelClient.findUnique({ where: scopedWhere });
+      if (beforeRecord) {
+        break;
+      }
     }
 
-    preFetchLog('1:N where clause: field=%s where=%O', nestedOp.fieldName, whereClause);
+    const entityId = extractEntityId(beforeRecord, where, pkConstraint);
+    storePreFetchResult(preFetchResults, path, entityId, beforeRecord);
 
-    const beforeRecord = await relatedModelClient.findUnique({ where: whereClause });
-    const entityId = extractEntityId(beforeRecord, whereClause, pkConstraint);
-
-    storePreFetchResult(preFetchResults, nestedOp.path, entityId, beforeRecord);
-
-    preFetchLog('1:N stored: path=%s entityId=%s', nestedOp.path, entityId);
+    preFetchLog('1:N stored: path=%s entityId=%s', path, entityId);
   }
 };

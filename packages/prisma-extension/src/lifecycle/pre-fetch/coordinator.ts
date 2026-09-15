@@ -9,6 +9,7 @@
 import {
   detectNestedOperations,
   filterOperationsToPreFetch,
+  getPrimaryKeyConstraint,
   type NestedOperationInfo,
   type NestedPreFetchResults,
   preFetchLog,
@@ -24,11 +25,11 @@ import type {
   TransactionalPrismaClient,
 } from '../../internal-types.js';
 import type { AuditErrorObserver } from '../../types.js';
-import { getPrimaryKeyConstraint } from '../../utils/id-generator.js';
 import { createSchemaMetadataFromDMMF } from '../../utils/nested-operations.js';
 import { getPreFetchModelClient, type PreFetchModelClient } from './model-client.js';
-import { preFetchOneToManyRelation } from './one-to-many-fetcher.js';
+import { preFetchOneToManyRelation, resolveToManyRelationScope } from './one-to-many-fetcher.js';
 import { preFetchOneToOneRelation, resolveToOneRelationLink } from './one-to-one-fetcher.js';
+import { isRecord, parentKeysFromOperationWheres } from './parent-rows.js';
 import { extractEntityId, storePreFetchResult } from './pre-fetch-result-store.js';
 
 type NestedOperation = NestedOperationInfo;
@@ -213,71 +214,34 @@ export const preFetchNestedRecordsBeforeOperation = async (
     return preFetchResults;
   }
 
-  const topLevelModel = dmmf.datamodel.models.find((m) => m.name === modelName);
-  const topLevelModelClient = getPreFetchModelClient(prismaClient, modelName);
+  const pkConstraintCache = new Map<string, UniqueConstraint | undefined>();
+  const preFetchedOperations = new Set(operationsToPreFetch);
 
-  const pkConstraintCache = new Map<string, UniqueConstraint>();
-  const resolvePkConstraint = (relatedModel: string): UniqueConstraint | undefined => {
-    if (pkConstraintCache.has(relatedModel)) return pkConstraintCache.get(relatedModel);
-    try {
-      const constraint = getPrimaryKeyConstraint(Prisma, relatedModel);
-      pkConstraintCache.set(relatedModel, constraint);
-      return constraint;
-    } catch {
-      return undefined;
-    }
+  const context: NestedPreFetchContext = {
+    prismaClient,
+    modelName,
+    dmmf,
+    topLevelModel: dmmf.datamodel.models.find((m) => m.name === modelName),
+    topLevelModelClient: getPreFetchModelClient(prismaClient, modelName),
+    topLevelWhere: args.where,
+    preFetchResults,
+    resolvePkConstraint: (model) => {
+      if (!pkConstraintCache.has(model)) {
+        pkConstraintCache.set(model, getPrimaryKeyConstraint(prismaMetadata, model));
+      }
+      return pkConstraintCache.get(model);
+    },
+    parentOperationsNotPreFetched: (path) => {
+      const separatorIndex = path.lastIndexOf('.');
+      if (separatorIndex === -1) return [];
+      const parentPath = path.slice(0, separatorIndex);
+      return nestedOperations.filter((op) => op.path === parentPath && !preFetchedOperations.has(op));
+    },
   };
 
   for (const nestedOp of sortedOperations) {
     try {
-      const relatedModelClient = getPreFetchModelClient(prismaClient, nestedOp.relatedModel);
-
-      if (!relatedModelClient) {
-        preFetchLog('model client not found: model=%s', nestedOp.relatedModel);
-        continue;
-      }
-
-      const parentModel = resolveParentModelFromPath(nestedOp.path, topLevelModel, dmmf);
-      const field = findDMMFField(parentModel, nestedOp.fieldName);
-
-      if (!field) {
-        preFetchLog('field not found in model: model=%s field=%s', parentModel?.name || modelName, nestedOp.fieldName);
-        continue;
-      }
-
-      const { isOneToOne, isOwningSide } = categorizeRelationType(field);
-      const pkConstraint = resolvePkConstraint(nestedOp.relatedModel);
-
-      preFetchLog(
-        'processing field: field=%s operation=%s isOneToOne=%s isOwningSide=%s',
-        nestedOp.fieldName,
-        nestedOp.operation,
-        isOneToOne,
-        isOwningSide,
-      );
-
-      if (isOneToOne) {
-        await handleOneToOneRelation({
-          nestedOp,
-          field,
-          relatedModel: dmmf.datamodel.models.find((m) => m.name === nestedOp.relatedModel),
-          topLevelWhere: args.where,
-          topLevelModelClient,
-          relatedModelClient,
-          preFetchResults,
-          pkConstraint,
-        });
-      } else {
-        await preFetchOneToManyRelation(
-          {
-            ...nestedOp,
-            data: nestedOp.data as Record<string, unknown> | Record<string, unknown>[] | undefined,
-          },
-          relatedModelClient,
-          preFetchResults,
-          pkConstraint,
-        );
-      }
+      await preFetchNestedOperation(context, nestedOp);
     } catch (error) {
       storePreFetchResult(preFetchResults, nestedOp.path, UNRESOLVED_ENTITY_ID, null);
       preFetchLog('pre-fetch failed: path=%s error=%o', nestedOp.path, error);
@@ -288,66 +252,110 @@ export const preFetchNestedRecordsBeforeOperation = async (
   return preFetchResults;
 };
 
-/**
- * Shared input for the 1:1 pre-fetch call chain
- * (`handleOneToOneRelation` -> `handleOtherOneToOneOperations`), which pass it through unchanged.
- */
-interface HandleOneToOneRelationInput {
-  nestedOp: NestedOperation;
-  field: DMMFField;
-  relatedModel: DMMFModel | undefined;
-  topLevelWhere: unknown;
+interface NestedPreFetchContext {
+  prismaClient: PrismaClientWithDynamicAccess | TransactionalPrismaClient;
+  modelName: string;
+  dmmf: PrismaDMMF;
+  topLevelModel: DMMFModel | undefined;
   topLevelModelClient: PreFetchModelClient | undefined;
-  relatedModelClient: PreFetchModelClient;
+  topLevelWhere: unknown;
   preFetchResults: NestedPreFetchResults;
-  pkConstraint?: UniqueConstraint;
+  resolvePkConstraint: (model: string) => UniqueConstraint | undefined;
+  /** Operations at the parent path of `path` that were not pre-fetched; none for a direct child */
+  parentOperationsNotPreFetched: (path: string) => NestedOperation[];
 }
 
-const handleOneToOneRelation = async (input: HandleOneToOneRelationInput): Promise<void> => {
-  const { nestedOp, relatedModelClient, preFetchResults, pkConstraint } = input;
+const preFetchNestedOperation = async (context: NestedPreFetchContext, nestedOp: NestedOperation): Promise<void> => {
+  const { prismaClient, modelName, dmmf, topLevelModel, preFetchResults, resolvePkConstraint } = context;
+
+  const relatedModelClient = getPreFetchModelClient(prismaClient, nestedOp.relatedModel);
+  if (!relatedModelClient) {
+    preFetchLog('model client not found: model=%s', nestedOp.relatedModel);
+    return;
+  }
+
+  const parentModel = resolveParentModelFromPath(nestedOp.path, topLevelModel, dmmf);
+  const field = findDMMFField(parentModel, nestedOp.fieldName);
+  if (!parentModel || !field) {
+    preFetchLog('field not found in model: model=%s field=%s', parentModel?.name || modelName, nestedOp.fieldName);
+    return;
+  }
+
+  const pkConstraint = resolvePkConstraint(nestedOp.relatedModel);
+  if (!pkConstraint) {
+    preFetchLog('model has no primary key, skipping pre-fetch: model=%s path=%s', nestedOp.relatedModel, nestedOp.path);
+    return;
+  }
+
+  const { isOneToOne, isOwningSide } = categorizeRelationType(field);
+  preFetchLog(
+    'processing field: field=%s operation=%s isOneToOne=%s isOwningSide=%s',
+    nestedOp.fieldName,
+    nestedOp.operation,
+    isOneToOne,
+    isOwningSide,
+  );
+
+  const relatedModel = dmmf.datamodel.models.find((m) => m.name === nestedOp.relatedModel);
 
   if (nestedOp.operation === 'connectOrCreate') {
     await handleConnectOrCreate(nestedOp, relatedModelClient, preFetchResults, pkConstraint);
+    return;
+  }
+
+  const relationInput = { nestedOp, field, parentModel, relatedModel, relatedModelClient, pkConstraint };
+  if (isOneToOne) {
+    await handleOneToOneRelation(context, relationInput);
   } else {
-    await handleOtherOneToOneOperations(input);
+    await handleOneToManyRelation(context, relationInput);
   }
 };
 
+/**
+ * Pre-fetches the row each `connectOrCreate` WHERE names, on either relation cardinality.
+ *
+ * Not scoped to the parent rows: `connect` re-parents an existing row, so the row the WHERE names
+ * is the target whichever parent it belongs to. The WHERE is a `<Model>WhereUniqueInput`, which
+ * `findUnique` accepts natively, including a composite-key compound-unique shape.
+ */
 const handleConnectOrCreate = async (
   nestedOp: NestedOperation,
   relatedModelClient: PreFetchModelClient,
   preFetchResults: NestedPreFetchResults,
-  pkConstraint?: UniqueConstraint,
+  pkConstraint: UniqueConstraint,
 ): Promise<void> => {
-  const opData = nestedOp.data as Record<string, unknown> | undefined;
-  const whereClause = opData?.where;
+  const items = Array.isArray(nestedOp.data) ? nestedOp.data : [nestedOp.data];
 
-  if (!whereClause || typeof whereClause !== 'object') {
-    preFetchLog('connectOrCreate: no valid where clause, skipping');
-    return;
+  for (const item of items) {
+    const whereClause = isRecord(item) ? item.where : undefined;
+
+    if (!isRecord(whereClause)) {
+      preFetchLog('connectOrCreate: no valid where clause, skipping: path=%s', nestedOp.path);
+      continue;
+    }
+
+    const beforeRecord = await relatedModelClient.findUnique({ where: whereClause });
+    const entityId = extractEntityId(beforeRecord, whereClause, pkConstraint);
+
+    storePreFetchResult(preFetchResults, nestedOp.path, entityId, beforeRecord);
+
+    preFetchLog('connectOrCreate added to map: path=%s entityId=%s', nestedOp.path, entityId);
   }
-
-  // `whereClause` is a `<Model>WhereUniqueInput` — `findUnique` accepts it natively, including
-  // a composite-key compound-unique shape.
-  const beforeRecord = await relatedModelClient.findUnique({ where: whereClause });
-  const entityId = extractEntityId(beforeRecord, whereClause as Record<string, unknown>, pkConstraint);
-
-  storePreFetchResult(preFetchResults, nestedOp.path, entityId, beforeRecord);
-
-  preFetchLog('1:1 connectOrCreate added to map: path=%s entityId=%s', nestedOp.path, entityId);
 };
 
-const handleOtherOneToOneOperations = async (input: HandleOneToOneRelationInput): Promise<void> => {
-  const {
-    nestedOp,
-    field,
-    relatedModel,
-    topLevelWhere,
-    topLevelModelClient,
-    relatedModelClient,
-    preFetchResults,
-    pkConstraint,
-  } = input;
+/** The relation `nestedOp` writes through, resolved from the DMMF */
+interface RelationOperationInput {
+  nestedOp: NestedOperation;
+  field: DMMFField;
+  parentModel: DMMFModel;
+  relatedModel: DMMFModel | undefined;
+  relatedModelClient: PreFetchModelClient;
+  pkConstraint: UniqueConstraint;
+}
+
+const handleOneToOneRelation = async (context: NestedPreFetchContext, input: RelationOperationInput): Promise<void> => {
+  const { topLevelWhere, topLevelModelClient, preFetchResults } = context;
+  const { nestedOp, field, relatedModel, relatedModelClient, pkConstraint } = input;
 
   const results = await preFetchOneToOneRelation({
     path: nestedOp.path,
@@ -356,7 +364,7 @@ const handleOtherOneToOneOperations = async (input: HandleOneToOneRelationInput)
     topLevelModelClient,
     relatedModelClient,
     preFetchResults,
-    pkFields: pkConstraint?.fields,
+    pkFields: pkConstraint.fields,
   });
 
   for (const result of results) {
@@ -364,4 +372,39 @@ const handleOtherOneToOneOperations = async (input: HandleOneToOneRelationInput)
 
     preFetchLog('1:1 added to map: path=%s entityId=%s', nestedOp.path, result.entityId);
   }
+};
+
+const handleOneToManyRelation = async (
+  context: NestedPreFetchContext,
+  input: RelationOperationInput,
+): Promise<void> => {
+  const { topLevelWhere, topLevelModelClient, preFetchResults, resolvePkConstraint, parentOperationsNotPreFetched } =
+    context;
+  const { nestedOp, field, parentModel, relatedModel, relatedModelClient, pkConstraint } = input;
+
+  const parentPkConstraint = resolvePkConstraint(parentModel.name);
+  if (!parentPkConstraint) {
+    preFetchLog(
+      'parent model has no primary key, skipping pre-fetch: model=%s path=%s',
+      parentModel.name,
+      nestedOp.path,
+    );
+    return;
+  }
+
+  await preFetchOneToManyRelation({
+    path: nestedOp.path,
+    operation: nestedOp.operation,
+    data: nestedOp.data,
+    scope: resolveToManyRelationScope(field, parentModel.name, relatedModel, parentPkConstraint.fields),
+    topLevelWhere,
+    topLevelModelClient,
+    relatedModelClient,
+    preFetchResults,
+    pkConstraint,
+    parentKeysFromWhere: parentKeysFromOperationWheres(
+      parentOperationsNotPreFetched(nestedOp.path),
+      parentPkConstraint,
+    ),
+  });
 };

@@ -90,7 +90,22 @@ const Prisma: PrismaNamespace = {
   },
 };
 
-const matches = (row: Row, where: Row): boolean => Object.entries(where).every(([key, value]) => row[key] === value);
+/**
+ * Flat field equality, plus the back-relation filter a nested to-many pre-fetch adds under `AND`
+ * (`{ account: { is: { id } } }`), matched against the fixture's foreign key (`accountId`).
+ */
+const matches = (row: Row, where: Row): boolean =>
+  Object.entries(where).every(([key, value]) => {
+    if (key !== 'AND') return row[key] === value;
+    return (value as Row[]).every((filter) =>
+      Object.entries(filter).every(([relationField, relationFilter]) =>
+        Object.entries((relationFilter as { is: Row }).is).every(
+          ([keyField, keyValue]) =>
+            row[`${relationField}${keyField.charAt(0).toUpperCase()}${keyField.slice(1)}`] === keyValue,
+        ),
+      ),
+    );
+  });
 
 const createDelegate = (rows: Row[]) => {
   const find = async ({ where }: { where: Row }): Promise<Row | null> =>
