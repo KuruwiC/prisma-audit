@@ -1,5 +1,5 @@
 /**
- * A nested to-one `update` / `upsert` / `delete` has no WHERE of its own, so its pre-fetch derives
+ * A nested to-one `update` / `upsert` / `delete` is not addressed by a unique WHERE, so its pre-fetch derives
  * the related row from the schema's relation link (`relationFromFields` / `relationToFields`, every
  * field of a composite key) and the key of the parent row: the top-level row for a direct child,
  * the rows pre-fetched at the parent path for a deeper one.

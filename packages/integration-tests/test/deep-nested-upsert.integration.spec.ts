@@ -131,7 +131,7 @@ describe('Deep Nested Upsert Operations (Profile → Avatar → AvatarImage)', (
       });
 
       expect(avatarImageLogs.length).toBeGreaterThanOrEqual(1);
-      expect(avatarImageLogs.length).toBeLessThanOrEqual(2); // 1-2 logs depending on config
+      expect(avatarImageLogs.length).toBeLessThanOrEqual(2); // At most one per aggregate root: AvatarImage, Avatar
 
       // Verify audit log content
       const log = avatarImageLogs[0];
@@ -373,7 +373,7 @@ describe('Deep Nested Upsert Operations (Profile → Avatar → AvatarImage)', (
         },
       });
 
-      // 1 log with entity-level logging only, 2 with both entity-level and aggregate-level logging
+      // At most one log per aggregate root: AvatarImage itself and its Avatar
       expect(avatarImageLogs.length).toBeGreaterThanOrEqual(1);
       expect(avatarImageLogs.length).toBeLessThanOrEqual(2);
 
