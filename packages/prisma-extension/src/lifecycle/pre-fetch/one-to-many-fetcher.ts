@@ -8,7 +8,7 @@
 
 import { preFetchLog, type UniqueConstraint } from '@kuruwic/prisma-audit-core';
 import { unwrapCompoundWhere } from '../../utils/compound-where.js';
-import type { ModelClientWithFindUnique } from './one-to-one-fetcher.js';
+import type { PreFetchModelClient } from './model-client.js';
 import type { NestedPreFetchResults } from './pre-fetch-result-store.js';
 import { extractEntityIdOrDefault, PRE_FETCH_DEFAULT_KEY, storePreFetchResult } from './pre-fetch-result-store.js';
 
@@ -119,7 +119,7 @@ export const extractEntityId = (
  */
 export const preFetchOneToManyRelation = async (
   nestedOp: NestedOperation,
-  relatedModelClient: ModelClientWithFindUnique,
+  relatedModelClient: PreFetchModelClient,
   preFetchResults: NestedPreFetchResults,
   pkConstraint?: UniqueConstraint,
 ): Promise<void> => {

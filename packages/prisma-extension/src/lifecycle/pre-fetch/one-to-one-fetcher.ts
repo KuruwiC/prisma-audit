@@ -1,334 +1,173 @@
 /**
  * One-to-One Relation Pre-fetch Module
  *
- * Provides pre-fetch logic for 1:1 relations in Prisma operations.
+ * Captures the before-state of the row a nested to-one `update` / `upsert` / `delete` targets.
+ * Such an operation carries no WHERE of its own: its target is the related row whose relation
+ * key matches the key of the parent row the operation is nested under.
  *
  * @module lifecycle/pre-fetch/one-to-one-fetcher
  */
 
 import { preFetchLog } from '@kuruwic/prisma-audit-core';
-import type { NestedPreFetchResults } from './pre-fetch-result-store.js';
-import { extractEntityIdOrDefault } from './pre-fetch-result-store.js';
+import type { DMMFField, DMMFModel } from '../../internal-types.js';
+import type { PreFetchModelClient, PreFetchRecord } from './model-client.js';
+import { extractEntityIdOrDefault, type NestedPreFetchResults } from './pre-fetch-result-store.js';
 
-export interface DMMFRelationField {
-  relationFromFields?: string[];
-  relationToFields?: string[];
-  isList: boolean;
-}
-
-export interface DMMFModel {
-  name: string;
-  fields: DMMFField[];
-}
-
-export interface DMMFField {
-  name?: string;
-  kind?: string;
-  type?: string;
-  relationFromFields?: string[];
-  relationToFields?: string[];
-}
-
-export interface PrismaDMMF {
-  datamodel: {
-    models: DMMFModel[];
-  };
-}
-
-export interface NestedOperation {
-  operation: string;
-  fieldName: string;
-  relatedModel: string;
-  path: string;
-}
-
-export interface ModelClientWithFindUnique {
-  findUnique: (args: { where: Record<string, unknown> }) => Promise<Record<string, unknown> | null>;
-  [key: string]: unknown;
+/**
+ * How a parent row and its to-one related row reference each other: the related row holds the
+ * parent row's `parentFields[i]` value in `relatedFields[i]`, for every field of the key.
+ */
+export interface ToOneRelationLink {
+  readonly parentFields: readonly string[];
+  readonly relatedFields: readonly string[];
 }
 
 export interface PreFetchOneToOneResult {
   entityId: string;
-  beforeRecord: Record<string, unknown> | null;
+  beforeRecord: PreFetchRecord | null;
+}
+
+const isRecord = (value: unknown): value is PreFetchRecord => typeof value === 'object' && value !== null;
+
+const isKeyValue = (value: unknown): boolean =>
+  typeof value === 'string' || typeof value === 'number' || typeof value === 'bigint';
+
+const pairLinkFields = (
+  relationName: string,
+  parentFields: readonly string[] | undefined,
+  relatedFields: readonly string[] | undefined,
+): ToOneRelationLink => {
+  if (!parentFields || !relatedFields || parentFields.length === 0 || parentFields.length !== relatedFields.length) {
+    throw new Error(
+      `[@prisma-audit] Relation "${relationName}" pairs key fields [${parentFields?.join(', ') ?? ''}] ` +
+        `with [${relatedFields?.join(', ') ?? ''}]; expected two non-empty lists of the same length`,
+    );
+  }
+  return { parentFields, relatedFields };
+};
+
+/**
+ * Resolves the link of the to-one relation field `field`, declared on the parent model, from
+ * the DMMF.
+ *
+ * - Owning side (`field` declares `fields` / `references`): the parent row holds
+ *   `relationFromFields`, which the related row matches with `relationToFields`.
+ * - Inverse side: the related model's field with the same `relationName` is the owning side;
+ *   the parent row holds that field's `relationToFields`, which the related row references with
+ *   its `relationFromFields`.
+ *
+ * @throws Error when the DMMF does not describe the owning side of the relation
+ */
+export const resolveToOneRelationLink = (field: DMMFField, relatedModel: DMMFModel | undefined): ToOneRelationLink => {
+  const { relationName } = field;
+  if (!relationName) {
+    throw new Error(`[@prisma-audit] Relation field "${field.name}" has no relation name in the DMMF`);
+  }
+
+  if (field.relationFromFields && field.relationFromFields.length > 0) {
+    return pairLinkFields(relationName, field.relationFromFields, field.relationToFields);
+  }
+
+  const owningField = relatedModel?.fields.find(
+    (candidate) => candidate.relationName === relationName && (candidate.relationFromFields?.length ?? 0) > 0,
+  );
+  if (!owningField) {
+    throw new Error(`[@prisma-audit] Relation "${relationName}" has no owning side on model "${field.type}"`);
+  }
+
+  return pairLinkFields(relationName, owningField.relationToFields, owningField.relationFromFields);
+};
+
+export interface ResolveParentRowsInput {
+  /** Path of the nested operation (e.g. `profile`, `profile.avatar`) */
+  path: string;
+  /** Key fields every returned row must carry */
+  parentFields: readonly string[];
+  /** The top-level operation's `where` */
+  topLevelWhere: unknown;
+  /** Delegate of the top-level model */
+  topLevelModelClient: PreFetchModelClient | undefined;
+  /** Before-states pre-fetched so far, shallower paths first */
+  preFetchResults: NestedPreFetchResults;
 }
 
 /**
- * Determines relation fields for 1:1 relation
+ * Returns the rows the nested operation at `path` is nested under.
  *
- * Owning side: Uses field's relationFromFields/relationToFields
- * Inverse side: Finds the related model's field that points back
+ * - A direct child of the top-level operation is nested under the top-level row. Its key is read
+ *   from the top-level `where` when that names every key field with a plain value; otherwise the
+ *   row is fetched with that `where`.
+ * - A deeper child is nested under every row pre-fetched at the parent path. Rows recorded as not
+ *   existing (`before: null`) have no children.
  *
- * @param isOwningSide - Whether this is the owning side
- * @param field - DMMF field metadata
- * @param nestedOp - Nested operation
- * @param parentModelName - Parent model name
- * @param dmmf - Prisma DMMF
- * @returns Tuple of [relationFromField, relationToField] or [undefined, undefined]
- *
- * @example
- * ```typescript
- * const [fromField, toField] = determineRelationFields(
- *   true,
- *   profileField,
- *   nestedOp,
- *   'User',
- *   dmmf
- * );
- * // Returns: ['userId', 'id']
- * ```
+ * An empty list means there is no parent row to follow: the top-level operation has no `where`,
+ * its row does not exist, or nothing exists at the parent path.
  */
-export const determineRelationFields = (
-  isOwningSide: boolean,
-  field: DMMFRelationField,
-  nestedOp: NestedOperation,
-  parentModelName: string,
-  dmmf: PrismaDMMF,
-): [string | undefined, string | undefined] => {
-  if (isOwningSide) {
-    return [field.relationFromFields?.[0], field.relationToFields?.[0]];
+export const resolveParentRows = async (input: ResolveParentRowsInput): Promise<PreFetchRecord[]> => {
+  const { path, parentFields, topLevelWhere, topLevelModelClient, preFetchResults } = input;
+
+  const separatorIndex = path.lastIndexOf('.');
+  if (separatorIndex !== -1) {
+    const parentPath = path.slice(0, separatorIndex);
+    const parentEntries = preFetchResults.get(parentPath)?.values() ?? [];
+    return Array.from(parentEntries, (entry) => entry.before).filter(isRecord);
   }
 
-  const relatedModel = dmmf.datamodel.models.find((m) => m.name === nestedOp.relatedModel);
-  if (!relatedModel) {
-    return [undefined, undefined];
+  if (!isRecord(topLevelWhere)) {
+    return [];
   }
 
-  const relatedField = relatedModel.fields.find((f) => {
-    return f.type === parentModelName && f.relationFromFields && f.relationFromFields.length > 0;
-  });
-
-  if (!relatedField?.relationFromFields) {
-    return [undefined, undefined];
+  if (parentFields.every((fieldName) => isKeyValue(topLevelWhere[fieldName]))) {
+    return [Object.fromEntries(parentFields.map((fieldName) => [fieldName, topLevelWhere[fieldName]]))];
   }
 
-  return [relatedField.relationFromFields[0], relatedField.relationToFields?.[0]];
+  if (!topLevelModelClient) {
+    throw new Error(`[@prisma-audit] No model client to read the parent key of nested path "${path}"`);
+  }
+
+  const select: Record<string, true> = Object.fromEntries(parentFields.map((fieldName) => [fieldName, true]));
+  const parentRow = await topLevelModelClient.findUnique({ where: topLevelWhere, select });
+  preFetchLog('1:1 fetched top-level parent key: path=%s found=%s', path, parentRow !== null);
+  return parentRow ? [parentRow] : [];
 };
 
-/**
- * Resolves effective parent where clause for deeply nested operations
- *
- * Attempts to use pre-fetched parent record for deeply nested paths.
- * Falls back to original parentWhere if not available.
- *
- * @param nestedOp - Nested operation
- * @param parentWhere - Original parent where clause
- * @param preFetchResults - Pre-fetched results
- * @returns Effective parent where clause
- *
- * @example
- * ```typescript
- * const effectiveWhere = resolveEffectiveParentWhere(
- *   { path: 'postTags.tag', ... },
- *   { id: 1 },
- *   preFetchResults
- * );
- * // Returns: { id: <postTag.id from pre-fetch> } or { id: 1 }
- * ```
- */
-export const resolveEffectiveParentWhere = (
-  nestedOp: NestedOperation,
-  parentWhere: Record<string, unknown>,
-  preFetchResults: NestedPreFetchResults,
-  relationToField?: string,
-): Record<string, unknown> => {
-  if (!nestedOp.path.includes('.')) {
-    return parentWhere;
-  }
-
-  const pathSegments = nestedOp.path.split('.');
-  const parentPath = pathSegments.slice(0, -1).join('.');
-
-  preFetchLog('1:1 deeply nested operation: path=%s parentPath=%s', nestedOp.path, parentPath);
-
-  const parentResults = preFetchResults.get(parentPath);
-  if (!parentResults || parentResults.size === 0) {
-    return parentWhere;
-  }
-
-  const parentRecord = Array.from(parentResults.values())[0]?.before;
-  if (!parentRecord || typeof parentRecord !== 'object') {
-    return parentWhere;
-  }
-
-  const toField = relationToField ?? 'id';
-  if (!(toField in parentRecord)) {
-    return parentWhere;
-  }
-
-  const effectiveWhere = { [toField]: parentRecord[toField] };
-  preFetchLog('1:1 using parent pre-fetch result: parentWhere=%O', effectiveWhere);
-  return effectiveWhere;
-};
-
-/**
- * Fetches parent record when where clause lacks required relation field
- *
- * @param relationToField - Required field in parent where clause
- * @param effectiveParentWhere - Current effective parent where
- * @param parentWhere - Original parent where
- * @param parentModelName - Parent model name
- * @param prismaClient - Prisma client with model access
- * @returns Effective parent where with required field, or null if fetch failed
- *
- * @example
- * ```typescript
- * const where = await fetchParentRecordIfNeeded(
- *   'id',
- *   { email: 'test@example.com' },
- *   { email: 'test@example.com' },
- *   'User',
- *   prismaClient
- * );
- * // Returns: { id: <fetched user.id> } or null
- * ```
- */
-export const fetchParentRecordIfNeeded = async (
-  relationToField: string,
-  effectiveParentWhere: Record<string, unknown>,
-  parentWhere: Record<string, unknown>,
-  parentModelName: string,
-  prismaClient: Record<string, ModelClientWithFindUnique>,
-): Promise<Record<string, unknown> | null> => {
-  if (relationToField in effectiveParentWhere) {
-    return effectiveParentWhere;
-  }
-
-  preFetchLog(
-    '1:1 relation: parent where missing required field %s, attempting to fetch parent record',
-    relationToField,
-  );
-
-  const parentModelLowerCase = parentModelName.charAt(0).toLowerCase() + parentModelName.slice(1);
-  const parentModelClient = prismaClient[parentModelLowerCase];
-
-  if (!parentModelClient || typeof parentModelClient !== 'object' || !('findUnique' in parentModelClient)) {
-    preFetchLog('1:1 parent model client not found for model=%s, skipping', parentModelName);
-    return null;
-  }
-
-  // `parentWhere` is the top-level operation's `where` (a `WhereUniqueInput`), which
-  // `findUnique` accepts as-is, including a composite-key compound-unique shape.
-  const parentRecord = await parentModelClient.findUnique({ where: parentWhere });
-
-  preFetchLog('1:1 fetched parent record: %s', parentRecord ? 'found' : 'null');
-
-  if (!parentRecord || typeof parentRecord !== 'object' || !(relationToField in parentRecord)) {
-    preFetchLog('1:1 parent record not found or missing field %s, skipping', relationToField);
-    return null;
-  }
-
-  const result = { [relationToField]: parentRecord[relationToField] };
-  preFetchLog('1:1 using fetched parent record ID: parentWhere=%O', result);
-  return result;
-};
-
-/**
- * Input for {@link preFetchOneToOneRelation}
- */
-export interface PreFetchOneToOneRelationInput {
-  /** Nested operation metadata */
-  nestedOp: NestedOperation;
-  /** DMMF field metadata */
-  field: DMMFRelationField;
-  /** Whether this is the owning side of the relation */
-  isOwningSide: boolean;
-  /** Parent where clause */
-  parentWhere: Record<string, unknown>;
-  /** Prisma client for the related model */
-  relatedModelClient: ModelClientWithFindUnique;
-  /** Parent model name */
-  parentModelName: string;
-  /** Prisma DMMF */
-  dmmf: PrismaDMMF;
-  /** Pre-fetched records (for deeply nested operations) */
-  preFetchResults: NestedPreFetchResults;
-  /** Full Prisma client to fetch parent records if needed */
-  prismaClient: Record<string, ModelClientWithFindUnique>;
+export interface PreFetchOneToOneRelationInput extends Omit<ResolveParentRowsInput, 'parentFields'> {
+  link: ToOneRelationLink;
+  relatedModelClient: PreFetchModelClient;
   pkFields?: string[];
 }
 
 /**
- * Pre-fetches 1:1 relation record before operation execution
+ * Pre-fetches the related row of every parent row the nested to-one operation is nested under.
  *
- * Captures "before" state for one-to-one relations with support for deeply nested operations.
+ * Each related row is read with `findFirst` on the flat link key: the link references a unique
+ * key of the parent, so at most one related row matches. A parent row whose key is incomplete
+ * (a nullable foreign key left unset) references no related row and is not queried.
  *
- * @returns Pre-fetch result with entityId and beforeRecord, or null if fetch failed
- *
- * @example
- * ```typescript
- * const result = await preFetchOneToOneRelation({
- *   nestedOp,
- *   field: profileField,
- *   isOwningSide: true,
- *   parentWhere: { id: 1 },
- *   relatedModelClient: prismaClient.profile,
- *   parentModelName: 'User',
- *   dmmf,
- *   preFetchResults,
- *   prismaClient,
- * });
- * // Returns: { entityId: '123', beforeRecord: { id: 123, ... } } or null
- * ```
+ * @returns One result per queried parent row; a related row that does not exist yields
+ *   `beforeRecord: null`
  */
 export const preFetchOneToOneRelation = async (
   input: PreFetchOneToOneRelationInput,
-): Promise<PreFetchOneToOneResult | null> => {
-  const {
-    nestedOp,
-    field,
-    isOwningSide,
-    parentWhere,
-    relatedModelClient,
-    parentModelName,
-    dmmf,
-    preFetchResults,
-    prismaClient,
-    pkFields,
-  } = input;
+): Promise<PreFetchOneToOneResult[]> => {
+  const { link, relatedModelClient, pkFields } = input;
 
-  const [relationFromField, relationToField] = determineRelationFields(
-    isOwningSide,
-    field,
-    nestedOp,
-    parentModelName,
-    dmmf,
-  );
+  const parentRows = await resolveParentRows({ ...input, parentFields: link.parentFields });
+  preFetchLog('1:1 parent rows: path=%s count=%d', input.path, parentRows.length);
 
-  preFetchLog('1:1 relation fields: from=%s to=%s', relationFromField, relationToField);
-  preFetchLog('1:1 parent where: %O', parentWhere);
+  const results: PreFetchOneToOneResult[] = [];
+  for (const parentRow of parentRows) {
+    const values = link.parentFields.map((fieldName) => parentRow[fieldName]);
+    if (values.some((value) => value === null || value === undefined)) {
+      continue;
+    }
 
-  if (!relationFromField || !relationToField) {
-    preFetchLog('1:1 relation: missing relation field definitions, skipping');
-    return null;
+    const relatedWhere = Object.fromEntries(link.relatedFields.map((fieldName, index) => [fieldName, values[index]]));
+    preFetchLog('1:1 related where: %O', relatedWhere);
+
+    const beforeRecord = await relatedModelClient.findFirst({ where: relatedWhere });
+    results.push({ entityId: extractEntityIdOrDefault(beforeRecord, pkFields), beforeRecord });
   }
 
-  let effectiveParentWhere = resolveEffectiveParentWhere(nestedOp, parentWhere, preFetchResults, relationToField);
-
-  const fetchedParentWhere = await fetchParentRecordIfNeeded(
-    relationToField,
-    effectiveParentWhere,
-    parentWhere,
-    parentModelName,
-    prismaClient,
-  );
-
-  if (!fetchedParentWhere) {
-    return null;
-  }
-
-  effectiveParentWhere = fetchedParentWhere;
-
-  const relatedWhere: Record<string, unknown> = {
-    [relationFromField]: effectiveParentWhere[relationToField],
-  };
-
-  preFetchLog('1:1 related where: %O', relatedWhere);
-
-  const beforeRecord = await relatedModelClient.findUnique({ where: relatedWhere });
-
-  preFetchLog('1:1 beforeRecord: %s', beforeRecord ? 'found' : 'null');
-
-  const entityId = extractEntityIdOrDefault(beforeRecord, pkFields);
-
-  return { entityId, beforeRecord };
+  return results;
 };

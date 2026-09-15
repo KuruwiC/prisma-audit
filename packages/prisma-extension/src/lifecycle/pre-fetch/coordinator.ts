@@ -17,6 +17,8 @@ import {
   type UniqueConstraint,
 } from '@kuruwic/prisma-audit-core';
 import type {
+  DMMFField,
+  DMMFModel,
   PrismaClientWithDynamicAccess,
   PrismaNamespace,
   TransactionalPrismaClient,
@@ -26,12 +28,9 @@ import { unwrapCompoundWhere } from '../../utils/compound-where.js';
 import { getPrimaryKeyFields } from '../../utils/id-generator.js';
 import { createSchemaMetadataFromDMMF } from '../../utils/nested-operations.js';
 import { getUniqueConstraints } from '../../utils/schema-metadata.js';
+import { getPreFetchModelClient, type PreFetchModelClient } from './model-client.js';
 import { preFetchOneToManyRelation } from './one-to-many-fetcher.js';
-import {
-  type ModelClientWithFindUnique,
-  type PreFetchOneToOneRelationInput,
-  preFetchOneToOneRelation,
-} from './one-to-one-fetcher.js';
+import { preFetchOneToOneRelation, resolveToOneRelationLink } from './one-to-one-fetcher.js';
 import {
   extractEntityIdOrDefault,
   type NestedPreFetchResults,
@@ -82,25 +81,7 @@ const convertToPreFetchResults = (internalResults: NestedPreFetchResults): PreFe
   return results;
 };
 
-export interface DMMFField {
-  name: string;
-  kind?: string;
-  type: string;
-  relationFromFields?: string[];
-  relationToFields?: string[];
-  isList: boolean;
-}
-
-export interface DMMFModel {
-  name: string;
-  fields: DMMFField[];
-}
-
-export interface PrismaDMMF {
-  datamodel: {
-    models: DMMFModel[];
-  };
-}
+type PrismaDMMF = PrismaNamespace['dmmf'];
 
 export type GetOperationConfig = (
   modelName: string,
@@ -282,7 +263,7 @@ export const preFetchNestedRecordsBeforeOperation = async (
     sortedOperations.map((op) => ({ path: op.path, depth: op.path.split('.').length })),
   );
 
-  const dmmf = Prisma.dmmf as unknown as PrismaDMMF;
+  const dmmf: PrismaDMMF | undefined = Prisma.dmmf;
 
   if (!dmmf?.datamodel?.models) {
     preFetchLog('DMMF metadata not available, skipping pre-fetch');
@@ -290,6 +271,7 @@ export const preFetchNestedRecordsBeforeOperation = async (
   }
 
   const topLevelModel = dmmf.datamodel.models.find((m) => m.name === modelName);
+  const topLevelModelClient = getPreFetchModelClient(prismaClient, modelName);
 
   const pkFieldsCache = new Map<string, string[]>();
   const resolvePkFields = (relatedModel: string): string[] | undefined => {
@@ -322,10 +304,9 @@ export const preFetchNestedRecordsBeforeOperation = async (
 
   for (const nestedOp of sortedOperations) {
     try {
-      const relatedModelLowerCase = nestedOp.relatedModel.charAt(0).toLowerCase() + nestedOp.relatedModel.slice(1);
-      const relatedModelClient = prismaClient[relatedModelLowerCase];
+      const relatedModelClient = getPreFetchModelClient(prismaClient, nestedOp.relatedModel);
 
-      if (!relatedModelClient || typeof relatedModelClient !== 'object') {
+      if (!relatedModelClient) {
         preFetchLog('model client not found: model=%s', nestedOp.relatedModel);
         continue;
       }
@@ -353,13 +334,11 @@ export const preFetchNestedRecordsBeforeOperation = async (
         await handleOneToOneRelation({
           nestedOp,
           field,
-          isOwningSide,
-          args,
+          relatedModel: dmmf.datamodel.models.find((m) => m.name === nestedOp.relatedModel),
+          topLevelWhere: args.where,
+          topLevelModelClient,
           relatedModelClient,
-          parentModelName: parentModel?.name || modelName,
-          dmmf,
           preFetchResults: internalResults,
-          prismaClient,
           pkConstraint,
         });
       } else {
@@ -368,7 +347,7 @@ export const preFetchNestedRecordsBeforeOperation = async (
             ...nestedOp,
             data: nestedOp.data as Record<string, unknown> | Record<string, unknown>[] | undefined,
           },
-          relatedModelClient as ModelClientWithFindUnique,
+          relatedModelClient,
           internalResults,
           pkConstraint,
         );
@@ -392,14 +371,14 @@ export const preFetchNestedRecordsBeforeOperation = async (
  */
 interface HandleOneToOneRelationInput {
   nestedOp: NestedOperation;
+  /** The relation field on the parent model */
   field: DMMFField;
-  isOwningSide: boolean;
-  args: Record<string, unknown>;
-  relatedModelClient: unknown;
-  parentModelName: string;
-  dmmf: PrismaDMMF;
+  /** DMMF model of `nestedOp.relatedModel` */
+  relatedModel: DMMFModel | undefined;
+  topLevelWhere: unknown;
+  topLevelModelClient: PreFetchModelClient | undefined;
+  relatedModelClient: PreFetchModelClient;
   preFetchResults: NestedPreFetchResults;
-  prismaClient: PrismaClientWithDynamicAccess | TransactionalPrismaClient;
   pkConstraint?: UniqueConstraint;
 }
 
@@ -415,7 +394,7 @@ const handleOneToOneRelation = async (input: HandleOneToOneRelationInput): Promi
 
 const handleConnectOrCreate = async (
   nestedOp: NestedOperation,
-  relatedModelClient: unknown,
+  relatedModelClient: PreFetchModelClient,
   preFetchResults: NestedPreFetchResults,
   pkConstraint?: UniqueConstraint,
 ): Promise<void> => {
@@ -427,18 +406,9 @@ const handleConnectOrCreate = async (
     return;
   }
 
-  const modelClient = relatedModelClient as {
-    findUnique?: (args: { where: unknown }) => Promise<unknown>;
-  };
-
-  if (!modelClient.findUnique) {
-    preFetchLog('connectOrCreate: findUnique not available, skipping');
-    return;
-  }
-
   // `whereClause` is a `<Model>WhereUniqueInput` — `findUnique` accepts it natively, including
   // a composite-key compound-unique shape.
-  const beforeRecord = await modelClient.findUnique({ where: whereClause });
+  const beforeRecord = await relatedModelClient.findUnique({ where: whereClause });
 
   let entityId = extractEntityIdOrDefault(beforeRecord, pkConstraint?.fields);
   if (entityId === PRE_FETCH_DEFAULT_KEY) {
@@ -446,7 +416,7 @@ const handleConnectOrCreate = async (
     entityId = extractEntityIdOrDefault(unwrapped, pkConstraint?.fields);
   }
 
-  storePreFetchResult(preFetchResults, nestedOp.path, entityId, beforeRecord as Record<string, unknown> | null);
+  storePreFetchResult(preFetchResults, nestedOp.path, entityId, beforeRecord);
 
   preFetchLog('1:1 connectOrCreate added to map: path=%s entityId=%s', nestedOp.path, entityId);
 };
@@ -455,40 +425,25 @@ const handleOtherOneToOneOperations = async (input: HandleOneToOneRelationInput)
   const {
     nestedOp,
     field,
-    isOwningSide,
-    args,
+    relatedModel,
+    topLevelWhere,
+    topLevelModelClient,
     relatedModelClient,
-    parentModelName,
-    dmmf,
     preFetchResults,
-    prismaClient,
     pkConstraint,
   } = input;
 
-  if (!args.where || typeof args.where !== 'object') {
-    preFetchLog('1:1 relation: no where clause, skipping');
-    return;
-  }
-
-  // PrismaClientWithDynamicAccess's `unknown` index signature does not fit the fetcher's
-  // per-model client record, so the client is widened to `unknown` before being narrowed
-  // to the fetcher's input type.
-  const prismaClientAsUnknown: unknown = prismaClient;
-
-  const result = await preFetchOneToOneRelation({
-    nestedOp,
-    field,
-    isOwningSide,
-    parentWhere: args.where as Record<string, unknown>,
-    relatedModelClient: relatedModelClient as PreFetchOneToOneRelationInput['relatedModelClient'],
-    parentModelName,
-    dmmf,
+  const results = await preFetchOneToOneRelation({
+    path: nestedOp.path,
+    link: resolveToOneRelationLink(field, relatedModel),
+    topLevelWhere,
+    topLevelModelClient,
+    relatedModelClient,
     preFetchResults,
-    prismaClient: prismaClientAsUnknown as PreFetchOneToOneRelationInput['prismaClient'],
     pkFields: pkConstraint?.fields,
   });
 
-  if (result) {
+  for (const result of results) {
     storePreFetchResult(preFetchResults, nestedOp.path, result.entityId, result.beforeRecord);
 
     preFetchLog('1:1 added to map: path=%s entityId=%s', nestedOp.path, result.entityId);
