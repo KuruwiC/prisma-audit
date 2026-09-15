@@ -17,11 +17,11 @@ describe('extractEntityIdentity', () => {
       expect(extractEntityIdentity({ uuid: 'x-y-z' }, ['uuid'])).toBe('x-y-z');
     });
 
-    it('should return default when PK field is missing', () => {
+    it('should return UNRESOLVED_ENTITY_ID when PK field is missing', () => {
       expect(extractEntityIdentity({ name: 'test' }, ['id'])).toBe(UNRESOLVED_ENTITY_ID);
     });
 
-    it('should return default when PK field is null', () => {
+    it('should return UNRESOLVED_ENTITY_ID when PK field is null', () => {
       expect(extractEntityIdentity({ id: null }, ['id'])).toBe(UNRESOLVED_ENTITY_ID);
     });
   });
@@ -32,11 +32,11 @@ describe('extractEntityIdentity', () => {
       expect(result).toBe(JSON.stringify(['a', '1']));
     });
 
-    it('should return default when any composite PK field is missing', () => {
+    it('should return UNRESOLVED_ENTITY_ID when any composite PK field is missing', () => {
       expect(extractEntityIdentity({ tenantId: 'a' }, ['tenantId', 'userId'])).toBe(UNRESOLVED_ENTITY_ID);
     });
 
-    it('should return default when any composite PK field is null', () => {
+    it('should return UNRESOLVED_ENTITY_ID when any composite PK field is null', () => {
       expect(extractEntityIdentity({ tenantId: 'a', userId: null }, ['tenantId', 'userId'])).toBe(UNRESOLVED_ENTITY_ID);
     });
   });

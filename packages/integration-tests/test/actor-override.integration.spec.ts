@@ -1,9 +1,9 @@
 /**
  * Integration Tests: Actor Override Inside Transactions
  *
- * Regression for the issue where provider.runAsync({ actor }, fn) inside a
- * $transaction callback silently dropped the library-injected transactional
- * client, causing FK violations on uncommitted parent rows.
+ * Verifies that provider.runAsync({ actor }, fn) inside a $transaction callback
+ * keeps the library-injected transactional client, so writes referencing
+ * uncommitted parent rows via FK succeed.
  *
  * The transaction scope (client + deferred-write queue) lives in a separate
  * library-owned AsyncLocalStorage, so app-level actor overrides cannot clobber
