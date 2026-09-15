@@ -9,10 +9,9 @@
  * @module lifecycle/types
  */
 
-import type { AuditContext } from '@kuruwic/prisma-audit-core';
+import type { AuditContext, NestedPreFetchResults } from '@kuruwic/prisma-audit-core';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../internal-types.js';
 import type { AuditLogData, OperationContext } from '../types.js';
-import type { NestedPreFetchResults } from './pre-fetch/pre-fetch-result-store.js';
 
 /**
  * Result of fetching before-state for an entity.

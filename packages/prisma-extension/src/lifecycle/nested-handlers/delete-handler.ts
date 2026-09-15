@@ -6,7 +6,13 @@
  * Enrichment and audit log building are handled by the batch pipeline in audit-log-builder.ts.
  */
 
-import { AUDIT_ACTION, nestedLog, UNRESOLVED_ENTITY_ID, type UniqueConstraint } from '@kuruwic/prisma-audit-core';
+import {
+  AUDIT_ACTION,
+  type NestedPreFetchResults,
+  nestedLog,
+  UNRESOLVED_ENTITY_ID,
+  type UniqueConstraint,
+} from '@kuruwic/prisma-audit-core';
 
 import { extractDeleteOperationEntityId } from '../../utils/extension-utils.js';
 import type { CollectedNestedRecord } from './collected-record.js';
@@ -99,11 +105,7 @@ export type NestedOperationInfo = {
   path: string;
 };
 
-/**
- * Pre-fetch results map structure
- * Map<path, Map<entityId, { before: Record | null }>>
- */
-export type NestedPreFetchResults = Map<string, Map<string, { before: Record<string, unknown> | null }>>;
+export type { NestedPreFetchResults };
 
 /**
  * Collect delete targets from pre-fetched results or operation data.

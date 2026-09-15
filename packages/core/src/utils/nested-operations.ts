@@ -13,6 +13,7 @@
 
 import { UNRESOLVED_ENTITY_ID } from '../constants.js';
 import type { DbClient, SchemaMetadata } from '../interfaces/index.js';
+import type { NestedPreFetchResult } from '../state-resolution/nested-state-resolver.js';
 import { nestedLog } from './debug.js';
 
 /**
@@ -65,6 +66,12 @@ export interface NestedRecordInfo {
   /** Full path from root (e.g., 'postTags', 'postTags.tag') */
   path: string;
 }
+
+/**
+ * Before-states of nested records pre-fetched ahead of an operation, keyed by operation path,
+ * then by entity identity (`UNRESOLVED_ENTITY_ID` when the identity is unknown)
+ */
+export type NestedPreFetchResults = Map<string, Map<string, NestedPreFetchResult>>;
 
 /** A branch of an upsert: `create` runs when the target row does not exist, `update` when it does */
 export type UpsertBranch = 'create' | 'update';
@@ -820,7 +827,7 @@ const extractPkFromRecord = (record: Record<string, unknown>, pkFields: string[]
 /** @internal Extract PK values from a pre-fetch entry */
 const extractPkFromEntry = (
   entityId: string,
-  preFetchResult: { before: Record<string, unknown> | null },
+  preFetchResult: NestedPreFetchResult,
   pkFields: string[],
 ): Record<string, unknown> | null => {
   if (entityId !== UNRESOLVED_ENTITY_ID) {
@@ -834,7 +841,7 @@ const extractPkFromEntry = (
 
 /** @internal Extract PKs to refetch from pre-fetch results */
 const extractPksToRefetch = (
-  fieldMap: Map<string, { before: Record<string, unknown> | null }>,
+  fieldMap: Map<string, NestedPreFetchResult>,
   _path: string,
   pkFields: string[],
 ): Record<string, unknown>[] => {
@@ -888,7 +895,7 @@ const processNestedOperationForRefetch = async (
   client: DbClient,
   schemaMetadata: SchemaMetadata,
   nestedOp: NestedOperationInfo,
-  nestedPreFetchResults: Map<string, Map<string, { before: Record<string, unknown> | null }>>,
+  nestedPreFetchResults: NestedPreFetchResults,
   relationFields: { name: string; relatedModel: string; isList: boolean }[],
   nestedRecords: NestedRecordInfo[],
 ): Promise<void> => {
@@ -968,7 +975,7 @@ export const refetchNestedRecords = async (
   client: DbClient,
   schemaMetadata: SchemaMetadata,
   modelName: string,
-  nestedPreFetchResults: Map<string, Map<string, { before: Record<string, unknown> | null }>> | undefined,
+  nestedPreFetchResults: NestedPreFetchResults | undefined,
   nestedOperations: NestedOperationInfo[],
 ): Promise<NestedRecordInfo[]> => {
   const nestedRecords: NestedRecordInfo[] = [];

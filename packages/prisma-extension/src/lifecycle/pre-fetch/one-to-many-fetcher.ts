@@ -6,10 +6,14 @@
  * @module lifecycle/pre-fetch/one-to-many-fetcher
  */
 
-import { preFetchLog, UNRESOLVED_ENTITY_ID, type UniqueConstraint } from '@kuruwic/prisma-audit-core';
+import {
+  type NestedPreFetchResults,
+  preFetchLog,
+  UNRESOLVED_ENTITY_ID,
+  type UniqueConstraint,
+} from '@kuruwic/prisma-audit-core';
 import { unwrapCompoundWhere } from '../../utils/compound-where.js';
 import type { PreFetchModelClient } from './model-client.js';
-import type { NestedPreFetchResults } from './pre-fetch-result-store.js';
 import { extractEntityIdOrDefault, storePreFetchResult } from './pre-fetch-result-store.js';
 
 export interface NestedOperation {

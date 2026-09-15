@@ -10,23 +10,13 @@
  *   → { before: Record | null }
  */
 
-import { UNRESOLVED_ENTITY_ID } from '@kuruwic/prisma-audit-core';
+import {
+  type NestedPreFetchResult,
+  type NestedPreFetchResults,
+  UNRESOLVED_ENTITY_ID,
+} from '@kuruwic/prisma-audit-core';
 
 import { extractEntityIdentity } from '../../utils/id-generator.js';
-
-/**
- * Pre-fetch result structure
- */
-export type PreFetchResult = {
-  before: Record<string, unknown> | null;
-};
-
-/**
- * Nested Map structure for pre-fetch results
- * - Outer Map: path → Inner Map
- * - Inner Map: entityId → PreFetchResult
- */
-export type NestedPreFetchResults = Map<string, Map<string, PreFetchResult>>;
 
 /**
  * Retrieves pre-fetch result for a specific path and entity ID
@@ -48,7 +38,7 @@ export const getPreFetchResult = (
   nestedPreFetchResults: NestedPreFetchResults | undefined,
   path: string,
   entityId?: string,
-): PreFetchResult | undefined => {
+): NestedPreFetchResult | undefined => {
   if (!nestedPreFetchResults) {
     return undefined;
   }

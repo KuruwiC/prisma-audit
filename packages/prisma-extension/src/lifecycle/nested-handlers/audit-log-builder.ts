@@ -10,6 +10,7 @@
 import type {
   AggregateConfigService,
   AuditContext,
+  NestedPreFetchResults,
   NestedRecordInfo,
   RedactConfig,
   SerializationConfig,
@@ -42,11 +43,7 @@ import {
   type SurvivorEntity,
 } from '../batch-aggregate-resolver.js';
 import type { CollectedNestedRecord } from './collected-record.js';
-import {
-  collectDeleteRecords,
-  type NestedPreFetchResults,
-  type UnresolvedDeleteEntityIdReporter,
-} from './delete-handler.js';
+import { collectDeleteRecords, type UnresolvedDeleteEntityIdReporter } from './delete-handler.js';
 import { collectNestedRecords } from './record-processor.js';
 import type { GetNestedOperationConfig } from './state-resolver.js';
 

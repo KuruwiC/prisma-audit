@@ -15,6 +15,7 @@ import {
   NESTED_OPERATION_KEYWORDS,
   type NestedOperationInfo,
   type NestedOperationKeyword,
+  type NestedPreFetchResults,
   type NestedRecordInfo,
 } from '@kuruwic/prisma-audit-core';
 
@@ -114,7 +115,7 @@ export const refetchNestedRecords = async (
   Prisma: PrismaWithDMMF,
   prismaClient: PrismaClientWithModels,
   modelName: string,
-  nestedPreFetchResults: Map<string, Map<string, { before: Record<string, unknown> | null }>> | undefined,
+  nestedPreFetchResults: NestedPreFetchResults | undefined,
   nestedOperations: NestedOperationInfo[],
 ): Promise<NestedRecordInfo[]> => {
   const schemaMetadata = createSchemaMetadataFromDMMF(Prisma);

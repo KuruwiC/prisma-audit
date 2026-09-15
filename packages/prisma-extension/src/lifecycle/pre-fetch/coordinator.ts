@@ -10,6 +10,7 @@ import {
   detectNestedOperations,
   filterOperationsToPreFetch,
   type NestedOperationInfo,
+  type NestedPreFetchResults,
   preFetchLog,
   sortByPathDepth,
   UNRESOLVED_ENTITY_ID,
@@ -29,7 +30,7 @@ import { createSchemaMetadataFromDMMF } from '../../utils/nested-operations.js';
 import { getPreFetchModelClient, type PreFetchModelClient } from './model-client.js';
 import { preFetchOneToManyRelation } from './one-to-many-fetcher.js';
 import { preFetchOneToOneRelation, resolveToOneRelationLink } from './one-to-one-fetcher.js';
-import { extractEntityIdOrDefault, type NestedPreFetchResults, storePreFetchResult } from './pre-fetch-result-store.js';
+import { extractEntityIdOrDefault, storePreFetchResult } from './pre-fetch-result-store.js';
 
 export type NestedOperation = NestedOperationInfo;
 

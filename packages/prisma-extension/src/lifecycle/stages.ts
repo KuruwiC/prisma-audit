@@ -10,6 +10,7 @@ import type {
   AuditContext,
   GlobalContextEnricherConfig,
   LoggableEntity,
+  NestedPreFetchResults,
   RedactConfig,
   SerializationConfig,
   UpsertBranch,
@@ -26,7 +27,6 @@ import {
   resolveAndFilterSurvivors,
 } from './batch-aggregate-resolver.js';
 import type { BuildNestedAuditLogsParams } from './nested-handlers/index.js';
-import type { NestedPreFetchResults } from './pre-fetch/pre-fetch-result-store.js';
 import type {
   BeforeStateResult,
   EnrichedContext,

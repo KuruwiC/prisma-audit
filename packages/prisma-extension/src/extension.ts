@@ -9,7 +9,7 @@
  * @see {@link PrismaAuditExtensionOptions}
  */
 
-import type { AuditContext, ErrorStrategy } from '@kuruwic/prisma-audit-core';
+import type { AuditContext, ErrorStrategy, NestedPreFetchResults } from '@kuruwic/prisma-audit-core';
 import {
   AUDIT_ACTION,
   batchEnrichEntityContexts,
@@ -40,7 +40,6 @@ import {
   type PreFetchCoordinatorDependencies,
   preFetchNestedRecordsBeforeOperation,
 } from './lifecycle/pre-fetch/coordinator.js';
-import type { NestedPreFetchResults } from './lifecycle/pre-fetch/pre-fetch-result-store.js';
 import {
   createBuildLogsStage,
   createEnrichContextsStage,

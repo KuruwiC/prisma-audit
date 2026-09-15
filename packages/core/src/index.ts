@@ -107,6 +107,7 @@ export type {
   NestedDetectionPass,
   NestedOperationInfo,
   NestedOperationKeyword,
+  NestedPreFetchResults,
   NestedRecordInfo,
   UpsertBranch,
 } from './utils/nested-operations.js';

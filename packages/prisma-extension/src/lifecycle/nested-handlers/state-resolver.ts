@@ -8,6 +8,7 @@
 import {
   AUDIT_ACTION,
   type NestedPreFetchResult,
+  type NestedPreFetchResults,
   resolveConnectOrCreateState,
   resolveCreateState,
   resolveUpdateState,
@@ -15,7 +16,7 @@ import {
   UNRESOLVED_ENTITY_ID,
 } from '@kuruwic/prisma-audit-core';
 import type { PrismaAction } from '../../types.js';
-import type { NestedOperationInfo, NestedPreFetchResults } from './delete-handler.js';
+import type { NestedOperationInfo } from './delete-handler.js';
 
 /**
  * Configuration for nested operations (update/delete)

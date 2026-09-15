@@ -8,10 +8,10 @@
  * @module lifecycle/pre-fetch/one-to-one-fetcher
  */
 
-import { preFetchLog } from '@kuruwic/prisma-audit-core';
+import { type NestedPreFetchResults, preFetchLog } from '@kuruwic/prisma-audit-core';
 import type { DMMFField, DMMFModel } from '../../internal-types.js';
 import type { PreFetchModelClient, PreFetchRecord } from './model-client.js';
-import { extractEntityIdOrDefault, type NestedPreFetchResults } from './pre-fetch-result-store.js';
+import { extractEntityIdOrDefault } from './pre-fetch-result-store.js';
 
 /**
  * How a parent row and its to-one related row reference each other: the related row holds the
