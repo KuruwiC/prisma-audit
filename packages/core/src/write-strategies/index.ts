@@ -49,7 +49,6 @@ export type {
   DeferredResult,
   ImmediateResult,
   SkippedResult,
-  WriteErrorHandler,
   WriteFn,
   WriteResult,
   WriteStrategyConfig,

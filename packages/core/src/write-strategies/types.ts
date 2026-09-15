@@ -6,6 +6,7 @@
 
 import type { AuditLogData } from '../domain/audit-log-types.js';
 import type { AuditContext } from '../types.js';
+import type { ErrorHandler } from '../utils/error-handler.js';
 import type { DbClientManager, DefaultWriteFn, WriteExecutor } from './interfaces.js';
 
 export interface ImmediateResult {
@@ -65,12 +66,6 @@ export type WriteResult = ImmediateResult | DeferredResult | SkippedResult;
 export type WriteFn = (logs: AuditLogData[], context: AuditContext, defaultWrite: DefaultWriteFn) => Promise<void>;
 
 /**
- * Receives write failures from the deferred and fire-and-forget strategies, which write after the
- * triggering call has returned. The synchronous strategy propagates write errors to the caller instead.
- */
-export type WriteErrorHandler = (error: Error, operationDescription: string) => void | Promise<void>;
-
-/**
  * Shared input for every write strategy implementation (synchronous, deferred, fire-and-forget).
  */
 export interface WriteStrategyInput {
@@ -79,7 +74,11 @@ export interface WriteStrategyInput {
   manager: DbClientManager;
   auditLogModel: string;
   writer?: WriteFn;
-  handleError: WriteErrorHandler;
+  /**
+   * Receives write failures from the deferred and fire-and-forget strategies, which write after the
+   * triggering call has returned. The synchronous strategy propagates write errors to the caller instead.
+   */
+  handleError: ErrorHandler;
   writeExecutor: WriteExecutor;
 }
 

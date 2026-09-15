@@ -7,7 +7,8 @@
 import type { AuditLogData } from '../domain/audit-log-types.js';
 import { getRuntimeContext } from '../runtime-context.js';
 import type { AuditContext } from '../types.js';
-import type { WriteErrorHandler, WriteFn, WriteResult, WriteStrategyInput } from './types.js';
+import type { ErrorHandler } from '../utils/error-handler.js';
+import type { WriteFn, WriteResult, WriteStrategyInput } from './types.js';
 import { createBaseClientWriteFn } from './utils.js';
 
 const createDeferredExecutor = (
@@ -15,7 +16,7 @@ const createDeferredExecutor = (
   context: AuditContext,
   baseClientWriteFn: (logsToWrite: AuditLogData[]) => Promise<void>,
   customWriter: WriteFn | undefined,
-  errorHandler: WriteErrorHandler,
+  errorHandler: ErrorHandler,
 ): (() => Promise<void>) => {
   return async (): Promise<void> => {
     try {

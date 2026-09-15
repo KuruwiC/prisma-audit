@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AuditLogData } from '../../src/domain/audit-log-types.js';
 import { createActorId, createAggregateId, createEntityId } from '../../src/domain/branded-types.js';
 import type { AuditContext } from '../../src/types.js';
+import type { ErrorHandler } from '../../src/utils/error-handler.js';
 import {
   clearPendingWrites,
   flushPendingWrites,
@@ -14,7 +15,7 @@ import {
   writeFireAndForget,
 } from '../../src/write-strategies/fire-and-forget.js';
 import type { DbClientManager, WriteExecutor } from '../../src/write-strategies/interfaces.js';
-import type { WriteErrorHandler, WriteFn } from '../../src/write-strategies/types.js';
+import type { WriteFn } from '../../src/write-strategies/types.js';
 
 /**
  * Create mock DbClientManager
@@ -74,7 +75,7 @@ const createMockContext = (): AuditContext => ({
 /**
  * Create mock error handler
  */
-const createMockErrorHandler = (): WriteErrorHandler => vi.fn();
+const createMockErrorHandler = (): ErrorHandler => vi.fn();
 
 describe('writeFireAndForget', () => {
   describe('basic functionality', () => {

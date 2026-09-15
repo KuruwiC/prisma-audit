@@ -3,9 +3,10 @@ import type { AuditLogData } from '../../src/domain/audit-log-types.js';
 import { createActorId, createAggregateId, createEntityId } from '../../src/domain/branded-types.js';
 import { getRuntimeContext, runWithRuntimeContext } from '../../src/runtime-context.js';
 import type { AuditContext } from '../../src/types.js';
+import type { ErrorHandler } from '../../src/utils/error-handler.js';
 import { writeDeferredInTransaction } from '../../src/write-strategies/deferred.js';
 import type { DbClientManager, WriteExecutor } from '../../src/write-strategies/interfaces.js';
-import type { WriteErrorHandler, WriteFn } from '../../src/write-strategies/types.js';
+import type { WriteFn } from '../../src/write-strategies/types.js';
 
 const createMockManager = (): DbClientManager => {
   return {
@@ -50,7 +51,7 @@ const createMockContext = (): AuditContext => ({
   },
 });
 
-const createMockErrorHandler = (): WriteErrorHandler => vi.fn();
+const createMockErrorHandler = (): ErrorHandler => vi.fn();
 
 // Run fn inside a runtime frame marking an active transaction scope, so the
 // deferred strategy enqueues into the library-owned runtime store.

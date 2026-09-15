@@ -3,11 +3,12 @@ import type { AuditLogData } from '../../src/domain/audit-log-types.js';
 import { createActorId, createAggregateId, createEntityId } from '../../src/domain/branded-types.js';
 import { runWithRuntimeContext } from '../../src/runtime-context.js';
 import type { AuditContext } from '../../src/types.js';
+import type { ErrorHandler } from '../../src/utils/error-handler.js';
 import { createWriteStrategySelector } from '../../src/write-strategies/factory.js';
 import type { DbClientManager, WriteExecutor } from '../../src/write-strategies/interfaces.js';
-import type { WriteErrorHandler, WriteFn, WriteStrategyConfig } from '../../src/write-strategies/types.js';
+import type { WriteFn, WriteStrategyConfig } from '../../src/write-strategies/types.js';
 
-const mockHandleError: WriteErrorHandler = vi.fn();
+const mockHandleError: ErrorHandler = vi.fn();
 
 const mockLogs: AuditLogData[] = [
   {

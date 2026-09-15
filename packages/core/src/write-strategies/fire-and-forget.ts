@@ -7,7 +7,8 @@
 import type { AuditLogData } from '../domain/audit-log-types.js';
 import { getGlobalSingleton } from '../global-singleton.js';
 import type { AuditContext } from '../types.js';
-import type { WriteErrorHandler, WriteFn, WriteResult, WriteStrategyInput } from './types.js';
+import type { ErrorHandler } from '../utils/error-handler.js';
+import type { WriteFn, WriteResult, WriteStrategyInput } from './types.js';
 import { createDefaultWriteFn } from './utils.js';
 
 /**
@@ -67,7 +68,7 @@ const createAsyncWriteExecutor = (
   };
 };
 
-const executeAsyncWrite = (asyncExecutor: () => Promise<void>, errorHandler: WriteErrorHandler): void => {
+const executeAsyncWrite = (asyncExecutor: () => Promise<void>, errorHandler: ErrorHandler): void => {
   const promise = asyncExecutor()
     .catch(async (error) => {
       const errorObject = error instanceof Error ? error : new Error(String(error));
