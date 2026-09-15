@@ -18,7 +18,7 @@ import type { PreFetchModelClient, PreFetchRecord } from './model-client.js';
 
 export const isRecord = (value: unknown): value is PreFetchRecord => typeof value === 'object' && value !== null;
 
-export const isKeyValue = (value: unknown): boolean =>
+const isKeyValue = (value: unknown): boolean =>
   typeof value === 'string' || typeof value === 'number' || typeof value === 'bigint';
 
 export interface ResolveParentRowsInput {
