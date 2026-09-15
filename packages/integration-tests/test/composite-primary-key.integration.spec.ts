@@ -373,7 +373,6 @@ describe('Composite Primary Key (PostLike)', () => {
       const prisma = createAuditClient(basePrisma, {
         Prisma,
         provider,
-        basePrisma,
         aggregateMapping: mappingWithoutPreFetch,
         diffing: { excludeFields: ['createdAt'] },
         security: { redact: { fields: [] } },

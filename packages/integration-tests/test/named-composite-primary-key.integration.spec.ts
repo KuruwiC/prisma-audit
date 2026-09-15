@@ -86,7 +86,6 @@ describe('Named Composite Primary Key (PostBookmark)', () => {
     const prisma = createAuditClient(basePrisma, {
       Prisma,
       provider,
-      basePrisma,
       aggregateMapping,
       diffing: { excludeFields: ['createdAt'] },
       security: { redact: { fields: [] } },

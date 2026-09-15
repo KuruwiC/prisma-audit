@@ -35,7 +35,6 @@ describe('Transaction Enrichment Consistency', () => {
       const prisma = createAuditClient(context.basePrisma, {
         Prisma,
         provider,
-        basePrisma: context.basePrisma,
         aggregateMapping: {
           User: defineEntity({
             type: 'User',
@@ -94,7 +93,6 @@ describe('Transaction Enrichment Consistency', () => {
       const prisma = createAuditClient(context.basePrisma, {
         Prisma,
         provider,
-        basePrisma: context.basePrisma,
         aggregateMapping: {
           Post: defineEntity({
             type: 'Post',
@@ -186,7 +184,6 @@ describe('Transaction Enrichment Consistency', () => {
       const prisma = createAuditClient(context.basePrisma, {
         Prisma,
         provider,
-        basePrisma: context.basePrisma,
         aggregateMapping: {
           Post: defineEntity({
             type: 'Post',
@@ -279,7 +276,6 @@ describe('Transaction Enrichment Consistency', () => {
       const prisma = createAuditClient(context.basePrisma, {
         Prisma,
         provider,
-        basePrisma: context.basePrisma,
         aggregateMapping: {
           Post: defineEntity({
             type: 'Post',
@@ -366,7 +362,6 @@ describe('Transaction Enrichment Consistency', () => {
       const prisma = createAuditClient(context.basePrisma, {
         Prisma,
         provider,
-        basePrisma: context.basePrisma,
         aggregateMapping: {
           User: defineEntity({
             type: 'User',

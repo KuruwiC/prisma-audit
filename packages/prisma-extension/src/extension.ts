@@ -66,7 +66,6 @@ import {
   findManyByPKs,
   getModelAccessor,
   getPrimaryKeyFields,
-  getPrisma,
   injectDeepInclude,
   isAuditableAction,
   isBatchOperation,
@@ -116,7 +115,6 @@ interface BatchActionResult {
 export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) => {
   const {
     provider,
-    basePrisma,
     aggregateMapping,
     diffing,
     security,
@@ -124,13 +122,11 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     hooks,
     contextEnricher,
     auditLogModel: customAuditLogModel,
-    Prisma: userProvidedPrisma,
+    Prisma: prismaNamespace,
     errorHandling,
   } = options;
 
-  // Use user-provided Prisma namespace or extract from basePrisma
-  // User-provided is required for Prisma 6.x+ with custom output paths
-  const Prisma = (userProvidedPrisma ?? getPrisma(basePrisma as PrismaClientWithDynamicAccess)) as PrismaNamespace;
+  const Prisma = prismaNamespace as PrismaNamespace;
   const DbNull = Prisma.DbNull;
   const auditLogModel = customAuditLogModel ? uncapitalizeFirst(customAuditLogModel) : 'auditLog';
   const excludeFields = diffing?.excludeFields ?? [];

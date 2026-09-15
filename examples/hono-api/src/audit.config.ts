@@ -11,7 +11,7 @@ import {
   resolveId,
   to,
 } from '@kuruwic/prisma-audit';
-import { getBasePrisma, Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database';
+import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database';
 
 export const auditProvider = createAsyncLocalStorageProvider();
 
@@ -949,7 +949,6 @@ const aggregateMapping = defineAggregateMapping<PrismaClient>()({
 
 export default defineConfig({
   provider: auditProvider,
-  basePrisma: getBasePrisma(),
   Prisma,
   aggregateMapping,
 

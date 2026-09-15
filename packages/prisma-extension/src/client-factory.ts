@@ -29,20 +29,24 @@ export type PrismaClientLike = {
 /**
  * Creates a Prisma client instance with the audit logging extension applied
  *
+ * @param prisma - Client to audit. Audited operations run on it, and audit logs are written
+ *   with it, bypassing the audit extension.
+ * @param options - Audit configuration, including the `Prisma` namespace of the generated
+ *   client `prisma` comes from
  * @returns Extended Prisma client with `$audit` namespace
  *
  * @example Basic configuration
  * ```typescript
  * import { createAuditClient, defineLoggableEntity, foreignKey, root } from '@kuruwic/prisma-audit';
  * import { createAsyncLocalStorageProvider } from '@kuruwic/prisma-audit-core';
- * import { PrismaClient } from '@prisma/client';
+ * import { Prisma, PrismaClient } from '@prisma/client';
  *
  * const auditProvider = createAsyncLocalStorageProvider();
  * const basePrisma = new PrismaClient();
  *
  * const prisma = createAuditClient(basePrisma, {
+ *   Prisma,
  *   provider: auditProvider,
- *   basePrisma,
  *   aggregateMapping: {
  *     User: defineLoggableEntity({ type: 'User' }),
  *     Post: defineLoggableEntity({
@@ -56,8 +60,8 @@ export type PrismaClientLike = {
  * @example Full configuration with hooks and enrichment
  * ```typescript
  * const prisma = createAuditClient(basePrisma, {
+ *   Prisma,
  *   provider: auditProvider,
- *   basePrisma,
  *   aggregateMapping,
  *   diffing: {
  *     excludeFields: ['updatedAt', 'createdAt'],
@@ -117,11 +121,11 @@ export type PrismaClientWithAudit<T extends PrismaClientLike = PrismaClientLike>
  * // audit.config.ts
  * import { defineConfig, defineAggregateMapping, defineEntity } from '@kuruwic/prisma-audit';
  * import { createAsyncLocalStorageProvider } from '@kuruwic/prisma-audit-core';
- * import type { PrismaClient } from '@prisma/client';
+ * import { Prisma, type PrismaClient } from '@prisma/client';
  *
  * export default defineConfig({
+ *   Prisma,
  *   provider: createAsyncLocalStorageProvider(),
- *   basePrisma: new PrismaClient(),
  *   aggregateMapping: defineAggregateMapping<PrismaClient>()({
  *     User: defineEntity({ type: 'User' }),
  *     Post: defineEntity({

@@ -34,7 +34,6 @@ const createFailingWriterClient = (databaseUrl: string, options: FailingWriterCl
   const prisma = createAuditClient(basePrisma, {
     Prisma,
     provider,
-    basePrisma,
     aggregateMapping: testAggregateMapping,
     diffing: {
       excludeFields: ['createdAt'],
@@ -601,7 +600,6 @@ describe('Error Handling Integration', () => {
       const prisma = createAuditClient(basePrisma, {
         Prisma,
         provider,
-        basePrisma,
         aggregateMapping: testAggregateMapping,
         performance: { awaitWrite: true },
         errorHandling: { writeFailurePolicy: policy, observer },
@@ -717,7 +715,6 @@ describe('Error Handling Integration', () => {
       const prisma = createAuditClient(basePrisma, {
         Prisma,
         provider,
-        basePrisma,
         aggregateMapping: testAggregateMapping,
         performance: { awaitWrite: true },
         errorHandling: { writeFailurePolicy: policy, observer },
@@ -778,7 +775,6 @@ describe('Error Handling Integration', () => {
       const prisma = createAuditClient(basePrisma, {
         Prisma,
         provider,
-        basePrisma,
         aggregateMapping: testAggregateMapping,
         performance: { awaitWrite: true },
         errorHandling: { writeFailurePolicy: policy, observer },

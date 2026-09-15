@@ -39,7 +39,6 @@ const createScenario = (databaseUrl: string, options: ScenarioOptions) => {
   const prisma = createAuditClient(basePrisma, {
     Prisma,
     provider,
-    basePrisma,
     aggregateMapping: testAggregateMapping,
     performance: options.performance,
     ...(options.failingWriter

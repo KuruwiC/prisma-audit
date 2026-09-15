@@ -118,7 +118,6 @@ export const createTestClients = (databaseUrl: string): TestContext => {
 
   const prisma = createAuditClient(basePrisma, {
     provider,
-    basePrisma,
     Prisma,
     aggregateMapping: testAggregateMapping,
     diffing: {

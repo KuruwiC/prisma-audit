@@ -52,7 +52,6 @@ const createClients = (databaseUrl: string, nestedOperations: NestedOperationsCo
   const prisma = createAuditClient(basePrisma, {
     Prisma,
     provider,
-    basePrisma,
     aggregateMapping: testAggregateMapping,
     diffing: { excludeFields: ['createdAt'] },
     security: { redact: { fields: [] } },

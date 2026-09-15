@@ -73,7 +73,6 @@ describe('Write Strategy Tests', () => {
 
       const prisma = createAuditClient(db, {
         provider: auditProvider,
-        basePrisma: db,
         aggregateMapping: testAggregateMapping,
         performance: { awaitWrite: true },
         Prisma,
@@ -120,7 +119,6 @@ describe('Write Strategy Tests', () => {
 
       const prisma = createAuditClient(db, {
         provider: auditProvider,
-        basePrisma: db,
         aggregateMapping: testAggregateMapping,
         performance: { awaitWrite: true },
         Prisma,
@@ -174,7 +172,6 @@ describe('Write Strategy Tests', () => {
 
       const prisma = createAuditClient(db, {
         provider: auditProvider,
-        basePrisma: db,
         aggregateMapping: testAggregateMapping,
         performance: { awaitWrite: false },
         Prisma,
@@ -226,7 +223,6 @@ describe('Write Strategy Tests', () => {
 
       const prisma = createAuditClient(db, {
         provider: auditProvider,
-        basePrisma: db,
         aggregateMapping: testAggregateMapping,
         performance: { awaitWrite: false },
         Prisma,
@@ -284,7 +280,6 @@ describe('Write Strategy Tests', () => {
 
       const prisma = createAuditClient(db, {
         provider: auditProvider,
-        basePrisma: db,
         aggregateMapping: testAggregateMapping,
         performance: { awaitWrite: true },
         Prisma,
@@ -346,7 +341,6 @@ describe('Write Strategy Tests', () => {
 
       const prisma = createAuditClient(db, {
         provider: auditProvider,
-        basePrisma: db,
         aggregateMapping: testAggregateMapping,
         performance: { awaitWrite: true },
         Prisma,

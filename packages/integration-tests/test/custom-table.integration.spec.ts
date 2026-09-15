@@ -33,7 +33,6 @@ describe('Custom Audit Log Table', () => {
     const prisma = createAuditClient(basePrisma, {
       Prisma,
       provider,
-      basePrisma,
       aggregateMapping: testAggregateMapping,
       performance: {
         awaitWrite: true,
@@ -45,7 +44,6 @@ describe('Custom Audit Log Table', () => {
     });
     const customPrisma = createAuditClient(customBasePrisma, {
       provider,
-      basePrisma: customBasePrisma,
       Prisma,
       aggregateMapping: testAggregateMapping,
       auditLogModel: 'Activity',

@@ -49,7 +49,7 @@ export type DetectNestedOperationsFn = (
 ) => NestedOperation[];
 
 export interface PreFetchCoordinatorDependencies {
-  /** Prisma namespace extracted from basePrisma at extension initialization */
+  /** Prisma namespace given as the extension's `Prisma` option */
   readonly Prisma: PrismaNamespace;
   readonly getNestedOperationConfig: GetOperationConfig;
   /**

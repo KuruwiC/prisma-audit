@@ -765,7 +765,6 @@ describe('Context Enrichment Integration', () => {
       const customPrisma = createAuditClient(customBasePrisma, {
         Prisma,
         provider: customProvider,
-        basePrisma: customBasePrisma,
         aggregateMapping: customAggregateMapping,
         contextEnricher: {
           actor: {
@@ -1004,7 +1003,6 @@ describe('Context Enrichment Integration', () => {
       const customPrisma = createAuditClient(customBasePrisma, {
         Prisma,
         provider: customProvider,
-        basePrisma: customBasePrisma,
         aggregateMapping: customAggregateMapping,
         contextEnricher: {
           actor: {
@@ -1102,7 +1100,6 @@ describe('Context Enrichment Integration', () => {
       const customPrisma = createAuditClient(customBasePrisma, {
         Prisma,
         provider: customProvider,
-        basePrisma: customBasePrisma,
         aggregateMapping: customAggregateMapping,
         contextEnricher: {
           actor: {
@@ -1161,7 +1158,6 @@ describe('Context Enrichment Integration', () => {
       const customPrisma = createAuditClient(customBasePrisma, {
         Prisma,
         provider: customProvider,
-        basePrisma: customBasePrisma,
         aggregateMapping: testAggregateMapping,
         contextEnricher: {
           actor: {
@@ -1329,7 +1325,6 @@ describe('Context Enrichment Integration', () => {
       const customPrisma = createAuditClient(customBasePrisma, {
         Prisma,
         provider: customProvider,
-        basePrisma: customBasePrisma,
         aggregateMapping: testAggregateMapping,
         contextEnricher: {
           actor: {
@@ -1394,7 +1389,6 @@ describe('Context Enrichment Integration', () => {
       const customPrisma = createAuditClient(customBasePrisma, {
         Prisma,
         provider: customProvider,
-        basePrisma: customBasePrisma,
         aggregateMapping: testAggregateMapping,
         contextEnricher: {
           actor: {
@@ -1452,7 +1446,6 @@ describe('Context Enrichment Integration', () => {
       const customPrisma = createAuditClient(customBasePrisma, {
         Prisma,
         provider: customProvider,
-        basePrisma: customBasePrisma,
         aggregateMapping: testAggregateMapping,
         contextEnricher: {
           actor: {
@@ -1510,7 +1503,6 @@ describe('Context Enrichment Integration', () => {
       const customPrisma = createAuditClient(customBasePrisma, {
         Prisma,
         provider: customProvider,
-        basePrisma: customBasePrisma,
         aggregateMapping: testAggregateMapping,
         contextEnricher: {
           actor: {
@@ -1607,7 +1599,6 @@ describe('Context Enrichment Integration', () => {
       const customPrisma = createAuditClient(customBasePrisma, {
         Prisma,
         provider: customProvider,
-        basePrisma: customBasePrisma,
         aggregateMapping: customAggregateMapping,
         contextEnricher: {
           actor: {
@@ -1691,7 +1682,6 @@ describe('Context Enrichment Integration', () => {
       const customPrisma = createAuditClient(customBasePrisma, {
         Prisma,
         provider: customProvider,
-        basePrisma: customBasePrisma,
         aggregateMapping: customAggregateMapping,
         contextEnricher: {
           actor: {
@@ -1770,7 +1760,6 @@ describe('Context Enrichment Integration', () => {
       const customPrisma = createAuditClient(customBasePrisma, {
         Prisma,
         provider: customProvider,
-        basePrisma: customBasePrisma,
         aggregateMapping: customAggregateMapping,
         contextEnricher: {
           actor: {
@@ -1862,7 +1851,6 @@ describe('Context Enrichment Integration', () => {
       const customPrisma = createAuditClient(customBasePrisma, {
         Prisma,
         provider: customProvider,
-        basePrisma: customBasePrisma,
         aggregateMapping: customAggregateMapping,
         contextEnricher: {
           actor: {
@@ -1958,7 +1946,6 @@ describe('Context Enrichment Integration', () => {
       const customPrisma = createAuditClient(customBasePrisma, {
         Prisma,
         provider: customProvider,
-        basePrisma: customBasePrisma,
         aggregateMapping: customAggregateMapping,
         performance: {
           awaitWrite: true,
@@ -2020,7 +2007,6 @@ describe('Context Enrichment Integration', () => {
       const customPrisma = createAuditClient(customBasePrisma, {
         Prisma,
         provider: customProvider,
-        basePrisma: customBasePrisma,
         aggregateMapping: customAggregateMapping,
         performance: { awaitWrite: true },
       });
@@ -2092,7 +2078,6 @@ describe('Context Enrichment Integration', () => {
       const customPrisma = createAuditClient(customBasePrisma, {
         Prisma,
         provider: customProvider,
-        basePrisma: customBasePrisma,
         aggregateMapping: customAggregateMapping,
         performance: { awaitWrite: true },
       });
@@ -2159,7 +2144,6 @@ describe('Context Enrichment Integration', () => {
       const customPrisma = createAuditClient(customBasePrisma, {
         Prisma,
         provider: customProvider,
-        basePrisma: customBasePrisma,
         aggregateMapping: customAggregateMapping,
         performance: { awaitWrite: true },
       });

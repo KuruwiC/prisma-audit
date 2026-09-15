@@ -51,7 +51,6 @@ const createAuditedClientWithQueryLog = (
   const prisma = createAuditClient(basePrisma, {
     Prisma,
     provider,
-    basePrisma,
     aggregateMapping: testAggregateMapping,
   });
 

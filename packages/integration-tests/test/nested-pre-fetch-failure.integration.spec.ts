@@ -80,7 +80,6 @@ describe('nested pre-fetch failures — observer notification', () => {
     const prisma = createAuditClient(basePrisma, {
       Prisma,
       provider,
-      basePrisma,
       aggregateMapping: testAggregateMapping,
       diffing: { excludeFields: ['createdAt'] },
       security: { redact: { fields: [] } },

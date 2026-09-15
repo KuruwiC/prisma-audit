@@ -88,7 +88,6 @@ export function createEnrichmentTestContext(options: EnrichmentTestContextOption
   const customPrisma = createAuditClient(basePrisma, {
     Prisma,
     provider,
-    basePrisma,
     aggregateMapping: finalAggregateMapping,
     ...(actorEnricher && {
       contextEnricher: {

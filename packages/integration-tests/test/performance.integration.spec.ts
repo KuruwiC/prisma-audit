@@ -34,7 +34,6 @@ const createAuditedClientWithAuditLogRowCounter = (
   return createAuditClient(basePrisma, {
     Prisma,
     provider,
-    basePrisma,
     aggregateMapping: testAggregateMapping,
     diffing: {
       excludeFields: ['createdAt'],
@@ -69,7 +68,6 @@ const createAuditedClientWithRefetchFallback = (
   return createAuditClient(basePrisma, {
     Prisma,
     provider,
-    basePrisma,
     aggregateMapping: testAggregateMapping,
     diffing: {
       excludeFields: ['createdAt'],

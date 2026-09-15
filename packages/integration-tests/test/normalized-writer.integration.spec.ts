@@ -82,7 +82,6 @@ describe('Normalized Writer Helpers', () => {
       const prisma = createAuditClient(context.basePrisma, {
         Prisma,
         provider: context.provider,
-        basePrisma: context.basePrisma,
         aggregateMapping: testAggregateMapping,
         performance: {
           awaitWrite: true,
@@ -147,7 +146,6 @@ describe('Normalized Writer Helpers', () => {
       const prisma = createAuditClient(context.basePrisma, {
         Prisma,
         provider: context.provider,
-        basePrisma: context.basePrisma,
         aggregateMapping: testAggregateMapping,
         performance: {
           awaitWrite: true,
@@ -190,7 +188,6 @@ describe('Normalized Writer Helpers', () => {
       const prisma = createAuditClient(context.basePrisma, {
         Prisma,
         provider: context.provider,
-        basePrisma: context.basePrisma,
         aggregateMapping: testAggregateMapping,
         performance: {
           awaitWrite: true,
@@ -224,7 +221,6 @@ describe('Normalized Writer Helpers', () => {
       const prisma = createAuditClient(context.basePrisma, {
         Prisma,
         provider: context.provider,
-        basePrisma: context.basePrisma,
         aggregateMapping: testAggregateMapping,
         performance: {
           awaitWrite: true,
@@ -277,7 +273,6 @@ describe('Normalized Writer Helpers', () => {
       const prisma = createAuditClient(context.basePrisma, {
         Prisma,
         provider: context.provider,
-        basePrisma: context.basePrisma,
         aggregateMapping: testAggregateMapping,
         performance: {
           awaitWrite: true,
@@ -340,7 +335,6 @@ describe('Normalized Writer Helpers', () => {
       const prisma = createAuditClient(context.basePrisma, {
         Prisma,
         provider: context.provider,
-        basePrisma: context.basePrisma,
         aggregateMapping: testAggregateMapping,
         performance: {
           awaitWrite: true,

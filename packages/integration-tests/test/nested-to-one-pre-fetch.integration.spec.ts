@@ -28,7 +28,6 @@ const createClients = (databaseUrl: string, observer: AuditErrorObserver) => {
   const prisma = createAuditClient(basePrisma, {
     Prisma,
     provider,
-    basePrisma,
     aggregateMapping: testAggregateMapping,
     diffing: { excludeFields: ['createdAt'] },
     security: { redact: { fields: [] } },

@@ -66,7 +66,6 @@ export const setupSQLiteDatabase = async (): Promise<SQLiteTestContext> => {
   const prisma = createAuditClient(basePrisma, {
     Prisma,
     provider,
-    basePrisma,
     aggregateMapping: testAggregateMapping,
     diffing: {
       excludeFields: ['createdAt'],

@@ -65,7 +65,6 @@ export const setupMySQLDatabase = async (): Promise<MySQLTestContext> => {
   const prisma = createAuditClient(basePrisma, {
     Prisma,
     provider,
-    basePrisma,
     aggregateMapping: testAggregateMapping,
     diffing: {
       excludeFields: ['createdAt'],

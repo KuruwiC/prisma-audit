@@ -45,7 +45,6 @@ describe('Tag-based Strategies E2E', () => {
 
       const prisma = createAuditClient(basePrisma, {
         provider: auditProvider,
-        basePrisma,
         aggregateMapping,
         performance: {
           awaitWrite: false,
@@ -92,7 +91,6 @@ describe('Tag-based Strategies E2E', () => {
 
       const prisma = createAuditClient(basePrisma, {
         provider: auditProvider,
-        basePrisma,
         aggregateMapping,
         performance: {
           awaitWrite: false,
@@ -154,7 +152,6 @@ describe('Tag-based Strategies E2E', () => {
 
       const prisma = createAuditClient(basePrisma, {
         provider: auditProvider,
-        basePrisma,
         aggregateMapping,
         performance: {
           sampling: 0.5,
@@ -211,7 +208,6 @@ describe('Tag-based Strategies E2E', () => {
 
       const prisma = createAuditClient(basePrisma, {
         provider: auditProvider,
-        basePrisma,
         aggregateMapping,
         performance: {
           sampling: 1.0, // Global default (overridden by samplingIf)
@@ -283,7 +279,6 @@ describe('Tag-based Strategies E2E', () => {
 
       const prisma = createAuditClient(basePrisma, {
         provider: auditProvider,
-        basePrisma,
         aggregateMapping,
         performance: {
           awaitWrite: false,
@@ -347,7 +342,6 @@ describe('Tag-based Strategies E2E', () => {
 
       const prisma = createAuditClient(basePrisma, {
         provider: auditProvider,
-        basePrisma,
         aggregateMapping,
         performance: {
           awaitWrite: false,

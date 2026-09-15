@@ -356,7 +356,7 @@ const createAuditEvents = async (
  * const prisma = createAuditClient(basePrisma, {
  *   provider,
  *   aggregateMapping,
- *   basePrisma,
+ *   Prisma,
  *   hooks: {
  *     writer: createEntityNormalizedWriter(
  *       {
@@ -447,7 +447,7 @@ const groupLogsByChange = (logs: AuditLogData[]): Map<string, AuditLogData[]> =>
  * const prisma = createAuditClient(basePrisma, {
  *   provider,
  *   aggregateMapping,
- *   basePrisma,
+ *   Prisma,
  *   hooks: {
  *     writer: createSharedChangeWriter(
  *       {

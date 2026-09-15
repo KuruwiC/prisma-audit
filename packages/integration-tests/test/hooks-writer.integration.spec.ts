@@ -29,7 +29,6 @@ const createAuditedClientWithWriterSpy = (
   return createAuditClient(basePrisma, {
     Prisma,
     provider,
-    basePrisma,
     aggregateMapping: testAggregateMapping,
     diffing: {
       excludeFields: ['createdAt'],
