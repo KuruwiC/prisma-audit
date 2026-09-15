@@ -1,57 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  createRedactor,
-  getDefaultSensitiveFields,
-  isSensitiveField,
-  type RedactedFieldInfo,
-  redactSensitiveData,
-} from '../../src/utils/redaction.js';
-
-describe('getDefaultSensitiveFields', () => {
-  it('should return default sensitive field patterns', () => {
-    const fields = getDefaultSensitiveFields();
-
-    expect(fields).toContain('password');
-    expect(fields).toContain('token');
-    expect(fields).toContain('apiKey');
-    expect(fields).toContain('secret');
-    expect(fields.length).toBeGreaterThan(0);
-  });
-});
-
-describe('isSensitiveField', () => {
-  it('should identify default sensitive fields (exact match)', () => {
-    expect(isSensitiveField('password')).toBe(true);
-    expect(isSensitiveField('passwordHash')).toBe(true);
-    expect(isSensitiveField('token')).toBe(true);
-    expect(isSensitiveField('apiKey')).toBe(true);
-    expect(isSensitiveField('secret')).toBe(true);
-  });
-
-  it('should be case-sensitive', () => {
-    expect(isSensitiveField('PASSWORD')).toBe(false);
-    expect(isSensitiveField('Password')).toBe(false);
-    expect(isSensitiveField('ApiKey')).toBe(false);
-  });
-
-  it('should identify non-sensitive fields', () => {
-    expect(isSensitiveField('id')).toBe(false);
-    expect(isSensitiveField('name')).toBe(false);
-    expect(isSensitiveField('email')).toBe(false);
-    expect(isSensitiveField('createdAt')).toBe(false);
-  });
-
-  it('should support custom sensitive fields', () => {
-    expect(isSensitiveField('customField', ['customField'])).toBe(true);
-    expect(isSensitiveField('anotherField', ['customField'])).toBe(false);
-  });
-
-  it('should merge custom fields with defaults', () => {
-    const customFields = ['customSecret'];
-    expect(isSensitiveField('password', customFields)).toBe(true); // default
-    expect(isSensitiveField('customSecret', customFields)).toBe(true); // custom
-  });
-});
+import { createRedactor, type RedactedFieldInfo, redactSensitiveData } from '../../src/utils/redaction.js';
 
 describe('createRedactor', () => {
   it('should redact sensitive fields', () => {

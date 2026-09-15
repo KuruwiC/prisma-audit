@@ -201,18 +201,3 @@ export const redactSensitiveData = (data: unknown, config: RedactConfig = {}): u
   const redactor = createRedactor(config);
   return redactor(cloned);
 };
-
-/**
- * Check if a field name is sensitive
- */
-export const isSensitiveField = (fieldName: string, additionalFields: string[] = []): boolean => {
-  const allSensitiveFields = new Set([...DEFAULT_SENSITIVE_FIELDS, ...additionalFields]);
-  return allSensitiveFields.has(fieldName);
-};
-
-/**
- * Get list of default sensitive fields
- */
-export const getDefaultSensitiveFields = (): readonly string[] => {
-  return DEFAULT_SENSITIVE_FIELDS;
-};
