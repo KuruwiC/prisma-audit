@@ -12,7 +12,6 @@ import {
   detectNestedOperations as coreDetectNestedOperations,
   extractNestedRecords as coreExtractNestedRecords,
   refetchNestedRecords as coreRefetchNestedRecords,
-  NESTED_OPERATION_KEYWORDS,
   type NestedOperationInfo,
   type NestedOperationKeyword,
   type NestedPreFetchResults,
@@ -23,9 +22,8 @@ import { createSchemaMetadataFromDMMF, type PrismaWithDMMF } from './schema-meta
 
 export { createSchemaMetadataFromDMMF };
 
-// Re-export core types and constants
+// Re-export core types
 export type { NestedOperationInfo, NestedOperationKeyword, NestedRecordInfo };
-export { NESTED_OPERATION_KEYWORDS };
 
 /**
  * Relation field information (Prisma-specific)

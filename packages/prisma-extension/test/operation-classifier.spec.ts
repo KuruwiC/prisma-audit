@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isBatchOperation, isSingleOperation, requiresBeforeState } from '../src/utils/operation-classifier.js';
+import { isBatchOperation, requiresBeforeState } from '../src/utils/operation-classifier.js';
 
 describe('operation-classifier', () => {
   describe('isBatchOperation', () => {
@@ -16,21 +16,6 @@ describe('operation-classifier', () => {
       expect(isBatchOperation('update')).toBe(false);
       expect(isBatchOperation('upsert')).toBe(false);
       expect(isBatchOperation('delete')).toBe(false);
-    });
-  });
-
-  describe('isSingleOperation', () => {
-    it('classifies single-record operations as single', () => {
-      expect(isSingleOperation('create')).toBe(true);
-      expect(isSingleOperation('update')).toBe(true);
-      expect(isSingleOperation('upsert')).toBe(true);
-      expect(isSingleOperation('delete')).toBe(true);
-    });
-
-    it('does not let batch *AndReturn operations flow into single handling', () => {
-      expect(isSingleOperation('createManyAndReturn')).toBe(false);
-      expect(isSingleOperation('updateManyAndReturn')).toBe(false);
-      expect(isSingleOperation('createMany')).toBe(false);
     });
   });
 

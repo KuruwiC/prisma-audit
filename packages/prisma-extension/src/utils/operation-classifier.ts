@@ -7,7 +7,7 @@
  * @module utils/operation-classifier
  */
 
-import { AUDIT_ACTION, BATCH_OPERATIONS, SINGLE_OPERATIONS } from '@kuruwic/prisma-audit-core';
+import { AUDIT_ACTION, BATCH_OPERATIONS } from '@kuruwic/prisma-audit-core';
 import type { PrismaAction } from '../types.js';
 
 /**
@@ -27,21 +27,6 @@ export const isBatchOperation = (
   action: string,
 ): action is 'createMany' | 'updateMany' | 'deleteMany' | 'createManyAndReturn' | 'updateManyAndReturn' => {
   return BATCH_OPERATIONS.has(action as PrismaAction);
-};
-
-/**
- * Checks if an operation is a single-record operation
- *
- * Single-record operations (create, update, upsert, delete) process one record at a time.
- *
- * @example
- * ```typescript
- * isSingleOperation('create');  // => true
- * isSingleOperation('createMany'); // => false
- * ```
- */
-export const isSingleOperation = (action: string): action is 'create' | 'update' | 'upsert' | 'delete' => {
-  return SINGLE_OPERATIONS.has(action as PrismaAction);
 };
 
 /**

@@ -9,31 +9,13 @@
 
 import {
   ensureIds as coreEnsureIds,
-  getIdFieldInfo as coreGetIdFieldInfo,
   getPrimaryKeyConstraint as coreGetPrimaryKeyConstraint,
   type EntityIdentityKey,
-  getIdGenerator,
-  ID_GENERATOR_FACTORIES,
-  type IdFieldInfo,
-  type IdGenerator,
-  type IdGeneratorFactory,
   UNRESOLVED_ENTITY_ID,
   type UniqueConstraint,
 } from '@kuruwic/prisma-audit-core';
 
 import { createSchemaMetadataFromDMMF, type PrismaWithDMMF } from './schema-metadata.js';
-
-// Re-export core types and functions
-export type { IdGenerator, IdGeneratorFactory, IdFieldInfo };
-export { ID_GENERATOR_FACTORIES, getIdGenerator };
-
-/**
- * Get ID field information from Prisma DMMF
- */
-export const getIdFieldInfo = (Prisma: PrismaWithDMMF, modelName: string, idKey = 'id'): IdFieldInfo | undefined => {
-  const schemaMetadata = createSchemaMetadataFromDMMF(Prisma);
-  return coreGetIdFieldInfo(schemaMetadata, modelName, idKey);
-};
 
 /**
  * Generate missing IDs for entities in createMany data

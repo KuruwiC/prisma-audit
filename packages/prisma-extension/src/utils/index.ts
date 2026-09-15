@@ -10,22 +10,10 @@
 export { isCallerMutationError, runCallerMutation } from './caller-mutation-error.js';
 
 // Extension utilities
-export {
-  extractDeleteOperationEntityId,
-  isAuditableAction,
-  shouldAuditModel,
-  uncapitalizeFirst,
-} from './extension-utils.js';
+export { isAuditableAction, shouldAuditModel, uncapitalizeFirst } from './extension-utils.js';
 
 // ID generation and primary key utilities
-export {
-  buildEntityMap,
-  buildPKWhereClause,
-  ensureIds,
-  extractPrimaryKey,
-  findManyByPKs,
-  getPrimaryKeyFields,
-} from './id-generator.js';
+export { buildEntityMap, ensureIds, extractPrimaryKey, findManyByPKs, getPrimaryKeyFields } from './id-generator.js';
 
 // Nested-write selection injection
 export { injectNestedWriteSelection, projectToRequestedShape } from './include-injection.js';
@@ -34,4 +22,4 @@ export { injectNestedWriteSelection, projectToRequestedShape } from './include-i
 export { getModelAccessor } from './model-accessor.js';
 
 // Operation classification
-export { isBatchOperation, isSingleOperation, requiresBeforeState } from './operation-classifier.js';
+export { isBatchOperation, requiresBeforeState } from './operation-classifier.js';
