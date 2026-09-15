@@ -11,9 +11,8 @@ import { BATCH_TO_SINGULAR_ACTION } from '@kuruwic/prisma-audit-core';
 
 import type { ResolvedAggregateData } from '../audit-log-builder/index.js';
 import { createPrismaClientManager } from '../client-manager/index.js';
-import type { PrismaClientWithDynamicAccess } from '../internal-types.js';
 import type { AuditLogData, PrismaAction } from '../types.js';
-import { createSchemaMetadataFromDMMF, getPrisma } from '../utils/schema-metadata.js';
+import { createSchemaMetadataFromDMMF } from '../utils/schema-metadata.js';
 import {
   buildAggregateDataForEntity,
   enrichAggregateContexts,
@@ -132,14 +131,11 @@ const buildLogsForEntity = async (
   const entityContext = entityContexts[entityIndex] ?? null;
   const modelName = operation.model as string;
 
-  let relationFields: Set<string> | undefined;
-  try {
-    const Prisma = getPrisma(deps.basePrisma as PrismaClientWithDynamicAccess);
-    const metadata = createSchemaMetadataFromDMMF(Prisma);
-    relationFields = new Set(metadata.getRelationFields(modelName).map((f) => f.name));
-  } catch {
-    // Prisma namespace not available — fall back to heuristic relation detection
-  }
+  const relationFields = new Set(
+    createSchemaMetadataFromDMMF(deps.Prisma)
+      .getRelationFields(modelName)
+      .map((f) => f.name),
+  );
 
   return deps.buildAuditLog({
     entity: entity as Record<string, unknown>,

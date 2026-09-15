@@ -412,6 +412,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     redact,
     serialization,
     basePrisma: baseClient,
+    Prisma,
     contextEnricher,
   });
 
@@ -437,6 +438,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
       lifecycleStages: lifecycleStages as unknown as ReadonlyArray<(context: unknown) => Promise<unknown>>,
       writeAuditLogs,
       basePrisma: baseClient,
+      Prisma,
       provider,
       resolveAwaitWrite,
       // `executeAuditedOperation` (operation-executor.ts) rethrows the caller's own mutation

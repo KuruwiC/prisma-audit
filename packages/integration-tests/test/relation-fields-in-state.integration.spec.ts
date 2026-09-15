@@ -1,0 +1,110 @@
+/**
+ * Integration Test: relation fields stay out of audited entity state
+ *
+ * Relation fields a caller loads with `include` are part of the operation result, not
+ * of the entity's own columns, so they must not appear in the `before` / `after` state
+ * of the entity's audit log. Relation fields are identified from the `Prisma` namespace
+ * passed to `createAuditClient`.
+ *
+ * The client is built from the generated client module directly (never the database
+ * package entry), so the namespace reaches the extension only through the `Prisma` option.
+ */
+
+import { createAuditClient } from '@kuruwic/prisma-audit';
+import type { AuditContext } from '@kuruwic/prisma-audit-core';
+import { createAsyncLocalStorageProvider } from '@kuruwic/prisma-audit-core';
+import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
+
+const testActor: AuditContext = {
+  actor: { category: 'model', type: 'User', id: 'relation-fields-actor' },
+};
+
+const stateKeys = (state: unknown): string[] => (state !== null && typeof state === 'object' ? Object.keys(state) : []);
+
+describe('relation fields in audited entity state', () => {
+  let sharedDatabaseUrl: string;
+
+  beforeAll(async () => {
+    sharedDatabaseUrl = await getSharedDatabaseUrl();
+  });
+
+  const createClient = (databaseUrl: string) => {
+    const basePrisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
+    const provider = createAsyncLocalStorageProvider();
+    const prisma = createAuditClient(basePrisma, {
+      Prisma,
+      provider,
+      aggregateMapping: testAggregateMapping,
+      diffing: { excludeFields: ['createdAt'] },
+      security: { redact: { fields: [] } },
+    });
+    return { basePrisma, provider, prisma };
+  };
+
+  let scenario: ReturnType<typeof createClient>;
+
+  beforeEach(async () => {
+    scenario = createClient(sharedDatabaseUrl);
+    await scenario.basePrisma.auditLog.deleteMany();
+    await scenario.basePrisma.post.deleteMany();
+    await scenario.basePrisma.user.deleteMany();
+  });
+
+  afterAll(async () => {
+    await scenario?.basePrisma.$disconnect();
+  });
+
+  it('keeps an included to-many relation out of a single update log', async () => {
+    const { prisma, basePrisma, provider } = scenario;
+    const user = await basePrisma.user.create({
+      data: {
+        email: 'relation-fields-update@example.com',
+        name: 'Before Rename',
+        posts: { create: { title: 'Existing Post' } },
+      },
+    });
+
+    const updated = await provider.runAsync(testActor, async () =>
+      prisma.user.update({ where: { id: user.id }, data: { name: 'After Rename' }, include: { posts: true } }),
+    );
+    expect(updated.posts).toHaveLength(1);
+
+    const logs = await basePrisma.auditLog.findMany({
+      where: { entityType: 'User', entityId: user.id, action: 'update' },
+    });
+    expect(logs).toHaveLength(1);
+    const [log] = logs;
+    expect(stateKeys(log?.after)).toContain('name');
+    expect(stateKeys(log?.after)).not.toContain('posts');
+    expect(stateKeys(log?.before)).toContain('name');
+    expect(stateKeys(log?.before)).not.toContain('posts');
+  });
+
+  it('keeps an included to-one relation out of batch create logs', async () => {
+    const { prisma, basePrisma, provider } = scenario;
+    const user = await basePrisma.user.create({ data: { email: 'relation-fields-batch@example.com', name: 'Author' } });
+
+    const created = await provider.runAsync(testActor, async () =>
+      prisma.post.createManyAndReturn({
+        data: [
+          { title: 'Batch Post A', authorId: user.id },
+          { title: 'Batch Post B', authorId: user.id },
+        ],
+        include: { author: true },
+      }),
+    );
+    expect(created.map((post) => post.author.id)).toEqual([user.id, user.id]);
+
+    const createdIds = created.map((post) => post.id);
+    const logs = await basePrisma.auditLog.findMany({
+      where: { entityType: 'Post', entityId: { in: createdIds }, action: 'create' },
+    });
+    expect(new Set(logs.map((log) => log.entityId))).toEqual(new Set(createdIds));
+    for (const log of logs) {
+      expect(stateKeys(log.after)).toContain('title');
+      expect(stateKeys(log.after)).not.toContain('author');
+    }
+  });
+});

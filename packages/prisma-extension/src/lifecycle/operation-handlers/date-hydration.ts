@@ -19,16 +19,9 @@ import type { PrismaWithDMMF } from '../../utils/schema-metadata.js';
 const buildCreateWhereClause = (
   resultRecord: Record<string, unknown>,
   modelName: string,
-  Prisma?: PrismaWithDMMF,
+  Prisma: PrismaWithDMMF,
 ): Record<string, unknown> | null => {
-  let pkFields: string[] = ['id'];
-  if (Prisma) {
-    try {
-      pkFields = getPrimaryKeyFields(Prisma, modelName);
-    } catch {
-      // Model not in DMMF — fall back to ['id']
-    }
-  }
+  const pkFields = getPrimaryKeyFields(Prisma, modelName);
   const allPresent = pkFields.every((f) => f in resultRecord && resultRecord[f] != null);
   if (!allPresent) return null;
   return Object.fromEntries(pkFields.map((f) => [f, resultRecord[f]]));
@@ -43,6 +36,7 @@ const buildCreateWhereClause = (
  * @param result - Original query result (may have Date serialization issues)
  * @param operation - Operation context (model, action, args)
  * @param clientToUse - Prisma client for database access
+ * @param Prisma - Prisma namespace whose DMMF supplies the model's primary key fields
  * @returns Re-fetched result with proper Date objects, or original result if re-fetch fails
  *
  * @internal
@@ -52,7 +46,7 @@ export const refetchForDateHydration = async (
   result: unknown,
   operation: OperationContext,
   clientToUse: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
-  Prisma?: PrismaWithDMMF,
+  Prisma: PrismaWithDMMF,
 ): Promise<unknown> => {
   if (
     operation.action !== AUDIT_ACTION.CREATE &&

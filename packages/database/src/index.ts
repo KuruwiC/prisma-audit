@@ -13,10 +13,6 @@ import { Prisma, PrismaClient } from '../generated/client';
 // Explicitly export Prisma namespace (not covered by export *)
 export { Prisma };
 
-// Make Prisma namespace available globally for extension to use
-// biome-ignore lint/suspicious/noExplicitAny: Prisma namespace injection
-(globalThis as any).Prisma = Prisma;
-
 /**
  * Base Prisma Client (without audit extension)
  *

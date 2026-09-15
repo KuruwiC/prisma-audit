@@ -11,7 +11,7 @@ import type { AuditContext } from '@kuruwic/prisma-audit-core';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../internal-types.js';
 import type { AuditLogData, OperationContext } from '../../types.js';
 import { isCallerMutationError, runCallerMutation } from '../../utils/caller-mutation-error.js';
-import { getPrisma, type PrismaWithDMMF } from '../../utils/schema-metadata.js';
+import type { PrismaWithDMMF } from '../../utils/schema-metadata.js';
 import { runLifecyclePipeline } from '../pipeline.js';
 import type { FinalContext, InitialContext } from '../types.js';
 import { refetchForDateHydration } from './date-hydration.js';
@@ -24,6 +24,8 @@ export interface OperationExecutorDependencies {
   writeAuditLogs: (logs: AuditLogData[], baseClient: PrismaClientWithDynamicAccess) => Promise<void>;
   /** Base Prisma client for audit log writes */
   basePrisma: PrismaClientWithDynamicAccess;
+  /** Prisma namespace from the client options; its DMMF supplies primary key fields for date hydration */
+  Prisma: PrismaWithDMMF;
   /** Called when pipeline (fetch/enrich/build) fails, before rethrowing */
   onPipelineError?: (error: Error) => Promise<void>;
 }
@@ -96,13 +98,7 @@ export const executeAuditedOperation = async (
     );
   }
 
-  let prismaNamespace: PrismaWithDMMF | undefined;
-  try {
-    prismaNamespace = getPrisma(deps.basePrisma);
-  } catch {
-    // Prisma namespace not available — date hydration falls back to ['id']
-  }
-  const result = await refetchForDateHydration(finalContext.result, operation, clientToUse, prismaNamespace);
+  const result = await refetchForDateHydration(finalContext.result, operation, clientToUse, deps.Prisma);
 
   await deps.writeAuditLogs(finalContext.logs as AuditLogData[], deps.basePrisma);
 

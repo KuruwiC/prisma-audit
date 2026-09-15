@@ -51,7 +51,7 @@ function createMockDeps(
   entityConfig: LoggableEntity | undefined,
 ): Pick<
   StageDependencies,
-  'buildAuditLog' | 'aggregateConfig' | 'excludeFields' | 'basePrisma' | 'redact' | 'serialization'
+  'buildAuditLog' | 'aggregateConfig' | 'excludeFields' | 'basePrisma' | 'Prisma' | 'redact' | 'serialization'
 > {
   const mockBuildAuditLog = vi.fn().mockImplementation(({ aggregateData }: BuildAuditLogInput) => {
     const roots = aggregateData?.aggregateRoots ?? [];
@@ -72,6 +72,7 @@ function createMockDeps(
     buildAuditLog: mockBuildAuditLog,
     aggregateConfig: mockAggregateConfig,
     excludeFields: [],
+    Prisma: {},
     basePrisma: {} as unknown as PrismaClientWithDynamicAccess,
     redact: undefined,
     serialization: undefined,

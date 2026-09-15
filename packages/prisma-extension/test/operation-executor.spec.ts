@@ -34,6 +34,7 @@ describe('executeAuditedOperation phase-aware error dispatch', () => {
       lifecycleStages: [failingStage],
       writeAuditLogs: vi.fn(),
       basePrisma: {} as never,
+      Prisma: {},
       onPipelineError,
     };
 
@@ -61,6 +62,7 @@ describe('executeAuditedOperation phase-aware error dispatch', () => {
       lifecycleStages: [successStage],
       writeAuditLogs: vi.fn().mockRejectedValue(writeError),
       basePrisma: {} as never,
+      Prisma: {},
       onPipelineError,
     };
 
@@ -84,6 +86,7 @@ describe('executeAuditedOperation phase-aware error dispatch', () => {
       lifecycleStages: [successStage],
       writeAuditLogs: vi.fn(),
       basePrisma: {} as never,
+      Prisma: {},
       onPipelineError,
     };
 
@@ -105,6 +108,7 @@ describe('executeAuditedOperation phase-aware error dispatch', () => {
       lifecycleStages: [failingStage],
       writeAuditLogs: vi.fn(),
       basePrisma: {} as never,
+      Prisma: {},
     };
 
     await expect(
@@ -122,6 +126,7 @@ describe('executeAuditedOperation phase-aware error dispatch', () => {
       lifecycleStages: [failingStage],
       writeAuditLogs: vi.fn(),
       basePrisma: {} as never,
+      Prisma: {},
       // no onPipelineError
     };
 
@@ -146,6 +151,7 @@ describe('executeAuditedOperation phase-aware error dispatch', () => {
       lifecycleStages: [failingStage],
       writeAuditLogs: vi.fn(),
       basePrisma: {} as never,
+      Prisma: {},
       onPipelineError,
     };
 

@@ -20,7 +20,7 @@ import type { BuildAuditLogInput } from '../audit-log-builder/index.js';
 import { createPrismaClientManager } from '../client-manager/index.js';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../internal-types.js';
 import type { AuditLogData, PrismaAction } from '../types.js';
-import { createSchemaMetadataFromDMMF, getPrisma } from '../utils/schema-metadata.js';
+import { createSchemaMetadataFromDMMF, type PrismaWithDMMF } from '../utils/schema-metadata.js';
 import {
   buildAggregateDataForEntity,
   enrichAggregateContexts,
@@ -237,6 +237,13 @@ export interface StageDependencies {
   basePrisma: PrismaClientWithDynamicAccess;
 
   /**
+   * Prisma namespace passed in the client options
+   *
+   * Its DMMF identifies relation fields, which are removed from before/after state.
+   */
+  Prisma: PrismaWithDMMF;
+
+  /**
    * Global context enricher configuration
    *
    * Configuration for actor, entity, and aggregate context enrichment.
@@ -442,7 +449,7 @@ const buildMainAuditLogs = async (
   context: EnrichedContext,
   deps: Pick<
     StageDependencies,
-    'buildAuditLog' | 'aggregateConfig' | 'excludeFields' | 'redact' | 'serialization' | 'basePrisma'
+    'buildAuditLog' | 'aggregateConfig' | 'excludeFields' | 'redact' | 'serialization' | 'basePrisma' | 'Prisma'
   >,
 ): Promise<AuditLogData[]> => {
   const manager = createPrismaClientManager(deps.basePrisma);
@@ -501,14 +508,11 @@ const buildMainAuditLogs = async (
     aggregateContextLookup,
   );
 
-  let relationFields: Set<string> | undefined;
-  try {
-    const Prisma = getPrisma(deps.basePrisma as PrismaClientWithDynamicAccess);
-    const metadata = createSchemaMetadataFromDMMF(Prisma);
-    relationFields = new Set(metadata.getRelationFields(modelName).map((f) => f.name));
-  } catch {
-    // Prisma namespace not available — fall back to heuristic relation detection
-  }
+  const relationFields = new Set(
+    createSchemaMetadataFromDMMF(deps.Prisma)
+      .getRelationFields(modelName)
+      .map((f) => f.name),
+  );
 
   return deps.buildAuditLog({
     entity,
@@ -606,6 +610,7 @@ export const createBuildLogsStage = (
     | 'redact'
     | 'serialization'
     | 'basePrisma'
+    | 'Prisma'
   >,
 ): ((context: EnrichedContext) => Promise<FinalContext>) => {
   return async (context: EnrichedContext): Promise<FinalContext> => {

@@ -76,12 +76,13 @@ describe('createBuildLogsStage', () => {
 
     const deps: Pick<
       StageDependencies,
-      'buildAuditLog' | 'buildNestedAuditLogs' | 'aggregateConfig' | 'excludeFields' | 'basePrisma'
+      'buildAuditLog' | 'buildNestedAuditLogs' | 'aggregateConfig' | 'excludeFields' | 'basePrisma' | 'Prisma'
     > = {
       buildAuditLog: mockBuildAuditLog,
       buildNestedAuditLogs: mockBuildNestedAuditLogs,
       aggregateConfig: mockAggregateConfig,
       excludeFields: [],
+      Prisma: {},
       basePrisma: {} as unknown as PrismaClientWithDynamicAccess,
     };
 
@@ -209,12 +210,13 @@ describe('createBuildLogsStage', () => {
 
     const deps: Pick<
       StageDependencies,
-      'buildAuditLog' | 'buildNestedAuditLogs' | 'aggregateConfig' | 'excludeFields' | 'basePrisma'
+      'buildAuditLog' | 'buildNestedAuditLogs' | 'aggregateConfig' | 'excludeFields' | 'basePrisma' | 'Prisma'
     > = {
       buildAuditLog: mockBuildAuditLog,
       buildNestedAuditLogs: mockBuildNestedAuditLogs,
       aggregateConfig: mockAggregateConfig,
       excludeFields: [],
+      Prisma: {},
       basePrisma: {} as unknown as PrismaClientWithDynamicAccess,
     };
 
@@ -295,12 +297,13 @@ describe('createBuildLogsStage', () => {
 
     const deps: Pick<
       StageDependencies,
-      'buildAuditLog' | 'buildNestedAuditLogs' | 'aggregateConfig' | 'excludeFields' | 'basePrisma'
+      'buildAuditLog' | 'buildNestedAuditLogs' | 'aggregateConfig' | 'excludeFields' | 'basePrisma' | 'Prisma'
     > = {
       buildAuditLog: mockBuildAuditLog,
       buildNestedAuditLogs: mockBuildNestedAuditLogs,
       aggregateConfig: mockAggregateConfig,
       excludeFields: [],
+      Prisma: {},
       basePrisma: {} as unknown as PrismaClientWithDynamicAccess,
     };
 
@@ -354,12 +357,13 @@ describe('createBuildLogsStage', () => {
 
     const deps: Pick<
       StageDependencies,
-      'buildAuditLog' | 'buildNestedAuditLogs' | 'aggregateConfig' | 'excludeFields' | 'basePrisma'
+      'buildAuditLog' | 'buildNestedAuditLogs' | 'aggregateConfig' | 'excludeFields' | 'basePrisma' | 'Prisma'
     > = {
       buildAuditLog: mockBuildAuditLog,
       buildNestedAuditLogs: mockBuildNestedAuditLogs,
       aggregateConfig: mockAggregateConfig,
       excludeFields: [],
+      Prisma: {},
       basePrisma: {} as unknown as PrismaClientWithDynamicAccess,
     };
 
@@ -438,12 +442,13 @@ describe('createBuildLogsStage', () => {
 
     const deps: Pick<
       StageDependencies,
-      'buildAuditLog' | 'buildNestedAuditLogs' | 'aggregateConfig' | 'excludeFields' | 'basePrisma'
+      'buildAuditLog' | 'buildNestedAuditLogs' | 'aggregateConfig' | 'excludeFields' | 'basePrisma' | 'Prisma'
     > = {
       buildAuditLog: mockBuildAuditLog,
       buildNestedAuditLogs: mockBuildNestedAuditLogs,
       aggregateConfig: mockAggregateConfig,
       excludeFields: [],
+      Prisma: {},
       basePrisma: {} as unknown as PrismaClientWithDynamicAccess,
     };
 
@@ -495,7 +500,7 @@ describe('createBuildLogsStage', () => {
 
       const deps: Pick<
         StageDependencies,
-        'buildAuditLog' | 'buildNestedAuditLogs' | 'aggregateConfig' | 'excludeFields' | 'basePrisma'
+        'buildAuditLog' | 'buildNestedAuditLogs' | 'aggregateConfig' | 'excludeFields' | 'basePrisma' | 'Prisma'
       > = {
         buildAuditLog: vi.fn(),
         buildNestedAuditLogs: mockBuildNestedAuditLogs,
@@ -508,6 +513,7 @@ describe('createBuildLogsStage', () => {
         },
         excludeFields: [],
         basePrisma: clientStub,
+        Prisma: {},
       };
 
       await createBuildLogsStage(deps)(enrichedContext);
@@ -582,13 +588,14 @@ describe('createBuildLogsStage', () => {
 
     const deps: Pick<
       StageDependencies,
-      'buildAuditLog' | 'buildNestedAuditLogs' | 'aggregateConfig' | 'excludeFields' | 'basePrisma'
+      'buildAuditLog' | 'buildNestedAuditLogs' | 'aggregateConfig' | 'excludeFields' | 'basePrisma' | 'Prisma'
     > = {
       buildAuditLog: mockBuildAuditLog,
       buildNestedAuditLogs: mockBuildNestedAuditLogs,
       aggregateConfig: mockAggregateConfig,
       excludeFields: [],
       basePrisma: clientStub,
+      Prisma: {},
     };
 
     const stage = createBuildLogsStage(deps);
