@@ -142,13 +142,11 @@ export const collectDeleteRecords = async (
 
   const pathMap = nestedPreFetchResults?.get(nestedOp.path);
 
-  // Use pre-fetched results when available
   if (pathMap && pathMap.size > 0) {
     const collected: CollectedNestedRecord[] = [];
 
     for (const [entityId, preFetchResult] of pathMap) {
       const beforeState = preFetchResult.before;
-      // Use beforeState as entity when available, otherwise build from entityId + pkFields
       const entity = beforeState ?? buildMinimalEntity(entityId, pkFields);
 
       if (entity === null) {

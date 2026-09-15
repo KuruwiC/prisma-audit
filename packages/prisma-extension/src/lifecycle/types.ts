@@ -128,10 +128,9 @@ export interface BatchInitialContext {
  * Enriched context for batch operations after enrichment stage
  *
  * Includes enriched contextual information for actor and all entities. Enrichment is
- * performed in batch to optimize database queries.
- *
- * NOTE: aggregateContexts is no longer enriched at this stage. It is now enriched
- * per aggregate root inside buildAuditLog for aggregate-aware context.
+ * performed in batch to optimize database queries. Aggregate contexts are not part of
+ * this stage: they are enriched per aggregate root inside buildAuditLog for
+ * aggregate-aware context.
  */
 export interface BatchEnrichedContext extends BatchInitialContext {
   /** Enriched actor context (role, department, email) */
