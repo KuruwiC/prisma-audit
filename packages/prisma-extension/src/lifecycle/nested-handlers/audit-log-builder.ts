@@ -34,7 +34,7 @@ import type {
   TransactionalPrismaClient,
 } from '../../internal-types.js';
 import type { AuditLogData } from '../../types.js';
-import { createSchemaMetadataFromDMMF } from '../../utils/nested-operations.js';
+import { createSchemaMetadataFromDMMF } from '../../utils/schema-metadata.js';
 import {
   buildAggregateDataForEntity,
   enrichAggregateContexts,

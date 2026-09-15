@@ -26,7 +26,7 @@ import type {
   TransactionalPrismaClient,
 } from '../../internal-types.js';
 import type { AuditErrorObserver } from '../../types.js';
-import { createSchemaMetadataFromDMMF } from '../../utils/nested-operations.js';
+import { createSchemaMetadataFromDMMF } from '../../utils/schema-metadata.js';
 import { getPreFetchModelClient, type PreFetchModelClient } from './model-client.js';
 import { preFetchOneToManyRelation, resolveToManyRelationScope } from './one-to-many-fetcher.js';
 import { preFetchOneToOneRelation, resolveToOneRelationLink } from './one-to-one-fetcher.js';
