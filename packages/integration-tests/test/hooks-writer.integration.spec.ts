@@ -1,5 +1,5 @@
 import type { AggregateMapping, AuditLogData } from '@kuruwic/prisma-audit';
-import { createAuditClient, defineEntity, foreignKey, to } from '@kuruwic/prisma-audit';
+import { createAuditClient, defineEntity, flushAllPendingWrites, foreignKey, to } from '@kuruwic/prisma-audit';
 import type { AuditContext, AuditContextProvider } from '@kuruwic/prisma-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/prisma-audit-core';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
@@ -393,6 +393,32 @@ describe('hooks.writer Coverage', () => {
 
       // Verify: hooks.writer was called (deferred writes are executed after commit)
       expect(asyncContext.writerSpy.callCount).toBeGreaterThan(0);
+    });
+
+    it('should not call hooks.writer or persist audit logs when a deferred write is queued inside a transaction that then throws', async () => {
+      const transactionPromise = asyncContext.provider.runAsync(testActor, async () => {
+        return asyncContext.prisma.$transaction(async (tx: typeof asyncContext.prisma) => {
+          await tx.user.create({
+            data: {
+              email: 'rollback-deferred@example.com',
+              name: 'User',
+              password: 'secret123',
+            },
+          });
+
+          throw new Error('Rollback test');
+        });
+      });
+
+      await expect(transactionPromise).rejects.toThrow('Rollback test');
+
+      // Give any deferred write a chance to run before asserting it did not.
+      await flushAllPendingWrites();
+
+      expect(asyncContext.writerSpy.callCount).toBe(0);
+
+      const auditLogs = await asyncContext.prisma.auditLog.findMany();
+      expect(auditLogs).toHaveLength(0);
     });
   });
 
