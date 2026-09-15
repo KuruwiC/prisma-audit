@@ -25,9 +25,8 @@ import type {
 } from '../../internal-types.js';
 import type { AuditErrorObserver } from '../../types.js';
 import { unwrapCompoundWhere } from '../../utils/compound-where.js';
-import { getPrimaryKeyFields } from '../../utils/id-generator.js';
+import { getPrimaryKeyConstraint } from '../../utils/id-generator.js';
 import { createSchemaMetadataFromDMMF } from '../../utils/nested-operations.js';
-import { getUniqueConstraints } from '../../utils/schema-metadata.js';
 import { getPreFetchModelClient, type PreFetchModelClient } from './model-client.js';
 import { preFetchOneToManyRelation } from './one-to-many-fetcher.js';
 import { preFetchOneToOneRelation, resolveToOneRelationLink } from './one-to-one-fetcher.js';
@@ -273,33 +272,18 @@ export const preFetchNestedRecordsBeforeOperation = async (
   const topLevelModel = dmmf.datamodel.models.find((m) => m.name === modelName);
   const topLevelModelClient = getPreFetchModelClient(prismaClient, modelName);
 
-  const pkFieldsCache = new Map<string, string[]>();
-  const resolvePkFields = (relatedModel: string): string[] | undefined => {
-    if (pkFieldsCache.has(relatedModel)) return pkFieldsCache.get(relatedModel);
+  // `getPrimaryKeyConstraint` throws when a model has no primary key; cache successes only, so a
+  // model without one is re-checked on every lookup rather than treated as permanently absent.
+  const pkConstraintCache = new Map<string, UniqueConstraint>();
+  const resolvePkConstraint = (relatedModel: string): UniqueConstraint | undefined => {
+    if (pkConstraintCache.has(relatedModel)) return pkConstraintCache.get(relatedModel);
     try {
-      const fields = getPrimaryKeyFields(Prisma, relatedModel);
-      pkFieldsCache.set(relatedModel, fields);
-      return fields;
+      const constraint = getPrimaryKeyConstraint(Prisma, relatedModel);
+      pkConstraintCache.set(relatedModel, constraint);
+      return constraint;
     } catch {
       return undefined;
     }
-  };
-
-  // Only needed to unwrap a composite-key `findUnique` WHERE (`{ a_b: { a, b } }`) back into
-  // its scalar fields — `getPrimaryKeyFields` only has the field list, not the DMMF-declared
-  // compound-unique key name (which differs from `fields.join('_')` when `@@id([...], name:
-  // "custom")` is used). `getUniqueConstraints` reads that name straight off the DMMF.
-  const pkNameCache = new Map<string, string | null | undefined>();
-  const resolvePkName = (relatedModel: string): string | null | undefined => {
-    if (pkNameCache.has(relatedModel)) return pkNameCache.get(relatedModel);
-    const primaryKey = getUniqueConstraints(Prisma, relatedModel).find((c) => c.type === 'primaryKey');
-    pkNameCache.set(relatedModel, primaryKey?.name);
-    return primaryKey?.name;
-  };
-  const resolvePkConstraint = (relatedModel: string): UniqueConstraint | undefined => {
-    const fields = resolvePkFields(relatedModel);
-    if (!fields) return undefined;
-    return { type: 'primaryKey', fields, name: fields.length > 1 ? resolvePkName(relatedModel) : undefined };
   };
 
   for (const nestedOp of sortedOperations) {
