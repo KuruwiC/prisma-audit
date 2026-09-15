@@ -86,17 +86,17 @@ export const storePreFetchResult = (
  *
  * @example
  * ```typescript
- * extractEntityIdOrDefault({ id: 123, name: 'test' });
+ * extractEntityIdOrUnresolved({ id: 123, name: 'test' });
  * // Returns: '123'
  *
- * extractEntityIdOrDefault({ tenantId: 'a', userId: '1' }, ['tenantId', 'userId']);
+ * extractEntityIdOrUnresolved({ tenantId: 'a', userId: '1' }, ['tenantId', 'userId']);
  * // Returns: '["a","1"]'
  *
- * extractEntityIdOrDefault({ name: 'test' });
+ * extractEntityIdOrUnresolved({ name: 'test' });
  * // Returns: UNRESOLVED_ENTITY_ID
  * ```
  */
-export const extractEntityIdOrDefault = (record: unknown, pkFields?: string[]): string => {
+export const extractEntityIdOrUnresolved = (record: unknown, pkFields?: string[]): string => {
   if (!record || typeof record !== 'object') {
     return UNRESOLVED_ENTITY_ID;
   }
@@ -121,13 +121,13 @@ export const extractEntityId = (
   pkConstraint?: UniqueConstraint,
 ): string => {
   if (beforeRecord) {
-    const id = extractEntityIdOrDefault(beforeRecord, pkConstraint?.fields);
+    const id = extractEntityIdOrUnresolved(beforeRecord, pkConstraint?.fields);
     if (id !== UNRESOLVED_ENTITY_ID) return id;
   }
 
   if (whereClause) {
     const unwrapped = unwrapCompoundWhere(whereClause, pkConstraint);
-    const id = extractEntityIdOrDefault(unwrapped, pkConstraint?.fields);
+    const id = extractEntityIdOrUnresolved(unwrapped, pkConstraint?.fields);
     if (id !== UNRESOLVED_ENTITY_ID) return id;
   }
 

@@ -11,7 +11,7 @@
 import { type NestedPreFetchResults, preFetchLog } from '@kuruwic/prisma-audit-core';
 import type { DMMFField, DMMFModel } from '../../internal-types.js';
 import type { PreFetchModelClient, PreFetchRecord } from './model-client.js';
-import { extractEntityIdOrDefault } from './pre-fetch-result-store.js';
+import { extractEntityIdOrUnresolved } from './pre-fetch-result-store.js';
 
 /** The related row holds the parent row's `parentFields[i]` value in `relatedFields[i]`. */
 export interface ToOneRelationLink {
@@ -152,7 +152,7 @@ export const preFetchOneToOneRelation = async (
     preFetchLog('1:1 related where: %O', relatedWhere);
 
     const beforeRecord = await relatedModelClient.findFirst({ where: relatedWhere });
-    results.push({ entityId: extractEntityIdOrDefault(beforeRecord, pkFields), beforeRecord });
+    results.push({ entityId: extractEntityIdOrUnresolved(beforeRecord, pkFields), beforeRecord });
   }
 
   return results;
