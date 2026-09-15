@@ -19,7 +19,6 @@ export type {
   AuditContextProvider,
   EntityId,
   Result,
-  TraceId,
   ValidationError,
 } from '@kuruwic/prisma-audit-core';
 

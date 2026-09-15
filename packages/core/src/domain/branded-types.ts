@@ -25,10 +25,8 @@ export type ActorId = Brand<string, 'ActorId'>;
 export type EntityId = Brand<string, 'EntityId'>;
 /** Aggregate identifier */
 export type AggregateId = Brand<string, 'AggregateId'>;
-/** Trace identifier */
-export type TraceId = Brand<string, 'TraceId'>;
 /** Union type of all branded ID types */
-export type AnyBrandedId = ActorId | EntityId | AggregateId | TraceId;
+export type AnyBrandedId = ActorId | EntityId | AggregateId;
 
 /** Validation error thrown when ID creation fails */
 export class IdValidationError extends Error {
@@ -84,12 +82,6 @@ export const createAggregateId = (id: string): AggregateId => {
   return id as AggregateId;
 };
 
-/** Creates a validated TraceId */
-export const createTraceId = (id: string): TraceId => {
-  validateNonEmptyString(id, 'TraceId');
-  return id as TraceId;
-};
-
 /** Type guard for ActorId */
 export const isActorId = (value: unknown): value is ActorId => {
   return typeof value === 'string' && isNonEmptyString(value);
@@ -100,10 +92,6 @@ export const isEntityId = (value: unknown): value is EntityId => {
 };
 /** Type guard for AggregateId */
 export const isAggregateId = (value: unknown): value is AggregateId => {
-  return typeof value === 'string' && isNonEmptyString(value);
-};
-/** Type guard for TraceId */
-export const isTraceId = (value: unknown): value is TraceId => {
   return typeof value === 'string' && isNonEmptyString(value);
 };
 

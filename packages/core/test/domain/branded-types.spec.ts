@@ -8,12 +8,10 @@ import {
   createActorId,
   createAggregateId,
   createEntityId,
-  createTraceId,
   IdValidationError,
   isActorId,
   isAggregateId,
   isEntityId,
-  isTraceId,
   unwrapId,
 } from '../../src/domain/branded-types.js';
 
@@ -52,7 +50,6 @@ describe('Branded Types', () => {
   describe.each([
     ['EntityId', createEntityId, 'post-456'],
     ['AggregateId', createAggregateId, 'order-789'],
-    ['TraceId', createTraceId, 'trace-abc'],
   ] as const)('%s constructor', (typeName, createFn, validValue) => {
     it(`should create a valid ${typeName}`, () => {
       const id = createFn(validValue);
@@ -98,7 +95,6 @@ describe('Branded Types', () => {
     describe.each([
       ['isEntityId', isEntityId, 'post-456'],
       ['isAggregateId', isAggregateId, 'order-789'],
-      ['isTraceId', isTraceId, 'trace-abc'],
     ] as const)('%s type guard', (_guardName, guardFn, validValue) => {
       it('should return true for non-empty strings', () => {
         expect(guardFn(validValue)).toBe(true);
@@ -118,7 +114,6 @@ describe('Branded Types', () => {
       ['ActorId', createActorId('user-123'), 'user-123'],
       ['EntityId', createEntityId('post-456'), 'post-456'],
       ['AggregateId', createAggregateId('order-789'), 'order-789'],
-      ['TraceId', createTraceId('trace-abc'), 'trace-abc'],
     ] as const)('should unwrap %s to string', (_, brandedId, expectedValue) => {
       const unwrapped = unwrapId(brandedId);
       expect(unwrapped).toBe(expectedValue);

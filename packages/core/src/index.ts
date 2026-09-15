@@ -40,12 +40,7 @@ export { createAsyncLocalStorageProvider } from './context-provider.js';
 // Domain - Audit Log Types
 export type { AuditLogData, AuditLogInput } from './domain/audit-log-types.js';
 // Domain - Branded Types
-export type {
-  ActorId,
-  AggregateId,
-  EntityId,
-  TraceId,
-} from './domain/branded-types.js';
+export type { ActorId, AggregateId, EntityId } from './domain/branded-types.js';
 export {
   createActorId,
   createAggregateId,
