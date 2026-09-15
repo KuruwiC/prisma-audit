@@ -6,7 +6,7 @@
  * Enrichment and audit log building are handled by the batch pipeline in audit-log-builder.ts.
  */
 
-import { AUDIT_ACTION, nestedLog } from '@kuruwic/prisma-audit-core';
+import { AUDIT_ACTION, nestedLog, type UniqueConstraint } from '@kuruwic/prisma-audit-core';
 
 import { extractDeleteOperationEntityId } from '../../utils/extension-utils.js';
 import { PRE_FETCH_DEFAULT_KEY } from '../pre-fetch/pre-fetch-result-store.js';
@@ -125,15 +125,21 @@ export type NestedPreFetchResults = Map<string, Map<string, { before: Record<str
  * WHERE names the PK fields directly (e.g. `{ id: 'x' }`) still resolves an entityId and
  * follows the normal fallback path.
  *
+ * @param pkConstraint - The deleted model's primary key (`getPrimaryKeyConstraint`). Its
+ *   fields rebuild an entity from a serialized entityId; the whole constraint, including its
+ *   declared name, is what the fallback unwraps a compound-unique WHERE clause with.
+ *   Defaults to a single `id` field.
  * @returns Collected records ready for batch enrichment and audit log building
  */
 export const collectDeleteRecords = async (
   nestedOp: NestedOperationInfo,
   nestedPreFetchResults: NestedPreFetchResults | undefined,
-  pkFields?: string[],
+  pkConstraint?: UniqueConstraint,
   onUnresolvedDeleteEntityId?: UnresolvedDeleteEntityIdReporter,
 ): Promise<CollectedNestedRecord[]> => {
   nestedLog('delete operation detected, collecting targets');
+
+  const pkFields = pkConstraint?.fields;
 
   const pathMap = nestedPreFetchResults?.get(nestedOp.path);
 
@@ -172,7 +178,7 @@ export const collectDeleteRecords = async (
   // Fallback: extract ID from operation data when prefetch is unavailable
   nestedLog('no pre-fetch results for path=%s, falling back to operation data', nestedOp.path);
 
-  const entityId = extractDeleteOperationEntityId(nestedOp.data, pkFields);
+  const entityId = extractDeleteOperationEntityId(nestedOp.data, pkConstraint);
   if (!entityId) {
     if (nestedOp.operation === 'deleteMany') {
       // Expected for a filter WHERE — see the `deleteMany` exception in the JSDoc above.

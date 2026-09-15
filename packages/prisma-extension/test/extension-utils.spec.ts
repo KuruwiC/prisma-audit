@@ -3,12 +3,14 @@
  *
  * Focus: composite-key entityId extraction on the fallback (no-pre-fetch) path.
  * `extractDeleteOperationEntityId` reuses `unwrapCompoundWhere` (utils/compound-where.ts)
- * to read Prisma's compound-unique WHERE shape (`{ postId_userId: { postId, userId } }`),
- * so a composite-key nested delete still resolves an identity from the primary-key
- * fields named in the WHERE clause even when `nestedOperations.delete.fetchBeforeOperation`
- * is `false` and no pre-fetched before-state is available.
+ * to read Prisma's compound-unique WHERE shape (`{ postId_userId: { postId, userId } }`,
+ * or `{ <name>: { ... } }` for a key declared with an explicit name), so a composite-key
+ * nested delete still resolves an identity from the primary-key fields named in the WHERE
+ * clause even when `nestedOperations.delete.fetchBeforeOperation` is `false` and no
+ * pre-fetched before-state is available.
  */
 
+import type { UniqueConstraint } from '@kuruwic/prisma-audit-core';
 import { describe, expect, it } from 'vitest';
 import { extractDeleteOperationEntityId } from '../src/utils/extension-utils.js';
 
@@ -28,37 +30,47 @@ describe('extractDeleteOperationEntityId', () => {
   });
 
   describe('composite primary key — Prisma compound-unique WHERE shape', () => {
-    const pkFields = ['postId', 'userId'];
+    const pkConstraint: UniqueConstraint = { type: 'primaryKey', fields: ['postId', 'userId'] };
 
     it('unwraps the compound-unique wrapper passed directly (nested delete data shape) and extracts the composite entityId', () => {
-      // This is exactly the shape `detectNestedDeletes` (core) hands `collectDeleteRecords`
+      // This is exactly the shape the nested-operation detector hands `collectDeleteRecords`
       // for `post.update({ data: { postLikes: { delete: { postId_userId: { postId, userId } } } } })`
       // when pre-fetch is skipped (`fetchBeforeOperation: false`).
       const data = { postId_userId: { postId: 'post-1', userId: 'user-1' } };
 
-      expect(extractDeleteOperationEntityId(data, pkFields)).toBe(JSON.stringify(['post-1', 'user-1']));
+      expect(extractDeleteOperationEntityId(data, pkConstraint)).toBe(JSON.stringify(['post-1', 'user-1']));
     });
 
     it('unwraps the compound-unique wrapper nested under where', () => {
       const data = { where: { postId_userId: { postId: 'post-2', userId: 'user-2' } } };
 
-      expect(extractDeleteOperationEntityId(data, pkFields)).toBe(JSON.stringify(['post-2', 'user-2']));
+      expect(extractDeleteOperationEntityId(data, pkConstraint)).toBe(JSON.stringify(['post-2', 'user-2']));
     });
 
     it('still returns undefined when the WHERE names neither the compound key nor the individual PK fields', () => {
       const data = { note: 'not a valid unique where for this model' };
 
-      expect(extractDeleteOperationEntityId(data, pkFields)).toBeUndefined();
+      expect(extractDeleteOperationEntityId(data, pkConstraint)).toBeUndefined();
+    });
+  });
+
+  describe('composite primary key with an explicit name (`@@id([...], name: "bookmarkKey")`)', () => {
+    const namedPkConstraint: UniqueConstraint = {
+      type: 'primaryKey',
+      fields: ['postId', 'userId'],
+      name: 'bookmarkKey',
+    };
+
+    it('unwraps the wrapper keyed by the declared name and extracts the composite entityId', () => {
+      const data = { bookmarkKey: { postId: 'post-3', userId: 'user-3' } };
+
+      expect(extractDeleteOperationEntityId(data, namedPkConstraint)).toBe(JSON.stringify(['post-3', 'user-3']));
     });
 
-    it('an explicitly-named compound key (not pkFields.join("_")) stays unsupported on this fallback path', () => {
-      // `extractDeleteOperationEntityId` has only `pkFields`, not the constraint's explicit
-      // `name`, so it unwraps only Prisma's default compound-key name (`pkFields.join('_')`).
-      // A WHERE clause under a `@@id([...], name: "custom")` key is left unwrapped, so no PK
-      // fields are found directly on it.
-      const data = { customCompoundKeyName: { postId: 'post-3', userId: 'user-3' } };
+    it('unwraps the wrapper keyed by the declared name nested under where', () => {
+      const data = { where: { bookmarkKey: { postId: 'post-4', userId: 'user-4' } } };
 
-      expect(extractDeleteOperationEntityId(data, pkFields)).toBeUndefined();
+      expect(extractDeleteOperationEntityId(data, namedPkConstraint)).toBe(JSON.stringify(['post-4', 'user-4']));
     });
   });
 });

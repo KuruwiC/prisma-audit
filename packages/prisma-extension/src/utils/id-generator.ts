@@ -15,6 +15,7 @@ import {
   type IdFieldInfo,
   type IdGenerator,
   type IdGeneratorFactory,
+  type UniqueConstraint,
 } from '@kuruwic/prisma-audit-core';
 
 import { createSchemaMetadataFromDMMF, type PrismaWithDMMF } from './schema-metadata.js';
@@ -69,13 +70,16 @@ export const ensureIds = <T extends Record<string, unknown>>(
 const PK_CHUNK_SIZE = 1000;
 
 /**
- * Get primary key field names for a model from DMMF.
+ * Get a model's primary key from DMMF: its fields and, for a composite key declared as
+ * `@@id([a, b], name: "custom")`, its name. The name is what Prisma uses as the
+ * compound-unique WHERE key (`{ custom: { a, b } }`); without one, Prisma's default
+ * `fields.join('_')` applies.
  *
  * Priority: @@id composite key → @id scalar field → error
  *
  * @throws Error if model has no primary key
  */
-export const getPrimaryKeyFields = (Prisma: PrismaWithDMMF, modelName: string): string[] => {
+export const getPrimaryKeyConstraint = (Prisma: PrismaWithDMMF, modelName: string): UniqueConstraint => {
   const dmmf = Prisma.dmmf;
   if (!dmmf?.datamodel?.models) {
     throw new Error(`[@prisma-audit] DMMF not available, cannot determine primary key for ${modelName}`);
@@ -88,13 +92,13 @@ export const getPrimaryKeyFields = (Prisma: PrismaWithDMMF, modelName: string): 
 
   // @@id composite key takes precedence
   if (model.primaryKey?.fields && model.primaryKey.fields.length > 0) {
-    return model.primaryKey.fields;
+    return { type: 'primaryKey', fields: model.primaryKey.fields, name: model.primaryKey.name };
   }
 
   // @id scalar field
   const idField = model.fields.find((f) => f.isId === true);
   if (idField) {
-    return [idField.name];
+    return { type: 'primaryKey', fields: [idField.name] };
   }
 
   throw new Error(
@@ -102,6 +106,14 @@ export const getPrimaryKeyFields = (Prisma: PrismaWithDMMF, modelName: string): 
       'Batch audit operations require a primary key for before/after state matching.',
   );
 };
+
+/**
+ * Get primary key field names for a model from DMMF (the fields of `getPrimaryKeyConstraint`).
+ *
+ * @throws Error if model has no primary key
+ */
+export const getPrimaryKeyFields = (Prisma: PrismaWithDMMF, modelName: string): string[] =>
+  getPrimaryKeyConstraint(Prisma, modelName).fields;
 
 /**
  * Extract a stable string key from an entity's primary key fields.

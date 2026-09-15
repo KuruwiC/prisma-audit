@@ -61,13 +61,14 @@ export const isAuditableAction = (operation: string): operation is PrismaAction 
  *
  * Handles direct ID format (`{ id: '123' }`), WHERE clause format
  * (`{ where: { id: '456' } }`), and — for a composite primary key — Prisma's
- * compound-unique shape (`{ postId_userId: { postId, userId } }`, directly or under
- * `where`), unwrapped with the same `unwrapCompoundWhere` the pre-fetch path uses. Only
- * Prisma's default compound-key name (`pkFields.join('_')`) is recognized: this function
- * receives `pkFields`, not the constraint's explicit `name`, so a key declared as
- * `@@id([a, b], name: "custom")` is not unwrapped on this fallback path.
+ * compound-unique shape (`{ postId_userId: { postId, userId } }`, or `{ custom: { ... } }`
+ * for a key declared as `@@id([a, b], name: "custom")`, directly or under `where`),
+ * unwrapped with the same `unwrapCompoundWhere` the pre-fetch path uses.
  *
  * @param data - The delete operation data
+ * @param pkConstraint - The deleted model's primary key (`getPrimaryKeyConstraint`): its
+ *   fields make up the entityId, and its `name` (or `fields.join('_')` when unnamed) is the
+ *   compound-unique key to unwrap. Defaults to a single `id` field.
  * @returns Entity ID if found, undefined otherwise
  *
  * @example
@@ -78,20 +79,31 @@ export const isAuditableAction = (operation: string): operation is PrismaAction 
  * extractDeleteOperationEntityId({ where: { id: '456' } });
  * // => '456'
  *
- * extractDeleteOperationEntityId({ postId_userId: { postId: 'p1', userId: 'u1' } }, ['postId', 'userId']);
+ * extractDeleteOperationEntityId(
+ *   { postId_userId: { postId: 'p1', userId: 'u1' } },
+ *   { type: 'primaryKey', fields: ['postId', 'userId'] },
+ * );
+ * // => '["p1","u1"]'
+ *
+ * extractDeleteOperationEntityId(
+ *   { bookmarkKey: { postId: 'p1', userId: 'u1' } },
+ *   { type: 'primaryKey', fields: ['postId', 'userId'], name: 'bookmarkKey' },
+ * );
  * // => '["p1","u1"]'
  *
  * extractDeleteOperationEntityId({ where: { email: 'user@example.com' } });
  * // => undefined
  * ```
  */
-export const extractDeleteOperationEntityId = (data: unknown, pkFields?: string[]): string | undefined => {
+export const extractDeleteOperationEntityId = (
+  data: unknown,
+  pkConstraint: UniqueConstraint = { type: 'primaryKey', fields: ['id'] },
+): string | undefined => {
   if (!data || typeof data !== 'object') {
     return undefined;
   }
 
-  const fields = pkFields ?? ['id'];
-  const pkConstraint: UniqueConstraint = { type: 'primaryKey', fields };
+  const { fields } = pkConstraint;
   const record = data as Record<string, unknown>;
 
   const identity = extractEntityIdentity(unwrapCompoundWhere(record, pkConstraint), fields);

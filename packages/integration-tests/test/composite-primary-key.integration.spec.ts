@@ -28,9 +28,10 @@
  *     WHERE when the row itself was not found.
  *   - `fetchBeforeOperation: false`: with pre-fetch skipped, `extractDeleteOperationEntityId`
  *     (`utils/extension-utils.ts`) unwraps the same compound-unique WHERE shape via
- *     `unwrapCompoundWhere`, so the real composite entityId is still recorded from the
- *     WHERE clause alone — no `findUnique` round-trip needed for this fixture's
- *     default-named `@@id([postId, userId])`.
+ *     `unwrapCompoundWhere`, keyed by the primary key's declared name or, for this
+ *     fixture's unnamed `@@id([postId, userId])`, by `postId_userId`. The real composite
+ *     entityId is still recorded from the WHERE clause alone, with no `findUnique`
+ *     round-trip (`named-composite-primary-key.integration.spec.ts` covers a named key).
  *   - the boundary where identity genuinely cannot be resolved: deleting a
  *     composite-key row that does not exist. No fabricated entityId is ever recorded —
  *     the write fails before any log is built (see `buildMinimalEntity` in

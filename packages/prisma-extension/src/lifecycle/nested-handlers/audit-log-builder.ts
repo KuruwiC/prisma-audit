@@ -15,6 +15,7 @@ import type {
   PreFetchResults,
   RedactConfig,
   SerializationConfig,
+  UniqueConstraint,
 } from '@kuruwic/prisma-audit-core';
 import {
   batchEnrichEntityContexts,
@@ -33,7 +34,7 @@ import type {
   TransactionalPrismaClient,
 } from '../../internal-types.js';
 import type { AuditLogData } from '../../types.js';
-import { getPrimaryKeyFields } from '../../utils/id-generator.js';
+import { getPrimaryKeyConstraint } from '../../utils/id-generator.js';
 import { createSchemaMetadataFromDMMF } from '../../utils/nested-operations.js';
 import {
   buildAggregateDataForEntity,
@@ -126,9 +127,9 @@ const collectAllNestedRecords = async (
     }
     processedPaths.add(nestedOp.path);
 
-    let pkFields: string[] | undefined;
+    let pkConstraint: UniqueConstraint | undefined;
     try {
-      pkFields = getPrimaryKeyFields(Prisma, nestedOp.relatedModel);
+      pkConstraint = getPrimaryKeyConstraint(Prisma, nestedOp.relatedModel);
     } catch {
       // Model not found in DMMF — fall back to ['id']
     }
@@ -137,7 +138,7 @@ const collectAllNestedRecords = async (
       const deleteRecords = await collectDeleteRecords(
         nestedOp,
         nestedPreFetchResults,
-        pkFields,
+        pkConstraint,
         onUnresolvedDeleteEntityId,
       );
       allCollected.push(...deleteRecords);
@@ -164,7 +165,7 @@ const collectAllNestedRecords = async (
       recordsInfo,
       nestedPreFetchResults,
       getNestedOperationConfig,
-      pkFields,
+      pkConstraint?.fields,
     );
     allCollected.push(...regularRecords);
   }
