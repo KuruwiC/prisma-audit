@@ -111,12 +111,8 @@ export type {
   NestedRecordInfo,
 } from './utils/nested-operations.js';
 export {
-  detectNestedDeletes,
   detectNestedOperations,
-  detectNestedUpdates,
-  detectNestedUpserts,
   extractNestedRecords,
-  isRelationField,
   NESTED_OPERATION_KEYWORDS,
   refetchNestedRecords,
 } from './utils/nested-operations.js';
