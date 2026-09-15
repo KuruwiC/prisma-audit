@@ -1,5 +1,5 @@
 /**
- * @prisma-audit/prisma - Prisma Extension for Audit Logging
+ * @kuruwic/prisma-audit - Prisma Extension for Audit Logging
  *
  * Framework-agnostic audit logging solution with aggregate root support,
  * enrichment pipeline, branded types, and redaction utilities.

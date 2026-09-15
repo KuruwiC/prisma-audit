@@ -38,7 +38,10 @@ export interface OperationExecutorDependencies {
  * @param clientToUse - Prisma client (base or transactional)
  * @param deps - Dependencies (stages, write function, base client)
  * @returns Operation result
- * @throws {Error} If operation execution or audit logging fails
+ * @throws {Error} If the caller's own database mutation fails (e.g. a unique constraint
+ * violation), that error is rethrown as-is, skipping `deps.onPipelineError` and message
+ * wrapping. Any other pipeline failure (fetch-before-state / enrich / build) calls
+ * `deps.onPipelineError` and is rethrown wrapped with `cause`.
  */
 export const executeAuditedOperation = async (
   operation: OperationContext,
