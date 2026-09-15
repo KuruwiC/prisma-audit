@@ -815,7 +815,6 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
               return query(args);
             }
 
-            // Nested writes are audited from the returned records, so the written relations are selected
             const injection = injectNestedWriteSelection(schemaMetadata, model, args);
 
             // Mark the re-entrancy guard on the library-owned runtime store; the app context
