@@ -23,8 +23,9 @@ import { extractEntityIdentity } from '../../utils/id-generator.js';
  *
  * @param nestedPreFetchResults - Nested Map containing pre-fetch results
  * @param path - Operation path (e.g., 'postTags', 'postTags.tag')
- * @param entityId - Entity ID to look up (optional)
- * @returns Pre-fetch result if found, undefined otherwise
+ * @param entityId - Entity ID to look up
+ * @returns The entry for `entityId`, else the entry stored under `UNRESOLVED_ENTITY_ID`
+ *   (a pre-fetch result whose entity identity is unknown), else undefined
  *
  * @example
  * ```typescript
@@ -37,26 +38,12 @@ import { extractEntityIdentity } from '../../utils/id-generator.js';
 export const getPreFetchResult = (
   nestedPreFetchResults: NestedPreFetchResults | undefined,
   path: string,
-  entityId?: string,
+  entityId: string,
 ): NestedPreFetchResult | undefined => {
-  if (!nestedPreFetchResults) {
-    return undefined;
-  }
+  const pathMap = nestedPreFetchResults?.get(path);
+  if (!pathMap) return undefined;
 
-  const pathMap = nestedPreFetchResults.get(path);
-  if (!pathMap) {
-    return undefined;
-  }
-
-  // Try specific entityId first, then fall back to the entry whose identity is unknown
-  if (entityId) {
-    const specificResult = pathMap.get(entityId);
-    if (specificResult !== undefined) {
-      return specificResult;
-    }
-  }
-
-  return pathMap.get(UNRESOLVED_ENTITY_ID);
+  return pathMap.get(entityId) || pathMap.get(UNRESOLVED_ENTITY_ID);
 };
 
 /**
