@@ -49,6 +49,7 @@ export type {
   SkippedResult,
   WriteFn,
   WriteResult,
+  WriteStrategy,
   WriteStrategyConfig,
   WriteStrategyInput,
 } from './types.js';

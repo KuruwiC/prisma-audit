@@ -83,6 +83,12 @@ export interface WriteStrategyInput {
 }
 
 /**
+ * A write strategy chosen by the selector from `createWriteStrategySelector`. The selector binds
+ * the write executor, so callers omit it.
+ */
+export type WriteStrategy = (input: Omit<WriteStrategyInput, 'writeExecutor'>) => Promise<WriteResult> | WriteResult;
+
+/**
  * Configuration for write strategy selection
  *
  * @example

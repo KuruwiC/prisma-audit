@@ -9,12 +9,7 @@ import { writeDeferredInTransaction } from './deferred.js';
 import { writeFireAndForget } from './fire-and-forget.js';
 import type { WriteExecutor } from './interfaces.js';
 import { writeSynchronously } from './synchronous.js';
-import type { WriteResult, WriteStrategyConfig, WriteStrategyInput } from './types.js';
-
-/**
- * A selected write strategy. The write executor is bound by the selector, so callers omit it.
- */
-type StrategyFunction = (input: Omit<WriteStrategyInput, 'writeExecutor'>) => Promise<WriteResult> | WriteResult;
+import type { WriteStrategy, WriteStrategyConfig } from './types.js';
 
 const isInTransaction = (): boolean => {
   return getRuntimeContext()?.transaction !== undefined;
@@ -37,8 +32,8 @@ const isInTransaction = (): boolean => {
 export const createWriteStrategySelector = (
   config: WriteStrategyConfig,
   writeExecutor: WriteExecutor,
-): ((modelName: string) => StrategyFunction) => {
-  return (modelName: string): StrategyFunction => {
+): ((modelName: string) => WriteStrategy) => {
+  return (modelName: string): WriteStrategy => {
     if (config.shouldAwaitWrite(modelName)) {
       return (input) => writeSynchronously({ ...input, writeExecutor });
     }

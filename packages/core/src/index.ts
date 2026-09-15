@@ -123,5 +123,11 @@ export { redactSensitiveData } from './utils/redaction.js';
 export type { ValueSerializer } from './utils/serialization.js';
 export { serializeForAuditJson, UNHANDLED } from './utils/serialization.js';
 // Write Strategies
-export type { WriteExecutor, WriteFn, WriteResult } from './write-strategies/index.js';
+export type {
+  WriteExecutor,
+  WriteFn,
+  WriteResult,
+  WriteStrategy,
+  WriteStrategyConfig,
+} from './write-strategies/index.js';
 export { createWriteStrategySelector, flushPendingWrites, getPendingWriteCount } from './write-strategies/index.js';
