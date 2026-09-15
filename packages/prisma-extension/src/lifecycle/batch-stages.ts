@@ -177,12 +177,10 @@ export const createBatchBuildLogsStage = (
     const manager = createPrismaClientManager(deps.basePrisma);
     const entityConfig = deps.aggregateConfig.getEntityConfig(modelName);
 
-    // Resolve aggregate roots and filter out entities with zero roots
     const survivors = entityConfig
       ? await resolveAndFilterSurvivors(entities as Record<string, unknown>[], entityConfig, manager.activeClient)
       : [];
 
-    // Enrich aggregate contexts (only for survivors)
     const aggregateContextLookup =
       survivors.length > 0 && entityConfig
         ? await enrichAggregateContexts(
@@ -193,7 +191,6 @@ export const createBatchBuildLogsStage = (
           )
         : new Map<string, unknown>();
 
-    // Build logs for survivors
     const allLogs: AuditLogData[] = [];
     for (const survivor of survivors) {
       const aggregateData = buildAggregateDataForEntity(

@@ -67,9 +67,7 @@ export const isAuditableAction = (operation: string): operation is PrismaAction 
  * unwrapped with the same `unwrapCompoundWhere` the pre-fetch path uses.
  *
  * @param data - The delete operation data
- * @param pkConstraint - The deleted model's primary key (`getPrimaryKeyConstraint`): its
- *   fields make up the entityId, and its `name` (or `fields.join('_')` when unnamed) is the
- *   compound-unique key to unwrap. Defaults to a single `id` field.
+ * @param pkConstraint - The deleted model's primary key, as returned by `getPrimaryKeyConstraint`
  * @returns Entity ID if found, undefined otherwise
  *
  * @example

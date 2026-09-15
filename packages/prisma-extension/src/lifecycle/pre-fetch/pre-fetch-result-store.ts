@@ -24,8 +24,7 @@ import { extractEntityIdentity } from '../../utils/id-generator.js';
  * @param nestedPreFetchResults - Nested Map containing pre-fetch results
  * @param path - Operation path (e.g., 'postTags', 'postTags.tag')
  * @param entityId - Entity ID to look up
- * @returns The entry for `entityId`, else the entry stored under `UNRESOLVED_ENTITY_ID`
- *   (a pre-fetch result whose entity identity is unknown), else undefined
+ * @returns The entry for `entityId`, else the entry stored under `UNRESOLVED_ENTITY_ID`, else undefined
  *
  * @example
  * ```typescript

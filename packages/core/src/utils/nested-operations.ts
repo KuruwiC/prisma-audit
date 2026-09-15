@@ -271,8 +271,6 @@ const processRelationField = (
 /**
  * Recursively detect deeply nested operations (e.g., postTags.create.tag.connectOrCreate)
  *
- * Upsert branches are explored as `pass` selects them (see {@link NestedDetectionPass}).
- *
  * @internal
  */
 const detectDeeplyNestedOperations = (
@@ -357,7 +355,7 @@ const processDeeplyNestedOperations = (
     );
   }
 
-  // For 'upsert', filter branch based on pre-fetch results
+  // For 'upsert', explore the branches the pass selects
   if (keyword === 'upsert' && typeof nestedData === 'object' && nestedData !== null) {
     return processTopLevelUpsertBranches(
       schemaMetadata,
@@ -533,8 +531,6 @@ const processDataSource = (input: ProcessDataSourceInput): void => {
  * - Top-level: `"posts"`
  * - Nested: `"postTags.tag"`
  * - Deep: `"author.profile.avatar"`
- *
- * @param pass - The detection pass that selects the upsert branches to scan
  *
  * @example
  * ```typescript
@@ -965,7 +961,7 @@ const processNestedOperationForRefetch = async (
  *   dbClient,
  *   schemaMetadata,
  *   'User',
- *   pass,
+ *   nestedPreFetchResults,
  *   nestedOperations
  * );
  * // Returns: [{ fieldName: 'posts', relatedModel: 'Post', records: [...], path: 'posts' }]

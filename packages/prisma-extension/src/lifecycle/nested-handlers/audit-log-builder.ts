@@ -1,10 +1,7 @@
 /**
  * Nested Audit Log Builder
  *
- * Builds audit logs for nested operations using a batch pipeline:
- *   collect:          Gather all nested records, resolve action/beforeState
- *   group:            Group collected records by relatedModel
- *   enrich-and-build: Batch entity + aggregate enrichment, then construct audit logs, per model group
+ * Builds audit logs for nested operations using a batch pipeline (see `buildNestedAuditLogs`).
  */
 
 import type {
@@ -48,14 +45,12 @@ import { collectNestedRecords } from './record-processor.js';
 import type { GetNestedOperationConfig } from './state-resolver.js';
 
 /**
- * Whether the record targeted by the nested upsert at `path` existed before the operation, which
- * selects that upsert's `update` branch in the executed detection pass.
+ * Whether the record targeted by the nested upsert at `path` existed before the operation.
  *
- * Answered per path, not per row: the entry stored under `UNRESOLVED_ENTITY_ID` decides when one
- * exists, otherwise the first entry stored for the path does, and a path with no entry has no
- * record. Every upsert at one path is therefore treated as taking the same branch. The to-one
- * pre-fetch stores a row it did not find, and a failed pre-fetch, under `UNRESOLVED_ENTITY_ID`
- * with a `null` before-state, so a path whose rows are a mix of found and missing reads as missing.
+ * Answered per path, not per row, so every upsert at one path takes the same branch: the entry
+ * under `UNRESOLVED_ENTITY_ID` decides when present, else the first entry. A missing to-one row and
+ * a failed pre-fetch are both stored there with a `null` before-state, so a path mixing found and
+ * missing rows reads as missing.
  *
  * @internal
  */
@@ -88,10 +83,6 @@ export type NestedAuditLogBuilderDependencies = {
    */
   onUnresolvedDeleteEntityId?: UnresolvedDeleteEntityIdReporter;
 };
-
-// ============================================================================
-// Collect all nested records
-// ============================================================================
 
 const collectAllNestedRecords = async (
   nestedOperations: readonly NestedOperationInfo[],
@@ -156,10 +147,6 @@ const collectAllNestedRecords = async (
   return allCollected;
 };
 
-// ============================================================================
-// Group collected records by relatedModel
-// ============================================================================
-
 interface ModelGroup {
   modelName: string;
   records: { collectedIndex: number; record: CollectedNestedRecord }[];
@@ -182,10 +169,6 @@ const groupByModel = (collected: CollectedNestedRecord[]): ModelGroup[] => {
 
   return Array.from(groups.values());
 };
-
-// ============================================================================
-// Enrich and build per model group
-// ============================================================================
 
 const enrichAndBuildForModelGroup = async (
   group: ModelGroup,
@@ -282,12 +265,8 @@ export interface BuildNestedAuditLogsParams {
   context: AuditContext;
   prismaClient: PrismaClientWithDynamicAccess | TransactionalPrismaClient;
   actorContext: unknown;
-  /** Before-states pre-fetched ahead of the operation, keyed by operation path, then by entity identity */
   nestedPreFetchResults: NestedPreFetchResults;
-  /**
-   * The branch the top-level upsert executed, whose nested writes are the ones audited;
-   * `undefined` when the operation is not an upsert.
-   */
+  /** Branch the top-level upsert executed (only its nested writes are audited); `undefined` when not an upsert */
   topLevelUpsertBranch: UpsertBranch | undefined;
 }
 
@@ -357,7 +336,6 @@ export const buildNestedAuditLogs = async (input: BuildNestedAuditLogsInput): Pr
     nestedRecordsInfo = [...nestedRecordsInfo, ...refetchedRecords];
   }
 
-  // Collect all nested records
   const allCollected = await collectAllNestedRecords(
     nestedOperations,
     nestedRecordsInfo,
@@ -371,10 +349,8 @@ export const buildNestedAuditLogs = async (input: BuildNestedAuditLogsInput): Pr
     return [];
   }
 
-  // Group by relatedModel
   const modelGroups = groupByModel(allCollected);
 
-  // Enrich and build per model group
   const allLogs: AuditLogData[] = [];
   for (const group of modelGroups) {
     const logs = await enrichAndBuildForModelGroup(group, context, actorContext, prismaClient, {

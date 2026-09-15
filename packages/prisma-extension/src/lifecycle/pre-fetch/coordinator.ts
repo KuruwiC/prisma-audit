@@ -217,8 +217,6 @@ export const preFetchNestedRecordsBeforeOperation = async (
   const topLevelModel = dmmf.datamodel.models.find((m) => m.name === modelName);
   const topLevelModelClient = getPreFetchModelClient(prismaClient, modelName);
 
-  // `getPrimaryKeyConstraint` throws when a model has no primary key; cache successes only, so a
-  // model without one is re-checked on every lookup rather than treated as permanently absent.
   const pkConstraintCache = new Map<string, UniqueConstraint>();
   const resolvePkConstraint = (relatedModel: string): UniqueConstraint | undefined => {
     if (pkConstraintCache.has(relatedModel)) return pkConstraintCache.get(relatedModel);
@@ -297,9 +295,7 @@ export const preFetchNestedRecordsBeforeOperation = async (
  */
 interface HandleOneToOneRelationInput {
   nestedOp: NestedOperation;
-  /** The relation field on the parent model */
   field: DMMFField;
-  /** DMMF model of `nestedOp.relatedModel` */
   relatedModel: DMMFModel | undefined;
   topLevelWhere: unknown;
   topLevelModelClient: PreFetchModelClient | undefined;

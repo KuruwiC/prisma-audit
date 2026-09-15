@@ -124,8 +124,6 @@ export interface StageDependencies {
    *
    * IMPORTANT: Must be called before the operation executes, otherwise records
    * will already be modified/deleted and unavailable.
-   *
-   * @returns Before-states keyed by operation path, then by entity identity
    */
   preFetchNestedRecordsBeforeOperation: (
     prismaClient: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
@@ -438,9 +436,6 @@ export const createEnrichContextsStage = (
 /**
  * Build main audit logs for an entity
  *
- * Follows the same pattern as batch-stages: resolve aggregate roots, then enrich
- * aggregate contexts per aggregateType, before building the log below.
- *
  * @internal
  */
 const buildMainAuditLogs = async (
@@ -484,13 +479,11 @@ const buildMainAuditLogs = async (
     }
   }
 
-  // Resolve aggregate roots (reuses batch resolver with 1-element array)
   const survivors = await resolveAndFilterSurvivors([entity], entityConfig, manager.activeClient);
   if (survivors.length === 0) {
     return [];
   }
 
-  // Enrich aggregate contexts (root-side + projection-side, merged)
   const aggregateContextLookup = await enrichAggregateContexts(
     survivors,
     entityConfig,
@@ -541,12 +534,9 @@ const buildMainAuditLogs = async (
  * Handles extraction of nested records from the operation result and generates
  * audit logs for each nested entity.
  *
- * For a top-level upsert, the before-state fetch tells which branch executed, and only that
- * branch's nested writes are audited: `found` → `update`, `notFound` → `create`. When the fetch
- * failed the executed branch is unknown, so the upsert's nested entries are skipped, as its main
- * entry is in `buildMainAuditLogs`; fetchBeforeState already reported the failure to the observer.
- * 'notRequested', which an upsert never sees (see `shouldFetchBeforeState`), leaves the branch
- * unknown too.
+ * For a top-level upsert, only the nested writes of the branch that executed are audited. When the
+ * before-state fetch failed that branch is unknown, so the nested entries are skipped, as the main
+ * entry is in `buildMainAuditLogs` (fetchBeforeState already reported the failure).
  *
  * @internal
  */

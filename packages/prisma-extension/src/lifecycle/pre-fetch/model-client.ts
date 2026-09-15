@@ -9,8 +9,8 @@ import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '.
 export type PreFetchRecord = Record<string, unknown>;
 
 /**
- * The read methods of a Prisma model delegate used to capture before-states. `where` is the
- * model's `WhereUniqueInput` for `findUnique` and a flat field-equality filter for `findFirst`.
+ * Read methods of a Prisma model delegate. `where` is the model's `WhereUniqueInput` for
+ * `findUnique` and a flat field-equality filter for `findFirst`.
  */
 export interface PreFetchModelClient {
   findUnique(args: { where: object; select?: Record<string, true> }): Promise<PreFetchRecord | null>;
@@ -25,10 +25,7 @@ const isPreFetchModelClient = (value: unknown): value is PreFetchModelClient =>
   'findFirst' in value &&
   typeof value.findFirst === 'function';
 
-/**
- * Returns the delegate of `modelName` (PascalCase) on `prismaClient`, or `undefined` when the
- * client exposes no such delegate.
- */
+/** `modelName` is PascalCase, as in the DMMF. */
 export const getPreFetchModelClient = (
   prismaClient: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
   modelName: string,

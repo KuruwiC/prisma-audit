@@ -60,7 +60,7 @@ export interface PreparedContext extends InitialContext {
   beforeState: Record<string, unknown> | null;
   /** Full outcome of the before-state fetch; see {@link BeforeStateResult}. */
   beforeStateResult: BeforeStateResult;
-  /** Before-states of nested records, keyed by operation path, then by entity identity */
+  /** Before-states of nested records; see {@link NestedPreFetchResults}. */
   nestedPreFetchResults: NestedPreFetchResults;
 }
 
@@ -127,9 +127,8 @@ export interface BatchInitialContext {
  * Enriched context for batch operations after enrichment stage
  *
  * Includes enriched contextual information for actor and all entities. Enrichment is
- * performed in batch to optimize database queries. Aggregate contexts are not part of
- * this stage: they are enriched per aggregate root inside buildAuditLog for
- * aggregate-aware context.
+ * performed in batch to optimize database queries. Aggregate contexts are enriched later,
+ * in the build-logs stage via enrichAggregateContexts.
  */
 export interface BatchEnrichedContext extends BatchInitialContext {
   /** Enriched actor context (role, department, email) */

@@ -2,8 +2,8 @@
  * One-to-One Relation Pre-fetch Module
  *
  * Captures the before-state of the row a nested to-one `update` / `upsert` / `delete` targets.
- * Such an operation carries no WHERE of its own: its target is the related row whose relation
- * key matches the key of the parent row the operation is nested under.
+ * Such an operation is not addressed by a unique WHERE: its target is the related row whose
+ * relation key matches the key of the parent row the operation is nested under.
  *
  * @module lifecycle/pre-fetch/one-to-one-fetcher
  */
@@ -13,10 +13,7 @@ import type { DMMFField, DMMFModel } from '../../internal-types.js';
 import type { PreFetchModelClient, PreFetchRecord } from './model-client.js';
 import { extractEntityIdOrDefault } from './pre-fetch-result-store.js';
 
-/**
- * How a parent row and its to-one related row reference each other: the related row holds the
- * parent row's `parentFields[i]` value in `relatedFields[i]`, for every field of the key.
- */
+/** The related row holds the parent row's `parentFields[i]` value in `relatedFields[i]`. */
 export interface ToOneRelationLink {
   readonly parentFields: readonly string[];
   readonly relatedFields: readonly string[];
@@ -47,8 +44,7 @@ const pairLinkFields = (
 };
 
 /**
- * Resolves the link of the to-one relation field `field`, declared on the parent model, from
- * the DMMF.
+ * Resolves the link of `field`, a to-one relation field declared on the parent model.
  *
  * - Owning side (`field` declares `fields` / `references`): the parent row holds
  *   `relationFromFields`, which the related row matches with `relationToFields`.
@@ -56,7 +52,8 @@ const pairLinkFields = (
  *   the parent row holds that field's `relationToFields`, which the related row references with
  *   its `relationFromFields`.
  *
- * @throws Error when the DMMF does not describe the owning side of the relation
+ * @throws Error when the DMMF gives no relation name, no owning side, or key-field lists that do
+ *   not pair up
  */
 export const resolveToOneRelationLink = (field: DMMFField, relatedModel: DMMFModel | undefined): ToOneRelationLink => {
   const { relationName } = field;
@@ -79,29 +76,18 @@ export const resolveToOneRelationLink = (field: DMMFField, relatedModel: DMMFMod
 };
 
 export interface ResolveParentRowsInput {
-  /** Path of the nested operation (e.g. `profile`, `profile.avatar`) */
   path: string;
-  /** Key fields every returned row must carry */
   parentFields: readonly string[];
-  /** The top-level operation's `where` */
   topLevelWhere: unknown;
-  /** Delegate of the top-level model */
   topLevelModelClient: PreFetchModelClient | undefined;
-  /** Before-states pre-fetched so far, shallower paths first */
+  /** Read for the parent path's rows, so operations must be pre-fetched shallowest path first */
   preFetchResults: NestedPreFetchResults;
 }
 
 /**
- * Returns the rows the nested operation at `path` is nested under.
- *
- * - A direct child of the top-level operation is nested under the top-level row. Its key is read
- *   from the top-level `where` when that names every key field with a plain value; otherwise the
- *   row is fetched with that `where`.
- * - A deeper child is nested under every row pre-fetched at the parent path. Rows recorded as not
- *   existing (`before: null`) have no children.
- *
- * An empty list means there is no parent row to follow: the top-level operation has no `where`,
- * its row does not exist, or nothing exists at the parent path.
+ * Returns the rows the nested operation at `path` is nested under: for a deeper path, every row
+ * that exists at the parent path; for a direct child, the top-level row, keyed from `where`
+ * without a query when `where` names every key field with a plain value.
  */
 const resolveParentRows = async (input: ResolveParentRowsInput): Promise<PreFetchRecord[]> => {
   const { path, parentFields, topLevelWhere, topLevelModelClient, preFetchResults } = input;
@@ -140,12 +126,12 @@ export interface PreFetchOneToOneRelationInput extends Omit<ResolveParentRowsInp
 /**
  * Pre-fetches the related row of every parent row the nested to-one operation is nested under.
  *
- * Each related row is read with `findFirst` on the flat link key: the link references a unique
- * key of the parent, so at most one related row matches. A parent row whose key is incomplete
- * (a nullable foreign key left unset) references no related row and is not queried.
+ * Each related row is read with `findFirst` on the flat link key, which is unique on the related
+ * model (the referenced key on the owning side, a unique foreign key on the inverse side), so at
+ * most one row matches. A parent row with a null key field (an unset optional foreign key) is
+ * skipped.
  *
- * @returns One result per queried parent row; a related row that does not exist yields
- *   `beforeRecord: null`
+ * @returns One result per queried parent row; `beforeRecord` is null when no related row exists
  */
 export const preFetchOneToOneRelation = async (
   input: PreFetchOneToOneRelationInput,

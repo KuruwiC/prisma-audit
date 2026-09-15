@@ -126,10 +126,9 @@ export type { NestedPreFetchResults };
  * WHERE names the PK fields directly (e.g. `{ id: 'x' }`) still resolves an entityId and
  * follows the normal fallback path.
  *
- * @param pkConstraint - The deleted model's primary key (`getPrimaryKeyConstraint`). Its
- *   fields rebuild an entity from a serialized entityId; the whole constraint, including its
- *   declared name, is what the fallback unwraps a compound-unique WHERE clause with.
- *   Defaults to a single `id` field.
+ * @param pkConstraint - The deleted model's primary key (default: a single `id` field). The
+ *   fallback needs the whole constraint, not just its fields, because a named composite key
+ *   wraps the WHERE clause under its declared name.
  * @returns Collected records ready for batch enrichment and audit log building
  */
 export const collectDeleteRecords = async (

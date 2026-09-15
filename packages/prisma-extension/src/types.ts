@@ -208,17 +208,15 @@ export interface ErrorHandlingConfig {
  * Prisma Extension configuration options
  *
  * @remarks
- * The Prisma client is not an option: it is the client passed to `createAuditClient`, which
- * runs the audited operations and writes the audit logs.
+ * Audited operations run on, and audit logs are written through, the client passed to
+ * `createAuditClient`.
  */
 export interface PrismaAuditExtensionOptions {
   provider: AuditContextProvider;
   aggregateMapping: AggregateMapping;
   /**
    * Prisma namespace exported by the generated client that the audited `PrismaClient` comes from.
-   *
-   * Supplies the schema metadata (`dmmf`), `DbNull` and `defineExtension`. A generated client
-   * instance does not expose its namespace, so it cannot be derived from the client.
+   * Required because a client instance does not expose its namespace.
    *
    * @example
    * ```typescript

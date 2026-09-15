@@ -145,24 +145,13 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
   const getModelTags = (modelName: string): string[] => aggregateConfig.getEntityConfig(modelName)?.tags ?? [];
 
   /**
-   * Whether the caller's operation awaits the audit-log write for `modelName`. The single source
-   * for this decision: the top-level handler, the batch handler and the write strategy selector
-   * all read it.
-   *
-   * `performance.awaitWriteIf`, when set, decides for every model and receives the model's `tags`
-   * (an empty list for a model without tags); its result replaces `performance.awaitWrite`.
-   * Without `awaitWriteIf`, `performance.awaitWrite` (default `true`) applies.
+   * Whether the audit-log write for `modelName` is awaited. The top-level handler, the batch handler
+   * and the write strategy selector all read this one decision so they cannot disagree.
    */
   const resolveAwaitWrite = (modelName: string): boolean =>
     awaitWriteIf ? awaitWriteIf(modelName, getModelTags(modelName)) : awaitWrite;
 
-  /**
-   * The sampling rate (0-1) for an operation on `modelName`.
-   *
-   * `performance.samplingIf`, when set, decides for every model and receives the model's `tags`
-   * (an empty list for a model without tags); its result replaces `performance.sampling`.
-   * Without `samplingIf`, `performance.sampling` (default `1.0`) applies.
-   */
+  /** Sampling rate (0-1) for an operation on `modelName` */
   const resolveSamplingRate = (modelName: string): number =>
     samplingIf ? samplingIf(modelName, getModelTags(modelName)) : sampling;
 
@@ -368,7 +357,6 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
 
   /**
    * Pre-fetch nested records before operation execution
-   * @returns Before-states keyed by operation path, then by entity identity
    */
   const preFetchNestedRecordsBeforeOperationWrapper = async (
     prismaClient: PrismaClientWithDynamicAccess | TransactionalPrismaClient,

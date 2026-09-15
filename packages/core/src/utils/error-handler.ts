@@ -8,9 +8,7 @@
  *
  * @example
  * ```typescript
- * // Re-throw: for a caller such as the extension's WriteFailurePolicy, this fails the
- * // caller's operation only while it is still awaiting the write — a deferred write
- * // falls back to logging once queued or detached
+ * // Re-throw (see ErrorStrategy for when this fails the caller's operation)
  * const strictHandler = createErrorHandler('throw');
  *
  * // Log and continue
@@ -23,10 +21,8 @@
 
 /**
  * Error handling strategy
- * - `throw`: Re-throw the error. Whether this fails the caller's own operation depends
- *   on the caller of this handler — e.g. the extension's write-failure policy fails the
- *   caller's operation only while it is still awaiting the write; once the write is
- *   deferred or detached, this is equivalent to `log`.
+ * - `throw`: Re-throw the error. The effect depends on the caller: the extension's write-failure policy
+ *   fails the caller's operation only while it awaits the write; for a deferred or detached write it acts as `log`.
  * - `log`: Log error and continue
  * - `ignore`: Silent
  */

@@ -71,10 +71,9 @@ export const ensureIds = <T extends Record<string, unknown>>(
 const PK_CHUNK_SIZE = 1000;
 
 /**
- * Get a model's primary key from DMMF: its fields and, for a composite key declared as
- * `@@id([a, b], name: "custom")`, its name. The name is what Prisma uses as the
- * compound-unique WHERE key (`{ custom: { a, b } }`); without one, Prisma's default
- * `fields.join('_')` applies.
+ * Get a model's primary key from DMMF. `name` is the explicit name of a composite key declared as
+ * `@@id([a, b], name: "custom")`; Prisma uses it, or `fields.join('_')` when absent, as the
+ * compound-unique WHERE key.
  *
  * Priority: @@id composite key → @id scalar field → error
  *
@@ -108,11 +107,7 @@ export const getPrimaryKeyConstraint = (Prisma: PrismaWithDMMF, modelName: strin
   );
 };
 
-/**
- * Get primary key field names for a model from DMMF (the fields of `getPrimaryKeyConstraint`).
- *
- * @throws Error if model has no primary key
- */
+/** Fields of `getPrimaryKeyConstraint`; throws if the model has no primary key. */
 export const getPrimaryKeyFields = (Prisma: PrismaWithDMMF, modelName: string): string[] =>
   getPrimaryKeyConstraint(Prisma, modelName).fields;
 
