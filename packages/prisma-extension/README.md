@@ -203,6 +203,8 @@ const prisma = createAuditClient(new PrismaClient(), { Prisma, provider, aggrega
 
 The Prisma client itself is the first argument of `createAuditClient`. Audited operations run on it, and audit logs are written with it, bypassing the audit extension.
 
+### Transaction Behavior and Recursion Safety
+
 **Transaction behavior:**
 - **Sync mode** (`awaitWrite: true`, default):
   - Audit logs written using transaction client (`tx`)
@@ -756,6 +758,8 @@ Conditionally control write strategy per model. Called for every model on each w
 ### Write Strategies
 
 The extension uses three different write strategies for audit logs, selected automatically based on configuration and transaction context.
+
+> The `createAuditClient` calls below show only the option under discussion. In your code, combine it with the full configuration shown in [Quick Start](#2-create-audited-client) (`Prisma`, `provider`, `aggregateMapping`, and so on).
 
 #### 1. Synchronous Strategy (`awaitWrite: true`)
 
