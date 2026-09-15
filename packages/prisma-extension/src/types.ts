@@ -89,9 +89,19 @@ export interface PerformanceConfig {
   sampling?: number;
   /** Whether to await audit log writes. Default: true */
   awaitWrite?: boolean;
-  /** Dynamic awaitWrite decision based on model name and tags */
+  /**
+   * Dynamic `awaitWrite` decision, called for every model on each write with that model's
+   * name and its `tags` from `aggregateMapping` (`tags` is `[]` for a model whose entity
+   * config declares no tags). Its return value replaces {@link PerformanceConfig.awaitWrite}
+   * for that model.
+   */
   awaitWriteIf?: (modelName: string, tags: string[]) => boolean;
-  /** Dynamic sampling rate based on model name and tags */
+  /**
+   * Dynamic sampling rate, called for every model on each write with that model's name and
+   * its `tags` from `aggregateMapping` (`tags` is `[]` for a model whose entity config
+   * declares no tags). Its return value replaces {@link PerformanceConfig.sampling} for that
+   * model.
+   */
   samplingIf?: (modelName: string, tags: string[]) => number;
 }
 

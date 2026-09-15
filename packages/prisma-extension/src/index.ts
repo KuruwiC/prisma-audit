@@ -55,6 +55,7 @@ export type {
   AuditLogInput,
   AuditLogWriter,
   ErrorHandlingConfig,
+  PerformanceConfig,
   PrismaAuditExtensionOptions,
   WriteFailurePolicy,
 } from './types.js';
