@@ -8,6 +8,7 @@
 
 import {
   AUDIT_ACTION,
+  type EntityIdentityKey,
   type NestedPreFetchResults,
   nestedLog,
   UNRESOLVED_ENTITY_ID,
@@ -31,7 +32,7 @@ import type { CollectedNestedRecord } from './collected-record.js';
  *     key is unknown. Same contract as core's `deserializeEntityId`
  *     (`packages/core/src/utils/nested-operations.ts`), which also returns `null` here.
  */
-const buildMinimalEntity = (entityId: string, pkFields?: string[]): Record<string, unknown> | null => {
+const buildMinimalEntity = (entityId: EntityIdentityKey, pkFields?: string[]): Record<string, unknown> | null => {
   if (entityId === UNRESOLVED_ENTITY_ID) return null;
 
   const fields = pkFields ?? ['id'];
@@ -55,12 +56,12 @@ const buildMinimalEntity = (entityId: string, pkFields?: string[]): Record<strin
 
 /**
  * A nested delete skipped because its primary key could not be resolved. `entityId` is the
- * raw serialized key, or `UNRESOLVED_ENTITY_ID` when no identity was ever determined.
+ * raw serialized key, or `undefined` when no identity was ever determined.
  * extension.ts maps these fields into an `entity-id-resolution` observer context.
  */
 export interface UnresolvedDeleteEntityId {
   relatedModel: string;
-  entityId: string;
+  entityId: string | undefined;
   pkFields: string[];
   error: Error;
 }
@@ -75,20 +76,22 @@ export type UnresolvedDeleteEntityIdReporter = (info: UnresolvedDeleteEntityId) 
  */
 const reportUnresolvedEntityId = async (
   relatedModel: string,
-  entityId: string,
+  entityId: EntityIdentityKey,
   pkFields: string[] | undefined,
   onUnresolvedDeleteEntityId: UnresolvedDeleteEntityIdReporter | undefined,
 ): Promise<void> => {
   if (!onUnresolvedDeleteEntityId) return;
 
   const fields = pkFields ?? ['id'];
+  const rawEntityId = entityId === UNRESOLVED_ENTITY_ID ? undefined : entityId;
+  const renderedEntityId = rawEntityId === undefined ? 'unresolved' : `"${rawEntityId}"`;
   await onUnresolvedDeleteEntityId({
     relatedModel,
-    entityId,
+    entityId: rawEntityId,
     pkFields: fields,
     error: new Error(
       `[@prisma-audit] Cannot resolve the primary key of a deleted ${relatedModel} record ` +
-        `(entityId="${entityId}", pkFields=[${fields.join(', ')}]). Skipping this delete's audit log entry ` +
+        `(entityId=${renderedEntityId}, pkFields=[${fields.join(', ')}]). Skipping this delete's audit log entry ` +
         'instead of recording a fabricated identity.',
     ),
   });
@@ -188,9 +191,8 @@ export const collectDeleteRecords = async (
     }
 
     nestedLog('could not extract entity ID from delete operation data');
-    // No raw entityId exists here; report the `UNRESOLVED_ENTITY_ID` sentinel ("identity
-    // never determined") so the observer can tell this apart from a malformed composite
-    // key, which is reported with its raw value.
+    // No raw entityId exists here; report the identity as never determined so the observer
+    // can tell this apart from a malformed composite key, which is reported with its raw value.
     await reportUnresolvedEntityId(nestedOp.relatedModel, UNRESOLVED_ENTITY_ID, pkFields, onUnresolvedDeleteEntityId);
     return [];
   }

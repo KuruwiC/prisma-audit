@@ -114,6 +114,42 @@ describe('collectDeleteRecords — composite primary key reconstruction', () => 
   });
 });
 
+describe('collectDeleteRecords — unresolved identity', () => {
+  const commentsOp: NestedOperationInfo = { ...nestedOp, relatedModel: 'Comment', path: 'comments' };
+
+  it('reports an entry stored under UNRESOLVED_ENTITY_ID with no entityId instead of a placeholder string', async () => {
+    const preFetchResults: NestedPreFetchResults = new Map([
+      ['comments', new Map([[UNRESOLVED_ENTITY_ID, { before: null }]])],
+    ]);
+    const onUnresolvedDeleteEntityId = vi.fn().mockResolvedValue(undefined);
+
+    const collected = await collectDeleteRecords(commentsOp, preFetchResults, idPrimaryKey, onUnresolvedDeleteEntityId);
+
+    expect(collected).toEqual([]);
+    expect(onUnresolvedDeleteEntityId).toHaveBeenCalledWith(
+      expect.objectContaining({
+        relatedModel: 'Comment',
+        entityId: undefined,
+        error: expect.objectContaining({ message: expect.stringContaining('entityId=unresolved') }),
+      }),
+    );
+  });
+
+  it('treats a real primary key spelled like a placeholder as a resolved identity', async () => {
+    const preFetchResults: NestedPreFetchResults = new Map([
+      ['comments', new Map([['__default__', { before: null }]])],
+    ]);
+    const onUnresolvedDeleteEntityId = vi.fn().mockResolvedValue(undefined);
+
+    const collected = await collectDeleteRecords(commentsOp, preFetchResults, idPrimaryKey, onUnresolvedDeleteEntityId);
+
+    expect(collected).toEqual([
+      { entity: { id: '__default__' }, action: 'delete', beforeState: null, relatedModel: 'Comment' },
+    ]);
+    expect(onUnresolvedDeleteEntityId).not.toHaveBeenCalled();
+  });
+});
+
 describe('collectDeleteRecords — nested deleteMany has no single-row identity to resolve', () => {
   // Nested `deleteMany` (e.g. `posts: { deleteMany: { where: { published: false } } }`) is
   // deliberately never pre-fetched (see the "Exception" note on `collectDeleteRecords`), so
@@ -165,9 +201,9 @@ describe('collectDeleteRecords — nested deleteMany has no single-row identity 
     expect(onUnresolvedDeleteEntityId).toHaveBeenCalledWith(
       expect.objectContaining({
         relatedModel: 'Post',
-        entityId: UNRESOLVED_ENTITY_ID,
+        entityId: undefined,
         pkFields: ['id'],
-        error: expect.any(Error),
+        error: expect.objectContaining({ message: expect.stringContaining('entityId=unresolved') }),
       }),
     );
   });

@@ -11,7 +11,7 @@
  * @packageDocumentation
  */
 
-import { UNRESOLVED_ENTITY_ID } from '../constants.js';
+import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID } from '../constants.js';
 import type { DbClient, SchemaMetadata } from '../interfaces/index.js';
 import type { NestedPreFetchResult } from '../state-resolution/nested-state-resolver.js';
 import { nestedLog } from './debug.js';
@@ -71,7 +71,7 @@ export interface NestedRecordInfo {
  * Before-states of nested records pre-fetched ahead of an operation, keyed by operation path,
  * then by entity identity (`UNRESOLVED_ENTITY_ID` when the identity is unknown)
  */
-export type NestedPreFetchResults = Map<string, Map<string, NestedPreFetchResult>>;
+export type NestedPreFetchResults = Map<string, Map<EntityIdentityKey, NestedPreFetchResult>>;
 
 /** A branch of an upsert: `create` runs when the target row does not exist, `update` when it does */
 export type UpsertBranch = 'create' | 'update';
@@ -790,7 +790,7 @@ const buildPkWhereClause = (pkFields: string[], pks: Record<string, unknown>[]):
 };
 
 /** @internal Deserialize a composite entity ID string into PK fields */
-const deserializeEntityId = (entityId: string, pkFields: string[]): Record<string, unknown> | null => {
+const deserializeEntityId = (entityId: EntityIdentityKey, pkFields: string[]): Record<string, unknown> | null => {
   if (entityId === UNRESOLVED_ENTITY_ID) return null;
 
   if (pkFields.length === 1) {
@@ -822,7 +822,7 @@ const extractPkFromRecord = (record: Record<string, unknown>, pkFields: string[]
 
 /** @internal Extract PK values from a pre-fetch entry */
 const extractPkFromEntry = (
-  entityId: string,
+  entityId: EntityIdentityKey,
   preFetchResult: NestedPreFetchResult,
   pkFields: string[],
 ): Record<string, unknown> | null => {
@@ -837,7 +837,7 @@ const extractPkFromEntry = (
 
 /** @internal Extract PKs to refetch from pre-fetch results */
 const extractPksToRefetch = (
-  fieldMap: Map<string, NestedPreFetchResult>,
+  fieldMap: Map<EntityIdentityKey, NestedPreFetchResult>,
   _path: string,
   pkFields: string[],
 ): Record<string, unknown>[] => {

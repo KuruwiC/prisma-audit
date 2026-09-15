@@ -10,6 +10,7 @@
 import {
   ensureIds as coreEnsureIds,
   getIdFieldInfo as coreGetIdFieldInfo,
+  type EntityIdentityKey,
   getIdGenerator,
   ID_GENERATOR_FACTORIES,
   type IdFieldInfo,
@@ -131,7 +132,7 @@ export const extractPrimaryKey = (entity: Record<string, unknown>, pkFields: str
  * Unlike `extractPrimaryKey` (which assumes all fields exist), this returns
  * `UNRESOLVED_ENTITY_ID` when any PK field is absent or null. BigInt-safe serialization.
  */
-export const extractEntityIdentity = (record: Record<string, unknown>, pkFields: string[]): string => {
+export const extractEntityIdentity = (record: Record<string, unknown>, pkFields: string[]): EntityIdentityKey => {
   const allPresent = pkFields.every((f) => f in record && record[f] != null);
   if (!allPresent) return UNRESOLVED_ENTITY_ID;
 

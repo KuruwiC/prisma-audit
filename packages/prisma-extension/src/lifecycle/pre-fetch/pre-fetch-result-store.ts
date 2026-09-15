@@ -11,6 +11,7 @@
  */
 
 import {
+  type EntityIdentityKey,
   type NestedPreFetchResult,
   type NestedPreFetchResults,
   UNRESOLVED_ENTITY_ID,
@@ -39,7 +40,7 @@ import { extractEntityIdentity } from '../../utils/id-generator.js';
 export const getPreFetchResult = (
   nestedPreFetchResults: NestedPreFetchResults | undefined,
   path: string,
-  entityId: string,
+  entityId: EntityIdentityKey,
 ): NestedPreFetchResult | undefined => {
   const pathMap = nestedPreFetchResults?.get(path);
   if (!pathMap) return undefined;
@@ -64,7 +65,7 @@ export const getPreFetchResult = (
 export const storePreFetchResult = (
   nestedPreFetchResults: NestedPreFetchResults,
   path: string,
-  entityId: string,
+  entityId: EntityIdentityKey,
   beforeState: Record<string, unknown> | null,
 ): void => {
   let pathMap = nestedPreFetchResults.get(path);
@@ -82,7 +83,7 @@ export const storePreFetchResult = (
  *
  * @param record - Record to extract identity from
  * @param pkFields - Primary key field names. Defaults to ['id'].
- * @returns Entity identity as string, or `UNRESOLVED_ENTITY_ID` if PK fields are missing
+ * @returns Serialized entity identity, or `UNRESOLVED_ENTITY_ID` if PK fields are missing
  *
  * @example
  * ```typescript
@@ -96,7 +97,7 @@ export const storePreFetchResult = (
  * // Returns: UNRESOLVED_ENTITY_ID
  * ```
  */
-export const extractEntityIdOrUnresolved = (record: unknown, pkFields?: string[]): string => {
+export const extractEntityIdOrUnresolved = (record: unknown, pkFields?: string[]): EntityIdentityKey => {
   if (!record || typeof record !== 'object') {
     return UNRESOLVED_ENTITY_ID;
   }
@@ -119,7 +120,7 @@ export const extractEntityId = (
   beforeRecord: Record<string, unknown> | null,
   whereClause: Record<string, unknown> | null,
   pkConstraint?: UniqueConstraint,
-): string => {
+): EntityIdentityKey => {
   if (beforeRecord) {
     const id = extractEntityIdOrUnresolved(beforeRecord, pkConstraint?.fields);
     if (id !== UNRESOLVED_ENTITY_ID) return id;

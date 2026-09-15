@@ -7,6 +7,7 @@
 
 import {
   AUDIT_ACTION,
+  type EntityIdentityKey,
   type NestedPreFetchResults,
   resolveConnectOrCreateState,
   resolveCreateState,
@@ -44,7 +45,7 @@ export type ResolvedState = {
 const resolveUpdateOperation = (
   nestedPreFetchResults: NestedPreFetchResults | undefined,
   path: string,
-  entityId: string,
+  entityId: EntityIdentityKey,
 ): ResolvedState => {
   const resolved = resolveUpdateState(
     getPreFetchResult(nestedPreFetchResults, path, entityId),
@@ -58,7 +59,7 @@ const resolveUpdateOperation = (
 
 const resolveUpsertOperation = (
   nestedOp: NestedOperationInfo,
-  entityId: string,
+  entityId: EntityIdentityKey,
   nestedPreFetchResults: NestedPreFetchResults | undefined,
   getNestedOperationConfig: GetNestedOperationConfig,
 ): ResolvedState => {
@@ -85,7 +86,7 @@ const resolveUpsertOperation = (
 const resolveConnectOrCreateOperation = (
   nestedPreFetchResults: NestedPreFetchResults | undefined,
   path: string,
-  entityId: string,
+  entityId: EntityIdentityKey,
 ): ResolvedState => {
   const preFetchResult = getPreFetchResult(nestedPreFetchResults, path, entityId);
   const resolved = resolveConnectOrCreateState(preFetchResult, null);
@@ -151,7 +152,7 @@ const resolveCreateOperation = (): ResolvedState => {
  */
 export const resolveNestedOperationState = (
   nestedOp: NestedOperationInfo,
-  entityId: string,
+  entityId: EntityIdentityKey,
   nestedPreFetchResults: NestedPreFetchResults | undefined,
   getNestedOperationConfig: GetNestedOperationConfig,
 ): ResolvedState => {

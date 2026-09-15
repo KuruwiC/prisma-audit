@@ -8,7 +8,7 @@
  * @module lifecycle/pre-fetch/one-to-one-fetcher
  */
 
-import { type NestedPreFetchResults, preFetchLog } from '@kuruwic/prisma-audit-core';
+import { type EntityIdentityKey, type NestedPreFetchResults, preFetchLog } from '@kuruwic/prisma-audit-core';
 import type { DMMFField, DMMFModel } from '../../internal-types.js';
 import type { PreFetchModelClient, PreFetchRecord } from './model-client.js';
 import { extractEntityIdOrUnresolved } from './pre-fetch-result-store.js';
@@ -20,7 +20,7 @@ export interface ToOneRelationLink {
 }
 
 export interface PreFetchOneToOneResult {
-  entityId: string;
+  entityId: EntityIdentityKey;
   beforeRecord: PreFetchRecord | null;
 }
 

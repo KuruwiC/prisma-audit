@@ -27,6 +27,7 @@ export type {
 // Config Types
 export type { GlobalContextEnricherConfig, SerializationConfig } from './config.types.js';
 // Constants
+export type { EntityIdentityKey } from './constants.js';
 export {
   AUDIT_ACTION,
   BATCH_OPERATIONS,
