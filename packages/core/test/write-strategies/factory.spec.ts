@@ -5,10 +5,11 @@ import { runWithRuntimeContext } from '../../src/runtime-context.js';
 import type { AuditContext } from '../../src/types.js';
 import type { ErrorHandler } from '../../src/utils/error-handler.js';
 import { createWriteStrategySelector } from '../../src/write-strategies/factory.js';
+import { flushPendingWrites } from '../../src/write-strategies/fire-and-forget.js';
 import type { DbClientManager, WriteExecutor } from '../../src/write-strategies/interfaces.js';
 import type { WriteFn, WriteStrategyConfig } from '../../src/write-strategies/types.js';
 
-const mockHandleError: ErrorHandler = vi.fn();
+const WRITE_FAILURE_MESSAGE = 'simulated audit log write failure';
 
 const mockLogs: AuditLogData[] = [
   {
@@ -44,23 +45,6 @@ const mockContext: AuditContext = {
   },
 };
 
-// The transactional context has the same shape as the plain one; the difference
-// is driven via runWithRuntimeContext, not the context object itself.
-const mockTransactionalContext: AuditContext = {
-  actor: {
-    category: 'model',
-    type: 'User',
-    id: 'user-123',
-  },
-  request: {
-    requestId: 'req-123',
-  },
-};
-
-// Marks an active transaction in the library-owned runtime store.
-const inTransaction = <T>(fn: () => T): T =>
-  runWithRuntimeContext({ transaction: { client: {}, deferredWrites: [] } }, fn);
-
 const mockManager: DbClientManager = {
   baseClient: {
     auditLog: {
@@ -78,299 +62,85 @@ const mockExecutor: WriteExecutor = {
   write: vi.fn().mockResolvedValue(undefined),
 };
 
-const mockWriter: WriteFn = vi.fn().mockResolvedValue(undefined);
+/**
+ * Builds strategy input whose writer always fails, which tells the strategies apart: the
+ * synchronous strategy rejects with the writer's error, the deferred strategy queues the write
+ * without running it, and the fire-and-forget strategy resolves and reports the error to
+ * `handleError`.
+ */
+const createFailingWriteInput = () => {
+  const writer: WriteFn = vi.fn().mockRejectedValue(new Error(WRITE_FAILURE_MESSAGE));
+  const handleError: ErrorHandler = vi.fn();
+  return {
+    writer,
+    handleError,
+    input: {
+      logs: mockLogs,
+      context: mockContext,
+      manager: mockManager,
+      auditLogModel: 'auditLog',
+      writer,
+      handleError,
+    },
+  };
+};
+
+// Marks an active transaction in the library-owned runtime store.
+const inTransaction = <T>(deferredWrites: Array<() => Promise<void>>, fn: () => T): T =>
+  runWithRuntimeContext({ transaction: { client: {}, deferredWrites } }, fn);
 
 describe('createWriteStrategySelector', () => {
-  describe('Global awaitWrite: true', () => {
-    it('should return synchronous strategy when awaitWrite is true', async () => {
-      const config: WriteStrategyConfig = {
-        awaitWrite: true,
-        aggregateConfig: {
-          getEntityConfig: () => undefined,
-        },
-      };
+  it('asks shouldAwaitWrite about the selected model', () => {
+    const shouldAwaitWrite = vi.fn(() => true);
+    const config: WriteStrategyConfig = { shouldAwaitWrite };
 
-      const selector = createWriteStrategySelector(config, mockExecutor);
-      const strategy = selector('User');
+    createWriteStrategySelector(config, mockExecutor)('Payment');
 
-      const result = await strategy({
-        logs: mockLogs,
-        context: mockContext,
-        manager: mockManager,
-        auditLogModel: 'auditLog',
-        writer: mockWriter,
-        handleError: mockHandleError,
-      });
-
-      // Synchronous strategy returns Immediate result
-      expect(result._tag).toBe('Immediate');
-      expect(result).toHaveProperty('createdAt');
-    });
+    expect(shouldAwaitWrite).toHaveBeenCalledWith('Payment');
   });
 
-  describe('Transactional context', () => {
-    it('should return deferred strategy when in transaction and awaitWrite is false', async () => {
-      const config: WriteStrategyConfig = {
-        awaitWrite: false,
-        aggregateConfig: {
-          getEntityConfig: () => undefined,
-        },
-      };
+  it('selects the synchronous strategy when shouldAwaitWrite returns true', async () => {
+    const selector = createWriteStrategySelector({ shouldAwaitWrite: () => true }, mockExecutor);
+    const { input, handleError } = createFailingWriteInput();
 
-      const selector = createWriteStrategySelector(config, mockExecutor);
-
-      const result = await inTransaction(async () => {
-        const strategy = selector('User');
-        return strategy({
-          logs: mockLogs,
-          context: mockTransactionalContext,
-          manager: mockManager,
-          auditLogModel: 'auditLog',
-          writer: mockWriter,
-          handleError: mockHandleError,
-        });
-      });
-
-      // Deferred strategy returns Deferred result
-      expect(result._tag).toBe('Deferred');
-      expect(result).toHaveProperty('queuedAt');
-      if (result._tag === 'Deferred') {
-        expect(typeof result.execute).toBe('function');
-      }
-    });
+    await expect(selector('Payment')(input)).rejects.toThrow(WRITE_FAILURE_MESSAGE);
+    expect(handleError).not.toHaveBeenCalled();
   });
 
-  describe('Non-transactional context with awaitWrite: false', () => {
-    it('should return fire-and-forget strategy when outside transaction and awaitWrite is false', async () => {
-      const config: WriteStrategyConfig = {
-        awaitWrite: false,
-        aggregateConfig: {
-          getEntityConfig: () => undefined,
-        },
-      };
+  it('selects the synchronous strategy inside a transaction when shouldAwaitWrite returns true', async () => {
+    const selector = createWriteStrategySelector({ shouldAwaitWrite: () => true }, mockExecutor);
+    const { input } = createFailingWriteInput();
+    const deferredWrites: Array<() => Promise<void>> = [];
 
-      const selector = createWriteStrategySelector(config, mockExecutor);
-      const strategy = selector('User');
-
-      const result = await strategy({
-        logs: mockLogs,
-        context: mockContext,
-        manager: mockManager,
-        auditLogModel: 'auditLog',
-        writer: mockWriter,
-        handleError: mockHandleError,
-      });
-
-      // Fire-and-forget strategy returns Immediate result (non-blocking)
-      expect(result._tag).toBe('Immediate');
-      expect(result).toHaveProperty('createdAt');
-    });
+    await expect(inTransaction(deferredWrites, async () => selector('Payment')(input))).rejects.toThrow(
+      WRITE_FAILURE_MESSAGE,
+    );
+    expect(deferredWrites).toHaveLength(0);
   });
 
-  describe('Tag-based awaitWriteIf', () => {
-    it('should use awaitWriteIf when entity has tags', async () => {
-      const config: WriteStrategyConfig = {
-        awaitWrite: false, // Global default: false
-        awaitWriteIf: (_modelName, tags) => tags.includes('critical'),
-        aggregateConfig: {
-          getEntityConfig: (modelName) => {
-            if (modelName === 'Payment') {
-              return { tags: ['critical', 'financial'] };
-            }
-            return undefined;
-          },
-        },
-      };
+  it('selects the deferred strategy inside a transaction when shouldAwaitWrite returns false', async () => {
+    const selector = createWriteStrategySelector({ shouldAwaitWrite: () => false }, mockExecutor);
+    const { input, writer } = createFailingWriteInput();
+    const deferredWrites: Array<() => Promise<void>> = [];
 
-      const selector = createWriteStrategySelector(config, mockExecutor);
-      const strategy = selector('Payment');
+    const result = await inTransaction(deferredWrites, async () => selector('User')(input));
 
-      const result = await strategy({
-        logs: mockLogs,
-        context: mockContext,
-        manager: mockManager,
-        auditLogModel: 'auditLog',
-        writer: mockWriter,
-        handleError: mockHandleError,
-      });
-
-      // awaitWriteIf returns true for 'critical' tag → synchronous strategy
-      expect(result._tag).toBe('Immediate');
-      expect(result).toHaveProperty('createdAt');
-    });
-
-    it('should fall back to global awaitWrite when awaitWriteIf returns false', async () => {
-      const config: WriteStrategyConfig = {
-        awaitWrite: false, // Global default: false
-        awaitWriteIf: (_modelName, tags) => tags.includes('critical'),
-        aggregateConfig: {
-          getEntityConfig: (modelName) => {
-            if (modelName === 'User') {
-              return { tags: ['normal'] }; // No 'critical' tag
-            }
-            return undefined;
-          },
-        },
-      };
-
-      const selector = createWriteStrategySelector(config, mockExecutor);
-      const strategy = selector('User');
-
-      const result = await strategy({
-        logs: mockLogs,
-        context: mockContext,
-        manager: mockManager,
-        auditLogModel: 'auditLog',
-        writer: mockWriter,
-        handleError: mockHandleError,
-      });
-
-      // awaitWriteIf returns false → falls back to awaitWrite: false → fire-and-forget
-      expect(result._tag).toBe('Immediate');
-    });
-
-    it('should use deferred strategy when awaitWriteIf returns false and in transaction', async () => {
-      const config: WriteStrategyConfig = {
-        awaitWrite: false,
-        awaitWriteIf: (_modelName, tags) => tags.includes('critical'),
-        aggregateConfig: {
-          getEntityConfig: (modelName) => {
-            if (modelName === 'User') {
-              return { tags: ['normal'] }; // No 'critical' tag
-            }
-            return undefined;
-          },
-        },
-      };
-
-      const selector = createWriteStrategySelector(config, mockExecutor);
-
-      const result = await inTransaction(async () => {
-        const strategy = selector('User');
-        return strategy({
-          logs: mockLogs,
-          context: mockTransactionalContext,
-          manager: mockManager,
-          auditLogModel: 'auditLog',
-          writer: mockWriter,
-          handleError: mockHandleError,
-        });
-      });
-
-      // awaitWriteIf returns false + in transaction → deferred strategy
-      expect(result._tag).toBe('Deferred');
-      expect(result).toHaveProperty('execute');
-    });
-
-    it('should use synchronous strategy even in transaction when awaitWriteIf returns true', async () => {
-      const config: WriteStrategyConfig = {
-        awaitWrite: false,
-        awaitWriteIf: (_modelName, tags) => tags.includes('critical'),
-        aggregateConfig: {
-          getEntityConfig: (modelName) => {
-            if (modelName === 'Payment') {
-              return { tags: ['critical'] };
-            }
-            return undefined;
-          },
-        },
-      };
-
-      const selector = createWriteStrategySelector(config, mockExecutor);
-
-      const result = await inTransaction(async () => {
-        const strategy = selector('Payment');
-        return strategy({
-          logs: mockLogs,
-          context: mockTransactionalContext,
-          manager: mockManager,
-          auditLogModel: 'auditLog',
-          writer: mockWriter,
-          handleError: mockHandleError,
-        });
-      });
-
-      // awaitWriteIf returns true → synchronous (not deferred), even in transaction
-      expect(result._tag).toBe('Immediate');
-      expect(result).toHaveProperty('createdAt');
-    });
+    expect(result._tag).toBe('Deferred');
+    expect(deferredWrites).toHaveLength(1);
+    expect(writer).not.toHaveBeenCalled();
   });
 
-  describe('Edge cases', () => {
-    it('should handle entity without tags', async () => {
-      const config: WriteStrategyConfig = {
-        awaitWrite: false,
-        awaitWriteIf: (_modelName, tags) => tags.includes('critical'),
-        aggregateConfig: {
-          getEntityConfig: () => undefined, // No entity config
-        },
-      };
+  it('selects the fire-and-forget strategy outside a transaction when shouldAwaitWrite returns false', async () => {
+    const selector = createWriteStrategySelector({ shouldAwaitWrite: () => false }, mockExecutor);
+    const { input, handleError } = createFailingWriteInput();
 
-      const selector = createWriteStrategySelector(config, mockExecutor);
-      const strategy = selector('UnknownModel');
+    const result = await selector('User')(input);
+    await flushPendingWrites();
 
-      const result = await strategy({
-        logs: mockLogs,
-        context: mockContext,
-        manager: mockManager,
-        auditLogModel: 'auditLog',
-        writer: mockWriter,
-        handleError: mockHandleError,
-      });
-
-      // No entity config → falls back to awaitWrite: false → fire-and-forget
-      expect(result._tag).toBe('Immediate');
-    });
-
-    it('should handle entity with empty tags array', async () => {
-      const config: WriteStrategyConfig = {
-        awaitWrite: false,
-        awaitWriteIf: (_modelName, tags) => tags.includes('critical'),
-        aggregateConfig: {
-          getEntityConfig: () => ({ tags: [] }), // Empty tags
-        },
-      };
-
-      const selector = createWriteStrategySelector(config, mockExecutor);
-      const strategy = selector('User');
-
-      const result = await strategy({
-        logs: mockLogs,
-        context: mockContext,
-        manager: mockManager,
-        auditLogModel: 'auditLog',
-        writer: mockWriter,
-        handleError: mockHandleError,
-      });
-
-      // awaitWriteIf returns false (empty tags) → falls back to awaitWrite: false → fire-and-forget
-      expect(result._tag).toBe('Immediate');
-    });
-
-    it('should handle missing awaitWriteIf', async () => {
-      const config: WriteStrategyConfig = {
-        awaitWrite: true,
-        // awaitWriteIf is undefined
-        aggregateConfig: {
-          getEntityConfig: () => ({ tags: ['critical'] }),
-        },
-      };
-
-      const selector = createWriteStrategySelector(config, mockExecutor);
-      const strategy = selector('User');
-
-      const result = await strategy({
-        logs: mockLogs,
-        context: mockContext,
-        manager: mockManager,
-        auditLogModel: 'auditLog',
-        writer: mockWriter,
-        handleError: mockHandleError,
-      });
-
-      // No awaitWriteIf → uses global awaitWrite: true → synchronous strategy
-      expect(result._tag).toBe('Immediate');
-      expect(result).toHaveProperty('createdAt');
-    });
+    expect(result._tag).toBe('Immediate');
+    expect(handleError).toHaveBeenCalledWith(
+      expect.objectContaining({ message: WRITE_FAILURE_MESSAGE }),
+      'async audit log write',
+    );
   });
 });

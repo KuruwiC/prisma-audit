@@ -146,15 +146,33 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
   const writeFailurePolicyConfig: WriteFailurePolicy = errorHandling?.writeFailurePolicy ?? 'log';
 
   const aggregateConfig = createAggregateConfig(aggregateMapping);
+
+  const getModelTags = (modelName: string): string[] => aggregateConfig.getEntityConfig(modelName)?.tags ?? [];
+
+  /**
+   * Whether the caller's operation awaits the audit-log write for `modelName`. The single source
+   * for this decision: the top-level handler, the batch handler and the write strategy selector
+   * all read it.
+   *
+   * `performance.awaitWriteIf`, when set, decides for every model and receives the model's `tags`
+   * (an empty list for a model without tags); its result replaces `performance.awaitWrite`.
+   * Without `awaitWriteIf`, `performance.awaitWrite` (default `true`) applies.
+   */
+  const resolveAwaitWrite = (modelName: string): boolean =>
+    awaitWriteIf ? awaitWriteIf(modelName, getModelTags(modelName)) : awaitWrite;
+
+  /**
+   * The sampling rate (0-1) for an operation on `modelName`.
+   *
+   * `performance.samplingIf`, when set, decides for every model and receives the model's `tags`
+   * (an empty list for a model without tags); its result replaces `performance.sampling`.
+   * Without `samplingIf`, `performance.sampling` (default `1.0`) applies.
+   */
+  const resolveSamplingRate = (modelName: string): number =>
+    samplingIf ? samplingIf(modelName, getModelTags(modelName)) : sampling;
+
   const writeExecutor = createPrismaWriteExecutor(DbNull);
-  const strategySelector = createWriteStrategySelector(
-    {
-      awaitWrite,
-      awaitWriteIf,
-      aggregateConfig,
-    },
-    writeExecutor,
-  );
+  const strategySelector = createWriteStrategySelector({ shouldAwaitWrite: resolveAwaitWrite }, writeExecutor);
 
   /**
    * Notifies the observer of an audit failure. An observer that throws (sync or async) is
@@ -216,9 +234,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
       context,
       auditLogModel,
       isLoggable: aggregateConfig.isLoggable,
-      sampling,
-      samplingIf,
-      getEntityConfig: aggregateConfig.getEntityConfig,
+      resolveSamplingRate,
     });
   };
 
@@ -438,10 +454,8 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
       lifecycleStages: lifecycleStages as unknown as ReadonlyArray<(context: unknown) => Promise<unknown>>,
       writeAuditLogs,
       basePrisma: baseClient,
-      aggregateConfig,
       provider,
-      awaitWrite,
-      awaitWriteIf,
+      resolveAwaitWrite,
       // `executeAuditedOperation` (operation-executor.ts) rethrows the caller's own mutation
       // error (see `isCallerMutationError`) before calling this, so only audit-stage failures
       // (fetch-before-state / enrich / build) reach the observer here.
@@ -718,9 +732,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     baseClient: PrismaClientWithDynamicAccess,
   ): Promise<unknown> => {
     const modelName = operation.model as string;
-    const entityConfig = modelName ? aggregateConfig.getEntityConfig(modelName) : undefined;
-    const shouldAwaitForModel =
-      awaitWriteIf && entityConfig?.tags && modelName ? awaitWriteIf(modelName, entityConfig.tags) : awaitWrite;
+    const shouldAwaitForModel = resolveAwaitWrite(modelName);
 
     const dispatchBatchAction = async (
       txContext: AuditContext,

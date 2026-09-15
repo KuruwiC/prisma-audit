@@ -24,9 +24,7 @@
  * };
  *
  * const config: WriteStrategyConfig = {
- *   awaitWrite: false,
- *   awaitWriteIf: (modelName, tags) => tags.includes('critical'),
- *   aggregateConfig: { getEntityConfig }
+ *   shouldAwaitWrite: (modelName) => modelName === 'Payment',
  * };
  *
  * const selector = createWriteStrategySelector(config, writeExecutor);

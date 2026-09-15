@@ -7,7 +7,7 @@
  * @module lifecycle/operation-handlers/top-level-handler
  */
 
-import type { AggregateConfigService, AuditContext, AuditContextProvider } from '@kuruwic/prisma-audit-core';
+import type { AuditContext, AuditContextProvider } from '@kuruwic/prisma-audit-core';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../internal-types.js';
 import type { OperationContext } from '../../types.js';
 import { withOptionalTransaction } from '../transaction-wrapper.js';
@@ -15,21 +15,17 @@ import { executeAuditedOperation, type OperationExecutorDependencies } from './o
 
 /** Dependencies for handling top-level operations */
 export interface TopLevelHandlerDependencies extends OperationExecutorDependencies {
-  /** Aggregate configuration service */
-  aggregateConfig: AggregateConfigService;
   /** Audit context provider for transaction coordination */
   provider: AuditContextProvider;
-  /** Global awaitWrite setting */
-  awaitWrite: boolean;
-  /** Per-entity awaitWrite override function */
-  awaitWriteIf?: (modelName: string, tags: string[]) => boolean;
+  /** Whether the caller's operation awaits the audit-log write for a model */
+  resolveAwaitWrite: (modelName: string) => boolean;
 }
 
 /**
  * Handle single entity operations with transaction management
  *
- * Determines awaitWrite setting (per-entity or global), wraps in transaction if necessary,
- * and executes via executeAuditedOperation.
+ * Wraps the operation in a transaction when the model's audit-log write is awaited, and
+ * executes via executeAuditedOperation.
  *
  * @param operation - Operation context (model, action, args)
  * @param context - Audit context
@@ -45,12 +41,9 @@ export const handleTopLevelOperation = async (
   _query: (args: unknown) => Promise<unknown>,
   deps: TopLevelHandlerDependencies,
 ): Promise<unknown> => {
+  // A model-less operation produces no audit log, so there is no write to await.
   const modelName = operation.model;
-  const entityConfig = modelName ? deps.aggregateConfig.getEntityConfig(modelName) : undefined;
-  const shouldAwaitForModel =
-    deps.awaitWriteIf && entityConfig?.tags && modelName
-      ? deps.awaitWriteIf(modelName, entityConfig.tags)
-      : deps.awaitWrite;
+  const shouldAwaitForModel = modelName !== undefined && deps.resolveAwaitWrite(modelName);
 
   const executeOperation = async (
     txContext: AuditContext,

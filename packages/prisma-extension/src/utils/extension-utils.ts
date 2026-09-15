@@ -144,32 +144,6 @@ const isAuditLogModel = (modelName: string, auditLogModel: string): boolean => {
 };
 
 /**
- * Calculates effective sampling rate for a model
- *
- * Uses tag-based sampling if entity has tags and samplingIf is defined,
- * otherwise falls back to global sampling rate.
- *
- * @param modelName - Model name
- * @param globalSampling - Global sampling rate (0-1)
- * @param samplingIf - Tag-based sampling function
- * @param getEntityConfig - Function to get entity config
- * @returns Effective sampling rate (0-1)
- * @internal
- */
-const calculateSamplingRate = (
-  modelName: string,
-  globalSampling: number,
-  samplingIf: ((modelName: string, tags: string[]) => number) | undefined,
-  getEntityConfig: (modelName: string) => { tags?: string[] } | undefined,
-): number => {
-  const entityConfig = getEntityConfig(modelName);
-  if (samplingIf && entityConfig?.tags) {
-    return samplingIf(modelName, entityConfig.tags);
-  }
-  return globalSampling;
-};
-
-/**
  * Checks if operation should be sampled based on sampling rate
  *
  * Uses Math.random() for probabilistic sampling (1.0 = 100%, 0.1 = 10%, 0.0 = 0%).
@@ -187,9 +161,8 @@ export interface ShouldAuditModelInput {
   context: AuditContext | undefined;
   auditLogModel: string;
   isLoggable: (modelName: string) => boolean;
-  sampling: number;
-  samplingIf: ((modelName: string, tags: string[]) => number) | undefined;
-  getEntityConfig: (modelName: string) => { tags?: string[] } | undefined;
+  /** Sampling rate (0-1) for the model's operations */
+  resolveSamplingRate: (modelName: string) => number;
 }
 
 /**
@@ -207,14 +180,12 @@ export interface ShouldAuditModelInput {
  *   context,
  *   auditLogModel: 'auditLog',
  *   isLoggable: (m) => aggregateMapping.has(m),
- *   sampling: 1.0,
- *   samplingIf: undefined,
- *   getEntityConfig: (m) => entityConfigs.get(m),
+ *   resolveSamplingRate: () => 1.0,
  * });
  * ```
  */
 export const shouldAuditModel = (input: ShouldAuditModelInput): boolean => {
-  const { modelName, context, auditLogModel, isLoggable, sampling, samplingIf, getEntityConfig } = input;
+  const { modelName, context, auditLogModel, isLoggable, resolveSamplingRate } = input;
 
   if (!modelName || !context) {
     return false;
@@ -232,8 +203,7 @@ export const shouldAuditModel = (input: ShouldAuditModelInput): boolean => {
     return false;
   }
 
-  const effectiveSamplingRate = calculateSamplingRate(modelName, sampling, samplingIf, getEntityConfig);
-  if (!shouldSample(effectiveSamplingRate)) {
+  if (!shouldSample(resolveSamplingRate(modelName))) {
     return false;
   }
 

@@ -16,21 +16,6 @@ import type { WriteResult, WriteStrategyConfig, WriteStrategyInput } from './typ
  */
 type StrategyFunction = (input: Omit<WriteStrategyInput, 'writeExecutor'>) => Promise<WriteResult> | WriteResult;
 
-/**
- * Determine if write should be awaited
- *
- * Priority: awaitWriteIf (tag-based) > awaitWrite (global)
- */
-const shouldAwaitWrite = (config: WriteStrategyConfig, modelName: string): boolean => {
-  const entityConfig = config.aggregateConfig.getEntityConfig(modelName);
-
-  if (config.awaitWriteIf && entityConfig?.tags) {
-    return config.awaitWriteIf(modelName, entityConfig.tags);
-  }
-
-  return config.awaitWrite;
-};
-
 const isInTransaction = (): boolean => {
   return getRuntimeContext()?.transaction !== undefined;
 };
@@ -40,11 +25,11 @@ const isInTransaction = (): boolean => {
  *
  * Selects appropriate write strategy based on await configuration and transaction state.
  *
- * Strategy flow: shouldAwait? → Synchronous : inTransaction? → Deferred : Fire-and-Forget
+ * Strategy flow: shouldAwaitWrite(modelName)? → Synchronous : inTransaction? → Deferred : Fire-and-Forget
  *
  * @example
  * ```typescript
- * const selector = createWriteStrategySelector(config, writeExecutor);
+ * const selector = createWriteStrategySelector({ shouldAwaitWrite: () => true }, writeExecutor);
  * const strategy = selector('User');
  * await strategy({ logs, context, manager, auditLogModel: 'auditLog', writer, handleError });
  * ```
@@ -54,9 +39,7 @@ export const createWriteStrategySelector = (
   writeExecutor: WriteExecutor,
 ): ((modelName: string) => StrategyFunction) => {
   return (modelName: string): StrategyFunction => {
-    const shouldAwait = shouldAwaitWrite(config, modelName);
-
-    if (shouldAwait) {
+    if (config.shouldAwaitWrite(modelName)) {
       return (input) => writeSynchronously({ ...input, writeExecutor });
     }
 

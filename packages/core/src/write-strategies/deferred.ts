@@ -62,7 +62,7 @@ const enqueueDeferredWrite = (executor: () => Promise<void>): void => {
  * to avoid "transaction already closed" errors.
  *
  * @remarks
- * Used when inside transaction and awaitWrite is false.
+ * Used inside a transaction scope when the model's write is not awaited.
  * Errors handled via errorHandler without affecting main transaction.
  *
  * @example

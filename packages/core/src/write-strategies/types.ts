@@ -88,41 +88,15 @@ export interface WriteStrategyInput {
  * @example
  * ```typescript
  * const config: WriteStrategyConfig = {
- *   awaitWrite: false,
- *   awaitWriteIf: (modelName, tags) => {
- *     if (tags.includes('critical')) return true;
- *     if (modelName === 'Payment' || modelName === 'Transaction') return true;
- *     return false;
- *   },
- *   aggregateConfig: {
- *     getEntityConfig: (modelName) => entityConfigMap.get(modelName),
- *   },
+ *   shouldAwaitWrite: (modelName) => modelName === 'Payment',
  * };
  * ```
  */
 export interface WriteStrategyConfig {
   /**
-   * Global awaitWrite flag
-   * @default true
+   * Whether the caller's operation awaits the audit-log write for `modelName`. `true` selects the
+   * synchronous strategy; `false` selects the deferred strategy inside a transaction scope and the
+   * fire-and-forget strategy outside one.
    */
-  awaitWrite: boolean;
-
-  /**
-   * Conditional awaitWrite based on model name and tags
-   * Takes precedence over global awaitWrite
-   *
-   * @example
-   * ```typescript
-   * awaitWriteIf: (modelName, tags) => {
-   *   if (tags.includes('critical')) return true;
-   *   if (['Payment', 'Transaction'].includes(modelName)) return true;
-   *   return false;
-   * }
-   * ```
-   */
-  awaitWriteIf?: (modelName: string, tags: string[]) => boolean;
-
-  aggregateConfig: {
-    getEntityConfig: (modelName: string) => { tags?: string[] } | undefined;
-  };
+  shouldAwaitWrite: (modelName: string) => boolean;
 }

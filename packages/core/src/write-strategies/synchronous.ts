@@ -28,7 +28,7 @@ const executeWriteOperation = async (
  * Blocks until audit logs are written, maintaining transactional consistency.
  *
  * @remarks
- * Used when awaitWrite is true or awaitWriteIf returns true.
+ * Used when the model's write is awaited (`WriteStrategyConfig.shouldAwaitWrite` returns true).
  * Write errors propagate to caller.
  *
  * @example
