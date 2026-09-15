@@ -46,6 +46,7 @@ model Post {
   postTags        PostTag[]
   postAttachments PostAttachment[]
   postLikes       PostLike[]
+  postBookmarks   PostBookmark[]
 
   @@map("posts")
 }
@@ -198,6 +199,35 @@ model PostLike {
   @@index([postId])
   @@index([userId])
   @@map("post_likes")
+}
+
+// ============================================
+// Post Bookmark Models (Named Composite Key + Related Child Example)
+// ============================================
+
+model PostBookmark {
+  postId    String   @map("post_id")
+  userId    String   @map("user_id")
+  label     String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  post Post              @relation(fields: [postId], references: [id], onDelete: Cascade)
+  note PostBookmarkNote?
+
+  @@id([postId, userId], name: "bookmarkKey")
+  @@map("post_bookmarks")
+}
+
+model PostBookmarkNote {
+  id     String @id @default(cuid())
+  postId String @map("post_id")
+  userId String @map("user_id")
+  body   String
+
+  bookmark PostBookmark @relation(fields: [postId, userId], references: [postId, userId], onDelete: Cascade)
+
+  @@unique([postId, userId])
+  @@map("post_bookmark_notes")
 }
 
 // ============================================

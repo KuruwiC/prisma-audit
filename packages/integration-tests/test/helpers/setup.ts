@@ -57,6 +57,21 @@ export const testAggregateMapping: AggregateMapping = {
     },
     aggregates: [to('Post', foreignKey('postId'))],
   }),
+  // Named composite primary key (`@@id([postId, userId], name: "bookmarkKey")`) — same
+  // resolution need as `PostLike` above; the constraint name does not change the field
+  // order `getPrimaryKeyFields`/`extractPrimaryKey` derive it from.
+  PostBookmark: defineEntity({
+    type: 'PostBookmark',
+    idResolver: async (entity) => {
+      const record = entity as { postId: string; userId: string };
+      return JSON.stringify([record.postId, record.userId]);
+    },
+    aggregates: [to('Post', foreignKey('postId'))],
+  }),
+  PostBookmarkNote: defineEntity({
+    type: 'PostBookmarkNote',
+    aggregates: [to('Post', foreignKey('postId'))],
+  }),
   CommentAttachment: defineEntity({
     type: 'CommentAttachment',
     aggregates: [to('Comment', foreignKey('commentId')), to('Attachment', foreignKey('attachmentId'))],

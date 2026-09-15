@@ -129,6 +129,8 @@ export const cleanSQLiteDatabase = async (prisma: ReturnType<typeof createAuditC
   await prisma.commentAttachment.deleteMany();
   await prisma.postAttachment.deleteMany();
   await prisma.postLike.deleteMany();
+  await prisma.postBookmarkNote.deleteMany();
+  await prisma.postBookmark.deleteMany();
   await prisma.avatarImage.deleteMany();
   await prisma.avatar.deleteMany();
   await prisma.profile.deleteMany();
