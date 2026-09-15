@@ -38,7 +38,7 @@ describe('createEnrichContextsStage', () => {
       query: vi.fn(),
       beforeState: null,
       beforeStateResult: { _tag: 'notFound' },
-      nestedPreFetchResults: undefined,
+      nestedPreFetchResults: new Map(),
       result: { id: 'post-1', title: 'New Title' },
     };
 
@@ -95,7 +95,7 @@ describe('createEnrichContextsStage', () => {
       query: vi.fn(),
       beforeState: null,
       beforeStateResult: { _tag: 'notFound' },
-      nestedPreFetchResults: undefined,
+      nestedPreFetchResults: new Map(),
       result: { id: 'post-1', title: 'New Title' },
     };
 
@@ -148,7 +148,7 @@ describe('createEnrichContextsStage', () => {
       query: vi.fn(),
       beforeState: null,
       beforeStateResult: { _tag: 'notFound' },
-      nestedPreFetchResults: undefined,
+      nestedPreFetchResults: new Map(),
       result: { id: 'unknown-1', name: 'Test' },
     };
 
@@ -195,7 +195,7 @@ describe('createEnrichContextsStage', () => {
       query: vi.fn(),
       beforeState: null,
       beforeStateResult: { _tag: 'notFound' },
-      nestedPreFetchResults: undefined,
+      nestedPreFetchResults: new Map(),
       result: { id: 'post-1', title: 'New Title' },
     };
 

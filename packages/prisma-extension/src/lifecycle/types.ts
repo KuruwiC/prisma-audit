@@ -9,9 +9,10 @@
  * @module lifecycle/types
  */
 
-import type { AuditContext, PreFetchResults } from '@kuruwic/prisma-audit-core';
+import type { AuditContext } from '@kuruwic/prisma-audit-core';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../internal-types.js';
 import type { AuditLogData, OperationContext } from '../types.js';
+import type { NestedPreFetchResults } from './pre-fetch/pre-fetch-result-store.js';
 
 /**
  * Result of fetching before-state for an entity.
@@ -60,8 +61,8 @@ export interface PreparedContext extends InitialContext {
   beforeState: Record<string, unknown> | null;
   /** Full outcome of the before-state fetch; see {@link BeforeStateResult}. */
   beforeStateResult: BeforeStateResult;
-  /** Pre-fetched nested operation states (path → record | null) */
-  nestedPreFetchResults: PreFetchResults | undefined;
+  /** Before-states of nested records, keyed by operation path, then by entity identity */
+  nestedPreFetchResults: NestedPreFetchResults;
 }
 
 /**

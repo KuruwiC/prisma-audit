@@ -9,7 +9,7 @@
  * @see {@link PrismaAuditExtensionOptions}
  */
 
-import type { AuditContext, ErrorStrategy, PreFetchResults } from '@kuruwic/prisma-audit-core';
+import type { AuditContext, ErrorStrategy } from '@kuruwic/prisma-audit-core';
 import {
   AUDIT_ACTION,
   batchEnrichEntityContexts,
@@ -40,6 +40,7 @@ import {
   type PreFetchCoordinatorDependencies,
   preFetchNestedRecordsBeforeOperation,
 } from './lifecycle/pre-fetch/coordinator.js';
+import type { NestedPreFetchResults } from './lifecycle/pre-fetch/pre-fetch-result-store.js';
 import {
   createBuildLogsStage,
   createEnrichContextsStage,
@@ -356,13 +357,13 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
 
   /**
    * Pre-fetch nested records before operation execution
-   * @returns Path-based Map: path → record | null
+   * @returns Before-states keyed by operation path, then by entity identity
    */
   const preFetchNestedRecordsBeforeOperationWrapper = async (
     prismaClient: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
     modelName: string,
     args: Record<string, unknown>,
-  ): Promise<PreFetchResults> => {
+  ): Promise<NestedPreFetchResults> => {
     const dependencies: PreFetchCoordinatorDependencies = {
       Prisma,
       getNestedOperationConfig: getNestedOperationConfigWrapper,

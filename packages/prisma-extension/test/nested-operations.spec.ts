@@ -2,7 +2,7 @@
  * Unit tests for nested operations utilities
  */
 
-import { createEmptyPreFetchResults } from '@kuruwic/prisma-audit-core';
+import type { NestedDetectionPass, UpsertBranch } from '@kuruwic/prisma-audit-core';
 import { describe, expect, it } from 'vitest';
 import { detectNestedOperations, extractNestedRecords, getRelationFields } from '../src/utils/nested-operations.js';
 
@@ -138,7 +138,7 @@ describe('detectNestedOperations', () => {
       },
     };
 
-    const operations = detectNestedOperations(Prisma, 'User', args, createEmptyPreFetchResults());
+    const operations = detectNestedOperations(Prisma, 'User', args, { kind: 'discovery' });
 
     expect(operations).toHaveLength(1);
     expect(operations[0]).toEqual({
@@ -169,7 +169,7 @@ describe('detectNestedOperations', () => {
       },
     };
 
-    const operations = detectNestedOperations(Prisma, 'User', args, createEmptyPreFetchResults());
+    const operations = detectNestedOperations(Prisma, 'User', args, { kind: 'discovery' });
 
     expect(operations).toHaveLength(1);
     expect(operations[0]?.operation).toBe('createMany');
@@ -188,7 +188,7 @@ describe('detectNestedOperations', () => {
       },
     };
 
-    const operations = detectNestedOperations(Prisma, 'User', args, createEmptyPreFetchResults());
+    const operations = detectNestedOperations(Prisma, 'User', args, { kind: 'discovery' });
 
     expect(operations).toHaveLength(2);
     expect(operations.find((op) => op.fieldName === 'posts')).toBeDefined();
@@ -208,7 +208,7 @@ describe('detectNestedOperations', () => {
       },
     };
 
-    const operations = detectNestedOperations(Prisma, 'User', args, createEmptyPreFetchResults());
+    const operations = detectNestedOperations(Prisma, 'User', args, { kind: 'discovery' });
     expect(operations).toHaveLength(0);
   });
 
@@ -219,7 +219,7 @@ describe('detectNestedOperations', () => {
       },
     };
 
-    const operations = detectNestedOperations(Prisma, 'User', args, createEmptyPreFetchResults());
+    const operations = detectNestedOperations(Prisma, 'User', args, { kind: 'discovery' });
     expect(operations).toEqual([]);
   });
 
@@ -228,7 +228,7 @@ describe('detectNestedOperations', () => {
       where: { id: 'user-id' },
     };
 
-    const operations = detectNestedOperations(Prisma, 'User', args, createEmptyPreFetchResults());
+    const operations = detectNestedOperations(Prisma, 'User', args, { kind: 'discovery' });
     expect(operations).toEqual([]);
   });
 
@@ -242,7 +242,7 @@ describe('detectNestedOperations', () => {
       },
     };
 
-    const operations = detectNestedOperations(Prisma, 'User', args, createEmptyPreFetchResults());
+    const operations = detectNestedOperations(Prisma, 'User', args, { kind: 'discovery' });
 
     expect(operations).toHaveLength(1);
     expect(operations[0]?.operation).toBe('connect');
@@ -261,7 +261,7 @@ describe('detectNestedOperations', () => {
       },
     };
 
-    const operations = detectNestedOperations(Prisma, 'User', args, createEmptyPreFetchResults());
+    const operations = detectNestedOperations(Prisma, 'User', args, { kind: 'discovery' });
 
     expect(operations).toHaveLength(1);
     expect(operations[0]?.operation).toBe('connectOrCreate');
@@ -280,7 +280,7 @@ describe('detectNestedOperations', () => {
       },
     };
 
-    const operations = detectNestedOperations(Prisma, 'User', args, createEmptyPreFetchResults());
+    const operations = detectNestedOperations(Prisma, 'User', args, { kind: 'discovery' });
 
     expect(operations).toHaveLength(1);
     expect(operations[0]?.operation).toBe('update');
@@ -301,7 +301,7 @@ describe('detectNestedOperations', () => {
       },
     };
 
-    const operations = detectNestedOperations(Prisma, 'User', args, createEmptyPreFetchResults());
+    const operations = detectNestedOperations(Prisma, 'User', args, { kind: 'discovery' });
 
     expect(operations).toHaveLength(1);
     expect(operations[0]?.operation).toBe('updateMany');
@@ -317,7 +317,7 @@ describe('detectNestedOperations', () => {
       },
     };
 
-    const operations = detectNestedOperations(Prisma, 'User', args, createEmptyPreFetchResults());
+    const operations = detectNestedOperations(Prisma, 'User', args, { kind: 'discovery' });
 
     expect(operations).toHaveLength(1);
     expect(operations[0]?.operation).toBe('delete');
@@ -333,7 +333,7 @@ describe('detectNestedOperations', () => {
       },
     };
 
-    const operations = detectNestedOperations(Prisma, 'User', args, createEmptyPreFetchResults());
+    const operations = detectNestedOperations(Prisma, 'User', args, { kind: 'discovery' });
 
     expect(operations).toHaveLength(1);
     expect(operations[0]?.operation).toBe('deleteMany');
@@ -352,7 +352,7 @@ describe('detectNestedOperations', () => {
       },
     };
 
-    const operations = detectNestedOperations(Prisma, 'User', args, createEmptyPreFetchResults());
+    const operations = detectNestedOperations(Prisma, 'User', args, { kind: 'discovery' });
 
     expect(operations).toHaveLength(1);
     expect(operations[0]?.operation).toBe('upsert');
@@ -380,7 +380,7 @@ describe('detectNestedOperations', () => {
       },
     };
 
-    const operations = detectNestedOperations(Prisma, 'User', args, createEmptyPreFetchResults());
+    const operations = detectNestedOperations(Prisma, 'User', args, { kind: 'discovery' });
 
     expect(operations).toHaveLength(4);
     expect(operations.find((op) => op.operation === 'create')).toBeDefined();
@@ -516,6 +516,12 @@ describe('extractNestedRecords', () => {
   });
 });
 
+const executedPass = (existingPaths: readonly string[], topLevelUpsertBranch?: UpsertBranch): NestedDetectionPass => ({
+  kind: 'executed',
+  topLevelUpsertBranch,
+  hasRecordAt: (path) => existingPaths.includes(path),
+});
+
 describe('detectNestedOperations with upsert branch filtering', () => {
   const Prisma = {
     dmmf: {
@@ -551,54 +557,31 @@ describe('detectNestedOperations with upsert branch filtering', () => {
     },
   };
 
-  it('should detect only update branch when pre-fetch result exists', () => {
-    const args = {
-      data: {
-        email: 'user@example.com',
-        profile: {
-          upsert: {
-            create: { bio: 'New bio' },
-            update: { bio: 'Updated bio' },
-          },
+  const profileUpsertArgs = {
+    data: {
+      email: 'user@example.com',
+      profile: {
+        upsert: {
+          create: { bio: 'New bio', avatar: { create: { name: 'New avatar' } } },
+          update: { bio: 'Updated bio', avatar: { update: { name: 'Updated avatar' } } },
         },
       },
-    };
+    },
+  };
 
-    // Pre-fetch result indicates profile exists
-    const preFetchResults = new Map();
-    preFetchResults.set('profile', { id: 'profile-1', bio: 'Old bio', userId: 'user-1' });
+  const operationKeys = (operations: { path: string; operation: string }[]) =>
+    operations.map((op) => `${op.path}:${op.operation}`);
 
-    const operations = detectNestedOperations(Prisma, 'User', args, preFetchResults);
+  it('should detect only the update branch when the upserted record existed', () => {
+    const operations = detectNestedOperations(Prisma, 'User', profileUpsertArgs, executedPass(['profile']));
 
-    // Should detect only update operation, not both
-    expect(operations).toHaveLength(1);
-    expect(operations[0]?.operation).toBe('upsert');
-    expect(operations[0]?.fieldName).toBe('profile');
+    expect(operationKeys(operations)).toEqual(['profile:upsert', 'profile.avatar:update']);
   });
 
-  it('should detect only create branch when pre-fetch result does not exist', () => {
-    const args = {
-      data: {
-        email: 'user@example.com',
-        profile: {
-          upsert: {
-            create: { bio: 'New bio' },
-            update: { bio: 'Updated bio' },
-          },
-        },
-      },
-    };
+  it('should detect only the create branch when the upserted record did not exist', () => {
+    const operations = detectNestedOperations(Prisma, 'User', profileUpsertArgs, executedPass([]));
 
-    // Pre-fetch result indicates profile does NOT exist
-    const preFetchResults = new Map();
-    preFetchResults.set('profile', null);
-
-    const operations = detectNestedOperations(Prisma, 'User', args, preFetchResults);
-
-    // Should detect only create operation, not both
-    expect(operations).toHaveLength(1);
-    expect(operations[0]?.operation).toBe('upsert');
-    expect(operations[0]?.fieldName).toBe('profile');
+    expect(operationKeys(operations)).toEqual(['profile:upsert', 'profile.avatar:create']);
   });
 
   it('should detect nested upsert with different pre-fetch results', () => {
@@ -630,12 +613,8 @@ describe('detectNestedOperations with upsert branch filtering', () => {
       },
     };
 
-    // Pre-fetch result indicates profile exists but avatar does not
-    const preFetchResults = new Map();
-    preFetchResults.set('profile', { id: 'profile-1', bio: 'Old bio', userId: 'user-1' });
-    preFetchResults.set('profile.avatar', null);
-
-    const operations = detectNestedOperations(Prisma, 'User', args, preFetchResults);
+    // Profile exists but avatar does not
+    const operations = detectNestedOperations(Prisma, 'User', args, executedPass(['profile']));
 
     // Should detect profile upsert (will take update branch) and avatar upsert (will take create branch)
     expect(operations.length).toBeGreaterThanOrEqual(1);
@@ -644,27 +623,10 @@ describe('detectNestedOperations with upsert branch filtering', () => {
     expect(profileOp?.operation).toBe('upsert');
   });
 
-  it('should handle empty pre-fetch results (no filtering)', () => {
-    const args = {
-      data: {
-        email: 'user@example.com',
-        profile: {
-          upsert: {
-            create: { bio: 'New bio' },
-            update: { bio: 'Updated bio' },
-          },
-        },
-      },
-    };
+  it('should detect both branches in the discovery pass', () => {
+    const operations = detectNestedOperations(Prisma, 'User', profileUpsertArgs, { kind: 'discovery' });
 
-    // Empty pre-fetch results
-    const preFetchResults = createEmptyPreFetchResults();
-
-    const operations = detectNestedOperations(Prisma, 'User', args, preFetchResults);
-
-    // Should still detect upsert operation
-    expect(operations).toHaveLength(1);
-    expect(operations[0]?.operation).toBe('upsert');
+    expect(operationKeys(operations)).toEqual(['profile:upsert', 'profile.avatar:update', 'profile.avatar:create']);
   });
 
   it('should prevent AvatarImage duplication bug (original issue)', () => {
@@ -731,21 +693,13 @@ describe('detectNestedOperations with upsert branch filtering', () => {
       },
     };
 
-    // Pre-fetch result: All records exist (update path for all upserts)
-    const preFetchResults = new Map();
-    preFetchResults.set('profile', { id: 'profile-1', bio: 'Old bio', userId: 'user-1' });
-    preFetchResults.set('profile.avatar', {
-      id: 'avatar-1',
-      name: 'Old Avatar',
-      profileId: 'profile-1',
-    });
-    preFetchResults.set('profile.avatar.avatarImage', {
-      id: 'avatarImage-1',
-      imageUrl: 'https://example.com/old.png',
-      avatarId: 'avatar-1',
-    });
-
-    const operations = detectNestedOperations(Prisma, 'User', args, preFetchResults);
+    // All records exist (update path for all upserts)
+    const operations = detectNestedOperations(
+      Prisma,
+      'User',
+      args,
+      executedPass(['profile', 'profile.avatar', 'profile.avatar.avatarImage']),
+    );
 
     // Before fix: Would detect AvatarImage upsert 3 times (from all branches)
     // After fix: Should detect each upsert only once
@@ -754,5 +708,52 @@ describe('detectNestedOperations with upsert branch filtering', () => {
 
     // Note: Deep nested operations (avatar, avatarImage) are handled recursively
     // The key is that we don't explore all branches optimistically
+  });
+});
+
+describe('detectNestedOperations top-level upsert branches', () => {
+  const Prisma = {
+    dmmf: {
+      datamodel: {
+        models: [
+          {
+            name: 'User',
+            fields: [
+              { name: 'id', kind: 'scalar', type: 'String', isList: false },
+              { name: 'email', kind: 'scalar', type: 'String', isList: false },
+              { name: 'profile', kind: 'object', type: 'Profile', isList: false },
+            ],
+          },
+          {
+            name: 'Profile',
+            fields: [
+              { name: 'id', kind: 'scalar', type: 'String', isList: false },
+              { name: 'bio', kind: 'scalar', type: 'String', isList: false },
+            ],
+          },
+        ],
+      },
+    },
+  };
+
+  const args = {
+    where: { id: 'user-1' },
+    create: { email: 'user@example.com', profile: { create: { bio: 'Created bio' } } },
+    update: { profile: { update: { bio: 'Updated bio' } } },
+  };
+
+  const detectedOperations = (pass: NestedDetectionPass) =>
+    detectNestedOperations(Prisma, 'User', args, pass).map((op) => `${op.path}:${op.operation}`);
+
+  it('scans both branches in the discovery pass', () => {
+    expect(detectedOperations({ kind: 'discovery' })).toEqual(['profile:create', 'profile:update']);
+  });
+
+  it.each(['create', 'update'] as const)('scans only the %s branch the top-level upsert executed', (branch) => {
+    expect(detectedOperations(executedPass([], branch))).toEqual([`profile:${branch}`]);
+  });
+
+  it('scans neither branch in the executed pass of an operation that is not an upsert', () => {
+    expect(detectedOperations(executedPass([]))).toEqual([]);
   });
 });

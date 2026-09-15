@@ -12,18 +12,18 @@ import type {
   AggregateConfigService,
   AuditContext,
   NestedRecordInfo,
-  PreFetchResults,
   RedactConfig,
   SerializationConfig,
   UniqueConstraint,
+  UpsertBranch,
 } from '@kuruwic/prisma-audit-core';
 import {
   batchEnrichEntityContexts,
-  createEmptyPreFetchResults,
   detectNestedOperations,
   extractNestedRecords,
   type NestedOperationInfo,
   refetchNestedRecords,
+  UNRESOLVED_ENTITY_ID,
 } from '@kuruwic/prisma-audit-core';
 
 import { buildAuditLog } from '../../audit-log-builder/index.js';
@@ -42,8 +42,6 @@ import {
   resolveAndFilterSurvivors,
   type SurvivorEntity,
 } from '../batch-aggregate-resolver.js';
-import { PRE_FETCH_INTERNAL_RESULTS } from '../pre-fetch/coordinator.js';
-import { extractEntityIdOrDefault } from '../pre-fetch/pre-fetch-result-store.js';
 import type { CollectedNestedRecord } from './collected-record.js';
 import {
   collectDeleteRecords,
@@ -54,36 +52,25 @@ import { collectNestedRecords } from './record-processor.js';
 import type { GetNestedOperationConfig } from './state-resolver.js';
 
 /**
- * Extract internal NestedPreFetchResults from PreFetchResults
+ * Whether the record targeted by the nested upsert at `path` existed before the operation, which
+ * selects that upsert's `update` branch in the executed detection pass.
  *
- * Uses Symbol-attached internal structure to preserve multiple entityIds per path,
- * which is essential for array operations like `connectOrCreate: [...]`.
+ * Answered per path, not per row: the entry stored under `UNRESOLVED_ENTITY_ID` decides when one
+ * exists, otherwise the first entry stored for the path does, and a path with no entry has no
+ * record. Every upsert at one path is therefore treated as taking the same branch. The to-one
+ * pre-fetch stores a row it did not find, and a failed pre-fetch, under `UNRESOLVED_ENTITY_ID`
+ * with a `null` before-state, so a path whose rows are a mix of found and missing reads as missing.
  *
  * @internal
  */
-const extractNestedPreFetchResults = (
-  preFetchResults: PreFetchResults | undefined,
-): NestedPreFetchResults | undefined => {
-  if (!preFetchResults || preFetchResults.size === 0) {
-    return undefined;
+const hasPreFetchedRecordAt = (nestedPreFetchResults: NestedPreFetchResults, path: string): boolean => {
+  const pathMap = nestedPreFetchResults.get(path);
+  if (!pathMap) {
+    return false;
   }
 
-  const internalResults = (preFetchResults as unknown as Record<symbol, unknown>)[PRE_FETCH_INTERNAL_RESULTS];
-  if (internalResults && internalResults instanceof Map) {
-    return internalResults as NestedPreFetchResults;
-  }
-
-  // Fallback: Convert flat structure for backward compatibility
-  const nestedResults: NestedPreFetchResults = new Map();
-
-  for (const [path, record] of preFetchResults) {
-    const entityMap = new Map<string, { before: Record<string, unknown> | null }>();
-    const entityId = extractEntityIdOrDefault(record);
-    entityMap.set(entityId, { before: record as Record<string, unknown> | null });
-    nestedResults.set(path, entityMap);
-  }
-
-  return nestedResults;
+  const entry = pathMap.get(UNRESOLVED_ENTITY_ID) ?? pathMap.values().next().value;
+  return entry !== undefined && entry.before !== null;
 };
 
 /**
@@ -299,7 +286,13 @@ export interface BuildNestedAuditLogsParams {
   context: AuditContext;
   prismaClient: PrismaClientWithDynamicAccess | TransactionalPrismaClient;
   actorContext: unknown;
-  preFetchResults?: PreFetchResults;
+  /** Before-states pre-fetched ahead of the operation, keyed by operation path, then by entity identity */
+  nestedPreFetchResults: NestedPreFetchResults;
+  /**
+   * The branch the top-level upsert executed, whose nested writes are the ones audited;
+   * `undefined` when the operation is not an upsert.
+   */
+  topLevelUpsertBranch: UpsertBranch | undefined;
 }
 
 export interface BuildNestedAuditLogsInput extends BuildNestedAuditLogsParams {
@@ -310,14 +303,23 @@ export interface BuildNestedAuditLogsInput extends BuildNestedAuditLogsParams {
  * Build audit logs for nested records using batch pipeline.
  *
  * Pipeline:
- *   1. Detect nested operations and extract/refetch records
+ *   1. Detect the nested operations that executed and extract/refetch records
  *   2. Collect all records (resolve action, beforeState, skip connect)
  *   3. Group by relatedModel
  *   4. Per group: batch entity enrichment → batch aggregate resolution → batch aggregate enrichment → build logs
  */
 export const buildNestedAuditLogs = async (input: BuildNestedAuditLogsInput): Promise<AuditLogData[]> => {
-  const { modelName, args, result, context, prismaClient, actorContext, preFetchResults, deps } = input;
-  const nestedPreFetchResults = extractNestedPreFetchResults(preFetchResults);
+  const {
+    modelName,
+    args,
+    result,
+    context,
+    prismaClient,
+    actorContext,
+    nestedPreFetchResults,
+    topLevelUpsertBranch,
+    deps,
+  } = input;
   const {
     aggregateConfig,
     excludeFields,
@@ -330,9 +332,11 @@ export const buildNestedAuditLogs = async (input: BuildNestedAuditLogsInput): Pr
 
   const prismaMetadata = createSchemaMetadataFromDMMF(Prisma);
 
-  // Detect nested operations
-  const preFetchResultsForDetection = preFetchResults ?? createEmptyPreFetchResults();
-  const nestedOperations = detectNestedOperations(prismaMetadata, modelName, args, preFetchResultsForDetection);
+  const nestedOperations = detectNestedOperations(prismaMetadata, modelName, args, {
+    kind: 'executed',
+    topLevelUpsertBranch,
+    hasRecordAt: (path) => hasPreFetchedRecordAt(nestedPreFetchResults, path),
+  });
 
   if (nestedOperations.length === 0) {
     return [];
@@ -346,7 +350,7 @@ export const buildNestedAuditLogs = async (input: BuildNestedAuditLogsInput): Pr
     return !hasRecord;
   });
 
-  if (missingOperations.length > 0 && nestedPreFetchResults && nestedPreFetchResults.size > 0) {
+  if (missingOperations.length > 0 && nestedPreFetchResults.size > 0) {
     const refetchedRecords = await refetchNestedRecords(
       prismaClient as never,
       prismaMetadata as never,

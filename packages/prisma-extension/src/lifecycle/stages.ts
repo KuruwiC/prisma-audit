@@ -10,9 +10,9 @@ import type {
   AuditContext,
   GlobalContextEnricherConfig,
   LoggableEntity,
-  PreFetchResults,
   RedactConfig,
   SerializationConfig,
+  UpsertBranch,
 } from '@kuruwic/prisma-audit-core';
 import { AUDIT_ACTION } from '@kuruwic/prisma-audit-core';
 import type { BuildAuditLogInput } from '../audit-log-builder/index.js';
@@ -26,6 +26,7 @@ import {
   resolveAndFilterSurvivors,
 } from './batch-aggregate-resolver.js';
 import type { BuildNestedAuditLogsParams } from './nested-handlers/index.js';
+import type { NestedPreFetchResults } from './pre-fetch/pre-fetch-result-store.js';
 import type {
   BeforeStateResult,
   EnrichedContext,
@@ -124,13 +125,13 @@ export interface StageDependencies {
    * IMPORTANT: Must be called before the operation executes, otherwise records
    * will already be modified/deleted and unavailable.
    *
-   * @returns Path-based Map: path → record | null
+   * @returns Before-states keyed by operation path, then by entity identity
    */
   preFetchNestedRecordsBeforeOperation: (
     prismaClient: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
     modelName: string,
     args: Record<string, unknown>,
-  ) => Promise<PreFetchResults>;
+  ) => Promise<NestedPreFetchResults>;
 
   /**
    * Get nested operation configuration with priority resolution
@@ -541,12 +542,40 @@ const buildMainAuditLogs = async (
  * Handles extraction of nested records from the operation result and generates
  * audit logs for each nested entity.
  *
+ * For a top-level upsert, the before-state fetch tells which branch executed, and only that
+ * branch's nested writes are audited: `found` → `update`, `notFound` → `create`. When the fetch
+ * failed the executed branch is unknown, so the upsert's nested entries are skipped, as its main
+ * entry is in `buildMainAuditLogs`; fetchBeforeState already reported the failure to the observer.
+ * 'notRequested', which an upsert never sees (see `shouldFetchBeforeState`), leaves the branch
+ * unknown too.
+ *
  * @internal
  */
 const buildNestedLogsFromResult = async (
   context: EnrichedContext,
   deps: Pick<StageDependencies, 'buildNestedAuditLogs'>,
 ): Promise<AuditLogData[]> => {
+  let topLevelUpsertBranch: UpsertBranch | undefined;
+
+  if (context.operation.action === AUDIT_ACTION.UPSERT) {
+    switch (context.beforeStateResult._tag) {
+      case 'found':
+        topLevelUpsertBranch = 'update';
+        break;
+      case 'notFound':
+        topLevelUpsertBranch = 'create';
+        break;
+      case 'error':
+      case 'notRequested':
+        return [];
+      default: {
+        const exhaustiveCheck: never = context.beforeStateResult;
+        console.error(`[@prisma-audit] Unhandled BeforeStateResult tag: ${JSON.stringify(exhaustiveCheck)}`);
+        return [];
+      }
+    }
+  }
+
   return deps.buildNestedAuditLogs({
     modelName: getModelName(context.operation.model),
     args: toArgsRecord(context.operation.args),
@@ -554,7 +583,8 @@ const buildNestedLogsFromResult = async (
     context: context.auditContext,
     prismaClient: context.clientToUse,
     actorContext: context.actorContext,
-    preFetchResults: context.nestedPreFetchResults,
+    nestedPreFetchResults: context.nestedPreFetchResults,
+    topLevelUpsertBranch,
   });
 };
 

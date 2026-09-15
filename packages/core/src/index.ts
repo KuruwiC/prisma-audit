@@ -90,9 +90,6 @@ export {
   filterOperationsToPreFetch,
   sortByPathDepth,
 } from './state-resolution/pre-fetch-coordinator.js';
-// Types - PreFetch
-export type { PreFetchResults } from './types/pre-fetch.js';
-export { createEmptyPreFetchResults } from './types/pre-fetch.js';
 // Types
 export type { AuditActor, AuditContext, AuditContextProvider } from './types.js';
 // Utils - Debug
@@ -107,9 +104,11 @@ export type { IdFieldInfo, IdGenerator, IdGeneratorFactory } from './utils/id-ge
 export { ensureIds, getIdFieldInfo, getIdGenerator, ID_GENERATOR_FACTORIES } from './utils/id-generator.js';
 // Utils - Nested Operations
 export type {
+  NestedDetectionPass,
   NestedOperationInfo,
   NestedOperationKeyword,
   NestedRecordInfo,
+  UpsertBranch,
 } from './utils/nested-operations.js';
 export {
   detectNestedOperations,

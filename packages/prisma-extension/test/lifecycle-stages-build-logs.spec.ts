@@ -68,7 +68,7 @@ describe('createBuildLogsStage', () => {
       query: vi.fn(),
       beforeState: null,
       beforeStateResult: { _tag: 'notFound' },
-      nestedPreFetchResults: undefined,
+      nestedPreFetchResults: new Map(),
       result: { id: 'post-1', title: 'New Title' },
       actorContext: null,
       entityContext: null,
@@ -196,7 +196,7 @@ describe('createBuildLogsStage', () => {
       query: vi.fn(),
       beforeState: null,
       beforeStateResult: { _tag: 'notFound' },
-      nestedPreFetchResults: undefined,
+      nestedPreFetchResults: new Map(),
       result: {
         id: 'post-1',
         title: 'New Title',
@@ -346,7 +346,7 @@ describe('createBuildLogsStage', () => {
       query: vi.fn(),
       beforeState: null,
       beforeStateResult: { _tag: 'notFound' },
-      nestedPreFetchResults: undefined,
+      nestedPreFetchResults: new Map(),
       result: { id: 'unknown-1', name: 'Test' },
       actorContext: null,
       entityContext: null,
@@ -372,7 +372,7 @@ describe('createBuildLogsStage', () => {
     expect(result.logs).toEqual([]);
   });
 
-  it('should skip the main log for an upsert whose before-state fetch failed, instead of defaulting to create', async () => {
+  it('should skip the main and nested logs for an upsert whose before-state fetch failed, instead of defaulting to create', async () => {
     // Arrange — buildAuditLog would otherwise resolve this to action: 'create'
     // (resolveBeforeAndAfterStates treats before === null as "record did not
     // exist"), which would misrepresent a failed fetch as a genuine absence.
@@ -430,7 +430,7 @@ describe('createBuildLogsStage', () => {
       query: vi.fn(),
       beforeState: null,
       beforeStateResult: { _tag: 'error', error: new Error('simulated before-state fetch failure') },
-      nestedPreFetchResults: undefined,
+      nestedPreFetchResults: new Map(),
       result: { id: 'post-1', title: 'Updated Title' },
       actorContext: null,
       entityContext: null,
@@ -453,10 +453,71 @@ describe('createBuildLogsStage', () => {
     const result: FinalContext = await stage(enrichedContext);
 
     // Assert — no main log entry at all, and buildAuditLog (which would have
-    // resolved the action to 'create') is never even called.
+    // resolved the action to 'create') is never even called. The executed branch is
+    // unknown, so no nested entries are built either.
     expect(mockBuildAuditLog).not.toHaveBeenCalled();
+    expect(mockBuildNestedAuditLogs).not.toHaveBeenCalled();
     expect(result.logs).toEqual([]);
   });
+
+  it.each([
+    { beforeStateResult: { _tag: 'found', data: { id: 'post-1', title: 'Old Title' } }, branch: 'update' },
+    { beforeStateResult: { _tag: 'notFound' }, branch: 'create' },
+  ] as const)(
+    'builds nested logs from the $branch branch of an upsert whose before-state is $beforeStateResult._tag',
+    async ({ beforeStateResult, branch }) => {
+      const mockBuildNestedAuditLogs = vi.fn().mockResolvedValue([]);
+      const clientStub: PrismaClientWithDynamicAccess = Object.create(null);
+      const nestedPreFetchResults = new Map();
+
+      const enrichedContext: EnrichedContext = {
+        operation: {
+          model: 'Post',
+          action: 'upsert',
+          args: {
+            where: { id: 'post-1' },
+            create: { title: 'Created Title' },
+            update: { title: 'Updated Title' },
+          },
+        },
+        auditContext: {
+          actor: { category: 'model', type: 'User', id: 'user-1' },
+        },
+        clientToUse: clientStub,
+        query: vi.fn(),
+        beforeState: beforeStateResult._tag === 'found' ? beforeStateResult.data : null,
+        beforeStateResult,
+        nestedPreFetchResults,
+        result: { id: 'post-1', title: 'Title' },
+        actorContext: null,
+        entityContext: null,
+      };
+
+      const deps: Pick<
+        StageDependencies,
+        'buildAuditLog' | 'buildNestedAuditLogs' | 'aggregateConfig' | 'excludeFields' | 'basePrisma'
+      > = {
+        buildAuditLog: vi.fn(),
+        buildNestedAuditLogs: mockBuildNestedAuditLogs,
+        aggregateConfig: {
+          getEntityConfig: vi.fn().mockReturnValue(undefined),
+          getEntityConfigByType: vi.fn().mockReturnValue(undefined),
+          isLoggable: vi.fn(),
+          getAllLoggableModels: vi.fn(),
+          getMapping: vi.fn(),
+        },
+        excludeFields: [],
+        basePrisma: clientStub,
+      };
+
+      await createBuildLogsStage(deps)(enrichedContext);
+
+      expect(mockBuildNestedAuditLogs).toHaveBeenCalledTimes(1);
+      expect(mockBuildNestedAuditLogs).toHaveBeenCalledWith(
+        expect.objectContaining({ nestedPreFetchResults, topLevelUpsertBranch: branch }),
+      );
+    },
+  );
 
   it('builds the main log normally for a create whose before-state fetch was never requested (not the same as a failed fetch)', async () => {
     // Arrange — `beforeStateResult: { _tag: 'notRequested' }` is what a `create`
@@ -513,7 +574,7 @@ describe('createBuildLogsStage', () => {
       query: vi.fn(),
       beforeState: null,
       beforeStateResult: { _tag: 'notRequested' },
-      nestedPreFetchResults: undefined,
+      nestedPreFetchResults: new Map(),
       result: { id: 'post-1', title: 'New Title' },
       actorContext: null,
       entityContext: null,

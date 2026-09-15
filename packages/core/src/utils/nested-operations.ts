@@ -13,7 +13,6 @@
 
 import { UNRESOLVED_ENTITY_ID } from '../constants.js';
 import type { DbClient, SchemaMetadata } from '../interfaces/index.js';
-import { hasPreFetchedRecord, type PreFetchResults } from '../types/pre-fetch.js';
 import { nestedLog } from './debug.js';
 
 /**
@@ -67,74 +66,91 @@ export interface NestedRecordInfo {
   path: string;
 }
 
+/** A branch of an upsert: `create` runs when the target row does not exist, `update` when it does */
+export type UpsertBranch = 'create' | 'update';
+
+/**
+ * Which upsert branches {@link detectNestedOperations} scans.
+ *
+ * - `discovery`: the operation has not run, so which branch of an upsert executes is unknown.
+ *   Every branch of every upsert is scanned, so every nested record the operation could write is
+ *   found (e.g. to pre-fetch its before-state).
+ * - `executed`: the operation ran, and only the writes of the branches that executed are reported.
+ *   `topLevelUpsertBranch` is the branch the top-level upsert executed; it is absent when the
+ *   operation is not an upsert, and the top-level `create` / `update` args are then not scanned.
+ *   `hasRecordAt(path)` tells whether the record targeted by the nested upsert at `path` existed
+ *   before the operation: `true` selects that upsert's `update` branch, `false` its `create` branch.
+ */
+export type NestedDetectionPass =
+  | { readonly kind: 'discovery' }
+  | {
+      readonly kind: 'executed';
+      readonly topLevelUpsertBranch?: UpsertBranch;
+      readonly hasRecordAt: (path: string) => boolean;
+    };
+
+/** @internal The branches of the nested upsert at `path` that the pass scans */
+const nestedUpsertBranches = (pass: NestedDetectionPass, path: string): readonly UpsertBranch[] => {
+  if (pass.kind === 'discovery') {
+    return ['update', 'create'];
+  }
+  return [pass.hasRecordAt(path) ? 'update' : 'create'];
+};
+
+/** @internal The branches of the top-level upsert whose args the pass scans */
+const topLevelUpsertBranches = (pass: NestedDetectionPass): readonly UpsertBranch[] => {
+  if (pass.kind === 'discovery') {
+    return ['create', 'update'];
+  }
+  return pass.topLevelUpsertBranch ? [pass.topLevelUpsertBranch] : [];
+};
+
 /** @internal Process create/createMany operations recursively */
 const processCreateOperation = (
   schemaMetadata: SchemaMetadata,
   relationField: { name: string; relatedModel: string; isList: boolean },
   nestedData: unknown,
   currentPath: string,
-  preFetchResults: PreFetchResults,
+  pass: NestedDetectionPass,
 ): NestedOperationInfo[] => {
   return detectDeeplyNestedOperations(
     schemaMetadata,
     relationField.relatedModel,
     nestedData,
     currentPath,
-    preFetchResults,
+    pass,
     currentPath,
   );
 };
 
-/** @internal Process upsert operation - explore branches based on the pass (discovery/filtered) and record existence */
+/** @internal Process upsert operation - explore the branches the pass selects for this path */
 const processUpsertOperation = (
   schemaMetadata: SchemaMetadata,
   relationField: { name: string; relatedModel: string; isList: boolean },
   nestedData: unknown,
   currentPath: string,
-  preFetchResults: PreFetchResults,
+  pass: NestedDetectionPass,
 ): NestedOperationInfo[] => {
   if (typeof nestedData !== 'object' || nestedData === null) {
     return [];
   }
 
   const upsertData = nestedData as Record<string, unknown>;
-  const createData = upsertData.create;
-  const updateData = upsertData.update;
-
-  // Discovery pass (empty preFetchResults): explore BOTH branches
-  // Filtered pass (populated preFetchResults): explore only the executing branch
-  const isDiscoveryPass = preFetchResults.size === 0;
-  const recordExists = hasPreFetchedRecord(preFetchResults, currentPath);
-
   const deeplyNestedOps: NestedOperationInfo[] = [];
 
-  // Explore UPDATE branch if: discovery pass, or filtered pass and the record exists
-  if (isDiscoveryPass || recordExists) {
-    if (typeof updateData === 'object' && updateData !== null) {
-      const updateOps = detectDeeplyNestedOperations(
-        schemaMetadata,
-        relationField.relatedModel,
-        updateData,
-        currentPath,
-        preFetchResults,
-        currentPath,
+  for (const branch of nestedUpsertBranches(pass, currentPath)) {
+    const branchData = upsertData[branch];
+    if (typeof branchData === 'object' && branchData !== null) {
+      deeplyNestedOps.push(
+        ...detectDeeplyNestedOperations(
+          schemaMetadata,
+          relationField.relatedModel,
+          branchData,
+          currentPath,
+          pass,
+          currentPath,
+        ),
       );
-      deeplyNestedOps.push(...updateOps);
-    }
-  }
-
-  // Explore CREATE branch if: discovery pass, or filtered pass and the record doesn't exist
-  if (isDiscoveryPass || !recordExists) {
-    if (typeof createData === 'object' && createData !== null) {
-      const createOps = detectDeeplyNestedOperations(
-        schemaMetadata,
-        relationField.relatedModel,
-        createData,
-        currentPath,
-        preFetchResults,
-        currentPath,
-      );
-      deeplyNestedOps.push(...createOps);
     }
   }
 
@@ -147,7 +163,7 @@ const processConnectOrCreateOperation = (
   relationField: { name: string; relatedModel: string; isList: boolean },
   nestedData: unknown,
   currentPath: string,
-  preFetchResults: PreFetchResults,
+  pass: NestedDetectionPass,
 ): NestedOperationInfo[] => {
   if (typeof nestedData !== 'object' || nestedData === null) {
     return [];
@@ -165,7 +181,7 @@ const processConnectOrCreateOperation = (
     relationField.relatedModel,
     createData,
     currentPath,
-    preFetchResults,
+    pass,
     currentPath,
   );
 };
@@ -177,7 +193,7 @@ const processNestedKeyword = (
   keyword: NestedOperationKeyword,
   nestedData: unknown,
   currentPath: string,
-  preFetchResults: PreFetchResults,
+  pass: NestedDetectionPass,
 ): NestedOperationInfo[] => {
   const ops: NestedOperationInfo[] = [];
 
@@ -193,10 +209,10 @@ const processNestedKeyword = (
 
   // Process recursive operations based on keyword type
   if (keyword === 'create' || keyword === 'createMany') {
-    const createOps = processCreateOperation(schemaMetadata, relationField, nestedData, currentPath, preFetchResults);
+    const createOps = processCreateOperation(schemaMetadata, relationField, nestedData, currentPath, pass);
     ops.push(...createOps);
   } else if (keyword === 'upsert') {
-    const upsertOps = processUpsertOperation(schemaMetadata, relationField, nestedData, currentPath, preFetchResults);
+    const upsertOps = processUpsertOperation(schemaMetadata, relationField, nestedData, currentPath, pass);
     ops.push(...upsertOps);
   } else if (keyword === 'connectOrCreate') {
     const connectOrCreateOps = processConnectOrCreateOperation(
@@ -204,7 +220,7 @@ const processNestedKeyword = (
       relationField,
       nestedData,
       currentPath,
-      preFetchResults,
+      pass,
     );
     ops.push(...connectOrCreateOps);
   }
@@ -218,7 +234,7 @@ const processRelationField = (
   relationField: { name: string; relatedModel: string; isList: boolean },
   singleData: Record<string, unknown>,
   parentPath: string,
-  preFetchResults: PreFetchResults,
+  pass: NestedDetectionPass,
 ): NestedOperationInfo[] => {
   const fieldValue = singleData[relationField.name];
 
@@ -238,14 +254,7 @@ const processRelationField = (
       continue;
     }
 
-    const keywordOps = processNestedKeyword(
-      schemaMetadata,
-      relationField,
-      keyword,
-      nestedData,
-      currentPath,
-      preFetchResults,
-    );
+    const keywordOps = processNestedKeyword(schemaMetadata, relationField, keyword, nestedData, currentPath, pass);
     ops.push(...keywordOps);
   }
 
@@ -255,11 +264,8 @@ const processRelationField = (
 /**
  * Recursively detect deeply nested operations (e.g., postTags.create.tag.connectOrCreate)
  *
- * For upsert operations, filters branches based on record existence in preFetchResults:
- * - Record exists: Only explore UPDATE branch
- * - Record missing: Only explore CREATE branch
+ * Upsert branches are explored as `pass` selects them (see {@link NestedDetectionPass}).
  *
- * @param preFetchResults - Empty = discovery pass (explore all branches), populated = filtered pass (by existence)
  * @internal
  */
 const detectDeeplyNestedOperations = (
@@ -267,7 +273,7 @@ const detectDeeplyNestedOperations = (
   modelName: string,
   operationData: unknown,
   parentPath: string,
-  preFetchResults: PreFetchResults,
+  pass: NestedDetectionPass,
   _currentPath: string,
 ): NestedOperationInfo[] => {
   const deeplyNestedOps: NestedOperationInfo[] = [];
@@ -289,7 +295,7 @@ const detectDeeplyNestedOperations = (
         relationField,
         singleData as Record<string, unknown>,
         parentPath,
-        preFetchResults,
+        pass,
       );
       deeplyNestedOps.push(...fieldOps);
     }
@@ -305,39 +311,17 @@ const addDataFieldIfPresent = (args: Record<string, unknown>, dataSources: Recor
   }
 };
 
-/** @internal Add both the create and update branches (discovery pass) */
-const addCreateAndUpdateBranches = (args: Record<string, unknown>, dataSources: Record<string, unknown>[]): void => {
-  if (args.create && typeof args.create === 'object') {
-    dataSources.push(args.create as Record<string, unknown>);
-  }
-  if (args.update && typeof args.update === 'object') {
-    dataSources.push(args.update as Record<string, unknown>);
-  }
-};
-
-/** @internal Add only the update branch, or the create branch when there is no update (filtered pass) */
-const addUpdateOrCreateBranch = (args: Record<string, unknown>, dataSources: Record<string, unknown>[]): void => {
-  if (args.update && typeof args.update === 'object') {
-    dataSources.push(args.update as Record<string, unknown>);
-  } else if (args.create && typeof args.create === 'object') {
-    dataSources.push(args.create as Record<string, unknown>);
-  }
-};
-
-/** @internal Extract data sources from args */
-const extractDataSources = (
-  args: Record<string, unknown>,
-  preFetchResults: PreFetchResults,
-): Record<string, unknown>[] => {
+/** @internal Extract data sources from args: `data`, and the top-level upsert branches the pass selects */
+const extractDataSources = (args: Record<string, unknown>, pass: NestedDetectionPass): Record<string, unknown>[] => {
   const dataSources: Record<string, unknown>[] = [];
 
   addDataFieldIfPresent(args, dataSources);
 
-  const isDiscoveryPass = preFetchResults.size === 0;
-  if (isDiscoveryPass) {
-    addCreateAndUpdateBranches(args, dataSources);
-  } else {
-    addUpdateOrCreateBranch(args, dataSources);
+  for (const branch of topLevelUpsertBranches(pass)) {
+    const branchData = args[branch];
+    if (branchData && typeof branchData === 'object') {
+      dataSources.push(branchData as Record<string, unknown>);
+    }
   }
 
   return dataSources;
@@ -350,7 +334,7 @@ const processDeeplyNestedOperations = (
   keyword: NestedOperationKeyword,
   nestedData: unknown,
   currentPath: string,
-  preFetchResults: PreFetchResults,
+  pass: NestedDetectionPass,
 ): NestedOperationInfo[] => {
   const fieldPath = currentPath ? `${currentPath}.${relationField.name}` : relationField.name;
 
@@ -361,7 +345,7 @@ const processDeeplyNestedOperations = (
       relationField.relatedModel,
       nestedData,
       relationField.name,
-      preFetchResults,
+      pass,
       fieldPath,
     );
   }
@@ -373,7 +357,7 @@ const processDeeplyNestedOperations = (
       relationField,
       nestedData as Record<string, unknown>,
       fieldPath,
-      preFetchResults,
+      pass,
     );
   }
 
@@ -388,7 +372,7 @@ const processDeeplyNestedOperations = (
         relationField.relatedModel,
         createData,
         relationField.name,
-        preFetchResults,
+        pass,
         fieldPath,
       );
     }
@@ -403,42 +387,23 @@ const processTopLevelUpsertBranches = (
   relationField: { name: string; relatedModel: string; isList: boolean },
   upsertData: Record<string, unknown>,
   fieldPath: string,
-  preFetchResults: PreFetchResults,
+  pass: NestedDetectionPass,
 ): NestedOperationInfo[] => {
   const operations: NestedOperationInfo[] = [];
-  const createData = upsertData.create;
-  const updateData = upsertData.update;
 
-  const isDiscoveryPass = preFetchResults.size === 0;
-  const recordExists = hasPreFetchedRecord(preFetchResults, relationField.name);
-
-  // Explore UPDATE branch if: discovery pass, or filtered pass and the record exists
-  if (isDiscoveryPass || recordExists) {
-    if (typeof updateData === 'object' && updateData !== null) {
-      const updateOps = detectDeeplyNestedOperations(
-        schemaMetadata,
-        relationField.relatedModel,
-        updateData,
-        relationField.name,
-        preFetchResults,
-        fieldPath,
+  for (const branch of nestedUpsertBranches(pass, relationField.name)) {
+    const branchData = upsertData[branch];
+    if (typeof branchData === 'object' && branchData !== null) {
+      operations.push(
+        ...detectDeeplyNestedOperations(
+          schemaMetadata,
+          relationField.relatedModel,
+          branchData,
+          relationField.name,
+          pass,
+          fieldPath,
+        ),
       );
-      operations.push(...updateOps);
-    }
-  }
-
-  // Explore CREATE branch if: discovery pass, or filtered pass and the record doesn't exist
-  if (isDiscoveryPass || !recordExists) {
-    if (typeof createData === 'object' && createData !== null) {
-      const createOps = detectDeeplyNestedOperations(
-        schemaMetadata,
-        relationField.relatedModel,
-        createData,
-        relationField.name,
-        preFetchResults,
-        fieldPath,
-      );
-      operations.push(...createOps);
     }
   }
 
@@ -453,7 +418,7 @@ const processTopLevelUpsertBranches = (
 interface NestedOperationScanContext {
   schemaMetadata: SchemaMetadata;
   currentPath: string;
-  preFetchResults: PreFetchResults;
+  pass: NestedDetectionPass;
   processedOps: Set<string>;
   nestedOperations: NestedOperationInfo[];
 }
@@ -466,16 +431,8 @@ interface ProcessKeywordOperationInput extends NestedOperationScanContext {
 
 /** @internal Process a single keyword operation on a relation field */
 const processKeywordOperation = (input: ProcessKeywordOperationInput): void => {
-  const {
-    schemaMetadata,
-    relationField,
-    keyword,
-    nestedData,
-    currentPath,
-    preFetchResults,
-    processedOps,
-    nestedOperations,
-  } = input;
+  const { schemaMetadata, relationField, keyword, nestedData, currentPath, pass, processedOps, nestedOperations } =
+    input;
 
   // Create unique key for this operation to avoid duplicates
   const opKey = `${relationField.name}:${keyword}:${relationField.name}`;
@@ -495,14 +452,7 @@ const processKeywordOperation = (input: ProcessKeywordOperationInput): void => {
     path: relationField.name, // Top-level path is just the field name
   });
 
-  const deepOps = processDeeplyNestedOperations(
-    schemaMetadata,
-    relationField,
-    keyword,
-    nestedData,
-    currentPath,
-    preFetchResults,
-  );
+  const deepOps = processDeeplyNestedOperations(schemaMetadata, relationField, keyword, nestedData, currentPath, pass);
   nestedOperations.push(...deepOps);
 };
 
@@ -513,8 +463,7 @@ interface ProcessRelationFieldKeywordsInput extends NestedOperationScanContext {
 
 /** @internal Process all keywords for a relation field */
 const processRelationFieldKeywords = (input: ProcessRelationFieldKeywordsInput): void => {
-  const { schemaMetadata, relationField, fieldValue, currentPath, preFetchResults, processedOps, nestedOperations } =
-    input;
+  const { schemaMetadata, relationField, fieldValue, currentPath, pass, processedOps, nestedOperations } = input;
 
   for (const keyword of NESTED_OPERATION_KEYWORDS) {
     const nestedData = fieldValue[keyword];
@@ -528,7 +477,7 @@ const processRelationFieldKeywords = (input: ProcessRelationFieldKeywordsInput):
       keyword,
       nestedData,
       currentPath,
-      preFetchResults,
+      pass,
       processedOps,
       nestedOperations,
     });
@@ -542,7 +491,7 @@ interface ProcessDataSourceInput extends NestedOperationScanContext {
 
 /** @internal Process a single data source for nested operations */
 const processDataSource = (input: ProcessDataSourceInput): void => {
-  const { schemaMetadata, relationFields, data, currentPath, preFetchResults, processedOps, nestedOperations } = input;
+  const { schemaMetadata, relationFields, data, currentPath, pass, processedOps, nestedOperations } = input;
 
   for (const relationField of relationFields) {
     const fieldValue = data[relationField.name];
@@ -556,7 +505,7 @@ const processDataSource = (input: ProcessDataSourceInput): void => {
       relationField,
       fieldValue: fieldValue as Record<string, unknown>,
       currentPath,
-      preFetchResults,
+      pass,
       processedOps,
       nestedOperations,
     });
@@ -569,43 +518,43 @@ const processDataSource = (input: ProcessDataSourceInput): void => {
  * Main entry point for detecting all nested write operations (create, update, delete, upsert, connectOrCreate)
  * at any depth level. Supports deeply nested operations like `postTags.create.tag.connectOrCreate`.
  *
- * **Two-Pass Strategy:**
- * - Discovery pass (empty preFetchResults): Explores ALL branches to discover records needing pre-fetch
- * - Filtered pass (populated preFetchResults): Filters upsert branches based on record existence
+ * **Upsert branches:** `pass` decides which branches of the top-level upsert and of nested upserts
+ * are scanned — all of them in the discovery pass, the executed ones in the executed pass
+ * (see {@link NestedDetectionPass}).
  *
  * **Path Format:**
  * - Top-level: `"posts"`
  * - Nested: `"postTags.tag"`
  * - Deep: `"author.profile.avatar"`
  *
- * @param preFetchResults - Empty for the discovery pass (explore all), populated for the filtered pass
+ * @param pass - The detection pass that selects the upsert branches to scan
  *
  * @example
  * ```typescript
- * // Discovery pass: pre-fetch detection
- * const ops = detectNestedOperations(schemaMetadata, 'User', {
- *   data: {
- *     profile: {
- *       upsert: {
- *         create: { bio: 'New', avatar: { create: {...} } },
- *         update: { bio: 'Updated', avatar: { update: {...} } }
- *       }
- *     }
- *   }
- * }, new Map());
- * // Result: Operations from BOTH create and update branches
+ * const args = {
+ *   where: { id: 'user-1' },
+ *   create: { email: 'new@example.com', profile: { create: { bio: 'New' } } },
+ *   update: { profile: { upsert: { create: { bio: 'New' }, update: { bio: 'Updated', avatar: { update: {...} } } } } },
+ * };
  *
- * // Filtered pass: with pre-fetched data
- * const preFetchResults = new Map([['profile', { id: '1', bio: 'Old' }]]);
- * const ops = detectNestedOperations(schemaMetadata, 'User', { data: {...} }, preFetchResults);
- * // Result: Operations from ONLY update branch (record exists)
+ * // Discovery pass, before the operation runs
+ * detectNestedOperations(schemaMetadata, 'User', args, { kind: 'discovery' });
+ * // Result: profile create, profile upsert, avatar update
+ *
+ * // Executed pass: the user existed and so did its profile
+ * detectNestedOperations(schemaMetadata, 'User', args, {
+ *   kind: 'executed',
+ *   topLevelUpsertBranch: 'update',
+ *   hasRecordAt: (path) => path === 'profile',
+ * });
+ * // Result: profile upsert, avatar update
  * ```
  */
 export const detectNestedOperations = (
   schemaMetadata: SchemaMetadata,
   modelName: string,
   args: Record<string, unknown>,
-  preFetchResults: PreFetchResults,
+  pass: NestedDetectionPass,
   currentPath: string = '',
 ): NestedOperationInfo[] => {
   const nestedOperations: NestedOperationInfo[] = [];
@@ -617,7 +566,7 @@ export const detectNestedOperations = (
   }
 
   // Extract data sources from args
-  const dataSources = extractDataSources(args, preFetchResults);
+  const dataSources = extractDataSources(args, pass);
   if (dataSources.length === 0) {
     return nestedOperations;
   }
@@ -632,7 +581,7 @@ export const detectNestedOperations = (
       relationFields,
       data,
       currentPath,
-      preFetchResults,
+      pass,
       processedOps,
       nestedOperations,
     });
@@ -1009,7 +958,7 @@ const processNestedOperationForRefetch = async (
  *   dbClient,
  *   schemaMetadata,
  *   'User',
- *   preFetchResults,
+ *   pass,
  *   nestedOperations
  * );
  * // Returns: [{ fieldName: 'posts', relatedModel: 'Post', records: [...], path: 'posts' }]

@@ -9,11 +9,7 @@
 
 import { describe, expect, it } from 'vitest';
 import type { DMMFField, PrismaNamespace, TransactionalPrismaClient } from '../src/internal-types.js';
-import {
-  PRE_FETCH_INTERNAL_RESULTS,
-  type PreFetchResultsWithInternal,
-  preFetchNestedRecordsBeforeOperation,
-} from '../src/lifecycle/pre-fetch/coordinator.js';
+import { preFetchNestedRecordsBeforeOperation } from '../src/lifecycle/pre-fetch/coordinator.js';
 
 type Row = Record<string, unknown>;
 
@@ -109,13 +105,11 @@ const createDelegate = (rows: Row[]) => {
 const createClient = (tables: Record<string, Row[]>): TransactionalPrismaClient =>
   Object.fromEntries(Object.entries(tables).map(([model, rows]) => [model, createDelegate(rows)]));
 
-const preFetch = async (client: TransactionalPrismaClient, modelName: string, args: Row) => {
-  const results = (await preFetchNestedRecordsBeforeOperation(client, modelName, args, {
+const preFetch = (client: TransactionalPrismaClient, modelName: string, args: Row) =>
+  preFetchNestedRecordsBeforeOperation(client, modelName, args, {
     Prisma,
     getNestedOperationConfig: () => ({ fetchBeforeOperation: true }),
-  })) as PreFetchResultsWithInternal;
-  return results[PRE_FETCH_INTERNAL_RESULTS];
-};
+  });
 
 describe('nested to-one pre-fetch relation link and parent rows', () => {
   it('follows the back-relation with the same relation name when two relations point to the same model', async () => {

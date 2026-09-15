@@ -7,12 +7,11 @@
  * @module nested-operations
  */
 
-import type { DbClient, PreFetchResults } from '@kuruwic/prisma-audit-core';
+import type { DbClient, NestedDetectionPass } from '@kuruwic/prisma-audit-core';
 import {
   detectNestedOperations as coreDetectNestedOperations,
   extractNestedRecords as coreExtractNestedRecords,
   refetchNestedRecords as coreRefetchNestedRecords,
-  createEmptyPreFetchResults,
   NESTED_OPERATION_KEYWORDS,
   type NestedOperationInfo,
   type NestedOperationKeyword,
@@ -71,18 +70,17 @@ export const getRelationFields = (Prisma: PrismaWithDMMF, modelName: string): Re
  * @param Prisma - Prisma namespace with DMMF
  * @param modelName - Model name (PascalCase)
  * @param args - Prisma operation args
- * @param preFetchResults - Pre-fetched records mapped by path (used to filter upsert branches)
- * @param currentPath - Current path in dot-notation for recursive tracking (default: '')
+ * @param pass - Which upsert branches to scan (see `NestedDetectionPass`)
  * @returns Array of detected nested operations
  */
 export const detectNestedOperations = (
   Prisma: PrismaWithDMMF,
   modelName: string,
   args: Record<string, unknown>,
-  preFetchResults: PreFetchResults = createEmptyPreFetchResults(),
+  pass: NestedDetectionPass,
 ): NestedOperationInfo[] => {
   const schemaMetadata = createSchemaMetadataFromDMMF(Prisma);
-  return coreDetectNestedOperations(schemaMetadata, modelName, args, preFetchResults);
+  return coreDetectNestedOperations(schemaMetadata, modelName, args, pass);
 };
 
 /**

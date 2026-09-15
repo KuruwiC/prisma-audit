@@ -31,7 +31,7 @@ describe('createExecuteOperationStage', () => {
       query: mockQuery,
       beforeState: null,
       beforeStateResult: { _tag: 'notFound' },
-      nestedPreFetchResults: undefined,
+      nestedPreFetchResults: new Map(),
     };
 
     const stage = createExecuteOperationStage();
@@ -55,7 +55,9 @@ describe('createExecuteOperationStage', () => {
     const mockQuery = vi.fn().mockResolvedValue(mockResult);
 
     const beforeState = { id: 'user-1', email: 'old@example.com' };
-    const nestedPreFetchResults = new Map([['posts', { id: 'post-1', title: 'Old' }]]);
+    const nestedPreFetchResults = new Map([
+      ['posts', new Map([['post-1', { before: { id: 'post-1', title: 'Old' } }]])],
+    ]);
 
     const preparedContext: PreparedContext = {
       operation: {
@@ -106,7 +108,7 @@ describe('createExecuteOperationStage', () => {
       query: mockQuery,
       beforeState: null,
       beforeStateResult: { _tag: 'notFound' },
-      nestedPreFetchResults: undefined,
+      nestedPreFetchResults: new Map(),
     };
 
     const stage = createExecuteOperationStage();
