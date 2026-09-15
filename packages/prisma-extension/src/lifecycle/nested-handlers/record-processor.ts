@@ -31,7 +31,7 @@ export type NestedRecordsInfo = {
  *
  * Skips when action is 'connect' (connectOrCreate to existing record or connect operation).
  */
-export const shouldSkipNestedRecord = (action: PrismaAction): boolean => {
+const shouldSkipNestedRecord = (action: PrismaAction): boolean => {
   return action === ('connect' as PrismaAction);
 };
 

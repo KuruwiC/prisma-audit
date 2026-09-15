@@ -141,7 +141,7 @@ export const buildEntityMap = (
  *
  * Returns null for empty entity lists to signal callers to skip the query.
  */
-export const buildPKWhereClause = (
+const buildPKWhereClause = (
   pkFields: string[],
   entities: ReadonlyArray<Record<string, unknown>>,
 ): Record<string, unknown> | null => {
