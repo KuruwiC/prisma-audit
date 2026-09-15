@@ -7,14 +7,13 @@
   "scripts": {
     "generate:sqlite": "DATABASE_URL='file:./placeholder.db' prisma generate --schema=prisma/schema.sqlite.prisma",
     "generate:mysql": "DATABASE_URL='mysql://placeholder:placeholder@localhost:3306/placeholder' prisma generate --schema=prisma/schema.mysql.prisma",
-    "pretest": "pnpm generate:sqlite && pnpm generate:mysql",
+    "generate": "pnpm generate:sqlite && pnpm generate:mysql",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:postgresql": "vitest run",
-    "test:sqlite": "pnpm generate:sqlite && vitest run --config vitest.config.sqlite.ts",
-    "test:mysql": "pnpm generate:mysql && vitest run --config vitest.config.mysql.ts",
+    "test:sqlite": "vitest run --config vitest.config.sqlite.ts",
+    "test:mysql": "vitest run --config vitest.config.mysql.ts",
     "test:all-dbs": "pnpm test:postgresql && pnpm test:sqlite && pnpm test:mysql",
-    "pretypecheck": "pnpm generate:sqlite && pnpm generate:mysql",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

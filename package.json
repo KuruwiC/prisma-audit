@@ -17,7 +17,7 @@
     "ci": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
     "changeset": "changeset",
     "version-packages": "changeset version",
-    "db:generate": "pnpm --filter @kuruwic/prisma-audit-database db:generate",
+    "db:generate": "pnpm --filter @kuruwic/prisma-audit-database db:generate && pnpm --filter @kuruwic/prisma-audit-integration-tests generate",
     "db:push": "pnpm --filter @kuruwic/prisma-audit-database db:push",
     "db:migrate:dev": "pnpm --filter @kuruwic/prisma-audit-database db:migrate:dev",
     "db:studio": "pnpm --filter @kuruwic/prisma-audit-database db:studio",
