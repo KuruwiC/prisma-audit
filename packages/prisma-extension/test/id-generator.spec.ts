@@ -5,7 +5,7 @@
 import { getIdFieldInfo as coreGetIdFieldInfo } from '@kuruwic/prisma-audit-core';
 import { describe, expect, it } from 'vitest';
 import type { DMMFModel } from '../src/internal-types.js';
-import { ensureIds, getPrimaryKeyConstraint } from '../src/utils/id-generator.js';
+import { ensureIds, getPrimaryKeyConstraintOrThrow } from '../src/utils/id-generator.js';
 import { createSchemaMetadataFromDMMF } from '../src/utils/schema-metadata.js';
 
 const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -322,14 +322,14 @@ describe('ensureIds', () => {
   });
 });
 
-describe('getPrimaryKeyConstraint', () => {
+describe('getPrimaryKeyConstraintOrThrow', () => {
   const prismaWith = (models: DMMFModel[]) => ({ dmmf: { datamodel: { models } } });
   const scalar = (name: string, isId = false) => ({ name, kind: 'scalar', type: 'String', isId });
 
   it('returns the @id field', () => {
     const Prisma = prismaWith([{ name: 'User', fields: [scalar('id', true), scalar('email')] }]);
 
-    expect(getPrimaryKeyConstraint(Prisma, 'User')).toEqual({ type: 'primaryKey', fields: ['id'] });
+    expect(getPrimaryKeyConstraintOrThrow(Prisma, 'User')).toEqual({ type: 'primaryKey', fields: ['id'] });
   });
 
   it('returns a named @@id with its declared name', () => {
@@ -341,7 +341,7 @@ describe('getPrimaryKeyConstraint', () => {
       },
     ]);
 
-    expect(getPrimaryKeyConstraint(Prisma, 'PostBookmark')).toEqual({
+    expect(getPrimaryKeyConstraintOrThrow(Prisma, 'PostBookmark')).toEqual({
       type: 'primaryKey',
       fields: ['postId', 'userId'],
       name: 'bookmarkKey',
@@ -351,12 +351,12 @@ describe('getPrimaryKeyConstraint', () => {
   it('throws for a model without a primary key', () => {
     const Prisma = prismaWith([{ name: 'Setting', fields: [{ ...scalar('key'), isUnique: true }] }]);
 
-    expect(() => getPrimaryKeyConstraint(Prisma, 'Setting')).toThrow('Model "Setting" has no primary key');
+    expect(() => getPrimaryKeyConstraintOrThrow(Prisma, 'Setting')).toThrow('Model "Setting" has no primary key');
   });
 
   it('throws for a model missing from DMMF', () => {
     const Prisma = prismaWith([{ name: 'User', fields: [scalar('id', true)] }]);
 
-    expect(() => getPrimaryKeyConstraint(Prisma, 'Unknown')).toThrow('Model "Unknown" not found in DMMF');
+    expect(() => getPrimaryKeyConstraintOrThrow(Prisma, 'Unknown')).toThrow('Model "Unknown" not found in DMMF');
   });
 });

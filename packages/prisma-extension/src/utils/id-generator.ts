@@ -9,8 +9,8 @@
 
 import {
   ensureIds as coreEnsureIds,
-  getPrimaryKeyConstraint as coreGetPrimaryKeyConstraint,
   type EntityIdentityKey,
+  getPrimaryKeyConstraint,
   UNRESOLVED_ENTITY_ID,
   type UniqueConstraint,
 } from '@kuruwic/prisma-audit-core';
@@ -60,7 +60,7 @@ const PK_CHUNK_SIZE = 1000;
  *
  * @throws Error if DMMF is unavailable, the model is unknown, or the model has no primary key
  */
-export const getPrimaryKeyConstraint = (Prisma: PrismaWithDMMF, modelName: string): UniqueConstraint => {
+export const getPrimaryKeyConstraintOrThrow = (Prisma: PrismaWithDMMF, modelName: string): UniqueConstraint => {
   const models = Prisma.dmmf?.datamodel?.models;
   if (!models) {
     throw new Error(`[@prisma-audit] DMMF not available, cannot determine primary key for ${modelName}`);
@@ -70,7 +70,7 @@ export const getPrimaryKeyConstraint = (Prisma: PrismaWithDMMF, modelName: strin
     throw new Error(`[@prisma-audit] Model "${modelName}" not found in DMMF`);
   }
 
-  const primaryKey = coreGetPrimaryKeyConstraint(createSchemaMetadataFromDMMF(Prisma), modelName);
+  const primaryKey = getPrimaryKeyConstraint(createSchemaMetadataFromDMMF(Prisma), modelName);
   if (primaryKey) {
     return primaryKey;
   }
@@ -81,9 +81,9 @@ export const getPrimaryKeyConstraint = (Prisma: PrismaWithDMMF, modelName: strin
   );
 };
 
-/** Fields of `getPrimaryKeyConstraint`; throws if the model has no primary key. */
+/** Fields of `getPrimaryKeyConstraintOrThrow`; throws if the model has no primary key. */
 export const getPrimaryKeyFields = (Prisma: PrismaWithDMMF, modelName: string): string[] =>
-  getPrimaryKeyConstraint(Prisma, modelName).fields;
+  getPrimaryKeyConstraintOrThrow(Prisma, modelName).fields;
 
 /**
  * Extract a stable string key from an entity's primary key fields.
