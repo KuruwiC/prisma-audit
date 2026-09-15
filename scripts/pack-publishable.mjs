@@ -43,7 +43,7 @@ function main() {
     console.error(`Packing ${pkg.name}@${pkg.version} (${pkg.path})`);
     execFileSync('pnpm', ['pack', '--pack-destination', absDestDir], {
       cwd: pkg.path,
-      stdio: 'inherit',
+      stdio: ['ignore', 2, 'inherit'],
     });
   }
 
