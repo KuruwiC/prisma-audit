@@ -857,8 +857,12 @@ describe('Error Handling Integration', () => {
       const posts = await context.prisma.post.findMany();
       expect(posts).toHaveLength(0);
 
-      // Note: Audit logs behavior during transaction depends on implementation
-      // In current design, audit logs are created per-operation, not transactionally
+      // The test context client uses `awaitWrite: true` (helpers/setup.ts), so audit
+      // logs are written synchronously inside the transaction and roll back with it —
+      // same guarantee `actor-override.integration.spec.ts` asserts for actor-overridden
+      // writes inside a transaction.
+      const auditLogs = await context.prisma.auditLog.findMany({ where: { entityType: 'Post' } });
+      expect(auditLogs).toHaveLength(0);
     });
   });
 });
