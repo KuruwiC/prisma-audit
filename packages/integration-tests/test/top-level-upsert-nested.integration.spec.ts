@@ -1,15 +1,9 @@
 /**
- * Integration Test: nested audit entries of a top-level upsert
- *
- * Only one branch of a top-level `upsert` executes, and the before-state fetch that
- * precedes it decides which: an existing row means `update` ran, a missing row means
- * `create` ran. The nested writes that are audited are the ones inside that branch,
- * whatever the other branch contains and whether or not any nested record was
- * pre-fetched. When the before-state fetch fails, the executed branch is unknown, so
- * the upsert's nested entries are skipped along with its main entry.
- *
- * The before-state fetch failure is injected with a Prisma Client Extension applied
- * before the audit extension, as in upsert-before-state-failure.integration.spec.ts.
+ * A top-level upsert audits only the nested writes of the branch its before-state fetch identifies
+ * (existing row → `update`, missing row → `create`), whether or not nested records were pre-fetched.
+ * When that fetch fails the branch is unknown, so the nested entries are skipped with the main entry.
+ * The before-state fetch is a `post.findUnique` through the base client, which is how the
+ * `fault-injection` query extension fails it.
  */
 
 import type { AuditErrorObserver, PrismaAuditExtensionOptions } from '@kuruwic/prisma-audit';

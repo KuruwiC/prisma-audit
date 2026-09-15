@@ -1,10 +1,6 @@
 /**
- * Unit tests for the nested to-one pre-fetch in `preFetchNestedRecordsBeforeOperation`
- *
- * Covers schema shapes the integration fixtures do not have: two relations between the
- * same pair of models (the back-relation must be matched by relation name, not by model
- * type), and a to-one child nested under a parent path that holds several pre-fetched
- * rows (every parent row is followed, not only the first).
+ * Unit tests for the nested to-one pre-fetch in `preFetchNestedRecordsBeforeOperation`, on
+ * schema shapes the integration fixtures do not have.
  */
 
 import { describe, expect, it } from 'vitest';

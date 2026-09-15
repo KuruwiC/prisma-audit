@@ -1,13 +1,8 @@
 /**
- * Integration Test: before-state of nested to-one operations
- *
- * A nested to-one `update` / `upsert` / `delete` has no WHERE of its own, so its
- * pre-fetch derives the related row from the relation link declared in the schema
- * (`relationFromFields` / `relationToFields`, all fields of a composite key) and the
- * key values of the parent row it is nested under: the top-level row for a direct
- * child, the pre-fetched rows at the parent path for a deeper one. These scenarios
- * cover the owning side, the inverse side, a parent that does not exist yet, and
- * relations whose foreign key spans a composite key.
+ * A nested to-one `update` / `upsert` / `delete` has no WHERE of its own, so its pre-fetch derives
+ * the related row from the schema's relation link (`relationFromFields` / `relationToFields`, every
+ * field of a composite key) and the key of the parent row: the top-level row for a direct child,
+ * the rows pre-fetched at the parent path for a deeper one.
  */
 
 import type { AuditErrorObserver } from '@kuruwic/prisma-audit';

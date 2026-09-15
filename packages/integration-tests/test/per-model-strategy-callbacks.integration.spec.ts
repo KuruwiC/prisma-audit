@@ -1,7 +1,6 @@
 /**
- * `performance.samplingIf` and `performance.awaitWriteIf` decide per model, and apply to every
- * audited model: a model without `tags` receives an empty tag list instead of being skipped.
- * `Tag` and `User` in the test aggregate mapping declare no tags.
+ * `Tag` and `User` declare no tags in `testAggregateMapping`, so `performance.samplingIf` and
+ * `performance.awaitWriteIf` receive an empty tag list for them.
  */
 import type { PrismaAuditExtensionOptions } from '@kuruwic/prisma-audit';
 import { createAuditClient } from '@kuruwic/prisma-audit';
@@ -28,11 +27,6 @@ interface ScenarioOptions {
   failingWriter?: boolean;
 }
 
-/**
- * Builds an audited client with its own Prisma client, so the `performance` config under test
- * cannot leak into other scenarios. With `failingWriter`, every audit-log write throws and the
- * `'throw'` write-failure policy fails the caller's operation whenever it awaits the write.
- */
 const createScenario = (databaseUrl: string, options: ScenarioOptions) => {
   const basePrisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
   const provider = createAsyncLocalStorageProvider();

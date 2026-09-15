@@ -63,10 +63,8 @@ const mockExecutor: WriteExecutor = {
 };
 
 /**
- * Builds strategy input whose writer always fails, which tells the strategies apart: the
- * synchronous strategy rejects with the writer's error, the deferred strategy queues the write
- * without running it, and the fire-and-forget strategy resolves and reports the error to
- * `handleError`.
+ * A failing writer tells the strategies apart: synchronous rejects, deferred queues without
+ * writing, and fire-and-forget resolves and reports the error to `handleError`.
  */
 const createFailingWriteInput = () => {
   const writer: WriteFn = vi.fn().mockRejectedValue(new Error(WRITE_FAILURE_MESSAGE));

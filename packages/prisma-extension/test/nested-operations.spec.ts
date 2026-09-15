@@ -630,9 +630,8 @@ describe('detectNestedOperations with upsert branch filtering', () => {
   });
 
   it('should detect only the executed branch for a 3-level nested upsert chain', () => {
-    // Each level of the profile → avatar → avatarImage upsert chain takes exactly one
-    // branch (create or update) at runtime; executed-pass detection must report only
-    // that branch, not every create/update combination across all three levels.
+    // avatar and avatarImage repeat under both branches of their parent upsert, so scanning
+    // every branch would report them once per create/update combination.
 
     const args = {
       data: {

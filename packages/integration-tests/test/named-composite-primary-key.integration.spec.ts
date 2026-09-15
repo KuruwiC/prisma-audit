@@ -1,22 +1,7 @@
 /**
- * Integration Test: explicitly-named composite primary key audit behavior (`PostBookmark`)
- *
- * `PostBookmark` declares `@@id([postId, userId], name: "bookmarkKey")`, so Prisma addresses
- * a row as `{ bookmarkKey: { postId, userId } }` rather than the default
- * `{ postId_userId: { ... } }`. The primary-key identity of a model is its DMMF primary key —
- * both its fields and its name — so every path that reads a compound-unique WHERE clause
- * must unwrap it under the declared name.
- *
- * Covers, through the public client against a real database:
- *   - nested delete via `bookmarkKey` with the default configuration (pre-fetch runs).
- *   - nested delete via `bookmarkKey` with `nestedOperations.delete.fetchBeforeOperation:
- *     false`, where the entityId is resolved from the WHERE clause alone.
- *   - nested connectOrCreate via `bookmarkKey`, both creating a new row and connecting an
- *     existing one.
- *
- * In every case the real composite entityId (`'["<postId>","<userId>"]'`, the format of
- * `PostBookmark`'s `idResolver` in `testAggregateMapping`) is recorded, and the error
- * observer is never notified.
+ * `PostBookmark` declares `@@id([postId, userId], name: "bookmarkKey")`, so Prisma addresses a row
+ * as `{ bookmarkKey: { postId, userId } }` instead of the default `{ postId_userId: { ... } }`, and
+ * every path that reads a compound-unique WHERE clause must unwrap it under the declared name.
  */
 
 import type { AuditErrorObserver } from '@kuruwic/prisma-audit';
