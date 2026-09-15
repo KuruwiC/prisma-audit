@@ -293,7 +293,7 @@ describe('hooks.writer Coverage', () => {
       expect(totalLogs).toBeGreaterThan(0); // User + posts
     });
 
-    it('should NOT call hooks.writer if transaction is rolled back', async () => {
+    it('should persist no audit logs when the transaction rolls back', async () => {
       const transactionPromise = context.provider.runAsync(testActor, async () => {
         return context.prisma.$transaction(async (tx: typeof context.prisma) => {
           await tx.user.create({
@@ -311,10 +311,6 @@ describe('hooks.writer Coverage', () => {
 
       await expect(transactionPromise).rejects.toThrow('Rollback test');
 
-      // Verify: hooks.writer should NOT be called (transaction rolled back)
-      // Note: This depends on implementation - if deferred writes are used,
-      // writer may not be called until after commit
-      // For now, we just verify that no audit logs were persisted
       const auditLogs = await context.prisma.auditLog.findMany();
       expect(auditLogs).toHaveLength(0);
     });
