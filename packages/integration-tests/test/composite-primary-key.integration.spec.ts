@@ -6,8 +6,7 @@
  * entityId handling can be exercised through the public audit client instead of
  * only through the white-box unit test in
  * `packages/prisma-extension/test/delete-handler.spec.ts`, which constructs a
- * `NestedPreFetchResults` map by hand to reach `collectDeleteRecords` /
- * `buildMinimalEntity` directly.
+ * `NestedPreFetchResults` map by hand to reach `collectDeleteRecords` directly.
  *
  * Because a composite-key entity has no `entity.id` field, the default
  * `idResolver` (`self('id')`) cannot resolve it — `testAggregateMapping` gives
@@ -34,7 +33,7 @@
  *     round-trip (`named-composite-primary-key.integration.spec.ts` covers a named key).
  *   - the boundary where identity genuinely cannot be resolved: deleting a
  *     composite-key row that does not exist. No fabricated entityId is ever recorded —
- *     the write fails before any log is built (see `buildMinimalEntity` in
+ *     the write fails before any log is built (see `collectDeleteRecords` in
  *     `lifecycle/nested-handlers/delete-handler.ts` for the general "never guess" rule).
  */
 
