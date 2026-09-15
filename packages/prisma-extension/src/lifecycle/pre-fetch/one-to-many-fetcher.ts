@@ -37,7 +37,7 @@ export interface NestedOperation {
  * // Returns: { id: 1 }
  * ```
  */
-export const extractWhereClause = (
+const extractWhereClause = (
   operation: string,
   singleOpData: Record<string, unknown>,
 ): Record<string, unknown> | undefined => {
@@ -77,7 +77,7 @@ export const extractWhereClause = (
  * extractEntityId(null, { email: 'test@example' }); // Returns: UNRESOLVED_ENTITY_ID
  * ```
  */
-export const extractEntityId = (
+const extractEntityId = (
   beforeRecord: Record<string, unknown> | null,
   whereClause: Record<string, unknown> | null,
   pkConstraint?: UniqueConstraint,

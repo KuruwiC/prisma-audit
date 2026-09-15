@@ -103,7 +103,7 @@ export interface ResolveParentRowsInput {
  * An empty list means there is no parent row to follow: the top-level operation has no `where`,
  * its row does not exist, or nothing exists at the parent path.
  */
-export const resolveParentRows = async (input: ResolveParentRowsInput): Promise<PreFetchRecord[]> => {
+const resolveParentRows = async (input: ResolveParentRowsInput): Promise<PreFetchRecord[]> => {
   const { path, parentFields, topLevelWhere, topLevelModelClient, preFetchResults } = input;
 
   const separatorIndex = path.lastIndexOf('.');

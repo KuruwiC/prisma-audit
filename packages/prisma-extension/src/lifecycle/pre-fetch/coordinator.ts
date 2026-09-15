@@ -32,7 +32,7 @@ import { preFetchOneToManyRelation } from './one-to-many-fetcher.js';
 import { preFetchOneToOneRelation, resolveToOneRelationLink } from './one-to-one-fetcher.js';
 import { extractEntityIdOrDefault, storePreFetchResult } from './pre-fetch-result-store.js';
 
-export type NestedOperation = NestedOperationInfo;
+type NestedOperation = NestedOperationInfo;
 
 type PrismaDMMF = PrismaNamespace['dmmf'];
 
@@ -42,12 +42,6 @@ export type GetOperationConfig = (
 ) => {
   fetchBeforeOperation: boolean;
 };
-
-export type DetectNestedOperationsFn = (
-  prismaNamespace: PrismaNamespace,
-  modelName: string,
-  args: Record<string, unknown>,
-) => NestedOperation[];
 
 export interface PreFetchCoordinatorDependencies {
   /** Prisma namespace given as the extension's `Prisma` option */
@@ -83,10 +77,8 @@ export interface PreFetchCoordinatorDependencies {
  * );
  * // Returns: PostTag model
  * ```
- *
- * @internal
  */
-export const resolveParentModelFromPath = (
+const resolveParentModelFromPath = (
   path: string,
   topLevelModel: DMMFModel | undefined,
   dmmf: PrismaDMMF,
@@ -117,7 +109,7 @@ export const resolveParentModelFromPath = (
   return currentModel;
 };
 
-export const findDMMFField = (model: DMMFModel | undefined, fieldName: string): DMMFField | undefined => {
+const findDMMFField = (model: DMMFModel | undefined, fieldName: string): DMMFField | undefined => {
   if (!model) {
     return undefined;
   }
@@ -125,7 +117,7 @@ export const findDMMFField = (model: DMMFModel | undefined, fieldName: string): 
   return model.fields.find((f) => f.name === fieldName);
 };
 
-export const categorizeRelationType = (
+const categorizeRelationType = (
   field: DMMFField,
 ): {
   readonly isOneToOne: boolean;
