@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { removeRelations } from './remove-relations';
+import { removeRelations } from '../../src/utils/remove-relations.js';
 
 describe('removeRelations', () => {
   describe('with relationFieldNames (precise removal)', () => {
