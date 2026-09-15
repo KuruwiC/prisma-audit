@@ -3,14 +3,14 @@
  *
  * `preFetchNestedRecordsBeforeOperation` (`lifecycle/pre-fetch/coordinator.ts`) wraps
  * each nested operation's pre-fetch in a per-operation try/catch that falls back to
- * the `'__default__'` sentinel on failure. It reports the failure through
+ * core's `UNRESOLVED_ENTITY_ID` sentinel on failure. It reports the failure through
  * `errorHandling.observer` with `phase: 'pre-fetch'`, matching the top-level
  * equivalent (`fetchBeforeState` in extension.ts): a nested `update`/`delete` whose
  * pre-fetch query fails keeps that notification even though it loses its before-state.
  *
  * The second scenario below drives the same underlying failure through a nested
  * *delete array*: when the pre-fetch for one item in the array throws, the items
- * after it are never individually pre-fetched, and the `'__default__'` sentinel
+ * after it are never individually pre-fetched, and the `UNRESOLVED_ENTITY_ID` sentinel
  * ends up sharing the pre-fetch results map with the item(s) that already
  * succeeded. `collectDeleteRecords` (`lifecycle/nested-handlers/delete-handler.ts`)
  * treats that combination like every other unresolved entityId: the entry is
@@ -216,7 +216,7 @@ describe('nested pre-fetch failures — observer notification', () => {
         }),
       );
 
-      // The consequence inside collectDeleteRecords: the resulting `'__default__'`
+      // The consequence inside collectDeleteRecords: the resulting `UNRESOLVED_ENTITY_ID`
       // entry (added by the same catch, alongside c1's already-resolved entry) is
       // reported instead of being silently skipped.
       expect(observer).toHaveBeenCalledWith(

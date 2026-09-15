@@ -327,7 +327,7 @@ describe('Composite Primary Key (PostLike)', () => {
    * cannot be forced through the public client. Every producer that writes an
    * entityId key into the nested pre-fetch map (`extractEntityIdentity`, via
    * `storePreFetchResult`) emits either a well-formed `JSON.stringify` of exactly
-   * `pkFields.length` elements or the `'__default__'` sentinel; nothing in the shipped
+   * `pkFields.length` elements or core's `UNRESOLVED_ENTITY_ID` sentinel; nothing in the shipped
    * pipeline can hand it a truncated or corrupted JSON string. That branch guards
    * against a hypothetical bug in a different producer, not a state reachable from
    * real Prisma operations — which is exactly why
