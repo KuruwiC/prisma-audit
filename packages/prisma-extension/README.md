@@ -695,16 +695,16 @@ Controls whether audit log writes are synchronous or asynchronous.
   - ⚠️ No atomicity guarantee
 
 #### `awaitWriteIf`
-**Type:** `(operation: string, model: string) => boolean`
+**Type:** `(modelName: string, tags: string[]) => boolean`
 
-Conditionally control write strategy per operation.
+Conditionally control write strategy per model. Called for every model on each write, receiving that model's `tags` from `aggregateMapping` (`[]` for a model without tags); its return value replaces `performance.awaitWrite` for that model.
 
 ```typescript
 {
   performance: {
-    awaitWriteIf: (operation, model) => {
+    awaitWriteIf: (modelName, tags) => {
       // Sync writes for critical operations
-      if (model === 'Payment' || operation === 'delete') {
+      if (modelName === 'Payment' || tags.includes('critical')) {
         return true;
       }
       // Async for others
@@ -806,7 +806,7 @@ createAuditClient(prisma, {
 
 #### Tag-based Conditional Writing
 
-Override global `awaitWrite` for specific models using tags.
+Override the global `awaitWrite` per model with `awaitWriteIf(modelName, tags)`, which is called for every model — `tags` is `[]` for a model without tags.
 
 **Configuration:**
 ```typescript
@@ -841,26 +841,29 @@ createAuditClient(prisma, {
 
 #### Internal Architecture
 
+The extension resolves `awaitWrite`/`awaitWriteIf` into a plain per-model predicate before handing it to core; core's selector itself only ever sees that resolved predicate, not `awaitWriteIf` or `tags`.
+
 ```
 writeAuditLogs()
     ↓
-Strategy Selector Factory
+extension.ts: resolveAwaitWrite(modelName)
+┌───────────────────────────────────────┐
+│ 1. If awaitWriteIf is set, call it     │
+│    with (modelName, tags) and use its  │
+│    result                              │
+│ 2. Otherwise use the global awaitWrite │
+└───────────────────────────────────────┘
     ↓
-┌─────────────────────────────────────┐
-│ Determine shouldAwait:              │
-│ 1. Check awaitWriteIf(modelName,    │
-│    tags)                            │
-│ 2. Fall back to global awaitWrite   │
-└─────────────────────────────────────┘
+core: createWriteStrategySelector({ shouldAwaitWrite: resolveAwaitWrite })
     ↓
 Select Strategy:
-├─ Synchronous (if shouldAwait === true)
-├─ Deferred (if inside transaction scope && shouldAwait === false)
-└─ Fire-and-Forget (if no transaction scope && shouldAwait === false)
+├─ Synchronous (if shouldAwaitWrite(modelName) === true)
+├─ Deferred (if inside transaction scope && shouldAwaitWrite(modelName) === false)
+└─ Fire-and-Forget (if no transaction scope && shouldAwaitWrite(modelName) === false)
 ```
 
 **Source Files** (in `@kuruwic/prisma-audit-core`):
-- `write-strategies/types.ts` - Core type definitions
+- `write-strategies/types.ts` - Core type definitions (`WriteStrategyConfig.shouldAwaitWrite(modelName)`)
 - `write-strategies/factory.ts` - Strategy selector factory
 - `write-strategies/synchronous.ts` - Synchronous strategy
 - `write-strategies/deferred.ts` - Deferred strategy
@@ -882,16 +885,16 @@ Sample rate for audit logging (0.0 = 0%, 1.0 = 100%).
 ```
 
 #### `samplingIf`
-**Type:** `(operation: string, model: string) => number`
+**Type:** `(modelName: string, tags: string[]) => number`
 
-Per-operation sampling rate.
+Per-model sampling rate. Called for every model on each write, receiving that model's `tags` from `aggregateMapping` (`[]` for a model without tags); its return value replaces `performance.sampling` for that model.
 
 ```typescript
 {
   performance: {
-    samplingIf: (operation, model) => {
-      if (model === 'Session') return 0.01;  // 1% sampling
-      if (operation === 'update') return 0.5;  // 50% sampling
+    samplingIf: (modelName, tags) => {
+      if (modelName === 'Session') return 0.01;  // 1% sampling
+      if (tags.includes('high-volume')) return 0.5;  // 50% sampling
       return 1.0;  // 100% for others
     },
   }
@@ -951,7 +954,7 @@ Two independent options, both receiving the same structured failure context (`{ 
 - `'log'`: log to console and let the operation succeed (**default**)
 - `'ignore'`: do neither
 
-**Only the `log-write` phase is policy-gated.** `pre-fetch` and `entity-id-resolution` failures never fail the caller's operation — they degrade gracefully instead (e.g. an upsert whose before-state fetch failed skips its main log entry rather than mislabeling it `create`). `diff-generation` failures are different: they always propagate to the caller as a thrown error, regardless of `writeFailurePolicy` — building the audit log entry (enrichment, aggregate resolution, redaction, batch pipeline) has already failed by the time `writeFailurePolicy` could apply, so there is nothing for it to decide. `observer` hears about all four phases either way.
+**Only the `log-write` phase is policy-gated.** `pre-fetch` and `entity-id-resolution` failures never fail the caller's operation — they degrade gracefully instead (e.g. an upsert whose before-state fetch failed skips its main log entry rather than mislabeling it `create`). `diff-generation` failures are different: they always propagate to the caller as a thrown error, regardless of `writeFailurePolicy` — building the audit log entry (enrichment, aggregate resolution, redaction, or, for batch operations, fetching the affected rows before or after the mutation) has already failed by the time `writeFailurePolicy` could apply, so there is nothing for it to decide. `observer` hears about all four phases either way.
 
 **`awaitWrite: false` (deferred / fire-and-forget writes):** once the audit-log write has been queued (inside a transaction) or detached (outside one), the caller has already received its result — there is nothing left to fail. `'throw'` fails the caller only while it is still waiting on the write (the `awaitWrite: true` default); once the write is queued or detached, `'throw'` logs instead, exactly like `'log'`.
 
@@ -1276,7 +1279,7 @@ export { auditProvider };
 
 ## Lifecycle Pipeline Pattern
 
-The audit extension implements a **Lifecycle Pipeline Pattern** for type-safe, composable context transformation. This architecture separates concerns into four distinct stages, each adding specific information while maintaining compile-time type safety.
+The audit extension implements a **Lifecycle Pipeline Pattern** for type-safe, composable context transformation. This architecture separates concerns into four distinct stages, each adding specific information while maintaining compile-time type safety. This section documents internal architecture for readers of the source — the pipeline, its stage factories, and `LifecycleStage` are not part of the package's public API (only the top-level exports in `src/index.ts` are).
 
 ### Pipeline Overview
 
@@ -1327,17 +1330,11 @@ const logBuildingStage: LifecycleStage<EnrichedContext, FinalContext>;
 const invalidPipeline = [preFetchStage, enrichmentStage];
 ```
 
-### Code Example
+### Internal Wiring
+
+`runLifecyclePipeline` (`src/lifecycle/pipeline.ts`) runs an ordered array of stages, each produced by an internal factory (`createFetchBeforeStateStage`, `createExecuteOperationStage`, `createEnrichContextsStage`, `createBuildLogsStage` in `src/lifecycle/stages.ts`) closed over the extension's runtime dependencies:
 
 ```typescript
-import {
-  runLifecyclePipeline,
-  createFetchBeforeStateStage,
-  createExecuteOperationStage,
-  createEnrichContextsStage,
-  createBuildLogsStage,
-} from '@kuruwic/prisma-audit';
-
 // Define dependencies for each stage
 const deps = {
   fetchBeforeState,
@@ -1453,7 +1450,6 @@ import type { ActorId, EntityId, AggregateId } from '@kuruwic/prisma-audit';
 - **`ActorId`**: Type-safe identifier for actors (users, systems, etc.)
 - **`EntityId`**: Type-safe identifier for entities being audited
 - **`AggregateId`**: Type-safe identifier for aggregate roots
-- **`TraceId`**: Type-safe identifier for distributed tracing
 
 ### Creating Branded IDs
 
