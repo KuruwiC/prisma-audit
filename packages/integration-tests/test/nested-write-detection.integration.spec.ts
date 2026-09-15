@@ -119,4 +119,66 @@ describe('nested write detection', () => {
     const post = await clients.basePrisma.post.findFirstOrThrow({ where: { author: { email } } });
     expect(aggregateTypes(await createLogs('Post', post.id))).toEqual(['Post', 'User']);
   });
+
+  describe('value returned to the caller', () => {
+    it('resolves to exactly the caller select while auditing the nested create', async () => {
+      const user = await createUser('select-owner@example.com');
+
+      const result = await asActor(() =>
+        clients.prisma.user.update({
+          where: { id: user.id },
+          data: { posts: { create: { title: 'Created with select' } } },
+          select: { id: true },
+        }),
+      );
+
+      expect(result).toEqual({ id: user.id });
+      const post = await clients.basePrisma.post.findFirstOrThrow({ where: { authorId: user.id } });
+      expect(aggregateTypes(await createLogs('Post', post.id))).toEqual(['Post', 'User']);
+    });
+
+    it('returns no relation the caller did not include while auditing the nested create', async () => {
+      const user = await createUser('no-include-owner@example.com');
+
+      const result = await asActor(() =>
+        clients.prisma.user.update({
+          where: { id: user.id },
+          data: { posts: { create: { title: 'Created without include' } } },
+        }),
+      );
+
+      expect(result).not.toHaveProperty('posts');
+      expect(result).toEqual(await clients.basePrisma.user.findUniqueOrThrow({ where: { id: user.id } }));
+      const post = await clients.basePrisma.post.findFirstOrThrow({ where: { authorId: user.id } });
+      expect(aggregateTypes(await createLogs('Post', post.id))).toEqual(['Post', 'User']);
+    });
+
+    it('returns included relations with the caller nested select while auditing the full created row', async () => {
+      const user = await createUser('nested-select-owner@example.com');
+
+      const result = await asActor(() =>
+        clients.prisma.user.update({
+          where: { id: user.id },
+          data: { posts: { create: { title: 'Created with nested select' } } },
+          include: { posts: { select: { title: true } } },
+        }),
+      );
+
+      expect(result.posts).toEqual([{ title: 'Created with nested select' }]);
+      expect(result.email).toBe(user.email);
+
+      const post = await clients.basePrisma.post.findFirstOrThrow({ where: { authorId: user.id } });
+      const logs = await createLogs('Post', post.id);
+      expect(aggregateTypes(logs)).toEqual(['Post', 'User']);
+      for (const log of logs) {
+        expect(log.after).toMatchObject({
+          id: post.id,
+          title: 'Created with nested select',
+          content: null,
+          published: false,
+          authorId: user.id,
+        });
+      }
+    });
+  });
 });

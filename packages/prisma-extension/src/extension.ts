@@ -65,10 +65,11 @@ import {
   findManyByPKs,
   getModelAccessor,
   getPrimaryKeyFields,
-  injectDeepInclude,
+  injectNestedWriteSelection,
   isAuditableAction,
   isBatchOperation,
   isCallerMutationError,
+  projectToRequestedShape,
   requiresBeforeState,
   runCallerMutation,
   shouldAuditModel,
@@ -811,16 +812,16 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
               return query(args);
             }
 
-            // Nested writes are audited from the returned records, so the written relations are included
-            const argsWithInclude = injectDeepInclude(schemaMetadata, model, args);
+            // Nested writes are audited from the returned records, so the written relations are selected
+            const injection = injectNestedWriteSelection(schemaMetadata, model, args);
 
             // Mark the re-entrancy guard on the library-owned runtime store; the app context
             // stays untouched so downstream code keeps the caller's actor and request metadata.
-            return runWithRuntimeContext({ isProcessingAuditLog: true }, async () => {
+            const result = await runWithRuntimeContext({ isProcessingAuditLog: true }, async () => {
               const operationContext: OperationContext = {
                 model,
                 action: operation,
-                args: argsWithInclude as Record<string, unknown>,
+                args: injection.args as Record<string, unknown>,
               };
 
               if (isBatchOperation(operation)) {
@@ -828,9 +829,12 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
               }
 
               return handleSingleOperation(operationContext, context as AuditContext, baseClient, (modifiedArgs) =>
-                query(modifiedArgs ?? argsWithInclude),
+                query(modifiedArgs ?? injection.args),
               );
             });
+
+            // The audit logs were built from the full result; the caller receives the shape it requested.
+            return projectToRequestedShape(result, injection.injected);
           },
         },
       },

@@ -1095,7 +1095,7 @@ The stored `aggregateContext` is the shallow merge of the root-side and projecti
 
 ### Nested Operations (`nestedOperations`)
 
-Control nested operation audit logging (requires `include` option on queries).
+Control nested operation audit logging.
 
 #### `enabled`
 **Type:** `boolean`
@@ -1149,17 +1149,12 @@ await prisma.post.update({
       },
     },
   },
-  include: {
-    postTags: {
-      include: { tag: true },  // ← Required for audit logging
-    },
-  },
 });
 ```
 
 #### Important Notes
 
-1. **`include` requirement**: Nested operation audit logging requires the `include` option to retrieve nested records
+1. **No `include` needed**: The relations a nested write touches are added to the query's `include` (or to its `select` when the query uses `select`, including a relation's nested `select`) so their rows can be audited. The value returned to the caller keeps the shape the query requested.
 2. **`connect` behavior**:
    - Creates join table records (e.g., PostTag) for many-to-many relations
    - Creates audit logs for join table entities if defined in `aggregateMapping`

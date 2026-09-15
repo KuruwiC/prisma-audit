@@ -27,8 +27,8 @@ export {
   getPrimaryKeyFields,
 } from './id-generator.js';
 
-// Include injection
-export { injectDeepInclude } from './include-injection.js';
+// Nested-write selection injection
+export { injectNestedWriteSelection, projectToRequestedShape } from './include-injection.js';
 
 // Model accessor
 export { getModelAccessor } from './model-accessor.js';
