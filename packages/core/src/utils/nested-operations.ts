@@ -11,6 +11,7 @@
  * @packageDocumentation
  */
 
+import { UNRESOLVED_ENTITY_ID } from '../constants.js';
 import type { DbClient, SchemaMetadata } from '../interfaces/index.js';
 import { hasPreFetchedRecord, type PreFetchResults } from '../types/pre-fetch.js';
 import { nestedLog } from './debug.js';
@@ -838,7 +839,7 @@ const buildPkWhereClause = (pkFields: string[], pks: Record<string, unknown>[]):
 
 /** @internal Deserialize a composite entity ID string into PK fields */
 const deserializeEntityId = (entityId: string, pkFields: string[]): Record<string, unknown> | null => {
-  if (entityId === '__default__') return null;
+  if (entityId === UNRESOLVED_ENTITY_ID) return null;
 
   if (pkFields.length === 1) {
     return { [pkFields[0] as string]: entityId };
@@ -873,7 +874,7 @@ const extractPkFromEntry = (
   preFetchResult: { before: Record<string, unknown> | null },
   pkFields: string[],
 ): Record<string, unknown> | null => {
-  if (entityId !== '__default__') {
+  if (entityId !== UNRESOLVED_ENTITY_ID) {
     return deserializeEntityId(entityId, pkFields);
   }
 

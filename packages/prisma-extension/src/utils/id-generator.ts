@@ -15,6 +15,7 @@ import {
   type IdFieldInfo,
   type IdGenerator,
   type IdGeneratorFactory,
+  UNRESOLVED_ENTITY_ID,
   type UniqueConstraint,
 } from '@kuruwic/prisma-audit-core';
 
@@ -129,18 +130,15 @@ export const extractPrimaryKey = (entity: Record<string, unknown>, pkFields: str
   return JSON.stringify(pkFields.map((f) => entity[f]));
 };
 
-/** Default key used when PK fields are missing from a record */
-export const ENTITY_IDENTITY_DEFAULT = '__default__';
-
 /**
  * Extract entity identity string with fallback for missing PK fields.
  *
  * Unlike `extractPrimaryKey` (which assumes all fields exist), this returns
- * `__default__` when any PK field is absent. BigInt-safe serialization.
+ * `UNRESOLVED_ENTITY_ID` when any PK field is absent or null. BigInt-safe serialization.
  */
 export const extractEntityIdentity = (record: Record<string, unknown>, pkFields: string[]): string => {
   const allPresent = pkFields.every((f) => f in record && record[f] != null);
-  if (!allPresent) return ENTITY_IDENTITY_DEFAULT;
+  if (!allPresent) return UNRESOLVED_ENTITY_ID;
 
   if (pkFields.length === 1) return String(record[pkFields[0] as string]);
 

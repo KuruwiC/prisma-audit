@@ -1,6 +1,7 @@
+import { UNRESOLVED_ENTITY_ID } from '@kuruwic/prisma-audit-core';
 import { describe, expect, it } from 'vitest';
 
-import { ENTITY_IDENTITY_DEFAULT, extractEntityIdentity } from '../src/utils/id-generator.js';
+import { extractEntityIdentity } from '../src/utils/id-generator.js';
 
 describe('extractEntityIdentity', () => {
   describe('single PK', () => {
@@ -17,11 +18,11 @@ describe('extractEntityIdentity', () => {
     });
 
     it('should return default when PK field is missing', () => {
-      expect(extractEntityIdentity({ name: 'test' }, ['id'])).toBe(ENTITY_IDENTITY_DEFAULT);
+      expect(extractEntityIdentity({ name: 'test' }, ['id'])).toBe(UNRESOLVED_ENTITY_ID);
     });
 
     it('should return default when PK field is null', () => {
-      expect(extractEntityIdentity({ id: null }, ['id'])).toBe(ENTITY_IDENTITY_DEFAULT);
+      expect(extractEntityIdentity({ id: null }, ['id'])).toBe(UNRESOLVED_ENTITY_ID);
     });
   });
 
@@ -32,13 +33,11 @@ describe('extractEntityIdentity', () => {
     });
 
     it('should return default when any composite PK field is missing', () => {
-      expect(extractEntityIdentity({ tenantId: 'a' }, ['tenantId', 'userId'])).toBe(ENTITY_IDENTITY_DEFAULT);
+      expect(extractEntityIdentity({ tenantId: 'a' }, ['tenantId', 'userId'])).toBe(UNRESOLVED_ENTITY_ID);
     });
 
     it('should return default when any composite PK field is null', () => {
-      expect(extractEntityIdentity({ tenantId: 'a', userId: null }, ['tenantId', 'userId'])).toBe(
-        ENTITY_IDENTITY_DEFAULT,
-      );
+      expect(extractEntityIdentity({ tenantId: 'a', userId: null }, ['tenantId', 'userId'])).toBe(UNRESOLVED_ENTITY_ID);
     });
   });
 

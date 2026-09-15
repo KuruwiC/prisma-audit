@@ -34,6 +34,7 @@ export {
   DEFAULTS,
   SINGLE_OPERATIONS,
   SUPPORTED_OPERATIONS,
+  UNRESOLVED_ENTITY_ID,
 } from './constants.js';
 // Context Provider
 export { createAsyncLocalStorageProvider } from './context-provider.js';

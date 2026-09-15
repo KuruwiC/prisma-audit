@@ -60,6 +60,15 @@ export const ENRICHMENT_TIMEOUTS = {
   BATCH: 2000,
 } as const;
 
+/**
+ * Entity identity of a record whose primary key could not be determined (a primary-key field
+ * is absent or null, or the lookup that would have produced the record failed). Nested
+ * pre-fetch results store such a record under this key, and a lookup for a specific entityId
+ * falls back to it. Never a real entityId: consumers that need the primary key read it from
+ * the stored record or treat the identity as unresolved.
+ */
+export const UNRESOLVED_ENTITY_ID = '__default__';
+
 /** Default configuration values for the audit extension */
 export const DEFAULTS = {
   AUDIT_LOG_MODEL: 'AuditLog',

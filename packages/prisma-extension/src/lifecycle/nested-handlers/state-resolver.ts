@@ -12,6 +12,7 @@ import {
   resolveCreateState,
   resolveUpdateState,
   resolveUpsertState,
+  UNRESOLVED_ENTITY_ID,
 } from '@kuruwic/prisma-audit-core';
 import type { PrismaAction } from '../../types.js';
 import type { NestedOperationInfo, NestedPreFetchResults } from './delete-handler.js';
@@ -43,7 +44,8 @@ export type ResolvedState = {
 /**
  * Get pre-fetch result from nested Map structure
  *
- * Tries specific entityId first, then falls back to '__default__'.
+ * Tries specific entityId first, then falls back to the entry stored under
+ * `UNRESOLVED_ENTITY_ID` (a pre-fetch result whose entity identity is unknown).
  */
 const getPreFetchResult = (
   nestedPreFetchResults: NestedPreFetchResults | undefined,
@@ -53,8 +55,7 @@ const getPreFetchResult = (
   const pathMap = nestedPreFetchResults?.get(path);
   if (!pathMap) return undefined;
 
-  // Try specific entityId first, then fallback to __default__
-  return pathMap.get(entityId) || pathMap.get('__default__');
+  return pathMap.get(entityId) || pathMap.get(UNRESOLVED_ENTITY_ID);
 };
 
 const resolveUpdateOperation = (

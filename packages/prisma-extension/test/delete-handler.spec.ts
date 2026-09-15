@@ -8,7 +8,7 @@
  * it must be skipped and reported instead.
  */
 
-import type { UniqueConstraint } from '@kuruwic/prisma-audit-core';
+import { UNRESOLVED_ENTITY_ID, type UniqueConstraint } from '@kuruwic/prisma-audit-core';
 import { describe, expect, it, vi } from 'vitest';
 import {
   collectDeleteRecords,
@@ -169,7 +169,7 @@ describe('collectDeleteRecords — nested deleteMany has no single-row identity 
     expect(onUnresolvedDeleteEntityId).toHaveBeenCalledWith(
       expect.objectContaining({
         relatedModel: 'Post',
-        entityId: '__default__',
+        entityId: UNRESOLVED_ENTITY_ID,
         pkFields: ['id'],
         error: expect.any(Error),
       }),

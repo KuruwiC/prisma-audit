@@ -6,15 +6,19 @@
  *
  * Map Structure:
  * - Level 1: `path` (e.g., 'postTags', 'postTags.tag') → Map
- * - Level 2: `entityId` (e.g., '123', '__default__') → { before: Record | null }
+ * - Level 2: `entityId` (e.g., '123', or `UNRESOLVED_ENTITY_ID` when the identity is unknown)
+ *   → { before: Record | null }
  */
 
-import { ENTITY_IDENTITY_DEFAULT, extractEntityIdentity } from '../../utils/id-generator.js';
+import { UNRESOLVED_ENTITY_ID } from '@kuruwic/prisma-audit-core';
+
+import { extractEntityIdentity } from '../../utils/id-generator.js';
 
 /**
- * Default key used when entity ID is not available
+ * Key of a pre-fetch result whose entity identity is unknown: `UNRESOLVED_ENTITY_ID` from
+ * `@kuruwic/prisma-audit-core`, the single definition of that sentinel.
  */
-export const PRE_FETCH_DEFAULT_KEY = '__default__' as const;
+export const PRE_FETCH_DEFAULT_KEY = UNRESOLVED_ENTITY_ID;
 
 /**
  * Pre-fetch result structure
@@ -60,7 +64,7 @@ export const getPreFetchResult = (
     return undefined;
   }
 
-  // Try specific entityId first, then fallback to __default__
+  // Try specific entityId first, then fall back to the entry whose identity is unknown
   if (entityId) {
     const specificResult = pathMap.get(entityId);
     if (specificResult !== undefined) {
@@ -68,7 +72,7 @@ export const getPreFetchResult = (
     }
   }
 
-  return pathMap.get(PRE_FETCH_DEFAULT_KEY);
+  return pathMap.get(UNRESOLVED_ENTITY_ID);
 };
 
 /**
@@ -76,7 +80,7 @@ export const getPreFetchResult = (
  *
  * @param nestedPreFetchResults - Nested Map to store result in
  * @param path - Operation path (e.g., 'postTags', 'postTags.tag')
- * @param entityId - Entity ID (use PRE_FETCH_DEFAULT_KEY if not available)
+ * @param entityId - Entity ID (`UNRESOLVED_ENTITY_ID` if not available)
  * @param beforeState - Record state before operation
  *
  * @example
@@ -102,11 +106,11 @@ export const storePreFetchResult = (
 };
 
 /**
- * Extracts entity identity from record using PK fields, or returns default key
+ * Extracts entity identity from record using PK fields, or returns `UNRESOLVED_ENTITY_ID`
  *
  * @param record - Record to extract identity from
- * @param pkFields - Primary key field names. When omitted, falls back to ['id'] for backward compatibility.
- * @returns Entity identity as string, or PRE_FETCH_DEFAULT_KEY if PK fields are missing
+ * @param pkFields - Primary key field names. Defaults to ['id'].
+ * @returns Entity identity as string, or `UNRESOLVED_ENTITY_ID` if PK fields are missing
  *
  * @example
  * ```typescript
@@ -117,15 +121,13 @@ export const storePreFetchResult = (
  * // Returns: '["a","1"]'
  *
  * extractEntityIdOrDefault({ name: 'test' });
- * // Returns: '__default__'
+ * // Returns: UNRESOLVED_ENTITY_ID
  * ```
  */
 export const extractEntityIdOrDefault = (record: unknown, pkFields?: string[]): string => {
   if (!record || typeof record !== 'object') {
-    return PRE_FETCH_DEFAULT_KEY;
+    return UNRESOLVED_ENTITY_ID;
   }
 
-  const fields = pkFields ?? ['id'];
-  const identity = extractEntityIdentity(record as Record<string, unknown>, fields);
-  return identity === ENTITY_IDENTITY_DEFAULT ? PRE_FETCH_DEFAULT_KEY : identity;
+  return extractEntityIdentity(record as Record<string, unknown>, pkFields ?? ['id']);
 };

@@ -6,10 +6,9 @@
  * Enrichment and audit log building are handled by the batch pipeline in audit-log-builder.ts.
  */
 
-import { AUDIT_ACTION, nestedLog, type UniqueConstraint } from '@kuruwic/prisma-audit-core';
+import { AUDIT_ACTION, nestedLog, UNRESOLVED_ENTITY_ID, type UniqueConstraint } from '@kuruwic/prisma-audit-core';
 
 import { extractDeleteOperationEntityId } from '../../utils/extension-utils.js';
-import { PRE_FETCH_DEFAULT_KEY } from '../pre-fetch/pre-fetch-result-store.js';
 import type { CollectedNestedRecord } from './collected-record.js';
 
 /**
@@ -17,7 +16,7 @@ import type { CollectedNestedRecord } from './collected-record.js';
  *
  * Returns `null` when the full primary key cannot be recovered, so the caller skips the
  * record instead of logging a guessed identity:
- *   - `entityId === PRE_FETCH_DEFAULT_KEY` — pre-fetch never determined a primary key for this
+ *   - `entityId === UNRESOLVED_ENTITY_ID` — pre-fetch never determined a primary key for this
  *     row (pre-fetch failed, or the WHERE clause exposed no recognizable PK fields). An empty
  *     `{}` would pass as a complete entity, and an idResolver reading fields off it could
  *     produce a plausible but fabricated id (e.g. `"[null,null]"` for a two-field key).
@@ -27,7 +26,7 @@ import type { CollectedNestedRecord } from './collected-record.js';
  *     (`packages/core/src/utils/nested-operations.ts`), which also returns `null` here.
  */
 const buildMinimalEntity = (entityId: string, pkFields?: string[]): Record<string, unknown> | null => {
-  if (entityId === PRE_FETCH_DEFAULT_KEY) return null;
+  if (entityId === UNRESOLVED_ENTITY_ID) return null;
 
   const fields = pkFields ?? ['id'];
   if (fields.length === 1) {
@@ -50,7 +49,7 @@ const buildMinimalEntity = (entityId: string, pkFields?: string[]): Record<strin
 
 /**
  * A nested delete skipped because its primary key could not be resolved. `entityId` is the
- * raw serialized key, or `PRE_FETCH_DEFAULT_KEY` when no identity was ever determined.
+ * raw serialized key, or `UNRESOLVED_ENTITY_ID` when no identity was ever determined.
  * extension.ts maps these fields into an `entity-id-resolution` observer context.
  */
 export interface UnresolvedDeleteEntityId {
@@ -190,10 +189,10 @@ export const collectDeleteRecords = async (
     }
 
     nestedLog('could not extract entity ID from delete operation data');
-    // No raw entityId exists here; report the `PRE_FETCH_DEFAULT_KEY` sentinel ("identity
+    // No raw entityId exists here; report the `UNRESOLVED_ENTITY_ID` sentinel ("identity
     // never determined") so the observer can tell this apart from a malformed composite
     // key, which is reported with its raw value.
-    await reportUnresolvedEntityId(nestedOp.relatedModel, PRE_FETCH_DEFAULT_KEY, pkFields, onUnresolvedDeleteEntityId);
+    await reportUnresolvedEntityId(nestedOp.relatedModel, UNRESOLVED_ENTITY_ID, pkFields, onUnresolvedDeleteEntityId);
     return [];
   }
 

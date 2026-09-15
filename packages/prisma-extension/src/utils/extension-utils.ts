@@ -11,11 +11,12 @@ import {
   type AuditContext,
   getRuntimeContext,
   SUPPORTED_OPERATIONS,
+  UNRESOLVED_ENTITY_ID,
   type UniqueConstraint,
 } from '@kuruwic/prisma-audit-core';
 import type { PrismaAction } from '../types.js';
 import { unwrapCompoundWhere } from './compound-where.js';
-import { ENTITY_IDENTITY_DEFAULT, extractEntityIdentity } from './id-generator.js';
+import { extractEntityIdentity } from './id-generator.js';
 
 /**
  * Converts PascalCase to camelCase
@@ -107,13 +108,13 @@ export const extractDeleteOperationEntityId = (
   const record = data as Record<string, unknown>;
 
   const identity = extractEntityIdentity(unwrapCompoundWhere(record, pkConstraint), fields);
-  if (identity !== ENTITY_IDENTITY_DEFAULT) return identity;
+  if (identity !== UNRESOLVED_ENTITY_ID) return identity;
 
   if ('where' in record) {
     const where = record.where as Record<string, unknown>;
     if (where) {
       const whereIdentity = extractEntityIdentity(unwrapCompoundWhere(where, pkConstraint), fields);
-      if (whereIdentity !== ENTITY_IDENTITY_DEFAULT) return whereIdentity;
+      if (whereIdentity !== UNRESOLVED_ENTITY_ID) return whereIdentity;
     }
   }
 
