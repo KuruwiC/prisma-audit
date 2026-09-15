@@ -30,7 +30,8 @@ export interface TopLevelHandlerDependencies extends OperationExecutorDependenci
  * @param operation - Operation context (model, action, args)
  * @param context - Audit context
  * @param baseClient - Base Prisma client
- * @param _query - Original query function (unused, preserved for compatibility)
+ * @param _query - Original query function; unused because the audited operation is executed
+ *   through the audit-owned client rather than through this function
  * @param deps - Dependencies (executor deps + transaction settings)
  * @returns Operation result
  */
