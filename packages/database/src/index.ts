@@ -2,7 +2,6 @@
  * Shared Prisma Client for prisma-audit monorepo
  *
  * This module provides basic Prisma Client infrastructure for tests and examples.
- * For audit configuration, see audit.config.ts.
  */
 
 // Re-export all Prisma Client types and utilities
