@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Modern, framework-agnostic audit logging solution for Prisma",
   "scripts": {
-    "postinstall": "pnpm --filter @kuruwic/prisma-audit-database db:generate",
+    "postinstall": "pnpm db:generate",
     "build": "pnpm --filter @kuruwic/prisma-audit-database build && pnpm -r --filter=!@kuruwic/prisma-audit-database build",
     "test": "pnpm -r --workspace-concurrency=1 test",
     "test:watch": "pnpm -r test:watch",
