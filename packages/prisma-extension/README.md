@@ -36,7 +36,6 @@ export const auditProvider = createAsyncLocalStorageProvider();
 export default defineConfig({
   Prisma,
   provider: auditProvider,
-  DbNull: Prisma.DbNull, // Required for NULL handling
   aggregateMapping: defineAggregateMapping<PrismaClient>()({
     User: defineEntity({ type: 'User' }),
     Post: defineEntity({
