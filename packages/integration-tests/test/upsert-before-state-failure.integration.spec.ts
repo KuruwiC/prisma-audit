@@ -129,8 +129,11 @@ describe('upsert — before-state fetch failure', () => {
       }),
     );
 
-    // The core requirement: this update-through-upsert must never be recorded as 'create'.
+    // The core requirement: an upsert whose before-state fetch failed must never be
+    // recorded as 'create' — and in fact the whole audit entry for it is skipped, since
+    // the branch (create vs. update) can no longer be determined. No log at all, not
+    // just none with action 'create'.
     const logs = await basePrisma.auditLog.findMany({ where: { entityType: 'Post', entityId: post.id } });
-    expect(logs.some((log) => log.action === 'create')).toBe(false);
+    expect(logs).toEqual([]);
   });
 });
