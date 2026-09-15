@@ -26,7 +26,7 @@ import {
   enrichAggregateContexts,
   resolveAndFilterSurvivors,
 } from './batch-aggregate-resolver.js';
-import type { BuildNestedAuditLogsParams } from './nested-handlers/index.js';
+import type { BuildNestedAuditLogsParams } from './nested-handlers/audit-log-builder.js';
 import type {
   BeforeStateResult,
   EnrichedContext,

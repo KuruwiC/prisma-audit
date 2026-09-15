@@ -33,7 +33,10 @@ import type {
   TransactionalPrismaClient,
 } from './internal-types.js';
 import { createBatchBuildLogsStage, createBatchEnrichContextsStage } from './lifecycle/batch-stages.js';
-import { type BuildNestedAuditLogsParams, buildNestedAuditLogs } from './lifecycle/nested-handlers/index.js';
+import {
+  type BuildNestedAuditLogsParams,
+  buildNestedAuditLogs,
+} from './lifecycle/nested-handlers/audit-log-builder.js';
 import { handleTopLevelOperation, type TopLevelHandlerDependencies } from './lifecycle/operation-handlers/index.js';
 import { runLifecyclePipeline } from './lifecycle/pipeline.js';
 import {
