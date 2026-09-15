@@ -33,24 +33,13 @@ export const setupSQLiteDatabase = async (): Promise<SQLiteTestContext> => {
   const schemaPath = join(integrationTestsPath, 'prisma/schema.sqlite.prisma');
 
   try {
-    execSync(`npx prisma db push --schema=${schemaPath} --accept-data-loss`, {
+    execSync(`npx prisma db push --schema=${schemaPath} --accept-data-loss --skip-generate`, {
       cwd: integrationTestsPath,
       stdio: 'inherit',
       env: { ...process.env, DATABASE_URL: databaseUrl },
     });
   } catch (error) {
     console.error('DB push failed:', error);
-    throw error;
-  }
-
-  try {
-    execSync(`npx prisma generate --schema=${schemaPath}`, {
-      cwd: integrationTestsPath,
-      stdio: 'inherit',
-      env: { ...process.env, DATABASE_URL: databaseUrl },
-    });
-  } catch (error) {
-    console.error('Prisma generate failed:', error);
     throw error;
   }
 

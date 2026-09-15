@@ -33,25 +33,13 @@ export const setupMySQLDatabase = async (): Promise<MySQLTestContext> => {
   const schemaPath = join(integrationTestsPath, 'prisma/schema.mysql.prisma');
 
   try {
-    execSync(`npx prisma db push --schema=${schemaPath} --accept-data-loss`, {
+    execSync(`npx prisma db push --schema=${schemaPath} --accept-data-loss --skip-generate`, {
       cwd: integrationTestsPath,
       stdio: 'inherit',
       env: { ...process.env, DATABASE_URL: databaseUrl },
     });
   } catch (error) {
     console.error('DB push failed:', error);
-    await container.stop();
-    throw error;
-  }
-
-  try {
-    execSync(`npx prisma generate --schema=${schemaPath}`, {
-      cwd: integrationTestsPath,
-      stdio: 'inherit',
-      env: { ...process.env, DATABASE_URL: databaseUrl },
-    });
-  } catch (error) {
-    console.error('Prisma generate failed:', error);
     await container.stop();
     throw error;
   }
