@@ -140,7 +140,7 @@ import {
   to,
   foreignKey,
 } from "@kuruwic/prisma-audit";
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 
 const auditProvider = createAsyncLocalStorageProvider();
 const basePrisma = new PrismaClient();
@@ -154,8 +154,8 @@ const aggregateMapping = defineAggregateMapping<PrismaClient>()({
 });
 
 const prisma = createAuditClient(basePrisma, {
+  Prisma,
   provider: auditProvider,
-  basePrisma,
   aggregateMapping,
 });
 
@@ -226,8 +226,8 @@ The library automatically selects the optimal write strategy based on your confi
 
 ```typescript
 createAuditClient(basePrisma, {
+  Prisma,
   provider: auditProvider,
-  basePrisma,
   aggregateMapping,
 
   // Exclude noisy fields from change tracking

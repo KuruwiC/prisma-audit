@@ -34,8 +34,8 @@ import { Prisma, PrismaClient } from '@prisma/client';
 export const auditProvider = createAsyncLocalStorageProvider();
 
 export default defineConfig({
+  Prisma,
   provider: auditProvider,
-  basePrisma: new PrismaClient(),
   DbNull: Prisma.DbNull, // Required for NULL handling
   aggregateMapping: defineAggregateMapping<PrismaClient>()({
     User: defineEntity({ type: 'User' }),
@@ -191,16 +191,18 @@ This allows you to:
 - Categorize entities with custom `category` values (e.g., `"identity"`, `"system"`, `"business"`)
 - Control which entities create self aggregates with `self: false`
 
-#### `basePrisma`
-**Type:** `PrismaClient`
+#### `Prisma`
+**Type:** Prisma namespace
 
-The base Prisma client instance (non-extended). Used for:
-- Deferred writes (when `awaitWrite: false` in transactions)
-- Implicit transaction wrapping
+The `Prisma` namespace exported by the generated client your `PrismaClient` comes from. The extension reads schema metadata (`Prisma.dmmf`), `Prisma.DbNull` and `Prisma.defineExtension` from it. A client instance does not expose its namespace, so it is passed explicitly.
 
 ```typescript
-const basePrisma = new PrismaClient();
+import { Prisma, PrismaClient } from '@prisma/client';
+
+const prisma = createAuditClient(new PrismaClient(), { Prisma, provider, aggregateMapping });
 ```
+
+The Prisma client is not an option: it is the first argument of `createAuditClient`. Audited operations run on it, and audit logs are written with it, bypassing the audit extension.
 
 **Transaction behavior:**
 - **Sync mode** (`awaitWrite: true`, default):
@@ -208,7 +210,7 @@ const basePrisma = new PrismaClient();
   - Atomicity (operation + audit both succeed/fail) is available, but opt-in: with the default `errorHandling.writeFailurePolicy: 'log'` an audit-log write failure is logged and the operation still succeeds; set `errorHandling.writeFailurePolicy: 'throw'` to fail the transaction together with the audit write
   - **Default behavior**: Ensures complete audit trails with all changes tracked
 - **Async mode** (`awaitWrite: false`):
-  - Audit logs written using `basePrisma` **after** transaction commits
+  - Audit logs written using the client passed to `createAuditClient` **after** transaction commits
   - No atomicity guarantee
   - **Performance optimization**: Use when high-throughput is more important than completeness
 
@@ -238,7 +240,7 @@ model Activity {
 createAuditClient(basePrisma, {
   provider,
   aggregateMapping,
-  basePrisma,
+  Prisma,
   auditLogModel: 'Activity',  // Use 'Activity' instead of 'AuditLog'
 });
 ```
@@ -265,7 +267,7 @@ model CustomAuditLog {
 createAuditClient(basePrisma, {
   provider,
   aggregateMapping,
-  basePrisma,
+  Prisma,
   auditLogModel: 'CustomAuditLog',
   hooks: {
     writer: async (logs, context, defaultWrite) => {
@@ -406,14 +408,14 @@ import {
   createEntityNormalizedWriter,
 } from '@kuruwic/prisma-audit';
 import { createAsyncLocalStorageProvider } from '@kuruwic/prisma-audit-core';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 
 export const auditProvider = createAsyncLocalStorageProvider();
 const basePrisma = new PrismaClient();
 
 export default defineConfig({
+  Prisma,
   provider: auditProvider,
-  basePrisma,
   aggregateMapping: defineAggregateMapping<PrismaClient>()({
     User: defineEntity({ type: 'User' }),
     Post: defineEntity({
@@ -534,14 +536,14 @@ import {
   createSharedChangeWriter,
 } from '@kuruwic/prisma-audit';
 import { createAsyncLocalStorageProvider } from '@kuruwic/prisma-audit-core';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 
 export const auditProvider = createAsyncLocalStorageProvider();
 const basePrisma = new PrismaClient();
 
 export default defineConfig({
+  Prisma,
   provider: auditProvider,
-  basePrisma,
   aggregateMapping: defineAggregateMapping<PrismaClient>()({
     User: defineEntity({ type: 'User' }),
     Post: defineEntity({
@@ -753,7 +755,7 @@ Defers audit log write until after transaction commits successfully.
 
 **Behavior:**
 - Writes queued on the library-owned transaction scope (not on the app context)
-- Executed after successful transaction commit using `basePrisma`
+- Executed after successful transaction commit using the client passed to `createAuditClient`
 - Discarded if transaction rolls back
 
 **Example:**
@@ -764,7 +766,7 @@ await prisma.$transaction(async (tx) => {
   // Not written yet - transaction still open
 });
 // Transaction committed successfully
-// Audit logs written now using basePrisma
+// Audit logs written now using the client passed to createAuditClient
 ```
 
 #### 3. Fire-and-Forget Strategy (when `awaitWrite: false`)
@@ -923,7 +925,7 @@ Customize how audit logs are written.
 }
 ```
 
-**⚠️ Important:** Always use `defaultWrite` or `basePrisma` to avoid infinite recursion. Never use the extended client inside the writer hook.
+**⚠️ Important:** Always use `defaultWrite` or the client passed to `createAuditClient` to avoid infinite recursion. Never use the extended client inside the writer hook.
 
 ### Error Handling (`errorHandling`)
 
@@ -1181,13 +1183,13 @@ import {
   foreignKey,
 } from '@kuruwic/prisma-audit';
 import { createAsyncLocalStorageProvider } from '@kuruwic/prisma-audit-core';
-import type { PrismaClient } from '@prisma/client';
+import { Prisma, type PrismaClient } from '@prisma/client';
 
 export const auditProvider = createAsyncLocalStorageProvider();
 
 export default defineConfig({
+  Prisma,
   provider: auditProvider,
-  basePrisma: new PrismaClient(),
   aggregateMapping: defineAggregateMapping<PrismaClient>()({
     User: defineEntity({
       type: 'User',
