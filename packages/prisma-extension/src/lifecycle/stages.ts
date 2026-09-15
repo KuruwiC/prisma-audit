@@ -438,9 +438,8 @@ export const createEnrichContextsStage = (
 /**
  * Build main audit logs for an entity
  *
- * Follows the same 2-phase pattern as batch-stages:
- * Phase 1: Resolve aggregate roots
- * Phase 2: Enrich aggregate contexts per aggregateType
+ * Follows the same pattern as batch-stages: resolve aggregate roots, then enrich
+ * aggregate contexts per aggregateType, before building the log below.
  *
  * @internal
  */
@@ -485,13 +484,13 @@ const buildMainAuditLogs = async (
     }
   }
 
-  // Phase 1: Resolve aggregate roots (reuses batch resolver with 1-element array)
+  // Resolve aggregate roots (reuses batch resolver with 1-element array)
   const survivors = await resolveAndFilterSurvivors([entity], entityConfig, manager.activeClient);
   if (survivors.length === 0) {
     return [];
   }
 
-  // Phase 2: Batch-enrich aggregate contexts (root-side + projection-side, merged)
+  // Enrich aggregate contexts (root-side + projection-side, merged)
   const aggregateContextLookup = await enrichAggregateContexts(
     survivors,
     entityConfig,

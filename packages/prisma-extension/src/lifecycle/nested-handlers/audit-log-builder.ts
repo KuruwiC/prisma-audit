@@ -2,10 +2,9 @@
  * Nested Audit Log Builder
  *
  * Builds audit logs for nested operations using a batch pipeline:
- *   Phase 1 (collect): Gather all nested records, resolve action/beforeState
- *   Phase 2 (group):   Group collected records by relatedModel
- *   Phase 3 (enrich):  Batch entity + aggregate enrichment per model group
- *   Phase 4 (build):   Construct audit logs with pre-computed enrichment results
+ *   collect:          Gather all nested records, resolve action/beforeState
+ *   group:            Group collected records by relatedModel
+ *   enrich-and-build: Batch entity + aggregate enrichment, then construct audit logs, per model group
  */
 
 import type {
@@ -94,7 +93,7 @@ export type NestedAuditLogBuilderDependencies = {
 };
 
 // ============================================================================
-// Phase 1: Collect all nested records
+// Collect all nested records
 // ============================================================================
 
 const collectAllNestedRecords = async (
@@ -161,7 +160,7 @@ const collectAllNestedRecords = async (
 };
 
 // ============================================================================
-// Phase 2: Group collected records by relatedModel
+// Group collected records by relatedModel
 // ============================================================================
 
 interface ModelGroup {
@@ -188,7 +187,7 @@ const groupByModel = (collected: CollectedNestedRecord[]): ModelGroup[] => {
 };
 
 // ============================================================================
-// Phase 3+4: Batch enrich and build per model group
+// Enrich and build per model group
 // ============================================================================
 
 const enrichAndBuildForModelGroup = async (
@@ -361,7 +360,7 @@ export const buildNestedAuditLogs = async (input: BuildNestedAuditLogsInput): Pr
     nestedRecordsInfo = [...nestedRecordsInfo, ...refetchedRecords];
   }
 
-  // Phase 1: Collect all nested records
+  // Collect all nested records
   const allCollected = await collectAllNestedRecords(
     nestedOperations,
     nestedRecordsInfo,
@@ -375,10 +374,10 @@ export const buildNestedAuditLogs = async (input: BuildNestedAuditLogsInput): Pr
     return [];
   }
 
-  // Phase 2: Group by relatedModel
+  // Group by relatedModel
   const modelGroups = groupByModel(allCollected);
 
-  // Phase 3+4: Batch enrich and build per model group
+  // Enrich and build per model group
   const allLogs: AuditLogData[] = [];
   for (const group of modelGroups) {
     const logs = await enrichAndBuildForModelGroup(group, context, actorContext, prismaClient, {
