@@ -616,11 +616,10 @@ describe('detectNestedOperations with upsert branch filtering', () => {
     // Profile exists but avatar does not
     const operations = detectNestedOperations(Prisma, 'User', args, executedPass(['profile']));
 
-    // Should detect profile upsert (will take update branch) and avatar upsert (will take create branch)
-    expect(operations.length).toBeGreaterThanOrEqual(1);
-    const profileOp = operations.find((op) => op.fieldName === 'profile');
-    expect(profileOp).toBeDefined();
-    expect(profileOp?.operation).toBe('upsert');
+    // Profile upsert (takes its update branch, since it exists) recurses into that
+    // branch's data and finds the nested avatar upsert (reported once, regardless of
+    // which of its own branches it will take).
+    expect(operationKeys(operations)).toEqual(['profile:upsert', 'profile.avatar:upsert']);
   });
 
   it('should detect both branches in the discovery pass', () => {
@@ -701,11 +700,14 @@ describe('detectNestedOperations with upsert branch filtering', () => {
       executedPass(['profile', 'profile.avatar', 'profile.avatar.avatarImage']),
     );
 
-    const profileOps = operations.filter((op) => op.fieldName === 'profile');
-    expect(profileOps.length).toBeLessThanOrEqual(1); // Maximum 1 profile upsert
-
-    // Note: Deep nested operations (avatar, avatarImage) are handled recursively
-    // The key is that we don't explore all branches optimistically
+    // profile and avatar are each reported exactly once — the recursion follows only the
+    // update branch (the one the pre-fetch says already exists), instead of exploring
+    // every create/update combination down the chain. `avatarImage` is present three
+    // levels deep in `args` but does not appear here: this describe block's `Prisma` stub
+    // declares `Avatar` without an `avatarImage` relation field, so the recursion has no
+    // relation to follow past `avatar` — not evidence of a depth limit in the detection
+    // logic itself.
+    expect(operationKeys(operations)).toEqual(['profile:upsert', 'profile.avatar:upsert']);
   });
 });
 
