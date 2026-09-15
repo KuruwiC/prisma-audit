@@ -550,6 +550,15 @@ describe('detectNestedOperations with upsert branch filtering', () => {
               { name: 'id', kind: 'scalar', type: 'String', isList: false },
               { name: 'name', kind: 'scalar', type: 'String', isList: false },
               { name: 'profileId', kind: 'scalar', type: 'String', isList: false },
+              { name: 'avatarImage', kind: 'object', type: 'AvatarImage', isList: false },
+            ],
+          },
+          {
+            name: 'AvatarImage',
+            fields: [
+              { name: 'id', kind: 'scalar', type: 'String', isList: false },
+              { name: 'imageUrl', kind: 'scalar', type: 'String', isList: false },
+              { name: 'avatarId', kind: 'scalar', type: 'String', isList: false },
             ],
           },
         ],
@@ -700,14 +709,13 @@ describe('detectNestedOperations with upsert branch filtering', () => {
       executedPass(['profile', 'profile.avatar', 'profile.avatar.avatarImage']),
     );
 
-    // profile and avatar are each reported exactly once — the recursion follows only the
-    // update branch (the one the pre-fetch says already exists), instead of exploring
-    // every create/update combination down the chain. `avatarImage` is present three
-    // levels deep in `args` but does not appear here: this describe block's `Prisma` stub
-    // declares `Avatar` without an `avatarImage` relation field, so the recursion has no
-    // relation to follow past `avatar` — not evidence of a depth limit in the detection
-    // logic itself.
-    expect(operationKeys(operations)).toEqual(['profile:upsert', 'profile.avatar:upsert']);
+    // Each level is reported exactly once: the recursion follows only the update branch
+    // the pre-fetch reports as existing, not every create/update combination down the chain.
+    expect(operationKeys(operations)).toEqual([
+      'profile:upsert',
+      'profile.avatar:upsert',
+      'profile.avatar.avatarImage:upsert',
+    ]);
   });
 });
 
