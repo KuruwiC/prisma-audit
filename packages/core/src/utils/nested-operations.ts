@@ -193,6 +193,37 @@ const processConnectOrCreateOperation = (
   );
 };
 
+/** @internal Whether a to-one nested `update` value is the `{ where?, data }` form rather than the data itself */
+const isToOneUpdateWithWhere = (update: Record<string, unknown>): boolean =>
+  typeof update.data === 'object' &&
+  update.data !== null &&
+  Object.keys(update).every((key) => key === 'where' || key === 'data');
+
+/**
+ * @internal The data objects a nested `update` writes: a to-many update is one `{ where, data }` or a
+ * list of them; a to-one update is either `{ where?, data }` or the data object itself.
+ */
+const extractNestedUpdateData = (nestedData: unknown, isList: boolean): Record<string, unknown>[] => {
+  const updates = Array.isArray(nestedData) ? nestedData : [nestedData];
+  const dataObjects: Record<string, unknown>[] = [];
+
+  for (const update of updates) {
+    if (typeof update !== 'object' || update === null) {
+      continue;
+    }
+    const updateRecord = update as Record<string, unknown>;
+    if (isList || isToOneUpdateWithWhere(updateRecord)) {
+      if (typeof updateRecord.data === 'object' && updateRecord.data !== null) {
+        dataObjects.push(updateRecord.data as Record<string, unknown>);
+      }
+    } else {
+      dataObjects.push(updateRecord);
+    }
+  }
+
+  return dataObjects;
+};
+
 /** @internal Process a single nested operation keyword */
 const processNestedKeyword = (
   schemaMetadata: SchemaMetadata,
@@ -218,6 +249,17 @@ const processNestedKeyword = (
   if (keyword === 'create' || keyword === 'createMany') {
     const createOps = processCreateOperation(schemaMetadata, relationField, nestedData, currentPath, pass);
     ops.push(...createOps);
+  } else if (keyword === 'update') {
+    ops.push(
+      ...detectDeeplyNestedOperations(
+        schemaMetadata,
+        relationField.relatedModel,
+        extractNestedUpdateData(nestedData, relationField.isList),
+        currentPath,
+        pass,
+        currentPath,
+      ),
+    );
   } else if (keyword === 'upsert') {
     const upsertOps = processUpsertOperation(schemaMetadata, relationField, nestedData, currentPath, pass);
     ops.push(...upsertOps);
@@ -349,6 +391,17 @@ const processDeeplyNestedOperations = (
       schemaMetadata,
       relationField.relatedModel,
       nestedData,
+      relationField.name,
+      pass,
+      fieldPath,
+    );
+  }
+
+  if (keyword === 'update') {
+    return detectDeeplyNestedOperations(
+      schemaMetadata,
+      relationField.relatedModel,
+      extractNestedUpdateData(nestedData, relationField.isList),
       relationField.name,
       pass,
       fieldPath,

@@ -755,3 +755,183 @@ describe('detectNestedOperations top-level upsert branches', () => {
     expect(detectedOperations(executedPass([]))).toEqual([]);
   });
 });
+
+describe('detectNestedOperations inside nested updates', () => {
+  const Prisma = {
+    dmmf: {
+      datamodel: {
+        models: [
+          {
+            name: 'User',
+            fields: [
+              { name: 'id', kind: 'scalar', type: 'String', isList: false },
+              { name: 'posts', kind: 'object', type: 'Post', isList: true },
+              { name: 'profile', kind: 'object', type: 'Profile', isList: false },
+            ],
+          },
+          {
+            name: 'Profile',
+            fields: [
+              { name: 'id', kind: 'scalar', type: 'String', isList: false },
+              { name: 'avatar', kind: 'object', type: 'Avatar', isList: false },
+            ],
+          },
+          {
+            name: 'Avatar',
+            fields: [
+              { name: 'id', kind: 'scalar', type: 'String', isList: false },
+              { name: 'name', kind: 'scalar', type: 'String', isList: false },
+            ],
+          },
+          {
+            name: 'Post',
+            fields: [
+              { name: 'id', kind: 'scalar', type: 'String', isList: false },
+              { name: 'comments', kind: 'object', type: 'Comment', isList: true },
+            ],
+          },
+          {
+            name: 'Comment',
+            fields: [
+              { name: 'id', kind: 'scalar', type: 'String', isList: false },
+              { name: 'attachments', kind: 'object', type: 'Attachment', isList: true },
+            ],
+          },
+          {
+            name: 'Attachment',
+            fields: [{ name: 'id', kind: 'scalar', type: 'String', isList: false }],
+          },
+        ],
+      },
+    },
+  };
+
+  const passes: [string, NestedDetectionPass][] = [
+    ['discovery', { kind: 'discovery' }],
+    ['executed', executedPass([])],
+  ];
+
+  const detectedOperations = (args: Record<string, unknown>, pass: NestedDetectionPass) =>
+    detectNestedOperations(Prisma, 'User', args, pass).map((op) => `${op.path}:${op.operation}`);
+
+  describe.each(passes)('%s pass', (_name, pass) => {
+    it('detects a write inside a to-one update given as the update data', () => {
+      const args = { data: { profile: { update: { avatar: { create: { name: 'Avatar' } } } } } };
+
+      expect(detectedOperations(args, pass)).toEqual(['profile:update', 'profile.avatar:create']);
+    });
+
+    it('detects a write inside a to-one update given as { where, data }', () => {
+      const args = {
+        data: { profile: { update: { where: { id: 'profile-1' }, data: { avatar: { create: { name: 'Avatar' } } } } } },
+      };
+
+      expect(detectedOperations(args, pass)).toEqual(['profile:update', 'profile.avatar:create']);
+    });
+
+    it('detects a write inside a to-many update given as one { where, data }', () => {
+      const args = {
+        data: { posts: { update: { where: { id: 'post-1' }, data: { comments: { create: { id: 'comment-1' } } } } } },
+      };
+
+      expect(detectedOperations(args, pass)).toEqual(['posts:update', 'posts.comments:create']);
+    });
+
+    it('detects writes inside a to-many update given as a list of { where, data }', () => {
+      const args = {
+        data: {
+          posts: {
+            update: [
+              { where: { id: 'post-1' }, data: { comments: { create: { id: 'comment-1' } } } },
+              { where: { id: 'post-2' }, data: { comments: { createMany: { data: [{ id: 'comment-2' }] } } } },
+            ],
+          },
+        },
+      };
+
+      expect(detectedOperations(args, pass)).toEqual([
+        'posts:update',
+        'posts.comments:create',
+        'posts.comments:createMany',
+      ]);
+    });
+
+    it('detects writes inside an update nested in another nested update', () => {
+      const args = {
+        data: {
+          posts: {
+            update: {
+              where: { id: 'post-1' },
+              data: {
+                comments: {
+                  update: { where: { id: 'comment-1' }, data: { attachments: { create: { id: 'attachment-1' } } } },
+                },
+              },
+            },
+          },
+        },
+      };
+
+      expect(detectedOperations(args, pass)).toEqual([
+        'posts:update',
+        'posts.comments:update',
+        'posts.comments.attachments:create',
+      ]);
+    });
+
+    it('detects writes inside a nested update in the upsert create branch', () => {
+      const args = {
+        where: { id: 'user-1' },
+        create: { profile: { create: {} } },
+        update: {
+          posts: { update: { where: { id: 'post-1' }, data: { comments: { create: { id: 'comment-1' } } } } },
+        },
+      };
+      const upsertPass: NestedDetectionPass = pass.kind === 'discovery' ? pass : executedPass([], 'update');
+
+      expect(detectedOperations(args, upsertPass)).toEqual(
+        pass.kind === 'discovery'
+          ? ['profile:create', 'posts:update', 'posts.comments:create']
+          : ['posts:update', 'posts.comments:create'],
+      );
+    });
+  });
+
+  it('scans only the executed branch of an upsert nested inside a nested update', () => {
+    const args = {
+      data: {
+        posts: {
+          update: {
+            where: { id: 'post-1' },
+            data: {
+              comments: {
+                upsert: {
+                  where: { id: 'comment-1' },
+                  create: { attachments: { create: { id: 'attachment-1' } } },
+                  update: { attachments: { deleteMany: {} } },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+
+    expect(detectedOperations(args, { kind: 'discovery' })).toEqual([
+      'posts:update',
+      'posts.comments:upsert',
+      'posts.comments.attachments:deleteMany',
+      'posts.comments.attachments:create',
+    ]);
+    expect(detectedOperations(args, executedPass(['posts.comments']))).toEqual([
+      'posts:update',
+      'posts.comments:upsert',
+      'posts.comments.attachments:deleteMany',
+    ]);
+    expect(detectedOperations(args, executedPass([]))).toEqual([
+      'posts:update',
+      'posts.comments:upsert',
+      'posts.comments.attachments:create',
+    ]);
+  });
+});
