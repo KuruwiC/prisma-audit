@@ -8,7 +8,7 @@ import type { AuditLogData } from '../domain/audit-log-types.js';
 import { getRuntimeContext } from '../runtime-context.js';
 import type { AuditContext } from '../types.js';
 import type { ErrorHandler } from '../utils/error-handler.js';
-import type { WriteFn, WriteResult, WriteStrategyInput } from './types.js';
+import type { DeferredResult, WriteFn, WriteStrategyInput } from './types.js';
 import { createBaseClientWriteFn } from './utils.js';
 
 const createDeferredExecutor = (
@@ -74,7 +74,7 @@ const enqueueDeferredWrite = (executor: () => Promise<void>): void => {
  * await result.execute(); // Execute after commit
  * ```
  */
-export const writeDeferredInTransaction = (input: WriteStrategyInput): WriteResult => {
+export const writeDeferredInTransaction = (input: WriteStrategyInput): DeferredResult => {
   const { logs, context, manager, auditLogModel, writer, handleError, writeExecutor } = input;
 
   const queuedAt = new Date();
