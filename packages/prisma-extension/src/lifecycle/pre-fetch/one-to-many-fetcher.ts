@@ -6,11 +6,11 @@
  * @module lifecycle/pre-fetch/one-to-many-fetcher
  */
 
-import { preFetchLog, type UniqueConstraint } from '@kuruwic/prisma-audit-core';
+import { preFetchLog, UNRESOLVED_ENTITY_ID, type UniqueConstraint } from '@kuruwic/prisma-audit-core';
 import { unwrapCompoundWhere } from '../../utils/compound-where.js';
 import type { PreFetchModelClient } from './model-client.js';
 import type { NestedPreFetchResults } from './pre-fetch-result-store.js';
-import { extractEntityIdOrDefault, PRE_FETCH_DEFAULT_KEY, storePreFetchResult } from './pre-fetch-result-store.js';
+import { extractEntityIdOrDefault, storePreFetchResult } from './pre-fetch-result-store.js';
 
 export interface NestedOperation {
   operation: string;
@@ -58,7 +58,7 @@ export const extractWhereClause = (
  * Extracts entity ID from record or where clause
  *
  * Priority: beforeRecord's PK fields > whereClause's PK fields (unwrapped from Prisma's
- * compound-unique shape when `pkConstraint` describes a composite key) > PRE_FETCH_DEFAULT_KEY
+ * compound-unique shape when `pkConstraint` describes a composite key) > UNRESOLVED_ENTITY_ID
  *
  * @param beforeRecord - Fetched record (may be null)
  * @param whereClause - Where clause used for fetch
@@ -70,7 +70,7 @@ export const extractWhereClause = (
  * ```typescript
  * extractEntityId({ id: 123 }, null);              // Returns: '123'
  * extractEntityId(null, { id: 456 });              // Returns: '456'
- * extractEntityId(null, { email: 'test@example' }); // Returns: '__default__'
+ * extractEntityId(null, { email: 'test@example' }); // Returns: UNRESOLVED_ENTITY_ID
  * ```
  */
 export const extractEntityId = (
@@ -80,16 +80,16 @@ export const extractEntityId = (
 ): string => {
   if (beforeRecord) {
     const id = extractEntityIdOrDefault(beforeRecord, pkConstraint?.fields);
-    if (id !== PRE_FETCH_DEFAULT_KEY) return id;
+    if (id !== UNRESOLVED_ENTITY_ID) return id;
   }
 
   if (whereClause) {
     const unwrapped = unwrapCompoundWhere(whereClause, pkConstraint);
     const id = extractEntityIdOrDefault(unwrapped, pkConstraint?.fields);
-    if (id !== PRE_FETCH_DEFAULT_KEY) return id;
+    if (id !== UNRESOLVED_ENTITY_ID) return id;
   }
 
-  return PRE_FETCH_DEFAULT_KEY;
+  return UNRESOLVED_ENTITY_ID;
 };
 
 /**

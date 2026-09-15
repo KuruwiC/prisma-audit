@@ -14,6 +14,7 @@ import {
   type PreFetchResults,
   preFetchLog,
   sortByPathDepth,
+  UNRESOLVED_ENTITY_ID,
   type UniqueConstraint,
 } from '@kuruwic/prisma-audit-core';
 import type {
@@ -30,12 +31,7 @@ import { createSchemaMetadataFromDMMF } from '../../utils/nested-operations.js';
 import { getPreFetchModelClient, type PreFetchModelClient } from './model-client.js';
 import { preFetchOneToManyRelation } from './one-to-many-fetcher.js';
 import { preFetchOneToOneRelation, resolveToOneRelationLink } from './one-to-one-fetcher.js';
-import {
-  extractEntityIdOrDefault,
-  type NestedPreFetchResults,
-  PRE_FETCH_DEFAULT_KEY,
-  storePreFetchResult,
-} from './pre-fetch-result-store.js';
+import { extractEntityIdOrDefault, type NestedPreFetchResults, storePreFetchResult } from './pre-fetch-result-store.js';
 
 export type NestedOperation = NestedOperationInfo;
 
@@ -50,7 +46,8 @@ export interface PreFetchResultsWithInternal extends PreFetchResults {
  *
  * Transforms: `path → entityId → { before }` to `path → record | null`
  *
- * IMPORTANT: For paths with multiple entities, only __default__ or first entity is preserved.
+ * IMPORTANT: For paths with multiple entities, only the entry under UNRESOLVED_ENTITY_ID or the
+ * first entity is preserved.
  * This is acceptable for the filtered detection pass, which only checks whether a record exists per path,
  * but NOT for audit log building, which reads every entity from PRE_FETCH_INTERNAL_RESULTS.
  *
@@ -63,7 +60,7 @@ const convertToPreFetchResults = (internalResults: NestedPreFetchResults): PreFe
   const results: PreFetchResults = new Map();
 
   for (const [path, entityMap] of internalResults) {
-    const defaultRecord = entityMap.get(PRE_FETCH_DEFAULT_KEY);
+    const defaultRecord = entityMap.get(UNRESOLVED_ENTITY_ID);
 
     if (defaultRecord !== undefined) {
       results.set(path, defaultRecord.before);
@@ -101,7 +98,7 @@ export interface PreFetchCoordinatorDependencies {
   readonly getNestedOperationConfig: GetOperationConfig;
   /**
    * Notified when a single nested operation's pre-fetch query fails. The before-state
-   * for that path is recorded as unresolved (the `PRE_FETCH_DEFAULT_KEY` sentinel) and the
+   * for that path is recorded as unresolved (the `UNRESOLVED_ENTITY_ID` sentinel) and the
    * caller's own operation continues — mirrors the top-level equivalent,
    * `fetchBeforeState` in extension.ts, which reports the same failure class through
    * the same observer. Optional: when omitted, the failure is visible only via
@@ -337,7 +334,7 @@ export const preFetchNestedRecordsBeforeOperation = async (
         );
       }
     } catch (error) {
-      storePreFetchResult(internalResults, nestedOp.path, PRE_FETCH_DEFAULT_KEY, null);
+      storePreFetchResult(internalResults, nestedOp.path, UNRESOLVED_ENTITY_ID, null);
       preFetchLog('pre-fetch failed: path=%s error=%o', nestedOp.path, error);
       await reportNestedPreFetchFailure(onPreFetchFailure, nestedOp, error);
     }
@@ -395,7 +392,7 @@ const handleConnectOrCreate = async (
   const beforeRecord = await relatedModelClient.findUnique({ where: whereClause });
 
   let entityId = extractEntityIdOrDefault(beforeRecord, pkConstraint?.fields);
-  if (entityId === PRE_FETCH_DEFAULT_KEY) {
+  if (entityId === UNRESOLVED_ENTITY_ID) {
     const unwrapped = unwrapCompoundWhere(whereClause as Record<string, unknown>, pkConstraint);
     entityId = extractEntityIdOrDefault(unwrapped, pkConstraint?.fields);
   }

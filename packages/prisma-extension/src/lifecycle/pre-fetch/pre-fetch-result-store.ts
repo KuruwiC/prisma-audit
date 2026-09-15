@@ -15,12 +15,6 @@ import { UNRESOLVED_ENTITY_ID } from '@kuruwic/prisma-audit-core';
 import { extractEntityIdentity } from '../../utils/id-generator.js';
 
 /**
- * Key of a pre-fetch result whose entity identity is unknown: `UNRESOLVED_ENTITY_ID` from
- * `@kuruwic/prisma-audit-core`, the single definition of that sentinel.
- */
-export const PRE_FETCH_DEFAULT_KEY = UNRESOLVED_ENTITY_ID;
-
-/**
  * Pre-fetch result structure
  */
 export type PreFetchResult = {
