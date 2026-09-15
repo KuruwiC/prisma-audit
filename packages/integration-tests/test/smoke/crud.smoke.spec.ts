@@ -1,5 +1,5 @@
 /**
- * SQLite/MySQL Smoke Tests - Basic CRUD Operations
+ * SQLite Smoke Tests - Basic CRUD Operations
  */
 
 import type { AuditContext } from '@kuruwic/prisma-audit-core';
