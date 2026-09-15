@@ -337,7 +337,6 @@ const handleConnectOrCreate = async (
   }
 };
 
-/** The relation `nestedOp` writes through, resolved from the DMMF */
 interface RelationOperationInput {
   nestedOp: NestedOperationInfo;
   field: DMMFField;

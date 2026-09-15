@@ -26,7 +26,6 @@ const RESULT_AUDITED_KEYWORDS: ReadonlySet<NestedOperationKeyword> = new Set([
   'connectOrCreate',
 ]);
 
-/** A relation the operation writes, with the relations written below it */
 interface WrittenRelation {
   readonly relatedModel: string;
   readonly children: WrittenRelations;
@@ -58,11 +57,6 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const isEmptyInjection = (injected: InjectedSelection): boolean =>
   injected.keys.size === 0 && injected.nested.size === 0;
 
-/**
- * Build the tree of written relations from nested operation paths (e.g. `posts`, `posts.comments`)
- *
- * @internal
- */
 const buildWrittenRelations = (
   schemaMetadata: SchemaMetadata,
   modelName: string,
@@ -91,16 +85,12 @@ const buildWrittenRelations = (
   return root;
 };
 
-/**
- * Convert written relations into Prisma `include` entries
- *
- * @internal
- */
 const buildIncludeTree = (relations: WrittenRelations): Selection =>
   Object.fromEntries(Array.from(relations, ([field, relation]) => [field, buildRelationEntry(relation)]));
 
 /**
- * The `include` / `select` entry that returns a written relation's rows and the relations written below
+ * Entry for one written relation. Nested relations always use `include`, valid even when this entry is
+ * placed under a `select` field.
  *
  * @internal
  */
@@ -126,9 +116,8 @@ const selectMissingScalarFields = (schemaMetadata: SchemaMetadata, modelName: st
 };
 
 /**
- * Add a written relation to the arguments the caller gave for that relation. A nested `select` gets
- * the related model's scalar fields, which the audit entry records, and the relations written below;
- * otherwise the relations written below are merged into the nested `include`.
+ * Add a written relation to the caller's args for that relation. A nested `select` also gets the
+ * related model's scalar fields for the audit entry, since select must enumerate them explicitly.
  *
  * @internal
  */
@@ -154,9 +143,8 @@ const mergeIntoRequestedRelation = (
 };
 
 /**
- * Merge written relations into one level of the caller's `include` or `select` entries. A relation the
- * caller did not request is added whole; a requested one keeps the caller's arguments and receives
- * only what is missing inside it.
+ * Merge written relations into one level of the caller's `include`/`select` entries: a relation not
+ * requested is added whole; a requested one keeps the caller's arguments and gets only what's missing.
  *
  * @internal
  */

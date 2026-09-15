@@ -673,9 +673,8 @@ describe('detectNestedOperations with upsert branch filtering', () => {
       executedPass(['profile']),
     );
 
-    // Profile upsert (takes its update branch, since it exists) recurses into that
-    // branch's data and finds the nested avatar upsert (reported once, regardless of
-    // which of its own branches it will take).
+    // Profile takes the update branch (it exists) and recurses into it, reporting the nested avatar
+    // upsert once regardless of which of its own branches it will take.
     expect(operationKeys(operations)).toEqual(['profile:upsert', 'profile.avatar:upsert']);
   });
 

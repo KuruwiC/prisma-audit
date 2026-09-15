@@ -1,13 +1,7 @@
 /**
- * Integration Test: relation fields stay out of audited entity state
- *
- * Relation fields a caller loads with `include` are part of the operation result, not
- * of the entity's own columns, so they must not appear in the `before` / `after` state
- * of the entity's audit log. Relation fields are identified from the `Prisma` namespace
- * passed to `createAuditClient`.
- *
- * The client is built from the generated client module directly (never the database
- * package entry), so the namespace reaches the extension only through the `Prisma` option.
+ * Relation fields loaded via `include` belong to the operation result, not the entity's own
+ * columns, so they must not appear in the `before`/`after` audit log state. The extension
+ * identifies them from the `Prisma` namespace passed to `createAuditClient`.
  */
 
 import { createAuditClient } from '@kuruwic/prisma-audit';
