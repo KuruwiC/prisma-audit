@@ -1101,16 +1101,17 @@ The stored `aggregateContext` is the shallow merge of the root-side and projecti
 
 Control nested operation audit logging.
 
-#### `enabled`
+#### `update.fetchBeforeOperation` / `delete.fetchBeforeOperation`
 **Type:** `boolean`
 **Default:** `true`
 
-Enable/disable nested operation logging.
+Controls whether a nested `update` or `delete` operation fetches the affected row's before-state ahead of the operation. Pre-fetching is what lets a nested `update`'s audit log carry a `before` value and lets a nested `delete` resolve an identity it could not otherwise recover from the operation's own arguments.
 
 ```typescript
 {
   nestedOperations: {
-    enabled: false,  // Disable nested operation logging
+    update: { fetchBeforeOperation: false },  // Skip pre-fetch for nested updates
+    delete: { fetchBeforeOperation: true },   // Pre-fetch for nested deletes (default)
   }
 }
 ```
@@ -1257,9 +1258,10 @@ export default defineConfig({
     },
   },
 
-  // Nested operations
+  // Nested operations (defaults shown)
   nestedOperations: {
-    enabled: true,
+    update: { fetchBeforeOperation: true },
+    delete: { fetchBeforeOperation: true },
   },
 });
 ```
