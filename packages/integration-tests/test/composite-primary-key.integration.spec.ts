@@ -203,14 +203,12 @@ describe('Composite Primary Key (PostLike)', () => {
    *
    * The other two pre-fetch sites that resolve a WHERE clause via `findUnique` —
    * `coordinator.ts`'s `handleConnectOrCreate` and `one-to-one-fetcher.ts`'s
-   * `fetchParentRecordIfNeeded` — only run for a *to-one* relation (a nested `connectOrCreate`
-   * on a singular relation field, or a 1:1 parent whose own `where` needs completing). No
-   * model in this fixture has a to-one relation pointing at a composite-key model — `PostLike`
-   * is only ever the many side (`Post.postLikes: PostLike[]`) — so neither site can be
-   * exercised against a composite key through the public client. Both are still covered
-   * against single-field-PK models by the rest of the integration suite (e.g.
-   * `nested-connect-or-create.integration.spec.ts`'s `Profile` connectOrCreate tests, which go
-   * through `handleConnectOrCreate`).
+   * `resolveParentRows` — only run for a *to-one* relation (a nested `connectOrCreate` on a
+   * singular relation field, or a to-one operation whose top-level `where` does not name the
+   * parent key fields directly). `PostLike` is only ever the many side
+   * (`Post.postLikes: PostLike[]`), so this spec cannot reach either site;
+   * `nested-to-one-pre-fetch.integration.spec.ts` exercises both against the composite-key
+   * `PostBookmark`.
    */
   describe('nested connectOrCreate from Post', () => {
     it('creates a new composite-key row and records the real composite entityId with action=create', async () => {
