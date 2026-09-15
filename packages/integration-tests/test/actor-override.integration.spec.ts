@@ -127,15 +127,15 @@ describe('Actor Override Inside Transactions (Integration)', () => {
   });
 
   describe('runAsync({ actor: actor2 }) inside $transaction', () => {
-    it('should succeed with FK to an uncommitted parent row (structural fix)', async () => {
+    it('should succeed with FK to an uncommitted parent row', async () => {
       await context.provider.runAsync(actor1, async () => {
         await context.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
           const user = await tx.user.create({
             data: { email: 'parent-ra@example.com', name: 'Parent', password: 'secret' },
           });
 
-          // Full replacement: infra state now lives in the separate runtime ALS,
-          // so replacing the app context can no longer break the transactional client.
+          // Full replacement: infra state lives in a separate runtime ALS from the app
+          // context, so replacing the app context does not affect the transactional client.
           // Plain arrow: runAsync's async wrapper settles the returned promise
           // inside the overridden scope, so actor attribution is correct.
           await context.provider.runAsync({ actor: actor2 }, () =>

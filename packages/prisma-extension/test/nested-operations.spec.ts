@@ -629,9 +629,10 @@ describe('detectNestedOperations with upsert branch filtering', () => {
     expect(operationKeys(operations)).toEqual(['profile:upsert', 'profile.avatar:update', 'profile.avatar:create']);
   });
 
-  it('should prevent AvatarImage duplication bug (original issue)', () => {
-    // This test simulates the original bug scenario where AvatarImage was logged 3 times
-    // With pre-fetch aware detection, it should be logged only once
+  it('should detect only the executed branch for a 3-level nested upsert chain', () => {
+    // Each level of the profile → avatar → avatarImage upsert chain takes exactly one
+    // branch (create or update) at runtime; executed-pass detection must report only
+    // that branch, not every create/update combination across all three levels.
 
     const args = {
       data: {
@@ -701,8 +702,6 @@ describe('detectNestedOperations with upsert branch filtering', () => {
       executedPass(['profile', 'profile.avatar', 'profile.avatar.avatarImage']),
     );
 
-    // Before fix: Would detect AvatarImage upsert 3 times (from all branches)
-    // After fix: Should detect each upsert only once
     const profileOps = operations.filter((op) => op.fieldName === 'profile');
     expect(profileOps.length).toBeLessThanOrEqual(1); // Maximum 1 profile upsert
 

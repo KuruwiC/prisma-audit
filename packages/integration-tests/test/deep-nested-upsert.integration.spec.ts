@@ -27,9 +27,8 @@ describe('Deep Nested Upsert Operations (Profile → Avatar → AvatarImage)', (
   };
 
   describe('Avatar Update via Nested Upsert (3 levels deep)', () => {
-    // NOTE: For 3-level nested operations (Profile → Avatar → AvatarImage),
-    // pre-fetch now properly supports deep nesting using post-fetch fallback.
-    // The implementation:
+    // 3-level nested operations (Profile → Avatar → AvatarImage) are supported via
+    // post-fetch fallback:
     // 1. Pre-fetch captures IDs from deeply nested records (before state)
     // 2. Post-fetch uses those IDs to retrieve current state (after state)
     // 3. Audit logs are created with correct before/after states
@@ -76,7 +75,7 @@ describe('Deep Nested Upsert Operations (Profile → Avatar → AvatarImage)', (
       // Action: Update avatar image through deeply nested upsert
       // This simulates the PUT /profiles/:userId endpoint behavior
       //
-      // With post-fetch fallback improvements:
+      // Post-fetch fallback:
       // 1. Pre-fetch captures avatar.avatarImage with ID (before state)
       // 2. Operation executes (Prisma doesn't include deep nested records in result)
       // 3. Post-fetch uses pre-fetched ID to retrieve current state (after state)
@@ -128,8 +127,8 @@ describe('Deep Nested Upsert Operations (Profile → Avatar → AvatarImage)', (
 
       expect(profile?.avatar?.avatarImage?.imageUrl).toBe('https://example.com/updated.png');
 
-      // Verify: Audit logs should now be created with proper before/after states
-      // Post-fetch fallback enables 3-level nested operation tracking
+      // Verify: audit logs are created with proper before/after states via the
+      // post-fetch fallback that enables 3-level nested operation tracking
       const avatarImageLogs = await context.prisma.auditLog.findMany({
         where: {
           entityType: 'AvatarImage',
@@ -138,7 +137,6 @@ describe('Deep Nested Upsert Operations (Profile → Avatar → AvatarImage)', (
         },
       });
 
-      // Post-fetch improvement: Now creates audit logs for 3-level nesting
       expect(avatarImageLogs.length).toBeGreaterThanOrEqual(1);
       expect(avatarImageLogs.length).toBeLessThanOrEqual(2); // 1-2 logs depending on config
 
@@ -255,19 +253,13 @@ describe('Deep Nested Upsert Operations (Profile → Avatar → AvatarImage)', (
   });
 
   describe('PUT /profiles/:userId endpoint simulation (Transaction)', () => {
-    it('should NOT duplicate audit logs for AvatarImage (original bug fix validation)', async () => {
-      // This test validates the fix for the original bug where AvatarImage create action
-      // was logged 3 times instead of once.
-      //
-      // Root cause: detectNestedOperations explored all branches of upsert operations optimistically,
-      // even though only one branch executes. This caused:
-      // - profile.upsert.create.avatar.upsert.create.avatarImage.upsert.create
-      // - profile.upsert.create.avatar.upsert.update.avatarImage.upsert.create
-      // - profile.upsert.update.avatar.upsert.create.avatarImage.upsert.create
-      // All 3 paths were detected, resulting in 3 audit logs for the same AvatarImage create.
-      //
-      // Fix: Pre-fetch results are now passed to detectNestedOperations, allowing it to explore
-      // only the branch that will actually execute.
+    it('should not duplicate audit logs for AvatarImage across nested upsert branches', async () => {
+      // Each level of a nested upsert chain (profile.upsert → avatar.upsert →
+      // avatarImage.upsert) takes exactly one branch (create or update) at runtime.
+      // detectNestedOperations relies on pre-fetch results to know which branch each
+      // level took; without that, it would treat every create/update combination across
+      // all three levels as taken, producing one audit log per combination instead of
+      // one per AvatarImage actually created.
 
       // Setup: Create user with profile, avatar, and avatarImage
       const user = await context.provider.runAsync(testActor, async () => {
