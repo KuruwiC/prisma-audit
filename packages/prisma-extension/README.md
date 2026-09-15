@@ -415,6 +415,9 @@ export const basePrisma = new PrismaClient();
 import {
   defineConfig,
   defineAggregateMapping,
+  defineEntity,
+  to,
+  foreignKey,
   createEntityNormalizedWriter,
 } from '@kuruwic/prisma-audit';
 import { createAsyncLocalStorageProvider } from '@kuruwic/prisma-audit-core';
@@ -563,6 +566,9 @@ export const basePrisma = new PrismaClient();
 import {
   defineConfig,
   defineAggregateMapping,
+  defineEntity,
+  to,
+  foreignKey,
   createSharedChangeWriter,
 } from '@kuruwic/prisma-audit';
 import { createAsyncLocalStorageProvider } from '@kuruwic/prisma-audit-core';
