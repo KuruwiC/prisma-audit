@@ -275,15 +275,16 @@ describe('writeDeferredInTransaction', () => {
       expect(writeFn).toHaveBeenCalledTimes(1);
     });
 
-    it('should be a no-op when there is no runtime frame', () => {
+    it('should enqueue nothing when there is no runtime frame and return an executor that still writes', async () => {
       const manager = createMockManager();
-      const executor = createMockExecutor();
+      const writeFn = vi.fn().mockResolvedValue(undefined);
+      const executor = createMockExecutor(writeFn);
       const logs = [createMockLog()];
       const context = createMockContext();
       const handleError = createMockErrorHandler();
 
-      // Without an active transaction scope the strategy would not normally be
-      // selected; enqueueing must not throw and the returned executor still works.
+      // Without an active transaction scope the strategy is not normally selected; enqueueing
+      // must not throw, and the returned executor writes when called directly.
       const result = writeDeferredInTransaction({
         logs,
         context,
@@ -296,6 +297,10 @@ describe('writeDeferredInTransaction', () => {
 
       expect(result._tag).toBe('Deferred');
       expect(getRuntimeContext()?.transaction).toBeUndefined();
+
+      expect(writeFn).not.toHaveBeenCalled();
+      await result.execute();
+      expect(writeFn).toHaveBeenCalledTimes(1);
     });
 
     it('should be a no-op and create no queue when the frame has no transaction scope', () => {
