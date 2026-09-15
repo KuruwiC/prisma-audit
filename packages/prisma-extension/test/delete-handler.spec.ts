@@ -8,14 +8,20 @@
  * it must be skipped and reported instead.
  */
 
-import { type NestedPreFetchResults, UNRESOLVED_ENTITY_ID, type UniqueConstraint } from '@kuruwic/prisma-audit-core';
+import {
+  type NestedOperationInfo,
+  type NestedPreFetchResults,
+  UNRESOLVED_ENTITY_ID,
+  type UniqueConstraint,
+} from '@kuruwic/prisma-audit-core';
 import { describe, expect, it, vi } from 'vitest';
-import { collectDeleteRecords, type NestedOperationInfo } from '../src/lifecycle/nested-handlers/delete-handler.js';
+import { collectDeleteRecords } from '../src/lifecycle/nested-handlers/delete-handler.js';
 
 const nestedOp: NestedOperationInfo = {
   operation: 'delete',
   fieldName: 'items',
   relatedModel: 'OrderItem',
+  isList: true,
   data: { tenantId: 'tenant-1', itemId: 'item-1' },
   path: 'items',
 };
@@ -160,6 +166,7 @@ describe('collectDeleteRecords — nested deleteMany has no single-row identity 
     operation: 'deleteMany',
     fieldName: 'posts',
     relatedModel: 'Post',
+    isList: true,
     data: { published: false },
     path: 'posts',
   };

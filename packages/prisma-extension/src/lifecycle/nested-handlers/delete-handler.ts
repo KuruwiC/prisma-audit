@@ -10,6 +10,7 @@ import {
   AUDIT_ACTION,
   deserializeEntityId,
   type EntityIdentityKey,
+  type NestedOperationInfo,
   type NestedPreFetchResults,
   nestedLog,
   UNRESOLVED_ENTITY_ID,
@@ -60,19 +61,6 @@ const reportUnresolvedEntityId = async (
     ),
   });
 };
-
-/**
- * Nested operation information
- */
-export type NestedOperationInfo = {
-  operation: string;
-  fieldName: string;
-  relatedModel: string;
-  data: unknown;
-  path: string;
-};
-
-export type { NestedPreFetchResults };
 
 /**
  * Collect delete targets from pre-fetched results or operation data.

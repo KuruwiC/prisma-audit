@@ -87,6 +87,7 @@ export {
   resolveUpdateState,
   resolveUpsertState,
 } from './state-resolution/nested-state-resolver.js';
+export type { GetOperationConfig, OperationPreFetchConfig } from './state-resolution/pre-fetch-coordinator.js';
 export {
   filterOperationsToPreFetch,
   sortByPathDepth,

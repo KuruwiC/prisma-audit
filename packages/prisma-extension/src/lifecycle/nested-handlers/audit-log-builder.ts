@@ -7,6 +7,7 @@
 import type {
   AggregateConfigService,
   AuditContext,
+  GetOperationConfig,
   NestedPreFetchResults,
   NestedRecordInfo,
   RedactConfig,
@@ -43,7 +44,6 @@ import {
 import type { CollectedNestedRecord } from './collected-record.js';
 import { collectDeleteRecords, type UnresolvedDeleteEntityIdReporter } from './delete-handler.js';
 import { collectNestedRecords } from './record-processor.js';
-import type { GetNestedOperationConfig } from './state-resolver.js';
 
 /**
  * Whether the record targeted by the nested upsert at `path` existed before the operation.
@@ -74,7 +74,7 @@ export type NestedAuditLogBuilderDependencies = {
   redact: RedactConfig | undefined;
   serialization?: SerializationConfig;
   basePrisma: PrismaClientWithDynamicAccess;
-  getNestedOperationConfig: GetNestedOperationConfig;
+  getNestedOperationConfig: GetOperationConfig;
   Prisma: PrismaNamespace;
   /**
    * Notified when a nested delete's primary key cannot be resolved (see
@@ -89,7 +89,7 @@ const collectAllNestedRecords = async (
   nestedOperations: readonly NestedOperationInfo[],
   nestedRecordsInfo: readonly NestedRecordInfo[],
   nestedPreFetchResults: NestedPreFetchResults | undefined,
-  getNestedOperationConfig: GetNestedOperationConfig,
+  getNestedOperationConfig: GetOperationConfig,
   schemaMetadata: SchemaMetadata,
   onUnresolvedDeleteEntityId: UnresolvedDeleteEntityIdReporter | undefined,
 ): Promise<CollectedNestedRecord[]> => {

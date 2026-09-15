@@ -8,6 +8,8 @@
 import {
   AUDIT_ACTION,
   type EntityIdentityKey,
+  type GetOperationConfig,
+  type NestedOperationInfo,
   type NestedPreFetchResults,
   resolveConnectOrCreateState,
   resolveCreateState,
@@ -16,19 +18,6 @@ import {
 } from '@kuruwic/prisma-audit-core';
 import type { PrismaAction } from '../../types.js';
 import { getPreFetchResult } from '../pre-fetch/pre-fetch-result-store.js';
-import type { NestedOperationInfo } from './delete-handler.js';
-
-/**
- * Configuration for nested operations (update/delete)
- */
-export type NestedOperationConfig = {
-  fetchBeforeOperation: boolean;
-};
-
-/**
- * Function to get nested operation configuration
- */
-export type GetNestedOperationConfig = (modelName: string, operation: string) => NestedOperationConfig;
 
 /**
  * Resolved state result
@@ -61,7 +50,7 @@ const resolveUpsertOperation = (
   nestedOp: NestedOperationInfo,
   entityId: EntityIdentityKey,
   nestedPreFetchResults: NestedPreFetchResults | undefined,
-  getNestedOperationConfig: GetNestedOperationConfig,
+  getNestedOperationConfig: GetOperationConfig,
 ): ResolvedState => {
   const config = getNestedOperationConfig(nestedOp.relatedModel, 'update');
   const preFetchResult = getPreFetchResult(nestedPreFetchResults, nestedOp.path, entityId);
@@ -154,7 +143,7 @@ export const resolveNestedOperationState = (
   nestedOp: NestedOperationInfo,
   entityId: EntityIdentityKey,
   nestedPreFetchResults: NestedPreFetchResults | undefined,
-  getNestedOperationConfig: GetNestedOperationConfig,
+  getNestedOperationConfig: GetOperationConfig,
 ): ResolvedState => {
   if (nestedOp.operation === 'update' || nestedOp.operation === 'updateMany') {
     return resolveUpdateOperation(nestedPreFetchResults, nestedOp.path, entityId);

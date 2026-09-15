@@ -9,6 +9,7 @@
 import {
   detectNestedOperations,
   filterOperationsToPreFetch,
+  type GetOperationConfig,
   getPrimaryKeyConstraint,
   type NestedOperationInfo,
   type NestedPreFetchResults,
@@ -32,16 +33,7 @@ import { preFetchOneToOneRelation, resolveToOneRelationLink } from './one-to-one
 import { isRecord, parentKeysFromOperationWheres } from './parent-rows.js';
 import { extractEntityId, storePreFetchResult } from './pre-fetch-result-store.js';
 
-type NestedOperation = NestedOperationInfo;
-
 type PrismaDMMF = PrismaNamespace['dmmf'];
-
-export type GetOperationConfig = (
-  modelName: string,
-  operation: string,
-) => {
-  fetchBeforeOperation: boolean;
-};
 
 export interface PreFetchCoordinatorDependencies {
   /** Prisma namespace given as the extension's `Prisma` option */
@@ -136,7 +128,7 @@ const categorizeRelationType = (
  */
 const reportNestedPreFetchFailure = async (
   onPreFetchFailure: AuditErrorObserver | undefined,
-  nestedOp: NestedOperation,
+  nestedOp: NestedOperationInfo,
   error: unknown,
 ): Promise<void> => {
   if (!onPreFetchFailure) return;
@@ -262,10 +254,13 @@ interface NestedPreFetchContext {
   preFetchResults: NestedPreFetchResults;
   resolvePkConstraint: (model: string) => UniqueConstraint | undefined;
   /** Operations at the parent path of `path` that were not pre-fetched; none for a direct child */
-  parentOperationsNotPreFetched: (path: string) => NestedOperation[];
+  parentOperationsNotPreFetched: (path: string) => NestedOperationInfo[];
 }
 
-const preFetchNestedOperation = async (context: NestedPreFetchContext, nestedOp: NestedOperation): Promise<void> => {
+const preFetchNestedOperation = async (
+  context: NestedPreFetchContext,
+  nestedOp: NestedOperationInfo,
+): Promise<void> => {
   const { prismaClient, modelName, dmmf, topLevelModel, preFetchResults, resolvePkConstraint } = context;
 
   const relatedModelClient = getPreFetchModelClient(prismaClient, nestedOp.relatedModel);
@@ -319,7 +314,7 @@ const preFetchNestedOperation = async (context: NestedPreFetchContext, nestedOp:
  * `findUnique` accepts natively, including a composite-key compound-unique shape.
  */
 const handleConnectOrCreate = async (
-  nestedOp: NestedOperation,
+  nestedOp: NestedOperationInfo,
   relatedModelClient: PreFetchModelClient,
   preFetchResults: NestedPreFetchResults,
   pkConstraint: UniqueConstraint,
@@ -345,7 +340,7 @@ const handleConnectOrCreate = async (
 
 /** The relation `nestedOp` writes through, resolved from the DMMF */
 interface RelationOperationInput {
-  nestedOp: NestedOperation;
+  nestedOp: NestedOperationInfo;
   field: DMMFField;
   parentModel: DMMFModel;
   relatedModel: DMMFModel | undefined;

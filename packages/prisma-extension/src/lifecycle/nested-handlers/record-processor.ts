@@ -5,13 +5,16 @@
  * Enrichment and audit log building are handled by the batch pipeline in audit-log-builder.ts.
  */
 
-import { nestedLog } from '@kuruwic/prisma-audit-core';
+import {
+  type GetOperationConfig,
+  type NestedOperationInfo,
+  type NestedPreFetchResults,
+  nestedLog,
+} from '@kuruwic/prisma-audit-core';
 
 import type { PrismaAction } from '../../types.js';
 import { extractEntityIdentity } from '../../utils/id-generator.js';
 import type { CollectedNestedRecord } from './collected-record.js';
-import type { NestedOperationInfo, NestedPreFetchResults } from './delete-handler.js';
-import type { GetNestedOperationConfig } from './state-resolver.js';
 import { resolveNestedOperationState } from './state-resolver.js';
 
 /**
@@ -44,7 +47,7 @@ export const collectNestedRecords = (
   nestedOp: NestedOperationInfo,
   recordsInfo: NestedRecordsInfo,
   nestedPreFetchResults: NestedPreFetchResults | undefined,
-  getNestedOperationConfig: GetNestedOperationConfig,
+  getNestedOperationConfig: GetOperationConfig,
   pkFields: string[],
 ): CollectedNestedRecord[] => {
   const collected: CollectedNestedRecord[] = [];
