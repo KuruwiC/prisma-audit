@@ -83,7 +83,7 @@ Branded types (`ActorId`, `EntityId`, `AggregateId`) prevent ID mix-ups at compi
 pnpm add https://github.com/KuruwiC/prisma-audit/releases/download/v0.1.6/kuruwic-prisma-audit-0.1.6.tgz
 ```
 
-**Requirements:** Node.js 20+ (AsyncLocalStorage), Prisma 5.10+
+**Requirements:** Node.js >=20.19.0 (AsyncLocalStorage), Prisma 5.10+
 
 ## Quick Start
 
@@ -512,7 +512,7 @@ For best performance, use `include` to avoid additional refetch queries.
 |             | Supported                                | Minimum                    |
 | ----------- | ---------------------------------------- | -------------------------- |
 | **Prisma**  | 5.10.x — 7.x                             | 5.10.0 (Client Extensions) |
-| **Node.js** | 20.x, 22.x                               | 20.0.0 (AsyncLocalStorage) |
+| **Node.js** | 20.x, 22.x                               | 20.19.0 (AsyncLocalStorage) |
 | **Runtime** | Node.js ✅, Bun ⚠️ Experimental, Edge ❌ | —                          |
 
 ## Limitations
