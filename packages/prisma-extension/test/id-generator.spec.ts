@@ -2,7 +2,7 @@
  * ID Generator Unit Tests
  */
 
-import { getIdFieldInfo as coreGetIdFieldInfo } from '@kuruwic/prisma-audit-core';
+import { getIdFieldInfo } from '@kuruwic/prisma-audit-core';
 import { describe, expect, it } from 'vitest';
 import type { DMMFModel } from '../src/internal-types.js';
 import { ensureIds, getPrimaryKeyConstraintOrThrow } from '../src/utils/id-generator.js';
@@ -14,7 +14,7 @@ const UUID_V7_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9
 describe('getIdFieldInfo', () => {
   it('should return undefined if Prisma.dmmf is not available', () => {
     const Prisma = {};
-    const info = coreGetIdFieldInfo(createSchemaMetadataFromDMMF(Prisma), 'User', 'id');
+    const info = getIdFieldInfo(createSchemaMetadataFromDMMF(Prisma), 'User', 'id');
     expect(info).toBeUndefined();
   });
 
@@ -26,7 +26,7 @@ describe('getIdFieldInfo', () => {
         },
       },
     };
-    const info = coreGetIdFieldInfo(createSchemaMetadataFromDMMF(Prisma), 'NonExistent', 'id');
+    const info = getIdFieldInfo(createSchemaMetadataFromDMMF(Prisma), 'NonExistent', 'id');
     expect(info).toBeUndefined();
   });
 
@@ -43,7 +43,7 @@ describe('getIdFieldInfo', () => {
         },
       },
     };
-    const info = coreGetIdFieldInfo(createSchemaMetadataFromDMMF(Prisma), 'User', 'id');
+    const info = getIdFieldInfo(createSchemaMetadataFromDMMF(Prisma), 'User', 'id');
     expect(info).toBeUndefined();
   });
 
@@ -67,7 +67,7 @@ describe('getIdFieldInfo', () => {
         },
       },
     };
-    const info = coreGetIdFieldInfo(createSchemaMetadataFromDMMF(Prisma), 'User', 'id');
+    const info = getIdFieldInfo(createSchemaMetadataFromDMMF(Prisma), 'User', 'id');
     expect(info).toBeDefined();
     expect(info?.name).toBe('id');
     expect(info?.hasDefault).toBe(true);
@@ -90,11 +90,11 @@ describe('getIdFieldInfo', () => {
       },
     });
 
-    const v7 = coreGetIdFieldInfo(createSchemaMetadataFromDMMF(createPrisma([7])), 'User', 'id');
+    const v7 = getIdFieldInfo(createSchemaMetadataFromDMMF(createPrisma([7])), 'User', 'id');
     expect(v7?.defaultExpr).toBe('uuid(7)');
     expect(v7?.generator?.()).toMatch(UUID_V7_RE);
 
-    const v4 = coreGetIdFieldInfo(createSchemaMetadataFromDMMF(createPrisma([4])), 'User', 'id');
+    const v4 = getIdFieldInfo(createSchemaMetadataFromDMMF(createPrisma([4])), 'User', 'id');
     expect(v4?.defaultExpr).toBe('uuid(4)');
     expect(v4?.generator?.()).toMatch(UUID_V4_RE);
   });
@@ -112,7 +112,7 @@ describe('getIdFieldInfo', () => {
         },
       },
     };
-    const info = coreGetIdFieldInfo(createSchemaMetadataFromDMMF(Prisma), 'User', 'id');
+    const info = getIdFieldInfo(createSchemaMetadataFromDMMF(Prisma), 'User', 'id');
     expect(info?.defaultExpr).toBe('uuid(8)');
     expect(info?.generator).toBeUndefined();
   });
@@ -137,7 +137,7 @@ describe('getIdFieldInfo', () => {
         },
       },
     };
-    const info = coreGetIdFieldInfo(createSchemaMetadataFromDMMF(Prisma), 'User', 'id');
+    const info = getIdFieldInfo(createSchemaMetadataFromDMMF(Prisma), 'User', 'id');
     expect(info).toBeDefined();
     expect(info?.name).toBe('id');
     expect(info?.hasDefault).toBe(true);
