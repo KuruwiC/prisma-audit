@@ -32,6 +32,12 @@ importers:
       '@hono/node-server':
         specifier: ^1.13.7
         version: 1.19.6(hono@4.10.5)
+      '@kuruwic/prisma-audit':
+        specifier: workspace:*
+        version: link:../../packages/prisma-extension
+      '@kuruwic/prisma-audit-core':
+        specifier: workspace:*
+        version: link:../../packages/core
       '@kuruwic/prisma-audit-database':
         specifier: workspace:*
         version: link:../../packages/database
@@ -39,12 +45,6 @@ importers:
         specifier: ^4.6.0
         version: 4.10.5
     devDependencies:
-      '@kuruwic/prisma-audit':
-        specifier: workspace:*
-        version: link:../../packages/prisma-extension
-      '@kuruwic/prisma-audit-core':
-        specifier: workspace:*
-        version: link:../../packages/core
       '@testcontainers/postgresql':
         specifier: ^11.8.0
         version: 11.8.1
