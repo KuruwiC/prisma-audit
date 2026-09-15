@@ -8,7 +8,7 @@
  * recorded, so the value handed back to the caller can be projected to the shape the caller
  * requested while audit logs are built from the full result.
  *
- * @module include-injection
+ * @module nested-write-selection
  */
 
 import { detectNestedOperations, type NestedOperationKeyword, type SchemaMetadata } from '@kuruwic/prisma-audit-core';

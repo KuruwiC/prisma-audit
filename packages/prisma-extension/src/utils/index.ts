@@ -15,11 +15,11 @@ export { isAuditableAction, shouldAuditModel, uncapitalizeFirst } from './extens
 // ID generation and primary key utilities
 export { buildEntityMap, ensureIds, extractPrimaryKey, findManyByPKs, getPrimaryKeyFields } from './id-generator.js';
 
-// Nested-write selection injection
-export { injectNestedWriteSelection, projectToRequestedShape } from './include-injection.js';
-
 // Model accessor
 export { getModelAccessor } from './model-accessor.js';
+
+// Nested-write selection injection
+export { injectNestedWriteSelection, projectToRequestedShape } from './nested-write-selection.js';
 
 // Operation classification
 export { isBatchOperation, requiresBeforeState } from './operation-classifier.js';
