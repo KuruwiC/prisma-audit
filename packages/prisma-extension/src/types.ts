@@ -206,10 +206,6 @@ export interface ErrorHandlingConfig {
 
 /**
  * Prisma Extension configuration options
- *
- * @remarks
- * Audited operations run on, and audit logs are written through, the client passed to
- * `createAuditClient`.
  */
 export interface PrismaAuditExtensionOptions {
   provider: AuditContextProvider;

@@ -127,8 +127,8 @@ export type { NestedPreFetchResults };
  * follows the normal fallback path.
  *
  * @param pkConstraint - The deleted model's primary key (default: a single `id` field). The
- *   fallback needs the whole constraint, not just its fields, because a named composite key
- *   wraps the WHERE clause under its declared name.
+ *   fallback reads the constraint's declared name as well as its fields, because a named
+ *   composite key wraps the WHERE clause under that name.
  * @returns Collected records ready for batch enrichment and audit log building
  */
 export const collectDeleteRecords = async (

@@ -94,7 +94,7 @@ const executeAsyncWrite = (asyncExecutor: () => Promise<void>, errorHandler: Err
  * Best for high-throughput scenarios with minimal latency impact.
  *
  * @remarks
- * Used outside transaction when awaitWrite is false.
+ * Used outside a transaction scope when the model's write is not awaited.
  * Errors handled via errorHandler without propagating to caller.
  *
  * @example
