@@ -35,7 +35,7 @@ export interface SkippedResult {
  *
  * switch (result._tag) {
  *   case 'Immediate':
- *     console.log('Write completed at:', result.timestamp);
+ *     console.log('Write completed at:', result.createdAt);
  *     break;
  *   case 'Deferred':
  *     console.log('Write queued at:', result.queuedAt);

@@ -15,7 +15,7 @@
  *   createWriteStrategySelector,
  *   type WriteStrategyConfig,
  *   type WriteExecutor
- * } from '@kuruwic/prisma-audit-core/write-strategies';
+ * } from '@kuruwic/prisma-audit-core';
  *
  * const writeExecutor: WriteExecutor = {
  *   write: async (client, modelName, logs) => {
