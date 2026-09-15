@@ -67,17 +67,3 @@ export const requiresBeforeState = (action: PrismaAction): boolean => {
     action === AUDIT_ACTION.DELETE_MANY
   );
 };
-
-/**
- * Checks if an operation is a write operation
- *
- * All auditable operations are write operations.
- *
- * @example
- * ```typescript
- * isWriteOperation('create');  // => true
- * ```
- */
-export const isWriteOperation = (action: PrismaAction): boolean => {
-  return isSingleOperation(action) || isBatchOperation(action);
-};

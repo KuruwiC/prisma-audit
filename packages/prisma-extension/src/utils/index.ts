@@ -34,12 +34,7 @@ export { injectDeepInclude } from './include-injection.js';
 export { getModelAccessor } from './model-accessor.js';
 
 // Operation classification
-export {
-  isBatchOperation,
-  isSingleOperation,
-  isWriteOperation,
-  requiresBeforeState,
-} from './operation-classifier.js';
+export { isBatchOperation, isSingleOperation, requiresBeforeState } from './operation-classifier.js';
 
 // Schema metadata
 export { getPrisma } from './schema-metadata.js';
