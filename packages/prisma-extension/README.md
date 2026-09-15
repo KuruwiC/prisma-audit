@@ -411,7 +411,7 @@ export const basePrisma = new PrismaClient();
 ```
 
 ```typescript
-// audit.config.ts
+// src/audit.config.ts
 import {
   defineConfig,
   defineAggregateMapping,
@@ -562,7 +562,7 @@ export const basePrisma = new PrismaClient();
 ```
 
 ```typescript
-// audit.config.ts
+// src/audit.config.ts
 import {
   defineConfig,
   defineAggregateMapping,
