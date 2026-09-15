@@ -399,6 +399,15 @@ model AuditEvent {
 
 **Configuration with Built-in Helper:**
 
+Give the writer helper the same client `createAuditClient` uses, by having both pull it from a shared module instead of each constructing their own `PrismaClient`:
+
+```typescript
+// src/client.ts
+import { PrismaClient } from '@prisma/client';
+
+export const basePrisma = new PrismaClient();
+```
+
 ```typescript
 // audit.config.ts
 import {
@@ -407,10 +416,10 @@ import {
   createEntityNormalizedWriter,
 } from '@kuruwic/prisma-audit';
 import { createAsyncLocalStorageProvider } from '@kuruwic/prisma-audit-core';
-import { Prisma, PrismaClient } from '@prisma/client';
+import { Prisma, type PrismaClient } from '@prisma/client';
+import { basePrisma } from './client.js';
 
 export const auditProvider = createAsyncLocalStorageProvider();
-const basePrisma = new PrismaClient();
 
 export default defineConfig({
   Prisma,
@@ -423,7 +432,8 @@ export default defineConfig({
     }),
   }),
   hooks: {
-    // Use the built-in entity normalized writer helper
+    // Use the built-in entity normalized writer helper, on the same client passed to
+    // createAuditClient in src/db.ts
     writer: createEntityNormalizedWriter(
       {
         actorModel: 'Actor',
@@ -435,6 +445,16 @@ export default defineConfig({
     ),
   },
 });
+```
+
+```typescript
+// src/db.ts
+import { createAuditClient } from '@kuruwic/prisma-audit';
+import { basePrisma } from './client.js';
+import auditConfig, { auditProvider } from './audit.config.js';
+
+export const prisma = createAuditClient(basePrisma, auditConfig);
+export { auditProvider };
 ```
 
 ##### Pattern 2: Shared Change Normalization
@@ -527,6 +547,15 @@ model AuditAggregate {
 
 **Configuration with Built-in Helper:**
 
+Give the writer helper the same client `createAuditClient` uses, by having both pull it from a shared module instead of each constructing their own `PrismaClient`:
+
+```typescript
+// src/client.ts
+import { PrismaClient } from '@prisma/client';
+
+export const basePrisma = new PrismaClient();
+```
+
 ```typescript
 // audit.config.ts
 import {
@@ -535,10 +564,10 @@ import {
   createSharedChangeWriter,
 } from '@kuruwic/prisma-audit';
 import { createAsyncLocalStorageProvider } from '@kuruwic/prisma-audit-core';
-import { Prisma, PrismaClient } from '@prisma/client';
+import { Prisma, type PrismaClient } from '@prisma/client';
+import { basePrisma } from './client.js';
 
 export const auditProvider = createAsyncLocalStorageProvider();
-const basePrisma = new PrismaClient();
 
 export default defineConfig({
   Prisma,
@@ -558,7 +587,8 @@ export default defineConfig({
     }),
   }),
   hooks: {
-    // Use the built-in shared change writer helper
+    // Use the built-in shared change writer helper, on the same client passed to
+    // createAuditClient in src/db.ts
     writer: createSharedChangeWriter(
       {
         changeModel: 'AuditChange',
@@ -568,6 +598,16 @@ export default defineConfig({
     ),
   },
 });
+```
+
+```typescript
+// src/db.ts
+import { createAuditClient } from '@kuruwic/prisma-audit';
+import { basePrisma } from './client.js';
+import auditConfig, { auditProvider } from './audit.config.js';
+
+export const prisma = createAuditClient(basePrisma, auditConfig);
+export { auditProvider };
 ```
 
 **Benefits:**
