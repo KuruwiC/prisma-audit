@@ -14,8 +14,10 @@ import {
   type NestedPreFetchResult,
   type NestedPreFetchResults,
   UNRESOLVED_ENTITY_ID,
+  type UniqueConstraint,
 } from '@kuruwic/prisma-audit-core';
 
+import { unwrapCompoundWhere } from '../../utils/compound-where.js';
 import { extractEntityIdentity } from '../../utils/id-generator.js';
 
 /**
@@ -100,4 +102,34 @@ export const extractEntityIdOrDefault = (record: unknown, pkFields?: string[]): 
   }
 
   return extractEntityIdentity(record as Record<string, unknown>, pkFields ?? ['id']);
+};
+
+/**
+ * Extracts the entity identity from `beforeRecord`, else from `whereClause` (unwrapped from Prisma's
+ * compound-unique shape by `pkConstraint`), else returns `UNRESOLVED_ENTITY_ID`
+ *
+ * @example
+ * ```typescript
+ * extractEntityId({ id: 123 }, null);               // Returns: '123'
+ * extractEntityId(null, { id: 456 });               // Returns: '456'
+ * extractEntityId(null, { email: 'test@example' }); // Returns: UNRESOLVED_ENTITY_ID
+ * ```
+ */
+export const extractEntityId = (
+  beforeRecord: Record<string, unknown> | null,
+  whereClause: Record<string, unknown> | null,
+  pkConstraint?: UniqueConstraint,
+): string => {
+  if (beforeRecord) {
+    const id = extractEntityIdOrDefault(beforeRecord, pkConstraint?.fields);
+    if (id !== UNRESOLVED_ENTITY_ID) return id;
+  }
+
+  if (whereClause) {
+    const unwrapped = unwrapCompoundWhere(whereClause, pkConstraint);
+    const id = extractEntityIdOrDefault(unwrapped, pkConstraint?.fields);
+    if (id !== UNRESOLVED_ENTITY_ID) return id;
+  }
+
+  return UNRESOLVED_ENTITY_ID;
 };

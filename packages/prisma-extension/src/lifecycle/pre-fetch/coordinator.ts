@@ -24,13 +24,12 @@ import type {
   TransactionalPrismaClient,
 } from '../../internal-types.js';
 import type { AuditErrorObserver } from '../../types.js';
-import { unwrapCompoundWhere } from '../../utils/compound-where.js';
 import { getPrimaryKeyConstraint } from '../../utils/id-generator.js';
 import { createSchemaMetadataFromDMMF } from '../../utils/nested-operations.js';
 import { getPreFetchModelClient, type PreFetchModelClient } from './model-client.js';
 import { preFetchOneToManyRelation } from './one-to-many-fetcher.js';
 import { preFetchOneToOneRelation, resolveToOneRelationLink } from './one-to-one-fetcher.js';
-import { extractEntityIdOrDefault, storePreFetchResult } from './pre-fetch-result-store.js';
+import { extractEntityId, storePreFetchResult } from './pre-fetch-result-store.js';
 
 type NestedOperation = NestedOperationInfo;
 
@@ -331,12 +330,7 @@ const handleConnectOrCreate = async (
   // `whereClause` is a `<Model>WhereUniqueInput` — `findUnique` accepts it natively, including
   // a composite-key compound-unique shape.
   const beforeRecord = await relatedModelClient.findUnique({ where: whereClause });
-
-  let entityId = extractEntityIdOrDefault(beforeRecord, pkConstraint?.fields);
-  if (entityId === UNRESOLVED_ENTITY_ID) {
-    const unwrapped = unwrapCompoundWhere(whereClause as Record<string, unknown>, pkConstraint);
-    entityId = extractEntityIdOrDefault(unwrapped, pkConstraint?.fields);
-  }
+  const entityId = extractEntityId(beforeRecord, whereClause as Record<string, unknown>, pkConstraint);
 
   storePreFetchResult(preFetchResults, nestedOp.path, entityId, beforeRecord);
 
