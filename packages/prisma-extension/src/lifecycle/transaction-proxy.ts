@@ -36,9 +36,9 @@ const pendingDeferredWrites: Set<Promise<void>> = getGlobalSingleton(
 /**
  * Executes a deferred write and tracks it in the pending registry.
  *
- * Single tracker feeding `pendingDeferredWrites`, so `flushPendingDeferredWrites` /
- * `flushAllPendingWrites` cover every drain — both the explicit-`$transaction` path here and
- * the implicit-wrapper path in transaction-wrapper.ts.
+ * Single tracker feeding `pendingDeferredWrites`, so `flushAllPendingWrites` covers every
+ * drain — both the explicit-`$transaction` path here and the implicit-wrapper path in
+ * transaction-wrapper.ts.
  */
 export const executeDeferredWrite = (deferredWrite: () => Promise<void>): void => {
   const promise = deferredWrite()
@@ -52,17 +52,10 @@ export const executeDeferredWrite = (deferredWrite: () => Promise<void>): void =
 };
 
 /**
- * Waits for all pending deferred writes from transactions to complete.
- */
-export const flushPendingDeferredWrites = async (): Promise<void> => {
-  await Promise.all([...pendingDeferredWrites]);
-};
-
-/**
  * Waits for all pending writes (both fire-and-forget and deferred) to complete.
  */
 export const flushAllPendingWrites = async (): Promise<void> => {
-  await Promise.all([flushPendingWrites(), flushPendingDeferredWrites()]);
+  await Promise.all([flushPendingWrites(), ...pendingDeferredWrites]);
 };
 
 import type { TransactionalPrismaClient } from '../internal-types.js';
@@ -70,7 +63,7 @@ import type { TransactionalPrismaClient } from '../internal-types.js';
 type OriginalTransactionMethod = (...args: unknown[]) => Promise<unknown>;
 
 /** Transaction proxy handler dependencies */
-export type TransactionProxyDependencies = {
+type TransactionProxyDependencies = {
   provider: AuditContextProvider;
   originalTransaction: OriginalTransactionMethod;
   target: object;
