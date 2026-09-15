@@ -202,7 +202,7 @@ import { Prisma, PrismaClient } from '@prisma/client';
 const prisma = createAuditClient(new PrismaClient(), { Prisma, provider, aggregateMapping });
 ```
 
-The Prisma client is not an option: it is the first argument of `createAuditClient`. Audited operations run on it, and audit logs are written with it, bypassing the audit extension.
+The Prisma client itself is the first argument of `createAuditClient`. Audited operations run on it, and audit logs are written with it, bypassing the audit extension.
 
 **Transaction behavior:**
 - **Sync mode** (`awaitWrite: true`, default):
@@ -841,7 +841,7 @@ createAuditClient(prisma, {
 
 #### Internal Architecture
 
-The extension resolves `awaitWrite`/`awaitWriteIf` into a plain per-model predicate before handing it to core; core's selector itself only ever sees that resolved predicate, not `awaitWriteIf` or `tags`.
+The extension resolves `awaitWrite`/`awaitWriteIf` into a plain per-model predicate and passes it to core's strategy selector, which receives only that predicate.
 
 ```
 writeAuditLogs()
