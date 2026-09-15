@@ -910,6 +910,8 @@ Hook into the audit log lifecycle.
 
 Customize how audit logs are written.
 
+**Contract:** with `awaitWrite: true` (the default), the writer runs on the transaction client inside the caller's transaction — before commit — so a later rollback undoes audit rows the writer wrote through `defaultWrite`. With `awaitWrite: false`, the write is deferred inside `$transaction` and drained only after `$transaction` resolves; a transaction that throws discards the queued write, so the writer never runs for it. Either way, side effects the writer performs outside the database transaction — an HTTP call, a queue publish — are never rolled back, because they have already happened by the time a rollback occurs. Use `awaitWrite: false` (or `awaitWriteIf`) to defer that kind of delivery until after commit instead.
+
 ```typescript
 {
   hooks: {
@@ -917,7 +919,9 @@ Customize how audit logs are written.
       // Write to database
       await defaultWrite(logs);
 
-      // Send to external service
+      // This call is not part of the database transaction, so it is not undone if the
+      // transaction later rolls back. For delivery that only happens after commit, use
+      // `awaitWrite: false` (or `awaitWriteIf`) instead.
       await fetch('https://audit-service.example.com/logs', {
         method: 'POST',
         body: JSON.stringify(logs),

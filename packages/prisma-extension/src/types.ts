@@ -99,7 +99,20 @@ export interface PerformanceConfig {
  * Lifecycle hooks configuration
  */
 export interface HooksConfig {
-  /** Custom audit log writer */
+  /**
+   * Custom audit log writer, replacing the default persistence step.
+   *
+   * With `awaitWrite: true` (the default), the writer runs on the transaction client inside
+   * the caller's transaction — before commit — so a later rollback undoes rows it wrote
+   * through `defaultWrite`. With `awaitWrite: false`, the write is deferred inside
+   * `$transaction` and drained only after `$transaction` resolves; a transaction that throws
+   * discards the queued write unrun, so the writer never runs for it.
+   *
+   * Either way, side effects the writer performs outside the database transaction (an HTTP
+   * call, a queue publish) are never rolled back — they have already happened by the time a
+   * rollback occurs. Use `awaitWrite: false` (or `awaitWriteIf`) to defer such delivery
+   * until after commit.
+   */
   writer?: AuditLogWriter;
 }
 
