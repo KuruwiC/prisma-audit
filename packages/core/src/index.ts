@@ -113,8 +113,10 @@ export type {
   UpsertBranch,
 } from './utils/nested-operations.js';
 export {
+  deserializeEntityId,
   detectNestedOperations,
   extractNestedRecords,
+  getPrimaryKeyConstraint,
   NESTED_OPERATION_KEYWORDS,
   refetchNestedRecords,
 } from './utils/nested-operations.js';

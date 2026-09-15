@@ -72,10 +72,10 @@ export const isAuditableAction = (operation: string): operation is PrismaAction 
  *
  * @example
  * ```typescript
- * extractDeleteOperationEntityId({ id: '123' });
+ * extractDeleteOperationEntityId({ id: '123' }, { type: 'primaryKey', fields: ['id'] });
  * // => '123'
  *
- * extractDeleteOperationEntityId({ where: { id: '456' } });
+ * extractDeleteOperationEntityId({ where: { id: '456' } }, { type: 'primaryKey', fields: ['id'] });
  * // => '456'
  *
  * extractDeleteOperationEntityId(
@@ -90,14 +90,11 @@ export const isAuditableAction = (operation: string): operation is PrismaAction 
  * );
  * // => '["p1","u1"]'
  *
- * extractDeleteOperationEntityId({ where: { email: 'user@example.com' } });
+ * extractDeleteOperationEntityId({ where: { email: 'user@example.com' } }, { type: 'primaryKey', fields: ['id'] });
  * // => undefined
  * ```
  */
-export const extractDeleteOperationEntityId = (
-  data: unknown,
-  pkConstraint: UniqueConstraint = { type: 'primaryKey', fields: ['id'] },
-): string | undefined => {
+export const extractDeleteOperationEntityId = (data: unknown, pkConstraint: UniqueConstraint): string | undefined => {
   if (!data || typeof data !== 'object') {
     return undefined;
   }

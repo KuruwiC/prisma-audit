@@ -10,15 +10,17 @@ import type {
   NestedPreFetchResults,
   NestedRecordInfo,
   RedactConfig,
+  SchemaMetadata,
   SerializationConfig,
-  UniqueConstraint,
   UpsertBranch,
 } from '@kuruwic/prisma-audit-core';
 import {
   batchEnrichEntityContexts,
   detectNestedOperations,
   extractNestedRecords,
+  getPrimaryKeyConstraint,
   type NestedOperationInfo,
+  nestedLog,
   refetchNestedRecords,
   UNRESOLVED_ENTITY_ID,
 } from '@kuruwic/prisma-audit-core';
@@ -31,7 +33,6 @@ import type {
   TransactionalPrismaClient,
 } from '../../internal-types.js';
 import type { AuditLogData } from '../../types.js';
-import { getPrimaryKeyConstraint } from '../../utils/id-generator.js';
 import { createSchemaMetadataFromDMMF } from '../../utils/nested-operations.js';
 import {
   buildAggregateDataForEntity,
@@ -89,7 +90,7 @@ const collectAllNestedRecords = async (
   nestedRecordsInfo: readonly NestedRecordInfo[],
   nestedPreFetchResults: NestedPreFetchResults | undefined,
   getNestedOperationConfig: GetNestedOperationConfig,
-  Prisma: PrismaNamespace,
+  schemaMetadata: SchemaMetadata,
   onUnresolvedDeleteEntityId: UnresolvedDeleteEntityIdReporter | undefined,
 ): Promise<CollectedNestedRecord[]> => {
   const allCollected: CollectedNestedRecord[] = [];
@@ -101,11 +102,14 @@ const collectAllNestedRecords = async (
     }
     processedPaths.add(nestedOp.path);
 
-    let pkConstraint: UniqueConstraint | undefined;
-    try {
-      pkConstraint = getPrimaryKeyConstraint(Prisma, nestedOp.relatedModel);
-    } catch {
-      // Model not found in DMMF — fall back to ['id']
+    const pkConstraint = getPrimaryKeyConstraint(schemaMetadata, nestedOp.relatedModel);
+    if (!pkConstraint) {
+      nestedLog(
+        'model=%s has no primary key; skipping nested records at path=%s',
+        nestedOp.relatedModel,
+        nestedOp.path,
+      );
+      continue;
     }
 
     if (nestedOp.operation === 'delete' || nestedOp.operation === 'deleteMany') {
@@ -139,7 +143,7 @@ const collectAllNestedRecords = async (
       recordsInfo,
       nestedPreFetchResults,
       getNestedOperationConfig,
-      pkConstraint?.fields,
+      pkConstraint.fields,
     );
     allCollected.push(...regularRecords);
   }
@@ -341,7 +345,7 @@ export const buildNestedAuditLogs = async (input: BuildNestedAuditLogsInput): Pr
     nestedRecordsInfo,
     nestedPreFetchResults,
     getNestedOperationConfig,
-    Prisma,
+    prismaMetadata,
     onUnresolvedDeleteEntityId,
   );
 

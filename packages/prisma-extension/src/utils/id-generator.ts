@@ -10,6 +10,7 @@
 import {
   ensureIds as coreEnsureIds,
   getIdFieldInfo as coreGetIdFieldInfo,
+  getPrimaryKeyConstraint as coreGetPrimaryKeyConstraint,
   type EntityIdentityKey,
   getIdGenerator,
   ID_GENERATOR_FACTORIES,
@@ -72,34 +73,24 @@ export const ensureIds = <T extends Record<string, unknown>>(
 const PK_CHUNK_SIZE = 1000;
 
 /**
- * Get a model's primary key from DMMF. `name` is the explicit name of a composite key declared as
- * `@@id([a, b], name: "custom")`; Prisma uses it, or `fields.join('_')` when absent, as the
- * compound-unique WHERE key.
+ * Get a model's primary key from DMMF, as derived by core `getPrimaryKeyConstraint`
+ * (`@@id` with its declared name → `@id` field).
  *
- * Priority: @@id composite key → @id scalar field → error
- *
- * @throws Error if model has no primary key
+ * @throws Error if DMMF is unavailable, the model is unknown, or the model has no primary key
  */
 export const getPrimaryKeyConstraint = (Prisma: PrismaWithDMMF, modelName: string): UniqueConstraint => {
-  const dmmf = Prisma.dmmf;
-  if (!dmmf?.datamodel?.models) {
+  const models = Prisma.dmmf?.datamodel?.models;
+  if (!models) {
     throw new Error(`[@prisma-audit] DMMF not available, cannot determine primary key for ${modelName}`);
   }
 
-  const model = dmmf.datamodel.models.find((m) => m.name === modelName);
-  if (!model) {
+  if (!models.some((m) => m.name === modelName)) {
     throw new Error(`[@prisma-audit] Model "${modelName}" not found in DMMF`);
   }
 
-  // @@id composite key takes precedence
-  if (model.primaryKey?.fields && model.primaryKey.fields.length > 0) {
-    return { type: 'primaryKey', fields: model.primaryKey.fields, name: model.primaryKey.name };
-  }
-
-  // @id scalar field
-  const idField = model.fields.find((f) => f.isId === true);
-  if (idField) {
-    return { type: 'primaryKey', fields: [idField.name] };
+  const primaryKey = coreGetPrimaryKeyConstraint(createSchemaMetadataFromDMMF(Prisma), modelName);
+  if (primaryKey) {
+    return primaryKey;
   }
 
   throw new Error(

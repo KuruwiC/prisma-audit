@@ -16,16 +16,18 @@ import { extractDeleteOperationEntityId } from '../src/utils/extension-utils.js'
 
 describe('extractDeleteOperationEntityId', () => {
   describe('single-field primary key (unaffected by the compound-unique unwrap)', () => {
+    const idPrimaryKey: UniqueConstraint = { type: 'primaryKey', fields: ['id'] };
+
     it('extracts a direct id field', () => {
-      expect(extractDeleteOperationEntityId({ id: '123' })).toBe('123');
+      expect(extractDeleteOperationEntityId({ id: '123' }, idPrimaryKey)).toBe('123');
     });
 
     it('extracts an id field nested under where', () => {
-      expect(extractDeleteOperationEntityId({ where: { id: '456' } })).toBe('456');
+      expect(extractDeleteOperationEntityId({ where: { id: '456' } }, idPrimaryKey)).toBe('456');
     });
 
     it('returns undefined when no recognizable PK field is present', () => {
-      expect(extractDeleteOperationEntityId({ where: { email: 'user@example.com' } })).toBeUndefined();
+      expect(extractDeleteOperationEntityId({ where: { email: 'user@example.com' } }, idPrimaryKey)).toBeUndefined();
     });
   });
 

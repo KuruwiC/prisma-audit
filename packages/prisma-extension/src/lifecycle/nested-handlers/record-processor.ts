@@ -45,7 +45,7 @@ export const collectNestedRecords = (
   recordsInfo: NestedRecordsInfo,
   nestedPreFetchResults: NestedPreFetchResults | undefined,
   getNestedOperationConfig: GetNestedOperationConfig,
-  pkFields?: string[],
+  pkFields: string[],
 ): CollectedNestedRecord[] => {
   const collected: CollectedNestedRecord[] = [];
 
@@ -58,7 +58,7 @@ export const collectNestedRecords = (
     }
 
     const recordObj = record as Record<string, unknown>;
-    const entityId = extractEntityIdentity(recordObj, pkFields ?? ['id']);
+    const entityId = extractEntityIdentity(recordObj, pkFields);
 
     const { action, beforeState } = resolveNestedOperationState(
       nestedOp,

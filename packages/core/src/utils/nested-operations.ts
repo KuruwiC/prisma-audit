@@ -12,7 +12,7 @@
  */
 
 import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID } from '../constants.js';
-import type { DbClient, SchemaMetadata } from '../interfaces/index.js';
+import type { DbClient, SchemaMetadata, UniqueConstraint } from '../interfaces/index.js';
 import type { NestedPreFetchResult } from '../state-resolution/nested-state-resolver.js';
 import { nestedLog } from './debug.js';
 
@@ -759,17 +759,25 @@ const shouldSkipRefetch = (operation: NestedOperationKeyword): boolean => {
   return skipOperations.includes(operation as (typeof skipOperations)[number]);
 };
 
-/** @internal Resolve PK field names from SchemaMetadata */
-const getPrimaryKeyFieldsFromMetadata = (schemaMetadata: SchemaMetadata, modelName: string): string[] => {
-  const constraints = schemaMetadata.getUniqueConstraints(modelName);
-  const pk = constraints.find((c) => c.type === 'primaryKey');
-  if (pk && pk.fields.length > 0) return pk.fields;
+/**
+ * A model's primary key: its `@@id` constraint, else its `@id` field.
+ *
+ * The `@@id` constraint keeps its declared `name` (`@@id([a, b], name: "custom")`), which Prisma
+ * uses, or `fields.join('_')` when absent, as the compound-unique WHERE key.
+ *
+ * @returns The primary key, or `undefined` when the model declares none
+ */
+export const getPrimaryKeyConstraint = (
+  schemaMetadata: SchemaMetadata,
+  modelName: string,
+): UniqueConstraint | undefined => {
+  const primaryKey = schemaMetadata.getUniqueConstraints(modelName).find((c) => c.type === 'primaryKey');
+  if (primaryKey && primaryKey.fields.length > 0) return primaryKey;
 
-  const fields = schemaMetadata.getAllFields(modelName);
-  const idField = fields.find((f) => f.isId);
-  if (idField) return [idField.name];
+  const idField = schemaMetadata.getAllFields(modelName).find((f) => f.isId);
+  if (idField) return { type: 'primaryKey', fields: [idField.name] };
 
-  return ['id'];
+  return undefined;
 };
 
 /** @internal Build WHERE clause for PK-based refetch */
@@ -789,8 +797,19 @@ const buildPkWhereClause = (pkFields: string[], pks: Record<string, unknown>[]):
   };
 };
 
-/** @internal Deserialize a composite entity ID string into PK fields */
-const deserializeEntityId = (entityId: EntityIdentityKey, pkFields: string[]): Record<string, unknown> | null => {
+/**
+ * Rebuild the primary-key fields of a record from its serialized entity identity: the value
+ * itself for a single-field key, a JSON array in `pkFields` order for a composite key.
+ *
+ * @returns The primary-key fields, or `null` when the full key cannot be recovered: the identity
+ *   is {@link UNRESOLVED_ENTITY_ID}, or a composite identity is not a JSON array of
+ *   `pkFields.length` elements. A partial key is never returned, since it would read as a complete
+ *   identity.
+ */
+export const deserializeEntityId = (
+  entityId: EntityIdentityKey,
+  pkFields: readonly string[],
+): Record<string, unknown> | null => {
   if (entityId === UNRESOLVED_ENTITY_ID) return null;
 
   if (pkFields.length === 1) {
@@ -912,7 +931,13 @@ const processNestedOperationForRefetch = async (
 
   nestedLog('Found pre-fetch results for path=%s, entityCount=%d', nestedOp.path, fieldMap.size);
 
-  const pkFields = getPrimaryKeyFieldsFromMetadata(schemaMetadata, nestedOp.relatedModel);
+  const primaryKey = getPrimaryKeyConstraint(schemaMetadata, nestedOp.relatedModel);
+  if (!primaryKey) {
+    nestedLog('Model %s has no primary key, cannot refetch path=%s', nestedOp.relatedModel, nestedOp.path);
+    return;
+  }
+
+  const pkFields = primaryKey.fields;
   const pksToRefetch = extractPksToRefetch(fieldMap, nestedOp.path, pkFields);
   if (pksToRefetch.length === 0) {
     nestedLog('No PKs to refetch for path=%s, skipping', nestedOp.path);
