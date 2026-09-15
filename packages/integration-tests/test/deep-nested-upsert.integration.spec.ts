@@ -246,7 +246,7 @@ describe('Deep Nested Upsert Operations (Profile → Avatar → AvatarImage)', (
   });
 
   describe('PUT /profiles/:userId endpoint simulation (Transaction)', () => {
-    it('should not duplicate audit logs for AvatarImage across nested upsert branches', async () => {
+    it('should not duplicate AvatarImage update logs when each level is upserted separately in a transaction', async () => {
       // Profile, Avatar, and AvatarImage are written as separate top-level upserts in one
       // transaction; each upsert is audited only for the branch its before-state fetch identifies.
 
