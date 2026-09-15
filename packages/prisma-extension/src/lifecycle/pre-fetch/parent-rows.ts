@@ -21,6 +21,12 @@ export const isRecord = (value: unknown): value is PreFetchRecord => typeof valu
 const isKeyValue = (value: unknown): boolean =>
   typeof value === 'string' || typeof value === 'number' || typeof value === 'bigint';
 
+/** The path of the operation `path` is nested under; `undefined` for a direct child of the top-level operation */
+export const parentPathOf = (path: string): string | undefined => {
+  const separatorIndex = path.lastIndexOf('.');
+  return separatorIndex === -1 ? undefined : path.slice(0, separatorIndex);
+};
+
 export interface ResolveParentRowsInput {
   path: string;
   parentFields: readonly string[];
@@ -38,9 +44,8 @@ export interface ResolveParentRowsInput {
 export const resolveParentRows = async (input: ResolveParentRowsInput): Promise<PreFetchRecord[]> => {
   const { path, parentFields, topLevelWhere, topLevelModelClient, preFetchResults } = input;
 
-  const separatorIndex = path.lastIndexOf('.');
-  if (separatorIndex !== -1) {
-    const parentPath = path.slice(0, separatorIndex);
+  const parentPath = parentPathOf(path);
+  if (parentPath !== undefined) {
     const parentEntries = preFetchResults.get(parentPath)?.values() ?? [];
     return Array.from(parentEntries, (entry) => entry.before).filter(isRecord);
   }

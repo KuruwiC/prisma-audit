@@ -30,7 +30,7 @@ import { createSchemaMetadataFromDMMF } from '../../utils/nested-operations.js';
 import { getPreFetchModelClient, type PreFetchModelClient } from './model-client.js';
 import { preFetchOneToManyRelation, resolveToManyRelationScope } from './one-to-many-fetcher.js';
 import { preFetchOneToOneRelation, resolveToOneRelationLink } from './one-to-one-fetcher.js';
-import { isRecord, parentKeysFromOperationWheres } from './parent-rows.js';
+import { isRecord, parentKeysFromOperationWheres, parentPathOf } from './parent-rows.js';
 import { extractEntityId, storePreFetchResult } from './pre-fetch-result-store.js';
 
 type PrismaDMMF = PrismaNamespace['dmmf'];
@@ -224,9 +224,8 @@ export const preFetchNestedRecordsBeforeOperation = async (
       return pkConstraintCache.get(model);
     },
     parentOperationsNotPreFetched: (path) => {
-      const separatorIndex = path.lastIndexOf('.');
-      if (separatorIndex === -1) return [];
-      const parentPath = path.slice(0, separatorIndex);
+      const parentPath = parentPathOf(path);
+      if (parentPath === undefined) return [];
       return nestedOperations.filter((op) => op.path === parentPath && !preFetchedOperations.has(op));
     },
   };
