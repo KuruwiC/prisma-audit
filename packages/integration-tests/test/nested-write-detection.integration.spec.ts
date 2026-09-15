@@ -81,5 +81,42 @@ describe('nested write detection', () => {
       const avatar = await clients.basePrisma.avatar.findUniqueOrThrow({ where: { profileId: profile.id } });
       expect(aggregateTypes(await createLogs('Avatar', avatar.id))).toEqual(['Avatar', 'Profile']);
     });
+
+    it('audits a comment created inside a to-many post update', async () => {
+      const user = await createUser('post-update-owner@example.com');
+      const post = await clients.basePrisma.post.create({ data: { title: 'Only post', authorId: user.id } });
+
+      await asActor(() =>
+        clients.prisma.user.update({
+          where: { id: user.id },
+          data: {
+            posts: {
+              update: {
+                where: { id: post.id },
+                data: { comments: { create: { content: 'Created comment', authorId: user.id } } },
+              },
+            },
+          },
+        }),
+      );
+
+      const comment = await clients.basePrisma.comment.findFirstOrThrow({ where: { postId: post.id } });
+      expect(aggregateTypes(await createLogs('Comment', comment.id))).toEqual(['Comment', 'Post', 'User']);
+    });
+  });
+
+  it('audits a post created in the create branch of a top-level upsert', async () => {
+    const email = 'upsert-created-owner@example.com';
+
+    await asActor(() =>
+      clients.prisma.user.upsert({
+        where: { email },
+        create: { email, password: 'secret123', posts: { create: { title: 'Created through upsert' } } },
+        update: { name: 'Not used' },
+      }),
+    );
+
+    const post = await clients.basePrisma.post.findFirstOrThrow({ where: { author: { email } } });
+    expect(aggregateTypes(await createLogs('Post', post.id))).toEqual(['Post', 'User']);
   });
 });

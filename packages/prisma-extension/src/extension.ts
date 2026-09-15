@@ -74,6 +74,7 @@ import {
   shouldAuditModel,
   uncapitalizeFirst,
 } from './utils/index.js';
+import { createSchemaMetadataFromDMMF } from './utils/schema-metadata.js';
 
 /**
  * Input for the `handleLimitedUpdateMany` helper defined inside {@link createAuditLogExtension}.
@@ -126,6 +127,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
   } = options;
 
   const Prisma = prismaNamespace as PrismaNamespace;
+  const schemaMetadata = createSchemaMetadataFromDMMF(Prisma);
   const DbNull = Prisma.DbNull;
   const auditLogModel = customAuditLogModel ? uncapitalizeFirst(customAuditLogModel) : 'auditLog';
   const excludeFields = diffing?.excludeFields ?? [];
@@ -809,8 +811,8 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
               return query(args);
             }
 
-            // Inject deep include for nested write operations (3+ levels)
-            const argsWithInclude = injectDeepInclude(args);
+            // Nested writes are audited from the returned records, so the written relations are included
+            const argsWithInclude = injectDeepInclude(schemaMetadata, model, args);
 
             // Mark the re-entrancy guard on the library-owned runtime store; the app context
             // stays untouched so downstream code keeps the caller's actor and request metadata.

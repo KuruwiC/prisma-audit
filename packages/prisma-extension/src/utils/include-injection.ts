@@ -1,205 +1,67 @@
 /**
  * Dynamic Include Injection Utilities
  *
- * Automatically injects deep `include` clauses into Prisma operations to ensure
- * nested write operations are captured in the result for audit logging.
- *
- * Analyzes operation args to detect nested write operations, builds an include tree,
- * and merges with user-provided includes (user includes take precedence).
+ * Nested writes are audited from the records the operation returns, so the relations an operation
+ * writes are injected into its `include`. The written relations come from core
+ * `detectNestedOperations` in the discovery pass, which scans every branch the operation could
+ * execute (both branches of an upsert). User-provided includes take precedence when merged.
  *
  * @module include-injection
  */
 
+import { detectNestedOperations, type NestedOperationKeyword, type SchemaMetadata } from '@kuruwic/prisma-audit-core';
+
 /**
- * Represents a nested write operation detected in args.data
+ * Nested write keywords whose written rows are audited from the operation result. Deleted rows are
+ * audited from their pre-fetched state, `connect` writes no row of the related model, and
+ * `updateMany` rows are not read from the result.
+ */
+const RESULT_AUDITED_KEYWORDS: ReadonlySet<NestedOperationKeyword> = new Set([
+  'create',
+  'createMany',
+  'update',
+  'upsert',
+  'connectOrCreate',
+]);
+
+/** Relation fields written at one level of the operation, each with the relations written below it */
+type WrittenRelationTree = Map<string, WrittenRelationTree>;
+
+/**
+ * Build the tree of written relations from nested operation paths (e.g. `posts`, `posts.comments`)
  *
  * @internal
  */
-interface NestedOperation {
-  path: string[];
-  operation: 'create' | 'createMany' | 'update' | 'upsert' | 'connectOrCreate' | 'delete' | 'deleteMany';
-  fieldName: string;
-}
+const buildWrittenRelationTree = (paths: readonly string[]): WrittenRelationTree => {
+  const root: WrittenRelationTree = new Map();
 
-/**
- * Analyze upsert operation's nested data
- *
- * @internal
- */
-const analyzeUpsertData = (nestedData: Record<string, unknown>, path: string[]): NestedOperation[] => {
-  const operations: NestedOperation[] = [];
-  const createData = nestedData.create;
-  const updateData = nestedData.update;
-
-  if (typeof createData === 'object' && createData !== null) {
-    operations.push(...analyzeNestedWriteOperations(createData, path));
-  }
-  if (typeof updateData === 'object' && updateData !== null) {
-    operations.push(...analyzeNestedWriteOperations(updateData, path));
-  }
-
-  return operations;
-};
-
-/**
- * Analyze connectOrCreate operation's nested data
- *
- * @internal
- */
-const analyzeConnectOrCreateData = (nestedData: Record<string, unknown>, path: string[]): NestedOperation[] => {
-  const createData = nestedData.create;
-  if (typeof createData === 'object' && createData !== null) {
-    return analyzeNestedWriteOperations(createData, path);
-  }
-  return [];
-};
-
-/**
- * Process a single write operation
- *
- * @internal
- */
-const processWriteOperation = (
-  op: 'create' | 'createMany' | 'update' | 'upsert' | 'connectOrCreate' | 'delete' | 'deleteMany',
-  key: string,
-  value: Record<string, unknown>,
-  path: string[],
-): NestedOperation[] => {
-  const operations: NestedOperation[] = [];
-  const currentPath = [...path, key];
-
-  operations.push({
-    path: currentPath,
-    operation: op,
-    fieldName: key,
-  });
-
-  const nestedData = value[op];
-  if (typeof nestedData !== 'object' || nestedData === null) {
-    return operations;
-  }
-
-  const nestedDataRecord = nestedData as Record<string, unknown>;
-
-  if (op === 'upsert') {
-    operations.push(...analyzeUpsertData(nestedDataRecord, currentPath));
-  } else if (op === 'connectOrCreate') {
-    operations.push(...analyzeConnectOrCreateData(nestedDataRecord, currentPath));
-  } else {
-    operations.push(...analyzeNestedWriteOperations(nestedData, currentPath));
-  }
-
-  return operations;
-};
-
-/**
- * Recursively analyze args.data to detect all nested write operations
- */
-export const analyzeNestedWriteOperations = (data: unknown, path: string[] = []): NestedOperation[] => {
-  if (!data || typeof data !== 'object') {
-    return [];
-  }
-
-  const operations: NestedOperation[] = [];
-  const writeOps = ['create', 'createMany', 'update', 'upsert', 'connectOrCreate', 'delete', 'deleteMany'] as const;
-
-  for (const [key, value] of Object.entries(data)) {
-    if (!value || typeof value !== 'object') {
-      continue;
-    }
-
-    for (const op of writeOps) {
-      if (op in value) {
-        operations.push(...processWriteOperation(op, key, value as Record<string, unknown>, path));
+  for (const path of paths) {
+    let level = root;
+    for (const segment of path.split('.')) {
+      let children = level.get(segment);
+      if (!children) {
+        children = new Map();
+        level.set(segment, children);
       }
+      level = children;
     }
   }
 
-  return operations;
+  return root;
 };
 
 /**
- * Check if there are deeper nested operations for a given path
+ * Convert a written-relation tree into a Prisma `include` object
  *
  * @internal
  */
-const hasDeeperNested = (operations: readonly NestedOperation[], currentPath: readonly string[]): boolean => {
-  const pathString = currentPath.join('.');
-  return operations.some(
-    (otherOp) =>
-      otherOp.path.length > currentPath.length && otherOp.path.slice(0, currentPath.length).join('.') === pathString,
+const buildIncludeTree = (tree: WrittenRelationTree): Record<string, unknown> =>
+  Object.fromEntries(
+    Array.from(tree, ([field, children]) => [
+      field,
+      children.size === 0 ? true : { include: buildIncludeTree(children) },
+    ]),
   );
-};
-
-/**
- * Process the last segment of a path in the include tree
- *
- * @internal
- */
-const processLastSegment = (
-  current: Record<string, unknown>,
-  segment: string,
-  operations: readonly NestedOperation[],
-  currentPath: readonly string[],
-): void => {
-  const hasDeeper = hasDeeperNested(operations, currentPath);
-
-  if (hasDeeper) {
-    if (!current[segment]) {
-      current[segment] = { include: {} };
-    }
-  } else {
-    current[segment] = true;
-  }
-};
-
-/**
- * Process an intermediate segment of a path in the include tree
- *
- * @internal
- */
-const processIntermediateSegment = (current: Record<string, unknown>, segment: string): Record<string, unknown> => {
-  if (!current[segment]) {
-    current[segment] = { include: {} };
-  }
-  return (current[segment] as Record<string, unknown>).include as Record<string, unknown>;
-};
-
-/**
- * Build an include tree structure from nested operations
- *
- * Converts a flat list of nested operations into a nested include object
- * that Prisma can use to fetch the related records.
- */
-export const buildIncludeTree = (operations: NestedOperation[]): Record<string, unknown> | undefined => {
-  if (operations.length === 0) {
-    return undefined;
-  }
-
-  const includeTree: Record<string, unknown> = {};
-
-  for (const op of operations) {
-    let current = includeTree;
-
-    for (let i = 0; i < op.path.length; i++) {
-      const segment = op.path[i];
-
-      if (!segment) {
-        continue;
-      }
-
-      const isLastSegment = i === op.path.length - 1;
-
-      if (isLastSegment) {
-        processLastSegment(current, segment, operations, op.path);
-      } else {
-        current = processIntermediateSegment(current, segment);
-      }
-    }
-  }
-
-  return includeTree;
-};
 
 /**
  * Check if both values are objects
@@ -276,44 +138,33 @@ export const mergeIncludes = (
 };
 
 /**
- * Inject deep include into operation args based on nested write operations
+ * Inject an include for the relations the operation writes
  *
  * Main entry point for the include injection feature.
+ *
+ * @param schemaMetadata - Schema metadata of the audited client
+ * @param modelName - Model the operation runs on
+ * @param args - Operation args
+ * @returns The args with the written relations merged into `include`, or `args` itself when the
+ *   operation writes no relation whose rows are audited from the result
  */
-export const injectDeepInclude = (args: unknown): unknown => {
+export const injectDeepInclude = (schemaMetadata: SchemaMetadata, modelName: string, args: unknown): unknown => {
   if (!args || typeof args !== 'object') {
     return args;
   }
 
   const argsObj = args as Record<string, unknown>;
 
-  // Analyze nested write operations in args.data
-  const createData = argsObj.create;
-  const updateData = argsObj.update;
-  const dataToAnalyze = argsObj.data || updateData || createData;
+  const writtenPaths = detectNestedOperations(schemaMetadata, modelName, argsObj, { kind: 'discovery' })
+    .filter((operation) => RESULT_AUDITED_KEYWORDS.has(operation.operation))
+    .map((operation) => operation.path);
 
-  if (!dataToAnalyze) {
+  if (writtenPaths.length === 0) {
     return args;
   }
-
-  const nestedOps = analyzeNestedWriteOperations(dataToAnalyze);
-
-  if (nestedOps.length === 0) {
-    return args;
-  }
-
-  // Build include tree from detected operations
-  const autoInclude = buildIncludeTree(nestedOps);
-
-  if (!autoInclude) {
-    return args;
-  }
-
-  // Merge with user-provided include
-  const mergedInclude = mergeIncludes(argsObj.include, autoInclude);
 
   return {
     ...argsObj,
-    include: mergedInclude,
+    include: mergeIncludes(argsObj.include, buildIncludeTree(buildWrittenRelationTree(writtenPaths))),
   };
 };
