@@ -4,6 +4,7 @@
  * @module write-strategies/factory
  */
 
+import { dispatch } from '../dispatch/index.js';
 import { getRuntimeContext } from '../runtime-context.js';
 import { writeDeferredInTransaction } from './deferred.js';
 import { writeFireAndForget } from './fire-and-forget.js';
@@ -18,9 +19,8 @@ const isInTransaction = (): boolean => {
 /**
  * Create write strategy selector
  *
- * Selects appropriate write strategy based on await configuration and transaction state.
- *
- * Strategy flow: shouldAwaitWrite(modelName)? → Synchronous : inTransaction? → Deferred : Fire-and-Forget
+ * Maps the write plan kind that `dispatch` picks for a model to a strategy:
+ * immediate → Synchronous, after-commit → Deferred, detached → Fire-and-Forget.
  *
  * @example
  * ```typescript
@@ -34,14 +34,19 @@ export const createWriteStrategySelector = (
   writeExecutor: WriteExecutor,
 ): ((modelName: string) => WriteStrategy) => {
   return (modelName: string): WriteStrategy => {
-    if (config.shouldAwaitWrite(modelName)) {
-      return (input) => writeSynchronously({ ...input, writeExecutor });
-    }
+    const plan = dispatch([], config.shouldAwaitWrite(modelName), { inTransaction: isInTransaction() });
 
-    if (isInTransaction()) {
-      return (input) => writeDeferredInTransaction({ ...input, writeExecutor });
+    switch (plan.kind) {
+      case 'immediate':
+        return (input) => writeSynchronously({ ...input, writeExecutor });
+      case 'after-commit':
+        return (input) => writeDeferredInTransaction({ ...input, writeExecutor });
+      case 'detached':
+        return (input) => writeFireAndForget({ ...input, writeExecutor });
+      default: {
+        const exhaustiveCheck: never = plan;
+        throw new Error(`[@prisma-audit] Unknown write plan kind: ${JSON.stringify(exhaustiveCheck)}`);
+      }
     }
-
-    return (input) => writeFireAndForget({ ...input, writeExecutor });
   };
 };
