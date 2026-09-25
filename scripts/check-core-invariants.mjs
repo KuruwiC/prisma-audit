@@ -2,7 +2,7 @@
 /**
  * Checks that @kuruwic/db-audit-core stays independent of any ORM:
  *
- * 1. `Prisma` and `Drizzle` appear nowhere in the core's source, comments included.
+ * 1. `Prisma` and `Drizzle` appear nowhere in the core's source, in any letter case, comments included.
  * 2. No ORM operation vocabulary (`findUnique`, `createMany`, `upsert`, `dmmf`, ...) appears as a
  *    whole word in the core's source. `where`, `include` and `select` are ordinary English words
  *    and are not checked.
@@ -30,7 +30,7 @@ const CORE_PACKAGE_JSON = `${CORE_DIR}/package.json`;
 const CONTEXT_PROVIDER = `${CORE_SRC}/context-provider.ts`;
 const SKIPPED_DIRS = new Set(['node_modules', 'dist', 'generated']);
 
-const ORM_NAME = /Prisma|Drizzle/g;
+const ORM_NAME = /prisma|drizzle/gi;
 const ORM_VOCABULARY =
   /\b(findUnique|findMany|findFirst|connectOrCreate|createMany|updateMany|deleteMany|createManyAndReturn|updateManyAndReturn|upsert|dmmf|DMMF)\b/g;
 const CLIENT_SHAPE_INFERENCE = /extends \{\s*(findUnique|findMany|create|update|delete)\b/g;
@@ -179,7 +179,7 @@ function main() {
   const coreFiles = listFiles(CORE_SRC);
   const checks = [
     {
-      title: `no Prisma or Drizzle in ${CORE_SRC} (${coreFiles.length} files, comments included)`,
+      title: `no Prisma or Drizzle in ${CORE_SRC} (${coreFiles.length} files, any case, comments included)`,
       violations: scan(coreFiles, ORM_NAME),
     },
     {
