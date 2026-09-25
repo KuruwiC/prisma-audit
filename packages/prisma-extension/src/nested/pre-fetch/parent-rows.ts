@@ -49,7 +49,9 @@ export const resolveParentRows = async (input: ResolveParentRowsInput): Promise<
   const parentPath = parentPathOf(path);
   if (parentPath !== undefined) {
     const parentEntries = preFetchResults.get(parentPath)?.values() ?? [];
-    return Array.from(parentEntries, (entry) => entry.before).filter(isRecord);
+    return Array.from(parentEntries, ({ before }) => before).flatMap((before) =>
+      before.kind === 'captured' ? [before.row] : [],
+    );
   }
 
   if (!isRecord(topLevelWhere)) {

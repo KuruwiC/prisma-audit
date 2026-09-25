@@ -124,7 +124,7 @@ describe('snapshotPreExistingRows', () => {
 
   it('snapshots a deeper path under the parent rows the pre-fetch found', async () => {
     const results: NestedPreFetchResults = new Map();
-    storePreFetchResult(results, 'posts', 'p1', { id: 'p1', authorId: 'u1' });
+    storePreFetchResult(results, 'posts', 'p1', { kind: 'captured', row: { id: 'p1', authorId: 'u1' } });
     const findMany = vi.fn(async () => [{ id: 'c1' }]);
 
     const preExisting = await snapshot(

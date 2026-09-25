@@ -11,6 +11,7 @@
  * before the operation can be snapshotted.
  */
 
+import type { BeforeState } from '@kuruwic/db-audit-core';
 import {
   detectNestedOperations,
   isNestedBatchKeyword,
@@ -22,7 +23,7 @@ import {
   type UpsertBranch,
 } from '../../grammar/nested-operations.js';
 import type { SchemaMetadata } from '../../schema/types.js';
-import { preFetchedRowAt } from '../pre-fetch/pre-fetch-result-store.js';
+import { preFetchedStateAt } from '../pre-fetch/pre-fetch-result-store.js';
 
 type Row = Record<string, unknown>;
 
@@ -30,8 +31,11 @@ export interface NestedWriteTarget {
   /** The unique WHERE the operation names the row by, or the row's primary key when a filter matched it */
   readonly where: Row;
   readonly operation: NestedOperationInfo;
-  /** The row's pre-fetched before-state; `undefined` when it did not exist under the parent or was not pre-fetched */
-  readonly before: Row | undefined;
+  /**
+   * The row's pre-fetched before state: none when it did not exist under the parent or was not
+   * pre-fetched, unavailable when the pre-fetch of the path failed
+   */
+  readonly before: BeforeState;
 }
 
 export interface NestedWriteSet {
@@ -57,7 +61,7 @@ export const detectExecutedNestedOperations = (
   detectNestedOperations(schemaMetadata, modelName, args, {
     kind: 'executed',
     topLevelUpsertBranch,
-    hasRecordAt: (path, where) => preFetchedRowAt(nestedPreFetchResults, path, where) !== undefined,
+    hasRecordAt: (path, where) => preFetchedStateAt(nestedPreFetchResults, path, where).kind === 'captured',
   });
 
 const INSERTING_KEYWORDS: ReadonlySet<NestedOperationKeyword> = new Set(['create', 'createMany']);
@@ -65,7 +69,8 @@ const INSERTING_WHEN_TARGET_MISSING: ReadonlySet<NestedOperationKeyword> = new S
 
 export const insertsRows = (operation: NestedOperationInfo, targets: readonly NestedWriteTarget[]): boolean =>
   INSERTING_KEYWORDS.has(operation.operation) ||
-  (INSERTING_WHEN_TARGET_MISSING.has(operation.operation) && targets.some((target) => target.before === undefined));
+  (INSERTING_WHEN_TARGET_MISSING.has(operation.operation) &&
+    targets.some((target) => target.before.kind !== 'captured'));
 
 const targetWheresOf = (operation: NestedOperationInfo, batchTargets: NestedBatchTargets): Row[] =>
   isNestedBatchKeyword(operation.operation)
@@ -89,7 +94,7 @@ export const buildNestedWriteSets = (
     const targets = targetWheresOf(operation, batchTargets).map((where) => ({
       where,
       operation,
-      before: preFetchedRowAt(nestedPreFetchResults, operation.path, where),
+      before: preFetchedStateAt(nestedPreFetchResults, operation.path, where),
     }));
     writeSet.targets.push(...targets);
     writeSet.createsPending = writeSet.createsPending || insertsRows(operation, targets);

@@ -33,7 +33,7 @@ const p1 = { id: 'p1', title: 'First' };
 const preFetched = (entries: [string, string, Record<string, unknown> | null][]): NestedPreFetchResults => {
   const results: NestedPreFetchResults = new Map();
   for (const [path, identity, before] of entries) {
-    storePreFetchResult(results, path, identity, before);
+    storePreFetchResult(results, path, identity, before ? { kind: 'captured', row: before } : { kind: 'none' });
   }
   return results;
 };
@@ -90,8 +90,8 @@ describe('buildNestedWriteSets', () => {
 
     expect(writeSets.get('posts')).toEqual({
       targets: [
-        { where: { id: 'p1' }, operation: operations[0], before: p1 },
-        { where: { id: 'p2' }, operation: operations[0], before: undefined },
+        { where: { id: 'p1' }, operation: operations[0], before: { kind: 'captured', row: p1 } },
+        { where: { id: 'p2' }, operation: operations[0], before: { kind: 'none' } },
       ],
       createsPending: false,
     });
@@ -140,8 +140,8 @@ describe('buildNestedWriteSets', () => {
 
       expect(writeSets.get('posts')).toEqual({
         targets: [
-          { where: { id: 'p1' }, operation: operations[0], before: p1 },
-          { where: { id: 'p2' }, operation: operations[0], before: undefined },
+          { where: { id: 'p1' }, operation: operations[0], before: { kind: 'captured', row: p1 } },
+          { where: { id: 'p2' }, operation: operations[0], before: { kind: 'none' } },
         ],
         createsPending: false,
       });
@@ -160,7 +160,7 @@ describe('buildNestedWriteSets', () => {
     const connect = operations.find((op) => op.operation === 'connect');
 
     expect(writeSets.get('posts')).toEqual({
-      targets: [{ where: { id: 'p1' }, operation: connect, before: undefined }],
+      targets: [{ where: { id: 'p1' }, operation: connect, before: { kind: 'none' } }],
       createsPending: true,
     });
   });

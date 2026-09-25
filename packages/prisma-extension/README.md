@@ -1016,7 +1016,7 @@ Two independent options, both receiving the same structured failure context (`{ 
 
 #### Before state that could not be read
 
-An `update` or `delete` reads its target row before the write when `fetchBeforeOperation` is on. When that read fails, the caller's operation still runs, the observer hears about it under `pre-fetch`, and the entry is recorded with `before: null`, `changes: null` and `beforeUnavailable: true`, so it cannot be mistaken for an entry whose before state was never requested (`beforeUnavailable: false`). An `upsert` whose read failed is not recorded at all: the before state is what tells whether it created or updated its row.
+An `update` or `delete`, top-level or nested, reads its target row before the write when `fetchBeforeOperation` is on. When that read fails, the caller's operation still runs, the observer hears about it under `pre-fetch`, and the entry is recorded with `before: null`, `changes: null` and `beforeUnavailable: true`, so it cannot be mistaken for an entry whose before state was never requested (`beforeUnavailable: false`). An `upsert` whose read failed is not recorded at all: the before state is what tells whether it created or updated its row.
 
 Every record carries `beforeUnavailable`. The default write stores it when the audit-log model declares a `beforeUnavailable Boolean` column and leaves it out otherwise, so no column is required; a `hooks.writer` sees it on each record and can store it however it likes. The normalized writers (`createEntityNormalizedWriter`, `createSharedChangeWriter`) do not store it.
 

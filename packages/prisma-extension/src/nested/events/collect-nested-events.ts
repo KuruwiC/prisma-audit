@@ -16,7 +16,7 @@
  * that parent.
  */
 
-import type { MutationEvent } from '@kuruwic/db-audit-core';
+import type { BeforeState, MutationEvent } from '@kuruwic/db-audit-core';
 import {
   extractNestedRecords,
   getPrimaryKeyConstraint,
@@ -47,6 +47,8 @@ import { insertsRows, type NestedWriteSet, type NestedWriteSets, type NestedWrit
 type Row = Record<string, unknown>;
 
 const isRow = (value: unknown): value is Row => typeof value === 'object' && value !== null;
+
+const NO_BEFORE_STATE: BeforeState = { kind: 'none' };
 
 export interface NestedEventCollectorDependencies {
   schemaMetadata: SchemaMetadata;
@@ -80,7 +82,7 @@ const toEvent = (
   model: record.relatedModel,
   identity: identityOf(record.entity, pkConstraint.fields, { model: record.relatedModel, path: nestedOp.path }),
   action: record.action,
-  before: record.beforeState ? { kind: 'captured', row: record.beforeState } : { kind: 'none' },
+  before: record.beforeState,
   after: record.entity,
   origin: { path: nestedOp.path, op: nestedOp.operation },
 });
@@ -98,7 +100,7 @@ const rowsByPath = (records: readonly NestedRecordInfo[]): Map<string, Row[]> =>
 const resolveRow = (
   nestedOp: NestedOperationInfo,
   row: Row,
-  before: Row | undefined,
+  before: BeforeState,
   getNestedOperationConfig: GetOperationConfig,
 ): CollectedNestedRecord | undefined => {
   const { action, beforeState } = resolveNestedRowState(nestedOp, before, getNestedOperationConfig);
@@ -138,7 +140,7 @@ const claimUnnamedRows = (
       continue;
     }
     claimed.add(row);
-    const record = resolveRow(nestedOp, row, undefined, getNestedOperationConfig);
+    const record = resolveRow(nestedOp, row, NO_BEFORE_STATE, getNestedOperationConfig);
     if (record) collected.push(record);
   }
   return collected;
@@ -184,7 +186,7 @@ const collectToOneRows = (
 ): CollectedNestedRecord[] =>
   attribution.rows.flatMap((row) => {
     const identity = extractEntityIdOrUnresolved(row, [...attribution.pkFields]);
-    const before = getPreFetchResult(nestedPreFetchResults, nestedOp.path, identity)?.before ?? undefined;
+    const before = getPreFetchResult(nestedPreFetchResults, nestedOp.path, identity)?.before ?? NO_BEFORE_STATE;
     return resolveRow(nestedOp, row, before, getNestedOperationConfig) ?? [];
   });
 
@@ -247,7 +249,9 @@ const attributionsOf = (
 const updatesExistingRow = (target: NestedWriteTarget): boolean => {
   const { operation } = target.operation;
   return (
-    operation === 'update' || operation === 'updateMany' || (operation === 'upsert' && target.before !== undefined)
+    operation === 'update' ||
+    operation === 'updateMany' ||
+    (operation === 'upsert' && target.before.kind === 'captured')
   );
 };
 

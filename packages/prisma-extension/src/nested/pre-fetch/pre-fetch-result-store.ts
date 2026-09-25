@@ -3,6 +3,7 @@
  * path, then by entity identity (`UNRESOLVED_ENTITY_ID` when the identity is unknown).
  */
 
+import type { BeforeState } from '@kuruwic/db-audit-core';
 import type { NestedPreFetchResults } from '../../grammar/nested-operations.js';
 import type { NestedPreFetchResult } from '../../grammar/nested-state.js';
 import type { UniqueConstraint } from '../../schema/types.js';
@@ -25,24 +26,30 @@ export const getPreFetchResult = (
   return pathMap.get(entityId) || pathMap.get(UNRESOLVED_ENTITY_ID);
 };
 
+const NO_BEFORE_STATE: BeforeState = { kind: 'none' };
+
+/** The before state a pre-fetch read yields: the row it found as captured, none when it found no row */
+export const beforeStateOf = (row: Record<string, unknown> | null): BeforeState =>
+  row ? { kind: 'captured', row } : NO_BEFORE_STATE;
+
 /**
- * The pre-fetched before-state of a row a nested operation at `path` targets: with `where`, the
- * row the unique WHERE names among the found rows at the path; without it (a to-one relation), any
- * found row at the path. A missing row and a failed pre-fetch are both stored with a `null`
- * before-state and yield `undefined`.
+ * The pre-fetched before state of a row a nested operation at `path` targets: with `where`, the
+ * captured row the unique WHERE names at the path; without it (a to-one relation), any captured
+ * row at the path. Without such a row, `unavailable` when the pre-fetch of the path failed (its
+ * `UNRESOLVED_ENTITY_ID` entry says so), else none.
  */
-export const preFetchedRowAt = (
+export const preFetchedStateAt = (
   nestedPreFetchResults: NestedPreFetchResults | undefined,
   path: string,
   where: Record<string, unknown> | undefined,
-): Record<string, unknown> | undefined => {
-  const entries = nestedPreFetchResults?.get(path)?.values() ?? [];
-  for (const entry of entries) {
-    if (entry.before !== null && (where === undefined || matchesUniqueWhere(entry.before, where))) {
-      return entry.before;
+): BeforeState => {
+  const pathMap = nestedPreFetchResults?.get(path);
+  for (const { before } of pathMap?.values() ?? []) {
+    if (before.kind === 'captured' && (where === undefined || matchesUniqueWhere(before.row, where))) {
+      return before;
     }
   }
-  return undefined;
+  return pathMap?.get(UNRESOLVED_ENTITY_ID)?.before.kind === 'unavailable' ? { kind: 'unavailable' } : NO_BEFORE_STATE;
 };
 
 /** Stores `beforeState` under `path` and `entityId` (`UNRESOLVED_ENTITY_ID` when the identity is unknown). */
@@ -50,7 +57,7 @@ export const storePreFetchResult = (
   nestedPreFetchResults: NestedPreFetchResults,
   path: string,
   entityId: EntityIdentityKey,
-  beforeState: Record<string, unknown> | null,
+  beforeState: BeforeState,
 ): void => {
   let pathMap = nestedPreFetchResults.get(path);
 

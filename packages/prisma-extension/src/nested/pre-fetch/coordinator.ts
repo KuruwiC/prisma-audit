@@ -46,7 +46,7 @@ import {
 } from './one-to-many-fetcher.js';
 import { preFetchOneToOneRelation, resolveToOneRelationLink } from './one-to-one-fetcher.js';
 import { isRecord, parentKeysFromOperationWheres, parentPathOf } from './parent-rows.js';
-import { extractEntityId, storePreFetchResult } from './pre-fetch-result-store.js';
+import { beforeStateOf, extractEntityId, storePreFetchResult } from './pre-fetch-result-store.js';
 
 type PrismaDMMF = PrismaNamespace['dmmf'];
 
@@ -56,9 +56,9 @@ export interface PreFetchCoordinatorDependencies {
   readonly schemaMetadata: SchemaMetadata;
   readonly getNestedOperationConfig: GetOperationConfig;
   /**
-   * Notified when a single nested operation's pre-fetch query fails. The before-state
-   * for that path is recorded as unresolved (the `UNRESOLVED_ENTITY_ID` sentinel) and the
-   * caller's own operation continues — mirrors the top-level equivalent,
+   * Notified when a single nested operation's pre-fetch query fails. The path is recorded
+   * as `unavailable` under the `UNRESOLVED_ENTITY_ID` sentinel, so a row of the path without
+   * a captured row of its own reads as unavailable, and the caller's own operation continues — mirrors the top-level equivalent,
    * `fetchBeforeState` in pipeline/before-state.ts, which reports the same failure class
    * through the same observer. Optional: when omitted, the failure is visible only via
    * `preFetchLog`.
@@ -228,7 +228,7 @@ export const preFetchNestedRecordsBeforeOperation = async (
     try {
       await preFetchNestedOperation(context, nestedOp);
     } catch (error) {
-      storePreFetchResult(preFetchResults, nestedOp.path, UNRESOLVED_ENTITY_ID, null);
+      storePreFetchResult(preFetchResults, nestedOp.path, UNRESOLVED_ENTITY_ID, { kind: 'unavailable' });
       preFetchLog('pre-fetch failed: path=%s error=%o', nestedOp.path, error);
       await reportNestedPreFetchFailure(onPreFetchFailure, nestedOp, error);
     }
@@ -350,7 +350,7 @@ const handleConnectOrCreate = async (
     const beforeRecord = await relatedModelClient.findUnique({ where: whereClause });
     const entityId = extractEntityId(beforeRecord, whereClause, pkConstraint);
 
-    storePreFetchResult(preFetchResults, nestedOp.path, entityId, beforeRecord);
+    storePreFetchResult(preFetchResults, nestedOp.path, entityId, beforeStateOf(beforeRecord));
 
     preFetchLog('connectOrCreate added to map: path=%s entityId=%s', nestedOp.path, entityId);
   }
@@ -375,7 +375,7 @@ const handleOneToOneRelation = async (
   });
 
   for (const result of results) {
-    storePreFetchResult(preFetchResults, nestedOp.path, result.entityId, result.beforeRecord);
+    storePreFetchResult(preFetchResults, nestedOp.path, result.entityId, beforeStateOf(result.beforeRecord));
 
     preFetchLog('1:1 added to map: path=%s entityId=%s', nestedOp.path, result.entityId);
   }

@@ -134,7 +134,7 @@ describe('nested to-many pre-fetch parent scope', () => {
     expect(delegates.member?.findUnique.mock.calls).toEqual([
       [{ where: { id: 'm1', AND: [{ account: { is: { id: 'a1' } } }] } }],
     ]);
-    expect(results.get('members')?.get('m1')?.before).toMatchObject({ name: 'first' });
+    expect(results.get('members')?.get('m1')?.before).toMatchObject({ kind: 'captured', row: { name: 'first' } });
   });
 
   it('reads the parent key when the top-level WHERE names the parent by another unique field', async () => {
@@ -193,7 +193,7 @@ describe('nested to-many pre-fetch parent scope', () => {
     expect(delegates.note?.findUnique.mock.calls).toEqual([
       [{ where: { id: 'n1', AND: [{ member: { is: { id: 'm1' } } }] } }],
     ]);
-    expect(results.get('members.notes')?.get('n1')?.before).toMatchObject({ body: 'note' });
+    expect(results.get('members.notes')?.get('n1')?.before).toMatchObject({ kind: 'captured', row: { body: 'note' } });
   });
 
   it('queries and stores nothing for a deeper path when no row exists at the parent path', async () => {
@@ -265,7 +265,7 @@ describe('nested to-many pre-fetch parent scope', () => {
     });
 
     expect(delegates.member?.findUnique.mock.calls).toEqual([[{ where: { id: 'm9' } }]]);
-    expect(results.get('members')?.get('m9')?.before).toMatchObject({ name: 'elsewhere' });
+    expect(results.get('members')?.get('m9')?.before).toMatchObject({ kind: 'captured', row: { name: 'elsewhere' } });
   });
 
   it('tries each parent key in turn and stores the row the first parent holding it returns', async () => {
@@ -293,7 +293,10 @@ describe('nested to-many pre-fetch parent scope', () => {
       [{ where: { id: 'n1', AND: [{ member: { is: { id: 'm1' } } }] } }],
       [{ where: { id: 'n1', AND: [{ member: { is: { id: 'm2' } } }] } }],
     ]);
-    expect(preFetchResults.get('members.notes')?.get('n1')?.before).toMatchObject({ memberId: 'm2' });
+    expect(preFetchResults.get('members.notes')?.get('n1')?.before).toMatchObject({
+      kind: 'captured',
+      row: { memberId: 'm2' },
+    });
     expect(preFetchResults.get('members.notes')?.has(UNRESOLVED_ENTITY_ID)).toBe(false);
   });
 });
@@ -315,7 +318,10 @@ describe('nested to-many batch pre-read', () => {
     });
 
     expect(delegates.member?.findMany.mock.calls).toEqual([[{ where: underA1({ name: 'draft' }) }]]);
-    expect(results.get('members')?.get('m1')?.before).toEqual({ id: 'm1', accountId: 'a1', name: 'draft' });
+    expect(results.get('members')?.get('m1')?.before).toEqual({
+      kind: 'captured',
+      row: { id: 'm1', accountId: 'a1', name: 'draft' },
+    });
     expect(results.get('members')?.has('m2')).toBe(false);
     expect(batchTargets).toEqual(new Map([['members', new Map([['updateMany', new Map([['m1', { id: 'm1' }]])]])]]));
   });
@@ -333,7 +339,7 @@ describe('nested to-many batch pre-read', () => {
     expect(delegates.member?.findMany.mock.calls).toEqual([
       [{ where: underA1({ name: 'draft' }), select: { id: true } }],
     ]);
-    expect(results.get('members')?.get('m1')).toEqual({ before: null });
+    expect(results.get('members')?.get('m1')).toEqual({ before: { kind: 'none' } });
     expect(batchTargets.get('members')?.get('updateMany')).toEqual(new Map([['m1', { id: 'm1' }]]));
   });
 
@@ -353,7 +359,7 @@ describe('nested to-many batch pre-read', () => {
       [{ where: underA1({ name: 'draft' }) }],
       [{ where: underA1({ name: 'stale' }) }],
     ]);
-    expect(results.get('members')?.get('m3')?.before).toMatchObject({ name: 'stale' });
+    expect(results.get('members')?.get('m3')?.before).toMatchObject({ kind: 'captured', row: { name: 'stale' } });
     expect(batchTargets.get('members')?.get('deleteMany')).toEqual(
       new Map([
         ['m1', { id: 'm1' }],
@@ -380,7 +386,7 @@ describe('nested to-many batch pre-read', () => {
       identityOnly,
     );
 
-    expect(results.get('members')?.get('m1')?.before).toMatchObject({ name: 'draft' });
+    expect(results.get('members')?.get('m1')?.before).toMatchObject({ kind: 'captured', row: { name: 'draft' } });
   });
 
   it('scopes a deeper path by the parent row a parent-path update names when the pre-fetch did not read it', async () => {

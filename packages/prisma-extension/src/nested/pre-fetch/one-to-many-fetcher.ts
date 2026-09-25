@@ -22,7 +22,7 @@ import { extractEntityIdentity } from '../../utils/id-generation.js';
 import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID } from '../../utils/identity-key.js';
 import type { PreFetchListClient, PreFetchModelClient, PreFetchRecord } from './model-client.js';
 import { parentKeyOf, type ResolveParentRowsInput, resolveParentRows } from './parent-rows.js';
-import { extractEntityId, storePreFetchResult } from './pre-fetch-result-store.js';
+import { beforeStateOf, extractEntityId, storePreFetchResult } from './pre-fetch-result-store.js';
 
 /** A related row belongs to the parent row when `backField` matches the parent's `parentFields`. */
 export interface ToManyRelationScope {
@@ -137,7 +137,7 @@ export const preFetchOneToManyRelation = async (input: PreFetchOneToManyRelation
     }
 
     const entityId = extractEntityId(beforeRecord, where, pkConstraint);
-    storePreFetchResult(preFetchResults, path, entityId, beforeRecord);
+    storePreFetchResult(preFetchResults, path, entityId, beforeStateOf(beforeRecord));
 
     preFetchLog('1:N stored: path=%s entityId=%s', path, entityId);
   }
@@ -163,7 +163,7 @@ const storeMatchedRow = (
   if (before === null && preFetchResults.get(path)?.has(identity)) {
     return;
   }
-  storePreFetchResult(preFetchResults, path, identity, before);
+  storePreFetchResult(preFetchResults, path, identity, beforeStateOf(before));
 };
 
 const scopeFilterToParents = (

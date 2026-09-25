@@ -95,7 +95,7 @@ export const collectDeleteRecords = async (
 
     for (const [entityId, preFetchResult] of pathMap) {
       const beforeState = preFetchResult.before;
-      const entity = beforeState ?? deserializeEntityId(entityId, pkFields);
+      const entity = beforeState.kind === 'captured' ? beforeState.row : deserializeEntityId(entityId, pkFields);
 
       if (entity === null) {
         nestedLog(
@@ -146,7 +146,7 @@ export const collectDeleteRecords = async (
     {
       entity,
       action: AUDIT_ACTION.DELETE,
-      beforeState: null,
+      beforeState: { kind: 'none' },
       relatedModel: nestedOp.relatedModel,
     },
   ];
@@ -164,8 +164,8 @@ export const collectDeleteManyRecords = (
   targets
     .filter((target) => target.operation === nestedOp)
     .map((target) => ({
-      entity: target.before ?? target.where,
+      entity: target.before.kind === 'captured' ? target.before.row : target.where,
       action: AUDIT_ACTION.DELETE,
-      beforeState: target.before ?? null,
+      beforeState: target.before,
       relatedModel: nestedOp.relatedModel,
     }));

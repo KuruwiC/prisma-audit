@@ -143,7 +143,7 @@ describe('nested to-one pre-fetch relation link and parent rows', () => {
 
     const entries = results?.get('backupContact');
     expect([...(entries?.keys() ?? [])]).toEqual(['c-backup']);
-    expect(entries?.get('c-backup')?.before).toMatchObject({ label: 'backup' });
+    expect(entries?.get('c-backup')?.before).toMatchObject({ kind: 'captured', row: { label: 'backup' } });
   });
 
   it('pre-fetches the to-one child of every row pre-fetched at the parent path', async () => {
@@ -173,6 +173,9 @@ describe('nested to-one pre-fetch relation link and parent rows', () => {
       },
     });
 
-    expect(results?.get('members.badge')?.get('b1')?.before).toMatchObject({ label: 'badge-1' });
+    expect(results?.get('members.badge')?.get('b1')?.before).toMatchObject({
+      kind: 'captured',
+      row: { label: 'badge-1' },
+    });
   });
 });

@@ -16,6 +16,7 @@ import {
   collectSingleOperationEvents,
   type SingleOperationOutcome,
 } from '../../src/pipeline/collect-events.js';
+import { UNRESOLVED_ENTITY_ID } from '../../src/utils/identity-key.js';
 import { createSchemaMetadataFromDMMF } from '../../src/utils/schema-metadata.js';
 
 const schemaMetadata = createSchemaMetadataFromDMMF({
@@ -276,7 +277,12 @@ describe('collectSingleOperationEvents', () => {
     const preFetched = (entries: [string, Record<string, unknown> | null][]) => {
       const results = new Map();
       for (const [identity, before] of entries) {
-        results.set('posts', (results.get('posts') ?? new Map()).set(identity, { before }));
+        results.set(
+          'posts',
+          (results.get('posts') ?? new Map()).set(identity, {
+            before: before ? { kind: 'captured', row: before } : { kind: 'none' },
+          }),
+        );
       }
       return results;
     };
@@ -313,6 +319,18 @@ describe('collectSingleOperationEvents', () => {
           after: p1,
           origin: { path: 'posts', op: 'update' },
         },
+      ]);
+    });
+
+    it('attributes an update at a path whose pre-fetch failed the row with an unavailable before state', async () => {
+      const events = await postEvents({ update: { where: { id: 'p1' }, data: { title: 'A' } } }, [p1, p2], {
+        nestedPreFetchResults: new Map([
+          ['posts', new Map([[UNRESOLVED_ENTITY_ID, { before: { kind: 'unavailable' } }]])],
+        ]),
+      });
+
+      expect(events).toEqual([
+        expect.objectContaining({ identity: 'p1', action: 'update', before: { kind: 'unavailable' } }),
       ]);
     });
 
@@ -591,6 +609,29 @@ describe('collectSingleOperationEvents', () => {
       ['Post', 'create'],
     ]);
     expect(updated.map((e) => [e.model, e.action])).toEqual([['User', 'update']]);
+  });
+});
+
+describe('collectSingleOperationEvents — a to-one relation', () => {
+  it('records an update of the related row whose pre-fetch failed with an unavailable before state', async () => {
+    const author = { id: 'u1', name: 'Anne' };
+    const events = await collectSingleOperationEvents(
+      single({
+        modelName: 'Post',
+        action: 'update',
+        args: { where: { id: 'p1' }, data: { author: { update: { name: 'Anne' } } } },
+        result: { id: 'p1', title: 'A', authorId: 'u1', author },
+        beforeState: { kind: 'captured', row: { id: 'p1', title: 'A', authorId: 'u1' } },
+        nestedPreFetchResults: new Map([
+          ['author', new Map([[UNRESOLVED_ENTITY_ID, { before: { kind: 'unavailable' } }]])],
+        ]),
+      }),
+      deps,
+    );
+
+    expect(events.filter((event) => event.model === 'User')).toEqual([
+      expect.objectContaining({ identity: 'u1', action: 'update', before: { kind: 'unavailable' }, after: author }),
+    ]);
   });
 });
 

@@ -150,6 +150,48 @@ describe('nested pre-fetch failures — observer notification', () => {
     }
   });
 
+  it('records a nested update whose pre-fetch failed with beforeUnavailable, a null before and no changes', async () => {
+    const observer = vi.fn<AuditErrorObserver>();
+    const { rawBasePrisma, basePrisma, provider, prisma, armFault } = createClient(sharedDatabaseUrl, observer);
+
+    try {
+      await basePrisma.auditLog.deleteMany();
+      await basePrisma.comment.deleteMany();
+      await basePrisma.post.deleteMany();
+      await basePrisma.user.deleteMany();
+
+      const user = await provider.runAsync(testActor, async () =>
+        prisma.user.create({ data: { email: 'nested-pf-marker@example.com', name: 'Owner', password: 'secret123' } }),
+      );
+      const post = await provider.runAsync(testActor, async () =>
+        prisma.post.create({ data: { title: 'Original', content: 'original', authorId: user.id } }),
+      );
+      const comment = await provider.runAsync(testActor, async () =>
+        prisma.comment.create({ data: { content: 'Original Comment', postId: post.id, authorId: user.id } }),
+      );
+
+      armFault(new Set([1]), 'simulated nested pre-fetch failure (update marker)');
+
+      await provider.runAsync(testActor, async () =>
+        prisma.post.update({
+          where: { id: post.id },
+          data: { comments: { update: { where: { id: comment.id }, data: { content: 'Updated Comment' } } } },
+        }),
+      );
+
+      const rows = await basePrisma.auditLog.findMany({
+        where: { entityType: 'Comment', entityId: comment.id, action: 'update' },
+      });
+      expect(rows.length).toBeGreaterThan(0);
+      for (const row of rows) {
+        expect(row).toMatchObject({ before: null, changes: null, beforeUnavailable: true });
+      }
+    } finally {
+      await prisma.$disconnect();
+      await rawBasePrisma.$disconnect();
+    }
+  });
+
   it('a nested delete array whose pre-fetch fails partway reports both the pre-fetch failure and the resulting unresolved entry, without dropping either silently', async () => {
     const FAILURE_MESSAGE = 'simulated nested pre-fetch failure (delete #2)';
     const observer = vi.fn<AuditErrorObserver>();
