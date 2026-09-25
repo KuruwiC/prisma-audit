@@ -10,10 +10,10 @@
 import {
   type AuditAction,
   type AuditContext,
-  getRuntimeContext,
   SUPPORTED_OPERATIONS,
   UNRESOLVED_ENTITY_ID,
 } from '@kuruwic/prisma-audit-core';
+import { isProcessingAuditLog } from '../runtime/scope.js';
 import type { UniqueConstraint } from '../schema/types.js';
 import { unwrapCompoundWhere } from './compound-where.js';
 import { extractEntityIdentity } from './id-generation.js';
@@ -114,16 +114,6 @@ export const extractDeleteOperationEntityId = (data: unknown, pkConstraint: Uniq
   }
 
   return undefined;
-};
-
-/**
- * Checks if the library-owned runtime context indicates we're in a recursive audit log write
- *
- * @returns True if currently processing an audit log
- * @internal
- */
-const isProcessingAuditLog = (): boolean => {
-  return getRuntimeContext()?.isProcessingAuditLog === true;
 };
 
 /**

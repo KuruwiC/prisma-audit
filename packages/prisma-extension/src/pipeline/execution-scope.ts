@@ -7,9 +7,9 @@
  */
 
 import type { AuditContext, AuditContextProvider } from '@kuruwic/prisma-audit-core';
-import { getRuntimeContext } from '@kuruwic/prisma-audit-core';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../internal-types.js';
 import { withOptionalTransaction } from '../lifecycle/transaction-wrapper.js';
+import { currentScope } from '../runtime/scope.js';
 
 export interface TransactionScope {
   /** Writes queued here run on the base handle once the transaction has committed */
@@ -56,7 +56,7 @@ export const withExecutionScope = <T>(
   );
 
   return inScope((context, handle) => {
-    const runtime = getRuntimeContext();
+    const runtime = currentScope();
     const transaction = runtime?.transaction;
     return run({
       auditContext: context,

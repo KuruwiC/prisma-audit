@@ -1,64 +1,20 @@
 /**
  * Transaction Proxy Module
  *
- * Wraps Prisma's `$transaction` method to inject audit logging capabilities. Intercepts
- * transaction calls to ensure audit logs are written atomically within transactions.
- *
- * The transaction scope (transactional client + deferred-write queue) is propagated on the
- * library-owned runtime context (separate from the app-owned audit context), so an actor
- * override inside the callback cannot drop them.
- *
- * Deferred writes execute strictly AFTER commit (the queue is drained once `$transaction`
- * resolves), in both the explicit-`$transaction` path here and the implicit-wrapper path in
- * transaction-wrapper.ts. On rollback the queue is discarded unrun.
+ * Wraps the client's `$transaction` so that an interactive transaction runs its callback inside
+ * the runtime scope of its transactional client: the audit reads and writes of the operations
+ * in the callback share the client, and the writes that must wait for the commit queue on the
+ * scope. The queue is drained strictly after `$transaction` resolves; on rejection it is
+ * discarded unrun. The sequential form, `$transaction([...])`, passes through untouched: a list
+ * of operations carries no callback, hence no interactive scope to establish.
  *
  * @module lifecycle/transaction-proxy
  */
 
-import {
-  type AuditContext,
-  type AuditContextProvider,
-  flushPendingWrites,
-  getGlobalSingleton,
-  runWithRuntimeContext,
-} from '@kuruwic/prisma-audit-core';
-
-export { flushPendingWrites };
-
-/**
- * Registry to track pending deferred writes from transactions.
- */
-const pendingDeferredWrites: Set<Promise<void>> = getGlobalSingleton(
-  'transaction-proxy-pending-deferred-writes',
-  () => new Set<Promise<void>>(),
-);
-
-/**
- * Executes a deferred write and tracks it in the pending registry.
- *
- * Single tracker feeding `pendingDeferredWrites`, so `flushAllPendingWrites` covers every
- * drain — both the explicit-`$transaction` path here and the implicit-wrapper path in
- * transaction-wrapper.ts.
- */
-export const executeDeferredWrite = (deferredWrite: () => Promise<void>): void => {
-  const promise = deferredWrite()
-    .catch((err: Error) => {
-      console.error('[@prisma-audit] Deferred write failed:', err);
-    })
-    .finally(() => {
-      pendingDeferredWrites.delete(promise);
-    });
-  pendingDeferredWrites.add(promise);
-};
-
-/**
- * Waits for all pending writes (both fire-and-forget and deferred) to complete.
- */
-export const flushAllPendingWrites = async (): Promise<void> => {
-  await Promise.all([flushPendingWrites(), ...pendingDeferredWrites]);
-};
-
+import type { AuditContext, AuditContextProvider } from '@kuruwic/prisma-audit-core';
 import type { TransactionalPrismaClient } from '../internal-types.js';
+import { trackPendingWrite } from '../runtime/pending-writes.js';
+import { enterTransaction } from '../runtime/scope.js';
 
 type OriginalTransactionMethod = (...args: unknown[]) => Promise<unknown>;
 
@@ -70,8 +26,8 @@ type TransactionProxyDependencies = {
 };
 
 /**
- * Creates a wrapped transaction callback that injects the transactional client into the
- * library-owned runtime context.
+ * Creates a wrapped transaction callback that runs the user's callback inside the runtime scope
+ * of the transactional client.
  *
  * The transactional client and the deferred-write queue live in the runtime store (separate
  * from the app-owned audit context), so re-attributing the actor mid-transaction via
@@ -98,23 +54,21 @@ export const createWrappedTransactionCallback = (
     // Defensive against callback re-invocation: start each run with an empty queue.
     deferredWrites.length = 0;
 
-    // Re-establish BOTH stores inside the tx callback to survive microtask boundaries.
-    return provider.runAsync(context, () =>
-      runWithRuntimeContext({ transaction: { client: txClient, deferredWrites } }, () => callback(txClient)),
-    );
+    return enterTransaction(provider, context, { client: txClient, deferredWrites }, () => callback(txClient));
   };
 };
 
 /**
  * Creates a transaction proxy handler that intercepts $transaction calls
  *
- * Wraps Prisma's `$transaction` to inject the transactional client into the library-owned
- * runtime context for interactive transactions. Sequential transactions (array-style) pass through unchanged.
+ * Interactive transactions (callback form) run inside the runtime scope of their transactional
+ * client. Sequential transactions (array form) pass through unchanged: a list of operations
+ * carries no interactive scope.
  *
  * Deferred writes are drained strictly AFTER `$transaction` resolves (i.e. after commit), so an
  * audit log never persists for a transaction whose commit subsequently fails. On rejection the
  * locally-owned queue is discarded with the thrown error (no drain). This matches the
- * implicit-wrapper path in transaction-wrapper.ts.
+ * implicit transaction `openImplicitTransaction` opens.
  *
  * @param deps - Dependencies for transaction proxy
  * @returns Async function handling $transaction calls
@@ -144,7 +98,7 @@ export const createTransactionProxyHandler = (
       const result = await originalTransaction.apply(target, transactionArgs);
 
       for (const deferredWrite of deferredWrites) {
-        executeDeferredWrite(deferredWrite);
+        trackPendingWrite(deferredWrite);
       }
 
       return result;
@@ -155,10 +109,11 @@ export const createTransactionProxyHandler = (
 };
 
 /**
- * Creates a Proxy wrapping Prisma client to intercept $transaction calls
+ * Creates a Proxy over the extended client that traps `$transaction` only.
  *
- * Injects audit logging capabilities into transactions by intercepting `$transaction`
- * calls and wrapping them with transaction context management.
+ * Every other property is returned as the client holds it, so method identity
+ * (`client.user.findMany === client.user.findMany`), `in` checks and the prototype chain are
+ * those of the client itself.
  *
  * @param extendedClient - Prisma client with audit extension
  * @param provider - Audit context provider
@@ -168,25 +123,19 @@ export const createTransactionProxy = <TClient extends object>(
   extendedClient: TClient,
   provider: AuditContextProvider,
 ): TClient => {
-  return new Proxy(
-    extendedClient as object,
-    {
-      get(target: object, prop: string | symbol): unknown {
-        if (prop === '$transaction') {
-          const targetWithTransaction = target as Record<string | symbol, unknown>;
-          const originalTransaction = targetWithTransaction.$transaction as OriginalTransactionMethod;
-
-          return createTransactionProxyHandler({
-            provider,
-            originalTransaction,
-            target,
-          });
-        }
-
-        const targetWithProp = target as Record<string | symbol, unknown>;
-        const value = targetWithProp[prop];
-        return typeof value === 'function' ? (value as CallableFunction).bind(target) : value;
-      },
-    } as ProxyHandler<object>,
-  ) as TClient;
+  return new Proxy(extendedClient, {
+    get(target, prop) {
+      if (prop === '$transaction') {
+        const originalTransaction = Reflect.get(target, prop) as OriginalTransactionMethod;
+        return createTransactionProxyHandler({ provider, originalTransaction, target });
+      }
+      return Reflect.get(target, prop);
+    },
+    has(target, prop) {
+      return Reflect.has(target, prop);
+    },
+    getPrototypeOf(target) {
+      return Reflect.getPrototypeOf(target);
+    },
+  });
 };

@@ -2,11 +2,12 @@
  * Transaction Wrapper Tests
  */
 
-import { type AuditContext, getRuntimeContext, runWithRuntimeContext } from '@kuruwic/prisma-audit-core';
+import type { AuditContext } from '@kuruwic/prisma-audit-core';
 import { describe, expect, it, vi } from 'vitest';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../src/internal-types.js';
-import { flushAllPendingWrites } from '../src/lifecycle/transaction-proxy.js';
 import { withOptionalTransaction } from '../src/lifecycle/transaction-wrapper.js';
+import { flushAllPendingWrites } from '../src/runtime/pending-writes.js';
+import { currentScope, withScope } from '../src/runtime/scope.js';
 
 describe('withOptionalTransaction', () => {
   const mockActor = { category: 'model' as const, type: 'User', id: 'user-1' };
@@ -60,7 +61,7 @@ describe('withOptionalTransaction', () => {
     const mockOperationFn = vi.fn(async () => 'result');
 
     // Act - drive transaction state via the library-owned runtime store
-    const result = await runWithRuntimeContext({ transaction: { client: mockTxClient, deferredWrites: [] } }, () =>
+    const result = await withScope({ transaction: { client: mockTxClient, deferredWrites: [] } }, () =>
       wrapper(mockOperationFn),
     );
 
@@ -85,7 +86,7 @@ describe('withOptionalTransaction', () => {
     const mockOperationFn = vi.fn(async () => 'result');
 
     // Act
-    const result = await runWithRuntimeContext({ isInImplicitTransaction: true }, () => wrapper(mockOperationFn));
+    const result = await withScope({ isInImplicitTransaction: true }, () => wrapper(mockOperationFn));
 
     // Assert
     expect(result).toBe('result');
@@ -113,9 +114,9 @@ describe('withOptionalTransaction', () => {
       mockProvider,
     );
 
-    let runtimeInsideOperation: ReturnType<typeof getRuntimeContext>;
+    let runtimeInsideOperation: ReturnType<typeof currentScope>;
     const mockOperationFn = vi.fn(async (_context: AuditContext, _txClient: TransactionalPrismaClient) => {
-      runtimeInsideOperation = getRuntimeContext();
+      runtimeInsideOperation = currentScope();
       return 'tx-result';
     });
 
@@ -218,13 +219,13 @@ describe('withOptionalTransaction', () => {
       );
 
       let appContextInsideOperation: AuditContext | undefined;
-      let runtimeInsideOperation: ReturnType<typeof getRuntimeContext>;
+      let runtimeInsideOperation: ReturnType<typeof currentScope>;
 
       // Act
       await wrapper(async (_context, _txClient) => {
         // This simulates what writeAuditLogs does: read both stores inside the operation
         appContextInsideOperation = mockProviderWithStorage.getContext();
-        runtimeInsideOperation = getRuntimeContext();
+        runtimeInsideOperation = currentScope();
         return 'result';
       });
 
@@ -238,7 +239,7 @@ describe('withOptionalTransaction', () => {
       // This test verifies the fix: the implicit-transaction runtime frame must be
       // established OUTSIDE $transaction so it survives the transaction boundary.
       // The flag is read at the $transaction boundary, which is the production-relevant
-      // observation point (the outer runAsync wraps the runWithRuntimeContext that sets it).
+      // observation point (the outer runAsync wraps the withScope call that sets it).
       let flagAtTransactionStart: boolean | undefined;
 
       const mockProviderTracking = {
@@ -251,7 +252,7 @@ describe('withOptionalTransaction', () => {
       const mockTxClient = { _isTx: true } as unknown as TransactionalPrismaClient;
       const mockBasePrismaWithTx = {
         $transaction: vi.fn(async (fn: (tx: TransactionalPrismaClient) => Promise<unknown>) => {
-          flagAtTransactionStart = getRuntimeContext()?.isInImplicitTransaction;
+          flagAtTransactionStart = currentScope()?.isInImplicitTransaction;
           return fn(mockTxClient);
         }),
       } as unknown as PrismaClientWithDynamicAccess;
@@ -300,8 +301,8 @@ describe('withOptionalTransaction', () => {
 
       // Act
       await wrapper(async () => {
-        // Mirror core's deferred strategy: enqueue onto the runtime-store queue.
-        getRuntimeContext()?.transaction?.deferredWrites?.push(deferredWrite);
+        // Enqueue onto the runtime-scope queue, as an after-commit write does.
+        currentScope()?.transaction?.deferredWrites?.push(deferredWrite);
         return 'result';
       });
       await flushAllPendingWrites();
@@ -338,7 +339,7 @@ describe('withOptionalTransaction', () => {
       // Act & Assert - error propagates and the locally-owned queue is discarded unrun
       await expect(
         wrapper(async () => {
-          getRuntimeContext()?.transaction?.deferredWrites?.push(deferredWrite);
+          currentScope()?.transaction?.deferredWrites?.push(deferredWrite);
           return 'result';
         }),
       ).rejects.toThrow('transaction rolled back');

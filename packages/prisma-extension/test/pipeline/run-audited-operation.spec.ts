@@ -11,7 +11,6 @@ import {
   createAggregateId,
   createAsyncLocalStorageProvider,
   createEntityId,
-  runWithRuntimeContext,
 } from '@kuruwic/prisma-audit-core';
 import { describe, expect, it, vi } from 'vitest';
 import type { FailureSink } from '../../src/failure-sink.js';
@@ -28,6 +27,7 @@ import {
   type InterceptedOperation,
   runAuditedOperation,
 } from '../../src/pipeline/run-audited-operation.js';
+import { withScope } from '../../src/runtime/scope.js';
 import type { AuditLogData } from '../../src/types.js';
 import { isCallerMutationError, runCallerMutation } from '../../src/utils/caller-mutation-error.js';
 
@@ -163,7 +163,7 @@ describe('runAuditedOperation', () => {
       const deps = createDeps({ policyConfig: { awaitWrite: false } });
       const deferredWrites: Array<() => Promise<void>> = [];
 
-      await runWithRuntimeContext({ transaction: { client: transactionClient, deferredWrites } }, () =>
+      await withScope({ transaction: { client: transactionClient, deferredWrites } }, () =>
         runAuditedOperation({ operation: interceptedOf(), auditContext, baseClient }, deps),
       );
 
@@ -210,7 +210,7 @@ describe('runAuditedOperation', () => {
       const deps = createDeps({ policyConfig: { awaitWrite: true }, singleExecutor: runningTheOperation() });
       const operation = interceptedOf();
 
-      await runWithRuntimeContext(
+      await withScope(
         { transaction: { client: transactionClientWith({ user: { update } }), deferredWrites: [] } },
         () => runAuditedOperation({ operation, auditContext, baseClient: createBaseClient() }, deps),
       );

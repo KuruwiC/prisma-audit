@@ -10,7 +10,6 @@
  * @see {@link PrismaAuditExtensionOptions}
  */
 
-import { getRuntimeContext, runWithRuntimeContext } from '@kuruwic/prisma-audit-core';
 import { createPrismaWriteExecutor } from './adapters/write-executor.js';
 import { type AuditOptions, normalizeAuditOptions } from './audit-options.js';
 import { createFailureSink } from './failure-sink.js';
@@ -21,6 +20,7 @@ import { createRecordProducer } from './pipeline/produce-records.js';
 import { type AuditPipelineDependencies, runAuditedOperation } from './pipeline/run-audited-operation.js';
 import { createSingleExecutor } from './pipeline/single-executor.js';
 import { createAuditLogWriter } from './pipeline/write-audit-logs.js';
+import { isProcessingAuditLog, withScope } from './runtime/scope.js';
 import type { PrismaAuditExtensionOptions } from './types.js';
 import { injectNestedWriteSelection, isAuditableAction, projectToRequestedShape } from './utils/index.js';
 
@@ -68,7 +68,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
             const { operation, model, args, query } = params;
             const auditContext = audit.provider.getContext();
 
-            if (getRuntimeContext()?.isProcessingAuditLog) {
+            if (isProcessingAuditLog()) {
               return query(args);
             }
             if (!model || !auditContext || !audit.shouldAudit(model, auditContext)) {
@@ -82,7 +82,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
 
             // Mark the re-entrancy guard on the library-owned runtime store; the app context
             // stays untouched so downstream code keeps the caller's actor and request metadata.
-            const result = await runWithRuntimeContext({ isProcessingAuditLog: true }, () =>
+            const result = await withScope({ isProcessingAuditLog: true }, () =>
               runAuditedOperation(
                 {
                   operation: { model, action: operation, args: injection.args as Record<string, unknown>, query },

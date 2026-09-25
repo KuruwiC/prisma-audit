@@ -16,27 +16,28 @@ import {
   type AuditContext,
   type AuditContextProvider,
   createAsyncLocalStorageProvider,
-  getRuntimeContext,
 } from '@kuruwic/prisma-audit-core';
 import { describe, expect, it, vi } from 'vitest';
 import type { TransactionalPrismaClient } from '../src/internal-types.js';
 import {
+  createTransactionProxy,
   createTransactionProxyHandler,
   createWrappedTransactionCallback,
-  flushAllPendingWrites,
 } from '../src/lifecycle/transaction-proxy.js';
+import { flushAllPendingWrites } from '../src/runtime/pending-writes.js';
+import { currentScope } from '../src/runtime/scope.js';
 
 const actor1: AuditActor = { category: 'model', type: 'User', id: 'user-1' };
 const actor2: AuditActor = { category: 'model', type: 'User', id: 'user-2' };
 
 const baseContext: AuditContext = { actor: actor1, request: { ipAddress: '10.0.0.1' } };
 
-/** Reads the transactional client the audit write code would resolve from the runtime store. */
-const resolveTxClientFromRuntime = (): unknown => getRuntimeContext()?.transaction?.client;
+/** Reads the transactional client the audit write code would resolve from the runtime scope. */
+const resolveTxClientFromRuntime = (): unknown => currentScope()?.transaction?.client;
 
-/** Enqueues a deferred write the same way core's deferred strategy does (mutates the scope queue). */
+/** Enqueues a deferred write onto the scope queue, as an after-commit write does. */
 const enqueueDeferredWrite = (write: () => Promise<void>): void => {
-  const transaction = getRuntimeContext()?.transaction;
+  const transaction = currentScope()?.transaction;
   if (!transaction) throw new Error('expected a transaction scope');
   transaction.deferredWrites.push(write);
 };
@@ -263,5 +264,72 @@ describe('createTransactionProxyHandler (deferred-write drain timing)', () => {
     await expect(provider.runAsync(baseContext, () => handler(callback))).rejects.toThrow('commit failed');
     await flushAllPendingWrites();
     expect(deferredWrite).not.toHaveBeenCalled();
+  });
+});
+
+describe('createTransactionProxy', () => {
+  /** A client with methods on its prototype, as a Prisma client has */
+  class FakeClient {
+    readonly user = { findMany: async (): Promise<unknown[]> => [] };
+    async $connect(): Promise<void> {}
+    async $transaction(...args: unknown[]): Promise<unknown> {
+      return args;
+    }
+  }
+
+  it('returns every property other than $transaction as the client holds it', () => {
+    const target = new FakeClient();
+    const proxy = createTransactionProxy(target, createAsyncLocalStorageProvider());
+
+    expect(proxy.user).toBe(target.user);
+    expect(proxy.user.findMany).toBe(proxy.user.findMany);
+    expect(proxy.$connect).toBe(target.$connect);
+  });
+
+  it('answers `in` and the prototype chain from the client itself', () => {
+    const target = new FakeClient();
+    const proxy = createTransactionProxy(target, createAsyncLocalStorageProvider());
+
+    expect('user' in proxy).toBe(true);
+    expect('$transaction' in proxy).toBe(true);
+    expect('missing' in proxy).toBe(false);
+    expect(Object.getPrototypeOf(proxy)).toBe(FakeClient.prototype);
+    expect(proxy).toBeInstanceOf(FakeClient);
+  });
+
+  it('passes the array form of $transaction through untouched', async () => {
+    const provider = createAsyncLocalStorageProvider();
+    const target = new FakeClient();
+    const original = vi.spyOn(target, '$transaction');
+    const proxy = createTransactionProxy(target, provider);
+    const operations = [Promise.resolve('a'), Promise.resolve('b')];
+
+    await provider.runAsync(baseContext, () => proxy.$transaction(operations));
+
+    expect(original).toHaveBeenCalledTimes(1);
+    expect(original.mock.calls[0]?.[0]).toBe(operations);
+    expect(original.mock.instances[0]).toBe(target);
+  });
+
+  it('runs an interactive $transaction callback inside the scope of its transactional client', async () => {
+    const provider = createAsyncLocalStorageProvider();
+    const txClient = { _isTx: true } as unknown as TransactionalPrismaClient;
+    const target = new FakeClient();
+    vi.spyOn(target, '$transaction').mockImplementation(async (...args: unknown[]) => {
+      const callback = args[0] as (tx: TransactionalPrismaClient) => Promise<unknown>;
+      return callback(txClient);
+    });
+    const proxy = createTransactionProxy(target, provider);
+    let clientInsideCallback: unknown;
+
+    const result = await provider.runAsync(baseContext, () =>
+      proxy.$transaction(async () => {
+        clientInsideCallback = resolveTxClientFromRuntime();
+        return 'committed';
+      }),
+    );
+
+    expect(result).toBe('committed');
+    expect(clientInsideCallback).toBe(txClient);
   });
 });

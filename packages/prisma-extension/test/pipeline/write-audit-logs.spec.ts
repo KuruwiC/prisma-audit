@@ -5,18 +5,14 @@
  */
 
 import type { AuditContext, WriteExecutor, WritePlan } from '@kuruwic/prisma-audit-core';
-import {
-  createActorId,
-  createAggregateId,
-  createEntityId,
-  flushPendingWrites,
-  runWithRuntimeContext,
-} from '@kuruwic/prisma-audit-core';
+import { createActorId, createAggregateId, createEntityId } from '@kuruwic/prisma-audit-core';
 import { describe, expect, it, vi } from 'vitest';
 import type { FailureSink } from '../../src/failure-sink.js';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../src/internal-types.js';
 import type { ExecutionScope } from '../../src/pipeline/execution-scope.js';
 import { createAuditLogWriter } from '../../src/pipeline/write-audit-logs.js';
+import { flushAllPendingWrites } from '../../src/runtime/pending-writes.js';
+import { withScope } from '../../src/runtime/scope.js';
 import type { AuditLogData } from '../../src/types.js';
 
 const auditContext: AuditContext = { actor: { category: 'model', type: 'User', id: 'user-1' } };
@@ -84,7 +80,7 @@ describe('createAuditLogWriter', () => {
     const { write, writeExecutor } = createWriter();
     const deferredWrites: Array<() => Promise<void>> = [];
 
-    await runWithRuntimeContext({ transaction: { client: transactionClient, deferredWrites } }, () =>
+    await withScope({ transaction: { client: transactionClient, deferredWrites } }, () =>
       write(plan('after-commit'), transactionScope(deferredWrites)),
     );
 
@@ -105,7 +101,7 @@ describe('createAuditLogWriter', () => {
 
     expect(writeExecutor.write).toHaveBeenCalledWith(baseClient, 'auditLog', [record]);
     finish();
-    await flushPendingWrites();
+    await flushAllPendingWrites();
   });
 
   it('hands the writer hook the logs, the context and the default write', async () => {
@@ -170,7 +166,7 @@ describe('createAuditLogWriter', () => {
     });
 
     await write(plan('detached'), baseScope);
-    await flushPendingWrites();
+    await flushAllPendingWrites();
 
     expect(failureSink.reportWriteFailure).toHaveBeenCalledWith(
       { phase: 'log-write', modelName: 'User', operation: 'write', params: [record], error: writeError },

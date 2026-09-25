@@ -12,7 +12,8 @@
  * @module normalized-writer
  */
 
-import { type AuditContext, getRuntimeContext } from '@kuruwic/prisma-audit-core';
+import type { AuditContext } from '@kuruwic/prisma-audit-core';
+import { currentScope } from '../runtime/scope.js';
 import type { AuditLogData, AuditLogWriter } from '../types.js';
 
 /**
@@ -395,7 +396,7 @@ export const createEntityNormalizedWriter = (schema: NormalizedSchema, basePrism
       await createAuditEvents(tx, schema.eventModel, logs, actorMap, entityMap, aggregateMap);
     };
 
-    const transactionalClient = getRuntimeContext()?.transaction?.client;
+    const transactionalClient = currentScope()?.transaction?.client;
     if (transactionalClient) {
       await writeWithinTransaction(transactionalClient as TransactionClient);
     } else {
@@ -552,7 +553,7 @@ export const createSharedChangeWriter = (schema: SharedChangeSchema, basePrisma:
       );
     };
 
-    const transactionalClient = getRuntimeContext()?.transaction?.client;
+    const transactionalClient = currentScope()?.transaction?.client;
     if (transactionalClient) {
       await writeWithinTransaction(transactionalClient as TransactionClient);
     } else {
