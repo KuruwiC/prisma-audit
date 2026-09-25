@@ -82,6 +82,10 @@ export const testAggregateMapping: AggregateMapping = {
   AutoIncItem: defineEntity({
     type: 'AutoIncItem',
   }),
+  AutoIncChild: defineEntity({
+    type: 'AutoIncChild',
+    aggregates: [to('User', foreignKey('parentId'))],
+  }),
 };
 
 export interface TestContext {

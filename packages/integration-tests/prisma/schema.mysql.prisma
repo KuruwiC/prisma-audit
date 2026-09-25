@@ -26,8 +26,9 @@ model User {
 
   posts       Post[]
   comments    Comment[]
-  attachments Attachment[]
-  profile     Profile?
+  attachments     Attachment[]
+  profile         Profile?
+  autoIncChildren AutoIncChild[]
 
   @@map("users")
 }
@@ -251,6 +252,16 @@ model AutoIncItem {
   label String
 
   @@map("auto_inc_items")
+}
+
+model AutoIncChild {
+  id       Int    @id @default(autoincrement())
+  parentId String @map("parent_id")
+
+  parent User @relation(fields: [parentId], references: [id], onDelete: Cascade)
+
+  @@index([parentId])
+  @@map("auto_inc_children")
 }
 
 // ============================================
