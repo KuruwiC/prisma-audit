@@ -8,6 +8,7 @@
 
 import type { AuditAction } from '@kuruwic/prisma-audit-core';
 import { AUDIT_ACTION } from '@kuruwic/prisma-audit-core';
+import type { UpsertBranch } from '../grammar/nested-operations.js';
 import type { GetOperationConfig } from '../grammar/pre-fetch-selection.js';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../internal-types.js';
 import type { AuditErrorContext } from '../types.js';
@@ -27,6 +28,38 @@ export type BeforeStateResult =
   | { readonly _tag: 'notFound' }
   | { readonly _tag: 'notRequested' }
   | { readonly _tag: 'error'; readonly error: Error };
+
+/**
+ * The branch a top-level upsert executed: `update` when its before-state was found, `create`
+ * when the row did not exist. Undefined when the fetch failed (the branch is unknown) or the
+ * operation is not an upsert.
+ */
+export const executedUpsertBranch = (action: AuditAction, result: BeforeStateResult): UpsertBranch | undefined => {
+  if (action !== AUDIT_ACTION.UPSERT) {
+    return undefined;
+  }
+  switch (result._tag) {
+    case 'found':
+      return 'update';
+    case 'notFound':
+      return 'create';
+    case 'error':
+    case 'notRequested':
+      return undefined;
+    default: {
+      const exhaustiveCheck: never = result;
+      throw new Error(`[@prisma-audit] Unhandled before-state result: ${JSON.stringify(exhaustiveCheck)}`);
+    }
+  }
+};
+
+/**
+ * Whether the row a single operation targets exists before the operation runs: a create inserts
+ * it, an upsert whose before-state was not found creates it, and an upsert whose fetch failed
+ * cannot tell.
+ */
+export const targetRowExistsBefore = (action: AuditAction, result: BeforeStateResult): boolean =>
+  action === AUDIT_ACTION.UPDATE || action === AUDIT_ACTION.DELETE || executedUpsertBranch(action, result) === 'update';
 
 export interface BeforeStateInput {
   readonly handle: PrismaClientWithDynamicAccess | TransactionalPrismaClient;

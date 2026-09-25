@@ -151,6 +151,48 @@ describe('Database Round-Trip Guard', () => {
     expect(statements).toHaveLength(9);
   });
 
+  it('update with a nested create under an existing parent (1 existing post) issues 11 statements', async () => {
+    const user = await provider.runAsync(testActor, async () => {
+      return prisma.user.create({
+        data: {
+          email: 'nested-create-existing@example.com',
+          name: 'Existing',
+          password: 'secret123',
+          posts: { create: [{ title: 'Post 1', content: 'C1' }] },
+        },
+      });
+    });
+    statements.length = 0;
+
+    await provider.runAsync(testActor, async () => {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { posts: { create: [{ title: 'Post 2', content: 'C2' }] } },
+      });
+    });
+
+    console.log(`Update with nested create: ${statements.length} SQL statements`);
+    // 1. BEGIN                  — awaitWrite: true (default) wraps the operation in a transaction
+    // 2. SELECT FROM users      — the before-state fetch (fetchBeforeOperation, default: true)
+    // 3. SELECT id FROM posts   — the snapshot of the posts the user already holds, primary key
+    //                             only, so the created post is told apart from its sibling in the
+    //                             included relation
+    // 4. SELECT FROM users      — Prisma's own read of the parent row the nested create attaches
+    //                             to (no UPDATE statement: the data changes no scalar column)
+    // 5. INSERT INTO posts      — the caller's own nested create
+    // 6. SELECT FROM users      — Prisma's resolution of the injected `include: { posts: true }`
+    //                             on the update() result: base record...
+    // 7. SELECT FROM posts      — ...and the included relation, fetched as a separate query
+    // 8. SELECT FROM users      — refetchForDateHydration's findUnique (re-runs the same
+    //                             `include: { posts: true }`)...
+    // 9. SELECT FROM posts      — ...so its relation resolution repeats the same 2-statement shape
+    // 10. INSERT INTO audit_logs — one batched write: user + the created post + the post's
+    //                              aggregate-owner (User) propagation log — 3 rows, 1 statement;
+    //                              the existing post gets no row
+    // 11. COMMIT
+    expect(statements).toHaveLength(11);
+  });
+
   it('deleteMany (2 rows) issues 5 statements', async () => {
     const user = await provider.runAsync(testActor, async () => {
       return prisma.user.create({

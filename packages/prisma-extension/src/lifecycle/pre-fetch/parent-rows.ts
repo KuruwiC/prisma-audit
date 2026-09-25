@@ -8,7 +8,11 @@
  */
 
 import { preFetchLog } from '@kuruwic/prisma-audit-core';
-import type { NestedOperationInfo, NestedPreFetchResults } from '../../grammar/nested-operations.js';
+import {
+  type NestedOperationInfo,
+  type NestedPreFetchResults,
+  targetWhereClauses,
+} from '../../grammar/nested-operations.js';
 import type { UniqueConstraint } from '../../schema/types.js';
 import { unwrapCompoundWhere } from '../../utils/compound-where.js';
 import type { PreFetchModelClient, PreFetchRecord } from './model-client.js';
@@ -66,25 +70,12 @@ export const resolveParentRows = async (input: ResolveParentRowsInput): Promise<
 };
 
 /**
- * Returns the unique WHERE of every row a nested `update` / `upsert` / `delete` targets
- * (`{ where, data }`, `{ where, create, update }`, or the WHERE itself for `delete`), one per
- * element when `data` is an array.
- *
- * No `updateMany` / `deleteMany` branch: `filterOperationsToPreFetch` (`grammar/pre-fetch-selection`)
- * excludes them before pre-fetch runs; see its JSDoc for why.
+ * The key fields of `parentRow` a related row's back-relation filter compares to, or `undefined`
+ * when the row lacks one of them.
  */
-export const targetWhereClauses = (operation: string, data: unknown): PreFetchRecord[] => {
-  const items = Array.isArray(data) ? data : [data];
-
-  if (operation === 'update' || operation === 'upsert') {
-    return items.map((item) => (isRecord(item) ? item.where : undefined)).filter(isRecord);
-  }
-
-  if (operation === 'delete') {
-    return items.filter(isRecord);
-  }
-
-  return [];
+export const parentKeyOf = (parentRow: PreFetchRecord, parentFields: readonly string[]): PreFetchRecord | undefined => {
+  const parentKey = Object.fromEntries(parentFields.map((fieldName) => [fieldName, parentRow[fieldName]]));
+  return Object.values(parentKey).some((value) => value === null || value === undefined) ? undefined : parentKey;
 };
 
 /**

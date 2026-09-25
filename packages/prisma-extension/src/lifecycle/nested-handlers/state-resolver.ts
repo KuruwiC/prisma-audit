@@ -1,12 +1,12 @@
 /**
- * Nested Operation State Resolver
+ * Nested Row State Resolver
  *
- * Resolves the action (create/update/delete/connect) and before state
- * for nested operations based on operation type and pre-fetched data.
+ * Resolves the audited action and before-state of one row a nested operation wrote, from the
+ * operation's keyword and the row's pre-fetched before-state.
  */
 
-import { AUDIT_ACTION, type AuditAction, type EntityIdentityKey } from '@kuruwic/prisma-audit-core';
-import type { NestedOperationInfo, NestedPreFetchResults } from '../../grammar/nested-operations.js';
+import { AUDIT_ACTION, type AuditAction } from '@kuruwic/prisma-audit-core';
+import type { NestedOperationInfo } from '../../grammar/nested-operations.js';
 import {
   resolveConnectOrCreateState,
   resolveCreateState,
@@ -14,7 +14,8 @@ import {
   resolveUpsertState,
 } from '../../grammar/nested-state.js';
 import type { GetOperationConfig } from '../../grammar/pre-fetch-selection.js';
-import { getPreFetchResult } from '../pre-fetch/pre-fetch-result-store.js';
+
+type Row = Record<string, unknown>;
 
 /** Action of a nested record; `connect` marks a record that only got linked and is not audited */
 export type NestedRecordAction = AuditAction | 'connect';
@@ -28,138 +29,59 @@ export type NestedRecordAction = AuditAction | 'connect';
  */
 export type ResolvedState = {
   action: NestedRecordAction;
-  beforeState: Record<string, unknown> | null;
+  beforeState: Row | null;
 };
 
-const resolveUpdateOperation = (
-  nestedPreFetchResults: NestedPreFetchResults | undefined,
-  path: string,
-  entityId: EntityIdentityKey,
-): ResolvedState => {
-  const resolved = resolveUpdateState(
-    getPreFetchResult(nestedPreFetchResults, path, entityId),
-    null, // afterRecord is not used for action determination
-  );
-  return {
-    action: resolved.action,
-    beforeState: resolved.before,
-  };
-};
-
-const resolveUpsertOperation = (
+const resolveUpsertRow = (
   nestedOp: NestedOperationInfo,
-  entityId: EntityIdentityKey,
-  nestedPreFetchResults: NestedPreFetchResults | undefined,
+  before: Row | undefined,
   getNestedOperationConfig: GetOperationConfig,
 ): ResolvedState => {
+  const resolved = resolveUpsertState({ before: before ?? null }, null);
   const config = getNestedOperationConfig(nestedOp.relatedModel, 'update');
-  const preFetchResult = getPreFetchResult(nestedPreFetchResults, nestedOp.path, entityId);
+  const shouldIncludeBeforeState = config.fetchBeforeOperation && resolved.action === AUDIT_ACTION.UPDATE;
 
-  if (preFetchResult !== undefined) {
-    const resolved = resolveUpsertState(preFetchResult, null);
-    const shouldIncludeBeforeState = config.fetchBeforeOperation && resolved.action === AUDIT_ACTION.UPDATE;
-
-    return {
-      action: resolved.action,
-      beforeState: shouldIncludeBeforeState ? resolved.before : null,
-    };
-  }
-
-  // Fallback: No pre-fetch result (shouldn't happen but handle gracefully)
-  return {
-    action: AUDIT_ACTION.CREATE,
-    beforeState: null,
-  };
+  return { action: resolved.action, beforeState: shouldIncludeBeforeState ? resolved.before : null };
 };
 
-const resolveConnectOrCreateOperation = (
-  nestedPreFetchResults: NestedPreFetchResults | undefined,
-  path: string,
-  entityId: EntityIdentityKey,
-): ResolvedState => {
-  const preFetchResult = getPreFetchResult(nestedPreFetchResults, path, entityId);
-  const resolved = resolveConnectOrCreateState(preFetchResult, null);
-
-  if (resolved === null) {
-    // Record existed - this was a connect operation
-    return {
-      action: 'connect',
-      beforeState: null,
-    };
-  }
-
-  // Record did not exist - this was a create operation
-  return {
-    action: resolved.action,
-    beforeState: null,
-  };
-};
-
-const resolveConnectOperation = (): ResolvedState => {
-  return {
-    action: 'connect',
-    beforeState: null,
-  };
-};
-
-const resolveCreateOperation = (): ResolvedState => {
-  const resolved = resolveCreateState(null);
-  return {
-    action: resolved.action,
-    beforeState: null,
-  };
+const resolveConnectOrCreateRow = (before: Row | undefined): ResolvedState => {
+  const resolved = resolveConnectOrCreateState({ before: before ?? null }, null);
+  return resolved === null ? { action: 'connect', beforeState: null } : { action: resolved.action, beforeState: null };
 };
 
 /**
- * Resolve action and before state for nested operations
+ * Resolve the action and before state of a row `nestedOp` wrote
  *
- * Determines action (create/update/delete/connect) and retrieves before state based on
- * operation type and pre-fetched data.
- *
- * **Operation behavior:**
- * - **create**: action=create, beforeState=null
- * - **update/updateMany**: action=update, beforeState from pre-fetch
- * - **upsert**: action=create/update based on record existence
- * - **connectOrCreate**: action='connect' (existing) or action=create (new)
+ * - **create / createMany**: action=create, beforeState=null
+ * - **update / updateMany**: action=update, beforeState from the pre-fetch
+ * - **upsert**: action=update when the row existed (its before state included when the update
+ *   config asks for it), else create
+ * - **connectOrCreate**: action='connect' when the row existed, else create
  * - **connect**: action='connect' (skip audit log)
- * - **delete/deleteMany**: Handled separately
+ * - **delete / deleteMany**: handled separately
  *
  * @param nestedOp - Nested operation information
- * @param entityId - Entity ID for map lookup
- * @param nestedPreFetchResults - Pre-fetched before states
+ * @param before - The row's pre-fetched before-state; `undefined` when it did not exist or was not pre-fetched
  * @param getNestedOperationConfig - Config getter function
- * @returns Resolved action and before state
- *
- * @example
- * ```typescript
- * const { action, beforeState } = resolveNestedOperationState(
- *   { operation: 'upsert', path: 'user', relatedModel: 'User', fieldName: 'user' },
- *   '1', preFetchResults, getNestedOperationConfig
- * );
- * // action === 'update', beforeState === { id: 1, name: 'old' }
- * ```
  */
-export const resolveNestedOperationState = (
+export const resolveNestedRowState = (
   nestedOp: NestedOperationInfo,
-  entityId: EntityIdentityKey,
-  nestedPreFetchResults: NestedPreFetchResults | undefined,
+  before: Row | undefined,
   getNestedOperationConfig: GetOperationConfig,
 ): ResolvedState => {
-  if (nestedOp.operation === 'update' || nestedOp.operation === 'updateMany') {
-    return resolveUpdateOperation(nestedPreFetchResults, nestedOp.path, entityId);
+  switch (nestedOp.operation) {
+    case 'update':
+    case 'updateMany': {
+      const resolved = resolveUpdateState({ before: before ?? null }, null);
+      return { action: resolved.action, beforeState: resolved.before };
+    }
+    case 'upsert':
+      return resolveUpsertRow(nestedOp, before, getNestedOperationConfig);
+    case 'connectOrCreate':
+      return resolveConnectOrCreateRow(before);
+    case 'connect':
+      return { action: 'connect', beforeState: null };
+    default:
+      return { action: resolveCreateState(null).action, beforeState: null };
   }
-
-  if (nestedOp.operation === 'upsert') {
-    return resolveUpsertOperation(nestedOp, entityId, nestedPreFetchResults, getNestedOperationConfig);
-  }
-
-  if (nestedOp.operation === 'connectOrCreate') {
-    return resolveConnectOrCreateOperation(nestedPreFetchResults, nestedOp.path, entityId);
-  }
-
-  if (nestedOp.operation === 'connect') {
-    return resolveConnectOperation();
-  }
-
-  return resolveCreateOperation();
 };

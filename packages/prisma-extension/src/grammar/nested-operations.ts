@@ -618,6 +618,26 @@ export const detectNestedOperations = (
   return nestedOperations;
 };
 
+/**
+ * The unique WHERE of every row a nested operation names: the `where` of each `update`, `upsert`
+ * and `connectOrCreate` element, the element itself for `delete` and `connect`; one per element when
+ * `data` is a list. `updateMany` / `deleteMany` name rows by a filter, not a unique WHERE, and
+ * yield none, as do the keywords that only insert.
+ */
+export const targetWhereClauses = (operation: NestedOperationKeyword, data: unknown): Record<string, unknown>[] => {
+  const items = Array.isArray(data) ? data : [data];
+
+  if (operation === 'update' || operation === 'upsert' || operation === 'connectOrCreate') {
+    return items.map((item) => (isRecord(item) ? item.where : undefined)).filter(isRecord);
+  }
+
+  if (operation === 'delete' || operation === 'connect') {
+    return items.filter(isRecord);
+  }
+
+  return [];
+};
+
 /** @internal Convert field value to array based on isList flag */
 const convertToRecordsList = (fieldValue: unknown, isList: boolean): unknown[] => {
   if (isList) {

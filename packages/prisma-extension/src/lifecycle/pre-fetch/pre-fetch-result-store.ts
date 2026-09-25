@@ -45,24 +45,31 @@ export const getPreFetchResult = (
 };
 
 /**
- * Whether a row a nested operation at `path` targets was pre-fetched: with `where`, the row the
- * unique WHERE names among the found rows at the path; without it (a to-one relation), any found
- * row at the path. A missing row and a failed pre-fetch are both stored with a `null` before-state
- * and read as not found.
+ * The pre-fetched before-state of a row a nested operation at `path` targets: with `where`, the
+ * row the unique WHERE names among the found rows at the path; without it (a to-one relation), any
+ * found row at the path. A missing row and a failed pre-fetch are both stored with a `null`
+ * before-state and yield `undefined`.
  */
+export const preFetchedRowAt = (
+  nestedPreFetchResults: NestedPreFetchResults | undefined,
+  path: string,
+  where: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined => {
+  const entries = nestedPreFetchResults?.get(path)?.values() ?? [];
+  for (const entry of entries) {
+    if (entry.before !== null && (where === undefined || matchesUniqueWhere(entry.before, where))) {
+      return entry.before;
+    }
+  }
+  return undefined;
+};
+
+/** Whether {@link preFetchedRowAt} finds a row */
 export const hasPreFetchedRecordAt = (
   nestedPreFetchResults: NestedPreFetchResults | undefined,
   path: string,
   where: Record<string, unknown> | undefined,
-): boolean => {
-  const entries = nestedPreFetchResults?.get(path)?.values() ?? [];
-  for (const entry of entries) {
-    if (entry.before !== null && (where === undefined || matchesUniqueWhere(entry.before, where))) {
-      return true;
-    }
-  }
-  return false;
-};
+): boolean => preFetchedRowAt(nestedPreFetchResults, path, where) !== undefined;
 
 /**
  * Stores pre-fetch result in nested Map structure

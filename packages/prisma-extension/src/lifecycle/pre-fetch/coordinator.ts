@@ -71,7 +71,7 @@ export interface PreFetchCoordinatorDependencies {
  * // Returns: PostTag model
  * ```
  */
-const resolveParentModelFromPath = (
+export const resolveParentModelFromPath = (
   path: string,
   topLevelModel: DMMFModel | undefined,
   dmmf: PrismaDMMF,
@@ -102,7 +102,7 @@ const resolveParentModelFromPath = (
   return currentModel;
 };
 
-const findDMMFField = (model: DMMFModel | undefined, fieldName: string): DMMFField | undefined => {
+export const findDMMFField = (model: DMMFModel | undefined, fieldName: string): DMMFField | undefined => {
   if (!model) {
     return undefined;
   }

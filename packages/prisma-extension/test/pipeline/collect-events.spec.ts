@@ -5,6 +5,9 @@
 
 import { describe, expect, it } from 'vitest';
 import type { PrismaClientWithDynamicAccess } from '../../src/internal-types.js';
+import { buildNestedWriteSets, detectExecutedNestedOperations } from '../../src/lifecycle/nested-handlers/write-set.js';
+import type { PreExistingRows } from '../../src/lifecycle/pre-fetch/pre-existing-rows.js';
+import { executedUpsertBranch } from '../../src/pipeline/before-state.js';
 import {
   type BatchOperationOutcome,
   collectBatchOperationEvents,
@@ -46,16 +49,32 @@ const schemaMetadata = createSchemaMetadataFromDMMF({
 const deps = { schemaMetadata, getNestedOperationConfig: () => ({ fetchBeforeOperation: true }) };
 const client: PrismaClientWithDynamicAccess = Object.create(null);
 
-const single = (overrides: Partial<SingleOperationOutcome> = {}): SingleOperationOutcome => ({
-  modelName: 'User',
-  action: 'create',
-  args: { data: { name: 'Ann' } },
-  result: { id: 'u1', name: 'Ann' },
-  beforeStateResult: { _tag: 'notRequested' },
-  nestedPreFetchResults: new Map(),
-  client,
-  ...overrides,
-});
+type SingleCase = Partial<
+  Omit<SingleOperationOutcome, 'nestedOperations' | 'writeSets'> & { args: Record<string, unknown> }
+>;
+
+/** An outcome whose executed nested operations and write sets are resolved from `args`, as the executor does */
+const single = (overrides: SingleCase = {}): SingleOperationOutcome => {
+  const { args = { data: { name: 'Ann' } }, ...outcome } = overrides;
+  const base = {
+    modelName: 'User',
+    action: 'create' as const,
+    result: { id: 'u1', name: 'Ann' },
+    beforeStateResult: { _tag: 'notRequested' as const },
+    nestedPreFetchResults: new Map(),
+    preExistingRows: new Map() as PreExistingRows,
+    client,
+    ...outcome,
+  };
+  const nestedOperations = detectExecutedNestedOperations(
+    schemaMetadata,
+    base.modelName,
+    args,
+    executedUpsertBranch(base.action, base.beforeStateResult),
+    base.nestedPreFetchResults,
+  );
+  return { ...base, nestedOperations, writeSets: buildNestedWriteSets(nestedOperations, base.nestedPreFetchResults) };
+};
 
 describe('collectSingleOperationEvents', () => {
   it('collects the top-level row of a create, whose before state is never requested, as one event', async () => {
@@ -213,6 +232,140 @@ describe('collectSingleOperationEvents', () => {
         origin: { path: 'posts', op: 'delete' },
       },
     ]);
+  });
+
+  describe('rows of a to-many relation', () => {
+    const p1 = { id: 'p1', title: 'A', authorId: 'u1' };
+    const p2 = { id: 'p2', title: 'B', authorId: 'u1' };
+    const p3 = { id: 'p3', title: 'C', authorId: 'u1' };
+    const p1Before = { id: 'p1', title: 'A0', authorId: 'u1' };
+    const userBefore = { id: 'u1', name: 'Ann' };
+
+    const preFetched = (entries: [string, Record<string, unknown> | null][]) => {
+      const results = new Map();
+      for (const [identity, before] of entries) {
+        results.set('posts', (results.get('posts') ?? new Map()).set(identity, { before }));
+      }
+      return results;
+    };
+
+    const postEvents = async (
+      posts: Record<string, unknown>,
+      rows: Record<string, unknown>[],
+      overrides: SingleCase = {},
+    ) => {
+      const events = await collectSingleOperationEvents(
+        single({
+          action: 'update',
+          args: { where: { id: 'u1' }, data: { posts } },
+          result: { id: 'u1', name: 'Ann', posts: rows },
+          beforeStateResult: { _tag: 'found', data: userBefore },
+          ...overrides,
+        }),
+        deps,
+      );
+      return events.filter((event) => event.model === 'Post');
+    };
+
+    it('attributes an update the row its WHERE names, with its before state, and not its siblings', async () => {
+      const events = await postEvents({ update: { where: { id: 'p1' }, data: { title: 'A' } } }, [p1, p2], {
+        nestedPreFetchResults: preFetched([['p1', p1Before]]),
+      });
+
+      expect(events).toEqual([
+        {
+          model: 'Post',
+          identity: 'p1',
+          action: 'update',
+          before: p1Before,
+          after: p1,
+          origin: { path: 'posts', op: 'update' },
+        },
+      ]);
+    });
+
+    it('attributes a create the rows that did not exist under the parent before the operation', async () => {
+      const events = await postEvents({ create: { title: 'C' } }, [p1, p2, p3], {
+        preExistingRows: new Map([['posts', new Set(['p1', 'p2'])]]),
+      });
+
+      expect(events).toEqual([
+        expect.objectContaining({ identity: 'p3', action: 'create', origin: { path: 'posts', op: 'create' } }),
+      ]);
+    });
+
+    it('attributes an upsert whose target did not exist the inserted row as a create', async () => {
+      const events = await postEvents(
+        { upsert: { where: { id: 'missing' }, create: { title: 'C' }, update: {} } },
+        [p1, p3],
+        {
+          nestedPreFetchResults: preFetched([['missing', null]]),
+          preExistingRows: new Map([['posts', new Set(['p1'])]]),
+        },
+      );
+
+      expect(events).toEqual([
+        expect.objectContaining({ identity: 'p3', action: 'create', origin: { path: 'posts', op: 'upsert' } }),
+      ]);
+    });
+
+    it('attributes an upsert whose target existed that row as an update', async () => {
+      const events = await postEvents(
+        { upsert: { where: { id: 'p1' }, create: { title: 'C' }, update: {} } },
+        [p1, p2],
+        {
+          nestedPreFetchResults: preFetched([['p1', p1Before]]),
+        },
+      );
+
+      expect(events).toEqual([expect.objectContaining({ identity: 'p1', action: 'update', before: p1Before })]);
+    });
+
+    it('attributes an updateMany the rows no operation named', async () => {
+      const events = await postEvents(
+        { update: { where: { id: 'p1' }, data: { title: 'A' } }, updateMany: { where: {}, data: { title: 'X' } } },
+        [p1, p2, p3],
+      );
+
+      expect(events.map((event) => [event.identity, event.action, event.origin.op])).toEqual([
+        ['p1', 'update', 'update'],
+        ['p2', 'update', 'updateMany'],
+        ['p3', 'update', 'updateMany'],
+      ]);
+    });
+
+    it('gives a connected row no event and keeps it out of the inserted rows', async () => {
+      const events = await postEvents({ connect: { id: 'p2' }, create: { title: 'C' } }, [p1, p2, p3], {
+        preExistingRows: new Map([['posts', new Set(['p1'])]]),
+      });
+
+      expect(events).toEqual([expect.objectContaining({ identity: 'p3', action: 'create' })]);
+    });
+
+    it('attributes every inserted row to the first operation at the path that inserts rows', async () => {
+      const events = await postEvents(
+        { create: { title: 'C' }, upsert: { where: { id: 'missing' }, create: { title: 'D' }, update: {} } },
+        [p1, p2, p3],
+        {
+          nestedPreFetchResults: preFetched([['missing', null]]),
+          preExistingRows: new Map([['posts', new Set(['p1'])]]),
+        },
+      );
+
+      expect(events.map((event) => [event.identity, event.origin.op])).toEqual([
+        ['p2', 'create'],
+        ['p3', 'create'],
+      ]);
+    });
+
+    it('audits every returned row not named by an operation as created when the parent has no snapshot', async () => {
+      const events = await postEvents({ create: { title: 'C' } }, [p1, p2]);
+
+      expect(events.map((event) => [event.identity, event.action])).toEqual([
+        ['p1', 'create'],
+        ['p2', 'create'],
+      ]);
+    });
   });
 
   it('collects only the nested writes of the branch an upsert executed', async () => {

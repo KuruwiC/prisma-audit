@@ -42,6 +42,18 @@ describe('nested to-many write set', () => {
 
   const asActor = <T>(fn: () => Promise<T>): Promise<T> => clients.provider.runAsync(testActor, fn);
 
+  /** A user with posts p1 and p2, each holding one comment */
+  const seedUserWithTwoPosts = async (email: string) => {
+    const user = await clients.basePrisma.user.create({ data: { email, name: 'Owner', password: 'secret123' } });
+    const p1 = await clients.basePrisma.post.create({
+      data: { title: 'P1', authorId: user.id, comments: { create: { content: 'c-p1', authorId: user.id } } },
+    });
+    const p2 = await clients.basePrisma.post.create({
+      data: { title: 'P2', authorId: user.id, comments: { create: { content: 'c-p2', authorId: user.id } } },
+    });
+    return { user, p1, p2 };
+  };
+
   /**
    * One row per audited event of `entityType`: the row whose aggregate is the entity itself. The
    * rows propagated to the entity's other aggregate roots repeat the same event.
@@ -70,6 +82,108 @@ describe('nested to-many write set', () => {
   afterEach(async () => {
     await clients.prisma.$disconnect();
     await clients.basePrisma.$disconnect();
+  });
+
+  it('a nested update audits the targeted post only', async () => {
+    const { user, p1 } = await seedUserWithTwoPosts('nested-update@example.com');
+
+    await asActor(() =>
+      clients.prisma.user.update({
+        where: { id: user.id },
+        data: { posts: { update: { where: { id: p1.id }, data: { title: 'T' } } } },
+      }),
+    );
+
+    expect(await eventsOf('Post')).toEqual([expect.objectContaining({ entityId: p1.id, action: 'update' })]);
+  });
+
+  it('a nested create audits the created post only', async () => {
+    const { user } = await seedUserWithTwoPosts('nested-create@example.com');
+
+    await asActor(() =>
+      clients.prisma.user.update({
+        where: { id: user.id },
+        data: { posts: { create: { title: 'N' } } },
+      }),
+    );
+
+    const postEvents = await eventsOf('Post');
+    expect(postEvents).toHaveLength(1);
+    expect(postEvents[0]).toMatchObject({ action: 'create', after: { title: 'N' } });
+    expect(await eventsOf('Comment')).toEqual([]);
+  });
+
+  it('a nested createMany audits the created posts only', async () => {
+    const { user } = await seedUserWithTwoPosts('nested-create-many@example.com');
+
+    await asActor(() =>
+      clients.prisma.user.update({
+        where: { id: user.id },
+        data: { posts: { createMany: { data: [{ title: 'A' }, { title: 'B' }] } } },
+      }),
+    );
+
+    const postEvents = await eventsOf('Post');
+    expect(postEvents.map((event) => event.action)).toEqual(['create', 'create']);
+    expect(postEvents.map((event) => event.after?.title).sort()).toEqual(['A', 'B']);
+  });
+
+  it('a nested upsert on an existing post audits that post as an update only', async () => {
+    const { user, p1 } = await seedUserWithTwoPosts('nested-upsert@example.com');
+
+    await asActor(() =>
+      clients.prisma.user.update({
+        where: { id: user.id },
+        data: {
+          posts: { upsert: { where: { id: p1.id }, create: { title: 'never' }, update: { title: 'X' } } },
+        },
+      }),
+    );
+
+    expect(await eventsOf('Post')).toEqual([expect.objectContaining({ entityId: p1.id, action: 'update' })]);
+  });
+
+  it('a comment created inside a nested post update is audited once, without its siblings', async () => {
+    const { user, p1 } = await seedUserWithTwoPosts('nested-update-comment-create@example.com');
+
+    await asActor(() =>
+      clients.prisma.user.update({
+        where: { id: user.id },
+        data: {
+          posts: {
+            update: { where: { id: p1.id }, data: { comments: { create: { content: 'c', authorId: user.id } } } },
+          },
+        },
+      }),
+    );
+
+    const commentEvents = await eventsOf('Comment');
+    expect(commentEvents).toHaveLength(1);
+    expect(commentEvents[0]).toMatchObject({ action: 'create', after: { content: 'c', postId: p1.id } });
+  });
+
+  it('a nested create of a row with a database-generated key audits the new row only', async () => {
+    const user = await clients.basePrisma.user.create({
+      data: {
+        email: 'auto-inc-child@example.com',
+        name: 'Owner',
+        password: 'secret123',
+        autoIncChildren: { create: [{}, {}] },
+      },
+    });
+
+    await asActor(() =>
+      clients.prisma.user.update({
+        where: { id: user.id },
+        data: { autoIncChildren: { create: {} } },
+      }),
+    );
+
+    const children = await clients.basePrisma.autoIncChild.findMany({ where: { parentId: user.id } });
+    const newestId = Math.max(...children.map((child) => child.id));
+    expect(await eventsOf('AutoIncChild')).toEqual([
+      expect.objectContaining({ entityId: String(newestId), action: 'create' }),
+    ]);
   });
 
   it('an array-form nested upsert takes its branch per element and audits the writes nested in each', async () => {

@@ -9,10 +9,11 @@
  */
 
 import { preFetchLog } from '@kuruwic/prisma-audit-core';
+import { type NestedOperationKeyword, targetWhereClauses } from '../../grammar/nested-operations.js';
 import type { DMMFField, DMMFModel } from '../../internal-types.js';
 import type { UniqueConstraint } from '../../schema/types.js';
 import type { PreFetchModelClient, PreFetchRecord } from './model-client.js';
-import { type ResolveParentRowsInput, resolveParentRows, targetWhereClauses } from './parent-rows.js';
+import { parentKeyOf, type ResolveParentRowsInput, resolveParentRows } from './parent-rows.js';
 import { extractEntityId, storePreFetchResult } from './pre-fetch-result-store.js';
 
 /** A related row belongs to the parent row when `backField` matches the parent's `parentFields`. */
@@ -65,7 +66,7 @@ const scopeWhereToParent = (
 };
 
 export interface PreFetchOneToManyRelationInput extends Omit<ResolveParentRowsInput, 'parentFields'> {
-  operation: string;
+  operation: NestedOperationKeyword;
   data: unknown;
   scope: ToManyRelationScope;
   relatedModelClient: PreFetchModelClient;
@@ -109,8 +110,8 @@ export const preFetchOneToManyRelation = async (input: PreFetchOneToManyRelation
     let beforeRecord: PreFetchRecord | null = null;
 
     for (const parentRow of parentRows) {
-      const parentKey = Object.fromEntries(scope.parentFields.map((fieldName) => [fieldName, parentRow[fieldName]]));
-      if (Object.values(parentKey).some((value) => value === null || value === undefined)) {
+      const parentKey = parentKeyOf(parentRow, scope.parentFields);
+      if (!parentKey) {
         continue;
       }
 

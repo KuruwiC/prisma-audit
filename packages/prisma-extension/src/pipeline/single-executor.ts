@@ -2,22 +2,34 @@
  * Single-operation executor
  *
  * create, update, upsert and delete: reads the target row's before state and the nested records
- * the operation will write, runs the operation on the scope's handle, collects the top-level row
- * and the nested records it wrote, and re-reads the result so its Date fields reach the caller
- * as Date instances.
+ * the operation will write, resolves the nested write set (the operations that execute, the rows
+ * they name, and the rows a to-many relation holds before a nested create), runs the operation
+ * on the scope's handle, collects the top-level row and the nested rows the operation wrote, and
+ * re-reads the result so its Date fields reach the caller as Date instances.
  */
 
 import type { MutationEvent } from '@kuruwic/prisma-audit-core';
 import type { FailureSink } from '../failure-sink.js';
-import type { NestedPreFetchResults } from '../grammar/nested-operations.js';
+import type { NestedOperationInfo, NestedPreFetchResults } from '../grammar/nested-operations.js';
 import type { GetOperationConfig } from '../grammar/pre-fetch-selection.js';
 import type { PrismaNamespace } from '../internal-types.js';
+import {
+  buildNestedWriteSets,
+  detectExecutedNestedOperations,
+  type NestedWriteSets,
+} from '../lifecycle/nested-handlers/write-set.js';
 import { refetchForDateHydration } from '../lifecycle/operation-handlers/date-hydration.js';
 import { preFetchNestedRecordsBeforeOperation } from '../lifecycle/pre-fetch/coordinator.js';
+import { type PreExistingRows, snapshotPreExistingRows } from '../lifecycle/pre-fetch/pre-existing-rows.js';
 import type { SchemaMetadata } from '../schema/types.js';
 import { runCallerMutation } from '../utils/caller-mutation-error.js';
 import { getModelDelegate, getModelOperation } from '../utils/model-accessor.js';
-import { type BeforeStateResult, fetchBeforeState } from './before-state.js';
+import {
+  type BeforeStateResult,
+  executedUpsertBranch,
+  fetchBeforeState,
+  targetRowExistsBefore,
+} from './before-state.js';
 import { collectSingleOperationEvents } from './collect-events.js';
 import type { ExecutionScope } from './execution-scope.js';
 import { type AuditedOperation, createExecutor, type OperationExecutor } from './executor.js';
@@ -32,6 +44,9 @@ export interface SingleExecutorDependencies {
 export interface SinglePrepared {
   readonly beforeStateResult: BeforeStateResult;
   readonly nestedPreFetchResults: NestedPreFetchResults;
+  readonly nestedOperations: readonly NestedOperationInfo[];
+  readonly writeSets: NestedWriteSets;
+  readonly preExistingRows: PreExistingRows;
 }
 
 /**
@@ -58,7 +73,29 @@ export const createSingleExecutor = (deps: SingleExecutorDependencies): Operatio
       getNestedOperationConfig,
       onPreFetchFailure: failureSink.notify,
     });
-    return { beforeStateResult, nestedPreFetchResults };
+    const nestedOperations = detectExecutedNestedOperations(
+      schemaMetadata,
+      modelName,
+      args,
+      executedUpsertBranch(action, beforeStateResult),
+      nestedPreFetchResults,
+    );
+    const writeSets = buildNestedWriteSets(nestedOperations, nestedPreFetchResults);
+    // A top-level row the operation creates has no children yet, so nothing is snapshotted under it.
+    const preExistingRows = targetRowExistsBefore(action, beforeStateResult)
+      ? await snapshotPreExistingRows(
+          {
+            prismaClient: scope.handle,
+            modelName,
+            topLevelWhere: args.where,
+            nestedOperations,
+            writeSets,
+            nestedPreFetchResults,
+          },
+          { Prisma, schemaMetadata, getNestedOperationConfig, onSnapshotFailure: failureSink.notify },
+        )
+      : new Map();
+    return { beforeStateResult, nestedPreFetchResults, nestedOperations, writeSets, preExistingRows };
   };
 
   const execute = async (operation: AuditedOperation, scope: ExecutionScope): Promise<unknown> => {
@@ -82,10 +119,12 @@ export const createSingleExecutor = (deps: SingleExecutorDependencies): Operatio
       {
         modelName: operation.model,
         action: operation.action,
-        args: operation.args,
         result: executed,
         beforeStateResult: prepared.beforeStateResult,
         nestedPreFetchResults: prepared.nestedPreFetchResults,
+        nestedOperations: prepared.nestedOperations,
+        writeSets: prepared.writeSets,
+        preExistingRows: prepared.preExistingRows,
         client: scope.handle,
       },
       {

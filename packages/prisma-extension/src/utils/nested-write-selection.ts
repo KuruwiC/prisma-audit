@@ -4,14 +4,21 @@
  * Nested writes are audited from the records the operation returns, so the relations an operation
  * writes are added to its selection: into `select` when the caller selects, else into `include`.
  * The written relations come from `detectNestedOperations` in the discovery pass, which scans
- * every branch the operation could execute (both branches of an upsert). What was added is
- * recorded, so the value handed back to the caller can be projected to the shape the caller
- * requested while audit logs are built from the full result.
+ * every branch the operation could execute (both branches of an upsert). A to-many relation the
+ * operation only updates is bounded to the rows the updates name, so its siblings are not read;
+ * a relation the operation may insert into is read whole, since the inserted rows have no
+ * identity yet. What was added is recorded, so the value handed back to the caller can be
+ * projected to the shape the caller requested while audit logs are built from the full result.
  *
  * @module nested-write-selection
  */
 
-import { detectNestedOperations, type NestedOperationKeyword } from '../grammar/nested-operations.js';
+import {
+  detectNestedOperations,
+  type NestedOperationInfo,
+  type NestedOperationKeyword,
+  targetWhereClauses,
+} from '../grammar/nested-operations.js';
 import type { SchemaMetadata } from '../schema/types.js';
 
 /**
@@ -27,9 +34,17 @@ const RESULT_AUDITED_KEYWORDS: ReadonlySet<NestedOperationKeyword> = new Set([
   'connectOrCreate',
 ]);
 
+/**
+ * The rows of a written relation to read: `rows` bounds a to-many relation to the unique WHEREs
+ * of the updates at its path; `all` reads the relation whole (a to-one relation, or a path whose
+ * operations may insert rows).
+ */
+type RelationRows = { readonly kind: 'rows'; readonly wheres: Selection[] } | { readonly kind: 'all' };
+
 interface WrittenRelation {
   readonly relatedModel: string;
   readonly children: WrittenRelations;
+  rows: RelationRows;
 }
 
 type WrittenRelations = Map<string, WrittenRelation>;
@@ -58,45 +73,103 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const isEmptyInjection = (injected: InjectedSelection): boolean =>
   injected.keys.size === 0 && injected.nested.size === 0;
 
+/** The rows `operation` reads at its path: those its update elements name, or the relation whole */
+const rowsWrittenBy = (operation: NestedOperationInfo): RelationRows => {
+  if (!operation.isList || operation.operation !== 'update') {
+    return { kind: 'all' };
+  }
+  const elements = Array.isArray(operation.data) ? operation.data : [operation.data];
+  const wheres = targetWhereClauses(operation.operation, operation.data);
+  return wheres.length === elements.length ? { kind: 'rows', wheres } : { kind: 'all' };
+};
+
+const narrowRelationRows = (current: RelationRows, written: RelationRows): RelationRows =>
+  current.kind === 'all' || written.kind === 'all'
+    ? { kind: 'all' }
+    : { kind: 'rows', wheres: [...current.wheres, ...written.wheres] };
+
+const relationAt = (
+  schemaMetadata: SchemaMetadata,
+  root: WrittenRelations,
+  modelName: string,
+  path: string,
+): WrittenRelation | undefined => {
+  let level = root;
+  let model = modelName;
+  let relation: WrittenRelation | undefined;
+  for (const segment of path.split('.')) {
+    relation = level.get(segment);
+    if (!relation) {
+      const field = schemaMetadata.getRelationFields(model).find((candidate) => candidate.name === segment);
+      if (!field) {
+        return undefined;
+      }
+      relation = { relatedModel: field.relatedModel, children: new Map(), rows: { kind: 'rows', wheres: [] } };
+      level.set(segment, relation);
+    }
+    level = relation.children;
+    model = relation.relatedModel;
+  }
+  return relation;
+};
+
 const buildWrittenRelations = (
   schemaMetadata: SchemaMetadata,
   modelName: string,
-  paths: readonly string[],
+  operations: readonly NestedOperationInfo[],
 ): WrittenRelations => {
   const root: WrittenRelations = new Map();
 
-  for (const path of paths) {
-    let level = root;
-    let model = modelName;
-    for (const segment of path.split('.')) {
-      let relation = level.get(segment);
-      if (!relation) {
-        const field = schemaMetadata.getRelationFields(model).find((candidate) => candidate.name === segment);
-        if (!field) {
-          break;
-        }
-        relation = { relatedModel: field.relatedModel, children: new Map() };
-        level.set(segment, relation);
-      }
-      level = relation.children;
-      model = relation.relatedModel;
+  for (const operation of operations) {
+    const relation = relationAt(schemaMetadata, root, modelName, operation.path);
+    if (relation) {
+      relation.rows = narrowRelationRows(relation.rows, rowsWrittenBy(operation));
     }
   }
 
   return root;
 };
 
-const buildIncludeTree = (relations: WrittenRelations): Selection =>
-  Object.fromEntries(Array.from(relations, ([field, relation]) => [field, buildRelationEntry(relation)]));
-
 /**
- * Entry for one written relation. Nested relations always use `include`, valid even when this entry is
- * placed under a `select` field.
+ * A unique WHERE as a relation filter: the compound-unique wrapper (`{ a_b: { a, b } }`) is a
+ * WHERE-unique shape only, so its fields are lifted out; a key that is neither a field nor such
+ * a wrapper is dropped.
  *
  * @internal
  */
-const buildRelationEntry = (relation: WrittenRelation): true | Selection =>
-  relation.children.size === 0 ? true : { include: buildIncludeTree(relation.children) };
+const toRelationFilter = (where: Selection, fieldNames: ReadonlySet<string>): Selection =>
+  Object.fromEntries(
+    Object.entries(where).flatMap(([key, value]) => {
+      if (fieldNames.has(key)) {
+        return [[key, value]];
+      }
+      return isRecord(value) ? Object.entries(value) : [];
+    }),
+  );
+
+const buildIncludeTree = (schemaMetadata: SchemaMetadata, relations: WrittenRelations): Selection =>
+  Object.fromEntries(
+    Array.from(relations, ([field, relation]) => [field, buildRelationEntry(schemaMetadata, relation)]),
+  );
+
+/**
+ * Entry for one written relation: a `where` bounding it to the rows its updates name when the path
+ * inserts nothing, and the relations written below it. Nested relations always use `include`,
+ * valid even when this entry is placed under a `select` field.
+ *
+ * @internal
+ */
+const buildRelationEntry = (schemaMetadata: SchemaMetadata, relation: WrittenRelation): true | Selection => {
+  const entry: Selection = {};
+  if (relation.rows.kind === 'rows' && relation.rows.wheres.length > 0) {
+    const fieldNames = new Set(schemaMetadata.getAllFields(relation.relatedModel).map((field) => field.name));
+    entry.where = { OR: relation.rows.wheres.map((where) => toRelationFilter(where, fieldNames)) };
+  }
+  if (relation.children.size > 0) {
+    entry.include = buildIncludeTree(schemaMetadata, relation.children);
+  }
+  return Object.keys(entry).length === 0 ? true : entry;
+};
 
 /**
  * Select every scalar field of `modelName` missing from `select`, in place
@@ -162,7 +235,7 @@ const mergeWrittenRelations = (
     const callerValue = entries[field];
 
     if (callerValue === undefined || callerValue === false) {
-      entries[field] = buildRelationEntry(relation);
+      entries[field] = buildRelationEntry(schemaMetadata, relation);
       keys.add(field);
     } else if (callerValue === true || isRecord(callerValue)) {
       const requested = mergeIntoRequestedRelation(schemaMetadata, callerValue === true ? {} : callerValue, relation);
@@ -195,11 +268,11 @@ export const injectNestedWriteSelection = (
     return { args, injected: undefined };
   }
 
-  const writtenPaths = detectNestedOperations(schemaMetadata, modelName, args, { kind: 'discovery' })
-    .filter((operation) => RESULT_AUDITED_KEYWORDS.has(operation.operation))
-    .map((operation) => operation.path);
+  const writtenOperations = detectNestedOperations(schemaMetadata, modelName, args, { kind: 'discovery' }).filter(
+    (operation) => RESULT_AUDITED_KEYWORDS.has(operation.operation),
+  );
 
-  if (writtenPaths.length === 0) {
+  if (writtenOperations.length === 0) {
     return { args, injected: undefined };
   }
 
@@ -208,7 +281,7 @@ export const injectNestedWriteSelection = (
   const { entries, injected } = mergeWrittenRelations(
     schemaMetadata,
     isRecord(callerSelection) ? callerSelection : {},
-    buildWrittenRelations(schemaMetadata, modelName, writtenPaths),
+    buildWrittenRelations(schemaMetadata, modelName, writtenOperations),
   );
 
   if (isEmptyInjection(injected)) {

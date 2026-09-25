@@ -16,16 +16,18 @@ import type { AuditAction, MutationAction, MutationEvent } from '@kuruwic/prisma
 import { AUDIT_ACTION, BATCH_TO_SINGULAR_ACTION } from '@kuruwic/prisma-audit-core';
 import {
   getPrimaryKeyConstraint,
+  type NestedOperationInfo,
   type NestedPreFetchResults,
-  type UpsertBranch,
 } from '../grammar/nested-operations.js';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../internal-types.js';
 import {
   collectNestedEvents,
   type NestedEventCollectorDependencies,
 } from '../lifecycle/nested-handlers/collect-nested-events.js';
+import type { NestedWriteSets } from '../lifecycle/nested-handlers/write-set.js';
+import type { PreExistingRows } from '../lifecycle/pre-fetch/pre-existing-rows.js';
 import type { SchemaMetadata } from '../schema/types.js';
-import type { BeforeStateResult } from './before-state.js';
+import { type BeforeStateResult, executedUpsertBranch } from './before-state.js';
 import { identityOf, toMutationAction } from './event-fields.js';
 
 type Row = Record<string, unknown>;
@@ -39,38 +41,17 @@ const toRow = (result: unknown): Row => {
   return result;
 };
 
-/**
- * The branch a top-level upsert executed: `update` when its before-state was found, `create`
- * when the row did not exist. Undefined when the fetch failed (the branch is unknown) or the
- * operation is not an upsert.
- */
-const upsertBranchOf = (action: AuditAction, beforeStateResult: BeforeStateResult): UpsertBranch | undefined => {
-  if (action !== AUDIT_ACTION.UPSERT) {
-    return undefined;
-  }
-  switch (beforeStateResult._tag) {
-    case 'found':
-      return 'update';
-    case 'notFound':
-      return 'create';
-    case 'error':
-    case 'notRequested':
-      return undefined;
-    default: {
-      const exhaustiveCheck: never = beforeStateResult;
-      throw new Error(`[@prisma-audit] Unhandled before-state result: ${JSON.stringify(exhaustiveCheck)}`);
-    }
-  }
-};
-
 /** What a single operation (create, update, upsert, delete) left behind once it ran */
 export interface SingleOperationOutcome {
   readonly modelName: string;
   readonly action: AuditAction;
-  readonly args: Row;
   readonly result: unknown;
   readonly beforeStateResult: BeforeStateResult;
   readonly nestedPreFetchResults: NestedPreFetchResults;
+  /** The nested operations the operation executed, resolved before it ran */
+  readonly nestedOperations: readonly NestedOperationInfo[];
+  readonly writeSets: NestedWriteSets;
+  readonly preExistingRows: PreExistingRows;
   /** Client the operation ran on; re-fetches the nested rows the result did not include */
   readonly client: PrismaClientWithDynamicAccess | TransactionalPrismaClient;
 }
@@ -88,10 +69,10 @@ export const collectSingleOperationEvents = async (
   outcome: SingleOperationOutcome,
   deps: EventCollectorDependencies,
 ): Promise<MutationEvent[]> => {
-  const { modelName, action, args, result, beforeStateResult, nestedPreFetchResults, client } = outcome;
+  const { modelName, action, result, beforeStateResult, client } = outcome;
+  const { nestedPreFetchResults, nestedOperations, writeSets, preExistingRows } = outcome;
 
-  const topLevelUpsertBranch = upsertBranchOf(action, beforeStateResult);
-  if (action === AUDIT_ACTION.UPSERT && topLevelUpsertBranch === undefined) {
+  if (action === AUDIT_ACTION.UPSERT && executedUpsertBranch(action, beforeStateResult) === undefined) {
     return [];
   }
 
@@ -107,7 +88,7 @@ export const collectSingleOperationEvents = async (
   };
 
   const nested = await collectNestedEvents(
-    { modelName, args, result, client, nestedPreFetchResults, topLevelUpsertBranch },
+    { modelName, result, client, nestedPreFetchResults, nestedOperations, writeSets, preExistingRows },
     deps,
   );
 

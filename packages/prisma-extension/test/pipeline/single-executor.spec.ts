@@ -44,7 +44,21 @@ const Prisma: PrismaNamespace = {
       models: [
         {
           name: 'User',
-          fields: [scalar('id', { isId: true }), scalar('name'), relation('profile', 'Profile', 'UserProfile')],
+          fields: [
+            scalar('id', { isId: true }),
+            scalar('name'),
+            relation('profile', 'Profile', 'UserProfile'),
+            relation('posts', 'Post', 'UserPosts', { isList: true }),
+          ],
+        },
+        {
+          name: 'Post',
+          fields: [
+            scalar('id', { isId: true }),
+            scalar('title'),
+            scalar('authorId'),
+            relation('author', 'User', 'UserPosts', { relationFromFields: ['authorId'], relationToFields: ['id'] }),
+          ],
         },
         {
           name: 'Profile',
@@ -313,6 +327,75 @@ describe('createSingleExecutor', () => {
         }),
       );
       expect(update).toHaveBeenCalledWith(nestedUpdateArgs);
+    });
+  });
+
+  describe('rows a to-many relation holds before a nested create', () => {
+    const existingPost: Row = { id: 'p1', title: 'A', authorId: 'u1' };
+    const createdPost: Row = { id: 'p2', title: 'B', authorId: 'u1' };
+
+    it('snapshots them on the scope handle before the operation and audits only the created row', async () => {
+      const calls: string[] = [];
+      const findMany = vi.fn(async () => {
+        calls.push('snapshot');
+        return [{ id: 'p1' }];
+      });
+      const client = clientWith({
+        user: {
+          findUnique: vi.fn(async () => user),
+          update: vi.fn(async () => {
+            calls.push('update');
+            return { ...user, posts: [existingPost, createdPost] };
+          }),
+        },
+        post: { findMany },
+      });
+      const { executor, produceRecords } = executorWith();
+
+      await executor.run(
+        operationOf('update', { where: { id: 'u1' }, data: { posts: { create: { title: 'B' } } } }),
+        scopeOn(client),
+        produceRecords,
+      );
+
+      expect(calls).toEqual(['snapshot', 'update']);
+      expect(findMany).toHaveBeenCalledWith({ where: { author: { is: { id: 'u1' } } }, select: { id: true } });
+      expect(produceRecords).toHaveBeenCalledWith(
+        [
+          expect.objectContaining({ model: 'User', action: 'update' }),
+          expect.objectContaining({
+            model: 'Post',
+            identity: 'p2',
+            action: 'create',
+            origin: { path: 'posts', op: 'create' },
+          }),
+        ],
+        expect.anything(),
+      );
+    });
+
+    it('snapshots nothing under a row the operation creates', async () => {
+      const findMany = vi.fn();
+      const client = clientWith({
+        user: { create: vi.fn(async () => ({ ...user, posts: [createdPost] })) },
+        post: { findMany },
+      });
+      const { executor, produceRecords } = executorWith();
+
+      await executor.run(
+        operationOf('create', { data: { name: 'Ann', posts: { create: { title: 'B' } } } }),
+        scopeOn(client),
+        produceRecords,
+      );
+
+      expect(findMany).not.toHaveBeenCalled();
+      expect(produceRecords).toHaveBeenCalledWith(
+        [
+          expect.objectContaining({ model: 'User' }),
+          expect.objectContaining({ model: 'Post', identity: 'p2', action: 'create' }),
+        ],
+        expect.anything(),
+      );
     });
   });
 

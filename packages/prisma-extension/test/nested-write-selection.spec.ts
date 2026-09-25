@@ -6,6 +6,8 @@ import { describe, expect, it } from 'vitest';
 import { injectNestedWriteSelection, projectToRequestedShape } from '../src/utils/nested-write-selection.js';
 import { createSchemaMetadataFromDMMF } from '../src/utils/schema-metadata.js';
 
+type Selection = Record<string, unknown>;
+
 const scalar = (name: string) => ({ name, kind: 'scalar', type: 'String', isList: false });
 const relation = (name: string, type: string, isList: boolean) => ({ name, kind: 'object', type, isList });
 
@@ -66,7 +68,70 @@ describe('injectNestedWriteSelection', () => {
 
     const { args: injectedArgs } = injectNestedWriteSelection(schemaMetadata, 'User', args);
 
-    expect(injectedArgs).toEqual({ ...args, include: { posts: { include: { comments: true } }, profile: true } });
+    expect(injectedArgs).toEqual({
+      ...args,
+      include: { posts: { where: { OR: [{ id: 'post-1' }] }, include: { comments: true } }, profile: true },
+    });
+  });
+
+  describe('bounding a to-many relation to the rows its updates name', () => {
+    const postsOf = (data: Record<string, unknown>) =>
+      (
+        injectNestedWriteSelection(schemaMetadata, 'User', { where: { id: 'user-1' }, data }).args as {
+          include: Selection;
+        }
+      ).include.posts;
+
+    it('bounds a relation the operation only updates to the WHERE of each update element', () => {
+      expect(
+        postsOf({
+          posts: {
+            update: [
+              { where: { id: 'post-1' }, data: { title: 'A' } },
+              { where: { id: 'post-2' }, data: { title: 'B' } },
+            ],
+          },
+        }),
+      ).toEqual({ where: { OR: [{ id: 'post-1' }, { id: 'post-2' }] } });
+    });
+
+    it('lifts the fields out of a compound-unique WHERE wrapper', () => {
+      expect(
+        postsOf({ posts: { update: { where: { title_authorId: { title: 'A', authorId: 'user-1' } }, data: {} } } }),
+      ).toEqual({ where: { OR: [{ title: 'A', authorId: 'user-1' }] } });
+    });
+
+    it.each([
+      ['create', { posts: { create: { title: 'A' }, update: { where: { id: 'post-1' }, data: {} } } }],
+      ['createMany', { posts: { createMany: { data: [{ title: 'A' }] } } }],
+      ['upsert', { posts: { upsert: { where: { id: 'post-1' }, create: { title: 'A' }, update: {} } } }],
+      ['connectOrCreate', { posts: { connectOrCreate: { where: { id: 'post-1' }, create: { title: 'A' } } } }],
+    ])('reads a relation whole when a %s at its path may insert rows', (_keyword, data) => {
+      expect(postsOf(data)).toBe(true);
+    });
+
+    it('reads a relation whole when an update element names no row', () => {
+      expect(postsOf({ posts: { update: [{ data: { title: 'A' } }] } })).toBe(true);
+    });
+
+    it('never bounds a to-one relation', () => {
+      const injection = injectNestedWriteSelection(schemaMetadata, 'User', {
+        where: { id: 'user-1' },
+        data: { profile: { update: { where: { id: 'profile-1' }, data: { bio: 'B' } } } },
+      });
+
+      expect((injection.args as { include: Selection }).include).toEqual({ profile: true });
+    });
+
+    it('leaves a relation the caller requested unbounded', () => {
+      const injection = injectNestedWriteSelection(schemaMetadata, 'User', {
+        where: { id: 'user-1' },
+        data: commentCreatedInPostUpdate,
+        include: { posts: true },
+      });
+
+      expect((injection.args as { include: Selection }).include).toEqual({ posts: { include: { comments: true } } });
+    });
   });
 
   it('includes the relations written in either upsert branch', () => {
@@ -109,7 +174,10 @@ describe('injectNestedWriteSelection', () => {
 
     const { args: injectedArgs } = injectNestedWriteSelection(schemaMetadata, 'User', args);
 
-    expect(injectedArgs).toEqual({ ...args, select: { id: true, posts: { include: { comments: true } } } });
+    expect(injectedArgs).toEqual({
+      ...args,
+      select: { id: true, posts: { where: { OR: [{ id: 'post-1' }] }, include: { comments: true } } },
+    });
     expect(injectedArgs).not.toHaveProperty('include');
   });
 

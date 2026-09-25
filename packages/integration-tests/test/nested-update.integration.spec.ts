@@ -382,50 +382,25 @@ describe('Nested Update Operations', () => {
         });
       });
 
-      // IMPORTANT: include: { posts: true } returns ALL posts, not just updated ones
-      // This is Prisma's behavior - it returns the full relation after the update
-      // So the extension creates audit logs for ALL posts in the result
-      // (This is because we can't distinguish between updated and unchanged nested records from the result alone)
+      // `include: { posts: true }` returns every post of the user, but only the post the update
+      // names is the update's row: its siblings match no nested operation and get no entry.
+      const postLogs: { entityId: string; aggregateType: string; before: unknown; after: unknown }[] =
+        await context.prisma.auditLog.findMany({
+          where: { entityType: 'Post', action: 'update' },
+          orderBy: { aggregateType: 'asc' },
+        });
 
-      const post1Logs = await context.prisma.auditLog.findMany({
-        where: { entityType: 'Post', entityId: post1.id, action: 'update' },
-      });
-      const post2Logs = await context.prisma.auditLog.findMany({
-        where: { entityType: 'Post', entityId: post2.id, action: 'update' },
-      });
-      const post3Logs = await context.prisma.auditLog.findMany({
-        where: { entityType: 'Post', entityId: post3.id, action: 'update' },
-      });
+      expect(postLogs.map((log) => [log.entityId, log.aggregateType])).toEqual([
+        [post2.id, 'Post'],
+        [post2.id, 'User'],
+      ]);
+      expect(postLogs.map((log) => log.entityId)).not.toContain(post1.id);
+      expect(postLogs.map((log) => log.entityId)).not.toContain(post3.id);
 
-      // All posts are logged because include returns all posts
-      expect(post1Logs.length).toBeGreaterThan(0);
-      expect(post2Logs.length).toBeGreaterThan(0);
-      expect(post3Logs.length).toBeGreaterThan(0);
-
-      // With fetchBeforeOperation: true (test setup), before state is only populated
-      // for records that were actually updated (post2 in this case)
-      // Post1 and post3 were NOT updated, so their before state may be null
-      // (because pre-fetch only happens for the records matching the update where clause)
-      for (const log of post2Logs) {
-        expect(log.before).not.toBeNull(); // post2 was updated, so before state exists
-        expect(log.after).not.toBeNull();
-      }
-
-      // Post1 and post3 logs may have null before state since they weren't actually updated
-      // (they appear in the result only due to include: { posts: true })
-      for (const log of [...post1Logs, ...post3Logs]) {
-        expect(log.after).not.toBeNull();
-        // before may be null for unchanged records
-      }
-
-      // Verify post2 has the updated title
-      const post2EntityLog = post2Logs.find(
-        (log: { aggregateId: string; entityId: string }) => log.aggregateId === log.entityId,
-      );
-      expect(post2EntityLog).toBeDefined();
-      if (post2EntityLog) {
-        const after = post2EntityLog.after as { title?: string };
-        expect(after.title).toBe('Updated Post 2');
+      // With fetchBeforeOperation: true (test setup), the updated post carries its before state.
+      for (const log of postLogs) {
+        expect((log.before as { title: string }).title).toBe('Post 2');
+        expect((log.after as { title: string }).title).toBe('Updated Post 2');
       }
     });
 
