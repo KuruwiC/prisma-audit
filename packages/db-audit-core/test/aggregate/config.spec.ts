@@ -1,6 +1,7 @@
-import type { AggregateMapping } from '@kuruwic/db-audit-core';
-import { createAggregateConfig, defineEntity, foreignKey, to } from '@kuruwic/db-audit-core';
 import { describe, expect, it } from 'vitest';
+import { createAggregateConfig } from '../../src/aggregate/config.js';
+import { defineEntity, foreignKey, to } from '../../src/aggregate/helpers.js';
+import type { AggregateMapping } from '../../src/aggregate/types.js';
 
 describe('createAggregateConfig', () => {
   const createTestMapping = (): AggregateMapping => ({
