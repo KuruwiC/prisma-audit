@@ -7,12 +7,8 @@
  * @module lifecycle/pre-fetch/parent-rows
  */
 
-import {
-  type NestedOperationInfo,
-  type NestedPreFetchResults,
-  preFetchLog,
-  type UniqueConstraint,
-} from '@kuruwic/prisma-audit-core';
+import { preFetchLog, type UniqueConstraint } from '@kuruwic/prisma-audit-core';
+import type { NestedOperationInfo, NestedPreFetchResults } from '../../grammar/nested-operations.js';
 import { unwrapCompoundWhere } from '../../utils/compound-where.js';
 import type { PreFetchModelClient, PreFetchRecord } from './model-client.js';
 
@@ -73,7 +69,7 @@ export const resolveParentRows = async (input: ResolveParentRowsInput): Promise<
  * (`{ where, data }`, `{ where, create, update }`, or the WHERE itself for `delete`), one per
  * element when `data` is an array.
  *
- * No `updateMany` / `deleteMany` branch: `filterOperationsToPreFetch` (`@kuruwic/prisma-audit-core`)
+ * No `updateMany` / `deleteMany` branch: `filterOperationsToPreFetch` (`grammar/pre-fetch-selection`)
  * excludes them before pre-fetch runs; see its JSDoc for why.
  */
 export const targetWhereClauses = (operation: string, data: unknown): PreFetchRecord[] => {

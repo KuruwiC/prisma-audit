@@ -10,11 +10,10 @@
 import {
   ensureIds as coreEnsureIds,
   type EntityIdentityKey,
-  getPrimaryKeyConstraint,
   UNRESOLVED_ENTITY_ID,
   type UniqueConstraint,
 } from '@kuruwic/prisma-audit-core';
-
+import { getPrimaryKeyConstraint } from '../grammar/nested-operations.js';
 import { createSchemaMetadataFromDMMF, type PrismaWithDMMF } from './schema-metadata.js';
 
 /**
@@ -55,7 +54,7 @@ export const ensureIds = <T extends Record<string, unknown>>(
 const PK_CHUNK_SIZE = 1000;
 
 /**
- * Get a model's primary key from DMMF, as derived by core `getPrimaryKeyConstraint`
+ * Get a model's primary key from DMMF, as derived by `getPrimaryKeyConstraint`
  * (`@@id` with its declared name → `@id` field).
  *
  * @throws Error if DMMF is unavailable, the model is unknown, or the model has no primary key

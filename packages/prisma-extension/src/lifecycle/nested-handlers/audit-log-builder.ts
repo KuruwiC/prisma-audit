@@ -7,27 +7,25 @@
 import type {
   AggregateConfigService,
   AuditContext,
-  GetOperationConfig,
-  NestedPreFetchResults,
-  NestedRecordInfo,
   RedactConfig,
   SchemaMetadata,
   SerializationConfig,
-  UpsertBranch,
 } from '@kuruwic/prisma-audit-core';
+import { batchEnrichEntityContexts, nestedLog, UNRESOLVED_ENTITY_ID } from '@kuruwic/prisma-audit-core';
+
+import { buildAuditLog } from '../../audit-log-builder/index.js';
+import { createPrismaClientManager } from '../../client-manager/index.js';
 import {
-  batchEnrichEntityContexts,
   detectNestedOperations,
   extractNestedRecords,
   getPrimaryKeyConstraint,
   type NestedOperationInfo,
-  nestedLog,
+  type NestedPreFetchResults,
+  type NestedRecordInfo,
   refetchNestedRecords,
-  UNRESOLVED_ENTITY_ID,
-} from '@kuruwic/prisma-audit-core';
-
-import { buildAuditLog } from '../../audit-log-builder/index.js';
-import { createPrismaClientManager } from '../../client-manager/index.js';
+  type UpsertBranch,
+} from '../../grammar/nested-operations.js';
+import type { GetOperationConfig } from '../../grammar/pre-fetch-selection.js';
 import type {
   PrismaClientWithDynamicAccess,
   PrismaNamespace,

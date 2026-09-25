@@ -1,20 +1,26 @@
 /**
- * Nested Operations Utilities
+ * Prisma Nested-Write Grammar
  *
- * @module nested-operations
+ * @module grammar/nested-operations
  *
  * @remarks
- * Framework-agnostic utilities for detecting and processing nested write operations.
- * Supports deep nesting (e.g., `postTags.create.tag.connectOrCreate`) and includes
- * mechanisms for extracting nested records from results or re-fetching when necessary.
- *
- * @packageDocumentation
+ * Detects the nested write operations (`create`, `connectOrCreate`, `upsert`, ...) inside
+ * Prisma operation args, extracts the nested records from an operation result, and
+ * re-fetches them when the result does not include them.
+ * Supports deep nesting (e.g., `postTags.create.tag.connectOrCreate`).
  */
 
-import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID } from '../constants.js';
-import type { DbClient, SchemaMetadata, UniqueConstraint } from '../interfaces/index.js';
-import type { NestedPreFetchResult } from '../state-resolution/nested-state-resolver.js';
-import { nestedLog } from './debug.js';
+import {
+  type EntityIdentityKey,
+  nestedLog,
+  type SchemaMetadata,
+  UNRESOLVED_ENTITY_ID,
+  type UniqueConstraint,
+} from '@kuruwic/prisma-audit-core';
+import type { NestedPreFetchResult } from './nested-state.js';
+
+/** Client the refetch reads through: model delegates keyed by uncapitalized model name. */
+type RefetchClient = Record<string, { findMany?(args: { where: Record<string, unknown> }): Promise<unknown[]> }>;
 
 /**
  * Nested operation keywords that can appear in operation args
@@ -935,7 +941,7 @@ const extractPksToRefetch = (
 
 /** @internal Execute refetch query for nested records */
 const executeRefetchQuery = async (
-  client: DbClient,
+  client: RefetchClient,
   relationField: { name: string; relatedModel: string; isList: boolean },
   pksToRefetch: Record<string, unknown>[],
   pkFields: string[],
@@ -960,7 +966,7 @@ const executeRefetchQuery = async (
 
 /** @internal Process a single nested operation for refetch */
 const processNestedOperationForRefetch = async (
-  client: DbClient,
+  client: RefetchClient,
   schemaMetadata: SchemaMetadata,
   nestedOp: NestedOperationInfo,
   nestedPreFetchResults: NestedPreFetchResults,
@@ -1046,7 +1052,7 @@ const processNestedOperationForRefetch = async (
  * ```
  */
 export const refetchNestedRecords = async (
-  client: DbClient,
+  client: RefetchClient,
   schemaMetadata: SchemaMetadata,
   modelName: string,
   nestedPreFetchResults: NestedPreFetchResults | undefined,

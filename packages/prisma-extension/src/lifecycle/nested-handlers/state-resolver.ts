@@ -5,17 +5,15 @@
  * for nested operations based on operation type and pre-fetched data.
  */
 
+import { AUDIT_ACTION, type EntityIdentityKey } from '@kuruwic/prisma-audit-core';
+import type { NestedOperationInfo, NestedPreFetchResults } from '../../grammar/nested-operations.js';
 import {
-  AUDIT_ACTION,
-  type EntityIdentityKey,
-  type GetOperationConfig,
-  type NestedOperationInfo,
-  type NestedPreFetchResults,
   resolveConnectOrCreateState,
   resolveCreateState,
   resolveUpdateState,
   resolveUpsertState,
-} from '@kuruwic/prisma-audit-core';
+} from '../../grammar/nested-state.js';
+import type { GetOperationConfig } from '../../grammar/pre-fetch-selection.js';
 import type { PrismaAction } from '../../types.js';
 import { getPreFetchResult } from '../pre-fetch/pre-fetch-result-store.js';
 

@@ -9,7 +9,8 @@
  * @module lifecycle/types
  */
 
-import type { AuditContext, NestedPreFetchResults } from '@kuruwic/prisma-audit-core';
+import type { AuditContext } from '@kuruwic/prisma-audit-core';
+import type { NestedPreFetchResults } from '../grammar/nested-operations.js';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../internal-types.js';
 import type { AuditLogData, OperationContext } from '../types.js';
 

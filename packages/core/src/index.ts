@@ -30,7 +30,7 @@ export { compose } from './compose/index.js';
 // Config Types
 export type { GlobalContextEnricherConfig, SerializationConfig } from './config.types.js';
 // Constants
-export type { EntityIdentityKey } from './constants.js';
+export type { AuditAction, EntityIdentityKey } from './constants.js';
 export {
   AUDIT_ACTION,
   BATCH_OPERATIONS,
@@ -100,18 +100,6 @@ export { getRuntimeContext, runWithRuntimeContext } from './runtime-context.js';
 // State Resolution
 export { applyRelationConfig } from './state-resolution/apply-relation-config.js';
 export { resolveBeforeAndAfterStates } from './state-resolution/index.js';
-export type { NestedPreFetchResult } from './state-resolution/nested-state-resolver.js';
-export {
-  resolveConnectOrCreateState,
-  resolveCreateState,
-  resolveUpdateState,
-  resolveUpsertState,
-} from './state-resolution/nested-state-resolver.js';
-export type { GetOperationConfig, OperationPreFetchConfig } from './state-resolution/pre-fetch-coordinator.js';
-export {
-  filterOperationsToPreFetch,
-  sortByPathDepth,
-} from './state-resolution/pre-fetch-coordinator.js';
 // Types
 export type { AuditActor, AuditContext, AuditContextProvider } from './types.js';
 // Utils - Debug
@@ -124,23 +112,6 @@ export { createErrorHandler } from './utils/error-handler.js';
 // Utils - ID Generator
 export type { IdFieldInfo, IdGenerator, IdGeneratorFactory } from './utils/id-generator.js';
 export { ensureIds, getIdFieldInfo, getIdGenerator, ID_GENERATOR_FACTORIES } from './utils/id-generator.js';
-// Utils - Nested Operations
-export type {
-  NestedDetectionPass,
-  NestedOperationInfo,
-  NestedOperationKeyword,
-  NestedPreFetchResults,
-  NestedRecordInfo,
-  UpsertBranch,
-} from './utils/nested-operations.js';
-export {
-  deserializeEntityId,
-  detectNestedOperations,
-  extractNestedRecords,
-  getPrimaryKeyConstraint,
-  NESTED_OPERATION_KEYWORDS,
-  refetchNestedRecords,
-} from './utils/nested-operations.js';
 // Utils - Redaction
 export type { RedactConfig } from './utils/redaction.js';
 export { redactSensitiveData } from './utils/redaction.js';

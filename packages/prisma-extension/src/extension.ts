@@ -9,7 +9,7 @@
  * @see {@link PrismaAuditExtensionOptions}
  */
 
-import type { AuditContext, ErrorStrategy, NestedPreFetchResults } from '@kuruwic/prisma-audit-core';
+import type { AuditContext, ErrorStrategy } from '@kuruwic/prisma-audit-core';
 import {
   AUDIT_ACTION,
   batchEnrichEntityContexts,
@@ -28,6 +28,7 @@ import { createPrismaWriteExecutor } from './adapters/write-executor.js';
 import { buildAuditLog } from './audit-log-builder/index.js';
 import { createPrismaClientManager } from './client-manager/index.js';
 import { getNestedOperationConfig, validateFieldConflicts } from './config/index.js';
+import type { NestedPreFetchResults } from './grammar/nested-operations.js';
 import type {
   ExtensionParams,
   PrismaClientWithDynamicAccess,

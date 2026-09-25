@@ -5,13 +5,9 @@
  * Enrichment and audit log building are handled by the batch pipeline in audit-log-builder.ts.
  */
 
-import {
-  type GetOperationConfig,
-  type NestedOperationInfo,
-  type NestedPreFetchResults,
-  nestedLog,
-} from '@kuruwic/prisma-audit-core';
-
+import { nestedLog } from '@kuruwic/prisma-audit-core';
+import type { NestedOperationInfo, NestedPreFetchResults } from '../../grammar/nested-operations.js';
+import type { GetOperationConfig } from '../../grammar/pre-fetch-selection.js';
 import type { PrismaAction } from '../../types.js';
 import { extractEntityIdentity } from '../../utils/id-generator.js';
 import type { CollectedNestedRecord } from './collected-record.js';

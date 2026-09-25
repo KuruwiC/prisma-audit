@@ -8,15 +8,16 @@
 
 import {
   AUDIT_ACTION,
-  deserializeEntityId,
   type EntityIdentityKey,
-  type NestedOperationInfo,
-  type NestedPreFetchResults,
   nestedLog,
   UNRESOLVED_ENTITY_ID,
   type UniqueConstraint,
 } from '@kuruwic/prisma-audit-core';
-
+import {
+  deserializeEntityId,
+  type NestedOperationInfo,
+  type NestedPreFetchResults,
+} from '../../grammar/nested-operations.js';
 import { extractDeleteOperationEntityId } from '../../utils/extension-utils.js';
 import type { CollectedNestedRecord } from './collected-record.js';
 
@@ -69,14 +70,14 @@ const reportUnresolvedEntityId = async (
  *   1. Use pre-fetched before states (has full record data)
  *   2. Fallback: extract entity ID from nestedOp.data (minimal record only)
  *
- * A delete whose primary key cannot be fully resolved (core `deserializeEntityId` returns
+ * A delete whose primary key cannot be fully resolved (`deserializeEntityId` returns
  * `null` for an unresolved identity or a malformed composite key), or whose operation data
  * yields no entityId at all, is skipped rather than recorded with a partial or empty
  * identity — an idResolver reading fields off a partial entity could produce a plausible but
  * fabricated id — and reported through `onUnresolvedDeleteEntityId` when provided.
  *
  * **Exception — nested `deleteMany` with no extractable entityId.** Nested `deleteMany` is
- * never pre-fetched (see `filterOperationsToPreFetch` in `@kuruwic/prisma-audit-core`), and
+ * never pre-fetched (see `filterOperationsToPreFetch` in `grammar/pre-fetch-selection`), and
  * a filter WHERE such as `{ published: false }` names no single row, so finding no entityId
  * is expected rather than a resolution failure. Reporting it would flag every ordinary
  * nested `deleteMany` as an audit failure, so it is only debug-logged. A `deleteMany` whose

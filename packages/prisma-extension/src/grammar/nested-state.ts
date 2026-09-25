@@ -1,11 +1,12 @@
 /**
- * Nested State Resolver
+ * Nested Write State
  *
- * Resolves before/after states and actions for nested operations based on pre-fetched data.
+ * Resolves the audited action and before/after states of a nested write from its pre-fetched data.
+ *
+ * @module grammar/nested-state
  */
 
-import type { AuditAction } from '../constants.js';
-import { AUDIT_ACTION } from '../constants.js';
+import { AUDIT_ACTION, type AuditAction } from '@kuruwic/prisma-audit-core';
 
 export type NestedPreFetchResult = {
   before: Record<string, unknown> | null;

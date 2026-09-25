@@ -6,18 +6,18 @@
  * @module lifecycle/pre-fetch/coordinator
  */
 
+import { preFetchLog, UNRESOLVED_ENTITY_ID, type UniqueConstraint } from '@kuruwic/prisma-audit-core';
 import {
   detectNestedOperations,
-  filterOperationsToPreFetch,
-  type GetOperationConfig,
   getPrimaryKeyConstraint,
   type NestedOperationInfo,
   type NestedPreFetchResults,
-  preFetchLog,
+} from '../../grammar/nested-operations.js';
+import {
+  filterOperationsToPreFetch,
+  type GetOperationConfig,
   sortByPathDepth,
-  UNRESOLVED_ENTITY_ID,
-  type UniqueConstraint,
-} from '@kuruwic/prisma-audit-core';
+} from '../../grammar/pre-fetch-selection.js';
 import type {
   DMMFField,
   DMMFModel,

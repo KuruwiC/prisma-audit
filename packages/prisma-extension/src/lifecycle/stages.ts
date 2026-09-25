@@ -10,14 +10,13 @@ import type {
   AuditContext,
   GlobalContextEnricherConfig,
   LoggableEntity,
-  NestedPreFetchResults,
   RedactConfig,
   SerializationConfig,
-  UpsertBranch,
 } from '@kuruwic/prisma-audit-core';
 import { AUDIT_ACTION } from '@kuruwic/prisma-audit-core';
 import type { BuildAuditLogInput } from '../audit-log-builder/index.js';
 import { createPrismaClientManager } from '../client-manager/index.js';
+import type { NestedPreFetchResults, UpsertBranch } from '../grammar/nested-operations.js';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../internal-types.js';
 import type { AuditLogData, PrismaAction } from '../types.js';
 import { createSchemaMetadataFromDMMF, type PrismaWithDMMF } from '../utils/schema-metadata.js';

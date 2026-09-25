@@ -1,10 +1,13 @@
 /**
- * Pre-fetch Coordinator
+ * Pre-fetch Selection
  *
- * Filters and categorizes operations that require pre-fetching before execution.
+ * Selects the nested write operations whose before state is pre-fetched, and orders them
+ * parents first.
+ *
+ * @module grammar/pre-fetch-selection
  */
 
-import type { NestedOperationInfo } from '../utils/nested-operations.js';
+import type { NestedOperationInfo } from './nested-operations.js';
 
 export type OperationPreFetchConfig = {
   fetchBeforeOperation: boolean;

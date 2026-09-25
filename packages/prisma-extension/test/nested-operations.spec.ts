@@ -2,13 +2,13 @@
  * Unit tests for nested operations utilities
  */
 
+import { describe, expect, it } from 'vitest';
 import {
   detectNestedOperations,
   extractNestedRecords,
   type NestedDetectionPass,
   type UpsertBranch,
-} from '@kuruwic/prisma-audit-core';
-import { describe, expect, it } from 'vitest';
+} from '../src/grammar/nested-operations.js';
 import { createSchemaMetadataFromDMMF } from '../src/utils/schema-metadata.js';
 
 describe('getRelationFields', () => {

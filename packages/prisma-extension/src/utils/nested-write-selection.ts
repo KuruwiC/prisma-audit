@@ -3,7 +3,7 @@
  *
  * Nested writes are audited from the records the operation returns, so the relations an operation
  * writes are added to its selection: into `select` when the caller selects, else into `include`.
- * The written relations come from core `detectNestedOperations` in the discovery pass, which scans
+ * The written relations come from `detectNestedOperations` in the discovery pass, which scans
  * every branch the operation could execute (both branches of an upsert). What was added is
  * recorded, so the value handed back to the caller can be projected to the shape the caller
  * requested while audit logs are built from the full result.
@@ -11,7 +11,8 @@
  * @module nested-write-selection
  */
 
-import { detectNestedOperations, type NestedOperationKeyword, type SchemaMetadata } from '@kuruwic/prisma-audit-core';
+import type { SchemaMetadata } from '@kuruwic/prisma-audit-core';
+import { detectNestedOperations, type NestedOperationKeyword } from '../grammar/nested-operations.js';
 
 /**
  * Nested write keywords whose written rows are audited from the operation result. Deleted rows are
