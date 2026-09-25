@@ -37,6 +37,9 @@ jobs:
       - name: Lint
         run: pnpm run lint
 
+      - name: Check core invariants
+        run: pnpm check:invariants
+
   typecheck:
     name: Type Check
     runs-on: ubuntu-latest
