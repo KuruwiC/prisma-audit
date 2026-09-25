@@ -5,6 +5,7 @@
  * operation's keyword and the row's pre-fetched before-state.
  */
 
+import type { MutationAction } from '@kuruwic/db-audit-core';
 import type { NestedOperationInfo } from '../../grammar/nested-operations.js';
 import {
   resolveConnectOrCreateState,
@@ -12,13 +13,13 @@ import {
   resolveUpdateState,
   resolveUpsertState,
 } from '../../grammar/nested-state.js';
-import { AUDIT_ACTION, type AuditAction } from '../../grammar/operations.js';
+import { AUDIT_ACTION } from '../../grammar/operations.js';
 import type { GetOperationConfig } from '../../grammar/pre-fetch-selection.js';
 
 type Row = Record<string, unknown>;
 
 /** Action of a nested record; `connect` marks a record that only got linked and is not audited */
-export type NestedRecordAction = AuditAction | 'connect';
+export type NestedRecordAction = MutationAction | 'connect';
 
 export type ResolvedState = {
   action: NestedRecordAction;

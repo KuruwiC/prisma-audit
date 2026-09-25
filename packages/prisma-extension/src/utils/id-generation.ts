@@ -239,24 +239,9 @@ export const getPrimaryKeyFields = (Prisma: PrismaWithDMMF, modelName: string): 
   getPrimaryKeyConstraintOrThrow(Prisma, modelName).fields;
 
 /**
- * Extract a stable string key from an entity's primary key fields.
- *
- * Uses JSON.stringify for collision safety with composite keys
- * (e.g. ["a:b", "c"] vs ["a", "b:c"] are distinguishable).
- */
-export const extractPrimaryKey = (entity: Record<string, unknown>, pkFields: string[]): string => {
-  if (pkFields.length === 1) {
-    const field = pkFields[0] as string;
-    return String(entity[field]);
-  }
-  return JSON.stringify(pkFields.map((f) => entity[f]));
-};
-
-/**
- * Extract entity identity string with fallback for missing PK fields.
- *
- * Unlike `extractPrimaryKey` (which assumes all fields exist), this returns
- * `UNRESOLVED_ENTITY_ID` when any PK field is absent or null. BigInt-safe serialization.
+ * Extract the entity identity of `record` from its primary-key fields: the single key's value as
+ * a string, or the JSON array of a composite key's values (BigInt values as strings), which keeps
+ * `["a:b", "c"]` and `["a", "b:c"]` apart. `UNRESOLVED_ENTITY_ID` when any field is absent or null.
  */
 export const extractEntityIdentity = (record: Record<string, unknown>, pkFields: string[]): EntityIdentityKey => {
   const allPresent = pkFields.every((f) => f in record && record[f] != null);
@@ -275,10 +260,10 @@ export const extractEntityIdentity = (record: Record<string, unknown>, pkFields:
 export const buildEntityMap = (
   entities: ReadonlyArray<Record<string, unknown>>,
   pkFields: string[],
-): Map<string, Record<string, unknown>> => {
-  const map = new Map<string, Record<string, unknown>>();
+): Map<EntityIdentityKey, Record<string, unknown>> => {
+  const map = new Map<EntityIdentityKey, Record<string, unknown>>();
   for (const entity of entities) {
-    map.set(extractPrimaryKey(entity, pkFields), entity);
+    map.set(extractEntityIdentity(entity, pkFields), entity);
   }
   return map;
 };

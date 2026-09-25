@@ -5,13 +5,13 @@
  * hand it over to become a mutation event.
  */
 
-import type { AuditAction } from '../../grammar/operations.js';
+import type { MutationAction } from '@kuruwic/db-audit-core';
 
 export interface CollectedNestedRecord {
   /** The entity data (after state for create/update, minimal record for delete) */
   entity: Record<string, unknown>;
   /** Resolved action (create, update, delete) — 'connect' records are already filtered out */
-  action: AuditAction;
+  action: MutationAction;
   /** Before state for update/delete, null for create */
   beforeState: Record<string, unknown> | null;
   /** Related model name (e.g., 'Post', 'Comment') */

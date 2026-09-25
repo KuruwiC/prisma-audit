@@ -61,6 +61,13 @@ export interface ImplicitTransactionInput {
   readonly auditContext: AuditContext;
 }
 
+/** Starts the writes queued on a committed transaction on the base client, as pending writes no caller awaits */
+export const drainAfterCommit = (deferredWrites: ReadonlyArray<() => Promise<void>>): void => {
+  for (const deferredWrite of deferredWrites) {
+    trackPendingWrite(deferredWrite);
+  }
+};
+
 /**
  * Both stores are established before `$transaction` so that they survive its microtask
  * boundary. The writes `run` queues on the transaction start on the base client once
@@ -78,9 +85,7 @@ export const openImplicitTransaction = <T>(
       const result = await base.$transaction((tx) =>
         enterTransaction(provider, auditContext, { client: tx, deferredWrites }, () => run(tx)),
       );
-      for (const deferredWrite of deferredWrites) {
-        trackPendingWrite(deferredWrite);
-      }
+      drainAfterCommit(deferredWrites);
       return result;
     }),
   );

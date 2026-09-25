@@ -1,3 +1,4 @@
+import type { EnricherErrorStrategy } from './enrichment/types.js';
 import type { ValueSerializer } from './utils/serialization.js';
 
 export type { ErrorStrategy } from './utils/error-handler.js';
@@ -20,15 +21,6 @@ export interface SerializationConfig {
   /** Custom serializers applied before built-in converters (BigInt, Date) */
   customSerializers?: ValueSerializer[];
 }
-
-/**
- * Error handling strategy for enrichment failures
- *
- * - 'fail': Throw error and fail the operation (default, safest)
- * - 'log': Log warning and use fallback value
- * - Custom function: Custom error handler with fallback value
- */
-export type EnrichmentErrorStrategy = 'fail' | 'log' | ((error: Error) => unknown);
 
 /**
  * Global context enricher configuration
@@ -60,11 +52,11 @@ export interface GlobalContextEnricherConfig<TActor = unknown, TActorContext = u
     enricher(actor: TActor, db: TDbHandle): Promise<TActorContext>;
 
     /**
-     * Error handling strategy
+     * What a failure of the enricher becomes; see {@link EnricherErrorStrategy}
      *
      * @default 'fail'
      */
-    onError?: EnrichmentErrorStrategy;
+    onError?: EnricherErrorStrategy;
 
     /**
      * Fallback value when enrichment fails

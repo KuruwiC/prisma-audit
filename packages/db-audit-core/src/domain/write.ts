@@ -7,7 +7,7 @@
  */
 
 import type { AuditContext } from '../types.js';
-import type { AuditLogData } from './audit-log-types.js';
+import type { AuditRecord } from './mutation-event.js';
 
 /**
  * Writes audit records with database-specific API calls.
@@ -22,7 +22,7 @@ import type { AuditLogData } from './audit-log-types.js';
  * ```
  */
 export interface WriteExecutor {
-  write: (handle: unknown, modelName: string, logs: AuditLogData[]) => Promise<void>;
+  write: (handle: unknown, modelName: string, logs: AuditRecord[]) => Promise<void>;
 }
 
 /**
@@ -40,7 +40,7 @@ export interface WriteExecutor {
  * ```
  */
 export type WriteFn = (
-  logs: AuditLogData[],
+  logs: AuditRecord[],
   context: AuditContext,
-  defaultWrite: (logs: AuditLogData[]) => Promise<void>,
+  defaultWrite: (logs: AuditRecord[]) => Promise<void>,
 ) => Promise<void>;

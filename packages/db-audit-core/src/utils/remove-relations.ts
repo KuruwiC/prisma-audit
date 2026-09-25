@@ -6,7 +6,7 @@ const processObjectEntry = <T>(
   key: string,
   value: unknown,
   recurse: (obj: T) => T,
-  relationFieldNames: Set<string> | undefined,
+  relationFieldNames: ReadonlySet<string> | undefined,
 ): [string, unknown] | null => {
   if (relationFieldNames?.has(key)) {
     return null;
@@ -45,7 +45,7 @@ const processObjectEntry = <T>(
  * // => input (unchanged)
  * ```
  */
-export const removeRelations = <T>(obj: T, relationFieldNames?: Set<string>): T => {
+export const removeRelations = <T>(obj: T, relationFieldNames?: ReadonlySet<string>): T => {
   if (!obj || typeof obj !== 'object') {
     return obj;
   }

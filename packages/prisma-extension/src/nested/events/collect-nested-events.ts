@@ -26,7 +26,7 @@ import {
 } from '../../grammar/nested-operations.js';
 import type { GetOperationConfig } from '../../grammar/pre-fetch-selection.js';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../internal-types.js';
-import { identityOf, toMutationAction } from '../../pipeline/event-fields.js';
+import { identityOf } from '../../pipeline/event-fields.js';
 import type { SchemaMetadata, UniqueConstraint } from '../../schema/types.js';
 import { matchesUniqueWhere } from '../../utils/compound-where.js';
 import { nestedLog } from '../../utils/debug.js';
@@ -79,7 +79,7 @@ const toEvent = (
 ): MutationEvent => ({
   model: record.relatedModel,
   identity: identityOf(record.entity, pkConstraint.fields),
-  action: toMutationAction(record.action, record.beforeState),
+  action: record.action,
   before: record.beforeState ?? undefined,
   after: record.entity,
   origin: { path: nestedOp.path, op: nestedOp.operation },

@@ -13,7 +13,7 @@
  * {@link WriteFailurePolicy}).
  */
 
-import type { AuditLogData, WriteExecutor, WriteFn, WritePlan } from '@kuruwic/db-audit-core';
+import type { AuditRecord, WriteExecutor, WriteFn, WritePlan } from '@kuruwic/db-audit-core';
 import { type FailureSink, toError } from '../failure-sink.js';
 import { trackPendingWrite } from '../runtime/pending-writes.js';
 import type { ExecutionScope } from './execution-scope.js';
@@ -77,13 +77,13 @@ export const createAuditLogWriter = (deps: AuditLogWriterDependencies): AuditLog
     if (first === undefined) {
       return;
     }
-    const logs: AuditLogData[] = [...plan.records];
+    const logs: AuditRecord[] = [...plan.records];
     const modelName = first.entityType;
 
     const planned: PlannedWrite = {
       scope,
       writeOn: async (handle) => {
-        const defaultWrite = (logsToWrite: AuditLogData[]): Promise<void> =>
+        const defaultWrite = (logsToWrite: AuditRecord[]): Promise<void> =>
           writeExecutor.write(handle, auditLogModel, logsToWrite);
         if (writer) {
           await writer(logs, scope.auditContext, defaultWrite);

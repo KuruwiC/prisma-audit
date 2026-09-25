@@ -23,7 +23,7 @@ export const applyRelationConfig = (
   beforeData: Record<string, unknown> | null | undefined,
   afterData: Record<string, unknown> | null | undefined,
   includeRelations: boolean,
-  relationFieldNames?: Set<string>,
+  relationFieldNames?: ReadonlySet<string>,
 ): [Record<string, unknown> | null, Record<string, unknown> | null] => {
   if (includeRelations) {
     return [beforeData ?? null, afterData ?? null];

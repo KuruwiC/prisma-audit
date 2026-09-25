@@ -12,7 +12,7 @@ import { AUDIT_ACTION, type AuditAction } from '../grammar/operations.js';
 import type { GetOperationConfig } from '../grammar/pre-fetch-selection.js';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../internal-types.js';
 import type { AuditErrorContext } from '../types.js';
-import { getModelDelegate } from '../utils/model-accessor.js';
+import { getModelDelegate, hasOperation } from '../utils/model-accessor.js';
 
 /**
  * Outcome of the before-state fetch. "Not found", "fetch failed" and "never attempted" are kept
@@ -70,11 +70,7 @@ export interface BeforeStateDependencies {
   readonly onFetchFailure: (context: AuditErrorContext) => Promise<void>;
 }
 
-const hasFindUnique = (value: unknown): value is { findUnique: (args: { where: unknown }) => Promise<unknown> } =>
-  typeof value === 'object' &&
-  value !== null &&
-  'findUnique' in value &&
-  typeof (value as { findUnique: unknown }).findUnique === 'function';
+type FindUniqueDelegate = { findUnique: (args: { where: unknown }) => Promise<unknown> };
 
 const isRow = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -95,7 +91,7 @@ const findExistingRow = async (
   where: unknown,
 ): Promise<BeforeStateResult> => {
   const delegate = getModelDelegate(handle, modelName);
-  if (!hasFindUnique(delegate)) {
+  if (!hasOperation<FindUniqueDelegate>(delegate, 'findUnique')) {
     return { _tag: 'notFound' };
   }
   const row = await delegate.findUnique({ where });

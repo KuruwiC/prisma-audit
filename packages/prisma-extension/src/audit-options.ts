@@ -59,6 +59,15 @@ export const normalizeAuditOptions = (options: PrismaAuditExtensionOptions): Aud
   validateFieldConflicts(excludeFields, redact, aggregateMapping);
 
   const modelTags = (modelName: string): string[] => aggregateConfig.getEntityConfig(modelName)?.tags ?? [];
+  const relationFieldNamesByModel = new Map<string, ReadonlySet<string>>();
+  const relationFieldNames = (modelName: string): ReadonlySet<string> => {
+    let names = relationFieldNamesByModel.get(modelName);
+    if (names === undefined) {
+      names = new Set(schemaMetadata.getRelationFields(modelName).map((field) => field.name));
+      relationFieldNamesByModel.set(modelName, names);
+    }
+    return names;
+  };
   const auditLogModel = options.auditLogModel ? uncapitalizeFirst(options.auditLogModel) : 'auditLog';
 
   return {
@@ -80,8 +89,7 @@ export const normalizeAuditOptions = (options: PrismaAuditExtensionOptions): Aud
       excludeFields,
       redact,
       serialization: options.serialization,
-      relationFieldNames: (modelName) =>
-        new Set(schemaMetadata.getRelationFields(modelName).map((field) => field.name)),
+      relationFieldNames,
     },
     writer: hooks?.writer,
     observer: errorHandling?.observer,

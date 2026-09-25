@@ -5,7 +5,7 @@
  */
 
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../internal-types.js';
-import { getModelDelegate } from '../../utils/model-accessor.js';
+import { getModelDelegate, hasOperation } from '../../utils/model-accessor.js';
 
 export type PreFetchRecord = Record<string, unknown>;
 
@@ -22,24 +22,16 @@ export interface PreFetchListClient {
   findMany(args: { where: PreFetchRecord; select?: Record<string, true> }): Promise<PreFetchRecord[]>;
 }
 
-const isPreFetchModelClient = (value: unknown): value is PreFetchModelClient =>
-  typeof value === 'object' &&
-  value !== null &&
-  'findUnique' in value &&
-  typeof value.findUnique === 'function' &&
-  'findFirst' in value &&
-  typeof value.findFirst === 'function';
-
-const isPreFetchListClient = (value: unknown): value is PreFetchListClient =>
-  typeof value === 'object' && value !== null && 'findMany' in value && typeof value.findMany === 'function';
-
 /** `modelName` is PascalCase, as in the DMMF. */
 export const getPreFetchModelClient = (
   prismaClient: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
   modelName: string,
 ): PreFetchModelClient | undefined => {
   const delegate = getModelDelegate(prismaClient, modelName);
-  return isPreFetchModelClient(delegate) ? delegate : undefined;
+  return hasOperation<PreFetchModelClient>(delegate, 'findUnique') &&
+    hasOperation<PreFetchModelClient>(delegate, 'findFirst')
+    ? delegate
+    : undefined;
 };
 
 /** `modelName` is PascalCase, as in the DMMF. */
@@ -48,5 +40,5 @@ export const getPreFetchListClient = (
   modelName: string,
 ): PreFetchListClient | undefined => {
   const delegate = getModelDelegate(prismaClient, modelName);
-  return isPreFetchListClient(delegate) ? delegate : undefined;
+  return hasOperation<PreFetchListClient>(delegate, 'findMany') ? delegate : undefined;
 };

@@ -7,9 +7,8 @@
  * collected events to the record producer.
  */
 
-import type { MutationEvent } from '@kuruwic/db-audit-core';
+import type { AuditRecord, MutationEvent } from '@kuruwic/db-audit-core';
 import type { AuditAction } from '../grammar/operations.js';
-import type { AuditLogData } from '../types.js';
 import type { ExecutionScope } from './execution-scope.js';
 import type { RecordProducer } from './produce-records.js';
 
@@ -42,7 +41,7 @@ export interface OperationSteps<TPrepared, TExecuted> {
 
 export interface OperationOutcome {
   readonly result: unknown;
-  readonly records: AuditLogData[];
+  readonly records: AuditRecord[];
 }
 
 export interface OperationExecutor {

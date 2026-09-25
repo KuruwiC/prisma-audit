@@ -13,11 +13,11 @@ import type { SchemaMetadata } from '../schema/types.js';
 import {
   buildEntityMap,
   ensureIds,
-  extractPrimaryKey,
+  extractEntityIdentity,
   findManyByPKs,
   getPrimaryKeyFields,
 } from '../utils/id-generation.js';
-import { getModelDelegate } from '../utils/model-accessor.js';
+import { getModelDelegate, hasOperation } from '../utils/model-accessor.js';
 import { requiresBeforeState } from '../utils/operation-classifier.js';
 import { collectBatchOperationEvents } from './collect-events.js';
 import type { ExecutionScope } from './execution-scope.js';
@@ -56,18 +56,9 @@ interface BatchDelegate {
   readonly findMany: (args: { where: unknown; take?: number }) => Promise<Row[]>;
 }
 
-const hasFindMany = (value: unknown): value is BatchDelegate =>
-  typeof value === 'object' &&
-  value !== null &&
-  'findMany' in value &&
-  typeof (value as { findMany: unknown }).findMany === 'function';
-
-const hasUpdateManyAndReturn = (value: object): boolean =>
-  'updateManyAndReturn' in value && typeof value.updateManyAndReturn === 'function';
-
 const batchDelegate = (scope: ExecutionScope, modelName: string): BatchDelegate => {
   const delegate = getModelDelegate(scope.handle, modelName);
-  if (!hasFindMany(delegate)) {
+  if (!hasOperation<BatchDelegate>(delegate, 'findMany')) {
     throw new Error(`Model ${modelName} does not have findMany operation. This is required for batch operations.`);
   }
   return delegate;
@@ -79,7 +70,7 @@ const pairByPrimaryKey = (afterRows: Row[], beforeRows: Row[], pkFields: string[
   const beforeByPk = buildEntityMap(beforeRows, pkFields);
   return {
     rows: afterRows,
-    beforeStates: afterRows.map((row) => beforeByPk.get(extractPrimaryKey(row, pkFields)) ?? null),
+    beforeStates: afterRows.map((row) => beforeByPk.get(extractEntityIdentity(row, pkFields)) ?? null),
   };
 };
 
@@ -117,7 +108,7 @@ const prepareUpdateOrDelete = async (
   const where = args.where ?? {};
   const limit = typeof args.limit === 'number' ? args.limit : undefined;
 
-  if (action !== AUDIT_ACTION.DELETE_MANY && limit !== undefined && hasUpdateManyAndReturn(delegate)) {
+  if (action !== AUDIT_ACTION.DELETE_MANY && limit !== undefined && hasOperation(delegate, 'updateManyAndReturn')) {
     const beforeRows = await delegate.findMany({ where });
     return { kind: 'update-returning', beforeRows, pkFields: getPrimaryKeyFields(Prisma, model) };
   }

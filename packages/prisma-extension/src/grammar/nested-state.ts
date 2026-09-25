@@ -6,14 +6,15 @@
  * @module grammar/nested-state
  */
 
-import { AUDIT_ACTION, type AuditAction } from './operations.js';
+import type { MutationAction } from '@kuruwic/db-audit-core';
+import { AUDIT_ACTION } from './operations.js';
 
 export type NestedPreFetchResult = {
   before: Record<string, unknown> | null;
 };
 
 export type ResolvedNestedState = {
-  action: AuditAction;
+  action: MutationAction;
   before: Record<string, unknown> | null;
 };
 

@@ -13,8 +13,7 @@
 
 import type { AuditContext, AuditContextProvider } from '@kuruwic/db-audit-core';
 import type { TransactionalPrismaClient } from '../internal-types.js';
-import { trackPendingWrite } from './pending-writes.js';
-import { enterTransaction } from './scope.js';
+import { drainAfterCommit, enterTransaction } from './scope.js';
 
 type OriginalTransactionMethod = (...args: unknown[]) => Promise<unknown>;
 
@@ -80,11 +79,7 @@ export const createTransactionProxyHandler = (
 
       const transactionArgs = options ? [wrappedCallback, options] : [wrappedCallback];
       const result = await originalTransaction.apply(target, transactionArgs);
-
-      for (const deferredWrite of deferredWrites) {
-        trackPendingWrite(deferredWrite);
-      }
-
+      drainAfterCommit(deferredWrites);
       return result;
     }
 

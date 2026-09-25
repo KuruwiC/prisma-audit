@@ -7,12 +7,12 @@
 import type {
   AggregateMapping,
   AuditActor,
-  AuditContext,
   AuditContextProvider,
   AuditLogData as CoreAuditLogData,
   AuditLogInput as CoreAuditLogInput,
   ErrorStrategy,
   GlobalContextEnricherConfig,
+  WriteFn,
 } from '@kuruwic/db-audit-core';
 
 /**
@@ -31,12 +31,10 @@ export type AuditLogInput = CoreAuditLogInput;
 
 /**
  * Custom audit log writer callback
+ *
+ * Re-exported from @kuruwic/db-audit-core's `WriteFn`
  */
-export type AuditLogWriter = (
-  logs: AuditLogData[],
-  context: AuditContext,
-  defaultWrite: (logs: AuditLogData[]) => Promise<void>,
-) => Promise<void>;
+export type AuditLogWriter = WriteFn;
 
 /**
  * Change calculation configuration

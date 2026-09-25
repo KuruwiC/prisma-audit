@@ -8,9 +8,8 @@
  * transaction reads that transaction's writes.
  */
 
-import type { ComposeConfig, MutationEvent, ResolveConfig } from '@kuruwic/db-audit-core';
+import type { AuditRecord, ComposeConfig, MutationEvent, ResolveConfig } from '@kuruwic/db-audit-core';
 import { compose, resolve } from '@kuruwic/db-audit-core';
-import type { AuditLogData } from '../types.js';
 import type { ExecutionScope } from './execution-scope.js';
 
 export interface RecordProducerConfig {
@@ -18,7 +17,7 @@ export interface RecordProducerConfig {
   readonly composeConfig: ComposeConfig;
 }
 
-export type RecordProducer = (events: readonly MutationEvent[], scope: ExecutionScope) => Promise<AuditLogData[]>;
+export type RecordProducer = (events: readonly MutationEvent[], scope: ExecutionScope) => Promise<AuditRecord[]>;
 
 export const createRecordProducer = (config: RecordProducerConfig): RecordProducer => {
   return async (events, scope) => {

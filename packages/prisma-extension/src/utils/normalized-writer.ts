@@ -12,9 +12,9 @@
  * @module utils/normalized-writer
  */
 
-import type { AuditContext } from '@kuruwic/db-audit-core';
+import type { AuditContext, AuditRecord } from '@kuruwic/db-audit-core';
 import { currentScope } from '../runtime/scope.js';
-import type { AuditLogData, AuditLogWriter } from '../types.js';
+import type { AuditLogWriter } from '../types.js';
 
 /**
  * Entity-normalized schema configuration
@@ -77,19 +77,19 @@ const capitalizeModelName = (name: string): string => {
   return name.charAt(0).toUpperCase() + name.slice(1);
 };
 
-const getActorKey = (log: AuditLogData): string => {
+const getActorKey = (log: AuditRecord): string => {
   return `${log.actorCategory}:${log.actorType}:${log.actorId}`;
 };
 
-const getEntityKey = (log: AuditLogData): string => {
+const getEntityKey = (log: AuditRecord): string => {
   return `${log.entityCategory}:${log.entityType}:${log.entityId}`;
 };
 
-const getAggregateKey = (log: AuditLogData): string => {
+const getAggregateKey = (log: AuditRecord): string => {
   return `${log.aggregateCategory}:${log.aggregateType}:${log.aggregateId}`;
 };
 
-const deduplicateData = (logs: AuditLogData[]): DeduplicationResult => {
+const deduplicateData = (logs: AuditRecord[]): DeduplicationResult => {
   const actors = new Map<string, ActorData>();
   const entities = new Map<string, EntityData>();
   const aggregates = new Map<string, AggregateData>();
@@ -254,7 +254,7 @@ const batchUpsertAggregates = async (
 const createAuditEvents = async (
   tx: TransactionClient,
   modelName: string,
-  logs: AuditLogData[],
+  logs: AuditRecord[],
   actorMap: Map<string, string>,
   entityMap: Map<string, string>,
   aggregateMap: Map<string, string>,
@@ -327,11 +327,7 @@ type PrismaClientWithTransaction = {
  * ```
  */
 export const createEntityNormalizedWriter = (schema: NormalizedSchema, basePrisma: unknown): AuditLogWriter => {
-  return async (
-    logs: AuditLogData[],
-    _context: AuditContext,
-    _defaultWrite: (logs: AuditLogData[]) => Promise<void>,
-  ) => {
+  return async (logs: AuditRecord[], _context: AuditContext, _defaultWrite: (logs: AuditRecord[]) => Promise<void>) => {
     if (logs.length === 0) {
       return;
     }
@@ -356,12 +352,12 @@ export const createEntityNormalizedWriter = (schema: NormalizedSchema, basePrism
   };
 };
 
-const getChangeKey = (log: AuditLogData): string => {
+const getChangeKey = (log: AuditRecord): string => {
   return `${log.entityCategory}:${log.entityType}:${log.entityId}:${log.action}`;
 };
 
-const groupLogsByChange = (logs: AuditLogData[]): Map<string, AuditLogData[]> => {
-  const groups = new Map<string, AuditLogData[]>();
+const groupLogsByChange = (logs: AuditRecord[]): Map<string, AuditRecord[]> => {
+  const groups = new Map<string, AuditRecord[]>();
 
   for (const log of logs) {
     const key = getChangeKey(log);
@@ -400,11 +396,7 @@ const groupLogsByChange = (logs: AuditLogData[]): Map<string, AuditLogData[]> =>
  * ```
  */
 export const createSharedChangeWriter = (schema: SharedChangeSchema, basePrisma: unknown): AuditLogWriter => {
-  return async (
-    logs: AuditLogData[],
-    _context: AuditContext,
-    _defaultWrite: (logs: AuditLogData[]) => Promise<void>,
-  ) => {
+  return async (logs: AuditRecord[], _context: AuditContext, _defaultWrite: (logs: AuditRecord[]) => Promise<void>) => {
     if (logs.length === 0) {
       return;
     }
@@ -413,7 +405,7 @@ export const createSharedChangeWriter = (schema: SharedChangeSchema, basePrisma:
 
     const createChangeRecord = async (
       changeModel: { create: (args: { data: unknown }) => Promise<{ id: string }> },
-      representativeLog: AuditLogData,
+      representativeLog: AuditRecord,
     ): Promise<{ id: string }> => {
       return changeModel.create({
         data: {
@@ -432,7 +424,7 @@ export const createSharedChangeWriter = (schema: SharedChangeSchema, basePrisma:
     const createAggregateRecords = async (
       aggregateModel: { create: (args: { data: unknown }) => Promise<unknown> },
       changeId: string,
-      groupedLogs: readonly AuditLogData[],
+      groupedLogs: readonly AuditRecord[],
     ): Promise<void> => {
       for (const log of groupedLogs) {
         await aggregateModel.create({
@@ -456,7 +448,7 @@ export const createSharedChangeWriter = (schema: SharedChangeSchema, basePrisma:
     const processChangeGroups = async (
       changeModel: { create: (args: { data: unknown }) => Promise<{ id: string }> },
       aggregateModel: { create: (args: { data: unknown }) => Promise<unknown> },
-      changeGroups: Map<string, AuditLogData[]>,
+      changeGroups: Map<string, AuditRecord[]>,
     ): Promise<void> => {
       for (const [_changeKey, groupedLogs] of changeGroups) {
         const representativeLog = groupedLogs[0];

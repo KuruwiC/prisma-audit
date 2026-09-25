@@ -7,6 +7,8 @@
 import { ENRICHMENT_TIMEOUTS } from '../constants.js';
 import type { EnricherConfig, EnricherErrorStrategy } from './types.js';
 
+const toError = (caught: unknown): Error => (caught instanceof Error ? caught : new Error(String(caught)));
+
 /** Rejects with 'Enricher timeout' when `timeoutMs` elapses first; the timer is cleared either way so a settled call leaves nothing pending. */
 const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number): Promise<T> => {
   let timeoutId: NodeJS.Timeout | undefined;
@@ -70,7 +72,7 @@ export const executeEnricherSafely = async <TInput, TContext, TMeta = void>(
   try {
     return await withTimeout(config.enricher(input, db, meta as TMeta), timeoutMs);
   } catch (unknownError) {
-    const error = unknownError instanceof Error ? unknownError : new Error(String(unknownError));
+    const error = toError(unknownError);
     const errorStrategy = config.onError ?? 'fail';
 
     return handleEnricherError<TContext>(error, errorStrategy, config.fallback);
@@ -140,7 +142,7 @@ export const executeBatchEnricherSafely = async <TInput, TContext, TMeta = void>
     }
     return enrichedContexts;
   } catch (unknownError) {
-    const error = unknownError instanceof Error ? unknownError : new Error(String(unknownError));
+    const error = toError(unknownError);
     const errorStrategy = config.onError ?? 'fail';
 
     return handleBatchEnricherError<TContext>(error, errorStrategy, config.fallback, inputs.length);

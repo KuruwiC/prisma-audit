@@ -115,12 +115,11 @@ const resolveStates = <TModelName extends string>(
   const states = config.redact ? redactStates({ before, after, changes }, config.redact) : { before, after, changes };
 
   const includeRelations = entity.includeRelations ?? config.includeRelations ?? false;
-  const relationFieldNames = config.relationFieldNames(event.model);
   const [strippedBefore, strippedAfter] = applyRelationConfig(
     states.before,
     states.after,
     includeRelations,
-    relationFieldNames === undefined ? undefined : new Set(relationFieldNames),
+    config.relationFieldNames(event.model),
   );
 
   return { before: strippedBefore, after: strippedAfter, changes: states.changes };

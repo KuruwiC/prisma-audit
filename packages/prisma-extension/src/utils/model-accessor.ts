@@ -116,3 +116,10 @@ export const getModelOperation = (
   const method = (delegate as Record<string, unknown>)[operation];
   return typeof method === 'function' ? (method as (args: unknown) => Promise<unknown>) : undefined;
 };
+
+/**
+ * Whether `delegate` is an object whose `operation` property is a function. Narrows to
+ * `TDelegate`, the shape the caller invokes the operation through.
+ */
+export const hasOperation = <TDelegate extends object>(delegate: unknown, operation: string): delegate is TDelegate =>
+  getModelOperation(delegate, operation) !== undefined;
