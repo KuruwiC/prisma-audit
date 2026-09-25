@@ -11,7 +11,6 @@ import {
   validateAggregateMapping,
 } from '@kuruwic/prisma-audit-core';
 import { describe, expect, it } from 'vitest';
-import { resolveAndFilterSurvivors } from '../src/lifecycle/batch-aggregate-resolver.js';
 
 describe('normalizeId', () => {
   it('should convert primitive types to string', () => {
@@ -253,112 +252,6 @@ describe('resolveAggregateId', () => {
 
     const id = await resolveAggregateId(entity, aggregateRoot, null);
     expect(id).toBe('42');
-  });
-});
-
-describe('resolveAndFilterSurvivors (aggregate root resolution)', () => {
-  it('should resolve the self aggregate root by default', async () => {
-    const entity = defineEntity({
-      type: 'User',
-    });
-    const data = { id: 'user-123', name: 'John' };
-    const mockPrisma = {};
-
-    const survivors = await resolveAndFilterSurvivors([data], entity, mockPrisma);
-
-    expect(survivors).toHaveLength(1);
-    expect(survivors[0]?.aggregateRoots).toEqual([
-      {
-        aggregateCategory: 'model',
-        aggregateType: 'User',
-        aggregateId: 'user-123',
-      },
-    ]);
-  });
-
-  it('should resolve self and declared aggregate roots', async () => {
-    const entity = defineEntity({
-      type: 'Post',
-      aggregates: [to('User', foreignKey('authorId'))],
-    });
-
-    const data = {
-      id: 'post-456',
-      authorId: 'user-123',
-    };
-    const mockPrisma = {};
-
-    const survivors = await resolveAndFilterSurvivors([data], entity, mockPrisma);
-
-    const roots = survivors[0]?.aggregateRoots ?? [];
-    expect(roots).toHaveLength(2);
-    expect(roots[0]).toMatchObject({
-      aggregateCategory: 'model',
-      aggregateType: 'Post',
-      aggregateId: 'post-456',
-    });
-    // Roots produced by to() declarations carry their source projection
-    expect(roots[1]).toMatchObject({
-      aggregateCategory: 'model',
-      aggregateType: 'User',
-      aggregateId: 'user-123',
-      source: entity.aggregates[0],
-    });
-  });
-
-  it('should skip failed id resolutions (null FK)', async () => {
-    const entity = defineEntity({
-      type: 'Post',
-      aggregates: [to('User', foreignKey('authorId'))],
-    });
-
-    const data = { id: 'post-456', title: 'Test' }; // Missing authorId
-    const mockPrisma = {};
-
-    const survivors = await resolveAndFilterSurvivors([data], entity, mockPrisma);
-
-    // Only Post itself should be resolved
-    expect(survivors[0]?.aggregateRoots).toEqual([
-      {
-        aggregateCategory: 'model',
-        aggregateType: 'Post',
-        aggregateId: 'post-456',
-      },
-    ]);
-  });
-
-  it('should respect self: false option', async () => {
-    const entity = defineEntity({
-      type: 'PostTag',
-      self: false,
-      aggregates: [to('Post', foreignKey('postId')), to('Tag', foreignKey('tagId'))],
-    });
-
-    const data = { id: 'pt-123', postId: 'post-456', tagId: 'tag-789' };
-    const mockPrisma = {};
-
-    const survivors = await resolveAndFilterSurvivors([data], entity, mockPrisma);
-
-    // Should not include self (PostTag)
-    const roots = survivors[0]?.aggregateRoots ?? [];
-    expect(roots).toHaveLength(2);
-    expect(roots[0]?.aggregateType).toBe('Post');
-    expect(roots[1]?.aggregateType).toBe('Tag');
-  });
-
-  it('should filter out entities with no aggregate roots', async () => {
-    const entity = defineEntity({
-      type: 'PostTag',
-      self: false,
-      aggregates: [to('Post', foreignKey('postId'))],
-    });
-
-    const data = { id: 'pt-123', postId: null };
-    const mockPrisma = {};
-
-    const survivors = await resolveAndFilterSurvivors([data], entity, mockPrisma);
-
-    expect(survivors).toEqual([]);
   });
 });
 

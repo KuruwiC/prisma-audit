@@ -3,7 +3,7 @@
  *
  * Collects delete targets from pre-fetched before states.
  * Falls back to extracting entity ID from operation data when prefetch is unavailable.
- * Enrichment and audit log building are handled by the batch pipeline in audit-log-builder.ts.
+ * The collected records become mutation events in collect-nested-events.ts.
  */
 
 import { AUDIT_ACTION, type EntityIdentityKey, nestedLog, UNRESOLVED_ENTITY_ID } from '@kuruwic/prisma-audit-core';
@@ -82,7 +82,7 @@ const reportUnresolvedEntityId = async (
  * @param pkConstraint - The deleted model's primary key. The fallback reads the constraint's
  *   declared name as well as its fields, because a named composite key wraps the WHERE clause
  *   under that name.
- * @returns Collected records ready for batch enrichment and audit log building
+ * @returns Collected records, ready to become mutation events
  */
 export const collectDeleteRecords = async (
   nestedOp: NestedOperationInfo,

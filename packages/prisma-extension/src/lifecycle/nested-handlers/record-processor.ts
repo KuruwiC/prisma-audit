@@ -2,16 +2,15 @@
  * Nested Record Processor
  *
  * Collects nested records (create/update/upsert) by resolving action and before state.
- * Enrichment and audit log building are handled by the batch pipeline in audit-log-builder.ts.
+ * The collected records become mutation events in collect-nested-events.ts.
  */
 
 import { nestedLog } from '@kuruwic/prisma-audit-core';
 import type { NestedOperationInfo, NestedPreFetchResults } from '../../grammar/nested-operations.js';
 import type { GetOperationConfig } from '../../grammar/pre-fetch-selection.js';
-import type { PrismaAction } from '../../types.js';
 import { extractEntityIdentity } from '../../utils/id-generation.js';
 import type { CollectedNestedRecord } from './collected-record.js';
-import { resolveNestedOperationState } from './state-resolver.js';
+import { type NestedRecordAction, resolveNestedOperationState } from './state-resolver.js';
 
 /**
  * Nested records information
@@ -27,17 +26,16 @@ export type NestedRecordsInfo = {
  *
  * Skips when action is 'connect' (connectOrCreate to existing record or connect operation).
  */
-const shouldSkipNestedRecord = (action: PrismaAction): boolean => {
-  return action === ('connect' as PrismaAction);
+const shouldSkipNestedRecord = (action: NestedRecordAction): action is 'connect' => {
+  return action === 'connect';
 };
 
 /**
  * Collect nested records for create/update/upsert operations.
  *
  * Resolves action and before state for each record, skipping 'connect' operations.
- * Does NOT perform enrichment or build audit logs — that is the caller's responsibility.
  *
- * @returns Collected records ready for batch enrichment
+ * @returns Collected records, ready to become mutation events
  */
 export const collectNestedRecords = (
   nestedOp: NestedOperationInfo,

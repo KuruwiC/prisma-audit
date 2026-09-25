@@ -5,7 +5,7 @@
  * for nested operations based on operation type and pre-fetched data.
  */
 
-import { AUDIT_ACTION, type EntityIdentityKey } from '@kuruwic/prisma-audit-core';
+import { AUDIT_ACTION, type AuditAction, type EntityIdentityKey } from '@kuruwic/prisma-audit-core';
 import type { NestedOperationInfo, NestedPreFetchResults } from '../../grammar/nested-operations.js';
 import {
   resolveConnectOrCreateState,
@@ -14,8 +14,10 @@ import {
   resolveUpsertState,
 } from '../../grammar/nested-state.js';
 import type { GetOperationConfig } from '../../grammar/pre-fetch-selection.js';
-import type { PrismaAction } from '../../types.js';
 import { getPreFetchResult } from '../pre-fetch/pre-fetch-result-store.js';
+
+/** Action of a nested record; `connect` marks a record that only got linked and is not audited */
+export type NestedRecordAction = AuditAction | 'connect';
 
 /**
  * Resolved state result
@@ -25,7 +27,7 @@ import { getPreFetchResult } from '../pre-fetch/pre-fetch-result-store.js';
  * Special case: action === 'connect' signals that audit log should be skipped
  */
 export type ResolvedState = {
-  action: PrismaAction;
+  action: NestedRecordAction;
   beforeState: Record<string, unknown> | null;
 };
 
@@ -81,7 +83,7 @@ const resolveConnectOrCreateOperation = (
   if (resolved === null) {
     // Record existed - this was a connect operation
     return {
-      action: 'connect' as PrismaAction,
+      action: 'connect',
       beforeState: null,
     };
   }
@@ -95,7 +97,7 @@ const resolveConnectOrCreateOperation = (
 
 const resolveConnectOperation = (): ResolvedState => {
   return {
-    action: 'connect' as PrismaAction,
+    action: 'connect',
     beforeState: null,
   };
 };

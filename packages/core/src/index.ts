@@ -71,13 +71,6 @@ export type {
 // Domain - Smart Constructors
 export type { Result, ValidationError } from './domain/smart-constructors.js';
 export { createAuditLogData } from './domain/smart-constructors.js';
-// Enrichment - Functions
-export { enrichActorContext } from './enrichment/actor.js';
-export {
-  batchEnrichEntityContexts,
-  batchEnrichProjectionContexts,
-  batchEnrichRootAggregateContexts,
-} from './enrichment/batch.js';
 // Enrichment - Types
 export type { ProjectionEnrichmentMeta } from './enrichment/types.js';
 // Global Singleton

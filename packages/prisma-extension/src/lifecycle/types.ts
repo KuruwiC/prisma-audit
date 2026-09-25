@@ -4,7 +4,7 @@
  * Type-safe context transformation pipeline for audit logging. Each stage adds new
  * properties while preserving type safety.
  *
- * Flow: InitialContext → PreparedContext → ExecutedContext → EnrichedContext → FinalContext
+ * Flow: InitialContext → PreparedContext → ExecutedContext → FinalContext
  *
  * @module lifecycle/types
  */
@@ -76,27 +76,11 @@ export interface ExecutedContext extends PreparedContext {
 }
 
 /**
- * Enriched context after enrichment stage
- *
- * Includes enriched contextual information for actor and entity. Enrichment adds
- * human-readable or computed metadata not present in raw data.
- *
- * Aggregate context is resolved separately in the build-logs stage via
- * enrichAggregateContexts, enabling batch optimization per projection.
- */
-export interface EnrichedContext extends ExecutedContext {
-  /** Enriched actor context (role, department, email) */
-  actorContext: unknown | null;
-  /** Enriched entity context (title, status, authorName) */
-  entityContext: unknown | null;
-}
-
-/**
  * Final context after log generation stage
  *
  * Includes generated audit log entries ready to be written to storage.
  */
-export interface FinalContext extends EnrichedContext {
+export interface FinalContext extends ExecutedContext {
   /** Generated audit log entries */
   logs: ReadonlyArray<AuditLogData>;
 }
@@ -125,25 +109,11 @@ export interface BatchInitialContext {
 }
 
 /**
- * Enriched context for batch operations after enrichment stage
- *
- * Includes enriched contextual information for actor and all entities. Enrichment is
- * performed in batch to optimize database queries. Aggregate contexts are enriched later,
- * in the build-logs stage via enrichAggregateContexts.
- */
-export interface BatchEnrichedContext extends BatchInitialContext {
-  /** Enriched actor context (role, department, email) */
-  actorContext: unknown | null;
-  /** Enriched entity contexts (parallel to entities array) */
-  entityContexts: ReadonlyArray<unknown | null>;
-}
-
-/**
  * Final context for batch operations after log generation stage
  *
  * Includes generated audit log entries for all entities, ready to be written to storage.
  */
-export interface BatchFinalContext extends BatchEnrichedContext {
+export interface BatchFinalContext extends BatchInitialContext {
   /** Generated audit log entries for all entities */
   logs: ReadonlyArray<AuditLogData>;
   /** Result of executed batch operation */

@@ -9,15 +9,13 @@
  * @see {@link PrismaAuditExtensionOptions}
  */
 
-import type { AuditContext, ErrorStrategy } from '@kuruwic/prisma-audit-core';
+import type { AuditContext, ComposeConfig, ErrorStrategy, ResolveConfig } from '@kuruwic/prisma-audit-core';
 import {
   AUDIT_ACTION,
-  batchEnrichEntityContexts,
   createAggregateConfig,
   createErrorHandler,
   createWriteStrategySelector,
   DEFAULTS,
-  enrichActorContext,
   getRuntimeContext,
   type PolicyConfig,
   policy,
@@ -25,7 +23,6 @@ import {
   type WriteResult,
 } from '@kuruwic/prisma-audit-core';
 import { createPrismaWriteExecutor } from './adapters/write-executor.js';
-import { buildAuditLog } from './audit-log-builder/index.js';
 import { createPrismaClientManager } from './client-manager/index.js';
 import { getNestedOperationConfig, validateFieldConflicts } from './config/index.js';
 import type { NestedPreFetchResults } from './grammar/nested-operations.js';
@@ -35,11 +32,7 @@ import type {
   PrismaNamespace,
   TransactionalPrismaClient,
 } from './internal-types.js';
-import { createBatchBuildLogsStage, createBatchEnrichContextsStage } from './lifecycle/batch-stages.js';
-import {
-  type BuildNestedAuditLogsParams,
-  buildNestedAuditLogs,
-} from './lifecycle/nested-handlers/audit-log-builder.js';
+import { createBatchBuildLogsStage } from './lifecycle/batch-stages.js';
 import { handleTopLevelOperation, type TopLevelHandlerDependencies } from './lifecycle/operation-handlers/index.js';
 import { runLifecyclePipeline } from './lifecycle/pipeline.js';
 import {
@@ -48,7 +41,6 @@ import {
 } from './lifecycle/pre-fetch/coordinator.js';
 import {
   createBuildLogsStage,
-  createEnrichContextsStage,
   createExecuteOperationStage,
   createFetchBeforeStateStage,
   type StageDependencies,
@@ -56,6 +48,7 @@ import {
 import { createTransactionProxy } from './lifecycle/transaction-proxy.js';
 import { withOptionalTransaction } from './lifecycle/transaction-wrapper.js';
 import type { BatchFinalContext, BatchInitialContext, BeforeStateResult } from './lifecycle/types.js';
+import { createRecordProducer } from './pipeline/produce-records.js';
 import type {
   AuditErrorContext,
   AuditLogData,
@@ -150,6 +143,20 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
   const writeFailurePolicyConfig: WriteFailurePolicy = errorHandling?.writeFailurePolicy ?? 'log';
 
   const aggregateConfig = createAggregateConfig(aggregateMapping);
+
+  const resolveConfig: ResolveConfig = {
+    entity: aggregateConfig.getEntityConfig,
+    rootEntity: aggregateConfig.getEntityConfigByType,
+    actor: contextEnricher?.actor,
+  };
+
+  const composeConfig: ComposeConfig = {
+    entity: aggregateConfig.getEntityConfig,
+    excludeFields,
+    redact,
+    serialization,
+    relationFieldNames: (modelName) => new Set(schemaMetadata.getRelationFields(modelName).map((field) => field.name)),
+  };
 
   const getModelTags = (modelName: string): string[] => aggregateConfig.getEntityConfig(modelName)?.tags ?? [];
 
@@ -390,44 +397,21 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     fetchBeforeState,
     preFetchNestedRecordsBeforeOperation: preFetchNestedRecordsBeforeOperationWrapper,
     getNestedOperationConfig: getNestedOperationConfigWrapper,
-    enrichActorContext,
-    batchEnrichEntityContexts: (entities, config, prisma) => {
-      return batchEnrichEntityContexts(entities, config, prisma);
+    schemaMetadata,
+    // A nested delete whose primary key cannot be resolved is skipped rather than
+    // recorded under a partial or fabricated identity (see collectDeleteRecords). It is
+    // reported under its own phase: the record's identity is what failed, not a
+    // pre-fetch or diff generation.
+    onUnresolvedDeleteEntityId: async ({ relatedModel, entityId, pkFields, error }) => {
+      await notifyObserver({
+        phase: 'entity-id-resolution',
+        modelName: relatedModel,
+        operation: 'delete',
+        params: { entityId, pkFields },
+        error,
+      });
     },
-    buildAuditLog,
-    buildNestedAuditLogs: (params: BuildNestedAuditLogsParams) =>
-      buildNestedAuditLogs({
-        ...params,
-        deps: {
-          aggregateConfig,
-          excludeFields,
-          redact,
-          serialization,
-          basePrisma: baseClient,
-          getNestedOperationConfig: getNestedOperationConfigWrapper,
-          Prisma,
-          // A nested delete whose primary key cannot be resolved is skipped rather than
-          // recorded under a partial or fabricated identity (see collectDeleteRecords). It is
-          // reported under its own phase: the record's identity is what failed, not a
-          // pre-fetch or diff generation.
-          onUnresolvedDeleteEntityId: async ({ relatedModel, entityId, pkFields, error }) => {
-            await notifyObserver({
-              phase: 'entity-id-resolution',
-              modelName: relatedModel,
-              operation: 'delete',
-              params: { entityId, pkFields },
-              error,
-            });
-          },
-        },
-      }),
-    aggregateConfig,
-    excludeFields,
-    redact,
-    serialization,
-    basePrisma: baseClient,
-    Prisma,
-    contextEnricher,
+    produceRecords: createRecordProducer({ resolveConfig, composeConfig }, baseClient),
   });
 
   const createLifecycleStages = (baseClient: PrismaClientWithDynamicAccess) => {
@@ -435,7 +419,6 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     return [
       createFetchBeforeStateStage(stageDependencies),
       createExecuteOperationStage(),
-      createEnrichContextsStage(stageDependencies),
       createBuildLogsStage(stageDependencies),
     ] as const;
   };
@@ -502,7 +485,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
   };
 
   /**
-   * Runs the batch enrich/build stages and returns the resulting audit logs unwritten;
+   * Runs the batch build stage and returns the resulting audit logs unwritten;
    * `executeBatch` writes them outside its try/catch (see the note above `executeBatch`).
    */
   const runBatchPipeline = async (
@@ -510,10 +493,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     baseClient: PrismaClientWithDynamicAccess,
   ): Promise<AuditLogData[]> => {
     const stageDependencies = createStageDependencies(baseClient);
-    const batchStages = [
-      createBatchEnrichContextsStage(stageDependencies),
-      createBatchBuildLogsStage(stageDependencies),
-    ] as const;
+    const batchStages = [createBatchBuildLogsStage(stageDependencies)] as const;
 
     const batchFinalContext = await runLifecyclePipeline<BatchInitialContext, BatchFinalContext>(
       batchInitialContext,
