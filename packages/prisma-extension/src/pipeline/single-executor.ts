@@ -79,7 +79,7 @@ export const createSingleExecutor = (deps: SingleExecutorDependencies): Operatio
             writeSets,
             nestedPreFetchResults,
           },
-          { Prisma, schemaMetadata, getNestedOperationConfig, onSnapshotFailure: failureSink.notify },
+          { Prisma, schemaMetadata, getNestedOperationConfig },
         )
       : new Map();
     return { beforeStateResult, nestedPreFetchResults, nestedOperations, writeSets, preExistingRows };

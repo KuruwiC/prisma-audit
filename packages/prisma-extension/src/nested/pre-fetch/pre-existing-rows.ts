@@ -11,7 +11,6 @@
  * @module nested/pre-fetch/pre-existing-rows
  */
 
-import { toError } from '../../failure-sink.js';
 import {
   getPrimaryKeyConstraint,
   type NestedOperationInfo,
@@ -24,7 +23,6 @@ import type {
   TransactionalPrismaClient,
 } from '../../internal-types.js';
 import type { SchemaMetadata, UniqueConstraint } from '../../schema/types.js';
-import type { AuditErrorObserver } from '../../types.js';
 import { preFetchLog } from '../../utils/debug.js';
 import { extractEntityIdentity } from '../../utils/id-generation.js';
 import type { EntityIdentityKey } from '../../utils/identity-key.js';
@@ -51,12 +49,6 @@ export interface SnapshotPreExistingRowsDependencies {
   readonly Prisma: PrismaNamespace;
   readonly schemaMetadata: SchemaMetadata;
   readonly getNestedOperationConfig: GetOperationConfig;
-  /**
-   * Notified when a snapshot query fails; the path is then left without a snapshot, so the rows
-   * returned there that match no operation are audited as created, and the caller's operation
-   * continues.
-   */
-  readonly onSnapshotFailure?: AuditErrorObserver;
 }
 
 interface PathRelation {
@@ -150,24 +142,10 @@ const snapshotPath = async (
   return identities;
 };
 
-const reportSnapshotFailure = async (
-  onSnapshotFailure: AuditErrorObserver | undefined,
-  operation: NestedOperationInfo,
-  error: unknown,
-): Promise<void> => {
-  if (!onSnapshotFailure) return;
-  await onSnapshotFailure({
-    phase: 'pre-fetch',
-    modelName: operation.relatedModel,
-    operation: operation.operation,
-    params: operation.data,
-    error: toError(error),
-  });
-};
-
 /**
  * Snapshot the primary keys each to-many path with a pending create holds under its parent rows.
- * A path whose relation cannot be resolved, or whose snapshot query fails, gets no entry.
+ * A path whose relation cannot be resolved gets no entry. A failed snapshot query rejects: without
+ * the snapshot the rows that existed before cannot be told apart from the created ones.
  */
 export const snapshotPreExistingRows = async (
   input: SnapshotPreExistingRowsInput,
@@ -180,14 +158,9 @@ export const snapshotPreExistingRows = async (
     if (!writeSet.createsPending || !operation) {
       continue;
     }
-    try {
-      const relation = resolvePathRelation(input, deps, operation);
-      if (relation) {
-        preExisting.set(path, await snapshotPath(input, deps, relation));
-      }
-    } catch (error) {
-      preFetchLog('snapshot failed: path=%s error=%o', path, error);
-      await reportSnapshotFailure(deps.onSnapshotFailure, operation, error);
+    const relation = resolvePathRelation(input, deps, operation);
+    if (relation) {
+      preExisting.set(path, await snapshotPath(input, deps, relation));
     }
   }
 

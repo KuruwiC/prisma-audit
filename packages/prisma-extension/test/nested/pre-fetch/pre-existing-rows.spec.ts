@@ -8,7 +8,6 @@ import type { DMMFField, PrismaClientWithDynamicAccess, PrismaNamespace } from '
 import { buildNestedWriteSets, detectExecutedNestedOperations } from '../../../src/nested/events/write-set.js';
 import { snapshotPreExistingRows } from '../../../src/nested/pre-fetch/pre-existing-rows.js';
 import { storePreFetchResult } from '../../../src/nested/pre-fetch/pre-fetch-result-store.js';
-import type { AuditErrorObserver } from '../../../src/types.js';
 import { createSchemaMetadataFromDMMF } from '../../../src/utils/schema-metadata.js';
 
 const scalar = (name: string, extra: Partial<DMMFField> = {}): DMMFField => ({
@@ -77,7 +76,6 @@ const snapshot = (
   args: Record<string, unknown>,
   delegates: Record<string, Record<string, unknown>>,
   nestedPreFetchResults: NestedPreFetchResults = new Map(),
-  onSnapshotFailure?: AuditErrorObserver,
 ) => {
   const nestedOperations = detectExecutedNestedOperations(
     schemaMetadata,
@@ -95,7 +93,7 @@ const snapshot = (
       writeSets: buildNestedWriteSets(nestedOperations, nestedPreFetchResults, new Map()),
       nestedPreFetchResults,
     },
-    { Prisma, schemaMetadata, getNestedOperationConfig, onSnapshotFailure },
+    { Prisma, schemaMetadata, getNestedOperationConfig },
   );
 };
 
@@ -163,31 +161,21 @@ describe('snapshotPreExistingRows', () => {
     );
   });
 
-  it('reports a failed snapshot under pre-fetch and leaves the path without one', async () => {
+  it('rejects with the error of a failed snapshot query', async () => {
     const error = new Error('connection reset');
-    const onSnapshotFailure = vi.fn<AuditErrorObserver>(async () => {});
 
-    const preExisting = await snapshot(
-      { where: { id: 'u1' }, data: { posts: { create: { title: 'A' } } } },
-      {
-        user: { findUnique: vi.fn(), findFirst: vi.fn() },
-        post: {
-          findMany: vi.fn(async () => {
-            throw error;
-          }),
+    await expect(
+      snapshot(
+        { where: { id: 'u1' }, data: { posts: { create: { title: 'A' } } } },
+        {
+          user: { findUnique: vi.fn(), findFirst: vi.fn() },
+          post: {
+            findMany: vi.fn(async () => {
+              throw error;
+            }),
+          },
         },
-      },
-      new Map(),
-      onSnapshotFailure,
-    );
-
-    expect(onSnapshotFailure).toHaveBeenCalledWith({
-      phase: 'pre-fetch',
-      modelName: 'Post',
-      operation: 'create',
-      params: { title: 'A' },
-      error,
-    });
-    expect(preExisting.size).toBe(0);
+      ),
+    ).rejects.toBe(error);
   });
 });

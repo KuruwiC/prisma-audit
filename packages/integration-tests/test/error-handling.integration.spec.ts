@@ -788,6 +788,89 @@ describe('Error Handling Integration', () => {
         await rawBasePrisma.$disconnect();
       }
     });
+    describe('a failed snapshot of the rows a to-many relation holds before a nested create', () => {
+      // A nested create under an existing user tells the new post apart from the user's
+      // existing posts by the primary keys the relation held before the write. That snapshot
+      // (the first `post.findMany` once armed) is injected to fail; without it the existing
+      // posts would be indistinguishable from the created one, so the operation fails as a
+      // diff-generation failure before the caller's write is attempted.
+      const SNAPSHOT_FAILURE_MESSAGE = 'simulated to-many snapshot failure';
+
+      const runWithFailingSnapshot = async (awaitWrite: boolean) => {
+        const snapshotError = new Error(SNAPSHOT_FAILURE_MESSAGE);
+        const rawBasePrisma = new PrismaClient({ datasources: { db: { url: context.databaseUrl } } });
+        let snapshotArmed = false;
+        const basePrisma = rawBasePrisma.$extends({
+          name: 'fault-injection',
+          query: {
+            post: {
+              async findMany({ args, query }) {
+                if (snapshotArmed) {
+                  snapshotArmed = false;
+                  throw snapshotError;
+                }
+                return query(args);
+              },
+            },
+          },
+        });
+        const provider = createAsyncLocalStorageProvider();
+        const observer = vi.fn();
+        const policy = vi.fn((_context: AuditErrorContext) => 'ignore' as const);
+        const prisma = createAuditClient(basePrisma, {
+          Prisma,
+          provider,
+          aggregateMapping: testAggregateMapping,
+          performance: { awaitWrite },
+          errorHandling: { writeFailurePolicy: policy, observer },
+        });
+
+        try {
+          const user = await context.provider.runAsync(testActor, async () =>
+            context.prisma.user.create({
+              data: { email: 'nested-snapshot@example.com', name: 'Owner', password: 'secret123' },
+            }),
+          );
+          await context.provider.runAsync(testActor, async () =>
+            context.prisma.post.create({ data: { title: 'Existing', content: 'existing', authorId: user.id } }),
+          );
+          const auditRowsBefore = await context.basePrisma.auditLog.count();
+
+          snapshotArmed = true;
+          await expect(
+            provider.runAsync(testActor, async () =>
+              prisma.user.update({
+                where: { id: user.id },
+                data: { posts: { create: { title: 'Should Not Persist', content: 'new' } } },
+              }),
+            ),
+          ).rejects.toBe(snapshotError);
+
+          expect(
+            await context.basePrisma.post.findMany({ where: { authorId: user.id }, select: { title: true } }),
+          ).toEqual([{ title: 'Existing' }]);
+          expect(await context.basePrisma.auditLog.count()).toBe(auditRowsBefore);
+          expect(observer).toHaveBeenCalledTimes(1);
+          expect(observer).toHaveBeenCalledWith(
+            expect.objectContaining({ phase: 'diff-generation', modelName: 'User', error: snapshotError }),
+          );
+          expect(policy).not.toHaveBeenCalled();
+        } finally {
+          await prisma.$disconnect();
+          await rawBasePrisma.$disconnect();
+        }
+      };
+
+      it('propagates the original error and leaves neither the created row nor audit rows', async () => {
+        await runWithFailingSnapshot(true);
+      });
+
+      it('fails before the caller write runs: without a transaction around the operation, no created row remains either', async () => {
+        // With `awaitWrite: false` no transaction wraps the operation, so a write that had run
+        // would stay committed; the absent row shows the write was never attempted.
+        await runWithFailingSnapshot(false);
+      });
+    });
   });
 
   describe('Database constraint violations', () => {

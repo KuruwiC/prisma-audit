@@ -388,6 +388,32 @@ describe('createSingleExecutor', () => {
       );
     });
 
+    it('fails with the snapshot error before the operation runs when the snapshot query fails', async () => {
+      const snapshotError = new Error('connection reset');
+      const update = vi.fn(async () => ({ ...user, posts: [existingPost, createdPost] }));
+      const client = clientWith({
+        user: { findUnique: vi.fn(async () => user), update },
+        post: {
+          findMany: vi.fn(async () => {
+            throw snapshotError;
+          }),
+        },
+      });
+      const { executor, produceRecords, failureSink } = executorWith();
+
+      await expect(
+        executor.run(
+          operationOn(client, 'update', { where: { id: 'u1' }, data: { posts: { create: { title: 'B' } } } }),
+          scopeOn(client),
+          produceRecords,
+        ),
+      ).rejects.toBe(snapshotError);
+
+      expect(update).not.toHaveBeenCalled();
+      expect(produceRecords).not.toHaveBeenCalled();
+      expect(failureSink.notify).not.toHaveBeenCalled();
+    });
+
     it('snapshots nothing under a row the operation creates', async () => {
       const findMany = vi.fn();
       const client = clientWith({
