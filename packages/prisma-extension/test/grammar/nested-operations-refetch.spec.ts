@@ -5,8 +5,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { deserializeEntityId, getPrimaryKeyConstraint } from '../../src/grammar/nested-operations.js';
 import { refetchNestedRecords } from '../../src/nested/events/refetch-nested-records.js';
-import { UNRESOLVED_ENTITY_ID } from '../../src/nested/pre-fetch/identity-key.js';
 import type { FieldMetadata, SchemaMetadata, UniqueConstraint } from '../../src/schema/types.js';
+import { UNRESOLVED_ENTITY_ID } from '../../src/utils/identity-key.js';
 
 const scalarField = (name: string, isId = false): FieldMetadata => ({
   name,

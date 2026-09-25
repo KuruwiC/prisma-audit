@@ -30,8 +30,8 @@ import cuidV1 from '@bugsnag/cuid';
 import { createId } from '@paralleldrive/cuid2';
 import { v4 as uuidV4, v7 as uuidV7 } from 'uuid';
 import { getPrimaryKeyConstraint } from '../grammar/nested-operations.js';
-import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID } from '../nested/pre-fetch/identity-key.js';
 import type { SchemaMetadata, UniqueConstraint } from '../schema/types.js';
+import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID } from './identity-key.js';
 import { createSchemaMetadataFromDMMF, type PrismaWithDMMF } from './schema-metadata.js';
 
 export type IdGenerator = () => string;

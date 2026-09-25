@@ -16,7 +16,7 @@ import { AUDIT_ACTION } from '../../grammar/operations.js';
 import type { UniqueConstraint } from '../../schema/types.js';
 import { nestedLog } from '../../utils/debug.js';
 import { extractDeleteOperationEntityId } from '../../utils/extension-utils.js';
-import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID } from '../pre-fetch/identity-key.js';
+import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID } from '../../utils/identity-key.js';
 import type { CollectedNestedRecord } from './collected-record.js';
 import type { NestedWriteTarget } from './write-set.js';
 

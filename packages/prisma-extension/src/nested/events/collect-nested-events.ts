@@ -29,7 +29,7 @@ import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '.
 import type { SchemaMetadata, UniqueConstraint } from '../../schema/types.js';
 import { matchesUniqueWhere } from '../../utils/compound-where.js';
 import { nestedLog } from '../../utils/debug.js';
-import type { EntityIdentityKey } from '../pre-fetch/identity-key.js';
+import type { EntityIdentityKey } from '../../utils/identity-key.js';
 import { getPreFetchModelClient } from '../pre-fetch/model-client.js';
 import type { PreExistingRows } from '../pre-fetch/pre-existing-rows.js';
 import { extractEntityIdOrUnresolved, getPreFetchResult } from '../pre-fetch/pre-fetch-result-store.js';

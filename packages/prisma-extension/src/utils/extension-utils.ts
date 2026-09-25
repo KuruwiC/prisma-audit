@@ -9,10 +9,10 @@
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { type AuditAction, SUPPORTED_OPERATIONS } from '../grammar/operations.js';
-import { UNRESOLVED_ENTITY_ID } from '../nested/pre-fetch/identity-key.js';
 import type { UniqueConstraint } from '../schema/types.js';
 import { unwrapCompoundWhere } from './compound-where.js';
 import { extractEntityIdentity } from './id-generation.js';
+import { UNRESOLVED_ENTITY_ID } from './identity-key.js';
 
 /**
  * Converts PascalCase to camelCase

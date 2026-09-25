@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { UNRESOLVED_ENTITY_ID } from '../../src/nested/pre-fetch/identity-key.js';
-
 import { extractEntityIdentity } from '../../src/utils/id-generation.js';
+import { UNRESOLVED_ENTITY_ID } from '../../src/utils/identity-key.js';
 
 describe('extractEntityIdentity', () => {
   describe('single PK', () => {

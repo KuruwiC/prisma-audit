@@ -6,7 +6,7 @@ import type { MutationAction } from '@kuruwic/db-audit-core';
 import { AUDIT_ACTION, type AuditAction } from '../../grammar/operations.js';
 import { nestedLog } from '../../utils/debug.js';
 import { extractEntityIdentity } from '../../utils/id-generation.js';
-import { UNRESOLVED_ENTITY_ID } from '../pre-fetch/identity-key.js';
+import { UNRESOLVED_ENTITY_ID } from '../../utils/identity-key.js';
 
 type Row = Record<string, unknown>;
 

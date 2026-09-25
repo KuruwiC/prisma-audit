@@ -9,8 +9,8 @@
  * Supports deep nesting (e.g., `postTags.create.tag.connectOrCreate`).
  */
 
-import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID } from '../nested/pre-fetch/identity-key.js';
 import type { SchemaMetadata, UniqueConstraint } from '../schema/types.js';
+import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID } from '../utils/identity-key.js';
 import type { NestedPreFetchResult } from './nested-state.js';
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;

@@ -31,7 +31,7 @@ import type {
 import type { SchemaMetadata, UniqueConstraint } from '../../schema/types.js';
 import type { AuditErrorObserver } from '../../types.js';
 import { preFetchLog } from '../../utils/debug.js';
-import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID } from './identity-key.js';
+import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID } from '../../utils/identity-key.js';
 import {
   getPreFetchListClient,
   getPreFetchModelClient,
