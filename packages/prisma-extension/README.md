@@ -793,13 +793,12 @@ createAuditClient(prisma, {
 - Guarantees atomicity when `errorHandling.writeFailurePolicy: 'throw'` is set
 - Ensures complete and accurate audit trail with all changes tracked
 
-#### 2. Deferred Strategy (inside transactions)
+#### 2. Deferred Strategy (`awaitWrite: false` inside transactions)
 
-Defers audit log write until after transaction commits successfully.
+When the write is not awaited (`awaitWrite: false`, or `awaitWriteIf` returning `false` for the model) and the operation runs inside `$transaction`, the audit log write is queued and runs after the transaction commits successfully. With the default `awaitWrite: true`, an operation inside `$transaction` uses the synchronous strategy on the transaction client instead.
 
 **Use cases:**
-- Operations inside `$transaction`
-- Ensures atomic writes with business logic
+- Operations inside `$transaction` that should not wait for the audit write
 - Avoids "transaction already closed" errors
 
 **Behavior:**
@@ -809,6 +808,11 @@ Defers audit log write until after transaction commits successfully.
 
 **Example:**
 ```typescript
+const prisma = createAuditClient(basePrisma, {
+  performance: { awaitWrite: false },
+  // ...
+});
+
 await prisma.$transaction(async (tx) => {
   await tx.user.create({ data: { email: 'test@example.com' } });
   // Audit log queued in the library-owned transaction scope
@@ -818,7 +822,7 @@ await prisma.$transaction(async (tx) => {
 // Audit logs written now using the client passed to createAuditClient
 ```
 
-#### 3. Fire-and-Forget Strategy (when `awaitWrite: false`)
+#### 3. Fire-and-Forget Strategy (`awaitWrite: false` outside transactions)
 
 Writes audit logs asynchronously without blocking the main operation. **Opt into this strategy to prioritize performance over completeness.**
 

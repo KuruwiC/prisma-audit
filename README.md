@@ -70,7 +70,7 @@ Branded types (`ActorId`, `EntityId`, `AggregateId`) prevent ID mix-ups at compi
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | **Core**          | Automatic create/update/delete logging, field-level diff tracking, before/after state capture                                  |
 | **Operations**    | Batch operations (createMany, updateMany, deleteMany, createManyAndReturn, updateManyAndReturn), nested operations at all depths (including nested createMany), smart upsert/connectOrCreate detection |
-| **Architecture**  | DDD aggregate root mapping, AsyncLocalStorage context propagation, 6-stage lifecycle pipeline                                  |
+| **Architecture**  | DDD aggregate root mapping, AsyncLocalStorage context propagation, one audit pipeline for single and batch writes              |
 | **Performance**   | 3 write strategies (sync/deferred/fire-and-forget), probabilistic sampling, batch context enrichment (N+1 free)                |
 | **Security**      | Automatic PII redaction (passwords, tokens, SSN, etc.), configurable sensitive field detection                                 |
 | **Extensibility** | Custom writer hooks, custom serializers, pluggable error handling, framework-agnostic core                                     |
@@ -79,8 +79,12 @@ Branded types (`ActorId`, `EntityId`, `AggregateId`) prevent ID mix-ups at compi
 
 > **Note**: This package is not yet published to npm. Install from GitHub Releases.
 
+Each release attaches one tarball per package; `@kuruwic/prisma-audit` depends on `@kuruwic/db-audit-core`, so install both together:
+
 ```bash
-pnpm add https://github.com/KuruwiC/prisma-audit/releases/download/v0.1.6/kuruwic-prisma-audit-0.1.6.tgz
+pnpm add \
+  https://github.com/KuruwiC/prisma-audit/releases/download/v0.1.6/kuruwic-db-audit-core-0.1.6.tgz \
+  https://github.com/KuruwiC/prisma-audit/releases/download/v0.1.6/kuruwic-prisma-audit-0.1.6.tgz
 ```
 
 **Requirements:** Node.js >=20.19.0 (AsyncLocalStorage), Prisma 5.10+
@@ -188,19 +192,21 @@ await auditProvider.runAsync(
 
 ## Architecture
 
-### Lifecycle Pipeline
+### Audit Pipeline
 
-Every intercepted write operation passes through a 6-stage pipeline:
+Every intercepted write operation, single or batch, passes through one pipeline:
 
 ```
 Operation arrives
   │
-  ├─ 1. Fetch Before State ─── Capture current DB state (UPDATE/DELETE)
-  ├─ 2. Execute Operation ──── Run the original Prisma operation
-  ├─ 3. Enrich Contexts ────── Add actor/entity metadata (batch, N+1 free)
-  ├─ 4. Build Audit Logs ───── Compute diffs, resolve aggregates, handle nested ops
-  ├─ 5. Select Write Strategy ─ Auto-select based on config & transaction context
-  └─ 6. Write Logs ──────────── Execute via selected strategy
+  ├─ 1. Write Policy ───────── Decide whether the audit rows join the operation's transaction
+  │                            (awaitWrite / awaitWriteIf); open one when they do and none is active
+  ├─ 2. Read Before State ──── Capture the target row (UPDATE/DELETE/UPSERT) and the nested rows the write touches
+  ├─ 3. Execute Operation ──── Run the original Prisma operation
+  ├─ 4. Collect Events ─────── One mutation event per row written, top-level, nested or batch
+  ├─ 5. Resolve & Compose ──── Resolve entity ids and aggregates, enrich contexts (batch, N+1 free), diff, redact
+  ├─ 6. Dispatch ───────────── Choose the write plan from the policy and the transaction context
+  └─ 7. Write Logs ─────────── Immediately, after commit, or detached
 ```
 
 ### Write Strategies
