@@ -505,7 +505,7 @@ Nested creates, updates, and deletes are automatically tracked at all depths:
 - **connectOrCreate**: Smart detection — logs only when creating new records
 - **connect**: No entity log (join table log if defined in mapping)
 
-For best performance, use `include` to avoid additional refetch queries.
+Nested rows are audited from the operation's own result: the relations a nested write touches are added to its `include` (or `select`) and removed again before the result is returned. A nested row is re-read only when your own `include` / `select` on the written relation leaves out an existing row a nested write updated; the re-read runs on the same client as the operation.
 
 ## Compatibility
 
@@ -520,7 +520,7 @@ For best performance, use `include` to avoid additional refetch queries.
 - **Edge runtimes**: No AsyncLocalStorage support (Vercel Edge, Cloudflare Workers)
 - **Raw queries**: `$executeRaw` / `$queryRaw` are not intercepted
 - **Many-to-many with multiple aggregates**: Not currently supported
-- **Refetch consistency**: Without `include`, nested records are refetched outside the transaction
+- **Nested re-read consistency**: An existing row a nested write updated that your own `include` / `select` leaves out is re-read after the operation on the same client. For a non-atomic write (`awaitWrite: false`, or `awaitWriteIf` returning `false`) outside `$transaction`, that re-read is a separate query and may observe concurrent changes
 
 ## Development
 

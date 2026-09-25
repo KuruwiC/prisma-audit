@@ -890,34 +890,19 @@ createAuditClient(prisma, {
 
 #### Internal Architecture
 
-The extension resolves `awaitWrite`/`awaitWriteIf` into a plain per-model predicate and passes it to core's strategy selector, which receives only that predicate.
+Before the operation runs, core's `policy` decides from `awaitWrite` / `awaitWriteIf` whether the model's audit rows are written atomically with it: `awaitWriteIf(modelName, tags)` when it is set, otherwise `awaitWrite`. An atomic write outside any transaction runs the operation inside an implicit transaction. Once the records are built, core's `dispatch` wraps them in a `WritePlan`, and `src/pipeline/write-audit-logs.ts` executes it:
 
-```
-writeAuditLogs()
-    ↓
-extension.ts: resolveAwaitWrite(modelName)
-┌───────────────────────────────────────┐
-│ 1. If awaitWriteIf is set, call it     │
-│    with (modelName, tags) and use its  │
-│    result                              │
-│ 2. Otherwise use the global awaitWrite │
-└───────────────────────────────────────┘
-    ↓
-core: createWriteStrategySelector({ shouldAwaitWrite: resolveAwaitWrite })
-    ↓
-Select Strategy:
-├─ Synchronous (if shouldAwaitWrite(modelName) === true)
-├─ Deferred (if inside transaction scope && shouldAwaitWrite(modelName) === false)
-└─ Fire-and-Forget (if no transaction scope && shouldAwaitWrite(modelName) === false)
-```
+| `WritePlan` kind | Selected when                                                  | Strategy        | Write                                                                                                        |
+| ---------------- | -------------------------------------------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------ |
+| `immediate`      | `awaitWriteIf` returns `true`, or `awaitWrite: true` without it | Synchronous     | On the operation's client (inside its transaction), awaited before the operation returns                     |
+| `after-commit`   | not atomic, inside a transaction                               | Deferred        | Queued on the transaction; run on the client passed to `createAuditClient` after it commits, dropped on rollback |
+| `detached`       | not atomic, outside any transaction                            | Fire-and-Forget | Started on the client passed to `createAuditClient`; the operation returns without waiting                    |
 
-**Source Files** (in `@kuruwic/db-audit-core`):
-- `write-strategies/types.ts` - Core type definitions (`WriteStrategyConfig.shouldAwaitWrite(modelName)`)
-- `write-strategies/factory.ts` - Strategy selector factory
-- `write-strategies/synchronous.ts` - Synchronous strategy
-- `write-strategies/deferred.ts` - Deferred strategy
-- `write-strategies/fire-and-forget.ts` - Fire-and-forget strategy
-- `write-strategies/utils.ts` - Utility functions
+**Source Files:**
+- `policy/index.ts`, `dispatch/index.ts`, `domain/mutation-event.ts` (`WritePlan`) in `@kuruwic/db-audit-core`
+- [pipeline/run-audited-operation.ts](./src/pipeline/run-audited-operation.ts) - Calls `policy` and `dispatch` around the operation
+- [pipeline/write-audit-logs.ts](./src/pipeline/write-audit-logs.ts) - Executes the write plan
+- [runtime/pending-writes.ts](./src/runtime/pending-writes.ts) - Tracks the writes no caller awaits
 
 #### `sampling`
 **Type:** `number` (0.0 - 1.0)
@@ -1007,7 +992,7 @@ Two independent options, both receiving the same structured failure context (`{ 
 - `'log'`: log to console and let the operation succeed (**default**)
 - `'ignore'`: do neither
 
-**Only the `log-write` phase is policy-gated.** `pre-fetch` and `entity-id-resolution` failures never fail the caller's operation — they degrade gracefully instead (e.g. an upsert whose before-state fetch failed skips its main log entry rather than mislabeling it `create`). `diff-generation` failures are different: they always propagate to the caller as a thrown error, regardless of `writeFailurePolicy` — building the audit log entry (enrichment, aggregate resolution, redaction, or, for batch operations, fetching the affected rows before or after the mutation) has already failed by the time `writeFailurePolicy` could apply, so there is nothing for it to decide. `observer` hears about all four phases either way.
+**Only the `log-write` phase is policy-gated.** `pre-fetch` and `entity-id-resolution` failures never fail the caller's operation — they degrade gracefully instead (e.g. an upsert whose before-state fetch failed skips its main log entry rather than mislabeling it `create`). `diff-generation` failures are different: they always propagate to the caller as a thrown error, regardless of `writeFailurePolicy` — building the audit log entry (enrichment, aggregate resolution, redaction, re-reading an existing row a nested write updated that the caller's own `include` / `select` left out of the result, or, for batch operations, fetching the affected rows before or after the mutation) has already failed by the time `writeFailurePolicy` could apply, so there is nothing for it to decide. `observer` hears about all four phases either way.
 
 **`awaitWrite: false` (deferred / fire-and-forget writes):** once the audit-log write has been queued (inside a transaction) or detached (outside one), the caller has already received its result — there is nothing left to fail. `'throw'` fails the caller only while it is still waiting on the write (the `awaitWrite: true` default); once the write is queued or detached, `'throw'` logs instead, exactly like `'log'`.
 
@@ -1327,165 +1312,36 @@ export const prisma = createAuditClient(basePrisma, auditConfig);
 export { auditProvider };
 ```
 
-## Lifecycle Pipeline Pattern
+## Audit Pipeline
 
-The audit extension implements a **Lifecycle Pipeline Pattern** for type-safe, composable context transformation. This architecture separates concerns into four distinct stages, each adding specific information while maintaining compile-time type safety. This section documents internal architecture for readers of the source — the pipeline, its stage factories, and `LifecycleStage` are not part of the package's public API (only the top-level exports in `src/index.ts` are).
+This section is for readers of the source. None of the modules below is public API; only the exports of `src/index.ts` are.
 
-### Pipeline Overview
+Every audited write, single or batch, goes through `runAuditedOperation` (`src/pipeline/run-audited-operation.ts`). The extension collects what the operation wrote as mutation events; `@kuruwic/db-audit-core` resolves them, composes the audit records and chooses the write plan; the extension executes that plan with Prisma.
 
 ```
-InitialContext → PreparedContext → ExecutedContext → EnrichedContext → FinalContext
+$allOperations (src/extension.ts)
+  └─ runAuditedOperation
+       ├─ policy        core: atomic or not, from awaitWrite / awaitWriteIf
+       ├─ scope         implicit transaction when atomic and none is active
+       ├─ prepare       before states, nested pre-fetches, id injection
+       ├─ execute       the caller's own mutation
+       ├─ collect       one mutation event per written row
+       ├─ records       core resolve, then compose
+       ├─ dispatch      core: immediate / after-commit / detached write plan
+       └─ write         execute the write plan
 ```
 
-Each stage transforms the context by adding new properties:
-
-1. **Fetch Before State** (`InitialContext` → `PreparedContext`)
-   - Fetches pre-operation state for update/delete/upsert operations
-   - Pre-fetches nested records for nested operations (connectOrCreate, etc.)
-   - Adds `beforeState` and `nestedPreFetchResults` properties
-
-2. **Execute Operation** (`PreparedContext` → `ExecutedContext`)
-   - Executes the Prisma query via `context.query(args)`
-   - Adds `result` property containing the operation outcome
-
-3. **Enrich Contexts** (`ExecutedContext` → `EnrichedContext`)
-   - Enriches actor information (role, department, email)
-   - Enriches entity context (title, status, metadata)
-   - Adds `actorContext`, `entityContext` properties
-
-4. **Build Logs** (`EnrichedContext` → `FinalContext`)
-   - Resolves aggregate roots and enriches aggregate contexts
-     (root-side `aggregateContext` merged with projection-side `to(..., { context })`)
-   - Constructs main audit log entry
-   - Constructs nested audit logs (if applicable)
-   - Calculates field-level changes and applies redaction
-   - Adds `logs` property (read-only array of audit log entries)
-
-### Type-Safe Context Transformation
-
-The pipeline ensures **compile-time type safety** through TypeScript's type system:
-
-```typescript
-// Type definitions enforce correct stage sequencing
-export type LifecycleStage<TIn, TOut> = (context: TIn) => Promise<TOut>;
-
-// Each stage has a strict input/output contract
-const preFetchStage: LifecycleStage<InitialContext, PreparedContext>;
-const executionStage: LifecycleStage<PreparedContext, ExecutedContext>;
-const enrichmentStage: LifecycleStage<ExecutedContext, EnrichedContext>;
-const logBuildingStage: LifecycleStage<EnrichedContext, FinalContext>;
-
-// Invalid stage sequences are caught at compile time
-// ❌ TypeScript error: PreparedContext !== ExecutedContext
-const invalidPipeline = [preFetchStage, enrichmentStage];
-```
-
-### Internal Wiring
-
-`runLifecyclePipeline` (`src/lifecycle/pipeline.ts`) runs an ordered array of stages, each produced by an internal factory (`createFetchBeforeStateStage`, `createExecuteOperationStage`, `createEnrichContextsStage`, `createBuildLogsStage` in `src/lifecycle/stages.ts`) closed over the extension's runtime dependencies:
-
-```typescript
-// Define dependencies for each stage
-const deps = {
-  fetchBeforeState,
-  preFetchNestedRecordsBeforeOperation,
-  enrichActorContext,
-  batchEnrichEntityContexts,
-  batchEnrichAggregateContexts,
-  buildAuditLog,
-  buildNestedAuditLogs,
-  aggregateConfig,
-  contextEnricher,
-};
-
-// Create stage instances
-const preFetchStage = createFetchBeforeStateStage(deps);
-const executionStage = createExecuteOperationStage();
-const enrichmentStage = createEnrichContextsStage(deps);
-const logBuildingStage = createBuildLogsStage(deps);
-
-// Execute pipeline
-const finalContext = await runLifecyclePipeline<InitialContext, FinalContext>(
-  initialContext,
-  [preFetchStage, executionStage, enrichmentStage, logBuildingStage]
-);
-
-// Write audit logs
-await writeAuditLogs(finalContext.logs);
-```
-
-### Benefits
-
-#### 1. Type Safety
-Each context transformation is **verified at compile time**. TypeScript ensures:
-- Stage input types match previous stage output types
-- Required properties are present before access
-- No runtime type errors from missing properties
-
-#### 2. Separation of Concerns
-Each stage has a **single responsibility**:
-- Pre-fetch: Data retrieval before operation
-- Execution: Query execution
-- Enrichment: Context enhancement
-- Log Building: Audit log construction
-
-This makes it easy to:
-- Understand each stage in isolation
-- Modify one stage without affecting others
-- Test each stage independently
-
-#### 3. Testability
-Each stage can be **unit tested independently** by mocking dependencies:
-
-```typescript
-import { describe, it, expect, vi } from 'vitest';
-import { createFetchBeforeStateStage } from './stages';
-
-describe('createFetchBeforeStateStage', () => {
-  it('fetches before state for update operations', async () => {
-    const mockFetchBeforeState = vi.fn().mockResolvedValue({ id: '1', title: 'Old' });
-    const mockPreFetch = vi.fn().mockResolvedValue(new Map());
-    const mockGetConfig = vi.fn().mockReturnValue({ fetchBeforeOperation: true });
-
-    const stage = createFetchBeforeStateStage({
-      fetchBeforeState: mockFetchBeforeState,
-      preFetchNestedRecordsBeforeOperation: mockPreFetch,
-      getNestedOperationConfig: mockGetConfig,
-    });
-
-    const result = await stage(initialContext);
-
-    expect(result.beforeState).toEqual({ id: '1', title: 'Old' });
-    expect(mockFetchBeforeState).toHaveBeenCalledTimes(1);
-  });
-});
-```
-
-#### 4. Maintainability
-Clear pipeline structure makes the codebase easier to:
-- Navigate (each stage is a separate module)
-- Extend (add new stages without modifying existing ones)
-- Debug (trace context transformations step by step)
-
-#### 5. Extensibility
-New stages can be added without breaking existing code:
-
-```typescript
-// Add a new validation stage
-const validationStage: LifecycleStage<ExecutedContext, ExecutedContext> = async (ctx) => {
-  validateResult(ctx.result);
-  return ctx;
-};
-
-// Insert into pipeline
-const pipeline = [
-  preFetchStage,
-  executionStage,
-  validationStage,  // ← New stage
-  enrichmentStage,
-  logBuildingStage,
-];
-```
+- `src/extension.ts`: the `$allOperations` hook. Decides whether an operation is audited, adds the relations its nested writes touch to the operation's selection, runs it through the pipeline, and returns the result in the shape the caller requested.
+- `src/audit-options.ts`: validates the extension options once and normalizes them into the write policy, the resolve and compose configs, the schema metadata, the audit-log model accessor, the hooks and the failure-handling settings.
+- `src/pipeline/run-audited-operation.ts`: the pipeline above. A failure of the caller's own mutation propagates untouched; any other failure that escapes the executor is reported as `diff-generation` and rethrown.
+- `src/pipeline/execution-scope.ts`: the client the operation and every audit read and write share (the transaction's client inside a transaction, else the base client) and the transaction it belongs to.
+- `src/pipeline/single-executor.ts`, `src/pipeline/batch-executor.ts`: the prepare, execute and collect steps of a single operation (create, update, upsert, delete, with nested writes) and of a batch operation (createMany, updateMany, deleteMany and their returning variants), run in order by `src/pipeline/executor.ts`.
+- `src/pipeline/produce-records.ts`: core `resolve` then `compose`. Id resolvers and enrichers receive the scope's client when each one runs, so inside a transaction they read its writes.
+- `src/pipeline/write-audit-logs.ts`: executes the write plan (see [Write Strategies](#write-strategies)) and reports write failures under `log-write`.
+- `src/runtime/scope.ts`: the library-owned async-local state of an audited flow: the active transaction with its client and the writes queued until it commits, the re-entrancy guard that keeps the audit's own queries from being audited, and whether the library opened the transaction. It is kept apart from the app-owned audit context.
+- `src/runtime/pending-writes.ts`: the writes no caller awaits; `flushAllPendingWrites` waits for them.
+- `src/lifecycle/transaction-proxy.ts`: wraps interactive `$transaction` so the operations in its callback share the transaction's client and the queued writes run after it commits.
+- `src/failure-sink.ts`: the one place audit failures are reported. Every phase notifies `errorHandling.observer`; only `log-write` also applies `errorHandling.writeFailurePolicy`.
 
 ## Type Safety with Branded Types
 
@@ -1603,10 +1459,6 @@ if (result.success) {
 ### Internal Architecture
 
 **Source Files:**
-- [lifecycle/types.ts](./src/lifecycle/types.ts) - Context type definitions
-- [lifecycle/pipeline.ts](./src/lifecycle/pipeline.ts) - Pipeline execution engine
-- [lifecycle/stages.ts](./src/lifecycle/stages.ts) - Stage factory functions
-- [extension.ts](./src/extension.ts) - Main extension entry point using pipeline
 - `domain/branded-types.ts` (in `@kuruwic/db-audit-core`) - Branded type definitions and constructors
 - `domain/smart-constructors.ts` (in `@kuruwic/db-audit-core`) - Smart constructors with Result pattern
 

@@ -1,17 +1,61 @@
 # @kuruwic/db-audit-core
 
-Framework-agnostic core for audit logging with Prisma.
+ORM-independent core for audit logging. An ORM adapter such as `@kuruwic/prisma-audit` intercepts
+writes, reports the rows they wrote, and persists audit records with its database's API; this package
+turns those rows into audit records and decides how they are written. It holds no database client and
+its only runtime dependency is `debug`.
 
 ## Installation
 
-> **Note**: This package is not yet published to npm. Install the main package from GitHub.
+> **Note**: This package is not yet published to npm.
 
-```bash
-# Install from GitHub
-pnpm add github:kuruwic/prisma-audit#main
+It is installed as a dependency of `@kuruwic/prisma-audit`. Each GitHub release attaches its tarball
+(`kuruwic-db-audit-core-<version>.tgz`) next to the adapter's; install both together.
+
+## Boundary
+
+An adapter calls four functions for each intercepted write:
+
+```
+policy(model, tags, config)                    -> { atomic }        before the write runs
+  adapter runs the write, collects one MutationEvent per written row
+resolve(events, auditContext, config, read)    -> ResolvedEvent[]
+compose(resolvedEvents, ambient, now)          -> AuditRecord[]
+dispatch(records, atomic, { inTransaction })   -> WritePlan
+  adapter executes the WritePlan with its WriteExecutor
 ```
 
-This package is included as a dependency of `@kuruwic/prisma-audit`.
+- **`policy`** decides whether the audit rows are written atomically with the operation:
+  `awaitWriteIf(model, tags)` when configured, otherwise `awaitWrite`. It runs before the write
+  because an atomic write needs a transaction around the operation when none is active.
+- **`MutationEvent`** is one written row as the adapter saw it: model, primary-key identity, action
+  (`create` / `update` / `delete`), the before and after rows, and its origin (nested path and the
+  adapter's keyword that wrote it).
+- **`resolve`** adds the entity id, the aggregate roots (the self projection unless disabled, plus
+  every `to()` root that resolves), and the actor, entity and aggregate contexts from the configured
+  enrichers. Id resolvers and enrichers receive the database handle through the `read` thunk,
+  evaluated at each call, so a callback running inside a transaction reads that transaction's writes.
+- **`compose`** builds one `AuditRecord` per aggregate root: before and after states by action, the
+  field-level diff of an update (an update that changed only excluded fields of an existing before
+  state yields no record),
+  redaction, relation stripping, serialization for JSON storage, and branded ids.
+- **`dispatch`** wraps the records in a `WritePlan`: `immediate` when atomic, `after-commit` when not
+  atomic inside a transaction, `detached` otherwise.
+- **`WriteExecutor`** is the adapter's `write(handle, modelName, logs)`, which persists records with
+  the database's API. **`WriteFn`** is the user hook that runs in place of the default write and
+  receives it as `defaultWrite`.
+
+## Configuration API
+
+- **Aggregate mapping**: `defineAggregateMapping`, `defineEntity`, `to`, `self`, `foreignKey`,
+  `resolveId`, `batchResolveIds`, `validateAggregateMapping`, `createAggregateConfig`. The database
+  handle is the opaque type parameter `TDbHandle`; the adapter supplies its type.
+- **Context provider**: `createAsyncLocalStorageProvider()` returns an `AuditContextProvider`
+  (`run`, `runAsync`, `getContext`, `withActor`) that carries the actor and request context through
+  async calls. `@kuruwic/db-audit-core/testing` exports `createMockAuditContext` for tests.
+- **Utilities**: `redactSensitiveData`, `serializeForAuditJson`, `createDiffCalculator`,
+  `createErrorHandler`, the branded id constructors and guards (`createActorId`, `isEntityId`,
+  `unwrapId`, ...), and `createAuditLogData`.
 
 ## Usage
 
@@ -31,7 +75,7 @@ await provider.runAsync(
 );
 ```
 
-See the [main README](../../README.md) for full documentation.
+See the [main README](../../README.md) for the Prisma adapter's documentation.
 
 ## License
 
