@@ -5,6 +5,7 @@
  */
 
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../internal-types.js';
+import { getModelDelegate } from '../../utils/model-accessor.js';
 
 export type PreFetchRecord = Record<string, unknown>;
 
@@ -30,6 +31,6 @@ export const getPreFetchModelClient = (
   prismaClient: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
   modelName: string,
 ): PreFetchModelClient | undefined => {
-  const delegate = prismaClient[modelName.charAt(0).toLowerCase() + modelName.slice(1)];
+  const delegate = getModelDelegate(prismaClient, modelName);
   return isPreFetchModelClient(delegate) ? delegate : undefined;
 };
