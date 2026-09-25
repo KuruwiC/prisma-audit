@@ -48,8 +48,28 @@ export interface NestedWriteSet {
 export type NestedWriteSets = ReadonlyMap<string, NestedWriteSet>;
 
 /**
+ * The branch an upsert took, from the pre-fetched state of its target: `update` when it existed,
+ * `create` when it did not, unknown when the pre-fetch failed
+ */
+const upsertBranchOf = (before: BeforeState): UpsertBranch | undefined => {
+  switch (before.kind) {
+    case 'captured':
+      return 'update';
+    case 'none':
+      return 'create';
+    case 'unavailable':
+      return undefined;
+    default: {
+      const exhaustiveCheck: never = before;
+      throw new Error(`[@prisma-audit] Unhandled before state: ${JSON.stringify(exhaustiveCheck)}`);
+    }
+  }
+};
+
+/**
  * The nested operations an operation executes: the executed pass of the detection, with each
- * upsert taking the branch its pre-fetched target decides.
+ * upsert taking the branch its pre-fetched target decides, and none when that target could not
+ * be read.
  */
 export const detectExecutedNestedOperations = (
   schemaMetadata: SchemaMetadata,
@@ -61,7 +81,7 @@ export const detectExecutedNestedOperations = (
   detectNestedOperations(schemaMetadata, modelName, args, {
     kind: 'executed',
     topLevelUpsertBranch,
-    hasRecordAt: (path, where) => preFetchedStateAt(nestedPreFetchResults, path, where).kind === 'captured',
+    upsertBranchAt: (path, where) => upsertBranchOf(preFetchedStateAt(nestedPreFetchResults, path, where)),
   });
 
 const INSERTING_KEYWORDS: ReadonlySet<NestedOperationKeyword> = new Set(['create', 'createMany']);
@@ -69,8 +89,7 @@ const INSERTING_WHEN_TARGET_MISSING: ReadonlySet<NestedOperationKeyword> = new S
 
 export const insertsRows = (operation: NestedOperationInfo, targets: readonly NestedWriteTarget[]): boolean =>
   INSERTING_KEYWORDS.has(operation.operation) ||
-  (INSERTING_WHEN_TARGET_MISSING.has(operation.operation) &&
-    targets.some((target) => target.before.kind !== 'captured'));
+  (INSERTING_WHEN_TARGET_MISSING.has(operation.operation) && targets.some((target) => target.before.kind === 'none'));
 
 const targetWheresOf = (operation: NestedOperationInfo, batchTargets: NestedBatchTargets): Row[] =>
   isNestedBatchKeyword(operation.operation)

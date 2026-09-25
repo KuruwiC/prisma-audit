@@ -103,12 +103,21 @@ const resolveRow = (
   before: BeforeState,
   getNestedOperationConfig: GetOperationConfig,
 ): CollectedNestedRecord | undefined => {
-  const { action, beforeState } = resolveNestedRowState(nestedOp, before, getNestedOperationConfig);
-  if (action === 'connect') {
-    nestedLog('skipping audit log for connect operation at path=%s', nestedOp.path);
+  const resolved = resolveNestedRowState(nestedOp, before, getNestedOperationConfig);
+  if (resolved === undefined) {
+    nestedLog(
+      'no audit log for the %s row at path=%s (connected, or its target could not be read)',
+      nestedOp.operation,
+      nestedOp.path,
+    );
     return undefined;
   }
-  return { entity: row, action, beforeState, relatedModel: nestedOp.relatedModel };
+  return {
+    entity: row,
+    action: resolved.action,
+    beforeState: resolved.beforeState,
+    relatedModel: nestedOp.relatedModel,
+  };
 };
 
 const targetOf = (row: Row, targets: readonly NestedWriteTarget[]): NestedWriteTarget | undefined =>

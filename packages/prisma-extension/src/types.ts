@@ -117,10 +117,11 @@ export interface NestedOperationsConfig {
  *
  * - `pre-fetch`: fetching the before-state (for update / delete / upsert) failed. The
  *   caller's operation continues. An `update` or `delete` entry, top-level or nested, is
- *   recorded with `beforeUnavailable: true` and a null `before` and `changes`. A top-level
- *   `upsert` entry, whose create-vs-update action depends on the before-state, is skipped. A
+ *   recorded with `beforeUnavailable: true` and a null `before` and `changes`. An `upsert`
+ *   entry, top-level or nested, whose create-vs-update action depends on the before-state, is
+ *   skipped with the writes of its branches, and so is a nested `connectOrCreate` entry. A
  *   nested delete entry left without an identity by the failed fetch is skipped and also
- *   reported as `entity-id-resolution`. A nested `upsert` resolves to `create`.
+ *   reported as `entity-id-resolution`.
  * - `log-write`: persisting the audit log entry itself failed. This is the only phase whose
  *   outcome {@link ErrorHandlingConfig.writeFailurePolicy} decides — see
  *   {@link WriteFailurePolicy} for writes that are queued or detached.

@@ -359,6 +359,19 @@ describe('collectSingleOperationEvents', () => {
       ]);
     });
 
+    it.each([
+      ['upsert', { upsert: { where: { id: 'p1' }, create: { title: 'C' }, update: { title: 'A' } } }],
+      ['connectOrCreate', { connectOrCreate: { where: { id: 'p1' }, create: { title: 'C' } } }],
+    ])('gives the row of a nested %s whose target could not be read no event', async (_keyword, posts) => {
+      const events = await postEvents(posts, [p1, p2], {
+        nestedPreFetchResults: new Map([
+          ['posts', new Map([[UNRESOLVED_ENTITY_ID, { before: { kind: 'unavailable' } }]])],
+        ]),
+      });
+
+      expect(events).toEqual([]);
+    });
+
     it('attributes an upsert whose target existed that row as an update', async () => {
       const events = await postEvents(
         { upsert: { where: { id: 'p1' }, create: { title: 'C' }, update: {} } },
@@ -632,6 +645,29 @@ describe('collectSingleOperationEvents — a to-one relation', () => {
     expect(events.filter((event) => event.model === 'User')).toEqual([
       expect.objectContaining({ identity: 'u1', action: 'update', before: { kind: 'unavailable' }, after: author }),
     ]);
+  });
+});
+
+describe('collectSingleOperationEvents — an upsert of a to-one relation', () => {
+  it('gives the related row no event when its pre-fetch failed', async () => {
+    const events = await collectSingleOperationEvents(
+      single({
+        modelName: 'Post',
+        action: 'update',
+        args: {
+          where: { id: 'p1' },
+          data: { author: { upsert: { create: { name: 'Anne' }, update: { name: 'Anne' } } } },
+        },
+        result: { id: 'p1', title: 'A', authorId: 'u1', author: { id: 'u1', name: 'Anne' } },
+        beforeState: { kind: 'captured', row: { id: 'p1', title: 'A', authorId: 'u1' } },
+        nestedPreFetchResults: new Map([
+          ['author', new Map([[UNRESOLVED_ENTITY_ID, { before: { kind: 'unavailable' } }]])],
+        ]),
+      }),
+      deps,
+    );
+
+    expect(events.filter((event) => event.model === 'User')).toEqual([]);
   });
 });
 

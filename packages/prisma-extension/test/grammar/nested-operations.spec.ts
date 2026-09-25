@@ -553,7 +553,7 @@ describe('extractNestedRecords', () => {
 const executedPass = (existingPaths: readonly string[], topLevelUpsertBranch?: UpsertBranch): NestedDetectionPass => ({
   kind: 'executed',
   topLevelUpsertBranch,
-  hasRecordAt: (path) => existingPaths.includes(path),
+  upsertBranchAt: (path) => (existingPaths.includes(path) ? 'update' : 'create'),
 });
 
 describe('detectNestedOperations with upsert branch filtering', () => {
@@ -1032,9 +1032,9 @@ describe('detectNestedOperations inside nested updates', () => {
       const asked: [string, Record<string, unknown> | undefined][] = [];
       const pass: NestedDetectionPass = {
         kind: 'executed',
-        hasRecordAt: (path, where) => {
+        upsertBranchAt: (path, where) => {
           asked.push([path, where]);
-          return where?.id === 'post-1';
+          return where?.id === 'post-1' ? 'update' : 'create';
         },
       };
 
@@ -1049,13 +1049,22 @@ describe('detectNestedOperations inside nested updates', () => {
       ]);
     });
 
+    it('scans neither branch of an element whose target could not be read', () => {
+      const pass: NestedDetectionPass = {
+        kind: 'executed',
+        upsertBranchAt: (_path, where) => (where?.id === 'post-1' ? undefined : 'create'),
+      };
+
+      expect(detectedOperations(args, pass)).toEqual(['posts:upsert', 'posts.comments:create']);
+    });
+
     it('passes no WHERE for a to-one upsert', () => {
       const asked: unknown[] = [];
       const pass: NestedDetectionPass = {
         kind: 'executed',
-        hasRecordAt: (_path, where) => {
+        upsertBranchAt: (_path, where) => {
           asked.push(where);
-          return false;
+          return 'create';
         },
       };
 

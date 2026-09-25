@@ -94,17 +94,17 @@ export type UpsertBranch = 'create' | 'update';
  * - `executed`: the operation ran, and only the writes of the branches that executed are reported.
  *   `topLevelUpsertBranch` is the branch the top-level upsert executed; it is absent when the
  *   operation is not an upsert, and the top-level `create` / `update` args are then not scanned.
- *   `hasRecordAt(path, where)` tells whether the record a nested upsert at `path` targets existed
- *   before the operation: `true` selects that upsert's `update` branch, `false` its `create`
- *   branch. `where` is the element's unique WHERE, absent for a to-one upsert, which targets the
- *   single related row.
+ *   `upsertBranchAt(path, where)` is the branch a nested upsert at `path` executed: `update` when
+ *   the record it targets existed before the operation, `create` when it did not, undefined when
+ *   that could not be read, and then neither branch is scanned. `where` is the element's unique
+ *   WHERE, absent for a to-one upsert, which targets the single related row.
  */
 export type NestedDetectionPass =
   | { readonly kind: 'discovery' }
   | {
       readonly kind: 'executed';
       readonly topLevelUpsertBranch?: UpsertBranch;
-      readonly hasRecordAt: (path: string, where: Record<string, unknown> | undefined) => boolean;
+      readonly upsertBranchAt: (path: string, where: Record<string, unknown> | undefined) => UpsertBranch | undefined;
     };
 
 /** @internal The branches of one nested upsert element at `path` that the pass scans */
@@ -117,7 +117,8 @@ const upsertElementBranches = (
     return ['update', 'create'];
   }
   const where = isRecord(element.where) ? element.where : undefined;
-  return [pass.hasRecordAt(path, where) ? 'update' : 'create'];
+  const branch = pass.upsertBranchAt(path, where);
+  return branch ? [branch] : [];
 };
 
 /**
@@ -533,7 +534,7 @@ const processDataSource = (input: ProcessDataSourceInput): void => {
  * detectNestedOperations(schemaMetadata, 'User', args, {
  *   kind: 'executed',
  *   topLevelUpsertBranch: 'update',
- *   hasRecordAt: (path) => path === 'profile',
+ *   upsertBranchAt: (path) => (path === 'profile' ? 'update' : 'create'),
  * });
  * // Result: profile upsert, avatar update
  * ```

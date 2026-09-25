@@ -21,19 +21,26 @@ export type ResolvedNestedState = {
 
 const NO_BEFORE_STATE: BeforeState = { kind: 'none' };
 
-/** Resolves an upsert: action `update` when a before state was captured, `create` otherwise */
-export const resolveUpsertState = (before: BeforeState): ResolvedNestedState => {
+/**
+ * Resolves an upsert: action `update` when a before state was captured, `create` when there was
+ * none, `null` when its target could not be read (which branch ran is unknown, so it is not
+ * audited)
+ */
+export const resolveUpsertState = (before: BeforeState): ResolvedNestedState | null => {
+  if (before.kind === 'unavailable') {
+    return null;
+  }
   const action = before.kind === 'captured' ? AUDIT_ACTION.UPDATE : AUDIT_ACTION.CREATE;
 
   return { action, before };
 };
 
 /**
- * Resolves a connectOrCreate: `null` when the record existed (it was connected, so no audit log),
- * action `create` otherwise
+ * Resolves a connectOrCreate: `null` when the record existed (it was connected, so no audit log)
+ * or could not be read (whether it was connected is unknown), action `create` otherwise
  */
 export const resolveConnectOrCreateState = (before: BeforeState): ResolvedNestedState | null => {
-  if (before.kind === 'captured') {
+  if (before.kind !== 'none') {
     return null;
   }
 

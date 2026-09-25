@@ -16,11 +16,8 @@ import {
 import { AUDIT_ACTION } from '../../grammar/operations.js';
 import type { GetOperationConfig } from '../../grammar/pre-fetch-selection.js';
 
-/** Action of a nested record; `connect` marks a record that only got linked and is not audited */
-export type NestedRecordAction = MutationAction | 'connect';
-
 export type ResolvedState = {
-  action: NestedRecordAction;
+  action: MutationAction;
   beforeState: BeforeState;
 };
 
@@ -30,31 +27,34 @@ const resolveUpsertRow = (
   nestedOp: NestedOperationInfo,
   before: BeforeState,
   getNestedOperationConfig: GetOperationConfig,
-): ResolvedState => {
+): ResolvedState | undefined => {
   const resolved = resolveUpsertState(before);
+  if (resolved === null) {
+    return undefined;
+  }
   const config = getNestedOperationConfig(nestedOp.relatedModel, 'update');
   const shouldIncludeBeforeState = config.fetchBeforeOperation && resolved.action === AUDIT_ACTION.UPDATE;
 
   return { action: resolved.action, beforeState: shouldIncludeBeforeState ? resolved.before : NO_BEFORE_STATE };
 };
 
-const resolveConnectOrCreateRow = (before: BeforeState): ResolvedState => {
+const resolveConnectOrCreateRow = (before: BeforeState): ResolvedState | undefined => {
   const resolved = resolveConnectOrCreateState(before);
-  return resolved === null
-    ? { action: 'connect', beforeState: NO_BEFORE_STATE }
-    : { action: resolved.action, beforeState: resolved.before };
+  return resolved === null ? undefined : { action: resolved.action, beforeState: resolved.before };
 };
 
 /**
- * Resolve the action and before state of a row `nestedOp` wrote
+ * Resolve the action and before state of a row `nestedOp` wrote, or undefined for a row that is
+ * not audited
  *
  * - **create / createMany**: action=create, no before state
  * - **update / updateMany**: action=update, the pre-fetched before state (`unavailable` when the
  *   pre-fetch of the path failed)
  * - **upsert**: action=update when the row existed (its before state included when the update
- *   config asks for it), else create
- * - **connectOrCreate**: action='connect' when the row existed, else create
- * - **connect**: action='connect' (skip audit log)
+ *   config asks for it), create when it did not, not audited when its pre-fetch failed
+ * - **connectOrCreate**: create when the row did not exist; not audited when it existed (it was
+ *   connected) or its pre-fetch failed
+ * - **connect**: not audited
  * - **delete / deleteMany**: handled separately
  *
  * @param before - The row's pre-fetched before state
@@ -63,7 +63,7 @@ export const resolveNestedRowState = (
   nestedOp: NestedOperationInfo,
   before: BeforeState,
   getNestedOperationConfig: GetOperationConfig,
-): ResolvedState => {
+): ResolvedState | undefined => {
   switch (nestedOp.operation) {
     case 'update':
     case 'updateMany': {
@@ -75,7 +75,7 @@ export const resolveNestedRowState = (
     case 'connectOrCreate':
       return resolveConnectOrCreateRow(before);
     case 'connect':
-      return { action: 'connect', beforeState: NO_BEFORE_STATE };
+      return undefined;
     default:
       return { action: resolveCreateState().action, beforeState: NO_BEFORE_STATE };
   }
