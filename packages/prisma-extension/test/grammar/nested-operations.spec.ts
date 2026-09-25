@@ -553,7 +553,7 @@ describe('extractNestedRecords', () => {
 const executedPass = (existingPaths: readonly string[], topLevelUpsertBranch?: UpsertBranch): NestedDetectionPass => ({
   kind: 'executed',
   topLevelUpsertBranch,
-  upsertBranchAt: (path) => (existingPaths.includes(path) ? 'update' : 'create'),
+  branchAt: (path) => (existingPaths.includes(path) ? 'update' : 'create'),
 });
 
 describe('detectNestedOperations with upsert branch filtering', () => {
@@ -1032,7 +1032,7 @@ describe('detectNestedOperations inside nested updates', () => {
       const asked: [string, Record<string, unknown> | undefined][] = [];
       const pass: NestedDetectionPass = {
         kind: 'executed',
-        upsertBranchAt: (path, where) => {
+        branchAt: (path, where) => {
           asked.push([path, where]);
           return where?.id === 'post-1' ? 'update' : 'create';
         },
@@ -1052,7 +1052,7 @@ describe('detectNestedOperations inside nested updates', () => {
     it('scans neither branch of an element whose target could not be read', () => {
       const pass: NestedDetectionPass = {
         kind: 'executed',
-        upsertBranchAt: (_path, where) => (where?.id === 'post-1' ? undefined : 'create'),
+        branchAt: (_path, where) => (where?.id === 'post-1' ? undefined : 'create'),
       };
 
       expect(detectedOperations(args, pass)).toEqual(['posts:upsert', 'posts.comments:create']);
@@ -1062,7 +1062,7 @@ describe('detectNestedOperations inside nested updates', () => {
       const asked: unknown[] = [];
       const pass: NestedDetectionPass = {
         kind: 'executed',
-        upsertBranchAt: (_path, where) => {
+        branchAt: (_path, where) => {
           asked.push(where);
           return 'create';
         },
@@ -1071,6 +1071,54 @@ describe('detectNestedOperations inside nested updates', () => {
       detectedOperations({ data: { profile: { upsert: { create: {}, update: {} } } } }, pass);
 
       expect(asked).toEqual([undefined]);
+    });
+  });
+
+  describe('the create data of a nested connectOrCreate', () => {
+    const args = {
+      data: {
+        posts: {
+          connectOrCreate: [
+            { where: { id: 'post-1' }, create: { title: 'A', comments: { create: { content: 'a' } } } },
+            { where: { id: 'missing' }, create: { title: 'B', comments: { create: { content: 'b' } } } },
+          ],
+        },
+      },
+    };
+    const connectsPost1: NestedDetectionPass = {
+      kind: 'executed',
+      branchAt: (_path, where) => (where?.id === 'post-1' ? 'update' : 'create'),
+    };
+
+    it('is scanned for every element of a list in the discovery pass', () => {
+      expect(detectedOperations(args, { kind: 'discovery' })).toEqual([
+        'posts:connectOrCreate',
+        'posts.comments:create',
+        'posts.comments:create',
+      ]);
+    });
+
+    it('is scanned only for the elements that created their row in the executed pass', () => {
+      expect(detectedOperations(args, connectsPost1)).toEqual(['posts:connectOrCreate', 'posts.comments:create']);
+    });
+
+    it('is not scanned for a to-one connectOrCreate that connected, nor for one whose target could not be read', () => {
+      const toOne = {
+        data: {
+          profile: { connectOrCreate: { where: { id: 'profile-1' }, create: { avatar: { create: { name: 'A' } } } } },
+        },
+      };
+
+      expect(detectedOperations(toOne, { kind: 'executed', branchAt: () => 'update' })).toEqual([
+        'profile:connectOrCreate',
+      ]);
+      expect(detectedOperations(toOne, { kind: 'executed', branchAt: () => undefined })).toEqual([
+        'profile:connectOrCreate',
+      ]);
+      expect(detectedOperations(toOne, { kind: 'executed', branchAt: () => 'create' })).toEqual([
+        'profile:connectOrCreate',
+        'profile.avatar:create',
+      ]);
     });
   });
 });

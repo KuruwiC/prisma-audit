@@ -86,29 +86,32 @@ export type NestedBatchTargets = Map<string, Map<NestedBatchKeyword, Map<EntityI
 export type UpsertBranch = 'create' | 'update';
 
 /**
- * Which upsert branches {@link detectNestedOperations} scans.
+ * Which upsert and connectOrCreate branches {@link detectNestedOperations} scans.
  *
- * - `discovery`: the operation has not run, so which branch of an upsert executes is unknown.
- *   Every branch of every upsert is scanned, so every nested record the operation could write is
- *   found (e.g. to pre-fetch its before-state).
+ * - `discovery`: the operation has not run, so which branch of an upsert executes, or whether a
+ *   connectOrCreate creates its row, is unknown. Every branch of every upsert and the `create`
+ *   data of every connectOrCreate are scanned, so every nested record the operation could write
+ *   is found (e.g. to pre-fetch its before-state).
  * - `executed`: the operation ran, and only the writes of the branches that executed are reported.
  *   `topLevelUpsertBranch` is the branch the top-level upsert executed; it is absent when the
  *   operation is not an upsert, and the top-level `create` / `update` args are then not scanned.
- *   `upsertBranchAt(path, where)` is the branch a nested upsert at `path` executed: `update` when
- *   the record it targets existed before the operation, `create` when it did not, undefined when
- *   that could not be read, and then neither branch is scanned. `where` is the element's unique
- *   WHERE, absent for a to-one upsert, which targets the single related row.
+ *   `branchAt(path, where)` is the branch a nested upsert or connectOrCreate element at `path`
+ *   executed: `update` (a connect, for a connectOrCreate) when the record it targets existed
+ *   before the operation, `create` when it did not, undefined when that could not be read, and
+ *   then nothing of the element is scanned. `where` is the element's unique WHERE, absent for a
+ *   to-one upsert, which targets the single related row. A connectOrCreate's `create` data is
+ *   scanned only on its `create` branch.
  */
 export type NestedDetectionPass =
   | { readonly kind: 'discovery' }
   | {
       readonly kind: 'executed';
       readonly topLevelUpsertBranch?: UpsertBranch;
-      readonly upsertBranchAt: (path: string, where: Record<string, unknown> | undefined) => UpsertBranch | undefined;
+      readonly branchAt: (path: string, where: Record<string, unknown> | undefined) => UpsertBranch | undefined;
     };
 
-/** @internal The branches of one nested upsert element at `path` that the pass scans */
-const upsertElementBranches = (
+/** @internal The branches of one nested upsert or connectOrCreate element at `path` that the pass scans */
+const elementBranches = (
   pass: NestedDetectionPass,
   path: string,
   element: Record<string, unknown>,
@@ -117,7 +120,7 @@ const upsertElementBranches = (
     return ['update', 'create'];
   }
   const where = isRecord(element.where) ? element.where : undefined;
-  const branch = pass.upsertBranchAt(path, where);
+  const branch = pass.branchAt(path, where);
   return branch ? [branch] : [];
 };
 
@@ -128,7 +131,7 @@ const upsertElementBranches = (
 const upsertBranchData = (pass: NestedDetectionPass, path: string, nestedData: unknown): Record<string, unknown>[] => {
   const elements = Array.isArray(nestedData) ? nestedData : [nestedData];
   return elements.filter(isRecord).flatMap((element) =>
-    upsertElementBranches(pass, path, element)
+    elementBranches(pass, path, element)
       .map((branch) => element[branch])
       .filter(isRecord),
   );
@@ -165,27 +168,35 @@ const processUpsertOperation = (
     detectDeeplyNestedOperations(schemaMetadata, relationField.relatedModel, branchData, currentPath, pass),
   );
 
-/** @internal Process connectOrCreate operation */
+/**
+ * @internal The `create` data of the connectOrCreate elements whose `create` branch the pass
+ * scans: a to-many connectOrCreate is one `{ where, create }` or a list of them, each creating
+ * its row or connecting an existing one on its own.
+ */
+const connectOrCreateCreateData = (
+  pass: NestedDetectionPass,
+  path: string,
+  nestedData: unknown,
+): Record<string, unknown>[] => {
+  const elements = Array.isArray(nestedData) ? nestedData : [nestedData];
+  return elements
+    .filter(isRecord)
+    .filter((element) => elementBranches(pass, path, element).includes('create'))
+    .map((element) => element.create)
+    .filter(isRecord);
+};
+
+/** @internal Process connectOrCreate operation - explore the create data of the elements that create their row */
 const processConnectOrCreateOperation = (
   schemaMetadata: SchemaMetadata,
   relationField: { name: string; relatedModel: string; isList: boolean },
   nestedData: unknown,
   currentPath: string,
   pass: NestedDetectionPass,
-): NestedOperationInfo[] => {
-  if (typeof nestedData !== 'object' || nestedData === null) {
-    return [];
-  }
-
-  const connectOrCreateData = nestedData as Record<string, unknown>;
-  const createData = connectOrCreateData.create;
-
-  if (typeof createData !== 'object' || createData === null) {
-    return [];
-  }
-
-  return detectDeeplyNestedOperations(schemaMetadata, relationField.relatedModel, createData, currentPath, pass);
-};
+): NestedOperationInfo[] =>
+  connectOrCreateCreateData(pass, currentPath, nestedData).flatMap((createData) =>
+    detectDeeplyNestedOperations(schemaMetadata, relationField.relatedModel, createData, currentPath, pass),
+  );
 
 /** @internal Whether a to-one nested `update` value is the `{ where?, data }` form rather than the data itself */
 const isToOneUpdateWithWhere = (update: Record<string, unknown>): boolean =>
@@ -388,19 +399,8 @@ const processDeeplyNestedOperations = (
     return processUpsertOperation(schemaMetadata, relationField, nestedData, relationField.name, pass);
   }
 
-  if (keyword === 'connectOrCreate' && typeof nestedData === 'object' && nestedData !== null) {
-    const connectOrCreateData = nestedData as Record<string, unknown>;
-    const createData = connectOrCreateData.create;
-
-    if (typeof createData === 'object' && createData !== null) {
-      return detectDeeplyNestedOperations(
-        schemaMetadata,
-        relationField.relatedModel,
-        createData,
-        relationField.name,
-        pass,
-      );
-    }
+  if (keyword === 'connectOrCreate') {
+    return processConnectOrCreateOperation(schemaMetadata, relationField, nestedData, relationField.name, pass);
   }
 
   return [];
@@ -534,7 +534,7 @@ const processDataSource = (input: ProcessDataSourceInput): void => {
  * detectNestedOperations(schemaMetadata, 'User', args, {
  *   kind: 'executed',
  *   topLevelUpsertBranch: 'update',
- *   upsertBranchAt: (path) => (path === 'profile' ? 'update' : 'create'),
+ *   branchAt: (path) => (path === 'profile' ? 'update' : 'create'),
  * });
  * // Result: profile upsert, avatar update
  * ```

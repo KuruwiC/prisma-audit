@@ -60,10 +60,10 @@ export interface NestedWriteSet {
 export type NestedWriteSets = ReadonlyMap<string, NestedWriteSet>;
 
 /**
- * The branch an upsert took, from the pre-fetched state of its target: `update` when it existed,
- * `create` when it did not, unknown when the pre-fetch failed
+ * The branch an upsert or connectOrCreate took, from the pre-fetched state of its target: `update`
+ * (a connect) when it existed, `create` when it did not, unknown when the pre-fetch failed
  */
-const upsertBranchOf = (before: BeforeState): UpsertBranch | undefined => {
+const branchOf = (before: BeforeState): UpsertBranch | undefined => {
   switch (before.kind) {
     case 'captured':
       return 'update';
@@ -80,8 +80,8 @@ const upsertBranchOf = (before: BeforeState): UpsertBranch | undefined => {
 
 /**
  * The nested operations an operation executes: the executed pass of the detection, with each
- * upsert taking the branch its pre-fetched target decides, and none when that target could not
- * be read.
+ * upsert and connectOrCreate taking the branch its pre-fetched target decides, and none when that
+ * target could not be read.
  */
 export const detectExecutedNestedOperations = (
   schemaMetadata: SchemaMetadata,
@@ -93,7 +93,7 @@ export const detectExecutedNestedOperations = (
   detectNestedOperations(schemaMetadata, modelName, args, {
     kind: 'executed',
     topLevelUpsertBranch,
-    upsertBranchAt: (path, where) => upsertBranchOf(preFetchedStateAt(nestedPreFetchResults, path, where)),
+    branchAt: (path, where) => branchOf(preFetchedStateAt(nestedPreFetchResults, path, where)),
   });
 
 const INSERTING_KEYWORDS: ReadonlySet<NestedOperationKeyword> = new Set(['create', 'createMany']);

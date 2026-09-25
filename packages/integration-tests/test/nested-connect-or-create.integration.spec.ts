@@ -520,4 +520,45 @@ describe('Nested ConnectOrCreate Operations', () => {
       expect(postLogs.length).toBeGreaterThanOrEqual(1);
     });
   });
+  describe('the writes nested in the create data', () => {
+    // A connectOrCreate runs the writes nested in its `create` data only when it creates its row.
+
+    const connectOrCreateAuthor = (email: string) =>
+      context.provider.runAsync(testActor, () =>
+        context.prisma.post.create({
+          data: {
+            title: 'Post',
+            author: {
+              connectOrCreate: {
+                where: { email },
+                create: { email, name: 'Author', password: 'secret123', profile: { create: { bio: 'new bio' } } },
+              },
+            },
+          },
+        }),
+      );
+
+    it('records nothing for them when the connectOrCreate connects an existing row', async () => {
+      const user = await context.basePrisma.user.create({
+        data: { email: 'existing-author@example.com', name: 'Author', password: 'secret123' },
+      });
+      await context.basePrisma.profile.create({ data: { userId: user.id, bio: 'existing bio' } });
+
+      await connectOrCreateAuthor('existing-author@example.com');
+
+      expect(await context.basePrisma.auditLog.findMany({ where: { entityType: 'Profile' } })).toEqual([]);
+      expect(await context.basePrisma.auditLog.count({ where: { entityType: 'Post', action: 'create' } })).toBe(2);
+    });
+
+    it('records them when the connectOrCreate creates its row', async () => {
+      await connectOrCreateAuthor('new-author@example.com');
+
+      const profileLogs = await context.basePrisma.auditLog.findMany({
+        where: { entityType: 'Profile', aggregateType: 'Profile' },
+      });
+      expect(profileLogs.map((log) => [log.action, (log.after as { bio?: string }).bio])).toEqual([
+        ['create', 'new bio'],
+      ]);
+    });
+  });
 });
