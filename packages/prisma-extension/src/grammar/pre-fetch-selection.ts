@@ -7,7 +7,7 @@
  * @module grammar/pre-fetch-selection
  */
 
-import type { NestedOperationInfo } from './nested-operations.js';
+import { isNestedBatchKeyword, type NestedOperationInfo } from './nested-operations.js';
 
 export type OperationPreFetchConfig = {
   fetchBeforeOperation: boolean;
@@ -20,12 +20,11 @@ export type GetOperationConfig = (modelName: string, operation: string) => Opera
  * Upsert and connectOrCreate always require pre-fetch.
  * Update and delete operations require pre-fetch only if configured.
  *
- * `updateMany` / `deleteMany` are never pre-fetched. Their WHERE clause is a `ScalarWhereInput`
- * with no parent-relation scope (Prisma adds that scope only when it executes the nested write),
- * so querying with it directly (e.g. nested `posts: { updateMany: { where: { published: false } } }`
- * matches unpublished posts of every parent) could record another parent's rows as the "before"
- * state, which is worse than recording none. Pre-fetching them would require adding the parent's
- * foreign key to that WHERE clause.
+ * `updateMany` / `deleteMany` are always pre-fetched: their rows are the rows their filter
+ * matches under the parent rows, which nothing but a read ahead of the write can tell, so the
+ * audit needs at least the primary keys of those rows. Whether that read also carries the rows'
+ * before-state follows the configuration of `update` (for `updateMany`) or `delete` (for
+ * `deleteMany`) and is decided by the fetcher.
  *
  * @param operations - Array of detected nested operations
  * @param getConfig - Function to retrieve operation configuration
@@ -41,6 +40,10 @@ export const filterOperationsToPreFetch = (
     }
 
     if (op.operation === 'connectOrCreate') {
+      return true;
+    }
+
+    if (isNestedBatchKeyword(op.operation)) {
       return true;
     }
 

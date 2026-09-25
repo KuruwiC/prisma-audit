@@ -1,10 +1,11 @@
 /**
- * Unit tests for the nested to-many pre-fetch: the target WHERE is scoped to the parent rows
- * through the back-relation filter.
+ * Unit tests for the nested to-many pre-fetch: the target WHERE of a unique-keyed operation and
+ * the filter of a batch keyword are scoped to the parent rows through the back-relation filter.
  */
 
 import { UNRESOLVED_ENTITY_ID } from '@kuruwic/prisma-audit-core';
 import { describe, expect, it, vi } from 'vitest';
+import type { GetOperationConfig } from '../src/grammar/pre-fetch-selection.js';
 import type { DMMFField, PrismaNamespace, TransactionalPrismaClient } from '../src/internal-types.js';
 import { preFetchNestedRecordsBeforeOperation } from '../src/lifecycle/pre-fetch/coordinator.js';
 import { preFetchOneToManyRelation } from '../src/lifecycle/pre-fetch/one-to-many-fetcher.js';
@@ -82,15 +83,18 @@ const Prisma: PrismaNamespace = {
 
 /** Looks rows up by their flat WHERE fields; the back-relation filter is asserted on the recorded call instead. */
 const createDelegate = (rows: Row[]) => {
-  const find = vi.fn(
-    async ({ where }: { where: Row }): Promise<Row | null> =>
-      rows.find((row) =>
-        Object.entries(where)
-          .filter(([key]) => key !== 'AND')
-          .every(([key, value]) => row[key] === value),
-      ) ?? null,
+  const matches = (where: Row) => (row: Row) =>
+    Object.entries(where)
+      .filter(([key]) => key !== 'AND')
+      .every(([key, value]) => row[key] === value);
+  const find = vi.fn(async ({ where }: { where: Row }): Promise<Row | null> => rows.find(matches(where)) ?? null);
+  const findMany = vi.fn(
+    async ({ where, select }: { where: Row; select?: Record<string, true> }): Promise<Row[]> =>
+      rows
+        .filter(matches(where))
+        .map((row) => (select ? Object.fromEntries(Object.keys(select).map((key) => [key, row[key]])) : row)),
   );
-  return { findUnique: find, findFirst: vi.fn() };
+  return { findUnique: find, findFirst: vi.fn(), findMany };
 };
 
 const createClient = (tables: Record<string, Row[]>) => {
@@ -98,11 +102,15 @@ const createClient = (tables: Record<string, Row[]>) => {
   return { client: delegates as TransactionalPrismaClient, delegates };
 };
 
-const preFetch = (client: TransactionalPrismaClient, modelName: string, args: Row) =>
-  preFetchNestedRecordsBeforeOperation(client, modelName, args, {
-    Prisma,
-    getNestedOperationConfig: () => ({ fetchBeforeOperation: true }),
-  });
+const fetchBefore: GetOperationConfig = () => ({ fetchBeforeOperation: true });
+const identityOnly: GetOperationConfig = () => ({ fetchBeforeOperation: false });
+
+const preFetch = (
+  client: TransactionalPrismaClient,
+  modelName: string,
+  args: Row,
+  getNestedOperationConfig: GetOperationConfig = fetchBefore,
+) => preFetchNestedRecordsBeforeOperation(client, modelName, args, { Prisma, getNestedOperationConfig });
 
 describe('nested to-many pre-fetch parent scope', () => {
   it('scopes a direct child by the parent key the top-level WHERE names, without reading the parent', async () => {
@@ -111,7 +119,7 @@ describe('nested to-many pre-fetch parent scope', () => {
       member: [{ id: 'm1', accountId: 'a1', name: 'first' }],
     });
 
-    const results = await preFetch(client, 'Account', {
+    const { results } = await preFetch(client, 'Account', {
       where: { id: 'a1' },
       data: { members: { update: { where: { id: 'm1' }, data: { name: 'renamed' } } } },
     });
@@ -161,7 +169,7 @@ describe('nested to-many pre-fetch parent scope', () => {
       note: [{ id: 'n1', memberId: 'm1', body: 'note' }],
     });
 
-    const results = await preFetch(client, 'Account', {
+    const { results } = await preFetch(client, 'Account', {
       where: { id: 'a1' },
       data: {
         members: {
@@ -185,7 +193,7 @@ describe('nested to-many pre-fetch parent scope', () => {
   it('queries and stores nothing for a deeper path when no row exists at the parent path', async () => {
     const { client, delegates } = createClient({ member: [], note: [{ id: 'n1', memberId: 'm-other', body: 'note' }] });
 
-    const results = await preFetch(client, 'Account', {
+    const { results } = await preFetch(client, 'Account', {
       where: { id: 'a1' },
       data: {
         members: {
@@ -207,7 +215,7 @@ describe('nested to-many pre-fetch parent scope', () => {
   it('queries and stores nothing for a direct child when the top-level row does not exist', async () => {
     const { client, delegates } = createClient({ account: [], member: [{ id: 'm1', accountId: 'a2', name: 'x' }] });
 
-    const results = await preFetch(client, 'Account', {
+    const { results } = await preFetch(client, 'Account', {
       where: { email: 'missing@example.com' },
       data: { members: { update: { where: { id: 'm1' }, data: { name: 'renamed' } } } },
     });
@@ -245,7 +253,7 @@ describe('nested to-many pre-fetch parent scope', () => {
   it('leaves connectOrCreate unscoped', async () => {
     const { client, delegates } = createClient({ member: [{ id: 'm9', accountId: 'a2', name: 'elsewhere' }] });
 
-    const results = await preFetch(client, 'Account', {
+    const { results } = await preFetch(client, 'Account', {
       where: { id: 'a1' },
       data: { members: { connectOrCreate: { where: { id: 'm9' }, create: { name: 'new' } } } },
     });
@@ -281,6 +289,152 @@ describe('nested to-many pre-fetch parent scope', () => {
     ]);
     expect(preFetchResults.get('members.notes')?.get('n1')?.before).toMatchObject({ memberId: 'm2' });
     expect(preFetchResults.get('members.notes')?.has(UNRESOLVED_ENTITY_ID)).toBe(false);
+  });
+});
+
+describe('nested to-many batch pre-read', () => {
+  const underA1 = (filter: Row) => ({ ...filter, AND: [{ account: { is: { id: 'a1' } } }] });
+  const underM1 = (filter: Row) => ({ ...filter, AND: [{ member: { is: { id: 'm1' } } }] });
+  const draftOrFinal = [
+    { id: 'm1', accountId: 'a1', name: 'draft' },
+    { id: 'm2', accountId: 'a1', name: 'final' },
+  ];
+
+  it('reads the rows an updateMany filter matches under the parent whole and stores them by primary key', async () => {
+    const { client, delegates } = createClient({ member: draftOrFinal });
+
+    const { results, batchTargets } = await preFetch(client, 'Account', {
+      where: { id: 'a1' },
+      data: { members: { updateMany: { where: { name: 'draft' }, data: { name: 'revised' } } } },
+    });
+
+    expect(delegates.member?.findMany.mock.calls).toEqual([[{ where: underA1({ name: 'draft' }) }]]);
+    expect(results.get('members')?.get('m1')?.before).toEqual({ id: 'm1', accountId: 'a1', name: 'draft' });
+    expect(results.get('members')?.has('m2')).toBe(false);
+    expect(batchTargets).toEqual(new Map([['members', new Map([['updateMany', new Map([['m1', { id: 'm1' }]])]])]]));
+  });
+
+  it('reads the primary keys only, as identities without a before state, when the update configuration asks for none', async () => {
+    const { client, delegates } = createClient({ member: draftOrFinal });
+
+    const { results, batchTargets } = await preFetch(
+      client,
+      'Account',
+      { where: { id: 'a1' }, data: { members: { updateMany: { where: { name: 'draft' }, data: { name: 'x' } } } } },
+      identityOnly,
+    );
+
+    expect(delegates.member?.findMany.mock.calls).toEqual([
+      [{ where: underA1({ name: 'draft' }), select: { id: true } }],
+    ]);
+    expect(results.get('members')?.get('m1')).toEqual({ before: null });
+    expect(batchTargets.get('members')?.get('updateMany')).toEqual(new Map([['m1', { id: 'm1' }]]));
+  });
+
+  it('follows the delete configuration for a deleteMany and reads the filter of each element', async () => {
+    const { client, delegates } = createClient({
+      member: [...draftOrFinal, { id: 'm3', accountId: 'a1', name: 'stale' }],
+    });
+
+    const { results, batchTargets } = await preFetch(
+      client,
+      'Account',
+      { where: { id: 'a1' }, data: { members: { deleteMany: [{ name: 'draft' }, { name: 'stale' }] } } },
+      (_model, operation) => ({ fetchBeforeOperation: operation === 'delete' }),
+    );
+
+    expect(delegates.member?.findMany.mock.calls).toEqual([
+      [{ where: underA1({ name: 'draft' }) }],
+      [{ where: underA1({ name: 'stale' }) }],
+    ]);
+    expect(results.get('members')?.get('m3')?.before).toMatchObject({ name: 'stale' });
+    expect(batchTargets.get('members')?.get('deleteMany')).toEqual(
+      new Map([
+        ['m1', { id: 'm1' }],
+        ['m3', { id: 'm3' }],
+      ]),
+    );
+  });
+
+  it('keeps a row another operation at the path read whole when the batch read carries identities only', async () => {
+    const { client } = createClient({ member: draftOrFinal });
+
+    const { results } = await preFetch(
+      client,
+      'Account',
+      {
+        where: { id: 'a1' },
+        data: {
+          members: {
+            upsert: { where: { id: 'm1' }, create: { name: 'x' }, update: { name: 'y' } },
+            updateMany: { where: { name: 'draft' }, data: { name: 'x' } },
+          },
+        },
+      },
+      identityOnly,
+    );
+
+    expect(results.get('members')?.get('m1')?.before).toMatchObject({ name: 'draft' });
+  });
+
+  it('scopes a deeper path by the parent row a parent-path update names when the pre-fetch did not read it', async () => {
+    const { client, delegates } = createClient({ note: [{ id: 'n1', memberId: 'm1', body: 'a' }] });
+
+    const { batchTargets } = await preFetch(
+      client,
+      'Account',
+      {
+        where: { id: 'a1' },
+        data: {
+          members: {
+            update: {
+              where: { id: 'm1' },
+              data: { notes: { updateMany: { where: { body: 'a' }, data: { body: 'b' } } } },
+            },
+          },
+        },
+      },
+      identityOnly,
+    );
+
+    expect(delegates.note?.findMany.mock.calls).toEqual([[{ where: underM1({ body: 'a' }), select: { id: true } }]]);
+    expect(batchTargets.get('members.notes')?.get('updateMany')).toEqual(new Map([['n1', { id: 'n1' }]]));
+  });
+
+  it('merges by identity the rows the same keyword matched in both branches of an upsert', async () => {
+    const { client, delegates } = createClient({
+      member: [{ id: 'm1', accountId: 'a1', name: 'first' }],
+      note: [{ id: 'n1', memberId: 'm1', body: 'a' }],
+    });
+    const revise = { updateMany: { where: { body: 'a' }, data: { body: 'b' } } };
+
+    const { batchTargets } = await preFetch(client, 'Account', {
+      where: { id: 'a1' },
+      data: {
+        members: {
+          upsert: { where: { id: 'm1' }, create: { name: 'x', notes: revise }, update: { notes: revise } },
+        },
+      },
+    });
+
+    expect(delegates.note?.findMany.mock.calls).toEqual([
+      [{ where: underM1({ body: 'a' }) }],
+      [{ where: underM1({ body: 'a' }) }],
+    ]);
+    expect(batchTargets.get('members.notes')?.get('updateMany')).toEqual(new Map([['n1', { id: 'n1' }]]));
+  });
+
+  it('queries nothing for a batch keyword whose parent row does not exist', async () => {
+    const { client, delegates } = createClient({ account: [], member: draftOrFinal });
+
+    const { results, batchTargets } = await preFetch(client, 'Account', {
+      where: { email: 'missing@example.com' },
+      data: { members: { deleteMany: { name: 'draft' } } },
+    });
+
+    expect(delegates.member?.findMany).not.toHaveBeenCalled();
+    expect(results.has('members')).toBe(false);
+    expect(batchTargets.get('members')?.get('deleteMany')).toEqual(new Map());
   });
 });
 

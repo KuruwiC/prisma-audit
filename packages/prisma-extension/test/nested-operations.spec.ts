@@ -4,6 +4,7 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  batchFilterClauses,
   detectNestedOperations,
   extractNestedRecords,
   type NestedDetectionPass,
@@ -1062,5 +1063,29 @@ describe('detectNestedOperations inside nested updates', () => {
 
       expect(asked).toEqual([undefined]);
     });
+  });
+});
+
+describe('batchFilterClauses', () => {
+  it('takes the where of each updateMany element', () => {
+    expect(batchFilterClauses('updateMany', { where: { published: false }, data: { title: 'T' } })).toEqual([
+      { published: false },
+    ]);
+    expect(
+      batchFilterClauses('updateMany', [
+        { where: { published: false }, data: {} },
+        { where: { title: 'A' }, data: {} },
+      ]),
+    ).toEqual([{ published: false }, { title: 'A' }]);
+  });
+
+  it('takes each deleteMany element as the filter itself', () => {
+    expect(batchFilterClauses('deleteMany', { published: false })).toEqual([{ published: false }]);
+    expect(batchFilterClauses('deleteMany', [{ published: false }, {}])).toEqual([{ published: false }, {}]);
+  });
+
+  it('drops elements that carry no filter', () => {
+    expect(batchFilterClauses('updateMany', [{ data: {} }, null])).toEqual([]);
+    expect(batchFilterClauses('deleteMany', [null, 'x'])).toEqual([]);
   });
 });

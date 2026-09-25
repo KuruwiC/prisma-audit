@@ -5,10 +5,12 @@
  * writes are added to its selection: into `select` when the caller selects, else into `include`.
  * The written relations come from `detectNestedOperations` in the discovery pass, which scans
  * every branch the operation could execute (both branches of an upsert). A to-many relation the
- * operation only updates is bounded to the rows the updates name, so its siblings are not read;
- * a relation the operation may insert into is read whole, since the inserted rows have no
- * identity yet. What was added is recorded, so the value handed back to the caller can be
- * projected to the shape the caller requested while audit logs are built from the full result.
+ * operation only updates by unique WHERE is bounded to the rows the updates name, so its siblings
+ * are not read; a relation the operation may insert into is read whole, since the inserted rows
+ * have no identity yet, and so is one an `updateMany` writes, since its filter describes the rows
+ * as they were before the write. What was added is recorded, so the value handed back to the
+ * caller can be projected to the shape the caller requested while audit logs are built from the
+ * full result.
  *
  * @module nested-write-selection
  */
@@ -23,13 +25,13 @@ import type { SchemaMetadata } from '../schema/types.js';
 
 /**
  * Nested write keywords whose written rows are audited from the operation result. Deleted rows are
- * audited from their pre-fetched state, `connect` writes no row of the related model, and
- * `updateMany` rows are not read from the result.
+ * audited from their pre-fetched state, and `connect` writes no row of the related model.
  */
 const RESULT_AUDITED_KEYWORDS: ReadonlySet<NestedOperationKeyword> = new Set([
   'create',
   'createMany',
   'update',
+  'updateMany',
   'upsert',
   'connectOrCreate',
 ]);
@@ -37,7 +39,7 @@ const RESULT_AUDITED_KEYWORDS: ReadonlySet<NestedOperationKeyword> = new Set([
 /**
  * The rows of a written relation to read: `rows` bounds a to-many relation to the unique WHEREs
  * of the updates at its path; `all` reads the relation whole (a to-one relation, or a path whose
- * operations may insert rows).
+ * operations may insert rows or write the rows a filter matches).
  */
 type RelationRows = { readonly kind: 'rows'; readonly wheres: Selection[] } | { readonly kind: 'all' };
 

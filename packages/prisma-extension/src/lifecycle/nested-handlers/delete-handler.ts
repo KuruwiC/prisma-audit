@@ -1,8 +1,9 @@
 /**
  * Nested Delete Operation Handler
  *
- * Collects delete targets from pre-fetched before states.
- * Falls back to extracting entity ID from operation data when prefetch is unavailable.
+ * Collects the rows a nested `delete` deleted from the pre-fetched before states, falling back to
+ * the entity ID in the operation data when nothing was pre-fetched, and the rows a nested
+ * `deleteMany` deleted from the write set, where the pre-read of its filter put them.
  * The collected records become mutation events in collect-nested-events.ts.
  */
 
@@ -15,6 +16,7 @@ import {
 import type { UniqueConstraint } from '../../schema/types.js';
 import { extractDeleteOperationEntityId } from '../../utils/extension-utils.js';
 import type { CollectedNestedRecord } from './collected-record.js';
+import type { NestedWriteTarget } from './write-set.js';
 
 /**
  * A nested delete skipped because its primary key could not be resolved. `entityId` is the
@@ -71,14 +73,6 @@ const reportUnresolvedEntityId = async (
  * identity — an idResolver reading fields off a partial entity could produce a plausible but
  * fabricated id — and reported through `onUnresolvedDeleteEntityId` when provided.
  *
- * **Exception — nested `deleteMany` with no extractable entityId.** Nested `deleteMany` is
- * never pre-fetched (see `filterOperationsToPreFetch` in `grammar/pre-fetch-selection`), and
- * a filter WHERE such as `{ published: false }` names no single row, so finding no entityId
- * is expected rather than a resolution failure. Reporting it would flag every ordinary
- * nested `deleteMany` as an audit failure, so it is only debug-logged. A `deleteMany` whose
- * WHERE names the PK fields directly (e.g. `{ id: 'x' }`) still resolves an entityId and
- * follows the normal fallback path.
- *
  * @param pkConstraint - The deleted model's primary key. The fallback reads the constraint's
  *   declared name as well as its fields, because a named composite key wraps the WHERE clause
  *   under that name.
@@ -131,15 +125,6 @@ export const collectDeleteRecords = async (
 
   const entityId = extractDeleteOperationEntityId(nestedOp.data, pkConstraint);
   if (!entityId) {
-    if (nestedOp.operation === 'deleteMany') {
-      // Expected for a filter WHERE — see the `deleteMany` exception in the JSDoc above.
-      nestedLog(
-        'nested deleteMany has no single-row identity to resolve (path=%s); no audit entry, no observer notification',
-        nestedOp.path,
-      );
-      return [];
-    }
-
     nestedLog('could not extract entity ID from delete operation data');
     // No raw entityId exists here; report the identity as never determined so the observer
     // can tell this apart from a malformed composite key, which is reported with its raw value.
@@ -167,3 +152,21 @@ export const collectDeleteRecords = async (
     },
   ];
 };
+
+/**
+ * The rows a nested `deleteMany` deleted: those its filter matched when read ahead of the
+ * operation, each with the before-state that read captured, or its primary key alone when the
+ * before-state was not requested.
+ */
+export const collectDeleteManyRecords = (
+  nestedOp: NestedOperationInfo,
+  targets: readonly NestedWriteTarget[],
+): CollectedNestedRecord[] =>
+  targets
+    .filter((target) => target.operation === nestedOp)
+    .map((target) => ({
+      entity: target.before ?? target.where,
+      action: AUDIT_ACTION.DELETE,
+      beforeState: target.before ?? null,
+      relatedModel: nestedOp.relatedModel,
+    }));

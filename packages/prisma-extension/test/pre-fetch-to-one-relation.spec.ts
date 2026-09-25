@@ -116,11 +116,13 @@ const createDelegate = (rows: Row[]) => {
 const createClient = (tables: Record<string, Row[]>): TransactionalPrismaClient =>
   Object.fromEntries(Object.entries(tables).map(([model, rows]) => [model, createDelegate(rows)]));
 
-const preFetch = (client: TransactionalPrismaClient, modelName: string, args: Row) =>
-  preFetchNestedRecordsBeforeOperation(client, modelName, args, {
-    Prisma,
-    getNestedOperationConfig: () => ({ fetchBeforeOperation: true }),
-  });
+const preFetch = async (client: TransactionalPrismaClient, modelName: string, args: Row) =>
+  (
+    await preFetchNestedRecordsBeforeOperation(client, modelName, args, {
+      Prisma,
+      getNestedOperationConfig: () => ({ fetchBeforeOperation: true }),
+    })
+  ).results;
 
 describe('nested to-one pre-fetch relation link and parent rows', () => {
   it('follows the back-relation with the same relation name when two relations point to the same model', async () => {

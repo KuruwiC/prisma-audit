@@ -4,6 +4,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import type { NestedBatchKeyword, NestedBatchTargets } from '../../src/grammar/nested-operations.js';
 import type { PrismaClientWithDynamicAccess } from '../../src/internal-types.js';
 import { buildNestedWriteSets, detectExecutedNestedOperations } from '../../src/lifecycle/nested-handlers/write-set.js';
 import type { PreExistingRows } from '../../src/lifecycle/pre-fetch/pre-existing-rows.js';
@@ -50,12 +51,15 @@ const deps = { schemaMetadata, getNestedOperationConfig: () => ({ fetchBeforeOpe
 const client: PrismaClientWithDynamicAccess = Object.create(null);
 
 type SingleCase = Partial<
-  Omit<SingleOperationOutcome, 'nestedOperations' | 'writeSets'> & { args: Record<string, unknown> }
+  Omit<SingleOperationOutcome, 'nestedOperations' | 'writeSets'> & {
+    args: Record<string, unknown>;
+    batchTargets: NestedBatchTargets;
+  }
 >;
 
 /** An outcome whose executed nested operations and write sets are resolved from `args`, as the executor does */
 const single = (overrides: SingleCase = {}): SingleOperationOutcome => {
-  const { args = { data: { name: 'Ann' } }, ...outcome } = overrides;
+  const { args = { data: { name: 'Ann' } }, batchTargets = new Map(), ...outcome } = overrides;
   const base = {
     modelName: 'User',
     action: 'create' as const,
@@ -73,7 +77,11 @@ const single = (overrides: SingleCase = {}): SingleOperationOutcome => {
     executedUpsertBranch(base.action, base.beforeStateResult),
     base.nestedPreFetchResults,
   );
-  return { ...base, nestedOperations, writeSets: buildNestedWriteSets(nestedOperations, base.nestedPreFetchResults) };
+  return {
+    ...base,
+    nestedOperations,
+    writeSets: buildNestedWriteSets(nestedOperations, base.nestedPreFetchResults, batchTargets),
+  };
 };
 
 describe('collectSingleOperationEvents', () => {
@@ -239,7 +247,12 @@ describe('collectSingleOperationEvents', () => {
     const p2 = { id: 'p2', title: 'B', authorId: 'u1' };
     const p3 = { id: 'p3', title: 'C', authorId: 'u1' };
     const p1Before = { id: 'p1', title: 'A0', authorId: 'u1' };
+    const p2Before = { id: 'p2', title: 'B0', authorId: 'u1' };
     const userBefore = { id: 'u1', name: 'Ann' };
+
+    /** The primary keys a batch keyword at `posts` matched before the operation */
+    const batchTargetsOf = (keyword: NestedBatchKeyword, ids: string[]): NestedBatchTargets =>
+      new Map([['posts', new Map([[keyword, new Map(ids.map((id) => [id, { id }]))]])]]);
 
     const preFetched = (entries: [string, Record<string, unknown> | null][]) => {
       const results = new Map();
@@ -321,16 +334,72 @@ describe('collectSingleOperationEvents', () => {
       expect(events).toEqual([expect.objectContaining({ identity: 'p1', action: 'update', before: p1Before })]);
     });
 
-    it('attributes an updateMany the rows no operation named', async () => {
+    it('attributes an updateMany the rows its filter matched before the operation, with their before states', async () => {
       const events = await postEvents(
-        { update: { where: { id: 'p1' }, data: { title: 'A' } }, updateMany: { where: {}, data: { title: 'X' } } },
+        {
+          update: { where: { id: 'p1' }, data: { title: 'A' } },
+          updateMany: { where: { title: 'B0' }, data: { title: 'B' } },
+        },
         [p1, p2, p3],
+        {
+          nestedPreFetchResults: preFetched([
+            ['p1', p1Before],
+            ['p2', p2Before],
+          ]),
+          batchTargets: batchTargetsOf('updateMany', ['p2']),
+        },
       );
 
-      expect(events.map((event) => [event.identity, event.action, event.origin.op])).toEqual([
-        ['p1', 'update', 'update'],
-        ['p2', 'update', 'updateMany'],
-        ['p3', 'update', 'updateMany'],
+      expect(events.map((event) => [event.identity, event.action, event.origin.op, event.before])).toEqual([
+        ['p1', 'update', 'update', p1Before],
+        ['p2', 'update', 'updateMany', p2Before],
+      ]);
+    });
+
+    it('attributes an updateMany a matched row without a before state when none was read', async () => {
+      const events = await postEvents({ updateMany: { where: { title: 'B0' }, data: { title: 'B' } } }, [p1, p2], {
+        nestedPreFetchResults: preFetched([['p2', null]]),
+        batchTargets: batchTargetsOf('updateMany', ['p2']),
+      });
+
+      expect(events).toEqual([
+        {
+          model: 'Post',
+          identity: 'p2',
+          action: 'update',
+          before: undefined,
+          after: p2,
+          origin: { path: 'posts', op: 'updateMany' },
+        },
+      ]);
+    });
+
+    it('collects a delete per row a deleteMany matched before the operation, from that read', async () => {
+      const events = await postEvents({ deleteMany: { title: 'B0' } }, [p1], {
+        nestedPreFetchResults: preFetched([
+          ['p2', p2Before],
+          ['p3', null],
+        ]),
+        batchTargets: batchTargetsOf('deleteMany', ['p2', 'p3']),
+      });
+
+      expect(events).toEqual([
+        {
+          model: 'Post',
+          identity: 'p2',
+          action: 'delete',
+          before: p2Before,
+          after: p2Before,
+          origin: { path: 'posts', op: 'deleteMany' },
+        },
+        {
+          model: 'Post',
+          identity: 'p3',
+          action: 'delete',
+          before: undefined,
+          after: { id: 'p3' },
+          origin: { path: 'posts', op: 'deleteMany' },
+        },
       ]);
     });
 

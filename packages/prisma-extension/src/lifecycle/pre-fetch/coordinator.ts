@@ -6,10 +6,13 @@
  * @module lifecycle/pre-fetch/coordinator
  */
 
-import { preFetchLog, UNRESOLVED_ENTITY_ID } from '@kuruwic/prisma-audit-core';
+import { type EntityIdentityKey, preFetchLog, UNRESOLVED_ENTITY_ID } from '@kuruwic/prisma-audit-core';
 import {
   detectNestedOperations,
   getPrimaryKeyConstraint,
+  isNestedBatchKeyword,
+  type NestedBatchKeyword,
+  type NestedBatchTargets,
   type NestedOperationInfo,
   type NestedPreFetchResults,
 } from '../../grammar/nested-operations.js';
@@ -28,8 +31,18 @@ import type {
 import type { UniqueConstraint } from '../../schema/types.js';
 import type { AuditErrorObserver } from '../../types.js';
 import { createSchemaMetadataFromDMMF } from '../../utils/schema-metadata.js';
-import { getPreFetchModelClient, type PreFetchModelClient } from './model-client.js';
-import { preFetchOneToManyRelation, resolveToManyRelationScope } from './one-to-many-fetcher.js';
+import {
+  getPreFetchListClient,
+  getPreFetchModelClient,
+  type PreFetchModelClient,
+  type PreFetchRecord,
+} from './model-client.js';
+import {
+  preFetchOneToManyRelation,
+  preFetchToManyBatch,
+  resolveToManyRelationScope,
+  type ToManyScopeInput,
+} from './one-to-many-fetcher.js';
 import { preFetchOneToOneRelation, resolveToOneRelationLink } from './one-to-one-fetcher.js';
 import { isRecord, parentKeysFromOperationWheres, parentPathOf } from './parent-rows.js';
 import { extractEntityId, storePreFetchResult } from './pre-fetch-result-store.js';
@@ -49,6 +62,14 @@ export interface PreFetchCoordinatorDependencies {
    * `preFetchLog`.
    */
   readonly onPreFetchFailure?: AuditErrorObserver;
+}
+
+/** What the pre-fetch read ahead of an operation */
+export interface NestedPreFetch {
+  /** Before-states keyed by operation path, then by entity identity; empty when nothing was pre-fetched */
+  readonly results: NestedPreFetchResults;
+  /** The primary keys of the rows each nested batch keyword's filter matched under its parent rows */
+  readonly batchTargets: NestedBatchTargets;
 }
 
 /**
@@ -156,11 +177,11 @@ const reportNestedPreFetchFailure = async (
  * @param modelName - Parent model name
  * @param args - Operation arguments containing nested operations
  * @param dependencies - Pre-fetch coordinator dependencies
- * @returns Before-states keyed by operation path, then by entity identity; empty when nothing was pre-fetched
+ * @returns The before-states read and the rows each batch keyword's filter matched
  *
  * @example
  * ```typescript
- * const results = await preFetchNestedRecordsBeforeOperation(
+ * const { results } = await preFetchNestedRecordsBeforeOperation(
  *   tx,
  *   'Post',
  *   { where: { id: 1 }, data: { postTags: { create: { tag: { connectOrCreate: {...} } } } } },
@@ -173,10 +194,12 @@ export const preFetchNestedRecordsBeforeOperation = async (
   modelName: string,
   args: Record<string, unknown>,
   dependencies: PreFetchCoordinatorDependencies,
-): Promise<NestedPreFetchResults> => {
+): Promise<NestedPreFetch> => {
   const { Prisma, getNestedOperationConfig, onPreFetchFailure } = dependencies;
 
   const preFetchResults: NestedPreFetchResults = new Map();
+  const batchTargets: NestedBatchTargets = new Map();
+  const preFetch: NestedPreFetch = { results: preFetchResults, batchTargets };
   const prismaMetadata = createSchemaMetadataFromDMMF(Prisma);
 
   const nestedOperations = detectNestedOperations(prismaMetadata, modelName, args, { kind: 'discovery' });
@@ -190,7 +213,7 @@ export const preFetchNestedRecordsBeforeOperation = async (
   );
 
   if (operationsToPreFetch.length === 0) {
-    return preFetchResults;
+    return preFetch;
   }
 
   const sortedOperations = sortByPathDepth(operationsToPreFetch);
@@ -204,7 +227,7 @@ export const preFetchNestedRecordsBeforeOperation = async (
 
   if (!dmmf?.datamodel?.models) {
     preFetchLog('DMMF metadata not available, skipping pre-fetch');
-    return preFetchResults;
+    return preFetch;
   }
 
   const pkConstraintCache = new Map<string, UniqueConstraint | undefined>();
@@ -218,6 +241,8 @@ export const preFetchNestedRecordsBeforeOperation = async (
     topLevelModelClient: getPreFetchModelClient(prismaClient, modelName),
     topLevelWhere: args.where,
     preFetchResults,
+    batchTargets,
+    getNestedOperationConfig,
     resolvePkConstraint: (model) => {
       if (!pkConstraintCache.has(model)) {
         pkConstraintCache.set(model, getPrimaryKeyConstraint(prismaMetadata, model));
@@ -241,7 +266,7 @@ export const preFetchNestedRecordsBeforeOperation = async (
     }
   }
 
-  return preFetchResults;
+  return preFetch;
 };
 
 interface NestedPreFetchContext {
@@ -252,37 +277,66 @@ interface NestedPreFetchContext {
   topLevelModelClient: PreFetchModelClient | undefined;
   topLevelWhere: unknown;
   preFetchResults: NestedPreFetchResults;
+  batchTargets: NestedBatchTargets;
+  getNestedOperationConfig: GetOperationConfig;
   resolvePkConstraint: (model: string) => UniqueConstraint | undefined;
   /** Operations at the parent path of `path` that were not pre-fetched; none for a direct child */
   parentOperationsNotPreFetched: (path: string) => NestedOperationInfo[];
 }
 
-const preFetchNestedOperation = async (
+/** The relation a nested operation writes, resolved from the DMMF, with the related model's primary key */
+interface NestedRelation {
+  readonly nestedOp: NestedOperationInfo;
+  readonly field: DMMFField;
+  readonly parentModel: DMMFModel;
+  readonly relatedModel: DMMFModel | undefined;
+  readonly pkConstraint: UniqueConstraint;
+}
+
+const resolveNestedRelation = (
   context: NestedPreFetchContext,
   nestedOp: NestedOperationInfo,
-): Promise<void> => {
-  const { prismaClient, modelName, dmmf, topLevelModel, preFetchResults, resolvePkConstraint } = context;
-
-  const relatedModelClient = getPreFetchModelClient(prismaClient, nestedOp.relatedModel);
-  if (!relatedModelClient) {
-    preFetchLog('model client not found: model=%s', nestedOp.relatedModel);
-    return;
-  }
+): NestedRelation | undefined => {
+  const { modelName, dmmf, topLevelModel, resolvePkConstraint } = context;
 
   const parentModel = resolveParentModelFromPath(nestedOp.path, topLevelModel, dmmf);
   const field = findDMMFField(parentModel, nestedOp.fieldName);
   if (!parentModel || !field) {
     preFetchLog('field not found in model: model=%s field=%s', parentModel?.name || modelName, nestedOp.fieldName);
-    return;
+    return undefined;
   }
 
   const pkConstraint = resolvePkConstraint(nestedOp.relatedModel);
   if (!pkConstraint) {
     preFetchLog('model has no primary key, skipping pre-fetch: model=%s path=%s', nestedOp.relatedModel, nestedOp.path);
+    return undefined;
+  }
+
+  const relatedModel = dmmf.datamodel.models.find((m) => m.name === nestedOp.relatedModel);
+  return { nestedOp, field, parentModel, relatedModel, pkConstraint };
+};
+
+const preFetchNestedOperation = async (
+  context: NestedPreFetchContext,
+  nestedOp: NestedOperationInfo,
+): Promise<void> => {
+  const relation = resolveNestedRelation(context, nestedOp);
+  if (!relation) {
     return;
   }
 
-  const { isOneToOne, isOwningSide } = categorizeRelationType(field);
+  if (isNestedBatchKeyword(nestedOp.operation)) {
+    await handleToManyBatch(context, relation, nestedOp.operation);
+    return;
+  }
+
+  const relatedModelClient = getPreFetchModelClient(context.prismaClient, nestedOp.relatedModel);
+  if (!relatedModelClient) {
+    preFetchLog('model client not found: model=%s', nestedOp.relatedModel);
+    return;
+  }
+
+  const { isOneToOne, isOwningSide } = categorizeRelationType(relation.field);
   preFetchLog(
     'processing field: field=%s operation=%s isOneToOne=%s isOwningSide=%s',
     nestedOp.fieldName,
@@ -291,18 +345,15 @@ const preFetchNestedOperation = async (
     isOwningSide,
   );
 
-  const relatedModel = dmmf.datamodel.models.find((m) => m.name === nestedOp.relatedModel);
-
   if (nestedOp.operation === 'connectOrCreate') {
-    await handleConnectOrCreate(nestedOp, relatedModelClient, preFetchResults, pkConstraint);
+    await handleConnectOrCreate(nestedOp, relatedModelClient, context.preFetchResults, relation.pkConstraint);
     return;
   }
 
-  const relationInput = { nestedOp, field, parentModel, relatedModel, relatedModelClient, pkConstraint };
   if (isOneToOne) {
-    await handleOneToOneRelation(context, relationInput);
+    await handleOneToOneRelation(context, relation, relatedModelClient);
   } else {
-    await handleOneToManyRelation(context, relationInput);
+    await handleOneToManyRelation(context, relation, relatedModelClient);
   }
 };
 
@@ -338,18 +389,13 @@ const handleConnectOrCreate = async (
   }
 };
 
-interface RelationOperationInput {
-  nestedOp: NestedOperationInfo;
-  field: DMMFField;
-  parentModel: DMMFModel;
-  relatedModel: DMMFModel | undefined;
-  relatedModelClient: PreFetchModelClient;
-  pkConstraint: UniqueConstraint;
-}
-
-const handleOneToOneRelation = async (context: NestedPreFetchContext, input: RelationOperationInput): Promise<void> => {
+const handleOneToOneRelation = async (
+  context: NestedPreFetchContext,
+  relation: NestedRelation,
+  relatedModelClient: PreFetchModelClient,
+): Promise<void> => {
   const { topLevelWhere, topLevelModelClient, preFetchResults } = context;
-  const { nestedOp, field, relatedModel, relatedModelClient, pkConstraint } = input;
+  const { nestedOp, field, relatedModel, pkConstraint } = relation;
 
   const results = await preFetchOneToOneRelation({
     path: nestedOp.path,
@@ -368,13 +414,14 @@ const handleOneToOneRelation = async (context: NestedPreFetchContext, input: Rel
   }
 };
 
-const handleOneToManyRelation = async (
+/** What scopes the to-many operation of `relation` to its parent rows; `undefined` when the parent model has no primary key */
+const resolveToManyScopeInput = (
   context: NestedPreFetchContext,
-  input: RelationOperationInput,
-): Promise<void> => {
+  relation: NestedRelation,
+): ToManyScopeInput | undefined => {
   const { topLevelWhere, topLevelModelClient, preFetchResults, resolvePkConstraint, parentOperationsNotPreFetched } =
     context;
-  const { nestedOp, field, parentModel, relatedModel, relatedModelClient, pkConstraint } = input;
+  const { nestedOp, field, parentModel, relatedModel, pkConstraint } = relation;
 
   const parentPkConstraint = resolvePkConstraint(parentModel.name);
   if (!parentPkConstraint) {
@@ -383,22 +430,90 @@ const handleOneToManyRelation = async (
       parentModel.name,
       nestedOp.path,
     );
-    return;
+    return undefined;
   }
 
-  await preFetchOneToManyRelation({
+  return {
     path: nestedOp.path,
-    operation: nestedOp.operation,
     data: nestedOp.data,
     scope: resolveToManyRelationScope(field, parentModel.name, relatedModel, parentPkConstraint.fields),
     topLevelWhere,
     topLevelModelClient,
-    relatedModelClient,
     preFetchResults,
     pkConstraint,
     parentKeysFromWhere: parentKeysFromOperationWheres(
       parentOperationsNotPreFetched(nestedOp.path),
       parentPkConstraint,
     ),
+  };
+};
+
+const handleOneToManyRelation = async (
+  context: NestedPreFetchContext,
+  relation: NestedRelation,
+  relatedModelClient: PreFetchModelClient,
+): Promise<void> => {
+  const scopeInput = resolveToManyScopeInput(context, relation);
+  if (!scopeInput) {
+    return;
+  }
+
+  await preFetchOneToManyRelation({ ...scopeInput, operation: relation.nestedOp.operation, relatedModelClient });
+};
+
+/** The configured operation whose `fetchBeforeOperation` decides whether a batch keyword reads whole rows */
+const BATCH_CONFIG_OPERATION: Record<NestedBatchKeyword, 'update' | 'delete'> = {
+  updateMany: 'update',
+  deleteMany: 'delete',
+};
+
+const recordBatchTargets = (
+  batchTargets: NestedBatchTargets,
+  path: string,
+  keyword: NestedBatchKeyword,
+  matched: ReadonlyMap<EntityIdentityKey, PreFetchRecord>,
+): void => {
+  const atPath = batchTargets.get(path) ?? new Map<NestedBatchKeyword, Map<EntityIdentityKey, PreFetchRecord>>();
+  batchTargets.set(path, atPath);
+  const known = atPath.get(keyword) ?? new Map<EntityIdentityKey, PreFetchRecord>();
+  atPath.set(keyword, known);
+  for (const [identity, key] of matched) {
+    known.set(identity, key);
+  }
+};
+
+/**
+ * Pre-reads the rows a batch keyword's filter matches under the parent rows. The discovery pass
+ * may find the same keyword at a path in more than one upsert branch; the rows each read matched
+ * are merged by identity.
+ */
+const handleToManyBatch = async (
+  context: NestedPreFetchContext,
+  relation: NestedRelation,
+  keyword: NestedBatchKeyword,
+): Promise<void> => {
+  const { nestedOp } = relation;
+
+  const relatedModelClient = getPreFetchListClient(context.prismaClient, nestedOp.relatedModel);
+  if (!relatedModelClient) {
+    preFetchLog('model client has no findMany: model=%s', nestedOp.relatedModel);
+    return;
+  }
+
+  const scopeInput = resolveToManyScopeInput(context, relation);
+  if (!scopeInput) {
+    return;
+  }
+
+  const { fetchBeforeOperation } = context.getNestedOperationConfig(
+    nestedOp.relatedModel,
+    BATCH_CONFIG_OPERATION[keyword],
+  );
+  const matched = await preFetchToManyBatch({
+    ...scopeInput,
+    operation: keyword,
+    relatedModelClient,
+    fetchBeforeOperation,
   });
+  recordBatchTargets(context.batchTargets, nestedOp.path, keyword, matched);
 };

@@ -36,6 +36,12 @@ export const NESTED_OPERATION_KEYWORDS = [
 
 export type NestedOperationKeyword = (typeof NESTED_OPERATION_KEYWORDS)[number];
 
+/** The nested keywords that name their rows by a filter rather than by a unique WHERE */
+export type NestedBatchKeyword = 'updateMany' | 'deleteMany';
+
+export const isNestedBatchKeyword = (keyword: NestedOperationKeyword): keyword is NestedBatchKeyword =>
+  keyword === 'updateMany' || keyword === 'deleteMany';
+
 /**
  * Information about a detected nested operation
  */
@@ -75,6 +81,12 @@ export interface NestedRecordInfo {
  * then by entity identity (`UNRESOLVED_ENTITY_ID` when the identity is unknown)
  */
 export type NestedPreFetchResults = Map<string, Map<EntityIdentityKey, NestedPreFetchResult>>;
+
+/**
+ * The primary key of every row each nested batch keyword's filter matched under its parent rows
+ * before the operation, keyed by operation path, then by keyword, then by entity identity
+ */
+export type NestedBatchTargets = Map<string, Map<NestedBatchKeyword, Map<EntityIdentityKey, Record<string, unknown>>>>;
 
 /** A branch of an upsert: `create` runs when the target row does not exist, `update` when it does */
 export type UpsertBranch = 'create' | 'update';
@@ -636,6 +648,22 @@ export const targetWhereClauses = (operation: NestedOperationKeyword, data: unkn
   }
 
   return [];
+};
+
+/**
+ * The filter of every element of a nested batch keyword: the `where` of each `updateMany` element,
+ * the element itself for `deleteMany`; one per element when `data` is a list. A filter is a
+ * `<Model>ScalarWhereInput` that any number of rows may match, so, unlike a unique WHERE, it
+ * names its rows only through a query.
+ */
+export const batchFilterClauses = (operation: NestedBatchKeyword, data: unknown): Record<string, unknown>[] => {
+  const items = Array.isArray(data) ? data : [data];
+
+  if (operation === 'updateMany') {
+    return items.map((item) => (isRecord(item) ? item.where : undefined)).filter(isRecord);
+  }
+
+  return items.filter(isRecord);
 };
 
 /** @internal Convert field value to array based on isList flag */

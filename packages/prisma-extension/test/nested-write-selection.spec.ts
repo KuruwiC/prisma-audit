@@ -50,7 +50,7 @@ describe('injectNestedWriteSelection', () => {
     const args = {
       where: { id: 'user-1' },
       data: {
-        posts: { connect: { id: 'post-1' }, updateMany: { where: {}, data: { title: 'T' } }, delete: { id: 'post-2' } },
+        posts: { connect: { id: 'post-1' }, deleteMany: { title: 'T' }, delete: { id: 'post-2' } },
       },
     };
 
@@ -108,6 +108,17 @@ describe('injectNestedWriteSelection', () => {
       ['connectOrCreate', { posts: { connectOrCreate: { where: { id: 'post-1' }, create: { title: 'A' } } } }],
     ])('reads a relation whole when a %s at its path may insert rows', (_keyword, data) => {
       expect(postsOf(data)).toBe(true);
+    });
+
+    it('reads a relation whole when an updateMany at its path writes the rows a filter matches', () => {
+      expect(
+        postsOf({
+          posts: {
+            update: { where: { id: 'post-1' }, data: { title: 'A' } },
+            updateMany: { where: { title: 'T' }, data: { title: 'U' } },
+          },
+        }),
+      ).toBe(true);
     });
 
     it('reads a relation whole when an update element names no row', () => {

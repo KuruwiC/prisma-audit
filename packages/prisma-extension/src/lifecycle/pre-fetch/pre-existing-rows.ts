@@ -26,10 +26,9 @@ import type {
 import type { SchemaMetadata, UniqueConstraint } from '../../schema/types.js';
 import type { AuditErrorObserver } from '../../types.js';
 import { extractEntityIdentity } from '../../utils/id-generation.js';
-import { getModelDelegate } from '../../utils/model-accessor.js';
 import type { NestedWriteSets } from '../nested-handlers/write-set.js';
 import { findDMMFField, resolveParentModelFromPath } from './coordinator.js';
-import { getPreFetchModelClient, type PreFetchRecord } from './model-client.js';
+import { getPreFetchListClient, getPreFetchModelClient, type PreFetchListClient } from './model-client.js';
 import { resolveToManyRelationScope, type ToManyRelationScope } from './one-to-many-fetcher.js';
 import { parentKeyOf, parentKeysFromOperationWheres, parentPathOf, resolveParentRows } from './parent-rows.js';
 
@@ -58,20 +57,13 @@ export interface SnapshotPreExistingRowsDependencies {
   readonly onSnapshotFailure?: AuditErrorObserver;
 }
 
-interface SnapshotModelClient {
-  findMany(args: { where: PreFetchRecord; select: Record<string, true> }): Promise<PreFetchRecord[]>;
-}
-
-const isSnapshotModelClient = (value: unknown): value is SnapshotModelClient =>
-  typeof value === 'object' && value !== null && 'findMany' in value && typeof value.findMany === 'function';
-
 interface PathRelation {
   readonly operation: NestedOperationInfo;
   readonly parentModelName: string;
   readonly parentPk: UniqueConstraint;
   readonly pk: UniqueConstraint;
   readonly scope: ToManyRelationScope;
-  readonly client: SnapshotModelClient;
+  readonly client: PreFetchListClient;
 }
 
 const resolvePathRelation = (
@@ -90,8 +82,8 @@ const resolvePathRelation = (
 
   const parentPk = getPrimaryKeyConstraint(deps.schemaMetadata, parentModel.name);
   const pk = getPrimaryKeyConstraint(deps.schemaMetadata, operation.relatedModel);
-  const client = getModelDelegate(input.prismaClient, operation.relatedModel);
-  if (!parentPk || !pk || !isSnapshotModelClient(client)) {
+  const client = getPreFetchListClient(input.prismaClient, operation.relatedModel);
+  if (!parentPk || !pk || !client) {
     preFetchLog('snapshot: no primary key or model client: model=%s path=%s', operation.relatedModel, operation.path);
     return undefined;
   }

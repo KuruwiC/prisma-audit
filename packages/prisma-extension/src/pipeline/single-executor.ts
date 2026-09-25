@@ -2,10 +2,11 @@
  * Single-operation executor
  *
  * create, update, upsert and delete: reads the target row's before state and the nested records
- * the operation will write, resolves the nested write set (the operations that execute, the rows
- * they name, and the rows a to-many relation holds before a nested create), runs the operation
- * on the scope's handle, collects the top-level row and the nested rows the operation wrote, and
- * re-reads the result so its Date fields reach the caller as Date instances.
+ * the operation will write (including the rows a nested batch filter matches under its parent),
+ * resolves the nested write set (the operations that execute, the rows they name or matched, and
+ * the rows a to-many relation holds before a nested create), runs the operation on the scope's
+ * handle, collects the top-level row and the nested rows the operation wrote, and re-reads the
+ * result so its Date fields reach the caller as Date instances.
  */
 
 import type { MutationEvent } from '@kuruwic/prisma-audit-core';
@@ -68,11 +69,12 @@ export const createSingleExecutor = (deps: SingleExecutorDependencies): Operatio
       { handle: scope.handle, modelName, action, args },
       { getNestedOperationConfig, onFetchFailure: failureSink.notify },
     );
-    const nestedPreFetchResults = await preFetchNestedRecordsBeforeOperation(scope.handle, modelName, args, {
-      Prisma,
-      getNestedOperationConfig,
-      onPreFetchFailure: failureSink.notify,
-    });
+    const { results: nestedPreFetchResults, batchTargets } = await preFetchNestedRecordsBeforeOperation(
+      scope.handle,
+      modelName,
+      args,
+      { Prisma, getNestedOperationConfig, onPreFetchFailure: failureSink.notify },
+    );
     const nestedOperations = detectExecutedNestedOperations(
       schemaMetadata,
       modelName,
@@ -80,7 +82,7 @@ export const createSingleExecutor = (deps: SingleExecutorDependencies): Operatio
       executedUpsertBranch(action, beforeStateResult),
       nestedPreFetchResults,
     );
-    const writeSets = buildNestedWriteSets(nestedOperations, nestedPreFetchResults);
+    const writeSets = buildNestedWriteSets(nestedOperations, nestedPreFetchResults, batchTargets);
     // A top-level row the operation creates has no children yet, so nothing is snapshotted under it.
     const preExistingRows = targetRowExistsBefore(action, beforeStateResult)
       ? await snapshotPreExistingRows(

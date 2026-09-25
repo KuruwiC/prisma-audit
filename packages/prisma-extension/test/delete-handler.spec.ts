@@ -1,5 +1,5 @@
 /**
- * Unit tests for `collectDeleteRecords` (nested delete handler)
+ * Unit tests for the nested delete handler: `collectDeleteRecords` and `collectDeleteManyRecords`
  *
  * Focus: composite primary key reconstruction. When the pre-fetch step only knows
  * a serialized entityId (no full before-state), `collectDeleteRecords` must
@@ -11,7 +11,7 @@
 import { UNRESOLVED_ENTITY_ID } from '@kuruwic/prisma-audit-core';
 import { describe, expect, it, vi } from 'vitest';
 import type { NestedOperationInfo, NestedPreFetchResults } from '../src/grammar/nested-operations.js';
-import { collectDeleteRecords } from '../src/lifecycle/nested-handlers/delete-handler.js';
+import { collectDeleteManyRecords, collectDeleteRecords } from '../src/lifecycle/nested-handlers/delete-handler.js';
 import type { UniqueConstraint } from '../src/schema/types.js';
 
 const nestedOp: NestedOperationInfo = {
@@ -153,12 +153,7 @@ describe('collectDeleteRecords — unresolved identity', () => {
   });
 });
 
-describe('collectDeleteRecords — nested deleteMany has no single-row identity to resolve', () => {
-  // Nested `deleteMany` (e.g. `posts: { deleteMany: { where: { published: false } } }`) is
-  // deliberately never pre-fetched (see the "Exception" note on `collectDeleteRecords`), so
-  // an ordinary filter WHERE reaches the fallback with nothing pre-fetched and no PK fields
-  // present in `nestedOp.data`. That is a designed limitation, not an identity resolution
-  // failure — it must not be reported through `onUnresolvedDeleteEntityId`.
+describe('collectDeleteRecords — a delete whose data names no identity', () => {
   const deleteManyOp: NestedOperationInfo = {
     operation: 'deleteMany',
     fieldName: 'posts',
@@ -168,33 +163,7 @@ describe('collectDeleteRecords — nested deleteMany has no single-row identity 
     path: 'posts',
   };
 
-  it('produces no audit entry and does not notify the observer for an ordinary filter WHERE', async () => {
-    const onUnresolvedDeleteEntityId = vi.fn().mockResolvedValue(undefined);
-
-    const collected = await collectDeleteRecords(deleteManyOp, undefined, idPrimaryKey, onUnresolvedDeleteEntityId);
-
-    expect(collected).toEqual([]);
-    expect(onUnresolvedDeleteEntityId).not.toHaveBeenCalled();
-  });
-
-  it('still extracts an identity and yields an entry when the WHERE names a PK field directly', async () => {
-    const deleteManyByIdOp: NestedOperationInfo = { ...deleteManyOp, data: { id: 'post-1' } };
-    const onUnresolvedDeleteEntityId = vi.fn().mockResolvedValue(undefined);
-
-    const collected = await collectDeleteRecords(deleteManyByIdOp, undefined, idPrimaryKey, onUnresolvedDeleteEntityId);
-
-    expect(collected).toEqual([
-      {
-        entity: { id: 'post-1' },
-        action: 'delete',
-        beforeState: null,
-        relatedModel: 'Post',
-      },
-    ]);
-    expect(onUnresolvedDeleteEntityId).not.toHaveBeenCalled();
-  });
-
-  it('reports a single delete (not deleteMany) whose identity cannot be resolved through the callback', async () => {
+  it('reports a delete whose identity cannot be resolved through the callback', async () => {
     const singleDeleteOp: NestedOperationInfo = { ...deleteManyOp, operation: 'delete' };
     const onUnresolvedDeleteEntityId = vi.fn().mockResolvedValue(undefined);
 
@@ -210,5 +179,37 @@ describe('collectDeleteRecords — nested deleteMany has no single-row identity 
         error: expect.objectContaining({ message: expect.stringContaining('entityId=unresolved') }),
       }),
     );
+  });
+});
+
+describe('collectDeleteManyRecords', () => {
+  const deleteManyOp: NestedOperationInfo = {
+    operation: 'deleteMany',
+    fieldName: 'posts',
+    relatedModel: 'Post',
+    isList: true,
+    data: { published: false },
+    path: 'posts',
+  };
+  const deleteOp: NestedOperationInfo = { ...deleteManyOp, operation: 'delete', data: { id: 'post-9' } };
+
+  it('collects a delete per row the filter matched, with the before state the pre-read captured', () => {
+    const before = { id: 'post-1', published: false };
+
+    expect(
+      collectDeleteManyRecords(deleteManyOp, [{ where: { id: 'post-1' }, operation: deleteManyOp, before }]),
+    ).toEqual([{ entity: before, action: 'delete', beforeState: before, relatedModel: 'Post' }]);
+  });
+
+  it('collects the primary key alone when the before state was not read', () => {
+    expect(
+      collectDeleteManyRecords(deleteManyOp, [{ where: { id: 'post-1' }, operation: deleteManyOp, before: undefined }]),
+    ).toEqual([{ entity: { id: 'post-1' }, action: 'delete', beforeState: null, relatedModel: 'Post' }]);
+  });
+
+  it('leaves the rows of the other operations at the path to them', () => {
+    expect(
+      collectDeleteManyRecords(deleteManyOp, [{ where: { id: 'post-9' }, operation: deleteOp, before: undefined }]),
+    ).toEqual([]);
   });
 });

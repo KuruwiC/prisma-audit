@@ -18,6 +18,11 @@ export interface PreFetchModelClient {
   findFirst(args: { where: PreFetchRecord }): Promise<PreFetchRecord | null>;
 }
 
+/** Read method of a Prisma model delegate that returns every row a filter matches */
+export interface PreFetchListClient {
+  findMany(args: { where: PreFetchRecord; select?: Record<string, true> }): Promise<PreFetchRecord[]>;
+}
+
 const isPreFetchModelClient = (value: unknown): value is PreFetchModelClient =>
   typeof value === 'object' &&
   value !== null &&
@@ -26,6 +31,9 @@ const isPreFetchModelClient = (value: unknown): value is PreFetchModelClient =>
   'findFirst' in value &&
   typeof value.findFirst === 'function';
 
+const isPreFetchListClient = (value: unknown): value is PreFetchListClient =>
+  typeof value === 'object' && value !== null && 'findMany' in value && typeof value.findMany === 'function';
+
 /** `modelName` is PascalCase, as in the DMMF. */
 export const getPreFetchModelClient = (
   prismaClient: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
@@ -33,4 +41,13 @@ export const getPreFetchModelClient = (
 ): PreFetchModelClient | undefined => {
   const delegate = getModelDelegate(prismaClient, modelName);
   return isPreFetchModelClient(delegate) ? delegate : undefined;
+};
+
+/** `modelName` is PascalCase, as in the DMMF. */
+export const getPreFetchListClient = (
+  prismaClient: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
+  modelName: string,
+): PreFetchListClient | undefined => {
+  const delegate = getModelDelegate(prismaClient, modelName);
+  return isPreFetchListClient(delegate) ? delegate : undefined;
 };

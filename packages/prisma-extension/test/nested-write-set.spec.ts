@@ -4,7 +4,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import type { NestedPreFetchResults } from '../src/grammar/nested-operations.js';
+import type { NestedBatchTargets, NestedPreFetchResults } from '../src/grammar/nested-operations.js';
 import { buildNestedWriteSets, detectExecutedNestedOperations } from '../src/lifecycle/nested-handlers/write-set.js';
 import { storePreFetchResult } from '../src/lifecycle/pre-fetch/pre-fetch-result-store.js';
 import { createSchemaMetadataFromDMMF } from '../src/utils/schema-metadata.js';
@@ -38,9 +38,13 @@ const preFetched = (entries: [string, string, Record<string, unknown> | null][])
   return results;
 };
 
-const writeSetsOf = (data: Record<string, unknown>, results: NestedPreFetchResults = new Map()) => {
+const writeSetsOf = (
+  data: Record<string, unknown>,
+  results: NestedPreFetchResults = new Map(),
+  batchTargets: NestedBatchTargets = new Map(),
+) => {
   const operations = detectExecutedNestedOperations(schemaMetadata, 'User', { data }, undefined, results);
-  return { operations, writeSets: buildNestedWriteSets(operations, results) };
+  return { operations, writeSets: buildNestedWriteSets(operations, results, batchTargets) };
 };
 
 describe('detectExecutedNestedOperations', () => {
@@ -109,6 +113,47 @@ describe('buildNestedWriteSets', () => {
       expect(writeSetsOf(data, preFetched([['posts', 'p1', null]])).writeSets.get('posts')?.createsPending).toBe(true);
     },
   );
+
+  it.each([
+    ['updateMany', { posts: { updateMany: { where: { title: 'x' }, data: { title: 'y' } } } }],
+    ['deleteMany', { posts: { deleteMany: { title: 'x' } } }],
+  ] as const)(
+    'names the rows a %s matched before the operation by their primary key, with the before state read',
+    (keyword, data) => {
+      const results = preFetched([['posts', 'p1', p1]]);
+      const batchTargets: NestedBatchTargets = new Map([
+        [
+          'posts',
+          new Map([
+            [
+              keyword,
+              new Map([
+                ['p1', { id: 'p1' }],
+                ['p2', { id: 'p2' }],
+              ]),
+            ],
+          ]),
+        ],
+      ]);
+
+      const { operations, writeSets } = writeSetsOf(data, results, batchTargets);
+
+      expect(writeSets.get('posts')).toEqual({
+        targets: [
+          { where: { id: 'p1' }, operation: operations[0], before: p1 },
+          { where: { id: 'p2' }, operation: operations[0], before: undefined },
+        ],
+        createsPending: false,
+      });
+    },
+  );
+
+  it('names no row for a batch keyword whose filter matched nothing', () => {
+    expect(writeSetsOf({ posts: { deleteMany: { title: 'x' } } }).writeSets.get('posts')).toEqual({
+      targets: [],
+      createsPending: false,
+    });
+  });
 
   it('names the rows a nested connect links, so they are not read as inserted', () => {
     const { operations, writeSets } = writeSetsOf({ posts: { connect: [{ id: 'p1' }], create: { title: 'A' } } });

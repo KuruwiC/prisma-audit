@@ -7,12 +7,13 @@
  * an operation wrote.
  *
  * A to-many relation is returned whole, so a row there is an operation's only when the write set
- * says so: a row a target WHERE names belongs to that operation; a row that matches no target and
- * did not exist under the parent before the operation was inserted, and belongs to the first
- * operation at the path that inserts rows; any other row is a sibling and yields nothing. An
- * `updateMany` names its rows by a filter the result does not carry, so it is attributed every row
- * at its path no operation named or claimed. A to-one path holds one related row per parent row,
- * each the row of the operation nested under that parent.
+ * says so: a row a target names belongs to that operation (a unique WHERE, or the primary key of
+ * a row an `updateMany` filter matched when read ahead of the operation); a row that matches no
+ * target and did not exist under the parent before the operation was inserted, and belongs to
+ * the first operation at the path that inserts rows; any other row is a sibling and yields
+ * nothing. A `deleteMany` yields one delete event per row its filter matched in that read. A
+ * to-one path holds one related row per parent row, each the row of the operation nested under
+ * that parent.
  */
 
 import type { EntityIdentityKey, MutationEvent } from '@kuruwic/prisma-audit-core';
@@ -34,7 +35,11 @@ import { matchesUniqueWhere } from '../../utils/compound-where.js';
 import type { PreExistingRows } from '../pre-fetch/pre-existing-rows.js';
 import { extractEntityIdOrUnresolved, getPreFetchResult } from '../pre-fetch/pre-fetch-result-store.js';
 import type { CollectedNestedRecord } from './collected-record.js';
-import { collectDeleteRecords, type UnresolvedDeleteEntityIdReporter } from './delete-handler.js';
+import {
+  collectDeleteManyRecords,
+  collectDeleteRecords,
+  type UnresolvedDeleteEntityIdReporter,
+} from './delete-handler.js';
 import { resolveNestedRowState } from './state-resolver.js';
 import { insertsRows, type NestedWriteSet, type NestedWriteSets, type NestedWriteTarget } from './write-set.js';
 
@@ -140,9 +145,8 @@ const claimUnnamedRows = (
 };
 
 /**
- * The rows at a to-many path `nestedOp` wrote: those its target WHEREs name; for an operation that
- * inserts rows, the unclaimed rows that did not exist under the parent before; for an `updateMany`,
- * every unclaimed row.
+ * The rows at a to-many path `nestedOp` wrote: those its targets name and, for an operation that
+ * inserts rows, the unclaimed rows that did not exist under the parent before.
  */
 const collectToManyRows = (
   nestedOp: NestedOperationInfo,
@@ -166,9 +170,6 @@ const collectToManyRows = (
   if (insertsRows(nestedOp, ownTargets)) {
     const isNew = (row: Row) => !(preExisting?.has(identityOf(row, pkFields)) ?? false);
     return [...collected, ...claimUnnamedRows(nestedOp, attribution, isNew, getNestedOperationConfig)];
-  }
-  if (nestedOp.operation === 'updateMany') {
-    return [...collected, ...claimUnnamedRows(nestedOp, attribution, () => true, getNestedOperationConfig)];
   }
   return collected;
 };
@@ -196,7 +197,10 @@ const collectRecordsOf = async (
   const { nestedPreFetchResults } = input;
   const { getNestedOperationConfig } = deps;
 
-  if (nestedOp.operation === 'delete' || nestedOp.operation === 'deleteMany') {
+  if (nestedOp.operation === 'deleteMany') {
+    return collectDeleteManyRecords(nestedOp, input.writeSets.get(nestedOp.path)?.targets ?? []);
+  }
+  if (nestedOp.operation === 'delete') {
     return collectDeleteRecords(nestedOp, nestedPreFetchResults, pkConstraint, deps.onUnresolvedDeleteEntityId);
   }
   if (nestedOp.operation === 'connect') {

@@ -193,6 +193,55 @@ describe('Database Round-Trip Guard', () => {
     expect(statements).toHaveLength(11);
   });
 
+  it('update with a nested updateMany under an existing parent (1 matching post, 1 other) issues 12 statements', async () => {
+    const user = await provider.runAsync(testActor, async () => {
+      return prisma.user.create({
+        data: {
+          email: 'nested-update-many@example.com',
+          name: 'Batch',
+          password: 'secret123',
+          posts: {
+            create: [
+              { title: 'Draft', content: 'C1', published: false },
+              { title: 'Live', content: 'C2', published: true },
+            ],
+          },
+        },
+      });
+    });
+    statements.length = 0;
+
+    await provider.runAsync(testActor, async () => {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { posts: { updateMany: { where: { published: false }, data: { published: true } } } },
+      });
+    });
+
+    console.log(`Update with nested updateMany: ${statements.length} SQL statements`);
+    // 1. BEGIN                  — awaitWrite: true (default) wraps the operation in a transaction
+    // 2. SELECT FROM users      — the before-state fetch (fetchBeforeOperation, default: true)
+    // 3. SELECT FROM posts      — the pre-read of the rows the nested updateMany filter matches
+    //                             under this user (the filter plus the back-relation to the
+    //                             parent), whole rows since fetchBeforeOperation defaults to
+    //                             true; these rows are the ones the updateMany is attributed
+    // 4. SELECT FROM users      — Prisma's own read of the parent row the nested write applies to
+    // 5. SELECT id FROM posts   — Prisma's own resolution of the rows the nested updateMany
+    //                             filter matches under that parent...
+    // 6. UPDATE posts           — ...which it then updates by primary key
+    // 7. SELECT FROM users      — Prisma's resolution of the injected `include: { posts: true }`
+    //                             on the update() result: base record...
+    // 8. SELECT FROM posts      — ...and the included relation, fetched as a separate query
+    // 9. SELECT FROM users      — refetchForDateHydration's findUnique (re-runs the same
+    //                             `include: { posts: true }`)...
+    // 10. SELECT FROM posts     — ...so its relation resolution repeats the same 2-statement shape
+    // 11. INSERT INTO audit_logs — one batched write: user + the matched post + the post's
+    //                              aggregate-owner (User) propagation log — 3 rows, 1 statement;
+    //                              the post the filter did not match gets no row
+    // 12. COMMIT
+    expect(statements).toHaveLength(12);
+  });
+
   it('deleteMany (2 rows) issues 5 statements', async () => {
     const user = await provider.runAsync(testActor, async () => {
       return prisma.user.create({

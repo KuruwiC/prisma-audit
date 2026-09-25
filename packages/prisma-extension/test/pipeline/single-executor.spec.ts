@@ -399,6 +399,112 @@ describe('createSingleExecutor', () => {
     });
   });
 
+  describe('rows a nested batch filter matches', () => {
+    const p1Before: Row = { id: 'p1', title: 'A', authorId: 'u1' };
+    const p1After: Row = { id: 'p1', title: 'X', authorId: 'u1' };
+    const sibling: Row = { id: 'p2', title: 'B', authorId: 'u1' };
+    const underU1 = (filter: Row) => ({ ...filter, AND: [{ author: { is: { id: 'u1' } } }] });
+    const updateManyArgs = {
+      where: { id: 'u1' },
+      data: { posts: { updateMany: { where: { title: 'A' }, data: { title: 'X' } } } },
+    };
+
+    it('reads them on the scope handle before the operation and audits those rows only, with their before state', async () => {
+      const calls: string[] = [];
+      const findMany = vi.fn(async () => {
+        calls.push('pre-read');
+        return [p1Before];
+      });
+      const client = clientWith({
+        user: {
+          findUnique: vi.fn(async () => user),
+          update: vi.fn(async () => {
+            calls.push('update');
+            return { ...user, posts: [p1After, sibling] };
+          }),
+        },
+        post: { findMany },
+      });
+      const { executor, produceRecords } = executorWith();
+
+      await executor.run(operationOf('update', updateManyArgs), scopeOn(client), produceRecords);
+
+      expect(calls).toEqual(['pre-read', 'update']);
+      expect(findMany).toHaveBeenCalledWith({ where: underU1({ title: 'A' }) });
+      expect(produceRecords).toHaveBeenCalledWith(
+        [
+          expect.objectContaining({ model: 'User', action: 'update' }),
+          {
+            model: 'Post',
+            identity: 'p1',
+            action: 'update',
+            before: p1Before,
+            after: p1After,
+            origin: { path: 'posts', op: 'updateMany' },
+          },
+        ],
+        expect.anything(),
+      );
+    });
+
+    it('reads their primary keys only when the before state of an update is not requested', async () => {
+      const findMany = vi.fn(async () => [{ id: 'p1' }]);
+      const client = clientWith({
+        user: { findUnique: vi.fn(), update: vi.fn(async () => ({ ...user, posts: [p1After, sibling] })) },
+        post: { findMany },
+      });
+      const { executor, produceRecords } = executorWith({ fetchBeforeOperation: false });
+
+      await executor.run(operationOf('update', updateManyArgs), scopeOn(client), produceRecords);
+
+      expect(findMany).toHaveBeenCalledWith({ where: underU1({ title: 'A' }), select: { id: true } });
+      expect(produceRecords).toHaveBeenCalledWith(
+        [
+          expect.objectContaining({ model: 'User', action: 'update' }),
+          expect.objectContaining({
+            model: 'Post',
+            identity: 'p1',
+            action: 'update',
+            before: undefined,
+            after: p1After,
+            origin: { path: 'posts', op: 'updateMany' },
+          }),
+        ],
+        expect.anything(),
+      );
+    });
+
+    it('collects a delete per row a deleteMany matched, from the pre-read', async () => {
+      const findMany = vi.fn(async () => [p1Before]);
+      const client = clientWith({
+        user: { findUnique: vi.fn(async () => user), update: vi.fn(async () => user) },
+        post: { findMany },
+      });
+      const { executor, produceRecords } = executorWith();
+
+      await executor.run(
+        operationOf('update', { where: { id: 'u1' }, data: { posts: { deleteMany: { title: 'A' } } } }),
+        scopeOn(client),
+        produceRecords,
+      );
+
+      expect(findMany).toHaveBeenCalledWith({ where: underU1({ title: 'A' }) });
+      expect(produceRecords).toHaveBeenCalledWith(
+        [
+          expect.objectContaining({ model: 'User', action: 'update' }),
+          expect.objectContaining({
+            model: 'Post',
+            identity: 'p1',
+            action: 'delete',
+            before: p1Before,
+            origin: { path: 'posts', op: 'deleteMany' },
+          }),
+        ],
+        expect.anything(),
+      );
+    });
+  });
+
   describe('execution', () => {
     it('runs the action of the model delegate on the scope handle with the operation args', async () => {
       const create = vi.fn(async () => user);

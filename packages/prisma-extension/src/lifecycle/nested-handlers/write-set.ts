@@ -3,15 +3,18 @@
  *
  * What a single operation writes below its top-level row, resolved before it runs: the nested
  * operations that execute (the branch of every upsert is known once the before-states are read)
- * and, per to-many path, the rows those operations name by unique WHERE. A relation written at a
- * to-many path is read back whole, so the write set is what tells the rows an operation wrote
- * from their siblings. A create at a to-many path inserts rows whose identity is unknown until
- * the operation ran; the write set marks such a path so the rows the relation held before the
- * operation can be snapshotted.
+ * and, per to-many path, the rows those operations name by unique WHERE or, for an `updateMany`
+ * / `deleteMany`, the rows their filter matched when read ahead of the operation. A relation
+ * written at a to-many path is read back whole, so the write set is what tells the rows an
+ * operation wrote from their siblings. A create at a to-many path inserts rows whose identity is
+ * unknown until the operation ran; the write set marks such a path so the rows the relation held
+ * before the operation can be snapshotted.
  */
 
 import {
   detectNestedOperations,
+  isNestedBatchKeyword,
+  type NestedBatchTargets,
   type NestedOperationInfo,
   type NestedOperationKeyword,
   type NestedPreFetchResults,
@@ -23,8 +26,9 @@ import { preFetchedRowAt } from '../pre-fetch/pre-fetch-result-store.js';
 
 type Row = Record<string, unknown>;
 
-/** A row a nested operation names by its unique WHERE */
+/** A row a nested operation writes: named by its unique WHERE, or matched by a batch keyword's filter */
 export interface NestedWriteTarget {
+  /** The unique WHERE the operation names the row by, or the row's primary key when a filter matched it */
   readonly where: Row;
   readonly operation: NestedOperationInfo;
   /** The row's pre-fetched before-state; `undefined` when it did not exist under the parent or was not pre-fetched */
@@ -69,10 +73,17 @@ export const insertsRows = (operation: NestedOperationInfo, targets: readonly Ne
   INSERTING_KEYWORDS.has(operation.operation) ||
   (INSERTING_WHEN_TARGET_MISSING.has(operation.operation) && targets.some((target) => target.before === undefined));
 
+/** The unique WHEREs `operation` names rows by, or the primary keys of the rows its filter matched */
+const targetWheresOf = (operation: NestedOperationInfo, batchTargets: NestedBatchTargets): Row[] =>
+  isNestedBatchKeyword(operation.operation)
+    ? [...(batchTargets.get(operation.path)?.get(operation.operation)?.values() ?? [])]
+    : targetWhereClauses(operation.operation, operation.data);
+
 /** Build the write set of every to-many path the executed nested operations write */
 export const buildNestedWriteSets = (
   operations: readonly NestedOperationInfo[],
   nestedPreFetchResults: NestedPreFetchResults,
+  batchTargets: NestedBatchTargets,
 ): NestedWriteSets => {
   const writeSets = new Map<string, { targets: NestedWriteTarget[]; createsPending: boolean }>();
 
@@ -83,7 +94,7 @@ export const buildNestedWriteSets = (
     const writeSet = writeSets.get(operation.path) ?? { targets: [], createsPending: false };
     writeSets.set(operation.path, writeSet);
 
-    const targets = targetWhereClauses(operation.operation, operation.data).map((where) => ({
+    const targets = targetWheresOf(operation, batchTargets).map((where) => ({
       where,
       operation,
       before: preFetchedRowAt(nestedPreFetchResults, operation.path, where),
