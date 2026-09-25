@@ -6,7 +6,7 @@ import {
   foreignKey,
   to,
 } from '@kuruwic/db-audit-core';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createMemoryAuditAdapter, type MemoryAuditOptions, type MemoryDb, type MemorySchema } from '../src/index.js';
 
 type ModelName = 'User' | 'Post';
@@ -297,6 +297,20 @@ describe('transaction membership', () => {
 
     expect(handles[0]).not.toBe(adapter.store);
     expect(handles[1]).toBe(adapter.store);
+  });
+
+  it('a detached write that fails is recorded in writeFailures and flush resolves', async () => {
+    const adapter = createAdapter({ awaitWrite: false });
+    const failure = new Error('audit-log store unavailable');
+    vi.spyOn(adapter.store, 'appendAuditLogs').mockImplementation(() => {
+      throw failure;
+    });
+
+    await withContext(() => adapter.create('User', { id: 'u1', name: 'Alice' }));
+    await expect(adapter.flush()).resolves.toBeUndefined();
+
+    expect(adapter.writeFailures).toEqual([failure]);
+    expect(adapter.store.find('User', 'u1')).toEqual({ id: 'u1', name: 'Alice' });
   });
 
   it('awaitWriteIf by tag: a tagged model writes atomically in an implicit transaction, an untagged one detached', async () => {

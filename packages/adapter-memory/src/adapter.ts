@@ -51,6 +51,8 @@ export interface MemoryAuditAdapter<TModelName extends string> {
   transaction<T>(fn: (db: MemoryDb<TModelName>) => Promise<T>): Promise<T>;
   /** Waits for every audit write no caller awaited that is pending at the time of the call */
   flush(): Promise<void>;
+  /** Errors of the detached and after-commit writes that failed; `flush` resolves regardless */
+  readonly writeFailures: readonly Error[];
 }
 
 /** The transaction the current async flow is inside: its handle and the writes queued until it commits */
@@ -93,9 +95,15 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
   /** The handle of the transaction the current flow is inside, else the store; read at each call */
   const currentHandle = (): MemoryDb<TModelName> => scopes.getStore()?.handle ?? store;
 
+  const writeFailures: Error[] = [];
+
+  /** A write no caller awaits: its failure is recorded, never left as an unhandled rejection */
   const startDetached = (write: () => Promise<void>): void => {
     const promise = Promise.resolve()
       .then(write)
+      .catch((error: unknown) => {
+        writeFailures.push(error instanceof Error ? error : new Error(String(error)));
+      })
       .finally(() => {
         pending.delete(promise);
       });
@@ -211,5 +219,6 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
     flush: async () => {
       await Promise.all([...pending]);
     },
+    writeFailures,
   };
 };
