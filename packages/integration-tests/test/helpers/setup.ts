@@ -33,6 +33,9 @@ export const testAggregateMapping: AggregateMapping = {
   Tag: defineEntity({
     type: 'Tag',
   }),
+  Label: defineEntity({
+    type: 'Label',
+  }),
   PostTag: defineEntity({
     type: 'PostTag',
     aggregates: [to('Post', foreignKey('postId')), to('Tag', foreignKey('tagId'))],

@@ -16,14 +16,14 @@ import type { NestedPreFetchResult } from './nested-state.js';
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
 
 /**
- * Nested operation keywords that can appear in operation args. `set` and `disconnect` rewrite
- * the foreign keys of related rows but are not attributed: those related-row writes yield no
- * audit event.
+ * Nested operation keywords that can appear in operation args. `disconnect` is not among them:
+ * it rewrites the foreign keys of related rows, which yields no audit event.
  */
 export const NESTED_OPERATION_KEYWORDS = [
   'create',
   'createMany',
   'connect',
+  'set',
   'connectOrCreate',
   'update',
   'updateMany',
@@ -39,6 +39,13 @@ export type NestedBatchKeyword = 'updateMany' | 'deleteMany';
 
 export const isNestedBatchKeyword = (keyword: NestedOperationKeyword): keyword is NestedBatchKeyword =>
   keyword === 'updateMany' || keyword === 'deleteMany';
+
+/**
+ * Whether `keyword` links existing rows it names by unique WHERE without writing them: `connect`
+ * and `set` rewrite only the foreign keys that relate those rows to the parent, which yields no
+ * audit event, but the rows they name are theirs and not rows another operation inserted.
+ */
+export const linksNamedRows = (keyword: NestedOperationKeyword): boolean => keyword === 'connect' || keyword === 'set';
 
 /** Information about a detected nested operation */
 export interface NestedOperationInfo {
@@ -575,7 +582,7 @@ export const detectNestedOperations = (
 
 /**
  * The unique WHERE of every row a nested operation names: the `where` of each `update`, `upsert`
- * and `connectOrCreate` element, the element itself for `delete` and `connect`; one per element when
+ * and `connectOrCreate` element, the element itself for `delete`, `connect` and `set`; one per element when
  * `data` is a list. `updateMany` / `deleteMany` name rows by a filter, not a unique WHERE, and
  * yield none, as do the keywords that only insert.
  */
@@ -586,7 +593,7 @@ export const targetWhereClauses = (operation: NestedOperationKeyword, data: unkn
     return items.map((item) => (isRecord(item) ? item.where : undefined)).filter(isRecord);
   }
 
-  if (operation === 'delete' || operation === 'connect') {
+  if (operation === 'delete' || linksNamedRows(operation)) {
     return items.filter(isRecord);
   }
 

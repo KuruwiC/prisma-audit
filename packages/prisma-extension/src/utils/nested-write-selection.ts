@@ -25,7 +25,8 @@ import type { SchemaMetadata } from '../schema/types.js';
 
 /**
  * Nested write keywords whose written rows are audited from the operation result. Deleted rows are
- * audited from their pre-fetched state, and `connect` writes no row of the related model.
+ * audited from their pre-fetched state, and `connect` and `set` write no audited row of the related
+ * model.
  */
 const RESULT_AUDITED_KEYWORDS: ReadonlySet<NestedOperationKeyword> = new Set([
   'create',

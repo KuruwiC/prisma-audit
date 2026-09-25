@@ -48,6 +48,7 @@ model Post {
   postAttachments PostAttachment[]
   postLikes       PostLike[]
   postBookmarks   PostBookmark[]
+  labels          Label[]
 
   @@map("posts")
 }
@@ -78,6 +79,19 @@ model Tag {
   postTags PostTag[]
 
   @@map("tags")
+}
+
+// A to-many relation with an optional foreign key, which `set` and `disconnect` can rewrite
+model Label {
+  id        String   @id @default(cuid())
+  name      String
+  postId    String?  @map("post_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  post Post? @relation(fields: [postId], references: [id], onDelete: SetNull)
+
+  @@index([postId])
+  @@map("labels")
 }
 
 model PostTag {

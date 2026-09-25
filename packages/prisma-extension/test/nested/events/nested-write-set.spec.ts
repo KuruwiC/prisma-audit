@@ -176,6 +176,16 @@ describe('buildNestedWriteSets', () => {
     });
   });
 
+  it('names the rows a nested set links, so they are not read as inserted', () => {
+    const { operations, writeSets } = writeSetsOf({ posts: { set: [{ id: 'p1' }], create: { title: 'A' } } });
+    const set = operations.find((op) => op.operation === 'set');
+
+    expect(writeSets.get('posts')).toEqual({
+      targets: [{ locator: { by: 'uniqueWhere', where: { id: 'p1' } }, operation: set, before: { kind: 'none' } }],
+      createsPending: true,
+    });
+  });
+
   it('keeps the targets of each operation at a path apart', () => {
     const { operations, writeSets } = writeSetsOf({
       posts: { update: { where: { id: 'p1' }, data: {} }, delete: { id: 'p2' } },

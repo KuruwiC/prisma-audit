@@ -20,6 +20,7 @@ import type { BeforeState, MutationEvent } from '@kuruwic/db-audit-core';
 import {
   extractNestedRecords,
   getPrimaryKeyConstraint,
+  linksNamedRows,
   type NestedOperationInfo,
   type NestedPreFetchResults,
   type NestedRecordInfo,
@@ -220,7 +221,7 @@ const collectRecordsOf = async (
         )
       : collectToOneDeleteRecords(nestedOp, nestedPreFetchResults, pkConstraint, deps.onUnresolvedDeleteEntityId);
   }
-  if (nestedOp.operation === 'connect') {
+  if (linksNamedRows(nestedOp.operation)) {
     return [];
   }
 

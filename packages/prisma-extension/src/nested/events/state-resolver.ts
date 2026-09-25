@@ -54,7 +54,7 @@ const resolveConnectOrCreateRow = (before: BeforeState): ResolvedState | undefin
  *   config asks for it), create when it did not, not audited when its pre-fetch failed
  * - **connectOrCreate**: create when the row did not exist; not audited when it existed (it was
  *   connected) or its pre-fetch failed
- * - **connect**: not audited
+ * - **connect / set**: not audited
  * - **delete / deleteMany**: handled separately
  *
  * @param before - The row's pre-fetched before state
@@ -75,6 +75,7 @@ export const resolveNestedRowState = (
     case 'connectOrCreate':
       return resolveConnectOrCreateRow(before);
     case 'connect':
+    case 'set':
       return undefined;
     default:
       return { action: resolveCreateState().action, beforeState: NO_BEFORE_STATE };

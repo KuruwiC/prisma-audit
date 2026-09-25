@@ -212,6 +212,25 @@ describe('nested to-many write set', () => {
     });
   });
 
+  it('a nested set next to a create audits the created label only', async () => {
+    const { p1, p2 } = await seedUserWithTwoPosts('nested-set@example.com');
+    const moved = await clients.basePrisma.label.create({ data: { name: 'moved', postId: p2.id } });
+    const dropped = await clients.basePrisma.label.create({ data: { name: 'dropped', postId: p1.id } });
+
+    await asActor(() =>
+      clients.prisma.post.update({
+        where: { id: p1.id },
+        data: { labels: { set: [{ id: moved.id }], create: { name: 'new' } } },
+      }),
+    );
+
+    const labels = await clients.basePrisma.label.findMany({ where: { postId: p1.id }, orderBy: { name: 'asc' } });
+    expect(labels.map((label) => label.name)).toEqual(['moved', 'new']);
+    expect(await clients.basePrisma.label.findUnique({ where: { id: dropped.id } })).toMatchObject({ postId: null });
+    const events = await eventsOf('Label');
+    expect(events.map((event) => [event.action, event.after?.name])).toEqual([['create', 'new']]);
+  });
+
   it('a nested update audits the targeted post only', async () => {
     const { user, p1 } = await seedUserWithTwoPosts('nested-update@example.com');
 
