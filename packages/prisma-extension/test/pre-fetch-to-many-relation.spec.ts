@@ -7,9 +7,9 @@ import { UNRESOLVED_ENTITY_ID } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
 import type { GetOperationConfig } from '../src/grammar/pre-fetch-selection.js';
 import type { DMMFField, PrismaNamespace, TransactionalPrismaClient } from '../src/internal-types.js';
-import { preFetchNestedRecordsBeforeOperation } from '../src/lifecycle/pre-fetch/coordinator.js';
-import { preFetchOneToManyRelation } from '../src/lifecycle/pre-fetch/one-to-many-fetcher.js';
-import { parentKeysFromOperationWheres } from '../src/lifecycle/pre-fetch/parent-rows.js';
+import { preFetchNestedRecordsBeforeOperation } from '../src/nested/pre-fetch/coordinator.js';
+import { preFetchOneToManyRelation } from '../src/nested/pre-fetch/one-to-many-fetcher.js';
+import { parentKeysFromOperationWheres } from '../src/nested/pre-fetch/parent-rows.js';
 
 type Row = Record<string, unknown>;
 

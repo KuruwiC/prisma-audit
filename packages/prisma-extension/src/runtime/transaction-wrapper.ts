@@ -7,7 +7,7 @@
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../internal-types.js';
-import { currentScope, openImplicitTransaction } from '../runtime/scope.js';
+import { currentScope, openImplicitTransaction } from './scope.js';
 
 /**
  * Transaction wrapper configuration.

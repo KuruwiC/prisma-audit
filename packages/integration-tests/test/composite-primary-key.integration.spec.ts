@@ -21,7 +21,7 @@
  *   - nested delete of a `PostLike` row through its `Post` relation. Prisma's only
  *     nested-delete syntax for a composite key is the compound-unique shape
  *     `{ postId_userId: { postId, userId } }`, a key of `PostLikeWhereUniqueInput`.
- *     `preFetchOneToManyRelation` (`lifecycle/pre-fetch/one-to-many-fetcher.ts`) passes
+ *     `preFetchOneToManyRelation` (`nested/pre-fetch/one-to-many-fetcher.ts`) passes
  *     that WHERE to `findUnique`, which accepts the compound-unique shape natively;
  *     `unwrapCompoundWhere` then flattens it to derive the composite entityId from the
  *     WHERE when the row itself was not found.
@@ -34,7 +34,7 @@
  *   - the boundary where identity genuinely cannot be resolved: deleting a
  *     composite-key row that does not exist. No fabricated entityId is ever recorded —
  *     the write fails before any log is built (see `collectDeleteRecords` in
- *     `lifecycle/nested-handlers/delete-handler.ts` for the general "never guess" rule).
+ *     `nested/events/delete-handler.ts` for the general "never guess" rule).
  */
 
 import type { AggregateMapping, AuditContext } from '@kuruwic/db-audit-core';
@@ -195,7 +195,7 @@ describe('Composite Primary Key (PostLike)', () => {
 
   /**
    * `connectOrCreate` on `postLikes` (a to-many relation from `Post`) is handled by
-   * `preFetchOneToManyRelation` (`lifecycle/pre-fetch/one-to-many-fetcher.ts`). These tests
+   * `preFetchOneToManyRelation` (`nested/pre-fetch/one-to-many-fetcher.ts`). These tests
    * cover both branches through the public client: the row does not exist yet (create path)
    * and the row already exists (connect path), both addressed through the compound-unique
    * WHERE shape `{ postId_userId: { postId, userId } }`.

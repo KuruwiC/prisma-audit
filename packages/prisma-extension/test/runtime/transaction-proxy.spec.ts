@@ -18,14 +18,14 @@ import {
   createAsyncLocalStorageProvider,
 } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
-import type { TransactionalPrismaClient } from '../src/internal-types.js';
+import type { TransactionalPrismaClient } from '../../src/internal-types.js';
+import { flushAllPendingWrites } from '../../src/runtime/pending-writes.js';
+import { currentScope } from '../../src/runtime/scope.js';
 import {
   createTransactionProxy,
   createTransactionProxyHandler,
   createWrappedTransactionCallback,
-} from '../src/lifecycle/transaction-proxy.js';
-import { flushAllPendingWrites } from '../src/runtime/pending-writes.js';
-import { currentScope } from '../src/runtime/scope.js';
+} from '../../src/runtime/transaction-proxy.js';
 
 const actor1: AuditActor = { category: 'model', type: 'User', id: 'user-1' };
 const actor2: AuditActor = { category: 'model', type: 'User', id: 'user-2' };

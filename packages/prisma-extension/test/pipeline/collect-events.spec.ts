@@ -6,8 +6,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { NestedBatchKeyword, NestedBatchTargets } from '../../src/grammar/nested-operations.js';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../src/internal-types.js';
-import { buildNestedWriteSets, detectExecutedNestedOperations } from '../../src/lifecycle/nested-handlers/write-set.js';
-import type { PreExistingRows } from '../../src/lifecycle/pre-fetch/pre-existing-rows.js';
+import { buildNestedWriteSets, detectExecutedNestedOperations } from '../../src/nested/events/write-set.js';
+import type { PreExistingRows } from '../../src/nested/pre-fetch/pre-existing-rows.js';
 import { executedUpsertBranch } from '../../src/pipeline/before-state.js';
 import {
   type BatchOperationOutcome,

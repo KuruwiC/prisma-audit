@@ -17,9 +17,9 @@ import {
   buildNestedWriteSets,
   detectExecutedNestedOperations,
   type NestedWriteSets,
-} from '../lifecycle/nested-handlers/write-set.js';
-import { preFetchNestedRecordsBeforeOperation } from '../lifecycle/pre-fetch/coordinator.js';
-import { type PreExistingRows, snapshotPreExistingRows } from '../lifecycle/pre-fetch/pre-existing-rows.js';
+} from '../nested/events/write-set.js';
+import { preFetchNestedRecordsBeforeOperation } from '../nested/pre-fetch/coordinator.js';
+import { type PreExistingRows, snapshotPreExistingRows } from '../nested/pre-fetch/pre-existing-rows.js';
 import type { SchemaMetadata } from '../schema/types.js';
 import {
   type BeforeStateResult,

@@ -8,7 +8,7 @@
  * resolves them (`resolveParentRows`), so a parent the operation itself creates has no rows and
  * issues no query.
  *
- * @module lifecycle/pre-fetch/pre-existing-rows
+ * @module nested/pre-fetch/pre-existing-rows
  */
 
 import type { EntityIdentityKey } from '@kuruwic/db-audit-core';
@@ -27,7 +27,7 @@ import type { SchemaMetadata, UniqueConstraint } from '../../schema/types.js';
 import type { AuditErrorObserver } from '../../types.js';
 import { preFetchLog } from '../../utils/debug.js';
 import { extractEntityIdentity } from '../../utils/id-generation.js';
-import type { NestedWriteSets } from '../nested-handlers/write-set.js';
+import type { NestedWriteSets } from '../events/write-set.js';
 import { findDMMFField, resolveParentModelFromPath } from './coordinator.js';
 import { getPreFetchListClient, getPreFetchModelClient, type PreFetchListClient } from './model-client.js';
 import { resolveToManyRelationScope, type ToManyRelationScope } from './one-to-many-fetcher.js';

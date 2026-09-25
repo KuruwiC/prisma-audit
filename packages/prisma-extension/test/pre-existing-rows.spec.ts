@@ -5,9 +5,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { NestedPreFetchResults } from '../src/grammar/nested-operations.js';
 import type { DMMFField, PrismaClientWithDynamicAccess, PrismaNamespace } from '../src/internal-types.js';
-import { buildNestedWriteSets, detectExecutedNestedOperations } from '../src/lifecycle/nested-handlers/write-set.js';
-import { snapshotPreExistingRows } from '../src/lifecycle/pre-fetch/pre-existing-rows.js';
-import { storePreFetchResult } from '../src/lifecycle/pre-fetch/pre-fetch-result-store.js';
+import { buildNestedWriteSets, detectExecutedNestedOperations } from '../src/nested/events/write-set.js';
+import { snapshotPreExistingRows } from '../src/nested/pre-fetch/pre-existing-rows.js';
+import { storePreFetchResult } from '../src/nested/pre-fetch/pre-fetch-result-store.js';
 import type { AuditErrorObserver } from '../src/types.js';
 import { createSchemaMetadataFromDMMF } from '../src/utils/schema-metadata.js';
 

@@ -5,8 +5,8 @@
 
 import { describe, expect, it } from 'vitest';
 import type { NestedBatchTargets, NestedPreFetchResults } from '../src/grammar/nested-operations.js';
-import { buildNestedWriteSets, detectExecutedNestedOperations } from '../src/lifecycle/nested-handlers/write-set.js';
-import { storePreFetchResult } from '../src/lifecycle/pre-fetch/pre-fetch-result-store.js';
+import { buildNestedWriteSets, detectExecutedNestedOperations } from '../src/nested/events/write-set.js';
+import { storePreFetchResult } from '../src/nested/pre-fetch/pre-fetch-result-store.js';
 import { createSchemaMetadataFromDMMF } from '../src/utils/schema-metadata.js';
 
 const scalar = (name: string) => ({ name, kind: 'scalar', type: 'String', isList: false });

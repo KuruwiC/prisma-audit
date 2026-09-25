@@ -1,7 +1,7 @@
 /**
  * Integration Test: nested pre-fetch failures are reported to the observer
  *
- * `preFetchNestedRecordsBeforeOperation` (`lifecycle/pre-fetch/coordinator.ts`) wraps
+ * `preFetchNestedRecordsBeforeOperation` (`nested/pre-fetch/coordinator.ts`) wraps
  * each nested operation's pre-fetch in a per-operation try/catch that falls back to
  * core's `UNRESOLVED_ENTITY_ID` sentinel on failure. It reports the failure through
  * `errorHandling.observer` with `phase: 'pre-fetch'`, matching the top-level
@@ -12,7 +12,7 @@
  * *delete array*: when the pre-fetch for one item in the array throws, the items
  * after it are never individually pre-fetched, and the `UNRESOLVED_ENTITY_ID` sentinel
  * ends up sharing the pre-fetch results map with the item(s) that already
- * succeeded. `collectDeleteRecords` (`lifecycle/nested-handlers/delete-handler.ts`)
+ * succeeded. `collectDeleteRecords` (`nested/events/delete-handler.ts`)
  * treats that combination like every other unresolved entityId: the entry is
  * skipped and reported through `onUnresolvedDeleteEntityId`, never dropped silently.
  *

@@ -6,7 +6,7 @@
  * `updateMany` / `deleteMany` matches. Prisma applies such an operation only to rows related to
  * the parent row, so a row that matches under another parent is not its target.
  *
- * @module lifecycle/pre-fetch/one-to-many-fetcher
+ * @module nested/pre-fetch/one-to-many-fetcher
  */
 
 import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID } from '@kuruwic/db-audit-core';

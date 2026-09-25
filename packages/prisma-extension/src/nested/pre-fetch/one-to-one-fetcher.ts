@@ -5,7 +5,7 @@
  * Such an operation is not addressed by a unique WHERE: its target is the related row whose
  * relation key matches the key of the parent row the operation is nested under.
  *
- * @module lifecycle/pre-fetch/one-to-one-fetcher
+ * @module nested/pre-fetch/one-to-one-fetcher
  */
 
 import type { EntityIdentityKey } from '@kuruwic/db-audit-core';

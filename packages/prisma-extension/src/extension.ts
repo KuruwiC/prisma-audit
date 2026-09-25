@@ -14,13 +14,13 @@ import { createPrismaWriteExecutor } from './adapters/write-executor.js';
 import { type AuditOptions, normalizeAuditOptions } from './audit-options.js';
 import { createFailureSink } from './failure-sink.js';
 import type { ExtensionParams, PrismaClientWithDynamicAccess } from './internal-types.js';
-import { createTransactionProxy } from './lifecycle/transaction-proxy.js';
 import { createBatchExecutor } from './pipeline/batch-executor.js';
 import { createRecordProducer } from './pipeline/produce-records.js';
 import { type AuditPipelineDependencies, runAuditedOperation } from './pipeline/run-audited-operation.js';
 import { createSingleExecutor } from './pipeline/single-executor.js';
 import { createAuditLogWriter } from './pipeline/write-audit-logs.js';
 import { isProcessingAuditLog, withScope } from './runtime/scope.js';
+import { createTransactionProxy } from './runtime/transaction-proxy.js';
 import type { PrismaAuditExtensionOptions } from './types.js';
 import { injectNestedWriteSelection, isAuditableAction, projectToRequestedShape } from './utils/index.js';
 

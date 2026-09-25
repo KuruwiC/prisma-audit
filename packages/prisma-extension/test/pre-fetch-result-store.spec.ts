@@ -5,7 +5,7 @@
 import { UNRESOLVED_ENTITY_ID } from '@kuruwic/db-audit-core';
 import { describe, expect, it } from 'vitest';
 import type { NestedPreFetchResults } from '../src/grammar/nested-operations.js';
-import { hasPreFetchedRecordAt, storePreFetchResult } from '../src/lifecycle/pre-fetch/pre-fetch-result-store.js';
+import { hasPreFetchedRecordAt, storePreFetchResult } from '../src/nested/pre-fetch/pre-fetch-result-store.js';
 
 describe('hasPreFetchedRecordAt', () => {
   const results = (): NestedPreFetchResults => {

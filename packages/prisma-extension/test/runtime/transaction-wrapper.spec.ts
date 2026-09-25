@@ -4,10 +4,10 @@
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
-import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../src/internal-types.js';
-import { withOptionalTransaction } from '../src/lifecycle/transaction-wrapper.js';
-import { flushAllPendingWrites } from '../src/runtime/pending-writes.js';
-import { currentScope, withScope } from '../src/runtime/scope.js';
+import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../src/internal-types.js';
+import { flushAllPendingWrites } from '../../src/runtime/pending-writes.js';
+import { currentScope, withScope } from '../../src/runtime/scope.js';
+import { withOptionalTransaction } from '../../src/runtime/transaction-wrapper.js';
 
 describe('withOptionalTransaction', () => {
   const mockActor = { category: 'model' as const, type: 'User', id: 'user-1' };

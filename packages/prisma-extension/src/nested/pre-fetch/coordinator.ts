@@ -3,7 +3,7 @@
  *
  * Orchestrates pre-fetching of nested records before operation execution.
  *
- * @module lifecycle/pre-fetch/coordinator
+ * @module nested/pre-fetch/coordinator
  */
 
 import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID } from '@kuruwic/db-audit-core';

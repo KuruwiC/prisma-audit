@@ -1,7 +1,7 @@
 /**
  * Model delegate shape the pre-fetch fetchers query through.
  *
- * @module lifecycle/pre-fetch/model-client
+ * @module nested/pre-fetch/model-client
  */
 
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../internal-types.js';

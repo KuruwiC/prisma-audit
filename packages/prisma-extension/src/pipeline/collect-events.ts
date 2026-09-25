@@ -20,12 +20,9 @@ import {
 } from '../grammar/nested-operations.js';
 import { AUDIT_ACTION, type AuditAction, BATCH_TO_SINGULAR_ACTION } from '../grammar/operations.js';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../internal-types.js';
-import {
-  collectNestedEvents,
-  type NestedEventCollectorDependencies,
-} from '../lifecycle/nested-handlers/collect-nested-events.js';
-import type { NestedWriteSets } from '../lifecycle/nested-handlers/write-set.js';
-import type { PreExistingRows } from '../lifecycle/pre-fetch/pre-existing-rows.js';
+import { collectNestedEvents, type NestedEventCollectorDependencies } from '../nested/events/collect-nested-events.js';
+import type { NestedWriteSets } from '../nested/events/write-set.js';
+import type { PreExistingRows } from '../nested/pre-fetch/pre-existing-rows.js';
 import type { SchemaMetadata } from '../schema/types.js';
 import { type BeforeStateResult, executedUpsertBranch } from './before-state.js';
 import { identityOf, toMutationAction } from './event-fields.js';

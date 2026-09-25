@@ -8,13 +8,13 @@
  * discarded unrun. The sequential form, `$transaction([...])`, passes through untouched: a list
  * of operations carries no callback, hence no interactive scope to establish.
  *
- * @module lifecycle/transaction-proxy
+ * @module runtime/transaction-proxy
  */
 
 import type { AuditContext, AuditContextProvider } from '@kuruwic/db-audit-core';
 import type { TransactionalPrismaClient } from '../internal-types.js';
-import { trackPendingWrite } from '../runtime/pending-writes.js';
-import { enterTransaction } from '../runtime/scope.js';
+import { trackPendingWrite } from './pending-writes.js';
+import { enterTransaction } from './scope.js';
 
 type OriginalTransactionMethod = (...args: unknown[]) => Promise<unknown>;
 

@@ -4,7 +4,7 @@
  * A nested `update` / `upsert` / `delete` applies only to rows related to the row it is nested
  * under, so its before-state read is scoped by the keys of those parent rows.
  *
- * @module lifecycle/pre-fetch/parent-rows
+ * @module nested/pre-fetch/parent-rows
  */
 
 import {

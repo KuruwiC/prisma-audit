@@ -8,8 +8,8 @@
 
 import type { AuditContext, AuditContextProvider } from '@kuruwic/db-audit-core';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../internal-types.js';
-import { withOptionalTransaction } from '../lifecycle/transaction-wrapper.js';
 import { currentScope } from '../runtime/scope.js';
+import { withOptionalTransaction } from '../runtime/transaction-wrapper.js';
 
 export interface TransactionScope {
   /** Writes queued here run on the base handle once the transaction has committed */

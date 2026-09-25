@@ -1344,7 +1344,7 @@ $allOperations (src/extension.ts)
 - `src/pipeline/write-audit-logs.ts`: executes the write plan (see [Write Strategies](#write-strategies)) and reports write failures under `log-write`.
 - `src/runtime/scope.ts`: the library-owned async-local state of an audited flow: the active transaction with its client and the writes queued until it commits, the re-entrancy guard that keeps the audit's own queries from being audited, and whether the library opened the transaction. It is kept apart from the app-owned audit context.
 - `src/runtime/pending-writes.ts`: the writes no caller awaits; `flushAllPendingWrites` waits for them.
-- `src/lifecycle/transaction-proxy.ts`: wraps interactive `$transaction` so the operations in its callback share the transaction's client and the queued writes run after it commits.
+- `src/runtime/transaction-proxy.ts`: wraps interactive `$transaction` so the operations in its callback share the transaction's client and the queued writes run after it commits.
 - `src/failure-sink.ts`: the one place audit failures are reported. Every phase notifies `errorHandling.observer`; only `log-write` also applies `errorHandling.writeFailurePolicy`.
 
 ## Type Safety with Branded Types
