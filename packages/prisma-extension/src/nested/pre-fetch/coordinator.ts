@@ -7,6 +7,7 @@
  */
 
 import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID } from '@kuruwic/db-audit-core';
+import { toError } from '../../failure-sink.js';
 import {
   detectNestedOperations,
   getPrimaryKeyConstraint,
@@ -156,13 +157,12 @@ const reportNestedPreFetchFailure = async (
 ): Promise<void> => {
   if (!onPreFetchFailure) return;
 
-  const reportedError = error instanceof Error ? error : new Error(String(error));
   await onPreFetchFailure({
     phase: 'pre-fetch',
     modelName: nestedOp.relatedModel,
     operation: nestedOp.operation,
     params: nestedOp.data,
-    error: reportedError,
+    error: toError(error),
   });
 };
 

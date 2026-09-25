@@ -30,6 +30,9 @@ export interface FailureSinkConfig {
 
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
+/** The `Error` a failure context carries for a caught value */
+export const toError = (caught: unknown): Error => (caught instanceof Error ? caught : new Error(String(caught)));
+
 export const createFailureSink = (config: FailureSinkConfig): FailureSink => {
   const { observer, writeFailurePolicy } = config;
 

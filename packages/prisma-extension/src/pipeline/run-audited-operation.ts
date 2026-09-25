@@ -9,7 +9,7 @@
 
 import type { AuditContext, AuditContextProvider, PolicyConfig } from '@kuruwic/db-audit-core';
 import { dispatch, policy } from '@kuruwic/db-audit-core';
-import type { FailureSink } from '../failure-sink.js';
+import { type FailureSink, toError } from '../failure-sink.js';
 import type { AuditAction } from '../grammar/operations.js';
 import type { PrismaClientWithDynamicAccess } from '../internal-types.js';
 import { isCallerMutationError, runCallerMutation } from '../utils/caller-mutation-error.js';
@@ -92,7 +92,7 @@ const runExecutor = async (
     if (isCallerMutationError(caughtError)) {
       throw caughtError;
     }
-    const error = caughtError instanceof Error ? caughtError : new Error(String(caughtError));
+    const error = toError(caughtError);
     await deps.failureSink.notify({
       phase: 'diff-generation',
       modelName: operation.model,

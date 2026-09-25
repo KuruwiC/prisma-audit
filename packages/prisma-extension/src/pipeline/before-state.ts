@@ -6,6 +6,7 @@
  * `fetchBeforeOperation` is configured; never for a create.
  */
 
+import { toError } from '../failure-sink.js';
 import type { UpsertBranch } from '../grammar/nested-operations.js';
 import { AUDIT_ACTION, type AuditAction } from '../grammar/operations.js';
 import type { GetOperationConfig } from '../grammar/pre-fetch-selection.js';
@@ -130,7 +131,7 @@ export const fetchBeforeState = async (
   try {
     return await findExistingRow(handle, modelName, args.where);
   } catch (caughtError) {
-    const error = caughtError instanceof Error ? caughtError : new Error(String(caughtError));
+    const error = toError(caughtError);
     await deps.onFetchFailure({ phase: 'pre-fetch', modelName, operation: action, params: args, error });
     return { _tag: 'error', error };
   }

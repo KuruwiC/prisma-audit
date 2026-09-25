@@ -14,7 +14,7 @@
  */
 
 import type { AuditLogData, WriteExecutor, WriteFn, WritePlan } from '@kuruwic/db-audit-core';
-import type { FailureSink } from '../failure-sink.js';
+import { type FailureSink, toError } from '../failure-sink.js';
 import { trackPendingWrite } from '../runtime/pending-writes.js';
 import type { ExecutionScope } from './execution-scope.js';
 
@@ -36,8 +36,6 @@ interface PlannedWrite {
   /** Reports a failure of the write under `log-write` */
   readonly report: (error: Error, logLabel: string) => Promise<void>;
 }
-
-const toError = (caught: unknown): Error => (caught instanceof Error ? caught : new Error(String(caught)));
 
 const writeImmediately = async (planned: PlannedWrite): Promise<void> => {
   try {

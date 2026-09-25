@@ -12,6 +12,7 @@
  */
 
 import type { EntityIdentityKey } from '@kuruwic/db-audit-core';
+import { toError } from '../../failure-sink.js';
 import {
   getPrimaryKeyConstraint,
   type NestedOperationInfo,
@@ -161,7 +162,7 @@ const reportSnapshotFailure = async (
     modelName: operation.relatedModel,
     operation: operation.operation,
     params: operation.data,
-    error: error instanceof Error ? error : new Error(String(error)),
+    error: toError(error),
   });
 };
 
