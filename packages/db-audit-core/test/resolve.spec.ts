@@ -624,6 +624,42 @@ describe('resolve', () => {
       expect(enricherA.mock.calls[0]?.[2]).toMatchObject({ aggregateType: 'User', aggregateIds: ['u1'] });
       expect(enricherB).not.toHaveBeenCalled();
       expect(resolved[0]?.aggregateContexts.get('User:u1')).toEqual({ side: 'A' });
+      expect(resolved[0]?.roots).toEqual([{ aggregateCategory: 'model', aggregateType: 'User', aggregateId: 'u1' }]);
+    });
+
+    it('keeps one root when the self projection and a to() declaration resolve the same aggregate', async () => {
+      const config = configOf({
+        Post: defineEntity({ type: 'Post', aggregates: [to('Post', foreignKey('threadRootId'))] }),
+      });
+
+      const { resolved } = await resolve([event('Post', { id: 'p1', threadRootId: 'p1' })], auditContext, config, read);
+
+      expect(resolved[0]?.roots).toEqual([{ aggregateCategory: 'model', aggregateType: 'Post', aggregateId: 'p1' }]);
+    });
+
+    it('keeps both roots when two to() declarations resolve the same id under different categories', async () => {
+      const config = configOf({
+        Friendship: defineEntity({
+          type: 'Friendship',
+          self: false,
+          aggregates: [
+            to('User', foreignKey('userAId'), { category: 'member' }),
+            to('User', foreignKey('userBId'), { category: 'guest' }),
+          ],
+        }),
+      });
+
+      const { resolved } = await resolve(
+        [event('Friendship', { id: 'f1', userAId: 'u1', userBId: 'u1' })],
+        auditContext,
+        config,
+        read,
+      );
+
+      expect(resolved[0]?.roots).toEqual([
+        { aggregateCategory: 'member', aggregateType: 'User', aggregateId: 'u1' },
+        { aggregateCategory: 'guest', aggregateType: 'User', aggregateId: 'u1' },
+      ]);
     });
   });
 

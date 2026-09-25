@@ -279,10 +279,15 @@ const resolveRootsRowByRow = async <TModelName extends string, TDbHandle>(
   return roots;
 };
 
+const isSameRoot = (a: ResolvedRoot, b: ResolvedRoot): boolean =>
+  a.aggregateCategory === b.aggregateCategory && a.aggregateType === b.aggregateType && a.aggregateId === b.aggregateId;
+
 /**
  * Resolve the aggregate roots of every identified row and keep the rows that have at least one:
  * the self projection unless `self` is `false`, whose id is the entity id, then each `to()` root
- * in declaration order. A resolver that fails or returns no id contributes no root.
+ * in declaration order. A resolver that fails or returns no id contributes no root, and a root
+ * equal in category, type and id to one the row already has is kept once, from the first
+ * declaration.
  */
 const resolveSurvivors = async <TModelName extends string, TDbHandle>(
   entries: readonly IdentifiedEntry<TModelName>[],
@@ -301,8 +306,9 @@ const resolveSurvivors = async <TModelName extends string, TDbHandle>(
       ? await resolveRootsInBatch(entries, aggregate, aggregate.batchResolve, read, failures)
       : await resolveRootsRowByRow(entries, entity.type, aggregate, read, failures);
     roots.forEach((root, index) => {
-      if (root) {
-        perRowRoots[index]?.push(root);
+      const rowRoots = perRowRoots[index];
+      if (root && rowRoots && !rowRoots.some((known) => isSameRoot(known, root))) {
+        rowRoots.push(root);
       }
     });
   }
