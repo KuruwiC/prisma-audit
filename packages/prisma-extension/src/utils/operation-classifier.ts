@@ -7,7 +7,7 @@
  * @module utils/operation-classifier
  */
 
-import { AUDIT_ACTION, type AuditAction, BATCH_OPERATIONS } from '@kuruwic/db-audit-core';
+import { AUDIT_ACTION, type AuditAction, BATCH_OPERATIONS } from '../grammar/operations.js';
 
 /**
  * Checks if an operation is a batch operation

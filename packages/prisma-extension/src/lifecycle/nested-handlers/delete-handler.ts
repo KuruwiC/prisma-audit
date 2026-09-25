@@ -7,13 +7,15 @@
  * The collected records become mutation events in collect-nested-events.ts.
  */
 
-import { AUDIT_ACTION, type EntityIdentityKey, nestedLog, UNRESOLVED_ENTITY_ID } from '@kuruwic/db-audit-core';
+import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID } from '@kuruwic/db-audit-core';
 import {
   deserializeEntityId,
   type NestedOperationInfo,
   type NestedPreFetchResults,
 } from '../../grammar/nested-operations.js';
+import { AUDIT_ACTION } from '../../grammar/operations.js';
 import type { UniqueConstraint } from '../../schema/types.js';
+import { nestedLog } from '../../utils/debug.js';
 import { extractDeleteOperationEntityId } from '../../utils/extension-utils.js';
 import type { CollectedNestedRecord } from './collected-record.js';
 import type { NestedWriteTarget } from './write-set.js';

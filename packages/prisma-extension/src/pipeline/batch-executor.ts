@@ -7,7 +7,7 @@
  */
 
 import type { MutationEvent } from '@kuruwic/db-audit-core';
-import { AUDIT_ACTION } from '@kuruwic/db-audit-core';
+import { AUDIT_ACTION } from '../grammar/operations.js';
 import type { PrismaNamespace } from '../internal-types.js';
 import type { SchemaMetadata } from '../schema/types.js';
 import {

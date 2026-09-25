@@ -5,7 +5,7 @@
  * hand it over to become a mutation event.
  */
 
-import type { AuditAction } from '@kuruwic/db-audit-core';
+import type { AuditAction } from '../../grammar/operations.js';
 
 export interface CollectedNestedRecord {
   /** The entity data (after state for create/update, minimal record for delete) */

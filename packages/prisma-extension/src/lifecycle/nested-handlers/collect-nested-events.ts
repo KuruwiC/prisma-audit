@@ -17,8 +17,6 @@
  */
 
 import type { EntityIdentityKey, MutationEvent } from '@kuruwic/db-audit-core';
-import { nestedLog } from '@kuruwic/db-audit-core';
-
 import {
   extractNestedRecords,
   getPrimaryKeyConstraint,
@@ -32,6 +30,7 @@ import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '.
 import { identityOf, toMutationAction } from '../../pipeline/event-fields.js';
 import type { SchemaMetadata, UniqueConstraint } from '../../schema/types.js';
 import { matchesUniqueWhere } from '../../utils/compound-where.js';
+import { nestedLog } from '../../utils/debug.js';
 import { getPreFetchModelClient } from '../pre-fetch/model-client.js';
 import type { PreExistingRows } from '../pre-fetch/pre-existing-rows.js';
 import { extractEntityIdOrUnresolved, getPreFetchResult } from '../pre-fetch/pre-fetch-result-store.js';

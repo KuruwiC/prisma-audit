@@ -10,13 +10,13 @@
 import type { ResolvedId } from '../aggregate/types.js';
 import type { ActorId, AggregateId, EntityId } from './branded-types.js';
 
-/** Action stored in the audit row. `upsert` and the batch keywords are resolved before an event exists. */
+/** Action stored in the audit row. An adapter maps its insert-or-update and multi-row keywords to one of these before it emits an event. */
 export type MutationAction = 'create' | 'update' | 'delete';
 
 export interface MutationOrigin {
   /** '' for the top-level row; nested path otherwise ('posts', 'posts.comments'). Adapters without nested grammar use ''. */
   readonly path: string;
-  /** Keyword that wrote the row, in the adapter's vocabulary: 'create' | 'update' | 'upsert' | 'delete' | 'createMany' | 'updateMany' | 'deleteMany' | 'connectOrCreate'. */
+  /** Keyword that wrote the row, in the adapter's own vocabulary ('create', or a nested or multi-row keyword). The core does not interpret it. */
   readonly op: string;
 }
 

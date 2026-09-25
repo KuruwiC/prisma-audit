@@ -2,8 +2,9 @@
  * Event fields shared by the single-operation and batch collectors
  */
 
-import type { AuditAction, MutationAction } from '@kuruwic/db-audit-core';
-import { AUDIT_ACTION, UNRESOLVED_ENTITY_ID } from '@kuruwic/db-audit-core';
+import type { MutationAction } from '@kuruwic/db-audit-core';
+import { UNRESOLVED_ENTITY_ID } from '@kuruwic/db-audit-core';
+import { AUDIT_ACTION, type AuditAction } from '../grammar/operations.js';
 import { extractEntityIdentity } from '../utils/id-generation.js';
 
 type Row = Record<string, unknown>;

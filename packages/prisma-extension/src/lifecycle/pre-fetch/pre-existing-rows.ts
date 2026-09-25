@@ -11,7 +11,7 @@
  * @module lifecycle/pre-fetch/pre-existing-rows
  */
 
-import { type EntityIdentityKey, preFetchLog } from '@kuruwic/db-audit-core';
+import type { EntityIdentityKey } from '@kuruwic/db-audit-core';
 import {
   getPrimaryKeyConstraint,
   type NestedOperationInfo,
@@ -25,6 +25,7 @@ import type {
 } from '../../internal-types.js';
 import type { SchemaMetadata, UniqueConstraint } from '../../schema/types.js';
 import type { AuditErrorObserver } from '../../types.js';
+import { preFetchLog } from '../../utils/debug.js';
 import { extractEntityIdentity } from '../../utils/id-generation.js';
 import type { NestedWriteSets } from '../nested-handlers/write-set.js';
 import { findDMMFField, resolveParentModelFromPath } from './coordinator.js';

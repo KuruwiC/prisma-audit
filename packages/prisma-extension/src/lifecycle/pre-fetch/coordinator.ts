@@ -6,7 +6,7 @@
  * @module lifecycle/pre-fetch/coordinator
  */
 
-import { type EntityIdentityKey, preFetchLog, UNRESOLVED_ENTITY_ID } from '@kuruwic/db-audit-core';
+import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID } from '@kuruwic/db-audit-core';
 import {
   detectNestedOperations,
   getPrimaryKeyConstraint,
@@ -30,6 +30,7 @@ import type {
 } from '../../internal-types.js';
 import type { UniqueConstraint } from '../../schema/types.js';
 import type { AuditErrorObserver } from '../../types.js';
+import { preFetchLog } from '../../utils/debug.js';
 import { createSchemaMetadataFromDMMF } from '../../utils/schema-metadata.js';
 import {
   getPreFetchListClient,

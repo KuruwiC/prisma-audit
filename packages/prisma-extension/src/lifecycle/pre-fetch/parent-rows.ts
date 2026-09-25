@@ -7,7 +7,6 @@
  * @module lifecycle/pre-fetch/parent-rows
  */
 
-import { preFetchLog } from '@kuruwic/db-audit-core';
 import {
   type NestedOperationInfo,
   type NestedPreFetchResults,
@@ -15,6 +14,7 @@ import {
 } from '../../grammar/nested-operations.js';
 import type { UniqueConstraint } from '../../schema/types.js';
 import { unwrapCompoundWhere } from '../../utils/compound-where.js';
+import { preFetchLog } from '../../utils/debug.js';
 import type { PreFetchModelClient, PreFetchRecord } from './model-client.js';
 
 export const isRecord = (value: unknown): value is PreFetchRecord => typeof value === 'object' && value !== null;

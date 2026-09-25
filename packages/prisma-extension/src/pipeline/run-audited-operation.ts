@@ -7,9 +7,10 @@
  * produced, dispatched into a write plan and written, and the caller receives the result.
  */
 
-import type { AuditAction, AuditContext, AuditContextProvider, PolicyConfig } from '@kuruwic/db-audit-core';
+import type { AuditContext, AuditContextProvider, PolicyConfig } from '@kuruwic/db-audit-core';
 import { dispatch, policy } from '@kuruwic/db-audit-core';
 import type { FailureSink } from '../failure-sink.js';
+import type { AuditAction } from '../grammar/operations.js';
 import type { PrismaClientWithDynamicAccess } from '../internal-types.js';
 import { isCallerMutationError, runCallerMutation } from '../utils/caller-mutation-error.js';
 import { getModelDelegate, getModelOperation } from '../utils/model-accessor.js';

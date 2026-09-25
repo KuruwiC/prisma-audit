@@ -5,7 +5,6 @@
  * operation's keyword and the row's pre-fetched before-state.
  */
 
-import { AUDIT_ACTION, type AuditAction } from '@kuruwic/db-audit-core';
 import type { NestedOperationInfo } from '../../grammar/nested-operations.js';
 import {
   resolveConnectOrCreateState,
@@ -13,6 +12,7 @@ import {
   resolveUpdateState,
   resolveUpsertState,
 } from '../../grammar/nested-state.js';
+import { AUDIT_ACTION, type AuditAction } from '../../grammar/operations.js';
 import type { GetOperationConfig } from '../../grammar/pre-fetch-selection.js';
 
 type Row = Record<string, unknown>;

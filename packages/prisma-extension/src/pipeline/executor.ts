@@ -7,7 +7,8 @@
  * collected events to the record producer.
  */
 
-import type { AuditAction, MutationEvent } from '@kuruwic/db-audit-core';
+import type { MutationEvent } from '@kuruwic/db-audit-core';
+import type { AuditAction } from '../grammar/operations.js';
 import type { AuditLogData } from '../types.js';
 import type { ExecutionScope } from './execution-scope.js';
 import type { RecordProducer } from './produce-records.js';

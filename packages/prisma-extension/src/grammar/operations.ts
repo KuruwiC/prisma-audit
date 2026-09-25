@@ -1,0 +1,62 @@
+/**
+ * Operation Vocabulary
+ *
+ * The top-level Prisma operations the extension audits, split into single-record and batch
+ * operations, and the audit-log action each batch operation is recorded as.
+ *
+ * @module grammar/operations
+ */
+
+/** Audited Prisma operation */
+export type AuditAction =
+  | 'create'
+  | 'update'
+  | 'upsert'
+  | 'delete'
+  | 'createMany'
+  | 'updateMany'
+  | 'deleteMany'
+  | 'createManyAndReturn'
+  | 'updateManyAndReturn';
+
+/** Audited Prisma operation constants */
+export const AUDIT_ACTION = {
+  CREATE: 'create',
+  UPDATE: 'update',
+  UPSERT: 'upsert',
+  DELETE: 'delete',
+  CREATE_MANY: 'createMany',
+  UPDATE_MANY: 'updateMany',
+  DELETE_MANY: 'deleteMany',
+  CREATE_MANY_AND_RETURN: 'createManyAndReturn',
+  UPDATE_MANY_AND_RETURN: 'updateManyAndReturn',
+} as const satisfies Record<string, AuditAction>;
+
+/** Single-record operations (processed one record at a time) */
+export const SINGLE_OPERATIONS: ReadonlySet<AuditAction> = new Set([
+  AUDIT_ACTION.CREATE,
+  AUDIT_ACTION.UPDATE,
+  AUDIT_ACTION.UPSERT,
+  AUDIT_ACTION.DELETE,
+]);
+
+/**
+ * Maps each batch operation to the singular action stored in the audit log.
+ * `...AndReturn` normalizes to its create/update counterpart (no new DB action values).
+ * This map's key set is the source of truth for "all batch operations".
+ */
+export const BATCH_TO_SINGULAR_ACTION = {
+  [AUDIT_ACTION.CREATE_MANY]: AUDIT_ACTION.CREATE,
+  [AUDIT_ACTION.UPDATE_MANY]: AUDIT_ACTION.UPDATE,
+  [AUDIT_ACTION.DELETE_MANY]: AUDIT_ACTION.DELETE,
+  [AUDIT_ACTION.CREATE_MANY_AND_RETURN]: AUDIT_ACTION.CREATE,
+  [AUDIT_ACTION.UPDATE_MANY_AND_RETURN]: AUDIT_ACTION.UPDATE,
+} as const satisfies Partial<Record<AuditAction, AuditAction>>;
+
+/** Batch operation set (derived from BATCH_TO_SINGULAR_ACTION keys) */
+export const BATCH_OPERATIONS: ReadonlySet<AuditAction> = new Set(
+  Object.keys(BATCH_TO_SINGULAR_ACTION) as AuditAction[],
+);
+
+/** Set of supported audit operations (union of single and batch operations) */
+export const SUPPORTED_OPERATIONS: ReadonlySet<AuditAction> = new Set([...SINGLE_OPERATIONS, ...BATCH_OPERATIONS]);

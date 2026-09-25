@@ -29,15 +29,8 @@ export { compose } from './compose/index.js';
 // Config Types
 export type { GlobalContextEnricherConfig, SerializationConfig } from './config.types.js';
 // Constants
-export type { AuditAction, EntityIdentityKey } from './constants.js';
-export {
-  AUDIT_ACTION,
-  BATCH_OPERATIONS,
-  BATCH_TO_SINGULAR_ACTION,
-  SINGLE_OPERATIONS,
-  SUPPORTED_OPERATIONS,
-  UNRESOLVED_ENTITY_ID,
-} from './constants.js';
+export type { EntityIdentityKey } from './constants.js';
+export { UNRESOLVED_ENTITY_ID } from './constants.js';
 // Context Provider
 export { createAsyncLocalStorageProvider } from './context-provider.js';
 // Dispatch
@@ -86,8 +79,6 @@ export type { EntityResolveConfig, ResolveConfig } from './resolve/index.js';
 export { resolve } from './resolve/index.js';
 // Types
 export type { AuditActor, AuditContext, AuditContextProvider } from './types.js';
-// Utils - Debug
-export { nestedLog, preFetchLog } from './utils/debug.js';
 // Utils - Error Handler
 export type { ErrorHandler, ErrorStrategy } from './utils/error-handler.js';
 export { createErrorHandler } from './utils/error-handler.js';

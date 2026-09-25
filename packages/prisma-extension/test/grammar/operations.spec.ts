@@ -6,7 +6,7 @@ import {
   BATCH_TO_SINGULAR_ACTION,
   SINGLE_OPERATIONS,
   SUPPORTED_OPERATIONS,
-} from '../src/constants.js';
+} from '../../src/grammar/operations.js';
 
 describe('operation classification invariants', () => {
   it('SUPPORTED_OPERATIONS contains every AUDIT_ACTION value', () => {

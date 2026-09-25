@@ -12,13 +12,13 @@
  * nested delete without a before-state) without either reaching the audit row.
  */
 
-import type { AuditAction, MutationAction, MutationEvent } from '@kuruwic/db-audit-core';
-import { AUDIT_ACTION, BATCH_TO_SINGULAR_ACTION } from '@kuruwic/db-audit-core';
+import type { MutationAction, MutationEvent } from '@kuruwic/db-audit-core';
 import {
   getPrimaryKeyConstraint,
   type NestedOperationInfo,
   type NestedPreFetchResults,
 } from '../grammar/nested-operations.js';
+import { AUDIT_ACTION, type AuditAction, BATCH_TO_SINGULAR_ACTION } from '../grammar/operations.js';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../internal-types.js';
 import {
   collectNestedEvents,
