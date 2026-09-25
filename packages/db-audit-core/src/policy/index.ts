@@ -2,8 +2,9 @@
  * Write policy
  *
  * Decides, before the caller's operation executes, whether its audit rows are written inside
- * the same transaction as the operation. An atomic policy opens an implicit transaction when
- * none is active, so it has to be known before execution.
+ * the same transaction as the operation. It has to be known before execution so that an adapter
+ * can open an implicit transaction around the operation when the policy is atomic and none is
+ * active; the core itself opens none.
  */
 
 export interface PolicyConfig {

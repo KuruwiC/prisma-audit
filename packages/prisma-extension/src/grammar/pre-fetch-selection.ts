@@ -13,6 +13,11 @@ export type OperationPreFetchConfig = {
   fetchBeforeOperation: boolean;
 };
 
+/**
+ * Whether the before state of an `update` or a `delete` on `modelName` is read ahead of the
+ * write. It gates the nested operations selected here and a top-level update or delete alike,
+ * from the `update` / `delete` entry of the nested-operations config.
+ */
 export type GetOperationConfig = (modelName: string, operation: string) => OperationPreFetchConfig;
 
 /**

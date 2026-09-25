@@ -1,13 +1,6 @@
 /**
- * Pre-fetch Result Store
- *
- * Provides utilities for storing and retrieving pre-fetched record states
- * from nested Map structures.
- *
- * Map Structure:
- * - Level 1: `path` (e.g., 'postTags', 'postTags.tag') → Map
- * - Level 2: `entityId` (e.g., '123', or `UNRESOLVED_ENTITY_ID` when the identity is unknown)
- *   → { before: Record | null }
+ * Pre-fetch result store: the before states pre-fetched ahead of an operation, keyed by nested
+ * path, then by entity identity (`UNRESOLVED_ENTITY_ID` when the identity is unknown).
  */
 
 import type { NestedPreFetchResults } from '../../grammar/nested-operations.js';

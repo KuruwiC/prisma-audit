@@ -744,7 +744,7 @@ Controls whether audit log writes are synchronous or asynchronous.
 #### `awaitWriteIf`
 **Type:** `(modelName: string, tags: string[]) => boolean`
 
-Conditionally control write strategy per model. Called for every model on each write, receiving that model's `tags` from `aggregateMapping` (`[]` for a model without tags); its return value replaces `performance.awaitWrite` for that model.
+Conditionally control the write strategy per operation. Called once per audited operation with its top-level model and that model's `tags` from `aggregateMapping` (`[]` for a model without tags); its return value replaces `performance.awaitWrite` for the whole operation, the audit rows of its nested writes to other models included.
 
 ```typescript
 {
@@ -859,7 +859,7 @@ createAuditClient(prisma, {
 
 #### Tag-based Conditional Writing
 
-Override the global `awaitWrite` per model with `awaitWriteIf(modelName, tags)`, which is called for every model — `tags` is `[]` for a model without tags.
+Override the global `awaitWrite` with `awaitWriteIf(modelName, tags)`, which is called once per operation with its top-level model — the decision covers the operation's nested writes too, and `tags` is `[]` for a model without tags.
 
 **Configuration:**
 ```typescript
@@ -1144,13 +1144,13 @@ Control nested operation audit logging.
 **Type:** `boolean`
 **Default:** `true`
 
-Controls whether a nested `update` or `delete` operation fetches the affected row's before-state ahead of the operation. Pre-fetching is what lets a nested `update`'s audit log carry a `before` value and lets a nested `delete` resolve an identity it could not otherwise recover from the operation's own arguments.
+Controls whether an `update` or `delete` operation, top-level or nested, fetches the affected row's before-state ahead of the operation. Pre-fetching is what lets an `update`'s audit log carry a `before` value and lets a nested `delete` resolve an identity it could not otherwise recover from the operation's own arguments.
 
 ```typescript
 {
   nestedOperations: {
-    update: { fetchBeforeOperation: false },  // Skip pre-fetch for nested updates
-    delete: { fetchBeforeOperation: true },   // Pre-fetch for nested deletes (default)
+    update: { fetchBeforeOperation: false },  // Skip the before-state read of updates
+    delete: { fetchBeforeOperation: true },   // Read the before state of deletes (default)
   }
 }
 ```
@@ -1340,6 +1340,9 @@ $allOperations (src/extension.ts)
 - `src/pipeline/run-audited-operation.ts`: the pipeline above. A failure of the caller's own mutation propagates untouched; any other failure that escapes the executor is reported as `diff-generation` and rethrown.
 - `src/pipeline/execution-scope.ts`: the client the operation and every audit read and write share (the transaction's client inside a transaction, else the base client) and the transaction it belongs to.
 - `src/pipeline/single-executor.ts`, `src/pipeline/batch-executor.ts`: the prepare, execute and collect steps of a single operation (create, update, upsert, delete, with nested writes) and of a batch operation (createMany, updateMany, deleteMany and their returning variants), run in order by `src/pipeline/executor.ts`.
+- `src/grammar/`: the Prisma nested-write grammar. `nested-operations.ts` detects the nested operations in an operation's args and extracts the nested rows of its result; `pre-fetch-selection.ts` selects the operations whose before state is read ahead of the write; `nested-state.ts` resolves a nested row's action from that before state; `operations.ts` is the top-level operation vocabulary.
+- `src/nested/pre-fetch/`: the before states read ahead of an operation. The coordinator runs the to-one, to-many and batch fetchers under the parent rows and stores each row's before state by path and identity; `pre-existing-rows.ts` snapshots the primary keys a to-many relation holds before a nested create.
+- `src/nested/events/`: the mutation events of the nested rows an operation wrote. `write-set.ts` names the rows each nested operation targets; `collect-nested-events.ts` attributes the rows the result returned (re-fetching the updated rows it does not hold) and yields one event per row, with `delete-handler.ts` for deletes and `event-fields.ts` for the identity and action shared with the top-level collectors.
 - `src/pipeline/produce-records.ts`: core `resolve` then `compose`. Id resolvers and enrichers receive the scope's client when each one runs, so inside a transaction they read its writes.
 - `src/pipeline/write-audit-logs.ts`: executes the write plan (see [Write Strategies](#write-strategies)) and reports write failures under `log-write`.
 - `src/runtime/scope.ts`: the library-owned async-local state of an audited flow: the active transaction with its client and the writes queued until it commits, the re-entrancy guard that keeps the audit's own queries from being audited, and whether the library opened the transaction. It is kept apart from the app-owned audit context.

@@ -31,9 +31,8 @@ interface DMMF {
 }
 
 /**
- * Client with the internal DMMF accessor. `_dmmf` is Prisma-internal and current clients no longer
- * expose it (Prisma 6 carries `_runtimeDataModel` instead), so {@link getModelAccessor} normally
- * takes its fallback.
+ * Client with the internal DMMF accessor. `_dmmf` is Prisma-internal and absent on Prisma 6
+ * clients, which carry `_runtimeDataModel`; {@link getModelAccessor} then takes its fallback.
  */
 interface ClientWithDMMF {
   _dmmf?: DMMF;

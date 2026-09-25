@@ -22,7 +22,11 @@ export interface MutationOrigin {
 
 export interface MutationEvent<TModelName extends string = string> {
   readonly model: TModelName;
-  /** Serialized primary key ('42', '["a","b"]'), derived synchronously from the schema. Not the stored `entityId`, which the idResolver produces. */
+  /**
+   * Serialized primary key ('42', '["a","b"]'), derived synchronously from the schema; '' when
+   * the adapter could not determine it (a row that lacks a primary-key field, or a model without
+   * one). Not the stored `entityId`, which the idResolver produces.
+   */
   readonly identity: string;
   readonly action: MutationAction;
   /** Row before the write. Absent when not captured (create, fetchBeforeOperation: false, failed fetch). */

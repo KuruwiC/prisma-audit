@@ -43,7 +43,6 @@ export const createWrappedTransactionCallback = (
   deferredWrites: Array<() => Promise<void>>,
 ): ((txClient: TransactionalPrismaClient) => Promise<unknown>) => {
   return async (txClient: TransactionalPrismaClient): Promise<unknown> => {
-    // Defensive against callback re-invocation: start each run with an empty queue.
     deferredWrites.length = 0;
 
     return enterTransaction(provider, context, { client: txClient, deferredWrites }, () => callback(txClient));

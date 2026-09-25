@@ -61,10 +61,11 @@ export interface PerformanceConfig {
   /** Whether to await audit log writes. Default: true */
   awaitWrite?: boolean;
   /**
-   * Dynamic `awaitWrite` decision, called for every model on each write with that model's
-   * name and its `tags` from `aggregateMapping` (`tags` is `[]` for a model whose entity
-   * config declares no tags). Its return value replaces {@link PerformanceConfig.awaitWrite}
-   * for that model.
+   * Dynamic `awaitWrite` decision, called once per audited operation with the name of its
+   * top-level model and that model's `tags` from `aggregateMapping` (`tags` is `[]` for a
+   * model whose entity config declares no tags). Its return value replaces
+   * {@link PerformanceConfig.awaitWrite} for the whole operation, the audit rows of its nested
+   * writes to other models included.
    */
   awaitWriteIf?: (modelName: string, tags: string[]) => boolean;
   /**
@@ -98,12 +99,15 @@ export interface HooksConfig {
 }
 
 /**
- * Nested operation configuration
+ * Before-state configuration of update and delete operations
+ *
+ * `fetchBeforeOperation` decides whether the row is read before the write, for a top-level
+ * update or delete as well as for one nested in another operation. Default: `true`.
  */
 export interface NestedOperationsConfig {
-  /** Configuration for nested update operations */
+  /** Update operations, top-level and nested */
   update?: { fetchBeforeOperation?: boolean };
-  /** Configuration for nested delete operations */
+  /** Delete operations, top-level and nested */
   delete?: { fetchBeforeOperation?: boolean };
 }
 

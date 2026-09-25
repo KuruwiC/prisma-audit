@@ -1,8 +1,8 @@
 /**
  * @kuruwic/prisma-audit - Prisma Extension for Audit Logging
  *
- * Framework-agnostic audit logging solution with aggregate root support,
- * enrichment pipeline, branded types, and redaction utilities.
+ * Prisma Client extension for audit logging, built on @kuruwic/db-audit-core: aggregate root
+ * support, an enrichment pipeline, branded types and redaction utilities.
  *
  * @packageDocumentation
  */

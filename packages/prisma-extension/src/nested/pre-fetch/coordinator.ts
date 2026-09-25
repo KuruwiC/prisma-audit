@@ -1,7 +1,7 @@
 /**
- * Pre-fetch Coordinator
- *
- * Orchestrates pre-fetching of nested records before operation execution.
+ * Pre-fetch coordinator: detects the nested operations in an operation's args, selects the ones
+ * whose before state is read ahead of the write, and runs the to-one, to-many and batch fetchers
+ * for them parents first, storing each row's before state under its path and identity.
  *
  * @module nested/pre-fetch/coordinator
  */

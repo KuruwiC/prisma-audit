@@ -15,7 +15,11 @@ import type { NestedPreFetchResult } from './nested-state.js';
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
 
-/** Nested operation keywords that can appear in operation args */
+/**
+ * Nested operation keywords that can appear in operation args. `set` and `disconnect` rewrite
+ * the foreign keys of related rows but are not attributed: those related-row writes yield no
+ * audit event.
+ */
 export const NESTED_OPERATION_KEYWORDS = [
   'create',
   'createMany',
@@ -423,7 +427,6 @@ interface ProcessKeywordOperationInput extends NestedOperationScanContext {
 const processKeywordOperation = (input: ProcessKeywordOperationInput): void => {
   const { schemaMetadata, relationField, keyword, nestedData, pass, processedOps, nestedOperations } = input;
 
-  // Create unique key for this operation to avoid duplicates
   const opKey = `${relationField.name}:${keyword}:${relationField.name}`;
 
   if (processedOps.has(opKey)) {
@@ -438,7 +441,7 @@ const processKeywordOperation = (input: ProcessKeywordOperationInput): void => {
     operation: keyword,
     isList: relationField.isList,
     data: nestedData,
-    path: relationField.name, // Top-level path is just the field name
+    path: relationField.name,
   });
 
   const deepOps = processDeeplyNestedOperations(schemaMetadata, relationField, keyword, nestedData, pass);
@@ -553,7 +556,6 @@ export const detectNestedOperations = (
     return nestedOperations;
   }
 
-  // Track processed operations to avoid duplicates when exploring both branches
   const processedOps = new Set<string>();
 
   for (const data of dataSources) {
@@ -743,14 +745,14 @@ export const extractNestedRecords = (
         relatedModel: relationField.relatedModel,
         isList: relationField.isList,
         records,
-        path: relationField.name, // Top-level path is just the field name
+        path: relationField.name,
       });
 
       const deeperRecords = extractDeeplyNestedRecords(
         schemaMetadata,
         relationField.relatedModel,
         records,
-        relationField.name, // Start path with current field name
+        relationField.name,
       );
       nestedRecords.push(...deeperRecords);
     }

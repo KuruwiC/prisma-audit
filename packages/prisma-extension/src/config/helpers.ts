@@ -1,8 +1,8 @@
 /**
  * Configuration Helper Functions
  *
- * Runtime configuration resolution with priority logic for nested operations
- * (model-level > global-level > default).
+ * Runtime configuration resolution with priority logic for the before-state reads of update
+ * and delete operations, top-level or nested (model-level > global-level > default).
  *
  * @module config/helpers
  */
@@ -16,12 +16,13 @@ export interface GetNestedOperationConfigDependencies {
 }
 
 /**
- * Get nested operation configuration with priority resolution
+ * Get the before-state configuration of an operation with priority resolution
  *
  * @remarks
  * Priority: Model-level > Global-level > Default (true)
  *
- * Only 'update' and 'delete' operations have configurable behavior.
+ * Only 'update' and 'delete' have configurable behavior, and their `fetchBeforeOperation` gates
+ * the before-state read of a top-level update or delete as well as of a nested one.
  * Other operations (create, upsert, connectOrCreate) always return false.
  *
  * @example Model-level override
