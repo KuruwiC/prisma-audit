@@ -65,7 +65,7 @@ dispatch(records, atomic, { inTransaction })   -> WritePlan
   handle is the opaque type parameter `TDbHandle`; the adapter supplies its type.
 - **Context provider**: `createAsyncLocalStorageProvider()` returns an `AuditContextProvider`
   (`run`, `runAsync`, `getContext`, `withActor`) that carries the actor and request context through
-  async calls. `@kuruwic/db-audit-core/testing` exports `createMockAuditContext` for tests.
+  async calls.
 - **Utilities**: `createErrorHandler`, the branded id constructors and guards (`createActorId`,
   `isEntityId`, `unwrapId`, ...), and `createAuditLogData`.
 - **Debug output**: the core logs through [`debug`](https://www.npmjs.com/package/debug) under the
