@@ -59,7 +59,7 @@ export const createSingleExecutor = (deps: SingleExecutorDependencies): Operatio
       scope.handle,
       modelName,
       args,
-      { Prisma, getNestedOperationConfig, onPreFetchFailure: failureSink.notify },
+      { Prisma, schemaMetadata, getNestedOperationConfig, onPreFetchFailure: failureSink.notify },
     );
     const nestedOperations = detectExecutedNestedOperations(
       schemaMetadata,

@@ -6,6 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import type { DMMFField, PrismaNamespace, TransactionalPrismaClient } from '../src/internal-types.js';
 import { preFetchNestedRecordsBeforeOperation } from '../src/nested/pre-fetch/coordinator.js';
+import { createSchemaMetadataFromDMMF } from '../src/utils/schema-metadata.js';
 
 type Row = Record<string, unknown>;
 
@@ -120,6 +121,7 @@ const preFetch = async (client: TransactionalPrismaClient, modelName: string, ar
   (
     await preFetchNestedRecordsBeforeOperation(client, modelName, args, {
       Prisma,
+      schemaMetadata: createSchemaMetadataFromDMMF(Prisma),
       getNestedOperationConfig: () => ({ fetchBeforeOperation: true }),
     })
   ).results;

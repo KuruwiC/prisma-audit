@@ -28,10 +28,9 @@ import type {
   PrismaNamespace,
   TransactionalPrismaClient,
 } from '../../internal-types.js';
-import type { UniqueConstraint } from '../../schema/types.js';
+import type { SchemaMetadata, UniqueConstraint } from '../../schema/types.js';
 import type { AuditErrorObserver } from '../../types.js';
 import { preFetchLog } from '../../utils/debug.js';
-import { createSchemaMetadataFromDMMF } from '../../utils/schema-metadata.js';
 import {
   getPreFetchListClient,
   getPreFetchModelClient,
@@ -51,8 +50,9 @@ import { extractEntityId, storePreFetchResult } from './pre-fetch-result-store.j
 type PrismaDMMF = PrismaNamespace['dmmf'];
 
 export interface PreFetchCoordinatorDependencies {
-  /** Prisma namespace given as the extension's `Prisma` option */
+  /** Prisma namespace given as the extension's `Prisma` option; read for the DMMF relation details */
   readonly Prisma: PrismaNamespace;
+  readonly schemaMetadata: SchemaMetadata;
   readonly getNestedOperationConfig: GetOperationConfig;
   /**
    * Notified when a single nested operation's pre-fetch query fails. The before-state
@@ -196,14 +196,13 @@ export const preFetchNestedRecordsBeforeOperation = async (
   args: Record<string, unknown>,
   dependencies: PreFetchCoordinatorDependencies,
 ): Promise<NestedPreFetch> => {
-  const { Prisma, getNestedOperationConfig, onPreFetchFailure } = dependencies;
+  const { Prisma, schemaMetadata, getNestedOperationConfig, onPreFetchFailure } = dependencies;
 
   const preFetchResults: NestedPreFetchResults = new Map();
   const batchTargets: NestedBatchTargets = new Map();
   const preFetch: NestedPreFetch = { results: preFetchResults, batchTargets };
-  const prismaMetadata = createSchemaMetadataFromDMMF(Prisma);
 
-  const nestedOperations = detectNestedOperations(prismaMetadata, modelName, args, { kind: 'discovery' });
+  const nestedOperations = detectNestedOperations(schemaMetadata, modelName, args, { kind: 'discovery' });
   preFetchLog('pre-fetch nested records for model=%s operations=%d', modelName, nestedOperations.length);
 
   const operationsToPreFetch = filterOperationsToPreFetch(nestedOperations, getNestedOperationConfig);
@@ -246,7 +245,7 @@ export const preFetchNestedRecordsBeforeOperation = async (
     getNestedOperationConfig,
     resolvePkConstraint: (model) => {
       if (!pkConstraintCache.has(model)) {
-        pkConstraintCache.set(model, getPrimaryKeyConstraint(prismaMetadata, model));
+        pkConstraintCache.set(model, getPrimaryKeyConstraint(schemaMetadata, model));
       }
       return pkConstraintCache.get(model);
     },

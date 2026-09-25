@@ -10,6 +10,7 @@ import type { DMMFField, PrismaNamespace, TransactionalPrismaClient } from '../s
 import { preFetchNestedRecordsBeforeOperation } from '../src/nested/pre-fetch/coordinator.js';
 import { preFetchOneToManyRelation } from '../src/nested/pre-fetch/one-to-many-fetcher.js';
 import { parentKeysFromOperationWheres } from '../src/nested/pre-fetch/parent-rows.js';
+import { createSchemaMetadataFromDMMF } from '../src/utils/schema-metadata.js';
 
 type Row = Record<string, unknown>;
 
@@ -110,7 +111,12 @@ const preFetch = (
   modelName: string,
   args: Row,
   getNestedOperationConfig: GetOperationConfig = fetchBefore,
-) => preFetchNestedRecordsBeforeOperation(client, modelName, args, { Prisma, getNestedOperationConfig });
+) =>
+  preFetchNestedRecordsBeforeOperation(client, modelName, args, {
+    Prisma,
+    schemaMetadata: createSchemaMetadataFromDMMF(Prisma),
+    getNestedOperationConfig,
+  });
 
 describe('nested to-many pre-fetch parent scope', () => {
   it('scopes a direct child by the parent key the top-level WHERE names, without reading the parent', async () => {
