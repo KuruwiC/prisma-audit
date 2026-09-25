@@ -22,7 +22,8 @@ import { createAuditLogWriter } from './pipeline/write-audit-logs.js';
 import { isProcessingAuditLog, withScope } from './runtime/scope.js';
 import { createTransactionProxy } from './runtime/transaction-proxy.js';
 import type { PrismaAuditExtensionOptions } from './types.js';
-import { injectNestedWriteSelection, isAuditableAction, projectToRequestedShape } from './utils/index.js';
+import { isAuditableAction } from './utils/extension-utils.js';
+import { injectNestedWriteSelection, projectToRequestedShape } from './utils/nested-write-selection.js';
 
 const createPipelineDependencies = (audit: AuditOptions): AuditPipelineDependencies => {
   const { Prisma, schemaMetadata, getNestedOperationConfig } = audit;
