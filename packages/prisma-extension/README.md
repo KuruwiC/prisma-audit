@@ -925,7 +925,7 @@ Sample rate for audit logging (0.0 = 0%, 1.0 = 100%).
 #### `samplingIf`
 **Type:** `(modelName: string, tags: string[]) => number`
 
-Per-model sampling rate. Called for every model on each write, receiving that model's `tags` from `aggregateMapping` (`[]` for a model without tags); its return value replaces `performance.sampling` for that model.
+Sampling rate per operation. Called once per audited operation with its top-level model and that model's `tags` from `aggregateMapping` (`[]` for a model without tags); its return value replaces `performance.sampling` for the whole operation, its nested writes included.
 
 ```typescript
 {

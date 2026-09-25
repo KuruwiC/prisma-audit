@@ -69,10 +69,10 @@ export interface PerformanceConfig {
    */
   awaitWriteIf?: (modelName: string, tags: string[]) => boolean;
   /**
-   * Dynamic sampling rate, called for every model on each write with that model's name and
-   * its `tags` from `aggregateMapping` (`tags` is `[]` for a model whose entity config
-   * declares no tags). Its return value replaces {@link PerformanceConfig.sampling} for that
-   * model.
+   * Dynamic sampling rate, called once per audited operation with the name of its top-level
+   * model and that model's `tags` from `aggregateMapping` (`tags` is `[]` for a model whose
+   * entity config declares no tags). Its return value replaces
+   * {@link PerformanceConfig.sampling} for the whole operation, its nested writes included.
    */
   samplingIf?: (modelName: string, tags: string[]) => number;
 }
