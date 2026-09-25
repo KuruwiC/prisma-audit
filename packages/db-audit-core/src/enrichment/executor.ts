@@ -89,6 +89,7 @@ const handleEnricherError = <TContext>(
  * Error handling strategies:
  * - 'fail': Re-throw error to fail the operation
  * - 'log': Log warning and use fallback value
+ * - 'skip': Return null without logging; `fallback` is not used
  * - Custom function: Execute custom error handler and use its return value or fallback
  *
  * @example
@@ -195,6 +196,7 @@ const handleBatchEnricherError = <TContext>(
  * Error handling strategies:
  * - 'fail': Re-throw error to fail the operation
  * - 'log': Log warning and return array of nulls/fallbacks
+ * - 'skip': Return an array of nulls without logging; `fallback` is not used
  * - Custom function: Execute custom error handler and use its return value or fallbacks
  *
  * @example
@@ -203,7 +205,7 @@ const handleBatchEnricherError = <TContext>(
  *   {
  *     enricher: async (users, db) => users.map(u => ({ roles: ['user'] })),
  *     onError: 'log',
- *     fallback: null
+ *     fallback: [null, null]
  *   },
  *   [{ id: '1' }, { id: '2' }],
  *   db

@@ -75,9 +75,10 @@ const isDMMFMapping = (value: unknown): value is DMMFModelMapping => {
 };
 
 /**
- * Get the correct model accessor name from DMMF
+ * Get the model's accessor name on the client
  *
- * Handles naming conventions like camelCase, PascalCase, snake_case.
+ * Read from the client's `_dmmf` model mappings (`plural`, else `model`) when the client exposes
+ * them; otherwise the model name with its first letter lowercased.
  * Accepts any Prisma client-like object (base client, extended client, transaction client).
  *
  * @example

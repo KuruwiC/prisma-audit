@@ -100,9 +100,9 @@ export interface PreFetchOneToManyRelationInput extends ToManyScopeInput {
  *
  * The WHERE is a `<Model>WhereUniqueInput`, so it goes to `findUnique` with the back-relation
  * filter added under `AND` — including Prisma's compound-unique shape for composite primary keys
- * (`{ a_b: { a, b } }`, or a custom name from `@@id([a, b], name: "custom")`). Only entityId
- * derivation unwraps that shape (see `extractEntityId`). Parent rows are tried in turn until one
- * holds the row; when no parent row exists, nothing is queried or stored.
+ * (`{ a_b: { a, b } }`, or a custom name from `@@id([a, b], name: "custom")`). Entity-identity
+ * derivation (`extractEntityId`) and `matchesUniqueWhere` unwrap that shape. Parent rows are
+ * tried in turn until one holds the row; when no parent row exists, nothing is queried or stored.
  */
 export const preFetchOneToManyRelation = async (input: PreFetchOneToManyRelationInput): Promise<void> => {
   const { path, operation, data, scope, relatedModelClient, pkConstraint, preFetchResults } = input;

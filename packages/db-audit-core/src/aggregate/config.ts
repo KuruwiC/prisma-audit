@@ -5,8 +5,6 @@
  *
  * @remarks
  * Factory function for managing aggregate mapping configuration with case-insensitive model name lookups and validation.
- *
- * @packageDocumentation
  */
 
 import { validateAggregateMapping } from './helpers.js';

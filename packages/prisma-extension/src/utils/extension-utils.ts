@@ -4,7 +4,7 @@
  * Provides helper functions for string transformations, operation validation,
  * entity ID extraction, and audit eligibility checks.
  *
- * @module extension-utils
+ * @module utils/extension-utils
  */
 
 import { type AuditContext, UNRESOLVED_ENTITY_ID } from '@kuruwic/db-audit-core';
@@ -160,7 +160,7 @@ export interface ShouldAuditModelInput {
  *   modelName: 'User',
  *   context,
  *   auditLogModel: 'auditLog',
- *   isLoggable: (m) => aggregateMapping.has(m),
+ *   isLoggable: aggregateConfig.isLoggable,
  *   resolveSamplingRate: () => 1.0,
  * });
  * ```

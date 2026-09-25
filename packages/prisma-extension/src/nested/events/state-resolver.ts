@@ -22,7 +22,7 @@ export type NestedRecordAction = AuditAction | 'connect';
 
 /**
  * Resolved state result
- * - action: The determined action (create/update/delete/connect)
+ * - action: The determined action (create/update/connect)
  * - beforeState: The before state (or null if not available/applicable)
  *
  * Special case: action === 'connect' signals that audit log should be skipped

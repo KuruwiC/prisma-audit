@@ -12,7 +12,7 @@
  * caller can be projected to the shape the caller requested while audit logs are built from the
  * full result.
  *
- * @module nested-write-selection
+ * @module utils/nested-write-selection
  */
 
 import {

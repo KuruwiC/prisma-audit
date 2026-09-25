@@ -23,7 +23,7 @@ import type { NestedWriteTarget } from './write-set.js';
 /**
  * A nested delete skipped because its primary key could not be resolved. `entityId` is the
  * raw serialized key, or `undefined` when no identity was ever determined.
- * extension.ts maps these fields into an `entity-id-resolution` observer context.
+ * The single executor maps these fields into an `entity-id-resolution` observer context.
  */
 export interface UnresolvedDeleteEntityId {
   relatedModel: string;

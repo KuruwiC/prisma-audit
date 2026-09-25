@@ -9,7 +9,7 @@
  * 1. Entity-normalized: Separate tables for Actor, Entity, Aggregate, Event
  * 2. Shared-change: Single Change table linked to multiple Aggregates
  *
- * @module normalized-writer
+ * @module utils/normalized-writer
  */
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
@@ -345,6 +345,10 @@ const createAuditEvents = async (
   }
 };
 
+type PrismaClientWithTransaction = {
+  $transaction: <T>(fn: (tx: TransactionClient) => Promise<T>) => Promise<T>;
+};
+
 /**
  * Creates an entity-normalized audit log writer
  *
@@ -372,10 +376,6 @@ const createAuditEvents = async (
  * });
  * ```
  */
-type PrismaClientWithTransaction = {
-  $transaction: <T>(fn: (tx: TransactionClient) => Promise<T>) => Promise<T>;
-};
-
 export const createEntityNormalizedWriter = (schema: NormalizedSchema, basePrisma: unknown): AuditLogWriter => {
   return async (
     logs: AuditLogData[],

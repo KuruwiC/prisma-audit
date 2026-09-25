@@ -35,7 +35,7 @@ const processObjectEntry = <T>(
  * to avoid false positives from heuristic detection.
  *
  * @param obj - Object to strip relations from
- * @param relationFieldNames - Relation field names from SchemaMetadata. Only
+ * @param relationFieldNames - Relation field names of the model, as the adapter derives them from its schema. Only
  *   these fields are removed. When undefined, no fields are removed.
  *
  * @example

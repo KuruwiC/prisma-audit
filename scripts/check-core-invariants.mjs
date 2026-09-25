@@ -12,8 +12,8 @@
  *    regular expression literals do not count.
  * 6. How often `dmmf` appears in the other packages' source is reported, without failing.
  *
- * Prints one line per check when every check passes. Otherwise prints each violation as
- * `file:line: text` under the failing check and exits with status 1.
+ * Prints one line per check; a failing check's line is followed by each violation as
+ * `file:line: text`, and the script then exits with status 1.
  *
  * Usage: node scripts/check-core-invariants.mjs
  */

@@ -3,7 +3,7 @@ import { safeStringify } from './serialization.js';
 /**
  * Diff calculation utilities for audit logging
  *
- * @module diff-calculator
+ * @module utils/diff-calculator
  *
  * @remarks
  * Compares before/after states of records and identifies field-level changes.

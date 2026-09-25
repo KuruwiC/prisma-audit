@@ -1,8 +1,9 @@
 /**
  * Parent rows of a nested operation
  *
- * A nested `update` / `upsert` / `delete` applies only to rows related to the row it is nested
- * under, so its before-state read is scoped by the keys of those parent rows.
+ * A nested write applies only to rows related to the row it is nested under, so the reads made
+ * on its behalf (before states, batch filter matches, pre-existing snapshots) are scoped by the
+ * keys of those parent rows.
  *
  * @module nested/pre-fetch/parent-rows
  */

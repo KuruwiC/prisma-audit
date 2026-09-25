@@ -1,13 +1,11 @@
 /**
  * Integration Tests: Before-state capture for batch write operations
  *
- * `updateMany`, `deleteMany`, and `updateManyAndReturn` intercept the operation
- * before the single-record lifecycle pipeline runs (see `handleBatchOperation` /
- * `handleUpdateOrDeleteMany` in extension.ts) and capture before-state themselves
- * via `findMany` + primary-key pairing, independent of the single-record
- * `fetchBeforeState` gate. These tests assert that behavior black-box, through the
- * public client, so it is pinned regardless of how the single-record gate
- * (`requiresBeforeState`) is implemented internally.
+ * `updateMany`, `deleteMany`, and `updateManyAndReturn` run through the batch executor,
+ * which captures before-state itself via `findMany` + primary-key pairing, independent
+ * of the single-record `fetchBeforeState` gate. These tests assert that behavior
+ * black-box, through the public client, so it is pinned regardless of how the
+ * single-record gate is implemented internally.
  */
 
 import type { AuditContext } from '@kuruwic/db-audit-core';

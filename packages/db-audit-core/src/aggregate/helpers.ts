@@ -1,12 +1,12 @@
 /**
- * Aggregate Mapping Helpers - Callback-based implementation with type safety
+ * Aggregate mapping helpers
  *
  * @module aggregate/helpers
  *
  * @remarks
- * Framework-agnostic helper functions for defining aggregate configurations. All helpers internally create callback-based resolvers.
- *
- * @packageDocumentation
+ * The resolver constructors (`self`, `foreignKey`, `resolveId`, `batchResolveIds`), the mapping
+ * DSL (`defineEntity`, `to`, `defineAggregateMapping`), `normalizeId`, the runtime resolution of
+ * one aggregate id, and the mapping validation.
  */
 
 import type {
@@ -27,7 +27,7 @@ import type {
 import { DEFAULT_ENTITY_CATEGORY } from './types.js';
 
 // ============================================================================
-// Resolver Metadata (WeakMap-based, no type assertions needed)
+// Resolver Metadata
 // ============================================================================
 
 const batchResolverRegistry = getGlobalSingleton(
@@ -70,7 +70,7 @@ export const warnAboutUnbatchedResolver = (entityType: string, aggregate: Aggreg
   }
   warnedAggregateTypes.add(aggregate.type);
   console.warn(
-    `[prisma-audit] ${entityType} → aggregate "${aggregate.type}" uses resolveId() for ${rowCount} entities. ` +
+    `[db-audit-core] ${entityType} → aggregate "${aggregate.type}" uses resolveId() for ${rowCount} entities. ` +
       `Consider using batchResolveIds() to avoid N+1 queries.`,
   );
 };
@@ -118,7 +118,7 @@ export type IdTransformer = (value: unknown) => string;
  * normalizeId(456);              // '456'
  * normalizeId(789n);             // '789'
  * normalizeId(true);             // 'true'
- * normalizeId(new Date());       // ISO string representation
+ * normalizeId(new Date());       // Date#toString() output
  * normalizeId({ toString: () => 'custom-id' }); // 'custom-id'
  * ```
  */
@@ -357,7 +357,7 @@ export type ToOptions<TDbHandle = unknown, TEntity extends Record<string, unknow
  *   resolver, or from the `aggregates` slot of a `defineEntity<TEntity, TDbHandle>()` call
  * @template TDbHandle - Database handle type, inferred the same way
  *
- * @param type - Aggregate type name (should be a valid model name)
+ * @param type - Aggregate type name: a model name, or any name of an external aggregate
  * @param resolver - ID resolution function (can be AggregateIdResolver or typed resolver function)
  * @param options - Projection options: custom category, projection-specific context enricher
  * @returns AggregateRoot configuration

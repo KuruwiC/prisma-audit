@@ -10,8 +10,6 @@
  * the mapping with both erased to their defaults, so the callback members are declared as method
  * signatures: their parameters are bivariant, which is what lets `LoggableEntity<Client, Post>`
  * be assigned where `LoggableEntity` is expected.
- *
- * @packageDocumentation
  */
 
 import type {

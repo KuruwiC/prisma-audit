@@ -2,8 +2,8 @@
  * ID Generation and Primary-Key Utilities
  *
  * Provides client-side ID generation for `createMany` data, so audit logs can record
- * the IDs of rows the operation does not return, and the primary-key helpers batch
- * operations use to pair before and after states.
+ * the IDs of rows the operation does not return, and the primary-key helpers that pair
+ * before and after states, serialize a row's entity identity, and read rows by primary key.
  *
  * Generated IDs must match the format the schema declares — Prisma itself
  * generates cuid v1 for `cuid()` and UUID v7 for `uuid(7)`, so injecting a
@@ -225,14 +225,6 @@ export const ensureIds = <T extends Record<string, unknown>>(
     };
   });
 };
-
-/**
- * Primary Key Extraction Utilities
- *
- * Used for identity-based before/after matching in batch operations.
- * These use DMMF-based synchronous PK extraction (not the async idResolver
- * which is for audit log entityId resolution).
- */
 
 const PK_CHUNK_SIZE = 1000;
 

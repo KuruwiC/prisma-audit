@@ -1,17 +1,18 @@
 /**
  * Apply relation configuration to before/after states
  *
- * When includeRelations is false (default), removes relation objects while preserving foreign keys.
+ * When includeRelations is false, removes the named relation fields while preserving foreign keys;
+ * without a name set nothing is removed.
  *
  * @example
  * ```typescript
  * const before = { id: "1", postId: "p1", post: { id: "p1", title: "..." } };
  * const after = { id: "1", postId: "p1", post: { id: "p1", title: "Updated" } };
  *
- * applyRelationConfig(before, after, false);
+ * applyRelationConfig(before, after, false, new Set(['post']));
  * // => [{ id: "1", postId: "p1" }, { id: "1", postId: "p1" }]
  *
- * applyRelationConfig(before, after, true);
+ * applyRelationConfig(before, after, true, new Set(['post']));
  * // => [before, after]  (unchanged)
  * ```
  */

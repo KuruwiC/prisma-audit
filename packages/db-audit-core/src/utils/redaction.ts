@@ -3,7 +3,7 @@ import { safeStringify } from './serialization.js';
 /**
  * PII Redaction Utilities
  *
- * @module redaction
+ * @module utils/redaction
  *
  * @remarks
  * Protects sensitive information in audit logs through field-level redaction.

@@ -752,7 +752,7 @@ const extractDeeplyNestedRecords = (
 /**
  * Extract nested records from operation result
  *
- * Requires the `include` option in the original operation args.
+ * Reads the relations the operation's selection returned (see `injectNestedWriteSelection`).
  *
  * @example
  * ```typescript

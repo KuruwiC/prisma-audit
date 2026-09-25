@@ -1,7 +1,7 @@
 /**
  * Error handling utilities for audit logging
  *
- * @module error-handler
+ * @module utils/error-handler
  *
  * @remarks
  * Configurable error handling strategies: throw, log, or ignore audit failures.
