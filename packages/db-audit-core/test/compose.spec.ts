@@ -376,30 +376,10 @@ describe('compose', () => {
       expect(composeOne(event({ after: row })).after).toEqual(row);
     });
 
-    it('keeps relations when the entity includes them, whatever the global setting', () => {
-      const record = composeOne(event({ after: row }), {
-        ...authorRelation,
-        includeRelations: false,
-        entity: () => ({ category: 'model', type: 'Post', includeRelations: true }),
-      });
-
-      expect(record.after).toEqual(row);
-    });
-
-    it('keeps relations when they are included globally and the entity does not say', () => {
+    it('keeps relations when they are included', () => {
       const record = composeOne(event({ after: row }), { ...authorRelation, includeRelations: true });
 
       expect(record.after).toEqual(row);
-    });
-
-    it('strips relations when the entity excludes them, whatever the global setting', () => {
-      const record = composeOne(event({ after: row }), {
-        ...authorRelation,
-        includeRelations: true,
-        entity: () => ({ category: 'model', type: 'Post', includeRelations: false }),
-      });
-
-      expect(record.after).toEqual(stripped);
     });
 
     it('strips relations by default', () => {

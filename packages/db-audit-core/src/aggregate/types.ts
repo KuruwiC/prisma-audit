@@ -198,8 +198,6 @@ export interface LoggableEntity<
     update?: { fetchBeforeOperation?: boolean };
     delete?: { fetchBeforeOperation?: boolean };
   };
-  /** Whether to include relation objects in before/after states for this entity (default: inherits from global config) */
-  includeRelations?: boolean;
 }
 
 // ============================================================================

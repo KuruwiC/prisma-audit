@@ -3,10 +3,10 @@
 import type { SerializationConfig } from '../config.types.js';
 import { createActorId, createAggregateId, createEntityId } from '../domain/branded-types.js';
 import type { AuditRecord, ResolvedEvent } from '../domain/mutation-event.js';
-import { applyRelationConfig } from '../state-resolution/apply-relation-config.js';
 import type { AuditContext } from '../types.js';
 import { createDiffCalculator, type DiffResult } from '../utils/diff-calculator.js';
 import { type RedactConfig, redactSensitiveData } from '../utils/redaction.js';
+import { removeRelations } from '../utils/remove-relations.js';
 import { serializeForAuditJson, type ValueSerializer } from '../utils/serialization.js';
 
 export interface EntityComposeConfig {
@@ -14,8 +14,6 @@ export interface EntityComposeConfig {
   readonly type: string;
   /** Fields excluded from change tracking; overrides the global list when present. */
   readonly excludeFields?: readonly string[];
-  /** Whether relation objects stay in the stored states; overrides the global setting when present. */
-  readonly includeRelations?: boolean;
 }
 
 export interface ComposeConfig<TModelName extends string = string> {
@@ -25,6 +23,7 @@ export interface ComposeConfig<TModelName extends string = string> {
   readonly excludeFields: readonly string[];
   readonly redact?: RedactConfig;
   readonly serialization?: SerializationConfig;
+  /** Whether relation objects stay in the stored states (default: false, they are stripped) */
   readonly includeRelations?: boolean;
   /** Relation field names of a model, as the adapter derives them from its schema; undefined strips nothing. */
   readonly relationFieldNames: (model: TModelName) => ReadonlySet<string> | undefined;
@@ -114,15 +113,16 @@ const resolveStates = <TModelName extends string>(
 
   const states = config.redact ? redactStates({ before, after, changes }, config.redact) : { before, after, changes };
 
-  const includeRelations = entity.includeRelations ?? config.includeRelations ?? false;
-  const [strippedBefore, strippedAfter] = applyRelationConfig(
-    states.before,
-    states.after,
-    includeRelations,
-    config.relationFieldNames(event.model),
-  );
+  if (config.includeRelations) {
+    return states;
+  }
 
-  return { before: strippedBefore, after: strippedAfter, changes: states.changes };
+  const relationFieldNames = config.relationFieldNames(event.model);
+  return {
+    before: states.before && removeRelations(states.before, relationFieldNames),
+    after: states.after && removeRelations(states.after, relationFieldNames),
+    changes: states.changes,
+  };
 };
 
 const composeEvent = <TModelName extends string>(
