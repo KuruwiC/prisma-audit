@@ -3,8 +3,8 @@
  */
 
 import type { MutationAction } from '@kuruwic/db-audit-core';
-import { UNRESOLVED_ENTITY_ID } from '@kuruwic/db-audit-core';
 import { AUDIT_ACTION, type AuditAction } from '../grammar/operations.js';
+import { UNRESOLVED_ENTITY_ID } from '../nested/pre-fetch/identity-key.js';
 import { extractEntityIdentity } from '../utils/id-generation.js';
 
 type Row = Record<string, unknown>;

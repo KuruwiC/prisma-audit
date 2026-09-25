@@ -1,5 +1,5 @@
-import { UNRESOLVED_ENTITY_ID } from '@kuruwic/db-audit-core';
 import { describe, expect, it } from 'vitest';
+import { UNRESOLVED_ENTITY_ID } from '../src/nested/pre-fetch/identity-key.js';
 
 import { extractEntityIdentity } from '../src/utils/id-generation.js';
 

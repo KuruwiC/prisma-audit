@@ -11,7 +11,6 @@
  * @module nested/pre-fetch/pre-existing-rows
  */
 
-import type { EntityIdentityKey } from '@kuruwic/db-audit-core';
 import { toError } from '../../failure-sink.js';
 import {
   getPrimaryKeyConstraint,
@@ -30,6 +29,7 @@ import { preFetchLog } from '../../utils/debug.js';
 import { extractEntityIdentity } from '../../utils/id-generation.js';
 import type { NestedWriteSets } from '../events/write-set.js';
 import { findDMMFField, resolveParentModelFromPath } from './coordinator.js';
+import type { EntityIdentityKey } from './identity-key.js';
 import { getPreFetchListClient, getPreFetchModelClient, type PreFetchListClient } from './model-client.js';
 import { resolveToManyRelationScope, type ToManyRelationScope } from './one-to-many-fetcher.js';
 import { parentKeyOf, parentKeysFromOperationWheres, parentPathOf, resolveParentRows } from './parent-rows.js';

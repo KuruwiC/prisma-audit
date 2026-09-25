@@ -10,12 +10,12 @@
  *   → { before: Record | null }
  */
 
-import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID } from '@kuruwic/db-audit-core';
 import type { NestedPreFetchResults } from '../../grammar/nested-operations.js';
 import type { NestedPreFetchResult } from '../../grammar/nested-state.js';
 import type { UniqueConstraint } from '../../schema/types.js';
 import { matchesUniqueWhere, unwrapCompoundWhere } from '../../utils/compound-where.js';
 import { extractEntityIdentity } from '../../utils/id-generation.js';
+import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID } from './identity-key.js';
 
 /**
  * The entry stored at `path` for `entityId`, else the entry stored there under

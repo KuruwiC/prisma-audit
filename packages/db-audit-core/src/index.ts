@@ -23,8 +23,6 @@ export type {
 export type { ComposeAmbient, ComposeConfig, EntityComposeConfig } from './compose/index.js';
 export { compose } from './compose/index.js';
 export type { GlobalContextEnricherConfig, SerializationConfig } from './config.types.js';
-export type { EntityIdentityKey } from './constants.js';
-export { UNRESOLVED_ENTITY_ID } from './constants.js';
 export { createAsyncLocalStorageProvider } from './context-provider.js';
 export type { DispatchScope } from './dispatch/index.js';
 export { dispatch } from './dispatch/index.js';

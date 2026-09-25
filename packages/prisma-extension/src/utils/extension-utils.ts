@@ -7,8 +7,9 @@
  * @module utils/extension-utils
  */
 
-import { type AuditContext, UNRESOLVED_ENTITY_ID } from '@kuruwic/db-audit-core';
+import type { AuditContext } from '@kuruwic/db-audit-core';
 import { type AuditAction, SUPPORTED_OPERATIONS } from '../grammar/operations.js';
+import { UNRESOLVED_ENTITY_ID } from '../nested/pre-fetch/identity-key.js';
 import { isProcessingAuditLog } from '../runtime/scope.js';
 import type { UniqueConstraint } from '../schema/types.js';
 import { unwrapCompoundWhere } from './compound-where.js';

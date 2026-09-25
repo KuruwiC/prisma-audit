@@ -9,7 +9,6 @@
  * @module nested/pre-fetch/one-to-many-fetcher
  */
 
-import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID } from '@kuruwic/db-audit-core';
 import {
   batchFilterClauses,
   type NestedBatchKeyword,
@@ -20,6 +19,7 @@ import type { DMMFField, DMMFModel } from '../../internal-types.js';
 import type { UniqueConstraint } from '../../schema/types.js';
 import { preFetchLog } from '../../utils/debug.js';
 import { extractEntityIdentity } from '../../utils/id-generation.js';
+import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID } from './identity-key.js';
 import type { PreFetchListClient, PreFetchModelClient, PreFetchRecord } from './model-client.js';
 import { parentKeyOf, type ResolveParentRowsInput, resolveParentRows } from './parent-rows.js';
 import { extractEntityId, storePreFetchResult } from './pre-fetch-result-store.js';

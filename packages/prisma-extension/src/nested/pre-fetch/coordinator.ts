@@ -6,7 +6,6 @@
  * @module nested/pre-fetch/coordinator
  */
 
-import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID } from '@kuruwic/db-audit-core';
 import { toError } from '../../failure-sink.js';
 import {
   detectNestedOperations,
@@ -32,6 +31,7 @@ import type {
 import type { SchemaMetadata, UniqueConstraint } from '../../schema/types.js';
 import type { AuditErrorObserver } from '../../types.js';
 import { preFetchLog } from '../../utils/debug.js';
+import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID } from './identity-key.js';
 import {
   getPreFetchListClient,
   getPreFetchModelClient,

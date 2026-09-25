@@ -8,9 +8,9 @@
  * @module nested/pre-fetch/one-to-one-fetcher
  */
 
-import type { EntityIdentityKey } from '@kuruwic/db-audit-core';
 import type { DMMFField, DMMFModel } from '../../internal-types.js';
 import { preFetchLog } from '../../utils/debug.js';
+import type { EntityIdentityKey } from './identity-key.js';
 import type { PreFetchModelClient, PreFetchRecord } from './model-client.js';
 import { type ResolveParentRowsInput, resolveParentRows } from './parent-rows.js';
 import { extractEntityIdOrUnresolved } from './pre-fetch-result-store.js';
