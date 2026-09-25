@@ -433,7 +433,7 @@ describe('createExecutor', () => {
     expect(steps.execute).toHaveBeenCalledWith(operation, scope, prepared);
     expect(steps.collect).toHaveBeenCalledWith(operation, scope, prepared, executed);
     expect(produceRecords).toHaveBeenCalledWith(events, scope);
-    expect(steps.result).toHaveBeenCalledWith(operation, scope, executed);
+    expect(steps.result).toHaveBeenCalledWith(executed);
     expect(result).toEqual({ result: 'returned', records: [record] });
   });
 

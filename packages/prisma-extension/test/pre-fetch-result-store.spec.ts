@@ -1,13 +1,13 @@
 /**
- * Tests for the pre-fetch result store: whether a targeted row was pre-fetched at a path.
+ * Tests for the pre-fetch result store: the pre-fetched row a nested operation targets at a path.
  */
 
 import { describe, expect, it } from 'vitest';
 import type { NestedPreFetchResults } from '../src/grammar/nested-operations.js';
 import { UNRESOLVED_ENTITY_ID } from '../src/nested/pre-fetch/identity-key.js';
-import { hasPreFetchedRecordAt, storePreFetchResult } from '../src/nested/pre-fetch/pre-fetch-result-store.js';
+import { preFetchedRowAt, storePreFetchResult } from '../src/nested/pre-fetch/pre-fetch-result-store.js';
 
-describe('hasPreFetchedRecordAt', () => {
+describe('preFetchedRowAt', () => {
   const results = (): NestedPreFetchResults => {
     const store: NestedPreFetchResults = new Map();
     storePreFetchResult(store, 'posts', 'p1', { id: 'p1', slug: 'first' });
@@ -18,21 +18,21 @@ describe('hasPreFetchedRecordAt', () => {
   };
 
   it('finds the row a unique WHERE names among the found rows at the path', () => {
-    expect(hasPreFetchedRecordAt(results(), 'posts', { id: 'p1' })).toBe(true);
-    expect(hasPreFetchedRecordAt(results(), 'posts', { slug: 'first' })).toBe(true);
+    expect(preFetchedRowAt(results(), 'posts', { id: 'p1' })).toEqual({ id: 'p1', slug: 'first' });
+    expect(preFetchedRowAt(results(), 'posts', { slug: 'first' })).toEqual({ id: 'p1', slug: 'first' });
   });
 
   it('reads a row stored without a before-state as not found', () => {
-    expect(hasPreFetchedRecordAt(results(), 'posts', { id: 'missing' })).toBe(false);
-    expect(hasPreFetchedRecordAt(results(), 'avatar', undefined)).toBe(false);
+    expect(preFetchedRowAt(results(), 'posts', { id: 'missing' })).toBeUndefined();
+    expect(preFetchedRowAt(results(), 'avatar', undefined)).toBeUndefined();
   });
 
   it('answers a to-one lookup without a WHERE from any found row at the path', () => {
-    expect(hasPreFetchedRecordAt(results(), 'profile', undefined)).toBe(true);
+    expect(preFetchedRowAt(results(), 'profile', undefined)).toEqual({ id: 'pr1' });
   });
 
   it('finds nothing at a path that was not pre-fetched', () => {
-    expect(hasPreFetchedRecordAt(results(), 'comments', { id: 'c1' })).toBe(false);
-    expect(hasPreFetchedRecordAt(undefined, 'posts', { id: 'p1' })).toBe(false);
+    expect(preFetchedRowAt(results(), 'comments', { id: 'c1' })).toBeUndefined();
+    expect(preFetchedRowAt(undefined, 'posts', { id: 'p1' })).toBeUndefined();
   });
 });

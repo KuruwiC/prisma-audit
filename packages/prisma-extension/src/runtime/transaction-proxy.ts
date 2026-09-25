@@ -111,11 +111,5 @@ export const createTransactionProxy = <TClient extends object>(
       }
       return Reflect.get(target, prop);
     },
-    has(target, prop) {
-      return Reflect.has(target, prop);
-    },
-    getPrototypeOf(target) {
-      return Reflect.getPrototypeOf(target);
-    },
   });
 };

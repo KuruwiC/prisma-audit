@@ -52,12 +52,6 @@ export const preFetchedRowAt = (
   return undefined;
 };
 
-export const hasPreFetchedRecordAt = (
-  nestedPreFetchResults: NestedPreFetchResults | undefined,
-  path: string,
-  where: Record<string, unknown> | undefined,
-): boolean => preFetchedRowAt(nestedPreFetchResults, path, where) !== undefined;
-
 /** Stores `beforeState` under `path` and `entityId` (`UNRESOLVED_ENTITY_ID` when the identity is unknown). */
 export const storePreFetchResult = (
   nestedPreFetchResults: NestedPreFetchResults,

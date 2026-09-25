@@ -145,14 +145,7 @@ const processCreateOperation = (
   currentPath: string,
   pass: NestedDetectionPass,
 ): NestedOperationInfo[] => {
-  return detectDeeplyNestedOperations(
-    schemaMetadata,
-    relationField.relatedModel,
-    nestedData,
-    currentPath,
-    pass,
-    currentPath,
-  );
+  return detectDeeplyNestedOperations(schemaMetadata, relationField.relatedModel, nestedData, currentPath, pass);
 };
 
 /** @internal Process upsert operation - explore the branches the pass selects for each element */
@@ -164,14 +157,7 @@ const processUpsertOperation = (
   pass: NestedDetectionPass,
 ): NestedOperationInfo[] =>
   upsertBranchData(pass, currentPath, nestedData).flatMap((branchData) =>
-    detectDeeplyNestedOperations(
-      schemaMetadata,
-      relationField.relatedModel,
-      branchData,
-      currentPath,
-      pass,
-      currentPath,
-    ),
+    detectDeeplyNestedOperations(schemaMetadata, relationField.relatedModel, branchData, currentPath, pass),
   );
 
 /** @internal Process connectOrCreate operation */
@@ -193,14 +179,7 @@ const processConnectOrCreateOperation = (
     return [];
   }
 
-  return detectDeeplyNestedOperations(
-    schemaMetadata,
-    relationField.relatedModel,
-    createData,
-    currentPath,
-    pass,
-    currentPath,
-  );
+  return detectDeeplyNestedOperations(schemaMetadata, relationField.relatedModel, createData, currentPath, pass);
 };
 
 /** @internal Whether a to-one nested `update` value is the `{ where?, data }` form rather than the data itself */
@@ -265,7 +244,6 @@ const processNestedKeyword = (
         extractNestedUpdateData(nestedData, relationField.isList),
         currentPath,
         pass,
-        currentPath,
       ),
     );
   } else if (keyword === 'upsert') {
@@ -323,7 +301,6 @@ const detectDeeplyNestedOperations = (
   operationData: unknown,
   parentPath: string,
   pass: NestedDetectionPass,
-  _currentPath: string,
 ): NestedOperationInfo[] => {
   const deeplyNestedOps: NestedOperationInfo[] = [];
 
@@ -380,11 +357,8 @@ const processDeeplyNestedOperations = (
   relationField: { name: string; relatedModel: string; isList: boolean },
   keyword: NestedOperationKeyword,
   nestedData: unknown,
-  currentPath: string,
   pass: NestedDetectionPass,
 ): NestedOperationInfo[] => {
-  const fieldPath = currentPath ? `${currentPath}.${relationField.name}` : relationField.name;
-
   if (keyword === 'create' || keyword === 'createMany') {
     return detectDeeplyNestedOperations(
       schemaMetadata,
@@ -392,7 +366,6 @@ const processDeeplyNestedOperations = (
       nestedData,
       relationField.name,
       pass,
-      fieldPath,
     );
   }
 
@@ -403,7 +376,6 @@ const processDeeplyNestedOperations = (
       extractNestedUpdateData(nestedData, relationField.isList),
       relationField.name,
       pass,
-      fieldPath,
     );
   }
 
@@ -422,7 +394,6 @@ const processDeeplyNestedOperations = (
         createData,
         relationField.name,
         pass,
-        fieldPath,
       );
     }
   }
@@ -437,7 +408,6 @@ const processDeeplyNestedOperations = (
  */
 interface NestedOperationScanContext {
   schemaMetadata: SchemaMetadata;
-  currentPath: string;
   pass: NestedDetectionPass;
   processedOps: Set<string>;
   nestedOperations: NestedOperationInfo[];
@@ -451,8 +421,7 @@ interface ProcessKeywordOperationInput extends NestedOperationScanContext {
 
 /** @internal Process a single keyword operation on a relation field */
 const processKeywordOperation = (input: ProcessKeywordOperationInput): void => {
-  const { schemaMetadata, relationField, keyword, nestedData, currentPath, pass, processedOps, nestedOperations } =
-    input;
+  const { schemaMetadata, relationField, keyword, nestedData, pass, processedOps, nestedOperations } = input;
 
   // Create unique key for this operation to avoid duplicates
   const opKey = `${relationField.name}:${keyword}:${relationField.name}`;
@@ -472,7 +441,7 @@ const processKeywordOperation = (input: ProcessKeywordOperationInput): void => {
     path: relationField.name, // Top-level path is just the field name
   });
 
-  const deepOps = processDeeplyNestedOperations(schemaMetadata, relationField, keyword, nestedData, currentPath, pass);
+  const deepOps = processDeeplyNestedOperations(schemaMetadata, relationField, keyword, nestedData, pass);
   nestedOperations.push(...deepOps);
 };
 
@@ -483,7 +452,7 @@ interface ProcessRelationFieldKeywordsInput extends NestedOperationScanContext {
 
 /** @internal Process all keywords for a relation field */
 const processRelationFieldKeywords = (input: ProcessRelationFieldKeywordsInput): void => {
-  const { schemaMetadata, relationField, fieldValue, currentPath, pass, processedOps, nestedOperations } = input;
+  const { schemaMetadata, relationField, fieldValue, pass, processedOps, nestedOperations } = input;
 
   for (const keyword of NESTED_OPERATION_KEYWORDS) {
     const nestedData = fieldValue[keyword];
@@ -496,7 +465,6 @@ const processRelationFieldKeywords = (input: ProcessRelationFieldKeywordsInput):
       relationField,
       keyword,
       nestedData,
-      currentPath,
       pass,
       processedOps,
       nestedOperations,
@@ -511,7 +479,7 @@ interface ProcessDataSourceInput extends NestedOperationScanContext {
 
 /** @internal Process a single data source for nested operations */
 const processDataSource = (input: ProcessDataSourceInput): void => {
-  const { schemaMetadata, relationFields, data, currentPath, pass, processedOps, nestedOperations } = input;
+  const { schemaMetadata, relationFields, data, pass, processedOps, nestedOperations } = input;
 
   for (const relationField of relationFields) {
     const fieldValue = data[relationField.name];
@@ -524,7 +492,6 @@ const processDataSource = (input: ProcessDataSourceInput): void => {
       schemaMetadata,
       relationField,
       fieldValue: fieldValue as Record<string, unknown>,
-      currentPath,
       pass,
       processedOps,
       nestedOperations,
@@ -573,7 +540,6 @@ export const detectNestedOperations = (
   modelName: string,
   args: Record<string, unknown>,
   pass: NestedDetectionPass,
-  currentPath: string = '',
 ): NestedOperationInfo[] => {
   const nestedOperations: NestedOperationInfo[] = [];
 
@@ -595,7 +561,6 @@ export const detectNestedOperations = (
       schemaMetadata,
       relationFields,
       data,
-      currentPath,
       pass,
       processedOps,
       nestedOperations,

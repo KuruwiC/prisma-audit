@@ -1,28 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { AuditLogInput } from '../../src/domain/audit-log-types.js';
-import { createAuditLogData, failure, success } from '../../src/domain/smart-constructors.js';
+import { createAuditLogData } from '../../src/domain/smart-constructors.js';
 
 describe('Smart Constructors', () => {
-  describe('success', () => {
-    it('should create a success Result', () => {
-      const result = success({ value: 42 });
-      expect(result.success).toBe(true);
-      if (result.success) {
-        expect(result.value).toEqual({ value: 42 });
-      }
-    });
-  });
-
-  describe('failure', () => {
-    it('should create a failure Result', () => {
-      const result = failure([{ field: 'test', message: 'error' }]);
-      expect(result.success).toBe(false);
-      if (!result.success) {
-        expect(result.errors).toEqual([{ field: 'test', message: 'error' }]);
-      }
-    });
-  });
-
   describe('createAuditLogData', () => {
     const validInput: AuditLogInput = {
       actorCategory: 'model',

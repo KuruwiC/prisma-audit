@@ -48,11 +48,11 @@ export const withExecutionScope = <T>(
     provider,
   );
 
-  return inScope((context, handle) => {
+  return inScope((handle) => {
     const runtime = currentScope();
     const transaction = runtime?.transaction;
     return run({
-      auditContext: context,
+      auditContext,
       handle,
       baseHandle: baseClient,
       transaction: transaction

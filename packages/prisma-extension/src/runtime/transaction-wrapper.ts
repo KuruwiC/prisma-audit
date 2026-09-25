@@ -33,7 +33,7 @@ export interface TransactionWrapperConfig {
  *   contextProvider
  * );
  *
- * const result = await wrapper(async (txContext, txClient) => {
+ * const result = await wrapper(async (txClient) => {
  *   return await txClient.user.create({ data: { ... } });
  * });
  * ```
@@ -42,10 +42,7 @@ export const withOptionalTransaction = <T>(
   config: TransactionWrapperConfig,
   provider: { runAsync: <R>(context: AuditContext, fn: () => Promise<R>) => Promise<R> },
 ): ((
-  operationFn: (
-    context: AuditContext,
-    txClient: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
-  ) => Promise<T>,
+  operationFn: (txClient: PrismaClientWithDynamicAccess | TransactionalPrismaClient) => Promise<T>,
 ) => Promise<T>) => {
   const { shouldWrap, context, basePrisma } = config;
 
@@ -54,11 +51,9 @@ export const withOptionalTransaction = <T>(
     const needsWrapping = shouldWrap && !scope?.transaction && !scope?.isInImplicitTransaction;
 
     if (!needsWrapping) {
-      return await operationFn(context, scope?.transaction?.client ?? basePrisma);
+      return await operationFn(scope?.transaction?.client ?? basePrisma);
     }
 
-    return openImplicitTransaction({ base: basePrisma, provider, auditContext: context }, (tx) =>
-      operationFn(context, tx),
-    );
+    return openImplicitTransaction({ base: basePrisma, provider, auditContext: context }, operationFn);
   };
 };

@@ -30,7 +30,7 @@ const resolveUpsertRow = (
   before: Row | undefined,
   getNestedOperationConfig: GetOperationConfig,
 ): ResolvedState => {
-  const resolved = resolveUpsertState({ before: before ?? null }, null);
+  const resolved = resolveUpsertState({ before: before ?? null });
   const config = getNestedOperationConfig(nestedOp.relatedModel, 'update');
   const shouldIncludeBeforeState = config.fetchBeforeOperation && resolved.action === AUDIT_ACTION.UPDATE;
 
@@ -38,7 +38,7 @@ const resolveUpsertRow = (
 };
 
 const resolveConnectOrCreateRow = (before: Row | undefined): ResolvedState => {
-  const resolved = resolveConnectOrCreateState({ before: before ?? null }, null);
+  const resolved = resolveConnectOrCreateState({ before: before ?? null });
   return resolved === null ? { action: 'connect', beforeState: null } : { action: resolved.action, beforeState: null };
 };
 
@@ -63,7 +63,7 @@ export const resolveNestedRowState = (
   switch (nestedOp.operation) {
     case 'update':
     case 'updateMany': {
-      const resolved = resolveUpdateState({ before: before ?? null }, null);
+      const resolved = resolveUpdateState({ before: before ?? null });
       return { action: resolved.action, beforeState: resolved.before };
     }
     case 'upsert':
@@ -73,6 +73,6 @@ export const resolveNestedRowState = (
     case 'connect':
       return { action: 'connect', beforeState: null };
     default:
-      return { action: resolveCreateState(null).action, beforeState: null };
+      return { action: resolveCreateState().action, beforeState: null };
   }
 };

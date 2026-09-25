@@ -38,12 +38,12 @@ const asyncResolverRegistry = getGlobalSingleton(
 );
 
 /** Check if a resolver was created by resolveId() (performs DB queries) */
-export function isAsyncResolver(resolver: AggregateIdResolver): boolean {
+function isAsyncResolver(resolver: AggregateIdResolver): boolean {
   return asyncResolverRegistry.has(resolver);
 }
 
 /** Get the batch resolver attached by batchResolveIds(), if any */
-export function getRegisteredBatchResolver(resolver: AggregateIdResolver): BatchAggregateIdResolver | undefined {
+function getRegisteredBatchResolver(resolver: AggregateIdResolver): BatchAggregateIdResolver | undefined {
   return batchResolverRegistry.get(resolver);
 }
 

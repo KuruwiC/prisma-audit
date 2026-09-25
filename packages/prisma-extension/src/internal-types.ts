@@ -112,13 +112,3 @@ export interface ExtensionParams {
   args: unknown;
   query: (args: unknown) => Promise<unknown>;
 }
-
-/**
- * Model delegate interface for dynamic Prisma operations
- */
-export interface ModelClient {
-  findUnique?: (args: { where: unknown }) => Promise<unknown>;
-  findMany?: (args: { where: unknown }) => Promise<unknown[]>;
-  createMany?: (args: { data: unknown[] }) => Promise<unknown>;
-  [key: string]: unknown;
-}

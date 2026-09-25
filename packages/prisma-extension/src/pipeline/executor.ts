@@ -37,7 +37,7 @@ export interface OperationSteps<TPrepared, TExecuted> {
     executed: TExecuted,
   ) => Promise<MutationEvent[]>;
   /** The value the caller receives */
-  readonly result: (operation: AuditedOperation, scope: ExecutionScope, executed: TExecuted) => Promise<unknown>;
+  readonly result: (executed: TExecuted) => Promise<unknown>;
 }
 
 export interface OperationOutcome {
@@ -61,7 +61,7 @@ export const createExecutor = <TPrepared, TExecuted>(
     const executed = await steps.execute(operation, scope, prepared);
     const events = await steps.collect(operation, scope, prepared, executed);
     const records = await produceRecords(events, scope);
-    const result = await steps.result(operation, scope, executed);
+    const result = await steps.result(executed);
     return { result, records };
   },
 });

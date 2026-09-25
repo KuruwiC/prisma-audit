@@ -120,8 +120,7 @@ export const createSingleExecutor = (deps: SingleExecutorDependencies): Operatio
       },
     );
 
-  const result = async (_operation: AuditedOperation, _scope: ExecutionScope, executed: unknown): Promise<unknown> =>
-    executed;
+  const result = async (executed: unknown): Promise<unknown> => executed;
 
   return createExecutor({ prepare, execute, collect, result });
 };

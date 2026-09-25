@@ -10,7 +10,6 @@
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { type AuditAction, SUPPORTED_OPERATIONS } from '../grammar/operations.js';
 import { UNRESOLVED_ENTITY_ID } from '../nested/pre-fetch/identity-key.js';
-import { isProcessingAuditLog } from '../runtime/scope.js';
 import type { UniqueConstraint } from '../schema/types.js';
 import { unwrapCompoundWhere } from './compound-where.js';
 import { extractEntityIdentity } from './id-generation.js';
@@ -127,8 +126,8 @@ export interface ShouldAuditModelInput {
 /**
  * Determines if audit logging should be applied to a model and operation
  *
- * Applies checks in order: input validation, recursion prevention,
- * self-reference prevention, loggability check, and sampling check.
+ * Applies checks in order: input validation, self-reference prevention (the audit-log model
+ * itself), loggability check, and sampling check.
  *
  * @example
  * ```typescript
@@ -145,10 +144,6 @@ export const shouldAuditModel = (input: ShouldAuditModelInput): boolean => {
   const { modelName, context, auditLogModel, isLoggable, resolveSamplingRate } = input;
 
   if (!modelName || !context) {
-    return false;
-  }
-
-  if (isProcessingAuditLog()) {
     return false;
   }
 

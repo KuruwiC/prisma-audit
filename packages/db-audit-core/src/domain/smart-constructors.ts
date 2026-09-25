@@ -29,12 +29,12 @@ export interface ValidationError {
  */
 export type Result<T, E = ValidationError> = { success: true; value: T } | { success: false; errors: E[] };
 
-export const success = <T>(value: T): Result<T, never> => ({
+const success = <T>(value: T): Result<T, never> => ({
   success: true,
   value,
 });
 
-export const failure = <E = ValidationError>(errors: E[]): Result<never, E> => ({
+const failure = <E = ValidationError>(errors: E[]): Result<never, E> => ({
   success: false,
   errors,
 });

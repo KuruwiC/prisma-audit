@@ -38,7 +38,7 @@ describe('withOptionalTransaction', () => {
     const result = await wrapper(mockOperationFn);
 
     expect(result).toBe('result');
-    expect(mockOperationFn).toHaveBeenCalledWith(context, mockBasePrisma);
+    expect(mockOperationFn).toHaveBeenCalledWith(mockBasePrisma);
     expect(mockBasePrisma.$transaction).not.toHaveBeenCalled();
   });
 
@@ -62,7 +62,7 @@ describe('withOptionalTransaction', () => {
     );
 
     expect(result).toBe('result');
-    expect(mockOperationFn).toHaveBeenCalledWith(context, mockTxClient);
+    expect(mockOperationFn).toHaveBeenCalledWith(mockTxClient);
     expect(mockBasePrisma.$transaction).not.toHaveBeenCalled();
   });
 
@@ -82,7 +82,7 @@ describe('withOptionalTransaction', () => {
     const result = await withScope({ isInImplicitTransaction: true }, () => wrapper(mockOperationFn));
 
     expect(result).toBe('result');
-    expect(mockOperationFn).toHaveBeenCalledWith(context, mockBasePrisma);
+    expect(mockOperationFn).toHaveBeenCalledWith(mockBasePrisma);
     expect(mockBasePrisma.$transaction).not.toHaveBeenCalled();
   });
 
@@ -106,7 +106,7 @@ describe('withOptionalTransaction', () => {
     );
 
     let runtimeInsideOperation: ReturnType<typeof currentScope>;
-    const mockOperationFn = vi.fn(async (_context: AuditContext, _txClient: TransactionalPrismaClient) => {
+    const mockOperationFn = vi.fn(async (_txClient: TransactionalPrismaClient) => {
       runtimeInsideOperation = currentScope();
       return 'tx-result';
     });
@@ -117,8 +117,8 @@ describe('withOptionalTransaction', () => {
     expect(mockBasePrismaWithTx.$transaction).toHaveBeenCalled();
     expect(mockProvider.runAsync).toHaveBeenCalled();
 
-    // operationFn receives the app-owned context; transaction state lives in the runtime store
-    expect(mockOperationFn).toHaveBeenCalledWith(context, mockTxClient);
+    // operationFn receives the transaction's client; the transaction state lives in the runtime store
+    expect(mockOperationFn).toHaveBeenCalledWith(mockTxClient);
     expect(runtimeInsideOperation?.transaction?.client).toBe(mockTxClient);
     expect(runtimeInsideOperation?.isInImplicitTransaction).toBe(true);
   });
@@ -206,7 +206,7 @@ describe('withOptionalTransaction', () => {
       let appContextInsideOperation: AuditContext | undefined;
       let runtimeInsideOperation: ReturnType<typeof currentScope>;
 
-      await wrapper(async (_context, _txClient) => {
+      await wrapper(async (_txClient) => {
         // This simulates what writeAuditLogs does: read both stores inside the operation
         appContextInsideOperation = mockProviderWithStorage.getContext();
         runtimeInsideOperation = currentScope();

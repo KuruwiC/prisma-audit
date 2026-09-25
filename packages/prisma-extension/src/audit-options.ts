@@ -14,7 +14,8 @@ import type {
   WriteFn,
 } from '@kuruwic/db-audit-core';
 import { createAggregateConfig } from '@kuruwic/db-audit-core';
-import { getNestedOperationConfig, validateFieldConflicts } from './config/index.js';
+import { getNestedOperationConfig } from './config/helpers.js';
+import { validateFieldConflicts } from './config/validation.js';
 import type { GetOperationConfig } from './grammar/pre-fetch-selection.js';
 import type { PrismaNamespace } from './internal-types.js';
 import type { SchemaMetadata } from './schema/types.js';

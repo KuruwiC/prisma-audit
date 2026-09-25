@@ -211,11 +211,7 @@ export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationE
     );
   };
 
-  const result = async (
-    _operation: AuditedOperation,
-    _scope: ExecutionScope,
-    executed: BatchExecuted,
-  ): Promise<unknown> => executed.result;
+  const result = async (executed: BatchExecuted): Promise<unknown> => executed.result;
 
   return createExecutor({ prepare, execute, collect, result });
 };

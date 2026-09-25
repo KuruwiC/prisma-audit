@@ -49,7 +49,7 @@ const convertNullToDbNull = (logData: AuditLogData, DbNull: unknown): AuditLogDa
 const validateModelAndGetCapabilities = (
   model: Record<string, unknown>,
   auditLogModelName: string,
-): { hasCreate: boolean; hasCreateMany: boolean } => {
+): { hasCreateMany: boolean } => {
   if (!model || typeof model !== 'object') {
     throw new Error(
       `Audit log model "${auditLogModelName}" not found in Prisma client. ` +
@@ -57,8 +57,7 @@ const validateModelAndGetCapabilities = (
     );
   }
 
-  const hasCreate = 'create' in model && typeof model.create === 'function';
-  if (!hasCreate) {
+  if (!('create' in model && typeof model.create === 'function')) {
     throw new Error(
       `Audit log model "${auditLogModelName}" has no create method. ` +
         'Verify that the model is correctly defined in your Prisma schema.',
@@ -67,10 +66,7 @@ const validateModelAndGetCapabilities = (
 
   const hasCreateMany = 'createMany' in model && typeof model.createMany === 'function';
 
-  return {
-    hasCreate,
-    hasCreateMany,
-  };
+  return { hasCreateMany };
 };
 
 const writeAuditLogSingle = async (model: AuditLogModel, logData: AuditLogData): Promise<void> => {
