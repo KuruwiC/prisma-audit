@@ -28,7 +28,7 @@ const event: MutationEvent = {
   model: 'Post',
   identity: 'p1',
   action: 'update',
-  before: { id: 'p1', title: 'old' },
+  before: { kind: 'captured', row: { id: 'p1', title: 'old' } },
   after: { id: 'p1', title: 'new' },
   origin: { path: '', op: 'update' },
 };
@@ -58,7 +58,8 @@ describe('createRecordProducer', () => {
       aggregateType: 'Post',
       aggregateId: 'p1',
       action: 'update',
-      before: event.before,
+      before: { id: 'p1', title: 'old' },
+      beforeUnavailable: false,
       after: event.after,
       changes: { title: { old: 'old', new: 'new' } },
     });

@@ -40,6 +40,7 @@ export {
 } from './domain/branded-types.js';
 export type {
   AuditRecord,
+  BeforeState,
   MutationAction,
   MutationEvent,
   MutationOrigin,

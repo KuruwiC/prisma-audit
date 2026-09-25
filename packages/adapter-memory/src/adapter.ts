@@ -173,7 +173,7 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
         model,
         identity: mutation.identity,
         action: mutation.action,
-        before: mutation.before,
+        before: mutation.before ? { kind: 'captured', row: mutation.before } : { kind: 'none' },
         after: mutation.after,
         origin: { path: '', op },
       };

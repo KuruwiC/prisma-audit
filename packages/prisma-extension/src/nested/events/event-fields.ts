@@ -2,7 +2,7 @@
  * Event fields shared by the top-level, batch and nested event collectors
  */
 
-import type { MutationAction } from '@kuruwic/db-audit-core';
+import type { BeforeState, MutationAction } from '@kuruwic/db-audit-core';
 import { AUDIT_ACTION, type AuditAction } from '../../grammar/operations.js';
 import { nestedLog } from '../../utils/debug.js';
 import { extractEntityIdentity } from '../../utils/id-generation.js';
@@ -38,7 +38,7 @@ export const identityOf = (row: Row, pkFields: readonly string[] | undefined, or
 };
 
 /** An upsert resolves to `update` when the target row existed (its before state was captured), else `create` */
-export const toMutationAction = (action: AuditAction, before: Row | null | undefined): MutationAction => {
+export const toMutationAction = (action: AuditAction, before: BeforeState): MutationAction => {
   switch (action) {
     case AUDIT_ACTION.CREATE:
     case AUDIT_ACTION.CREATE_MANY:
@@ -52,7 +52,7 @@ export const toMutationAction = (action: AuditAction, before: Row | null | undef
     case AUDIT_ACTION.DELETE_MANY:
       return 'delete';
     case AUDIT_ACTION.UPSERT:
-      return before ? 'update' : 'create';
+      return before.kind === 'captured' ? 'update' : 'create';
     default: {
       const exhaustiveCheck: never = action;
       throw new Error(`[@prisma-audit] Unknown action: ${exhaustiveCheck}`);

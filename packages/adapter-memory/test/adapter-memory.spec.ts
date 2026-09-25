@@ -82,6 +82,7 @@ describe('audited writes', () => {
     expect(logs[1]).toMatchObject({
       before: { id: 'u1', name: 'Alice', updatedAt: 1 },
       after: { id: 'u1', name: 'Bob', updatedAt: 2 },
+      beforeUnavailable: false,
     });
     expect(logs[1]?.changes).toEqual({ name: { old: 'Alice', new: 'Bob' } });
     expect(adapter.store.find('User', 'u1')).toEqual({ id: 'u1', name: 'Bob', updatedAt: 3 });

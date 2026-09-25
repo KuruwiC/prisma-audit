@@ -7,7 +7,7 @@
  * collects the top-level row and the nested rows it wrote.
  */
 
-import type { MutationEvent } from '@kuruwic/db-audit-core';
+import type { BeforeState, MutationEvent } from '@kuruwic/db-audit-core';
 import type { FailureSink } from '../failure-sink.js';
 import type { NestedOperationInfo, NestedPreFetchResults } from '../grammar/nested-operations.js';
 import type { GetOperationConfig } from '../grammar/pre-fetch-selection.js';
@@ -20,12 +20,7 @@ import {
 import { preFetchNestedRecordsBeforeOperation } from '../nested/pre-fetch/coordinator.js';
 import { type PreExistingRows, snapshotPreExistingRows } from '../nested/pre-fetch/pre-existing-rows.js';
 import type { SchemaMetadata } from '../schema/types.js';
-import {
-  type BeforeStateResult,
-  executedUpsertBranch,
-  fetchBeforeState,
-  targetRowExistsBefore,
-} from './before-state.js';
+import { executedUpsertBranch, fetchBeforeState, targetRowExistsBefore } from './before-state.js';
 import { collectSingleOperationEvents } from './collect-events.js';
 import type { ExecutionScope } from './execution-scope.js';
 import { type AuditedOperation, createExecutor, type OperationExecutor } from './executor.js';
@@ -38,7 +33,7 @@ export interface SingleExecutorDependencies {
 }
 
 export interface SinglePrepared {
-  readonly beforeStateResult: BeforeStateResult;
+  readonly beforeState: BeforeState;
   readonly nestedPreFetchResults: NestedPreFetchResults;
   readonly nestedOperations: readonly NestedOperationInfo[];
   readonly writeSets: NestedWriteSets;
@@ -50,7 +45,7 @@ export const createSingleExecutor = (deps: SingleExecutorDependencies): Operatio
 
   const prepare = async (operation: AuditedOperation, scope: ExecutionScope): Promise<SinglePrepared> => {
     const { model: modelName, action, args } = operation;
-    const beforeStateResult = await fetchBeforeState(
+    const beforeState = await fetchBeforeState(
       { handle: scope.handle, modelName, action, args },
       { getNestedOperationConfig, onFetchFailure: failureSink.notify },
     );
@@ -64,12 +59,12 @@ export const createSingleExecutor = (deps: SingleExecutorDependencies): Operatio
       schemaMetadata,
       modelName,
       args,
-      executedUpsertBranch(action, beforeStateResult),
+      executedUpsertBranch(action, beforeState),
       nestedPreFetchResults,
     );
     const writeSets = buildNestedWriteSets(nestedOperations, nestedPreFetchResults, batchTargets);
     // A top-level row the operation creates has no children yet, so nothing is snapshotted under it.
-    const preExistingRows = targetRowExistsBefore(action, beforeStateResult)
+    const preExistingRows = targetRowExistsBefore(action, beforeState)
       ? await snapshotPreExistingRows(
           {
             prismaClient: scope.handle,
@@ -82,7 +77,7 @@ export const createSingleExecutor = (deps: SingleExecutorDependencies): Operatio
           { Prisma, schemaMetadata, getNestedOperationConfig },
         )
       : new Map();
-    return { beforeStateResult, nestedPreFetchResults, nestedOperations, writeSets, preExistingRows };
+    return { beforeState, nestedPreFetchResults, nestedOperations, writeSets, preExistingRows };
   };
 
   const execute = (operation: AuditedOperation): Promise<unknown> => operation.execute(operation.args);
@@ -98,7 +93,7 @@ export const createSingleExecutor = (deps: SingleExecutorDependencies): Operatio
         modelName: operation.model,
         action: operation.action,
         result: executed,
-        beforeStateResult: prepared.beforeStateResult,
+        beforeState: prepared.beforeState,
         nestedPreFetchResults: prepared.nestedPreFetchResults,
         nestedOperations: prepared.nestedOperations,
         writeSets: prepared.writeSets,

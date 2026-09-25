@@ -3,6 +3,7 @@
  * operation, and the rows of a batch operation.
  */
 
+import type { BeforeState } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
 import type { NestedBatchKeyword, NestedBatchTargets } from '../../src/grammar/nested-operations.js';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../src/internal-types.js';
@@ -64,7 +65,7 @@ const single = (overrides: SingleCase = {}): SingleOperationOutcome => {
     modelName: 'User',
     action: 'create' as const,
     result: { id: 'u1', name: 'Ann' },
-    beforeStateResult: { _tag: 'notRequested' as const },
+    beforeState: { kind: 'none' } as BeforeState,
     nestedPreFetchResults: new Map(),
     preExistingRows: new Map() as PreExistingRows,
     client,
@@ -74,7 +75,7 @@ const single = (overrides: SingleCase = {}): SingleOperationOutcome => {
     schemaMetadata,
     base.modelName,
     args,
-    executedUpsertBranch(base.action, base.beforeStateResult),
+    executedUpsertBranch(base.action, base.beforeState),
     base.nestedPreFetchResults,
   );
   return {
@@ -95,7 +96,7 @@ describe('collectSingleOperationEvents', () => {
         model: 'User',
         identity: 'u1',
         action: 'create',
-        before: undefined,
+        before: { kind: 'none' },
         after: outcome.result,
         origin: { path: '', op: 'create' },
       },
@@ -107,13 +108,18 @@ describe('collectSingleOperationEvents', () => {
     const outcome = single({
       action: 'update',
       args: { where: { id: 'u1' }, data: { name: 'Ann' } },
-      beforeStateResult: { _tag: 'found', data: before },
+      beforeState: { kind: 'captured', row: before },
     });
 
     const events = await collectSingleOperationEvents(outcome, deps);
 
     expect(events).toEqual([
-      expect.objectContaining({ action: 'update', before, after: outcome.result, origin: { path: '', op: 'update' } }),
+      expect.objectContaining({
+        action: 'update',
+        before: { kind: 'captured', row: before },
+        after: outcome.result,
+        origin: { path: '', op: 'update' },
+      }),
     ]);
   });
 
@@ -122,24 +128,26 @@ describe('collectSingleOperationEvents', () => {
     const outcome = single({
       action: 'delete',
       args: { where: { id: 'u1' } },
-      beforeStateResult: { _tag: 'found', data: before },
+      beforeState: { kind: 'captured', row: before },
     });
 
     const events = await collectSingleOperationEvents(outcome, deps);
 
-    expect(events).toEqual([expect.objectContaining({ action: 'delete', before, after: outcome.result })]);
+    expect(events).toEqual([
+      expect.objectContaining({ action: 'delete', before: { kind: 'captured', row: before }, after: outcome.result }),
+    ]);
   });
 
   it.each([
-    { beforeStateResult: { _tag: 'found', data: { id: 'u1', name: 'Anne' } }, action: 'update' },
-    { beforeStateResult: { _tag: 'notFound' }, action: 'create' },
+    { beforeState: { kind: 'captured', row: { id: 'u1', name: 'Anne' } }, action: 'update' },
+    { beforeState: { kind: 'none' }, action: 'create' },
   ] as const)(
-    'resolves an upsert whose before state is $beforeStateResult._tag to $action',
-    async ({ beforeStateResult, action }) => {
+    'resolves an upsert whose before state is $beforeState.kind to $action',
+    async ({ beforeState, action }) => {
       const outcome = single({
         action: 'upsert',
         args: { where: { id: 'u1' }, create: { name: 'Ann' }, update: { name: 'Ann' } },
-        beforeStateResult,
+        beforeState,
       });
 
       const events = await collectSingleOperationEvents(outcome, deps);
@@ -147,10 +155,21 @@ describe('collectSingleOperationEvents', () => {
       expect(events).toEqual([
         expect.objectContaining({
           action,
-          before: beforeStateResult._tag === 'found' ? beforeStateResult.data : undefined,
+          before: beforeState,
           origin: { path: '', op: 'upsert' },
         }),
       ]);
+    },
+  );
+
+  it.each(['update', 'delete'] as const)(
+    'records a top-level %s whose before-state fetch failed with an unavailable before state',
+    async (action) => {
+      const outcome = single({ action, args: { where: { id: 'u1' } }, beforeState: { kind: 'unavailable' } });
+
+      const events = await collectSingleOperationEvents(outcome, deps);
+
+      expect(events).toEqual([expect.objectContaining({ action, before: { kind: 'unavailable' } })]);
     },
   );
 
@@ -163,7 +182,7 @@ describe('collectSingleOperationEvents', () => {
         update: { name: 'Ann' },
       },
       result: { id: 'u1', name: 'Ann', posts: [{ id: 'p1', title: 'A', authorId: 'u1' }] },
-      beforeStateResult: { _tag: 'error', error: new Error('fetch failed') },
+      beforeState: { kind: 'unavailable' },
     });
 
     const events = await collectSingleOperationEvents(outcome, deps);
@@ -204,7 +223,7 @@ describe('collectSingleOperationEvents', () => {
         model: 'Post',
         identity: 'p1',
         action: 'create',
-        before: undefined,
+        before: { kind: 'none' },
         after: posts[0],
         origin: { path: 'posts', op: 'create' },
       },
@@ -212,7 +231,7 @@ describe('collectSingleOperationEvents', () => {
         model: 'Post',
         identity: 'p2',
         action: 'create',
-        before: undefined,
+        before: { kind: 'none' },
         after: posts[1],
         origin: { path: 'posts', op: 'create' },
       },
@@ -224,7 +243,7 @@ describe('collectSingleOperationEvents', () => {
       action: 'update',
       args: { where: { id: 'u1' }, data: { posts: { delete: { id: 'p9' } } } },
       result: { id: 'u1', name: 'Ann', posts: [] },
-      beforeStateResult: { _tag: 'found', data: { id: 'u1', name: 'Ann' } },
+      beforeState: { kind: 'captured', row: { id: 'u1', name: 'Ann' } },
     });
 
     const events = await collectSingleOperationEvents(outcome, deps);
@@ -235,7 +254,7 @@ describe('collectSingleOperationEvents', () => {
         model: 'Post',
         identity: 'p9',
         action: 'delete',
-        before: undefined,
+        before: { kind: 'none' },
         after: { id: 'p9' },
         origin: { path: 'posts', op: 'delete' },
       },
@@ -272,7 +291,7 @@ describe('collectSingleOperationEvents', () => {
           action: 'update',
           args: { where: { id: 'u1' }, data: { posts } },
           result: { id: 'u1', name: 'Ann', posts: rows },
-          beforeStateResult: { _tag: 'found', data: userBefore },
+          beforeState: { kind: 'captured', row: userBefore },
           ...overrides,
         }),
         deps,
@@ -290,7 +309,7 @@ describe('collectSingleOperationEvents', () => {
           model: 'Post',
           identity: 'p1',
           action: 'update',
-          before: p1Before,
+          before: { kind: 'captured', row: p1Before },
           after: p1,
           origin: { path: 'posts', op: 'update' },
         },
@@ -331,7 +350,9 @@ describe('collectSingleOperationEvents', () => {
         },
       );
 
-      expect(events).toEqual([expect.objectContaining({ identity: 'p1', action: 'update', before: p1Before })]);
+      expect(events).toEqual([
+        expect.objectContaining({ identity: 'p1', action: 'update', before: { kind: 'captured', row: p1Before } }),
+      ]);
     });
 
     it('attributes an updateMany the rows its filter matched before the operation, with their before states', async () => {
@@ -351,8 +372,8 @@ describe('collectSingleOperationEvents', () => {
       );
 
       expect(events.map((event) => [event.identity, event.action, event.origin.op, event.before])).toEqual([
-        ['p1', 'update', 'update', p1Before],
-        ['p2', 'update', 'updateMany', p2Before],
+        ['p1', 'update', 'update', { kind: 'captured', row: p1Before }],
+        ['p2', 'update', 'updateMany', { kind: 'captured', row: p2Before }],
       ]);
     });
 
@@ -367,7 +388,7 @@ describe('collectSingleOperationEvents', () => {
           model: 'Post',
           identity: 'p2',
           action: 'update',
-          before: undefined,
+          before: { kind: 'none' },
           after: p2,
           origin: { path: 'posts', op: 'updateMany' },
         },
@@ -388,7 +409,7 @@ describe('collectSingleOperationEvents', () => {
           model: 'Post',
           identity: 'p2',
           action: 'delete',
-          before: p2Before,
+          before: { kind: 'captured', row: p2Before },
           after: p2Before,
           origin: { path: 'posts', op: 'deleteMany' },
         },
@@ -396,7 +417,7 @@ describe('collectSingleOperationEvents', () => {
           model: 'Post',
           identity: 'p3',
           action: 'delete',
-          before: undefined,
+          before: { kind: 'none' },
           after: { id: 'p3' },
           origin: { path: 'posts', op: 'deleteMany' },
         },
@@ -463,7 +484,7 @@ describe('collectSingleOperationEvents', () => {
             model: 'Post',
             identity: 'p1',
             action: 'update',
-            before: p1Before,
+            before: { kind: 'captured', row: p1Before },
             after: p1,
             origin: { path: 'posts', op: 'update' },
           },
@@ -478,7 +499,7 @@ describe('collectSingleOperationEvents', () => {
         });
 
         expect(events).toEqual([
-          expect.objectContaining({ identity: 'p1', action: 'update', before: undefined, after: p1 }),
+          expect.objectContaining({ identity: 'p1', action: 'update', before: { kind: 'none' }, after: p1 }),
         ]);
       });
 
@@ -493,7 +514,12 @@ describe('collectSingleOperationEvents', () => {
 
         expect(post.findFirst).toHaveBeenCalledWith({ where: { id: 'p2' } });
         expect(events).toEqual([
-          expect.objectContaining({ identity: 'p2', action: 'update', before: p2Before, after: p2 }),
+          expect.objectContaining({
+            identity: 'p2',
+            action: 'update',
+            before: { kind: 'captured', row: p2Before },
+            after: p2,
+          }),
         ]);
       });
 
@@ -547,7 +573,7 @@ describe('collectSingleOperationEvents', () => {
     const result = { id: 'u1', name: 'Ann', posts: [{ id: 'p1', title: 'A', authorId: 'u1' }] };
 
     const created = await collectSingleOperationEvents(
-      single({ action: 'upsert', args, result, beforeStateResult: { _tag: 'notFound' } }),
+      single({ action: 'upsert', args, result, beforeState: { kind: 'none' } }),
       deps,
     );
     const updated = await collectSingleOperationEvents(
@@ -555,7 +581,7 @@ describe('collectSingleOperationEvents', () => {
         action: 'upsert',
         args,
         result,
-        beforeStateResult: { _tag: 'found', data: { id: 'u1', name: 'Anne' } },
+        beforeState: { kind: 'captured', row: { id: 'u1', name: 'Anne' } },
       }),
       deps,
     );
@@ -587,7 +613,7 @@ describe('collectBatchOperationEvents', () => {
         model: 'Post',
         identity: 'p1',
         action: 'create',
-        before: undefined,
+        before: { kind: 'none' },
         after: rows[0],
         origin: { path: '', op: 'createMany' },
       },
@@ -595,7 +621,7 @@ describe('collectBatchOperationEvents', () => {
         model: 'Post',
         identity: 'p2',
         action: 'create',
-        before: undefined,
+        before: { kind: 'none' },
         after: rows[1],
         origin: { path: '', op: 'createMany' },
       },
@@ -608,8 +634,8 @@ describe('collectBatchOperationEvents', () => {
     const events = collectBatchOperationEvents(batch({ action: 'updateMany', beforeStates }), schemaMetadata);
 
     expect(events).toEqual([
-      expect.objectContaining({ action: 'update', before: beforeStates[0], after: rows[0] }),
-      expect.objectContaining({ action: 'update', before: undefined, after: rows[1] }),
+      expect.objectContaining({ action: 'update', before: { kind: 'captured', row: beforeStates[0] }, after: rows[0] }),
+      expect.objectContaining({ action: 'update', before: { kind: 'none' }, after: rows[1] }),
     ]);
     expect(events.map((e) => e.origin)).toEqual([
       { path: '', op: 'updateMany' },
@@ -625,7 +651,7 @@ describe('collectBatchOperationEvents', () => {
         model: 'Post',
         identity: 'p1',
         action: 'delete',
-        before: rows[0],
+        before: { kind: 'captured', row: rows[0] },
         after: undefined,
         origin: { path: '', op: 'deleteMany' },
       },
@@ -633,7 +659,7 @@ describe('collectBatchOperationEvents', () => {
         model: 'Post',
         identity: 'p2',
         action: 'delete',
-        before: rows[1],
+        before: { kind: 'captured', row: rows[1] },
         after: undefined,
         origin: { path: '', op: 'deleteMany' },
       },

@@ -97,6 +97,7 @@ const tryCreateBrandedId = <T>(
  *   before: null,
  *   after: { title: 'Hello' },
  *   changes: null,
+ *   beforeUnavailable: false,
  *   requestContext: null,
  *   createdAt: new Date(),
  * });
@@ -151,6 +152,7 @@ export const createAuditLogData = (input: AuditLogInput): Result<AuditLogData> =
     before: input.before,
     after: input.after,
     changes: input.changes,
+    beforeUnavailable: input.beforeUnavailable,
     requestContext: input.requestContext,
     createdAt: input.createdAt,
   });

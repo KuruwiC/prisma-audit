@@ -118,7 +118,7 @@ describe('createBatchExecutor', () => {
           eventOf({
             identity: row.id,
             action: 'create',
-            before: undefined,
+            before: { kind: 'none' },
             after: row,
             origin: { path: '', op: 'createMany' },
           }),
@@ -203,8 +203,20 @@ describe('createBatchExecutor', () => {
       expect(outcome.result).toEqual({ count: 2 });
       expect(produceRecords).toHaveBeenCalledWith(
         [
-          eventOf({ identity: 'b', action: 'update', before: b1, after: b2, origin: { path: '', op: 'updateMany' } }),
-          eventOf({ identity: 'a', action: 'update', before: a1, after: a2, origin: { path: '', op: 'updateMany' } }),
+          eventOf({
+            identity: 'b',
+            action: 'update',
+            before: { kind: 'captured', row: b1 },
+            after: b2,
+            origin: { path: '', op: 'updateMany' },
+          }),
+          eventOf({
+            identity: 'a',
+            action: 'update',
+            before: { kind: 'captured', row: a1 },
+            after: a2,
+            origin: { path: '', op: 'updateMany' },
+          }),
         ],
         expect.anything(),
       );
@@ -248,7 +260,15 @@ describe('createBatchExecutor', () => {
       expect(updateMany).not.toHaveBeenCalled();
       expect(outcome.result).toEqual({ count: 1 });
       expect(produceRecords).toHaveBeenCalledWith(
-        [eventOf({ identity: 'b', action: 'update', before: b1, after: b2, origin: { path: '', op: 'updateMany' } })],
+        [
+          eventOf({
+            identity: 'b',
+            action: 'update',
+            before: { kind: 'captured', row: b1 },
+            after: b2,
+            origin: { path: '', op: 'updateMany' },
+          }),
+        ],
         expect.anything(),
       );
     });
@@ -297,14 +317,14 @@ describe('createBatchExecutor', () => {
           eventOf({
             identity: 'a',
             action: 'delete',
-            before: a1,
+            before: { kind: 'captured', row: a1 },
             after: undefined,
             origin: { path: '', op: 'deleteMany' },
           }),
           eventOf({
             identity: 'b',
             action: 'delete',
-            before: b1,
+            before: { kind: 'captured', row: b1 },
             after: undefined,
             origin: { path: '', op: 'deleteMany' },
           }),

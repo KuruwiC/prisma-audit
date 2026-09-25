@@ -80,7 +80,7 @@ const toEvent = (
   model: record.relatedModel,
   identity: identityOf(record.entity, pkConstraint.fields, { model: record.relatedModel, path: nestedOp.path }),
   action: record.action,
-  before: record.beforeState ?? undefined,
+  before: record.beforeState ? { kind: 'captured', row: record.beforeState } : { kind: 'none' },
   after: record.entity,
   origin: { path: nestedOp.path, op: nestedOp.operation },
 });

@@ -101,7 +101,7 @@ const resolveStates = <TModelName extends string>(
   entity: EntityComposeConfig,
   config: ComposeConfig<TModelName>,
 ): RecordStates | undefined => {
-  const before = event.action === 'create' ? null : (event.before ?? null);
+  const before = event.action !== 'create' && event.before.kind === 'captured' ? event.before.row : null;
   const after = event.action === 'delete' ? null : (event.after ?? null);
 
   const isUpdate = event.action === 'update';
@@ -167,6 +167,7 @@ const composeEvent = <TModelName extends string>(
         before: states.before,
         after: states.after,
         changes: states.changes,
+        beforeUnavailable: event.action !== 'create' && event.before.kind === 'unavailable',
 
         requestContext,
         createdAt: now,

@@ -21,6 +21,7 @@ const records: AuditRecord[] = [
     before: null,
     after: { id: 'post-1' },
     changes: null,
+    beforeUnavailable: false,
     requestContext: null,
     createdAt: new Date('2025-01-01T00:00:00Z'),
   },

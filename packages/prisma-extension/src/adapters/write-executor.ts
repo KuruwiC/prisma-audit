@@ -9,16 +9,20 @@
 
 import type { AuditRecord, WriteExecutor } from '@kuruwic/db-audit-core';
 
+/** The data of one audit-log row: the record without the fields the audit-log model does not declare */
+type AuditLogRow = Omit<AuditRecord, 'beforeUnavailable'> & { readonly beforeUnavailable?: boolean };
+
 /**
  * Prisma model delegate interface for audit log writes
  */
 type AuditLogModel = {
-  create: (args: { data: AuditRecord }) => Promise<unknown>;
-  createMany?: (args: { data: AuditRecord[] }) => Promise<unknown>;
+  create: (args: { data: AuditLogRow }) => Promise<unknown>;
+  createMany?: (args: { data: AuditLogRow[] }) => Promise<unknown>;
 };
 
 /**
- * Convert JavaScript null to Prisma.DbNull for SQL NULL storage
+ * Convert JavaScript null to Prisma.DbNull for SQL NULL storage, and leave out
+ * `beforeUnavailable`, which no audit-log column receives
  *
  * @remarks
  * Prisma distinguishes SQL NULL (Prisma.DbNull) from JSON null (Prisma.JsonNull).
@@ -27,9 +31,10 @@ type AuditLogModel = {
  *
  * @internal
  */
-const convertNullToDbNull = (logData: AuditRecord, DbNull: unknown): AuditRecord => {
+const toAuditLogRow = (logData: AuditRecord, DbNull: unknown): AuditLogRow => {
+  const { beforeUnavailable: _beforeUnavailable, ...row } = logData;
   return {
-    ...logData,
+    ...row,
     before: logData.before === null ? DbNull : logData.before,
     after: logData.after === null ? DbNull : logData.after,
     changes: logData.changes === null ? DbNull : logData.changes,
@@ -69,7 +74,7 @@ const validateModelAndGetCapabilities = (
   return { hasCreateMany };
 };
 
-const writeAuditLogSingle = async (model: AuditLogModel, logData: AuditRecord): Promise<void> => {
+const writeAuditLogSingle = async (model: AuditLogModel, logData: AuditLogRow): Promise<void> => {
   await model.create({
     data: logData,
   });
@@ -79,7 +84,7 @@ const writeAuditLogSingle = async (model: AuditLogModel, logData: AuditRecord): 
  * Write audit logs sequentially (fallback for SQLite or when createMany unavailable)
  * @internal
  */
-const writeAuditLogsSequentially = async (model: AuditLogModel, logsToWrite: AuditRecord[]): Promise<void> => {
+const writeAuditLogsSequentially = async (model: AuditLogModel, logsToWrite: AuditLogRow[]): Promise<void> => {
   for (const logData of logsToWrite) {
     await writeAuditLogSingle(model, logData);
   }
@@ -91,7 +96,7 @@ const writeAuditLogsSequentially = async (model: AuditLogModel, logsToWrite: Aud
  */
 const writeAuditLogsBatch = async (
   model: AuditLogModel & { createMany: NonNullable<AuditLogModel['createMany']> },
-  logsToWrite: AuditRecord[],
+  logsToWrite: AuditLogRow[],
 ): Promise<void> => {
   await model.createMany({
     data: logsToWrite,
@@ -113,7 +118,7 @@ const writeAuditLogsBatch = async (
  */
 const writeAuditLogs = async (
   model: Record<string, unknown>,
-  logsToWrite: AuditRecord[],
+  logsToWrite: AuditLogRow[],
   auditLogModelName: string,
 ): Promise<void> => {
   const capabilities = validateModelAndGetCapabilities(model, auditLogModelName);
@@ -153,7 +158,7 @@ export const createPrismaWriteExecutor = (DbNull: unknown): WriteExecutor => {
   return {
     write: async (client: unknown, modelName: string, logs: AuditRecord[]): Promise<void> => {
       const model = (client as Record<string, unknown>)[modelName];
-      const convertedLogs = logs.map((log) => convertNullToDbNull(log, DbNull));
+      const convertedLogs = logs.map((log) => toAuditLogRow(log, DbNull));
       await writeAuditLogs(model as Record<string, unknown>, convertedLogs, modelName);
     },
   };

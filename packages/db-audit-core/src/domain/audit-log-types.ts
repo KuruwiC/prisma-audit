@@ -27,6 +27,7 @@ export interface AuditLogInput {
   before: unknown;
   after: unknown;
   changes: unknown;
+  beforeUnavailable: boolean;
   requestContext: unknown;
   createdAt: Date;
 }

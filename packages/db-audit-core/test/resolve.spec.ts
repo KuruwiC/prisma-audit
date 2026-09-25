@@ -24,6 +24,7 @@ const event = (model: string, after: Row, overrides: Partial<MutationEvent> = {}
   model,
   identity: String(after.id ?? ''),
   action: 'create',
+  before: { kind: 'none' },
   after,
   origin: { path: '', op: 'create' },
   ...overrides,
@@ -58,7 +59,11 @@ describe('resolve', () => {
     it('keeps the event fields and returns the resolved events in event order', async () => {
       const config = configOf({ Post: defineEntity({ type: 'Post' }), Comment: defineEntity({ type: 'Comment' }) });
       const events = [
-        event('Post', { id: 'p1' }, { before: { id: 'p1', title: 'old' }, action: 'update' }),
+        event(
+          'Post',
+          { id: 'p1' },
+          { before: { kind: 'captured', row: { id: 'p1', title: 'old' } }, action: 'update' },
+        ),
         event('Comment', { id: 'c1' }, { origin: { path: 'comments', op: 'create' } }),
         event('Post', { id: 'p2' }),
       ];
@@ -77,6 +82,7 @@ describe('resolve', () => {
         model: 'Post',
         identity: 'p1',
         action: 'delete',
+        before: { kind: 'none' },
         origin: { path: '', op: 'delete' },
       };
 
@@ -85,13 +91,42 @@ describe('resolve', () => {
       expect(resolved.map((e) => e.identity)).toEqual(['p2']);
     });
 
+    it('skips an event without an after row whose before state could not be read', async () => {
+      const config = configOf({ Post: defineEntity({ type: 'Post' }) });
+      const unreadable: MutationEvent = {
+        model: 'Post',
+        identity: 'p1',
+        action: 'delete',
+        before: { kind: 'unavailable' },
+        origin: { path: '', op: 'delete' },
+      };
+
+      const { resolved, failures } = await resolve(
+        [unreadable, event('Post', { id: 'p2' })],
+        auditContext,
+        config,
+        read,
+      );
+
+      expect(resolved.map((e) => e.identity)).toEqual(['p2']);
+      expect(failures).toEqual([]);
+    });
+
     it('hands the before row to the callbacks of an event without an after row', async () => {
       const idResolver = vi.fn(async (row: Row) => row.id as string);
       const config = configOf({ Post: defineEntity({ type: 'Post', idResolver }) });
       const before = { id: 'p1', title: 'deleted' };
 
       const { resolved } = await resolve(
-        [{ model: 'Post', identity: 'p1', action: 'delete', before, origin: { path: '', op: 'deleteMany' } }],
+        [
+          {
+            model: 'Post',
+            identity: 'p1',
+            action: 'delete',
+            before: { kind: 'captured', row: before },
+            origin: { path: '', op: 'deleteMany' },
+          },
+        ],
         auditContext,
         config,
         read,

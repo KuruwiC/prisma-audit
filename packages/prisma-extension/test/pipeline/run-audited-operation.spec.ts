@@ -5,7 +5,7 @@
  * the way its origin requires.
  */
 
-import type { AuditContext, WritePlan } from '@kuruwic/db-audit-core';
+import type { AuditContext, MutationEvent, WritePlan } from '@kuruwic/db-audit-core';
 import {
   createActorId,
   createAggregateId,
@@ -74,6 +74,7 @@ const record: AuditLogData = {
   before: { id: 'u1', name: 'Ann' },
   after: { id: 'u1', name: 'Anne' },
   changes: { name: { old: 'Ann', new: 'Anne' } },
+  beforeUnavailable: false,
   requestContext: null,
   createdAt: new Date('2025-01-01T00:00:00Z'),
 };
@@ -414,7 +415,9 @@ describe('createExecutor', () => {
       });
     const prepared = { before: null };
     const executed = { id: 'u1' };
-    const events = [{ model: 'User', identity: 'u1', action: 'update' as const, origin: { path: '', op: 'update' } }];
+    const events: MutationEvent[] = [
+      { model: 'User', identity: 'u1', action: 'update', before: { kind: 'none' }, origin: { path: '', op: 'update' } },
+    ];
     const steps = {
       prepare: step('prepare', prepared),
       execute: step('execute', executed),

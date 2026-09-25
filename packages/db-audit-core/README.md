@@ -29,8 +29,12 @@ dispatch(records, atomic, { inTransaction })   -> WritePlan
   `awaitWriteIf(model, tags)` when configured, otherwise `awaitWrite`. It runs before the write
   because an atomic write needs a transaction around the operation when none is active.
 - **`MutationEvent`** is one written row as the adapter saw it: model, primary-key identity, action
-  (`create` / `update` / `delete`), the before and after rows, and its origin (nested path and the
-  adapter's keyword that wrote it).
+  (`create` / `update` / `delete`), the before state, the after row, and its origin (nested path and
+  the adapter's keyword that wrote it). The before state is a `BeforeState`: `captured` with the row
+  as read before the write, `none` when there is nothing to carry (a create, a read the
+  configuration does not ask for, a read that found no row), or `unavailable` when the read was
+  asked for and failed. The adapter reports the failure itself; the event only says that the row
+  is unknown.
 - **`resolve`** adds the entity id, the aggregate roots (the self projection unless disabled, plus
   every `to()` root that resolves), and the actor, entity and aggregate contexts from the configured
   enrichers. Id resolvers and enrichers receive the database handle through the `read` thunk,
@@ -43,7 +47,11 @@ dispatch(records, atomic, { inTransaction })   -> WritePlan
 - **`compose`** builds one `AuditRecord` per aggregate root: before and after states by action, the
   field-level diff of an update (an update that changed only excluded fields of an existing before
   state yields no record),
-  redaction, relation stripping, serialization for JSON storage, and branded ids.
+  redaction, relation stripping, serialization for JSON storage, and branded ids. A record whose
+  event could not read its before state (any action but `create`) has `beforeUnavailable: true`
+  and a null `before` and `changes`; every other record has `false`. How it is stored is the
+  `WriteExecutor`'s or the `WriteFn`'s choice: the audit-log model is the user's, and no column is
+  required for it.
 - **`dispatch`** wraps the records in a `WritePlan`: `immediate` when atomic, `after-commit` when not
   atomic inside a transaction, `detached` otherwise.
 - **`WriteExecutor`** is the adapter's `write(handle, modelName, logs)`, which persists records with

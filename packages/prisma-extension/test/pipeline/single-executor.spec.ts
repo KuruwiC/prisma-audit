@@ -150,7 +150,7 @@ describe('createSingleExecutor', () => {
       expect(findUnique).not.toHaveBeenCalled();
       expect(getNestedOperationConfig).not.toHaveBeenCalled();
       expect(produceRecords).toHaveBeenCalledWith(
-        topLevelEvent({ identity: 'u1', action: 'create', before: undefined, after: user }),
+        topLevelEvent({ identity: 'u1', action: 'create', before: { kind: 'none' }, after: user }),
         expect.anything(),
       );
     });
@@ -168,7 +168,7 @@ describe('createSingleExecutor', () => {
       expect(getNestedOperationConfig).toHaveBeenCalledWith('User', action);
       expect(findUnique).toHaveBeenCalledWith({ where: { id: 'u1' } });
       expect(produceRecords).toHaveBeenCalledWith(
-        topLevelEvent({ identity: 'u1', action, before: user }),
+        topLevelEvent({ identity: 'u1', action, before: { kind: 'captured', row: user } }),
         expect.anything(),
       );
     });
@@ -184,7 +184,10 @@ describe('createSingleExecutor', () => {
       await executor.run(operationOn(client, action, args), scopeOn(client), produceRecords);
 
       expect(findUnique).not.toHaveBeenCalled();
-      expect(produceRecords).toHaveBeenCalledWith(topLevelEvent({ action, before: undefined }), expect.anything());
+      expect(produceRecords).toHaveBeenCalledWith(
+        topLevelEvent({ action, before: { kind: 'none' } }),
+        expect.anything(),
+      );
     });
 
     it('always fetches the before state of an upsert and records an update when the row existed', async () => {
@@ -198,7 +201,7 @@ describe('createSingleExecutor', () => {
       expect(getNestedOperationConfig).not.toHaveBeenCalled();
       expect(findUnique).toHaveBeenCalledWith({ where: { id: 'u1' } });
       expect(produceRecords).toHaveBeenCalledWith(
-        topLevelEvent({ action: 'update', before: user, after: { id: 'u1', name: 'Anne' } }),
+        topLevelEvent({ action: 'update', before: { kind: 'captured', row: user }, after: { id: 'u1', name: 'Anne' } }),
         expect.anything(),
       );
     });
@@ -214,7 +217,7 @@ describe('createSingleExecutor', () => {
       );
 
       expect(produceRecords).toHaveBeenCalledWith(
-        topLevelEvent({ action: 'create', before: undefined, after: user }),
+        topLevelEvent({ action: 'create', before: { kind: 'none' }, after: user }),
         expect.anything(),
       );
     });
@@ -245,7 +248,7 @@ describe('createSingleExecutor', () => {
       expect(update).toHaveBeenCalledWith(updateArgs);
       expect(outcome.result).toEqual({ id: 'u1', name: 'Anne' });
       expect(produceRecords).toHaveBeenCalledWith(
-        topLevelEvent({ action: 'update', before: undefined }),
+        topLevelEvent({ action: 'update', before: { kind: 'unavailable' } }),
         expect.anything(),
       );
     });
@@ -307,7 +310,7 @@ describe('createSingleExecutor', () => {
             model: 'Profile',
             identity: 'pr1',
             action: 'update',
-            before: profileBefore,
+            before: { kind: 'captured', row: profileBefore },
             after: profileAfter,
             origin: { path: 'profile', op: 'update' },
           }),
@@ -478,7 +481,7 @@ describe('createSingleExecutor', () => {
             model: 'Post',
             identity: 'p1',
             action: 'update',
-            before: p1Before,
+            before: { kind: 'captured', row: p1Before },
             after: p1After,
             origin: { path: 'posts', op: 'updateMany' },
           },
@@ -505,7 +508,7 @@ describe('createSingleExecutor', () => {
             model: 'Post',
             identity: 'p1',
             action: 'update',
-            before: undefined,
+            before: { kind: 'none' },
             after: p1After,
             origin: { path: 'posts', op: 'updateMany' },
           }),
@@ -536,7 +539,7 @@ describe('createSingleExecutor', () => {
             model: 'Post',
             identity: 'p1',
             action: 'delete',
-            before: p1Before,
+            before: { kind: 'captured', row: p1Before },
             origin: { path: 'posts', op: 'deleteMany' },
           }),
         ],

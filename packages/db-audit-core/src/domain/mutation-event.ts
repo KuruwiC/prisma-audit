@@ -20,6 +20,19 @@ export interface MutationOrigin {
   readonly op: string;
 }
 
+/**
+ * What the adapter knows of a row before the write
+ *
+ * - `captured`: the row as it was read before the write
+ * - `none`: nothing to carry: a create, a read the configuration does not ask for, or a read that
+ *   found no row
+ * - `unavailable`: the read was asked for and failed; the adapter reports the failure itself
+ */
+export type BeforeState =
+  | { readonly kind: 'captured'; readonly row: Record<string, unknown> }
+  | { readonly kind: 'none' }
+  | { readonly kind: 'unavailable' };
+
 export interface MutationEvent<TModelName extends string = string> {
   readonly model: TModelName;
   /**
@@ -29,8 +42,7 @@ export interface MutationEvent<TModelName extends string = string> {
    */
   readonly identity: string;
   readonly action: MutationAction;
-  /** Row before the write. Absent when not captured (create, fetchBeforeOperation: false, failed fetch). */
-  readonly before?: Record<string, unknown>;
+  readonly before: BeforeState;
   /**
    * Row after the write. Resolvers and enrichers receive `after ?? before`, so a delete event may
    * carry the deleted row here as the adapter last saw it; `compose` stores no after state for a
@@ -69,6 +81,12 @@ export interface AuditRecord {
   readonly before: unknown;
   readonly after: unknown;
   readonly changes: unknown;
+  /**
+   * The adapter was asked for the row's before state and could not read it; `before` and
+   * `changes` are then null. Whether and how it is stored is the write executor's or writer's
+   * choice.
+   */
+  readonly beforeUnavailable: boolean;
   readonly requestContext: unknown;
   readonly createdAt: Date;
 }

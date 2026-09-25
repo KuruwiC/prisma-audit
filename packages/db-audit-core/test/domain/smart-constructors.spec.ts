@@ -21,9 +21,16 @@ describe('Smart Constructors', () => {
       before: null,
       after: { id: 'post-456', title: 'Hello World' },
       changes: null,
+      beforeUnavailable: false,
       requestContext: { ip: '127.0.0.1' },
       createdAt: new Date('2024-01-01T00:00:00Z'),
     };
+
+    it('passes the before-state availability through', () => {
+      const result = createAuditLogData({ ...validInput, action: 'update', beforeUnavailable: true });
+
+      expect(result.success && result.value.beforeUnavailable).toBe(true);
+    });
 
     it('should create valid AuditLogData for valid input', () => {
       const result = createAuditLogData(validInput);

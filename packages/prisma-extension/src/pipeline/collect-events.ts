@@ -12,7 +12,7 @@
  * nested delete without a before-state) without either reaching the audit row.
  */
 
-import type { MutationAction, MutationEvent } from '@kuruwic/db-audit-core';
+import type { BeforeState, MutationAction, MutationEvent } from '@kuruwic/db-audit-core';
 import {
   getPrimaryKeyConstraint,
   type NestedOperationInfo,
@@ -25,7 +25,7 @@ import { identityOf, toMutationAction } from '../nested/events/event-fields.js';
 import type { NestedWriteSets } from '../nested/events/write-set.js';
 import type { PreExistingRows } from '../nested/pre-fetch/pre-existing-rows.js';
 import type { SchemaMetadata } from '../schema/types.js';
-import { type BeforeStateResult, executedUpsertBranch } from './before-state.js';
+import { executedUpsertBranch } from './before-state.js';
 
 type Row = Record<string, unknown>;
 
@@ -42,7 +42,7 @@ export interface SingleOperationOutcome {
   readonly modelName: string;
   readonly action: AuditAction;
   readonly result: unknown;
-  readonly beforeStateResult: BeforeStateResult;
+  readonly beforeState: BeforeState;
   readonly nestedPreFetchResults: NestedPreFetchResults;
   /** The nested operations the operation executed, resolved before it ran */
   readonly nestedOperations: readonly NestedOperationInfo[];
@@ -55,22 +55,22 @@ export interface SingleOperationOutcome {
 export type EventCollectorDependencies = NestedEventCollectorDependencies;
 
 /**
- * An upsert whose before-state fetch failed yields no event at all: a failed fetch cannot tell
- * an absent row from an existing one, so neither the top-level action nor the nested writes of
- * the executed branch can be told (the fetch already reported its failure).
+ * The top-level row carries the before state as read: captured, none, or unavailable when the
+ * read failed. An upsert whose read failed yields no event at all: a failed read cannot tell an
+ * absent row from an existing one, so neither the top-level action nor the nested writes of the
+ * executed branch can be told (the read already reported its failure).
  */
 export const collectSingleOperationEvents = async (
   outcome: SingleOperationOutcome,
   deps: EventCollectorDependencies,
 ): Promise<MutationEvent[]> => {
-  const { modelName, action, result, beforeStateResult, client } = outcome;
+  const { modelName, action, result, beforeState, client } = outcome;
   const { nestedPreFetchResults, nestedOperations, writeSets, preExistingRows } = outcome;
 
-  if (action === AUDIT_ACTION.UPSERT && executedUpsertBranch(action, beforeStateResult) === undefined) {
+  if (action === AUDIT_ACTION.UPSERT && executedUpsertBranch(action, beforeState) === undefined) {
     return [];
   }
 
-  const before = beforeStateResult._tag === 'found' ? beforeStateResult.data : undefined;
   const row = toRow(result);
   const topLevel: MutationEvent = {
     model: modelName,
@@ -78,8 +78,8 @@ export const collectSingleOperationEvents = async (
       model: modelName,
       path: '',
     }),
-    action: toMutationAction(action, before),
-    before,
+    action: toMutationAction(action, beforeState),
+    before: beforeState,
     after: row,
     origin: { path: '', op: action },
   };
@@ -108,6 +108,9 @@ const toSingularAction = (action: AuditAction): MutationAction => {
   return singular;
 };
 
+/** A batch operation reads the rows it updates or deletes, so a row without a before row had none */
+const beforeOf = (row: Row | null | undefined): BeforeState => (row ? { kind: 'captured', row } : { kind: 'none' });
+
 export const collectBatchOperationEvents = (
   outcome: BatchOperationOutcome,
   schemaMetadata: SchemaMetadata,
@@ -120,7 +123,7 @@ export const collectBatchOperationEvents = (
     model: modelName,
     identity: identityOf(row, pkFields, { model: modelName, path: '' }),
     action: singularAction,
-    before: beforeStates?.[index] ?? undefined,
+    before: beforeOf(beforeStates?.[index]),
     after: singularAction === 'delete' ? undefined : row,
     origin: { path: '', op: action },
   }));

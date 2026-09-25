@@ -32,6 +32,7 @@ const event = (overrides: Partial<ResolvedEvent> = {}): ResolvedEvent => ({
   model: 'Post',
   identity: 'post-1',
   action: 'create',
+  before: { kind: 'none' },
   after: { id: 'post-1', title: 'Hello' },
   origin: { path: '', op: 'create' },
   entityId: 'post-1',
@@ -43,7 +44,7 @@ const event = (overrides: Partial<ResolvedEvent> = {}): ResolvedEvent => ({
 });
 
 const updateEvent = (before: Record<string, unknown>, after: Record<string, unknown>): ResolvedEvent =>
-  event({ action: 'update', before, after, origin: { path: '', op: 'update' } });
+  event({ action: 'update', before: { kind: 'captured', row: before }, after, origin: { path: '', op: 'update' } });
 
 const ambient = (config: Partial<ComposeConfig> = {}): ComposeAmbient => ({
   auditContext,
@@ -170,7 +171,9 @@ describe('compose', () => {
 
   describe('states by action', () => {
     it('create: no before state, the row as after state, no changes', () => {
-      const record = composeOne(event({ action: 'create', before: { id: 'post-1' }, after: { id: 'post-1' } }));
+      const record = composeOne(
+        event({ action: 'create', before: { kind: 'captured', row: { id: 'post-1' } }, after: { id: 'post-1' } }),
+      );
 
       expect(record.before).toBeNull();
       expect(record.after).toEqual({ id: 'post-1' });
@@ -179,7 +182,11 @@ describe('compose', () => {
 
     it('delete: the before state, no after state, no changes', () => {
       const record = composeOne(
-        event({ action: 'delete', before: { id: 'post-1', title: 'Old' }, after: { id: 'post-1' } }),
+        event({
+          action: 'delete',
+          before: { kind: 'captured', row: { id: 'post-1', title: 'Old' } },
+          after: { id: 'post-1' },
+        }),
       );
 
       expect(record.before).toEqual({ id: 'post-1', title: 'Old' });
@@ -200,6 +207,51 @@ describe('compose', () => {
 
       expect(record.before).toBeNull();
       expect(record.changes).toBeNull();
+    });
+  });
+
+  describe('before-state availability', () => {
+    it('update whose before state could not be read: null before, no changes, marked unavailable', () => {
+      const record = composeOne(
+        event({ action: 'update', before: { kind: 'unavailable' }, after: { id: 'post-1', title: 'New' } }),
+      );
+
+      expect(record.before).toBeNull();
+      expect(record.changes).toBeNull();
+      expect(record.beforeUnavailable).toBe(true);
+    });
+
+    it('delete whose before state could not be read: still recorded, marked unavailable', () => {
+      const record = composeOne(event({ action: 'delete', before: { kind: 'unavailable' }, after: { id: 'post-1' } }));
+
+      expect(record.before).toBeNull();
+      expect(record.beforeUnavailable).toBe(true);
+    });
+
+    it('update with a captured before state: not marked', () => {
+      const record = composeOne(
+        event({
+          action: 'update',
+          before: { kind: 'captured', row: { id: 'post-1', title: 'Old' } },
+          after: { id: 'post-1', title: 'New' },
+        }),
+      );
+
+      expect(record.before).toEqual({ id: 'post-1', title: 'Old' });
+      expect(record.beforeUnavailable).toBe(false);
+    });
+
+    it('update that carries no before state: not marked', () => {
+      const record = composeOne(event({ action: 'update', before: { kind: 'none' }, after: { id: 'post-1' } }));
+
+      expect(record.before).toBeNull();
+      expect(record.beforeUnavailable).toBe(false);
+    });
+
+    it('create: never marked, whatever the event carries', () => {
+      const record = composeOne(event({ action: 'create', before: { kind: 'unavailable' }, after: { id: 'post-1' } }));
+
+      expect(record.beforeUnavailable).toBe(false);
     });
   });
 
@@ -241,7 +293,7 @@ describe('compose', () => {
     });
 
     it('never skips a delete', () => {
-      const resolved = event({ action: 'delete', before: { id: 'post-1', updatedAt: 1 } });
+      const resolved = event({ action: 'delete', before: { kind: 'captured', row: { id: 'post-1', updatedAt: 1 } } });
 
       expect(compose([resolved], ambient({ excludeFields: ['updatedAt'] }), now)).toHaveLength(1);
     });
@@ -303,7 +355,10 @@ describe('compose', () => {
     const authorRelation: Partial<ComposeConfig> = { relationFieldNames: () => new Set(['author']) };
 
     it('strips the relation fields named for the model from both states', () => {
-      const record = composeOne(event({ action: 'delete', before: row, after: row }), authorRelation);
+      const record = composeOne(
+        event({ action: 'delete', before: { kind: 'captured', row }, after: row }),
+        authorRelation,
+      );
 
       expect(record.before).toEqual(stripped);
       expect(record.after).toBeNull();

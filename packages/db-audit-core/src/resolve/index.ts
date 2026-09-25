@@ -117,7 +117,8 @@ interface ModelGroup<TModelName extends string> {
 }
 
 /** The row a user callback receives: the written row, or the before row when nothing was written back. */
-const rowOf = (event: MutationEvent): Row | undefined => event.after ?? event.before;
+const rowOf = (event: MutationEvent): Row | undefined =>
+  event.after ?? (event.before.kind === 'captured' ? event.before.row : undefined);
 
 const groupByModel = <TModelName extends string>(
   events: readonly MutationEvent<TModelName>[],

@@ -6,6 +6,7 @@
  * `fetchBeforeOperation` is configured; never for a create.
  */
 
+import type { BeforeState } from '@kuruwic/db-audit-core';
 import { toError } from '../failure-sink.js';
 import type { UpsertBranch } from '../grammar/nested-operations.js';
 import { AUDIT_ACTION, type AuditAction } from '../grammar/operations.js';
@@ -14,48 +15,37 @@ import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '.
 import type { AuditErrorContext } from '../types.js';
 import { getModelDelegate, hasOperation } from '../utils/model-accessor.js';
 
-/**
- * Outcome of the before-state fetch. "Not found", "fetch failed" and "never attempted" are kept
- * apart so that consumers (e.g. upsert action resolution) do not misclassify a database error,
- * or a deliberately skipped fetch, as "record does not exist".
- */
-export type BeforeStateResult =
-  | { readonly _tag: 'found'; readonly data: Record<string, unknown> }
-  | { readonly _tag: 'notFound' }
-  | { readonly _tag: 'notRequested' }
-  | { readonly _tag: 'error'; readonly error: Error };
+const NO_BEFORE_STATE: BeforeState = { kind: 'none' };
 
 /**
- * The branch a top-level upsert executed: `update` when its before-state was found, `create`
- * when the row did not exist. Undefined when the fetch failed (the branch is unknown) or the
- * operation is not an upsert.
+ * The branch a top-level upsert executed: `update` when its before state was captured, `create`
+ * when no row existed (an upsert always reads it, so `none` means the row was absent). Undefined
+ * when the read failed (the branch is unknown) or the operation is not an upsert.
  */
-export const executedUpsertBranch = (action: AuditAction, result: BeforeStateResult): UpsertBranch | undefined => {
+export const executedUpsertBranch = (action: AuditAction, before: BeforeState): UpsertBranch | undefined => {
   if (action !== AUDIT_ACTION.UPSERT) {
     return undefined;
   }
-  switch (result._tag) {
-    case 'found':
+  switch (before.kind) {
+    case 'captured':
       return 'update';
-    case 'notFound':
+    case 'none':
       return 'create';
-    case 'error':
-    case 'notRequested':
+    case 'unavailable':
       return undefined;
     default: {
-      const exhaustiveCheck: never = result;
-      throw new Error(`[@prisma-audit] Unhandled before-state result: ${JSON.stringify(exhaustiveCheck)}`);
+      const exhaustiveCheck: never = before;
+      throw new Error(`[@prisma-audit] Unhandled before state: ${JSON.stringify(exhaustiveCheck)}`);
     }
   }
 };
 
 /**
  * Whether the row a single operation targets exists before the operation runs: a create inserts
- * it, an upsert whose before-state was not found creates it, and an upsert whose fetch failed
- * cannot tell.
+ * it, an upsert whose row was absent creates it, and an upsert whose read failed cannot tell.
  */
-export const targetRowExistsBefore = (action: AuditAction, result: BeforeStateResult): boolean =>
-  action === AUDIT_ACTION.UPDATE || action === AUDIT_ACTION.DELETE || executedUpsertBranch(action, result) === 'update';
+export const targetRowExistsBefore = (action: AuditAction, before: BeforeState): boolean =>
+  action === AUDIT_ACTION.UPDATE || action === AUDIT_ACTION.DELETE || executedUpsertBranch(action, before) === 'update';
 
 export interface BeforeStateInput {
   readonly handle: PrismaClientWithDynamicAccess | TransactionalPrismaClient;
@@ -89,17 +79,17 @@ const findExistingRow = async (
   handle: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
   modelName: string,
   where: unknown,
-): Promise<BeforeStateResult> => {
+): Promise<BeforeState> => {
   const delegate = getModelDelegate(handle, modelName);
   if (!hasOperation<FindUniqueDelegate>(delegate, 'findUnique')) {
-    return { _tag: 'notFound' };
+    return NO_BEFORE_STATE;
   }
   const row = await delegate.findUnique({ where });
-  return isRow(row) ? { _tag: 'found', data: row } : { _tag: 'notFound' };
+  return isRow(row) ? { kind: 'captured', row } : NO_BEFORE_STATE;
 };
 
 /**
- * A failed fetch is reported and returned as `error`, never thrown: the caller's operation
+ * A failed read is reported and returned as `unavailable`, never thrown: the caller's operation
  * proceeds, and event collection decides what the missing before state means for it.
  *
  * TOCTOU note for upsert: there is a time gap between this fetch and the upsert itself. With
@@ -110,14 +100,11 @@ const findExistingRow = async (
 export const fetchBeforeState = async (
   input: BeforeStateInput,
   deps: BeforeStateDependencies,
-): Promise<BeforeStateResult> => {
+): Promise<BeforeState> => {
   const { handle, modelName, action, args } = input;
 
-  if (!shouldFetch(action, modelName, deps.getNestedOperationConfig)) {
-    return { _tag: 'notRequested' };
-  }
-  if (!args.where) {
-    return { _tag: 'notFound' };
+  if (!shouldFetch(action, modelName, deps.getNestedOperationConfig) || !args.where) {
+    return NO_BEFORE_STATE;
   }
 
   try {
@@ -125,6 +112,6 @@ export const fetchBeforeState = async (
   } catch (caughtError) {
     const error = toError(caughtError);
     await deps.onFetchFailure({ phase: 'pre-fetch', modelName, operation: action, params: args, error });
-    return { _tag: 'error', error };
+    return { kind: 'unavailable' };
   }
 };
