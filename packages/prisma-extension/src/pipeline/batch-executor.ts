@@ -218,5 +218,5 @@ export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationE
     executed: BatchExecuted,
   ): Promise<unknown> => executed.result;
 
-  return createExecutor({ prepare, execute, collect, result }, (_operation, error) => error);
+  return createExecutor({ prepare, execute, collect, result });
 };

@@ -77,7 +77,7 @@ const operationContinuation =
  * The caller's own mutation error (see `isCallerMutationError`) propagates untouched, without
  * reaching the observer. Any other failure is an audit failure: it is reported as
  * `diff-generation` (observer-only, since it always propagates and leaves the write-failure
- * policy nothing to decide) and rethrown the way the executor surfaces it.
+ * policy nothing to decide) and rethrown as the original error.
  */
 const runExecutor = async (
   executor: OperationExecutor,
@@ -99,7 +99,7 @@ const runExecutor = async (
       params: operation.args,
       error,
     });
-    throw executor.auditFailure(operation, error);
+    throw error;
   }
 };
 

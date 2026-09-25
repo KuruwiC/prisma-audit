@@ -94,10 +94,7 @@ const operationOf = (action: AuditedOperation['action'] = 'update'): AuditedOper
 
 const outcome: OperationOutcome = { result: { id: 'u1', name: 'Anne' }, records: [record] };
 
-const stubExecutor = (
-  run: OperationExecutor['run'],
-  auditFailure: OperationExecutor['auditFailure'] = (_operation, error) => error,
-): OperationExecutor => ({ run: vi.fn(run), auditFailure });
+const stubExecutor = (run: OperationExecutor['run']): OperationExecutor => ({ run: vi.fn(run) });
 
 const succeedingExecutor = () => stubExecutor(async () => outcome);
 
@@ -354,33 +351,34 @@ describe('runAuditedOperation', () => {
       expect(deps.writeAuditLogs).not.toHaveBeenCalled();
     });
 
-    it('reports any other executor failure as diff-generation and rethrows it the way the executor surfaces it', async () => {
-      const auditError = new Error('diff calculation failed');
-      const surfaced = new Error('surfaced');
-      const deps = createDeps({
-        singleExecutor: stubExecutor(
-          async () => {
-            throw auditError;
-          },
-          () => surfaced,
-        ),
-      });
-      const operation = interceptedOf();
+    it.each([
+      ['single', 'update'],
+      ['batch', 'updateMany'],
+    ] as const)(
+      'reports any other %s executor failure once as diff-generation and rethrows the original error',
+      async (_path, action) => {
+        const auditError = new Error('diff calculation failed');
+        const failingExecutor = stubExecutor(async () => {
+          throw auditError;
+        });
+        const deps = createDeps({ singleExecutor: failingExecutor, batchExecutor: failingExecutor });
+        const operation = interceptedOf(action);
 
-      await expect(runAuditedOperation({ operation, auditContext, baseClient: createBaseClient() }, deps)).rejects.toBe(
-        surfaced,
-      );
+        await expect(
+          runAuditedOperation({ operation, auditContext, baseClient: createBaseClient() }, deps),
+        ).rejects.toBe(auditError);
 
-      expect(deps.failureSink.notify).toHaveBeenCalledTimes(1);
-      expect(deps.failureSink.notify).toHaveBeenCalledWith({
-        phase: 'diff-generation',
-        modelName: 'User',
-        operation: 'update',
-        params: operation.args,
-        error: auditError,
-      });
-      expect(deps.writeAuditLogs).not.toHaveBeenCalled();
-    });
+        expect(deps.failureSink.notify).toHaveBeenCalledTimes(1);
+        expect(deps.failureSink.notify).toHaveBeenCalledWith({
+          phase: 'diff-generation',
+          modelName: 'User',
+          operation: action,
+          params: operation.args,
+          error: auditError,
+        });
+        expect(deps.writeAuditLogs).not.toHaveBeenCalled();
+      },
+    );
 
     it('lets a write failure propagate without reporting it as diff-generation', async () => {
       const writeError = new Error('DB write failed');
@@ -429,7 +427,7 @@ describe('createExecutor', () => {
     });
     const operation = operationOf();
 
-    const result = await createExecutor(steps, (_operation, error) => error).run(operation, scope, produceRecords);
+    const result = await createExecutor(steps).run(operation, scope, produceRecords);
 
     expect(calls).toEqual(['prepare', 'execute', 'collect', 'produce', 'result']);
     expect(steps.execute).toHaveBeenCalledWith(operation, scope, prepared);
@@ -444,10 +442,12 @@ describe('createExecutor', () => {
       throw new Error('execute failed');
     });
     const collect = vi.fn(async () => []);
-    const executor = createExecutor(
-      { prepare: async () => undefined, execute, collect, result: async () => undefined },
-      (_operation, error) => error,
-    );
+    const executor = createExecutor({
+      prepare: async () => undefined,
+      execute,
+      collect,
+      result: async () => undefined,
+    });
 
     await expect(executor.run(operationOf(), scope, vi.fn())).rejects.toThrow('execute failed');
 

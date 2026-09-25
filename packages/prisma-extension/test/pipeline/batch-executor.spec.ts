@@ -349,11 +349,5 @@ describe('createBatchExecutor', () => {
 
       expect(produceRecords).not.toHaveBeenCalled();
     });
-
-    it('surfaces an audit failure as the original error', () => {
-      const error = new Error('enricher failed');
-
-      expect(executor.auditFailure(operationOn(clientWith({}), 'deleteMany', {}), error)).toBe(error);
-    });
   });
 });

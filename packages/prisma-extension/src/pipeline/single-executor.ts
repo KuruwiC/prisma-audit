@@ -46,16 +46,6 @@ export interface SinglePrepared {
   readonly preExistingRows: PreExistingRows;
 }
 
-/**
- * An audit failure is wrapped with `cause` rather than rethrown with an edited `message`: the
- * caller may hold a reference to the same error.
- */
-export const wrapAuditFailure = (operation: AuditedOperation, error: Error): Error =>
-  new Error(
-    `[@prisma-audit] Audited operation failed for model "${operation.model}" and action "${operation.action}": ${error.message}`,
-    { cause: error },
-  );
-
 export const createSingleExecutor = (deps: SingleExecutorDependencies): OperationExecutor => {
   const { Prisma, schemaMetadata, getNestedOperationConfig, failureSink } = deps;
 
@@ -137,5 +127,5 @@ export const createSingleExecutor = (deps: SingleExecutorDependencies): Operatio
   const result = async (_operation: AuditedOperation, _scope: ExecutionScope, executed: unknown): Promise<unknown> =>
     executed;
 
-  return createExecutor({ prepare, execute, collect, result }, wrapAuditFailure);
+  return createExecutor({ prepare, execute, collect, result });
 };

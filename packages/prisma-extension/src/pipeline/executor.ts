@@ -52,13 +52,10 @@ export interface OperationExecutor {
     scope: ExecutionScope,
     produceRecords: RecordProducer,
   ) => Promise<OperationOutcome>;
-  /** The error the caller receives when a step other than the caller's own mutation fails */
-  readonly auditFailure: (operation: AuditedOperation, error: Error) => Error;
 }
 
 export const createExecutor = <TPrepared, TExecuted>(
   steps: OperationSteps<TPrepared, TExecuted>,
-  auditFailure: OperationExecutor['auditFailure'],
 ): OperationExecutor => ({
   run: async (operation, scope, produceRecords) => {
     const prepared = await steps.prepare(operation, scope);
@@ -68,5 +65,4 @@ export const createExecutor = <TPrepared, TExecuted>(
     const result = await steps.result(operation, scope, executed);
     return { result, records };
   },
-  auditFailure,
 });

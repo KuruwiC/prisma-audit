@@ -650,6 +650,68 @@ describe('Error Handling Integration', () => {
     });
   });
 
+  describe('Single operations — audit-stage failures', () => {
+    // The single-operation path follows the batch contract above: an audit-stage
+    // (`diff-generation`) failure reaches the caller as the original error, the observer
+    // is notified once, and the write-failure policy is never consulted.
+
+    it('an audit-stage (diff-generation) failure on the single-operation path propagates the original error to the caller, regardless of writeFailurePolicy', async () => {
+      const ENRICHER_FAILURE_MESSAGE = 'actor enricher is broken';
+      const enricherError = new Error(ENRICHER_FAILURE_MESSAGE);
+      const basePrisma = new PrismaClient({ datasources: { db: { url: context.databaseUrl } } });
+      const provider = createAsyncLocalStorageProvider();
+      const observer = vi.fn();
+      const policy = vi.fn((_context: AuditErrorContext) => 'ignore' as const);
+      const prisma = createAuditClient(basePrisma, {
+        Prisma,
+        provider,
+        aggregateMapping: testAggregateMapping,
+        performance: { awaitWrite: true },
+        errorHandling: { writeFailurePolicy: policy, observer },
+        contextEnricher: {
+          actor: {
+            enricher: async () => {
+              throw enricherError;
+            },
+          },
+        },
+      });
+
+      try {
+        // Seeded through the shared, unbroken test client so setup itself does not trip
+        // the broken enricher configured on `prisma` above.
+        const user = await context.provider.runAsync(testActor, async () =>
+          context.prisma.user.create({
+            data: { email: 'diff-gen-single@example.com', name: 'Diff Gen User', password: 'secret123' },
+          }),
+        );
+
+        await expect(
+          provider.runAsync(testActor, async () =>
+            prisma.user.update({
+              where: { id: user.id },
+              data: { name: 'Should Not Persist' },
+            }),
+          ),
+        ).rejects.toBe(enricherError);
+
+        // Rolled back together with the transaction the operation runs in.
+        const persisted = await context.basePrisma.user.findUnique({ where: { id: user.id } });
+        expect(persisted?.name).toBe('Diff Gen User');
+
+        expect(observer).toHaveBeenCalledTimes(1);
+        expect(observer).toHaveBeenCalledWith(
+          expect.objectContaining({ phase: 'diff-generation', modelName: 'User', error: enricherError }),
+        );
+        // Not policy-gated: the write-failure policy is never consulted for this phase.
+        expect(policy).not.toHaveBeenCalled();
+      } finally {
+        await prisma.$disconnect();
+        await basePrisma.$disconnect();
+      }
+    });
+  });
+
   describe('Database constraint violations', () => {
     it('should handle unique constraint violations correctly', async () => {
       const email = 'duplicate@example.com';
@@ -760,14 +822,12 @@ describe('Error Handling Integration', () => {
     });
 
     it('a single-record create unique constraint violation propagates raw, without reaching the audit observer or policy', async () => {
-      // `executeAuditedOperation` (operation-executor.ts) runs the caller's own `create`
-      // inside the lifecycle pipeline's execute-operation stage, alongside audit-support
-      // work (fetch-before-state, enrich, build). Only the audit-support work is an audit
-      // failure — the caller's own database error (a unique constraint violation here) must
-      // never reach `observer` or `policy`, and its message must reach the caller exactly as
-      // Prisma threw it, not rewritten as `[@prisma-audit] Audited operation failed for
-      // model ...`. Uses a normal (non-failing) writer so the only failure in play is the
-      // caller's own.
+      // The single-operation executor runs the caller's own `create` alongside audit-support
+      // work (before-state fetch, enrichment, record building). Only the audit-support work
+      // is an audit failure — the caller's own database error (a unique constraint violation
+      // here) must never reach `observer` or `policy`, and must reach the caller exactly as
+      // Prisma threw it. Uses a normal (non-failing) writer so the only failure in play is
+      // the caller's own.
       const basePrisma = new PrismaClient({ datasources: { db: { url: context.databaseUrl } } });
       const provider = createAsyncLocalStorageProvider();
       const observer = vi.fn();

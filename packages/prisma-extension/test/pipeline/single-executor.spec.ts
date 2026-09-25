@@ -11,7 +11,7 @@ import type { DMMFField, PrismaClientWithDynamicAccess, PrismaNamespace } from '
 import type { ExecutionScope } from '../../src/pipeline/execution-scope.js';
 import type { AuditedOperation } from '../../src/pipeline/executor.js';
 import type { RecordProducer } from '../../src/pipeline/produce-records.js';
-import { createSingleExecutor, wrapAuditFailure } from '../../src/pipeline/single-executor.js';
+import { createSingleExecutor } from '../../src/pipeline/single-executor.js';
 import { createSchemaMetadataFromDMMF } from '../../src/utils/schema-metadata.js';
 
 type Row = Record<string, unknown>;
@@ -552,20 +552,6 @@ describe('createSingleExecutor', () => {
 
       await expect(run).rejects.toBe(callerError);
       expect(produceRecords).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('audit failure', () => {
-    it('wraps an audit failure with the model and action and keeps the original error as cause', () => {
-      const original = new Error('diff calculation failed');
-
-      const surfaced = wrapAuditFailure(operationOn(clientWith({}), 'update', updateArgs), original);
-
-      expect(surfaced.message).toBe(
-        '[@prisma-audit] Audited operation failed for model "User" and action "update": diff calculation failed',
-      );
-      expect(surfaced.cause).toBe(original);
-      expect(executorWith().executor.auditFailure).toBe(wrapAuditFailure);
     });
   });
 });
