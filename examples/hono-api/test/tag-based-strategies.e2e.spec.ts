@@ -8,6 +8,7 @@ import {
   defineAggregateMapping,
   defineEntity,
   foreignKey,
+  type PrismaModelNames,
   to,
 } from '@kuruwic/prisma-audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
@@ -31,7 +32,7 @@ describe('Tag-based Strategies E2E', () => {
 
   describe('awaitWriteIf with database operations', () => {
     it('should write audit log synchronously for critical tagged models', async () => {
-      const aggregateMapping = defineAggregateMapping<PrismaClient>()({
+      const aggregateMapping = defineAggregateMapping<PrismaModelNames<PrismaClient>, PrismaClient>()({
         User: defineEntity({
           type: 'User',
           excludeFields: ['updatedAt'],
@@ -77,7 +78,7 @@ describe('Tag-based Strategies E2E', () => {
     });
 
     it('should write audit log asynchronously for non-critical tagged models', async () => {
-      const aggregateMapping = defineAggregateMapping<PrismaClient>()({
+      const aggregateMapping = defineAggregateMapping<PrismaModelNames<PrismaClient>, PrismaClient>()({
         Post: defineEntity({
           type: 'Post',
           aggregates: [to('User', foreignKey('authorId'))],
@@ -138,7 +139,7 @@ describe('Tag-based Strategies E2E', () => {
 
   describe('samplingIf with database operations', () => {
     it('should apply 100% sampling for financial tagged models', async () => {
-      const aggregateMapping = defineAggregateMapping<PrismaClient>()({
+      const aggregateMapping = defineAggregateMapping<PrismaModelNames<PrismaClient>, PrismaClient>()({
         User: defineEntity({
           type: 'User',
           excludeFields: ['updatedAt'],
@@ -190,7 +191,7 @@ describe('Tag-based Strategies E2E', () => {
     });
 
     it('should apply reduced sampling rate for analytics tagged models', async () => {
-      const aggregateMapping = defineAggregateMapping<PrismaClient>()({
+      const aggregateMapping = defineAggregateMapping<PrismaModelNames<PrismaClient>, PrismaClient>()({
         Post: defineEntity({
           type: 'Post',
           aggregates: [to('User', foreignKey('authorId'))],
@@ -254,7 +255,7 @@ describe('Tag-based Strategies E2E', () => {
 
   describe('Combined tag-based strategies in transactions', () => {
     it('should apply different strategies to different models in same transaction', async () => {
-      const aggregateMapping = defineAggregateMapping<PrismaClient>()({
+      const aggregateMapping = defineAggregateMapping<PrismaModelNames<PrismaClient>, PrismaClient>()({
         User: defineEntity({
           type: 'User',
           excludeFields: ['updatedAt'],
@@ -332,7 +333,7 @@ describe('Tag-based Strategies E2E', () => {
 
   describe('Real-world scenarios', () => {
     it('should handle financial transaction with full audit trail', async () => {
-      const aggregateMapping = defineAggregateMapping<PrismaClient>()({
+      const aggregateMapping = defineAggregateMapping<PrismaModelNames<PrismaClient>, PrismaClient>()({
         User: defineEntity({
           type: 'User',
           excludeFields: ['updatedAt'],

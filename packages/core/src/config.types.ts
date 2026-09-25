@@ -33,23 +33,10 @@ export interface NestedOperationConfig {
   /**
    * Enable pre-fetch for 'before' state
    *
-   * Executes additional query to fetch current state before update/delete operations. Must wrap operations in `prisma.$transaction()` for atomicity.
+   * Executes an additional query to fetch the current state before update/delete operations.
+   * Run the operation inside a transaction on the adapter's client for atomicity.
    *
    * @default true
-   *
-   * @example
-   * ```typescript
-   * await prisma.$transaction(async (tx) => {
-   *   await tx.user.update({
-   *     where: { id: 'user-1' },
-   *     data: {
-   *       posts: {
-   *         update: { where: { id: 'post-1' }, data: { title: 'Updated' } }
-   *       }
-   *     }
-   *   });
-   * });
-   * ```
    */
   fetchBeforeOperation?: boolean;
 }
@@ -68,32 +55,29 @@ export interface NestedOperationConfig {
 export type EnrichmentErrorStrategy = 'fail' | 'log' | ((error: Error) => unknown);
 
 /**
- * Actor enricher configuration
+ * Actor enricher function
  *
  * @template TActor - Actor type from AuditContext
  * @template TContext - Enriched context type
- * @template TPrisma - Prisma client type (defaults to unknown)
+ * @template TDbHandle - Database handle type the adapter passes (defaults to unknown)
  * @param actor - The actor from AuditContext
- * @param prisma - Base Prisma client (NOT transactional)
+ * @param db - Database handle the adapter passes
  * @returns Enriched actor context
  *
  * @example
  * ```typescript
- * actor: async (actor, prisma) => {
+ * const enricher: ActorEnricher<AuditActor, UserContext | null, DbHandle> = async (actor, db) => {
  *   if (actor.type === 'User') {
- *     const user = await prisma.user.findUnique({
- *       where: { id: actor.id },
- *       select: { email: true, role: true, department: true }
- *     });
+ *     const user = await db.users.find({ id: actor.id });
  *     return { email: user?.email, role: user?.role, department: user?.department };
  *   }
  *   return null;
- * }
+ * };
  * ```
  */
-export type ActorEnricher<TActor = unknown, TContext = unknown, TPrisma = unknown> = (
+export type ActorEnricher<TActor = unknown, TContext = unknown, TDbHandle = unknown> = (
   actor: TActor,
-  prisma: TPrisma,
+  db: TDbHandle,
 ) => Promise<TContext>;
 
 /**
@@ -101,11 +85,17 @@ export type ActorEnricher<TActor = unknown, TContext = unknown, TPrisma = unknow
  *
  * @template TActor - Actor type (defaults to unknown)
  * @template TActorContext - Enriched actor context type (defaults to unknown)
- * @template TPrisma - Prisma client type (defaults to unknown)
+ * @template TDbHandle - Database handle type the adapter passes (defaults to unknown)
  */
-export interface GlobalContextEnricherConfig<TActor = unknown, TActorContext = unknown, TPrisma = unknown> {
+export interface GlobalContextEnricherConfig<TActor = unknown, TActorContext = unknown, TDbHandle = unknown> {
   actor?: {
-    enricher: ActorEnricher<TActor, TActorContext, TPrisma>;
+    /**
+     * Actor enricher, see {@link ActorEnricher}.
+     *
+     * A method signature: its parameters are bivariant, so a config typed for a specific
+     * handle is assignable where the handle is erased to `unknown`.
+     */
+    enricher(actor: TActor, db: TDbHandle): Promise<TActorContext>;
 
     /**
      * Error handling strategy

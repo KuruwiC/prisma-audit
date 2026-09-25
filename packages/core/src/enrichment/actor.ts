@@ -11,7 +11,7 @@ import type { ActorEnricherConfig } from './types.js';
  *
  * @param auditContext - Audit context containing actor information
  * @param actorEnricherConfig - Actor enricher configuration
- * @param basePrisma - Base Prisma client for database access
+ * @param db - Database handle passed through to the enricher
  * @returns Enriched actor context or null if no enricher configured
  *
  * @example
@@ -19,8 +19,8 @@ import type { ActorEnricherConfig } from './types.js';
  * const enrichedActor = await enrichActorContext(
  *   { actor: { id: '123', role: 'admin' } },
  *   {
- *     enricher: async (actor, prisma) => {
- *       const user = await prisma.user.findUnique({ where: { id: actor.id } });
+ *     enricher: async (actor, db) => {
+ *       const user = await db.users.find({ id: actor.id });
  *       return {
  *         id: actor.id,
  *         fullName: user?.name ?? 'Unknown',
@@ -31,18 +31,18 @@ import type { ActorEnricherConfig } from './types.js';
  *     onError: 'log',
  *     fallback: null
  *   },
- *   prisma
+ *   db
  * );
  * ```
  */
 export const enrichActorContext = async (
   auditContext: AuditContext,
   actorEnricherConfig: ActorEnricherConfig,
-  basePrisma: unknown,
+  db: unknown,
 ): Promise<unknown> => {
   if (!actorEnricherConfig) {
     return null;
   }
 
-  return await executeEnricherSafely(actorEnricherConfig, auditContext.actor, basePrisma);
+  return await executeEnricherSafely(actorEnricherConfig, auditContext.actor, db);
 };

@@ -81,7 +81,7 @@ const handleEnricherError = <TContext>(
  * @template TContext - Enriched context type
  * @param config - Enricher configuration with error strategy and fallback
  * @param input - Input data to enrich
- * @param prisma - Prisma client instance for database access
+ * @param db - Database handle passed through to the enricher
  * @param timeoutMs - Timeout in milliseconds (default: ENRICHMENT_TIMEOUTS.DEFAULT)
  * @returns Enriched context or null if no enricher configured or error occurred
  *
@@ -95,19 +95,19 @@ const handleEnricherError = <TContext>(
  * ```typescript
  * const result = await executeEnricherSafely(
  *   {
- *     enricher: async (user, prisma) => ({ roles: ['admin'] }),
+ *     enricher: async (user, db) => ({ roles: ['admin'] }),
  *     onError: 'log',
  *     fallback: { roles: [] }
  *   },
  *   { id: '123' },
- *   prisma
+ *   db
  * );
  * ```
  */
 export const executeEnricherSafely = async <TInput, TContext, TMeta = void>(
   config: EnricherConfig<TInput, TContext, unknown, TMeta> | undefined,
   input: TInput,
-  prisma: unknown,
+  db: unknown,
   timeoutMs: number = ENRICHMENT_TIMEOUTS.DEFAULT,
   meta?: TMeta,
 ): Promise<TContext | null> => {
@@ -116,7 +116,7 @@ export const executeEnricherSafely = async <TInput, TContext, TMeta = void>(
   }
 
   try {
-    return await withTimeout(config.enricher(input, prisma, meta as TMeta), timeoutMs);
+    return await withTimeout(config.enricher(input, db, meta as TMeta), timeoutMs);
   } catch (unknownError) {
     const error = unknownError instanceof Error ? unknownError : new Error(String(unknownError));
     const errorStrategy = config.onError ?? 'fail';
@@ -184,7 +184,7 @@ const handleBatchEnricherError = <TContext>(
  * @template TContext - Enriched context type
  * @param config - Enricher configuration with error strategy and fallback
  * @param inputs - Array of input data to enrich
- * @param prisma - Prisma client instance for database access
+ * @param db - Database handle passed through to the enricher
  * @param timeoutMs - Timeout in milliseconds (default: ENRICHMENT_TIMEOUTS.BATCH)
  * @returns Array of enriched contexts or null array if no enricher configured or error occurred
  *
@@ -201,12 +201,12 @@ const handleBatchEnricherError = <TContext>(
  * ```typescript
  * const results = await executeBatchEnricherSafely(
  *   {
- *     enricher: async (users, prisma) => users.map(u => ({ roles: ['user'] })),
+ *     enricher: async (users, db) => users.map(u => ({ roles: ['user'] })),
  *     onError: 'log',
  *     fallback: null
  *   },
  *   [{ id: '1' }, { id: '2' }],
- *   prisma
+ *   db
  * );
  * // returns: [{ roles: ['user'] }, { roles: ['user'] }] or [null, null] on error
  * ```
@@ -214,7 +214,7 @@ const handleBatchEnricherError = <TContext>(
 export const executeBatchEnricherSafely = async <TInput, TContext, TMeta = void>(
   config: EnricherConfig<TInput[], (TContext | null)[], unknown, TMeta> | undefined,
   inputs: TInput[],
-  prisma: unknown,
+  db: unknown,
   timeoutMs: number = ENRICHMENT_TIMEOUTS.BATCH,
   meta?: TMeta,
 ): Promise<(TContext | null)[]> => {
@@ -223,7 +223,7 @@ export const executeBatchEnricherSafely = async <TInput, TContext, TMeta = void>
   }
 
   try {
-    const enrichedContexts = await withTimeout(config.enricher(inputs, prisma, meta as TMeta), timeoutMs);
+    const enrichedContexts = await withTimeout(config.enricher(inputs, db, meta as TMeta), timeoutMs);
     if (enrichedContexts.length !== inputs.length) {
       throw new Error(
         `Batch enricher returned ${enrichedContexts.length} results for ${inputs.length} inputs (expected same length)`,

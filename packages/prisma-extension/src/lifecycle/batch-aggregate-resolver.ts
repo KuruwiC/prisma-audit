@@ -86,7 +86,7 @@ async function resolveSelfAggregates(
 async function resolveAggregateBatch(
   entities: Record<string, unknown>[],
   aggregate: AggregateRoot,
-  batchResolver: BatchAggregateIdResolver,
+  batchResolver: BatchAggregateIdResolver<Record<string, unknown>>,
   dbClient: unknown,
   perEntityRoots: ResolvedRoot[][],
 ): Promise<void> {

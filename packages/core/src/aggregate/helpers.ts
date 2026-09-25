@@ -9,6 +9,11 @@
  * @packageDocumentation
  */
 
+import type {
+  AggregateContextEnricherConfig,
+  EntityEnricherConfig,
+  ProjectionEnricherConfig,
+} from '../enrichment/types.js';
 import { getGlobalSingleton } from '../global-singleton.js';
 import { coreLog } from '../utils/debug.js';
 import type {
@@ -16,10 +21,8 @@ import type {
   AggregateMapping,
   AggregateRoot,
   BatchAggregateIdResolver,
-  GetModelType,
   LoggableEntity,
   SelfProjectionConfig,
-  TypedAggregateMapping,
 } from './types.js';
 import { DEFAULT_ENTITY_CATEGORY } from './types.js';
 
@@ -203,7 +206,7 @@ export const foreignKey = (foreignKeyField: string | IdTransformer): AggregateId
  * Create a custom ID resolver with type safety
  *
  * @template TEntity - Entity type (optional, defaults to inferred from usage)
- * @template TDbClient - Database client type (optional, defaults to inferred from usage)
+ * @template TDbHandle - Database handle type (optional, defaults to inferred from usage)
  * @param resolverFn - Async function to resolve aggregate ID
  * @returns Type-erased AggregateIdResolver
  *
@@ -217,7 +220,7 @@ export const foreignKey = (foreignKeyField: string | IdTransformer): AggregateId
  *
  * @example With single type parameter (entity type only)
  * ```typescript
- * // Specify entity shape, client is inferred
+ * // Specify entity shape, the handle is inferred
  * to('Post', resolveId<{ postAttachments?: Array<{ postId: string }> }>(async (attachment) => {
  *   return attachment.postAttachments?.[0]?.postId ?? null;
  * }))
@@ -225,34 +228,26 @@ export const foreignKey = (foreignKeyField: string | IdTransformer): AggregateId
  *
  * @example With both type parameters (full control)
  * ```typescript
- * resolveId<Attachment, DbClient>(async (attachment, client) => {
- *   const postAttachment = await client.postAttachment.findFirst({
- *     where: { attachmentId: attachment.id },
- *     select: { postId: true },
- *   });
+ * resolveId<Attachment, DbHandle>(async (attachment, db) => {
+ *   const postAttachment = await db.postAttachments.find({ attachmentId: attachment.id });
  *   return postAttachment?.postId ?? null;
  * })
  * ```
  *
  * @example Deep nested query
  * ```typescript
- * resolveId<AvatarImage, DbClient>(async (avatarImage, client) => {
- *   const avatar = await client.avatar.findUnique({
- *     where: { id: avatarImage.avatarId },
- *     select: { profile: { select: { userId: true } } },
- *   });
- *   return avatar?.profile?.userId ?? null;
+ * resolveId<AvatarImage, DbHandle>(async (avatarImage, db) => {
+ *   const avatar = await db.avatars.find({ id: avatarImage.avatarId });
+ *   const profile = avatar ? await db.profiles.find({ id: avatar.profileId }) : null;
+ *   return profile?.userId ?? null;
  * })
  * ```
  */
-export const resolveId = <TEntity = unknown, TDbClient = unknown>(
-  resolverFn: (entity: TEntity, dbClient: TDbClient) => Promise<string | null | undefined>,
+export const resolveId = <TEntity = unknown, TDbHandle = unknown>(
+  resolverFn: (entity: TEntity, db: TDbHandle) => Promise<string | null | undefined>,
 ): AggregateIdResolver => {
-  const resolver: AggregateIdResolver = async (
-    entity: unknown,
-    dbClient: unknown,
-  ): Promise<string | null | undefined> => {
-    return resolverFn(entity as TEntity, dbClient as TDbClient);
+  const resolver: AggregateIdResolver = async (entity: unknown, db: unknown): Promise<string | null | undefined> => {
+    return resolverFn(entity as TEntity, db as TDbHandle);
   };
   asyncResolverRegistry.add(resolver);
   return resolver;
@@ -270,17 +265,14 @@ export const resolveId = <TEntity = unknown, TDbClient = unknown>(
  * undefined (both skip logging for that entity).
  *
  * @template TEntity - Entity type
- * @template TDbClient - Database client type
+ * @template TDbHandle - Database handle type
  * @param resolverFn - Batch resolver function
  * @returns An AggregateIdResolver. The batch function is registered internally via WeakMap and propagated to AggregateRoot.batchResolve by to().
  *
  * @example Reverse FK lookup
  * ```typescript
- * to('User', batchResolveIds<Post, PrismaClient>(async (posts, prisma) => {
- *   const users = await prisma.user.findMany({
- *     where: { OR: posts.map(p => ({ post1Id: p.id })) },
- *     select: { id: true, post1Id: true },
- *   });
+ * to('User', batchResolveIds<Post, DbHandle>(async (posts, db) => {
+ *   const users = await db.users.findAll({ post1Id: posts.map(p => p.id) });
  *   const postToUser = new Map(users.flatMap(u =>
  *     u.post1Id ? [[u.post1Id, u.id]] : []
  *   ));
@@ -288,20 +280,20 @@ export const resolveId = <TEntity = unknown, TDbClient = unknown>(
  * }))
  * ```
  */
-export const batchResolveIds = <TEntity = unknown, TDbClient = unknown>(
-  resolverFn: (entities: TEntity[], dbClient: TDbClient) => Promise<(string | null | undefined)[]>,
+export const batchResolveIds = <TEntity = unknown, TDbHandle = unknown>(
+  resolverFn: (entities: TEntity[], db: TDbHandle) => Promise<(string | null | undefined)[]>,
 ): AggregateIdResolver => {
   const batchFn: BatchAggregateIdResolver = async (
     entities: unknown[],
-    dbClient: unknown,
+    db: unknown,
   ): Promise<(string | null | undefined)[]> => {
-    return resolverFn(entities as TEntity[], dbClient as TDbClient);
+    return resolverFn(entities as TEntity[], db as TDbHandle);
   };
   const singleResolver: AggregateIdResolver = async (
     entity: unknown,
-    dbClient: unknown,
+    db: unknown,
   ): Promise<string | null | undefined> => {
-    const results = await batchFn([entity], dbClient);
+    const results = await batchFn([entity], db);
     return results[0] ?? null;
   };
   batchResolverRegistry.set(singleResolver, batchFn);
@@ -310,8 +302,11 @@ export const batchResolveIds = <TEntity = unknown, TDbClient = unknown>(
 
 /**
  * Options for a `to()` projection declaration
+ *
+ * @template TDbHandle - Database handle type passed to the projection enricher
+ * @template TEntity - Row type of the entity being projected
  */
-export type ToOptions = {
+export type ToOptions<TDbHandle = unknown, TEntity extends Record<string, unknown> = Record<string, unknown>> = {
   /** Aggregate category (default: DEFAULT_ENTITY_CATEGORY) */
   category?: string;
   /**
@@ -320,15 +315,16 @@ export type ToOptions = {
    * `meta.aggregateIds[i]` is the aggregate ID resolved for row i.
    * Merged over the root entity's `aggregateContext` (projection keys win).
    */
-  context?: import('../enrichment/types.js').ProjectionEnricherConfig;
+  context?: ProjectionEnricherConfig<TDbHandle, TEntity>;
 };
 
 /**
  * Define an aggregate root projection with type safety
  *
- * @template TAggregateName - The aggregate type name (for type safety when used with database client)
- * @template TEntity - Entity type (automatically inferred from resolver function)
- * @template TDbClient - Database client type (automatically inferred from resolver function)
+ * @template TAggregateName - The aggregate type name
+ * @template TEntity - Row type of the entity being projected. Inferred from a typed inline
+ *   resolver, or from the `aggregates` slot of a `defineEntity<TEntity, TDbHandle>()` call
+ * @template TDbHandle - Database handle type, inferred the same way
  *
  * @param type - Aggregate type name (should be a valid model name)
  * @param resolver - ID resolution function (can be AggregateIdResolver or typed resolver function)
@@ -344,7 +340,7 @@ export type ToOptions = {
  * ```typescript
  * to('Post', foreignKey('postId'), {
  *   context: {
- *     enricher: async (postTags, client, meta) =>
+ *     enricher: async (postTags, db, meta) =>
  *       postTags.map((pt, i) => ({ tagId: pt.tagId, postId: meta.aggregateIds[i] })),
  *   },
  * })
@@ -352,10 +348,8 @@ export type ToOptions = {
  *
  * @example With resolveId helper (explicit types)
  * ```typescript
- * to('Post', resolveId<Attachment, DbClient>(async (attachment, client) => {
- *   const postAttachment = await client.postAttachment.findFirst({
- *     where: { attachmentId: attachment.id }
- *   });
+ * to('Post', resolveId<Attachment, DbHandle>(async (attachment, db) => {
+ *   const postAttachment = await db.postAttachments.find({ attachmentId: attachment.id });
  *   return postAttachment?.postId ?? null;
  * }))
  * ```
@@ -365,21 +359,31 @@ export type ToOptions = {
  * to('ExternalSystem', foreignKey('systemId'), { category: 'external' })
  * ```
  */
-// Overload 1: Accept typed resolver function directly
-export function to<TAggregateName extends string = string, TEntity = unknown, TDbClient = unknown>(
-  type: TAggregateName,
-  resolver: (entity: TEntity, dbClient: TDbClient) => Promise<string | null | undefined>,
-  options?: ToOptions,
-): AggregateRoot;
-// Overload 2: Accept AggregateIdResolver (from helpers like foreignKey, self, resolveId)
-export function to<TAggregateName extends string = string>(
+// Overload 1: Accept AggregateIdResolver (from helpers like foreignKey, self, resolveId).
+// The resolver carries no row or handle type, so TEntity/TDbHandle come from the call's
+// contextual type (the `aggregates` slot of defineEntity) and flow into `options.context`.
+export function to<
+  TAggregateName extends string = string,
+  TEntity extends Record<string, unknown> = Record<string, unknown>,
+  TDbHandle = unknown,
+>(
   type: TAggregateName,
   resolver: AggregateIdResolver,
-  options?: ToOptions,
-): AggregateRoot;
+  options?: ToOptions<TDbHandle, TEntity>,
+): AggregateRoot<TDbHandle, TEntity>;
+// Overload 2: Accept typed resolver function directly
+export function to<
+  TAggregateName extends string = string,
+  TEntity extends Record<string, unknown> = Record<string, unknown>,
+  TDbHandle = unknown,
+>(
+  type: TAggregateName,
+  resolver: (entity: TEntity, db: TDbHandle) => Promise<string | null | undefined>,
+  options?: ToOptions<TDbHandle, TEntity>,
+): AggregateRoot<TDbHandle, TEntity>;
 export function to<TAggregateName extends string = string>(
   type: TAggregateName,
-  resolver: AggregateIdResolver | ((entity: unknown, dbClient: unknown) => Promise<string | null | undefined>),
+  resolver: AggregateIdResolver | ((entity: unknown, db: unknown) => Promise<string | null | undefined>),
   options?: ToOptions,
 ): AggregateRoot {
   const typedResolver = resolver as AggregateIdResolver;
@@ -408,35 +412,38 @@ export function to<TAggregateName extends string = string>(
 /**
  * Configuration options for defining an entity in the aggregate mapping.
  *
- * @template TDbClient - Database client type for type inference
- * @template TModelName - Model name from client (lowercase, e.g., 'user', 'post') for type inference
+ * @template TEntity - Row type of the entity, passed to its resolvers and enrichers
+ * @template TDbHandle - Database handle type passed to its resolvers and enrichers
  */
-export type DefineEntityOptions<TDbClient = unknown, TModelName extends string = string> = {
+export type DefineEntityOptions<
+  TEntity extends Record<string, unknown> = Record<string, unknown>,
+  TDbHandle = unknown,
+> = {
   /** Entity category stored in AuditLog.entityCategory (default: 'model') */
   category?: string;
   /** Entity type name stored in AuditLog.entityType */
   type: string;
   /** Custom ID resolver for this entity (defaults to self('id')) */
-  idResolver?: AggregateIdResolver<GetModelType<TDbClient, TModelName>, TDbClient>;
+  idResolver?: AggregateIdResolver<TEntity, TDbHandle>;
   /** Aggregate roots this entity belongs to. Use helpers: to(), foreignKey(), resolveId() */
-  aggregates?: AggregateRoot[];
+  aggregates?: AggregateRoot<TDbHandle, TEntity>[];
   /**
    * Self-projection configuration (default: included).
    * `false` skips the self aggregate log (useful for join tables);
    * `{ context }` enriches the self aggregate log with the entity's own rows.
    */
-  self?: SelfProjectionConfig;
+  self?: SelfProjectionConfig<TDbHandle, TEntity>;
   /** Fields to exclude when calculating changes for this entity */
   excludeFields?: string[];
 
   /** Entity-log context enrichment, stored in AuditLog.entityContext */
-  context?: import('../enrichment/types.js').EntityEnricherConfig;
+  context?: EntityEnricherConfig<TDbHandle, TEntity>;
   /**
    * Root-side aggregate context enrichment. Applied whenever ANY entity
    * (self or child) projects onto this entity as its aggregate root.
    * The enricher receives the unique aggregate IDs involved in the operation.
    */
-  aggregateContext?: import('../enrichment/types.js').AggregateContextEnricherConfig;
+  aggregateContext?: AggregateContextEnricherConfig<TDbHandle>;
   /** Tags for tag-based configuration rules */
   tags?: string[];
   /** Per-entity nested operation settings */
@@ -449,8 +456,8 @@ export type DefineEntityOptions<TDbClient = unknown, TModelName extends string =
 /**
  * Define a loggable entity with type safety
  *
- * @template TDbClient - Your database client type (optional but recommended)
- * @template TModelName - Model name from client (enables type checking for options)
+ * @template TEntity - Row type of the entity (optional; types every resolver and enricher input)
+ * @template TDbHandle - Database handle type (optional; types every resolver and enricher handle)
  *
  * @param options - Entity configuration options
  * @returns LoggableEntity configuration
@@ -463,36 +470,34 @@ export type DefineEntityOptions<TDbClient = unknown, TModelName extends string =
  * })
  * ```
  *
- * @example Type-safe usage with database client
+ * @example Type-safe usage with a row type and the adapter's handle
  * ```typescript
- * import { PrismaClient } from '@prisma/client';
- *
- * defineEntity<PrismaClient, 'user'>({
- *   type: 'user',
+ * defineEntity<User, DbHandle>({
+ *   type: 'User',
  *   aggregates: [
- *     to('organization', foreignKey('orgId'))
+ *     to('Organization', foreignKey('orgId'))
  *   ]
  * })
  * ```
  *
  * @example With custom ID resolver (type-safe)
  * ```typescript
- * defineEntity<PrismaClient, 'attachment'>({
- *   type: 'attachment',
- *   idResolver: async (entity, client) => {
+ * defineEntity<Attachment, DbHandle>({
+ *   type: 'Attachment',
+ *   idResolver: async (entity, db) => {
  *     // entity is typed as Attachment
- *     // client is typed as PrismaClient
+ *     // db is typed as DbHandle
  *     return entity.id;
  *   },
  *   aggregates: [
- *     to('user', foreignKey('ownerId'))
+ *     to('User', foreignKey('ownerId'))
  *   ]
  * })
  * ```
  */
-export const defineEntity = <TDbClient = unknown, TModelName extends string = string>(
-  options: DefineEntityOptions<TDbClient, TModelName>,
-): LoggableEntity => {
+export const defineEntity = <TEntity extends Record<string, unknown> = Record<string, unknown>, TDbHandle = unknown>(
+  options: DefineEntityOptions<TEntity, TDbHandle>,
+): LoggableEntity<TDbHandle, TEntity> => {
   const entityCategory = options.category ?? DEFAULT_ENTITY_CATEGORY;
 
   const {
@@ -510,7 +515,7 @@ export const defineEntity = <TDbClient = unknown, TModelName extends string = st
   return {
     category: entityCategory,
     type,
-    idResolver: (idResolver ?? self('id')) as AggregateIdResolver,
+    idResolver: idResolver ?? self('id'),
     aggregates,
     self: selfProjection,
     excludeFields,
@@ -530,9 +535,9 @@ export const defineEntity = <TDbClient = unknown, TModelName extends string = st
  *
  * Executes the aggregate's resolve function and normalizes the result. Errors are logged and null is returned to skip logging for that aggregate.
  *
- * @param entity - Entity instance to resolve the aggregate ID from
+ * @param entity - Entity row to resolve the aggregate ID from
  * @param aggregateRoot - Aggregate root configuration containing the resolver
- * @param dbClient - Database client for database queries
+ * @param db - Database handle for database queries
  * @returns Resolved and normalized aggregate ID, or null if resolution fails
  *
  * @example
@@ -543,16 +548,16 @@ export const defineEntity = <TDbClient = unknown, TModelName extends string = st
  *   resolve: async (comment) => comment.postId
  * };
  *
- * const postId = await resolveAggregateId(comment, postAggregate, client);
+ * const postId = await resolveAggregateId(comment, postAggregate, db);
  * ```
  */
 export const resolveAggregateId = async (
-  entity: unknown,
+  entity: Record<string, unknown>,
   aggregateRoot: AggregateRoot,
-  dbClient: unknown,
+  db: unknown,
 ): Promise<string | null> => {
   try {
-    const resolvedId = await aggregateRoot.resolve(entity, dbClient);
+    const resolvedId = await aggregateRoot.resolve(entity, db);
 
     if (resolvedId === null || resolvedId === undefined) {
       return null;
@@ -570,17 +575,17 @@ export const resolveAggregateId = async (
 // ============================================================================
 
 /**
- * Create a type-safe aggregate mapping with automatic model name inference from keys
+ * Create a type-safe aggregate mapping
  *
- * @template TDbClient - Your database client type for complete type inference
+ * @template TModelName - Union of the model names the mapping may declare; an adapter derives
+ *   it from its client type. Defaults to any string
+ * @template TDbHandle - Database handle type passed to the entities' resolvers and enrichers
  *
- * @returns A function that accepts a mapping object with capitalized model names as keys
+ * @returns A function that checks a mapping object's keys against TModelName and returns it unchanged
  *
- * @example Type-safe mapping with inferred model names
+ * @example Type-safe mapping with the adapter's model names and handle
  * ```typescript
- * import { PrismaClient } from '@prisma/client';
- *
- * const mapping = defineAggregateMapping<PrismaClient>()({
+ * const mapping = defineAggregateMapping<ModelName, DbHandle>()({
  *   User: defineEntity({
  *     type: 'User',
  *     excludeFields: ['password']
@@ -589,13 +594,13 @@ export const resolveAggregateId = async (
  *     type: 'Post',
  *     aggregates: [to('User', foreignKey('authorId'))]
  *   }),
- *   // TypeScript will autocomplete available model names!
+ *   // Keys are checked against ModelName
  * });
  * ```
  *
  * @example With custom categories
  * ```typescript
- * const mapping = defineAggregateMapping<PrismaClient>()({
+ * const mapping = defineAggregateMapping()({
  *   User: defineEntity({
  *     type: 'User',
  *     category: 'identity'
@@ -609,10 +614,9 @@ export const resolveAggregateId = async (
  * ```
  */
 export const defineAggregateMapping =
-  <TDbClient>() =>
-  <TMapping extends TypedAggregateMapping<TDbClient>>(mapping: TMapping): TMapping & AggregateMapping => {
-    return mapping as TMapping & AggregateMapping;
-  };
+  <TModelName extends string = string, TDbHandle = unknown>() =>
+  <TMapping extends AggregateMapping<TModelName, TDbHandle>>(mapping: TMapping): TMapping =>
+    mapping;
 
 // ============================================================================
 // Validation Utilities
@@ -643,6 +647,8 @@ export const validateAggregateMapping = (mapping: AggregateMapping): void => {
   const entityNameByRootKey = new Map<string, string>();
 
   for (const [entityName, entityConfig] of Object.entries(mapping)) {
+    if (!entityConfig) continue;
+
     if (!entityConfig.type) {
       validationErrors.push(`Entity "${entityName}": type is required`);
     }

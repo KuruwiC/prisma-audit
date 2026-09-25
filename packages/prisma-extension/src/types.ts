@@ -8,6 +8,7 @@
 
 import type {
   AggregateMapping,
+  AuditActor,
   AuditContext,
   AuditContextProvider,
   AuditLogData as CoreAuditLogData,
@@ -229,10 +230,14 @@ export interface ErrorHandlingConfig {
 
 /**
  * Prisma Extension configuration options
+ *
+ * @template TModelName - Model names the aggregate mapping may declare. `createAuditClient` and
+ *   `defineConfig` derive it from the client type with `PrismaModelNames`; defaults to any string
+ * @template TClient - The audited client type, passed to every resolver and enricher as `db`
  */
-export interface PrismaAuditExtensionOptions {
+export interface PrismaAuditExtensionOptions<TModelName extends string = string, TClient = unknown> {
   provider: AuditContextProvider;
-  aggregateMapping: AggregateMapping;
+  aggregateMapping: AggregateMapping<TModelName, TClient>;
   /**
    * Prisma namespace exported by the generated client that the audited `PrismaClient` comes from.
    * Required because a client instance does not expose its namespace.
@@ -265,7 +270,8 @@ export interface PrismaAuditExtensionOptions {
   security?: SecurityConfig;
   performance?: PerformanceConfig;
   hooks?: HooksConfig;
-  contextEnricher?: GlobalContextEnricherConfig;
+  /** Actor enrichment; the enricher receives the operation's `AuditActor` and the client. */
+  contextEnricher?: GlobalContextEnricherConfig<AuditActor, unknown, TClient>;
   nestedOperations?: NestedOperationsConfig;
   /** Audit-failure observation and policy. See {@link ErrorHandlingConfig}. */
   errorHandling?: ErrorHandlingConfig;

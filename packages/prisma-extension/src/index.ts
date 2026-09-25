@@ -47,6 +47,7 @@ export {
 export type { PrismaClientWithAudit } from './client-factory.js';
 export { createAuditClient, defineConfig } from './client-factory.js';
 export { flushAllPendingWrites } from './lifecycle/transaction-proxy.js';
+export type { PrismaModelNames, PrismaModelType } from './prisma-types.js';
 export type {
   AuditErrorContext,
   AuditErrorObserver,

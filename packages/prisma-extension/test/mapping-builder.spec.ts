@@ -4,6 +4,7 @@
 
 import { defineAggregateMapping, defineEntity, foreignKey, resolveId, to } from '@kuruwic/prisma-audit-core';
 import { describe, expect, it } from 'vitest';
+import type { PrismaModelNames } from '../src/prisma-types.js';
 
 // Mock PrismaClient type for testing
 interface MockPrismaClient {
@@ -20,7 +21,7 @@ interface MockPrismaClient {
 
 describe('defineAggregateMapping', () => {
   it('should create mapping with default values', () => {
-    const mapping = defineAggregateMapping<MockPrismaClient>()({
+    const mapping = defineAggregateMapping<PrismaModelNames<MockPrismaClient>, MockPrismaClient>()({
       User: defineEntity({
         type: 'User',
       }),
@@ -34,7 +35,7 @@ describe('defineAggregateMapping', () => {
   });
 
   it('should allow custom category', () => {
-    const mapping = defineAggregateMapping<MockPrismaClient>()({
+    const mapping = defineAggregateMapping<PrismaModelNames<MockPrismaClient>, MockPrismaClient>()({
       User: defineEntity({
         type: 'User',
         category: 'system',
@@ -45,7 +46,7 @@ describe('defineAggregateMapping', () => {
   });
 
   it('should support simple FK with foreignKey helper', () => {
-    const mapping = defineAggregateMapping<MockPrismaClient>()({
+    const mapping = defineAggregateMapping<PrismaModelNames<MockPrismaClient>, MockPrismaClient>()({
       Post: defineEntity({
         type: 'Post',
         aggregates: [to('User', foreignKey('authorId'))],
@@ -60,7 +61,7 @@ describe('defineAggregateMapping', () => {
   });
 
   it('should support custom resolver with resolveId', () => {
-    const mapping = defineAggregateMapping<MockPrismaClient>()({
+    const mapping = defineAggregateMapping<PrismaModelNames<MockPrismaClient>, MockPrismaClient>()({
       Attachment: defineEntity({
         type: 'Attachment',
         aggregates: [
@@ -81,7 +82,7 @@ describe('defineAggregateMapping', () => {
   });
 
   it('should support excludeFields', () => {
-    const mapping = defineAggregateMapping<MockPrismaClient>()({
+    const mapping = defineAggregateMapping<PrismaModelNames<MockPrismaClient>, MockPrismaClient>()({
       User: defineEntity({
         type: 'User',
         excludeFields: ['updatedAt', 'password'],
@@ -92,7 +93,7 @@ describe('defineAggregateMapping', () => {
   });
 
   it('should support disabling the self projection', () => {
-    const mapping = defineAggregateMapping<MockPrismaClient>()({
+    const mapping = defineAggregateMapping<PrismaModelNames<MockPrismaClient>, MockPrismaClient>()({
       User: defineEntity({
         type: 'User',
         self: false,
@@ -103,7 +104,7 @@ describe('defineAggregateMapping', () => {
   });
 
   it('should support multiple aggregates', () => {
-    const mapping = defineAggregateMapping<MockPrismaClient>()({
+    const mapping = defineAggregateMapping<PrismaModelNames<MockPrismaClient>, MockPrismaClient>()({
       Post: defineEntity({
         type: 'Post',
         aggregates: [
@@ -129,7 +130,7 @@ describe('defineAggregateMapping', () => {
   });
 
   it('should support custom idResolver', () => {
-    const mapping = defineAggregateMapping<MockPrismaClient>()({
+    const mapping = defineAggregateMapping<PrismaModelNames<MockPrismaClient>, MockPrismaClient>()({
       User: defineEntity({
         type: 'User',
         idResolver: resolveId<{ userId: string }, MockPrismaClient>(async (user) => user.userId),
@@ -140,7 +141,7 @@ describe('defineAggregateMapping', () => {
   });
 
   it('should handle async resolver', async () => {
-    const mapping = defineAggregateMapping<MockPrismaClient>()({
+    const mapping = defineAggregateMapping<PrismaModelNames<MockPrismaClient>, MockPrismaClient>()({
       Post: defineEntity({
         type: 'Post',
         aggregates: [
@@ -172,7 +173,7 @@ describe('defineAggregateMapping', () => {
   });
 
   it('should resolve simple FK correctly', async () => {
-    const mapping = defineAggregateMapping<MockPrismaClient>()({
+    const mapping = defineAggregateMapping<PrismaModelNames<MockPrismaClient>, MockPrismaClient>()({
       Post: defineEntity({
         type: 'Post',
         aggregates: [to('User', foreignKey('authorId'))],
@@ -192,7 +193,7 @@ describe('defineAggregateMapping', () => {
   });
 
   it('should return null for undefined FK', async () => {
-    const mapping = defineAggregateMapping<MockPrismaClient>()({
+    const mapping = defineAggregateMapping<PrismaModelNames<MockPrismaClient>, MockPrismaClient>()({
       Post: defineEntity({
         type: 'Post',
         aggregates: [to('User', foreignKey('authorId'))],
@@ -212,7 +213,7 @@ describe('defineAggregateMapping', () => {
   });
 
   it('should resolve idResolver with default id field', async () => {
-    const mapping = defineAggregateMapping<MockPrismaClient>()({
+    const mapping = defineAggregateMapping<PrismaModelNames<MockPrismaClient>, MockPrismaClient>()({
       User: defineEntity({
         type: 'User',
       }),
@@ -223,7 +224,7 @@ describe('defineAggregateMapping', () => {
   });
 
   it('should resolve idResolver with custom field', async () => {
-    const mapping = defineAggregateMapping<MockPrismaClient>()({
+    const mapping = defineAggregateMapping<PrismaModelNames<MockPrismaClient>, MockPrismaClient>()({
       User: defineEntity({
         type: 'User',
         idResolver: resolveId<{ userId: string }, MockPrismaClient>(async (user) => user.userId),
@@ -235,7 +236,7 @@ describe('defineAggregateMapping', () => {
   });
 
   it('should resolve idResolver with custom function', async () => {
-    const mapping = defineAggregateMapping<MockPrismaClient>()({
+    const mapping = defineAggregateMapping<PrismaModelNames<MockPrismaClient>, MockPrismaClient>()({
       User: defineEntity({
         type: 'User',
         idResolver: resolveId<{ id: string }, MockPrismaClient>(async (user) => {

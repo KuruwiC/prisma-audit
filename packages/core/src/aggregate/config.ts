@@ -109,6 +109,8 @@ export const createAggregateConfig = (mapping: AggregateMapping): AggregateConfi
   const configByRootIdentity: Map<string, LoggableEntity> = new Map();
 
   for (const [originalModelName, entityConfig] of Object.entries(mapping)) {
+    if (!entityConfig) continue;
+
     const normalizedModelName = originalModelName.toLowerCase();
     configByNormalizedName[normalizedModelName] = entityConfig;
     originalNameByNormalizedName.set(normalizedModelName, originalModelName);

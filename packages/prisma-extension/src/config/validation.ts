@@ -41,7 +41,7 @@ export const validateFieldConflicts = (
   if (redact?.fields) {
     const redactFieldsSet = new Set(redact.fields);
     for (const [modelName, entityConfig] of Object.entries(aggregateMapping)) {
-      if (entityConfig.excludeFields) {
+      if (entityConfig?.excludeFields) {
         const modelExcludeFieldsSet = new Set(entityConfig.excludeFields);
         const modelConflicts = [...redactFieldsSet].filter((field) => modelExcludeFieldsSet.has(field));
         if (modelConflicts.length > 0) {

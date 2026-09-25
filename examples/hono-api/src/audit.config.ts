@@ -8,6 +8,7 @@ import {
   defineConfig,
   defineEntity,
   foreignKey,
+  type PrismaModelNames,
   resolveId,
   to,
 } from '@kuruwic/prisma-audit';
@@ -474,12 +475,12 @@ const enrichAvatarImageContext = async (avatarImages: unknown[], prisma: unknown
   });
 };
 
-const aggregateMapping = defineAggregateMapping<PrismaClient>()({
+const aggregateMapping = defineAggregateMapping<PrismaModelNames<PrismaClient>, PrismaClient>()({
   User: defineEntity({
     type: 'User',
     excludeFields: ['updatedAt'],
   }),
-  Post: defineEntity<PrismaClient, 'post'>({
+  Post: defineEntity({
     type: 'Post',
     aggregates: [
       to('User', foreignKey('authorId'), {
@@ -526,7 +527,7 @@ const aggregateMapping = defineAggregateMapping<PrismaClient>()({
       onError: 'log',
     },
   }),
-  Comment: defineEntity<PrismaClient, 'comment'>({
+  Comment: defineEntity({
     type: 'Comment',
     aggregates: [
       to('Post', foreignKey('postId'), {
@@ -572,7 +573,7 @@ const aggregateMapping = defineAggregateMapping<PrismaClient>()({
   Tag: defineEntity({
     type: 'Tag',
   }),
-  PostTag: defineEntity<PrismaClient, 'postTag'>({
+  PostTag: defineEntity({
     type: 'PostTag',
     self: false,
     aggregates: [
@@ -676,7 +677,7 @@ const aggregateMapping = defineAggregateMapping<PrismaClient>()({
       onError: 'log',
     },
   }),
-  Attachment: defineEntity<PrismaClient, 'attachment'>({
+  Attachment: defineEntity({
     type: 'Attachment',
     aggregates: [
       to('User', foreignKey('ownerId'), {
@@ -796,7 +797,7 @@ const aggregateMapping = defineAggregateMapping<PrismaClient>()({
       onError: 'log',
     },
   }),
-  Profile: defineEntity<PrismaClient, 'profile'>({
+  Profile: defineEntity({
     type: 'Profile',
     aggregates: [
       to('User', foreignKey('userId'), {
@@ -868,7 +869,7 @@ const aggregateMapping = defineAggregateMapping<PrismaClient>()({
       onError: 'log',
     },
   }),
-  Avatar: defineEntity<PrismaClient, 'avatar'>({
+  Avatar: defineEntity({
     type: 'Avatar',
     aggregates: [
       to(
@@ -905,7 +906,7 @@ const aggregateMapping = defineAggregateMapping<PrismaClient>()({
       onError: 'log',
     },
   }),
-  AvatarImage: defineEntity<PrismaClient, 'avatarImage'>({
+  AvatarImage: defineEntity({
     type: 'AvatarImage',
     aggregates: [
       to(

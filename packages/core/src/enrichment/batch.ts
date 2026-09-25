@@ -12,13 +12,13 @@ import type { AggregateContextEnricherConfig, ProjectionEnricherConfig, Projecti
  *
  * @param entities - Array of written entity rows to enrich
  * @param entityConfig - Entity configuration with enricher settings
- * @param basePrisma - Base Prisma client for database access
+ * @param db - Database handle passed through to the enricher
  * @returns Array of enriched contexts (one per entity)
  */
 export const batchEnrichEntityContexts = async (
   entities: Record<string, unknown>[],
   entityConfig: LoggableEntity,
-  basePrisma: unknown,
+  db: unknown,
 ): Promise<(unknown | null)[]> => {
   if (entities.length === 0) {
     return [];
@@ -28,7 +28,7 @@ export const batchEnrichEntityContexts = async (
     return entities.map(() => null);
   }
 
-  return await executeBatchEnricherSafely(entityConfig.context, entities, basePrisma, ENRICHMENT_TIMEOUTS.BATCH);
+  return await executeBatchEnricherSafely(entityConfig.context, entities, db, ENRICHMENT_TIMEOUTS.BATCH);
 };
 
 /**
@@ -39,14 +39,14 @@ export const batchEnrichEntityContexts = async (
  *
  * @param entities - Written entity rows belonging to one projection
  * @param config - Projection enricher from `to(..., { context })` or `self.context`
- * @param basePrisma - Base Prisma client for database access
+ * @param db - Database handle passed through to the enricher
  * @param meta - Aggregate type/category and per-row aggregate IDs
  * @returns Array of enriched contexts (one per entity)
  */
 export const batchEnrichProjectionContexts = async (
   entities: Record<string, unknown>[],
   config: ProjectionEnricherConfig | undefined,
-  basePrisma: unknown,
+  db: unknown,
   meta: ProjectionEnrichmentMeta,
 ): Promise<(unknown | null)[]> => {
   if (entities.length === 0) {
@@ -57,7 +57,7 @@ export const batchEnrichProjectionContexts = async (
     return entities.map(() => null);
   }
 
-  return await executeBatchEnricherSafely(config, entities, basePrisma, ENRICHMENT_TIMEOUTS.BATCH, meta);
+  return await executeBatchEnricherSafely(config, entities, db, ENRICHMENT_TIMEOUTS.BATCH, meta);
 };
 
 /**
@@ -68,13 +68,13 @@ export const batchEnrichProjectionContexts = async (
  *
  * @param aggregateIds - Unique aggregate IDs to enrich
  * @param config - The root entity's `aggregateContext` enricher
- * @param basePrisma - Base Prisma client for database access
+ * @param db - Database handle passed through to the enricher
  * @returns Array of enriched contexts (one per ID, same order)
  */
 export const batchEnrichRootAggregateContexts = async (
   aggregateIds: string[],
   config: AggregateContextEnricherConfig | undefined,
-  basePrisma: unknown,
+  db: unknown,
 ): Promise<(unknown | null)[]> => {
   if (aggregateIds.length === 0) {
     return [];
@@ -84,5 +84,5 @@ export const batchEnrichRootAggregateContexts = async (
     return aggregateIds.map(() => null);
   }
 
-  return await executeBatchEnricherSafely(config, aggregateIds, basePrisma, ENRICHMENT_TIMEOUTS.BATCH);
+  return await executeBatchEnricherSafely(config, aggregateIds, db, ENRICHMENT_TIMEOUTS.BATCH);
 };
