@@ -44,8 +44,8 @@ export interface PreFetchCoordinatorDependencies {
    * Notified when a single nested operation's pre-fetch query fails. The before-state
    * for that path is recorded as unresolved (the `UNRESOLVED_ENTITY_ID` sentinel) and the
    * caller's own operation continues — mirrors the top-level equivalent,
-   * `fetchBeforeState` in extension.ts, which reports the same failure class through
-   * the same observer. Optional: when omitted, the failure is visible only via
+   * `fetchBeforeState` in pipeline/before-state.ts, which reports the same failure class
+   * through the same observer. Optional: when omitted, the failure is visible only via
    * `preFetchLog`.
    */
   readonly onPreFetchFailure?: AuditErrorObserver;

@@ -16,7 +16,7 @@ export { isAuditableAction, shouldAuditModel, uncapitalizeFirst } from './extens
 export { buildEntityMap, ensureIds, extractPrimaryKey, findManyByPKs, getPrimaryKeyFields } from './id-generation.js';
 
 // Model accessor
-export { getModelAccessor } from './model-accessor.js';
+export { getModelAccessor, getModelDelegate, getModelOperation } from './model-accessor.js';
 
 // Nested-write selection injection
 export { injectNestedWriteSelection, projectToRequestedShape } from './nested-write-selection.js';

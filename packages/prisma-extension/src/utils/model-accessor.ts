@@ -1,3 +1,5 @@
+import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../internal-types.js';
+
 /**
  * DMMF mapping type definition for type safety
  * Based on Prisma's internal DMMF structure
@@ -112,4 +114,22 @@ export const getModelAccessor = (client: unknown, modelName: string): string => 
   } catch {
     return fallbackAccessor(modelName);
   }
+};
+
+/** The delegate of `modelName` on `client`, resolved through {@link getModelAccessor} */
+export const getModelDelegate = (
+  client: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
+  modelName: string,
+): unknown => client[getModelAccessor(client, modelName)];
+
+/** The `operation` method of a model delegate, or undefined when the delegate does not have it */
+export const getModelOperation = (
+  delegate: unknown,
+  operation: string,
+): ((args: unknown) => Promise<unknown>) | undefined => {
+  if (typeof delegate !== 'object' || delegate === null) {
+    return undefined;
+  }
+  const method = (delegate as Record<string, unknown>)[operation];
+  return typeof method === 'function' ? (method as (args: unknown) => Promise<unknown>) : undefined;
 };

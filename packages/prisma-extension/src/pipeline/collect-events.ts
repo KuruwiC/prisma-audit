@@ -24,8 +24,8 @@ import {
   collectNestedEvents,
   type NestedEventCollectorDependencies,
 } from '../lifecycle/nested-handlers/collect-nested-events.js';
-import type { BeforeStateResult } from '../lifecycle/types.js';
 import type { SchemaMetadata } from '../schema/types.js';
+import type { BeforeStateResult } from './before-state.js';
 import { identityOf, toMutationAction } from './event-fields.js';
 
 type Row = Record<string, unknown>;

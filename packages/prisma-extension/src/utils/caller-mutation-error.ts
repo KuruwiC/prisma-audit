@@ -1,11 +1,9 @@
 /**
  * Tags an error as coming from the caller's own database mutation (e.g. a unique
- * constraint violation), as opposed to the audit-support work around it (before-fetch,
- * after-refetch, `runBatchPipeline`, the lifecycle pipeline's enrich/build stages).
- * `executeBatch` (`extension.ts`) and `executeAuditedOperation`
- * (`lifecycle/operation-handlers/operation-executor.ts`, the single-operation path) use
- * this pair to let such an error propagate untouched instead of routing it through the
- * audit observer or policy.
+ * constraint violation), as opposed to the audit-support work around it (the before-state
+ * and nested pre-fetches, the after-refetch, event collection, record production).
+ * `pipeline/run-audited-operation.ts` uses this pair to let such an error propagate
+ * untouched instead of routing it through the audit observer or policy.
  *
  * The symbol is module-scoped because the tag carries no per-extension-instance state.
  *
