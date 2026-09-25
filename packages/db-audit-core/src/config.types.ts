@@ -22,29 +22,6 @@ export interface SerializationConfig {
   customSerializers?: ValueSerializer[];
 }
 
-/** Configuration for PII (Personally Identifiable Information) redaction */
-export interface RedactConfig {
-  /** Field names to redact (in addition to default sensitive fields) */
-  fields?: string[];
-}
-
-/** Configuration for nested operation audit behavior */
-export interface NestedOperationConfig {
-  /**
-   * Enable pre-fetch for 'before' state
-   *
-   * Executes an additional query to fetch the current state before update/delete operations.
-   * Run the operation inside a transaction on the adapter's client for atomicity.
-   *
-   * @default true
-   */
-  fetchBeforeOperation?: boolean;
-}
-
-// ============================================================================
-// Enrichment Types (N+1 Resolution)
-// ============================================================================
-
 /**
  * Error handling strategy for enrichment failures
  *
@@ -53,32 +30,6 @@ export interface NestedOperationConfig {
  * - Custom function: Custom error handler with fallback value
  */
 export type EnrichmentErrorStrategy = 'fail' | 'log' | ((error: Error) => unknown);
-
-/**
- * Actor enricher function
- *
- * @template TActor - Actor type from AuditContext
- * @template TContext - Enriched context type
- * @template TDbHandle - Database handle type the adapter passes (defaults to unknown)
- * @param actor - The actor from AuditContext
- * @param db - Database handle the adapter passes
- * @returns Enriched actor context
- *
- * @example
- * ```typescript
- * const enricher: ActorEnricher<AuditActor, UserContext | null, DbHandle> = async (actor, db) => {
- *   if (actor.type === 'User') {
- *     const user = await db.users.find({ id: actor.id });
- *     return { email: user?.email, role: user?.role, department: user?.department };
- *   }
- *   return null;
- * };
- * ```
- */
-export type ActorEnricher<TActor = unknown, TContext = unknown, TDbHandle = unknown> = (
-  actor: TActor,
-  db: TDbHandle,
-) => Promise<TContext>;
 
 /**
  * Global context enricher configuration
@@ -90,10 +41,22 @@ export type ActorEnricher<TActor = unknown, TContext = unknown, TDbHandle = unkn
 export interface GlobalContextEnricherConfig<TActor = unknown, TActorContext = unknown, TDbHandle = unknown> {
   actor?: {
     /**
-     * Actor enricher, see {@link ActorEnricher}.
+     * Enriches the actor of the audit context with data read through the database handle the
+     * adapter passes.
      *
      * A method signature: its parameters are bivariant, so a config typed for a specific
      * handle is assignable where the handle is erased to `unknown`.
+     *
+     * @example
+     * ```typescript
+     * enricher: async (actor, db) => {
+     *   if (actor.type === 'User') {
+     *     const user = await db.users.find({ id: actor.id });
+     *     return { email: user?.email, role: user?.role, department: user?.department };
+     *   }
+     *   return null;
+     * },
+     * ```
      */
     enricher(actor: TActor, db: TDbHandle): Promise<TActorContext>;
 

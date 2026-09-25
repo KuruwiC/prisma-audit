@@ -13,7 +13,6 @@ import type {
   AuditContextProvider,
   AuditLogData as CoreAuditLogData,
   AuditLogInput as CoreAuditLogInput,
-  WriteFn as CoreWriteFn,
   ErrorStrategy,
   GlobalContextEnricherConfig,
 } from '@kuruwic/db-audit-core';
@@ -253,19 +252,3 @@ export interface PrismaAuditExtensionOptions<TModelName extends string = string,
   /** Custom serialization for non-JSON-safe types (BigInt, Date are handled by default) */
   serialization?: import('@kuruwic/db-audit-core').SerializationConfig;
 }
-
-/**
- * Prisma operation context
- */
-export interface OperationContext {
-  model?: string;
-  action: string;
-  args: Record<string, unknown>;
-}
-
-/**
- * Function type for custom audit log writers
- *
- * Re-exported from @kuruwic/db-audit-core
- */
-export type WriteFn = CoreWriteFn;
