@@ -450,7 +450,7 @@ const recordBatchTargets = (
 
 /**
  * The discovery pass may find the same batch keyword at a path in more than one upsert branch,
- * so the rows each read matched are merged by identity rather than replaced.
+ * so the rows each read matched are merged by identity.
  */
 const handleToManyBatch = async (
   context: NestedPreFetchContext,

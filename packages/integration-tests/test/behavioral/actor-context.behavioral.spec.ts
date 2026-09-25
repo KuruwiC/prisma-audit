@@ -1,7 +1,7 @@
 /**
  * Behavioral Tests: Actor Context
  *
- * Verifies actor information is correctly stored and enrichment works.
+ * Verifies actor information is correctly stored.
  */
 
 import type { AuditContext } from '@kuruwic/db-audit-core';

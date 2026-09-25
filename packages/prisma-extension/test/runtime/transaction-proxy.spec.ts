@@ -1,5 +1,5 @@
 /**
- * Transaction Proxy Regression Tests
+ * Transaction Proxy Tests
  *
  * Guards the context/runtime separation: re-attributing the actor inside a
  * wrapped `$transaction` callback (via full `runAsync` replacement or `withActor`) must NEVER
@@ -110,10 +110,9 @@ describe('createWrappedTransactionCallback (context/runtime separation)', () => 
   });
 
   it('plain arrow returning a lazy thenable resolves under the overridden actor inside a wrapped transaction', async () => {
-    // Regression: with the old sync withActor, a plain arrow returning a lazy
-    // thenable (like a Prisma query) would execute under the OUTER actor because
-    // .then was called after the storage.run scope had already exited. The async
-    // wrapper in withActor ensures .then is called INSIDE the overridden scope.
+    // A plain arrow returning a lazy thenable (like a Prisma query) must execute under the
+    // overridden actor: the async wrapper in withActor ensures .then is called INSIDE the
+    // overridden scope, while the storage.run scope is still active.
     const provider = createAsyncLocalStorageProvider();
     const txClient = { _isTx: true } as unknown as TransactionalPrismaClient;
     const seen: string[] = [];

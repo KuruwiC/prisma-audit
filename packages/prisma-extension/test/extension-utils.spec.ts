@@ -5,7 +5,7 @@
  * `extractDeleteOperationEntityId` reuses `unwrapCompoundWhere` (utils/compound-where.ts)
  * to read Prisma's compound-unique WHERE shape (`{ postId_userId: { postId, userId } }`,
  * or `{ <name>: { ... } }` for a key declared with an explicit name), so a composite-key
- * nested delete still resolves an identity from the primary-key fields named in the WHERE
+ * nested delete resolves an identity from the primary-key fields named in the WHERE
  * clause even when `nestedOperations.delete.fetchBeforeOperation` is `false` and no
  * pre-fetched before-state is available.
  */

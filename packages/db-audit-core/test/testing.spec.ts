@@ -171,10 +171,10 @@ describe('createMockAuditContext', () => {
       expect(result).toBe('value');
     });
 
-    // Regression: the mock's withActor must await fn's return value inside the
-    // overridden scope, matching the real ALS provider's async wrapper semantics.
-    // A plain arrow returning a lazy thenable must resolve under actor2, not the
-    // outer actor that was set before withActor was called.
+    // The mock's withActor must await fn's return value inside the overridden
+    // scope, matching the real ALS provider's async wrapper semantics. A plain
+    // arrow returning a lazy thenable must resolve under actor2, not the outer
+    // actor that was set before withActor was called.
     it('plain arrow returning a lazy thenable resolves under the overridden actor', async () => {
       const mock = createMockAuditContext();
       const seen: string[] = [];

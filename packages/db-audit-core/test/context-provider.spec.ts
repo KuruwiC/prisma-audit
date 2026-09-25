@@ -332,10 +332,9 @@ describe('createAsyncLocalStorageProvider', () => {
       expect(result).toBe('value');
     });
 
-    // Regression: lazy thenables (e.g. PrismaPromise) only invoke their pipeline
-    // when .then is called. The async wrapper in withActor ensures .then is called
-    // INSIDE the overridden scope, so the actor read at that point is actor2, not
-    // the outer actor.
+    // Lazy thenables (e.g. PrismaPromise) only invoke their pipeline when .then is
+    // called. The async wrapper in withActor ensures .then is called INSIDE the
+    // overridden scope, so the actor read at that point is actor2, not the outer actor.
     it('plain arrow returning a lazy thenable resolves under the overridden actor', async () => {
       const provider = createAsyncLocalStorageProvider();
       const seen: string[] = [];

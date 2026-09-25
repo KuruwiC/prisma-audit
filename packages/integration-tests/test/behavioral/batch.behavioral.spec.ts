@@ -1,7 +1,8 @@
 /**
  * Behavioral Tests: Batch Operations
  *
- * Verifies that createMany produces correct audit logs for each row.
+ * Verifies that createMany, createManyAndReturn, and updateManyAndReturn produce correct
+ * audit logs for each row.
  */
 
 import type { AuditContext } from '@kuruwic/db-audit-core';

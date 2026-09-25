@@ -128,7 +128,7 @@ describe('upsert — before-state fetch failure', () => {
       }),
     );
 
-    // The whole audit entry is skipped, since the branch (create vs. update) can no longer be determined.
+    // The whole audit entry is skipped, since the branch (create vs. update) cannot be determined.
     const logs = await basePrisma.auditLog.findMany({ where: { entityType: 'Post', entityId: post.id } });
     expect(logs).toEqual([]);
   });

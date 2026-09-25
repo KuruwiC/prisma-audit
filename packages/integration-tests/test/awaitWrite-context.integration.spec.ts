@@ -4,8 +4,8 @@
  * Verifies that AsyncLocalStorage context is preserved when awaitWrite: true,
  * ensuring audit logs are correctly written within implicit transactions.
  *
- * This test addresses the bug where context was lost across $transaction boundaries,
- * causing audit logs to be silently skipped.
+ * Context must survive $transaction boundaries; if it were lost, audit logs would be
+ * silently skipped.
  */
 
 import type { AuditContext } from '@kuruwic/db-audit-core';

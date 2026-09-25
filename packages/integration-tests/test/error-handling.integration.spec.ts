@@ -585,9 +585,9 @@ describe('Error Handling Integration', () => {
 
     it('an audit-stage (diff-generation) failure on the batch path still propagates to the caller, regardless of writeFailurePolicy', async () => {
       // `diff-generation` is never policy-gated, unlike `log-write` (see
-      // `AuditErrorPhase` / `WriteFailurePolicy` in types.ts): it propagates to the
-      // caller even under `writeFailurePolicy: 'ignore'`, and the policy function is
-      // never consulted. Trigger a genuine diff-generation failure — an
+      // `AuditErrorPhase` / `WriteFailurePolicy` in the audit extension's types.ts): it
+      // propagates to the caller even under `writeFailurePolicy: 'ignore'`, and the policy
+      // function is never consulted. Trigger a genuine diff-generation failure — an
       // actor-context enricher that throws, `onError: 'fail'` by default — rather
       // than a log-write failure or the caller's own database error.
       const ENRICHER_FAILURE_MESSAGE = 'actor enricher is broken';

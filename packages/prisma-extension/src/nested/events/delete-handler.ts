@@ -36,9 +36,8 @@ export type UnresolvedDeleteEntityIdReporter = (info: UnresolvedDeleteEntityId) 
 
 /**
  * Notify `onUnresolvedDeleteEntityId` (if provided) that an entityId could not be
- * resolved. Awaited by every caller rather than fired-and-forgotten, so the reporter
- * (which in practice forwards to the async error-handling observer) is never lost in a
- * short-lived runtime.
+ * resolved. Awaited by every caller, so the reporter (which in practice forwards to the
+ * async error-handling observer) is never lost in a short-lived runtime.
  */
 const reportUnresolvedEntityId = async (
   relatedModel: string,

@@ -3,7 +3,7 @@
  *
  * Decides, before the caller's operation executes, whether its audit rows are written inside
  * the same transaction as the operation. An atomic policy opens an implicit transaction when
- * none is active, so it has to be known before execution rather than derived afterwards.
+ * none is active, so it has to be known before execution.
  */
 
 export interface PolicyConfig {

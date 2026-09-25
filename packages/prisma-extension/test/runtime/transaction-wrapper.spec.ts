@@ -260,8 +260,8 @@ describe('withOptionalTransaction', () => {
 
   describe('deferred-write draining', () => {
     it('drains a deferred write enqueued by operationFn after the wrapper resolves (after commit)', async () => {
-      // Edge case the wrapper previously dropped: a nested deferred strategy enqueues onto the
-      // runtime queue inside the implicit transaction, and the wrapper must drain it post-commit.
+      // A nested deferred strategy enqueues onto the runtime queue inside the implicit
+      // transaction, and the wrapper must drain it post-commit.
       const provider = {
         runAsync: vi.fn(<T>(_ctx: AuditContext, fn: () => Promise<T>): Promise<T> => fn()) as <T>(
           context: AuditContext,
