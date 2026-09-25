@@ -7,7 +7,7 @@
  */
 
 import type { MutationEvent } from '@kuruwic/db-audit-core';
-import { AUDIT_ACTION, DEFAULTS } from '@kuruwic/db-audit-core';
+import { AUDIT_ACTION } from '@kuruwic/db-audit-core';
 import type { PrismaNamespace } from '../internal-types.js';
 import type { SchemaMetadata } from '../schema/types.js';
 import {
@@ -99,7 +99,7 @@ const prepareCreate = (operation: AuditedOperation, schemaMetadata: SchemaMetada
   }
   // Single-object data is normalized to an array so `data: {...}` is logged like `data: [...]`
   const rows = Array.isArray(data) ? (data as Row[]) : [data as Row];
-  return { kind: 'create', rows: ensureIds(schemaMetadata, operation.model, rows, DEFAULTS.ID_FIELD) };
+  return { kind: 'create', rows: ensureIds(schemaMetadata, operation.model, rows) };
 };
 
 /**

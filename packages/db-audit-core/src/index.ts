@@ -10,7 +10,6 @@ export {
   defineEntity,
   foreignKey,
   normalizeId,
-  resolveAggregateId,
   resolveId,
   self,
   to,
@@ -35,7 +34,6 @@ export {
   AUDIT_ACTION,
   BATCH_OPERATIONS,
   BATCH_TO_SINGULAR_ACTION,
-  DEFAULTS,
   SINGLE_OPERATIONS,
   SUPPORTED_OPERATIONS,
   UNRESOLVED_ENTITY_ID,
@@ -86,21 +84,15 @@ export { policy } from './policy/index.js';
 // Resolve
 export type { EntityResolveConfig, ResolveConfig } from './resolve/index.js';
 export { resolve } from './resolve/index.js';
-// State Resolution
-export { applyRelationConfig } from './state-resolution/apply-relation-config.js';
-export { resolveBeforeAndAfterStates } from './state-resolution/index.js';
 // Types
 export type { AuditActor, AuditContext, AuditContextProvider } from './types.js';
 // Utils - Debug
-export { coreLog, nestedLog, preFetchLog } from './utils/debug.js';
-// Utils - Diff Calculator
-export { createDiffCalculator } from './utils/diff-calculator.js';
+export { nestedLog, preFetchLog } from './utils/debug.js';
 // Utils - Error Handler
 export type { ErrorHandler, ErrorStrategy } from './utils/error-handler.js';
 export { createErrorHandler } from './utils/error-handler.js';
 // Utils - Redaction
 export type { RedactConfig } from './utils/redaction.js';
-export { redactSensitiveData } from './utils/redaction.js';
 // Utils - Serialization
 export type { ValueSerializer } from './utils/serialization.js';
-export { serializeForAuditJson, UNHANDLED } from './utils/serialization.js';
+export { UNHANDLED } from './utils/serialization.js';

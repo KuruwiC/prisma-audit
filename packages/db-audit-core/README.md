@@ -53,9 +53,8 @@ dispatch(records, atomic, { inTransaction })   -> WritePlan
 - **Context provider**: `createAsyncLocalStorageProvider()` returns an `AuditContextProvider`
   (`run`, `runAsync`, `getContext`, `withActor`) that carries the actor and request context through
   async calls. `@kuruwic/db-audit-core/testing` exports `createMockAuditContext` for tests.
-- **Utilities**: `redactSensitiveData`, `serializeForAuditJson`, `createDiffCalculator`,
-  `createErrorHandler`, the branded id constructors and guards (`createActorId`, `isEntityId`,
-  `unwrapId`, ...), and `createAuditLogData`.
+- **Utilities**: `createErrorHandler`, the branded id constructors and guards (`createActorId`,
+  `isEntityId`, `unwrapId`, ...), and `createAuditLogData`.
 
 ## Usage
 

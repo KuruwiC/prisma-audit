@@ -71,11 +71,3 @@ export const UNRESOLVED_ENTITY_ID: unique symbol = Symbol('UNRESOLVED_ENTITY_ID'
 
 /** Entity identity of a record: its serialized primary key, or {@link UNRESOLVED_ENTITY_ID} */
 export type EntityIdentityKey = string | typeof UNRESOLVED_ENTITY_ID;
-
-/** Default configuration values for the audit extension */
-export const DEFAULTS = {
-  AUDIT_LOG_MODEL: 'AuditLog',
-  SAMPLING: 1.0,
-  AWAIT_WRITE: false,
-  ID_FIELD: 'id',
-} as const;
