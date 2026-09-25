@@ -68,6 +68,8 @@ dispatch(records, atomic, { inTransaction })   -> WritePlan
   async calls. `@kuruwic/db-audit-core/testing` exports `createMockAuditContext` for tests.
 - **Utilities**: `createErrorHandler`, the branded id constructors and guards (`createActorId`,
   `isEntityId`, `unwrapId`, ...), and `createAuditLogData`.
+- **Debug output**: the core logs through [`debug`](https://www.npmjs.com/package/debug) under the
+  `db-audit-core` namespace (`DEBUG=db-audit-core`).
 
 ## Usage
 
