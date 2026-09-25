@@ -7,8 +7,9 @@
  * @module lifecycle/pre-fetch/parent-rows
  */
 
-import { preFetchLog, type UniqueConstraint } from '@kuruwic/prisma-audit-core';
+import { preFetchLog } from '@kuruwic/prisma-audit-core';
 import type { NestedOperationInfo, NestedPreFetchResults } from '../../grammar/nested-operations.js';
+import type { UniqueConstraint } from '../../schema/types.js';
 import { unwrapCompoundWhere } from '../../utils/compound-where.js';
 import type { PreFetchModelClient, PreFetchRecord } from './model-client.js';
 

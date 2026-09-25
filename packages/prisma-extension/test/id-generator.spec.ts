@@ -9,9 +9,9 @@
  * - uuid(7) -> UUID v7 (48-bit unix-ms timestamp prefix)
  */
 
-import type { SchemaMetadata } from '@kuruwic/prisma-audit-core';
 import { describe, expect, it } from 'vitest';
 import type { DMMFModel } from '../src/internal-types.js';
+import type { SchemaMetadata } from '../src/schema/types.js';
 import {
   ensureIds,
   getIdFieldInfo,

@@ -6,7 +6,7 @@
  * @module lifecycle/pre-fetch/coordinator
  */
 
-import { preFetchLog, UNRESOLVED_ENTITY_ID, type UniqueConstraint } from '@kuruwic/prisma-audit-core';
+import { preFetchLog, UNRESOLVED_ENTITY_ID } from '@kuruwic/prisma-audit-core';
 import {
   detectNestedOperations,
   getPrimaryKeyConstraint,
@@ -25,6 +25,7 @@ import type {
   PrismaNamespace,
   TransactionalPrismaClient,
 } from '../../internal-types.js';
+import type { UniqueConstraint } from '../../schema/types.js';
 import type { AuditErrorObserver } from '../../types.js';
 import { createSchemaMetadataFromDMMF } from '../../utils/schema-metadata.js';
 import { getPreFetchModelClient, type PreFetchModelClient } from './model-client.js';

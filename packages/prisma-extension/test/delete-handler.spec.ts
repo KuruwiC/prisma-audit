@@ -8,10 +8,11 @@
  * it must be skipped and reported instead.
  */
 
-import { UNRESOLVED_ENTITY_ID, type UniqueConstraint } from '@kuruwic/prisma-audit-core';
+import { UNRESOLVED_ENTITY_ID } from '@kuruwic/prisma-audit-core';
 import { describe, expect, it, vi } from 'vitest';
 import type { NestedOperationInfo, NestedPreFetchResults } from '../src/grammar/nested-operations.js';
 import { collectDeleteRecords } from '../src/lifecycle/nested-handlers/delete-handler.js';
+import type { UniqueConstraint } from '../src/schema/types.js';
 
 const nestedOp: NestedOperationInfo = {
   operation: 'delete',

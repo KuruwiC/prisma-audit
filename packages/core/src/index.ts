@@ -85,8 +85,6 @@ export type { ProjectionEnrichmentMeta } from './enrichment/types.js';
 // Exported because @kuruwic/prisma-audit imports it across the package boundary;
 // end users are not meant to call it directly.
 export { getGlobalSingleton } from './global-singleton.js';
-// Interfaces
-export type { DbClient, SchemaMetadata, UniqueConstraint } from './interfaces/index.js';
 // Policy
 export type { PolicyConfig, WritePolicy } from './policy/index.js';
 export { policy } from './policy/index.js';

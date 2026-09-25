@@ -8,8 +8,9 @@
  * @module lifecycle/pre-fetch/one-to-many-fetcher
  */
 
-import { preFetchLog, type UniqueConstraint } from '@kuruwic/prisma-audit-core';
+import { preFetchLog } from '@kuruwic/prisma-audit-core';
 import type { DMMFField, DMMFModel } from '../../internal-types.js';
+import type { UniqueConstraint } from '../../schema/types.js';
 import type { PreFetchModelClient, PreFetchRecord } from './model-client.js';
 import { type ResolveParentRowsInput, resolveParentRows, targetWhereClauses } from './parent-rows.js';
 import { extractEntityId, storePreFetchResult } from './pre-fetch-result-store.js';

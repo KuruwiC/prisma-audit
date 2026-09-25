@@ -39,15 +39,11 @@
  */
 
 import cuidV1 from '@bugsnag/cuid';
-import {
-  type EntityIdentityKey,
-  type SchemaMetadata,
-  UNRESOLVED_ENTITY_ID,
-  type UniqueConstraint,
-} from '@kuruwic/prisma-audit-core';
+import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID } from '@kuruwic/prisma-audit-core';
 import { createId } from '@paralleldrive/cuid2';
 import { v4 as uuidV4, v7 as uuidV7 } from 'uuid';
 import { getPrimaryKeyConstraint } from '../grammar/nested-operations.js';
+import type { SchemaMetadata, UniqueConstraint } from '../schema/types.js';
 import { createSchemaMetadataFromDMMF, type PrismaWithDMMF } from './schema-metadata.js';
 
 /**

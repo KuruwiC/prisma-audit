@@ -6,18 +6,13 @@
  * Enrichment and audit log building are handled by the batch pipeline in audit-log-builder.ts.
  */
 
-import {
-  AUDIT_ACTION,
-  type EntityIdentityKey,
-  nestedLog,
-  UNRESOLVED_ENTITY_ID,
-  type UniqueConstraint,
-} from '@kuruwic/prisma-audit-core';
+import { AUDIT_ACTION, type EntityIdentityKey, nestedLog, UNRESOLVED_ENTITY_ID } from '@kuruwic/prisma-audit-core';
 import {
   deserializeEntityId,
   type NestedOperationInfo,
   type NestedPreFetchResults,
 } from '../../grammar/nested-operations.js';
+import type { UniqueConstraint } from '../../schema/types.js';
 import { extractDeleteOperationEntityId } from '../../utils/extension-utils.js';
 import type { CollectedNestedRecord } from './collected-record.js';
 

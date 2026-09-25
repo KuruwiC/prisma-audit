@@ -8,7 +8,6 @@ import type {
   AggregateConfigService,
   AuditContext,
   RedactConfig,
-  SchemaMetadata,
   SerializationConfig,
 } from '@kuruwic/prisma-audit-core';
 import { batchEnrichEntityContexts, nestedLog, UNRESOLVED_ENTITY_ID } from '@kuruwic/prisma-audit-core';
@@ -31,6 +30,7 @@ import type {
   PrismaNamespace,
   TransactionalPrismaClient,
 } from '../../internal-types.js';
+import type { SchemaMetadata } from '../../schema/types.js';
 import type { AuditLogData } from '../../types.js';
 import { createSchemaMetadataFromDMMF } from '../../utils/schema-metadata.js';
 import {

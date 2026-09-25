@@ -11,8 +11,8 @@
  * @module nested-write-selection
  */
 
-import type { SchemaMetadata } from '@kuruwic/prisma-audit-core';
 import { detectNestedOperations, type NestedOperationKeyword } from '../grammar/nested-operations.js';
+import type { SchemaMetadata } from '../schema/types.js';
 
 /**
  * Nested write keywords whose written rows are audited from the operation result. Deleted rows are

@@ -2,7 +2,7 @@
  * Primary-key derivation and entity-identity helpers of the nested-write grammar
  */
 
-import { type SchemaMetadata, UNRESOLVED_ENTITY_ID, type UniqueConstraint } from '@kuruwic/prisma-audit-core';
+import { UNRESOLVED_ENTITY_ID } from '@kuruwic/prisma-audit-core';
 import { describe, expect, it, vi } from 'vitest';
 import {
   deserializeEntityId,
@@ -11,8 +11,7 @@ import {
   type NestedPreFetchResults,
   refetchNestedRecords,
 } from '../../src/grammar/nested-operations.js';
-
-type FieldMetadata = ReturnType<SchemaMetadata['getAllFields']>[number];
+import type { FieldMetadata, SchemaMetadata, UniqueConstraint } from '../../src/schema/types.js';
 
 const scalarField = (name: string, isId = false): FieldMetadata => ({
   name,

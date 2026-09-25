@@ -10,9 +10,10 @@
  *   → { before: Record | null }
  */
 
-import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID, type UniqueConstraint } from '@kuruwic/prisma-audit-core';
+import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID } from '@kuruwic/prisma-audit-core';
 import type { NestedPreFetchResults } from '../../grammar/nested-operations.js';
 import type { NestedPreFetchResult } from '../../grammar/nested-state.js';
+import type { UniqueConstraint } from '../../schema/types.js';
 import { unwrapCompoundWhere } from '../../utils/compound-where.js';
 import { extractEntityIdentity } from '../../utils/id-generation.js';
 

@@ -7,9 +7,8 @@
  * @module utils/schema-metadata
  */
 
-import type { SchemaMetadata, UniqueConstraint } from '@kuruwic/prisma-audit-core';
-
 import type { DMMFModel } from '../internal-types.js';
+import type { SchemaMetadata, UniqueConstraint } from '../schema/types.js';
 
 /**
  * Minimal DMMF-bearing type for schema metadata creation.

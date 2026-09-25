@@ -1,10 +1,11 @@
 /**
- * Schema Metadata Interfaces
+ * Schema Metadata Types
  *
- * Framework-agnostic interfaces for runtime introspection of database schemas.
- * Enables access to model structure, constraints, and relationships.
+ * The model structure the adapter reads from the Prisma schema at runtime: unique
+ * constraints, relation fields, and scalar fields. `createSchemaMetadataFromDMMF`
+ * builds it from the DMMF.
  *
- * @packageDocumentation
+ * @module schema/types
  */
 
 /**
@@ -43,6 +44,7 @@ export interface RelationField {
   relatedModel: string;
   isList: boolean;
   isRequired: boolean;
+  relationName?: string;
 }
 
 /**

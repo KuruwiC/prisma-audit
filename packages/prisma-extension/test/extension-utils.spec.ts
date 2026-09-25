@@ -10,8 +10,8 @@
  * pre-fetched before-state is available.
  */
 
-import type { UniqueConstraint } from '@kuruwic/prisma-audit-core';
 import { describe, expect, it } from 'vitest';
+import type { UniqueConstraint } from '../src/schema/types.js';
 import { extractDeleteOperationEntityId } from '../src/utils/extension-utils.js';
 
 describe('extractDeleteOperationEntityId', () => {

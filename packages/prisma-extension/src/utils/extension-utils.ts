@@ -12,8 +12,8 @@ import {
   getRuntimeContext,
   SUPPORTED_OPERATIONS,
   UNRESOLVED_ENTITY_ID,
-  type UniqueConstraint,
 } from '@kuruwic/prisma-audit-core';
+import type { UniqueConstraint } from '../schema/types.js';
 import type { PrismaAction } from '../types.js';
 import { unwrapCompoundWhere } from './compound-where.js';
 import { extractEntityIdentity } from './id-generation.js';

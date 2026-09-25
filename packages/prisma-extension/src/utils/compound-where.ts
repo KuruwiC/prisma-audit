@@ -1,10 +1,9 @@
+import type { UniqueConstraint } from '../schema/types.js';
 /**
  * Compound-unique WHERE handling
  *
  * @module utils/compound-where
  */
-
-import type { UniqueConstraint } from '@kuruwic/prisma-audit-core';
 
 /**
  * Unwraps Prisma's compound-unique WHERE wrapper (`{ a_b: { a, b } }`) into the flat

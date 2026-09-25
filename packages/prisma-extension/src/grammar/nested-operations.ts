@@ -10,13 +10,8 @@
  * Supports deep nesting (e.g., `postTags.create.tag.connectOrCreate`).
  */
 
-import {
-  type EntityIdentityKey,
-  nestedLog,
-  type SchemaMetadata,
-  UNRESOLVED_ENTITY_ID,
-  type UniqueConstraint,
-} from '@kuruwic/prisma-audit-core';
+import { type EntityIdentityKey, nestedLog, UNRESOLVED_ENTITY_ID } from '@kuruwic/prisma-audit-core';
+import type { SchemaMetadata, UniqueConstraint } from '../schema/types.js';
 import type { NestedPreFetchResult } from './nested-state.js';
 
 /** Client the refetch reads through: model delegates keyed by uncapitalized model name. */
