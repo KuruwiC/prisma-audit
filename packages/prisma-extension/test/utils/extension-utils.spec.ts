@@ -11,8 +11,8 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import type { UniqueConstraint } from '../src/schema/types.js';
-import { extractDeleteOperationEntityId } from '../src/utils/extension-utils.js';
+import type { UniqueConstraint } from '../../src/schema/types.js';
+import { extractDeleteOperationEntityId } from '../../src/utils/extension-utils.js';
 
 describe('extractDeleteOperationEntityId', () => {
   describe('single-field primary key (unaffected by the compound-unique unwrap)', () => {

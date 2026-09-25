@@ -3,9 +3,9 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import type { NestedPreFetchResults } from '../src/grammar/nested-operations.js';
-import { UNRESOLVED_ENTITY_ID } from '../src/nested/pre-fetch/identity-key.js';
-import { preFetchedRowAt, storePreFetchResult } from '../src/nested/pre-fetch/pre-fetch-result-store.js';
+import type { NestedPreFetchResults } from '../../../src/grammar/nested-operations.js';
+import { UNRESOLVED_ENTITY_ID } from '../../../src/nested/pre-fetch/identity-key.js';
+import { preFetchedRowAt, storePreFetchResult } from '../../../src/nested/pre-fetch/pre-fetch-result-store.js';
 
 describe('preFetchedRowAt', () => {
   const results = (): NestedPreFetchResults => {

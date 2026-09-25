@@ -3,8 +3,8 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { injectNestedWriteSelection, projectToRequestedShape } from '../src/utils/nested-write-selection.js';
-import { createSchemaMetadataFromDMMF } from '../src/utils/schema-metadata.js';
+import { injectNestedWriteSelection, projectToRequestedShape } from '../../src/utils/nested-write-selection.js';
+import { createSchemaMetadataFromDMMF } from '../../src/utils/schema-metadata.js';
 
 type Selection = Record<string, unknown>;
 

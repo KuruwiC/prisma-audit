@@ -9,10 +9,10 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import type { NestedOperationInfo, NestedPreFetchResults } from '../src/grammar/nested-operations.js';
-import { collectDeleteManyRecords, collectDeleteRecords } from '../src/nested/events/delete-handler.js';
-import { UNRESOLVED_ENTITY_ID } from '../src/nested/pre-fetch/identity-key.js';
-import type { UniqueConstraint } from '../src/schema/types.js';
+import type { NestedOperationInfo, NestedPreFetchResults } from '../../../src/grammar/nested-operations.js';
+import { collectDeleteManyRecords, collectDeleteRecords } from '../../../src/nested/events/delete-handler.js';
+import { UNRESOLVED_ENTITY_ID } from '../../../src/nested/pre-fetch/identity-key.js';
+import type { UniqueConstraint } from '../../../src/schema/types.js';
 
 const nestedOp: NestedOperationInfo = {
   operation: 'delete',

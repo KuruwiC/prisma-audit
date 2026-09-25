@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { matchesUniqueWhere } from '../src/utils/compound-where.js';
+import { matchesUniqueWhere } from '../../src/utils/compound-where.js';
 
 describe('matchesUniqueWhere', () => {
   const row = { id: 'p1', slug: 'hello', authorId: 'u1', postId: 'p1', userId: 'u1', publishedAt: new Date(0) };

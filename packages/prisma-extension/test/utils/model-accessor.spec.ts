@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getModelAccessor } from '../src/utils/model-accessor.js';
+import { getModelAccessor } from '../../src/utils/model-accessor.js';
 
 describe('getModelAccessor', () => {
   it('should return correct accessor for User model (without DMMF)', () => {

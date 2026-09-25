@@ -4,13 +4,13 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import type { GetOperationConfig } from '../src/grammar/pre-fetch-selection.js';
-import type { DMMFField, PrismaNamespace, TransactionalPrismaClient } from '../src/internal-types.js';
-import { preFetchNestedRecordsBeforeOperation } from '../src/nested/pre-fetch/coordinator.js';
-import { UNRESOLVED_ENTITY_ID } from '../src/nested/pre-fetch/identity-key.js';
-import { preFetchOneToManyRelation } from '../src/nested/pre-fetch/one-to-many-fetcher.js';
-import { parentKeysFromOperationWheres } from '../src/nested/pre-fetch/parent-rows.js';
-import { createSchemaMetadataFromDMMF } from '../src/utils/schema-metadata.js';
+import type { GetOperationConfig } from '../../../src/grammar/pre-fetch-selection.js';
+import type { DMMFField, PrismaNamespace, TransactionalPrismaClient } from '../../../src/internal-types.js';
+import { preFetchNestedRecordsBeforeOperation } from '../../../src/nested/pre-fetch/coordinator.js';
+import { UNRESOLVED_ENTITY_ID } from '../../../src/nested/pre-fetch/identity-key.js';
+import { preFetchOneToManyRelation } from '../../../src/nested/pre-fetch/one-to-many-fetcher.js';
+import { parentKeysFromOperationWheres } from '../../../src/nested/pre-fetch/parent-rows.js';
+import { createSchemaMetadataFromDMMF } from '../../../src/utils/schema-metadata.js';
 
 type Row = Record<string, unknown>;
 

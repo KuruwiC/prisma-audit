@@ -9,8 +9,8 @@ import {
   extractNestedRecords,
   type NestedDetectionPass,
   type UpsertBranch,
-} from '../src/grammar/nested-operations.js';
-import { createSchemaMetadataFromDMMF } from '../src/utils/schema-metadata.js';
+} from '../../src/grammar/nested-operations.js';
+import { createSchemaMetadataFromDMMF } from '../../src/utils/schema-metadata.js';
 
 describe('getRelationFields', () => {
   it('should return empty array if Prisma.dmmf is not available', () => {

@@ -4,9 +4,9 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import type { DMMFField, PrismaNamespace, TransactionalPrismaClient } from '../src/internal-types.js';
-import { preFetchNestedRecordsBeforeOperation } from '../src/nested/pre-fetch/coordinator.js';
-import { createSchemaMetadataFromDMMF } from '../src/utils/schema-metadata.js';
+import type { DMMFField, PrismaNamespace, TransactionalPrismaClient } from '../../../src/internal-types.js';
+import { preFetchNestedRecordsBeforeOperation } from '../../../src/nested/pre-fetch/coordinator.js';
+import { createSchemaMetadataFromDMMF } from '../../../src/utils/schema-metadata.js';
 
 type Row = Record<string, unknown>;
 

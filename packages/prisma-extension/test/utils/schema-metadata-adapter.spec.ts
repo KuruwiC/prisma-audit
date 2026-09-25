@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import type { DMMFModel } from '../src/internal-types.js';
-import { createSchemaMetadataFromDMMF, getUniqueConstraints } from '../src/utils/schema-metadata.js';
+import type { DMMFModel } from '../../src/internal-types.js';
+import { createSchemaMetadataFromDMMF, getUniqueConstraints } from '../../src/utils/schema-metadata.js';
 
 const createPrismaWithModel = (model: Partial<DMMFModel> & { name: string; fields: DMMFModel['fields'] }) => ({
   dmmf: { datamodel: { models: [model] as DMMFModel[] } },

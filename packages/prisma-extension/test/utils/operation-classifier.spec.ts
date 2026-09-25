@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isBatchOperation, requiresBeforeState } from '../src/utils/operation-classifier.js';
+import { isBatchOperation, requiresBeforeState } from '../../src/utils/operation-classifier.js';
 
 describe('operation-classifier', () => {
   describe('isBatchOperation', () => {
