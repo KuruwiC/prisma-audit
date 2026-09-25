@@ -33,7 +33,7 @@ export interface RuntimeScope {
 type ContextRunner = Pick<AuditContextProvider, 'runAsync'>;
 
 /** Process-wide, so that every copy of this package loaded in the process shares one scope */
-const storage = getGlobalSingleton('runtime-context-storage', () => new AsyncLocalStorage<RuntimeScope>());
+const storage = getGlobalSingleton('runtime-scope', () => new AsyncLocalStorage<RuntimeScope>());
 
 /** The scope of the current async flow, or undefined outside any */
 export const currentScope = (): RuntimeScope | undefined => storage.getStore();

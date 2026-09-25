@@ -9,10 +9,7 @@
 import { getGlobalSingleton } from '@kuruwic/db-audit-core';
 
 /** Process-wide, so that every copy of this package loaded in the process tracks one set */
-const pendingWrites: Set<Promise<void>> = getGlobalSingleton(
-  'transaction-proxy-pending-deferred-writes',
-  () => new Set<Promise<void>>(),
-);
+const pendingWrites: Set<Promise<void>> = getGlobalSingleton('pending-writes', () => new Set<Promise<void>>());
 
 /**
  * Starts `write` and keeps it in the registry until it settles. The write reports its own
