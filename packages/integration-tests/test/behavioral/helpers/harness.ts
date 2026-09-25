@@ -5,7 +5,7 @@
  * by swapping only the harness implementation.
  */
 
-import type { AuditContext } from '@kuruwic/prisma-audit-core';
+import type { AuditContext } from '@kuruwic/db-audit-core';
 
 /** Filter for querying audit logs */
 export interface AuditLogFilter {

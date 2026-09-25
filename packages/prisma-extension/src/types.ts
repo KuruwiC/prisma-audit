@@ -16,19 +16,19 @@ import type {
   WriteFn as CoreWriteFn,
   ErrorStrategy,
   GlobalContextEnricherConfig,
-} from '@kuruwic/prisma-audit-core';
+} from '@kuruwic/db-audit-core';
 
 /**
  * Audit log data structure with type-safe branded identifiers
  *
- * Re-exported from @kuruwic/prisma-audit-core
+ * Re-exported from @kuruwic/db-audit-core
  */
 export type AuditLogData = CoreAuditLogData;
 
 /**
  * Input for creating audit log data with plain string identifiers
  *
- * Re-exported from @kuruwic/prisma-audit-core
+ * Re-exported from @kuruwic/db-audit-core
  */
 export type AuditLogInput = CoreAuditLogInput;
 
@@ -54,7 +54,7 @@ export interface DiffingConfig {
  */
 export interface SecurityConfig {
   /** Redaction configuration for sensitive fields */
-  redact?: import('@kuruwic/prisma-audit-core').RedactConfig;
+  redact?: import('@kuruwic/db-audit-core').RedactConfig;
 }
 
 /**
@@ -251,7 +251,7 @@ export interface PrismaAuditExtensionOptions<TModelName extends string = string,
   /** Audit-failure observation and policy. See {@link ErrorHandlingConfig}. */
   errorHandling?: ErrorHandlingConfig;
   /** Custom serialization for non-JSON-safe types (BigInt, Date are handled by default) */
-  serialization?: import('@kuruwic/prisma-audit-core').SerializationConfig;
+  serialization?: import('@kuruwic/db-audit-core').SerializationConfig;
 }
 
 /**
@@ -266,6 +266,6 @@ export interface OperationContext {
 /**
  * Function type for custom audit log writers
  *
- * Re-exported from @kuruwic/prisma-audit-core
+ * Re-exported from @kuruwic/db-audit-core
  */
 export type WriteFn = CoreWriteFn;

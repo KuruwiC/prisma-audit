@@ -2,8 +2,8 @@
  * Event fields shared by the single-operation and batch collectors
  */
 
-import type { AuditAction, MutationAction } from '@kuruwic/prisma-audit-core';
-import { AUDIT_ACTION, UNRESOLVED_ENTITY_ID } from '@kuruwic/prisma-audit-core';
+import type { AuditAction, MutationAction } from '@kuruwic/db-audit-core';
+import { AUDIT_ACTION, UNRESOLVED_ENTITY_ID } from '@kuruwic/db-audit-core';
 import { extractEntityIdentity } from '../utils/id-generation.js';
 
 type Row = Record<string, unknown>;

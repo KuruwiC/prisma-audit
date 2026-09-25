@@ -8,7 +8,7 @@ export type { ErrorStrategy } from './utils/error-handler.js';
  *
  * @example
  * ```typescript
- * import { UNHANDLED } from '@kuruwic/prisma-audit-core';
+ * import { UNHANDLED } from '@kuruwic/db-audit-core';
  *
  * const config: SerializationConfig = {
  *   customSerializers: [

@@ -7,7 +7,7 @@
  * @module lifecycle/pre-fetch/parent-rows
  */
 
-import { preFetchLog } from '@kuruwic/prisma-audit-core';
+import { preFetchLog } from '@kuruwic/db-audit-core';
 import {
   type NestedOperationInfo,
   type NestedPreFetchResults,

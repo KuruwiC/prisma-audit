@@ -3,7 +3,7 @@
  * the filter of a batch keyword are scoped to the parent rows through the back-relation filter.
  */
 
-import { UNRESOLVED_ENTITY_ID } from '@kuruwic/prisma-audit-core';
+import { UNRESOLVED_ENTITY_ID } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
 import type { GetOperationConfig } from '../src/grammar/pre-fetch-selection.js';
 import type { DMMFField, PrismaNamespace, TransactionalPrismaClient } from '../src/internal-types.js';

@@ -41,7 +41,7 @@ export type PrismaClientLike = {
  * @example Basic configuration
  * ```typescript
  * import { createAuditClient, defineEntity, foreignKey, to } from '@kuruwic/prisma-audit';
- * import { createAsyncLocalStorageProvider } from '@kuruwic/prisma-audit-core';
+ * import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
  * import { Prisma, PrismaClient } from '@prisma/client';
  *
  * const auditProvider = createAsyncLocalStorageProvider();
@@ -139,7 +139,7 @@ export type PrismaClientWithAudit<T extends PrismaClientLike = PrismaClientLike>
  *   type PrismaModelNames,
  *   to,
  * } from '@kuruwic/prisma-audit';
- * import { createAsyncLocalStorageProvider } from '@kuruwic/prisma-audit-core';
+ * import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
  * import { type Post, Prisma, type PrismaClient } from '@prisma/client';
  *
  * export default defineConfig<PrismaClient>({

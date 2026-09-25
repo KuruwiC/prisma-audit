@@ -7,7 +7,7 @@
  * @module utils/operation-classifier
  */
 
-import { AUDIT_ACTION, type AuditAction, BATCH_OPERATIONS } from '@kuruwic/prisma-audit-core';
+import { AUDIT_ACTION, type AuditAction, BATCH_OPERATIONS } from '@kuruwic/db-audit-core';
 
 /**
  * Checks if an operation is a batch operation

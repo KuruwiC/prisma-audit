@@ -32,12 +32,12 @@ importers:
       '@hono/node-server':
         specifier: ^1.13.7
         version: 1.19.6(hono@4.10.5)
+      '@kuruwic/db-audit-core':
+        specifier: workspace:*
+        version: link:../../packages/db-audit-core
       '@kuruwic/prisma-audit':
         specifier: workspace:*
         version: link:../../packages/prisma-extension
-      '@kuruwic/prisma-audit-core':
-        specifier: workspace:*
-        version: link:../../packages/core
       '@kuruwic/prisma-audit-database':
         specifier: workspace:*
         version: link:../../packages/database
@@ -143,7 +143,26 @@ importers:
         specifier: ^7.2.2
         version: 7.2.2(@types/node@24.10.1)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.20.6)(yaml@2.9.0)
 
-  packages/core:
+  packages/database:
+    dependencies:
+      '@prisma/client':
+        specifier: ^6.19.0
+        version: 6.19.0(prisma@6.19.0(typescript@5.9.3))(typescript@5.9.3)
+    devDependencies:
+      '@kuruwic/prisma-audit-typescript-config':
+        specifier: workspace:*
+        version: link:../typescript-config
+      prisma:
+        specifier: ^6.19.0
+        version: 6.19.0(typescript@5.9.3)
+      tsup:
+        specifier: ^8.5.0
+        version: 8.5.1(jiti@2.6.1)(postcss@8.5.6)(tsx@4.20.6)(typescript@5.9.3)(yaml@2.9.0)
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  packages/db-audit-core:
     dependencies:
       debug:
         specifier: ^4.4.0
@@ -171,33 +190,14 @@ importers:
         specifier: ^4.0.8
         version: 4.0.8(@types/debug@4.1.12)(@types/node@24.10.1)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.20.6)(yaml@2.9.0)
 
-  packages/database:
-    dependencies:
-      '@prisma/client':
-        specifier: ^6.19.0
-        version: 6.19.0(prisma@6.19.0(typescript@5.9.3))(typescript@5.9.3)
-    devDependencies:
-      '@kuruwic/prisma-audit-typescript-config':
-        specifier: workspace:*
-        version: link:../typescript-config
-      prisma:
-        specifier: ^6.19.0
-        version: 6.19.0(typescript@5.9.3)
-      tsup:
-        specifier: ^8.5.0
-        version: 8.5.1(jiti@2.6.1)(postcss@8.5.6)(tsx@4.20.6)(typescript@5.9.3)(yaml@2.9.0)
-      typescript:
-        specifier: ^5.9.3
-        version: 5.9.3
-
   packages/integration-tests:
     devDependencies:
+      '@kuruwic/db-audit-core':
+        specifier: workspace:*
+        version: link:../db-audit-core
       '@kuruwic/prisma-audit':
         specifier: workspace:*
         version: link:../prisma-extension
-      '@kuruwic/prisma-audit-core':
-        specifier: workspace:*
-        version: link:../core
       '@kuruwic/prisma-audit-database':
         specifier: workspace:*
         version: link:../database
@@ -234,9 +234,9 @@ importers:
       '@bugsnag/cuid':
         specifier: ^3.2.2
         version: 3.2.2
-      '@kuruwic/prisma-audit-core':
+      '@kuruwic/db-audit-core':
         specifier: workspace:^
-        version: link:../core
+        version: link:../db-audit-core
       '@paralleldrive/cuid2':
         specifier: ^3.0.4
         version: 3.0.4

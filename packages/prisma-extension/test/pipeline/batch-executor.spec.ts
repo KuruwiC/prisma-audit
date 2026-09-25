@@ -4,7 +4,7 @@
  * written rows with their before rows, and each action's return-value contract.
  */
 
-import type { AuditContext } from '@kuruwic/prisma-audit-core';
+import type { AuditContext } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
 import type { DMMFField, PrismaClientWithDynamicAccess, PrismaNamespace } from '../../src/internal-types.js';
 import { createBatchExecutor } from '../../src/pipeline/batch-executor.js';

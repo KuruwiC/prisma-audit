@@ -6,8 +6,8 @@
  * {@link WriteFailurePolicy}'s "only `log-write` is policy-gated" contract true.
  */
 
-import type { ErrorStrategy } from '@kuruwic/prisma-audit-core';
-import { createErrorHandler } from '@kuruwic/prisma-audit-core';
+import type { ErrorStrategy } from '@kuruwic/db-audit-core';
+import { createErrorHandler } from '@kuruwic/db-audit-core';
 import type { AuditErrorContext, AuditErrorObserver, WriteFailurePolicy } from './types.js';
 
 export interface FailureSink {

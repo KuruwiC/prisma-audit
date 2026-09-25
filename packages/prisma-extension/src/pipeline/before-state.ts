@@ -6,8 +6,8 @@
  * `fetchBeforeOperation` is configured; never for a create.
  */
 
-import type { AuditAction } from '@kuruwic/prisma-audit-core';
-import { AUDIT_ACTION } from '@kuruwic/prisma-audit-core';
+import type { AuditAction } from '@kuruwic/db-audit-core';
+import { AUDIT_ACTION } from '@kuruwic/db-audit-core';
 import type { UpsertBranch } from '../grammar/nested-operations.js';
 import type { GetOperationConfig } from '../grammar/pre-fetch-selection.js';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../internal-types.js';

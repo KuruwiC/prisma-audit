@@ -22,7 +22,7 @@ export interface MockContextController {
  *
  * @example
  * ```typescript
- * import { createMockAuditContext } from '@kuruwic/prisma-audit-core/testing';
+ * import { createMockAuditContext } from '@kuruwic/db-audit-core/testing';
  *
  * describe('MyService', () => {
  *   const mock = createMockAuditContext();

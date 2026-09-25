@@ -7,7 +7,7 @@
  * @module config/helpers
  */
 
-import type { AggregateConfigService } from '@kuruwic/prisma-audit-core';
+import type { AggregateConfigService } from '@kuruwic/db-audit-core';
 import type { NestedOperationsConfig } from '../types.js';
 
 /**

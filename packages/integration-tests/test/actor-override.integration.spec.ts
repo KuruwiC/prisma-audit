@@ -18,7 +18,7 @@
  *      (awaitWrite: true) are visible after commit
  */
 
-import type { AuditContext } from '@kuruwic/prisma-audit-core';
+import type { AuditContext } from '@kuruwic/db-audit-core';
 import type { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { cleanDatabase, createTestContext, disposeTestContext, type TestContext } from './helpers/setup.js';

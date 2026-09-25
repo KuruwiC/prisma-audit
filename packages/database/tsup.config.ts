@@ -9,5 +9,5 @@ export default defineConfig({
   sourcemap: true,
   treeshake: true,
   noExternal: [],
-  external: ['@prisma/client', '@kuruwic/prisma-audit-core', /^\.\.\/generated\/client/],
+  external: ['@prisma/client', '@kuruwic/db-audit-core', /^\.\.\/generated\/client/],
 });

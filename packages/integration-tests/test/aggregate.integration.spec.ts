@@ -1,4 +1,4 @@
-import type { AuditContext } from '@kuruwic/prisma-audit-core';
+import type { AuditContext } from '@kuruwic/db-audit-core';
 import { describe, expect, it } from 'vitest';
 import { setupTestLifecycle } from './helpers/setup.js';
 

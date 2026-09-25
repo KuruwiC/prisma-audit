@@ -15,7 +15,7 @@
   "dependencies": {
     "@hono/node-server": "^1.13.7",
     "@kuruwic/prisma-audit": "workspace:*",
-    "@kuruwic/prisma-audit-core": "workspace:*",
+    "@kuruwic/db-audit-core": "workspace:*",
     "@kuruwic/prisma-audit-database": "workspace:*",
     "hono": "^4.6.0"
   },

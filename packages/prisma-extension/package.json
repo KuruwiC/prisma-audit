@@ -57,7 +57,7 @@
   },
   "dependencies": {
     "@bugsnag/cuid": "^3.2.2",
-    "@kuruwic/prisma-audit-core": "workspace:^",
+    "@kuruwic/db-audit-core": "workspace:^",
     "@paralleldrive/cuid2": "^3.0.4",
     "debug": "^4.4.0",
     "uuid": "^11.1.1"

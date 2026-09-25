@@ -8,7 +8,7 @@
  * the top-level row and the nested rows the operation wrote.
  */
 
-import type { MutationEvent } from '@kuruwic/prisma-audit-core';
+import type { MutationEvent } from '@kuruwic/db-audit-core';
 import type { FailureSink } from '../failure-sink.js';
 import type { NestedOperationInfo, NestedPreFetchResults } from '../grammar/nested-operations.js';
 import type { GetOperationConfig } from '../grammar/pre-fetch-selection.js';

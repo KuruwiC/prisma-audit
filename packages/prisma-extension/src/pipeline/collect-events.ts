@@ -12,8 +12,8 @@
  * nested delete without a before-state) without either reaching the audit row.
  */
 
-import type { AuditAction, MutationAction, MutationEvent } from '@kuruwic/prisma-audit-core';
-import { AUDIT_ACTION, BATCH_TO_SINGULAR_ACTION } from '@kuruwic/prisma-audit-core';
+import type { AuditAction, MutationAction, MutationEvent } from '@kuruwic/db-audit-core';
+import { AUDIT_ACTION, BATCH_TO_SINGULAR_ACTION } from '@kuruwic/db-audit-core';
 import {
   getPrimaryKeyConstraint,
   type NestedOperationInfo,

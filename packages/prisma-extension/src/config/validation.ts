@@ -7,7 +7,7 @@
  * @module config/validation
  */
 
-import type { AggregateMapping } from '@kuruwic/prisma-audit-core';
+import type { AggregateMapping } from '@kuruwic/db-audit-core';
 import type { SecurityConfig } from '../types.js';
 
 /**

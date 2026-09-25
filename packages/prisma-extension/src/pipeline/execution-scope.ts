@@ -6,7 +6,7 @@
  * is atomic and no transaction is active, the scope opens an implicit one around the operation.
  */
 
-import type { AuditContext, AuditContextProvider } from '@kuruwic/prisma-audit-core';
+import type { AuditContext, AuditContextProvider } from '@kuruwic/db-audit-core';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../internal-types.js';
 import { withOptionalTransaction } from '../lifecycle/transaction-wrapper.js';
 import { currentScope } from '../runtime/scope.js';

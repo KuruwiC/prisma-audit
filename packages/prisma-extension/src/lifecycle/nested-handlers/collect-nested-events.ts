@@ -16,8 +16,8 @@
  * that parent.
  */
 
-import type { EntityIdentityKey, MutationEvent } from '@kuruwic/prisma-audit-core';
-import { nestedLog } from '@kuruwic/prisma-audit-core';
+import type { EntityIdentityKey, MutationEvent } from '@kuruwic/db-audit-core';
+import { nestedLog } from '@kuruwic/db-audit-core';
 
 import {
   extractNestedRecords,

@@ -6,7 +6,7 @@
  * @module lifecycle/pre-fetch/coordinator
  */
 
-import { type EntityIdentityKey, preFetchLog, UNRESOLVED_ENTITY_ID } from '@kuruwic/prisma-audit-core';
+import { type EntityIdentityKey, preFetchLog, UNRESOLVED_ENTITY_ID } from '@kuruwic/db-audit-core';
 import {
   detectNestedOperations,
   getPrimaryKeyConstraint,

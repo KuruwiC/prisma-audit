@@ -7,7 +7,7 @@
  * collected events to the record producer.
  */
 
-import type { AuditAction, MutationEvent } from '@kuruwic/prisma-audit-core';
+import type { AuditAction, MutationEvent } from '@kuruwic/db-audit-core';
 import type { AuditLogData } from '../types.js';
 import type { ExecutionScope } from './execution-scope.js';
 import type { RecordProducer } from './produce-records.js';

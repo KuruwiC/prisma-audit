@@ -4,7 +4,7 @@
  * Verifies that createMany produces correct audit logs for each row.
  */
 
-import type { AuditContext } from '@kuruwic/prisma-audit-core';
+import type { AuditContext } from '@kuruwic/db-audit-core';
 import { describe, expect, it } from 'vitest';
 import { setupBehavioralTests } from './helpers/setup.js';
 

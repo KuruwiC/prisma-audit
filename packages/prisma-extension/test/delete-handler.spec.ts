@@ -8,7 +8,7 @@
  * it must be skipped and reported instead.
  */
 
-import { UNRESOLVED_ENTITY_ID } from '@kuruwic/prisma-audit-core';
+import { UNRESOLVED_ENTITY_ID } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
 import type { NestedOperationInfo, NestedPreFetchResults } from '../src/grammar/nested-operations.js';
 import { collectDeleteManyRecords, collectDeleteRecords } from '../src/lifecycle/nested-handlers/delete-handler.js';

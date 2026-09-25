@@ -5,7 +5,7 @@
  * Handles transaction wrapping when necessary while avoiding double-wrapping.
  */
 
-import type { AuditContext } from '@kuruwic/prisma-audit-core';
+import type { AuditContext } from '@kuruwic/db-audit-core';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../internal-types.js';
 import { currentScope, openImplicitTransaction } from '../runtime/scope.js';
 

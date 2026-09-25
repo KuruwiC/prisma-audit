@@ -13,7 +13,7 @@
  * {@link WriteFailurePolicy}).
  */
 
-import type { AuditLogData, WriteExecutor, WriteFn, WritePlan } from '@kuruwic/prisma-audit-core';
+import type { AuditLogData, WriteExecutor, WriteFn, WritePlan } from '@kuruwic/db-audit-core';
 import type { FailureSink } from '../failure-sink.js';
 import { trackPendingWrite } from '../runtime/pending-writes.js';
 import type { ExecutionScope } from './execution-scope.js';

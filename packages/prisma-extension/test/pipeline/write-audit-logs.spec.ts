@@ -4,8 +4,8 @@
  * the failure sink under the log-write phase.
  */
 
-import type { AuditContext, WriteExecutor, WritePlan } from '@kuruwic/prisma-audit-core';
-import { createActorId, createAggregateId, createEntityId } from '@kuruwic/prisma-audit-core';
+import type { AuditContext, WriteExecutor, WritePlan } from '@kuruwic/db-audit-core';
+import { createActorId, createAggregateId, createEntityId } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
 import type { FailureSink } from '../../src/failure-sink.js';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../src/internal-types.js';

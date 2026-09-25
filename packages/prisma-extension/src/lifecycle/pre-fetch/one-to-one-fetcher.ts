@@ -8,7 +8,7 @@
  * @module lifecycle/pre-fetch/one-to-one-fetcher
  */
 
-import { type EntityIdentityKey, preFetchLog } from '@kuruwic/prisma-audit-core';
+import { type EntityIdentityKey, preFetchLog } from '@kuruwic/db-audit-core';
 import type { DMMFField, DMMFModel } from '../../internal-types.js';
 import type { PreFetchModelClient, PreFetchRecord } from './model-client.js';
 import { type ResolveParentRowsInput, resolveParentRows } from './parent-rows.js';

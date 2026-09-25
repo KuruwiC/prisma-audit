@@ -1,7 +1,7 @@
+import type { AuditContextProvider } from '@kuruwic/db-audit-core';
+import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import type { AggregateMapping } from '@kuruwic/prisma-audit';
 import { createAuditClient, defineEntity, foreignKey, to } from '@kuruwic/prisma-audit';
-import type { AuditContextProvider } from '@kuruwic/prisma-audit-core';
-import { createAsyncLocalStorageProvider } from '@kuruwic/prisma-audit-core';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, beforeAll, beforeEach, inject } from 'vitest';
 

@@ -5,8 +5,8 @@
  * Drizzle version would replace this file with a Drizzle-based implementation.
  */
 
+import type { AuditContext, AuditContextProvider } from '@kuruwic/db-audit-core';
 import type { createAuditClient } from '@kuruwic/prisma-audit';
-import type { AuditContext, AuditContextProvider } from '@kuruwic/prisma-audit-core';
 import type { PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import type { AuditLogFilter, AuditLogRecord, AuditTestHarness } from './harness.js';
 

@@ -18,7 +18,7 @@
   },
   "devDependencies": {
     "@kuruwic/prisma-audit": "workspace:*",
-    "@kuruwic/prisma-audit-core": "workspace:*",
+    "@kuruwic/db-audit-core": "workspace:*",
     "@kuruwic/prisma-audit-database": "workspace:*",
     "@kuruwic/prisma-audit-typescript-config": "workspace:*",
     "@prisma/client": "^6.19.0",

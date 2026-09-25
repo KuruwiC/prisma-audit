@@ -1,9 +1,9 @@
 import { execSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { AuditContextProvider } from '@kuruwic/db-audit-core';
+import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { createAuditClient } from '@kuruwic/prisma-audit';
-import type { AuditContextProvider } from '@kuruwic/prisma-audit-core';
-import { createAsyncLocalStorageProvider } from '@kuruwic/prisma-audit-core';
 import { MySqlContainer, type StartedMySqlContainer } from '@testcontainers/mysql';
 import { Prisma, PrismaClient } from '../../generated/mysql-client/index.js';
 import { testAggregateMapping } from './setup.js';

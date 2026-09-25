@@ -1,5 +1,5 @@
-import type { AggregateMapping } from '@kuruwic/prisma-audit-core';
-import { createAggregateConfig, defineEntity, foreignKey, to } from '@kuruwic/prisma-audit-core';
+import type { AggregateMapping } from '@kuruwic/db-audit-core';
+import { createAggregateConfig, defineEntity, foreignKey, to } from '@kuruwic/db-audit-core';
 import { describe, expect, it } from 'vitest';
 
 describe('createAggregateConfig', () => {

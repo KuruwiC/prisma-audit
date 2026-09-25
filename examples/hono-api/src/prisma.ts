@@ -2,8 +2,8 @@
  * Prisma Client with Audit Extension for Hono API Example
  */
 
+import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAuditClient } from '@kuruwic/prisma-audit';
-import type { AuditContext } from '@kuruwic/prisma-audit-core';
 import { getBasePrisma } from '@kuruwic/prisma-audit-database';
 import auditConfig, { auditProvider } from './audit.config.js';
 

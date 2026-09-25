@@ -2,7 +2,7 @@
  * Transaction Wrapper Tests
  */
 
-import type { AuditContext } from '@kuruwic/prisma-audit-core';
+import type { AuditContext } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../src/internal-types.js';
 import { withOptionalTransaction } from '../src/lifecycle/transaction-wrapper.js';

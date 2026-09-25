@@ -28,7 +28,7 @@ import {
   to,
   foreignKey,
 } from '@kuruwic/prisma-audit';
-import { createAsyncLocalStorageProvider } from '@kuruwic/prisma-audit-core';
+import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { Prisma, PrismaClient } from '@prisma/client';
 
 export const auditProvider = createAsyncLocalStorageProvider();
@@ -420,7 +420,7 @@ import {
   foreignKey,
   createEntityNormalizedWriter,
 } from '@kuruwic/prisma-audit';
-import { createAsyncLocalStorageProvider } from '@kuruwic/prisma-audit-core';
+import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { basePrisma } from './client.js';
 
@@ -571,7 +571,7 @@ import {
   foreignKey,
   createSharedChangeWriter,
 } from '@kuruwic/prisma-audit';
-import { createAsyncLocalStorageProvider } from '@kuruwic/prisma-audit-core';
+import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { basePrisma } from './client.js';
 
@@ -911,7 +911,7 @@ Select Strategy:
 └─ Fire-and-Forget (if no transaction scope && shouldAwaitWrite(modelName) === false)
 ```
 
-**Source Files** (in `@kuruwic/prisma-audit-core`):
+**Source Files** (in `@kuruwic/db-audit-core`):
 - `write-strategies/types.ts` - Core type definitions (`WriteStrategyConfig.shouldAwaitWrite(modelName)`)
 - `write-strategies/factory.ts` - Strategy selector factory
 - `write-strategies/synchronous.ts` - Synchronous strategy
@@ -1234,7 +1234,7 @@ import {
   to,
   foreignKey,
 } from '@kuruwic/prisma-audit';
-import { createAsyncLocalStorageProvider } from '@kuruwic/prisma-audit-core';
+import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { Prisma, type PrismaClient } from '@prisma/client';
 
 export const auditProvider = createAsyncLocalStorageProvider();
@@ -1607,8 +1607,8 @@ if (result.success) {
 - [lifecycle/pipeline.ts](./src/lifecycle/pipeline.ts) - Pipeline execution engine
 - [lifecycle/stages.ts](./src/lifecycle/stages.ts) - Stage factory functions
 - [extension.ts](./src/extension.ts) - Main extension entry point using pipeline
-- `domain/branded-types.ts` (in `@kuruwic/prisma-audit-core`) - Branded type definitions and constructors
-- `domain/smart-constructors.ts` (in `@kuruwic/prisma-audit-core`) - Smart constructors with Result pattern
+- `domain/branded-types.ts` (in `@kuruwic/db-audit-core`) - Branded type definitions and constructors
+- `domain/smart-constructors.ts` (in `@kuruwic/db-audit-core`) - Smart constructors with Result pattern
 
 ## Documentation
 

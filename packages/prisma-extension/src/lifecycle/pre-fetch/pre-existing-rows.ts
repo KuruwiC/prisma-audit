@@ -11,7 +11,7 @@
  * @module lifecycle/pre-fetch/pre-existing-rows
  */
 
-import { type EntityIdentityKey, preFetchLog } from '@kuruwic/prisma-audit-core';
+import { type EntityIdentityKey, preFetchLog } from '@kuruwic/db-audit-core';
 import {
   getPrimaryKeyConstraint,
   type NestedOperationInfo,

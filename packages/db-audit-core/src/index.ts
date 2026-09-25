@@ -1,4 +1,4 @@
-/** @kuruwic/prisma-audit-core - Framework-agnostic core library for audit logging */
+/** @kuruwic/db-audit-core - ORM-independent core library for audit logging */
 
 // Aggregate Config
 export type { AggregateConfigService } from './aggregate/config.js';

@@ -2,7 +2,7 @@
  * Tests for the pre-fetch result store: whether a targeted row was pre-fetched at a path.
  */
 
-import { UNRESOLVED_ENTITY_ID } from '@kuruwic/prisma-audit-core';
+import { UNRESOLVED_ENTITY_ID } from '@kuruwic/db-audit-core';
 import { describe, expect, it } from 'vitest';
 import type { NestedPreFetchResults } from '../src/grammar/nested-operations.js';
 import { hasPreFetchedRecordAt, storePreFetchResult } from '../src/lifecycle/pre-fetch/pre-fetch-result-store.js';

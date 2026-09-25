@@ -8,7 +8,7 @@
  */
 
 // ============================================================================
-// Re-export selected @kuruwic/prisma-audit-core functionality
+// Re-export selected @kuruwic/db-audit-core functionality
 // ============================================================================
 
 export type {
@@ -20,7 +20,7 @@ export type {
   EntityId,
   Result,
   ValidationError,
-} from '@kuruwic/prisma-audit-core';
+} from '@kuruwic/db-audit-core';
 
 export {
   createActorId,
@@ -38,7 +38,7 @@ export {
   resolveId,
   to,
   unwrapId,
-} from '@kuruwic/prisma-audit-core';
+} from '@kuruwic/db-audit-core';
 
 // ============================================================================
 // Extension-specific exports

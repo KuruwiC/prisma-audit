@@ -4,9 +4,9 @@
  * identifies them from the `Prisma` namespace passed to `createAuditClient`.
  */
 
+import type { AuditContext } from '@kuruwic/db-audit-core';
+import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { createAuditClient } from '@kuruwic/prisma-audit';
-import type { AuditContext } from '@kuruwic/prisma-audit-core';
-import { createAsyncLocalStorageProvider } from '@kuruwic/prisma-audit-core';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';

@@ -1,4 +1,4 @@
-import type { AggregateMapping } from '@kuruwic/prisma-audit-core';
+import type { AggregateMapping } from '@kuruwic/db-audit-core';
 import {
   batchResolveIds,
   defineEntity,
@@ -9,7 +9,7 @@ import {
   self,
   to,
   validateAggregateMapping,
-} from '@kuruwic/prisma-audit-core';
+} from '@kuruwic/db-audit-core';
 import { describe, expect, it } from 'vitest';
 
 describe('normalizeId', () => {

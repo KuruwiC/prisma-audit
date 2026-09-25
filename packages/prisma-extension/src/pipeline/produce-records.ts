@@ -8,8 +8,8 @@
  * transaction reads that transaction's writes.
  */
 
-import type { ComposeConfig, MutationEvent, ResolveConfig } from '@kuruwic/prisma-audit-core';
-import { compose, resolve } from '@kuruwic/prisma-audit-core';
+import type { ComposeConfig, MutationEvent, ResolveConfig } from '@kuruwic/db-audit-core';
+import { compose, resolve } from '@kuruwic/db-audit-core';
 import type { AuditLogData } from '../types.js';
 import type { ExecutionScope } from './execution-scope.js';
 

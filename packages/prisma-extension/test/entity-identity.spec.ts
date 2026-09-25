@@ -1,4 +1,4 @@
-import { UNRESOLVED_ENTITY_ID } from '@kuruwic/prisma-audit-core';
+import { UNRESOLVED_ENTITY_ID } from '@kuruwic/db-audit-core';
 import { describe, expect, it } from 'vitest';
 
 import { extractEntityIdentity } from '../src/utils/id-generation.js';

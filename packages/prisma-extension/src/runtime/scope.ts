@@ -10,8 +10,8 @@
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
-import type { AuditContext, AuditContextProvider } from '@kuruwic/prisma-audit-core';
-import { getGlobalSingleton } from '@kuruwic/prisma-audit-core';
+import type { AuditContext, AuditContextProvider } from '@kuruwic/db-audit-core';
+import { getGlobalSingleton } from '@kuruwic/db-audit-core';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../internal-types.js';
 import { trackPendingWrite } from './pending-writes.js';
 

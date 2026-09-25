@@ -7,7 +7,7 @@
  * The collected records become mutation events in collect-nested-events.ts.
  */
 
-import { AUDIT_ACTION, type EntityIdentityKey, nestedLog, UNRESOLVED_ENTITY_ID } from '@kuruwic/prisma-audit-core';
+import { AUDIT_ACTION, type EntityIdentityKey, nestedLog, UNRESOLVED_ENTITY_ID } from '@kuruwic/db-audit-core';
 import {
   deserializeEntityId,
   type NestedOperationInfo,

@@ -12,7 +12,7 @@ import {
   type AuditContext,
   SUPPORTED_OPERATIONS,
   UNRESOLVED_ENTITY_ID,
-} from '@kuruwic/prisma-audit-core';
+} from '@kuruwic/db-audit-core';
 import { isProcessingAuditLog } from '../runtime/scope.js';
 import type { UniqueConstraint } from '../schema/types.js';
 import { unwrapCompoundWhere } from './compound-where.js';

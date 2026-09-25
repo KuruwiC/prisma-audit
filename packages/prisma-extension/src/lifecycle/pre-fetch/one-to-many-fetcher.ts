@@ -9,7 +9,7 @@
  * @module lifecycle/pre-fetch/one-to-many-fetcher
  */
 
-import { type EntityIdentityKey, preFetchLog, UNRESOLVED_ENTITY_ID } from '@kuruwic/prisma-audit-core';
+import { type EntityIdentityKey, preFetchLog, UNRESOLVED_ENTITY_ID } from '@kuruwic/db-audit-core';
 import {
   batchFilterClauses,
   type NestedBatchKeyword,

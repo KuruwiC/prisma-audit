@@ -2,7 +2,7 @@
  * Primary-key derivation, entity-identity helpers and the post-operation re-fetch of the nested-write grammar
  */
 
-import { UNRESOLVED_ENTITY_ID } from '@kuruwic/prisma-audit-core';
+import { UNRESOLVED_ENTITY_ID } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
 import {
   deserializeEntityId,

@@ -4,7 +4,7 @@
  * Verifies that upsert produces correct audit logs for both create and update paths.
  */
 
-import type { AuditContext } from '@kuruwic/prisma-audit-core';
+import type { AuditContext } from '@kuruwic/db-audit-core';
 import { describe, expect, it } from 'vitest';
 import { setupBehavioralTests } from './helpers/setup.js';
 

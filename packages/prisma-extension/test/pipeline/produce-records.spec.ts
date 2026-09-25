@@ -4,8 +4,8 @@
  * in when there is one.
  */
 
-import type { MutationEvent } from '@kuruwic/prisma-audit-core';
-import { createAggregateConfig, defineEntity } from '@kuruwic/prisma-audit-core';
+import type { MutationEvent } from '@kuruwic/db-audit-core';
+import { createAggregateConfig, defineEntity } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../src/internal-types.js';
 import type { ExecutionScope } from '../../src/pipeline/execution-scope.js';

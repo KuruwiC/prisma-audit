@@ -5,13 +5,13 @@
  * the way its origin requires.
  */
 
-import type { AuditContext, WritePlan } from '@kuruwic/prisma-audit-core';
+import type { AuditContext, WritePlan } from '@kuruwic/db-audit-core';
 import {
   createActorId,
   createAggregateId,
   createAsyncLocalStorageProvider,
   createEntityId,
-} from '@kuruwic/prisma-audit-core';
+} from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
 import type { FailureSink } from '../../src/failure-sink.js';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../src/internal-types.js';

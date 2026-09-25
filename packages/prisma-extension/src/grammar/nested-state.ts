@@ -6,7 +6,7 @@
  * @module grammar/nested-state
  */
 
-import { AUDIT_ACTION, type AuditAction } from '@kuruwic/prisma-audit-core';
+import { AUDIT_ACTION, type AuditAction } from '@kuruwic/db-audit-core';
 
 export type NestedPreFetchResult = {
   before: Record<string, unknown> | null;

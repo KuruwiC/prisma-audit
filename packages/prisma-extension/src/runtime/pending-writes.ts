@@ -6,7 +6,7 @@
  * wait for them.
  */
 
-import { getGlobalSingleton } from '@kuruwic/prisma-audit-core';
+import { getGlobalSingleton } from '@kuruwic/db-audit-core';
 
 /** Process-wide, so that every copy of this package loaded in the process tracks one set */
 const pendingWrites: Set<Promise<void>> = getGlobalSingleton(

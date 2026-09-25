@@ -1,4 +1,4 @@
-# @kuruwic/prisma-audit-core
+# @kuruwic/db-audit-core
 
 Framework-agnostic core for audit logging with Prisma.
 
@@ -16,7 +16,7 @@ This package is included as a dependency of `@kuruwic/prisma-audit`.
 ## Usage
 
 ```typescript
-import { createAsyncLocalStorageProvider } from '@kuruwic/prisma-audit-core';
+import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 
 const provider = createAsyncLocalStorageProvider();
 

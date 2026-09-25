@@ -12,7 +12,7 @@
  * @module normalized-writer
  */
 
-import type { AuditContext } from '@kuruwic/prisma-audit-core';
+import type { AuditContext } from '@kuruwic/db-audit-core';
 import { currentScope } from '../runtime/scope.js';
 import type { AuditLogData, AuditLogWriter } from '../types.js';
 

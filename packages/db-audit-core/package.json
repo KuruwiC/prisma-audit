@@ -1,8 +1,8 @@
 {
-  "name": "@kuruwic/prisma-audit-core",
+  "name": "@kuruwic/db-audit-core",
   "version": "0.1.6",
   "type": "module",
-  "description": "Framework-agnostic audit logging core for Prisma",
+  "description": "ORM-independent audit logging core: event resolution, record composition and write dispatch",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -34,7 +34,6 @@
     "typecheck": "tsc --noEmit"
   },
   "keywords": [
-    "prisma",
     "audit",
     "logging",
     "typescript",

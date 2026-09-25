@@ -6,8 +6,8 @@
  * event per written row, paired with its before row by primary key.
  */
 
-import type { MutationEvent } from '@kuruwic/prisma-audit-core';
-import { AUDIT_ACTION, DEFAULTS } from '@kuruwic/prisma-audit-core';
+import type { MutationEvent } from '@kuruwic/db-audit-core';
+import { AUDIT_ACTION, DEFAULTS } from '@kuruwic/db-audit-core';
 import type { PrismaNamespace } from '../internal-types.js';
 import type { SchemaMetadata } from '../schema/types.js';
 import {

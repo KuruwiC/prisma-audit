@@ -11,7 +11,7 @@
  * @module lifecycle/transaction-proxy
  */
 
-import type { AuditContext, AuditContextProvider } from '@kuruwic/prisma-audit-core';
+import type { AuditContext, AuditContextProvider } from '@kuruwic/db-audit-core';
 import type { TransactionalPrismaClient } from '../internal-types.js';
 import { trackPendingWrite } from '../runtime/pending-writes.js';
 import { enterTransaction } from '../runtime/scope.js';

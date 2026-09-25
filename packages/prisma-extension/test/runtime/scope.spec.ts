@@ -3,8 +3,8 @@
  * semantics, and its independence from the app-owned audit context.
  */
 
-import type { AuditContext } from '@kuruwic/prisma-audit-core';
-import { createAsyncLocalStorageProvider } from '@kuruwic/prisma-audit-core';
+import type { AuditContext } from '@kuruwic/db-audit-core';
+import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { describe, expect, it } from 'vitest';
 import type { TransactionalPrismaClient } from '../../src/internal-types.js';
 import { currentScope, withScope } from '../../src/runtime/scope.js';

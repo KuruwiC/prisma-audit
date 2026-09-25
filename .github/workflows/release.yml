@@ -76,11 +76,11 @@ jobs:
             **Installation**
 
             This release attaches one tarball per publishable package. `@kuruwic/prisma-audit` depends on
-            `@kuruwic/prisma-audit-core`, so install every attached tarball together, e.g.:
+            `@kuruwic/db-audit-core`, so install every attached tarball together, e.g.:
 
             ```sh
-            npm install ./kuruwic-prisma-audit-core-<version>.tgz ./kuruwic-prisma-audit-<version>.tgz
+            npm install ./kuruwic-db-audit-core-<version>.tgz ./kuruwic-prisma-audit-<version>.tgz
             ```
 
             Installing only the `@kuruwic/prisma-audit` tarball will fail to resolve its
-            `@kuruwic/prisma-audit-core` dependency.
+            `@kuruwic/db-audit-core` dependency.

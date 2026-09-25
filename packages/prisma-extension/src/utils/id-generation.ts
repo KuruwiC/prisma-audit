@@ -39,7 +39,7 @@
  */
 
 import cuidV1 from '@bugsnag/cuid';
-import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID } from '@kuruwic/prisma-audit-core';
+import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID } from '@kuruwic/db-audit-core';
 import { createId } from '@paralleldrive/cuid2';
 import { v4 as uuidV4, v7 as uuidV7 } from 'uuid';
 import { getPrimaryKeyConstraint } from '../grammar/nested-operations.js';

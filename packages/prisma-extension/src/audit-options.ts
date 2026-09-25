@@ -13,8 +13,8 @@ import type {
   PolicyConfig,
   ResolveConfig,
   WriteFn,
-} from '@kuruwic/prisma-audit-core';
-import { createAggregateConfig } from '@kuruwic/prisma-audit-core';
+} from '@kuruwic/db-audit-core';
+import { createAggregateConfig } from '@kuruwic/db-audit-core';
 import { getNestedOperationConfig, validateFieldConflicts } from './config/index.js';
 import type { GetOperationConfig } from './grammar/pre-fetch-selection.js';
 import type { PrismaNamespace } from './internal-types.js';

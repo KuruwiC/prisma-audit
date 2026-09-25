@@ -16,7 +16,7 @@ import {
   type AuditContext,
   type AuditContextProvider,
   createAsyncLocalStorageProvider,
-} from '@kuruwic/prisma-audit-core';
+} from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
 import type { TransactionalPrismaClient } from '../src/internal-types.js';
 import {

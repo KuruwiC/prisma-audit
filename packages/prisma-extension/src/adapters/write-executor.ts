@@ -7,7 +7,7 @@
  * @module adapters/write-executor
  */
 
-import type { AuditLogData, WriteExecutor } from '@kuruwic/prisma-audit-core';
+import type { AuditLogData, WriteExecutor } from '@kuruwic/db-audit-core';
 
 /**
  * Prisma model delegate interface for audit log writes

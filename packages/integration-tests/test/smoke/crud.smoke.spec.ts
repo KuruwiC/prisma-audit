@@ -2,7 +2,7 @@
  * SQLite Smoke Tests - Basic CRUD Operations
  */
 
-import type { AuditContext } from '@kuruwic/prisma-audit-core';
+import type { AuditContext } from '@kuruwic/db-audit-core';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import type { Prisma } from '../../generated/sqlite-client/index.js';
 import type { SQLiteTestContext } from '../helpers/setup-sqlite.js';

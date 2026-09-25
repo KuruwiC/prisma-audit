@@ -1,5 +1,5 @@
+import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAuditClient, flushAllPendingWrites } from '@kuruwic/prisma-audit';
-import type { AuditContext } from '@kuruwic/prisma-audit-core';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {

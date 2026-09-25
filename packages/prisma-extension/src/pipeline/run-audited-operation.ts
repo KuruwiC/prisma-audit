@@ -7,8 +7,8 @@
  * produced, dispatched into a write plan and written, and the caller receives the result.
  */
 
-import type { AuditAction, AuditContext, AuditContextProvider, PolicyConfig } from '@kuruwic/prisma-audit-core';
-import { dispatch, policy } from '@kuruwic/prisma-audit-core';
+import type { AuditAction, AuditContext, AuditContextProvider, PolicyConfig } from '@kuruwic/db-audit-core';
+import { dispatch, policy } from '@kuruwic/db-audit-core';
 import type { FailureSink } from '../failure-sink.js';
 import type { PrismaClientWithDynamicAccess } from '../internal-types.js';
 import { isCallerMutationError, runCallerMutation } from '../utils/caller-mutation-error.js';
