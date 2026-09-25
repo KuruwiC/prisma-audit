@@ -710,6 +710,87 @@ describe('Error Handling Integration', () => {
         await basePrisma.$disconnect();
       }
     });
+
+    it('a failed re-read of the nested rows the result did not return propagates the original error and leaves no audit rows', async () => {
+      // The caller's own `include` narrows `posts` to published rows, so the unpublished
+      // post the nested update writes is absent from the result, and its after state is
+      // read again by primary key once the write has run. That read is injected to fail
+      // (the first `post.findMany` after the top-level `user.update` wrote); the failure is
+      // an audit-stage failure like any other, not a nested audit row silently left out.
+      const REREAD_FAILURE_MESSAGE = 'simulated nested re-read failure';
+      const rereadError = new Error(REREAD_FAILURE_MESSAGE);
+      const rawBasePrisma = new PrismaClient({ datasources: { db: { url: context.databaseUrl } } });
+      let rereadArmed = false;
+      const basePrisma = rawBasePrisma.$extends({
+        name: 'fault-injection',
+        query: {
+          user: {
+            async update({ args, query }) {
+              const written = await query(args);
+              rereadArmed = true;
+              return written;
+            },
+          },
+          post: {
+            async findMany({ args, query }) {
+              if (rereadArmed) {
+                rereadArmed = false;
+                throw rereadError;
+              }
+              return query(args);
+            },
+          },
+        },
+      });
+      const provider = createAsyncLocalStorageProvider();
+      const observer = vi.fn();
+      const policy = vi.fn((_context: AuditErrorContext) => 'ignore' as const);
+      const prisma = createAuditClient(basePrisma, {
+        Prisma,
+        provider,
+        aggregateMapping: testAggregateMapping,
+        performance: { awaitWrite: true },
+        nestedOperations: { update: { fetchBeforeOperation: true } },
+        errorHandling: { writeFailurePolicy: policy, observer },
+      });
+
+      try {
+        const user = await context.provider.runAsync(testActor, async () =>
+          context.prisma.user.create({
+            data: { email: 'nested-reread@example.com', name: 'Owner', password: 'secret123' },
+          }),
+        );
+        const post = await context.provider.runAsync(testActor, async () =>
+          context.prisma.post.create({ data: { title: 'Original', content: 'original', authorId: user.id } }),
+        );
+        const auditRowsBefore = await context.basePrisma.auditLog.count();
+
+        await expect(
+          provider.runAsync(testActor, async () =>
+            prisma.user.update({
+              where: { id: user.id },
+              data: { posts: { update: { where: { id: post.id }, data: { title: 'Should Not Persist' } } } },
+              include: { posts: { where: { published: true } } },
+            }),
+          ),
+        ).rejects.toBe(rereadError);
+
+        // Rolled back together with the transaction the operation runs in: neither the
+        // nested write nor any audit row of the operation remains.
+        const persisted = await context.basePrisma.post.findUnique({ where: { id: post.id } });
+        expect(persisted?.title).toBe('Original');
+        expect(await context.basePrisma.auditLog.count()).toBe(auditRowsBefore);
+
+        expect(observer).toHaveBeenCalledTimes(1);
+        expect(observer).toHaveBeenCalledWith(
+          expect.objectContaining({ phase: 'diff-generation', modelName: 'User', error: rereadError }),
+        );
+        expect(policy).not.toHaveBeenCalled();
+      } finally {
+        await prisma.$disconnect();
+        await rawBasePrisma.$disconnect();
+      }
+    });
   });
 
   describe('Database constraint violations', () => {

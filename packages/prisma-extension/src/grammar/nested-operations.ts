@@ -1025,33 +1025,34 @@ const processNestedOperationForRefetch = async (
     return;
   }
 
-  try {
-    const refetchedRecords = await executeRefetchQuery(client, relationField, pksToRefetch, pkFields);
+  const refetchedRecords = await executeRefetchQuery(client, relationField, pksToRefetch, pkFields);
 
-    if (refetchedRecords.length > 0) {
-      nestedRecords.push({
-        fieldName: nestedOp.fieldName,
-        relatedModel: relationField.relatedModel,
-        isList: relationField.isList,
-        records: refetchedRecords,
-        path: nestedOp.path,
-      });
-      nestedLog('Successfully added %d refetched records for path=%s', refetchedRecords.length, nestedOp.path);
-    }
-  } catch (error) {
-    nestedLog('Failed to refetch nested records for path=%s: %O', nestedOp.path, error);
+  if (refetchedRecords.length > 0) {
+    nestedRecords.push({
+      fieldName: nestedOp.fieldName,
+      relatedModel: relationField.relatedModel,
+      isList: relationField.isList,
+      records: refetchedRecords,
+      path: nestedOp.path,
+    });
+    nestedLog('Successfully added %d refetched records for path=%s', refetchedRecords.length, nestedOp.path);
   }
 };
 
 /**
- * Re-fetch nested records after operation when `include` is missing
+ * Re-fetch nested records after the operation for the paths its result did not return
  *
- * Provides fallback mechanism to extract nested records by re-fetching IDs from pre-fetched data.
+ * Re-fetches, by the primary keys of the pre-fetched records, the rows at a written path the
+ * result holds none of: the relation is selected into the operation, but the caller's own
+ * `include` or `select` on it may filter the written rows out.
  *
  * **Consistency Tradeoffs:**
  * - Re-fetch happens AFTER operation (not atomic)
  * - Records may be modified between operation and re-fetch
  * - May occur outside user's transaction
+ *
+ * A failed read rejects with its error: the records it would have returned cannot be left out of
+ * the audit.
  *
  * @example
  * ```typescript

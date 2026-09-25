@@ -154,6 +154,20 @@ describe('refetchNestedRecords — primary key of the related model', () => {
     ]);
   });
 
+  it('propagates a failed refetch', async () => {
+    const readError = new Error('findMany failed');
+    const findMany = vi.fn(async () => {
+      throw readError;
+    });
+    const metadata = metadataFor({ Label: { fields: [scalarField('id', true)] } }, ['Label']);
+
+    await expect(
+      refetchNestedRecords({ label: { findMany } }, metadata, 'Post', preFetchedAt('label'), [
+        nestedOperationOn('Label'),
+      ]),
+    ).rejects.toBe(readError);
+  });
+
   it('skips the refetch when the related model has no primary key', async () => {
     const findMany = vi.fn(async () => [{ key: 'row-1' }]);
     const metadata = metadataFor(
