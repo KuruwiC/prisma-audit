@@ -1,7 +1,7 @@
 /** @kuruwic/db-audit-core - ORM-independent core library for audit logging */
 
-export type { AggregateConfigService } from './aggregate/config.js';
-export { createAggregateConfig } from './aggregate/config.js';
+export type { EntityConfigLookup } from './aggregate/entity-config-lookup.js';
+export { createEntityConfigLookup } from './aggregate/entity-config-lookup.js';
 export {
   batchResolveIds,
   defineAggregateMapping,

@@ -24,7 +24,7 @@ import type {
   SerializationConfig,
   WritePlan,
 } from '@kuruwic/db-audit-core';
-import { compose, createAggregateConfig, dispatch, policy, resolve } from '@kuruwic/db-audit-core';
+import { compose, createEntityConfigLookup, dispatch, policy, resolve } from '@kuruwic/db-audit-core';
 import { identityOf, type MemorySchema } from './schema.js';
 import { createMemoryStore, type MemoryDb, type MemoryStore, type Row } from './store.js';
 import { AUDIT_LOG_MODEL, memoryWriteExecutor } from './write-executor.js';
@@ -74,15 +74,15 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
 ): MemoryAuditAdapter<TModelName> => {
   const { schema, provider } = options;
   const store = createMemoryStore<TModelName>();
-  const aggregateConfig = createAggregateConfig(options.aggregateMapping);
+  const entityConfigs = createEntityConfigLookup(options.aggregateMapping);
   const policyConfig: PolicyConfig = { awaitWrite: options.awaitWrite ?? true, awaitWriteIf: options.awaitWriteIf };
   const resolveConfig: ResolveConfig<TModelName, MemoryDb<TModelName>> = {
-    entity: aggregateConfig.getEntityConfig,
-    rootEntity: aggregateConfig.getEntityConfigByType,
+    entity: entityConfigs.byModel,
+    rootEntity: entityConfigs.byCategoryAndType,
     actor: options.contextEnricher?.actor,
   };
   const composeConfig: ComposeConfig<TModelName> = {
-    entity: aggregateConfig.getEntityConfig,
+    entity: entityConfigs.byModel,
     excludeFields: options.excludeFields ?? [],
     redact: options.redact,
     serialization: options.serialization,
@@ -164,7 +164,7 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
     mutate: (handle: MemoryDb<TModelName>) => AppliedMutation,
   ): Promise<void> => {
     const auditContext = provider.useContext();
-    const tags = aggregateConfig.getEntityConfig(model)?.tags ?? [];
+    const tags = entityConfigs.byModel(model)?.tags ?? [];
     const { atomic } = policy(model, tags, policyConfig);
 
     await inScope(atomic, async (scope) => {

@@ -5,7 +5,7 @@
  */
 
 import type { MutationEvent } from '@kuruwic/db-audit-core';
-import { createAggregateConfig, defineEntity } from '@kuruwic/db-audit-core';
+import { createEntityConfigLookup, defineEntity } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
 import type { FailureSink } from '../../src/failure-sink.js';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../src/internal-types.js';
@@ -37,10 +37,10 @@ const producerWith = (
   idResolver: (row: Record<string, unknown>, db: unknown) => Promise<string | null>,
   failureSink: Pick<FailureSink, 'notify'> = { notify: vi.fn(async () => {}) },
 ) => {
-  const service = createAggregateConfig({ Post: defineEntity({ type: 'Post', idResolver }) });
+  const entityConfigs = createEntityConfigLookup({ Post: defineEntity({ type: 'Post', idResolver }) });
   return createRecordProducer({
-    resolveConfig: { entity: service.getEntityConfig, rootEntity: service.getEntityConfigByType },
-    composeConfig: { entity: service.getEntityConfig, excludeFields: [], relationFieldNames: () => undefined },
+    resolveConfig: { entity: entityConfigs.byModel, rootEntity: entityConfigs.byCategoryAndType },
+    composeConfig: { entity: entityConfigs.byModel, excludeFields: [], relationFieldNames: () => undefined },
     failureSink,
   });
 };

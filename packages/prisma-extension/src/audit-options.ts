@@ -13,7 +13,7 @@ import type {
   ResolveConfig,
   WriteFn,
 } from '@kuruwic/db-audit-core';
-import { createAggregateConfig } from '@kuruwic/db-audit-core';
+import { createEntityConfigLookup } from '@kuruwic/db-audit-core';
 import { getNestedOperationConfig } from './config/helpers.js';
 import { validateFieldConflicts } from './config/validation.js';
 import type { GetOperationConfig } from './grammar/pre-fetch-selection.js';
@@ -55,10 +55,10 @@ export const normalizeAuditOptions = (options: PrismaAuditExtensionOptions): Aud
   const awaitWriteIf = performance?.awaitWriteIf;
   const samplingIf = performance?.samplingIf;
 
-  const aggregateConfig = createAggregateConfig(aggregateMapping);
+  const entityConfigs = createEntityConfigLookup(aggregateMapping);
   validateFieldConflicts(excludeFields, redact, aggregateMapping);
 
-  const modelTags = (modelName: string): string[] => aggregateConfig.getEntityConfig(modelName)?.tags ?? [];
+  const modelTags = (modelName: string): string[] => entityConfigs.byModel(modelName)?.tags ?? [];
   const relationFieldNamesByModel = new Map<string, ReadonlySet<string>>();
   const relationFieldNames = (modelName: string): ReadonlySet<string> => {
     let names = relationFieldNamesByModel.get(modelName);
@@ -80,12 +80,12 @@ export const normalizeAuditOptions = (options: PrismaAuditExtensionOptions): Aud
       awaitWriteIf: awaitWriteIf && ((modelName, tags) => awaitWriteIf(modelName, [...tags])),
     },
     resolveConfig: {
-      entity: aggregateConfig.getEntityConfig,
-      rootEntity: aggregateConfig.getEntityConfigByType,
+      entity: entityConfigs.byModel,
+      rootEntity: entityConfigs.byCategoryAndType,
       actor: contextEnricher?.actor,
     },
     composeConfig: {
-      entity: aggregateConfig.getEntityConfig,
+      entity: entityConfigs.byModel,
       excludeFields,
       redact,
       serialization: options.serialization,
@@ -103,7 +103,7 @@ export const normalizeAuditOptions = (options: PrismaAuditExtensionOptions): Aud
         modelName,
         context,
         auditLogModel,
-        isLoggable: aggregateConfig.isLoggable,
+        isLoggable: entityConfigs.isLoggable,
         resolveSamplingRate: (model) => (samplingIf ? samplingIf(model, modelTags(model)) : sampling),
       }),
   };

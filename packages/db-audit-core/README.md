@@ -61,7 +61,7 @@ dispatch(records, atomic, { inTransaction })   -> WritePlan
 ## Configuration API
 
 - **Aggregate mapping**: `defineAggregateMapping`, `defineEntity`, `to`, `self`, `foreignKey`,
-  `resolveId`, `batchResolveIds`, `validateAggregateMapping`, `createAggregateConfig`. The database
+  `resolveId`, `batchResolveIds`, `validateAggregateMapping`, `createEntityConfigLookup`. The database
   handle is the opaque type parameter `TDbHandle`; the adapter supplies its type.
 - **Context provider**: `createAsyncLocalStorageProvider()` returns an `AuditContextProvider`
   (`run`, `runAsync`, `getContext`, `withActor`) that carries the actor and request context through

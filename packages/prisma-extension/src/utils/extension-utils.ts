@@ -135,7 +135,7 @@ export interface ShouldAuditModelInput {
  *   modelName: 'User',
  *   context,
  *   auditLogModel: 'auditLog',
- *   isLoggable: aggregateConfig.isLoggable,
+ *   isLoggable: entityConfigs.isLoggable,
  *   resolveSamplingRate: () => 1.0,
  * });
  * ```

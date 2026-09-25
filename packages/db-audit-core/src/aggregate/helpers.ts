@@ -593,8 +593,8 @@ export const defineAggregateMapping =
  * // Validate before use
  * validateAggregateMapping(mapping); // Throws if invalid
  *
- * // Or let createAggregateConfig handle it
- * const config = createAggregateConfig(mapping); // Automatically validates
+ * // Or let createEntityConfigLookup handle it
+ * const entityConfigs = createEntityConfigLookup(mapping); // Automatically validates
  * ```
  */
 export const validateAggregateMapping = (mapping: AggregateMapping): void => {

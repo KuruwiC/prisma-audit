@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { createAggregateConfig } from '../../src/aggregate/config.js';
+import { createEntityConfigLookup } from '../../src/aggregate/entity-config-lookup.js';
 import { defineEntity, foreignKey, to } from '../../src/aggregate/helpers.js';
 import type { AggregateMapping } from '../../src/aggregate/types.js';
 
-describe('createAggregateConfig', () => {
+describe('createEntityConfigLookup', () => {
   const createTestMapping = (): AggregateMapping => ({
     User: defineEntity({
       type: 'User',
@@ -18,10 +18,10 @@ describe('createAggregateConfig', () => {
     }),
   });
 
-  describe('getEntityConfig', () => {
+  describe('byModel', () => {
     it('should return entity config for valid model', () => {
-      const config = createAggregateConfig(createTestMapping());
-      const entity = config.getEntityConfig('User');
+      const config = createEntityConfigLookup(createTestMapping());
+      const entity = config.byModel('User');
 
       expect(entity).toBeDefined();
       expect(entity?.type).toBe('User');
@@ -29,16 +29,30 @@ describe('createAggregateConfig', () => {
     });
 
     it('should return undefined for non-existent model', () => {
-      const config = createAggregateConfig(createTestMapping());
-      const entity = config.getEntityConfig('NonExistent');
+      const config = createEntityConfigLookup(createTestMapping());
+      const entity = config.byModel('NonExistent');
 
       expect(entity).toBeUndefined();
     });
   });
 
+  describe('byCategoryAndType', () => {
+    it('finds an entity config by its category, then its type', () => {
+      const lookup = createEntityConfigLookup({
+        ...createTestMapping(),
+        Account: defineEntity({ type: 'Account', category: 'identity' }),
+      });
+
+      expect(lookup.byCategoryAndType('identity', 'Account')?.type).toBe('Account');
+      expect(lookup.byCategoryAndType('model', 'Post')?.type).toBe('Post');
+      expect(lookup.byCategoryAndType('model', 'Account')).toBeUndefined();
+      expect(lookup.byCategoryAndType('Account', 'identity')).toBeUndefined();
+    });
+  });
+
   describe('isLoggable', () => {
     it('should return true for loggable models', () => {
-      const config = createAggregateConfig(createTestMapping());
+      const config = createEntityConfigLookup(createTestMapping());
 
       expect(config.isLoggable('User')).toBe(true);
       expect(config.isLoggable('Post')).toBe(true);
@@ -46,7 +60,7 @@ describe('createAggregateConfig', () => {
     });
 
     it('should return false for non-loggable models', () => {
-      const config = createAggregateConfig(createTestMapping());
+      const config = createEntityConfigLookup(createTestMapping());
 
       expect(config.isLoggable('NonExistent')).toBe(false);
     });
@@ -58,7 +72,7 @@ describe('createAggregateConfig', () => {
         User: { category: 'model', aggregates: [] },
       } as unknown as AggregateMapping;
 
-      expect(() => createAggregateConfig(invalidMapping)).toThrow('Invalid aggregate mapping configuration');
+      expect(() => createEntityConfigLookup(invalidMapping)).toThrow('Invalid aggregate mapping configuration');
     });
   });
 
@@ -70,10 +84,10 @@ describe('createAggregateConfig', () => {
           type: 'AuditLog',
         }),
       };
-      const config = createAggregateConfig(mapping);
+      const config = createEntityConfigLookup(mapping);
 
       expect(config.isLoggable('AuditLog')).toBe(true);
-      const entity = config.getEntityConfig('AuditLog');
+      const entity = config.byModel('AuditLog');
       expect(entity?.category).toBe('system');
     });
   });

@@ -54,7 +54,7 @@ export interface ResolveConfig<TModelName extends string = string, TDbHandle = u
   /** Entity configuration of a written model, or undefined when the model is not audited. */
   readonly entity: (model: TModelName) => EntityResolveConfig<TDbHandle> | undefined;
   /** Entity configuration of an aggregate root, or undefined when it has none; no root-side enricher runs for it then. */
-  readonly rootEntity: (type: string, category: string) => EntityResolveConfig<TDbHandle> | undefined;
+  readonly rootEntity: (category: string, type: string) => EntityResolveConfig<TDbHandle> | undefined;
   readonly actor?: GlobalContextEnricherConfig<unknown, unknown, TDbHandle>['actor'];
 }
 
@@ -374,7 +374,7 @@ const enrichRootContexts = async <TDbHandle>(
 
   await Promise.all(
     Array.from(groups.values()).map(async (group) => {
-      const enricher = rootEntity(group.type, group.category)?.aggregateContext;
+      const enricher = rootEntity(group.category, group.type)?.aggregateContext;
       if (!enricher) {
         return;
       }

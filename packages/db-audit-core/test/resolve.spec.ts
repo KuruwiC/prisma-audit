@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createAggregateConfig } from '../src/aggregate/config.js';
+import { createEntityConfigLookup } from '../src/aggregate/entity-config-lookup.js';
 import {
   batchResolveIds,
   defineEntity,
@@ -31,8 +31,8 @@ const event = (model: string, after: Row, overrides: Partial<MutationEvent> = {}
 });
 
 const configOf = (mapping: AggregateMapping, actor?: ResolveConfig['actor']): ResolveConfig => {
-  const service = createAggregateConfig(mapping);
-  return { entity: service.getEntityConfig, rootEntity: service.getEntityConfigByType, actor };
+  const entityConfigs = createEntityConfigLookup(mapping);
+  return { entity: entityConfigs.byModel, rootEntity: entityConfigs.byCategoryAndType, actor };
 };
 
 const rowsOf = (model: string, count: number): MutationEvent[] =>
