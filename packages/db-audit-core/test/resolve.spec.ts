@@ -533,6 +533,37 @@ describe('resolve', () => {
       expect(resolved[0]?.aggregateContexts.get('User:u1')).toEqual({ side: 'A' });
       expect(resolved[0]?.aggregateContexts.get('User:u2')).toEqual({ side: 'B' });
     });
+
+    it('keeps the first to() declaration when two resolve the same aggregate id for a row', async () => {
+      const enricherA = vi.fn(async (rows: Row[], _db: unknown, _meta: ProjectionEnrichmentMeta) =>
+        rows.map(() => ({ side: 'A' })),
+      );
+      const enricherB = vi.fn(async (rows: Row[], _db: unknown, _meta: ProjectionEnrichmentMeta) =>
+        rows.map(() => ({ side: 'B' })),
+      );
+      const config = configOf({
+        Friendship: defineEntity({
+          type: 'Friendship',
+          self: false,
+          aggregates: [
+            to('User', foreignKey('userAId'), { context: { enricher: enricherA } }),
+            to('User', foreignKey('userBId'), { context: { enricher: enricherB } }),
+          ],
+        }),
+      });
+
+      const resolved = await resolve(
+        [event('Friendship', { id: 'f1', userAId: 'u1', userBId: 'u1' })],
+        auditContext,
+        config,
+        read,
+      );
+
+      expect(enricherA).toHaveBeenCalledTimes(1);
+      expect(enricherA.mock.calls[0]?.[2]).toMatchObject({ aggregateType: 'User', aggregateIds: ['u1'] });
+      expect(enricherB).not.toHaveBeenCalled();
+      expect(resolved[0]?.aggregateContexts.get('User:u1')).toEqual({ side: 'A' });
+    });
   });
 
   describe('entity id', () => {
