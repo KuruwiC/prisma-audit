@@ -1,27 +1,21 @@
 /**
  * Audit log builder module
  *
- * Constructs AuditLogData objects from entity operations with aggregate root resolution,
- * field-level diffing, redaction, and Prisma JSONB-compatible date serialization.
+ * Builds the audit rows of one written entity: resolves the entity id through the entity's
+ * idResolver, then composes one record per pre-resolved aggregate root.
  *
  * @module audit-log-builder
  */
 
-import type { AggregateConfigService, AuditContext, ResolvedId, SerializationConfig } from '@kuruwic/prisma-audit-core';
-import {
-  AUDIT_ACTION,
-  applyRelationConfig,
-  createActorId,
-  createAggregateId,
-  createDiffCalculator,
-  createEntityId,
-  normalizeId,
-  type RedactConfig,
-  redactSensitiveData,
-  resolveBeforeAndAfterStates,
-  serializeForAuditJson,
-  type ValueSerializer,
+import type {
+  AggregateConfigService,
+  AuditContext,
+  MutationAction,
+  ResolvedEvent,
+  ResolvedId,
+  SerializationConfig,
 } from '@kuruwic/prisma-audit-core';
+import { compose, normalizeId, type RedactConfig } from '@kuruwic/prisma-audit-core';
 import type { PrismaClientManager } from '../client-manager/index.js';
 import type { AuditLogData, PrismaAction } from '../types.js';
 
@@ -41,155 +35,27 @@ export type ResolvedAggregateData = {
 export const aggregateContextKey = (aggregateType: string, aggregateId: string): string =>
   `${aggregateType}:${aggregateId}`;
 
-/**
- * Type guard to ensure redaction result is a record or null/undefined
- */
-const isRecordOrNullish = (value: unknown): value is Record<string, unknown> | null | undefined => {
-  return value === null || value === undefined || (typeof value === 'object' && !Array.isArray(value));
-};
-
-/**
- * Apply redaction to audit log states and changes
- *
- * @remarks
- * redactSensitiveData returns unknown but preserves the structure of the input.
- * We validate the output type to ensure it matches our expectations.
- */
-const applyRedactionToStates = (
-  beforeData: Record<string, unknown> | null | undefined,
-  afterData: Record<string, unknown> | null | undefined,
-  changes: Record<string, { old: unknown; new: unknown }> | null,
-  redactConfig: RedactConfig,
-): [
-  Record<string, unknown> | null | undefined,
-  Record<string, unknown> | null | undefined,
-  Record<string, { old: unknown; new: unknown }> | null,
-] => {
-  const redactedBeforeRaw = redactSensitiveData(beforeData, redactConfig);
-  const redactedAfterRaw = redactSensitiveData(afterData, redactConfig);
-
-  if (!isRecordOrNullish(redactedBeforeRaw) || !isRecordOrNullish(redactedAfterRaw)) {
-    throw new Error('[@prisma-audit] Redaction produced unexpected type');
-  }
-
-  const redactedBefore = redactedBeforeRaw;
-  const redactedAfter = redactedAfterRaw;
-
-  let redactedChanges: Record<string, { old: unknown; new: unknown }> | null = null;
-  if (changes) {
-    const redactedChangesResult = redactSensitiveData(changes, redactConfig);
-    if (!isRecordOrNullish(redactedChangesResult)) {
-      throw new Error('[@prisma-audit] Redaction of changes produced unexpected type');
+/** Action stored in the audit row: upsert resolves by the presence of a before state, batch keywords to their singular action */
+const toMutationAction = (action: PrismaAction, before: Record<string, unknown> | null | undefined): MutationAction => {
+  switch (action) {
+    case 'create':
+    case 'createMany':
+    case 'createManyAndReturn':
+      return 'create';
+    case 'update':
+    case 'updateMany':
+    case 'updateManyAndReturn':
+      return 'update';
+    case 'delete':
+    case 'deleteMany':
+      return 'delete';
+    case 'upsert':
+      return before ? 'update' : 'create';
+    default: {
+      const exhaustiveCheck: never = action;
+      throw new Error(`[@prisma-audit] Unknown action: ${exhaustiveCheck}`);
     }
-    // Type assertion justified: redactSensitiveData preserves structure, validated by type guard
-    redactedChanges = redactedChangesResult as Record<string, { old: unknown; new: unknown }> | null;
   }
-
-  return [redactedBefore, redactedAfter, redactedChanges];
-};
-
-/**
- * Serialize all JSON-bound fields in AuditLogData for Prisma JSONB storage
- *
- * Centralizes serialization of all `unknown`-typed fields that end up in Prisma JSON columns.
- * This prevents BigInt/Date values in any field (states, contexts, request metadata)
- * from causing JSON.stringify errors at write time.
- *
- * Fields NOT serialized:
- * - `createdAt`: DateTime column, Prisma handles natively
- * - `actorId`/`entityId`/`aggregateId`: branded strings, already JSON-safe
- * - `*Category`/`*Type`/`action`: plain strings
- */
-const serializeAuditLogData = (log: AuditLogData, customSerializers?: ValueSerializer[]): AuditLogData => ({
-  ...log,
-  before: serializeForAuditJson(log.before, customSerializers),
-  after: serializeForAuditJson(log.after, customSerializers),
-  changes: serializeForAuditJson(log.changes, customSerializers),
-  actorContext: serializeForAuditJson(log.actorContext, customSerializers),
-  entityContext: serializeForAuditJson(log.entityContext, customSerializers),
-  aggregateContext: serializeForAuditJson(log.aggregateContext, customSerializers),
-  requestContext: serializeForAuditJson(log.requestContext, customSerializers),
-});
-
-/**
- * Check if only excluded fields were changed (no meaningful changes)
- *
- * @remarks
- * Skips audit log when changes are null/empty and beforeData exists.
- * Prevents logging operations that only touch excluded fields.
- */
-const shouldSkipAuditLog = (
-  changes: Record<string, { old: unknown; new: unknown }> | null,
-  beforeData: Record<string, unknown> | null,
-): boolean => {
-  if (beforeData === null) {
-    return false;
-  }
-
-  return !changes || Object.keys(changes).length === 0;
-};
-
-/**
- * Input for {@link buildSingleAuditLog}
- */
-interface BuildSingleAuditLogInput {
-  root: { aggregateCategory: string; aggregateType: string; aggregateId: string };
-  context: AuditContext;
-  entityConfig: { category: string; type: string };
-  entityId: string;
-  actualAction: PrismaAction;
-  beforeData: Record<string, unknown> | null | undefined;
-  afterData: Record<string, unknown> | null | undefined;
-  changes: Record<string, { old: unknown; new: unknown }> | null;
-  actorContext: unknown;
-  entityContext: unknown;
-  aggregateContext: unknown;
-}
-
-/**
- * Build a single audit log entry for an aggregate root
- */
-const buildSingleAuditLog = (input: BuildSingleAuditLogInput): AuditLogData => {
-  const {
-    root,
-    context,
-    entityConfig,
-    entityId,
-    actualAction,
-    beforeData,
-    afterData,
-    changes,
-    actorContext,
-    entityContext,
-    aggregateContext,
-  } = input;
-
-  const requestContext = context.request || null;
-
-  return {
-    actorCategory: context.actor.category,
-    actorType: context.actor.type,
-    actorId: createActorId(context.actor.id),
-    actorContext,
-
-    entityCategory: entityConfig.category,
-    entityType: entityConfig.type,
-    entityId: createEntityId(entityId),
-    entityContext,
-
-    aggregateCategory: root.aggregateCategory,
-    aggregateType: root.aggregateType,
-    aggregateId: createAggregateId(root.aggregateId),
-    aggregateContext,
-
-    action: actualAction,
-    before: beforeData,
-    after: afterData,
-    changes,
-
-    requestContext,
-    createdAt: new Date(),
-  };
 };
 
 export interface BuildAuditLogInput {
@@ -213,19 +79,8 @@ export interface BuildAuditLogInput {
 /**
  * Build audit log data for an entity
  *
- * @remarks
- * Processing flow:
- * 1. Resolve aggregate roots and entity ID
- * 2. Determine actual action and before/after states
- * 3. Calculate field-level changes (pre-redaction)
- * 4. Apply redaction and relation config
- * 5. Build audit log for each aggregate root using pre-resolved aggregate contexts
- *
- * Returns empty array if:
- * - Entity config not found
- * - No aggregate roots found
- * - ID resolution fails
- * - Only excluded fields changed (updates only)
+ * Returns an empty array when the entity config is missing, no aggregate root resolved,
+ * the idResolver returned no id, or (updates only) only excluded fields changed.
  */
 export const buildAuditLog = async (input: BuildAuditLogInput): Promise<AuditLogData[]> => {
   const {
@@ -262,51 +117,35 @@ export const buildAuditLog = async (input: BuildAuditLogInput): Promise<AuditLog
   }
   const entityId = normalizeId(entityIdResult);
 
-  const [actualAction, beforeDataUnredacted, afterDataUnredacted] = resolveBeforeAndAfterStates(action, entity, before);
+  // The caller has already paired this row with its before state, and compose never reads
+  // `identity` or `origin`, so the resolved entity id stands in for the primary key.
+  const event: ResolvedEvent = {
+    model: modelName,
+    identity: entityId,
+    action: toMutationAction(action, before),
+    before: before ?? undefined,
+    after: entity,
+    origin: { path: '', op: action },
+    entityId,
+    roots: aggregateRoots,
+    actorContext,
+    entityContext,
+    aggregateContexts,
+  };
 
-  const mergedExcludeFields = entityConfig.excludeFields ?? excludeFields;
-  const diffCalculator = createDiffCalculator(new Set(mergedExcludeFields));
-  const shouldCalculateChanges = actualAction === AUDIT_ACTION.UPDATE;
-  const changesUnredacted = shouldCalculateChanges ? diffCalculator(beforeDataUnredacted, afterDataUnredacted) : null;
-
-  if (shouldCalculateChanges && shouldSkipAuditLog(changesUnredacted, beforeDataUnredacted)) {
-    return [];
-  }
-
-  let beforeData: Record<string, unknown> | null | undefined = beforeDataUnredacted;
-  let afterData: Record<string, unknown> | null | undefined = afterDataUnredacted;
-  let changes: Record<string, { old: unknown; new: unknown }> | null = changesUnredacted;
-
-  if (redact) {
-    [beforeData, afterData, changes] = applyRedactionToStates(beforeData, afterData, changes, redact);
-  }
-
-  const shouldIncludeRelations = entityConfig.includeRelations ?? includeRelations ?? false;
-  [beforeData, afterData] = applyRelationConfig(beforeData, afterData, shouldIncludeRelations, relationFieldNames);
-
-  const auditLogs: AuditLogData[] = [];
-  const customSerializers = serialization?.customSerializers;
-
-  for (const root of aggregateRoots) {
-    const aggregateContextForRoot =
-      aggregateContexts.get(aggregateContextKey(root.aggregateType, root.aggregateId)) ?? null;
-
-    const rawLog = buildSingleAuditLog({
-      root,
-      context,
-      entityConfig,
-      entityId,
-      actualAction,
-      beforeData,
-      afterData,
-      changes,
-      actorContext,
-      entityContext,
-      aggregateContext: aggregateContextForRoot,
-    });
-
-    auditLogs.push(serializeAuditLogData(rawLog, customSerializers));
-  }
-
-  return auditLogs;
+  return compose(
+    [event],
+    {
+      auditContext: context,
+      config: {
+        entity: () => entityConfig,
+        excludeFields: excludeFields ?? [],
+        redact,
+        serialization,
+        includeRelations,
+        relationFieldNames: () => relationFieldNames,
+      },
+    },
+    new Date(),
+  );
 };
