@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { createAsyncLocalStorageProvider } from '../src/context-provider.js';
-import { getRuntimeContext, runWithRuntimeContext } from '../src/runtime-context.js';
 import type { AuditActor, AuditContext } from '../src/types.js';
 
 describe('createAsyncLocalStorageProvider', () => {
@@ -333,27 +332,6 @@ describe('createAsyncLocalStorageProvider', () => {
       expect(result).toBe('value');
     });
 
-    it('should preserve runtime infrastructure state set via runWithRuntimeContext', () => {
-      const provider = createAsyncLocalStorageProvider();
-      const txClient = { id: 'tx' };
-
-      const context: AuditContext = {
-        actor: { category: 'model', type: 'User', id: 'user-123' },
-        request: { traceId: 'trace-1' },
-      };
-
-      provider.run(context, () => {
-        runWithRuntimeContext({ transaction: { client: txClient, deferredWrites: [] } }, () => {
-          provider.withActor(otherActor, () => {
-            // App context actor is re-attributed...
-            expect(provider.getContext()?.actor).toEqual(otherActor);
-            // ...while the library-owned runtime store is untouched.
-            expect(getRuntimeContext()?.transaction?.client).toBe(txClient);
-          });
-        });
-      });
-    });
-
     // Regression: lazy thenables (e.g. PrismaPromise) only invoke their pipeline
     // when .then is called. The async wrapper in withActor ensures .then is called
     // INSIDE the overridden scope, so the actor read at that point is actor2, not
@@ -402,28 +380,6 @@ describe('createAsyncLocalStorageProvider', () => {
       await provider.runAsync(ctx2, () => lazyOp() as unknown as Promise<unknown>);
 
       expect(seen).toEqual(['actor-2']);
-    });
-
-    it('should keep runtime state intact under plain runAsync partial replacement', async () => {
-      const provider = createAsyncLocalStorageProvider();
-      const txClient = { id: 'tx' };
-
-      const context: AuditContext = {
-        actor: { category: 'model', type: 'User', id: 'user-123' },
-        request: { traceId: 'trace-1' },
-      };
-
-      await provider.runAsync(context, async () => {
-        await runWithRuntimeContext({ transaction: { client: txClient, deferredWrites: [] } }, async () => {
-          // A full replacement of the app context (different actor) must not
-          // disturb the separately-stored transactional client.
-          await provider.runAsync({ actor: otherActor }, async () => {
-            expect(provider.getContext()?.actor).toEqual(otherActor);
-            expect(provider.getContext()?.request).toBeUndefined();
-            expect(getRuntimeContext()?.transaction?.client).toBe(txClient);
-          });
-        });
-      });
     });
   });
 });

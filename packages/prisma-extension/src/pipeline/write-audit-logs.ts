@@ -3,13 +3,19 @@
  *
  * Executes the write plan `dispatch` chose for an operation's records: an immediate plan is
  * written on the scope's handle and awaited; an after-commit plan is queued on the enclosing
- * transaction and written on the base handle once it has committed; a detached plan starts
- * now and is never awaited by the caller.
+ * transaction and written on the base handle once it has committed; a detached plan starts now
+ * on the base handle and is never awaited by the caller.
+ *
+ * A write failure is reported through the failure sink under the `log-write` phase. An
+ * immediate plan is reported while the caller is still waiting, so a `'throw'` policy fails the
+ * caller's operation. An after-commit or detached write runs once the caller has returned; its
+ * report is contained, so a `'throw'` policy cannot become an unhandled rejection there (see
+ * {@link WriteFailurePolicy}).
  */
 
-import type { WriteExecutor, WriteFn, WritePlan } from '@kuruwic/prisma-audit-core';
-import { createWriteStrategySelector } from '@kuruwic/prisma-audit-core';
+import type { AuditLogData, WriteExecutor, WriteFn, WritePlan } from '@kuruwic/prisma-audit-core';
 import type { FailureSink } from '../failure-sink.js';
+import { trackPendingWrite } from '../runtime/pending-writes.js';
 import type { ExecutionScope } from './execution-scope.js';
 
 export interface AuditLogWriterDependencies {
@@ -22,12 +28,56 @@ export interface AuditLogWriterDependencies {
 
 export type AuditLogWriter = (plan: WritePlan, scope: ExecutionScope) => Promise<void>;
 
+/** The records of one plan, bound to the scope they are written in */
+interface PlannedWrite {
+  readonly scope: ExecutionScope;
+  /** Writes the records on `handle`, through the writer hook when one is configured */
+  readonly writeOn: (handle: unknown) => Promise<void>;
+  /** Reports a failure of the write under `log-write` */
+  readonly report: (error: Error, logLabel: string) => Promise<void>;
+}
+
+const toError = (caught: unknown): Error => (caught instanceof Error ? caught : new Error(String(caught)));
+
+const writeImmediately = async (planned: PlannedWrite): Promise<void> => {
+  try {
+    await planned.writeOn(planned.scope.handle);
+  } catch (caught) {
+    await planned.report(toError(caught), 'audit log write');
+  }
+};
+
 /**
- * A write failure of an immediate plan surfaces in the `catch` below, since that strategy has
- * no error handling of its own. The after-commit and detached strategies call `handleError`
- * themselves after the write was queued or detached, and catch and log anything it throws, so
- * a `'throw'` policy cannot become an unhandled rejection (see {@link WriteFailurePolicy}).
+ * A write on the base handle that reports its own failure and never rejects: it runs once the
+ * caller has returned, so a policy that rethrows has nothing left to fail and is logged instead.
  */
+const containedBaseWrite =
+  (planned: PlannedWrite, logLabel: string, handlerLabel: string) => async (): Promise<void> => {
+    try {
+      await planned.writeOn(planned.scope.baseHandle);
+    } catch (caught) {
+      try {
+        await planned.report(toError(caught), logLabel);
+      } catch (handlerError) {
+        console.error(`[@prisma-audit] Error in ${handlerLabel}:`, toError(handlerError).message);
+      }
+    }
+  };
+
+const queueAfterCommit = (planned: PlannedWrite): void => {
+  const { transaction } = planned.scope;
+  if (transaction === undefined) {
+    throw new Error('[@prisma-audit] An after-commit write plan needs a transaction scope to queue on');
+  }
+  transaction.deferredWrites.push(
+    containedBaseWrite(planned, 'deferred audit log write', 'deferred write error handler'),
+  );
+};
+
+const startDetached = (planned: PlannedWrite): void => {
+  trackPendingWrite(containedBaseWrite(planned, 'async audit log write', 'async write error handler'));
+};
+
 export const createAuditLogWriter = (deps: AuditLogWriterDependencies): AuditLogWriter => {
   const { auditLogModel, writeExecutor, writer, failureSink } = deps;
 
@@ -36,33 +86,38 @@ export const createAuditLogWriter = (deps: AuditLogWriterDependencies): AuditLog
     if (first === undefined) {
       return;
     }
-    const logs = [...plan.records];
+    const logs: AuditLogData[] = [...plan.records];
     const modelName = first.entityType;
-    const handleError = (error: Error, logLabel: string): Promise<void> =>
-      failureSink.reportWriteFailure(
-        { phase: 'log-write', modelName, operation: 'write', params: logs, error },
-        logLabel,
-      );
 
-    try {
-      // The core selector maps the plan's kind to its strategy. It re-derives the after-commit
-      // vs detached split from the runtime store the scope's transaction was read from, so the
-      // two agree.
-      const strategy = createWriteStrategySelector(
-        { shouldAwaitWrite: () => plan.kind === 'immediate' },
-        writeExecutor,
-      );
-      await strategy(modelName)({
-        logs,
-        context: scope.auditContext,
-        manager: { activeClient: scope.handle, baseClient: scope.baseHandle },
-        auditLogModel,
-        writer,
-        handleError,
-      });
-    } catch (caughtError) {
-      const error = caughtError instanceof Error ? caughtError : new Error(String(caughtError));
-      await handleError(error, 'audit log write');
+    const planned: PlannedWrite = {
+      scope,
+      writeOn: async (handle) => {
+        const defaultWrite = (logsToWrite: AuditLogData[]): Promise<void> =>
+          writeExecutor.write(handle, auditLogModel, logsToWrite);
+        if (writer) {
+          await writer(logs, scope.auditContext, defaultWrite);
+        } else {
+          await defaultWrite(logs);
+        }
+      },
+      report: (error, logLabel) =>
+        failureSink.reportWriteFailure(
+          { phase: 'log-write', modelName, operation: 'write', params: logs, error },
+          logLabel,
+        ),
+    };
+
+    switch (plan.kind) {
+      case 'immediate':
+        return writeImmediately(planned);
+      case 'after-commit':
+        return queueAfterCommit(planned);
+      case 'detached':
+        return startDetached(planned);
+      default: {
+        const exhaustiveCheck: never = plan;
+        throw new Error(`[@prisma-audit] Unknown write plan kind: ${JSON.stringify(exhaustiveCheck)}`);
+      }
     }
   };
 };

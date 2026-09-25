@@ -9,8 +9,9 @@
  * module is the only reader and writer of that store.
  */
 
+import { AsyncLocalStorage } from 'node:async_hooks';
 import type { AuditContext, AuditContextProvider } from '@kuruwic/prisma-audit-core';
-import { getRuntimeContext, runWithRuntimeContext } from '@kuruwic/prisma-audit-core';
+import { getGlobalSingleton } from '@kuruwic/prisma-audit-core';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../internal-types.js';
 import { trackPendingWrite } from './pending-writes.js';
 
@@ -31,14 +32,18 @@ export interface RuntimeScope {
 
 type ContextRunner = Pick<AuditContextProvider, 'runAsync'>;
 
+/** Process-wide, so that every copy of this package loaded in the process shares one scope */
+const storage = getGlobalSingleton('runtime-context-storage', () => new AsyncLocalStorage<RuntimeScope>());
+
 /** The scope of the current async flow, or undefined outside any */
-export const currentScope = (): RuntimeScope | undefined => getRuntimeContext() as RuntimeScope | undefined;
+export const currentScope = (): RuntimeScope | undefined => storage.getStore();
 
 /**
  * Runs `fn` in a scope that merges `patch` over the current one. Works for sync and async
  * functions alike; the return value passes through.
  */
-export const withScope = <T>(patch: RuntimeScope, fn: () => T): T => runWithRuntimeContext(patch, fn);
+export const withScope = <T>(patch: RuntimeScope, fn: () => T): T =>
+  storage.run({ ...storage.getStore(), ...patch }, fn);
 
 export const isProcessingAuditLog = (): boolean => currentScope()?.isProcessingAuditLog === true;
 

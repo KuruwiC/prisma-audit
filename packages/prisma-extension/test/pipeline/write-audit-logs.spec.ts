@@ -12,8 +12,9 @@ import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '.
 import type { ExecutionScope } from '../../src/pipeline/execution-scope.js';
 import { createAuditLogWriter } from '../../src/pipeline/write-audit-logs.js';
 import { flushAllPendingWrites } from '../../src/runtime/pending-writes.js';
-import { withScope } from '../../src/runtime/scope.js';
 import type { AuditLogData } from '../../src/types.js';
+
+type DefaultWrite = (logs: AuditLogData[]) => Promise<void>;
 
 const auditContext: AuditContext = { actor: { category: 'model', type: 'User', id: 'user-1' } };
 const baseClient: PrismaClientWithDynamicAccess = {
@@ -80,9 +81,7 @@ describe('createAuditLogWriter', () => {
     const { write, writeExecutor } = createWriter();
     const deferredWrites: Array<() => Promise<void>> = [];
 
-    await withScope({ transaction: { client: transactionClient, deferredWrites } }, () =>
-      write(plan('after-commit'), transactionScope(deferredWrites)),
-    );
+    await write(plan('after-commit'), transactionScope(deferredWrites));
 
     expect(writeExecutor.write).not.toHaveBeenCalled();
     expect(deferredWrites).toHaveLength(1);
@@ -172,5 +171,157 @@ describe('createAuditLogWriter', () => {
       { phase: 'log-write', modelName: 'User', operation: 'write', params: [record], error: writeError },
       'async audit log write',
     );
+  });
+
+  it('queues after-commit plans in order and runs them in that order', async () => {
+    const written: AuditLogData[][] = [];
+    const { write, writeExecutor } = createWriter({
+      write: async (_handle, _model, logs) => {
+        written.push(logs);
+      },
+    });
+    const deferredWrites: Array<() => Promise<void>> = [];
+    const scope = transactionScope(deferredWrites);
+    const second: AuditLogData = { ...record, entityId: createEntityId('u2') };
+
+    await write(plan('after-commit'), scope);
+    await write({ kind: 'after-commit', records: [second] }, scope);
+
+    expect(deferredWrites).toHaveLength(2);
+    expect(writeExecutor.write).not.toHaveBeenCalled();
+    for (const deferredWrite of deferredWrites) {
+      await deferredWrite();
+    }
+    expect(written).toEqual([[record], [second]]);
+  });
+
+  it('rejects an after-commit plan outside a transaction scope', async () => {
+    const { write, writeExecutor } = createWriter();
+
+    await expect(write(plan('after-commit'), baseScope)).rejects.toThrow(
+      'An after-commit write plan needs a transaction scope',
+    );
+    expect(writeExecutor.write).not.toHaveBeenCalled();
+  });
+
+  it('hands the writer hook a default write on the base handle for an after-commit plan', async () => {
+    const writer = vi.fn(async (logs: AuditLogData[], _context: AuditContext, defaultWrite: DefaultWrite) =>
+      defaultWrite(logs),
+    );
+    const { write, writeExecutor } = createWriter({ writer });
+    const deferredWrites: Array<() => Promise<void>> = [];
+
+    await write(plan('after-commit'), transactionScope(deferredWrites));
+    expect(writer).not.toHaveBeenCalled();
+    await deferredWrites[0]?.();
+
+    expect(writer).toHaveBeenCalledWith([record], auditContext, expect.any(Function));
+    expect(writeExecutor.write).toHaveBeenCalledWith(baseClient, 'auditLog', [record]);
+  });
+
+  it('hands the writer hook a default write on the base handle for a detached plan', async () => {
+    const writer = vi.fn(async (logs: AuditLogData[], _context: AuditContext, defaultWrite: DefaultWrite) =>
+      defaultWrite(logs),
+    );
+    const { write, writeExecutor } = createWriter({ writer });
+
+    await write(plan('detached'), baseScope);
+    await flushAllPendingWrites();
+
+    expect(writer).toHaveBeenCalledWith([record], auditContext, expect.any(Function));
+    expect(writeExecutor.write).toHaveBeenCalledWith(baseClient, 'auditLog', [record]);
+  });
+
+  it('lets the writer hook change the records the executor receives', async () => {
+    const changed: AuditLogData = { ...record, actorContext: { source: 'hook' } };
+    const writer = vi.fn(async (_logs: AuditLogData[], _context: AuditContext, defaultWrite: DefaultWrite) =>
+      defaultWrite([changed]),
+    );
+    const { write, writeExecutor } = createWriter({ writer });
+
+    await write(plan('immediate'), baseScope);
+
+    expect(writeExecutor.write).toHaveBeenCalledWith(baseClient, 'auditLog', [changed]);
+  });
+
+  it('reports an after-commit write failure under log-write once the queued write runs', async () => {
+    const writeError = new Error('insert failed');
+    const { write, failureSink } = createWriter({
+      write: async () => {
+        throw writeError;
+      },
+    });
+    const deferredWrites: Array<() => Promise<void>> = [];
+
+    await write(plan('after-commit'), transactionScope(deferredWrites));
+    expect(failureSink.reportWriteFailure).not.toHaveBeenCalled();
+    await expect(deferredWrites[0]?.()).resolves.toBeUndefined();
+
+    expect(failureSink.reportWriteFailure).toHaveBeenCalledWith(
+      { phase: 'log-write', modelName: 'User', operation: 'write', params: [record], error: writeError },
+      'deferred audit log write',
+    );
+  });
+
+  it('contains a rethrowing write-failure policy for an after-commit write', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const { write, failureSink } = createWriter({
+        write: async () => {
+          throw new Error('insert failed');
+        },
+      });
+      vi.mocked(failureSink.reportWriteFailure).mockImplementation(async ({ error }) => {
+        throw error;
+      });
+      const deferredWrites: Array<() => Promise<void>> = [];
+
+      await write(plan('after-commit'), transactionScope(deferredWrites));
+      await expect(deferredWrites[0]?.()).resolves.toBeUndefined();
+
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        '[@prisma-audit] Error in deferred write error handler:',
+        'insert failed',
+      );
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it('contains a rethrowing write-failure policy for a detached write', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const { write, failureSink } = createWriter({
+        write: async () => {
+          throw new Error('insert failed');
+        },
+      });
+      vi.mocked(failureSink.reportWriteFailure).mockImplementation(async ({ error }) => {
+        throw error;
+      });
+
+      await write(plan('detached'), baseScope);
+      await expect(flushAllPendingWrites()).resolves.toBeUndefined();
+
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        '[@prisma-audit] Error in async write error handler:',
+        'insert failed',
+      );
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it('wraps a non-Error rejection of a detached write in an Error', async () => {
+    const { write, failureSink } = createWriter({ write: () => Promise.reject('insert failed') });
+
+    await write(plan('detached'), baseScope);
+    await flushAllPendingWrites();
+
+    expect(failureSink.reportWriteFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ phase: 'log-write', error: expect.any(Error) }),
+      'async audit log write',
+    );
+    expect(vi.mocked(failureSink.reportWriteFailure).mock.calls[0]?.[0]?.error.message).toBe('insert failed');
   });
 });

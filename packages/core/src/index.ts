@@ -71,6 +71,8 @@ export type {
 // Domain - Smart Constructors
 export type { Result, ValidationError } from './domain/smart-constructors.js';
 export { createAuditLogData } from './domain/smart-constructors.js';
+// Domain - Write
+export type { WriteExecutor, WriteFn } from './domain/write.js';
 // Enrichment - Types
 export type { ProjectionEnrichmentMeta } from './enrichment/types.js';
 // Global Singleton
@@ -84,11 +86,6 @@ export { policy } from './policy/index.js';
 // Resolve
 export type { EntityResolveConfig, ResolveConfig } from './resolve/index.js';
 export { resolve } from './resolve/index.js';
-// Runtime Context (library-owned infrastructure state)
-//
-// Exported because @kuruwic/prisma-audit imports it across the package boundary;
-// end users are not meant to call it directly.
-export { getRuntimeContext, runWithRuntimeContext } from './runtime-context.js';
 // State Resolution
 export { applyRelationConfig } from './state-resolution/apply-relation-config.js';
 export { resolveBeforeAndAfterStates } from './state-resolution/index.js';
@@ -107,12 +104,3 @@ export { redactSensitiveData } from './utils/redaction.js';
 // Utils - Serialization
 export type { ValueSerializer } from './utils/serialization.js';
 export { serializeForAuditJson, UNHANDLED } from './utils/serialization.js';
-// Write Strategies
-export type {
-  WriteExecutor,
-  WriteFn,
-  WriteResult,
-  WriteStrategy,
-  WriteStrategyConfig,
-} from './write-strategies/index.js';
-export { createWriteStrategySelector, flushPendingWrites, getPendingWriteCount } from './write-strategies/index.js';

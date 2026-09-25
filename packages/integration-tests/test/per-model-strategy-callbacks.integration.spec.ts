@@ -3,9 +3,9 @@
  * `performance.awaitWriteIf` receive an empty tag list for them.
  */
 import type { PrismaAuditExtensionOptions } from '@kuruwic/prisma-audit';
-import { createAuditClient } from '@kuruwic/prisma-audit';
+import { createAuditClient, flushAllPendingWrites } from '@kuruwic/prisma-audit';
 import type { AuditContext } from '@kuruwic/prisma-audit-core';
-import { createAsyncLocalStorageProvider, flushPendingWrites } from '@kuruwic/prisma-audit-core';
+import { createAsyncLocalStorageProvider } from '@kuruwic/prisma-audit-core';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -129,7 +129,7 @@ describe('Per-model strategy callbacks for models without tags', () => {
       const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       try {
         await fn();
-        await flushPendingWrites();
+        await flushAllPendingWrites();
       } finally {
         consoleErrorSpy.mockRestore();
       }
