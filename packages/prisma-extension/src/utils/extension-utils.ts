@@ -8,13 +8,13 @@
  */
 
 import {
+  type AuditAction,
   type AuditContext,
   getRuntimeContext,
   SUPPORTED_OPERATIONS,
   UNRESOLVED_ENTITY_ID,
 } from '@kuruwic/prisma-audit-core';
 import type { UniqueConstraint } from '../schema/types.js';
-import type { PrismaAction } from '../types.js';
 import { unwrapCompoundWhere } from './compound-where.js';
 import { extractEntityIdentity } from './id-generation.js';
 
@@ -53,8 +53,8 @@ export const uncapitalizeFirst = (str: string): string => {
  * isAuditableAction('findMany');     // => false
  * ```
  */
-export const isAuditableAction = (operation: string): operation is PrismaAction => {
-  return SUPPORTED_OPERATIONS.has(operation as PrismaAction);
+export const isAuditableAction = (operation: string): operation is AuditAction => {
+  return SUPPORTED_OPERATIONS.has(operation as AuditAction);
 };
 
 /**

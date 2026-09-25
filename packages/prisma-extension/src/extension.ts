@@ -9,7 +9,13 @@
  * @see {@link PrismaAuditExtensionOptions}
  */
 
-import type { AuditContext, ComposeConfig, ErrorStrategy, ResolveConfig } from '@kuruwic/prisma-audit-core';
+import type {
+  AuditAction,
+  AuditContext,
+  ComposeConfig,
+  ErrorStrategy,
+  ResolveConfig,
+} from '@kuruwic/prisma-audit-core';
 import {
   AUDIT_ACTION,
   createAggregateConfig,
@@ -53,7 +59,6 @@ import type {
   AuditErrorContext,
   AuditLogData,
   OperationContext,
-  PrismaAction,
   PrismaAuditExtensionOptions,
   WriteFailurePolicy,
 } from './types.js';
@@ -84,7 +89,7 @@ interface HandleLimitedUpdateManyInput {
   context: AuditContext;
   baseClient: PrismaClientWithDynamicAccess;
   clientToUse: PrismaClientWithDynamicAccess | TransactionalPrismaClient;
-  action: PrismaAction;
+  action: AuditAction;
   modelDelegate: {
     findMany: (args: { where: unknown }) => Promise<Record<string, unknown>[]>;
     updateManyAndReturn: (args: unknown) => Promise<Record<string, unknown>[]>;
@@ -357,7 +362,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
   const fetchBeforeState = async (
     prismaClient: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
     modelName: string,
-    action: PrismaAction,
+    action: AuditAction,
     args: Record<string, unknown>,
   ): Promise<BeforeStateResult> => {
     // `requiresBeforeState` also lists the batch actions, which cannot reach this
@@ -632,7 +637,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     context: AuditContext,
     baseClient: PrismaClientWithDynamicAccess,
     clientToUse: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
-    action: PrismaAction,
+    action: AuditAction,
   ): Promise<BatchActionResult> => {
     const modelName = operation.model as string;
     const modelDelegate = resolveBatchModelDelegate(clientToUse, modelName);
@@ -717,7 +722,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
       txContext: AuditContext,
       clientToUse: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
     ): Promise<BatchActionResult> => {
-      const action = operation.action as PrismaAction;
+      const action = operation.action as AuditAction;
 
       if (action === AUDIT_ACTION.CREATE_MANY || action === AUDIT_ACTION.CREATE_MANY_AND_RETURN) {
         return handleCreateMany(operation, txContext, baseClient, clientToUse);

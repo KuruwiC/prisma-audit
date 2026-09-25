@@ -12,6 +12,7 @@ import type {
   AuditContext,
   AuditContextProvider,
   AuditLogData as CoreAuditLogData,
+  AuditLogInput as CoreAuditLogInput,
   WriteFn as CoreWriteFn,
   ErrorStrategy,
   GlobalContextEnricherConfig,
@@ -26,36 +27,10 @@ export type AuditLogData = CoreAuditLogData;
 
 /**
  * Input for creating audit log data with plain string identifiers
+ *
+ * Re-exported from @kuruwic/prisma-audit-core
  */
-export interface AuditLogInput {
-  // === Actor ===
-  actorCategory: string;
-  actorType: string;
-  actorId: string;
-  actorContext: unknown;
-
-  // === Entity ===
-  entityCategory: string;
-  entityType: string;
-  entityId: string;
-  entityContext: unknown;
-
-  // === Aggregate ===
-  aggregateCategory: string;
-  aggregateType: string;
-  aggregateId: string;
-  aggregateContext: unknown;
-
-  // === Action ===
-  action: string;
-  before: unknown;
-  after: unknown;
-  changes: unknown;
-
-  // === Request Context ===
-  requestContext: unknown;
-  createdAt: Date;
-}
+export type AuditLogInput = CoreAuditLogInput;
 
 /**
  * Custom audit log writer callback
@@ -278,20 +253,6 @@ export interface PrismaAuditExtensionOptions<TModelName extends string = string,
   /** Custom serialization for non-JSON-safe types (BigInt, Date are handled by default) */
   serialization?: import('@kuruwic/prisma-audit-core').SerializationConfig;
 }
-
-/**
- * Prisma operation actions
- */
-export type PrismaAction =
-  | 'create'
-  | 'update'
-  | 'upsert'
-  | 'delete'
-  | 'createMany'
-  | 'updateMany'
-  | 'deleteMany'
-  | 'createManyAndReturn'
-  | 'updateManyAndReturn';
 
 /**
  * Prisma operation context

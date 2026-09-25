@@ -7,8 +7,7 @@
  * @module utils/operation-classifier
  */
 
-import { AUDIT_ACTION, BATCH_OPERATIONS } from '@kuruwic/prisma-audit-core';
-import type { PrismaAction } from '../types.js';
+import { AUDIT_ACTION, type AuditAction, BATCH_OPERATIONS } from '@kuruwic/prisma-audit-core';
 
 /**
  * Checks if an operation is a batch operation
@@ -26,7 +25,7 @@ import type { PrismaAction } from '../types.js';
 export const isBatchOperation = (
   action: string,
 ): action is 'createMany' | 'updateMany' | 'deleteMany' | 'createManyAndReturn' | 'updateManyAndReturn' => {
-  return BATCH_OPERATIONS.has(action as PrismaAction);
+  return BATCH_OPERATIONS.has(action as AuditAction);
 };
 
 /**
@@ -42,7 +41,7 @@ export const isBatchOperation = (
  * requiresBeforeState('create');  // => false
  * ```
  */
-export const requiresBeforeState = (action: PrismaAction): boolean => {
+export const requiresBeforeState = (action: AuditAction): boolean => {
   return (
     action === AUDIT_ACTION.UPDATE ||
     action === AUDIT_ACTION.UPSERT ||
