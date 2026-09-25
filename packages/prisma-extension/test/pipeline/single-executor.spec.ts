@@ -1,7 +1,7 @@
 /**
  * Tests for the single-operation executor: the before state and the nested records it reads
- * before the write, the mutation it runs on the scope's handle, the events it collects, the
- * re-read that hydrates the result, and the error each kind of failure surfaces as.
+ * before the write, the mutation it runs through the operation's continuation, the events it
+ * collects, the re-read that hydrates the result, and the error each kind of failure surfaces as.
  */
 
 import type { AuditContext } from '@kuruwic/prisma-audit-core';
@@ -12,7 +12,6 @@ import type { ExecutionScope } from '../../src/pipeline/execution-scope.js';
 import type { AuditedOperation } from '../../src/pipeline/executor.js';
 import type { RecordProducer } from '../../src/pipeline/produce-records.js';
 import { createSingleExecutor, wrapAuditFailure } from '../../src/pipeline/single-executor.js';
-import { isCallerMutationError } from '../../src/utils/caller-mutation-error.js';
 import { createSchemaMetadataFromDMMF } from '../../src/utils/schema-metadata.js';
 
 type Row = Record<string, unknown>;
@@ -98,11 +97,26 @@ const createFailureSink = (): FailureSink => ({
   reportWriteFailure: vi.fn(async () => {}),
 });
 
-const operationOf = (action: AuditedOperation['action'], args: Row): AuditedOperation => ({
+/** The continuation the pipeline would build for `client`: the action of its `user` delegate */
+const mutationOn = (client: PrismaClientWithDynamicAccess, action: string): ((args: Row) => Promise<unknown>) => {
+  const mutation = (client.user as Record<string, unknown> | undefined)?.[action];
+  if (typeof mutation !== 'function') {
+    throw new Error(`Model "User" or action "${action}" not found`);
+  }
+  return mutation as (args: Row) => Promise<unknown>;
+};
+
+const operationOn = (
+  client: PrismaClientWithDynamicAccess,
+  action: AuditedOperation['action'],
+  args: Row,
+): AuditedOperation => ({
   model: 'User',
   action,
   args,
-  query: vi.fn(),
+  execute: vi.fn(async (runArgs: Row, runAction: AuditedOperation['action'] = action) =>
+    mutationOn(client, runAction)(runArgs),
+  ),
 });
 
 const updateArgs = { where: { id: 'u1' }, data: { name: 'Anne' } };
@@ -131,7 +145,7 @@ describe('createSingleExecutor', () => {
       const client = clientWith({ user: { findUnique, create: vi.fn(async () => user) } });
       const { executor, produceRecords, getNestedOperationConfig } = executorWith();
 
-      await executor.run(operationOf('create', { data: { name: 'Ann' } }), scopeOn(client), produceRecords);
+      await executor.run(operationOn(client, 'create', { data: { name: 'Ann' } }), scopeOn(client), produceRecords);
 
       expect(findUnique).not.toHaveBeenCalled();
       expect(getNestedOperationConfig).not.toHaveBeenCalled();
@@ -149,7 +163,7 @@ describe('createSingleExecutor', () => {
       const client = clientWith({ user: { findUnique, [action]: vi.fn(async () => returns) } });
       const { executor, produceRecords, getNestedOperationConfig } = executorWith({ fetchBeforeOperation: true });
 
-      await executor.run(operationOf(action, args), scopeOn(client), produceRecords);
+      await executor.run(operationOn(client, action, args), scopeOn(client), produceRecords);
 
       expect(getNestedOperationConfig).toHaveBeenCalledWith('User', action);
       expect(findUnique).toHaveBeenCalledWith({ where: { id: 'u1' } });
@@ -167,7 +181,7 @@ describe('createSingleExecutor', () => {
       const client = clientWith({ user: { findUnique, [action]: vi.fn(async () => user) } });
       const { executor, produceRecords } = executorWith({ fetchBeforeOperation: false });
 
-      await executor.run(operationOf(action, args), scopeOn(client), produceRecords);
+      await executor.run(operationOn(client, action, args), scopeOn(client), produceRecords);
 
       expect(findUnique).not.toHaveBeenCalled();
       expect(produceRecords).toHaveBeenCalledWith(topLevelEvent({ action, before: undefined }), expect.anything());
@@ -179,7 +193,7 @@ describe('createSingleExecutor', () => {
       const { executor, produceRecords, getNestedOperationConfig } = executorWith({ fetchBeforeOperation: false });
       const args = { where: { id: 'u1' }, create: { name: 'Ann' }, update: { name: 'Anne' } };
 
-      await executor.run(operationOf('upsert', args), scopeOn(client), produceRecords);
+      await executor.run(operationOn(client, 'upsert', args), scopeOn(client), produceRecords);
 
       expect(getNestedOperationConfig).not.toHaveBeenCalled();
       expect(findUnique).toHaveBeenCalledWith({ where: { id: 'u1' } });
@@ -194,7 +208,7 @@ describe('createSingleExecutor', () => {
       const { executor, produceRecords } = executorWith();
 
       await executor.run(
-        operationOf('upsert', { where: { id: 'u1' }, create: { name: 'Ann' }, update: {} }),
+        operationOn(client, 'upsert', { where: { id: 'u1' }, create: { name: 'Ann' }, update: {} }),
         scopeOn(client),
         produceRecords,
       );
@@ -217,7 +231,7 @@ describe('createSingleExecutor', () => {
         },
       });
       const { executor, produceRecords, failureSink } = executorWith();
-      const operation = operationOf('update', updateArgs);
+      const operation = operationOn(client, 'update', updateArgs);
 
       const outcome = await executor.run(operation, scopeOn(client), produceRecords);
 
@@ -248,7 +262,7 @@ describe('createSingleExecutor', () => {
       const { executor, produceRecords, failureSink } = executorWith();
 
       await executor.run(
-        operationOf('upsert', { where: { id: 'u1' }, create: { name: 'Ann' }, update: {} }),
+        operationOn(client, 'upsert', { where: { id: 'u1' }, create: { name: 'Ann' }, update: {} }),
         scopeOn(client),
         produceRecords,
       );
@@ -283,7 +297,7 @@ describe('createSingleExecutor', () => {
       });
       const { executor, produceRecords } = executorWith({ fetchBeforeOperation: true });
 
-      await executor.run(operationOf('update', nestedUpdateArgs), scopeOn(client), produceRecords);
+      await executor.run(operationOn(client, 'update', nestedUpdateArgs), scopeOn(client), produceRecords);
 
       expect(calls).toEqual(['pre-fetch', 'update']);
       expect(produceRecords).toHaveBeenCalledWith(
@@ -316,7 +330,7 @@ describe('createSingleExecutor', () => {
       });
       const { executor, produceRecords, failureSink } = executorWith({ fetchBeforeOperation: true });
 
-      await executor.run(operationOf('update', nestedUpdateArgs), scopeOn(client), produceRecords);
+      await executor.run(operationOn(client, 'update', nestedUpdateArgs), scopeOn(client), produceRecords);
 
       expect(failureSink.notify).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -353,7 +367,7 @@ describe('createSingleExecutor', () => {
       const { executor, produceRecords } = executorWith();
 
       await executor.run(
-        operationOf('update', { where: { id: 'u1' }, data: { posts: { create: { title: 'B' } } } }),
+        operationOn(client, 'update', { where: { id: 'u1' }, data: { posts: { create: { title: 'B' } } } }),
         scopeOn(client),
         produceRecords,
       );
@@ -383,7 +397,7 @@ describe('createSingleExecutor', () => {
       const { executor, produceRecords } = executorWith();
 
       await executor.run(
-        operationOf('create', { data: { name: 'Ann', posts: { create: { title: 'B' } } } }),
+        operationOn(client, 'create', { data: { name: 'Ann', posts: { create: { title: 'B' } } } }),
         scopeOn(client),
         produceRecords,
       );
@@ -427,7 +441,7 @@ describe('createSingleExecutor', () => {
       });
       const { executor, produceRecords } = executorWith();
 
-      await executor.run(operationOf('update', updateManyArgs), scopeOn(client), produceRecords);
+      await executor.run(operationOn(client, 'update', updateManyArgs), scopeOn(client), produceRecords);
 
       expect(calls).toEqual(['pre-read', 'update']);
       expect(findMany).toHaveBeenCalledWith({ where: underU1({ title: 'A' }) });
@@ -455,7 +469,7 @@ describe('createSingleExecutor', () => {
       });
       const { executor, produceRecords } = executorWith({ fetchBeforeOperation: false });
 
-      await executor.run(operationOf('update', updateManyArgs), scopeOn(client), produceRecords);
+      await executor.run(operationOn(client, 'update', updateManyArgs), scopeOn(client), produceRecords);
 
       expect(findMany).toHaveBeenCalledWith({ where: underU1({ title: 'A' }), select: { id: true } });
       expect(produceRecords).toHaveBeenCalledWith(
@@ -483,7 +497,7 @@ describe('createSingleExecutor', () => {
       const { executor, produceRecords } = executorWith();
 
       await executor.run(
-        operationOf('update', { where: { id: 'u1' }, data: { posts: { deleteMany: { title: 'A' } } } }),
+        operationOn(client, 'update', { where: { id: 'u1' }, data: { posts: { deleteMany: { title: 'A' } } } }),
         scopeOn(client),
         produceRecords,
       );
@@ -506,16 +520,16 @@ describe('createSingleExecutor', () => {
   });
 
   describe('execution', () => {
-    it('runs the action of the model delegate on the scope handle with the operation args', async () => {
+    it("runs the operation's continuation with the operation args", async () => {
       const create = vi.fn(async () => user);
       const client = clientWith({ user: { create } });
       const { executor, produceRecords } = executorWith();
-      const operation = operationOf('create', { data: { name: 'Ann' } });
+      const operation = operationOn(client, 'create', { data: { name: 'Ann' } });
 
       const outcome = await executor.run(operation, scopeOn(client), produceRecords);
 
+      expect(operation.execute).toHaveBeenCalledWith(operation.args);
       expect(create).toHaveBeenCalledWith(operation.args);
-      expect(operation.query).not.toHaveBeenCalled();
       expect(outcome.result).toBe(user);
     });
 
@@ -526,7 +540,7 @@ describe('createSingleExecutor', () => {
       const { executor, produceRecords } = executorWith();
 
       const outcome = await executor.run(
-        operationOf('create', { data: { name: 'Ann' } }),
+        operationOn(client, 'create', { data: { name: 'Ann' } }),
         scopeOn(client),
         produceRecords,
       );
@@ -535,7 +549,7 @@ describe('createSingleExecutor', () => {
       expect(outcome.result).toBe(hydrated);
     });
 
-    it("tags the caller's own mutation error so the pipeline rethrows it raw", async () => {
+    it("propagates the operation's own failure as it is and produces no records", async () => {
       const callerError = new Error('Unique constraint failed on the fields: (`name`)');
       const client = clientWith({
         user: {
@@ -546,20 +560,14 @@ describe('createSingleExecutor', () => {
       });
       const { executor, produceRecords } = executorWith();
 
-      const run = executor.run(operationOf('create', { data: { name: 'Ann' } }), scopeOn(client), produceRecords);
+      const run = executor.run(
+        operationOn(client, 'create', { data: { name: 'Ann' } }),
+        scopeOn(client),
+        produceRecords,
+      );
 
       await expect(run).rejects.toBe(callerError);
-      expect(isCallerMutationError(callerError)).toBe(true);
       expect(produceRecords).not.toHaveBeenCalled();
-    });
-
-    it('fails when the model delegate has no such action', async () => {
-      const client = clientWith({ user: {} });
-      const { executor, produceRecords } = executorWith();
-
-      await expect(executor.run(operationOf('update', updateArgs), scopeOn(client), produceRecords)).rejects.toThrow(
-        'Model "User" or action "update" not found',
-      );
     });
   });
 
@@ -567,7 +575,7 @@ describe('createSingleExecutor', () => {
     it('wraps an audit failure with the model and action and keeps the original error as cause', () => {
       const original = new Error('diff calculation failed');
 
-      const surfaced = wrapAuditFailure(operationOf('update', updateArgs), original);
+      const surfaced = wrapAuditFailure(operationOn(clientWith({}), 'update', updateArgs), original);
 
       expect(surfaced.message).toBe(
         '[@prisma-audit] Audited operation failed for model "User" and action "update": diff calculation failed',

@@ -55,7 +55,7 @@ const transactionScope = (deferredWrites: Array<() => Promise<void>>): Execution
   auditContext,
   handle: transactionClient,
   baseHandle: baseClient,
-  transaction: { deferredWrites },
+  transaction: { deferredWrites, implicit: false },
   atomic: true,
 });
 

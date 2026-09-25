@@ -2,15 +2,14 @@
  * Batch-operation executor
  *
  * createMany, createManyAndReturn, updateMany, updateManyAndReturn and deleteMany: reads the
- * rows an update or a delete will touch with `findMany`, runs the operation on the scope's
- * handle, and collects one event per written row, paired with its before row by primary key.
+ * rows an update or a delete will touch with `findMany`, runs the operation, and collects one
+ * event per written row, paired with its before row by primary key.
  */
 
 import type { MutationEvent } from '@kuruwic/prisma-audit-core';
 import { AUDIT_ACTION, DEFAULTS } from '@kuruwic/prisma-audit-core';
 import type { PrismaNamespace } from '../internal-types.js';
 import type { SchemaMetadata } from '../schema/types.js';
-import { runCallerMutation } from '../utils/caller-mutation-error.js';
 import {
   buildEntityMap,
   ensureIds,
@@ -18,7 +17,7 @@ import {
   findManyByPKs,
   getPrimaryKeyFields,
 } from '../utils/id-generation.js';
-import { getModelDelegate, getModelOperation } from '../utils/model-accessor.js';
+import { getModelDelegate } from '../utils/model-accessor.js';
 import { requiresBeforeState } from '../utils/operation-classifier.js';
 import { collectBatchOperationEvents } from './collect-events.js';
 import type { ExecutionScope } from './execution-scope.js';
@@ -73,14 +72,6 @@ const batchDelegate = (scope: ExecutionScope, modelName: string): BatchDelegate 
     throw new Error(`Model ${modelName} does not have findMany operation. This is required for batch operations.`);
   }
   return delegate;
-};
-
-const mutationOf = (scope: ExecutionScope, modelName: string, action: string) => {
-  const mutation = getModelOperation(getModelDelegate(scope.handle, modelName), action);
-  if (!mutation) {
-    throw new Error(`Model "${modelName}" or action "${action}" not found`);
-  }
-  return mutation;
 };
 
 const rowsOf = (value: unknown): Row[] => (Array.isArray(value) ? (value as Row[]) : []);
@@ -147,39 +138,28 @@ export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationE
       ? prepareUpdateOrDelete(operation, scope, Prisma)
       : Promise.resolve(prepareCreate(operation, schemaMetadata));
 
-  // The mutation runs on the scope's handle so it participates in the transaction the audit
-  // rows are written in; the real action name keeps updateManyAndReturn from being misrouted.
   const execute = async (
     operation: AuditedOperation,
-    scope: ExecutionScope,
+    _scope: ExecutionScope,
     prepared: BatchPrepared,
   ): Promise<BatchExecuted> => {
-    const { model, action, args } = operation;
+    const { action, args } = operation;
     switch (prepared.kind) {
-      case 'create': {
-        const mutation = mutationOf(scope, model, action);
-        return {
-          result: await runCallerMutation(() => mutation({ ...args, data: prepared.rows })),
-          returnedRows: undefined,
-        };
-      }
+      case 'create':
+        return { result: await operation.execute({ ...args, data: prepared.rows }), returnedRows: undefined };
       case 'create-returning': {
-        const result = await runCallerMutation(() => mutationOf(scope, model, action)(args));
+        const result = await operation.execute(args);
         return { result, returnedRows: rowsOf(result) };
       }
       case 'update-returning': {
-        const mutation = mutationOf(scope, model, AUDIT_ACTION.UPDATE_MANY_AND_RETURN);
-        const rows = rowsOf(await runCallerMutation(() => mutation(args)));
+        const rows = rowsOf(await operation.execute(args, AUDIT_ACTION.UPDATE_MANY_AND_RETURN));
         // Each action keeps its contract: updateMany returns { count }, updateManyAndReturn the rows.
         const result = action === AUDIT_ACTION.UPDATE_MANY_AND_RETURN ? rows : { count: rows.length };
         return { result, returnedRows: rows };
       }
       case 'update':
       case 'delete':
-        return {
-          result: await runCallerMutation(() => mutationOf(scope, model, action)(args)),
-          returnedRows: undefined,
-        };
+        return { result: await operation.execute(args), returnedRows: undefined };
       default: {
         const exhaustiveCheck: never = prepared;
         throw new Error(`[@prisma-audit] Unhandled batch preparation: ${JSON.stringify(exhaustiveCheck)}`);

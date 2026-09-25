@@ -14,6 +14,8 @@ import { withOptionalTransaction } from '../lifecycle/transaction-wrapper.js';
 export interface TransactionScope {
   /** Writes queued here run on the base handle once the transaction has committed */
   readonly deferredWrites: Array<() => Promise<void>>;
+  /** Opened by the scope around this one operation, as opposed to the caller's own `$transaction` */
+  readonly implicit: boolean;
 }
 
 export interface ExecutionScope {
@@ -54,12 +56,15 @@ export const withExecutionScope = <T>(
   );
 
   return inScope((context, handle) => {
-    const transaction = getRuntimeContext()?.transaction;
+    const runtime = getRuntimeContext();
+    const transaction = runtime?.transaction;
     return run({
       auditContext: context,
       handle,
       baseHandle: baseClient,
-      transaction: transaction ? { deferredWrites: transaction.deferredWrites } : undefined,
+      transaction: transaction
+        ? { deferredWrites: transaction.deferredWrites, implicit: runtime?.isInImplicitTransaction === true }
+        : undefined,
       atomic,
     });
   });

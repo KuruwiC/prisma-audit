@@ -18,16 +18,17 @@ export interface AuditedOperation {
   readonly action: AuditAction;
   readonly args: Record<string, unknown>;
   /**
-   * The continuation `$allOperations` handed the extension, bound to the client the caller
-   * invoked the operation on. The executors run the operation on the scope's handle instead.
+   * Runs the caller's mutation with `args` on the client the execution scope selected, through
+   * `runCallerMutation` (see `operationContinuation` in run-audited-operation.ts). `action`
+   * substitutes another action of the same model for the intercepted one.
    */
-  readonly query: (args: unknown) => Promise<unknown>;
+  readonly execute: (args: Record<string, unknown>, action?: AuditAction) => Promise<unknown>;
 }
 
 export interface OperationSteps<TPrepared, TExecuted> {
   /** Every read that has to happen before the write: before states, nested pre-fetches, id injection */
   readonly prepare: (operation: AuditedOperation, scope: ExecutionScope) => Promise<TPrepared>;
-  /** The caller's own mutation, run through `runCallerMutation` so its failure propagates untouched */
+  /** The caller's own mutation, run through `operation.execute` so its failure propagates untouched */
   readonly execute: (operation: AuditedOperation, scope: ExecutionScope, prepared: TPrepared) => Promise<TExecuted>;
   /** One mutation event per row the operation wrote */
   readonly collect: (

@@ -85,12 +85,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
             const result = await runWithRuntimeContext({ isProcessingAuditLog: true }, () =>
               runAuditedOperation(
                 {
-                  operation: {
-                    model,
-                    action: operation,
-                    args: injection.args as Record<string, unknown>,
-                    query: (modifiedArgs) => query(modifiedArgs ?? injection.args),
-                  },
+                  operation: { model, action: operation, args: injection.args as Record<string, unknown>, query },
                   auditContext,
                   baseClient,
                 },

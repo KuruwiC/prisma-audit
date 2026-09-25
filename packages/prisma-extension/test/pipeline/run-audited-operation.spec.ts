@@ -1,7 +1,8 @@
 /**
  * Tests for the audited-operation pipeline: the write policy decides the scope, the executor
- * runs inside it, its records are dispatched into a write plan and written, and each kind of
- * failure reaches the caller and the failure sink the way its origin requires.
+ * runs inside it through the continuation the scope calls for, its records are dispatched into
+ * a write plan and written, and each kind of failure reaches the caller and the failure sink
+ * the way its origin requires.
  */
 
 import type { AuditContext, WritePlan } from '@kuruwic/prisma-audit-core';
@@ -22,26 +23,37 @@ import {
   type OperationExecutor,
   type OperationOutcome,
 } from '../../src/pipeline/executor.js';
-import { type AuditPipelineDependencies, runAuditedOperation } from '../../src/pipeline/run-audited-operation.js';
+import {
+  type AuditPipelineDependencies,
+  type InterceptedOperation,
+  runAuditedOperation,
+} from '../../src/pipeline/run-audited-operation.js';
 import type { AuditLogData } from '../../src/types.js';
-import { runCallerMutation } from '../../src/utils/caller-mutation-error.js';
+import { isCallerMutationError, runCallerMutation } from '../../src/utils/caller-mutation-error.js';
 
 const auditContext: AuditContext = { actor: { category: 'model', type: 'User', id: 'user-1' } };
-const transactionClient: TransactionalPrismaClient = Object.assign(Object.create(null), { name: 'transaction' });
+
+const transactionClientWith = (delegates: Record<string, unknown> = {}): TransactionalPrismaClient =>
+  Object.assign(Object.create(null), { name: 'transaction', ...delegates });
+const transactionClient = transactionClientWith();
 
 interface BaseClientStub extends PrismaClientWithDynamicAccess {
   readonly transactionsOpened: { count: number };
 }
 
-const createBaseClient = (): BaseClientStub => {
+const createBaseClient = (
+  transaction: TransactionalPrismaClient = transactionClient,
+  delegates: Record<string, unknown> = {},
+): BaseClientStub => {
   const transactionsOpened = { count: 0 };
   return {
     $transaction: async <T>(fn: (tx: TransactionalPrismaClient) => Promise<T>): Promise<T> => {
       transactionsOpened.count += 1;
-      return fn(transactionClient);
+      return fn(transaction);
     },
     $extends: () => undefined,
     transactionsOpened,
+    ...delegates,
   };
 };
 
@@ -66,11 +78,18 @@ const record: AuditLogData = {
   createdAt: new Date('2025-01-01T00:00:00Z'),
 };
 
+const args = { where: { id: 'u1' }, data: { name: 'Anne' } };
+
+const interceptedOf = (
+  action: InterceptedOperation['action'] = 'update',
+  query: InterceptedOperation['query'] = vi.fn(),
+): InterceptedOperation => ({ model: 'User', action, args, query });
+
 const operationOf = (action: AuditedOperation['action'] = 'update'): AuditedOperation => ({
   model: 'User',
   action,
-  args: { where: { id: 'u1' }, data: { name: 'Anne' } },
-  query: vi.fn(),
+  args,
+  execute: vi.fn(),
 });
 
 const outcome: OperationOutcome = { result: { id: 'u1', name: 'Anne' }, records: [record] };
@@ -116,13 +135,13 @@ describe('runAuditedOperation', () => {
       const baseClient = createBaseClient();
       const deps = createDeps({ policyConfig: { awaitWrite: true } });
 
-      await runAuditedOperation({ operation: operationOf(), auditContext, baseClient }, deps);
+      await runAuditedOperation({ operation: interceptedOf(), auditContext, baseClient }, deps);
 
       expect(baseClient.transactionsOpened.count).toBe(1);
       const scope = scopeSeenBy(deps.singleExecutor);
       expect(scope.handle).toBe(transactionClient);
       expect(scope.baseHandle).toBe(baseClient);
-      expect(scope.transaction).toBeDefined();
+      expect(scope.transaction?.implicit).toBe(true);
       expect(scope.atomic).toBe(true);
       expect(planWrittenBy(deps)).toEqual({ kind: 'immediate', records: [record] });
       expect(deps.writeAuditLogs).toHaveBeenCalledWith(expect.anything(), scope);
@@ -132,7 +151,7 @@ describe('runAuditedOperation', () => {
       const baseClient = createBaseClient();
       const deps = createDeps({ policyConfig: { awaitWrite: false } });
 
-      await runAuditedOperation({ operation: operationOf(), auditContext, baseClient }, deps);
+      await runAuditedOperation({ operation: interceptedOf(), auditContext, baseClient }, deps);
 
       expect(baseClient.transactionsOpened.count).toBe(0);
       const scope = scopeSeenBy(deps.singleExecutor);
@@ -148,13 +167,13 @@ describe('runAuditedOperation', () => {
       const deferredWrites: Array<() => Promise<void>> = [];
 
       await runWithRuntimeContext({ transaction: { client: transactionClient, deferredWrites } }, () =>
-        runAuditedOperation({ operation: operationOf(), auditContext, baseClient }, deps),
+        runAuditedOperation({ operation: interceptedOf(), auditContext, baseClient }, deps),
       );
 
       expect(baseClient.transactionsOpened.count).toBe(0);
       const scope = scopeSeenBy(deps.singleExecutor);
       expect(scope.handle).toBe(transactionClient);
-      expect(scope.transaction?.deferredWrites).toBe(deferredWrites);
+      expect(scope.transaction).toEqual({ deferredWrites, implicit: false });
       expect(planWrittenBy(deps).kind).toBe('after-commit');
     });
 
@@ -162,11 +181,122 @@ describe('runAuditedOperation', () => {
       const awaitWriteIf = vi.fn(() => false);
       const deps = createDeps({ policyConfig: { awaitWrite: true, awaitWriteIf }, modelTags: () => ['pii'] });
 
-      await runAuditedOperation({ operation: operationOf(), auditContext, baseClient: createBaseClient() }, deps);
+      await runAuditedOperation({ operation: interceptedOf(), auditContext, baseClient: createBaseClient() }, deps);
 
       expect(awaitWriteIf).toHaveBeenCalledTimes(1);
       expect(awaitWriteIf).toHaveBeenCalledWith('User', ['pii']);
       expect(planWrittenBy(deps).kind).toBe('detached');
+    });
+  });
+
+  describe('continuation', () => {
+    const runningTheOperation = (action?: AuditedOperation['action']) =>
+      stubExecutor(async (operation) => {
+        await operation.execute(operation.args, action);
+        return outcome;
+      });
+
+    it("runs the operation on the implicit transaction client's model delegate when the scope opened the transaction", async () => {
+      const update = vi.fn(async () => outcome.result);
+      const baseClient = createBaseClient(transactionClientWith({ user: { update } }));
+      const deps = createDeps({ policyConfig: { awaitWrite: true }, singleExecutor: runningTheOperation() });
+      const operation = interceptedOf();
+
+      await runAuditedOperation({ operation, auditContext, baseClient }, deps);
+
+      expect(update).toHaveBeenCalledWith(args);
+      expect(operation.query).not.toHaveBeenCalled();
+    });
+
+    it("continues the operation through query inside the caller's own transaction", async () => {
+      const update = vi.fn();
+      const deps = createDeps({ policyConfig: { awaitWrite: true }, singleExecutor: runningTheOperation() });
+      const operation = interceptedOf();
+
+      await runWithRuntimeContext(
+        { transaction: { client: transactionClientWith({ user: { update } }), deferredWrites: [] } },
+        () => runAuditedOperation({ operation, auditContext, baseClient: createBaseClient() }, deps),
+      );
+
+      expect(operation.query).toHaveBeenCalledWith(args);
+      expect(update).not.toHaveBeenCalled();
+    });
+
+    it('continues the operation through query when the policy is not atomic', async () => {
+      const update = vi.fn();
+      const baseClient = createBaseClient(transactionClient, { user: { update } });
+      const deps = createDeps({ policyConfig: { awaitWrite: false }, singleExecutor: runningTheOperation() });
+      const operation = interceptedOf();
+
+      await runAuditedOperation({ operation, auditContext, baseClient }, deps);
+
+      expect(operation.query).toHaveBeenCalledWith(args);
+      expect(update).not.toHaveBeenCalled();
+    });
+
+    it("runs a substituted action on the scope handle's model delegate", async () => {
+      const updateManyAndReturn = vi.fn(async () => []);
+      const baseClient = createBaseClient(transactionClient, { user: { updateManyAndReturn } });
+      const deps = createDeps({
+        policyConfig: { awaitWrite: false },
+        batchExecutor: runningTheOperation('updateManyAndReturn'),
+      });
+      const operation = interceptedOf('updateMany');
+
+      await runAuditedOperation({ operation, auditContext, baseClient }, deps);
+
+      expect(updateManyAndReturn).toHaveBeenCalledWith(args);
+      expect(operation.query).not.toHaveBeenCalled();
+    });
+
+    it('fails when the model delegate has no such action', async () => {
+      const deps = createDeps({ policyConfig: { awaitWrite: true }, singleExecutor: runningTheOperation() });
+
+      await expect(
+        runAuditedOperation({ operation: interceptedOf(), auditContext, baseClient: createBaseClient() }, deps),
+      ).rejects.toThrow('Model "User" or action "update" not found');
+    });
+
+    it.each([
+      {
+        path: 'query',
+        setup: (callerError: Error) => ({
+          baseClient: createBaseClient(),
+          policyConfig: { awaitWrite: false },
+          operation: interceptedOf(
+            'update',
+            vi.fn(async () => {
+              throw callerError;
+            }),
+          ),
+        }),
+      },
+      {
+        path: 'the model delegate',
+        setup: (callerError: Error) => ({
+          baseClient: createBaseClient(
+            transactionClientWith({
+              user: {
+                update: vi.fn(async () => {
+                  throw callerError;
+                }),
+              },
+            }),
+          ),
+          policyConfig: { awaitWrite: true },
+          operation: interceptedOf(),
+        }),
+      },
+    ])("tags the caller's own mutation error thrown through $path so it propagates raw", async ({ setup }) => {
+      const callerError = new Error('Unique constraint failed on the fields: (`email`)');
+      const { baseClient, policyConfig, operation } = setup(callerError);
+      const deps = createDeps({ policyConfig, singleExecutor: runningTheOperation() });
+
+      await expect(runAuditedOperation({ operation, auditContext, baseClient }, deps)).rejects.toBe(callerError);
+
+      expect(isCallerMutationError(callerError)).toBe(true);
+      expect(deps.failureSink.notify).not.toHaveBeenCalled();
+      expect(deps.writeAuditLogs).not.toHaveBeenCalled();
     });
   });
 
@@ -175,8 +305,8 @@ describe('runAuditedOperation', () => {
       const deps = createDeps();
       const baseClient = createBaseClient();
 
-      await runAuditedOperation({ operation: operationOf('updateMany'), auditContext, baseClient }, deps);
-      await runAuditedOperation({ operation: operationOf('upsert'), auditContext, baseClient }, deps);
+      await runAuditedOperation({ operation: interceptedOf('updateMany'), auditContext, baseClient }, deps);
+      await runAuditedOperation({ operation: interceptedOf('upsert'), auditContext, baseClient }, deps);
 
       expect(deps.batchExecutor.run).toHaveBeenCalledTimes(1);
       expect(deps.batchExecutor.run).toHaveBeenCalledWith(
@@ -196,7 +326,7 @@ describe('runAuditedOperation', () => {
       const deps = createDeps();
 
       const result = await runAuditedOperation(
-        { operation: operationOf(), auditContext, baseClient: createBaseClient() },
+        { operation: interceptedOf(), auditContext, baseClient: createBaseClient() },
         deps,
       );
 
@@ -217,7 +347,7 @@ describe('runAuditedOperation', () => {
       });
 
       await expect(
-        runAuditedOperation({ operation: operationOf(), auditContext, baseClient: createBaseClient() }, deps),
+        runAuditedOperation({ operation: interceptedOf(), auditContext, baseClient: createBaseClient() }, deps),
       ).rejects.toBe(callerError);
 
       expect(deps.failureSink.notify).not.toHaveBeenCalled();
@@ -235,7 +365,7 @@ describe('runAuditedOperation', () => {
           () => surfaced,
         ),
       });
-      const operation = operationOf();
+      const operation = interceptedOf();
 
       await expect(runAuditedOperation({ operation, auditContext, baseClient: createBaseClient() }, deps)).rejects.toBe(
         surfaced,
@@ -261,7 +391,7 @@ describe('runAuditedOperation', () => {
       });
 
       await expect(
-        runAuditedOperation({ operation: operationOf(), auditContext, baseClient: createBaseClient() }, deps),
+        runAuditedOperation({ operation: interceptedOf(), auditContext, baseClient: createBaseClient() }, deps),
       ).rejects.toBe(writeError);
 
       expect(deps.failureSink.notify).not.toHaveBeenCalled();

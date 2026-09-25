@@ -4,9 +4,9 @@
  * create, update, upsert and delete: reads the target row's before state and the nested records
  * the operation will write (including the rows a nested batch filter matches under its parent),
  * resolves the nested write set (the operations that execute, the rows they name or matched, and
- * the rows a to-many relation holds before a nested create), runs the operation on the scope's
- * handle, collects the top-level row and the nested rows the operation wrote, and re-reads the
- * result so its Date fields reach the caller as Date instances.
+ * the rows a to-many relation holds before a nested create), runs the operation, collects the
+ * top-level row and the nested rows the operation wrote, and re-reads the result so its Date
+ * fields reach the caller as Date instances.
  */
 
 import type { MutationEvent } from '@kuruwic/prisma-audit-core';
@@ -23,8 +23,6 @@ import { refetchForDateHydration } from '../lifecycle/operation-handlers/date-hy
 import { preFetchNestedRecordsBeforeOperation } from '../lifecycle/pre-fetch/coordinator.js';
 import { type PreExistingRows, snapshotPreExistingRows } from '../lifecycle/pre-fetch/pre-existing-rows.js';
 import type { SchemaMetadata } from '../schema/types.js';
-import { runCallerMutation } from '../utils/caller-mutation-error.js';
-import { getModelDelegate, getModelOperation } from '../utils/model-accessor.js';
 import {
   type BeforeStateResult,
   executedUpsertBranch,
@@ -100,16 +98,7 @@ export const createSingleExecutor = (deps: SingleExecutorDependencies): Operatio
     return { beforeStateResult, nestedPreFetchResults, nestedOperations, writeSets, preExistingRows };
   };
 
-  const execute = async (operation: AuditedOperation, scope: ExecutionScope): Promise<unknown> => {
-    // The operation runs on the scope's handle, the client the audit reads and writes share
-    // (inside the implicit transaction, its transaction client), so `operation.query`, bound
-    // to the caller's client, is not invoked.
-    const mutation = getModelOperation(getModelDelegate(scope.handle, operation.model), operation.action);
-    if (!mutation) {
-      throw new Error(`Model "${operation.model}" or action "${operation.action}" not found`);
-    }
-    return runCallerMutation(() => mutation(operation.args));
-  };
+  const execute = (operation: AuditedOperation): Promise<unknown> => operation.execute(operation.args);
 
   const collect = (
     operation: AuditedOperation,
