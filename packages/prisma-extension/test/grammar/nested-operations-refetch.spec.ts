@@ -1,14 +1,11 @@
 /**
- * Primary-key derivation, entity-identity helpers and the post-operation re-fetch of the nested-write grammar
+ * Primary-key derivation and entity-identity helpers of the nested-write grammar, and the post-operation re-fetch of nested rows
  */
 
 import { UNRESOLVED_ENTITY_ID } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
-import {
-  deserializeEntityId,
-  getPrimaryKeyConstraint,
-  refetchNestedRecords,
-} from '../../src/grammar/nested-operations.js';
+import { deserializeEntityId, getPrimaryKeyConstraint } from '../../src/grammar/nested-operations.js';
+import { refetchNestedRecords } from '../../src/nested/events/refetch-nested-records.js';
 import type { FieldMetadata, SchemaMetadata, UniqueConstraint } from '../../src/schema/types.js';
 
 const scalarField = (name: string, isId = false): FieldMetadata => ({

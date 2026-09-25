@@ -23,7 +23,6 @@ import {
   type NestedOperationInfo,
   type NestedPreFetchResults,
   type NestedRecordInfo,
-  refetchNestedRecords,
 } from '../../grammar/nested-operations.js';
 import type { GetOperationConfig } from '../../grammar/pre-fetch-selection.js';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../internal-types.js';
@@ -40,6 +39,7 @@ import {
   collectDeleteRecords,
   type UnresolvedDeleteEntityIdReporter,
 } from './delete-handler.js';
+import { refetchNestedRecords } from './refetch-nested-records.js';
 import { resolveNestedRowState } from './state-resolver.js';
 import { insertsRows, type NestedWriteSet, type NestedWriteSets, type NestedWriteTarget } from './write-set.js';
 
