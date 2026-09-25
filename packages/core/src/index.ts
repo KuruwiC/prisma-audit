@@ -24,6 +24,9 @@ export type {
   LoggableEntity,
   ResolvedId,
 } from './aggregate/types.js';
+// Compose
+export type { ComposeAmbient, ComposeConfig, EntityComposeConfig } from './compose/index.js';
+export { compose } from './compose/index.js';
 // Config Types
 export type { GlobalContextEnricherConfig, SerializationConfig } from './config.types.js';
 // Constants
@@ -39,6 +42,9 @@ export {
 } from './constants.js';
 // Context Provider
 export { createAsyncLocalStorageProvider } from './context-provider.js';
+// Dispatch
+export type { DispatchScope } from './dispatch/index.js';
+export { dispatch } from './dispatch/index.js';
 // Domain - Audit Log Types
 export type { AuditLogData, AuditLogInput } from './domain/audit-log-types.js';
 // Domain - Branded Types
@@ -53,6 +59,15 @@ export {
   isEntityId,
   unwrapId,
 } from './domain/branded-types.js';
+// Domain - Mutation Event
+export type {
+  AuditRecord,
+  MutationAction,
+  MutationEvent,
+  MutationOrigin,
+  ResolvedEvent,
+  WritePlan,
+} from './domain/mutation-event.js';
 // Domain - Smart Constructors
 export type { Result, ValidationError } from './domain/smart-constructors.js';
 export { createAuditLogData } from './domain/smart-constructors.js';
@@ -72,6 +87,11 @@ export type { ProjectionEnrichmentMeta } from './enrichment/types.js';
 export { getGlobalSingleton } from './global-singleton.js';
 // Interfaces
 export type { DbClient, SchemaMetadata, UniqueConstraint } from './interfaces/index.js';
+// Policy
+export type { PolicyConfig, WritePolicy } from './policy/index.js';
+export { policy } from './policy/index.js';
+// Resolve
+export type { EntityResolveConfig, ResolveConfig } from './resolve/index.js';
 // Runtime Context (library-owned infrastructure state)
 //
 // Exported because @kuruwic/prisma-audit imports it across the package boundary;
