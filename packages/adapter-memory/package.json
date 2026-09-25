@@ -1,0 +1,20 @@
+{
+  "name": "@kuruwic/audit-adapter-memory",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "In-memory audit adapter built on @kuruwic/db-audit-core",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@kuruwic/db-audit-core": "workspace:^"
+  },
+  "devDependencies": {
+    "@kuruwic/prisma-audit-typescript-config": "workspace:*",
+    "@types/node": "^24.10.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.8"
+  }
+}
