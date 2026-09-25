@@ -1,7 +1,7 @@
 /**
  * Serialization Utilities for Audit Logging
  *
- * Converts JavaScript objects to JSON-compatible format for Prisma JSONB storage.
+ * Converts JavaScript objects to JSON-compatible format for JSON column storage.
  * Handles non-JSON-serializable types: BigInt → string, Date → ISO string.
  *
  * @example

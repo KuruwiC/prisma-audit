@@ -100,7 +100,7 @@ export interface AuditContextProvider {
   /**
    * Run a synchronous function with the given audit context
    *
-   * Do not return lazy thenables (e.g. a Prisma query promise) from `fn`:
+   * Do not return lazy thenables (e.g. a database client's query promise) from `fn`:
    * they execute when awaited, which happens after this synchronous scope
    * has exited, so the context would not apply. Use `runAsync` for those.
    *
@@ -114,7 +114,7 @@ export interface AuditContextProvider {
    * Run an asynchronous function with the given audit context
    *
    * The returned value is settled inside the context scope, so `fn` may
-   * return a lazy thenable (e.g. a Prisma query promise) directly.
+   * return a lazy thenable (e.g. a database client's query promise) directly.
    *
    * @param context - The audit context to set
    * @param fn - The async function to run
@@ -129,7 +129,7 @@ export interface AuditContextProvider {
    * re-attribute writes to a different actor mid-flow.
    *
    * Like `runAsync`, the returned value is settled inside the overridden
-   * scope, so `fn` may return a lazy Prisma query promise directly.
+   * scope, so `fn` may return a lazy query promise directly.
    */
   withActor<T>(actor: AuditActor, fn: () => T | Promise<T>): Promise<T>;
 }

@@ -9,9 +9,9 @@
  *   type EnricherConfig
  * } from '@kuruwic/prisma-audit/enrichment';
  *
- * const actorEnricher: EnricherConfig<Actor, EnrichedActor> = {
- *   enricher: async (actor, prisma) => {
- *     const user = await prisma.user.findUnique({ where: { id: actor.id } });
+ * const actorEnricher: EnricherConfig<Actor, EnrichedActor, DbHandle> = {
+ *   enricher: async (actor, db) => {
+ *     const user = await db.users.find({ id: actor.id });
  *     return { ...actor, fullName: user.name };
  *   },
  *   onError: 'log',

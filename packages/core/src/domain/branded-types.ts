@@ -105,7 +105,7 @@ export const isAggregateId = (value: unknown): value is AggregateId => {
  * ```typescript
  * const actorId = createActorId('user-123');
  * const rawId = unwrapId(actorId);
- * await db.user.findUnique({ where: { id: unwrapId(actorId) } });
+ * await db.users.find({ id: unwrapId(actorId) });
  * ```
  */
 export const unwrapId = (id: AnyBrandedId): string => {

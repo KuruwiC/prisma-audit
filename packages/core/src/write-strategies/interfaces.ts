@@ -37,8 +37,7 @@ export interface DbClientManager {
  * ```typescript
  * const executor: WriteExecutor = {
  *   write: async (client, modelName, logs) => {
- *     const model = (client as PrismaClient)[modelName];
- *     await model.createMany({ data: logs });
+ *     await (client as DbHandle).table(modelName).insertMany(logs);
  *   }
  * };
  * ```
