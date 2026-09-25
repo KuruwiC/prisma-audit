@@ -64,8 +64,6 @@ export interface RedactedFieldInfo {
   isDifferent?: boolean;
 }
 
-export type RedactMaskFn = (field: string, value: unknown) => unknown;
-
 export interface RedactConfig {
   fields?: string[];
 }

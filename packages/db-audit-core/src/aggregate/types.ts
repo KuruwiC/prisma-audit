@@ -283,23 +283,3 @@ export interface ResolvedId {
   aggregateType: string;
   aggregateId: string;
 }
-
-/**
- * Context for resolving aggregate IDs
- *
- * @interface
- *
- * @example
- * ```typescript
- * const context: AggregateResolutionContext = {
- *   entity: { id: 'post-1', authorId: 'user-123', title: 'Hello' },
- *   db,
- *   modelName: 'post'
- * };
- * ```
- */
-export interface AggregateResolutionContext {
-  entity: unknown;
-  db: unknown;
-  modelName: string;
-}

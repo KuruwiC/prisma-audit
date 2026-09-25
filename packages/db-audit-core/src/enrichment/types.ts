@@ -36,9 +36,6 @@ export interface EnricherConfig<TInput, TContext, TDbHandle = unknown, TMeta = v
   fallback?: TContext;
 }
 
-/** Actor enricher configuration: `(actor, db) => context` */
-export type ActorEnricherConfig<TDbHandle = unknown> = EnricherConfig<unknown, unknown, TDbHandle> | undefined;
-
 /**
  * Entity-log context enricher configuration: `(rows, db) => contexts`
  *
