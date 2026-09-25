@@ -13,15 +13,15 @@ import type { AuditLogData } from '../types.js';
 import type { ExecutionScope } from './execution-scope.js';
 import type { RecordProducer } from './produce-records.js';
 
-/** A write operation `$allOperations` intercepted, on a known model */
+/** The intercepted operation as an executor runs it */
 export interface AuditedOperation {
   readonly model: string;
   readonly action: AuditAction;
   readonly args: Record<string, unknown>;
   /**
-   * Runs the caller's mutation with `args` on the client the execution scope selected, through
-   * `runCallerMutation` (see `operationContinuation` in run-audited-operation.ts). `action`
-   * substitutes another action of the same model for the intercepted one.
+   * Runs the caller's mutation with `args` on the client the execution scope selected (see
+   * `operationContinuation` in run-audited-operation.ts). `action` substitutes another action
+   * of the same model for the intercepted one.
    */
   readonly execute: (args: Record<string, unknown>, action?: AuditAction) => Promise<unknown>;
 }

@@ -48,11 +48,8 @@ describe('nested pre-fetch failures — observer notification', () => {
    * Builds an audited client whose base Prisma client can fail `comment.findUnique`
    * on specific 1-indexed call numbers, armed via the returned `armFault`.
    *
-   * Setup work before `armFault` is called (e.g. the date-hydration re-fetch that
-   * `refetchForDateHydration` runs after every audited `comment.create`, via
-   * `clientToUse.Comment.findUnique` — Prisma aliases the PascalCase model name to
-   * the same delegate) also calls `comment.findUnique`. `armFault` resets the call
-   * counter to zero, so those setup calls never consume the armed call numbers.
+   * `armFault` resets the call counter to zero, so any `comment.findUnique` the setup
+   * work before it issues never consumes the armed call numbers.
    */
   const createClient = (databaseUrl: string, observer: AuditErrorObserver) => {
     const rawBasePrisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });

@@ -28,9 +28,9 @@ describe('Deep Nested Upsert Operations (Profile → Avatar → AvatarImage)', (
 
   describe('Avatar Update via Nested Upsert (3 levels deep)', () => {
     // 3-level nested operations (Profile → Avatar → AvatarImage):
-    // 1. Pre-fetch captures IDs from deeply nested records (before state)
-    // 2. The operation result does not include deeply nested records, so `refetchNestedRecords`
-    //    uses those IDs to retrieve the current state (after state)
+    // 1. Pre-fetch captures the deeply nested records before the write (before state)
+    // 2. The written relations are added to the operation's selection, so its result returns
+    //    the deeply nested records as written (after state)
     // 3. Audit logs are created with correct before/after states
     it('should create audit logs when updating avatar image through profile.upsert', async () => {
       // Setup: Create user with profile, avatar, and avatarImage

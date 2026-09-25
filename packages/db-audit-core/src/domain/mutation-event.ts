@@ -27,7 +27,11 @@ export interface MutationEvent<TModelName extends string = string> {
   readonly action: MutationAction;
   /** Row before the write. Absent when not captured (create, fetchBeforeOperation: false, failed fetch). */
   readonly before?: Record<string, unknown>;
-  /** Row after the write. Absent for delete. */
+  /**
+   * Row after the write. Resolvers and enrichers receive `after ?? before`, so a delete event may
+   * carry the deleted row here as the adapter last saw it; `compose` stores no after state for a
+   * delete.
+   */
   readonly after?: Record<string, unknown>;
   readonly origin: MutationOrigin;
 }

@@ -1,9 +1,8 @@
 /**
  * Integration Test: upsert action resolution when the before-state fetch fails
  *
- * `createFetchBeforeStateStage` always pre-fetches the before-state for `upsert`
- * (to tell create from update), via a `findUnique` call distinct from Prisma's own
- * upsert execution. If that pre-fetch throws, the failure must not silently make
+ * `fetchBeforeState` always reads the before-state for `upsert` (to tell create from
+ * update), via a `findUnique` call distinct from Prisma's own upsert execution. If that pre-fetch throws, the failure must not silently make
  * the operation look like a `create` in the audit log: an upsert that in fact
  * updated an existing row must never be recorded with `action: 'create'`.
  *
@@ -11,8 +10,8 @@
  * *before* the audit extension (`basePrisma.$extends({ query: { post: { findUnique... } } })`),
  * the same public mechanism `hooks.writer` fault-injection tests use on the write
  * side (see error-handling.integration.spec.ts). Because the audit extension's own
- * `fetchBeforeState` calls `clientToUse.post.findUnique(...)`, and `clientToUse`
- * always derives from this same extended client (directly, or via `$transaction`,
+ * `fetchBeforeState` calls `post.findUnique(...)` on the client the operation runs on,
+ * which always derives from this same extended client (directly, or via `$transaction`,
  * which carries extensions through), the injected failure reaches it regardless of
  * the `awaitWrite` setting. Prisma's own upsert execution does not call back into
  * the JS-level `findUnique` method, so it is unaffected.

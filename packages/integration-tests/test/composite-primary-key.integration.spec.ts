@@ -12,7 +12,7 @@
  * `idResolver` (`self('id')`) cannot resolve it — `testAggregateMapping` gives
  * `PostLike` an explicit `idResolver` that serializes `[postId, userId]` as JSON,
  * matching the format `getPrimaryKeyFields`/`extractPrimaryKey`
- * (`packages/prisma-extension/src/utils/id-generator.ts`) derive from the
+ * (`packages/prisma-extension/src/utils/id-generation.ts`) derive from the
  * schema's declared `@@id` field order.
  *
  * Covers, through the public client against a real database:

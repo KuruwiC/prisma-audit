@@ -441,17 +441,15 @@ describe('Error Handling Integration', () => {
 
   describe('Batch operations — error policy contract', () => {
     // A batch operation's own `log-write` failure notifies the observer exactly
-    // once, with `phase: 'log-write'` — the same as the single-operation path
-    // (`executeAuditedOperation` in operation-executor.ts). Under
-    // `writeFailurePolicy: 'throw'`, that failure rolls the caller's rows back
-    // with it.
+    // once, with `phase: 'log-write'`, through the same audited-operation pipeline
+    // as a single operation. Under `writeFailurePolicy: 'throw'`, that failure
+    // rolls the caller's rows back with it.
 
     // The next two tests use `writeFailurePolicy: 'throw'` specifically: it is the
-    // only policy that re-throws the `log-write` failure out of `writeAuditLogs`,
+    // only policy that re-throws the `log-write` failure out of the audit-log write,
     // so it is the one policy under which the once-only guarantee has to hold
-    // end to end — the failure must propagate through `runBatchPipeline` and
-    // `dispatchBatchAction` back to the caller without being reported a second
-    // time along the way.
+    // end to end — the failure must propagate back to the caller without being
+    // reported a second time along the way.
 
     it("a failing hooks.writer on a batch operation (createMany) notifies the observer exactly once, with phase: 'log-write'", async () => {
       const observer = vi.fn();
@@ -846,8 +844,8 @@ describe('Error Handling Integration', () => {
     });
 
     it('a batch (updateMany) unique constraint violation propagates raw, without reaching the audit observer or policy', async () => {
-      // `handleUpdateOrDeleteMany` calls the caller's own `updateMany` in the middle of
-      // audit-support work (before-fetch, after-refetch, runBatchPipeline). Only the
+      // The batch executor calls the caller's own `updateMany` in the middle of
+      // audit-support work (before-fetch, after-refetch, record production). Only the
       // audit-support work is an audit failure — the caller's own database error must
       // never be reported to `observer` or routed through `policy`. Uses a normal
       // (non-failing) writer so the only failure in play is the caller's own — the setup

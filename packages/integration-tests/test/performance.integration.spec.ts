@@ -59,7 +59,7 @@ const createAuditedClientWithAuditLogRowCounter = (
   });
 };
 
-/** Create audit client with fetchBeforeOperation: true for refetch fallback tests */
+/** Create audit client with fetchBeforeOperation: true for the nested-update tests below */
 const createAuditedClientWithRefetchFallback = (
   basePrisma: PrismaClient,
   provider: AuditContextProvider,

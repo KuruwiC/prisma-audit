@@ -13,7 +13,7 @@ import type { AuditActor, AuditContext, AuditContextProvider } from './types.js'
  *     type: 'User',
  *     id: 'user-123',
  *   },
- *   metadata: {
+ *   request: {
  *     ipAddress: '192.168.1.1',
  *     userAgent: 'Mozilla/5.0...',
  *   },

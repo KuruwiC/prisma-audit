@@ -256,7 +256,7 @@ describe('Database Round-Trip Guard', () => {
 
     console.log(`deleteMany: ${statements.length} SQL statements`);
     // 1. BEGIN                  — awaitWrite: true (default) wraps the operation in a transaction
-    // 2. SELECT FROM posts      — handleUpdateOrDeleteMany's findMany, capturing before-state for
+    // 2. SELECT FROM posts      — the batch executor's findMany, capturing before-state for
     //                             the 2 rows about to be deleted
     // 3. DELETE FROM posts      — the caller's own deleteMany
     // 4. INSERT INTO audit_logs — one batched write covering both deleted rows (2 rows, 1 statement)

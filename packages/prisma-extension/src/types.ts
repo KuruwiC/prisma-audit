@@ -124,8 +124,9 @@ export interface NestedOperationsConfig {
  *   outcome {@link ErrorHandlingConfig.writeFailurePolicy} decides — see
  *   {@link WriteFailurePolicy} for writes that are queued or detached.
  * - `diff-generation`: other audit-support work around the caller's operation failed —
- *   building the entry (enrichment, aggregate resolution, redaction) or, for batch
- *   operations, fetching the affected rows before or after the mutation. This phase is NOT
+ *   building the entry (enrichment, aggregate resolution, redaction), re-reading a nested
+ *   row the operation updated that its result did not return, or, for batch operations,
+ *   fetching the affected rows before or after the mutation. This phase is NOT
  *   policy-gated: it always propagates to the caller as a thrown error, regardless of
  *   {@link ErrorHandlingConfig.writeFailurePolicy}.
  * - `entity-id-resolution`: a nested delete's primary key could not be resolved, from
