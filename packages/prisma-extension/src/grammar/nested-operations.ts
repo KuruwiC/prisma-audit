@@ -14,6 +14,8 @@ import { type EntityIdentityKey, nestedLog, UNRESOLVED_ENTITY_ID } from '@kuruwi
 import type { SchemaMetadata, UniqueConstraint } from '../schema/types.js';
 import type { NestedPreFetchResult } from './nested-state.js';
 
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
+
 /** Client the refetch reads through: model delegates keyed by uncapitalized model name. */
 type RefetchClient = Record<string, { findMany?(args: { where: Record<string, unknown> }): Promise<unknown[]> }>;
 
@@ -86,23 +88,43 @@ export type UpsertBranch = 'create' | 'update';
  * - `executed`: the operation ran, and only the writes of the branches that executed are reported.
  *   `topLevelUpsertBranch` is the branch the top-level upsert executed; it is absent when the
  *   operation is not an upsert, and the top-level `create` / `update` args are then not scanned.
- *   `hasRecordAt(path)` tells whether the record targeted by the nested upsert at `path` existed
- *   before the operation: `true` selects that upsert's `update` branch, `false` its `create` branch.
+ *   `hasRecordAt(path, where)` tells whether the record a nested upsert at `path` targets existed
+ *   before the operation: `true` selects that upsert's `update` branch, `false` its `create`
+ *   branch. `where` is the element's unique WHERE, absent for a to-one upsert, which targets the
+ *   single related row.
  */
 export type NestedDetectionPass =
   | { readonly kind: 'discovery' }
   | {
       readonly kind: 'executed';
       readonly topLevelUpsertBranch?: UpsertBranch;
-      readonly hasRecordAt: (path: string) => boolean;
+      readonly hasRecordAt: (path: string, where: Record<string, unknown> | undefined) => boolean;
     };
 
-/** @internal The branches of the nested upsert at `path` that the pass scans */
-const nestedUpsertBranches = (pass: NestedDetectionPass, path: string): readonly UpsertBranch[] => {
+/** @internal The branches of one nested upsert element at `path` that the pass scans */
+const upsertElementBranches = (
+  pass: NestedDetectionPass,
+  path: string,
+  element: Record<string, unknown>,
+): readonly UpsertBranch[] => {
   if (pass.kind === 'discovery') {
     return ['update', 'create'];
   }
-  return [pass.hasRecordAt(path) ? 'update' : 'create'];
+  const where = isRecord(element.where) ? element.where : undefined;
+  return [pass.hasRecordAt(path, where) ? 'update' : 'create'];
+};
+
+/**
+ * @internal The data of the upsert branches the pass scans, element by element: a to-many upsert is
+ * one `{ where, create, update }` or a list of them, each taking its own branch.
+ */
+const upsertBranchData = (pass: NestedDetectionPass, path: string, nestedData: unknown): Record<string, unknown>[] => {
+  const elements = Array.isArray(nestedData) ? nestedData : [nestedData];
+  return elements.filter(isRecord).flatMap((element) =>
+    upsertElementBranches(pass, path, element)
+      .map((branch) => element[branch])
+      .filter(isRecord),
+  );
 };
 
 /** @internal The branches of the top-level upsert whose args the pass scans */
@@ -131,39 +153,24 @@ const processCreateOperation = (
   );
 };
 
-/** @internal Process upsert operation - explore the branches the pass selects for this path */
+/** @internal Process upsert operation - explore the branches the pass selects for each element */
 const processUpsertOperation = (
   schemaMetadata: SchemaMetadata,
   relationField: { name: string; relatedModel: string; isList: boolean },
   nestedData: unknown,
   currentPath: string,
   pass: NestedDetectionPass,
-): NestedOperationInfo[] => {
-  if (typeof nestedData !== 'object' || nestedData === null) {
-    return [];
-  }
-
-  const upsertData = nestedData as Record<string, unknown>;
-  const deeplyNestedOps: NestedOperationInfo[] = [];
-
-  for (const branch of nestedUpsertBranches(pass, currentPath)) {
-    const branchData = upsertData[branch];
-    if (typeof branchData === 'object' && branchData !== null) {
-      deeplyNestedOps.push(
-        ...detectDeeplyNestedOperations(
-          schemaMetadata,
-          relationField.relatedModel,
-          branchData,
-          currentPath,
-          pass,
-          currentPath,
-        ),
-      );
-    }
-  }
-
-  return deeplyNestedOps;
-};
+): NestedOperationInfo[] =>
+  upsertBranchData(pass, currentPath, nestedData).flatMap((branchData) =>
+    detectDeeplyNestedOperations(
+      schemaMetadata,
+      relationField.relatedModel,
+      branchData,
+      currentPath,
+      pass,
+      currentPath,
+    ),
+  );
 
 /** @internal Process connectOrCreate operation */
 const processConnectOrCreateOperation = (
@@ -409,15 +416,8 @@ const processDeeplyNestedOperations = (
     );
   }
 
-  // For 'upsert', explore the branches the pass selects
-  if (keyword === 'upsert' && typeof nestedData === 'object' && nestedData !== null) {
-    return processTopLevelUpsertBranches(
-      schemaMetadata,
-      relationField,
-      nestedData as Record<string, unknown>,
-      fieldPath,
-      pass,
-    );
+  if (keyword === 'upsert') {
+    return processUpsertOperation(schemaMetadata, relationField, nestedData, relationField.name, pass);
   }
 
   // For 'connectOrCreate', recursively detect deeply nested operations in create branch
@@ -438,35 +438,6 @@ const processDeeplyNestedOperations = (
   }
 
   return [];
-};
-
-/** @internal Process upsert branches at top level */
-const processTopLevelUpsertBranches = (
-  schemaMetadata: SchemaMetadata,
-  relationField: { name: string; relatedModel: string; isList: boolean },
-  upsertData: Record<string, unknown>,
-  fieldPath: string,
-  pass: NestedDetectionPass,
-): NestedOperationInfo[] => {
-  const operations: NestedOperationInfo[] = [];
-
-  for (const branch of nestedUpsertBranches(pass, relationField.name)) {
-    const branchData = upsertData[branch];
-    if (typeof branchData === 'object' && branchData !== null) {
-      operations.push(
-        ...detectDeeplyNestedOperations(
-          schemaMetadata,
-          relationField.relatedModel,
-          branchData,
-          relationField.name,
-          pass,
-          fieldPath,
-        ),
-      );
-    }
-  }
-
-  return operations;
 };
 
 /**

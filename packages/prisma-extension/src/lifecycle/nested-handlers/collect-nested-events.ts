@@ -7,7 +7,7 @@
  */
 
 import type { MutationEvent } from '@kuruwic/prisma-audit-core';
-import { nestedLog, UNRESOLVED_ENTITY_ID } from '@kuruwic/prisma-audit-core';
+import { nestedLog } from '@kuruwic/prisma-audit-core';
 
 import {
   detectNestedOperations,
@@ -23,29 +23,10 @@ import type { GetOperationConfig } from '../../grammar/pre-fetch-selection.js';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../internal-types.js';
 import { identityOf, toMutationAction } from '../../pipeline/event-fields.js';
 import type { SchemaMetadata, UniqueConstraint } from '../../schema/types.js';
+import { hasPreFetchedRecordAt } from '../pre-fetch/pre-fetch-result-store.js';
 import type { CollectedNestedRecord } from './collected-record.js';
 import { collectDeleteRecords, type UnresolvedDeleteEntityIdReporter } from './delete-handler.js';
 import { collectNestedRecords } from './record-processor.js';
-
-/**
- * Whether the record targeted by the nested upsert at `path` existed before the operation.
- *
- * Answered per path, not per row, so every upsert at one path takes the same branch: the entry
- * under `UNRESOLVED_ENTITY_ID` decides when present, else the first entry. A missing to-one row and
- * a failed pre-fetch are both stored there with a `null` before-state, so a path mixing found and
- * missing rows reads as missing.
- *
- * @internal
- */
-const hasPreFetchedRecordAt = (nestedPreFetchResults: NestedPreFetchResults, path: string): boolean => {
-  const pathMap = nestedPreFetchResults.get(path);
-  if (!pathMap) {
-    return false;
-  }
-
-  const entry = pathMap.get(UNRESOLVED_ENTITY_ID) ?? pathMap.values().next().value;
-  return entry !== undefined && entry.before !== null;
-};
 
 export interface NestedEventCollectorDependencies {
   schemaMetadata: SchemaMetadata;
@@ -163,7 +144,7 @@ export const collectNestedEvents = async (
   const nestedOperations = detectNestedOperations(schemaMetadata, modelName, args, {
     kind: 'executed',
     topLevelUpsertBranch,
-    hasRecordAt: (path) => hasPreFetchedRecordAt(nestedPreFetchResults, path),
+    hasRecordAt: (path, where) => hasPreFetchedRecordAt(nestedPreFetchResults, path, where),
   });
 
   if (nestedOperations.length === 0) {

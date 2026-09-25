@@ -997,4 +997,70 @@ describe('detectNestedOperations inside nested updates', () => {
       'posts.comments.attachments:create',
     ]);
   });
+
+  describe('array-form nested upsert', () => {
+    const args = {
+      data: {
+        posts: {
+          upsert: [
+            {
+              where: { id: 'post-1' },
+              create: { title: 'never' },
+              update: { comments: { create: { content: 'c1' } } },
+            },
+            {
+              where: { id: 'missing' },
+              create: { comments: { create: { content: 'c2' } } },
+              update: { comments: { deleteMany: {} } },
+            },
+          ],
+        },
+      },
+    };
+
+    it('scans both branches of every element in the discovery pass', () => {
+      expect(detectedOperations(args, { kind: 'discovery' })).toEqual([
+        'posts:upsert',
+        'posts.comments:create',
+        'posts.comments:deleteMany',
+        'posts.comments:create',
+      ]);
+    });
+
+    it('asks whether each element targets an existing row by its own WHERE and takes its branch', () => {
+      const asked: [string, Record<string, unknown> | undefined][] = [];
+      const pass: NestedDetectionPass = {
+        kind: 'executed',
+        hasRecordAt: (path, where) => {
+          asked.push([path, where]);
+          return where?.id === 'post-1';
+        },
+      };
+
+      expect(detectedOperations(args, pass)).toEqual([
+        'posts:upsert',
+        'posts.comments:create',
+        'posts.comments:create',
+      ]);
+      expect(asked).toEqual([
+        ['posts', { id: 'post-1' }],
+        ['posts', { id: 'missing' }],
+      ]);
+    });
+
+    it('passes no WHERE for a to-one upsert', () => {
+      const asked: unknown[] = [];
+      const pass: NestedDetectionPass = {
+        kind: 'executed',
+        hasRecordAt: (_path, where) => {
+          asked.push(where);
+          return false;
+        },
+      };
+
+      detectedOperations({ data: { profile: { upsert: { create: {}, update: {} } } } }, pass);
+
+      expect(asked).toEqual([undefined]);
+    });
+  });
 });

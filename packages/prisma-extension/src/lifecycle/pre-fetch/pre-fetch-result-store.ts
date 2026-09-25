@@ -14,7 +14,7 @@ import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID } from '@kuruwic/prisma-au
 import type { NestedPreFetchResults } from '../../grammar/nested-operations.js';
 import type { NestedPreFetchResult } from '../../grammar/nested-state.js';
 import type { UniqueConstraint } from '../../schema/types.js';
-import { unwrapCompoundWhere } from '../../utils/compound-where.js';
+import { matchesUniqueWhere, unwrapCompoundWhere } from '../../utils/compound-where.js';
 import { extractEntityIdentity } from '../../utils/id-generation.js';
 
 /**
@@ -42,6 +42,26 @@ export const getPreFetchResult = (
   if (!pathMap) return undefined;
 
   return pathMap.get(entityId) || pathMap.get(UNRESOLVED_ENTITY_ID);
+};
+
+/**
+ * Whether a row a nested operation at `path` targets was pre-fetched: with `where`, the row the
+ * unique WHERE names among the found rows at the path; without it (a to-one relation), any found
+ * row at the path. A missing row and a failed pre-fetch are both stored with a `null` before-state
+ * and read as not found.
+ */
+export const hasPreFetchedRecordAt = (
+  nestedPreFetchResults: NestedPreFetchResults | undefined,
+  path: string,
+  where: Record<string, unknown> | undefined,
+): boolean => {
+  const entries = nestedPreFetchResults?.get(path)?.values() ?? [];
+  for (const entry of entries) {
+    if (entry.before !== null && (where === undefined || matchesUniqueWhere(entry.before, where))) {
+      return true;
+    }
+  }
+  return false;
 };
 
 /**

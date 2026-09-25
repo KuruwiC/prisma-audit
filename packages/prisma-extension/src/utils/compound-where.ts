@@ -1,9 +1,11 @@
-import type { UniqueConstraint } from '../schema/types.js';
 /**
- * Compound-unique WHERE handling
+ * Unique WHERE handling: Prisma's compound-unique wrapper, and whether a row is the one a unique
+ * WHERE names
  *
  * @module utils/compound-where
  */
+
+import type { UniqueConstraint } from '../schema/types.js';
 
 /**
  * Unwraps Prisma's compound-unique WHERE wrapper (`{ a_b: { a, b } }`) into the flat
@@ -24,3 +26,35 @@ export const unwrapCompoundWhere = (
   const compoundKey = pkConstraint.name ?? pkConstraint.fields.join('_');
   return (whereClause[compoundKey] as Record<string, unknown> | undefined) ?? whereClause;
 };
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/** A value a unique WHERE compares a field to; a filter object (`{ contains }`) is not one */
+const isComparableValue = (value: unknown): boolean =>
+  value === null || typeof value !== 'object' || value instanceof Date;
+
+const valuesEqual = (rowValue: unknown, whereValue: unknown): boolean => {
+  if (rowValue instanceof Date && whereValue instanceof Date) {
+    return rowValue.getTime() === whereValue.getTime();
+  }
+  if (typeof rowValue === 'bigint' || typeof whereValue === 'bigint') {
+    return String(rowValue) === String(whereValue);
+  }
+  return rowValue === whereValue;
+};
+
+/**
+ * Whether `row` is the row `whereClause`, a `<Model>WhereUniqueInput`, names: every field the WHERE
+ * compares to a value holds that value in the row. A key the row does not carry wraps a
+ * compound unique key (`{ a_b: { a, b } }`) and is matched through its fields; a filter object on
+ * a field the row carries (`{ title: { contains } }`) cannot be evaluated and does not exclude
+ * the row, since the unique key fields decide.
+ */
+export const matchesUniqueWhere = (row: Record<string, unknown>, whereClause: Record<string, unknown>): boolean =>
+  Object.entries(whereClause).every(([field, expected]) => {
+    if (field in row) {
+      return isComparableValue(expected) ? valuesEqual(row[field], expected) : true;
+    }
+    return isRecord(expected) ? matchesUniqueWhere(row, expected) : true;
+  });
