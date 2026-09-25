@@ -281,7 +281,7 @@ describe('compose', () => {
       redaction.override = () => ['not', 'a', 'record'];
 
       expect(() => compose([event()], ambient({ redact: {} }), now)).toThrow(
-        '[@prisma-audit] Redaction produced unexpected type',
+        '[db-audit-core] Redaction produced unexpected type',
       );
     });
 
@@ -292,7 +292,7 @@ describe('compose', () => {
       const resolved = updateEvent({ id: 'post-1', title: 'Old' }, { id: 'post-1', title: 'New' });
 
       expect(() => compose([resolved], ambient({ redact: {} }), now)).toThrow(
-        '[@prisma-audit] Redaction of changes produced unexpected type',
+        '[db-audit-core] Redaction of changes produced unexpected type',
       );
     });
   });

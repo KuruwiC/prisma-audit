@@ -5,7 +5,7 @@
  * @internal
  */
 export const getGlobalSingleton = <T>(key: string, create: () => T): T => {
-  const symbol = Symbol.for(`@kuruwic/prisma-audit:${key}`);
+  const symbol = Symbol.for(`@kuruwic/db-audit-core:${key}`);
   const globals = globalThis as Record<symbol, unknown>;
   globals[symbol] ??= create();
   return globals[symbol] as T;

@@ -63,14 +63,14 @@ const redactStates = (states: RecordStates, redactConfig: RedactConfig): RecordS
   const after = redactSensitiveData(states.after, redactConfig);
 
   if (!isRecordOrNullish(before) || !isRecordOrNullish(after)) {
-    throw new Error('[@prisma-audit] Redaction produced unexpected type');
+    throw new Error('[db-audit-core] Redaction produced unexpected type');
   }
 
   let changes: DiffResult = null;
   if (states.changes) {
     const redactedChanges = redactSensitiveData(states.changes, redactConfig);
     if (!isRecordOrNullish(redactedChanges)) {
-      throw new Error('[@prisma-audit] Redaction of changes produced unexpected type');
+      throw new Error('[db-audit-core] Redaction of changes produced unexpected type');
     }
     changes = redactedChanges as DiffResult;
   }

@@ -153,7 +153,7 @@ describe('Error Handling Integration', () => {
         expect(persisted).not.toBeNull();
 
         expect(consoleErrorSpy).toHaveBeenCalledWith(
-          '[@prisma-audit] Error in audit log write:',
+          '[db-audit-core] Error in audit log write:',
           AUDIT_WRITE_FAILURE_MESSAGE,
         );
 
@@ -223,7 +223,7 @@ describe('Error Handling Integration', () => {
         expect(persisted).not.toBeNull();
 
         expect(consoleErrorSpy).toHaveBeenCalledWith(
-          '[@prisma-audit] Error in audit log write:',
+          '[db-audit-core] Error in audit log write:',
           AUDIT_WRITE_FAILURE_MESSAGE,
         );
 
@@ -376,7 +376,7 @@ describe('Error Handling Integration', () => {
         // ...and the fallback ('log') also reports the original audit-write failure it
         // was supposed to decide about.
         expect(consoleErrorSpy).toHaveBeenCalledWith(
-          '[@prisma-audit] Error in audit log write:',
+          '[db-audit-core] Error in audit log write:',
           AUDIT_WRITE_FAILURE_MESSAGE,
         );
 

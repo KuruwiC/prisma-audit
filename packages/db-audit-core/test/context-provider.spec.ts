@@ -197,7 +197,7 @@ describe('createAsyncLocalStorageProvider', () => {
 
       expect(() => {
         provider.useContext();
-      }).toThrow('[@prisma-audit] AuditContext is not available');
+      }).toThrow('[db-audit-core] AuditContext is not available');
       expect(() => {
         provider.useContext();
       }).toThrow('Make sure you are running within a context provider');

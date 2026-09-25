@@ -32,7 +32,7 @@ describe('createErrorHandler', () => {
 
       handler(error, 'test context');
 
-      expect(consoleErrorSpy).toHaveBeenNthCalledWith(1, '[@prisma-audit] Error in test context:', 'Test error');
+      expect(consoleErrorSpy).toHaveBeenNthCalledWith(1, '[db-audit-core] Error in test context:', 'Test error');
       expect(consoleErrorSpy).toHaveBeenCalledTimes(2);
       expect(consoleErrorSpy.mock.calls[1]?.[0]).toContain('Error: Test error');
 

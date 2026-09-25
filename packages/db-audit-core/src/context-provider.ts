@@ -38,7 +38,7 @@ export const createAsyncLocalStorageProvider = (): AuditContextProvider => {
       const context = storage.getStore();
       if (!context) {
         throw new Error(
-          '[@prisma-audit] AuditContext is not available. ' +
+          '[db-audit-core] AuditContext is not available. ' +
             'Make sure you are running within a context provider (e.g., inside provider.runAsync()).',
         );
       }

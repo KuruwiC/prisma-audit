@@ -51,7 +51,7 @@ describe('executeEnricherSafely', () => {
       };
       const result = await executeEnricherSafely(config, {}, null, 5000);
       expect(result).toEqual({ default: true });
-      expect(warnSpy).toHaveBeenCalledWith('[@prisma-audit] Enricher failed:', expect.any(Error));
+      expect(warnSpy).toHaveBeenCalledWith('[db-audit-core] Enricher failed:', expect.any(Error));
       warnSpy.mockRestore();
     });
 
@@ -198,7 +198,7 @@ describe('executeBatchEnricherSafely', () => {
       };
       const result = await executeBatchEnricherSafely(config, [{ id: 'a' }, { id: 'b' }], null, 5000);
       expect(result).toEqual([{ ctx: 'a' }, { ctx: 'b' }]);
-      expect(warnSpy).toHaveBeenCalledWith('[@prisma-audit] Batch enricher failed:', expect.any(Error));
+      expect(warnSpy).toHaveBeenCalledWith('[db-audit-core] Batch enricher failed:', expect.any(Error));
       warnSpy.mockRestore();
     });
 

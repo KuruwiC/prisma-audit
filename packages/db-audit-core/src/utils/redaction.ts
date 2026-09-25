@@ -179,20 +179,20 @@ export const redactSensitiveData = (data: unknown, config: RedactConfig = {}): u
     cloned = structuredClone(data);
   } catch (error) {
     console.warn(
-      '[@prisma-audit] Failed to clone data for redaction using structuredClone. Using JSON fallback.',
+      '[db-audit-core] Failed to clone data for redaction using structuredClone. Using JSON fallback.',
       error instanceof Error ? error.message : String(error),
     );
 
     try {
       const stringified = safeStringify(data);
       if (stringified === undefined) {
-        console.warn('[@prisma-audit] Cannot stringify data for redaction fallback. Applying redaction in-place.');
+        console.warn('[db-audit-core] Cannot stringify data for redaction fallback. Applying redaction in-place.');
         const redactor = createRedactor(config);
         return redactor(data);
       }
       cloned = JSON.parse(stringified);
     } catch {
-      console.warn('[@prisma-audit] Cannot clone data for redaction. Applying redaction in-place.');
+      console.warn('[db-audit-core] Cannot clone data for redaction. Applying redaction in-place.');
       const redactor = createRedactor(config);
       return redactor(data);
     }

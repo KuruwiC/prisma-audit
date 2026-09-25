@@ -704,6 +704,6 @@ export const validateAggregateMapping = (mapping: AggregateMapping): void => {
   }
 
   if (validationErrors.length > 0) {
-    throw new Error(`[@prisma-audit] Invalid aggregate mapping configuration:\n${validationErrors.join('\n')}`);
+    throw new Error(`[db-audit-core] Invalid aggregate mapping configuration:\n${validationErrors.join('\n')}`);
   }
 };

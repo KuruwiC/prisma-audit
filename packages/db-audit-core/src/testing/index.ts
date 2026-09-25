@@ -59,7 +59,7 @@ export const createMockAuditContext = (): MockContextController => {
     useContext: (): AuditContext => {
       if (!currentContext) {
         throw new Error(
-          '[@prisma-audit] AuditContext is not available. ' +
+          '[db-audit-core] AuditContext is not available. ' +
             'Make sure you have set a context using mock.setContext() or provider.run().',
         );
       }

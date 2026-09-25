@@ -53,7 +53,7 @@ const handleEnricherError = <TContext>(
   }
 
   if (errorStrategy === 'log') {
-    console.warn('[@prisma-audit] Enricher failed:', error);
+    console.warn('[db-audit-core] Enricher failed:', error);
     return fallback ?? null;
   }
 
@@ -66,7 +66,7 @@ const handleEnricherError = <TContext>(
       }
       return customResult as TContext;
     } catch (handlerError) {
-      console.warn('[@prisma-audit] Custom error handler failed:', handlerError);
+      console.warn('[db-audit-core] Custom error handler failed:', handlerError);
       return fallback ?? null;
     }
   }
@@ -156,7 +156,7 @@ const handleBatchEnricherError = <TContext>(
   };
 
   if (errorStrategy === 'log') {
-    console.warn('[@prisma-audit] Batch enricher failed:', error);
+    console.warn('[db-audit-core] Batch enricher failed:', error);
     return createFallbackArray();
   }
 
@@ -169,7 +169,7 @@ const handleBatchEnricherError = <TContext>(
       }
       return createFallbackArray();
     } catch (handlerError) {
-      console.warn('[@prisma-audit] Custom error handler failed:', handlerError);
+      console.warn('[db-audit-core] Custom error handler failed:', handlerError);
       return createFallbackArray();
     }
   }

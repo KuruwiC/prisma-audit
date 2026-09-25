@@ -42,21 +42,21 @@ const executeCustomHandler = (customHandler: ErrorHandler, error: Error, context
     if (result && typeof (result as Promise<void>).catch === 'function') {
       (result as Promise<void>).catch((handlerError) => {
         console.error(
-          '[@prisma-audit] Error in async custom error handler:',
+          '[db-audit-core] Error in async custom error handler:',
           handlerError instanceof Error ? handlerError.message : String(handlerError),
         );
       });
     }
   } catch (handlerError) {
     console.error(
-      '[@prisma-audit] Error in custom error handler:',
+      '[db-audit-core] Error in custom error handler:',
       handlerError instanceof Error ? handlerError.message : String(handlerError),
     );
   }
 };
 
 const logErrorToConsole = (error: Error, context: string): void => {
-  console.error(`[@prisma-audit] Error in ${context}:`, error.message);
+  console.error(`[db-audit-core] Error in ${context}:`, error.message);
   if (error.stack) {
     console.error(error.stack);
   }
@@ -98,7 +98,7 @@ export const createErrorHandler = (strategy: ErrorStrategy = 'log', customHandle
 
       default: {
         const exhaustiveCheck: never = strategy;
-        console.error(`[@prisma-audit] Unknown error strategy: ${exhaustiveCheck}`);
+        console.error(`[db-audit-core] Unknown error strategy: ${exhaustiveCheck}`);
       }
     }
   };
