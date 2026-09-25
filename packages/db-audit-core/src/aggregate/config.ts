@@ -48,17 +48,11 @@ export interface AggregateConfigService {
 
   /** Whether a model is configured for audit logging (model name case-insensitive) */
   isLoggable: (modelName: string) => boolean;
-
-  /** Get all loggable model names in their original casing */
-  getAllLoggableModels: () => string[];
-
-  /** Get the entire aggregate mapping as provided to createAggregateConfig */
-  getMapping: () => AggregateMapping;
 }
 
 /**
- * Create an aggregate configuration service: case-insensitive lookups over the mapping that
- * preserve the original model name casing
+ * Create an aggregate configuration service: validates the mapping, then looks entity configs up
+ * by model name (case-insensitive) and by aggregate identity
  *
  * @throws Error if the mapping configuration is invalid
  *
@@ -79,7 +73,6 @@ export const createAggregateConfig = (mapping: AggregateMapping): AggregateConfi
   validateAggregateMapping(mapping);
 
   const configByNormalizedName: Record<string, LoggableEntity> = {};
-  const originalNameByNormalizedName: Map<string, string> = new Map();
   const configByRootIdentity: Map<string, LoggableEntity> = new Map();
 
   for (const [originalModelName, entityConfig] of Object.entries(mapping)) {
@@ -87,7 +80,6 @@ export const createAggregateConfig = (mapping: AggregateMapping): AggregateConfi
 
     const normalizedModelName = originalModelName.toLowerCase();
     configByNormalizedName[normalizedModelName] = entityConfig;
-    originalNameByNormalizedName.set(normalizedModelName, originalModelName);
     configByRootIdentity.set(`${entityConfig.category}:${entityConfig.type}`, entityConfig);
   }
 
@@ -104,14 +96,6 @@ export const createAggregateConfig = (mapping: AggregateMapping): AggregateConfi
     isLoggable: (modelName: string): boolean => {
       const normalizedModelName = modelName.toLowerCase();
       return normalizedModelName in configByNormalizedName;
-    },
-
-    getAllLoggableModels: (): string[] => {
-      return Array.from(originalNameByNormalizedName.values());
-    },
-
-    getMapping: (): AggregateMapping => {
-      return mapping;
     },
   };
 };

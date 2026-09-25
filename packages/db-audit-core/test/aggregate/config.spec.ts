@@ -52,24 +52,6 @@ describe('createAggregateConfig', () => {
     });
   });
 
-  describe('getAllLoggableModels', () => {
-    it('should return all model names', () => {
-      const config = createAggregateConfig(createTestMapping());
-      const models = config.getAllLoggableModels();
-
-      expect(models).toEqual(['User', 'Post', 'Comment']);
-    });
-  });
-
-  describe('getMapping', () => {
-    it('should return the entire aggregate mapping', () => {
-      const mapping = createTestMapping();
-      const config = createAggregateConfig(mapping);
-
-      expect(config.getMapping()).toBe(mapping);
-    });
-  });
-
   describe('validation on construction', () => {
     it('should throw on missing required fields', () => {
       const invalidMapping = {
