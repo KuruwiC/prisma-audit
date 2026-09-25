@@ -421,7 +421,7 @@ describe('createExecutor', () => {
       prepare: step('prepare', prepared),
       execute: step('execute', executed),
       collect: step('collect', events),
-      result: step('result', 'hydrated'),
+      result: step('result', 'returned'),
     };
     const produceRecords = vi.fn(async () => {
       calls.push('produce');
@@ -436,7 +436,7 @@ describe('createExecutor', () => {
     expect(steps.collect).toHaveBeenCalledWith(operation, scope, prepared, executed);
     expect(produceRecords).toHaveBeenCalledWith(events, scope);
     expect(steps.result).toHaveBeenCalledWith(operation, scope, executed);
-    expect(result).toEqual({ result: 'hydrated', records: [record] });
+    expect(result).toEqual({ result: 'returned', records: [record] });
   });
 
   it('stops at the first failing step', async () => {

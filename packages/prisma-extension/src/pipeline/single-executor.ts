@@ -4,9 +4,8 @@
  * create, update, upsert and delete: reads the target row's before state and the nested records
  * the operation will write (including the rows a nested batch filter matches under its parent),
  * resolves the nested write set (the operations that execute, the rows they name or matched, and
- * the rows a to-many relation holds before a nested create), runs the operation, collects the
- * top-level row and the nested rows the operation wrote, and re-reads the result so its Date
- * fields reach the caller as Date instances.
+ * the rows a to-many relation holds before a nested create), runs the operation, and collects
+ * the top-level row and the nested rows the operation wrote.
  */
 
 import type { MutationEvent } from '@kuruwic/prisma-audit-core';
@@ -19,7 +18,6 @@ import {
   detectExecutedNestedOperations,
   type NestedWriteSets,
 } from '../lifecycle/nested-handlers/write-set.js';
-import { refetchForDateHydration } from '../lifecycle/operation-handlers/date-hydration.js';
 import { preFetchNestedRecordsBeforeOperation } from '../lifecycle/pre-fetch/coordinator.js';
 import { type PreExistingRows, snapshotPreExistingRows } from '../lifecycle/pre-fetch/pre-existing-rows.js';
 import type { SchemaMetadata } from '../schema/types.js';
@@ -136,8 +134,8 @@ export const createSingleExecutor = (deps: SingleExecutorDependencies): Operatio
       },
     );
 
-  const result = (operation: AuditedOperation, scope: ExecutionScope, executed: unknown): Promise<unknown> =>
-    refetchForDateHydration(executed, operation, scope.handle, Prisma);
+  const result = async (_operation: AuditedOperation, _scope: ExecutionScope, executed: unknown): Promise<unknown> =>
+    executed;
 
   return createExecutor({ prepare, execute, collect, result }, wrapAuditFailure);
 };

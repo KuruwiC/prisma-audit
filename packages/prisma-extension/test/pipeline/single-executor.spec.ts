@@ -1,7 +1,7 @@
 /**
  * Tests for the single-operation executor: the before state and the nested records it reads
  * before the write, the mutation it runs through the operation's continuation, the events it
- * collects, the re-read that hydrates the result, and the error each kind of failure surfaces as.
+ * collects, and the error each kind of failure surfaces as.
  */
 
 import type { AuditContext } from '@kuruwic/prisma-audit-core';
@@ -531,22 +531,6 @@ describe('createSingleExecutor', () => {
       expect(operation.execute).toHaveBeenCalledWith(operation.args);
       expect(create).toHaveBeenCalledWith(operation.args);
       expect(outcome.result).toBe(user);
-    });
-
-    it('re-reads the written row so the caller receives its hydrated fields', async () => {
-      const hydrated = { id: 'u1', name: 'Ann', createdAt: new Date('2025-01-01T00:00:00Z') };
-      const findUnique = vi.fn(async () => hydrated);
-      const client = clientWith({ user: { create: vi.fn(async () => user) }, User: { findUnique } });
-      const { executor, produceRecords } = executorWith();
-
-      const outcome = await executor.run(
-        operationOn(client, 'create', { data: { name: 'Ann' } }),
-        scopeOn(client),
-        produceRecords,
-      );
-
-      expect(findUnique).toHaveBeenCalledWith({ where: { id: 'u1' } });
-      expect(outcome.result).toBe(hydrated);
     });
 
     it("propagates the operation's own failure as it is and produces no records", async () => {

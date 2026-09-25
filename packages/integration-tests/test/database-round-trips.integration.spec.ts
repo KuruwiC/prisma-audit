@@ -83,7 +83,7 @@ describe('Database Round-Trip Guard', () => {
     statements.length = 0;
   });
 
-  it('plain single-record create issues 5 statements', async () => {
+  it('plain single-record create issues 4 statements', async () => {
     await provider.runAsync(testActor, async () => {
       await prisma.user.create({
         data: { email: 'plain-create@example.com', name: 'Plain', password: 'secret123' },
@@ -93,14 +93,12 @@ describe('Database Round-Trip Guard', () => {
     console.log(`Plain create: ${statements.length} SQL statements`);
     // 1. BEGIN                 — awaitWrite: true (default) wraps the operation in a transaction
     // 2. INSERT INTO users     — the caller's own create
-    // 3. SELECT FROM users     — refetchForDateHydration's findUnique (re-fetches so Date
-    //                            fields come back as real Date instances, not `{}`)
-    // 4. INSERT INTO audit_logs — the audit log write
-    // 5. COMMIT
-    expect(statements).toHaveLength(5);
+    // 3. INSERT INTO audit_logs — the audit log write
+    // 4. COMMIT
+    expect(statements).toHaveLength(4);
   });
 
-  it('single-record update issues 6 statements (includes the before-state fetch)', async () => {
+  it('single-record update issues 5 statements (includes the before-state fetch)', async () => {
     const user = await provider.runAsync(testActor, async () => {
       return prisma.user.create({
         data: { email: 'update-target@example.com', name: 'Original', password: 'secret123' },
@@ -116,13 +114,12 @@ describe('Database Round-Trip Guard', () => {
     // 1. BEGIN                  — awaitWrite: true (default) wraps the operation in a transaction
     // 2. SELECT FROM users      — the before-state fetch (fetchBeforeOperation, default: true)
     // 3. UPDATE users           — the caller's own update
-    // 4. SELECT FROM users      — refetchForDateHydration's findUnique
-    // 5. INSERT INTO audit_logs — the audit log write
-    // 6. COMMIT
-    expect(statements).toHaveLength(6);
+    // 4. INSERT INTO audit_logs — the audit log write
+    // 5. COMMIT
+    expect(statements).toHaveLength(5);
   });
 
-  it('nested create (1 nested post, with include) issues 9 statements', async () => {
+  it('nested create (1 nested post, with include) issues 7 statements', async () => {
     await provider.runAsync(testActor, async () => {
       await prisma.user.create({
         data: {
@@ -142,16 +139,13 @@ describe('Database Round-Trip Guard', () => {
     // 4. SELECT FROM users      — Prisma's own resolution of `include: { posts: true }` on the
     //                             create() result: base record...
     // 5. SELECT FROM posts      — ...and the included relation, fetched as a separate query
-    // 6. SELECT FROM users      — refetchForDateHydration's findUnique (re-runs the same
-    //                             `include: { posts: true }`)...
-    // 7. SELECT FROM posts      — ...so its relation resolution repeats the same 2-statement shape
-    // 8. INSERT INTO audit_logs — one batched write: user + post + the post's aggregate-owner
+    // 6. INSERT INTO audit_logs — one batched write: user + post + the post's aggregate-owner
     //                             (User) propagation log — 3 rows, 1 statement
-    // 9. COMMIT
-    expect(statements).toHaveLength(9);
+    // 7. COMMIT
+    expect(statements).toHaveLength(7);
   });
 
-  it('update with a nested create under an existing parent (1 existing post) issues 11 statements', async () => {
+  it('update with a nested create under an existing parent (1 existing post) issues 9 statements', async () => {
     const user = await provider.runAsync(testActor, async () => {
       return prisma.user.create({
         data: {
@@ -183,17 +177,14 @@ describe('Database Round-Trip Guard', () => {
     // 6. SELECT FROM users      — Prisma's resolution of the injected `include: { posts: true }`
     //                             on the update() result: base record...
     // 7. SELECT FROM posts      — ...and the included relation, fetched as a separate query
-    // 8. SELECT FROM users      — refetchForDateHydration's findUnique (re-runs the same
-    //                             `include: { posts: true }`)...
-    // 9. SELECT FROM posts      — ...so its relation resolution repeats the same 2-statement shape
-    // 10. INSERT INTO audit_logs — one batched write: user + the created post + the post's
-    //                              aggregate-owner (User) propagation log — 3 rows, 1 statement;
-    //                              the existing post gets no row
-    // 11. COMMIT
-    expect(statements).toHaveLength(11);
+    // 8. INSERT INTO audit_logs — one batched write: user + the created post + the post's
+    //                             aggregate-owner (User) propagation log — 3 rows, 1 statement;
+    //                             the existing post gets no row
+    // 9. COMMIT
+    expect(statements).toHaveLength(9);
   });
 
-  it('update with a nested updateMany under an existing parent (1 matching post, 1 other) issues 12 statements', async () => {
+  it('update with a nested updateMany under an existing parent (1 matching post, 1 other) issues 10 statements', async () => {
     const user = await provider.runAsync(testActor, async () => {
       return prisma.user.create({
         data: {
@@ -232,14 +223,11 @@ describe('Database Round-Trip Guard', () => {
     // 7. SELECT FROM users      — Prisma's resolution of the injected `include: { posts: true }`
     //                             on the update() result: base record...
     // 8. SELECT FROM posts      — ...and the included relation, fetched as a separate query
-    // 9. SELECT FROM users      — refetchForDateHydration's findUnique (re-runs the same
-    //                             `include: { posts: true }`)...
-    // 10. SELECT FROM posts     — ...so its relation resolution repeats the same 2-statement shape
-    // 11. INSERT INTO audit_logs — one batched write: user + the matched post + the post's
-    //                              aggregate-owner (User) propagation log — 3 rows, 1 statement;
-    //                              the post the filter did not match gets no row
-    // 12. COMMIT
-    expect(statements).toHaveLength(12);
+    // 9. INSERT INTO audit_logs — one batched write: user + the matched post + the post's
+    //                             aggregate-owner (User) propagation log — 3 rows, 1 statement;
+    //                             the post the filter did not match gets no row
+    // 10. COMMIT
+    expect(statements).toHaveLength(10);
   });
 
   it('deleteMany (2 rows) issues 5 statements', async () => {

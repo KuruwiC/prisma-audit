@@ -1,7 +1,7 @@
 /**
  * Tags an error as coming from the caller's own database mutation (e.g. a unique
  * constraint violation), as opposed to the audit-support work around it (the before-state
- * and nested pre-fetches, the after-refetch, event collection, record production).
+ * and nested pre-fetches, event collection, record production).
  * `pipeline/run-audited-operation.ts` uses this pair to let such an error propagate
  * untouched instead of routing it through the audit observer or policy.
  *
