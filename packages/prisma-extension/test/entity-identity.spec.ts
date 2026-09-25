@@ -1,7 +1,7 @@
 import { UNRESOLVED_ENTITY_ID } from '@kuruwic/prisma-audit-core';
 import { describe, expect, it } from 'vitest';
 
-import { extractEntityIdentity } from '../src/utils/id-generator.js';
+import { extractEntityIdentity } from '../src/utils/id-generation.js';
 
 describe('extractEntityIdentity', () => {
   describe('single PK', () => {

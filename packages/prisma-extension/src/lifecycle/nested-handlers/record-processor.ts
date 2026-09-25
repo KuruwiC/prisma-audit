@@ -9,7 +9,7 @@ import { nestedLog } from '@kuruwic/prisma-audit-core';
 import type { NestedOperationInfo, NestedPreFetchResults } from '../../grammar/nested-operations.js';
 import type { GetOperationConfig } from '../../grammar/pre-fetch-selection.js';
 import type { PrismaAction } from '../../types.js';
-import { extractEntityIdentity } from '../../utils/id-generator.js';
+import { extractEntityIdentity } from '../../utils/id-generation.js';
 import type { CollectedNestedRecord } from './collected-record.js';
 import { resolveNestedOperationState } from './state-resolver.js';
 

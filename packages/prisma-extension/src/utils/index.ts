@@ -13,7 +13,7 @@ export { isCallerMutationError, runCallerMutation } from './caller-mutation-erro
 export { isAuditableAction, shouldAuditModel, uncapitalizeFirst } from './extension-utils.js';
 
 // ID generation and primary key utilities
-export { buildEntityMap, ensureIds, extractPrimaryKey, findManyByPKs, getPrimaryKeyFields } from './id-generator.js';
+export { buildEntityMap, ensureIds, extractPrimaryKey, findManyByPKs, getPrimaryKeyFields } from './id-generation.js';
 
 // Model accessor
 export { getModelAccessor } from './model-accessor.js';

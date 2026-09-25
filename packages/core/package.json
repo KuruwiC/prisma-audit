@@ -54,10 +54,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@bugsnag/cuid": "^3.2.2",
-    "@paralleldrive/cuid2": "^3.0.4",
-    "debug": "^4.4.0",
-    "uuid": "^11.1.1"
+    "debug": "^4.4.0"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.5",

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 // Will be implemented
-import { findManyByPKs } from '../src/utils/id-generator.js';
+import { findManyByPKs } from '../src/utils/id-generation.js';
 
 const createMockDelegate = (findManyImpl?: (args: unknown) => Promise<Record<string, unknown>[]>) => ({
   findMany: vi.fn(findManyImpl ?? (async () => [])),

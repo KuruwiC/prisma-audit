@@ -109,9 +109,6 @@ export { createDiffCalculator } from './utils/diff-calculator.js';
 // Utils - Error Handler
 export type { ErrorHandler, ErrorStrategy } from './utils/error-handler.js';
 export { createErrorHandler } from './utils/error-handler.js';
-// Utils - ID Generator
-export type { IdFieldInfo, IdGenerator, IdGeneratorFactory } from './utils/id-generator.js';
-export { ensureIds, getIdFieldInfo, getIdGenerator, ID_GENERATOR_FACTORIES } from './utils/id-generator.js';
 // Utils - Redaction
 export type { RedactConfig } from './utils/redaction.js';
 export { redactSensitiveData } from './utils/redaction.js';

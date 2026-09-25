@@ -554,7 +554,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
       // Normalize single-object data to an array so `data: {...}` is logged like `data: [...]`
       const rawData = args.data;
       const dataArray = Array.isArray(rawData) ? rawData : [rawData as Record<string, unknown>];
-      entities = ensureIds(Prisma, modelName, dataArray, DEFAULTS.ID_FIELD);
+      entities = ensureIds(schemaMetadata, modelName, dataArray, DEFAULTS.ID_FIELD);
       result = await runCallerMutation(() => createFn({ ...operation.args, data: entities }));
     }
 

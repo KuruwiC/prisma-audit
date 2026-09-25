@@ -16,7 +16,7 @@ import {
 } from '@kuruwic/prisma-audit-core';
 import type { PrismaAction } from '../types.js';
 import { unwrapCompoundWhere } from './compound-where.js';
-import { extractEntityIdentity } from './id-generator.js';
+import { extractEntityIdentity } from './id-generation.js';
 
 /**
  * Converts PascalCase to camelCase

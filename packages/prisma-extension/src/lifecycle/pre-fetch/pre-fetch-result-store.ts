@@ -14,7 +14,7 @@ import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID, type UniqueConstraint } f
 import type { NestedPreFetchResults } from '../../grammar/nested-operations.js';
 import type { NestedPreFetchResult } from '../../grammar/nested-state.js';
 import { unwrapCompoundWhere } from '../../utils/compound-where.js';
-import { extractEntityIdentity } from '../../utils/id-generator.js';
+import { extractEntityIdentity } from '../../utils/id-generation.js';
 
 /**
  * Retrieves pre-fetch result for a specific path and entity ID

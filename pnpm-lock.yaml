@@ -145,18 +145,9 @@ importers:
 
   packages/core:
     dependencies:
-      '@bugsnag/cuid':
-        specifier: ^3.2.2
-        version: 3.2.2
-      '@paralleldrive/cuid2':
-        specifier: ^3.0.4
-        version: 3.0.4
       debug:
         specifier: ^4.4.0
         version: 4.4.3
-      uuid:
-        specifier: ^11.1.1
-        version: 11.1.1
     devDependencies:
       '@biomejs/biome':
         specifier: ^2.3.5
@@ -240,12 +231,21 @@ importers:
 
   packages/prisma-extension:
     dependencies:
+      '@bugsnag/cuid':
+        specifier: ^3.2.2
+        version: 3.2.2
       '@kuruwic/prisma-audit-core':
         specifier: workspace:^
         version: link:../core
+      '@paralleldrive/cuid2':
+        specifier: ^3.0.4
+        version: 3.0.4
       debug:
         specifier: ^4.4.0
         version: 4.4.3
+      uuid:
+        specifier: ^11.1.1
+        version: 11.1.1
     devDependencies:
       '@biomejs/biome':
         specifier: ^2.3.5

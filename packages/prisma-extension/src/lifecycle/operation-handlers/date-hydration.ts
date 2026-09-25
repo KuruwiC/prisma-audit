@@ -12,7 +12,7 @@ import { AUDIT_ACTION, coreLog } from '@kuruwic/prisma-audit-core';
 
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../internal-types.js';
 import type { OperationContext } from '../../types.js';
-import { getPrimaryKeyFields } from '../../utils/id-generator.js';
+import { getPrimaryKeyFields } from '../../utils/id-generation.js';
 import type { PrismaWithDMMF } from '../../utils/schema-metadata.js';
 
 /** Build WHERE clause from result record using PK fields */
