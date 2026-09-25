@@ -9,35 +9,22 @@
  * @see {@link PrismaAuditExtensionOptions}
  */
 
-import type {
-  AuditAction,
-  AuditContext,
-  ComposeConfig,
-  ErrorStrategy,
-  ResolveConfig,
-} from '@kuruwic/prisma-audit-core';
+import type { AuditAction, AuditContext } from '@kuruwic/prisma-audit-core';
 import {
   AUDIT_ACTION,
-  createAggregateConfig,
-  createErrorHandler,
   createWriteStrategySelector,
   DEFAULTS,
   getRuntimeContext,
-  type PolicyConfig,
   policy,
   runWithRuntimeContext,
   type WriteResult,
 } from '@kuruwic/prisma-audit-core';
 import { createPrismaWriteExecutor } from './adapters/write-executor.js';
+import { normalizeAuditOptions } from './audit-options.js';
 import { createPrismaClientManager } from './client-manager/index.js';
-import { getNestedOperationConfig, validateFieldConflicts } from './config/index.js';
+import { createFailureSink } from './failure-sink.js';
 import type { NestedPreFetchResults } from './grammar/nested-operations.js';
-import type {
-  ExtensionParams,
-  PrismaClientWithDynamicAccess,
-  PrismaNamespace,
-  TransactionalPrismaClient,
-} from './internal-types.js';
+import type { ExtensionParams, PrismaClientWithDynamicAccess, TransactionalPrismaClient } from './internal-types.js';
 import { createBatchBuildLogsStage } from './lifecycle/batch-stages.js';
 import { handleTopLevelOperation, type TopLevelHandlerDependencies } from './lifecycle/operation-handlers/index.js';
 import { runLifecyclePipeline } from './lifecycle/pipeline.js';
@@ -55,13 +42,7 @@ import { createTransactionProxy } from './lifecycle/transaction-proxy.js';
 import { withOptionalTransaction } from './lifecycle/transaction-wrapper.js';
 import type { BatchFinalContext, BatchInitialContext, BeforeStateResult } from './lifecycle/types.js';
 import { createRecordProducer } from './pipeline/produce-records.js';
-import type {
-  AuditErrorContext,
-  AuditLogData,
-  OperationContext,
-  PrismaAuditExtensionOptions,
-  WriteFailurePolicy,
-} from './types.js';
+import type { AuditLogData, OperationContext, PrismaAuditExtensionOptions } from './types.js';
 import {
   buildEntityMap,
   ensureIds,
@@ -76,10 +57,7 @@ import {
   projectToRequestedShape,
   requiresBeforeState,
   runCallerMutation,
-  shouldAuditModel,
-  uncapitalizeFirst,
 } from './utils/index.js';
-import { createSchemaMetadataFromDMMF } from './utils/schema-metadata.js';
 
 /**
  * Input for the `handleLimitedUpdateMany` helper defined inside {@link createAuditLogExtension}.
@@ -118,142 +96,31 @@ interface BatchActionResult {
  * @throws {Error} If configuration contains conflicts or peer dependency missing
  */
 export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) => {
+  const audit = normalizeAuditOptions(options);
   const {
     provider,
-    aggregateMapping,
-    diffing,
-    security,
-    performance,
-    hooks,
-    contextEnricher,
-    auditLogModel: customAuditLogModel,
-    Prisma: prismaNamespace,
-    errorHandling,
-  } = options;
-
-  const Prisma = prismaNamespace as PrismaNamespace;
-  const schemaMetadata = createSchemaMetadataFromDMMF(Prisma);
-  const DbNull = Prisma.DbNull;
-  const auditLogModel = customAuditLogModel ? uncapitalizeFirst(customAuditLogModel) : 'auditLog';
-  const excludeFields = diffing?.excludeFields ?? [];
-  const redact = security?.redact;
-  const serialization = options.serialization;
-  const sampling = performance?.sampling ?? 1.0;
-  const awaitWrite = performance?.awaitWrite ?? true;
-  const awaitWriteIf = performance?.awaitWriteIf;
-  const samplingIf = performance?.samplingIf;
-  const writer = hooks?.writer;
-  const observer = errorHandling?.observer;
-  // An audit library must not break the caller's write by default.
-  const writeFailurePolicyConfig: WriteFailurePolicy = errorHandling?.writeFailurePolicy ?? 'log';
-
-  const aggregateConfig = createAggregateConfig(aggregateMapping);
-
-  const resolveConfig: ResolveConfig = {
-    entity: aggregateConfig.getEntityConfig,
-    rootEntity: aggregateConfig.getEntityConfigByType,
-    actor: contextEnricher?.actor,
-  };
-
-  const composeConfig: ComposeConfig = {
-    entity: aggregateConfig.getEntityConfig,
-    excludeFields,
-    redact,
-    serialization,
-    relationFieldNames: (modelName) => new Set(schemaMetadata.getRelationFields(modelName).map((field) => field.name)),
-  };
-
-  const getModelTags = (modelName: string): string[] => aggregateConfig.getEntityConfig(modelName)?.tags ?? [];
-
-  const policyConfig: PolicyConfig = {
-    awaitWrite,
-    awaitWriteIf: awaitWriteIf && ((modelName, tags) => awaitWriteIf(modelName, [...tags])),
-  };
+    Prisma,
+    schemaMetadata,
+    auditLogModel,
+    policyConfig,
+    resolveConfig,
+    composeConfig,
+    writer,
+    getNestedOperationConfig: getNestedOperationConfigWrapper,
+    modelTags,
+    shouldAudit,
+  } = audit;
+  const { notify: notifyObserver, reportWriteFailure } = createFailureSink(audit);
 
   /**
    * Whether the audit-log write for `modelName` is awaited. The top-level handler, the batch handler
    * and the write strategy selector all read this one decision so they cannot disagree.
    */
   const resolveAwaitWrite = (modelName: string): boolean =>
-    policy(modelName, getModelTags(modelName), policyConfig).atomic;
+    policy(modelName, modelTags(modelName), policyConfig).atomic;
 
-  /** Sampling rate (0-1) for an operation on `modelName` */
-  const resolveSamplingRate = (modelName: string): number =>
-    samplingIf ? samplingIf(modelName, getModelTags(modelName)) : sampling;
-
-  const writeExecutor = createPrismaWriteExecutor(DbNull);
+  const writeExecutor = createPrismaWriteExecutor(Prisma.DbNull);
   const strategySelector = createWriteStrategySelector({ shouldAwaitWrite: resolveAwaitWrite }, writeExecutor);
-
-  /**
-   * Notifies the observer of an audit failure. An observer that throws (sync or async) is
-   * logged to the console and ignored, so it never affects the caller's own database operation.
-   */
-  const notifyObserver = async (context: AuditErrorContext): Promise<void> => {
-    if (!observer) return;
-    try {
-      await observer(context);
-    } catch (observerError) {
-      console.error(
-        '[@prisma-audit] Error in error-handling observer:',
-        observerError instanceof Error ? observerError.message : String(observerError),
-      );
-    }
-  };
-
-  /**
-   * Resolves and applies the write-failure policy for a single `log-write` failure:
-   * 'throw' re-throws (failing the caller's operation only while it is still waiting on the
-   * write — see {@link WriteFailurePolicy}), 'log' logs to the console, 'ignore' does neither.
-   *
-   * A policy function that throws falls back to `'log'`: unlike `'throw'` it cannot fail the
-   * caller's operation, and unlike `'ignore'` it still surfaces the `log-write` failure.
-   */
-  const applyWriteFailurePolicy = async (context: AuditErrorContext, logLabel: string): Promise<void> => {
-    let strategy: ErrorStrategy;
-    if (typeof writeFailurePolicyConfig === 'function') {
-      try {
-        strategy = await writeFailurePolicyConfig(context);
-      } catch (policyError) {
-        console.error(
-          "[@prisma-audit] Error in writeFailurePolicy function; falling back to 'log':",
-          policyError instanceof Error ? policyError.message : String(policyError),
-        );
-        strategy = 'log';
-      }
-    } else {
-      strategy = writeFailurePolicyConfig;
-    }
-    createErrorHandler(strategy)(context.error, logLabel);
-  };
-
-  /**
-   * Only {@link writeAuditLogs} calls this. Every other phase (`pre-fetch`, `diff-generation`,
-   * `entity-id-resolution`) calls `notifyObserver` directly, which is what keeps
-   * {@link WriteFailurePolicy}'s "only `log-write` is policy-gated" contract true.
-   */
-  const reportWriteFailure = async (context: AuditErrorContext, logLabel: string): Promise<void> => {
-    await notifyObserver(context);
-    await applyWriteFailurePolicy(context, logLabel);
-  };
-
-  validateFieldConflicts(excludeFields, redact, aggregateMapping);
-
-  const shouldAudit = (modelName: string | undefined, context: AuditContext | undefined): boolean => {
-    return shouldAuditModel({
-      modelName,
-      context,
-      auditLogModel,
-      isLoggable: aggregateConfig.isLoggable,
-      resolveSamplingRate,
-    });
-  };
-
-  const getNestedOperationConfigWrapper = (modelName: string, operation: string): { fetchBeforeOperation: boolean } => {
-    return getNestedOperationConfig(modelName, operation, {
-      getEntityConfig: aggregateConfig.getEntityConfig,
-      globalNestedOperations: options.nestedOperations,
-    });
-  };
 
   const handleWriteResult = (result: WriteResult): void => {
     if (result._tag === 'Skipped' && process.env.DEBUG_AUDIT_WRITE) {
@@ -559,7 +426,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     clientToUse: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
     modelName: string,
   ): { findMany: (args: { where: unknown }) => Promise<Record<string, unknown>[]> } => {
-    const entityConfig = aggregateConfig.getEntityConfig(modelName);
+    const entityConfig = resolveConfig.entity(modelName);
     if (!entityConfig) {
       throw new Error(
         `No entity configuration found for model: ${modelName}. ` +
