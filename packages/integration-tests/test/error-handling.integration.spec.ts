@@ -583,7 +583,7 @@ describe('Error Handling Integration', () => {
       }
     });
 
-    it('an audit-stage (diff-generation) failure on the batch path still propagates to the caller, regardless of writeFailurePolicy', async () => {
+    it('a diff-generation failure on the batch path still propagates to the caller, regardless of writeFailurePolicy', async () => {
       // `diff-generation` is never policy-gated, unlike `log-write` (see
       // `AuditErrorPhase` / `WriteFailurePolicy` in the audit extension's types.ts): it
       // propagates to the caller even under `writeFailurePolicy: 'ignore'`, and the policy
@@ -647,12 +647,12 @@ describe('Error Handling Integration', () => {
     });
   });
 
-  describe('Single operations — audit-stage failures', () => {
-    // The single-operation path follows the batch contract above: an audit-stage
-    // (`diff-generation`) failure reaches the caller as the original error, the observer
+  describe('Single operations — diff-generation failures', () => {
+    // The single-operation path follows the batch contract above: a `diff-generation` phase
+    // failure reaches the caller as the original error, the observer
     // is notified once, and the write-failure policy is never consulted.
 
-    it('an audit-stage (diff-generation) failure on the single-operation path propagates the original error to the caller, regardless of writeFailurePolicy', async () => {
+    it('a diff-generation failure on the single-operation path propagates the original error to the caller, regardless of writeFailurePolicy', async () => {
       const ENRICHER_FAILURE_MESSAGE = 'actor enricher is broken';
       const enricherError = new Error(ENRICHER_FAILURE_MESSAGE);
       const basePrisma = new PrismaClient({ datasources: { db: { url: context.databaseUrl } } });
@@ -712,7 +712,7 @@ describe('Error Handling Integration', () => {
       // post the nested update writes is absent from the result, and its after state is
       // read again by the update's WHERE once the write has run. That read is injected to
       // fail (the first `post.findUnique` after the top-level `user.update` wrote); the
-      // failure is an audit-stage failure like any other, not a nested audit row silently
+      // failure is a diff-generation failure like any other, not a nested audit row silently
       // left out.
       const REREAD_FAILURE_MESSAGE = 'simulated nested re-read failure';
       const rereadError = new Error(REREAD_FAILURE_MESSAGE);
