@@ -74,7 +74,10 @@ export const collectSingleOperationEvents = async (
   const row = toRow(result);
   const topLevel: MutationEvent = {
     model: modelName,
-    identity: identityOf(row, getPrimaryKeyConstraint(deps.schemaMetadata, modelName)?.fields),
+    identity: identityOf(row, getPrimaryKeyConstraint(deps.schemaMetadata, modelName)?.fields, {
+      model: modelName,
+      path: '',
+    }),
     action: toMutationAction(action, before),
     before,
     after: row,
@@ -115,7 +118,7 @@ export const collectBatchOperationEvents = (
 
   return rows.map((row, index) => ({
     model: modelName,
-    identity: identityOf(row, pkFields),
+    identity: identityOf(row, pkFields, { model: modelName, path: '' }),
     action: singularAction,
     before: beforeStates?.[index] ?? undefined,
     after: singularAction === 'delete' ? undefined : row,

@@ -4,6 +4,7 @@
 
 import type { MutationAction } from '@kuruwic/db-audit-core';
 import { AUDIT_ACTION, type AuditAction } from '../../grammar/operations.js';
+import { nestedLog } from '../../utils/debug.js';
 import { extractEntityIdentity } from '../../utils/id-generation.js';
 import { UNRESOLVED_ENTITY_ID } from '../pre-fetch/identity-key.js';
 
@@ -12,12 +13,28 @@ type Row = Record<string, unknown>;
 /** Identity of a row that does not carry every primary-key field (a `select` that omits one) or whose model has no primary key */
 const UNKNOWN_IDENTITY = '';
 
-export const identityOf = (row: Row, pkFields: readonly string[] | undefined): string => {
+/** Where a row came from, named in the debug log when its identity cannot be resolved */
+export interface RowOrigin {
+  readonly model: string;
+  /** '' for the top-level row */
+  readonly path: string;
+}
+
+export const identityOf = (row: Row, pkFields: readonly string[] | undefined, origin: RowOrigin): string => {
   if (pkFields === undefined) {
+    nestedLog('model=%s has no primary key; the identity of the row at path=%s is unknown', origin.model, origin.path);
     return UNKNOWN_IDENTITY;
   }
   const identity = extractEntityIdentity(row, [...pkFields]);
-  return identity === UNRESOLVED_ENTITY_ID ? UNKNOWN_IDENTITY : identity;
+  if (identity === UNRESOLVED_ENTITY_ID) {
+    nestedLog(
+      'model=%s row at path=%s lacks a primary-key field (a select that omits one?); its identity is unknown',
+      origin.model,
+      origin.path,
+    );
+    return UNKNOWN_IDENTITY;
+  }
+  return identity;
 };
 
 /** An upsert resolves to `update` when the target row existed (its before state was captured), else `create` */

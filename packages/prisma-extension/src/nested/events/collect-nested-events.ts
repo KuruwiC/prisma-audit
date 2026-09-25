@@ -78,7 +78,7 @@ const toEvent = (
   pkConstraint: UniqueConstraint,
 ): MutationEvent => ({
   model: record.relatedModel,
-  identity: identityOf(record.entity, pkConstraint.fields),
+  identity: identityOf(record.entity, pkConstraint.fields, { model: record.relatedModel, path: nestedOp.path }),
   action: record.action,
   before: record.beforeState ?? undefined,
   after: record.entity,
@@ -168,7 +168,8 @@ const collectToManyRows = (
   }
 
   if (insertsRows(nestedOp, ownTargets)) {
-    const isNew = (row: Row) => !(preExisting?.has(identityOf(row, pkFields)) ?? false);
+    const origin = { model: nestedOp.relatedModel, path: nestedOp.path };
+    const isNew = (row: Row) => !(preExisting?.has(identityOf(row, pkFields, origin)) ?? false);
     return [...collected, ...claimUnnamedRows(nestedOp, attribution, isNew, getNestedOperationConfig)];
   }
   return collected;
