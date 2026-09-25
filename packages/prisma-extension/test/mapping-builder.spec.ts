@@ -2,7 +2,7 @@
  * Tests for Type-safe Aggregate Mapping Builder
  */
 
-import { defineAggregateMapping, defineEntity, foreignKey, resolveId, to } from '@kuruwic/db-audit-core';
+import { defineAggregateMapping, defineEntity, foreignKey, lookup, to } from '@kuruwic/db-audit-core';
 import { describe, expect, it } from 'vitest';
 import type { PrismaModelNames } from '../src/prisma-types.js';
 
@@ -59,14 +59,14 @@ describe('defineAggregateMapping', () => {
     expect(firstAggregate?.category).toBe('model');
   });
 
-  it('should support custom resolver with resolveId', () => {
+  it('should support custom resolver with lookup', () => {
     const mapping = defineAggregateMapping<PrismaModelNames<MockPrismaClient>, MockPrismaClient>()({
       Attachment: defineEntity({
         type: 'Attachment',
         aggregates: [
           to(
             'User',
-            resolveId<{ ownerId: string }, MockPrismaClient>(async (attachment) => {
+            lookup<{ ownerId: string }, MockPrismaClient>(async (attachment) => {
               return attachment.ownerId;
             }),
           ),
@@ -110,7 +110,7 @@ describe('defineAggregateMapping', () => {
           to('User', foreignKey('authorId')),
           to(
             'Attachment',
-            resolveId<unknown, MockPrismaClient>(async (_post, prisma) => {
+            lookup<unknown, MockPrismaClient>(async (_post, prisma) => {
               const attachment = await prisma.attachment.findUnique({ where: { id: 'test' } });
               return attachment?.id ?? null;
             }),
@@ -132,7 +132,7 @@ describe('defineAggregateMapping', () => {
     const mapping = defineAggregateMapping<PrismaModelNames<MockPrismaClient>, MockPrismaClient>()({
       User: defineEntity({
         type: 'User',
-        idResolver: resolveId<{ userId: string }, MockPrismaClient>(async (user) => user.userId),
+        idResolver: lookup<{ userId: string }, MockPrismaClient>(async (user) => user.userId),
       }),
     });
 
@@ -146,7 +146,7 @@ describe('defineAggregateMapping', () => {
         aggregates: [
           to(
             'User',
-            resolveId<{ authorId: string }, MockPrismaClient>(async (post, prisma) => {
+            lookup<{ authorId: string }, MockPrismaClient>(async (post, prisma) => {
               const user = await prisma.user.findUnique({ where: { id: post.authorId } });
               return user?.id ?? null;
             }),
@@ -226,7 +226,7 @@ describe('defineAggregateMapping', () => {
     const mapping = defineAggregateMapping<PrismaModelNames<MockPrismaClient>, MockPrismaClient>()({
       User: defineEntity({
         type: 'User',
-        idResolver: resolveId<{ userId: string }, MockPrismaClient>(async (user) => user.userId),
+        idResolver: lookup<{ userId: string }, MockPrismaClient>(async (user) => user.userId),
       }),
     });
 
@@ -238,7 +238,7 @@ describe('defineAggregateMapping', () => {
     const mapping = defineAggregateMapping<PrismaModelNames<MockPrismaClient>, MockPrismaClient>()({
       User: defineEntity({
         type: 'User',
-        idResolver: resolveId<{ id: string }, MockPrismaClient>(async (user) => {
+        idResolver: lookup<{ id: string }, MockPrismaClient>(async (user) => {
           return `prefix-${user.id}`;
         }),
       }),

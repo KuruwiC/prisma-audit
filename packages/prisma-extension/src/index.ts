@@ -32,7 +32,7 @@ export {
   defineEntity,
   foreignKey,
   IdValidationError,
-  resolveId,
+  lookup,
   to,
   unwrapId,
 } from '@kuruwic/db-audit-core';

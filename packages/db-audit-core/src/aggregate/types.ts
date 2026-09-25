@@ -23,33 +23,34 @@ import type {
 // ============================================================================
 
 /**
- * Callback function to resolve aggregate ID from an entity
+ * Resolves an id from an entity row: the entity's own id (`idResolver`) or the id of an
+ * aggregate root it projects onto (`to()`)
  *
  * @returns Promise resolving to string (logged), null, or undefined (both skip logging)
  *
  * @example
  * ```typescript
- * const resolver: AggregateIdResolver<Post, DbHandle> = async (post, db) => {
+ * const resolver: IdResolver<Post, DbHandle> = async (post, db) => {
  *   return post.authorId;
  * };
  *
- * const resolver: AggregateIdResolver<Attachment, DbHandle> = async (attachment, db) => {
+ * const resolver: IdResolver<Attachment, DbHandle> = async (attachment, db) => {
  *   const link = await db.postAttachments.find({ attachmentId: attachment.id });
  *   return link?.postId ?? null;
  * };
  * ```
  */
-export type AggregateIdResolver<TEntity = unknown, TDbHandle = unknown> = (
+export type IdResolver<TEntity = unknown, TDbHandle = unknown> = (
   entity: TEntity,
   db: TDbHandle,
 ) => Promise<string | null | undefined>;
 
 /**
- * Batch resolver function that resolves aggregate IDs for multiple entities at once.
+ * Batch resolver function that resolves ids for multiple entities at once.
  * Must return an array of the same length and order as the input.
  * Each element is a string ID, null (skip), or undefined (skip).
  */
-export type BatchAggregateIdResolver<TEntity = unknown, TDbHandle = unknown> = (
+export type BatchIdResolver<TEntity = unknown, TDbHandle = unknown> = (
   entities: TEntity[],
   db: TDbHandle,
 ) => Promise<(string | null | undefined)[]>;
@@ -85,7 +86,7 @@ export interface AggregateRoot<TDbHandle = unknown, TEntity extends Record<strin
   resolve(entity: TEntity, db: TDbHandle): Promise<string | null | undefined>;
   /** Batch resolver for N+1 prevention; takes precedence over `resolve` when processing multiple entities. */
   batchResolve?(entities: TEntity[], db: TDbHandle): Promise<(string | null | undefined)[]>;
-  /** Whether `resolve` performs DB queries. Set automatically by resolveId(). Used for N+1 warnings. */
+  /** Whether `resolve` performs DB queries. Set automatically by lookup(). Used for N+1 warnings. */
   requiresDbAccess?: boolean;
   /**
    * Projection-specific context enricher for this projection.

@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
-  batchResolveIds,
+  batchLookup,
   defineEntity,
   foreignKey,
+  lookup,
   normalizeId,
-  resolveId,
   self,
   to,
   validateAggregateMapping,
@@ -92,10 +92,10 @@ describe('Resolver helper functions', () => {
     });
   });
 
-  describe('resolveId', () => {
+  describe('lookup', () => {
     it('should resolve id using custom callback', async () => {
       // biome-ignore lint/suspicious/noExplicitAny: Test code
-      const resolver = resolveId(async (entity: any, _prisma: any) => {
+      const resolver = lookup(async (entity: any, _prisma: any) => {
         return entity.customId;
       });
       const entity = { customId: 'custom-123' };
@@ -105,7 +105,7 @@ describe('Resolver helper functions', () => {
 
     it('should support returning null', async () => {
       // biome-ignore lint/suspicious/noExplicitAny: Test code
-      const resolver = resolveId(async (_entity: any, _prisma: any) => {
+      const resolver = lookup(async (_entity: any, _prisma: any) => {
         return null;
       });
       const entity = { id: 'test-123' };
@@ -264,9 +264,9 @@ describe('validateAggregateMapping', () => {
   });
 });
 
-describe('batchResolveIds', () => {
+describe('batchLookup', () => {
   it('should resolve single entity via fallback', async () => {
-    const resolver = batchResolveIds(async (entities: { id: string }[]) => {
+    const resolver = batchLookup(async (entities: { id: string }[]) => {
       return entities.map((e) => `resolved-${e.id}`);
     });
     const result = await resolver({ id: 'a' }, null);
@@ -274,7 +274,7 @@ describe('batchResolveIds', () => {
   });
 
   it('should propagate batchResolve via to()', () => {
-    const resolver = batchResolveIds(async (entities: { id: string }[]) => {
+    const resolver = batchLookup(async (entities: { id: string }[]) => {
       return entities.map((e) => e.id);
     });
     const root = to('User', resolver);
@@ -283,7 +283,7 @@ describe('batchResolveIds', () => {
   });
 
   it('should handle null/skip in batch results', async () => {
-    const resolver = batchResolveIds(async (entities: { id: string }[]) => {
+    const resolver = batchLookup(async (entities: { id: string }[]) => {
       return entities.map((e) => (e.id === 'skip' ? null : `resolved-${e.id}`));
     });
     const root = to('User', resolver);
@@ -294,10 +294,10 @@ describe('batchResolveIds', () => {
 });
 
 describe('to - resolver metadata propagation', () => {
-  it('should set requiresDbAccess for resolveId', () => {
+  it('should set requiresDbAccess for lookup', () => {
     const root = to(
       'User',
-      resolveId(async (entity: { id: string }) => entity.id),
+      lookup(async (entity: { id: string }) => entity.id),
     );
     expect(root.requiresDbAccess).toBe(true);
     expect(root.batchResolve).toBeUndefined();

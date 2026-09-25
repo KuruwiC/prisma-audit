@@ -14,10 +14,10 @@ import type {
 } from '../enrichment/types.js';
 import { getGlobalSingleton } from '../global-singleton.js';
 import type {
-  AggregateIdResolver,
   AggregateMapping,
   AggregateRoot,
-  BatchAggregateIdResolver,
+  BatchIdResolver,
+  IdResolver,
   LoggableEntity,
   SelfProjectionConfig,
 } from './types.js';
@@ -29,20 +29,17 @@ import { DEFAULT_ENTITY_CATEGORY } from './types.js';
 
 const batchResolverRegistry = getGlobalSingleton(
   'aggregate-batch-resolver-registry',
-  () => new WeakMap<AggregateIdResolver, BatchAggregateIdResolver>(),
+  () => new WeakMap<IdResolver, BatchIdResolver>(),
 );
-const asyncResolverRegistry = getGlobalSingleton(
-  'aggregate-async-resolver-registry',
-  () => new WeakSet<AggregateIdResolver>(),
-);
+const asyncResolverRegistry = getGlobalSingleton('aggregate-async-resolver-registry', () => new WeakSet<IdResolver>());
 
-/** Check if a resolver was created by resolveId() (performs DB queries) */
-function isAsyncResolver(resolver: AggregateIdResolver): boolean {
+/** Check if a resolver was created by lookup() (performs DB queries) */
+function isAsyncResolver(resolver: IdResolver): boolean {
   return asyncResolverRegistry.has(resolver);
 }
 
-/** Get the batch resolver attached by batchResolveIds(), if any */
-function getRegisteredBatchResolver(resolver: AggregateIdResolver): BatchAggregateIdResolver | undefined {
+/** Get the batch resolver attached by batchLookup(), if any */
+function getRegisteredBatchResolver(resolver: IdResolver): BatchIdResolver | undefined {
   return batchResolverRegistry.get(resolver);
 }
 
@@ -54,8 +51,8 @@ const BATCH_RESOLVE_WARNING_THRESHOLD = 5;
 const warnedAggregateTypes = getGlobalSingleton('aggregate-unbatched-resolver-warned-types', () => new Set<string>());
 
 /**
- * Warn, once per aggregate type, when a `resolveId()` resolver runs row by row for more rows
- * than the warning threshold: `batchResolveIds()` would resolve them in one query.
+ * Warn, once per aggregate type, when a `lookup()` resolver runs row by row for more rows
+ * than the warning threshold: `batchLookup()` would resolve them in one query.
  */
 export const warnAboutUnbatchedResolver = (entityType: string, aggregate: AggregateRoot, rowCount: number): void => {
   if (
@@ -67,8 +64,8 @@ export const warnAboutUnbatchedResolver = (entityType: string, aggregate: Aggreg
   }
   warnedAggregateTypes.add(aggregate.type);
   console.warn(
-    `[db-audit-core] ${entityType} → aggregate "${aggregate.type}" uses resolveId() for ${rowCount} entities. ` +
-      `Consider using batchResolveIds() to avoid N+1 queries.`,
+    `[db-audit-core] ${entityType} → aggregate "${aggregate.type}" uses lookup() for ${rowCount} entities. ` +
+      `Consider using batchLookup() to avoid N+1 queries.`,
   );
 };
 
@@ -156,7 +153,7 @@ export const normalizeId = (id: unknown): string => {
  * })
  * ```
  */
-export const self = (idKey: string | IdTransformer = 'id'): AggregateIdResolver => {
+export const self = (idKey: string | IdTransformer = 'id'): IdResolver => {
   return async (entity) => {
     if (typeof idKey === 'function') {
       const transformedId = idKey(entity);
@@ -205,7 +202,7 @@ export const self = (idKey: string | IdTransformer = 'id'): AggregateIdResolver 
  * to('User', foreignKey((post) => `user-${post.authorId}`))
  * ```
  */
-export const foreignKey = (foreignKeyField: string | IdTransformer): AggregateIdResolver => {
+export const foreignKey = (foreignKeyField: string | IdTransformer): IdResolver => {
   return async (entity) => {
     if (typeof foreignKeyField === 'function') {
       const transformedId = foreignKeyField(entity);
@@ -224,14 +221,17 @@ export const foreignKey = (foreignKeyField: string | IdTransformer): AggregateId
 };
 
 /**
- * Create a custom ID resolver with type safety
+ * Create an id resolver from a callback that may look the id up through the database handle
  *
- * @returns Type-erased AggregateIdResolver
+ * The resolver runs once per row; resolving many rows this way warns about N+1 queries, and
+ * `batchLookup` resolves them in one call.
+ *
+ * @returns Type-erased IdResolver
  *
  * @example Minimal usage with inline type annotation
  * ```typescript
  * // Specify only the shape you need inline
- * to('Post', resolveId(async (attachment: { postAttachments?: Array<{ postId: string }> }) => {
+ * to('Post', lookup(async (attachment: { postAttachments?: Array<{ postId: string }> }) => {
  *   return attachment.postAttachments?.[0]?.postId ?? null;
  * }))
  * ```
@@ -239,14 +239,14 @@ export const foreignKey = (foreignKeyField: string | IdTransformer): AggregateId
  * @example With single type parameter (entity type only)
  * ```typescript
  * // Specify entity shape, the handle is inferred
- * to('Post', resolveId<{ postAttachments?: Array<{ postId: string }> }>(async (attachment) => {
+ * to('Post', lookup<{ postAttachments?: Array<{ postId: string }> }>(async (attachment) => {
  *   return attachment.postAttachments?.[0]?.postId ?? null;
  * }))
  * ```
  *
  * @example With both type parameters (full control)
  * ```typescript
- * resolveId<Attachment, DbHandle>(async (attachment, db) => {
+ * lookup<Attachment, DbHandle>(async (attachment, db) => {
  *   const postAttachment = await db.postAttachments.find({ attachmentId: attachment.id });
  *   return postAttachment?.postId ?? null;
  * })
@@ -254,17 +254,17 @@ export const foreignKey = (foreignKeyField: string | IdTransformer): AggregateId
  *
  * @example Deep nested query
  * ```typescript
- * resolveId<AvatarImage, DbHandle>(async (avatarImage, db) => {
+ * lookup<AvatarImage, DbHandle>(async (avatarImage, db) => {
  *   const avatar = await db.avatars.find({ id: avatarImage.avatarId });
  *   const profile = avatar ? await db.profiles.find({ id: avatar.profileId }) : null;
  *   return profile?.userId ?? null;
  * })
  * ```
  */
-export const resolveId = <TEntity = unknown, TDbHandle = unknown>(
+export const lookup = <TEntity = unknown, TDbHandle = unknown>(
   resolverFn: (entity: TEntity, db: TDbHandle) => Promise<string | null | undefined>,
-): AggregateIdResolver => {
-  const resolver: AggregateIdResolver = async (entity: unknown, db: unknown): Promise<string | null | undefined> => {
+): IdResolver => {
+  const resolver: IdResolver = async (entity: unknown, db: unknown): Promise<string | null | undefined> => {
     return resolverFn(entity as TEntity, db as TDbHandle);
   };
   asyncResolverRegistry.add(resolver);
@@ -274,7 +274,7 @@ export const resolveId = <TEntity = unknown, TDbHandle = unknown>(
 /**
  * Create a batch ID resolver for N+1 prevention in aggregate resolution.
  *
- * Use this instead of `resolveId` when the aggregate root cannot be determined
+ * Use this instead of `lookup` when the aggregate root cannot be determined
  * from the entity's own fields (e.g., reverse FK lookups) and the entity may
  * be inserted/updated in batches.
  *
@@ -282,11 +282,11 @@ export const resolveId = <TEntity = unknown, TDbHandle = unknown>(
  * same length and order. Each element is a string ID (logged), null, or
  * undefined (both skip logging for that entity).
  *
- * @returns An AggregateIdResolver. The batch function is registered internally via WeakMap and propagated to AggregateRoot.batchResolve by to().
+ * @returns An IdResolver. The batch function is registered internally via WeakMap and propagated to AggregateRoot.batchResolve by to().
  *
  * @example Reverse FK lookup
  * ```typescript
- * to('User', batchResolveIds<Post, DbHandle>(async (posts, db) => {
+ * to('User', batchLookup<Post, DbHandle>(async (posts, db) => {
  *   const users = await db.users.findAll({ post1Id: posts.map(p => p.id) });
  *   const postToUser = new Map(users.flatMap(u =>
  *     u.post1Id ? [[u.post1Id, u.id]] : []
@@ -295,19 +295,13 @@ export const resolveId = <TEntity = unknown, TDbHandle = unknown>(
  * }))
  * ```
  */
-export const batchResolveIds = <TEntity = unknown, TDbHandle = unknown>(
+export const batchLookup = <TEntity = unknown, TDbHandle = unknown>(
   resolverFn: (entities: TEntity[], db: TDbHandle) => Promise<(string | null | undefined)[]>,
-): AggregateIdResolver => {
-  const batchFn: BatchAggregateIdResolver = async (
-    entities: unknown[],
-    db: unknown,
-  ): Promise<(string | null | undefined)[]> => {
+): IdResolver => {
+  const batchFn: BatchIdResolver = async (entities: unknown[], db: unknown): Promise<(string | null | undefined)[]> => {
     return resolverFn(entities as TEntity[], db as TDbHandle);
   };
-  const singleResolver: AggregateIdResolver = async (
-    entity: unknown,
-    db: unknown,
-  ): Promise<string | null | undefined> => {
+  const singleResolver: IdResolver = async (entity: unknown, db: unknown): Promise<string | null | undefined> => {
     const results = await batchFn([entity], db);
     return results[0] ?? null;
   };
@@ -357,9 +351,9 @@ export type ToOptions<TDbHandle = unknown, TEntity extends Record<string, unknow
  * })
  * ```
  *
- * @example With resolveId helper (explicit types)
+ * @example With lookup helper (explicit types)
  * ```typescript
- * to('Post', resolveId<Attachment, DbHandle>(async (attachment, db) => {
+ * to('Post', lookup<Attachment, DbHandle>(async (attachment, db) => {
  *   const postAttachment = await db.postAttachments.find({ attachmentId: attachment.id });
  *   return postAttachment?.postId ?? null;
  * }))
@@ -370,7 +364,7 @@ export type ToOptions<TDbHandle = unknown, TEntity extends Record<string, unknow
  * to('ExternalSystem', foreignKey('systemId'), { category: 'external' })
  * ```
  */
-// A resolver from the helpers (foreignKey, self, resolveId) carries no row or handle type, so
+// A resolver from the helpers (foreignKey, self, lookup) carries no row or handle type, so
 // this overload takes TEntity/TDbHandle from the call's contextual type (the `aggregates` slot
 // of defineEntity) and flows them into `options.context`.
 export function to<
@@ -379,7 +373,7 @@ export function to<
   TDbHandle = unknown,
 >(
   type: TAggregateName,
-  resolver: AggregateIdResolver,
+  resolver: IdResolver,
   options?: ToOptions<TDbHandle, TEntity>,
 ): AggregateRoot<TDbHandle, TEntity>;
 export function to<
@@ -393,10 +387,10 @@ export function to<
 ): AggregateRoot<TDbHandle, TEntity>;
 export function to<TAggregateName extends string = string>(
   type: TAggregateName,
-  resolver: AggregateIdResolver | ((entity: unknown, db: unknown) => Promise<string | null | undefined>),
+  resolver: IdResolver | ((entity: unknown, db: unknown) => Promise<string | null | undefined>),
   options?: ToOptions,
 ): AggregateRoot {
-  const typedResolver = resolver as AggregateIdResolver;
+  const typedResolver = resolver as IdResolver;
   const root: AggregateRoot = {
     category: options?.category ?? DEFAULT_ENTITY_CATEGORY,
     type,
@@ -434,8 +428,8 @@ export type DefineEntityOptions<
   /** Entity type name stored in AuditLog.entityType */
   type: string;
   /** Custom ID resolver for this entity (defaults to self('id')) */
-  idResolver?: AggregateIdResolver<TEntity, TDbHandle>;
-  /** Aggregate roots this entity belongs to. Use helpers: to(), foreignKey(), resolveId() */
+  idResolver?: IdResolver<TEntity, TDbHandle>;
+  /** Aggregate roots this entity belongs to. Use helpers: to(), foreignKey(), lookup() */
   aggregates?: AggregateRoot<TDbHandle, TEntity>[];
   /**
    * Self-projection configuration (default: included).

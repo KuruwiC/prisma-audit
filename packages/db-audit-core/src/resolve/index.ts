@@ -20,9 +20,9 @@
 
 import { normalizeId, warnAboutUnbatchedResolver } from '../aggregate/helpers.js';
 import type {
-  AggregateIdResolver,
   AggregateRoot,
-  BatchAggregateIdResolver,
+  BatchIdResolver,
+  IdResolver,
   ResolvedId,
   SelfProjectionConfig,
 } from '../aggregate/types.js';
@@ -43,7 +43,7 @@ import { toError } from '../utils/to-error.js';
 export interface EntityResolveConfig<TDbHandle = unknown> {
   readonly category: string;
   readonly type: string;
-  readonly idResolver: AggregateIdResolver<Record<string, unknown>, TDbHandle>;
+  readonly idResolver: IdResolver<Record<string, unknown>, TDbHandle>;
   readonly aggregates: readonly AggregateRoot[];
   readonly self?: SelfProjectionConfig;
   readonly context?: EntityEnricherConfig<TDbHandle>;
@@ -224,7 +224,7 @@ const toRoot = (aggregate: AggregateRoot, aggregateId: string): ResolvedRoot => 
 const resolveRootsInBatch = async <TModelName extends string, TDbHandle>(
   entries: readonly IdentifiedEntry<TModelName>[],
   aggregate: AggregateRoot,
-  batchResolver: BatchAggregateIdResolver<Row>,
+  batchResolver: BatchIdResolver<Row>,
   read: ReadHandle<TDbHandle>,
   failures: ResolverFailure<TModelName>[],
 ): Promise<(ResolvedRoot | undefined)[]> => {

@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createEntityConfigLookup } from '../src/aggregate/entity-config-lookup.js';
 import {
-  batchResolveIds,
+  batchLookup,
   defineEntity,
   foreignKey,
+  lookup,
   resetUnbatchedResolverWarnings,
-  resolveId,
   to,
 } from '../src/aggregate/helpers.js';
 import type { AggregateMapping } from '../src/aggregate/types.js';
@@ -266,7 +266,7 @@ describe('resolve', () => {
           aggregates: [
             to(
               'User',
-              resolveId(async () => {
+              lookup(async () => {
                 throw error;
               }),
             ),
@@ -332,11 +332,11 @@ describe('resolve', () => {
       expect(resolved.map((e) => e.identity)).toEqual(['p1', 'p3']);
     });
 
-    describe('batchResolveIds', () => {
+    describe('batchLookup', () => {
       it('calls the batch resolver once with all rows of the model', async () => {
         const batchFn = vi.fn(async (rows: { authorId?: string }[]) => rows.map((row) => row.authorId ?? null));
         const config = configOf({
-          Post: defineEntity({ type: 'Post', aggregates: [to('User', batchResolveIds(batchFn))] }),
+          Post: defineEntity({ type: 'Post', aggregates: [to('User', batchLookup(batchFn))] }),
         });
         const events = rowsOf('Post', 10);
 
@@ -358,7 +358,7 @@ describe('resolve', () => {
             aggregates: [
               to(
                 'User',
-                batchResolveIds(async () => {
+                batchLookup(async () => {
                   throw error;
                 }),
               ),
@@ -384,7 +384,7 @@ describe('resolve', () => {
             aggregates: [
               to(
                 'User',
-                batchResolveIds(async () => ['u1']),
+                batchLookup(async () => ['u1']),
               ),
             ],
           }),
@@ -401,7 +401,7 @@ describe('resolve', () => {
     });
   });
 
-  describe('N+1 warning for row-by-row resolveId() resolvers', () => {
+  describe('N+1 warning for row-by-row lookup() resolvers', () => {
     const postWithResolveId = () =>
       configOf({
         Post: defineEntity({
@@ -409,7 +409,7 @@ describe('resolve', () => {
           aggregates: [
             to(
               'User',
-              resolveId(async (row: { authorId?: string }) => row.authorId ?? null),
+              lookup(async (row: { authorId?: string }) => row.authorId ?? null),
             ),
           ],
         }),
@@ -421,7 +421,7 @@ describe('resolve', () => {
       await resolve(rowsOf('Post', 6), auditContext, postWithResolveId(), read);
 
       expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Post → aggregate "User"'));
-      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Consider using batchResolveIds()'));
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Consider using batchLookup()'));
     });
 
     it('does not warn at or below the threshold', async () => {
@@ -442,7 +442,7 @@ describe('resolve', () => {
       expect(warnSpy).toHaveBeenCalledTimes(1);
     });
 
-    it('does not warn for a batchResolveIds() resolver', async () => {
+    it('does not warn for a batchLookup() resolver', async () => {
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const config = configOf({
         Post: defineEntity({
@@ -450,7 +450,7 @@ describe('resolve', () => {
           aggregates: [
             to(
               'User',
-              batchResolveIds(async (rows: { authorId?: string }[]) => rows.map((row) => row.authorId ?? null)),
+              batchLookup(async (rows: { authorId?: string }[]) => rows.map((row) => row.authorId ?? null)),
             ),
           ],
         }),
@@ -765,7 +765,7 @@ describe('resolve', () => {
             if (row.id === 'p1') throw new Error('resolver broken');
             return row.id as string;
           },
-          aggregates: [to('User', resolveId(userResolver))],
+          aggregates: [to('User', lookup(userResolver))],
           context: { enricher },
         }),
       });
@@ -795,8 +795,8 @@ describe('resolve', () => {
             type: 'Post',
             idResolver: record('p1'),
             aggregates: [
-              to('User', resolveId(record('u1')), { context: { enricher: record([{ projection: true }]) } }),
-              to('Tag', batchResolveIds(record(['t1']))),
+              to('User', lookup(record('u1')), { context: { enricher: record([{ projection: true }]) } }),
+              to('Tag', batchLookup(record(['t1']))),
             ],
             context: { enricher: record([{ entity: true }]) },
           }),

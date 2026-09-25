@@ -3,12 +3,12 @@
 export type { EntityConfigLookup } from './aggregate/entity-config-lookup.js';
 export { createEntityConfigLookup } from './aggregate/entity-config-lookup.js';
 export {
-  batchResolveIds,
+  batchLookup,
   defineAggregateMapping,
   defineEntity,
   foreignKey,
+  lookup,
   normalizeId,
-  resolveId,
   self,
   to,
   validateAggregateMapping,
@@ -16,7 +16,6 @@ export {
 export type {
   AggregateMapping,
   AggregateRoot,
-  BatchAggregateIdResolver,
   LoggableEntity,
   ResolvedId,
 } from './aggregate/types.js';

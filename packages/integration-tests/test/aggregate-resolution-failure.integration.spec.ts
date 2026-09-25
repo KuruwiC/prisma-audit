@@ -8,7 +8,7 @@
  */
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
-import { createAsyncLocalStorageProvider, defineEntity, foreignKey, resolveId, to } from '@kuruwic/db-audit-core';
+import { createAsyncLocalStorageProvider, defineEntity, foreignKey, lookup, to } from '@kuruwic/db-audit-core';
 import type { AuditErrorObserver } from '@kuruwic/prisma-audit';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
@@ -130,7 +130,7 @@ describe('aggregate-resolution failures', () => {
         aggregates: [
           to(
             'User',
-            resolveId(async (post: Record<string, unknown>) => {
+            lookup(async (post: Record<string, unknown>) => {
               if (post.title === BROKEN_TITLE) throw resolverError;
               return post.authorId as string;
             }),

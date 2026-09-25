@@ -8,8 +8,8 @@ import {
   defineConfig,
   defineEntity,
   foreignKey,
+  lookup,
   type PrismaModelNames,
-  resolveId,
   to,
 } from '@kuruwic/prisma-audit';
 import {
@@ -396,7 +396,7 @@ const aggregateMapping = defineAggregateMapping<PrismaModelNames<PrismaClient>, 
       }),
       to(
         'Post',
-        resolveId(async (attachment: AttachmentRow) => {
+        lookup(async (attachment: AttachmentRow) => {
           return attachment.postAttachments?.[0]?.postId ?? null;
         }),
         {
@@ -425,7 +425,7 @@ const aggregateMapping = defineAggregateMapping<PrismaModelNames<PrismaClient>, 
       ),
       to(
         'Comment',
-        resolveId(async (attachment: AttachmentRow) => {
+        lookup(async (attachment: AttachmentRow) => {
           return attachment.commentAttachments?.[0]?.commentId ?? null;
         }),
         {
@@ -480,7 +480,7 @@ const aggregateMapping = defineAggregateMapping<PrismaModelNames<PrismaClient>, 
     aggregates: [
       to(
         'User',
-        resolveId(async (avatar: AvatarRow, db: PrismaClient) => {
+        lookup(async (avatar: AvatarRow, db: PrismaClient) => {
           if (avatar.profile?.userId) {
             return avatar.profile.userId;
           }
@@ -508,7 +508,7 @@ const aggregateMapping = defineAggregateMapping<PrismaModelNames<PrismaClient>, 
     aggregates: [
       to(
         'User',
-        resolveId(async (avatarImage: AvatarImageRow, db: PrismaClient) => {
+        lookup(async (avatarImage: AvatarImageRow, db: PrismaClient) => {
           const avatar = await db.avatar.findUnique({
             where: { id: avatarImage.avatarId },
             select: {

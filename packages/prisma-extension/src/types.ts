@@ -162,7 +162,7 @@ export interface NestedOperationsConfig<TModelName extends string = string> exte
  *   to a string. The entity's `idResolver` failing leaves the row without any audit log
  *   entry; a `to()` resolver failing leaves it without the entry under that aggregate root
  *   only. The caller's operation continues. Reported once per affected row, a failed
- *   `batchResolveIds` resolver once for every row of its call: `modelName` is the row's
+ *   `batchLookup` resolver once for every row of its call: `modelName` is the row's
  *   model, `operation` the keyword that wrote the row, and `params` is
  *   `{ identity, resolver }` with the row's serialized primary key and either
  *   `{ kind: 'entity' }` or `{ kind: 'aggregate', aggregateCategory, aggregateType }`.
