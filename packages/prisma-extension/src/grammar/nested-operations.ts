@@ -6,7 +6,7 @@
  * @remarks
  * Detects the nested write operations (`create`, `connectOrCreate`, `upsert`, ...) inside
  * Prisma operation args, extracts the nested records from an operation result, and
- * re-fetches them when the result does not include them.
+ * re-fetches the rows nested operations wrote that the result does not include.
  * Supports deep nesting (e.g., `postTags.create.tag.connectOrCreate`).
  */
 
@@ -15,9 +15,6 @@ import type { SchemaMetadata, UniqueConstraint } from '../schema/types.js';
 import type { NestedPreFetchResult } from './nested-state.js';
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
-
-/** Client the refetch reads through: model delegates keyed by uncapitalized model name. */
-type RefetchClient = Record<string, { findMany?(args: { where: Record<string, unknown> }): Promise<unknown[]> }>;
 
 /**
  * Nested operation keywords that can appear in operation args
@@ -826,12 +823,6 @@ export const extractNestedRecords = (
   return nestedRecords;
 };
 
-/** @internal Check if operation needs refetch */
-const shouldSkipRefetch = (operation: NestedOperationKeyword): boolean => {
-  const skipOperations = ['create', 'delete', 'deleteMany', 'connect', 'connectOrCreate'] as const;
-  return skipOperations.includes(operation as (typeof skipOperations)[number]);
-};
-
 /**
  * A model's primary key: its `@@id` constraint, else its `@id` field.
  *
@@ -851,23 +842,6 @@ export const getPrimaryKeyConstraint = (
   if (idField) return { type: 'primaryKey', fields: [idField.name] };
 
   return undefined;
-};
-
-/** @internal Build WHERE clause for PK-based refetch */
-const buildPkWhereClause = (pkFields: string[], pks: Record<string, unknown>[]): Record<string, unknown> => {
-  if (pkFields.length === 1) {
-    const field = pkFields[0] as string;
-    return { [field]: { in: pks.map((pk) => pk[field]) } };
-  }
-  return {
-    OR: pks.map((pk) => {
-      const condition: Record<string, unknown> = {};
-      for (const field of pkFields) {
-        condition[field] = pk[field];
-      }
-      return condition;
-    }),
-  };
 };
 
 /**
@@ -902,198 +876,52 @@ export const deserializeEntityId = (
   }
 };
 
-/** @internal Extract PK values from a record */
-const extractPkFromRecord = (record: Record<string, unknown>, pkFields: string[]): Record<string, unknown> | null => {
-  const pk: Record<string, unknown> = {};
-  for (const field of pkFields) {
-    if (!(field in record)) return null;
-    pk[field] = record[field];
-  }
-  return pk;
-};
+/** Model delegate reads a re-fetch goes through */
+export interface RefetchModelClient {
+  findUnique(args: { where: Record<string, unknown> }): Promise<Record<string, unknown> | null>;
+  findFirst(args: { where: Record<string, unknown> }): Promise<Record<string, unknown> | null>;
+}
 
-/** @internal Extract PK values from a pre-fetch entry */
-const extractPkFromEntry = (
-  entityId: EntityIdentityKey,
-  preFetchResult: NestedPreFetchResult,
-  pkFields: string[],
-): Record<string, unknown> | null => {
-  if (entityId !== UNRESOLVED_ENTITY_ID) {
-    return deserializeEntityId(entityId, pkFields);
-  }
-
-  const record = preFetchResult.before;
-  if (!record || typeof record !== 'object') return null;
-  return extractPkFromRecord(record, pkFields);
-};
-
-/** @internal Extract PKs to refetch from pre-fetch results */
-const extractPksToRefetch = (
-  fieldMap: Map<EntityIdentityKey, NestedPreFetchResult>,
-  _path: string,
-  pkFields: string[],
-): Record<string, unknown>[] => {
-  const pksToRefetch: Record<string, unknown>[] = [];
-
-  for (const [entityId, preFetchResult] of fieldMap.entries()) {
-    if (!preFetchResult.before) {
-      nestedLog('Skipping entityId=%s (no before state)', entityId);
-      continue;
-    }
-
-    const extractedPk = extractPkFromEntry(entityId, preFetchResult, pkFields);
-    if (extractedPk) {
-      pksToRefetch.push(extractedPk);
-      nestedLog('Queuing entity for refetch: pk=%O', extractedPk);
-    } else {
-      nestedLog('Skipping entry (no PK extractable from record)');
-    }
-  }
-
-  return pksToRefetch;
-};
-
-/** @internal Execute refetch query for nested records */
-const executeRefetchQuery = async (
-  client: RefetchClient,
-  relationField: { name: string; relatedModel: string; isList: boolean },
-  pksToRefetch: Record<string, unknown>[],
-  pkFields: string[],
-): Promise<unknown[]> => {
-  const modelDelegate = relationField.relatedModel.charAt(0).toLowerCase() + relationField.relatedModel.slice(1);
-
-  const model = client[modelDelegate];
-  if (!model || !model.findMany) {
-    nestedLog('Model delegate %s not found or findMany not available', modelDelegate);
-    return [];
-  }
-
-  const where = buildPkWhereClause(pkFields, pksToRefetch);
-  nestedLog('Executing findMany for modelDelegate=%s with where=%O', modelDelegate, where);
-
-  const refetchedRecords = await model.findMany({ where });
-
-  nestedLog('Refetch completed: found %d records for modelDelegate=%s', refetchedRecords?.length ?? 0, modelDelegate);
-
-  return refetchedRecords || [];
-};
-
-/** @internal Process a single nested operation for refetch */
-const processNestedOperationForRefetch = async (
-  client: RefetchClient,
-  schemaMetadata: SchemaMetadata,
-  nestedOp: NestedOperationInfo,
-  nestedPreFetchResults: NestedPreFetchResults,
-  relationFields: { name: string; relatedModel: string; isList: boolean }[],
-  nestedRecords: NestedRecordInfo[],
-): Promise<void> => {
-  if (shouldSkipRefetch(nestedOp.operation)) {
-    nestedLog(
-      'Skipping refetch for operation=%s path=%s (operation type does not need refetch)',
-      nestedOp.operation,
-      nestedOp.path,
-    );
-    return;
-  }
-
-  const fieldMap = nestedPreFetchResults.get(nestedOp.path);
-  if (!fieldMap || fieldMap.size === 0) {
-    nestedLog('No pre-fetch results found for path=%s, cannot refetch', nestedOp.path);
-    return;
-  }
-
-  nestedLog('Found pre-fetch results for path=%s, entityCount=%d', nestedOp.path, fieldMap.size);
-
-  const primaryKey = getPrimaryKeyConstraint(schemaMetadata, nestedOp.relatedModel);
-  if (!primaryKey) {
-    nestedLog('Model %s has no primary key, cannot refetch path=%s', nestedOp.relatedModel, nestedOp.path);
-    return;
-  }
-
-  const pkFields = primaryKey.fields;
-  const pksToRefetch = extractPksToRefetch(fieldMap, nestedOp.path, pkFields);
-  if (pksToRefetch.length === 0) {
-    nestedLog('No PKs to refetch for path=%s, skipping', nestedOp.path);
-    return;
-  }
-
-  nestedLog('Will refetch %d records for path=%s using PKs=%O', pksToRefetch.length, nestedOp.path, pksToRefetch);
-
-  const relationField = relationFields.find((f) => f.name === nestedOp.fieldName);
-  if (!relationField) {
-    nestedLog('Relation field not found for fieldName=%s, skipping', nestedOp.fieldName);
-    return;
-  }
-
-  const refetchedRecords = await executeRefetchQuery(client, relationField, pksToRefetch, pkFields);
-
-  if (refetchedRecords.length > 0) {
-    nestedRecords.push({
-      fieldName: nestedOp.fieldName,
-      relatedModel: relationField.relatedModel,
-      isList: relationField.isList,
-      records: refetchedRecords,
-      path: nestedOp.path,
-    });
-    nestedLog('Successfully added %d refetched records for path=%s', refetchedRecords.length, nestedOp.path);
-  }
-};
+/** A row a nested operation wrote, by the WHERE the operation named it with */
+export interface RefetchTarget {
+  /** A unique WHERE, or for a nested batch keyword the primary key of a row its filter matched */
+  readonly where: Record<string, unknown>;
+  readonly operation: NestedOperationKeyword;
+}
 
 /**
- * Re-fetch nested records after the operation for the paths its result did not return
+ * Re-fetch after the operation the rows nested operations wrote
  *
- * Re-fetches, by the primary keys of the pre-fetched records, the rows at a written path the
- * result holds none of: the relation is selected into the operation, but the caller's own
- * `include` or `select` on it may filter the written rows out.
+ * A nested write names its row by the model's `WhereUniqueInput`, read with `findUnique`; the
+ * primary key a nested batch keyword's filter matched is a flat field filter, read with
+ * `findFirst`. A row not found after the operation yields nothing.
  *
- * **Consistency Tradeoffs:**
- * - Re-fetch happens AFTER operation (not atomic)
- * - Records may be modified between operation and re-fetch
- * - May occur outside user's transaction
+ * The re-fetch runs after the operation, on the client the operation ran on: outside a
+ * transaction, another write may modify the row in between.
  *
- * A failed read rejects with its error: the records it would have returned cannot be left out of
+ * A failed read rejects with its error: the rows it would have returned cannot be left out of
  * the audit.
  *
  * @example
  * ```typescript
- * const nestedRecords = await refetchNestedRecords(
- *   dbClient,
- *   schemaMetadata,
- *   'User',
- *   nestedPreFetchResults,
- *   nestedOperations
- * );
- * // Returns: [{ fieldName: 'posts', relatedModel: 'Post', records: [...], path: 'posts' }]
+ * const rows = await refetchNestedRecords(postClient, [{ where: { id: 'post-1' }, operation: 'update' }]);
+ * // Returns: [{ id: 'post-1', title: 'Updated', ... }]
  * ```
  */
 export const refetchNestedRecords = async (
-  client: RefetchClient,
-  schemaMetadata: SchemaMetadata,
-  modelName: string,
-  nestedPreFetchResults: NestedPreFetchResults | undefined,
-  nestedOperations: NestedOperationInfo[],
-): Promise<NestedRecordInfo[]> => {
-  const nestedRecords: NestedRecordInfo[] = [];
-
-  if (!nestedPreFetchResults) {
-    return nestedRecords;
+  client: RefetchModelClient,
+  targets: readonly RefetchTarget[],
+): Promise<Record<string, unknown>[]> => {
+  const rows: Record<string, unknown>[] = [];
+  for (const { where, operation } of targets) {
+    const row = isNestedBatchKeyword(operation)
+      ? await client.findFirst({ where })
+      : await client.findUnique({ where });
+    if (row) {
+      rows.push(row);
+    } else {
+      nestedLog('Refetch found no row for operation=%s where=%O', operation, where);
+    }
   }
-
-  const relationFields = schemaMetadata.getRelationFields(modelName);
-  if (relationFields.length === 0) {
-    return nestedRecords;
-  }
-
-  for (const nestedOp of nestedOperations) {
-    await processNestedOperationForRefetch(
-      client,
-      schemaMetadata,
-      nestedOp,
-      nestedPreFetchResults,
-      relationFields,
-      nestedRecords,
-    );
-  }
-
-  return nestedRecords;
+  return rows;
 };

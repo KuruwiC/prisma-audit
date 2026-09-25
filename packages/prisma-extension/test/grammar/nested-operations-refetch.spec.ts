@@ -1,5 +1,5 @@
 /**
- * Primary-key derivation and entity-identity helpers of the nested-write grammar
+ * Primary-key derivation, entity-identity helpers and the post-operation re-fetch of the nested-write grammar
  */
 
 import { UNRESOLVED_ENTITY_ID } from '@kuruwic/prisma-audit-core';
@@ -7,8 +7,6 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   deserializeEntityId,
   getPrimaryKeyConstraint,
-  type NestedOperationInfo,
-  type NestedPreFetchResults,
   refetchNestedRecords,
 } from '../../src/grammar/nested-operations.js';
 import type { FieldMetadata, SchemaMetadata, UniqueConstraint } from '../../src/schema/types.js';
@@ -29,17 +27,9 @@ interface ModelShape {
   fields?: FieldMetadata[];
 }
 
-const metadataFor = (models: Record<string, ModelShape>, relationsOfPost: string[] = []): SchemaMetadata => ({
+const metadataFor = (models: Record<string, ModelShape>): SchemaMetadata => ({
   getUniqueConstraints: (modelName) => models[modelName]?.constraints ?? [],
-  getRelationFields: (modelName) =>
-    modelName === 'Post'
-      ? relationsOfPost.map((relatedModel) => ({
-          name: relatedModel.toLowerCase(),
-          relatedModel,
-          isList: true,
-          isRequired: false,
-        }))
-      : [],
+  getRelationFields: () => [],
   getAllFields: (modelName) => models[modelName]?.fields ?? [],
   getFieldMetadata: (modelName, fieldName) => models[modelName]?.fields?.find((field) => field.name === fieldName),
 });
@@ -127,59 +117,61 @@ describe('deserializeEntityId', () => {
   });
 });
 
-describe('refetchNestedRecords — primary key of the related model', () => {
-  const nestedOperationOn = (relatedModel: string): NestedOperationInfo => ({
-    fieldName: relatedModel.toLowerCase(),
-    relatedModel,
-    operation: 'update',
-    isList: true,
-    data: {},
-    path: relatedModel.toLowerCase(),
+describe('refetchNestedRecords', () => {
+  const stored = [
+    { id: 'row-1', key: 'k-1' },
+    { id: 'row-2', key: 'k-2' },
+  ];
+  const clientStoring = () => ({
+    findUnique: vi.fn(
+      async ({ where }: { where: Record<string, unknown> }) =>
+        stored.find((row) => row.id === where.id || row.key === where.key) ?? null,
+    ),
+    findFirst: vi.fn(
+      async ({ where }: { where: Record<string, unknown> }) => stored.find((row) => row.id === where.id) ?? null,
+    ),
   });
 
-  const preFetchedAt = (path: string): NestedPreFetchResults =>
-    new Map([[path, new Map([['row-1', { before: { id: 'row-1', key: 'row-1' } }]])]]);
+  it('reads a row a nested write names by its unique WHERE with findUnique', async () => {
+    const client = clientStoring();
 
-  it('refetches by the @id field of the related model', async () => {
-    const findMany = vi.fn(async () => [{ id: 'row-1' }]);
-    const metadata = metadataFor({ Label: { fields: [scalarField('id', true)] } }, ['Label']);
+    const rows = await refetchNestedRecords(client, [{ where: { key: 'k-2' }, operation: 'update' }]);
 
-    const records = await refetchNestedRecords({ label: { findMany } }, metadata, 'Post', preFetchedAt('label'), [
-      nestedOperationOn('Label'),
+    expect(client.findUnique).toHaveBeenCalledWith({ where: { key: 'k-2' } });
+    expect(client.findFirst).not.toHaveBeenCalled();
+    expect(rows).toEqual([{ id: 'row-2', key: 'k-2' }]);
+  });
+
+  it('reads a row a nested batch filter matched by its primary key with findFirst', async () => {
+    const client = clientStoring();
+
+    const rows = await refetchNestedRecords(client, [{ where: { id: 'row-1' }, operation: 'updateMany' }]);
+
+    expect(client.findFirst).toHaveBeenCalledWith({ where: { id: 'row-1' } });
+    expect(client.findUnique).not.toHaveBeenCalled();
+    expect(rows).toEqual([{ id: 'row-1', key: 'k-1' }]);
+  });
+
+  it('yields nothing for a row not found after the operation', async () => {
+    const rows = await refetchNestedRecords(clientStoring(), [
+      { where: { id: 'gone' }, operation: 'update' },
+      { where: { id: 'row-1' }, operation: 'upsert' },
     ]);
 
-    expect(findMany).toHaveBeenCalledWith({ where: { id: { in: ['row-1'] } } });
-    expect(records).toEqual([
-      { fieldName: 'label', relatedModel: 'Label', isList: true, records: [{ id: 'row-1' }], path: 'label' },
-    ]);
+    expect(rows).toEqual([{ id: 'row-1', key: 'k-1' }]);
   });
 
-  it('propagates a failed refetch', async () => {
-    const readError = new Error('findMany failed');
-    const findMany = vi.fn(async () => {
-      throw readError;
-    });
-    const metadata = metadataFor({ Label: { fields: [scalarField('id', true)] } }, ['Label']);
+  it('propagates a failed read', async () => {
+    const readError = new Error('findUnique failed');
+    const client = {
+      findUnique: vi.fn(async () => {
+        throw readError;
+      }),
+      findFirst: vi.fn(),
+    };
 
-    await expect(
-      refetchNestedRecords({ label: { findMany } }, metadata, 'Post', preFetchedAt('label'), [
-        nestedOperationOn('Label'),
-      ]),
-    ).rejects.toBe(readError);
-  });
-
-  it('skips the refetch when the related model has no primary key', async () => {
-    const findMany = vi.fn(async () => [{ key: 'row-1' }]);
-    const metadata = metadataFor(
-      { Setting: { constraints: [{ type: 'uniqueField', fields: ['key'] }], fields: [scalarField('key')] } },
-      ['Setting'],
+    await expect(refetchNestedRecords(client, [{ where: { id: 'row-1' }, operation: 'update' }])).rejects.toBe(
+      readError,
     );
-
-    const records = await refetchNestedRecords({ setting: { findMany } }, metadata, 'Post', preFetchedAt('setting'), [
-      nestedOperationOn('Setting'),
-    ]);
-
-    expect(findMany).not.toHaveBeenCalled();
-    expect(records).toEqual([]);
   });
 });

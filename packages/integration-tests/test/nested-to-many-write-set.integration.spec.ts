@@ -19,7 +19,7 @@ const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'nested-to-many-write-set-actor' },
 };
 
-const createClients = (databaseUrl: string) => {
+const createClients = (databaseUrl: string, fetchBeforeUpdate = true) => {
   const basePrisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
   const provider = createAsyncLocalStorageProvider();
   const prisma = createAuditClient(basePrisma, {
@@ -29,7 +29,7 @@ const createClients = (databaseUrl: string) => {
     diffing: { excludeFields: ['createdAt'] },
     security: { redact: { fields: [] } },
     nestedOperations: {
-      update: { fetchBeforeOperation: true },
+      update: { fetchBeforeOperation: fetchBeforeUpdate },
       delete: { fetchBeforeOperation: true },
     },
   });
@@ -82,6 +82,74 @@ describe('nested to-many write set', () => {
   afterEach(async () => {
     await clients.prisma.$disconnect();
     await clients.basePrisma.$disconnect();
+  });
+
+  describe('a relation the caller filters in its own include', () => {
+    // The caller's `include` keeps its own `where`, so the relation comes back with the rows
+    // that filter admits: the sibling p2, but not p1, the post the nested update writes. The
+    // written post is still audited, and the caller still receives only the posts it asked for.
+
+    /** A user whose post p1 is unpublished and whose post p2 is published */
+    const seedWithPublishedSibling = async (email: string) => {
+      const seeded = await seedUserWithTwoPosts(email);
+      await clients.basePrisma.post.update({ where: { id: seeded.p2.id }, data: { published: true } });
+      return seeded;
+    };
+
+    /** The audit rows of the post's update, one per aggregate root, ordered by aggregate type */
+    const updateLogsOf = (postId: string) =>
+      clients.basePrisma.auditLog.findMany({
+        where: { entityType: 'Post', entityId: postId, action: 'update' },
+        orderBy: { aggregateType: 'asc' },
+      });
+
+    it('audits the updated post the filter leaves out, with its before and after state', async () => {
+      const { user, p1, p2 } = await seedWithPublishedSibling('filtered-include@example.com');
+
+      const returned = await asActor(() =>
+        clients.prisma.user.update({
+          where: { id: user.id },
+          data: { posts: { update: { where: { id: p1.id }, data: { title: 'T' } } } },
+          include: { posts: { where: { published: true } } },
+        }),
+      );
+
+      expect(returned.posts.map((post) => post.id)).toEqual([p2.id]);
+      const logs = await updateLogsOf(p1.id);
+      expect(logs.map((log) => log.aggregateType)).toEqual(['Post', 'User']);
+      for (const log of logs) {
+        expect(log.before).toMatchObject({ title: 'P1' });
+        expect(log.after).toMatchObject({ title: 'T' });
+      }
+      expect(await clients.basePrisma.auditLog.count({ where: { entityType: 'Post', entityId: p2.id } })).toBe(0);
+    });
+
+    it('without a pre-fetch, audits the updated post the filter leaves out as an update without a before state', async () => {
+      const { user, p1, p2 } = await seedWithPublishedSibling('filtered-include-no-pre-fetch@example.com');
+      const withoutPreFetch = createClients(databaseUrl, false);
+
+      try {
+        const returned = await withoutPreFetch.provider.runAsync(testActor, () =>
+          withoutPreFetch.prisma.user.update({
+            where: { id: user.id },
+            data: { posts: { update: { where: { id: p1.id }, data: { title: 'T' } } } },
+            include: { posts: { where: { published: true } } },
+          }),
+        );
+
+        expect(returned.posts.map((post) => post.id)).toEqual([p2.id]);
+        const logs = await updateLogsOf(p1.id);
+        expect(logs.map((log) => log.aggregateType)).toEqual(['Post', 'User']);
+        for (const log of logs) {
+          expect(log.before).toBeNull();
+          expect(log.after).toMatchObject({ title: 'T' });
+        }
+        expect(await clients.basePrisma.auditLog.count({ where: { entityType: 'Post', entityId: p2.id } })).toBe(0);
+      } finally {
+        await withoutPreFetch.prisma.$disconnect();
+        await withoutPreFetch.basePrisma.$disconnect();
+      }
+    });
   });
 
   it('a nested update audits the targeted post only', async () => {

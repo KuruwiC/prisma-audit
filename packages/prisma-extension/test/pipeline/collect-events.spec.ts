@@ -3,9 +3,9 @@
  * operation, and the rows of a batch operation.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { NestedBatchKeyword, NestedBatchTargets } from '../../src/grammar/nested-operations.js';
-import type { PrismaClientWithDynamicAccess } from '../../src/internal-types.js';
+import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../src/internal-types.js';
 import { buildNestedWriteSets, detectExecutedNestedOperations } from '../../src/lifecycle/nested-handlers/write-set.js';
 import type { PreExistingRows } from '../../src/lifecycle/pre-fetch/pre-existing-rows.js';
 import { executedUpsertBranch } from '../../src/pipeline/before-state.js';
@@ -434,6 +434,108 @@ describe('collectSingleOperationEvents', () => {
         ['p1', 'create'],
         ['p2', 'create'],
       ]);
+    });
+
+    describe('an updated row the returned rows leave out', () => {
+      // The caller's own `include` or `select` on the relation keeps its filter, so a row an
+      // operation updated can be missing from the rows returned at its path.
+
+      /** A client whose `post` delegate finds the rows in `stored` by primary key */
+      const clientStoring = (stored: Record<string, unknown>[]) => {
+        const byId = async ({ where }: { where: Record<string, unknown> }) =>
+          stored.find((row) => row.id === where.id) ?? null;
+        const post = { findUnique: vi.fn(byId), findFirst: vi.fn(byId) };
+        const rereadClient: TransactionalPrismaClient = { post };
+        return { rereadClient, post };
+      };
+
+      it('reads the row again by the WHERE of the update and attributes it with its before state', async () => {
+        const { rereadClient, post } = clientStoring([p1, p2]);
+
+        const events = await postEvents({ update: { where: { id: 'p1' }, data: { title: 'A' } } }, [p2], {
+          nestedPreFetchResults: preFetched([['p1', p1Before]]),
+          client: rereadClient,
+        });
+
+        expect(post.findUnique).toHaveBeenCalledTimes(1);
+        expect(post.findUnique).toHaveBeenCalledWith({ where: { id: 'p1' } });
+        expect(events).toEqual([
+          {
+            model: 'Post',
+            identity: 'p1',
+            action: 'update',
+            before: p1Before,
+            after: p1,
+            origin: { path: 'posts', op: 'update' },
+          },
+        ]);
+      });
+
+      it('reads the row again by the WHERE of the update when no before state was read', async () => {
+        const { rereadClient } = clientStoring([p1, p2]);
+
+        const events = await postEvents({ update: { where: { id: 'p1' }, data: { title: 'A' } } }, [p2], {
+          client: rereadClient,
+        });
+
+        expect(events).toEqual([
+          expect.objectContaining({ identity: 'p1', action: 'update', before: undefined, after: p1 }),
+        ]);
+      });
+
+      it('reads a row an updateMany matched again by its primary key', async () => {
+        const { rereadClient, post } = clientStoring([p1, p2]);
+
+        const events = await postEvents({ updateMany: { where: { title: 'B0' }, data: { title: 'B' } } }, [p1], {
+          nestedPreFetchResults: preFetched([['p2', p2Before]]),
+          batchTargets: batchTargetsOf('updateMany', ['p2']),
+          client: rereadClient,
+        });
+
+        expect(post.findFirst).toHaveBeenCalledWith({ where: { id: 'p2' } });
+        expect(events).toEqual([
+          expect.objectContaining({ identity: 'p2', action: 'update', before: p2Before, after: p2 }),
+        ]);
+      });
+
+      it('does not read again a row the returned rows hold, nor the target of an upsert that inserted its row', async () => {
+        const { rereadClient, post } = clientStoring([p1, p2, p3]);
+
+        await postEvents(
+          {
+            update: { where: { id: 'p1' }, data: { title: 'A' } },
+            upsert: { where: { id: 'missing' }, create: { title: 'C' }, update: {} },
+          },
+          [p1, p3],
+          {
+            nestedPreFetchResults: preFetched([
+              ['p1', p1Before],
+              ['missing', null],
+            ]),
+            preExistingRows: new Map([['posts', new Set(['p1', 'p2'])]]),
+            client: rereadClient,
+          },
+        );
+
+        expect(post.findUnique).not.toHaveBeenCalled();
+        expect(post.findFirst).not.toHaveBeenCalled();
+      });
+
+      it('propagates a failed read', async () => {
+        const readError = new Error('findUnique failed');
+        const rereadClient: TransactionalPrismaClient = {
+          post: {
+            findUnique: vi.fn(async () => {
+              throw readError;
+            }),
+            findFirst: vi.fn(),
+          },
+        };
+
+        await expect(
+          postEvents({ update: { where: { id: 'p1' }, data: { title: 'A' } } }, [p2], { client: rereadClient }),
+        ).rejects.toBe(readError);
+      });
     });
   });
 

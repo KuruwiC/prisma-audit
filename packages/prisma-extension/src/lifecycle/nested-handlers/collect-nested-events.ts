@@ -2,9 +2,9 @@
  * Nested mutation event collection
  *
  * Attributes the rows an executed operation returned at each nested path to the nested
- * operations that wrote them (re-fetching by pre-fetched identity the rows the result did not
- * include), resolves each row's action and before-state, and yields one mutation event per row
- * an operation wrote.
+ * operations that wrote them (re-fetching the rows they updated that the result does not hold),
+ * resolves each row's action and before-state, and yields one mutation event per row an
+ * operation wrote.
  *
  * A to-many relation is returned whole, so a row there is an operation's only when the write set
  * says so: a row a target names belongs to that operation (a unique WHERE, or the primary key of
@@ -32,6 +32,7 @@ import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '.
 import { identityOf, toMutationAction } from '../../pipeline/event-fields.js';
 import type { SchemaMetadata, UniqueConstraint } from '../../schema/types.js';
 import { matchesUniqueWhere } from '../../utils/compound-where.js';
+import { getPreFetchModelClient } from '../pre-fetch/model-client.js';
 import type { PreExistingRows } from '../pre-fetch/pre-existing-rows.js';
 import { extractEntityIdOrUnresolved, getPreFetchResult } from '../pre-fetch/pre-fetch-result-store.js';
 import type { CollectedNestedRecord } from './collected-record.js';
@@ -62,7 +63,7 @@ export interface NestedEventCollectorDependencies {
 export interface NestedEventCollectionInput {
   modelName: string;
   result: unknown;
-  /** Client the operation ran on; re-fetches the nested rows the result did not include */
+  /** Client the operation ran on; re-fetches the nested rows the result does not hold */
   client: PrismaClientWithDynamicAccess | TransactionalPrismaClient;
   nestedPreFetchResults: NestedPreFetchResults;
   /** The nested operations the operation executed, in detection order */
@@ -84,8 +85,8 @@ const toEvent = (
   origin: { path: nestedOp.path, op: nestedOp.operation },
 });
 
-/** The rows returned at each path, from the result and the re-fetch */
-const rowsByPath = (records: readonly NestedRecordInfo[]): ReadonlyMap<string, readonly Row[]> => {
+/** The rows the result returned at each path */
+const rowsByPath = (records: readonly NestedRecordInfo[]): Map<string, Row[]> => {
   const rows = new Map<string, Row[]>();
   for (const info of records) {
     const atPath = rows.get(info.path) ?? [];
@@ -240,8 +241,23 @@ const attributionsOf = (
 };
 
 /**
- * The rows returned at every nested path: from the result, plus a re-fetch by pre-fetched
- * identity for the paths the result did not include.
+ * Whether the row `target` names existed before the operation and the operation updated it: an
+ * update, an updateMany, or an upsert whose target existed. Such a row is audited from its after
+ * state, which only the result or a re-fetch holds.
+ */
+const updatesExistingRow = (target: NestedWriteTarget): boolean => {
+  const { operation } = target.operation;
+  return (
+    operation === 'update' || operation === 'updateMany' || (operation === 'upsert' && target.before !== undefined)
+  );
+};
+
+/**
+ * The rows returned at every nested path: from the result, plus a re-fetch of each row an
+ * operation updated at a to-many path that the rows the result returned there do not hold. The
+ * caller's own `include` or `select` on a written relation keeps its filter, so the result may
+ * hold the siblings of an updated row but not the row itself; the rows it does hold are used as
+ * returned.
  *
  * With `include`, the records are the atomic, consistent rows of the operation itself. A
  * re-fetch is not atomic: it may observe state modified by another process.
@@ -249,25 +265,32 @@ const attributionsOf = (
 const returnedRows = async (
   input: NestedEventCollectionInput,
   schemaMetadata: SchemaMetadata,
+  pkConstraints: ReadonlyMap<string, UniqueConstraint | undefined>,
 ): Promise<ReadonlyMap<string, readonly Row[]>> => {
-  const { modelName, result, client, nestedPreFetchResults, nestedOperations } = input;
-  let nestedRecordsInfo = extractNestedRecords(schemaMetadata, modelName, result);
+  const { modelName, result, client, writeSets } = input;
+  const rows = rowsByPath(extractNestedRecords(schemaMetadata, modelName, result));
 
-  const missingOperations = nestedOperations.filter(
-    (op) => !nestedRecordsInfo.some((record) => record.path === op.path),
-  );
-  if (missingOperations.length > 0 && nestedPreFetchResults.size > 0) {
-    const refetchedRecords = await refetchNestedRecords(
-      client as never,
-      schemaMetadata,
-      modelName,
-      nestedPreFetchResults,
-      missingOperations,
+  for (const [path, writeSet] of writeSets) {
+    const rowsAtPath = rows.get(path) ?? [];
+    const absent = writeSet.targets.filter(
+      (target) => updatesExistingRow(target) && !rowsAtPath.some((row) => matchesUniqueWhere(row, target.where)),
     );
-    nestedRecordsInfo = [...nestedRecordsInfo, ...refetchedRecords];
+    const relatedModel = absent[0]?.operation.relatedModel;
+    if (relatedModel === undefined || !pkConstraints.get(path)) {
+      continue;
+    }
+    const modelClient = getPreFetchModelClient(client, relatedModel);
+    if (!modelClient) {
+      throw new Error(`[@prisma-audit] Cannot re-fetch nested records: no model client for "${relatedModel}"`);
+    }
+    const refetched = await refetchNestedRecords(
+      modelClient,
+      absent.map((target) => ({ where: target.where, operation: target.operation.operation })),
+    );
+    rows.set(path, [...rowsAtPath, ...refetched]);
   }
 
-  return rowsByPath(nestedRecordsInfo);
+  return rows;
 };
 
 /**
@@ -288,7 +311,7 @@ export const collectNestedEvents = async (
   const pkConstraints = new Map(
     nestedOperations.map((op) => [op.path, getPrimaryKeyConstraint(schemaMetadata, op.relatedModel)]),
   );
-  const rows = await returnedRows(input, schemaMetadata);
+  const rows = await returnedRows(input, schemaMetadata, pkConstraints);
   const attributions = attributionsOf(rows, input, pkConstraints);
   const events: MutationEvent[] = [];
 

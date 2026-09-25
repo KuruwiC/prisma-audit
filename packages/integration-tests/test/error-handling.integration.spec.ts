@@ -714,9 +714,10 @@ describe('Error Handling Integration', () => {
     it('a failed re-read of the nested rows the result did not return propagates the original error and leaves no audit rows', async () => {
       // The caller's own `include` narrows `posts` to published rows, so the unpublished
       // post the nested update writes is absent from the result, and its after state is
-      // read again by primary key once the write has run. That read is injected to fail
-      // (the first `post.findMany` after the top-level `user.update` wrote); the failure is
-      // an audit-stage failure like any other, not a nested audit row silently left out.
+      // read again by the update's WHERE once the write has run. That read is injected to
+      // fail (the first `post.findUnique` after the top-level `user.update` wrote); the
+      // failure is an audit-stage failure like any other, not a nested audit row silently
+      // left out.
       const REREAD_FAILURE_MESSAGE = 'simulated nested re-read failure';
       const rereadError = new Error(REREAD_FAILURE_MESSAGE);
       const rawBasePrisma = new PrismaClient({ datasources: { db: { url: context.databaseUrl } } });
@@ -732,7 +733,7 @@ describe('Error Handling Integration', () => {
             },
           },
           post: {
-            async findMany({ args, query }) {
+            async findUnique({ args, query }) {
               if (rereadArmed) {
                 rereadArmed = false;
                 throw rereadError;
