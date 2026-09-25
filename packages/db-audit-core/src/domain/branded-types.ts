@@ -78,19 +78,6 @@ export const createAggregateId = (id: string): AggregateId => {
   return id as AggregateId;
 };
 
-/** Type guard for ActorId */
-export const isActorId = (value: unknown): value is ActorId => {
-  return typeof value === 'string' && isNonEmptyString(value);
-};
-/** Type guard for EntityId */
-export const isEntityId = (value: unknown): value is EntityId => {
-  return typeof value === 'string' && isNonEmptyString(value);
-};
-/** Type guard for AggregateId */
-export const isAggregateId = (value: unknown): value is AggregateId => {
-  return typeof value === 'string' && isNonEmptyString(value);
-};
-
 /**
  * Unwraps a branded ID to its underlying string value
  *

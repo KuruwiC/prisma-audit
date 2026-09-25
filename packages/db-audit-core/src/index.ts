@@ -33,9 +33,6 @@ export {
   createAggregateId,
   createEntityId,
   IdValidationError,
-  isActorId,
-  isAggregateId,
-  isEntityId,
   unwrapId,
 } from './domain/branded-types.js';
 export type {

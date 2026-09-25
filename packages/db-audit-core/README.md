@@ -66,8 +66,8 @@ dispatch(records, atomic, { inTransaction })   -> WritePlan
 - **Context provider**: `createAsyncLocalStorageProvider()` returns an `AuditContextProvider`
   (`run`, `runAsync`, `getContext`, `withActor`) that carries the actor and request context through
   async calls.
-- **Utilities**: `createErrorHandler`, the branded id constructors and guards (`createActorId`,
-  `isEntityId`, `unwrapId`, ...), and `createAuditLogData`.
+- **Utilities**: `createErrorHandler`, the branded id constructors (`createActorId`,
+  `createEntityId`, `createAggregateId`), `unwrapId`, and `createAuditLogData`.
 - **Debug output**: the core logs through [`debug`](https://www.npmjs.com/package/debug) under the
   `db-audit-core` namespace (`DEBUG=db-audit-core`).
 

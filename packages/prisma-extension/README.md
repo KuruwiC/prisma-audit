@@ -1410,21 +1410,6 @@ try {
 }
 ```
 
-### Type Guards
-
-Use type guards to check if a value is a valid branded ID:
-
-```typescript
-import { isActorId, isEntityId, isAggregateId } from '@kuruwic/prisma-audit';
-
-const value: unknown = 'user-123';
-
-if (isActorId(value)) {
-  // value is narrowed to ActorId
-  const actorId: ActorId = value;
-}
-```
-
 ### Unwrapping Branded IDs
 
 Convert branded IDs back to plain strings when needed:

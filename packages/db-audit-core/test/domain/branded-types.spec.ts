@@ -1,13 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
-  type ActorId,
   createActorId,
   createAggregateId,
   createEntityId,
   IdValidationError,
-  isActorId,
-  isAggregateId,
-  isEntityId,
   unwrapId,
 } from '../../src/domain/branded-types.js';
 
@@ -57,51 +53,6 @@ describe('Branded Types', () => {
       expect(() => createFn('')).toThrow(IdValidationError);
       expect(() => createFn('')).toThrow(new RegExp(`${typeName} cannot be empty`));
       expect(() => createFn('   ')).toThrow(IdValidationError);
-    });
-  });
-
-  describe('Type Guards', () => {
-    describe('isActorId', () => {
-      it('should return true for non-empty strings', () => {
-        expect(isActorId('user-123')).toBe(true);
-        expect(isActorId('a')).toBe(true);
-      });
-
-      it('should return false for empty strings', () => {
-        expect(isActorId('')).toBe(false);
-        expect(isActorId('   ')).toBe(false);
-      });
-
-      it('should return false for non-strings', () => {
-        expect(isActorId(123)).toBe(false);
-        expect(isActorId(null)).toBe(false);
-        expect(isActorId(undefined)).toBe(false);
-        expect(isActorId({})).toBe(false);
-      });
-
-      it('should work as type guard', () => {
-        const value: unknown = 'user-123';
-        if (isActorId(value)) {
-          const typed: ActorId = value;
-          expect(typed).toBe('user-123');
-        }
-      });
-    });
-
-    describe.each([
-      ['isEntityId', isEntityId, 'post-456'],
-      ['isAggregateId', isAggregateId, 'order-789'],
-    ] as const)('%s type guard', (_guardName, guardFn, validValue) => {
-      it('should return true for non-empty strings', () => {
-        expect(guardFn(validValue)).toBe(true);
-      });
-
-      it('should return false for empty/whitespace strings and non-strings', () => {
-        expect(guardFn('')).toBe(false);
-        expect(guardFn('   ')).toBe(false);
-        expect(guardFn(123)).toBe(false);
-        expect(guardFn(null)).toBe(false);
-      });
     });
   });
 
