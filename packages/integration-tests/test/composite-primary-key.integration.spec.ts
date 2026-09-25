@@ -6,7 +6,7 @@
  * entityId handling can be exercised through the public audit client instead of
  * only through the white-box unit test in
  * `packages/prisma-extension/test/delete-handler.spec.ts`, which constructs a
- * `NestedPreFetchResults` map by hand to reach `collectDeleteRecords` directly.
+ * `NestedPreFetchResults` map by hand to reach `collectToOneDeleteRecords` directly.
  *
  * Because a composite-key entity has no `entity.id` field, the default
  * `idResolver` (`self('id')`) cannot resolve it — `testAggregateMapping` gives
@@ -25,15 +25,15 @@
  *     that WHERE to `findUnique`, which accepts the compound-unique shape natively;
  *     `unwrapCompoundWhere` then flattens it to derive the composite entityId from the
  *     WHERE when the row itself was not found.
- *   - `fetchBeforeOperation: false`: with pre-fetch skipped, `extractDeleteOperationEntityId`
- *     (`utils/extension-utils.ts`) unwraps the same compound-unique WHERE shape via
+ *   - `fetchBeforeOperation: false`: with pre-fetch skipped, `extractEntityId`
+ *     (`nested/pre-fetch/pre-fetch-result-store.ts`) unwraps the same compound-unique WHERE shape via
  *     `unwrapCompoundWhere`, keyed by the primary key's declared name or, for this
  *     fixture's unnamed `@@id([postId, userId])`, by `postId_userId`. The real composite
  *     entityId is still recorded from the WHERE clause alone, with no `findUnique`
  *     round-trip (`named-composite-primary-key.integration.spec.ts` covers a named key).
  *   - the boundary where identity genuinely cannot be resolved: deleting a
  *     composite-key row that does not exist. No fabricated entityId is ever recorded —
- *     the write fails before any log is built (see `collectDeleteRecords` in
+ *     the write fails before any log is built (see `collectToManyDeleteRecords` in
  *     `nested/events/delete-handler.ts` for the general "never guess" rule).
  */
 
@@ -314,7 +314,7 @@ describe('Composite Primary Key (PostLike)', () => {
   });
 
   /**
-   * `collectDeleteRecords`'s defensive branch — reconstructing a composite entityId
+   * `collectToOneDeleteRecords`'s defensive branch — reconstructing a composite entityId
    * from a serialized JSON key and returning `null` (dropping the record, reporting
    * it via `onUnresolvedDeleteEntityId`) when that JSON is malformed or the wrong length —
    * cannot be forced through the public client. Every producer that writes an
@@ -327,10 +327,10 @@ describe('Composite Primary Key (PostLike)', () => {
    * `packages/prisma-extension/test/delete-handler.spec.ts` covers it directly, by
    * constructing the `NestedPreFetchResults` map by hand.
    *
-   * With pre-fetch skipped entirely (this describe block), `collectDeleteRecords` falls
-   * back to `extractDeleteOperationEntityId` (`utils/extension-utils.ts`) against
-   * `nestedOp.data` directly — for this nested `delete`, that is the compound-unique
-   * WHERE shape `{ postId_userId: { postId, userId } }` itself. `unwrapCompoundWhere`
+   * With pre-fetch skipped entirely (this describe block), `collectToManyDeleteRecords`
+   * derives the primary key from the delete's own WHERE with `extractEntityId`
+   * (`nested/pre-fetch/pre-fetch-result-store.ts`) — for this nested `delete`, that is the
+   * compound-unique WHERE shape `{ postId_userId: { postId, userId } }` itself. `unwrapCompoundWhere`
    * flattens it the same way the pre-fetch path does, so the real composite entityId is
    * still resolved and recorded — no fabricated entry, and no dropped one either.
    */

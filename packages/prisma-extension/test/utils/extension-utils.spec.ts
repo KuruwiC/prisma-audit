@@ -35,9 +35,7 @@ describe('extractDeleteOperationEntityId', () => {
     const pkConstraint: UniqueConstraint = { type: 'primaryKey', fields: ['postId', 'userId'] };
 
     it('unwraps the compound-unique wrapper passed directly (nested delete data shape) and extracts the composite entityId', () => {
-      // This is exactly the shape the nested-operation detector hands `collectDeleteRecords`
-      // for `post.update({ data: { postLikes: { delete: { postId_userId: { postId, userId } } } } })`
-      // when pre-fetch is skipped (`fetchBeforeOperation: false`).
+      // The data of `post.update({ data: { postLikes: { delete: { postId_userId: { postId, userId } } } } })`.
       const data = { postId_userId: { postId: 'post-1', userId: 'user-1' } };
 
       expect(extractDeleteOperationEntityId(data, pkConstraint)).toBe(JSON.stringify(['post-1', 'user-1']));

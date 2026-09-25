@@ -10,11 +10,9 @@
  *
  * The second scenario below drives the same underlying failure through a nested
  * *delete array*: when the pre-fetch for one item in the array throws, the items
- * after it are never individually pre-fetched, and the `UNRESOLVED_ENTITY_ID` sentinel
- * ends up sharing the pre-fetch results map with the item(s) that already
- * succeeded. `collectDeleteRecords` (`nested/events/delete-handler.ts`)
- * treats that combination like every other unresolved entityId: the entry is
- * skipped and reported through `onUnresolvedDeleteEntityId`, never dropped silently.
+ * after it are never individually pre-fetched. Each item is still recorded from the
+ * primary key its own WHERE names: the item read before the failure with its before
+ * state, the others as deletes whose before state is unavailable.
  *
  * Both failures are injected the same way as
  * `upsert-before-state-failure.integration.spec.ts`: a plain Prisma Client
@@ -192,7 +190,7 @@ describe('nested pre-fetch failures — observer notification', () => {
     }
   });
 
-  it('a nested delete array whose pre-fetch fails partway reports both the pre-fetch failure and the resulting unresolved entry, without dropping either silently', async () => {
+  it('a nested delete array whose pre-fetch fails partway records every deleted row, those without a read before state as unavailable', async () => {
     const FAILURE_MESSAGE = 'simulated nested pre-fetch failure (delete #2)';
     const observer = vi.fn<AuditErrorObserver>();
     const { rawBasePrisma, basePrisma, provider, prisma, armFault } = createClient(sharedDatabaseUrl, observer);
@@ -255,16 +253,19 @@ describe('nested pre-fetch failures — observer notification', () => {
         }),
       );
 
-      // The consequence inside collectDeleteRecords: the resulting `UNRESOLVED_ENTITY_ID`
-      // entry (added by the same catch, alongside c1's already-resolved entry) is
-      // reported instead of being silently skipped.
-      expect(observer).toHaveBeenCalledWith(
-        expect.objectContaining({
-          phase: 'entity-id-resolution',
-          modelName: 'Comment',
-          operation: 'delete',
-        }),
-      );
+      // Every item names its primary key, so none is left unresolved.
+      expect(observer).not.toHaveBeenCalledWith(expect.objectContaining({ phase: 'entity-id-resolution' }));
+
+      const rows = await basePrisma.auditLog.findMany({
+        where: { entityType: 'Comment', aggregateType: 'Comment', action: 'delete' },
+      });
+      const byEntity = new Map(rows.map((row) => [row.entityId, row]));
+      expect([...byEntity.keys()].sort()).toEqual([c1.id, c2.id, c3.id].sort());
+      expect(rows).toHaveLength(3);
+      expect(byEntity.get(c1.id)).toMatchObject({ before: { content: 'Comment 1' }, beforeUnavailable: false });
+      for (const id of [c2.id, c3.id]) {
+        expect(byEntity.get(id)).toMatchObject({ before: null, changes: null, beforeUnavailable: true });
+      }
     } finally {
       await prisma.$disconnect();
       await rawBasePrisma.$disconnect();

@@ -1,16 +1,19 @@
 /**
- * Unit tests for the nested delete handler: `collectDeleteRecords` and `collectDeleteManyRecords`
+ * Unit tests for the nested delete handler: `collectToOneDeleteRecords` and
+ * `collectToManyDeleteRecords`
  *
- * Focus: composite primary key reconstruction. When the pre-fetch step only knows
- * a serialized entityId (no full before-state), `collectDeleteRecords` must
- * reconstruct the composite key from it. A broken entityId (not valid JSON, or the
- * wrong array length) must never be recorded as a plausible-looking partial key —
- * it must be skipped and reported instead.
+ * To-one: when the pre-fetch step only knows a serialized entityId (no full before-state),
+ * `collectToOneDeleteRecords` must reconstruct the composite key from it. A broken entityId
+ * (not valid JSON, or the wrong array length) must never be recorded as a plausible-looking
+ * partial key — it must be skipped and reported instead.
+ *
+ * To-many: each target of the operation yields its deleted row, from the row read ahead of the
+ * write or from the primary key its locator or WHERE holds.
  */
 
 import { describe, expect, it, vi } from 'vitest';
 import type { NestedOperationInfo, NestedPreFetchResults } from '../../../src/grammar/nested-operations.js';
-import { collectDeleteManyRecords, collectDeleteRecords } from '../../../src/nested/events/delete-handler.js';
+import { collectToManyDeleteRecords, collectToOneDeleteRecords } from '../../../src/nested/events/delete-handler.js';
 import type { UniqueConstraint } from '../../../src/schema/types.js';
 import { UNRESOLVED_ENTITY_ID } from '../../../src/utils/identity-key.js';
 
@@ -18,22 +21,22 @@ const nestedOp: NestedOperationInfo = {
   operation: 'delete',
   fieldName: 'items',
   relatedModel: 'OrderItem',
-  isList: true,
-  data: { tenantId: 'tenant-1', itemId: 'item-1' },
+  isList: false,
+  data: true,
   path: 'items',
 };
 
 const pkConstraint: UniqueConstraint = { type: 'primaryKey', fields: ['tenantId', 'itemId'] };
 const idPrimaryKey: UniqueConstraint = { type: 'primaryKey', fields: ['id'] };
 
-describe('collectDeleteRecords — composite primary key reconstruction', () => {
+describe('collectToOneDeleteRecords — composite primary key reconstruction', () => {
   it('does not fabricate a partial-key entity when the composite entityId is not valid JSON', async () => {
     const brokenEntityId = 'not-json';
     const preFetchResults: NestedPreFetchResults = new Map([
       ['items', new Map([[brokenEntityId, { before: { kind: 'none' } }]])],
     ]);
 
-    const collected = await collectDeleteRecords(nestedOp, preFetchResults, pkConstraint);
+    const collected = await collectToOneDeleteRecords(nestedOp, preFetchResults, pkConstraint);
 
     // A `{ tenantId: 'not-json' }` guess would look like a
     // complete, valid identity to anyone reading the audit log, when in fact the
@@ -48,7 +51,7 @@ describe('collectDeleteRecords — composite primary key reconstruction', () => 
       ['items', new Map([[brokenEntityId, { before: { kind: 'none' } }]])],
     ]);
 
-    const collected = await collectDeleteRecords(nestedOp, preFetchResults, pkConstraint);
+    const collected = await collectToOneDeleteRecords(nestedOp, preFetchResults, pkConstraint);
 
     expect(collected).toEqual([]);
   });
@@ -59,7 +62,7 @@ describe('collectDeleteRecords — composite primary key reconstruction', () => 
       ['items', new Map([[goodEntityId, { before: { kind: 'none' } }]])],
     ]);
 
-    const collected = await collectDeleteRecords(nestedOp, preFetchResults, pkConstraint);
+    const collected = await collectToOneDeleteRecords(nestedOp, preFetchResults, pkConstraint);
 
     expect(collected).toEqual([
       {
@@ -78,7 +81,12 @@ describe('collectDeleteRecords — composite primary key reconstruction', () => 
     ]);
     const onUnresolvedDeleteEntityId = vi.fn().mockResolvedValue(undefined);
 
-    const collected = await collectDeleteRecords(nestedOp, preFetchResults, pkConstraint, onUnresolvedDeleteEntityId);
+    const collected = await collectToOneDeleteRecords(
+      nestedOp,
+      preFetchResults,
+      pkConstraint,
+      onUnresolvedDeleteEntityId,
+    );
 
     expect(collected).toEqual([]);
     expect(onUnresolvedDeleteEntityId).toHaveBeenCalledTimes(1);
@@ -103,9 +111,9 @@ describe('collectDeleteRecords — composite primary key reconstruction', () => 
       reporterResolved = true;
     });
 
-    await collectDeleteRecords(nestedOp, preFetchResults, pkConstraint, onUnresolvedDeleteEntityId);
+    await collectToOneDeleteRecords(nestedOp, preFetchResults, pkConstraint, onUnresolvedDeleteEntityId);
 
-    // If `collectDeleteRecords` only fired the callback without awaiting it, this
+    // If `collectToOneDeleteRecords` only fired the callback without awaiting it, this
     // assertion would run before the callback's own microtask/timer resolved.
     expect(reporterResolved).toBe(true);
   });
@@ -116,7 +124,7 @@ describe('collectDeleteRecords — composite primary key reconstruction', () => 
       ['comments', new Map([['comment-1', { before: { kind: 'none' } }]])],
     ]);
 
-    const collected = await collectDeleteRecords(singleFieldOp, preFetchResults, idPrimaryKey);
+    const collected = await collectToOneDeleteRecords(singleFieldOp, preFetchResults, idPrimaryKey);
 
     expect(collected).toEqual([
       {
@@ -129,7 +137,7 @@ describe('collectDeleteRecords — composite primary key reconstruction', () => 
   });
 });
 
-describe('collectDeleteRecords — unresolved identity', () => {
+describe('collectToOneDeleteRecords — unresolved identity', () => {
   const commentsOp: NestedOperationInfo = { ...nestedOp, relatedModel: 'Comment', path: 'comments' };
 
   it('reports an entry stored under UNRESOLVED_ENTITY_ID with no entityId instead of a placeholder string', async () => {
@@ -138,7 +146,12 @@ describe('collectDeleteRecords — unresolved identity', () => {
     ]);
     const onUnresolvedDeleteEntityId = vi.fn().mockResolvedValue(undefined);
 
-    const collected = await collectDeleteRecords(commentsOp, preFetchResults, idPrimaryKey, onUnresolvedDeleteEntityId);
+    const collected = await collectToOneDeleteRecords(
+      commentsOp,
+      preFetchResults,
+      idPrimaryKey,
+      onUnresolvedDeleteEntityId,
+    );
 
     expect(collected).toEqual([]);
     expect(onUnresolvedDeleteEntityId).toHaveBeenCalledWith(
@@ -156,7 +169,12 @@ describe('collectDeleteRecords — unresolved identity', () => {
     ]);
     const onUnresolvedDeleteEntityId = vi.fn().mockResolvedValue(undefined);
 
-    const collected = await collectDeleteRecords(commentsOp, preFetchResults, idPrimaryKey, onUnresolvedDeleteEntityId);
+    const collected = await collectToOneDeleteRecords(
+      commentsOp,
+      preFetchResults,
+      idPrimaryKey,
+      onUnresolvedDeleteEntityId,
+    );
 
     expect(collected).toEqual([
       { entity: { id: '__default__' }, action: 'delete', beforeState: { kind: 'none' }, relatedModel: 'Comment' },
@@ -165,21 +183,24 @@ describe('collectDeleteRecords — unresolved identity', () => {
   });
 });
 
-describe('collectDeleteRecords — a delete whose data names no identity', () => {
-  const deleteManyOp: NestedOperationInfo = {
-    operation: 'deleteMany',
-    fieldName: 'posts',
-    relatedModel: 'Post',
-    isList: true,
-    data: { published: false },
-    path: 'posts',
-  };
-
+describe('collectToOneDeleteRecords — a delete whose data names no identity', () => {
   it('reports a delete whose identity cannot be resolved through the callback', async () => {
-    const singleDeleteOp: NestedOperationInfo = { ...deleteManyOp, operation: 'delete' };
+    const singleDeleteOp: NestedOperationInfo = {
+      operation: 'delete',
+      fieldName: 'profile',
+      relatedModel: 'Post',
+      isList: false,
+      data: true,
+      path: 'profile',
+    };
     const onUnresolvedDeleteEntityId = vi.fn().mockResolvedValue(undefined);
 
-    const collected = await collectDeleteRecords(singleDeleteOp, undefined, idPrimaryKey, onUnresolvedDeleteEntityId);
+    const collected = await collectToOneDeleteRecords(
+      singleDeleteOp,
+      undefined,
+      idPrimaryKey,
+      onUnresolvedDeleteEntityId,
+    );
 
     expect(collected).toEqual([]);
     expect(onUnresolvedDeleteEntityId).toHaveBeenCalledTimes(1);
@@ -194,7 +215,7 @@ describe('collectDeleteRecords — a delete whose data names no identity', () =>
   });
 });
 
-describe('collectDeleteManyRecords', () => {
+describe('collectToManyDeleteRecords', () => {
   const deleteManyOp: NestedOperationInfo = {
     operation: 'deleteMany',
     fieldName: 'posts',
@@ -205,35 +226,91 @@ describe('collectDeleteManyRecords', () => {
   };
   const deleteOp: NestedOperationInfo = { ...deleteManyOp, operation: 'delete', data: { id: 'post-9' } };
 
-  it('collects a delete per row the filter matched, with the before state the pre-read captured', () => {
+  it('collects a delete per row the filter matched, with the before state the pre-read captured', async () => {
     const before = { id: 'post-1', published: false };
 
     expect(
-      collectDeleteManyRecords(deleteManyOp, [
-        {
-          locator: { by: 'primaryKey', where: { id: 'post-1' } },
-          operation: deleteManyOp,
-          before: { kind: 'captured', row: before },
-        },
-      ]),
+      await collectToManyDeleteRecords(
+        deleteManyOp,
+        [
+          {
+            locator: { by: 'primaryKey', where: { id: 'post-1' } },
+            operation: deleteManyOp,
+            before: { kind: 'captured', row: before },
+          },
+        ],
+        idPrimaryKey,
+      ),
     ).toEqual([
       { entity: before, action: 'delete', beforeState: { kind: 'captured', row: before }, relatedModel: 'Post' },
     ]);
   });
 
-  it('collects the primary key alone when the before state was not read', () => {
+  it('collects the primary key alone when the before state was not read', async () => {
     expect(
-      collectDeleteManyRecords(deleteManyOp, [
-        { locator: { by: 'primaryKey', where: { id: 'post-1' } }, operation: deleteManyOp, before: { kind: 'none' } },
-      ]),
+      await collectToManyDeleteRecords(
+        deleteManyOp,
+        [{ locator: { by: 'primaryKey', where: { id: 'post-1' } }, operation: deleteManyOp, before: { kind: 'none' } }],
+        idPrimaryKey,
+      ),
     ).toEqual([{ entity: { id: 'post-1' }, action: 'delete', beforeState: { kind: 'none' }, relatedModel: 'Post' }]);
   });
 
-  it('leaves the rows of the other operations at the path to them', () => {
+  it('leaves the rows of the other operations at the path to them', async () => {
     expect(
-      collectDeleteManyRecords(deleteManyOp, [
-        { locator: { by: 'uniqueWhere', where: { id: 'post-9' } }, operation: deleteOp, before: { kind: 'none' } },
-      ]),
+      await collectToManyDeleteRecords(
+        deleteManyOp,
+        [{ locator: { by: 'uniqueWhere', where: { id: 'post-9' } }, operation: deleteOp, before: { kind: 'none' } }],
+        idPrimaryKey,
+      ),
     ).toEqual([]);
+  });
+
+  it('derives the primary key of a delete from its compound-unique WHERE, keeping an unavailable before state', async () => {
+    const itemsOp: NestedOperationInfo = { ...deleteOp, relatedModel: 'OrderItem', path: 'items' };
+
+    expect(
+      await collectToManyDeleteRecords(
+        itemsOp,
+        [
+          {
+            locator: { by: 'uniqueWhere', where: { tenantId_itemId: { tenantId: 'tenant-1', itemId: 'item-1' } } },
+            operation: itemsOp,
+            before: { kind: 'unavailable' },
+          },
+        ],
+        pkConstraint,
+      ),
+    ).toEqual([
+      {
+        entity: { tenantId: 'tenant-1', itemId: 'item-1' },
+        action: 'delete',
+        beforeState: { kind: 'unavailable' },
+        relatedModel: 'OrderItem',
+      },
+    ]);
+  });
+
+  it('reports and skips a delete whose WHERE names no primary key and whose row was not read', async () => {
+    const onUnresolvedDeleteEntityId = vi.fn().mockResolvedValue(undefined);
+    const byTitle: NestedOperationInfo = { ...deleteOp, data: { title: 'unique title' } };
+
+    const collected = await collectToManyDeleteRecords(
+      byTitle,
+      [
+        {
+          locator: { by: 'uniqueWhere', where: { title: 'unique title' } },
+          operation: byTitle,
+          before: { kind: 'unavailable' },
+        },
+      ],
+      idPrimaryKey,
+      onUnresolvedDeleteEntityId,
+    );
+
+    expect(collected).toEqual([]);
+    expect(onUnresolvedDeleteEntityId).toHaveBeenCalledWith(
+      expect.objectContaining({ relatedModel: 'Post', entityId: undefined, pkFields: ['id'] }),
+    );
   });
 });

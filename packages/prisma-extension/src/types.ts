@@ -120,8 +120,8 @@ export interface NestedOperationsConfig {
  *   recorded with `beforeUnavailable: true` and a null `before` and `changes`. An `upsert`
  *   entry, top-level or nested, whose create-vs-update action depends on the before-state, is
  *   skipped with the writes of its branches, and so is a nested `connectOrCreate` entry. A
- *   nested delete entry left without an identity by the failed fetch is skipped and also
- *   reported as `entity-id-resolution`.
+ *   nested delete entry the failed fetch leaves without a primary key (a to-one delete, or a
+ *   WHERE naming another unique field) is skipped and also reported as `entity-id-resolution`.
  * - `log-write`: persisting the audit log entry itself failed. This is the only phase whose
  *   outcome {@link ErrorHandlingConfig.writeFailurePolicy} decides — see
  *   {@link WriteFailurePolicy} for writes that are queued or detached.
@@ -134,7 +134,7 @@ export interface NestedOperationsConfig {
  *   policy-gated: it always propagates to the caller as a thrown error, regardless of
  *   {@link ErrorHandlingConfig.writeFailurePolicy}.
  * - `entity-id-resolution`: a nested delete's primary key could not be resolved, from
- *   either the pre-fetched entityId or the operation data. The caller's operation
+ *   the pre-fetched row, its WHERE or the operation data. The caller's operation
  *   continues; that record's audit log entry is skipped rather than recorded with a
  *   partial or fabricated identity.
  * - `aggregate-resolution`: an id resolver threw, or returned an id that cannot be normalized

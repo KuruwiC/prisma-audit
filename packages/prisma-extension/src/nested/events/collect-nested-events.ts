@@ -35,8 +35,8 @@ import type { PreExistingRows } from '../pre-fetch/pre-existing-rows.js';
 import { extractEntityIdOrUnresolved, getPreFetchResult } from '../pre-fetch/pre-fetch-result-store.js';
 import type { CollectedNestedRecord } from './collected-record.js';
 import {
-  collectDeleteManyRecords,
-  collectDeleteRecords,
+  collectToManyDeleteRecords,
+  collectToOneDeleteRecords,
   type UnresolvedDeleteEntityIdReporter,
 } from './delete-handler.js';
 import { identityOf } from './event-fields.js';
@@ -54,10 +54,9 @@ export interface NestedEventCollectorDependencies {
   schemaMetadata: SchemaMetadata;
   getNestedOperationConfig: GetOperationConfig;
   /**
-   * Notified when a nested delete's primary key cannot be resolved (see
-   * `collectDeleteRecords`); that entry is skipped instead of being recorded with a
-   * partial or guessed key. Optional: when omitted, the entry is still skipped, just
-   * not reported.
+   * Notified when a nested delete's primary key cannot be resolved (see `delete-handler.ts`);
+   * that entry is skipped instead of being recorded with a partial or guessed key. Optional:
+   * when omitted, the entry is still skipped, just not reported.
    */
   onUnresolvedDeleteEntityId?: UnresolvedDeleteEntityIdReporter;
 }
@@ -211,11 +210,15 @@ const collectRecordsOf = async (
   const { nestedPreFetchResults } = input;
   const { getNestedOperationConfig } = deps;
 
-  if (nestedOp.operation === 'deleteMany') {
-    return collectDeleteManyRecords(nestedOp, input.writeSets.get(nestedOp.path)?.targets ?? []);
-  }
-  if (nestedOp.operation === 'delete') {
-    return collectDeleteRecords(nestedOp, nestedPreFetchResults, pkConstraint, deps.onUnresolvedDeleteEntityId);
+  if (nestedOp.operation === 'delete' || nestedOp.operation === 'deleteMany') {
+    return nestedOp.isList
+      ? collectToManyDeleteRecords(
+          nestedOp,
+          input.writeSets.get(nestedOp.path)?.targets ?? [],
+          pkConstraint,
+          deps.onUnresolvedDeleteEntityId,
+        )
+      : collectToOneDeleteRecords(nestedOp, nestedPreFetchResults, pkConstraint, deps.onUnresolvedDeleteEntityId);
   }
   if (nestedOp.operation === 'connect') {
     return [];

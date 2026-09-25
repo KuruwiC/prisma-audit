@@ -1,6 +1,15 @@
 import type { AuditContext } from '@kuruwic/db-audit-core';
+import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
+import { createAuditClient } from '@kuruwic/prisma-audit';
+import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { cleanDatabase, createTestContext, disposeTestContext, type TestContext } from './helpers/setup.js';
+import {
+  cleanDatabase,
+  createTestContext,
+  disposeTestContext,
+  type TestContext,
+  testAggregateMapping,
+} from './helpers/setup.js';
 
 describe('Nested Delete Operations', () => {
   let context: TestContext;
@@ -534,4 +543,102 @@ describe('Nested Delete Operations', () => {
 
   // NOTE: Audit-pipeline failures reach errorHandling.observer; nested pre-fetch failures are covered
   // by nested-pre-fetch-failure.integration.spec.ts.
+  describe('a nested delete next to other operations at the same path', () => {
+    // Every operation at a path reads its targets ahead of the write into the same place; a
+    // delete records the rows it names, not every row read at its path.
+
+    const seedPosts = async (email: string) => {
+      const user = await context.basePrisma.user.create({ data: { email, name: 'Author', password: 'secret123' } });
+      const post = (title: string, published: boolean) =>
+        context.basePrisma.post.create({ data: { title, content: 'Content', authorId: user.id, published } });
+      return {
+        user,
+        a: await post('A', true),
+        b: await post('B', false),
+        c: await post('C', false),
+        d: await post('D', true),
+      };
+    };
+
+    const sorted = (entries: string[][]) => [...entries].sort((x, y) => (x.join() < y.join() ? -1 : 1));
+
+    /** One [entityId, action] per audited Post event: the row whose aggregate is the post itself */
+    const postEvents = async () => {
+      const logs = await context.basePrisma.auditLog.findMany({ where: { entityType: 'Post', aggregateType: 'Post' } });
+      return sorted(logs.map((log) => [log.entityId, log.action]));
+    };
+
+    it('records each row of a delete and a deleteMany at one path once', async () => {
+      const { user, a, b, c } = await seedPosts('delete-and-delete-many@example.com');
+
+      await context.provider.runAsync(testActor, () =>
+        context.prisma.user.update({
+          where: { id: user.id },
+          data: { posts: { delete: { id: a.id }, deleteMany: { published: false } } },
+        }),
+      );
+
+      expect(await postEvents()).toEqual(
+        sorted([
+          [a.id, 'delete'],
+          [b.id, 'delete'],
+          [c.id, 'delete'],
+        ]),
+      );
+    });
+
+    it('records the row an update next to a delete writes as updated only', async () => {
+      const { user, a, b } = await seedPosts('update-and-delete@example.com');
+
+      await context.provider.runAsync(testActor, () =>
+        context.prisma.user.update({
+          where: { id: user.id },
+          data: { posts: { update: { where: { id: a.id }, data: { title: 'A2' } }, delete: { id: b.id } } },
+        }),
+      );
+
+      expect(await postEvents()).toEqual(
+        sorted([
+          [b.id, 'delete'],
+          [a.id, 'update'],
+        ]),
+      );
+    });
+
+    it('records every row of a delete list whose before state is not read', async () => {
+      const { user, a, b } = await seedPosts('delete-list-no-pre-fetch@example.com');
+      const basePrisma = new PrismaClient({ datasources: { db: { url: context.databaseUrl } } });
+      const provider = createAsyncLocalStorageProvider();
+      const prisma = createAuditClient(basePrisma, {
+        Prisma,
+        provider,
+        aggregateMapping: testAggregateMapping,
+        performance: { awaitWrite: true },
+        nestedOperations: { delete: { fetchBeforeOperation: false } },
+      });
+
+      try {
+        await provider.runAsync(testActor, () =>
+          prisma.user.update({
+            where: { id: user.id },
+            data: { posts: { delete: [{ id: a.id }, { id: b.id }] } },
+          }),
+        );
+      } finally {
+        await prisma.$disconnect();
+        await basePrisma.$disconnect();
+      }
+
+      expect(await postEvents()).toEqual(
+        sorted([
+          [a.id, 'delete'],
+          [b.id, 'delete'],
+        ]),
+      );
+      const logs = await context.basePrisma.auditLog.findMany({ where: { entityType: 'Post' } });
+      for (const log of logs) {
+        expect(log.before).toBeNull();
+      }
+    });
+  });
 });
