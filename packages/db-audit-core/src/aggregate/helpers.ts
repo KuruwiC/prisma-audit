@@ -13,7 +13,6 @@ import type {
   ProjectionEnricherConfig,
 } from '../enrichment/types.js';
 import { getGlobalSingleton } from '../global-singleton.js';
-import { coreLog } from '../utils/debug.js';
 import type {
   AggregateIdResolver,
   AggregateMapping,
@@ -532,45 +531,6 @@ export const defineEntity = <TEntity extends Record<string, unknown> = Record<st
     tags,
     nestedOperations,
   };
-};
-
-// ============================================================================
-// Aggregate Resolution Utilities
-// ============================================================================
-
-/**
- * Resolve aggregate ID for a single aggregate root
- *
- * Executes the aggregate's resolve function and normalizes the result. Errors are logged and null is returned to skip logging for that aggregate.
- *
- * @example
- * ```typescript
- * const postAggregate: AggregateRoot = {
- *   category: 'model',
- *   type: 'Post',
- *   resolve: async (comment) => comment.postId
- * };
- *
- * const postId = await resolveAggregateId(comment, postAggregate, db);
- * ```
- */
-export const resolveAggregateId = async (
-  entity: Record<string, unknown>,
-  aggregateRoot: AggregateRoot,
-  db: unknown,
-): Promise<string | null> => {
-  try {
-    const resolvedId = await aggregateRoot.resolve(entity, db);
-
-    if (resolvedId === null || resolvedId === undefined) {
-      return null;
-    }
-
-    return normalizeId(resolvedId);
-  } catch (error) {
-    coreLog('Failed to resolve aggregate ID for type=%s: %O', aggregateRoot.type, error);
-    return null;
-  }
 };
 
 // ============================================================================

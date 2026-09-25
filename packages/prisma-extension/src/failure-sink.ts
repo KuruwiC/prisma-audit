@@ -13,7 +13,7 @@ import type { AuditErrorContext, AuditErrorObserver, WriteFailurePolicy } from '
 export interface FailureSink {
   /**
    * Notifies the observer of a failure in an observer-only phase (`pre-fetch`,
-   * `diff-generation`, `entity-id-resolution`). Never throws.
+   * `diff-generation`, `entity-id-resolution`, `aggregate-resolution`). Never throws.
    */
   readonly notify: (context: AuditErrorContext) => Promise<void>;
   /**

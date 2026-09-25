@@ -177,7 +177,7 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
         after: mutation.after,
         origin: { path: '', op },
       };
-      const resolved = await resolve([event], auditContext, resolveConfig, currentHandle);
+      const { resolved } = await resolve([event], auditContext, resolveConfig, currentHandle);
       const records = compose(resolved, { auditContext, config: composeConfig }, new Date());
       await executePlan(dispatch(records, atomic, { inTransaction: scope !== undefined }), scope);
     });

@@ -19,7 +19,7 @@ An adapter calls four functions for each intercepted write:
 ```
 policy(model, tags, config)                    -> { atomic }        before the write runs
   adapter runs the write, collects one MutationEvent per written row
-resolve(events, auditContext, config, read)    -> ResolvedEvent[]
+resolve(events, auditContext, config, read)    -> { resolved, failures }
 compose(resolvedEvents, ambient, now)          -> AuditRecord[]
 dispatch(records, atomic, { inTransaction })   -> WritePlan
   adapter executes the WritePlan with its WriteExecutor
@@ -35,6 +35,11 @@ dispatch(records, atomic, { inTransaction })   -> WritePlan
   every `to()` root that resolves), and the actor, entity and aggregate contexts from the configured
   enrichers. Id resolvers and enrichers receive the database handle through the `read` thunk,
   evaluated at each call, so a callback running inside a transaction reads that transaction's writes.
+  The entity's id resolver runs once per row and the self root is its id. A resolver that throws,
+  or returns an id `normalizeId` rejects, is returned in `failures` (the row, which resolver, the
+  error) instead of failing the call: the entity's id resolver leaves the row without records, a
+  `to()` resolver leaves it without the record under that root. The adapter decides how to report
+  them.
 - **`compose`** builds one `AuditRecord` per aggregate root: before and after states by action, the
   field-level diff of an update (an update that changed only excluded fields of an existing before
   state yields no record),

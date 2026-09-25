@@ -7,6 +7,7 @@
 import type { MutationEvent } from '@kuruwic/db-audit-core';
 import { createAggregateConfig, defineEntity } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
+import type { FailureSink } from '../../src/failure-sink.js';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../src/internal-types.js';
 import type { ExecutionScope } from '../../src/pipeline/execution-scope.js';
 import { createRecordProducer } from '../../src/pipeline/produce-records.js';
@@ -32,11 +33,15 @@ const event: MutationEvent = {
   origin: { path: '', op: 'update' },
 };
 
-const producerWith = (idResolver: (row: Record<string, unknown>, db: unknown) => Promise<string | null>) => {
+const producerWith = (
+  idResolver: (row: Record<string, unknown>, db: unknown) => Promise<string | null>,
+  failureSink: Pick<FailureSink, 'notify'> = { notify: vi.fn(async () => {}) },
+) => {
   const service = createAggregateConfig({ Post: defineEntity({ type: 'Post', idResolver }) });
   return createRecordProducer({
     resolveConfig: { entity: service.getEntityConfig, rootEntity: service.getEntityConfigByType },
     composeConfig: { entity: service.getEntityConfig, excludeFields: [], relationFieldNames: () => undefined },
+    failureSink,
   });
 };
 
@@ -56,6 +61,36 @@ describe('createRecordProducer', () => {
       before: event.before,
       after: event.after,
       changes: { title: { old: 'old', new: 'new' } },
+    });
+  });
+
+  it('notifies aggregate-resolution for a row whose id resolver throws and composes the other rows', async () => {
+    const error = new Error('resolver broken');
+    const notify = vi.fn(async () => {});
+    const failing: MutationEvent = {
+      ...event,
+      identity: 'p2',
+      after: { id: 'p2', title: 'new' },
+      origin: { path: 'posts', op: 'create' },
+    };
+    const produce = producerWith(
+      async (row) => {
+        if (row.id === 'p2') throw error;
+        return row.id as string;
+      },
+      { notify },
+    );
+
+    const records = await produce([event, failing], scopeOn(baseClient));
+
+    expect(records.map((record) => record.entityId)).toEqual(['p1']);
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify).toHaveBeenCalledWith({
+      phase: 'aggregate-resolution',
+      modelName: 'Post',
+      operation: 'create',
+      params: { identity: 'p2', resolver: { kind: 'entity' } },
+      error,
     });
   });
 

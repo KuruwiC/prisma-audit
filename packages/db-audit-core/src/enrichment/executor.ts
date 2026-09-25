@@ -5,9 +5,8 @@
  */
 
 import { ENRICHMENT_TIMEOUTS } from '../constants.js';
+import { toError } from '../utils/to-error.js';
 import type { EnricherConfig, EnricherErrorStrategy } from './types.js';
-
-const toError = (caught: unknown): Error => (caught instanceof Error ? caught : new Error(String(caught)));
 
 /** Rejects with 'Enricher timeout' when `timeoutMs` elapses first; the timer is cleared either way so a settled call leaves nothing pending. */
 const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number): Promise<T> => {

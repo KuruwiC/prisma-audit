@@ -50,7 +50,7 @@ describe('resolve', () => {
     it('yields nothing for a model without entity configuration', async () => {
       const config = configOf({ Post: defineEntity({ type: 'Post' }) });
 
-      const resolved = await resolve([event('Unknown', { id: 'x-1' })], auditContext, config, read);
+      const { resolved } = await resolve([event('Unknown', { id: 'x-1' })], auditContext, config, read);
 
       expect(resolved).toEqual([]);
     });
@@ -63,7 +63,7 @@ describe('resolve', () => {
         event('Post', { id: 'p2' }),
       ];
 
-      const resolved = await resolve(events, auditContext, config, read);
+      const { resolved } = await resolve(events, auditContext, config, read);
 
       expect(resolved.map((e) => e.identity)).toEqual(['p1', 'c1', 'p2']);
       for (const [i, resolvedEvent] of resolved.entries()) {
@@ -80,7 +80,7 @@ describe('resolve', () => {
         origin: { path: '', op: 'delete' },
       };
 
-      const resolved = await resolve([rowless, event('Post', { id: 'p2' })], auditContext, config, read);
+      const { resolved } = await resolve([rowless, event('Post', { id: 'p2' })], auditContext, config, read);
 
       expect(resolved.map((e) => e.identity)).toEqual(['p2']);
     });
@@ -90,7 +90,7 @@ describe('resolve', () => {
       const config = configOf({ Post: defineEntity({ type: 'Post', idResolver }) });
       const before = { id: 'p1', title: 'deleted' };
 
-      const resolved = await resolve(
+      const { resolved } = await resolve(
         [{ model: 'Post', identity: 'p1', action: 'delete', before, origin: { path: '', op: 'deleteMany' } }],
         auditContext,
         config,
@@ -107,7 +107,7 @@ describe('resolve', () => {
       const enricher = vi.fn(async (actor: unknown) => ({ role: 'admin', of: actor }));
       const config = configOf({ Post: defineEntity({ type: 'Post' }) }, { enricher });
 
-      const resolved = await resolve(rowsOf('Post', 3), auditContext, config, read);
+      const { resolved } = await resolve(rowsOf('Post', 3), auditContext, config, read);
 
       expect(enricher).toHaveBeenCalledTimes(1);
       expect(enricher.mock.calls[0]?.slice(0, 2)).toEqual([auditContext.actor, handle]);
@@ -117,7 +117,7 @@ describe('resolve', () => {
     it('is null without an actor enricher', async () => {
       const config = configOf({ Post: defineEntity({ type: 'Post' }) });
 
-      const resolved = await resolve(rowsOf('Post', 1), auditContext, config, read);
+      const { resolved } = await resolve(rowsOf('Post', 1), auditContext, config, read);
 
       expect(resolved[0]?.actorContext).toBeNull();
     });
@@ -153,7 +153,7 @@ describe('resolve', () => {
         event('Post', { id: 'p3', title: 'third', authorId: 'u2' }),
       ];
 
-      const resolved = await resolve(events, auditContext, config, read);
+      const { resolved } = await resolve(events, auditContext, config, read);
 
       expect(postEnricher).toHaveBeenCalledTimes(1);
       expect(postEnricher.mock.calls[0]?.slice(0, 2)).toEqual([
@@ -171,7 +171,7 @@ describe('resolve', () => {
     it('is null without an entity enricher', async () => {
       const config = configOf({ Post: defineEntity({ type: 'Post' }) });
 
-      const resolved = await resolve(rowsOf('Post', 1), auditContext, config, read);
+      const { resolved } = await resolve(rowsOf('Post', 1), auditContext, config, read);
 
       expect(resolved[0]?.entityContext).toBeNull();
     });
@@ -181,7 +181,7 @@ describe('resolve', () => {
     it('resolves the self root by default', async () => {
       const config = configOf({ User: defineEntity({ type: 'User' }) });
 
-      const resolved = await resolve([event('User', { id: 'user-123', name: 'John' })], auditContext, config, read);
+      const { resolved } = await resolve([event('User', { id: 'user-123', name: 'John' })], auditContext, config, read);
 
       expect(resolved[0]?.roots).toEqual([
         { aggregateCategory: 'model', aggregateType: 'User', aggregateId: 'user-123' },
@@ -193,7 +193,7 @@ describe('resolve', () => {
         Post: defineEntity({ type: 'Post', aggregates: [to('User', foreignKey('authorId'))] }),
       });
 
-      const resolved = await resolve(
+      const { resolved } = await resolve(
         [event('Post', { id: 'post-456', authorId: 'user-123' })],
         auditContext,
         config,
@@ -211,14 +211,20 @@ describe('resolve', () => {
         Post: defineEntity({ type: 'Post', aggregates: [to('User', foreignKey('authorId'))] }),
       });
 
-      const resolved = await resolve([event('Post', { id: 'post-456', title: 'Test' })], auditContext, config, read);
+      const { resolved } = await resolve(
+        [event('Post', { id: 'post-456', title: 'Test' })],
+        auditContext,
+        config,
+        read,
+      );
 
       expect(resolved[0]?.roots).toEqual([
         { aggregateCategory: 'model', aggregateType: 'Post', aggregateId: 'post-456' },
       ]);
     });
 
-    it('skips a to() root whose resolver throws', async () => {
+    it('reports a to() root whose resolver throws and keeps the other roots of the row', async () => {
+      const error = new Error('DB down');
       const config = configOf({
         Post: defineEntity({
           type: 'Post',
@@ -226,16 +232,20 @@ describe('resolve', () => {
             to(
               'User',
               resolveId(async () => {
-                throw new Error('DB down');
+                throw error;
               }),
             ),
           ],
         }),
       });
+      const events = [event('Post', { id: 'post-456' })];
 
-      const resolved = await resolve([event('Post', { id: 'post-456' })], auditContext, config, read);
+      const { resolved, failures } = await resolve(events, auditContext, config, read);
 
       expect(resolved[0]?.roots.map((r) => r.aggregateType)).toEqual(['Post']);
+      expect(failures).toEqual([
+        { event: events[0], resolver: { kind: 'aggregate', aggregateCategory: 'model', aggregateType: 'User' }, error },
+      ]);
     });
 
     it('resolves no self root when self is false', async () => {
@@ -247,7 +257,7 @@ describe('resolve', () => {
         }),
       });
 
-      const resolved = await resolve(
+      const { resolved } = await resolve(
         [event('PostTag', { id: 'pt-123', postId: 'post-456', tagId: 'tag-789' })],
         auditContext,
         config,
@@ -262,7 +272,12 @@ describe('resolve', () => {
         PostTag: defineEntity({ type: 'PostTag', self: false, aggregates: [to('Post', foreignKey('postId'))] }),
       });
 
-      const resolved = await resolve([event('PostTag', { id: 'pt-123', postId: null })], auditContext, config, read);
+      const { resolved } = await resolve(
+        [event('PostTag', { id: 'pt-123', postId: null })],
+        auditContext,
+        config,
+        read,
+      );
 
       expect(resolved).toEqual([]);
     });
@@ -277,7 +292,7 @@ describe('resolve', () => {
         event('Post', { id: 'p3', authorId: 'u2' }),
       ];
 
-      const resolved = await resolve(events, auditContext, config, read);
+      const { resolved } = await resolve(events, auditContext, config, read);
 
       expect(resolved.map((e) => e.identity)).toEqual(['p1', 'p3']);
     });
@@ -290,7 +305,7 @@ describe('resolve', () => {
         });
         const events = rowsOf('Post', 10);
 
-        const resolved = await resolve(events, auditContext, config, read);
+        const { resolved } = await resolve(events, auditContext, config, read);
 
         expect(batchFn).toHaveBeenCalledTimes(1);
         expect(batchFn).toHaveBeenCalledWith(
@@ -300,7 +315,8 @@ describe('resolve', () => {
         expect(resolved[9]?.roots.map((r) => r.aggregateId)).toEqual(['post-9', 'u9']);
       });
 
-      it('skips the aggregate when the batch resolver throws', async () => {
+      it('skips the aggregate and reports every row of the call when the batch resolver throws', async () => {
+        const error = new Error('DB down');
         const config = configOf({
           Post: defineEntity({
             type: 'Post',
@@ -308,19 +324,25 @@ describe('resolve', () => {
               to(
                 'User',
                 batchResolveIds(async () => {
-                  throw new Error('DB down');
+                  throw error;
                 }),
               ),
             ],
           }),
         });
+        const events = rowsOf('Post', 2);
 
-        const resolved = await resolve(rowsOf('Post', 2), auditContext, config, read);
+        const { resolved, failures } = await resolve(events, auditContext, config, read);
 
         expect(resolved.flatMap((e) => e.roots.map((r) => r.aggregateType))).toEqual(['Post', 'Post']);
+        const resolver = { kind: 'aggregate', aggregateCategory: 'model', aggregateType: 'User' };
+        expect(failures).toEqual([
+          { event: events[0], resolver, error },
+          { event: events[1], resolver, error },
+        ]);
       });
 
-      it('skips the aggregate when the batch resolver returns the wrong number of ids', async () => {
+      it('skips the aggregate and reports every row of the call when the batch resolver returns the wrong number of ids', async () => {
         const config = configOf({
           Post: defineEntity({
             type: 'Post',
@@ -332,10 +354,14 @@ describe('resolve', () => {
             ],
           }),
         });
+        const events = rowsOf('Post', 3);
 
-        const resolved = await resolve(rowsOf('Post', 3), auditContext, config, read);
+        const { resolved, failures } = await resolve(events, auditContext, config, read);
 
         expect(resolved.flatMap((e) => e.roots.map((r) => r.aggregateType))).toEqual(['Post', 'Post', 'Post']);
+        expect(failures.map((failure) => [failure.event, failure.resolver.kind, failure.error.message])).toEqual(
+          events.map((e) => [e, 'aggregate', 'The batch resolver of aggregate "User" returned 1 ids for 3 rows']),
+        );
       });
     });
   });
@@ -408,7 +434,7 @@ describe('resolve', () => {
         User: defineEntity({ type: 'User' }),
       });
 
-      const resolved = await resolve([event('Post', { id: 'p1', authorId: 'u1' })], auditContext, config, read);
+      const { resolved } = await resolve([event('Post', { id: 'p1', authorId: 'u1' })], auditContext, config, read);
 
       expect(resolved[0]?.aggregateContexts).toEqual(
         new Map([
@@ -439,7 +465,7 @@ describe('resolve', () => {
         }),
       });
 
-      const resolved = await resolve(
+      const { resolved } = await resolve(
         [event('Post', { id: 'p1', authorId: 'u1', title: 'T1' })],
         auditContext,
         config,
@@ -465,7 +491,7 @@ describe('resolve', () => {
         event('Post', { id: 'p3', authorId: 'u2' }),
       ];
 
-      const resolved = await resolve(events, auditContext, config, read);
+      const { resolved } = await resolve(events, auditContext, config, read);
 
       expect(rootEnricher).toHaveBeenCalledTimes(1);
       expect(rootEnricher.mock.calls[0]?.slice(0, 2)).toEqual([['u1', 'u2'], handle]);
@@ -482,7 +508,7 @@ describe('resolve', () => {
       );
       const config = configOf({ Post: defineEntity({ type: 'Post', self: { context: { enricher: selfEnricher } } }) });
 
-      const resolved = await resolve(
+      const { resolved } = await resolve(
         [event('Post', { id: 'p1' }), event('Post', { id: 'p2' })],
         auditContext,
         config,
@@ -519,7 +545,7 @@ describe('resolve', () => {
         }),
       });
 
-      const resolved = await resolve(
+      const { resolved } = await resolve(
         [event('Friendship', { id: 'f1', userAId: 'u1', userBId: 'u2' })],
         auditContext,
         config,
@@ -552,7 +578,7 @@ describe('resolve', () => {
         }),
       });
 
-      const resolved = await resolve(
+      const { resolved } = await resolve(
         [event('Friendship', { id: 'f1', userAId: 'u1', userBId: 'u1' })],
         auditContext,
         config,
@@ -570,7 +596,7 @@ describe('resolve', () => {
     it('stores the normalized id from the entity id resolver', async () => {
       const config = configOf({ Post: defineEntity({ type: 'Post', idResolver: async (row) => row.id as string }) });
 
-      const resolved = await resolve([event('Post', { id: 42 })], auditContext, config, read);
+      const { resolved } = await resolve([event('Post', { id: 42 })], auditContext, config, read);
 
       expect(resolved[0]?.entityId).toBe('42');
     });
@@ -585,26 +611,99 @@ describe('resolve', () => {
         }),
       });
 
-      const resolved = await resolve([event('Post', { id: 'p1', authorId: 'u1' })], auditContext, config, read);
+      const { resolved } = await resolve([event('Post', { id: 'p1', authorId: 'u1' })], auditContext, config, read);
 
       expect(resolved).toEqual([]);
     });
 
-    it('fails when the id resolver of a row with a root throws', async () => {
+    it('calls the id resolver once per row and derives the self root from its id', async () => {
+      const idResolver = vi.fn(async (row: Row) => row.id as string);
+      const config = configOf({
+        Post: defineEntity({ type: 'Post', idResolver, aggregates: [to('User', foreignKey('authorId'))] }),
+      });
+      const events = [event('Post', { id: 'p1', authorId: 'u1' }), event('Post', { id: 'p2', authorId: 'u2' })];
+
+      const { resolved, failures } = await resolve(events, auditContext, config, read);
+
+      expect(idResolver).toHaveBeenCalledTimes(2);
+      expect(resolved.map((e) => [e.entityId, e.roots.map((r) => `${r.aggregateType}:${r.aggregateId}`)])).toEqual([
+        ['p1', ['Post:p1', 'User:u1']],
+        ['p2', ['Post:p2', 'User:u2']],
+      ]);
+      expect(failures).toEqual([]);
+    });
+
+    it('reports a throwing id resolver and yields nothing for its row, resolving the other rows', async () => {
+      const error = new Error('resolver broken');
       const config = configOf({
         Post: defineEntity({
           type: 'Post',
-          idResolver: async () => {
-            throw new Error('resolver broken');
+          idResolver: async (row) => {
+            if (row.id === 'p1') throw error;
+            return row.id as string;
           },
           self: false,
           aggregates: [to('User', foreignKey('authorId'))],
         }),
       });
+      const events = [event('Post', { id: 'p1', authorId: 'u1' }), event('Post', { id: 'p2', authorId: 'u2' })];
 
-      await expect(resolve([event('Post', { id: 'p1', authorId: 'u1' })], auditContext, config, read)).rejects.toThrow(
-        'resolver broken',
-      );
+      const { resolved, failures } = await resolve(events, auditContext, config, read);
+
+      expect(resolved.map((e) => e.identity)).toEqual(['p2']);
+      expect(failures).toEqual([{ event: events[0], resolver: { kind: 'entity' }, error }]);
+    });
+
+    it('reports a throwing id resolver of a row whose only root is the self root', async () => {
+      const error = new Error('resolver broken');
+      const config = configOf({
+        Post: defineEntity({
+          type: 'Post',
+          idResolver: async () => {
+            throw error;
+          },
+        }),
+      });
+      const events = [event('Post', { id: 'p1' })];
+
+      const { resolved, failures } = await resolve(events, auditContext, config, read);
+
+      expect(resolved).toEqual([]);
+      expect(failures).toEqual([{ event: events[0], resolver: { kind: 'entity' }, error }]);
+    });
+
+    it('reports an id the id resolver returns that cannot be normalized', async () => {
+      const config = configOf({ Post: defineEntity({ type: 'Post', idResolver: async (row) => row.key as string }) });
+      const events = [event('Post', { id: 'p1', key: Object.create(null) })];
+
+      const { resolved, failures } = await resolve(events, auditContext, config, read);
+
+      expect(resolved).toEqual([]);
+      expect(failures.map((failure) => [failure.event, failure.resolver, failure.error.message])).toEqual([
+        [events[0], { kind: 'entity' }, 'Cannot normalize ID of type: object'],
+      ]);
+    });
+
+    it('hands a row without an entity id to neither the entity enricher nor the to() resolvers', async () => {
+      const enricher = vi.fn(async (rows: Row[]) => rows.map(() => null));
+      const userResolver = vi.fn(async (row: Row) => row.authorId as string);
+      const config = configOf({
+        Post: defineEntity({
+          type: 'Post',
+          idResolver: async (row) => {
+            if (row.id === 'p1') throw new Error('resolver broken');
+            return row.id as string;
+          },
+          aggregates: [to('User', resolveId(userResolver))],
+          context: { enricher },
+        }),
+      });
+      const events = [event('Post', { id: 'p1', authorId: 'u1' }), event('Post', { id: 'p2', authorId: 'u2' })];
+
+      await resolve(events, auditContext, config, read);
+
+      expect(enricher.mock.calls.map((call) => call[0])).toEqual([[events[1]?.after]]);
+      expect(userResolver.mock.calls.map((call) => call[0])).toEqual([events[1]?.after]);
     });
   });
 
@@ -685,7 +784,7 @@ describe('resolve', () => {
         },
       );
 
-      const resolved = await resolve(rowsOf('Post', 1), auditContext, config, read);
+      const { resolved } = await resolve(rowsOf('Post', 1), auditContext, config, read);
 
       expect(resolved[0]?.actorContext).toEqual({ role: 'unknown' });
       expect(resolved[0]?.entityContext).toEqual({ title: 'unknown' });

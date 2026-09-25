@@ -55,7 +55,13 @@ export type { ProjectionEnrichmentMeta } from './enrichment/types.js';
 export { getGlobalSingleton } from './global-singleton.js';
 export type { PolicyConfig, WritePolicy } from './policy/index.js';
 export { policy } from './policy/index.js';
-export type { EntityResolveConfig, ResolveConfig } from './resolve/index.js';
+export type {
+  EntityResolveConfig,
+  FailedResolver,
+  Resolution,
+  ResolveConfig,
+  ResolverFailure,
+} from './resolve/index.js';
 export { resolve } from './resolve/index.js';
 export type { AuditActor, AuditContext, AuditContextProvider } from './types.js';
 export type { ErrorHandler, ErrorStrategy } from './utils/error-handler.js';

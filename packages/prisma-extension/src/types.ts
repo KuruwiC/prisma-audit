@@ -124,7 +124,7 @@ export interface NestedOperationsConfig {
  *   outcome {@link ErrorHandlingConfig.writeFailurePolicy} decides — see
  *   {@link WriteFailurePolicy} for writes that are queued or detached.
  * - `diff-generation`: other audit-support work around the caller's operation failed —
- *   building the entry (enrichment, aggregate resolution, redaction), reading the primary
+ *   building the entry (enrichment, redaction), reading the primary
  *   keys a to-many relation holds before a nested create under an existing row (the caller's
  *   write is then never attempted), re-reading a nested row the operation updated that its
  *   result did not return, or, for batch operations, fetching the affected rows before or
@@ -135,8 +135,21 @@ export interface NestedOperationsConfig {
  *   either the pre-fetched entityId or the operation data. The caller's operation
  *   continues; that record's audit log entry is skipped rather than recorded with a
  *   partial or fabricated identity.
+ * - `aggregate-resolution`: an id resolver threw, or returned an id that cannot be normalized
+ *   to a string. The entity's `idResolver` failing leaves the row without any audit log
+ *   entry; a `to()` resolver failing leaves it without the entry under that aggregate root
+ *   only. The caller's operation continues. Reported once per affected row, a failed
+ *   `batchResolveIds` resolver once for every row of its call: `modelName` is the row's
+ *   model, `operation` the keyword that wrote the row, and `params` is
+ *   `{ identity, resolver }` with the row's serialized primary key and either
+ *   `{ kind: 'entity' }` or `{ kind: 'aggregate', aggregateCategory, aggregateType }`.
  */
-export type AuditErrorPhase = 'pre-fetch' | 'log-write' | 'diff-generation' | 'entity-id-resolution';
+export type AuditErrorPhase =
+  | 'pre-fetch'
+  | 'log-write'
+  | 'diff-generation'
+  | 'entity-id-resolution'
+  | 'aggregate-resolution';
 
 /**
  * Structured context describing a single audit-pipeline failure. Passed in the same shape
