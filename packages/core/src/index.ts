@@ -90,6 +90,7 @@ export type { PolicyConfig, WritePolicy } from './policy/index.js';
 export { policy } from './policy/index.js';
 // Resolve
 export type { EntityResolveConfig, ResolveConfig } from './resolve/index.js';
+export { resolve } from './resolve/index.js';
 // Runtime Context (library-owned infrastructure state)
 //
 // Exported because @kuruwic/prisma-audit imports it across the package boundary;

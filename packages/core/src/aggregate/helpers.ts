@@ -50,6 +50,37 @@ export function getRegisteredBatchResolver(resolver: AggregateIdResolver): Batch
 }
 
 // ============================================================================
+// N+1 Resolver Warning (once per aggregate type, process-wide)
+// ============================================================================
+
+const BATCH_RESOLVE_WARNING_THRESHOLD = 5;
+const warnedAggregateTypes = getGlobalSingleton('aggregate-unbatched-resolver-warned-types', () => new Set<string>());
+
+/**
+ * Warn, once per aggregate type, when a `resolveId()` resolver runs row by row for more rows
+ * than the warning threshold: `batchResolveIds()` would resolve them in one query.
+ */
+export const warnAboutUnbatchedResolver = (entityType: string, aggregate: AggregateRoot, rowCount: number): void => {
+  if (
+    !aggregate.requiresDbAccess ||
+    rowCount <= BATCH_RESOLVE_WARNING_THRESHOLD ||
+    warnedAggregateTypes.has(aggregate.type)
+  ) {
+    return;
+  }
+  warnedAggregateTypes.add(aggregate.type);
+  console.warn(
+    `[prisma-audit] ${entityType} → aggregate "${aggregate.type}" uses resolveId() for ${rowCount} entities. ` +
+      `Consider using batchResolveIds() to avoid N+1 queries.`,
+  );
+};
+
+/** @internal Forget which aggregate types were warned about. Exported for tests. */
+export function resetUnbatchedResolverWarnings(): void {
+  warnedAggregateTypes.clear();
+}
+
+// ============================================================================
 // Type Definitions
 // ============================================================================
 
