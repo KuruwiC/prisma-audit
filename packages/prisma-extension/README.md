@@ -246,6 +246,10 @@ createAuditClient(basePrisma, {
 });
 ```
 
+**Optional `beforeUnavailable` column:**
+
+An audit-log model may declare `beforeUnavailable Boolean @default(false)`. When it does, the default write stores each record's `beforeUnavailable` there (see [Before state that could not be read](#before-state-that-could-not-be-read)); when it does not, the default write leaves the field out. The column is looked up by that exact field name in the model `auditLogModel` names, and a field of that name that is not a single `Boolean` makes `createAuditClient` throw.
+
 **Custom schema with different field names:**
 
 If your audit log table has a different schema (e.g., different field names), use `hooks.writer` to transform the audit log data:
@@ -1014,7 +1018,7 @@ Two independent options, both receiving the same structured failure context (`{ 
 
 An `update` or `delete` reads its target row before the write when `fetchBeforeOperation` is on. When that read fails, the caller's operation still runs, the observer hears about it under `pre-fetch`, and the entry is recorded with `before: null`, `changes: null` and `beforeUnavailable: true`, so it cannot be mistaken for an entry whose before state was never requested (`beforeUnavailable: false`). An `upsert` whose read failed is not recorded at all: the before state is what tells whether it created or updated its row.
 
-Every record carries `beforeUnavailable`, so a `hooks.writer` can store it however it likes.
+Every record carries `beforeUnavailable`. The default write stores it when the audit-log model declares a `beforeUnavailable Boolean` column and leaves it out otherwise, so no column is required; a `hooks.writer` sees it on each record and can store it however it likes. The normalized writers (`createEntityNormalizedWriter`, `createSharedChangeWriter`) do not store it.
 
 ### Concurrency Considerations
 

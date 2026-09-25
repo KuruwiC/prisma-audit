@@ -120,6 +120,7 @@ model AuditLog {
   before               Json?
   after                Json?
   changes              Json?
+  beforeUnavailable    Boolean  @default(false) // Optional: the before state was requested and could not be read
 
   // Request info
   requestContext       Json?

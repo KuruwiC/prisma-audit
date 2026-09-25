@@ -290,6 +290,7 @@ model AuditLog {
   before            Json? // State before operation
   after             Json? // State after operation
   changes           Json? // Changed fields with old/new values
+  beforeUnavailable Boolean  @default(false) @map("before_unavailable") // The before state was requested and could not be read
   // Request Context
   requestContext    Json?    @map("request_context") // Request metadata (ipAddress, userAgent, path, method, traceId, sessionId)
   createdAt         DateTime @default(now()) @map("created_at")

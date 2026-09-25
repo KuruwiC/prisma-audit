@@ -10,7 +10,7 @@
  * @see {@link PrismaAuditExtensionOptions}
  */
 
-import { createPrismaWriteExecutor } from './adapters/write-executor.js';
+import { createPrismaWriteExecutor, declaresBeforeUnavailableColumn } from './adapters/write-executor.js';
 import { type AuditOptions, normalizeAuditOptions } from './audit-options.js';
 import { createFailureSink } from './failure-sink.js';
 import type { ExtensionParams, PrismaClientWithDynamicAccess } from './internal-types.js';
@@ -38,7 +38,9 @@ const createPipelineDependencies = (audit: AuditOptions): AuditPipelineDependenc
     produceRecords: createRecordProducer({ ...audit, failureSink }),
     writeAuditLogs: createAuditLogWriter({
       auditLogModel: audit.auditLogModel,
-      writeExecutor: createPrismaWriteExecutor(Prisma.DbNull),
+      writeExecutor: createPrismaWriteExecutor(Prisma.DbNull, {
+        storesBeforeUnavailable: declaresBeforeUnavailableColumn(Prisma.dmmf, audit.auditLogModel),
+      }),
       writer: audit.writer,
       failureSink,
     }),

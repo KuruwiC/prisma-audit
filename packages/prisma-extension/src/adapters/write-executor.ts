@@ -8,6 +8,41 @@
  */
 
 import type { AuditRecord, WriteExecutor } from '@kuruwic/db-audit-core';
+import type { DMMFModel } from '../internal-types.js';
+import { uncapitalizeFirst } from '../utils/extension-utils.js';
+
+/** The audit-log field that stores {@link AuditRecord.beforeUnavailable} when the model declares it */
+const BEFORE_UNAVAILABLE_FIELD = 'beforeUnavailable';
+
+export interface PrismaWriteExecutorOptions {
+  /** The audit-log model declares a `beforeUnavailable` column (see {@link declaresBeforeUnavailableColumn}) */
+  readonly storesBeforeUnavailable: boolean;
+}
+
+/**
+ * Whether the audit-log model declares a `beforeUnavailable` column, which the default write then
+ * fills. The column is optional: the audit-log model is the user's.
+ *
+ * @param auditLogModel - The client property of the audit-log model (`auditLog`, `activity`)
+ * @throws {Error} When the model declares a `beforeUnavailable` field that is not a single Boolean
+ */
+export const declaresBeforeUnavailableColumn = (
+  dmmf: { readonly datamodel: { readonly models: readonly Pick<DMMFModel, 'name' | 'fields'>[] } },
+  auditLogModel: string,
+): boolean => {
+  const model = dmmf.datamodel.models.find((candidate) => uncapitalizeFirst(candidate.name) === auditLogModel);
+  const field = model?.fields.find((candidate) => candidate.name === BEFORE_UNAVAILABLE_FIELD);
+  if (model === undefined || field === undefined) {
+    return false;
+  }
+  if (field.kind !== 'scalar' || field.type !== 'Boolean' || field.isList === true) {
+    throw new Error(
+      `[@prisma-audit] The audit-log model "${model.name}" declares "${BEFORE_UNAVAILABLE_FIELD}" as ` +
+        `${field.type}${field.isList === true ? '[]' : ''}; it must be Boolean.`,
+    );
+  }
+  return true;
+};
 
 /** The data of one audit-log row: the record without the fields the audit-log model does not declare */
 type AuditLogRow = Omit<AuditRecord, 'beforeUnavailable'> & { readonly beforeUnavailable?: boolean };
@@ -22,7 +57,7 @@ type AuditLogModel = {
 
 /**
  * Convert JavaScript null to Prisma.DbNull for SQL NULL storage, and leave out
- * `beforeUnavailable`, which no audit-log column receives
+ * `beforeUnavailable` unless the audit-log model has a column for it
  *
  * @remarks
  * Prisma distinguishes SQL NULL (Prisma.DbNull) from JSON null (Prisma.JsonNull).
@@ -31,10 +66,11 @@ type AuditLogModel = {
  *
  * @internal
  */
-const toAuditLogRow = (logData: AuditRecord, DbNull: unknown): AuditLogRow => {
-  const { beforeUnavailable: _beforeUnavailable, ...row } = logData;
+const toAuditLogRow = (logData: AuditRecord, DbNull: unknown, options: PrismaWriteExecutorOptions): AuditLogRow => {
+  const { beforeUnavailable, ...row } = logData;
   return {
     ...row,
+    ...(options.storesBeforeUnavailable ? { beforeUnavailable } : {}),
     before: logData.before === null ? DbNull : logData.before,
     after: logData.after === null ? DbNull : logData.after,
     changes: logData.changes === null ? DbNull : logData.changes,
@@ -150,15 +186,17 @@ const writeAuditLogs = async (
  *
  * @example
  * ```typescript
- * const writeExecutor = createPrismaWriteExecutor(Prisma.DbNull);
+ * const writeExecutor = createPrismaWriteExecutor(Prisma.DbNull, {
+ *   storesBeforeUnavailable: declaresBeforeUnavailableColumn(Prisma.dmmf, 'auditLog'),
+ * });
  * await writeExecutor.write(prisma, 'auditLog', logs);
  * ```
  */
-export const createPrismaWriteExecutor = (DbNull: unknown): WriteExecutor => {
+export const createPrismaWriteExecutor = (DbNull: unknown, options: PrismaWriteExecutorOptions): WriteExecutor => {
   return {
     write: async (client: unknown, modelName: string, logs: AuditRecord[]): Promise<void> => {
       const model = (client as Record<string, unknown>)[modelName];
-      const convertedLogs = logs.map((log) => toAuditLogRow(log, DbNull));
+      const convertedLogs = logs.map((log) => toAuditLogRow(log, DbNull, options));
       await writeAuditLogs(model as Record<string, unknown>, convertedLogs, modelName);
     },
   };
