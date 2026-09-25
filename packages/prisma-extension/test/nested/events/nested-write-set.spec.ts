@@ -20,7 +20,10 @@ const schemaMetadata = createSchemaMetadataFromDMMF({
           name: 'User',
           fields: [scalar('id'), relation('posts', 'Post', true), relation('profile', 'Profile', false)],
         },
-        { name: 'Post', fields: [scalar('id'), scalar('title'), relation('comments', 'Comment', true)] },
+        {
+          name: 'Post',
+          fields: [{ ...scalar('id'), isId: true }, scalar('title'), relation('comments', 'Comment', true)],
+        },
         { name: 'Comment', fields: [scalar('id'), scalar('content')] },
         { name: 'Profile', fields: [scalar('id'), scalar('bio')] },
       ],
@@ -44,7 +47,7 @@ const writeSetsOf = (
   batchTargets: NestedBatchTargets = new Map(),
 ) => {
   const operations = detectExecutedNestedOperations(schemaMetadata, 'User', { data }, undefined, results);
-  return { operations, writeSets: buildNestedWriteSets(operations, results, batchTargets) };
+  return { operations, writeSets: buildNestedWriteSets(schemaMetadata, operations, results, batchTargets) };
 };
 
 describe('detectExecutedNestedOperations', () => {
@@ -74,13 +77,13 @@ describe('buildNestedWriteSets', () => {
     expect(writeSets.size).toBe(0);
   });
 
-  it('names the rows of a nested update by their WHERE, with the pre-fetched before state', () => {
+  it('locates the rows of a nested update by the primary key of the pre-fetched row, else by their WHERE', () => {
     const results = preFetched([['posts', 'p1', p1]]);
     const { operations, writeSets } = writeSetsOf(
       {
         posts: {
           update: [
-            { where: { id: 'p1' }, data: { title: 'A' } },
+            { where: { id: 'p1', title: 'First' }, data: { title: 'A' } },
             { where: { id: 'p2' }, data: { title: 'B' } },
           ],
         },
@@ -90,8 +93,12 @@ describe('buildNestedWriteSets', () => {
 
     expect(writeSets.get('posts')).toEqual({
       targets: [
-        { where: { id: 'p1' }, operation: operations[0], before: { kind: 'captured', row: p1 } },
-        { where: { id: 'p2' }, operation: operations[0], before: { kind: 'none' } },
+        {
+          locator: { by: 'primaryKey', where: { id: 'p1' } },
+          operation: operations[0],
+          before: { kind: 'captured', row: p1 },
+        },
+        { locator: { by: 'uniqueWhere', where: { id: 'p2' } }, operation: operations[0], before: { kind: 'none' } },
       ],
       createsPending: false,
     });
@@ -118,7 +125,7 @@ describe('buildNestedWriteSets', () => {
     ['updateMany', { posts: { updateMany: { where: { title: 'x' }, data: { title: 'y' } } } }],
     ['deleteMany', { posts: { deleteMany: { title: 'x' } } }],
   ] as const)(
-    'names the rows a %s matched before the operation by their primary key, with the before state read',
+    'locates the rows a %s matched before the operation by their primary key, with the before state read',
     (keyword, data) => {
       const results = preFetched([['posts', 'p1', p1]]);
       const batchTargets: NestedBatchTargets = new Map([
@@ -140,8 +147,12 @@ describe('buildNestedWriteSets', () => {
 
       expect(writeSets.get('posts')).toEqual({
         targets: [
-          { where: { id: 'p1' }, operation: operations[0], before: { kind: 'captured', row: p1 } },
-          { where: { id: 'p2' }, operation: operations[0], before: { kind: 'none' } },
+          {
+            locator: { by: 'primaryKey', where: { id: 'p1' } },
+            operation: operations[0],
+            before: { kind: 'captured', row: p1 },
+          },
+          { locator: { by: 'primaryKey', where: { id: 'p2' } }, operation: operations[0], before: { kind: 'none' } },
         ],
         createsPending: false,
       });
@@ -160,7 +171,7 @@ describe('buildNestedWriteSets', () => {
     const connect = operations.find((op) => op.operation === 'connect');
 
     expect(writeSets.get('posts')).toEqual({
-      targets: [{ where: { id: 'p1' }, operation: connect, before: { kind: 'none' } }],
+      targets: [{ locator: { by: 'uniqueWhere', where: { id: 'p1' } }, operation: connect, before: { kind: 'none' } }],
       createsPending: true,
     });
   });
@@ -170,10 +181,12 @@ describe('buildNestedWriteSets', () => {
       posts: { update: { where: { id: 'p1' }, data: {} }, delete: { id: 'p2' } },
     });
 
-    expect(writeSets.get('posts')?.targets.map((target) => [target.where, target.operation.operation])).toEqual([
-      [{ id: 'p1' }, 'update'],
-      [{ id: 'p2' }, 'delete'],
-    ]);
+    expect(writeSets.get('posts')?.targets.map((target) => [target.locator.where, target.operation.operation])).toEqual(
+      [
+        [{ id: 'p1' }, 'update'],
+        [{ id: 'p2' }, 'delete'],
+      ],
+    );
     expect(writeSets.get('posts')?.targets.map((target) => target.operation)).toEqual(operations);
   });
 });

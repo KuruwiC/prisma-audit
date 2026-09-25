@@ -129,20 +129,20 @@ describe('refetchNestedRecords', () => {
     ),
   });
 
-  it('reads a row a nested write names by its unique WHERE with findUnique', async () => {
+  it('reads a row located by its unique WHERE with findUnique', async () => {
     const client = clientStoring();
 
-    const rows = await refetchNestedRecords(client, [{ where: { key: 'k-2' }, operation: 'update' }]);
+    const rows = await refetchNestedRecords(client, [{ by: 'uniqueWhere', where: { key: 'k-2' } }]);
 
     expect(client.findUnique).toHaveBeenCalledWith({ where: { key: 'k-2' } });
     expect(client.findFirst).not.toHaveBeenCalled();
     expect(rows).toEqual([{ id: 'row-2', key: 'k-2' }]);
   });
 
-  it('reads a row a nested batch filter matched by its primary key with findFirst', async () => {
+  it('reads a row located by its primary key with findFirst', async () => {
     const client = clientStoring();
 
-    const rows = await refetchNestedRecords(client, [{ where: { id: 'row-1' }, operation: 'updateMany' }]);
+    const rows = await refetchNestedRecords(client, [{ by: 'primaryKey', where: { id: 'row-1' } }]);
 
     expect(client.findFirst).toHaveBeenCalledWith({ where: { id: 'row-1' } });
     expect(client.findUnique).not.toHaveBeenCalled();
@@ -151,8 +151,8 @@ describe('refetchNestedRecords', () => {
 
   it('yields nothing for a row not found after the operation', async () => {
     const rows = await refetchNestedRecords(clientStoring(), [
-      { where: { id: 'gone' }, operation: 'update' },
-      { where: { id: 'row-1' }, operation: 'upsert' },
+      { by: 'uniqueWhere', where: { id: 'gone' } },
+      { by: 'uniqueWhere', where: { id: 'row-1' } },
     ]);
 
     expect(rows).toEqual([{ id: 'row-1', key: 'k-1' }]);
@@ -167,8 +167,6 @@ describe('refetchNestedRecords', () => {
       findFirst: vi.fn(),
     };
 
-    await expect(refetchNestedRecords(client, [{ where: { id: 'row-1' }, operation: 'update' }])).rejects.toBe(
-      readError,
-    );
+    await expect(refetchNestedRecords(client, [{ by: 'uniqueWhere', where: { id: 'row-1' } }])).rejects.toBe(readError);
   });
 });

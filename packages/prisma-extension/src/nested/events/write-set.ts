@@ -14,6 +14,7 @@
 import type { BeforeState } from '@kuruwic/db-audit-core';
 import {
   detectNestedOperations,
+  getPrimaryKeyConstraint,
   isNestedBatchKeyword,
   type NestedBatchTargets,
   type NestedOperationInfo,
@@ -27,9 +28,20 @@ import { preFetchedStateAt } from '../pre-fetch/pre-fetch-result-store.js';
 
 type Row = Record<string, unknown>;
 
-export interface NestedWriteTarget {
-  /** The unique WHERE the operation names the row by, or the row's primary key when a filter matched it */
+/**
+ * How a row a nested operation writes is found in the result, or read again, after the write:
+ * by its primary key when it was read ahead of the operation (its pre-fetched row, or a batch
+ * filter's match), since the write may change the columns the operation names it by; otherwise
+ * by the unique WHERE the operation names it by.
+ */
+export interface NestedRowLocator {
+  readonly by: 'primaryKey' | 'uniqueWhere';
+  /** The primary-key fields and values, or the unique WHERE */
   readonly where: Row;
+}
+
+export interface NestedWriteTarget {
+  readonly locator: NestedRowLocator;
   readonly operation: NestedOperationInfo;
   /**
    * The row's pre-fetched before state: none when it did not exist under the parent or was not
@@ -91,12 +103,41 @@ export const insertsRows = (operation: NestedOperationInfo, targets: readonly Ne
   INSERTING_KEYWORDS.has(operation.operation) ||
   (INSERTING_WHEN_TARGET_MISSING.has(operation.operation) && targets.some((target) => target.before.kind === 'none'));
 
-const targetWheresOf = (operation: NestedOperationInfo, batchTargets: NestedBatchTargets): Row[] =>
-  isNestedBatchKeyword(operation.operation)
-    ? [...(batchTargets.get(operation.path)?.get(operation.operation)?.values() ?? [])]
-    : targetWhereClauses(operation.operation, operation.data);
+/** The primary key of `row`, or undefined when the model has none or the row lacks one of its fields */
+const primaryKeyOf = (row: Row, pkFields: readonly string[] | undefined): Row | undefined => {
+  if (!pkFields || pkFields.some((field) => row[field] === undefined || row[field] === null)) {
+    return undefined;
+  }
+  return Object.fromEntries(pkFields.map((field) => [field, row[field]]));
+};
+
+const targetsOf = (
+  operation: NestedOperationInfo,
+  nestedPreFetchResults: NestedPreFetchResults,
+  batchTargets: NestedBatchTargets,
+  pkFields: readonly string[] | undefined,
+): NestedWriteTarget[] => {
+  if (isNestedBatchKeyword(operation.operation)) {
+    const matched = batchTargets.get(operation.path)?.get(operation.operation)?.values() ?? [];
+    return Array.from(matched, (key) => ({
+      locator: { by: 'primaryKey', where: key },
+      operation,
+      before: preFetchedStateAt(nestedPreFetchResults, operation.path, key),
+    }));
+  }
+  return targetWhereClauses(operation.operation, operation.data).map((where) => {
+    const before = preFetchedStateAt(nestedPreFetchResults, operation.path, where);
+    const key = before.kind === 'captured' ? primaryKeyOf(before.row, pkFields) : undefined;
+    return {
+      locator: key ? { by: 'primaryKey', where: key } : { by: 'uniqueWhere', where },
+      operation,
+      before,
+    };
+  });
+};
 
 export const buildNestedWriteSets = (
+  schemaMetadata: SchemaMetadata,
   operations: readonly NestedOperationInfo[],
   nestedPreFetchResults: NestedPreFetchResults,
   batchTargets: NestedBatchTargets,
@@ -110,11 +151,8 @@ export const buildNestedWriteSets = (
     const writeSet = writeSets.get(operation.path) ?? { targets: [], createsPending: false };
     writeSets.set(operation.path, writeSet);
 
-    const targets = targetWheresOf(operation, batchTargets).map((where) => ({
-      where,
-      operation,
-      before: preFetchedStateAt(nestedPreFetchResults, operation.path, where),
-    }));
+    const pkFields = getPrimaryKeyConstraint(schemaMetadata, operation.relatedModel)?.fields;
+    const targets = targetsOf(operation, nestedPreFetchResults, batchTargets, pkFields);
     writeSet.targets.push(...targets);
     writeSet.createsPending = writeSet.createsPending || insertsRows(operation, targets);
   }

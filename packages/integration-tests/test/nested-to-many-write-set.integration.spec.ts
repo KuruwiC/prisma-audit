@@ -151,6 +151,67 @@ describe('nested to-many write set', () => {
     });
   });
 
+  describe('a nested update that changes a column its own WHERE names', () => {
+    // After the write the row does not match the WHERE the caller named it by, so it is found
+    // again by the primary key read ahead of the operation.
+
+    it('audits a join row whose compound unique key the update changes', async () => {
+      const { p1 } = await seedUserWithTwoPosts('where-column-compound@example.com');
+      const t1 = await clients.basePrisma.tag.create({ data: { name: 'where-column-t1' } });
+      const t2 = await clients.basePrisma.tag.create({ data: { name: 'where-column-t2' } });
+      const postTag = await clients.basePrisma.postTag.create({ data: { postId: p1.id, tagId: t1.id } });
+      const sibling = await clients.basePrisma.tag.create({ data: { name: 'where-column-sibling' } });
+      await clients.basePrisma.postTag.create({ data: { postId: p1.id, tagId: sibling.id } });
+
+      await asActor(() =>
+        clients.prisma.post.update({
+          where: { id: p1.id },
+          data: {
+            postTags: {
+              update: {
+                where: { postId_tagId: { postId: p1.id, tagId: t1.id } },
+                data: { tag: { connect: { id: t2.id } } },
+              },
+            },
+          },
+        }),
+      );
+
+      const logs = await clients.basePrisma.auditLog.findMany({
+        where: { entityType: 'PostTag', aggregateType: 'PostTag' },
+      });
+      expect(logs.map((log) => ({ entityId: log.entityId, action: log.action }))).toEqual([
+        { entityId: postTag.id, action: 'update' },
+      ]);
+      expect(logs[0]?.before).toMatchObject({ tagId: t1.id });
+      expect(logs[0]?.after).toMatchObject({ tagId: t2.id });
+    });
+
+    it('audits a row whose extended unique WHERE filters on a column the update changes', async () => {
+      const { user, p1 } = await seedUserWithTwoPosts('where-column-extended@example.com');
+      const [comment] = await clients.basePrisma.comment.findMany({ where: { postId: p1.id } });
+      if (!comment) throw new Error('seed has no comment');
+
+      await asActor(() =>
+        clients.prisma.post.update({
+          where: { id: p1.id },
+          data: {
+            comments: {
+              update: { where: { id: comment.id, content: 'c-p1' }, data: { content: 'edited' } },
+              create: { content: 'new', authorId: user.id },
+            },
+          },
+        }),
+      );
+
+      const events = await eventsOf('Comment');
+      expect(events.filter((event) => event.action === 'update')).toEqual([
+        expect.objectContaining({ entityId: comment.id, after: expect.objectContaining({ content: 'edited' }) }),
+      ]);
+      expect(events.filter((event) => event.action === 'create').map((event) => event.after?.content)).toEqual(['new']);
+    });
+  });
+
   it('a nested update audits the targeted post only', async () => {
     const { user, p1 } = await seedUserWithTwoPosts('nested-update@example.com');
 

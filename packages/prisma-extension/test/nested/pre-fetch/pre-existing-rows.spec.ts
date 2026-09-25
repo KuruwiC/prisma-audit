@@ -90,7 +90,7 @@ const snapshot = (
       modelName: 'User',
       topLevelWhere: args.where,
       nestedOperations,
-      writeSets: buildNestedWriteSets(nestedOperations, nestedPreFetchResults, new Map()),
+      writeSets: buildNestedWriteSets(schemaMetadata, nestedOperations, nestedPreFetchResults, new Map()),
       nestedPreFetchResults,
     },
     { Prisma, schemaMetadata, getNestedOperationConfig },

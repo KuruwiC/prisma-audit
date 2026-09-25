@@ -210,7 +210,11 @@ describe('collectDeleteManyRecords', () => {
 
     expect(
       collectDeleteManyRecords(deleteManyOp, [
-        { where: { id: 'post-1' }, operation: deleteManyOp, before: { kind: 'captured', row: before } },
+        {
+          locator: { by: 'primaryKey', where: { id: 'post-1' } },
+          operation: deleteManyOp,
+          before: { kind: 'captured', row: before },
+        },
       ]),
     ).toEqual([
       { entity: before, action: 'delete', beforeState: { kind: 'captured', row: before }, relatedModel: 'Post' },
@@ -220,7 +224,7 @@ describe('collectDeleteManyRecords', () => {
   it('collects the primary key alone when the before state was not read', () => {
     expect(
       collectDeleteManyRecords(deleteManyOp, [
-        { where: { id: 'post-1' }, operation: deleteManyOp, before: { kind: 'none' } },
+        { locator: { by: 'primaryKey', where: { id: 'post-1' } }, operation: deleteManyOp, before: { kind: 'none' } },
       ]),
     ).toEqual([{ entity: { id: 'post-1' }, action: 'delete', beforeState: { kind: 'none' }, relatedModel: 'Post' }]);
   });
@@ -228,7 +232,7 @@ describe('collectDeleteManyRecords', () => {
   it('leaves the rows of the other operations at the path to them', () => {
     expect(
       collectDeleteManyRecords(deleteManyOp, [
-        { where: { id: 'post-9' }, operation: deleteOp, before: { kind: 'none' } },
+        { locator: { by: 'uniqueWhere', where: { id: 'post-9' } }, operation: deleteOp, before: { kind: 'none' } },
       ]),
     ).toEqual([]);
   });

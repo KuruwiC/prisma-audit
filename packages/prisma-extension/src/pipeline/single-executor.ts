@@ -62,7 +62,7 @@ export const createSingleExecutor = (deps: SingleExecutorDependencies): Operatio
       executedUpsertBranch(action, beforeState),
       nestedPreFetchResults,
     );
-    const writeSets = buildNestedWriteSets(nestedOperations, nestedPreFetchResults, batchTargets);
+    const writeSets = buildNestedWriteSets(schemaMetadata, nestedOperations, nestedPreFetchResults, batchTargets);
     // A top-level row the operation creates has no children yet, so nothing is snapshotted under it.
     const preExistingRows = targetRowExistsBefore(action, beforeState)
       ? await snapshotPreExistingRows(

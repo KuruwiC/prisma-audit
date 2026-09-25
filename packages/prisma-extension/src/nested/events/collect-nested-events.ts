@@ -7,8 +7,8 @@
  * operation wrote.
  *
  * A to-many relation is returned whole, so a row there is an operation's only when the write set
- * says so: a row a target names belongs to that operation (a unique WHERE, or the primary key of
- * a row an `updateMany` filter matched when read ahead of the operation); a row that matches no
+ * says so: a row a target locates belongs to that operation (by the primary key of the row read
+ * ahead of the operation, or else by its unique WHERE; see `NestedRowLocator`); a row that matches no
  * target and did not exist under the parent before the operation was inserted, and belongs to
  * the first operation at the path that inserts rows; any other row is a sibling and yields
  * nothing. A `deleteMany` yields one delete event per row its filter matched in that read. A
@@ -120,8 +120,10 @@ const resolveRow = (
   };
 };
 
+const isLocatedBy = (row: Row, target: NestedWriteTarget): boolean => matchesUniqueWhere(row, target.locator.where);
+
 const targetOf = (row: Row, targets: readonly NestedWriteTarget[]): NestedWriteTarget | undefined =>
-  targets.find((target) => matchesUniqueWhere(row, target.where));
+  targets.find((target) => isLocatedBy(row, target));
 
 /** The rows returned at one path and, shared by the operations at the path, the rows already attributed */
 interface PathAttribution {
@@ -267,9 +269,9 @@ const updatesExistingRow = (target: NestedWriteTarget): boolean => {
 /**
  * The rows returned at every nested path: from the result, plus a re-fetch of each row an
  * operation updated at a to-many path that the rows the result returned there do not hold. The
- * caller's own `include` or `select` on a written relation keeps its filter, so the result may
- * hold the siblings of an updated row but not the row itself; the rows it does hold are used as
- * returned.
+ * caller's own `include` or `select` on a written relation keeps its filter, and an update may
+ * change the columns its own WHERE names, so the result may hold the siblings of an updated row
+ * but not the row itself; the rows it does hold are used as returned.
  */
 const returnedRows = async (
   input: NestedEventCollectionInput,
@@ -282,7 +284,7 @@ const returnedRows = async (
   for (const [path, writeSet] of writeSets) {
     const rowsAtPath = rows.get(path) ?? [];
     const absent = writeSet.targets.filter(
-      (target) => updatesExistingRow(target) && !rowsAtPath.some((row) => matchesUniqueWhere(row, target.where)),
+      (target) => updatesExistingRow(target) && !rowsAtPath.some((row) => isLocatedBy(row, target)),
     );
     const relatedModel = absent[0]?.operation.relatedModel;
     if (relatedModel === undefined || !pkConstraints.get(path)) {
@@ -294,7 +296,7 @@ const returnedRows = async (
     }
     const refetched = await refetchNestedRecords(
       modelClient,
-      absent.map((target) => ({ where: target.where, operation: target.operation.operation })),
+      absent.map((target) => target.locator),
     );
     rows.set(path, [...rowsAtPath, ...refetched]);
   }

@@ -82,7 +82,7 @@ const single = (overrides: SingleCase = {}): SingleOperationOutcome => {
   return {
     ...base,
     nestedOperations,
-    writeSets: buildNestedWriteSets(nestedOperations, base.nestedPreFetchResults, batchTargets),
+    writeSets: buildNestedWriteSets(schemaMetadata, nestedOperations, base.nestedPreFetchResults, batchTargets),
   };
 };
 
@@ -500,7 +500,7 @@ describe('collectSingleOperationEvents', () => {
         return { rereadClient, post };
       };
 
-      it('reads the row again by the WHERE of the update and attributes it with its before state', async () => {
+      it('reads the row again by the primary key of its pre-fetched row and attributes it with its before state', async () => {
         const { rereadClient, post } = clientStoring([p1, p2]);
 
         const events = await postEvents({ update: { where: { id: 'p1' }, data: { title: 'A' } } }, [p2], {
@@ -508,8 +508,9 @@ describe('collectSingleOperationEvents', () => {
           client: rereadClient,
         });
 
-        expect(post.findUnique).toHaveBeenCalledTimes(1);
-        expect(post.findUnique).toHaveBeenCalledWith({ where: { id: 'p1' } });
+        expect(post.findFirst).toHaveBeenCalledTimes(1);
+        expect(post.findFirst).toHaveBeenCalledWith({ where: { id: 'p1' } });
+        expect(post.findUnique).not.toHaveBeenCalled();
         expect(events).toEqual([
           {
             model: 'Post',

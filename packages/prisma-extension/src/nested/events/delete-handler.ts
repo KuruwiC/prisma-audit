@@ -164,7 +164,7 @@ export const collectDeleteManyRecords = (
   targets
     .filter((target) => target.operation === nestedOp)
     .map((target) => ({
-      entity: target.before.kind === 'captured' ? target.before.row : target.where,
+      entity: target.before.kind === 'captured' ? target.before.row : target.locator.where,
       action: AUDIT_ACTION.DELETE,
       beforeState: target.before,
       relatedModel: nestedOp.relatedModel,
