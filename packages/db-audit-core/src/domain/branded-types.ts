@@ -40,12 +40,10 @@ export class IdValidationError extends Error {
   }
 }
 
-/** @internal */
 const isNonEmptyString = (value: string): boolean => {
   return value.trim() !== '';
 };
 
-/** @internal */
 const validateNonEmptyString = (id: string, idType: string): void => {
   if (!id || !isNonEmptyString(id)) {
     throw new IdValidationError(idType, id, `${idType} cannot be empty or whitespace-only`);
@@ -55,8 +53,6 @@ const validateNonEmptyString = (id: string, idType: string): void => {
 /**
  * Creates a validated ActorId
  *
- * @param id - String identifier to wrap
- * @returns Branded ActorId
  * @throws {IdValidationError} If id is empty or contains only whitespace
  *
  * @example
@@ -97,9 +93,6 @@ export const isAggregateId = (value: unknown): value is AggregateId => {
 
 /**
  * Unwraps a branded ID to its underlying string value
- *
- * @param id - Branded ID to unwrap
- * @returns Underlying string value
  *
  * @example
  * ```typescript

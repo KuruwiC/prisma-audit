@@ -23,18 +23,6 @@
  * - `autoincrement()`: Requires database INSERT
  * - `dbgenerated()`: Requires database trigger/function
  *
- * @example
- * ```typescript
- * const dataWithIds = ensureIds(schemaMetadata, 'User', [
- *   { email: 'user1@example.com' },
- *   { email: 'user2@example.com' },
- * ]);
- * // => [
- * //   { id: 'cm4x...', email: 'user1@example.com' },
- * //   { id: 'cm4y...', email: 'user2@example.com' },
- * // ]
- * ```
- *
  * @module utils/id-generation
  */
 
@@ -46,9 +34,6 @@ import { getPrimaryKeyConstraint } from '../grammar/nested-operations.js';
 import type { SchemaMetadata, UniqueConstraint } from '../schema/types.js';
 import { createSchemaMetadataFromDMMF, type PrismaWithDMMF } from './schema-metadata.js';
 
-/**
- * ID generator function type
- */
 export type IdGenerator = () => string;
 
 /**
@@ -112,9 +97,6 @@ export const getIdGenerator = (defaultExpr: string): IdGenerator | undefined => 
   return resolveIdGenerator(match[1], args);
 };
 
-/**
- * ID field inspection result
- */
 export interface IdFieldInfo {
   name: string;
   hasDefault: boolean;
@@ -122,9 +104,6 @@ export interface IdFieldInfo {
   defaultExpr?: string;
 }
 
-/**
- * Get ID field information from schema metadata
- */
 export const getIdFieldInfo = (
   schemaMetadata: SchemaMetadata,
   modelName: string,
@@ -293,9 +272,6 @@ export const extractEntityIdentity = (record: Record<string, unknown>, pkFields:
   );
 };
 
-/**
- * Build a Map from entities keyed by their primary key.
- */
 export const buildEntityMap = (
   entities: ReadonlyArray<Record<string, unknown>>,
   pkFields: string[],
@@ -311,7 +287,7 @@ export const buildEntityMap = (
  * Build a Prisma WHERE clause to re-fetch entities by their primary keys.
  *
  * - Single PK: `{ id: { in: [...] } }`
- * - Composite PK: `{ OR: [{ pk1: v1, pk2: v2 }, ...] }` (chunked for large sets)
+ * - Composite PK: `{ OR: [{ pk1: v1, pk2: v2 }, ...] }`
  *
  * Returns null for empty entity lists to signal callers to skip the query.
  */
@@ -328,7 +304,7 @@ const buildPKWhereClause = (
     return { [field]: { in: entities.map((e) => e[field]) } };
   }
 
-  // Composite PK: build OR conditions, chunked to avoid oversized queries
+  // Composite PK: one OR branch per entity; `findManyByPKs` chunks the list so the query stays bounded
   const conditions = entities.map((entity) => {
     const condition: Record<string, unknown> = {};
     for (const field of pkFields) {
@@ -345,10 +321,8 @@ type FindManyDelegate = {
 };
 
 /**
- * Fetch entities by primary keys with automatic chunking.
- *
- * Splits entities into batches of PK_CHUNK_SIZE, runs parallel findMany
- * calls, and merges results. This prevents exceeding database parameter limits.
+ * Fetch entities by primary keys in parallel batches of PK_CHUNK_SIZE, so that a single query
+ * never exceeds database parameter limits.
  */
 export const findManyByPKs = async (
   delegate: FindManyDelegate,

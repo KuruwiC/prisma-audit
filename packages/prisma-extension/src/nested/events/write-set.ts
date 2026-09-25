@@ -26,7 +26,6 @@ import { preFetchedRowAt } from '../pre-fetch/pre-fetch-result-store.js';
 
 type Row = Record<string, unknown>;
 
-/** A row a nested operation writes: named by its unique WHERE, or matched by a batch keyword's filter */
 export interface NestedWriteTarget {
   /** The unique WHERE the operation names the row by, or the row's primary key when a filter matched it */
   readonly where: Row;
@@ -35,7 +34,6 @@ export interface NestedWriteTarget {
   readonly before: Row | undefined;
 }
 
-/** The rows the nested operations at one to-many path write */
 export interface NestedWriteSet {
   readonly targets: readonly NestedWriteTarget[];
   /** An operation at the path inserts rows whose identity is unknown before it runs */
@@ -65,21 +63,15 @@ export const detectExecutedNestedOperations = (
 const INSERTING_KEYWORDS: ReadonlySet<NestedOperationKeyword> = new Set(['create', 'createMany']);
 const INSERTING_WHEN_TARGET_MISSING: ReadonlySet<NestedOperationKeyword> = new Set(['upsert', 'connectOrCreate']);
 
-/**
- * Whether `operation` inserts rows: a create always does; an upsert or connectOrCreate does for
- * each target that did not exist before the operation.
- */
 export const insertsRows = (operation: NestedOperationInfo, targets: readonly NestedWriteTarget[]): boolean =>
   INSERTING_KEYWORDS.has(operation.operation) ||
   (INSERTING_WHEN_TARGET_MISSING.has(operation.operation) && targets.some((target) => target.before === undefined));
 
-/** The unique WHEREs `operation` names rows by, or the primary keys of the rows its filter matched */
 const targetWheresOf = (operation: NestedOperationInfo, batchTargets: NestedBatchTargets): Row[] =>
   isNestedBatchKeyword(operation.operation)
     ? [...(batchTargets.get(operation.path)?.get(operation.operation)?.values() ?? [])]
     : targetWhereClauses(operation.operation, operation.data);
 
-/** Build the write set of every to-many path the executed nested operations write */
 export const buildNestedWriteSets = (
   operations: readonly NestedOperationInfo[],
   nestedPreFetchResults: NestedPreFetchResults,

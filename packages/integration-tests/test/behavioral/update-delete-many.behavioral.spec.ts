@@ -18,7 +18,6 @@ describe('updateMany / deleteMany (Behavioral)', () => {
   describe('updateMany', () => {
     it('should create audit logs for each updated record', async () => {
       const h = getHarness();
-      // Create test data with unique emails to identify them
       const user1 = await h.runWithContext(actor, () =>
         h.createOne('User', { email: 'um1@example.com', name: 'UM1', password: 'secret' }),
       );

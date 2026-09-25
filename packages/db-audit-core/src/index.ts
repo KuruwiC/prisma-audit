@@ -1,9 +1,7 @@
 /** @kuruwic/db-audit-core - ORM-independent core library for audit logging */
 
-// Aggregate Config
 export type { AggregateConfigService } from './aggregate/config.js';
 export { createAggregateConfig } from './aggregate/config.js';
-// Aggregate Helpers
 export {
   batchResolveIds,
   defineAggregateMapping,
@@ -15,7 +13,6 @@ export {
   to,
   validateAggregateMapping,
 } from './aggregate/helpers.js';
-// Aggregate Types
 export type {
   AggregateMapping,
   AggregateRoot,
@@ -23,22 +20,15 @@ export type {
   LoggableEntity,
   ResolvedId,
 } from './aggregate/types.js';
-// Compose
 export type { ComposeAmbient, ComposeConfig, EntityComposeConfig } from './compose/index.js';
 export { compose } from './compose/index.js';
-// Config Types
 export type { GlobalContextEnricherConfig, SerializationConfig } from './config.types.js';
-// Constants
 export type { EntityIdentityKey } from './constants.js';
 export { UNRESOLVED_ENTITY_ID } from './constants.js';
-// Context Provider
 export { createAsyncLocalStorageProvider } from './context-provider.js';
-// Dispatch
 export type { DispatchScope } from './dispatch/index.js';
 export { dispatch } from './dispatch/index.js';
-// Domain - Audit Log Types
 export type { AuditLogData, AuditLogInput } from './domain/audit-log-types.js';
-// Domain - Branded Types
 export type { ActorId, AggregateId, EntityId } from './domain/branded-types.js';
 export {
   createActorId,
@@ -50,7 +40,6 @@ export {
   isEntityId,
   unwrapId,
 } from './domain/branded-types.js';
-// Domain - Mutation Event
 export type {
   AuditRecord,
   MutationAction,
@@ -59,31 +48,20 @@ export type {
   ResolvedEvent,
   WritePlan,
 } from './domain/mutation-event.js';
-// Domain - Smart Constructors
 export type { Result, ValidationError } from './domain/smart-constructors.js';
 export { createAuditLogData } from './domain/smart-constructors.js';
-// Domain - Write
 export type { WriteExecutor, WriteFn } from './domain/write.js';
-// Enrichment - Types
 export type { ProjectionEnrichmentMeta } from './enrichment/types.js';
-// Global Singleton
-//
-// Exported because @kuruwic/prisma-audit imports it across the package boundary;
+// Exported because the adapter package imports it across the package boundary;
 // end users are not meant to call it directly.
 export { getGlobalSingleton } from './global-singleton.js';
-// Policy
 export type { PolicyConfig, WritePolicy } from './policy/index.js';
 export { policy } from './policy/index.js';
-// Resolve
 export type { EntityResolveConfig, ResolveConfig } from './resolve/index.js';
 export { resolve } from './resolve/index.js';
-// Types
 export type { AuditActor, AuditContext, AuditContextProvider } from './types.js';
-// Utils - Error Handler
 export type { ErrorHandler, ErrorStrategy } from './utils/error-handler.js';
 export { createErrorHandler } from './utils/error-handler.js';
-// Utils - Redaction
 export type { RedactConfig } from './utils/redaction.js';
-// Utils - Serialization
 export type { ValueSerializer } from './utils/serialization.js';
 export { UNHANDLED } from './utils/serialization.js';

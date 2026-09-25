@@ -137,7 +137,7 @@ describe('createMockAuditContext', () => {
 
       mock.setContext(context);
 
-      // withActor is async; await ensures assertions run before the context is restored.
+      // withActor is async; await it so the outer assertion runs after the context is restored.
       await mock.provider.withActor({ category: 'system', type: 'Admin', id: 'admin-456' }, () => {
         const ctx = mock.provider.getContext();
         expect(ctx?.actor).toEqual({ category: 'system', type: 'Admin', id: 'admin-456' });
@@ -193,7 +193,6 @@ describe('createMockAuditContext', () => {
 
       await mock.provider.withActor(actor2, () => lazyOp() as unknown as Promise<unknown>);
 
-      // The lazy op must have seen actor2 because await fn() runs inside the override.
       expect(seen).toEqual(['actor-2']);
     });
   });

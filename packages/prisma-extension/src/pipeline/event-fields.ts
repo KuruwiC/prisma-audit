@@ -12,7 +12,6 @@ type Row = Record<string, unknown>;
 /** Identity of a row that does not carry every primary-key field (a `select` that omits one) or whose model has no primary key */
 const UNKNOWN_IDENTITY = '';
 
-/** Serialized primary key of `row`, or {@link UNKNOWN_IDENTITY} when it cannot be derived */
 export const identityOf = (row: Row, pkFields: readonly string[] | undefined): string => {
   if (pkFields === undefined) {
     return UNKNOWN_IDENTITY;
@@ -21,10 +20,7 @@ export const identityOf = (row: Row, pkFields: readonly string[] | undefined): s
   return identity === UNRESOLVED_ENTITY_ID ? UNKNOWN_IDENTITY : identity;
 };
 
-/**
- * Action stored in the audit row: an upsert resolves to `update` when the target row existed
- * (a before state was captured) and to `create` otherwise; a batch keyword to its singular action.
- */
+/** An upsert resolves to `update` when the target row existed (its before state was captured), else `create` */
 export const toMutationAction = (action: AuditAction, before: Row | null | undefined): MutationAction => {
   switch (action) {
     case AUDIT_ACTION.CREATE:

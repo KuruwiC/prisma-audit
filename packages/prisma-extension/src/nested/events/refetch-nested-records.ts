@@ -1,17 +1,13 @@
-/**
- * Post-operation re-fetch of nested rows
- */
+/** Post-operation re-fetch of nested rows */
 
 import { isNestedBatchKeyword, type NestedOperationKeyword } from '../../grammar/nested-operations.js';
 import { nestedLog } from '../../utils/debug.js';
 
-/** Model delegate reads a re-fetch goes through */
 export interface RefetchModelClient {
   findUnique(args: { where: Record<string, unknown> }): Promise<Record<string, unknown> | null>;
   findFirst(args: { where: Record<string, unknown> }): Promise<Record<string, unknown> | null>;
 }
 
-/** A row a nested operation wrote, by the WHERE the operation named it with */
 export interface RefetchTarget {
   /** A unique WHERE, or for a nested batch keyword the primary key of a row its filter matched */
   readonly where: Record<string, unknown>;
@@ -30,12 +26,6 @@ export interface RefetchTarget {
  *
  * A failed read rejects with its error: the rows it would have returned cannot be left out of
  * the audit.
- *
- * @example
- * ```typescript
- * const rows = await refetchNestedRecords(postClient, [{ where: { id: 'post-1' }, operation: 'update' }]);
- * // Returns: [{ id: 'post-1', title: 'Updated', ... }]
- * ```
  */
 export const refetchNestedRecords = async (
   client: RefetchModelClient,

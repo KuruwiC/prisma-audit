@@ -3,8 +3,8 @@
  *
  * The one path every audited write takes, single or batch: the write policy decides whether
  * the audit rows join the operation's transaction, the execution scope opens that transaction
- * when needed, the executor prepares, runs and collects the operation, its records are
- * produced, dispatched into a write plan and written, and the caller receives the result.
+ * when needed, the executor's records are dispatched into a write plan and written, and the
+ * caller receives the result.
  */
 
 import type { AuditContext, AuditContextProvider, PolicyConfig } from '@kuruwic/db-audit-core';
@@ -20,7 +20,6 @@ import type { AuditedOperation, OperationExecutor, OperationOutcome } from './ex
 import type { RecordProducer } from './produce-records.js';
 import type { AuditLogWriter } from './write-audit-logs.js';
 
-/** A write operation `$allOperations` intercepted, on a known model */
 export interface InterceptedOperation {
   readonly model: string;
   readonly action: AuditAction;

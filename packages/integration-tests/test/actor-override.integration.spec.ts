@@ -38,7 +38,6 @@ describe('Actor Override Inside Transactions (Integration)', () => {
     await cleanDatabase(context.prisma);
   });
 
-  // Actors used across scenarios
   const actor1: AuditContext = {
     actor: { category: 'model', type: 'User', id: 'actor-1', name: 'Primary Actor' },
     request: { path: '/api/tx', method: 'POST', traceId: 'trace-abc' },
@@ -189,7 +188,6 @@ describe('Actor Override Inside Transactions (Integration)', () => {
               }),
             );
 
-            // Force rollback
             throw new Error('Intentional rollback');
           });
         }),

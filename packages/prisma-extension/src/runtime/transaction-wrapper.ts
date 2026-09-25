@@ -1,36 +1,25 @@
 /**
  * Transaction Wrapper Module
  *
- * Provides conditional transaction management for lifecycle operations.
- * Handles transaction wrapping when necessary while avoiding double-wrapping.
+ * Opens an implicit transaction around an audited operation when one is required and none is
+ * active.
  */
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../internal-types.js';
 import { currentScope, openImplicitTransaction } from './scope.js';
 
-/**
- * Transaction wrapper configuration.
- */
 export interface TransactionWrapperConfig {
-  /** Whether transaction wrapping should be applied */
   shouldWrap: boolean;
-  /** Current audit context */
   context: AuditContext;
-  /** Base Prisma client for creating transactions */
   basePrisma: PrismaClientWithDynamicAccess;
 }
 
 /**
- * Wraps operation execution in a transaction when necessary.
- *
- * Conditionally wraps operations in transactions based on configuration, avoiding
- * double-wrapping when a transaction already exists.
- *
- * @template T - Return type of the operation
- * @param config - Transaction wrapper configuration
- * @param provider - Audit context provider with runAsync method
- * @returns Higher-order function that executes operation with optional transaction wrapping
+ * Wraps operation execution in a transaction when necessary: opens an implicit transaction when
+ * `shouldWrap` is true and the runtime scope holds no transaction, the caller's or an implicit
+ * one; otherwise runs `operationFn` directly, on the client of the active transaction or the
+ * base client outside any.
  *
  * @example
  * ```typescript
@@ -48,12 +37,6 @@ export interface TransactionWrapperConfig {
  *   return await txClient.user.create({ data: { ... } });
  * });
  * ```
- *
- * @remarks
- * Opens an implicit transaction if `shouldWrap` is true AND the runtime scope holds no
- * transaction AND the flow is not already inside an implicit one. Otherwise executes directly.
- * `operationFn` receives the app-owned audit context and the client of the active transaction
- * (the base client outside any).
  */
 export const withOptionalTransaction = <T>(
   config: TransactionWrapperConfig,

@@ -9,10 +9,8 @@
  * the model name with the first letter lowercased.
  */
 
-/** Shape every Prisma model delegate satisfies */
 type ModelDelegate = { findUnique: (args: never) => unknown };
 
-/** Delegate property names of a client: `'user' | 'post' | ...` */
 type PrismaDelegateNames<TClient> = {
   [K in keyof TClient]: TClient[K] extends ModelDelegate ? (K extends string ? K : never) : never;
 }[keyof TClient];

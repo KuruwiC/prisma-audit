@@ -36,7 +36,6 @@ export type PrismaClientLike = {
  *   with it, bypassing the audit extension.
  * @param options - Audit configuration, including the `Prisma` namespace of the generated
  *   client `prisma` comes from
- * @returns Extended Prisma client with `$audit` namespace
  *
  * @example Basic configuration
  * ```typescript

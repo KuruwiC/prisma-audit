@@ -82,7 +82,7 @@ const fetchPosts = async (db: PrismaClient, postIds: Set<string>) => {
   return postMap;
 };
 
-// Profiles fetched by id; their users are added to userIds for a later fetchUsers
+// Adds each profile's user to userIds for the fetchUsers that follows
 const fetchProfiles = async (db: PrismaClient, profileIds: Set<string>, userIds: Set<string>) => {
   const profileMap = new Map<string, { userId: string }>();
 
@@ -176,8 +176,6 @@ const enrichPostTagContext = async (postTags: PostTagRow[], db: PrismaClient) =>
   });
 };
 
-// Ids an avatar row needs resolved: the profile when it is not included, else the user
-// when the profile is included without its user
 const collectAvatarRelationIds = (avatar: AvatarRow, profileIds: Set<string>, userIds: Set<string>) => {
   if (avatar.profile) {
     if (!avatar.profile.user) userIds.add(avatar.profile.userId);

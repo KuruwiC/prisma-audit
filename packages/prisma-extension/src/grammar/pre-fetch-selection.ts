@@ -25,10 +25,6 @@ export type GetOperationConfig = (modelName: string, operation: string) => Opera
  * audit needs at least the primary keys of those rows. Whether that read also carries the rows'
  * before-state follows the configuration of `update` (for `updateMany`) or `delete` (for
  * `deleteMany`) and is decided by the fetcher.
- *
- * @param operations - Array of detected nested operations
- * @param getConfig - Function to retrieve operation configuration
- * @returns Array of operations that require pre-fetching
  */
 export const filterOperationsToPreFetch = (
   operations: readonly NestedOperationInfo[],
@@ -62,11 +58,8 @@ export const filterOperationsToPreFetch = (
 };
 
 /**
- * Sorts operations by path depth (shallow to deep).
- * Ensures parent records are processed before child records in deeply nested operations.
- *
- * @param operations - Operations to sort
- * @returns Sorted operations (shallow first)
+ * Sorts operations by path depth (shallow to deep), so parent records are processed before child
+ * records in deeply nested operations.
  */
 export const sortByPathDepth = (operations: readonly NestedOperationInfo[]): NestedOperationInfo[] => {
   return [...operations].sort((a, b) => {

@@ -13,7 +13,6 @@ import type { AuditLogData } from '../types.js';
 import type { ExecutionScope } from './execution-scope.js';
 import type { RecordProducer } from './produce-records.js';
 
-/** The intercepted operation as an executor runs it */
 export interface AuditedOperation {
   readonly model: string;
   readonly action: AuditAction;
@@ -31,7 +30,6 @@ export interface OperationSteps<TPrepared, TExecuted> {
   readonly prepare: (operation: AuditedOperation, scope: ExecutionScope) => Promise<TPrepared>;
   /** The caller's own mutation, run through `operation.execute` so its failure propagates untouched */
   readonly execute: (operation: AuditedOperation, scope: ExecutionScope, prepared: TPrepared) => Promise<TExecuted>;
-  /** One mutation event per row the operation wrote */
   readonly collect: (
     operation: AuditedOperation,
     scope: ExecutionScope,

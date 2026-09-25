@@ -11,13 +11,10 @@ import type { AggregateMapping } from '@kuruwic/db-audit-core';
 import type { SecurityConfig } from '../types.js';
 
 /**
- * Validates that fields don't appear in both excludeFields and redact.fields
+ * Validates that no field is both excluded (`diffing.excludeFields` or an entity's `excludeFields`)
+ * and redacted (`security.redact.fields`): a field is either untracked or masked, never both
  *
  * @throws {Error} If conflicting fields are found
- *
- * @remarks
- * Ensures fields are either excluded (not tracked) OR redacted (masked), never both.
- * Validates at global and model levels.
  */
 export const validateFieldConflicts = (
   excludeFields: string[],

@@ -6,10 +6,6 @@
  *
  * @example
  * ```typescript
- * // BigInt and Date serialization
- * serializeForAuditJson({ balance: 100n, createdAt: new Date('2025-01-01') });
- * // => { balance: '100', createdAt: '2025-01-01T00:00:00.000Z' }
- *
  * // Safe JSON.stringify for BigInt-containing objects
  * safeStringify({ id: 123n, name: 'test' });
  * // => '{"id":"123","name":"test"}'
@@ -90,7 +86,7 @@ const serializeObjectEntries = (
 };
 
 /**
- * Recursively serialize non-JSON-safe values for audit log JSONB storage
+ * Recursively serialize non-JSON-safe values for audit log JSON column storage
  *
  * Built-in conversions:
  * - `BigInt` → `string` (e.g. `123n` → `"123"`)

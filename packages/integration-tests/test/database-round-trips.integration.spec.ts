@@ -216,7 +216,7 @@ describe('Database Round-Trip Guard', () => {
     // 3. SELECT FROM posts      — the pre-read of the rows the nested updateMany filter matches
     //                             under this user (the filter plus the back-relation to the
     //                             parent), whole rows since fetchBeforeOperation defaults to
-    //                             true; these rows are the ones the updateMany is attributed
+    //                             true; the updateMany is attributed to these rows
     // 4. SELECT FROM users      — Prisma's own read of the parent row the nested write applies to
     // 5. SELECT id FROM posts   — Prisma's own resolution of the rows the nested updateMany
     //                             filter matches under that parent...

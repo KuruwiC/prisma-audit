@@ -353,11 +353,10 @@ describe('createAsyncLocalStorageProvider', () => {
       const outerCtx: AuditContext = { actor: outerActor };
 
       await provider.runAsync(outerCtx, async () => {
-        // Plain arrow — would have captured 'outer-user' with the old sync implementation.
+        // Plain arrow on purpose — without the async wrapper this would capture 'outer-user'.
         await provider.withActor(actor2, () => lazyOp() as unknown as Promise<unknown>);
       });
 
-      // The lazy op must have seen actor2, not the outer actor.
       expect(seen).toEqual(['actor-2']);
     });
 
@@ -375,8 +374,6 @@ describe('createAsyncLocalStorageProvider', () => {
       const actor2 = { category: 'system' as const, type: 'Admin', id: 'actor-2' };
       const ctx2: AuditContext = { actor: actor2 };
 
-      // runAsync with a plain arrow returning a lazy thenable — the async wrapper
-      // settles the value inside the overridden context scope.
       await provider.runAsync(ctx2, () => lazyOp() as unknown as Promise<unknown>);
 
       expect(seen).toEqual(['actor-2']);

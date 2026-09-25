@@ -123,14 +123,12 @@ describe('Custom Audit Log Table', () => {
         });
       });
 
-      // Verify: audit log was written to activities table
       const activities = await customContext.customPrisma.activity.findMany();
       expect(activities).toHaveLength(1);
       expect(activities[0].entityType).toBe('User');
       expect(activities[0].action).toBe('create');
       expect(activities[0].actorId).toBe('test-user-1');
 
-      // Verify: default auditLog table should be empty
       const auditLogs = await customContext.customPrisma.auditLog.findMany();
       expect(auditLogs).toHaveLength(0);
     });
@@ -146,7 +144,7 @@ describe('Custom Audit Log Table', () => {
         });
       });
 
-      // Clean activities after setup
+      // Drop the setup create's log so only the operation under test is counted
       await customContext.customPrisma.$executeRawUnsafe('TRUNCATE TABLE activities CASCADE');
 
       await customContext.provider.runAsync(testActor, async () => {
@@ -156,7 +154,6 @@ describe('Custom Audit Log Table', () => {
         });
       });
 
-      // Verify: update audit log was written to activities table
       const activities = await customContext.customPrisma.activity.findMany();
       expect(activities).toHaveLength(1);
       expect(activities[0].entityType).toBe('User');
@@ -175,7 +172,7 @@ describe('Custom Audit Log Table', () => {
         });
       });
 
-      // Clean activities after setup
+      // Drop the setup create's log so only the operation under test is counted
       await customContext.customPrisma.$executeRawUnsafe('TRUNCATE TABLE activities CASCADE');
 
       await customContext.provider.runAsync(testActor, async () => {
@@ -184,7 +181,6 @@ describe('Custom Audit Log Table', () => {
         });
       });
 
-      // Verify: delete audit log was written to activities table
       const activities = await customContext.customPrisma.activity.findMany();
       expect(activities).toHaveLength(1);
       expect(activities[0].entityType).toBe('User');
@@ -209,7 +205,6 @@ describe('Custom Audit Log Table', () => {
         });
       });
 
-      // Verify: all audit logs were written to activities table
       const activities = await customContext.customPrisma.activity.findMany();
       expect(activities.length).toBeGreaterThan(2); // User + Posts + aggregates
 
@@ -221,7 +216,6 @@ describe('Custom Audit Log Table', () => {
     });
 
     it('should handle batch operations with custom table', async () => {
-      // Create users for updateMany
       await customContext.provider.runAsync(testActor, async () => {
         await customContext.customPrisma.user.createMany({
           data: [
@@ -232,7 +226,7 @@ describe('Custom Audit Log Table', () => {
         });
       });
 
-      // Clean activities after setup
+      // Drop the setup create's log so only the operation under test is counted
       await customContext.customPrisma.$executeRawUnsafe('TRUNCATE TABLE activities CASCADE');
 
       await customContext.provider.runAsync(testActor, async () => {
@@ -242,7 +236,6 @@ describe('Custom Audit Log Table', () => {
         });
       });
 
-      // Verify: updateMany audit logs were written to activities table
       const activities = await customContext.customPrisma.activity.findMany();
       expect(activities.length).toBeGreaterThanOrEqual(3); // 3 users updated
 
@@ -255,7 +248,6 @@ describe('Custom Audit Log Table', () => {
 
   describe('Table isolation', () => {
     it('should maintain separate audit logs for different clients', async () => {
-      // Write to default auditLog table
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.user.create({
           data: {
@@ -266,7 +258,6 @@ describe('Custom Audit Log Table', () => {
         });
       });
 
-      // Write to custom activities table
       await customContext.provider.runAsync(testActor, async () => {
         await customContext.customPrisma.user.create({
           data: {
@@ -277,14 +268,12 @@ describe('Custom Audit Log Table', () => {
         });
       });
 
-      // Verify: each table has its own audit log
       const auditLogs = await context.prisma.auditLog.findMany();
       const activities = await customContext.customPrisma.activity.findMany();
 
       expect(auditLogs).toHaveLength(1);
       expect(activities).toHaveLength(1);
 
-      // Verify: logs are in the correct tables
       expect(auditLogs[0].entityType).toBe('User');
       expect(activities[0].entityType).toBe('User');
     });

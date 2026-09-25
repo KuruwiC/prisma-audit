@@ -5,7 +5,6 @@ describe('getGlobalSingleton', () => {
   it('should return the identical instance for the same key across calls with different factories', () => {
     const key = `test-same-key-${Math.random()}`;
     const first = getGlobalSingleton(key, () => ({ value: 'first' }));
-    // Second call with a different factory must NOT re-create — the first wins.
     const second = getGlobalSingleton(key, () => ({ value: 'second' }));
 
     expect(second).toBe(first);

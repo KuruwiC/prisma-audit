@@ -28,7 +28,6 @@ describe('Nested Delete Operations', () => {
 
   describe('with fetchBeforeOperation: true (test setup)', () => {
     it('should create audit log with before state for nested delete', async () => {
-      // Setup: Create user and post
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -52,7 +51,6 @@ describe('Nested Delete Operations', () => {
       // Clear audit logs from setup
       await context.prisma.auditLog.deleteMany();
 
-      // Action: Delete user with nested post delete (default: no pre-fetch)
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.user.update({
           where: { id: user.id },
@@ -63,11 +61,10 @@ describe('Nested Delete Operations', () => {
               },
             },
           },
-          include: { posts: true }, // Required for nested operation audit logging
+          include: { posts: true },
         });
       });
 
-      // Verify: Audit logs for nested Post delete
       const postLogs = await context.prisma.auditLog.findMany({
         where: { entityType: 'Post', entityId: post.id, action: 'delete' },
       });
@@ -78,22 +75,16 @@ describe('Nested Delete Operations', () => {
         expect(log.after).toBeNull(); // Delete always has null 'after'
       }
 
-      // Verify: Post was actually deleted
       const deletedPost = await context.prisma.post.findUnique({ where: { id: post.id } });
       expect(deletedPost).toBeNull();
     });
   });
 
-  // NOTE: The tests above use the default setup.ts configuration (fetchBeforeOperation: true)
-  // and verify that pre-fetch works correctly for nested delete operations.
-  //
-  // Additional tests with fetchBeforeOperation: false are impractical in the current
-  // test infrastructure (see nested-update.integration.spec.ts for detailed explanation).
-  // However, performance.integration.spec.ts demonstrates fetchBeforeOperation: false behavior.
+  // NOTE: The tests in this file use the setup.ts configuration (fetchBeforeOperation: true).
+  // The fetchBeforeOperation: false path is covered by performance.integration.spec.ts with its own client.
 
   describe('Transaction Atomicity', () => {
     it('should NOT create audit log if main operation fails in transaction', async () => {
-      // Setup: Create two users with unique emails
       const user1 = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -104,7 +95,7 @@ describe('Nested Delete Operations', () => {
         });
       });
 
-      // Create another user (unused, for testing data isolation)
+      // A second user whose email the update below collides with
       await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -127,7 +118,6 @@ describe('Nested Delete Operations', () => {
 
       const initialLogCount = await context.prisma.auditLog.count();
 
-      // Action: Attempt nested delete that will fail due to unique constraint violation
       const transactionPromise = context.provider.runAsync(testActor, async () => {
         return context.prisma.$transaction(async (tx: typeof context.prisma) => {
           await tx.user.update({
@@ -143,21 +133,17 @@ describe('Nested Delete Operations', () => {
         });
       });
 
-      // Assert: Transaction should fail
       await expect(transactionPromise).rejects.toThrow();
 
-      // No new audit log should have been created
       const finalLogCount = await context.prisma.auditLog.count();
       expect(finalLogCount).toBe(initialLogCount);
 
-      // The post should still exist
       const finalPost = await context.prisma.post.findUnique({ where: { id: post.id } });
       expect(finalPost).not.toBeNull();
       expect(finalPost?.title).toBe('Test Post');
     });
 
     it('should roll back nested delete if transaction fails', async () => {
-      // Setup
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -178,7 +164,6 @@ describe('Nested Delete Operations', () => {
         });
       });
 
-      // Action: Nested delete in transaction that throws error
       const transactionPromise = context.provider.runAsync(testActor, async () => {
         return context.prisma.$transaction(async (tx: typeof context.prisma) => {
           await tx.user.update({
@@ -189,14 +174,12 @@ describe('Nested Delete Operations', () => {
               },
             },
           });
-          // Intentionally throw error after delete
           throw new Error('Rollback test');
         });
       });
 
       await expect(transactionPromise).rejects.toThrow('Rollback test');
 
-      // Verify: Post should still exist
       const finalPost = await context.prisma.post.findUnique({ where: { id: post.id } });
       expect(finalPost).not.toBeNull();
       expect(finalPost?.title).toBe('Post to Keep');
@@ -205,7 +188,6 @@ describe('Nested Delete Operations', () => {
 
   describe('Empty Results', () => {
     it('should handle nested delete with no matching records', async () => {
-      // Setup
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -216,10 +198,9 @@ describe('Nested Delete Operations', () => {
         });
       });
 
-      // Clear audit logs
+      // Clear audit logs from setup
       await context.prisma.auditLog.deleteMany();
 
-      // Action: Nested delete with non-existent post ID
       // Prisma throws an error when trying to delete non-existent nested records
       const deletePromise = context.provider.runAsync(testActor, async () => {
         await context.prisma.user.update({
@@ -234,7 +215,6 @@ describe('Nested Delete Operations', () => {
         });
       });
 
-      // Verify: Operation should fail
       await expect(deletePromise).rejects.toThrow();
 
       // Verify: No audit logs should be created due to transaction rollback
@@ -245,7 +225,6 @@ describe('Nested Delete Operations', () => {
 
   describe('deleteMany nested operation', () => {
     it('should handle deleteMany for multiple records', async () => {
-      // Setup: Create user with multiple posts
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -266,7 +245,6 @@ describe('Nested Delete Operations', () => {
 
       await context.prisma.auditLog.deleteMany();
 
-      // Action: Delete user with nested deleteMany (delete all drafts)
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.user.update({
           where: { id: user.id },
@@ -280,14 +258,12 @@ describe('Nested Delete Operations', () => {
         });
       });
 
-      // Verify: Published post should still exist
       const remainingPosts = await context.prisma.post.findMany({
         where: { authorId: user.id },
       });
       expect(remainingPosts).toHaveLength(1);
       expect(remainingPosts[0].title).toBe('Published');
 
-      // Verify: one delete log per deleted draft and aggregate root, from its before state
       const deleteLogs = await context.prisma.auditLog.findMany({
         where: { entityType: 'Post', action: 'delete' },
         orderBy: [{ entityId: 'asc' }, { aggregateType: 'asc' }],
@@ -317,7 +293,6 @@ describe('Nested Delete Operations', () => {
 
   describe('Cascade Delete', () => {
     it('should create audit logs for cascaded deletes', async () => {
-      // Setup: Create user with post and comment
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -350,7 +325,6 @@ describe('Nested Delete Operations', () => {
 
       await context.prisma.auditLog.deleteMany();
 
-      // Action: Delete post (should cascade to comment if schema configured)
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.user.update({
           where: { id: user.id },
@@ -362,12 +336,10 @@ describe('Nested Delete Operations', () => {
         });
       });
 
-      // Verify: Post and Comment should be deleted
       const deletedPost = await context.prisma.post.findUnique({ where: { id: post.id } });
       expect(deletedPost).toBeNull();
 
-      // Cascade behavior depends on Prisma schema configuration.
-      // If cascade delete is configured, comment should also be deleted.
+      // Comment cascades from Post (onDelete: Cascade in the schema)
       const deletedComment = await context.prisma.comment.findUnique({ where: { id: comment.id } });
       expect(deletedComment).toBeNull();
     });
@@ -375,7 +347,6 @@ describe('Nested Delete Operations', () => {
 
   describe('Where Clause Accuracy', () => {
     it('should pre-fetch only the correct record when multiple posts exist', async () => {
-      // Setup: Create user with multiple posts
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -415,7 +386,6 @@ describe('Nested Delete Operations', () => {
       // Clear audit logs from setup
       await context.prisma.auditLog.deleteMany();
 
-      // Action: Delete only post2 (using specific where clause)
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.user.update({
           where: { id: user.id },
@@ -428,7 +398,6 @@ describe('Nested Delete Operations', () => {
         });
       });
 
-      // Verify: Audit logs for delete operation
       const post1Logs = await context.prisma.auditLog.findMany({
         where: { entityType: 'Post', entityId: post1.id, action: 'delete' },
       });
@@ -439,27 +408,24 @@ describe('Nested Delete Operations', () => {
         where: { entityType: 'Post', entityId: post3.id, action: 'delete' },
       });
 
-      // With fetchBeforeOperation: true (test setup), before state should contain the deleted post
-      expect(post2Logs.length).toBeGreaterThanOrEqual(1); // post2 was deleted
+      expect(post2Logs.length).toBeGreaterThanOrEqual(1);
 
       // All delete logs should have before state (fetchBeforeOperation=true)
       for (const log of post2Logs) {
-        expect(log.before).not.toBeNull(); // fetchBeforeOperation=true (test setup)
+        expect(log.before).not.toBeNull();
         expect(log.after).toBeNull(); // Delete operation has no after state
       }
 
-      // CRITICAL: post1 and post3 should NOT have delete logs
-      // Because they were NOT deleted (only post2 was in the delete where clause)
-      expect(post1Logs).toHaveLength(0); // post1 was not deleted
-      expect(post3Logs).toHaveLength(0); // post3 was not deleted
+      // post1 and post3 were not deleted (only post2 was in the where clause), so they must have no delete logs
+      expect(post1Logs).toHaveLength(0);
+      expect(post3Logs).toHaveLength(0);
 
-      // Verify: Only post2 was actually deleted
       const finalPost1 = await context.prisma.post.findUnique({ where: { id: post1.id } });
       expect(finalPost1).not.toBeNull();
       expect(finalPost1?.title).toBe('Post 1');
 
       const finalPost2 = await context.prisma.post.findUnique({ where: { id: post2.id } });
-      expect(finalPost2).toBeNull(); // Deleted
+      expect(finalPost2).toBeNull();
 
       const finalPost3 = await context.prisma.post.findUnique({ where: { id: post3.id } });
       expect(finalPost3).not.toBeNull();
@@ -467,7 +433,6 @@ describe('Nested Delete Operations', () => {
     });
 
     it('should handle deleteMany with where clause correctly', async () => {
-      // Setup: Create user with posts of different published status
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -510,7 +475,6 @@ describe('Nested Delete Operations', () => {
       // Clear audit logs from setup
       await context.prisma.auditLog.deleteMany();
 
-      // Action: deleteMany only unpublished posts
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.user.update({
           where: { id: user.id },
@@ -524,24 +488,22 @@ describe('Nested Delete Operations', () => {
         });
       });
 
-      // Verify: Only unpublished posts should be deleted
       const finalUnpublished1 = await context.prisma.post.findUnique({
         where: { id: unpublished1.id },
       });
-      expect(finalUnpublished1).toBeNull(); // Deleted
+      expect(finalUnpublished1).toBeNull();
 
       const finalUnpublished2 = await context.prisma.post.findUnique({
         where: { id: unpublished2.id },
       });
-      expect(finalUnpublished2).toBeNull(); // Deleted
+      expect(finalUnpublished2).toBeNull();
 
       const finalPublished1 = await context.prisma.post.findUnique({
         where: { id: published1.id },
       });
-      expect(finalPublished1).not.toBeNull(); // Still exists
+      expect(finalPublished1).not.toBeNull();
       expect(finalPublished1?.title).toBe('Published 1');
 
-      // Verify: the matched posts are audited, the untouched one is not
       const unpublished1Logs = await context.prisma.auditLog.findMany({
         where: { entityType: 'Post', entityId: unpublished1.id, action: 'delete' },
       });
@@ -567,12 +529,9 @@ describe('Nested Delete Operations', () => {
     });
   });
 
-  // NOTE: Configuration priority tests require separate Prisma Client instances
-  // with different configurations, which is impractical in the current test infrastructure.
-  // The hierarchical configuration resolution (Entity > Global > Default) is fully implemented
-  // in getNestedOperationConfig() and indirectly tested by all tests using default settings.
+  // NOTE: Per-entity vs global nestedOperations config resolution (getNestedOperationConfig) is not
+  // covered here; every test uses the setup.ts defaults.
 
-  // NOTE: Error handling tests require complex mocking of database connections and
-  // invalid WHERE clauses, which is challenging with Testcontainers. The core error
-  // handling is implemented (onAuditError handler) and verified by transaction rollback tests.
+  // NOTE: Audit-pipeline failures reach errorHandling.observer; nested pre-fetch failures are covered
+  // by nested-pre-fetch-failure.integration.spec.ts.
 });

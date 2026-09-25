@@ -53,8 +53,7 @@ const createPipelineDependencies = (audit: AuditOptions): AuditPipelineDependenc
  * Internal extension factory, not exported from the package entry: `createAuditClient`
  * applies it via `prisma.$extends()` and returns the typed client.
  *
- * @returns Prisma Client Extension definition (use with `prisma.$extends()`)
- * @throws {Error} If configuration contains conflicts or peer dependency missing
+ * @throws {Error} If the aggregate mapping is invalid or the diffing and redaction settings conflict
  */
 export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) => {
   const audit = normalizeAuditOptions(options);

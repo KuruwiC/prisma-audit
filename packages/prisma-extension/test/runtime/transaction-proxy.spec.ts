@@ -1,7 +1,7 @@
 /**
  * Transaction Proxy Regression Tests
  *
- * Guards the core fix of the context/runtime separation: re-attributing the actor inside a
+ * Guards the context/runtime separation: re-attributing the actor inside a
  * wrapped `$transaction` callback (via full `runAsync` replacement or `withActor`) must NEVER
  * drop the library-injected transactional client or the deferred-write queue, because those
  * live on a separate, library-owned runtime store.
@@ -32,10 +32,8 @@ const actor2: AuditActor = { category: 'model', type: 'User', id: 'user-2' };
 
 const baseContext: AuditContext = { actor: actor1, request: { ipAddress: '10.0.0.1' } };
 
-/** Reads the transactional client the audit write code would resolve from the runtime scope. */
 const resolveTxClientFromRuntime = (): unknown => currentScope()?.transaction?.client;
 
-/** Enqueues a deferred write onto the scope queue, as an after-commit write does. */
 const enqueueDeferredWrite = (write: () => Promise<void>): void => {
   const transaction = currentScope()?.transaction;
   if (!transaction) throw new Error('expected a transaction scope');
@@ -63,7 +61,6 @@ const runThroughHandler = (
 
 describe('createWrappedTransactionCallback (context/runtime separation)', () => {
   it('keeps the transactional client after a full runAsync actor replacement', async () => {
-    // Arrange
     const provider = createAsyncLocalStorageProvider();
     const txClient = { _isTx: true } as unknown as TransactionalPrismaClient;
     let resolvedInsideOverride: unknown;
@@ -79,7 +76,6 @@ describe('createWrappedTransactionCallback (context/runtime separation)', () => 
     const deferredWrites: Array<() => Promise<void>> = [];
     const wrapped = createWrappedTransactionCallback(callback, baseContext, provider, deferredWrites);
 
-    // Act
     const result = await provider.runAsync(baseContext, () => wrapped(txClient));
 
     // Assert - the runtime store still carries the tx client despite the app-context swap
@@ -88,7 +84,6 @@ describe('createWrappedTransactionCallback (context/runtime separation)', () => 
   });
 
   it('keeps the transactional client and preserves request metadata under withActor', async () => {
-    // Arrange
     const provider = createAsyncLocalStorageProvider();
     const txClient = { _isTx: true } as unknown as TransactionalPrismaClient;
     let resolvedInsideOverride: unknown;
@@ -105,10 +100,8 @@ describe('createWrappedTransactionCallback (context/runtime separation)', () => 
     const deferredWrites: Array<() => Promise<void>> = [];
     const wrapped = createWrappedTransactionCallback(callback, baseContext, provider, deferredWrites);
 
-    // Act
     const result = await provider.runAsync(baseContext, () => wrapped(txClient));
 
-    // Assert
     expect(result).toBe('ok');
     expect(resolvedInsideOverride).toBe(txClient);
     expect(contextInsideOverride?.actor).toEqual(actor2);
@@ -166,7 +159,6 @@ describe('createWrappedTransactionCallback (context/runtime separation)', () => 
 
 describe('createTransactionProxyHandler (deferred-write drain timing)', () => {
   it('drains deferred writes enqueued under an actor-overridden scope after commit', async () => {
-    // Arrange
     const provider = createAsyncLocalStorageProvider();
     const txClient = { _isTx: true } as unknown as TransactionalPrismaClient;
     const deferredWrite = vi.fn(async () => {});
@@ -183,7 +175,6 @@ describe('createTransactionProxyHandler (deferred-write drain timing)', () => {
     const result = await runThroughHandler(provider, callback, txClient);
     await flushAllPendingWrites();
 
-    // Assert
     expect(result).toBe('committed');
     expect(deferredWrite).toHaveBeenCalledTimes(1);
   });
@@ -219,7 +210,6 @@ describe('createTransactionProxyHandler (deferred-write drain timing)', () => {
   });
 
   it('discards deferred writes when the transaction callback throws (rollback)', async () => {
-    // Arrange
     const provider = createAsyncLocalStorageProvider();
     const txClient = { _isTx: true } as unknown as TransactionalPrismaClient;
     const deferredWrite = vi.fn(async () => {});
@@ -260,7 +250,6 @@ describe('createTransactionProxyHandler (deferred-write drain timing)', () => {
     };
     const handler = createTransactionProxyHandler({ provider, originalTransaction, target });
 
-    // Act & Assert
     await expect(provider.runAsync(baseContext, () => handler(callback))).rejects.toThrow('commit failed');
     await flushAllPendingWrites();
     expect(deferredWrite).not.toHaveBeenCalled();

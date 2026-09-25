@@ -41,7 +41,6 @@ describe('CRUD Operations Integration', () => {
       expect(user).toBeDefined();
       expect(user.email).toBe('test@example.com');
 
-      // Verify audit log was created
       const auditLogs = await context.prisma.auditLog.findMany({
         where: { entityType: 'User', entityId: user.id },
       });
@@ -62,7 +61,6 @@ describe('CRUD Operations Integration', () => {
     });
 
     it('should create audit log for Post creation with User aggregate', async () => {
-      // Create user first
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -73,7 +71,6 @@ describe('CRUD Operations Integration', () => {
         });
       });
 
-      // Create post
       const post = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.post.create({
           data: {
@@ -86,7 +83,6 @@ describe('CRUD Operations Integration', () => {
 
       expect(post).toBeDefined();
 
-      // Verify audit logs - should have 2: one for User aggregate, one for Post aggregate
       const postLogs = await context.prisma.auditLog.findMany({
         where: { entityType: 'Post', entityId: post.id },
         orderBy: { aggregateType: 'asc' },
@@ -95,12 +91,10 @@ describe('CRUD Operations Integration', () => {
       // Post should have 2 logs: Post aggregate + User aggregate
       expect(postLogs).toHaveLength(2);
 
-      // Check Post aggregate log
       const postLog = postLogs.find((log: { aggregateType: string }) => log.aggregateType === 'Post');
       expect(postLog).toBeDefined();
       expect(postLog?.aggregateId).toBe(post.id);
 
-      // Check User aggregate log (parent)
       const userLog = postLogs.find((log: { aggregateType: string }) => log.aggregateType === 'User');
       expect(userLog).toBeDefined();
       expect(userLog?.aggregateId).toBe(user.id);
@@ -109,7 +103,6 @@ describe('CRUD Operations Integration', () => {
 
   describe('UPDATE operations', () => {
     it('should create audit log for User update', async () => {
-      // Create user
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -120,7 +113,6 @@ describe('CRUD Operations Integration', () => {
         });
       });
 
-      // Update user
       const updatedUser = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.update({
           where: { id: user.id },
@@ -130,7 +122,6 @@ describe('CRUD Operations Integration', () => {
 
       expect(updatedUser.name).toBe('Updated Name');
 
-      // Verify audit logs
       const auditLogs = await context.prisma.auditLog.findMany({
         where: { entityType: 'User', entityId: user.id },
         orderBy: { createdAt: 'asc' },
@@ -150,7 +141,6 @@ describe('CRUD Operations Integration', () => {
       expect(before.name).toBe('Original Name');
       expect(after.name).toBe('Updated Name');
 
-      // Verify changes field is populated for update operations
       expect(updateLog?.changes).toBeDefined();
       const changes = updateLog?.changes as Record<string, { old: unknown; new: unknown }>;
       expect(changes).toHaveProperty('name');
@@ -161,7 +151,6 @@ describe('CRUD Operations Integration', () => {
     });
 
     it('should populate changes field with only modified fields', async () => {
-      // Create user
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -172,7 +161,6 @@ describe('CRUD Operations Integration', () => {
         });
       });
 
-      // Update multiple fields
       await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.update({
           where: { id: user.id },
@@ -184,7 +172,6 @@ describe('CRUD Operations Integration', () => {
         });
       });
 
-      // Verify audit log
       const auditLogs = await context.prisma.auditLog.findMany({
         where: { entityType: 'User', entityId: user.id, action: 'update' },
       });
@@ -192,15 +179,12 @@ describe('CRUD Operations Integration', () => {
       expect(auditLogs).toHaveLength(1);
       const updateLog = auditLogs[0];
 
-      // Verify changes field
       expect(updateLog.changes).toBeDefined();
       const changes = updateLog.changes as Record<string, { old: unknown; new: unknown }>;
 
-      // Should have changes for name and email
       expect(changes).toHaveProperty('name');
       expect(changes).toHaveProperty('email');
 
-      // Should NOT have changes for unchanged fields (password, updatedAt, etc.)
       expect(changes.name).toEqual({
         old: 'Original Name',
         new: 'Updated Name',
@@ -231,7 +215,6 @@ describe('CRUD Operations Integration', () => {
     });
 
     it('should respect per-model excludeFields for User (excludes password and updatedAt)', async () => {
-      // Create user
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -242,14 +225,13 @@ describe('CRUD Operations Integration', () => {
         });
       });
 
-      // Update user - change name, email, and password
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.user.update({
           where: { id: user.id },
           data: {
             name: 'Updated Name',
             email: 'updated-permodel@example.com',
-            password: 'newsecret456', // This should be excluded from changes
+            password: 'newsecret456', // redacted in changes, not excluded
           },
         });
       });
@@ -261,12 +243,10 @@ describe('CRUD Operations Integration', () => {
       expect(updateLog?.changes).toBeDefined();
       const changes = updateLog?.changes as Record<string, { old: unknown; new: unknown }>;
 
-      // Should have name and email changes
       expect(changes).toHaveProperty('name');
       expect(changes).toHaveProperty('email');
 
-      // Should have password changes (redacted, not excluded)
-      // password is redacted globally, so it appears in changes with metadata
+      // password is redacted globally, so it still appears in changes (masked) rather than being excluded
       expect(changes).toHaveProperty('password');
       expect(changes.password).toEqual({
         old: {
@@ -283,13 +263,11 @@ describe('CRUD Operations Integration', () => {
       // Should NOT have updatedAt changes (excluded by per-model config)
       expect(changes).not.toHaveProperty('updatedAt');
 
-      // Should NOT have createdAt changes (excluded by global config)
-      // Note: User's excludeFields: ['updatedAt'] overrides global ['createdAt']
-      // But createdAt doesn't change anyway
+      // No createdAt assertion: User's excludeFields ['updatedAt'] overrides the global ['createdAt'],
+      // and createdAt never changes on update anyway
     });
 
     it('should respect global excludeFields for Post (excludes only createdAt)', async () => {
-      // Create user and post
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -310,7 +288,6 @@ describe('CRUD Operations Integration', () => {
         });
       });
 
-      // Update post
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.post.update({
           where: { id: post.id },
@@ -328,7 +305,6 @@ describe('CRUD Operations Integration', () => {
       expect(updateLog?.changes).toBeDefined();
       const changes = updateLog?.changes as Record<string, { old: unknown; new: unknown }>;
 
-      // Should have title and content changes
       expect(changes).toHaveProperty('title');
       expect(changes).toHaveProperty('content');
 
@@ -340,7 +316,6 @@ describe('CRUD Operations Integration', () => {
     });
 
     it('should NOT create audit log when ONLY excluded fields change', async () => {
-      // Create user
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -351,19 +326,16 @@ describe('CRUD Operations Integration', () => {
         });
       });
 
-      // Directly touch updatedAt (excluded field for User model)
-      // Note: Prisma always updates updatedAt, so we test that ONLY updatedAt changing doesn't create a log
+      // Prisma bumps updatedAt on every update, so a change to ONLY that (excluded) field must not produce a log
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.user.update({
           where: { id: user.id },
           data: {
-            // Prisma automatically updates updatedAt
             updatedAt: new Date(),
           },
         });
       });
 
-      // Count update logs
       const updateLogs = await context.prisma.auditLog.findMany({
         where: { entityType: 'User', entityId: user.id, action: 'update' },
       });
@@ -373,7 +345,6 @@ describe('CRUD Operations Integration', () => {
     });
 
     it('should create audit log when excluded fields + other fields change', async () => {
-      // Create user
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -403,7 +374,6 @@ describe('CRUD Operations Integration', () => {
       const log = updateLogs[0];
       const changes = log.changes as Record<string, { old: unknown; new: unknown }>;
 
-      // Should have name change
       expect(changes).toHaveProperty('name');
 
       // Should NOT have updatedAt change (excluded)
@@ -413,7 +383,6 @@ describe('CRUD Operations Integration', () => {
 
   describe('DELETE operations', () => {
     it('should create audit log for User deletion', async () => {
-      // Create user
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -426,20 +395,17 @@ describe('CRUD Operations Integration', () => {
 
       const userId = user.id;
 
-      // Delete user
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.user.delete({
           where: { id: userId },
         });
       });
 
-      // Verify user is deleted
       const deletedUser = await context.prisma.user.findUnique({
         where: { id: userId },
       });
       expect(deletedUser).toBeNull();
 
-      // Verify audit logs
       const auditLogs = await context.prisma.auditLog.findMany({
         where: { entityType: 'User', entityId: userId },
         orderBy: { createdAt: 'asc' },
@@ -453,7 +419,6 @@ describe('CRUD Operations Integration', () => {
       expect(deleteLog?.before).toBeDefined();
       expect(deleteLog?.after).toBeNull();
 
-      // Verify changes field is null for delete operations
       expect(deleteLog?.changes).toBeNull();
     });
   });
@@ -474,7 +439,6 @@ describe('CRUD Operations Integration', () => {
 
       expect(users.count).toBe(3);
 
-      // Verify audit logs were created
       const auditLogs = await context.prisma.auditLog.findMany({
         where: { entityType: 'User', action: 'create' },
       });
@@ -512,7 +476,6 @@ describe('CRUD Operations Integration', () => {
     });
 
     it('should create audit logs for updateManyAndReturn with before/after', async () => {
-      // Create multiple users
       const created = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.createManyAndReturn({
           data: [
@@ -523,7 +486,6 @@ describe('CRUD Operations Integration', () => {
       });
       const ids = created.map((u: { id: string }) => u.id);
 
-      // Bulk update name and return updated records
       const updated = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.updateManyAndReturn({
           where: { id: { in: ids } },
@@ -588,7 +550,6 @@ describe('CRUD Operations Integration', () => {
     // On connectors with updateManyAndReturn (PostgreSQL here), a limited update is audited via
     // updateManyAndReturn so the audited rows are exactly the ones the DB updated.
     it('should record audit logs matching the limit on updateMany with limit', async () => {
-      // Create 3 users
       const created = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.createManyAndReturn({
           data: [
@@ -600,7 +561,6 @@ describe('CRUD Operations Integration', () => {
       });
       const ids = created.map((u: { id: string }) => u.id);
 
-      // Update at most 2 of them
       const result = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.updateMany({
           where: { id: { in: ids } },
@@ -676,7 +636,6 @@ describe('CRUD Operations Integration', () => {
 
       expect(user).toBeDefined();
 
-      // Verify no audit log was created
       const auditLogs = await context.prisma.auditLog.findMany({
         where: { entityType: 'User', entityId: user.id },
       });
@@ -687,7 +646,6 @@ describe('CRUD Operations Integration', () => {
 
   describe('Nested operations', () => {
     it('should create audit logs for nested created records', async () => {
-      // Create user with nested posts in a single operation
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -716,14 +674,12 @@ describe('CRUD Operations Integration', () => {
       expect(user).toBeDefined();
       expect(user.posts).toHaveLength(2);
 
-      // Verify User audit log was created
       const userAuditLogs = await context.prisma.auditLog.findMany({
         where: { entityType: 'User', entityId: user.id },
       });
       expect(userAuditLogs).toHaveLength(1);
       expect(userAuditLogs[0]?.action).toBe('create');
 
-      // Verify Post audit logs WERE created (expected behavior)
       const postAuditLogs = await context.prisma.auditLog.findMany({
         where: {
           entityType: 'Post',
@@ -736,13 +692,11 @@ describe('CRUD Operations Integration', () => {
       expect(postAuditLogs).toHaveLength(4);
       expect(postAuditLogs.every((log: { action: string }) => log.action === 'create')).toBe(true);
 
-      // Verify we have both Post and User aggregate types
       const aggregateTypes = [
         ...new Set(postAuditLogs.map((log: { aggregateType: string }) => log.aggregateType)),
       ].sort();
       expect(aggregateTypes).toEqual(['Post', 'User']);
 
-      // Verify audit log content for nested posts
       for (const postLog of postAuditLogs) {
         expect(postLog.action).toBe('create');
         expect(postLog.before).toBeNull();
@@ -754,11 +708,9 @@ describe('CRUD Operations Integration', () => {
         expect(after.content).toBeDefined();
         expect(after.authorId).toBe(user.id);
 
-        // Verify entity information
         expect(postLog.entityType).toBe('Post');
         expect(postLog.entityId).toBeDefined();
 
-        // Verify actor information
         expect(postLog.actorCategory).toBe('model');
         expect(postLog.actorType).toBe('User');
         expect(postLog.actorId).toBe('test-user-1');

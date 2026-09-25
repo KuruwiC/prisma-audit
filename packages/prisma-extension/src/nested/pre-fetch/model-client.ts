@@ -18,7 +18,6 @@ export interface PreFetchModelClient {
   findFirst(args: { where: PreFetchRecord }): Promise<PreFetchRecord | null>;
 }
 
-/** Read method of a Prisma model delegate that returns every row a filter matches */
 export interface PreFetchListClient {
   findMany(args: { where: PreFetchRecord; select?: Record<string, true> }): Promise<PreFetchRecord[]>;
 }

@@ -12,9 +12,8 @@ import { getGlobalSingleton } from '@kuruwic/db-audit-core';
 const pendingWrites: Set<Promise<void>> = getGlobalSingleton('pending-writes', () => new Set<Promise<void>>());
 
 /**
- * Starts `write` and keeps it in the registry until it settles. The write reports its own
- * failure and does not reject; a rejection that reaches here is logged so that it never becomes
- * an unhandled rejection.
+ * The write reports its own failure and does not reject; a rejection that reaches here is
+ * logged so that it never becomes an unhandled rejection.
  */
 export const trackPendingWrite = (write: () => Promise<void>): void => {
   const promise = write()

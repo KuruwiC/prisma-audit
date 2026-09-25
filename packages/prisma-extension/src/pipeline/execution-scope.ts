@@ -25,9 +25,7 @@ export interface ExecutionScope {
    * inside a transaction, else the base client.
    */
   readonly handle: PrismaClientWithDynamicAccess | TransactionalPrismaClient;
-  /** The client the extension was applied to */
   readonly baseHandle: PrismaClientWithDynamicAccess;
-  /** Present inside a transaction, the caller's own or the implicit one */
   readonly transaction?: TransactionScope;
   /** The audit rows are written in the same transaction as the operation */
   readonly atomic: boolean;
@@ -40,11 +38,6 @@ export interface ExecutionScopeInput {
   readonly provider: AuditContextProvider;
 }
 
-/**
- * Runs `run` in the scope of one audited operation: inside an implicit transaction when the
- * policy is atomic and no transaction is active, otherwise in the transaction already active
- * or on the base client.
- */
 export const withExecutionScope = <T>(
   input: ExecutionScopeInput,
   run: (scope: ExecutionScope) => Promise<T>,

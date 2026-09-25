@@ -1,7 +1,3 @@
-/**
- * Branded Types Tests
- */
-
 import { describe, expect, it } from 'vitest';
 import {
   type ActorId,

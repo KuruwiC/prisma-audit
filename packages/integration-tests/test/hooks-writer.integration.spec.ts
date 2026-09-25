@@ -117,7 +117,6 @@ describe('hooks.writer Coverage', () => {
         });
       });
 
-      // Verify: hooks.writer was called exactly once
       expect(context.writerSpy.callCount).toBe(1);
       expect(context.writerSpy.calls[0]?.logCount).toBeGreaterThan(0);
       expect(context.writerSpy.calls[0]?.contextId).toBe('test-user-1');
@@ -145,7 +144,6 @@ describe('hooks.writer Coverage', () => {
         });
       });
 
-      // Verify: hooks.writer was called exactly once
       expect(context.writerSpy.callCount).toBe(1);
       expect(context.writerSpy.calls[0]?.logCount).toBeGreaterThan(0);
     });
@@ -171,7 +169,6 @@ describe('hooks.writer Coverage', () => {
         });
       });
 
-      // Verify: hooks.writer was called exactly once
       expect(context.writerSpy.callCount).toBe(1);
       expect(context.writerSpy.calls[0]?.logCount).toBeGreaterThan(0);
     });
@@ -194,7 +191,7 @@ describe('hooks.writer Coverage', () => {
         });
       });
 
-      // Verify: hooks.writer was called (may be once or multiple times depending on batching)
+      // Batching decides whether the logs arrive in one writer call or several.
       expect(context.writerSpy.callCount).toBeGreaterThan(0);
       const totalLogs = context.writerSpy.calls.reduce((sum, call) => sum + call.logCount, 0);
       expect(totalLogs).toBeGreaterThan(0); // At least user + posts
@@ -234,7 +231,6 @@ describe('hooks.writer Coverage', () => {
         });
       });
 
-      // Verify: hooks.writer was called
       expect(context.writerSpy.callCount).toBeGreaterThan(0);
     });
   });
@@ -261,7 +257,7 @@ describe('hooks.writer Coverage', () => {
         });
       });
 
-      // Verify: hooks.writer was called (once for batched logs or multiple times)
+      // Batching decides whether the logs arrive in one writer call or several.
       expect(context.writerSpy.callCount).toBeGreaterThan(0);
       const totalLogs = context.writerSpy.calls.reduce((sum, call) => sum + call.logCount, 0);
       expect(totalLogs).toBeGreaterThanOrEqual(2); // At least 2 users
@@ -287,7 +283,6 @@ describe('hooks.writer Coverage', () => {
         });
       });
 
-      // Verify: hooks.writer was called
       expect(context.writerSpy.callCount).toBeGreaterThan(0);
       const totalLogs = context.writerSpy.calls.reduce((sum, call) => sum + call.logCount, 0);
       expect(totalLogs).toBeGreaterThan(0); // User + posts
@@ -374,7 +369,6 @@ describe('hooks.writer Coverage', () => {
         elapsed += interval;
       }
 
-      // Verify: hooks.writer was called
       expect(asyncContext.writerSpy.callCount).toBeGreaterThan(0);
     });
 
@@ -391,7 +385,7 @@ describe('hooks.writer Coverage', () => {
         });
       });
 
-      // Verify: hooks.writer was called (deferred writes are executed after commit)
+      // The deferred write runs once the transaction has committed.
       expect(asyncContext.writerSpy.callCount).toBeGreaterThan(0);
     });
 
@@ -445,7 +439,6 @@ describe('hooks.writer Coverage', () => {
         });
       });
 
-      // Verify: hooks.writer was called even with null before state
       expect(context.writerSpy.callCount).toBe(1);
     });
 
@@ -468,7 +461,6 @@ describe('hooks.writer Coverage', () => {
         });
       });
 
-      // Verify: hooks.writer was called (may batch multiple logs into single call)
       expect(context.writerSpy.callCount).toBeGreaterThan(0);
       const totalLogs = context.writerSpy.calls.reduce((sum, call) => sum + call.logCount, 0);
       expect(totalLogs).toBeGreaterThan(3); // At least user + 3 posts (+ aggregate logs)
@@ -504,7 +496,6 @@ describe('hooks.writer Coverage', () => {
         });
       });
 
-      // Verify: hooks.writer was called twice with different contexts
       expect(context.writerSpy.callCount).toBe(2);
       expect(context.writerSpy.calls[0]?.contextId).toBe('actor-1');
       expect(context.writerSpy.calls[1]?.contextId).toBe('actor-2');

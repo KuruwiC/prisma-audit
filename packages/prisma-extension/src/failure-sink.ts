@@ -30,16 +30,12 @@ export interface FailureSinkConfig {
 
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
-/** The `Error` a failure context carries for a caught value */
 export const toError = (caught: unknown): Error => (caught instanceof Error ? caught : new Error(String(caught)));
 
 export const createFailureSink = (config: FailureSinkConfig): FailureSink => {
   const { observer, writeFailurePolicy } = config;
 
-  /**
-   * An observer that throws (sync or async) is logged to the console and ignored, so it
-   * never affects the caller's own database operation.
-   */
+  /** A throwing observer (sync or async) is logged and ignored: it never affects the caller's operation. */
   const notify = async (context: AuditErrorContext): Promise<void> => {
     if (!observer) return;
     try {
@@ -68,10 +64,6 @@ export const createFailureSink = (config: FailureSinkConfig): FailureSink => {
     }
   };
 
-  /**
-   * 'throw' re-throws (failing the caller's operation only while it is still waiting on the
-   * write, see {@link WriteFailurePolicy}), 'log' logs to the console, 'ignore' does neither.
-   */
   const reportWriteFailure = async (context: AuditErrorContext, logLabel: string): Promise<void> => {
     await notify(context);
     createErrorHandler(await resolveStrategy(context))(context.error, logLabel);

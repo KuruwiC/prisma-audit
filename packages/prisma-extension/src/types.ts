@@ -1,8 +1,6 @@
 /**
  * Public API type definitions for Prisma Audit Extension
  *
- * Provides types and interfaces for configuring and using the audit logging extension.
- *
  * @module types
  */
 

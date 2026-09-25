@@ -8,17 +8,6 @@ import { safeStringify } from './serialization.js';
  * @remarks
  * Compares before/after states of records and identifies field-level changes.
  * Supports ignoring specific fields (e.g., timestamps, version fields).
- *
- * @example
- * ```typescript
- * const calculateDiff = createDiffCalculator(new Set(['updatedAt']));
- *
- * const changes = calculateDiff(
- *   { id: '1', name: 'Alice', age: 30, updatedAt: '2024-01-01' },
- *   { id: '1', name: 'Alice', age: 31, updatedAt: '2024-01-02' }
- * );
- * // => { age: { old: 30, new: 31 } }
- * ```
  */
 
 /**
@@ -41,7 +30,6 @@ export type DiffResult = Record<string, FieldChange> | null;
  *
  * @param before - State before the change (null/undefined indicates no previous state)
  * @param after - State after the change (null/undefined indicates no new state)
- * @returns Object containing field-level changes, or null if no changes
  */
 export type DiffCalculator = (
   before: Record<string, unknown> | null | undefined,
@@ -59,18 +47,12 @@ const areValuesEqual = (oldValue: unknown, newValue: unknown): boolean => {
   return safeStringify(oldValue) === safeStringify(newValue);
 };
 
-/**
- * Type guard for valid record state (not null or undefined)
- */
 const isValidState = (state: Record<string, unknown> | null | undefined): state is Record<string, unknown> => {
   return state !== null && state !== undefined;
 };
 
 /**
  * Creates a diff calculator with ignored fields
- *
- * @param ignoredFields - Field names to exclude from diff calculation
- * @returns Diff calculator function
  *
  * @example
  * ```typescript

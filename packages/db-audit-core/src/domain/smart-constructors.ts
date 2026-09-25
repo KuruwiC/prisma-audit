@@ -8,25 +8,14 @@ import type { AuditLogData, AuditLogInput } from './audit-log-types.js';
 import type { ActorId, AggregateId, EntityId } from './branded-types.js';
 import { createActorId, createAggregateId, createEntityId } from './branded-types.js';
 
-// ============================================================================
-// Type Definitions
-// ============================================================================
-
-/** Validation error type with field name and error message */
+/** One failed check of an `AuditLogInput`; `field` names the offending input field. */
 export interface ValidationError {
-  /** Field that failed validation */
   field: string;
-  /** Human-readable error message */
   message: string;
 }
 
 /**
- * Result type for operations that can fail
- *
- * Discriminated union type representing success or failure, following Railway Oriented Programming pattern.
- *
- * @template T - Type of the successful value
- * @template E - Type of error (defaults to ValidationError)
+ * Outcome of an operation that can fail: the value, or every error collected rather than only the first.
  *
  * @example
  * ```typescript
@@ -40,19 +29,16 @@ export interface ValidationError {
  */
 export type Result<T, E = ValidationError> = { success: true; value: T } | { success: false; errors: E[] };
 
-/** Creates a successful Result */
 export const success = <T>(value: T): Result<T, never> => ({
   success: true,
   value,
 });
 
-/** Creates a failed Result */
 export const failure = <E = ValidationError>(errors: E[]): Result<never, E> => ({
   success: false,
   errors,
 });
 
-/** @internal Validates that a string field is non-empty */
 const validateNonEmptyStringField = (value: string | undefined, fieldName: string, errors: ValidationError[]): void => {
   if (!value || value.trim() === '') {
     errors.push({
@@ -62,7 +48,6 @@ const validateNonEmptyStringField = (value: string | undefined, fieldName: strin
   }
 };
 
-/** @internal Validates that a Date field is valid */
 const validateDateField = (value: Date | undefined, fieldName: string, errors: ValidationError[]): void => {
   if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
     errors.push({
@@ -72,7 +57,6 @@ const validateDateField = (value: Date | undefined, fieldName: string, errors: V
   }
 };
 
-/** @internal Safely creates a branded ID and accumulates errors on failure */
 const tryCreateBrandedId = <T>(
   id: string,
   fieldName: string,
@@ -91,12 +75,8 @@ const tryCreateBrandedId = <T>(
 };
 
 /**
- * Creates a validated AuditLogData with Branded IDs
- *
- * Performs comprehensive validation on all ID fields, required string fields, and timestamp. Collects all validation errors and returns them together.
- *
- * @param input - Raw input data with string IDs
- * @returns Result containing either validated AuditLogData or validation errors
+ * Validates an `AuditLogInput` and brands its ids. Every failing field is reported together
+ * rather than stopping at the first.
  *
  * @example
  * ```typescript

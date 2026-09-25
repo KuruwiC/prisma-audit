@@ -28,7 +28,6 @@ describe('Nested Upsert Operations', () => {
 
   describe('Create Path (record does not exist)', () => {
     it('should create audit log with action=create when record does not exist', async () => {
-      // Setup: Create user only (no profile)
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -41,7 +40,6 @@ describe('Nested Upsert Operations', () => {
 
       await context.prisma.auditLog.deleteMany();
 
-      // Action: Upsert profile (create path)
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.user.update({
           where: { id: user.id },
@@ -57,16 +55,14 @@ describe('Nested Upsert Operations', () => {
               },
             },
           },
-          include: { profile: true }, // Required for nested operation audit logging
+          include: { profile: true },
         });
       });
 
-      // Verify: Profile should be created
       const profile = await context.prisma.profile.findUnique({ where: { userId: user.id } });
       expect(profile).not.toBeNull();
       expect(profile?.bio).toBe('New bio');
 
-      // Verify: Audit log should have action=create
       const profileLogs = await context.prisma.auditLog.findMany({
         where: { entityType: 'Profile', entityId: profile?.id },
       });
@@ -81,7 +77,6 @@ describe('Nested Upsert Operations', () => {
     });
 
     it('should handle nested upsert create with multiple fields', async () => {
-      // Setup
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -94,7 +89,6 @@ describe('Nested Upsert Operations', () => {
 
       await context.prisma.auditLog.deleteMany();
 
-      // Action: Upsert profile with multiple fields
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.user.update({
           where: { id: user.id },
@@ -111,23 +105,20 @@ describe('Nested Upsert Operations', () => {
               },
             },
           },
-          include: { profile: true }, // Required for nested operation audit logging
+          include: { profile: true },
         });
       });
 
-      // Verify: Profile should be created with all fields
       const profile = await context.prisma.profile.findUnique({ where: { userId: user.id } });
       expect(profile?.bio).toBe('Biography');
       expect(profile?.website).toBe('https://example.com');
 
-      // Verify: Audit log captures all fields
       const profileLogs = await context.prisma.auditLog.findMany({
         where: { entityType: 'Profile' },
       });
 
       // Profile has 2 logs: Profile aggregate + User aggregate
       expect(profileLogs).toHaveLength(2);
-      // Verify at least one log has the correct data
       const logWithData = profileLogs.find((log: { after: unknown }) => {
         const after = log.after as { bio?: string; website?: string };
         return after.bio === 'Biography' && after.website === 'https://example.com';
@@ -138,7 +129,6 @@ describe('Nested Upsert Operations', () => {
 
   describe('Update Path (record exists)', () => {
     it('should create audit log with action=update when record exists', async () => {
-      // Setup: Create user with profile
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -157,7 +147,6 @@ describe('Nested Upsert Operations', () => {
 
       await context.prisma.auditLog.deleteMany();
 
-      // Action: Upsert profile (update path)
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.user.update({
           where: { id: user.id },
@@ -173,15 +162,13 @@ describe('Nested Upsert Operations', () => {
               },
             },
           },
-          include: { profile: true }, // Required for nested operation audit logging
+          include: { profile: true },
         });
       });
 
-      // Verify: Profile should be updated
       const profile = await context.prisma.profile.findUnique({ where: { userId: user.id } });
       expect(profile?.bio).toBe('Updated bio');
 
-      // Verify: Audit log should have action=update
       const profileLogs = await context.prisma.auditLog.findMany({
         where: { entityType: 'Profile', entityId: profile?.id, action: 'update' },
       });
@@ -190,7 +177,7 @@ describe('Nested Upsert Operations', () => {
       expect(profileLogs).toHaveLength(2);
       for (const log of profileLogs) {
         expect(log.action).toBe('update');
-        // With fetchBeforeOperation=true (test setup), before should contain 'Original bio'
+        // Upsert always pre-fetches to pick its branch, so before holds the original row
         expect(log.before).not.toBeNull();
         const before = log.before as { bio?: string };
         expect(before.bio).toBe('Original bio');
@@ -198,7 +185,6 @@ describe('Nested Upsert Operations', () => {
     });
 
     it('should handle nested upsert update with partial fields', async () => {
-      // Setup: Create user with profile
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -218,7 +204,6 @@ describe('Nested Upsert Operations', () => {
 
       await context.prisma.auditLog.deleteMany();
 
-      // Action: Upsert profile (update only bio, keep website)
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.user.update({
           where: { id: user.id },
@@ -234,25 +219,21 @@ describe('Nested Upsert Operations', () => {
               },
             },
           },
-          include: { profile: true }, // Required for nested operation audit logging
+          include: { profile: true },
         });
       });
 
-      // Verify: Profile should be updated partially
       const profile = await context.prisma.profile.findUnique({ where: { userId: user.id } });
       expect(profile?.bio).toBe('Updated bio');
-      expect(profile?.website).toBe('https://original.com'); // Unchanged
+      expect(profile?.website).toBe('https://original.com');
     });
   });
 
-  // NOTE: The tests above use the default setup.ts configuration (fetchBeforeOperation: true).
-  // Upsert operations always pre-fetch to determine whether to create or update (forced behavior),
-  // regardless of the fetchBeforeOperation configuration, so these tests comprehensively verify
-  // the pre-fetch functionality for upsert operations.
+  // NOTE: Upsert always pre-fetches to decide between create and update, regardless of
+  // fetchBeforeOperation, so these tests cover its pre-fetch under the setup.ts defaults.
 
   describe('Mixed Create and Update', () => {
     it('should handle upsert operations with different paths in same transaction', async () => {
-      // Setup: Create two users, one with profile, one without
       const user1 = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -281,7 +262,6 @@ describe('Nested Upsert Operations', () => {
 
       await context.prisma.auditLog.deleteMany();
 
-      // Action: Upsert profiles for both users in transaction
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.$transaction([
           context.prisma.user.update({
@@ -294,7 +274,7 @@ describe('Nested Upsert Operations', () => {
                 },
               },
             },
-            include: { profile: true }, // Required for nested operation audit logging
+            include: { profile: true },
           }),
           context.prisma.user.update({
             where: { id: user2.id },
@@ -306,19 +286,17 @@ describe('Nested Upsert Operations', () => {
                 },
               },
             },
-            include: { profile: true }, // Required for nested operation audit logging
+            include: { profile: true },
           }),
         ]);
       });
 
-      // Verify: Both profiles should exist
       const profile1 = await context.prisma.profile.findUnique({ where: { userId: user1.id } });
       expect(profile1?.bio).toBe('Updated bio 1');
 
       const profile2 = await context.prisma.profile.findUnique({ where: { userId: user2.id } });
       expect(profile2?.bio).toBe('New bio 2');
 
-      // Verify: Audit logs have correct actions
       const profile1Logs = await context.prisma.auditLog.findMany({
         where: { entityType: 'Profile', entityId: profile1?.id },
       });
@@ -333,7 +311,6 @@ describe('Nested Upsert Operations', () => {
 
   describe('Transaction Atomicity', () => {
     it('should NOT create audit log if upsert fails in transaction', async () => {
-      // Setup: Create user with profile
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -352,7 +329,6 @@ describe('Nested Upsert Operations', () => {
 
       const initialLogCount = await context.prisma.auditLog.count();
 
-      // Action: Upsert in transaction that throws error
       const transactionPromise = context.provider.runAsync(testActor, async () => {
         return context.prisma.$transaction(async (tx: typeof context.prisma) => {
           await tx.user.update({
@@ -365,26 +341,22 @@ describe('Nested Upsert Operations', () => {
                 },
               },
             },
-            include: { profile: true }, // Required for nested operation audit logging
+            include: { profile: true },
           });
-          // Intentionally throw error
           throw new Error('Rollback test');
         });
       });
 
       await expect(transactionPromise).rejects.toThrow('Rollback test');
 
-      // Verify: No new audit logs created
       const finalLogCount = await context.prisma.auditLog.count();
       expect(finalLogCount).toBe(initialLogCount);
 
-      // Verify: Profile unchanged
       const profile = await context.prisma.profile.findUnique({ where: { userId: user.id } });
       expect(profile?.bio).toBe('Original bio');
     });
 
     it('should roll back upsert create if transaction fails', async () => {
-      // Setup: Create user without profile
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -395,7 +367,6 @@ describe('Nested Upsert Operations', () => {
         });
       });
 
-      // Action: Upsert create in transaction that fails
       const transactionPromise = context.provider.runAsync(testActor, async () => {
         return context.prisma.$transaction(async (tx: typeof context.prisma) => {
           await tx.user.update({
@@ -408,7 +379,7 @@ describe('Nested Upsert Operations', () => {
                 },
               },
             },
-            include: { profile: true }, // Required for nested operation audit logging
+            include: { profile: true },
           });
           throw new Error('Rollback test');
         });
@@ -416,7 +387,6 @@ describe('Nested Upsert Operations', () => {
 
       await expect(transactionPromise).rejects.toThrow('Rollback test');
 
-      // Verify: Profile should NOT exist
       const profile = await context.prisma.profile.findUnique({ where: { userId: user.id } });
       expect(profile).toBeNull();
     });
@@ -424,7 +394,6 @@ describe('Nested Upsert Operations', () => {
 
   describe('Edge Cases', () => {
     it('should handle concurrent upserts on same record', async () => {
-      // Setup: Create user without profile
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -437,7 +406,6 @@ describe('Nested Upsert Operations', () => {
 
       await context.prisma.auditLog.deleteMany();
 
-      // Action: Two concurrent upserts
       // One may fail due to unique constraint (race condition)
       const results = await Promise.allSettled([
         context.provider.runAsync(testActor, async () => {
@@ -470,22 +438,18 @@ describe('Nested Upsert Operations', () => {
         }),
       ]);
 
-      // At least one should succeed
       const successCount = results.filter((r) => r.status === 'fulfilled').length;
       expect(successCount).toBeGreaterThanOrEqual(1);
 
-      // Verify: Profile exists (one of them succeeded)
       const profile = await context.prisma.profile.findUnique({ where: { userId: user.id } });
       expect(profile).not.toBeNull();
 
       // Note: Final bio depends on race condition
-      // This test documents that concurrent operations are handled
     });
   });
 
   describe('Where Clause Accuracy', () => {
     it('should correctly identify which profile to update when multiple users exist', async () => {
-      // Setup: Create multiple users, only one with a profile
       const [user1, user2, user3] = await context.provider.runAsync(testActor, async () => {
         return Promise.all([
           context.prisma.user.create({
@@ -518,7 +482,6 @@ describe('Nested Upsert Operations', () => {
       // Clear audit logs from setup
       await context.prisma.auditLog.deleteMany();
 
-      // Action: Upsert profile for user2 (should be update path)
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.user.update({
           where: { id: user2.id },
@@ -534,7 +497,6 @@ describe('Nested Upsert Operations', () => {
         });
       });
 
-      // Verify: Only user2's profile should have audit logs
       const user2Profile = await context.prisma.profile.findUnique({ where: { userId: user2.id } });
       expect(user2Profile).not.toBeNull();
       expect(user2Profile?.bio).toBe('Updated Bio for User 2');
@@ -550,10 +512,9 @@ describe('Nested Upsert Operations', () => {
       for (const profileLog of profileLogs) {
         expect(profileLog.before).not.toBeNull();
         const before = profileLog.before as { bio?: string };
-        expect(before.bio).toBe('Original Bio for User 2'); // Correct user's bio
+        expect(before.bio).toBe('Original Bio for User 2');
       }
 
-      // Verify: user1 and user3 should NOT have profiles
       const user1Profile = await context.prisma.profile.findUnique({ where: { userId: user1.id } });
       expect(user1Profile).toBeNull();
 
@@ -562,7 +523,6 @@ describe('Nested Upsert Operations', () => {
     });
 
     it('should correctly identify which profile to create when multiple users exist', async () => {
-      // Setup: Create multiple users, all without profiles
       const [user1, user2, user3] = await context.provider.runAsync(testActor, async () => {
         return Promise.all([
           context.prisma.user.create({
@@ -592,7 +552,6 @@ describe('Nested Upsert Operations', () => {
       // Clear audit logs from setup
       await context.prisma.auditLog.deleteMany();
 
-      // Action: Upsert profile for user2 (should be create path)
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.user.update({
           where: { id: user2.id },
@@ -608,7 +567,6 @@ describe('Nested Upsert Operations', () => {
         });
       });
 
-      // Verify: Only user2 should have a profile
       const user2Profile = await context.prisma.profile.findUnique({ where: { userId: user2.id } });
       expect(user2Profile).not.toBeNull();
       expect(user2Profile?.bio).toBe('New Bio for User 2');
@@ -619,7 +577,6 @@ describe('Nested Upsert Operations', () => {
       const user3Profile = await context.prisma.profile.findUnique({ where: { userId: user3.id } });
       expect(user3Profile).toBeNull();
 
-      // Verify: Audit log should have action=create for user2's profile
       const profileLogs = await context.prisma.auditLog.findMany({
         where: { entityType: 'Profile', entityId: user2Profile?.id, action: 'create' },
       });
@@ -629,12 +586,9 @@ describe('Nested Upsert Operations', () => {
     });
   });
 
-  // NOTE: Configuration priority tests require separate Prisma Client instances
-  // with different configurations, which is impractical in the current test infrastructure.
-  // The hierarchical configuration resolution is fully implemented and indirectly tested.
-  // Upsert operations always pre-fetch regardless of config (forced behavior).
+  // NOTE: Per-entity vs global nestedOperations config resolution (getNestedOperationConfig) is not
+  // covered here; every test uses the setup.ts defaults.
 
-  // NOTE: Error handling tests require complex mocking of database connections,
-  // which is challenging with Testcontainers. The core error handling is implemented
-  // (onAuditError handler) and verified by transaction rollback tests.
+  // NOTE: Audit-pipeline failures reach errorHandling.observer; nested pre-fetch failures are covered
+  // by nested-pre-fetch-failure.integration.spec.ts.
 });

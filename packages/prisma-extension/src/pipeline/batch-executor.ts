@@ -41,7 +41,6 @@ export type BatchPrepared =
   | { readonly kind: 'delete'; readonly beforeRows: Row[] };
 
 export interface BatchExecuted {
-  /** What the caller receives */
   readonly result: unknown;
   /** The rows the mutation itself returned (createManyAndReturn, updateManyAndReturn) */
   readonly returnedRows: Row[] | undefined;

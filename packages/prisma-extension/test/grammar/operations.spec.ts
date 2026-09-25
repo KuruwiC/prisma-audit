@@ -16,7 +16,6 @@ describe('operation classification invariants', () => {
   });
 
   it('SINGLE_OPERATIONS and BATCH_OPERATIONS partition all AUDIT_ACTION values', () => {
-    // Every action belongs to exactly one of single / batch (no gaps, no overlaps).
     for (const action of Object.values(AUDIT_ACTION)) {
       const inSingle = SINGLE_OPERATIONS.has(action);
       const inBatch = BATCH_OPERATIONS.has(action);

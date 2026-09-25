@@ -1,6 +1,5 @@
 import type { ValueSerializer } from './utils/serialization.js';
 
-/** Error handling strategy for audit logging */
 export type { ErrorStrategy } from './utils/error-handler.js';
 
 /**
@@ -34,9 +33,9 @@ export type EnrichmentErrorStrategy = 'fail' | 'log' | ((error: Error) => unknow
 /**
  * Global context enricher configuration
  *
- * @template TActor - Actor type (defaults to unknown)
- * @template TActorContext - Enriched actor context type (defaults to unknown)
- * @template TDbHandle - Database handle type the adapter passes (defaults to unknown)
+ * @template TActor - Actor type
+ * @template TActorContext - Enriched actor context type
+ * @template TDbHandle - Database handle type the adapter passes
  */
 export interface GlobalContextEnricherConfig<TActor = unknown, TActorContext = unknown, TDbHandle = unknown> {
   actor?: {

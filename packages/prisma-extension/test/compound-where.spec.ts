@@ -1,7 +1,3 @@
-/**
- * Tests for unique WHERE handling: whether a row is the one a `<Model>WhereUniqueInput` names.
- */
-
 import { describe, expect, it } from 'vitest';
 import { matchesUniqueWhere } from '../src/utils/compound-where.js';
 

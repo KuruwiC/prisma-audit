@@ -72,7 +72,6 @@ describe('nested updateMany / deleteMany parent scope', () => {
     }));
   };
 
-  /** Every audit row of `entityType` for `entityId`, one per aggregate root the entity belongs to */
   const rowsFor = (entityType: string, entityId: string) =>
     clients.basePrisma.auditLog.findMany({
       where: { entityType, entityId },

@@ -28,7 +28,6 @@ describe('Nested Update Operations', () => {
 
   describe('with fetchBeforeOperation: true (test setup)', () => {
     it('should create audit log with before state for nested update', async () => {
-      // Setup: Create user and post
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -52,7 +51,6 @@ describe('Nested Update Operations', () => {
       // Clear audit logs from setup
       await context.prisma.auditLog.deleteMany();
 
-      // Action: Update user with nested post update (default: no pre-fetch)
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.user.update({
           where: { id: user.id },
@@ -65,13 +63,11 @@ describe('Nested Update Operations', () => {
               },
             },
           },
-          include: { posts: true }, // Required for nested operation audit logging
+          include: { posts: true },
         });
       });
 
-      // Verify: Audit logs for User update
       // Note: Top-level update operations also use the fetchBeforeOperation config
-      // With fetchBeforeOperation=true (test setup), before state contains the original data
       const userLogs = await context.prisma.auditLog.findMany({
         where: { entityType: 'User', entityId: user.id, action: 'update' },
       });
@@ -79,7 +75,6 @@ describe('Nested Update Operations', () => {
       expect(userLogs[0].before).not.toBeNull(); // fetchBeforeOperation=true (test setup)
       expect(userLogs[0].after).not.toBeNull();
 
-      // Verify: Audit logs for nested Post update (with fetchBeforeOperation=true, test setup)
       const postLogs = await context.prisma.auditLog.findMany({
         where: { entityType: 'Post', entityId: post.id, action: 'update' },
       });
@@ -88,28 +83,18 @@ describe('Nested Update Operations', () => {
         expect(log.before).not.toBeNull(); // fetchBeforeOperation=true (test setup)
         expect(log.after).not.toBeNull();
         expect(log.changes).not.toBeNull(); // changes is available with before state
-        // Verify 'after' contains the updated title
         const after = log.after as { title?: string };
         expect(after.title).toBe('Updated Title');
       }
     });
   });
 
-  // NOTE: The tests above use the default setup.ts configuration (fetchBeforeOperation: true)
-  // and verify that pre-fetch works correctly for nested update operations.
-  //
-  // Additional tests with fetchBeforeOperation: false are impractical in the current
-  // test infrastructure because:
-  // - Each Prisma Client instance maintains a separate connection pool
-  // - Creating a separate client with different configuration would require a separate database
-  // - Audit logs written by that client cannot be easily queried from the main test client
-  //
-  // However, performance.integration.spec.ts demonstrates fetchBeforeOperation: false behavior
-  // with its own dedicated client setup.
+  // NOTE: The tests in this file use the setup.ts configuration (fetchBeforeOperation: true).
+  // The fetchBeforeOperation: false path is covered by nested-batch-parent-scope.integration.spec.ts
+  // and performance.integration.spec.ts, each with its own client.
 
   describe('Transaction Atomicity', () => {
     it('should NOT create audit log if main operation fails in transaction', async () => {
-      // Setup: Create two users with unique emails
       const user1 = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -120,7 +105,7 @@ describe('Nested Update Operations', () => {
         });
       });
 
-      // Create another user (for testing data isolation)
+      // A second user whose email the update below collides with
       await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -143,7 +128,6 @@ describe('Nested Update Operations', () => {
 
       const initialLogCount = await context.prisma.auditLog.count();
 
-      // Action: Attempt nested update that will fail due to unique constraint violation
       const transactionPromise = context.provider.runAsync(testActor, async () => {
         return context.prisma.$transaction(async (tx: typeof context.prisma) => {
           await tx.user.update({
@@ -162,20 +146,16 @@ describe('Nested Update Operations', () => {
         });
       });
 
-      // Assert: Transaction should fail
       await expect(transactionPromise).rejects.toThrow();
 
-      // No new audit log should have been created
       const finalLogCount = await context.prisma.auditLog.count();
       expect(finalLogCount).toBe(initialLogCount);
 
-      // The post title should NOT have been updated
       const finalPost = await context.prisma.post.findUnique({ where: { id: post.id } });
       expect(finalPost?.title).toBe('Test Post');
     });
 
     it('should roll back nested update if transaction fails', async () => {
-      // Setup
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -196,7 +176,6 @@ describe('Nested Update Operations', () => {
         });
       });
 
-      // Action: Nested update in transaction that throws error
       const transactionPromise = context.provider.runAsync(testActor, async () => {
         return context.prisma.$transaction(async (tx: typeof context.prisma) => {
           await tx.user.update({
@@ -210,14 +189,12 @@ describe('Nested Update Operations', () => {
               },
             },
           });
-          // Intentionally throw error after update
           throw new Error('Rollback test');
         });
       });
 
       await expect(transactionPromise).rejects.toThrow('Rollback test');
 
-      // Verify: Post should still have original title
       const finalPost = await context.prisma.post.findUnique({ where: { id: post.id } });
       expect(finalPost?.title).toBe('Original Title');
     });
@@ -225,7 +202,6 @@ describe('Nested Update Operations', () => {
 
   describe('Empty Results', () => {
     it('should handle nested update with no matching records', async () => {
-      // Setup
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -236,10 +212,9 @@ describe('Nested Update Operations', () => {
         });
       });
 
-      // Clear audit logs
+      // Clear audit logs from setup
       await context.prisma.auditLog.deleteMany();
 
-      // Action: Nested update with where clause that matches no posts
       // Prisma throws an error when trying to update non-existent nested records
       const updatePromise = context.provider.runAsync(testActor, async () => {
         await context.prisma.user.update({
@@ -257,7 +232,6 @@ describe('Nested Update Operations', () => {
         });
       });
 
-      // Verify: Operation should fail
       await expect(updatePromise).rejects.toThrow();
 
       // Verify: No audit logs should be created due to transaction rollback
@@ -268,7 +242,6 @@ describe('Nested Update Operations', () => {
 
   describe('updateMany nested operation', () => {
     it('should handle updateMany for multiple records', async () => {
-      // Setup: Create user with multiple posts
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -289,7 +262,6 @@ describe('Nested Update Operations', () => {
 
       await context.prisma.auditLog.deleteMany();
 
-      // Action: Update user with nested updateMany
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.user.update({
           where: { id: user.id },
@@ -304,7 +276,6 @@ describe('Nested Update Operations', () => {
         });
       });
 
-      // Verify: one update log per updated post and aggregate root, with its before state
       const postLogs = await context.prisma.auditLog.findMany({
         where: { entityType: 'Post', action: 'update' },
         orderBy: [{ entityId: 'asc' }, { aggregateType: 'asc' }],
@@ -331,7 +302,6 @@ describe('Nested Update Operations', () => {
 
   describe('Where Clause Accuracy', () => {
     it('should pre-fetch only the correct record when multiple posts exist', async () => {
-      // Setup: Create user with multiple posts
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -374,9 +344,7 @@ describe('Nested Update Operations', () => {
       // Clear audit logs from setup
       await context.prisma.auditLog.deleteMany();
 
-      // Action: Update only post2 (using specific where clause)
-      // IMPORTANT: We don't update the user itself, only nested post
-      // This ensures only post2 gets audit logs, not the user
+      // The user itself is not updated, only the nested post, so only post2 gets audit logs
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.user.update({
           where: { id: user.id },
@@ -415,7 +383,6 @@ describe('Nested Update Operations', () => {
     });
 
     it('should handle updateMany with where clause correctly', async () => {
-      // Setup: Create user with posts of different published status
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -458,7 +425,6 @@ describe('Nested Update Operations', () => {
       // Clear audit logs from setup
       await context.prisma.auditLog.deleteMany();
 
-      // Action: updateMany only unpublished posts
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.user.update({
           where: { id: user.id },
@@ -473,7 +439,6 @@ describe('Nested Update Operations', () => {
         });
       });
 
-      // Verify: the matched posts are audited, the untouched one is not
       const unpublished1Logs = await context.prisma.auditLog.findMany({
         where: { entityType: 'Post', entityId: unpublished1.id, action: 'update' },
       });
@@ -497,7 +462,6 @@ describe('Nested Update Operations', () => {
         }
       }
 
-      // Verify: only unpublished posts were actually updated.
       const finalPublished1 = await context.prisma.post.findUnique({
         where: { id: published1.id },
       });
@@ -506,21 +470,18 @@ describe('Nested Update Operations', () => {
       const finalUnpublished1 = await context.prisma.post.findUnique({
         where: { id: unpublished1.id },
       });
-      expect(finalUnpublished1?.published).toBe(true); // Now published
+      expect(finalUnpublished1?.published).toBe(true);
 
       const finalUnpublished2 = await context.prisma.post.findUnique({
         where: { id: unpublished2.id },
       });
-      expect(finalUnpublished2?.published).toBe(true); // Now published
+      expect(finalUnpublished2?.published).toBe(true);
     });
   });
 
-  // NOTE: Configuration priority tests require separate Prisma Client instances
-  // with different configurations, which is impractical in the current test infrastructure.
-  // The hierarchical configuration resolution (Entity > Global > Default) is fully implemented
-  // in getNestedOperationConfig() and indirectly tested by all tests using default settings.
+  // NOTE: Per-entity vs global nestedOperations config resolution (getNestedOperationConfig) is not
+  // covered here; every test uses the setup.ts defaults.
 
-  // NOTE: Error handling tests require complex mocking of database connections and
-  // invalid WHERE clauses, which is challenging with Testcontainers. The core error
-  // handling is implemented (onAuditError handler) and verified by transaction rollback tests.
+  // NOTE: Audit-pipeline failures reach errorHandling.observer; nested pre-fetch failures are covered
+  // by nested-pre-fetch-failure.integration.spec.ts.
 });

@@ -48,8 +48,6 @@ export interface MockContextController {
  *   });
  * });
  * ```
- *
- * @returns A mock context controller
  */
 export const createMockAuditContext = (): MockContextController => {
   let currentContext: AuditContext | undefined;

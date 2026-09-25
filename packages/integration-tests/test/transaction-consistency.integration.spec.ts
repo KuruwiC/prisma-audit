@@ -72,7 +72,6 @@ describe('Transaction Consistency Integration', () => {
 
       await context.provider.runAsync(auditContext, async () => {
         await context.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-          // Create user within transaction
           const user = await tx.user.create({
             data: {
               email: 'user@example.com',
@@ -119,7 +118,6 @@ describe('Transaction Consistency Integration', () => {
 
       await context.provider.runAsync(auditContext, async () => {
         await context.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-          // Create user within transaction
           const user = await tx.user.create({
             data: {
               email: 'user@example.com',

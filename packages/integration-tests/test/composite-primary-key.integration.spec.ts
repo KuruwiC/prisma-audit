@@ -194,19 +194,15 @@ describe('Composite Primary Key (PostLike)', () => {
   });
 
   /**
-   * `connectOrCreate` on `postLikes` (a to-many relation from `Post`) is handled by
-   * `preFetchOneToManyRelation` (`nested/pre-fetch/one-to-many-fetcher.ts`). These tests
-   * cover both branches through the public client: the row does not exist yet (create path)
-   * and the row already exists (connect path), both addressed through the compound-unique
-   * WHERE shape `{ postId_userId: { postId, userId } }`.
+   * `connectOrCreate` on `postLikes` (a to-many relation from `Post`) is pre-fetched by
+   * `handleConnectOrCreate` (`nested/pre-fetch/coordinator.ts`), which runs for either relation
+   * cardinality and passes the compound-unique WHERE shape `{ postId_userId: { postId, userId } }`
+   * to `findUnique` as is. These tests cover both branches through the public client: the row
+   * does not exist yet (create path) and the row already exists (connect path).
    *
-   * The other two pre-fetch sites that resolve a WHERE clause via `findUnique` —
-   * `coordinator.ts`'s `handleConnectOrCreate` and `one-to-one-fetcher.ts`'s
-   * `resolveParentRows` — only run for a *to-one* relation (a nested `connectOrCreate` on a
-   * singular relation field, or a to-one operation whose top-level `where` does not name the
-   * parent key fields directly). `PostLike` is only ever the many side
-   * (`Post.postLikes: PostLike[]`), so this spec cannot reach either site;
-   * `nested-to-one-pre-fetch.integration.spec.ts` exercises both against the composite-key
+   * The to-one pre-fetch (`preFetchOneToOneRelation`, `nested/pre-fetch/one-to-one-fetcher.ts`)
+   * is never reached here: `PostLike` is only ever the many side (`Post.postLikes: PostLike[]`).
+   * `nested-to-one-pre-fetch.integration.spec.ts` exercises it against the composite-key
    * `PostBookmark`.
    */
   describe('nested connectOrCreate from Post', () => {

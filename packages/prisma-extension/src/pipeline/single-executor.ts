@@ -1,11 +1,10 @@
 /**
  * Single-operation executor
  *
- * create, update, upsert and delete: reads the target row's before state and the nested records
- * the operation will write (including the rows a nested batch filter matches under its parent),
- * resolves the nested write set (the operations that execute, the rows they name or matched, and
- * the rows a to-many relation holds before a nested create), runs the operation, and collects
- * the top-level row and the nested rows the operation wrote.
+ * create, update, upsert and delete: reads the target row's before state and the nested rows
+ * the operation will write (including the rows a nested batch filter matches under its parent
+ * and the rows a to-many relation holds before a nested create), then runs the operation and
+ * collects the top-level row and the nested rows it wrote.
  */
 
 import type { MutationEvent } from '@kuruwic/db-audit-core';
@@ -109,10 +108,7 @@ export const createSingleExecutor = (deps: SingleExecutorDependencies): Operatio
       {
         schemaMetadata,
         getNestedOperationConfig,
-        // A nested delete whose primary key cannot be resolved is skipped rather than recorded
-        // under a partial or fabricated identity (see collectDeleteRecords). It is reported
-        // under its own phase: the record's identity is what failed, not a pre-fetch or diff
-        // generation.
+        // Reported under its own phase: the record's identity is what failed, not a pre-fetch or diff generation.
         onUnresolvedDeleteEntityId: ({ relatedModel, entityId, pkFields, error }) =>
           failureSink.notify({
             phase: 'entity-id-resolution',

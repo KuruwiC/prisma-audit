@@ -38,7 +38,6 @@ const toRow = (result: unknown): Row => {
   return result;
 };
 
-/** What a single operation (create, update, upsert, delete) left behind once it ran */
 export interface SingleOperationOutcome {
   readonly modelName: string;
   readonly action: AuditAction;
@@ -56,8 +55,6 @@ export interface SingleOperationOutcome {
 export type EventCollectorDependencies = NestedEventCollectorDependencies;
 
 /**
- * Collect the events of a single operation: the top-level row, then the nested records it wrote
- *
  * An upsert whose before-state fetch failed yields no event at all: a failed fetch cannot tell
  * an absent row from an existing one, so neither the top-level action nor the nested writes of
  * the executed branch can be told (the fetch already reported its failure).
@@ -92,12 +89,11 @@ export const collectSingleOperationEvents = async (
   return [topLevel, ...nested];
 };
 
-/** The rows a batch operation (createMany, updateMany, deleteMany and their variants) wrote */
 export interface BatchOperationOutcome {
   readonly modelName: string;
   readonly action: AuditAction;
   readonly rows: ReadonlyArray<Row>;
-  /** Before state of each row, paired by primary key; absent for createMany */
+  /** Before state of the row at the same index in `rows`; absent for createMany */
   readonly beforeStates?: ReadonlyArray<Row | null>;
 }
 
@@ -109,7 +105,6 @@ const toSingularAction = (action: AuditAction): MutationAction => {
   return singular;
 };
 
-/** Collect one event per row of a batch operation, in row order */
 export const collectBatchOperationEvents = (
   outcome: BatchOperationOutcome,
   schemaMetadata: SchemaMetadata,

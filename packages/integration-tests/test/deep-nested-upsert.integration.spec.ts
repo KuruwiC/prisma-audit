@@ -33,7 +33,6 @@ describe('Deep Nested Upsert Operations (Profile → Avatar → AvatarImage)', (
     //    the deeply nested records as written (after state)
     // 3. Audit logs are created with correct before/after states
     it('should create audit logs when updating avatar image through profile.upsert', async () => {
-      // Setup: Create user with profile, avatar, and avatarImage
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -72,7 +71,6 @@ describe('Deep Nested Upsert Operations (Profile → Avatar → AvatarImage)', (
 
       await context.prisma.auditLog.deleteMany();
 
-      // Action: Update avatar image through deeply nested upsert
       // This simulates the PUT /profiles/:userId endpoint behavior
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.profile.upsert({
@@ -107,7 +105,6 @@ describe('Deep Nested Upsert Operations (Profile → Avatar → AvatarImage)', (
         });
       });
 
-      // Verify: AvatarImage should be updated
       const profile = await context.prisma.profile.findUnique({
         where: { userId: user.id },
         include: {
@@ -121,7 +118,6 @@ describe('Deep Nested Upsert Operations (Profile → Avatar → AvatarImage)', (
 
       expect(profile?.avatar?.avatarImage?.imageUrl).toBe('https://example.com/updated.png');
 
-      // Verify: Audit logs should be created for AvatarImage update
       const avatarImageLogs = await context.prisma.auditLog.findMany({
         where: {
           entityType: 'AvatarImage',
@@ -134,7 +130,6 @@ describe('Deep Nested Upsert Operations (Profile → Avatar → AvatarImage)', (
       // projects onto its Avatar aggregate (aggregateType: 'Avatar', via `to('Avatar', foreignKey('avatarId'))`).
       expect(avatarImageLogs).toHaveLength(2);
 
-      // Verify audit log content
       const log = avatarImageLogs[0];
       expect(log.action).toBe('update');
       expect(log.before).not.toBeNull();
@@ -144,10 +139,9 @@ describe('Deep Nested Upsert Operations (Profile → Avatar → AvatarImage)', (
       expect(after.imageUrl).toBe('https://example.com/updated.png');
     });
 
-    // NOTE: Create operations work without pre-fetch since `before=null` is correct.
-    // This test passes because creating a new AvatarImage doesn't require `before` state.
+    // The create path needs no pre-fetch: a created record's `before` is null.
     it('should create audit logs when creating avatar image through profile.upsert (create path)', async () => {
-      // Setup: Create user with profile and avatar but no avatarImage
+      // No avatarImage yet, so the nested upsert takes its create path
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -181,7 +175,6 @@ describe('Deep Nested Upsert Operations (Profile → Avatar → AvatarImage)', (
 
       await context.prisma.auditLog.deleteMany();
 
-      // Action: Create avatar image through deeply nested upsert
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.profile.upsert({
           where: { userId: user.id },
@@ -213,7 +206,6 @@ describe('Deep Nested Upsert Operations (Profile → Avatar → AvatarImage)', (
         });
       });
 
-      // Verify: AvatarImage should be created
       const profile = await context.prisma.profile.findUnique({
         where: { userId: user.id },
         include: {
@@ -228,7 +220,6 @@ describe('Deep Nested Upsert Operations (Profile → Avatar → AvatarImage)', (
       expect(profile?.avatar?.avatarImage).not.toBeNull();
       expect(profile?.avatar?.avatarImage?.imageUrl).toBe('https://example.com/new.png');
 
-      // Verify: Audit logs should be created for AvatarImage creation
       const avatarImageLogs = await context.prisma.auditLog.findMany({
         where: {
           entityType: 'AvatarImage',
@@ -253,7 +244,6 @@ describe('Deep Nested Upsert Operations (Profile → Avatar → AvatarImage)', (
       // Profile, Avatar, and AvatarImage are written as separate top-level upserts in one
       // transaction; each upsert is audited only for the branch its before-state fetch identifies.
 
-      // Setup: Create user with profile, avatar, and avatarImage
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -291,7 +281,6 @@ describe('Deep Nested Upsert Operations (Profile → Avatar → AvatarImage)', (
 
       await context.prisma.auditLog.deleteMany();
 
-      // Action: Update AvatarImage through split operations (recommended workaround)
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.$transaction(async (tx: typeof context.prisma) => {
           const existingUser = await tx.user.findUnique({
@@ -353,7 +342,6 @@ describe('Deep Nested Upsert Operations (Profile → Avatar → AvatarImage)', (
         });
       });
 
-      // Verify: AvatarImage should be updated
       const profile = await context.prisma.profile.findUnique({
         where: { userId: user.id },
         include: {
@@ -367,7 +355,6 @@ describe('Deep Nested Upsert Operations (Profile → Avatar → AvatarImage)', (
 
       expect(profile?.avatar?.avatarImage?.imageUrl).toBe('https://i.pravatar.cc/150?img=10');
 
-      // Verify: Audit logs should be created for AvatarImage update
       const avatarImageLogs = await context.prisma.auditLog.findMany({
         where: {
           entityType: 'AvatarImage',
@@ -380,7 +367,6 @@ describe('Deep Nested Upsert Operations (Profile → Avatar → AvatarImage)', (
       // projects onto its Avatar aggregate (aggregateType: 'Avatar', via `to('Avatar', foreignKey('avatarId'))`).
       expect(avatarImageLogs).toHaveLength(2);
 
-      // Verify audit log content
       const log = avatarImageLogs[0];
       expect(log.action).toBe('update');
       expect(log.before).not.toBeNull();
@@ -391,7 +377,6 @@ describe('Deep Nested Upsert Operations (Profile → Avatar → AvatarImage)', (
     });
 
     it('should create audit logs when updating avatar through transaction-based endpoint (split operations)', async () => {
-      // Setup: Create user with profile, avatar, and avatarImage
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -429,11 +414,8 @@ describe('Deep Nested Upsert Operations (Profile → Avatar → AvatarImage)', (
 
       await context.prisma.auditLog.deleteMany();
 
-      // Action: Simulate PUT /profiles/:userId with avatar image update
-      // Split nested upsert operations to allow proper audit logging
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.$transaction(async (tx: typeof context.prisma) => {
-          // Verify user exists
           const existingUser = await tx.user.findUnique({
             where: { id: user.id },
             select: { id: true },
@@ -443,7 +425,6 @@ describe('Deep Nested Upsert Operations (Profile → Avatar → AvatarImage)', (
             throw new Error('User not found');
           }
 
-          // Step 1: Upsert profile (without nested operations)
           const profile = await tx.profile.upsert({
             where: { userId: user.id },
             create: {
@@ -455,7 +436,6 @@ describe('Deep Nested Upsert Operations (Profile → Avatar → AvatarImage)', (
             },
           });
 
-          // Step 2: Upsert avatar (without nested operations)
           const avatar = await tx.avatar.upsert({
             where: { profileId: profile.id },
             create: {
@@ -467,7 +447,6 @@ describe('Deep Nested Upsert Operations (Profile → Avatar → AvatarImage)', (
             },
           });
 
-          // Step 3: Upsert avatarImage (top-level operation)
           await tx.avatarImage.upsert({
             where: { avatarId: avatar.id },
             create: {
@@ -479,7 +458,6 @@ describe('Deep Nested Upsert Operations (Profile → Avatar → AvatarImage)', (
             },
           });
 
-          // Return user with updated profile
           return tx.user.findUniqueOrThrow({
             where: { id: user.id },
             include: {
@@ -497,7 +475,6 @@ describe('Deep Nested Upsert Operations (Profile → Avatar → AvatarImage)', (
         });
       });
 
-      // Verify: AvatarImage should be updated
       const profile = await context.prisma.profile.findUnique({
         where: { userId: user.id },
         include: {
@@ -511,7 +488,6 @@ describe('Deep Nested Upsert Operations (Profile → Avatar → AvatarImage)', (
 
       expect(profile?.avatar?.avatarImage?.imageUrl).toBe('https://i.pravatar.cc/150?img=10');
 
-      // Verify: Audit logs should be created for AvatarImage update
       const avatarImageLogs = await context.prisma.auditLog.findMany({
         where: {
           entityType: 'AvatarImage',

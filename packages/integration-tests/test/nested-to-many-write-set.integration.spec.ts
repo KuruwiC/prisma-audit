@@ -96,7 +96,6 @@ describe('nested to-many write set', () => {
       return seeded;
     };
 
-    /** The audit rows of the post's update, one per aggregate root, ordered by aggregate type */
     const updateLogsOf = (postId: string) =>
       clients.basePrisma.auditLog.findMany({
         where: { entityType: 'Post', entityId: postId, action: 'update' },

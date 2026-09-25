@@ -44,7 +44,6 @@ describe('Before/After Field Validation', () => {
         });
       });
 
-      // First, verify that Prisma returns Date objects
       expect(user.createdAt instanceof Date).toBe(true);
       expect(user.updatedAt instanceof Date).toBe(true);
 
@@ -62,13 +61,11 @@ describe('Before/After Field Validation', () => {
       const createdAt = afterData.createdAt;
       const updatedAt = afterData.updatedAt;
 
-      // Debug: log the actual values
       console.log('createdAt type:', typeof createdAt);
       console.log('createdAt value:', createdAt);
       console.log('updatedAt type:', typeof updatedAt);
       console.log('updatedAt value:', updatedAt);
 
-      // Should be strings (ISO format)
       expect(typeof createdAt).toBe('string');
       expect(typeof updatedAt).toBe('string');
 

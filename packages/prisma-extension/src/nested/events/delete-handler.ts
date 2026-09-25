@@ -23,7 +23,7 @@ import type { NestedWriteTarget } from './write-set.js';
 /**
  * A nested delete skipped because its primary key could not be resolved. `entityId` is the
  * raw serialized key, or `undefined` when no identity was ever determined.
- * The single executor maps these fields into an `entity-id-resolution` observer context.
+ * `pipeline/single-executor.ts` maps these fields into an `entity-id-resolution` observer context.
  */
 export interface UnresolvedDeleteEntityId {
   relatedModel: string;
@@ -78,7 +78,6 @@ const reportUnresolvedEntityId = async (
  * @param pkConstraint - The deleted model's primary key. The fallback reads the constraint's
  *   declared name as well as its fields, because a named composite key wraps the WHERE clause
  *   under that name.
- * @returns Collected records, ready to become mutation events
  */
 export const collectDeleteRecords = async (
   nestedOp: NestedOperationInfo,
@@ -122,7 +121,6 @@ export const collectDeleteRecords = async (
     return collected;
   }
 
-  // Fallback: extract ID from operation data when prefetch is unavailable
   nestedLog('no pre-fetch results for path=%s, falling back to operation data', nestedOp.path);
 
   const entityId = extractDeleteOperationEntityId(nestedOp.data, pkConstraint);

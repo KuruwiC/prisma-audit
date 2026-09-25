@@ -73,7 +73,6 @@ const scopeWhereToParent = (
   return { ...where, AND: [...and, { [scope.backField]: { [scope.filter]: parentKey } }] };
 };
 
-/** What scopes a nested to-many operation to its parent rows */
 export interface ToManyScopeInput extends Omit<ResolveParentRowsInput, 'parentFields'> {
   data: unknown;
   scope: ToManyRelationScope;
@@ -83,7 +82,6 @@ export interface ToManyScopeInput extends Omit<ResolveParentRowsInput, 'parentFi
   parentKeysFromWhere: readonly PreFetchRecord[];
 }
 
-/** The parent rows the pre-fetch resolves, plus the keys named by parent-path operations it did not read */
 const resolveScopedParentRows = async (input: ToManyScopeInput): Promise<PreFetchRecord[]> => [
   ...(await resolveParentRows({ ...input, parentFields: input.scope.parentFields })),
   ...input.parentKeysFromWhere,
@@ -168,7 +166,6 @@ const storeMatchedRow = (
   storePreFetchResult(preFetchResults, path, identity, before);
 };
 
-/** `filter` scoped to each parent row that carries its key: one query per parent row */
 const scopeFilterToParents = (
   filter: PreFetchRecord,
   scope: ToManyRelationScope,
@@ -180,11 +177,9 @@ const scopeFilterToParents = (
   });
 
 /**
- * Pre-reads the rows the filter of a nested to-many `updateMany` / `deleteMany` matches under each
- * of its parent rows: one `findMany` per filter and parent row, the filter scoped through the
- * back-relation the way Prisma scopes the write. Every matched row is stored under its primary
- * key: whole when `fetchBeforeOperation` asks for its before-state, else as an identity with a
- * `null` before-state.
+ * Pre-reads the rows a nested `updateMany` / `deleteMany` filter matches, scoped through the
+ * back-relation the way Prisma scopes the write. Each matched row is stored whole when
+ * `fetchBeforeOperation` asks for its before-state, else as an identity with a `null` before-state.
  *
  * @returns The primary key of every matched row, keyed by its identity
  */

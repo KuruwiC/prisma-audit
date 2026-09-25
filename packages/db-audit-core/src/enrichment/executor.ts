@@ -7,16 +7,7 @@
 import { ENRICHMENT_TIMEOUTS } from '../constants.js';
 import type { EnricherConfig, EnricherErrorStrategy } from './types.js';
 
-/**
- * Execute a promise with a timeout that is properly cleaned up
- *
- * @param promise - The promise to race against the timeout
- * @param timeoutMs - Timeout duration in milliseconds
- * @returns The resolved value of the promise
- * @throws Error('Enricher timeout') if the timeout fires first
- *
- * @internal
- */
+/** Rejects with 'Enricher timeout' when `timeoutMs` elapses first; the timer is cleared either way so a settled call leaves nothing pending. */
 const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number): Promise<T> => {
   let timeoutId: NodeJS.Timeout | undefined;
   try {
@@ -31,18 +22,6 @@ const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number): Promise<T
   }
 };
 
-/**
- * Handle enricher error based on configured strategy
- *
- * @template TContext - Enriched context type
- * @param error - Error that occurred during enrichment
- * @param errorStrategy - Error handling strategy
- * @param fallback - Fallback value to use
- * @returns Resolved context value or null
- * @throws Re-throws error if strategy is 'fail'
- *
- * @internal
- */
 const handleEnricherError = <TContext>(
   error: Error,
   errorStrategy: EnricherErrorStrategy,
@@ -60,7 +39,6 @@ const handleEnricherError = <TContext>(
   if (typeof errorStrategy === 'function') {
     try {
       const customResult = errorStrategy(error);
-      // Custom error handler can return any value or null
       if (customResult === null || customResult === undefined) {
         return fallback ?? null;
       }
@@ -75,35 +53,8 @@ const handleEnricherError = <TContext>(
 };
 
 /**
- * Execute enricher with error handling strategy
- *
- * @template TInput - Input type
- * @template TContext - Enriched context type
- * @param config - Enricher configuration with error strategy and fallback
- * @param input - Input data to enrich
- * @param db - Database handle passed through to the enricher
- * @param timeoutMs - Timeout in milliseconds (default: ENRICHMENT_TIMEOUTS.DEFAULT)
- * @returns Enriched context or null if no enricher configured or error occurred
- *
- * @remarks
- * Error handling strategies:
- * - 'fail': Re-throw error to fail the operation
- * - 'log': Log warning and use fallback value
- * - 'skip': Return null without logging; `fallback` is not used
- * - Custom function: Execute custom error handler and use its return value or fallback
- *
- * @example
- * ```typescript
- * const result = await executeEnricherSafely(
- *   {
- *     enricher: async (user, db) => ({ roles: ['admin'] }),
- *     onError: 'log',
- *     fallback: { roles: [] }
- *   },
- *   { id: '123' },
- *   db
- * );
- * ```
+ * Runs `config.enricher` under `timeoutMs`; null when no enricher is configured. A failure,
+ * including a timeout, is handled per `config.onError`.
  */
 export const executeEnricherSafely = async <TInput, TContext, TMeta = void>(
   config: EnricherConfig<TInput, TContext, unknown, TMeta> | undefined,
@@ -126,19 +77,6 @@ export const executeEnricherSafely = async <TInput, TContext, TMeta = void>(
   }
 };
 
-/**
- * Handle batch enricher error based on configured strategy
- *
- * @template TContext - Individual enriched context type
- * @param error - Error that occurred during batch enrichment
- * @param errorStrategy - Error handling strategy
- * @param fallback - Fallback value (can be array or single value) to use for each entity
- * @param inputCount - Number of input entities
- * @returns Array of resolved context values or nulls
- * @throws Re-throws error if strategy is 'fail'
- *
- * @internal
- */
 const handleBatchEnricherError = <TContext>(
   error: Error,
   errorStrategy: EnricherErrorStrategy,
@@ -165,7 +103,6 @@ const handleBatchEnricherError = <TContext>(
     try {
       const customResult = errorStrategy(error);
       if (Array.isArray(customResult)) {
-        // Ensure all elements are TContext | null
         return customResult as (TContext | null)[];
       }
       return createFallbackArray();
@@ -179,39 +116,9 @@ const handleBatchEnricherError = <TContext>(
 };
 
 /**
- * Execute batch enricher with error handling strategy
- *
- * @template TInput - Input type
- * @template TContext - Enriched context type
- * @param config - Enricher configuration with error strategy and fallback
- * @param inputs - Array of input data to enrich
- * @param db - Database handle passed through to the enricher
- * @param timeoutMs - Timeout in milliseconds (default: ENRICHMENT_TIMEOUTS.BATCH)
- * @returns Array of enriched contexts or null array if no enricher configured or error occurred
- *
- * @remarks
- * Designed for batch enrichment where the enricher processes multiple entities at once
- * and returns an array of contexts.
- *
- * Error handling strategies:
- * - 'fail': Re-throw error to fail the operation
- * - 'log': Log warning and return array of nulls/fallbacks
- * - 'skip': Return an array of nulls without logging; `fallback` is not used
- * - Custom function: Execute custom error handler and use its return value or fallbacks
- *
- * @example
- * ```typescript
- * const results = await executeBatchEnricherSafely(
- *   {
- *     enricher: async (users, db) => users.map(u => ({ roles: ['user'] })),
- *     onError: 'log',
- *     fallback: [null, null]
- *   },
- *   [{ id: '1' }, { id: '2' }],
- *   db
- * );
- * // returns: [{ roles: ['user'] }, { roles: ['user'] }] or [null, null] on error
- * ```
+ * Runs `config.enricher` over `inputs` under `timeoutMs`; all null when no enricher is configured.
+ * A failure, including a timeout or a result of the wrong length, is handled per `config.onError`;
+ * when it is not rethrown, `fallback` (an array) or nulls stand in for every input.
  */
 export const executeBatchEnricherSafely = async <TInput, TContext, TMeta = void>(
   config: EnricherConfig<TInput[], (TContext | null)[], unknown, TMeta> | undefined,

@@ -40,22 +40,12 @@ export interface SharedChangeSchema {
   aggregateModel: string;
 }
 
-/**
- * Deduplication result for actors, entities, and aggregates
- *
- * @internal
- */
 interface DeduplicationResult {
   actors: Map<string, ActorData>;
   entities: Map<string, EntityData>;
   aggregates: Map<string, AggregateData>;
 }
 
-/**
- * Actor data structure
- *
- * @internal
- */
 interface ActorData {
   category: string;
   type: string;
@@ -63,11 +53,6 @@ interface ActorData {
   context: unknown;
 }
 
-/**
- * Entity data structure
- *
- * @internal
- */
 interface EntityData {
   category: string;
   type: string;
@@ -75,11 +60,6 @@ interface EntityData {
   context: unknown;
 }
 
-/**
- * Aggregate data structure
- *
- * @internal
- */
 interface AggregateData {
   category: string;
   type: string;
@@ -97,45 +77,24 @@ const capitalizeModelName = (name: string): string => {
   return name.charAt(0).toUpperCase() + name.slice(1);
 };
 
-/**
- * Creates a unique key for an actor
- *
- * @internal
- */
 const getActorKey = (log: AuditLogData): string => {
   return `${log.actorCategory}:${log.actorType}:${log.actorId}`;
 };
 
-/**
- * Creates a unique key for an entity
- *
- * @internal
- */
 const getEntityKey = (log: AuditLogData): string => {
   return `${log.entityCategory}:${log.entityType}:${log.entityId}`;
 };
 
-/**
- * Creates a unique key for an aggregate
- *
- * @internal
- */
 const getAggregateKey = (log: AuditLogData): string => {
   return `${log.aggregateCategory}:${log.aggregateType}:${log.aggregateId}`;
 };
 
-/**
- * Deduplicates actors, entities, and aggregates from audit log data
- *
- * @internal
- */
 const deduplicateData = (logs: AuditLogData[]): DeduplicationResult => {
   const actors = new Map<string, ActorData>();
   const entities = new Map<string, EntityData>();
   const aggregates = new Map<string, AggregateData>();
 
   for (const log of logs) {
-    // Deduplicate actors
     const actorKey = getActorKey(log);
     if (!actors.has(actorKey)) {
       actors.set(actorKey, {
@@ -146,7 +105,6 @@ const deduplicateData = (logs: AuditLogData[]): DeduplicationResult => {
       });
     }
 
-    // Deduplicate entities
     const entityKey = getEntityKey(log);
     if (!entities.has(entityKey)) {
       entities.set(entityKey, {
@@ -157,7 +115,6 @@ const deduplicateData = (logs: AuditLogData[]): DeduplicationResult => {
       });
     }
 
-    // Deduplicate aggregates
     const aggregateKey = getAggregateKey(log);
     if (!aggregates.has(aggregateKey)) {
       aggregates.set(aggregateKey, {
@@ -172,11 +129,6 @@ const deduplicateData = (logs: AuditLogData[]): DeduplicationResult => {
   return { actors, entities, aggregates };
 };
 
-/**
- * Transaction client type
- *
- * @internal
- */
 type TransactionClient = Record<
   string,
   {
@@ -350,11 +302,9 @@ type PrismaClientWithTransaction = {
 };
 
 /**
- * Creates an entity-normalized audit log writer
- *
- * Creates a custom writer that stores audit logs in a normalized schema
- * with separate tables for actors, entities, aggregates, and events.
- * Prevents duplication of actor/entity/aggregate metadata across audit logs.
+ * Creates a writer that stores audit logs in a normalized schema with separate tables for actors,
+ * entities, aggregates and events, so their metadata is not duplicated across audit logs. Writes run
+ * in the audited operation's transaction when one is open, else in a transaction on `basePrisma`.
  *
  * @example
  * ```typescript
@@ -406,20 +356,10 @@ export const createEntityNormalizedWriter = (schema: NormalizedSchema, basePrism
   };
 };
 
-/**
- * Creates a key for grouping logs by entity change
- *
- * @internal
- */
 const getChangeKey = (log: AuditLogData): string => {
   return `${log.entityCategory}:${log.entityType}:${log.entityId}:${log.action}`;
 };
 
-/**
- * Groups logs by entity change
- *
- * @internal
- */
 const groupLogsByChange = (logs: AuditLogData[]): Map<string, AuditLogData[]> => {
   const groups = new Map<string, AuditLogData[]>();
 
@@ -437,11 +377,9 @@ const groupLogsByChange = (logs: AuditLogData[]): Map<string, AuditLogData[]> =>
 };
 
 /**
- * Creates a shared-change audit log writer
- *
- * Creates a custom writer that stores audit logs in a normalized schema
- * where change data (before/after/changes) is stored once and linked to multiple aggregate roots.
- * Prevents duplication of change data when an entity belongs to multiple aggregates.
+ * Creates a writer that stores each entity change (before/after/changes) once and links it to every
+ * aggregate root it belongs to, so change data is not duplicated across aggregates. Writes run in
+ * the audited operation's transaction when one is open, else in a transaction on `basePrisma`.
  *
  * @example
  * ```typescript

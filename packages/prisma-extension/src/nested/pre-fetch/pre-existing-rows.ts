@@ -101,7 +101,6 @@ const resolvePathRelation = (
   };
 };
 
-/** Operations at the parent path of `path` whose rows the pre-fetch did not read */
 const parentOperationsNotPreFetched = (
   path: string,
   nestedOperations: readonly NestedOperationInfo[],

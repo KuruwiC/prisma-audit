@@ -35,13 +35,9 @@ type ContextRunner = Pick<AuditContextProvider, 'runAsync'>;
 /** Process-wide, so that every copy of this package loaded in the process shares one scope */
 const storage = getGlobalSingleton('runtime-scope', () => new AsyncLocalStorage<RuntimeScope>());
 
-/** The scope of the current async flow, or undefined outside any */
 export const currentScope = (): RuntimeScope | undefined => storage.getStore();
 
-/**
- * Runs `fn` in a scope that merges `patch` over the current one. Works for sync and async
- * functions alike; the return value passes through.
- */
+/** Runs `fn`, sync or async, in a scope that merges `patch` over the current one */
 export const withScope = <T>(patch: RuntimeScope, fn: () => T): T =>
   storage.run({ ...storage.getStore(), ...patch }, fn);
 
@@ -66,10 +62,9 @@ export interface ImplicitTransactionInput {
 }
 
 /**
- * Opens a transaction on the base client around `run` and marks the flow as inside it. Both
- * stores are established before `$transaction` so that they survive its microtask boundary.
- * The writes `run` queues on the transaction start on the base client once `$transaction` has
- * resolved, after commit; when it rejects, they are discarded unrun.
+ * Both stores are established before `$transaction` so that they survive its microtask
+ * boundary. The writes `run` queues on the transaction start on the base client once
+ * `$transaction` has resolved, after commit; when it rejects, they are discarded unrun.
  */
 export const openImplicitTransaction = <T>(
   input: ImplicitTransactionInput,

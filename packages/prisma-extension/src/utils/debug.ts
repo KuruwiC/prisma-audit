@@ -13,12 +13,6 @@
 import type { Debugger } from 'debug';
 import debug from 'debug';
 
-/**
- * Debug logger for nested operations
- */
 export const nestedLog: Debugger = debug('prisma-audit:nested');
 
-/**
- * Debug logger for pre-fetch operations
- */
 export const preFetchLog: Debugger = debug('prisma-audit:prefetch');

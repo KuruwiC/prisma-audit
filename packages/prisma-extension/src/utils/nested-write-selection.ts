@@ -75,7 +75,10 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const isEmptyInjection = (injected: InjectedSelection): boolean =>
   injected.keys.size === 0 && injected.nested.size === 0;
 
-/** The rows `operation` reads at its path: those its update elements name, or the relation whole */
+/**
+ * The rows `operation` bounds its relation to: the unique WHEREs of a to-many `update` when every
+ * element names one, else the relation whole
+ */
 const rowsWrittenBy = (operation: NestedOperationInfo): RelationRows => {
   if (!operation.isList || operation.operation !== 'update') {
     return { kind: 'all' };
@@ -155,9 +158,8 @@ const buildIncludeTree = (schemaMetadata: SchemaMetadata, relations: WrittenRela
   );
 
 /**
- * Entry for one written relation: a `where` bounding it to the rows its updates name when the path
- * inserts nothing, and the relations written below it. Nested relations always use `include`,
- * valid even when this entry is placed under a `select` field.
+ * Entry for one written relation. Nested relations always use `include`, which is valid even when
+ * this entry is placed under a `select` field.
  *
  * @internal
  */
@@ -255,9 +257,6 @@ const mergeWrittenRelations = (
  * Select the relations the operation writes, so their rows are in the result the audit logs are
  * built from
  *
- * @param schemaMetadata - Schema metadata of the audited client
- * @param modelName - Model the operation runs on
- * @param args - Operation args
  * @returns The args to execute (`args` itself when nothing had to be added) and what was added to the
  *   caller's selection, for {@link projectToRequestedShape}
  */
@@ -297,9 +296,7 @@ export const injectNestedWriteSelection = (
  * Remove what {@link injectNestedWriteSelection} added from an operation result, recursively, leaving
  * everything the caller requested
  *
- * @param value - Result of the operation executed with the injected selection
  * @param injected - What the injection added; `undefined` returns `value` itself
- * @returns The result in the shape the caller requested
  */
 export const projectToRequestedShape = (value: unknown, injected: InjectedSelection | undefined): unknown => {
   if (!injected) {

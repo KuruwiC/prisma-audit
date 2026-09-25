@@ -15,9 +15,7 @@ import type { NestedPreFetchResult } from './nested-state.js';
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
 
-/**
- * Nested operation keywords that can appear in operation args
- */
+/** Nested operation keywords that can appear in operation args */
 export const NESTED_OPERATION_KEYWORDS = [
   'create',
   'createMany',
@@ -38,9 +36,7 @@ export type NestedBatchKeyword = 'updateMany' | 'deleteMany';
 export const isNestedBatchKeyword = (keyword: NestedOperationKeyword): keyword is NestedBatchKeyword =>
   keyword === 'updateMany' || keyword === 'deleteMany';
 
-/**
- * Information about a detected nested operation
- */
+/** Information about a detected nested operation */
 export interface NestedOperationInfo {
   /** Relation field name (e.g., 'posts') */
   fieldName: string;
@@ -56,9 +52,7 @@ export interface NestedOperationInfo {
   path: string;
 }
 
-/**
- * Information about nested records extracted from operation result
- */
+/** Information about nested records extracted from operation result */
 export interface NestedRecordInfo {
   /** Relation field name (e.g., 'posts') */
   fieldName: string;
@@ -251,7 +245,6 @@ const processNestedKeyword = (
 ): NestedOperationInfo[] => {
   const ops: NestedOperationInfo[] = [];
 
-  // Add the operation itself
   ops.push({
     fieldName: relationField.name,
     relatedModel: relationField.relatedModel,
@@ -261,7 +254,6 @@ const processNestedKeyword = (
     path: currentPath,
   });
 
-  // Process recursive operations based on keyword type
   if (keyword === 'create' || keyword === 'createMany') {
     const createOps = processCreateOperation(schemaMetadata, relationField, nestedData, currentPath, pass);
     ops.push(...createOps);
@@ -307,12 +299,10 @@ const processRelationField = (
     return [];
   }
 
-  // Build full path for this nested operation
   const currentPath = parentPath ? `${parentPath}.${relationField.name}` : relationField.name;
 
   const ops: NestedOperationInfo[] = [];
 
-  // Check for nested operation keywords in this relation field
   for (const keyword of NESTED_OPERATION_KEYWORDS) {
     const nestedData = (fieldValue as Record<string, unknown>)[keyword];
     if (nestedData === undefined) {
@@ -326,11 +316,7 @@ const processRelationField = (
   return ops;
 };
 
-/**
- * Recursively detect deeply nested operations (e.g., postTags.create.tag.connectOrCreate)
- *
- * @internal
- */
+/** @internal Recursively detect deeply nested operations (e.g., postTags.create.tag.connectOrCreate) */
 const detectDeeplyNestedOperations = (
   schemaMetadata: SchemaMetadata,
   modelName: string,
@@ -341,7 +327,6 @@ const detectDeeplyNestedOperations = (
 ): NestedOperationInfo[] => {
   const deeplyNestedOps: NestedOperationInfo[] = [];
 
-  // Handle array of operations
   const dataArray = Array.isArray(operationData) ? operationData : [operationData];
 
   for (const singleData of dataArray) {
@@ -349,7 +334,6 @@ const detectDeeplyNestedOperations = (
       continue;
     }
 
-    // Get relation fields for current model
     const relationFields = schemaMetadata.getRelationFields(modelName);
 
     for (const relationField of relationFields) {
@@ -401,7 +385,6 @@ const processDeeplyNestedOperations = (
 ): NestedOperationInfo[] => {
   const fieldPath = currentPath ? `${currentPath}.${relationField.name}` : relationField.name;
 
-  // For 'create' operations, recursively detect deeply nested operations
   if (keyword === 'create' || keyword === 'createMany') {
     return detectDeeplyNestedOperations(
       schemaMetadata,
@@ -428,7 +411,6 @@ const processDeeplyNestedOperations = (
     return processUpsertOperation(schemaMetadata, relationField, nestedData, relationField.name, pass);
   }
 
-  // For 'connectOrCreate', recursively detect deeply nested operations in create branch
   if (keyword === 'connectOrCreate' && typeof nestedData === 'object' && nestedData !== null) {
     const connectOrCreateData = nestedData as Record<string, unknown>;
     const createData = connectOrCreateData.create;
@@ -553,7 +535,7 @@ const processDataSource = (input: ProcessDataSourceInput): void => {
 /**
  * Detect nested operations in operation args
  *
- * Main entry point for detecting all nested write operations (create, update, delete, upsert, connectOrCreate)
+ * Main entry point for detecting all nested write operations (every keyword in `NESTED_OPERATION_KEYWORDS`)
  * at any depth level. Supports deeply nested operations like `postTags.create.tag.connectOrCreate`.
  *
  * **Upsert branches:** `pass` decides which branches of the top-level upsert and of nested upserts
@@ -595,13 +577,11 @@ export const detectNestedOperations = (
 ): NestedOperationInfo[] => {
   const nestedOperations: NestedOperationInfo[] = [];
 
-  // Get all relation fields for this model
   const relationFields = schemaMetadata.getRelationFields(modelName);
   if (relationFields.length === 0) {
     return nestedOperations;
   }
 
-  // Extract data sources from args
   const dataSources = extractDataSources(args, pass);
   if (dataSources.length === 0) {
     return nestedOperations;
@@ -610,7 +590,6 @@ export const detectNestedOperations = (
   // Track processed operations to avoid duplicates when exploring both branches
   const processedOps = new Set<string>();
 
-  // Process each data source
   for (const data of dataSources) {
     processDataSource({
       schemaMetadata,
@@ -773,12 +752,10 @@ export const extractNestedRecords = (
 ): NestedRecordInfo[] => {
   const nestedRecords: NestedRecordInfo[] = [];
 
-  // Result must be an object
   if (!result || typeof result !== 'object') {
     return nestedRecords;
   }
 
-  // Get all relation fields for this model
   const relationFields = schemaMetadata.getRelationFields(modelName);
   if (relationFields.length === 0) {
     return nestedRecords;
@@ -786,19 +763,15 @@ export const extractNestedRecords = (
 
   const resultObj = result as Record<string, unknown>;
 
-  // Check each relation field
   for (const relationField of relationFields) {
     const fieldValue = resultObj[relationField.name];
 
-    // Skip if field is not present
     if (fieldValue === undefined || fieldValue === null) {
       continue;
     }
 
-    // Convert to array for consistent processing
     const records = relationField.isList ? (Array.isArray(fieldValue) ? fieldValue : []) : [fieldValue];
 
-    // Only include if we have actual records
     if (records.length > 0) {
       nestedRecords.push({
         fieldName: relationField.name,
@@ -808,7 +781,6 @@ export const extractNestedRecords = (
         path: relationField.name, // Top-level path is just the field name
       });
 
-      // Recursively extract deeper nested records
       const deeperRecords = extractDeeplyNestedRecords(
         schemaMetadata,
         relationField.relatedModel,

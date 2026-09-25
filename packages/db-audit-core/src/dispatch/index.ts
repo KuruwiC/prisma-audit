@@ -12,9 +12,7 @@ export interface DispatchScope {
   readonly inTransaction: boolean;
 }
 
-/**
- * atomic -> immediate; not atomic inside a transaction -> after-commit; otherwise detached
- */
+/** atomic -> immediate; not atomic inside a transaction -> after-commit; otherwise detached */
 export const dispatch = (records: readonly AuditRecord[], atomic: boolean, scope: DispatchScope): WritePlan => {
   if (atomic) {
     return { kind: 'immediate', records };

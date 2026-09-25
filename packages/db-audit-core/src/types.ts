@@ -85,7 +85,6 @@ export interface AuditContext {
 export interface AuditContextProvider {
   /**
    * Get the current audit context
-   * @returns The current audit context or undefined if not set
    */
   getContext(): AuditContext | undefined;
 
@@ -93,7 +92,6 @@ export interface AuditContextProvider {
    * Get the current audit context (throws if not available)
    *
    * @throws {Error} If context is not available
-   * @returns The current audit context
    */
   useContext(): AuditContext;
 
@@ -103,10 +101,6 @@ export interface AuditContextProvider {
    * Do not return lazy thenables (e.g. a database client's query promise) from `fn`:
    * they execute when awaited, which happens after this synchronous scope
    * has exited, so the context would not apply. Use `runAsync` for those.
-   *
-   * @param context - The audit context to set
-   * @param fn - The function to run
-   * @returns The return value of the function
    */
   run<T>(context: AuditContext, fn: () => T): T;
 
@@ -115,17 +109,13 @@ export interface AuditContextProvider {
    *
    * The returned value is settled inside the context scope, so `fn` may
    * return a lazy thenable (e.g. a database client's query promise) directly.
-   *
-   * @param context - The audit context to set
-   * @param fn - The async function to run
-   * @returns A promise that resolves to the return value of the function
    */
   runAsync<T>(context: AuditContext, fn: () => Promise<T>): Promise<T>;
 
   /**
    * Run fn with only the actor overridden; the rest of the current context
    * (request metadata) and all library-internal transaction state are preserved.
-   * Safe to call inside $transaction callbacks — this is the official way to
+   * Safe to call inside a transaction callback — this is the official way to
    * re-attribute writes to a different actor mid-flow.
    *
    * Like `runAsync`, the returned value is settled inside the overridden

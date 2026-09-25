@@ -139,7 +139,6 @@ describe('Transaction Enrichment Consistency', () => {
   });
 
   describe('Aggregate enricher should read uncommitted changes within transaction', () => {
-    // Helper types for aggregate enricher
     type PostWithAuthor = { authorId: string };
     type UserFindManyClient = {
       user: {
@@ -150,7 +149,6 @@ describe('Transaction Enrichment Consistency', () => {
       };
     };
 
-    // Helper function to extract unique author IDs from posts
     const extractAuthorIds = (posts: PostWithAuthor[]): string[] => {
       const authorIds = new Set<string>();
       for (const post of posts) {
@@ -161,7 +159,6 @@ describe('Transaction Enrichment Consistency', () => {
       return Array.from(authorIds);
     };
 
-    // Helper function to fetch users and create a map of id -> email
     const fetchUserEmailMap = async (prismaClient: unknown, authorIds: string[]): Promise<Map<string, string>> => {
       const userMap = new Map<string, string>();
       if (authorIds.length === 0) return userMap;
@@ -201,7 +198,6 @@ describe('Transaction Enrichment Consistency', () => {
                       enrichedUserEmail = userMap.get(firstPost.authorId);
                     }
 
-                    // Return context for each post's author
                     return posts.map((post) => ({
                       parentUserEmail: userMap.get(post.authorId) ?? null,
                     }));

@@ -25,12 +25,6 @@ import type {
 /**
  * Callback function to resolve aggregate ID from an entity
  *
- * @template TEntity - Entity type being resolved (defaults to unknown)
- * @template TDbHandle - Database handle type (defaults to unknown)
- *
- * @param entity - Entity instance to extract the aggregate ID from
- * @param db - Database handle for performing queries if needed
- *
  * @returns Promise resolving to string (logged), null, or undefined (both skip logging)
  *
  * @example
@@ -60,23 +54,7 @@ export type BatchAggregateIdResolver<TEntity = unknown, TDbHandle = unknown> = (
   db: TDbHandle,
 ) => Promise<(string | null | undefined)[]>;
 
-/**
- * Default entity category value
- *
- * @default 'model'
- *
- * @example
- * ```typescript
- * defineEntity({
- *   type: 'User',
- *   category: DEFAULT_ENTITY_CATEGORY
- * })
- *
- * defineEntity({
- *   type: 'User'
- * })
- * ```
- */
+/** Entity and aggregate category used when defineEntity() and to() receive none */
 export const DEFAULT_ENTITY_CATEGORY = 'model' as const;
 
 // ============================================================================
@@ -105,10 +83,7 @@ export interface AggregateRoot<TDbHandle = unknown, TEntity extends Record<strin
   type: string;
   /** Callback function to resolve the aggregate ID from the entity */
   resolve(entity: TEntity, db: TDbHandle): Promise<string | null | undefined>;
-  /**
-   * Optional batch resolver for N+1 prevention. Takes precedence over `resolve` when processing multiple entities.
-   * Type safety is enforced at the `batchResolveIds<TEntity, TDbHandle>()` call site.
-   */
+  /** Batch resolver for N+1 prevention; takes precedence over `resolve` when processing multiple entities. */
   batchResolve?(entities: TEntity[], db: TDbHandle): Promise<(string | null | undefined)[]>;
   /** Whether `resolve` performs DB queries. Set automatically by resolveId(). Used for N+1 warnings. */
   requiresDbAccess?: boolean;
@@ -169,12 +144,7 @@ export interface LoggableEntity<
   idResolver(entity: TEntity, db: TDbHandle): Promise<string | null | undefined>;
   /** List of aggregate roots this entity belongs to */
   aggregates: AggregateRoot<TDbHandle, TEntity>[];
-  /**
-   * Self-projection configuration (default: included, no projection context)
-   *
-   * Set to `false` to skip the self aggregate log (useful for join tables).
-   * Provide `{ context }` to enrich the self aggregate log with the entity's own rows.
-   */
+  /** Self-projection configuration (default: included, no projection context) */
   self?: SelfProjectionConfig<TDbHandle, TEntity>;
   /** Field names to exclude from change tracking */
   excludeFields?: string[];
@@ -264,8 +234,6 @@ export type AggregateMapping<TModelName extends string = string, TDbHandle = unk
 
 /**
  * Result of aggregate ID resolution
- *
- * @interface
  *
  * @example
  * ```typescript

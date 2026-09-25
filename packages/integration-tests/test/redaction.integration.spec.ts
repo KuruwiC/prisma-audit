@@ -41,7 +41,6 @@ describe('PII Redaction Integration', () => {
       });
     });
 
-    // Verify audit log
     const auditLogs = await context.prisma.auditLog.findMany({
       where: { entityType: 'User', entityId: user.id, action: 'create' },
     });
@@ -51,7 +50,6 @@ describe('PII Redaction Integration', () => {
 
     const after = log.after as Record<string, unknown>;
 
-    // Password should be redacted
     expect(after.password).toEqual({
       redacted: true,
       hadValue: true,
@@ -63,7 +61,6 @@ describe('PII Redaction Integration', () => {
   });
 
   it('should redact password field in User update', async () => {
-    // Create user
     const user = await context.provider.runAsync(testActor, async () => {
       return await context.prisma.user.create({
         data: {
@@ -74,7 +71,6 @@ describe('PII Redaction Integration', () => {
       });
     });
 
-    // Update user with new password
     await context.provider.runAsync(testActor, async () => {
       return await context.prisma.user.update({
         where: { id: user.id },
@@ -82,7 +78,6 @@ describe('PII Redaction Integration', () => {
       });
     });
 
-    // Verify update audit log
     const updateLogs = await context.prisma.auditLog.findMany({
       where: { entityType: 'User', entityId: user.id, action: 'update' },
     });
@@ -93,7 +88,6 @@ describe('PII Redaction Integration', () => {
     const before = log.before as Record<string, unknown>;
     const after = log.after as Record<string, unknown>;
 
-    // Password should be redacted in both before and after
     expect(before.password).toEqual({
       redacted: true,
       hadValue: true,
@@ -103,7 +97,7 @@ describe('PII Redaction Integration', () => {
       hadValue: true,
     });
 
-    // Verify that password change is recorded in changes field
+    // Redaction must not hide that the password changed: changes still records it, flagged isDifferent
     expect(log.changes).toBeDefined();
     const changes = log.changes as Record<string, { old: unknown; new: unknown }>;
     expect(changes).toHaveProperty('password');
@@ -121,7 +115,6 @@ describe('PII Redaction Integration', () => {
   });
 
   it('should redact password field in User deletion', async () => {
-    // Create user
     const user = await context.provider.runAsync(testActor, async () => {
       return await context.prisma.user.create({
         data: {
@@ -134,14 +127,12 @@ describe('PII Redaction Integration', () => {
 
     const userId = user.id;
 
-    // Delete user
     await context.provider.runAsync(testActor, async () => {
       await context.prisma.user.delete({
         where: { id: userId },
       });
     });
 
-    // Verify delete audit log
     const deleteLogs = await context.prisma.auditLog.findMany({
       where: { entityType: 'User', entityId: userId, action: 'delete' },
     });
@@ -151,13 +142,11 @@ describe('PII Redaction Integration', () => {
 
     const before = log.before as Record<string, unknown>;
 
-    // Password should be redacted in before state
     expect(before.password).toEqual({
       redacted: true,
       hadValue: true,
     });
 
-    // After should be null for delete
     expect(log.after).toBeNull();
   });
 
@@ -181,7 +170,6 @@ describe('PII Redaction Integration', () => {
 
     const after = log.after as Record<string, unknown>;
 
-    // Non-sensitive fields should be intact
     expect(after.email).toBe('secure@example.com');
     expect(after.name).toBe('Secure User');
     expect(after.id).toBeDefined();

@@ -18,7 +18,6 @@ import { enterTransaction } from './scope.js';
 
 type OriginalTransactionMethod = (...args: unknown[]) => Promise<unknown>;
 
-/** Transaction proxy handler dependencies */
 type TransactionProxyDependencies = {
   provider: AuditContextProvider;
   originalTransaction: OriginalTransactionMethod;
@@ -37,12 +36,6 @@ type TransactionProxyDependencies = {
  * commits, so audit logs never persist for a transaction whose commit subsequently fails. The
  * callback clears the array at the start of each invocation (defensive against callback
  * re-invocation) and never drains itself.
- *
- * @param callback - User's transaction callback
- * @param context - Current audit context (app-owned: actor + request metadata)
- * @param provider - Audit context provider
- * @param deferredWrites - Caller-owned queue; the wrapped callback clears and fills it, the caller drains it post-commit
- * @returns Wrapped callback handling transaction context
  */
 export const createWrappedTransactionCallback = (
   callback: (tx: TransactionalPrismaClient) => Promise<unknown>,
@@ -61,17 +54,10 @@ export const createWrappedTransactionCallback = (
 /**
  * Creates a transaction proxy handler that intercepts $transaction calls
  *
- * Interactive transactions (callback form) run inside the runtime scope of their transactional
- * client. Sequential transactions (array form) pass through unchanged: a list of operations
- * carries no interactive scope.
- *
  * Deferred writes are drained strictly AFTER `$transaction` resolves (i.e. after commit), so an
  * audit log never persists for a transaction whose commit subsequently fails. On rejection the
  * locally-owned queue is discarded with the thrown error (no drain). This matches the
  * implicit transaction `openImplicitTransaction` opens.
- *
- * @param deps - Dependencies for transaction proxy
- * @returns Async function handling $transaction calls
  */
 export const createTransactionProxyHandler = (
   deps: TransactionProxyDependencies,
@@ -93,8 +79,6 @@ export const createTransactionProxyHandler = (
       const wrappedCallback = createWrappedTransactionCallback(callback, context, provider, deferredWrites);
 
       const transactionArgs = options ? [wrappedCallback, options] : [wrappedCallback];
-      // Drain only after $transaction resolves (after commit). On rejection the error
-      // propagates and the locally-owned queue is discarded unrun.
       const result = await originalTransaction.apply(target, transactionArgs);
 
       for (const deferredWrite of deferredWrites) {
@@ -114,10 +98,6 @@ export const createTransactionProxyHandler = (
  * Every other property is returned as the client holds it, so method identity
  * (`client.user.findMany === client.user.findMany`), `in` checks and the prototype chain are
  * those of the client itself.
- *
- * @param extendedClient - Prisma client with audit extension
- * @param provider - Audit context provider
- * @returns Proxied client with transaction interception
  */
 export const createTransactionProxy = <TClient extends object>(
   extendedClient: TClient,

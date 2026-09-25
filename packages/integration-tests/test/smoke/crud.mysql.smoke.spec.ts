@@ -33,7 +33,6 @@ describe('CRUD Smoke Tests (MySQL)', () => {
 
   describe('CREATE operations', () => {
     it('should create audit log for User creation', async () => {
-      // Act: Create user within audit context
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -43,7 +42,6 @@ describe('CRUD Smoke Tests (MySQL)', () => {
         });
       });
 
-      // Assert: Verify audit log was created
       const auditLogs = await context.prisma.auditLog.findMany({
         where: {
           entityType: 'User',
@@ -62,7 +60,6 @@ describe('CRUD Smoke Tests (MySQL)', () => {
         actorId: 'test-actor-id',
       });
 
-      // Verify 'after' contains created data
       expect(auditLogs[0]?.after).toMatchObject({
         email: 'test@example.com',
         name: 'Test User',
@@ -70,7 +67,6 @@ describe('CRUD Smoke Tests (MySQL)', () => {
     });
 
     it('should create audit log for Post creation', async () => {
-      // Arrange: Create user first
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: { email: 'author@example.com', name: 'Author' },
@@ -80,7 +76,6 @@ describe('CRUD Smoke Tests (MySQL)', () => {
       // Clear audit logs from user creation
       await context.prisma.auditLog.deleteMany();
 
-      // Act: Create post
       const post = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.post.create({
           data: {
@@ -91,7 +86,7 @@ describe('CRUD Smoke Tests (MySQL)', () => {
         });
       });
 
-      // Assert: Verify audit logs for both Post and User aggregates
+      // A post create is logged once per aggregate it belongs to: Post and User
       const auditLogs = await context.prisma.auditLog.findMany({
         where: {
           entityType: 'Post',
@@ -102,14 +97,12 @@ describe('CRUD Smoke Tests (MySQL)', () => {
 
       expect(auditLogs).toHaveLength(2);
 
-      // Post aggregate
       expect(auditLogs[0]).toMatchObject({
         action: 'create',
         entityType: 'Post',
         aggregateType: 'Post',
       });
 
-      // User aggregate
       expect(auditLogs[1]).toMatchObject({
         action: 'create',
         entityType: 'Post',
@@ -121,7 +114,6 @@ describe('CRUD Smoke Tests (MySQL)', () => {
 
   describe('UPDATE operations', () => {
     it('should create audit log with before/after for update', async () => {
-      // Arrange: Create user
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: { email: 'original@example.com', name: 'Original Name' },
@@ -131,7 +123,6 @@ describe('CRUD Smoke Tests (MySQL)', () => {
       // Clear creation audit logs
       await context.prisma.auditLog.deleteMany();
 
-      // Act: Update user
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.user.update({
           where: { id: user.id },
@@ -139,7 +130,6 @@ describe('CRUD Smoke Tests (MySQL)', () => {
         });
       });
 
-      // Assert: Verify update audit log
       const auditLogs = await context.prisma.auditLog.findMany({
         where: {
           action: 'update',
@@ -166,7 +156,6 @@ describe('CRUD Smoke Tests (MySQL)', () => {
 
   describe('DELETE operations', () => {
     it('should create audit log with before state for delete', async () => {
-      // Arrange: Create user
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: { email: 'todelete@example.com', name: 'To Delete' },
@@ -178,14 +167,12 @@ describe('CRUD Smoke Tests (MySQL)', () => {
       // Clear creation audit logs
       await context.prisma.auditLog.deleteMany();
 
-      // Act: Delete user
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.user.delete({
           where: { id: userId },
         });
       });
 
-      // Assert: Verify delete audit log
       const auditLogs = await context.prisma.auditLog.findMany({
         where: {
           action: 'delete',
@@ -205,7 +192,6 @@ describe('CRUD Smoke Tests (MySQL)', () => {
 
   describe('BATCH operations', () => {
     it('should create audit logs for createMany with auto-generated IDs', async () => {
-      // Act: Create multiple users using createMany
       const result = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.createMany({
           data: [
@@ -216,10 +202,8 @@ describe('CRUD Smoke Tests (MySQL)', () => {
         });
       });
 
-      // Assert: Verify batch result
       expect(result.count).toBe(3);
 
-      // Verify audit logs were created for all users
       const auditLogs = await context.prisma.auditLog.findMany({
         where: {
           action: 'create',
@@ -230,7 +214,7 @@ describe('CRUD Smoke Tests (MySQL)', () => {
 
       expect(auditLogs).toHaveLength(3);
 
-      // Verify all expected emails are present (order may vary)
+      // Log order is not guaranteed, so match the emails as a set
       const emails = auditLogs.map((log: { after: unknown }) => (log.after as { email?: string })?.email);
       expect(emails).toContain('user1@example.com');
       expect(emails).toContain('user2@example.com');
@@ -238,7 +222,6 @@ describe('CRUD Smoke Tests (MySQL)', () => {
     });
 
     it('should create audit logs for updateMany', async () => {
-      // Arrange: Create multiple posts
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: { email: 'author@example.com', name: 'Author' },
@@ -258,7 +241,6 @@ describe('CRUD Smoke Tests (MySQL)', () => {
       // Clear creation audit logs
       await context.prisma.auditLog.deleteMany();
 
-      // Act: Update all posts
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.post.updateMany({
           where: { authorId: user.id },
@@ -266,7 +248,6 @@ describe('CRUD Smoke Tests (MySQL)', () => {
         });
       });
 
-      // Assert: Verify update audit logs
       const auditLogs = await context.prisma.auditLog.findMany({
         where: {
           action: 'update',
@@ -276,7 +257,6 @@ describe('CRUD Smoke Tests (MySQL)', () => {
 
       expect(auditLogs.length).toBeGreaterThanOrEqual(3);
 
-      // Verify all have published changed
       for (const log of auditLogs) {
         expect(log.changes).toMatchObject({
           published: {
@@ -288,7 +268,6 @@ describe('CRUD Smoke Tests (MySQL)', () => {
     });
 
     it('should create audit logs for deleteMany', async () => {
-      // Arrange: Create multiple users
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.user.createMany({
           data: [
@@ -302,7 +281,6 @@ describe('CRUD Smoke Tests (MySQL)', () => {
       // Clear creation audit logs
       await context.prisma.auditLog.deleteMany();
 
-      // Act: Delete all users with email starting with 'delete'
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.user.deleteMany({
           where: {
@@ -313,7 +291,6 @@ describe('CRUD Smoke Tests (MySQL)', () => {
         });
       });
 
-      // Assert: Verify delete audit logs
       const auditLogs = await context.prisma.auditLog.findMany({
         where: {
           action: 'delete',
@@ -323,7 +300,6 @@ describe('CRUD Smoke Tests (MySQL)', () => {
 
       expect(auditLogs).toHaveLength(3);
 
-      // Verify all have 'before' state and null 'after'
       for (const log of auditLogs) {
         expect(log.before).not.toBeNull();
         expect(log.after).toBeNull();
@@ -333,7 +309,6 @@ describe('CRUD Smoke Tests (MySQL)', () => {
 
   describe('TRANSACTION operations', () => {
     it('should create audit logs within transaction', async () => {
-      // Act: Create multiple entities in a transaction
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
           const user = await tx.user.create({
@@ -349,7 +324,6 @@ describe('CRUD Smoke Tests (MySQL)', () => {
         });
       });
 
-      // Assert: Verify audit logs were created
       const userLogs = await context.prisma.auditLog.findMany({
         where: { entityType: 'User' },
       });
@@ -363,7 +337,6 @@ describe('CRUD Smoke Tests (MySQL)', () => {
     });
 
     it('should NOT create audit logs if transaction rolls back', async () => {
-      // Act: Attempt transaction that will fail
       const transactionPromise = context.provider.runAsync(testActor, async () => {
         return context.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
           await tx.user.create({
@@ -377,10 +350,8 @@ describe('CRUD Smoke Tests (MySQL)', () => {
         });
       });
 
-      // Assert: Transaction should fail
       await expect(transactionPromise).rejects.toThrow();
 
-      // Verify no audit logs were created
       const auditLogs = await context.prisma.auditLog.findMany();
       expect(auditLogs).toHaveLength(0);
     });

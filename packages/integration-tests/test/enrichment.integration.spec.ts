@@ -72,7 +72,6 @@ describe('Context Enrichment Integration', () => {
         });
       });
 
-      // Verify audit log has enriched actorContext
       const auditLogs = await context.prisma.auditLog.findMany({
         where: { entityType: 'User', entityId: user.id },
       });
@@ -111,7 +110,6 @@ describe('Context Enrichment Integration', () => {
         });
       });
 
-      // Verify audit log
       const auditLogs = await context.prisma.auditLog.findMany({
         where: { entityType: 'User', entityId: user.id },
       });
@@ -152,7 +150,6 @@ describe('Context Enrichment Integration', () => {
         },
       };
 
-      // Execute concurrent operations with different actors
       const [adminUser, regularUser] = await Promise.all([
         context.provider.runAsync(adminActor, async () => {
           return await context.prisma.user.create({
@@ -174,7 +171,6 @@ describe('Context Enrichment Integration', () => {
         }),
       ]);
 
-      // Verify admin actor context
       const adminLogs = await context.prisma.auditLog.findMany({
         where: { entityType: 'User', entityId: adminUser.id },
       });
@@ -185,7 +181,6 @@ describe('Context Enrichment Integration', () => {
       expect(adminContext.name).toBe('Admin User');
       expect(adminContext.role).toBe('admin');
 
-      // Verify regular actor context
       const regularLogs = await context.prisma.auditLog.findMany({
         where: { entityType: 'User', entityId: regularUser.id },
       });
@@ -198,9 +193,8 @@ describe('Context Enrichment Integration', () => {
     });
 
     it('[N+1 Resolution] should call actor enricher exactly once per operation', async () => {
-      // Track enricher calls by inspecting audit logs
-      // Since actor enricher is configured in setup.ts and we can't spy on it directly,
-      // we verify N+1 resolution by checking that actorContext is consistent across multiple entities
+      // The actor enricher is configured in helpers/setup.ts and cannot be spied on directly, so
+      // N+1 resolution is verified indirectly: actorContext must be consistent across all entities.
       const actor: TestAuditContext = {
         actor: {
           category: 'model',
@@ -211,9 +205,7 @@ describe('Context Enrichment Integration', () => {
         },
       };
 
-      // Create multiple users in a single operation context
       await context.provider.runAsync(actor, async () => {
-        // createMany should reuse the same actor enrichment result for all entities
         await context.prisma.user.createMany({
           data: [
             { email: 'user1@example.com', name: 'User 1', password: 'pass1' },
@@ -230,12 +222,10 @@ describe('Context Enrichment Integration', () => {
 
       expect(auditLogs.length).toBeGreaterThanOrEqual(3);
 
-      // All logs should have identical actorContext (same object reference conceptually)
       const firstActorContext = auditLogs[0]?.actorContext as Record<string, unknown>;
       expect(firstActorContext.name).toBe('Test Actor');
       expect(firstActorContext.role).toBe('admin');
 
-      // Verify all other logs have the same actorContext values
       for (const log of auditLogs) {
         const actorContext = log.actorContext as Record<string, unknown>;
         expect(actorContext.name).toBe('Test Actor');
@@ -256,7 +246,6 @@ describe('Context Enrichment Integration', () => {
         },
       };
 
-      // Create user
       const user = await context.provider.runAsync(actor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -267,7 +256,6 @@ describe('Context Enrichment Integration', () => {
         });
       });
 
-      // Update user
       await context.provider.runAsync(actor, async () => {
         return await context.prisma.user.update({
           where: { id: user.id },
@@ -275,7 +263,6 @@ describe('Context Enrichment Integration', () => {
         });
       });
 
-      // Verify update audit log has actorContext
       const updateLogs = await context.prisma.auditLog.findMany({
         where: { entityType: 'User', entityId: user.id, action: 'update' },
       });
@@ -302,7 +289,6 @@ describe('Context Enrichment Integration', () => {
         },
       };
 
-      // Create user
       const user = await context.provider.runAsync(actor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -315,14 +301,12 @@ describe('Context Enrichment Integration', () => {
 
       const userId = user.id;
 
-      // Delete user
       await context.provider.runAsync(actor, async () => {
         await context.prisma.user.delete({
           where: { id: userId },
         });
       });
 
-      // Verify delete audit log has actorContext
       const deleteLogs = await context.prisma.auditLog.findMany({
         where: { entityType: 'User', entityId: userId, action: 'delete' },
       });
@@ -339,7 +323,6 @@ describe('Context Enrichment Integration', () => {
 
   describe('Entity and Aggregate Context Enrichment in DELETE operations', () => {
     it('should enrich entity and aggregate context when deleting Comment', async () => {
-      // Setup enrichers with spies
       const entityEnricher = createCommentEntityEnricher();
       const aggregateEnricher = createCommentAggregateEnricher();
       const aggregateMapping = createCommentAggregateMapping(
@@ -347,7 +330,6 @@ describe('Context Enrichment Integration', () => {
         aggregateEnricher as Mock<(aggregates: unknown[], prisma: PrismaClient) => Promise<unknown[]>>,
       );
 
-      // Create custom Prisma client
       const customBasePrisma = new (await import('@kuruwic/prisma-audit-database/generated/client')).PrismaClient({
         datasources: { db: { url: context.databaseUrl } },
       });
@@ -360,7 +342,6 @@ describe('Context Enrichment Integration', () => {
         actor: { category: 'model', type: 'User', id: 'delete-comment-actor' },
       };
 
-      // Setup: Create Post and User first
       const { comment } = await provider.runAsync(actor, async () => {
         const user = await customPrisma.user.create({
           data: { email: 'comment-author@example.com', name: 'Author', password: 'pass' },
@@ -377,22 +358,18 @@ describe('Context Enrichment Integration', () => {
         return { comment };
       });
 
-      // Clear creation logs and reset spies
       await customBasePrisma.auditLog.deleteMany({ where: { action: 'create' } });
       entityEnricher.mockClear();
       aggregateEnricher.mockClear();
 
-      // Delete comment
       await provider.runAsync(actor, async () => {
         await customPrisma.comment.delete({ where: { id: comment.id } });
       });
 
-      // Verify enrichers were called
       expect(entityEnricher).toHaveBeenCalledTimes(1);
       // Aggregate enricher is called once per aggregate type (Comment has Post and User as aggregates)
       expect(aggregateEnricher).toHaveBeenCalledTimes(2); // Post + User
 
-      // Verify DELETE audit log has enriched contexts
       const deleteLogs = await customBasePrisma.auditLog.findMany({
         where: { entityType: 'Comment', entityId: comment.id, action: 'delete' },
       });
@@ -414,7 +391,6 @@ describe('Context Enrichment Integration', () => {
     });
 
     it('should enrich entity and aggregate context when deleting Profile', async () => {
-      // Setup enrichers with spies
       const entityEnricher = createProfileEntityEnricher();
       const aggregateEnricher = createProfileAggregateEnricher();
       const aggregateMapping = createProfileAggregateMapping(
@@ -422,7 +398,6 @@ describe('Context Enrichment Integration', () => {
         aggregateEnricher as Mock<(aggregates: unknown[], prisma: PrismaClient) => Promise<unknown[]>>,
       );
 
-      // Create custom Prisma client
       const customBasePrisma = new (await import('@kuruwic/prisma-audit-database/generated/client')).PrismaClient({
         datasources: { db: { url: context.databaseUrl } },
       });
@@ -435,7 +410,6 @@ describe('Context Enrichment Integration', () => {
         actor: { category: 'model', type: 'User', id: 'delete-profile-actor' },
       };
 
-      // Setup: Create User and Profile
       const { profile } = await provider.runAsync(actor, async () => {
         const user = await customPrisma.user.create({
           data: { email: 'profile-user@example.com', name: 'Profile User', password: 'pass' },
@@ -448,12 +422,10 @@ describe('Context Enrichment Integration', () => {
         return { profile };
       });
 
-      // Clear creation logs and reset spies
       await customBasePrisma.auditLog.deleteMany({ where: { action: 'create' } });
       entityEnricher.mockClear();
       aggregateEnricher.mockClear();
 
-      // Delete profile
       await provider.runAsync(actor, async () => {
         await customPrisma.profile.delete({ where: { id: profile.id } });
       });
@@ -462,7 +434,6 @@ describe('Context Enrichment Integration', () => {
       // Aggregate enricher is called once per aggregate type (Profile has User as aggregate)
       expect(aggregateEnricher).toHaveBeenCalledTimes(1); // User
 
-      // Verify DELETE audit log has enriched contexts
       const deleteLogs = await customBasePrisma.auditLog.findMany({
         where: { entityType: 'Profile', entityId: profile.id, action: 'delete' },
       });
@@ -491,7 +462,6 @@ describe('Context Enrichment Integration', () => {
         aggregateEnricher as Mock<(aggregates: unknown[], prisma: PrismaClient) => Promise<unknown[]>>,
       );
 
-      // Create custom Prisma client
       const customBasePrisma = new (await import('@kuruwic/prisma-audit-database/generated/client')).PrismaClient({
         datasources: { db: { url: context.databaseUrl } },
       });
@@ -504,7 +474,6 @@ describe('Context Enrichment Integration', () => {
         actor: { category: 'model', type: 'User', id: 'delete-many-comment-actor' },
       };
 
-      // Setup: Create Post, User, and multiple Comments
       const { commentIds } = await provider.runAsync(actor, async () => {
         const user = await customPrisma.user.create({
           data: { email: 'many-author@example.com', name: 'Many Author', password: 'pass' },
@@ -529,18 +498,15 @@ describe('Context Enrichment Integration', () => {
         return { commentIds: [comment1.id, comment2.id, comment3.id] };
       });
 
-      // Clear creation logs and reset spy
       await customBasePrisma.auditLog.deleteMany({ where: { action: 'create' } });
       entityEnricher.mockClear();
 
-      // Delete multiple comments
       await provider.runAsync(actor, async () => {
         await customPrisma.comment.deleteMany({ where: { id: { in: commentIds } } });
       });
 
       expect(entityEnricher).toHaveBeenCalledTimes(1);
 
-      // Verify enriched entity context in DELETE audit logs
       const deleteLogs = await customBasePrisma.auditLog.findMany({
         where: { entityType: 'Comment', action: 'delete', entityId: { in: commentIds } },
       });
@@ -563,7 +529,6 @@ describe('Context Enrichment Integration', () => {
         entityEnricher as Mock<(entities: unknown[], prisma: PrismaClient) => Promise<unknown[]>>,
       );
 
-      // Create custom Prisma client
       const customBasePrisma = new (await import('@kuruwic/prisma-audit-database/generated/client')).PrismaClient({
         datasources: { db: { url: context.databaseUrl } },
       });
@@ -576,7 +541,6 @@ describe('Context Enrichment Integration', () => {
         actor: { category: 'model', type: 'User', id: 'delete-batch-enricher-actor' },
       };
 
-      // Setup: Create users first
       const userIds = await provider.runAsync(actor, async () => {
         const user1 = await customPrisma.user.create({
           data: { email: 'del-batch1@example.com', name: 'Del Batch 1', password: 'pass1' },
@@ -619,7 +583,6 @@ describe('Context Enrichment Integration', () => {
         aggregateEnricher as Mock<(aggregates: unknown[], prisma: PrismaClient) => Promise<unknown[]>>,
       );
 
-      // Create custom Prisma client
       const customBasePrisma = new (await import('@kuruwic/prisma-audit-database/generated/client')).PrismaClient({
         datasources: { db: { url: context.databaseUrl } },
       });
@@ -632,7 +595,6 @@ describe('Context Enrichment Integration', () => {
         actor: { category: 'model', type: 'User', id: 'delete-agg-batch-actor' },
       };
 
-      // Setup: Create users first
       const userIds = await provider.runAsync(actor, async () => {
         const user1 = await customPrisma.user.create({
           data: { email: 'del-agg1@example.com', name: 'Del Agg 1', password: 'pass1' },
@@ -782,7 +744,6 @@ describe('Context Enrichment Integration', () => {
         actor: { category: 'model', type: 'User', id: 'deleted-fk-actor' },
       };
 
-      // Create user, post, and comment
       const { comment, postId, authorId } = await customProvider.runAsync(actor, async () => {
         const user = await customPrisma.user.create({
           data: { email: 'author@example.com', name: 'Author', password: 'pass' },
@@ -1201,7 +1162,6 @@ describe('Context Enrichment Integration', () => {
         actor: { category: 'model', type: 'User', id: 'batch-actor' },
       };
 
-      // Create multiple users in batch
       await context.provider.runAsync(actor, async () => {
         await context.prisma.user.createMany({
           data: [
@@ -1236,7 +1196,6 @@ describe('Context Enrichment Integration', () => {
         actor: { category: 'model', type: 'User', id: 'update-batch-actor' },
       };
 
-      // Setup: Create users first with different actor
       await context.provider.runAsync(createActor, async () => {
         return await Promise.all([
           context.prisma.user.create({
@@ -1276,7 +1235,6 @@ describe('Context Enrichment Integration', () => {
         actor: { category: 'model', type: 'User', id: 'delete-batch-actor' },
       };
 
-      // Setup: Create users first
       await context.provider.runAsync(actor, async () => {
         return await Promise.all([
           context.prisma.user.create({
@@ -1542,7 +1500,6 @@ describe('Context Enrichment Integration', () => {
         },
       };
 
-      // Execute concurrent operations with different actors
       await Promise.all([
         customProvider.runAsync(actor1, async () => {
           await customPrisma.user.create({
@@ -1952,7 +1909,6 @@ describe('Context Enrichment Integration', () => {
         },
       });
 
-      // Create prerequisite data
       const author = await customBasePrisma.user.create({
         data: { email: 'batch-author@example.com', name: 'Author', password: 'pass' },
       });

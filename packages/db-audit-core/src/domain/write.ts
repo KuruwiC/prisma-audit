@@ -26,7 +26,7 @@ export interface WriteExecutor {
 }
 
 /**
- * Custom writer function type
+ * Runs in place of the default write, which is passed in as `defaultWrite` so the hook can wrap it.
  *
  * @example
  * ```typescript

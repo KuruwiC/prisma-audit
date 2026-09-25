@@ -440,7 +440,6 @@ describe('collectSingleOperationEvents', () => {
       // The caller's own `include` or `select` on the relation keeps its filter, so a row an
       // operation updated can be missing from the rows returned at its path.
 
-      /** A client whose `post` delegate finds the rows in `stored` by primary key */
       const clientStoring = (stored: Record<string, unknown>[]) => {
         const byId = async ({ where }: { where: Record<string, unknown> }) =>
           stored.find((row) => row.id === where.id) ?? null;

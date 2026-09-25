@@ -4,9 +4,7 @@
  * @module aggregate/helpers
  *
  * @remarks
- * The resolver constructors (`self`, `foreignKey`, `resolveId`, `batchResolveIds`), the mapping
- * DSL (`defineEntity`, `to`, `defineAggregateMapping`), `normalizeId`, the runtime resolution of
- * one aggregate id, and the mapping validation.
+ * Helpers for declaring an aggregate mapping, plus the runtime resolution of one aggregate id.
  */
 
 import type {
@@ -75,7 +73,7 @@ export const warnAboutUnbatchedResolver = (entityType: string, aggregate: Aggreg
   );
 };
 
-/** @internal Forget which aggregate types were warned about. Exported for tests. */
+/** @internal Exported for tests. */
 export function resetUnbatchedResolverWarnings(): void {
   warnedAggregateTypes.clear();
 }
@@ -88,9 +86,6 @@ export function resetUnbatchedResolverWarnings(): void {
  * ID transformer function type
  *
  * Transforms unknown value into a string ID. Used by `self()` and `foreignKey()` for flexible ID extraction and formatting.
- *
- * @param value - Value to transform into an ID string
- * @returns Transformed ID as a string
  *
  * @example
  * ```typescript
@@ -108,8 +103,6 @@ export type IdTransformer = (value: unknown) => string;
  *
  * Handles primitive types and objects with toString methods.
  *
- * @param id - ID value to normalize (can be any type)
- * @returns Normalized string representation of the ID
  * @throws Error if the ID type cannot be normalized
  *
  * @example
@@ -145,7 +138,6 @@ export const normalizeId = (id: unknown): string => {
  * Supports field name extraction and custom transformation.
  *
  * @param idKey - Field name (string) or transformation function to extract the ID (defaults to 'id')
- * @returns AggregateIdResolver function
  *
  * @example
  * ```typescript
@@ -187,7 +179,6 @@ export const self = (idKey: string | IdTransformer = 'id'): AggregateIdResolver 
  * Create an ID resolver that extracts a foreign key field
  *
  * @param foreignKeyField - Field name (string) or transformation function to extract the foreign key
- * @returns An AggregateIdResolver function
  *
  * @example Simple foreign key extraction
  * ```typescript
@@ -236,9 +227,6 @@ export const foreignKey = (foreignKeyField: string | IdTransformer): AggregateId
 /**
  * Create a custom ID resolver with type safety
  *
- * @template TEntity - Entity type (optional, defaults to inferred from usage)
- * @template TDbHandle - Database handle type (optional, defaults to inferred from usage)
- * @param resolverFn - Async function to resolve aggregate ID
  * @returns Type-erased AggregateIdResolver
  *
  * @example Minimal usage with inline type annotation
@@ -295,9 +283,6 @@ export const resolveId = <TEntity = unknown, TDbHandle = unknown>(
  * same length and order. Each element is a string ID (logged), null, or
  * undefined (both skip logging for that entity).
  *
- * @template TEntity - Entity type
- * @template TDbHandle - Database handle type
- * @param resolverFn - Batch resolver function
  * @returns An AggregateIdResolver. The batch function is registered internally via WeakMap and propagated to AggregateRoot.batchResolve by to().
  *
  * @example Reverse FK lookup
@@ -352,15 +337,11 @@ export type ToOptions<TDbHandle = unknown, TEntity extends Record<string, unknow
 /**
  * Define an aggregate root projection with type safety
  *
- * @template TAggregateName - The aggregate type name
  * @template TEntity - Row type of the entity being projected. Inferred from a typed inline
  *   resolver, or from the `aggregates` slot of a `defineEntity<TEntity, TDbHandle>()` call
  * @template TDbHandle - Database handle type, inferred the same way
  *
  * @param type - Aggregate type name: a model name, or any name of an external aggregate
- * @param resolver - ID resolution function (can be AggregateIdResolver or typed resolver function)
- * @param options - Projection options: custom category, projection-specific context enricher
- * @returns AggregateRoot configuration
  *
  * @example Basic usage with foreignKey
  * ```typescript
@@ -390,9 +371,9 @@ export type ToOptions<TDbHandle = unknown, TEntity extends Record<string, unknow
  * to('ExternalSystem', foreignKey('systemId'), { category: 'external' })
  * ```
  */
-// Overload 1: Accept AggregateIdResolver (from helpers like foreignKey, self, resolveId).
-// The resolver carries no row or handle type, so TEntity/TDbHandle come from the call's
-// contextual type (the `aggregates` slot of defineEntity) and flow into `options.context`.
+// A resolver from the helpers (foreignKey, self, resolveId) carries no row or handle type, so
+// this overload takes TEntity/TDbHandle from the call's contextual type (the `aggregates` slot
+// of defineEntity) and flows them into `options.context`.
 export function to<
   TAggregateName extends string = string,
   TEntity extends Record<string, unknown> = Record<string, unknown>,
@@ -402,7 +383,6 @@ export function to<
   resolver: AggregateIdResolver,
   options?: ToOptions<TDbHandle, TEntity>,
 ): AggregateRoot<TDbHandle, TEntity>;
-// Overload 2: Accept typed resolver function directly
 export function to<
   TAggregateName extends string = string,
   TEntity extends Record<string, unknown> = Record<string, unknown>,
@@ -490,9 +470,6 @@ export type DefineEntityOptions<
  * @template TEntity - Row type of the entity (optional; types every resolver and enricher input)
  * @template TDbHandle - Database handle type (optional; types every resolver and enricher handle)
  *
- * @param options - Entity configuration options
- * @returns LoggableEntity configuration
- *
  * @example Basic usage without type parameters
  * ```typescript
  * defineEntity({
@@ -565,11 +542,6 @@ export const defineEntity = <TEntity extends Record<string, unknown> = Record<st
  * Resolve aggregate ID for a single aggregate root
  *
  * Executes the aggregate's resolve function and normalizes the result. Errors are logged and null is returned to skip logging for that aggregate.
- *
- * @param entity - Entity row to resolve the aggregate ID from
- * @param aggregateRoot - Aggregate root configuration containing the resolver
- * @param db - Database handle for database queries
- * @returns Resolved and normalized aggregate ID, or null if resolution fails
  *
  * @example
  * ```typescript
@@ -656,7 +628,6 @@ export const defineAggregateMapping =
 /**
  * Validate aggregate mapping configuration
  *
- * @param mapping - The aggregate mapping to validate
  * @throws Error if the mapping contains invalid configurations
  *
  * @example

@@ -8,11 +8,6 @@
  * @module schema/types
  */
 
-/**
- * Schema metadata provider interface
- *
- * Provides runtime access to Prisma schema information.
- */
 export interface SchemaMetadata {
   getUniqueConstraints(modelName: string): UniqueConstraint[];
   getRelationFields(modelName: string): RelationField[];
@@ -36,9 +31,6 @@ export interface UniqueConstraint {
   name?: string | null;
 }
 
-/**
- * Relation field metadata
- */
 export interface RelationField {
   name: string;
   relatedModel: string;
@@ -47,9 +39,6 @@ export interface RelationField {
   relationName?: string;
 }
 
-/**
- * Field metadata from Prisma schema
- */
 export interface FieldMetadata {
   name: string;
   type: string;

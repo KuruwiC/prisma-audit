@@ -28,10 +28,8 @@ describe('Nested ConnectOrCreate Operations', () => {
 
   describe('Create Path (record does not exist)', () => {
     it('should create audit log with action=create when connectOrCreate creates new Tag (DEEP NESTED)', async () => {
-      // NOTE: This uses deep nesting (postTags.create.tag.connectOrCreate)
-      // which is now supported via recursive detection
+      // Deep nesting (postTags.create.tag.connectOrCreate) is detected recursively
 
-      // Setup: Create post without tags
       const post = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.post.create({
           data: {
@@ -50,7 +48,6 @@ describe('Nested ConnectOrCreate Operations', () => {
 
       await context.prisma.auditLog.deleteMany();
 
-      // Action: ConnectOrCreate with non-existing tag (should create)
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.post.update({
           where: { id: post.id },
@@ -70,15 +67,13 @@ describe('Nested ConnectOrCreate Operations', () => {
             postTags: {
               include: { tag: true },
             },
-          }, // Required for nested operation audit logging
+          },
         });
       });
 
-      // Verify: Tag should be created
       const tag = await context.prisma.tag.findUnique({ where: { name: 'typescript' } });
       expect(tag).not.toBeNull();
 
-      // Verify: Audit log should have action=create for Tag
       const tagLogs = await context.prisma.auditLog.findMany({
         where: { entityType: 'Tag', entityId: tag?.id },
       });
@@ -93,7 +88,6 @@ describe('Nested ConnectOrCreate Operations', () => {
     });
 
     it('should create audit log for Profile when connectOrCreate creates new record', async () => {
-      // Setup: Create user without profile
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -106,7 +100,6 @@ describe('Nested ConnectOrCreate Operations', () => {
 
       await context.prisma.auditLog.deleteMany();
 
-      // Action: ConnectOrCreate profile (create path, since no profile exists)
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.user.update({
           where: { id: user.id },
@@ -120,16 +113,14 @@ describe('Nested ConnectOrCreate Operations', () => {
               },
             },
           },
-          include: { profile: true }, // Required for nested operation audit logging
+          include: { profile: true },
         });
       });
 
-      // Verify: Profile should be created
       const profile = await context.prisma.profile.findUnique({ where: { userId: user.id } });
       expect(profile).not.toBeNull();
       expect(profile?.bio).toBe('New bio');
 
-      // Verify: Audit log should have action=create
       const profileLogs = await context.prisma.auditLog.findMany({
         where: { entityType: 'Profile', entityId: profile?.id },
       });
@@ -142,7 +133,6 @@ describe('Nested ConnectOrCreate Operations', () => {
     });
 
     it('should handle multiple connectOrCreate operations with mixed create/connect paths', async () => {
-      // Setup: Create existing tag
       const existingTag = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.tag.create({
           data: { name: 'javascript' },
@@ -167,7 +157,6 @@ describe('Nested ConnectOrCreate Operations', () => {
 
       await context.prisma.auditLog.deleteMany();
 
-      // Action: ConnectOrCreate with one existing tag and one new tag
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.post.update({
           where: { id: post.id },
@@ -201,7 +190,6 @@ describe('Nested ConnectOrCreate Operations', () => {
         });
       });
 
-      // Verify: Both tags should exist
       const jsTag = await context.prisma.tag.findUnique({ where: { name: 'javascript' } });
       const tsTag = await context.prisma.tag.findUnique({ where: { name: 'typescript' } });
       expect(jsTag).not.toBeNull();
@@ -211,18 +199,17 @@ describe('Nested ConnectOrCreate Operations', () => {
       const jsTagLogs = await context.prisma.auditLog.findMany({
         where: { entityType: 'Tag', entityId: existingTag.id, action: 'create' },
       });
-      expect(jsTagLogs.length).toBe(0); // No new create log for connected tag
+      expect(jsTagLogs.length).toBe(0);
 
       const tsTagLogs = await context.prisma.auditLog.findMany({
         where: { entityType: 'Tag', entityId: tsTag?.id, action: 'create' },
       });
-      expect(tsTagLogs.length).toBeGreaterThanOrEqual(1); // Create log for new tag
+      expect(tsTagLogs.length).toBeGreaterThanOrEqual(1);
     });
   });
 
   describe('Connect Path (record exists)', () => {
     it('should NOT create audit log when connectOrCreate connects to existing record', async () => {
-      // Setup: Create existing tag
       const existingTag = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.tag.create({
           data: { name: 'react' },
@@ -245,12 +232,10 @@ describe('Nested ConnectOrCreate Operations', () => {
         });
       });
 
-      // Count Tag logs before PostTag creation
       const tagLogsBeforeConnect = await context.prisma.auditLog.count({
         where: { entityType: 'Tag', entityId: existingTag.id },
       });
 
-      // Action: ConnectOrCreate with existing tag (should connect, no new audit log)
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.post.update({
           where: { id: post.id },
@@ -276,20 +261,17 @@ describe('Nested ConnectOrCreate Operations', () => {
 
       // Verify: Tag was connected, not created
       const tag = await context.prisma.tag.findUnique({ where: { name: 'react' } });
-      expect(tag?.id).toBe(existingTag.id); // Same tag instance
+      expect(tag?.id).toBe(existingTag.id);
 
-      // Count Tag logs after PostTag creation
       const tagLogsAfterConnect = await context.prisma.auditLog.count({
         where: { entityType: 'Tag', entityId: existingTag.id },
       });
 
       // Verify: No new Tag audit logs were created (connectOrCreate connected to existing)
-      // The count should be the same before and after the connectOrCreate operation
       expect(tagLogsAfterConnect).toBe(tagLogsBeforeConnect);
     });
 
     it('should NOT create audit log for Profile when connectOrCreate connects to existing record', async () => {
-      // Setup: Create user with profile
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -311,8 +293,6 @@ describe('Nested ConnectOrCreate Operations', () => {
 
       await context.prisma.auditLog.deleteMany();
 
-      // Action: ConnectOrCreate profile (connect path, profile already exists)
-      // Note: This may throw error in practice (unique constraint), but tests the logic
       const result = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.update({
           where: { id: user.id },
@@ -343,7 +323,6 @@ describe('Nested ConnectOrCreate Operations', () => {
 
   describe('Transaction Atomicity', () => {
     it('should NOT create audit log if connectOrCreate fails in transaction', async () => {
-      // Setup: Create post
       const post = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.post.create({
           data: {
@@ -362,7 +341,6 @@ describe('Nested ConnectOrCreate Operations', () => {
 
       const initialLogCount = await context.prisma.auditLog.count();
 
-      // Action: ConnectOrCreate in transaction that throws error
       const transactionPromise = context.provider.runAsync(testActor, async () => {
         return context.prisma.$transaction(async (tx: typeof context.prisma) => {
           await tx.post.update({
@@ -385,18 +363,15 @@ describe('Nested ConnectOrCreate Operations', () => {
               },
             },
           });
-          // Intentionally throw error
           throw new Error('Rollback test');
         });
       });
 
       await expect(transactionPromise).rejects.toThrow('Rollback test');
 
-      // Verify: No new audit logs created
       const finalLogCount = await context.prisma.auditLog.count();
       expect(finalLogCount).toBe(initialLogCount);
 
-      // Verify: Tag was not created
       const tag = await context.prisma.tag.findUnique({ where: { name: 'typescript' } });
       expect(tag).toBeNull();
     });
@@ -404,7 +379,6 @@ describe('Nested ConnectOrCreate Operations', () => {
 
   describe('Edge Cases', () => {
     it('should handle connectOrCreate with complex where clause', async () => {
-      // Setup: Create user and post
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -427,7 +401,6 @@ describe('Nested ConnectOrCreate Operations', () => {
 
       await context.prisma.auditLog.deleteMany();
 
-      // Action: ConnectOrCreate with unique constraint (name)
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.post.update({
           where: { id: post.id },
@@ -451,11 +424,9 @@ describe('Nested ConnectOrCreate Operations', () => {
         });
       });
 
-      // Verify: Tag was created
       const tag = await context.prisma.tag.findUnique({ where: { name: 'vue' } });
       expect(tag).not.toBeNull();
 
-      // Verify: Audit log exists
       const tagLogs = await context.prisma.auditLog.findMany({
         where: { entityType: 'Tag', entityId: tag?.id, action: 'create' },
       });
@@ -463,7 +434,6 @@ describe('Nested ConnectOrCreate Operations', () => {
     });
 
     it('should handle deep nested connectOrCreate operations', async () => {
-      // Setup: Create user
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -510,11 +480,9 @@ describe('Nested ConnectOrCreate Operations', () => {
         });
       });
 
-      // Verify: Tag was created
       const tag = await context.prisma.tag.findUnique({ where: { name: 'angular' } });
       expect(tag).not.toBeNull();
 
-      // Verify: Audit log exists for Tag
       const tagLogs = await context.prisma.auditLog.findMany({
         where: { entityType: 'Tag', entityId: tag?.id, action: 'create' },
       });

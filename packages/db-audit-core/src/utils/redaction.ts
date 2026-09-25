@@ -51,12 +51,7 @@ const DEFAULT_SENSITIVE_FIELDS = [
   'pin',
 ];
 
-/**
- * Redacted field metadata
- *
- * @remarks
- * Provides information about redacted fields without exposing actual values
- */
+/** Metadata stored in place of a redacted value, without exposing the value itself */
 export interface RedactedFieldInfo {
   redacted: true;
   hadValue: boolean;
@@ -70,12 +65,10 @@ export interface RedactConfig {
 
 export type Redactor = (data: unknown) => unknown;
 
-/** @internal */
 const isChangeObject = (value: unknown): value is { old: unknown; new: unknown } => {
   return value !== null && typeof value === 'object' && !Array.isArray(value) && 'old' in value && 'new' in value;
 };
 
-/** @internal */
 const redactChangeObject = (changeObj: {
   old: unknown;
   new: unknown;
@@ -90,13 +83,11 @@ const redactChangeObject = (changeObj: {
   };
 };
 
-/** @internal */
 const redactSingleValue = (value: unknown): RedactedFieldInfo | null => {
   const hadValue = value != null;
   return hadValue ? ({ redacted: true, hadValue: true } as RedactedFieldInfo) : null;
 };
 
-/** @internal */
 const processObjectEntry = (
   key: string,
   value: unknown,

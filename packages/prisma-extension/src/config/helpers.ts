@@ -10,9 +10,6 @@
 import type { AggregateConfigService } from '@kuruwic/db-audit-core';
 import type { NestedOperationsConfig } from '../types.js';
 
-/**
- * Dependencies for getNestedOperationConfig
- */
 export interface GetNestedOperationConfigDependencies {
   getEntityConfig: AggregateConfigService['getEntityConfig'];
   globalNestedOperations?: NestedOperationsConfig;
@@ -55,13 +52,10 @@ export const getNestedOperationConfig = (
   const { getEntityConfig, globalNestedOperations } = dependencies;
   const entityConfig = getEntityConfig(modelName);
 
-  // Only update and delete operations have configuration
-  // Other operations (create, upsert, connectOrCreate) always return false
   if (operation !== 'update' && operation !== 'delete') {
     return { fetchBeforeOperation: false };
   }
 
-  // Priority: Model-level > Global-level > Default (true)
   const fetchBeforeOperation =
     entityConfig?.nestedOperations?.[operation as 'update' | 'delete']?.fetchBeforeOperation ??
     globalNestedOperations?.[operation as 'update' | 'delete']?.fetchBeforeOperation ??

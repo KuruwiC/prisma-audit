@@ -23,7 +23,6 @@ describe('withOptionalTransaction', () => {
   };
 
   it('should execute directly when shouldWrap is false', async () => {
-    // Arrange
     const context: AuditContext = { actor: mockActor };
     const wrapper = withOptionalTransaction(
       {
@@ -36,17 +35,14 @@ describe('withOptionalTransaction', () => {
 
     const mockOperationFn = vi.fn(async () => 'result');
 
-    // Act
     const result = await wrapper(mockOperationFn);
 
-    // Assert
     expect(result).toBe('result');
     expect(mockOperationFn).toHaveBeenCalledWith(context, mockBasePrisma);
     expect(mockBasePrisma.$transaction).not.toHaveBeenCalled();
   });
 
   it('should execute directly when a transactional client exists in the runtime context', async () => {
-    // Arrange
     const mockTxClient = {} as TransactionalPrismaClient;
     const context: AuditContext = { actor: mockActor };
     const wrapper = withOptionalTransaction(
@@ -65,14 +61,12 @@ describe('withOptionalTransaction', () => {
       wrapper(mockOperationFn),
     );
 
-    // Assert
     expect(result).toBe('result');
     expect(mockOperationFn).toHaveBeenCalledWith(context, mockTxClient);
     expect(mockBasePrisma.$transaction).not.toHaveBeenCalled();
   });
 
   it('should execute directly when already in implicit transaction', async () => {
-    // Arrange
     const context: AuditContext = { actor: mockActor };
     const wrapper = withOptionalTransaction(
       {
@@ -85,17 +79,14 @@ describe('withOptionalTransaction', () => {
 
     const mockOperationFn = vi.fn(async () => 'result');
 
-    // Act
     const result = await withScope({ isInImplicitTransaction: true }, () => wrapper(mockOperationFn));
 
-    // Assert
     expect(result).toBe('result');
     expect(mockOperationFn).toHaveBeenCalledWith(context, mockBasePrisma);
     expect(mockBasePrisma.$transaction).not.toHaveBeenCalled();
   });
 
   it('should wrap in transaction when shouldWrap is true and no existing transaction', async () => {
-    // Arrange
     const context: AuditContext = { actor: mockActor };
     const mockTxClient = {} as TransactionalPrismaClient;
 
@@ -120,10 +111,8 @@ describe('withOptionalTransaction', () => {
       return 'tx-result';
     });
 
-    // Act
     const result = await wrapper(mockOperationFn);
 
-    // Assert
     expect(result).toBe('tx-result');
     expect(mockBasePrismaWithTx.$transaction).toHaveBeenCalled();
     expect(mockProvider.runAsync).toHaveBeenCalled();
@@ -135,7 +124,6 @@ describe('withOptionalTransaction', () => {
   });
 
   it('should propagate errors from operation function', async () => {
-    // Arrange
     const context: AuditContext = { actor: mockActor };
     const mockError = new Error('Operation failed');
 
@@ -152,12 +140,10 @@ describe('withOptionalTransaction', () => {
       throw mockError;
     });
 
-    // Act & Assert
     await expect(wrapper(mockOperationFn)).rejects.toThrow('Operation failed');
   });
 
   it('should propagate errors from transaction', async () => {
-    // Arrange
     const context: AuditContext = { actor: mockActor };
     const mockError = new Error('Transaction failed');
 
@@ -178,7 +164,6 @@ describe('withOptionalTransaction', () => {
 
     const mockOperationFn = vi.fn(async () => 'result');
 
-    // Act & Assert
     await expect(wrapper(mockOperationFn)).rejects.toThrow('Transaction failed');
   });
 
@@ -221,7 +206,6 @@ describe('withOptionalTransaction', () => {
       let appContextInsideOperation: AuditContext | undefined;
       let runtimeInsideOperation: ReturnType<typeof currentScope>;
 
-      // Act
       await wrapper(async (_context, _txClient) => {
         // This simulates what writeAuditLogs does: read both stores inside the operation
         appContextInsideOperation = mockProviderWithStorage.getContext();
@@ -236,10 +220,10 @@ describe('withOptionalTransaction', () => {
     });
 
     it('should establish the runtime transaction flag before $transaction', async () => {
-      // This test verifies the fix: the implicit-transaction runtime frame must be
-      // established OUTSIDE $transaction so it survives the transaction boundary.
-      // The flag is read at the $transaction boundary, which is the production-relevant
-      // observation point (the outer runAsync wraps the withScope call that sets it).
+      // The implicit-transaction runtime frame must be established OUTSIDE $transaction so it
+      // survives the transaction boundary. The flag is read at the $transaction boundary, which is
+      // the production-relevant observation point (the outer runAsync wraps the withScope call
+      // that sets it).
       let flagAtTransactionStart: boolean | undefined;
 
       const mockProviderTracking = {
@@ -267,7 +251,6 @@ describe('withOptionalTransaction', () => {
         mockProviderTracking,
       );
 
-      // Act
       await wrapper(async () => 'result');
 
       // Assert - The implicit-transaction flag is already set when $transaction runs
@@ -299,9 +282,7 @@ describe('withOptionalTransaction', () => {
 
       const deferredWrite = vi.fn(async () => {});
 
-      // Act
       await wrapper(async () => {
-        // Enqueue onto the runtime-scope queue, as an after-commit write does.
         currentScope()?.transaction?.deferredWrites?.push(deferredWrite);
         return 'result';
       });

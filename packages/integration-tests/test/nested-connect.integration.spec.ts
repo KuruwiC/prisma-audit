@@ -28,7 +28,6 @@ describe('Nested Connect Operations', () => {
 
   describe('Many-to-Many Relations (Join Table)', () => {
     it('should create audit log for PostTag when connecting existing Tag to Post', async () => {
-      // Setup: Create existing tag and post separately
       const tag = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.tag.create({
           data: { name: 'typescript' },
@@ -53,7 +52,6 @@ describe('Nested Connect Operations', () => {
 
       await context.prisma.auditLog.deleteMany();
 
-      // Action: Connect existing tag to post (creates PostTag join record)
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.post.update({
           where: { id: post.id },
@@ -70,17 +68,15 @@ describe('Nested Connect Operations', () => {
             postTags: {
               include: { tag: true },
             },
-          }, // Required for nested operation audit logging
+          },
         });
       });
 
-      // Verify: PostTag join record was created
       const postTag = await context.prisma.postTag.findFirst({
         where: { postId: post.id, tagId: tag.id },
       });
       expect(postTag).not.toBeNull();
 
-      // Verify: Audit log should exist for PostTag create
       const postTagLogs = await context.prisma.auditLog.findMany({
         where: { entityType: 'PostTag', entityId: postTag?.id, action: 'create' },
       });
@@ -92,7 +88,6 @@ describe('Nested Connect Operations', () => {
     });
 
     it('should NOT create audit log for Tag entity itself when connecting (only join table)', async () => {
-      // Setup: Create existing tag and post
       const tag = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.tag.create({
           data: { name: 'react' },
@@ -117,7 +112,6 @@ describe('Nested Connect Operations', () => {
 
       await context.prisma.auditLog.deleteMany();
 
-      // Action: Connect tag to post
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.post.update({
           where: { id: post.id },
@@ -142,11 +136,10 @@ describe('Nested Connect Operations', () => {
       const tagLogs = await context.prisma.auditLog.findMany({
         where: { entityType: 'Tag', entityId: tag.id },
       });
-      expect(tagLogs.length).toBe(0); // Tag itself was not created/updated
+      expect(tagLogs.length).toBe(0);
     });
 
     it('should create multiple PostTag audit logs when connecting multiple tags', async () => {
-      // Setup: Create multiple tags and a post
       const tags = await context.provider.runAsync(testActor, async () => {
         return await Promise.all([
           context.prisma.tag.create({ data: { name: 'javascript' } }),
@@ -173,7 +166,6 @@ describe('Nested Connect Operations', () => {
 
       await context.prisma.auditLog.deleteMany();
 
-      // Action: Connect all tags to post
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.post.update({
           where: { id: post.id },
@@ -194,19 +186,16 @@ describe('Nested Connect Operations', () => {
         });
       });
 
-      // Verify: All PostTag join records were created
       const postTags = await context.prisma.postTag.findMany({
         where: { postId: post.id },
       });
       expect(postTags.length).toBe(3);
 
-      // Verify: Audit logs exist for all PostTag creates
       const postTagLogs = await context.prisma.auditLog.findMany({
         where: { entityType: 'PostTag', action: 'create' },
       });
       expect(postTagLogs.length).toBeGreaterThanOrEqual(3);
 
-      // Verify: All PostTag IDs are logged
       const loggedIds = postTagLogs.map((log: { entityId: string }) => log.entityId);
       for (const postTag of postTags) {
         expect(loggedIds).toContain(postTag.id);
@@ -216,7 +205,6 @@ describe('Nested Connect Operations', () => {
 
   describe('One-to-One Relations', () => {
     it('should NOT create audit log when connecting to existing Profile (1:1)', async () => {
-      // Setup: Create user and profile separately
       const user1 = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -236,14 +224,9 @@ describe('Nested Connect Operations', () => {
         });
       });
 
-      // Create another user to "connect" to the profile (edge case scenario)
-      // Note: In practice, this may fail due to unique constraint (userId)
-      // This test documents expected behavior for 1:1 relations
-
       await context.prisma.auditLog.deleteMany();
 
-      // Action: Attempt to connect (may not be practical for 1:1 with unique constraint)
-      // Instead, test that existing profile connection doesn't create new logs
+      // Connecting the already-attached profile is a no-op that must not create new logs
       const result = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.update({
           where: { id: user1.id },
@@ -269,7 +252,6 @@ describe('Nested Connect Operations', () => {
 
   describe('One-to-Many Relations', () => {
     it('should NOT create audit log when connecting Comment to existing Post (1:N)', async () => {
-      // Setup: Create post and comment separately
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -315,7 +297,6 @@ describe('Nested Connect Operations', () => {
         });
       });
 
-      // Verify: Same comment instance
       expect(result.comments.some((c: { id: string }) => c.id === comment.id)).toBe(true);
 
       // Verify: No new audit log (comment was not created/updated)
@@ -328,7 +309,6 @@ describe('Nested Connect Operations', () => {
 
   describe('Transaction Atomicity', () => {
     it('should NOT create audit log if connect operation fails in transaction', async () => {
-      // Setup: Create tag and post
       const tag = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.tag.create({
           data: { name: 'vue' },
@@ -353,7 +333,6 @@ describe('Nested Connect Operations', () => {
 
       const initialLogCount = await context.prisma.auditLog.count();
 
-      // Action: Connect in transaction that throws error
       const transactionPromise = context.provider.runAsync(testActor, async () => {
         return context.prisma.$transaction(async (tx: typeof context.prisma) => {
           await tx.post.update({
@@ -373,18 +352,15 @@ describe('Nested Connect Operations', () => {
               },
             },
           });
-          // Intentionally throw error
           throw new Error('Rollback test');
         });
       });
 
       await expect(transactionPromise).rejects.toThrow('Rollback test');
 
-      // Verify: No new audit logs created
       const finalLogCount = await context.prisma.auditLog.count();
       expect(finalLogCount).toBe(initialLogCount);
 
-      // Verify: PostTag was not created
       const postTag = await context.prisma.postTag.findFirst({
         where: { postId: post.id, tagId: tag.id },
       });
@@ -394,7 +370,6 @@ describe('Nested Connect Operations', () => {
 
   describe('Edge Cases', () => {
     it('should handle connect with non-existent ID gracefully', async () => {
-      // Setup: Create post
       const post = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.post.create({
           data: {
@@ -411,7 +386,6 @@ describe('Nested Connect Operations', () => {
         });
       });
 
-      // Action: Try to connect with non-existent tag ID
       const connectPromise = context.provider.runAsync(testActor, async () => {
         return context.prisma.post.update({
           where: { id: post.id },
@@ -443,7 +417,6 @@ describe('Nested Connect Operations', () => {
     });
 
     it('should handle duplicate connect attempts (idempotency)', async () => {
-      // Setup: Create tag and post with existing connection
       const tag = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.tag.create({
           data: { name: 'svelte' },
@@ -496,7 +469,6 @@ describe('Nested Connect Operations', () => {
         });
       });
 
-      // Verify: Should throw error (unique constraint violation)
       await expect(duplicateConnectPromise).rejects.toThrow();
 
       // Verify: No new audit log (operation failed)

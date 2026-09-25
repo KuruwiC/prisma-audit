@@ -28,12 +28,9 @@ export interface AuditLogWriterDependencies {
 
 export type AuditLogWriter = (plan: WritePlan, scope: ExecutionScope) => Promise<void>;
 
-/** The records of one plan, bound to the scope they are written in */
 interface PlannedWrite {
   readonly scope: ExecutionScope;
-  /** Writes the records on `handle`, through the writer hook when one is configured */
   readonly writeOn: (handle: unknown) => Promise<void>;
-  /** Reports a failure of the write under `log-write` */
   readonly report: (error: Error, logLabel: string) => Promise<void>;
 }
 
@@ -45,10 +42,6 @@ const writeImmediately = async (planned: PlannedWrite): Promise<void> => {
   }
 };
 
-/**
- * A write on the base handle that reports its own failure and never rejects: it runs once the
- * caller has returned, so a policy that rethrows has nothing left to fail and is logged instead.
- */
 const containedBaseWrite =
   (planned: PlannedWrite, logLabel: string, handlerLabel: string) => async (): Promise<void> => {
     try {

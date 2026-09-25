@@ -18,20 +18,8 @@ import { matchesUniqueWhere, unwrapCompoundWhere } from '../../utils/compound-wh
 import { extractEntityIdentity } from '../../utils/id-generation.js';
 
 /**
- * Retrieves pre-fetch result for a specific path and entity ID
- *
- * @param nestedPreFetchResults - Nested Map containing pre-fetch results
- * @param path - Operation path (e.g., 'postTags', 'postTags.tag')
- * @param entityId - Entity ID to look up
- * @returns The entry for `entityId`, else the entry stored under `UNRESOLVED_ENTITY_ID`, else undefined
- *
- * @example
- * ```typescript
- * const result = getPreFetchResult(results, 'postTags.tag', 'tag-123');
- * if (result) {
- *   console.log('Before state:', result.before);
- * }
- * ```
+ * The entry stored at `path` for `entityId`, else the entry stored there under
+ * `UNRESOLVED_ENTITY_ID`, else `undefined`.
  */
 export const getPreFetchResult = (
   nestedPreFetchResults: NestedPreFetchResults | undefined,
@@ -64,27 +52,13 @@ export const preFetchedRowAt = (
   return undefined;
 };
 
-/** Whether {@link preFetchedRowAt} finds a row */
 export const hasPreFetchedRecordAt = (
   nestedPreFetchResults: NestedPreFetchResults | undefined,
   path: string,
   where: Record<string, unknown> | undefined,
 ): boolean => preFetchedRowAt(nestedPreFetchResults, path, where) !== undefined;
 
-/**
- * Stores pre-fetch result in nested Map structure
- *
- * @param nestedPreFetchResults - Nested Map to store result in
- * @param path - Operation path (e.g., 'postTags', 'postTags.tag')
- * @param entityId - Entity ID (`UNRESOLVED_ENTITY_ID` if not available)
- * @param beforeState - Record state before operation
- *
- * @example
- * ```typescript
- * const results = new Map();
- * storePreFetchResult(results, 'postTags.tag', 'tag-123', tagRecord);
- * ```
- */
+/** Stores `beforeState` under `path` and `entityId` (`UNRESOLVED_ENTITY_ID` when the identity is unknown). */
 export const storePreFetchResult = (
   nestedPreFetchResults: NestedPreFetchResults,
   path: string,
@@ -102,11 +76,8 @@ export const storePreFetchResult = (
 };
 
 /**
- * Extracts entity identity from record using PK fields, or returns `UNRESOLVED_ENTITY_ID`
- *
- * @param record - Record to extract identity from
- * @param pkFields - Primary key field names
- * @returns Serialized entity identity, or `UNRESOLVED_ENTITY_ID` if PK fields are missing
+ * Extracts the entity identity of `record` from its `pkFields`, or `UNRESOLVED_ENTITY_ID` when
+ * `record` is not an object or one of the fields is missing or null.
  *
  * @example
  * ```typescript

@@ -1,11 +1,4 @@
-/**
- * Record composition
- *
- * Turns resolved mutation events into audit records: before/after states by action, the
- * field-level diff of an update, the skip of an update that touched only excluded fields,
- * redaction, relation stripping, serialization for JSON storage, and one record per
- * aggregate root.
- */
+/** Record composition: resolved mutation events to audit records */
 
 import type { SerializationConfig } from '../config.types.js';
 import { createActorId, createAggregateId, createEntityId } from '../domain/branded-types.js';

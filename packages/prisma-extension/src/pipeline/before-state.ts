@@ -15,13 +15,9 @@ import type { AuditErrorContext } from '../types.js';
 import { getModelDelegate } from '../utils/model-accessor.js';
 
 /**
- * Outcome of the before-state fetch.
- *
- * Distinguishes "record not found" from "fetch failed" from "fetch was never attempted" so
- * that consumers (e.g. upsert action resolution) do not misclassify a database error, or a
- * deliberately skipped fetch, as "record does not exist". `notRequested` is the outcome for
- * actions that skip the fetch entirely: `create`, and `update` / `delete` with
- * `fetchBeforeOperation: false`.
+ * Outcome of the before-state fetch. "Not found", "fetch failed" and "never attempted" are kept
+ * apart so that consumers (e.g. upsert action resolution) do not misclassify a database error,
+ * or a deliberately skipped fetch, as "record does not exist".
  */
 export type BeforeStateResult =
   | { readonly _tag: 'found'; readonly data: Record<string, unknown> }

@@ -6,7 +6,6 @@ import { defineAggregateMapping, defineEntity, foreignKey, resolveId, to } from 
 import { describe, expect, it } from 'vitest';
 import type { PrismaModelNames } from '../src/prisma-types.js';
 
-// Mock PrismaClient type for testing
 interface MockPrismaClient {
   user: {
     findUnique: (args: { where: { id: string } }) => Promise<{ id: string; name: string } | null>;

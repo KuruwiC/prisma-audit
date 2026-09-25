@@ -1,5 +1,3 @@
-/** Constants of the audit core */
-
 /** Timeout values for asynchronous enrichment operations (in milliseconds) */
 export const ENRICHMENT_TIMEOUTS = {
   DEFAULT: 500,

@@ -18,14 +18,7 @@ export type ResolvedNestedState = {
   after: Record<string, unknown> | null;
 };
 
-/**
- * Resolves action and states for upsert operation.
- * Action is determined by presence of before state: update if exists, create otherwise.
- *
- * @param preFetchResult - Pre-fetched before state
- * @param afterRecord - Record state after operation
- * @returns Resolved state with action and before/after states
- */
+/** Resolves an upsert: action `update` when a before state was pre-fetched, `create` otherwise */
 export const resolveUpsertState = (
   preFetchResult: NestedPreFetchResult | undefined,
   afterRecord: Record<string, unknown> | null,
@@ -41,13 +34,8 @@ export const resolveUpsertState = (
 };
 
 /**
- * Resolves action and states for connectOrCreate operation.
- * Returns null if record existed (connected path - no audit log needed).
- * Returns create action if record was newly created.
- *
- * @param preFetchResult - Pre-fetched before state
- * @param afterRecord - Record state after operation
- * @returns Resolved state for create path, or null for connect path
+ * Resolves a connectOrCreate: `null` when the record existed (it was connected, so no audit log),
+ * action `create` otherwise
  */
 export const resolveConnectOrCreateState = (
   preFetchResult: NestedPreFetchResult | undefined,
@@ -55,13 +43,10 @@ export const resolveConnectOrCreateState = (
 ): ResolvedNestedState | null => {
   const before = preFetchResult?.before ?? null;
 
-  // If record existed, it was connected (not created)
-  // → Return null to signal that audit log should be skipped
   if (before) {
     return null;
   }
 
-  // Record did not exist, so it was created
   return {
     action: AUDIT_ACTION.CREATE,
     before: null,
@@ -69,13 +54,7 @@ export const resolveConnectOrCreateState = (
   };
 };
 
-/**
- * Resolves action and states for update operation.
- *
- * @param preFetchResult - Pre-fetched before state
- * @param afterRecord - Record state after operation
- * @returns Resolved state with update action
- */
+/** Resolves an update: action `update`, before state from the pre-fetch when present */
 export const resolveUpdateState = (
   preFetchResult: NestedPreFetchResult | undefined,
   afterRecord: Record<string, unknown> | null,
@@ -87,12 +66,7 @@ export const resolveUpdateState = (
   };
 };
 
-/**
- * Resolves action and states for create operation.
- *
- * @param afterRecord - Record state after operation
- * @returns Resolved state with create action and null before state
- */
+/** Resolves a create: action `create`, no before state */
 export const resolveCreateState = (afterRecord: Record<string, unknown> | null): ResolvedNestedState => {
   return {
     action: AUDIT_ACTION.CREATE,

@@ -639,7 +639,6 @@ describe('Error Handling Integration', () => {
             error: expect.objectContaining({ message: ENRICHER_FAILURE_MESSAGE }),
           }),
         );
-        // Not policy-gated: the write-failure policy is never consulted for this phase.
         expect(policy).not.toHaveBeenCalled();
       } finally {
         await prisma.$disconnect();
@@ -701,7 +700,6 @@ describe('Error Handling Integration', () => {
         expect(observer).toHaveBeenCalledWith(
           expect.objectContaining({ phase: 'diff-generation', modelName: 'User', error: enricherError }),
         );
-        // Not policy-gated: the write-failure policy is never consulted for this phase.
         expect(policy).not.toHaveBeenCalled();
       } finally {
         await prisma.$disconnect();
@@ -968,11 +966,9 @@ describe('Error Handling Integration', () => {
         });
       });
 
-      // Try transaction that will fail
       await expect(
         context.provider.runAsync(testActor, async () => {
           return await context.prisma.$transaction(async (tx: typeof context.prisma) => {
-            // This should succeed
             await tx.post.create({
               data: {
                 title: 'Post 1',
@@ -993,7 +989,6 @@ describe('Error Handling Integration', () => {
         }),
       ).rejects.toThrow();
 
-      // Verify no posts were created (transaction rolled back)
       const posts = await context.prisma.post.findMany();
       expect(posts).toHaveLength(0);
 

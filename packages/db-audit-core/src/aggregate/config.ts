@@ -11,9 +11,7 @@ import { validateAggregateMapping } from './helpers.js';
 import type { AggregateMapping, LoggableEntity } from './types.js';
 
 /**
- * Aggregate configuration service interface
- *
- * Provides unified API for accessing aggregate mapping configuration with case-insensitive model name lookups.
+ * Aggregate configuration service with case-insensitive model name lookups
  *
  * @example
  * ```typescript
@@ -33,12 +31,7 @@ import type { AggregateMapping, LoggableEntity } from './types.js';
  * ```
  */
 export interface AggregateConfigService {
-  /**
-   * Get entity configuration by model name (case-insensitive)
-   *
-   * @param modelName - Model name (case-insensitive)
-   * @returns Entity configuration or undefined if not found
-   */
+  /** Get entity configuration by model name (case-insensitive) */
   getEntityConfig: (modelName: string) => LoggableEntity | undefined;
 
   /**
@@ -50,40 +43,23 @@ export interface AggregateConfigService {
    *
    * @param type - Aggregate type (case-sensitive, as declared in defineEntity)
    * @param category - Aggregate category (as declared in defineEntity / to())
-   * @returns Entity configuration or undefined if no entity declares this identity
    */
   getEntityConfigByType: (type: string, category: string) => LoggableEntity | undefined;
 
-  /**
-   * Check if a model is configured for audit logging
-   *
-   * @param modelName - Model name (case-insensitive)
-   * @returns True if the model has audit logging configured
-   */
+  /** Whether a model is configured for audit logging (model name case-insensitive) */
   isLoggable: (modelName: string) => boolean;
 
-  /**
-   * Get all loggable model names in their original casing
-   *
-   * @returns Array of model names as defined in the mapping
-   */
+  /** Get all loggable model names in their original casing */
   getAllLoggableModels: () => string[];
 
-  /**
-   * Get the entire aggregate mapping
-   *
-   * @returns Complete aggregate mapping as provided to createAggregateConfig
-   */
+  /** Get the entire aggregate mapping as provided to createAggregateConfig */
   getMapping: () => AggregateMapping;
 }
 
 /**
- * Create an aggregate configuration service
+ * Create an aggregate configuration service: case-insensitive lookups over the mapping that
+ * preserve the original model name casing
  *
- * Creates a service for accessing aggregate mapping configuration with case-insensitive lookups while preserving original model name casing.
- *
- * @param mapping - Aggregate mapping configuration to wrap
- * @returns Configuration service with methods for accessing the mapping
  * @throws Error if the mapping configuration is invalid
  *
  * @example

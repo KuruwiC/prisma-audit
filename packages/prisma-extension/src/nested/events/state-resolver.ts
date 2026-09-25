@@ -20,13 +20,6 @@ type Row = Record<string, unknown>;
 /** Action of a nested record; `connect` marks a record that only got linked and is not audited */
 export type NestedRecordAction = AuditAction | 'connect';
 
-/**
- * Resolved state result
- * - action: The determined action (create/update/connect)
- * - beforeState: The before state (or null if not available/applicable)
- *
- * Special case: action === 'connect' signals that audit log should be skipped
- */
 export type ResolvedState = {
   action: NestedRecordAction;
   beforeState: Row | null;
@@ -60,9 +53,7 @@ const resolveConnectOrCreateRow = (before: Row | undefined): ResolvedState => {
  * - **connect**: action='connect' (skip audit log)
  * - **delete / deleteMany**: handled separately
  *
- * @param nestedOp - Nested operation information
  * @param before - The row's pre-fetched before-state; `undefined` when it did not exist or was not pre-fetched
- * @param getNestedOperationConfig - Config getter function
  */
 export const resolveNestedRowState = (
   nestedOp: NestedOperationInfo,

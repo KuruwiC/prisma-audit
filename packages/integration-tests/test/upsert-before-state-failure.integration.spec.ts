@@ -2,9 +2,10 @@
  * Integration Test: upsert action resolution when the before-state fetch fails
  *
  * `fetchBeforeState` always reads the before-state for `upsert` (to tell create from
- * update), via a `findUnique` call distinct from Prisma's own upsert execution. If that pre-fetch throws, the failure must not silently make
- * the operation look like a `create` in the audit log: an upsert that in fact
- * updated an existing row must never be recorded with `action: 'create'`.
+ * update), via a `findUnique` call distinct from Prisma's own upsert execution. If that
+ * pre-fetch throws, the failure must not silently make the operation look like a `create`
+ * in the audit log: an upsert that in fact updated an existing row must never be recorded
+ * with `action: 'create'`.
  *
  * The pre-fetch failure is injected with a plain Prisma Client Extension applied
  * *before* the audit extension (`basePrisma.$extends({ query: { post: { findUnique... } } })`),
@@ -119,7 +120,6 @@ describe('upsert — before-state fetch failure', () => {
     const rowCount = await basePrisma.post.count({ where: { authorId: user.id } });
     expect(rowCount).toBe(1);
 
-    // The failure was reported through the read-only observer.
     expect(observer).toHaveBeenCalledWith(
       expect.objectContaining({
         phase: 'pre-fetch',
@@ -128,7 +128,6 @@ describe('upsert — before-state fetch failure', () => {
       }),
     );
 
-    // The core requirement: an upsert whose before-state fetch failed must never be recorded as 'create'.
     // The whole audit entry is skipped, since the branch (create vs. update) can no longer be determined.
     const logs = await basePrisma.auditLog.findMany({ where: { entityType: 'Post', entityId: post.id } });
     expect(logs).toEqual([]);

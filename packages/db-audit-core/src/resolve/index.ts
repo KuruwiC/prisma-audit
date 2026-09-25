@@ -47,7 +47,7 @@ export interface EntityResolveConfig<TDbHandle = unknown> {
 export interface ResolveConfig<TModelName extends string = string, TDbHandle = unknown> {
   /** Entity configuration of a written model, or undefined when the model is not audited. */
   readonly entity: (model: TModelName) => EntityResolveConfig<TDbHandle> | undefined;
-  /** Entity configuration of an aggregate root, looked up by its type and category. */
+  /** Entity configuration of an aggregate root, or undefined when it has none; no root-side enricher runs for it then. */
   readonly rootEntity: (type: string, category: string) => EntityResolveConfig<TDbHandle> | undefined;
   readonly actor?: GlobalContextEnricherConfig<unknown, unknown, TDbHandle>['actor'];
 }
@@ -235,10 +235,6 @@ interface ProjectionGroup {
 const isPlainObject = (value: unknown): value is Row =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
-/**
- * Both absent: null. One present: that one. Both plain objects: shallow merge, projection keys
- * winning. Anything else (a scalar context): the projection value.
- */
 const mergeAggregateContexts = (rootContext: unknown, projectionContext: unknown): unknown => {
   if (rootContext == null) return projectionContext ?? null;
   if (projectionContext == null) return rootContext;
@@ -348,11 +344,7 @@ const enrichProjectionContexts = async <TDbHandle>(
   return executeBatchEnricherSafely(enricher, rows, read(), ENRICHMENT_TIMEOUTS.BATCH, meta);
 };
 
-/**
- * Enrich the aggregate contexts of the survivors: projection-side enrichers once per `to()`
- * declaration (or the self projection), root-side enrichers once per (category, type), merged
- * with projection keys winning. Keyed by `${index}:${aggregateType}:${aggregateId}`.
- */
+/** Root-side and projection-side contexts merged per root, keyed `${index}:${aggregateType}:${aggregateId}`. */
 const enrichAggregateContexts = async <TDbHandle>(
   survivors: readonly Survivor[],
   entity: EntityResolveConfig<TDbHandle>,
@@ -391,10 +383,6 @@ const enrichAggregateContexts = async <TDbHandle>(
   return contexts;
 };
 
-// ============================================================================
-// Resolution of one model group
-// ============================================================================
-
 const enrichEntityContexts = async <TDbHandle>(
   rows: Row[],
   enricher: EntityEnricherConfig<TDbHandle>,
@@ -406,10 +394,6 @@ const enrichEntityContexts = async <TDbHandle>(
   return executeBatchEnricherSafely(enricher, rows, read(), ENRICHMENT_TIMEOUTS.BATCH);
 };
 
-/**
- * The entity id of a survivor through the entity's id resolver, normalized; null when the
- * resolver returns none. A resolver that throws fails the resolution.
- */
 const resolveEntityId = async <TDbHandle>(
   row: Row,
   entity: EntityResolveConfig<TDbHandle>,
@@ -438,11 +422,6 @@ const toResolvedId = ({ aggregateCategory, aggregateType, aggregateId }: Resolve
   aggregateId,
 });
 
-/**
- * Resolve the events of one model, in event order: entity contexts for every row, then the
- * aggregate roots, then the aggregate contexts and the entity id of the rows that have a root.
- * Rows without a root or without an entity id yield nothing.
- */
 const resolveModelGroup = async <TModelName extends string, TDbHandle>(
   group: ModelGroup<TModelName>,
   entity: EntityResolveConfig<TDbHandle>,

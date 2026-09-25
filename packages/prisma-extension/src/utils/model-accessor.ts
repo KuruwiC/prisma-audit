@@ -1,9 +1,6 @@
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../internal-types.js';
 
-/**
- * DMMF mapping type definition for type safety
- * Based on Prisma's internal DMMF structure
- */
+/** One model's entry in Prisma's internal DMMF `mappings.modelOperations` */
 interface DMMFModelMapping {
   model: string;
   plural: string;
@@ -22,9 +19,6 @@ interface DMMFModelMapping {
   count?: string;
 }
 
-/**
- * DMMF mappings structure
- */
 interface DMMFMappings {
   modelOperations?: DMMFModelMapping[];
 }
@@ -37,19 +31,14 @@ interface DMMF {
 }
 
 /**
- * Client with internal DMMF accessor
- * Note: _dmmf is internal API but stable across versions
- * Accepts any client-like object (PrismaClient, extended client, transaction client)
+ * Client with the internal DMMF accessor. `_dmmf` is Prisma-internal and current clients no longer
+ * expose it (Prisma 6 carries `_runtimeDataModel` instead), so {@link getModelAccessor} normally
+ * takes its fallback.
  */
 interface ClientWithDMMF {
   _dmmf?: DMMF;
 }
 
-/**
- * Type guard to check if client has DMMF
- *
- * @internal
- */
 const hasDMMF = (client: unknown): client is ClientWithDMMF => {
   return (
     typeof client === 'object' &&
@@ -60,11 +49,6 @@ const hasDMMF = (client: unknown): client is ClientWithDMMF => {
   );
 };
 
-/**
- * Type guard to check if value is a valid DMMF mapping
- *
- * @internal
- */
 const isDMMFMapping = (value: unknown): value is DMMFModelMapping => {
   return (
     typeof value === 'object' &&
@@ -117,13 +101,11 @@ export const getModelAccessor = (client: unknown, modelName: string): string => 
   }
 };
 
-/** The delegate of `modelName` on `client`, resolved through {@link getModelAccessor} */
 export const getModelDelegate = (
   client: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
   modelName: string,
 ): unknown => client[getModelAccessor(client, modelName)];
 
-/** The `operation` method of a model delegate, or undefined when the delegate does not have it */
 export const getModelOperation = (
   delegate: unknown,
   operation: string,

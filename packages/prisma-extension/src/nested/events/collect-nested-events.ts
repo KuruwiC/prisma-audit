@@ -84,7 +84,6 @@ const toEvent = (
   origin: { path: nestedOp.path, op: nestedOp.operation },
 });
 
-/** The rows the result returned at each path */
 const rowsByPath = (records: readonly NestedRecordInfo[]): Map<string, Row[]> => {
   const rows = new Map<string, Row[]>();
   for (const info of records) {
@@ -240,9 +239,8 @@ const attributionsOf = (
 };
 
 /**
- * Whether the row `target` names existed before the operation and the operation updated it: an
- * update, an updateMany, or an upsert whose target existed. Such a row is audited from its after
- * state, which only the result or a re-fetch holds.
+ * Whether `target` updated a row that existed before the operation: such a row is audited from its
+ * after state, which only the result or a re-fetch holds.
  */
 const updatesExistingRow = (target: NestedWriteTarget): boolean => {
   const { operation } = target.operation;
@@ -257,9 +255,6 @@ const updatesExistingRow = (target: NestedWriteTarget): boolean => {
  * caller's own `include` or `select` on a written relation keeps its filter, so the result may
  * hold the siblings of an updated row but not the row itself; the rows it does hold are used as
  * returned.
- *
- * With `include`, the records are the atomic, consistent rows of the operation itself. A
- * re-fetch is not atomic: it may observe state modified by another process.
  */
 const returnedRows = async (
   input: NestedEventCollectionInput,

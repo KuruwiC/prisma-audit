@@ -30,13 +30,10 @@ const processObjectEntry = <T>(
 /**
  * Remove relation objects from audit log states
  *
- * When `relationFieldNames` is provided, removes fields by name (precise).
- * When not provided, no relation removal is performed — data is returned as-is
- * to avoid false positives from heuristic detection.
+ * Only the fields named in `relationFieldNames` are removed. Without it, the data comes back
+ * unchanged: relations are not detected heuristically, to avoid false positives.
  *
- * @param obj - Object to strip relations from
- * @param relationFieldNames - Relation field names of the model, as the adapter derives them from its schema. Only
- *   these fields are removed. When undefined, no fields are removed.
+ * @param relationFieldNames - Relation field names of the model, as the adapter derives them from its schema
  *
  * @example
  * ```typescript

@@ -22,12 +22,7 @@ export interface PrismaWithDMMF {
   };
 }
 
-/**
- * Create a complete SchemaMetadata adapter from Prisma DMMF
- *
- * Provides all four SchemaMetadata methods using Prisma's DMMF.
- * This is the single source of truth for DMMF-to-SchemaMetadata conversion.
- */
+/** The SchemaMetadata adapter over Prisma's DMMF; the only place DMMF is converted to SchemaMetadata */
 export const createSchemaMetadataFromDMMF = (Prisma: PrismaWithDMMF): SchemaMetadata => {
   const findModel = (modelName: string) => {
     const dmmf = Prisma.dmmf;
@@ -120,9 +115,6 @@ export const createSchemaMetadataFromDMMF = (Prisma: PrismaWithDMMF): SchemaMeta
   };
 };
 
-/**
- * Get all unique constraints for a model from Prisma DMMF
- */
 export const getUniqueConstraints = (Prisma: PrismaWithDMMF, modelName: string): UniqueConstraint[] => {
   return createSchemaMetadataFromDMMF(Prisma).getUniqueConstraints(modelName);
 };

@@ -16,7 +16,6 @@ describe('Aggregate Root Resolution Integration', () => {
 
   describe('Post aggregate resolution', () => {
     it('should create audit logs for both Post and User aggregates on Post create', async () => {
-      // Create user
       const user = await getContext().provider.runAsync(testActor, async () => {
         return await getContext().prisma.user.create({
           data: {
@@ -27,7 +26,6 @@ describe('Aggregate Root Resolution Integration', () => {
         });
       });
 
-      // Create post
       const post = await getContext().provider.runAsync(testActor, async () => {
         return await getContext().prisma.post.create({
           data: {
@@ -38,7 +36,6 @@ describe('Aggregate Root Resolution Integration', () => {
         });
       });
 
-      // Verify audit logs
       const postLogs = await getContext().prisma.auditLog.findMany({
         where: { entityType: 'Post', entityId: post.id },
         orderBy: { aggregateType: 'asc' },
@@ -47,13 +44,11 @@ describe('Aggregate Root Resolution Integration', () => {
       // Should have logs for both Post and User aggregates
       expect(postLogs.length).toBeGreaterThanOrEqual(2);
 
-      // Post aggregate log
       const postAggregateLog = postLogs.find((log: { aggregateType: string }) => log.aggregateType === 'Post');
       expect(postAggregateLog).toBeDefined();
       expect(postAggregateLog?.aggregateId).toBe(post.id);
       expect(postAggregateLog?.action).toBe('create');
 
-      // User aggregate log (parent)
       const userAggregateLog = postLogs.find((log: { aggregateType: string }) => log.aggregateType === 'User');
       expect(userAggregateLog).toBeDefined();
       expect(userAggregateLog?.aggregateId).toBe(user.id);
@@ -61,7 +56,6 @@ describe('Aggregate Root Resolution Integration', () => {
     });
 
     it('should track Post changes under User aggregate', async () => {
-      // Create user and post
       const user = await getContext().provider.runAsync(testActor, async () => {
         return await getContext().prisma.user.create({
           data: {
@@ -82,7 +76,6 @@ describe('Aggregate Root Resolution Integration', () => {
         });
       });
 
-      // Update post
       await getContext().provider.runAsync(testActor, async () => {
         return await getContext().prisma.post.update({
           where: { id: post.id },
@@ -90,7 +83,6 @@ describe('Aggregate Root Resolution Integration', () => {
         });
       });
 
-      // Verify User aggregate has logs for Post operations
       const userAggregateLogs = await getContext().prisma.auditLog.findMany({
         where: {
           aggregateType: 'User',
@@ -112,7 +104,6 @@ describe('Aggregate Root Resolution Integration', () => {
 
   describe('Comment aggregate resolution', () => {
     it('should create audit logs for Comment, Post, and User aggregates', async () => {
-      // Create user
       const user = await getContext().provider.runAsync(testActor, async () => {
         return await getContext().prisma.user.create({
           data: {
@@ -123,7 +114,6 @@ describe('Aggregate Root Resolution Integration', () => {
         });
       });
 
-      // Create post
       const post = await getContext().provider.runAsync(testActor, async () => {
         return await getContext().prisma.post.create({
           data: {
@@ -134,7 +124,6 @@ describe('Aggregate Root Resolution Integration', () => {
         });
       });
 
-      // Create comment
       const comment = await getContext().provider.runAsync(testActor, async () => {
         return await getContext().prisma.comment.create({
           data: {
@@ -145,7 +134,6 @@ describe('Aggregate Root Resolution Integration', () => {
         });
       });
 
-      // Verify audit logs for Comment
       const commentLogs = await getContext().prisma.auditLog.findMany({
         where: { entityType: 'Comment', entityId: comment.id },
         orderBy: { aggregateType: 'asc' },
@@ -154,24 +142,20 @@ describe('Aggregate Root Resolution Integration', () => {
       // Should have logs for Comment, Post, and User aggregates
       expect(commentLogs.length).toBeGreaterThanOrEqual(3);
 
-      // Comment aggregate log
       const commentAggregateLog = commentLogs.find((log: { aggregateType: string }) => log.aggregateType === 'Comment');
       expect(commentAggregateLog).toBeDefined();
       expect(commentAggregateLog?.aggregateId).toBe(comment.id);
 
-      // Post aggregate log
       const postAggregateLog = commentLogs.find((log: { aggregateType: string }) => log.aggregateType === 'Post');
       expect(postAggregateLog).toBeDefined();
       expect(postAggregateLog?.aggregateId).toBe(post.id);
 
-      // User aggregate log
       const userAggregateLog = commentLogs.find((log: { aggregateType: string }) => log.aggregateType === 'User');
       expect(userAggregateLog).toBeDefined();
       expect(userAggregateLog?.aggregateId).toBe(user.id);
     });
 
     it('should track Comment changes under both Post and User aggregates', async () => {
-      // Setup
       const user = await getContext().provider.runAsync(testActor, async () => {
         return await getContext().prisma.user.create({
           data: {
@@ -202,7 +186,6 @@ describe('Aggregate Root Resolution Integration', () => {
         });
       });
 
-      // Update comment
       await getContext().provider.runAsync(testActor, async () => {
         return await getContext().prisma.comment.update({
           where: { id: comment.id },
@@ -210,7 +193,6 @@ describe('Aggregate Root Resolution Integration', () => {
         });
       });
 
-      // Verify Post aggregate has Comment logs
       const postAggregateLogs = await getContext().prisma.auditLog.findMany({
         where: {
           aggregateType: 'Post',
@@ -221,7 +203,6 @@ describe('Aggregate Root Resolution Integration', () => {
 
       expect(postAggregateLogs.length).toBeGreaterThanOrEqual(2); // create + update
 
-      // Verify User aggregate has Comment logs
       const userAggregateLogs = await getContext().prisma.auditLog.findMany({
         where: {
           aggregateType: 'User',
@@ -258,14 +239,12 @@ describe('Aggregate Root Resolution Integration', () => {
 
       const postId = post.id;
 
-      // Delete post
       await getContext().provider.runAsync(testActor, async () => {
         await getContext().prisma.post.delete({
           where: { id: postId },
         });
       });
 
-      // Verify User aggregate has delete log
       const userAggregateLogs = await getContext().prisma.auditLog.findMany({
         where: {
           aggregateType: 'User',

@@ -1,15 +1,12 @@
-/** Enrichment module types */
-
-/** Error handling strategy for enricher failures: 'fail', 'log', 'skip' (null result, nothing logged, `fallback` unused), or custom function */
+/**
+ * What an enricher failure (an error or a timeout) becomes: 'fail' rethrows it, 'log' warns and
+ * yields `fallback`, 'skip' yields null silently and ignores `fallback`, and a function receives
+ * the error and yields its result, or `fallback` when it returns none.
+ */
 export type EnricherErrorStrategy = 'fail' | 'log' | 'skip' | ((error: Error) => unknown);
 
 /**
- * Enricher configuration with error handling and fallback support
- *
- * @template TInput - Type of input data to enrich
- * @template TContext - Type of enriched context to produce
- * @template TDbHandle - Type of the database handle the adapter passes (defaults to unknown)
- * @template TMeta - Type of metadata passed to the enricher (void = no meta parameter)
+ * A user callback that derives a context to store on the audit row, with what to do when it fails.
  *
  * @example
  * ```typescript
@@ -24,10 +21,8 @@ export type EnricherErrorStrategy = 'fail' | 'log' | 'skip' | ((error: Error) =>
  */
 export interface EnricherConfig<TInput, TContext, TDbHandle = unknown, TMeta = void> {
   /**
-   * Enricher function that transforms input into enriched context.
-   *
-   * A method signature: its parameters are bivariant, so a config typed for a specific
-   * handle and input is assignable where both are erased to their defaults.
+   * A method rather than a property so its parameters are bivariant: a config typed for a
+   * specific handle and input stays assignable where both are erased to their defaults.
    */
   enricher(input: TInput, db: TDbHandle, meta: TMeta): Promise<TContext>;
   /** Error handling strategy when enricher fails (default: 'fail') */
@@ -47,9 +42,7 @@ export type EntityEnricherConfig<
   TEntity extends Record<string, unknown> = Record<string, unknown>,
 > = EnricherConfig<TEntity[], unknown[], TDbHandle> | undefined;
 
-/**
- * Metadata passed to projection-side context enrichers
- */
+/** Third argument of a projection-side context enricher */
 export interface ProjectionEnrichmentMeta {
   /** Aggregate type this projection targets */
   aggregateType: string;

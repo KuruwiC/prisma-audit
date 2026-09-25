@@ -73,10 +73,6 @@ const validateModelAndGetCapabilities = (
   };
 };
 
-/**
- * Write a single audit log record
- * @internal
- */
 const writeAuditLogSingle = async (model: AuditLogModel, logData: AuditLogData): Promise<void> => {
   await model.create({
     data: logData,
@@ -148,20 +144,13 @@ const writeAuditLogs = async (
 /**
  * Create Prisma write executor with DbNull support
  *
- * @param DbNull - Prisma.DbNull symbol (project-specific, must be passed from client code)
- *
- * @remarks
- * Features:
- * - Automatic createMany/create selection based on database capabilities
- * - SQLite compatibility with sequential write fallback
- * - SQL NULL handling via Prisma.DbNull conversion
+ * @param DbNull - `Prisma.DbNull` of the generated client the audit logs are written with; every
+ *   generated client has its own, so it cannot be imported here
  *
  * @example
  * ```typescript
- * import { Prisma, PrismaClient } from '@prisma/client';
- * import { createPrismaClient } from '@kuruwic/prisma-audit';
- *
- * const prisma = createPrismaClient(new PrismaClient(), config, Prisma.DbNull);
+ * const writeExecutor = createPrismaWriteExecutor(Prisma.DbNull);
+ * await writeExecutor.write(prisma, 'auditLog', logs);
  * ```
  */
 export const createPrismaWriteExecutor = (DbNull: unknown): WriteExecutor => {

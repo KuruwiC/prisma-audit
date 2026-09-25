@@ -20,9 +20,6 @@ import { extractEntityIdentity } from './id-generation.js';
  * Matches Prisma Client's naming convention where schema models (PascalCase)
  * are accessed via camelCase properties (e.g., `prisma.auditLog`).
  *
- * @param str - String to convert (e.g., 'AuditLog', 'Activity')
- * @returns String with first letter lowercase (e.g., 'auditLog', 'activity')
- *
  * @example
  * ```typescript
  * uncapitalizeFirst('AuditLog');  // => 'auditLog'
@@ -39,9 +36,6 @@ export const uncapitalizeFirst = (str: string): string => {
  *
  * Only write operations (create, update, delete, upsert, etc.) are auditable.
  * Read-only operations (findMany, aggregate) are not.
- *
- * @param operation - The Prisma operation name
- * @returns True if the operation should be audited
  *
  * @example
  * ```typescript
@@ -62,9 +56,7 @@ export const isAuditableAction = (operation: string): operation is AuditAction =
  * for a key declared as `@@id([a, b], name: "custom")`, directly or under `where`),
  * unwrapped with the same `unwrapCompoundWhere` the pre-fetch path uses.
  *
- * @param data - The delete operation data
  * @param pkConstraint - The deleted model's primary key, as returned by `getPrimaryKeyConstraint`
- * @returns Entity ID if found, undefined otherwise
  *
  * @example
  * ```typescript
@@ -112,27 +104,12 @@ export const extractDeleteOperationEntityId = (data: unknown, pkConstraint: Uniq
   return undefined;
 };
 
-/**
- * Checks if model is the audit log model itself
- *
- * @param modelName - Model to check
- * @param auditLogModel - Audit log model name
- * @returns True if models match (case-insensitive)
- * @internal
- */
+/** Case-insensitive: `auditLogModel` may be given as PascalCase or camelCase */
 const isAuditLogModel = (modelName: string, auditLogModel: string): boolean => {
   return modelName.toLowerCase() === auditLogModel.toLowerCase();
 };
 
-/**
- * Checks if operation should be sampled based on sampling rate
- *
- * Uses Math.random() for probabilistic sampling (1.0 = 100%, 0.1 = 10%, 0.0 = 0%).
- *
- * @param samplingRate - Sampling rate (0-1)
- * @returns True if operation should be audited
- * @internal
- */
+/** Probabilistic sampling: 1.0 audits every operation, 0.0 none */
 const shouldSample = (samplingRate: number): boolean => {
   return Math.random() < samplingRate;
 };
@@ -151,8 +128,6 @@ export interface ShouldAuditModelInput {
  *
  * Applies checks in order: input validation, recursion prevention,
  * self-reference prevention, loggability check, and sampling check.
- *
- * @returns True if audit should be applied
  *
  * @example
  * ```typescript

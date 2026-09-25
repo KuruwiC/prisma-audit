@@ -66,7 +66,6 @@ export interface PreFetchCoordinatorDependencies {
   readonly onPreFetchFailure?: AuditErrorObserver;
 }
 
-/** What the pre-fetch read ahead of an operation */
 export interface NestedPreFetch {
   /** Before-states keyed by operation path, then by entity identity; empty when nothing was pre-fetched */
   readonly results: NestedPreFetchResults;
@@ -75,24 +74,8 @@ export interface NestedPreFetch {
 }
 
 /**
- * Resolves parent model from nested operation path
- *
- * Traverses path segments to find the correct parent model.
- *
- * @param path - Nested operation path (e.g., "postTags.tag")
- * @param topLevelModel - Top-level model where operation starts
- * @param dmmf - Prisma DMMF metadata
- * @returns Parent model or undefined if not found
- *
- * @example
- * ```typescript
- * const parentModel = resolveParentModelFromPath(
- *   'postTags.tag',
- *   postModel,
- *   dmmf
- * );
- * // Returns: PostTag model
- * ```
+ * Resolves the model that declares the last segment of `path` by walking the DMMF from
+ * `topLevelModel` (e.g. `'postTags.tag'` under Post resolves to PostTag).
  */
 export const resolveParentModelFromPath = (
   path: string,
@@ -167,28 +150,13 @@ const reportNestedPreFetchFailure = async (
 };
 
 /**
- * Pre-fetches nested records before operation execution
+ * Pre-fetches nested records before operation execution.
  *
  * Detects nested operations with the discovery pass, which scans every upsert branch, so the
- * before-state of every nested record the operation could write is captured.
+ * before-state of every nested record the operation could write is captured. `prismaClient`
+ * must be the client of the transaction the operation runs in.
  *
- * IMPORTANT: Must be called BEFORE operation executes to capture original state.
- *
- * @param prismaClient - Prisma client instance (must be same transaction context)
- * @param modelName - Parent model name
- * @param args - Operation arguments containing nested operations
- * @param dependencies - Pre-fetch coordinator dependencies
  * @returns The before-states read and the rows each batch keyword's filter matched
- *
- * @example
- * ```typescript
- * const { results } = await preFetchNestedRecordsBeforeOperation(
- *   tx,
- *   'Post',
- *   { where: { id: 1 }, data: { postTags: { create: { tag: { connectOrCreate: {...} } } } } },
- *   dependencies
- * );
- * ```
  */
 export const preFetchNestedRecordsBeforeOperation = async (
   prismaClient: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
@@ -284,7 +252,6 @@ interface NestedPreFetchContext {
   parentOperationsNotPreFetched: (path: string) => NestedOperationInfo[];
 }
 
-/** The relation a nested operation writes, resolved from the DMMF, with the related model's primary key */
 interface NestedRelation {
   readonly nestedOp: NestedOperationInfo;
   readonly field: DMMFField;
@@ -414,7 +381,6 @@ const handleOneToOneRelation = async (
   }
 };
 
-/** What scopes the to-many operation of `relation` to its parent rows; `undefined` when the parent model has no primary key */
 const resolveToManyScopeInput = (
   context: NestedPreFetchContext,
   relation: NestedRelation,
@@ -483,9 +449,8 @@ const recordBatchTargets = (
 };
 
 /**
- * Pre-reads the rows a batch keyword's filter matches under the parent rows. The discovery pass
- * may find the same keyword at a path in more than one upsert branch; the rows each read matched
- * are merged by identity.
+ * The discovery pass may find the same batch keyword at a path in more than one upsert branch,
+ * so the rows each read matched are merged by identity rather than replaced.
  */
 const handleToManyBatch = async (
   context: NestedPreFetchContext,

@@ -1,8 +1,7 @@
 /**
  * Operation Classification Utilities
  *
- * Provides utilities for classifying and categorizing Prisma operations.
- * Determines the type and characteristics of database operations for audit logging.
+ * Predicates that classify Prisma operations for audit handling.
  *
  * @module utils/operation-classifier
  */
@@ -10,17 +9,8 @@
 import { AUDIT_ACTION, type AuditAction, BATCH_OPERATIONS } from '../grammar/operations.js';
 
 /**
- * Checks if an operation is a batch operation
- *
- * Batch operations (createMany, updateMany, deleteMany, createManyAndReturn,
- * updateManyAndReturn) process multiple records and have different handling
- * requirements compared to single-record operations.
- *
- * @example
- * ```typescript
- * isBatchOperation('createMany'); // => true
- * isBatchOperation('create');     // => false
- * ```
+ * Whether `action` writes several records at once (createMany, createManyAndReturn, updateMany,
+ * updateManyAndReturn, deleteMany)
  */
 export const isBatchOperation = (
   action: string,
@@ -29,17 +19,8 @@ export const isBatchOperation = (
 };
 
 /**
- * Checks if an operation requires fetching before state
- *
- * Operations that modify or delete existing records (update, upsert, delete, updateMany, deleteMany)
- * require fetching the before state to enable change tracking.
- * Create operations don't need before state (before is always null).
- *
- * @example
- * ```typescript
- * requiresBeforeState('update');  // => true
- * requiresBeforeState('create');  // => false
- * ```
+ * Whether the audit entry for `action` needs the pre-operation state: true for operations that modify
+ * or delete existing records, false for creates, whose `before` is always null
  */
 export const requiresBeforeState = (action: AuditAction): boolean => {
   return (

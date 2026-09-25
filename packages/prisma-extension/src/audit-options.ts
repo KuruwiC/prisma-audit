@@ -1,9 +1,8 @@
 /**
  * Audit options
  *
- * Validates the extension options once and normalizes them into what the audit pipeline
- * consumes: the write policy, resolve and compose configs, the schema metadata, the audit-log
- * model accessor, the hooks and the failure-handling settings.
+ * Validates the extension options once, at extension creation, and normalizes them into the
+ * shape the audit pipeline consumes.
  */
 
 import type {
@@ -36,7 +35,6 @@ export interface AuditOptions {
   readonly observer: AuditErrorObserver | undefined;
   readonly writeFailurePolicy: WriteFailurePolicy;
   readonly getNestedOperationConfig: GetOperationConfig;
-  /** Tags declared for a model's entity; the policy and sampling callbacks receive them */
   readonly modelTags: (modelName: string) => string[];
   /** Whether an operation on `modelName` is audited at all (audit-log model, loggability, sampling) */
   readonly shouldAudit: (modelName: string | undefined, context: AuditContext | undefined) => boolean;

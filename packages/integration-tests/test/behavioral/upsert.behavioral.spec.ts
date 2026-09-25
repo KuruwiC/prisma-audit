@@ -42,12 +42,10 @@ describe('Upsert Operations (Behavioral)', () => {
   describe('Update path (record exists)', () => {
     it('should create audit log with action=update when record exists', async () => {
       const h = getHarness();
-      // Create initial record
       await h.runWithContext(actor, () =>
         h.createOne('User', { email: 'upsert-existing@example.com', name: 'Original', password: 'secret' }),
       );
 
-      // Upsert same record
       const user = await h.runWithContext(actor, () =>
         h.upsertOne(
           'User',

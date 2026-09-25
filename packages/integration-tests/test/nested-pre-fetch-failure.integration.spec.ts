@@ -5,7 +5,7 @@
  * each nested operation's pre-fetch in a per-operation try/catch that falls back to
  * core's `UNRESOLVED_ENTITY_ID` sentinel on failure. It reports the failure through
  * `errorHandling.observer` with `phase: 'pre-fetch'`, matching the top-level
- * equivalent (`fetchBeforeState` in extension.ts): a nested `update`/`delete` whose
+ * equivalent (`fetchBeforeState` in `pipeline/before-state.ts`): a nested `update`/`delete` whose
  * pre-fetch query fails keeps that notification even though it loses its before-state.
  *
  * The second scenario below drives the same underlying failure through a nested

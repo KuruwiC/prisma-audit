@@ -108,7 +108,6 @@ describe('NULL Handling Verification', () => {
         });
       });
 
-      // Find the audit log
       const auditLog = await context.prisma.auditLog.findFirst({
         where: { entityType: 'User', entityId: user.id, action: 'delete' },
       });
@@ -172,7 +171,6 @@ describe('NULL Handling Verification', () => {
         });
       });
 
-      // Find the audit log
       const auditLog = await context.prisma.auditLog.findFirst({
         where: { entityType: 'User', entityId: user.id, action: 'update' },
       });
