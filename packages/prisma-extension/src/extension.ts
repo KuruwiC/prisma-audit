@@ -19,6 +19,8 @@ import {
   DEFAULTS,
   enrichActorContext,
   getRuntimeContext,
+  type PolicyConfig,
+  policy,
   runWithRuntimeContext,
   type WriteResult,
 } from '@kuruwic/prisma-audit-core';
@@ -150,12 +152,17 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
 
   const getModelTags = (modelName: string): string[] => aggregateConfig.getEntityConfig(modelName)?.tags ?? [];
 
+  const policyConfig: PolicyConfig = {
+    awaitWrite,
+    awaitWriteIf: awaitWriteIf && ((modelName, tags) => awaitWriteIf(modelName, [...tags])),
+  };
+
   /**
    * Whether the audit-log write for `modelName` is awaited. The top-level handler, the batch handler
    * and the write strategy selector all read this one decision so they cannot disagree.
    */
   const resolveAwaitWrite = (modelName: string): boolean =>
-    awaitWriteIf ? awaitWriteIf(modelName, getModelTags(modelName)) : awaitWrite;
+    policy(modelName, getModelTags(modelName), policyConfig).atomic;
 
   /** Sampling rate (0-1) for an operation on `modelName` */
   const resolveSamplingRate = (modelName: string): number =>
