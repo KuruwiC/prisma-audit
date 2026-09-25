@@ -137,7 +137,7 @@ describe('runAuditedOperation', () => {
       expect(baseClient.transactionsOpened.count).toBe(1);
       const scope = scopeSeenBy(deps.singleExecutor);
       expect(scope.handle).toBe(transactionClient);
-      expect(scope.baseHandle).toBe(baseClient);
+      expect(scope.baseClient).toBe(baseClient);
       expect(scope.transaction?.implicit).toBe(true);
       expect(scope.atomic).toBe(true);
       expect(planWrittenBy(deps)).toEqual({ kind: 'immediate', records: [record] });
@@ -401,7 +401,7 @@ describe('createExecutor', () => {
   const scope: ExecutionScope = {
     auditContext,
     handle: transactionClient,
-    baseHandle: createBaseClient(),
+    baseClient: createBaseClient(),
     atomic: true,
   };
 

@@ -12,7 +12,7 @@ import { currentScope, openImplicitTransaction } from './scope.js';
 export interface TransactionWrapperConfig {
   shouldWrap: boolean;
   context: AuditContext;
-  basePrisma: PrismaClientWithDynamicAccess;
+  baseClient: PrismaClientWithDynamicAccess;
 }
 
 /**
@@ -28,7 +28,7 @@ export interface TransactionWrapperConfig {
  *   {
  *     shouldWrap: true,
  *     context: auditContext,
- *     basePrisma: prisma,
+ *     baseClient: prisma,
  *   },
  *   contextProvider
  * );
@@ -44,16 +44,16 @@ export const withOptionalTransaction = <T>(
 ): ((
   operationFn: (txClient: PrismaClientWithDynamicAccess | TransactionalPrismaClient) => Promise<T>,
 ) => Promise<T>) => {
-  const { shouldWrap, context, basePrisma } = config;
+  const { shouldWrap, context, baseClient } = config;
 
   return async (operationFn) => {
     const scope = currentScope();
     const needsWrapping = shouldWrap && !scope?.transaction && !scope?.isInImplicitTransaction;
 
     if (!needsWrapping) {
-      return await operationFn(scope?.transaction?.client ?? basePrisma);
+      return await operationFn(scope?.transaction?.client ?? baseClient);
     }
 
-    return openImplicitTransaction({ base: basePrisma, provider, auditContext: context }, operationFn);
+    return openImplicitTransaction({ baseClient, provider, auditContext: context }, operationFn);
   };
 };

@@ -55,7 +55,7 @@ const clientWith = (delegates: Record<string, Record<string, unknown>>): PrismaC
 const scopeOn = (client: PrismaClientWithDynamicAccess): ExecutionScope => ({
   auditContext,
   handle: client,
-  baseHandle: client,
+  baseClient: client,
   atomic: true,
 });
 

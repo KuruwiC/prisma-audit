@@ -3,8 +3,8 @@
  *
  * Executes the write plan `dispatch` chose for an operation's records: an immediate plan is
  * written on the scope's handle and awaited; an after-commit plan is queued on the enclosing
- * transaction and written on the base handle once it has committed; a detached plan starts now
- * on the base handle and is never awaited by the caller.
+ * transaction and written on the base client once it has committed; a detached plan starts now
+ * on the base client and is never awaited by the caller.
  *
  * A write failure is reported through the failure sink under the `log-write` phase. An
  * immediate plan is reported while the caller is still waiting, so a `'throw'` policy fails the
@@ -45,7 +45,7 @@ const writeImmediately = async (planned: PlannedWrite): Promise<void> => {
 const containedBaseWrite =
   (planned: PlannedWrite, logLabel: string, handlerLabel: string) => async (): Promise<void> => {
     try {
-      await planned.writeOn(planned.scope.baseHandle);
+      await planned.writeOn(planned.scope.baseClient);
     } catch (caught) {
       try {
         await planned.report(toError(caught), logLabel);

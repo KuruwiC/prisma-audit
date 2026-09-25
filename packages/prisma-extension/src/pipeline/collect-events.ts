@@ -21,11 +21,11 @@ import {
 import { AUDIT_ACTION, type AuditAction, BATCH_TO_SINGULAR_ACTION } from '../grammar/operations.js';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../internal-types.js';
 import { collectNestedEvents, type NestedEventCollectorDependencies } from '../nested/events/collect-nested-events.js';
+import { identityOf, toMutationAction } from '../nested/events/event-fields.js';
 import type { NestedWriteSets } from '../nested/events/write-set.js';
 import type { PreExistingRows } from '../nested/pre-fetch/pre-existing-rows.js';
 import type { SchemaMetadata } from '../schema/types.js';
 import { type BeforeStateResult, executedUpsertBranch } from './before-state.js';
-import { identityOf, toMutationAction } from './event-fields.js';
 
 type Row = Record<string, unknown>;
 

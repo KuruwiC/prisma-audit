@@ -56,7 +56,7 @@ export const enterTransaction = <T>(
 ): Promise<T> => provider.runAsync(auditContext, () => withScope({ transaction }, fn));
 
 export interface ImplicitTransactionInput {
-  readonly base: PrismaClientWithDynamicAccess;
+  readonly baseClient: PrismaClientWithDynamicAccess;
   readonly provider: ContextRunner;
   readonly auditContext: AuditContext;
 }
@@ -77,12 +77,12 @@ export const openImplicitTransaction = <T>(
   input: ImplicitTransactionInput,
   run: (tx: TransactionalPrismaClient) => Promise<T>,
 ): Promise<T> => {
-  const { base, provider, auditContext } = input;
+  const { baseClient, provider, auditContext } = input;
 
   return provider.runAsync(auditContext, () =>
     withScope({ isInImplicitTransaction: true }, async () => {
       const deferredWrites: Array<() => Promise<void>> = [];
-      const result = await base.$transaction((tx) =>
+      const result = await baseClient.$transaction((tx) =>
         enterTransaction(provider, auditContext, { client: tx, deferredWrites }, () => run(tx)),
       );
       drainAfterCommit(deferredWrites);

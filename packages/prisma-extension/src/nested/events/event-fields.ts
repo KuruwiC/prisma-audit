@@ -1,11 +1,11 @@
 /**
- * Event fields shared by the single-operation and batch collectors
+ * Event fields shared by the top-level, batch and nested event collectors
  */
 
 import type { MutationAction } from '@kuruwic/db-audit-core';
-import { AUDIT_ACTION, type AuditAction } from '../grammar/operations.js';
-import { UNRESOLVED_ENTITY_ID } from '../nested/pre-fetch/identity-key.js';
-import { extractEntityIdentity } from '../utils/id-generation.js';
+import { AUDIT_ACTION, type AuditAction } from '../../grammar/operations.js';
+import { extractEntityIdentity } from '../../utils/id-generation.js';
+import { UNRESOLVED_ENTITY_ID } from '../pre-fetch/identity-key.js';
 
 type Row = Record<string, unknown>;
 

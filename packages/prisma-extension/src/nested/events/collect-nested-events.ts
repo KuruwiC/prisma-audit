@@ -26,7 +26,6 @@ import {
 } from '../../grammar/nested-operations.js';
 import type { GetOperationConfig } from '../../grammar/pre-fetch-selection.js';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../internal-types.js';
-import { identityOf } from '../../pipeline/event-fields.js';
 import type { SchemaMetadata, UniqueConstraint } from '../../schema/types.js';
 import { matchesUniqueWhere } from '../../utils/compound-where.js';
 import { nestedLog } from '../../utils/debug.js';
@@ -40,6 +39,7 @@ import {
   collectDeleteRecords,
   type UnresolvedDeleteEntityIdReporter,
 } from './delete-handler.js';
+import { identityOf } from './event-fields.js';
 import { refetchNestedRecords } from './refetch-nested-records.js';
 import { resolveNestedRowState } from './state-resolver.js';
 import { insertsRows, type NestedWriteSet, type NestedWriteSets, type NestedWriteTarget } from './write-set.js';

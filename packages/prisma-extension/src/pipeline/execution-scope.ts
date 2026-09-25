@@ -12,7 +12,7 @@ import { currentScope } from '../runtime/scope.js';
 import { withOptionalTransaction } from '../runtime/transaction-wrapper.js';
 
 export interface TransactionScope {
-  /** Writes queued here run on the base handle once the transaction has committed */
+  /** Writes queued here run on the base client once the transaction has committed */
   readonly deferredWrites: Array<() => Promise<void>>;
   /** Opened by the scope around this one operation, as opposed to the caller's own `$transaction` */
   readonly implicit: boolean;
@@ -25,7 +25,7 @@ export interface ExecutionScope {
    * inside a transaction, else the base client.
    */
   readonly handle: PrismaClientWithDynamicAccess | TransactionalPrismaClient;
-  readonly baseHandle: PrismaClientWithDynamicAccess;
+  readonly baseClient: PrismaClientWithDynamicAccess;
   readonly transaction?: TransactionScope;
   /** The audit rows are written in the same transaction as the operation */
   readonly atomic: boolean;
@@ -43,10 +43,7 @@ export const withExecutionScope = <T>(
   run: (scope: ExecutionScope) => Promise<T>,
 ): Promise<T> => {
   const { auditContext, baseClient, atomic, provider } = input;
-  const inScope = withOptionalTransaction<T>(
-    { shouldWrap: atomic, context: auditContext, basePrisma: baseClient },
-    provider,
-  );
+  const inScope = withOptionalTransaction<T>({ shouldWrap: atomic, context: auditContext, baseClient }, provider);
 
   return inScope((handle) => {
     const runtime = currentScope();
@@ -54,7 +51,7 @@ export const withExecutionScope = <T>(
     return run({
       auditContext,
       handle,
-      baseHandle: baseClient,
+      baseClient,
       transaction: transaction
         ? { deferredWrites: transaction.deferredWrites, implicit: runtime?.isInImplicitTransaction === true }
         : undefined,

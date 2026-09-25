@@ -46,12 +46,12 @@ const record: AuditLogData = {
   createdAt: new Date('2025-01-01T00:00:00Z'),
 };
 
-const baseScope: ExecutionScope = { auditContext, handle: baseClient, baseHandle: baseClient, atomic: false };
+const baseScope: ExecutionScope = { auditContext, handle: baseClient, baseClient, atomic: false };
 
 const transactionScope = (deferredWrites: Array<() => Promise<void>>): ExecutionScope => ({
   auditContext,
   handle: transactionClient,
-  baseHandle: baseClient,
+  baseClient,
   transaction: { deferredWrites, implicit: false },
   atomic: true,
 });

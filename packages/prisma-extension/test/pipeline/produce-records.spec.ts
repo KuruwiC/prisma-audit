@@ -18,7 +18,7 @@ const auditContext = { actor: { category: 'model', type: 'User', id: 'user-1' } 
 const scopeOn = (handle: ExecutionScope['handle']): ExecutionScope => ({
   auditContext,
   handle,
-  baseHandle: baseClient,
+  baseClient,
   transaction: handle === baseClient ? undefined : { deferredWrites: [], implicit: true },
   atomic: true,
 });

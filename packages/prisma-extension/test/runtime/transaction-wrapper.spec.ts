@@ -28,7 +28,7 @@ describe('withOptionalTransaction', () => {
       {
         shouldWrap: false,
         context,
-        basePrisma: mockBasePrisma,
+        baseClient: mockBasePrisma,
       },
       mockProvider,
     );
@@ -49,7 +49,7 @@ describe('withOptionalTransaction', () => {
       {
         shouldWrap: true,
         context,
-        basePrisma: mockBasePrisma,
+        baseClient: mockBasePrisma,
       },
       mockProvider,
     );
@@ -72,7 +72,7 @@ describe('withOptionalTransaction', () => {
       {
         shouldWrap: true,
         context,
-        basePrisma: mockBasePrisma,
+        baseClient: mockBasePrisma,
       },
       mockProvider,
     );
@@ -100,7 +100,7 @@ describe('withOptionalTransaction', () => {
       {
         shouldWrap: true,
         context,
-        basePrisma: mockBasePrismaWithTx,
+        baseClient: mockBasePrismaWithTx,
       },
       mockProvider,
     );
@@ -131,7 +131,7 @@ describe('withOptionalTransaction', () => {
       {
         shouldWrap: false,
         context,
-        basePrisma: mockBasePrisma,
+        baseClient: mockBasePrisma,
       },
       mockProvider,
     );
@@ -157,7 +157,7 @@ describe('withOptionalTransaction', () => {
       {
         shouldWrap: true,
         context,
-        basePrisma: mockBasePrismaWithTx,
+        baseClient: mockBasePrismaWithTx,
       },
       mockProvider,
     );
@@ -198,7 +198,7 @@ describe('withOptionalTransaction', () => {
         {
           shouldWrap: true,
           context,
-          basePrisma: mockBasePrismaWithTx,
+          baseClient: mockBasePrismaWithTx,
         },
         mockProviderWithStorage,
       );
@@ -246,7 +246,7 @@ describe('withOptionalTransaction', () => {
         {
           shouldWrap: true,
           context,
-          basePrisma: mockBasePrismaWithTx,
+          baseClient: mockBasePrismaWithTx,
         },
         mockProviderTracking,
       );
@@ -276,7 +276,7 @@ describe('withOptionalTransaction', () => {
 
       const context: AuditContext = { actor: mockActor };
       const wrapper = withOptionalTransaction(
-        { shouldWrap: true, context, basePrisma: mockBasePrismaWithTx },
+        { shouldWrap: true, context, baseClient: mockBasePrismaWithTx },
         provider,
       );
 
@@ -313,7 +313,7 @@ describe('withOptionalTransaction', () => {
 
       const context: AuditContext = { actor: mockActor };
       const wrapper = withOptionalTransaction(
-        { shouldWrap: true, context, basePrisma: mockBasePrismaWithTx },
+        { shouldWrap: true, context, baseClient: mockBasePrismaWithTx },
         provider,
       );
 
