@@ -1030,9 +1030,11 @@ When `awaitWrite: false`, there is a time gap between the before-state fetch and
 
 #### Batch Operations (updateMany / deleteMany)
 
-When `awaitWrite: true`, batch operations (updateMany, deleteMany) are wrapped in a transaction. The before-state fetch, the mutation, and the after-state fetch all see a consistent snapshot, ensuring accurate audit logs.
+When `awaitWrite: true`, batch operations (updateMany, deleteMany) are wrapped in a transaction with the before-state fetch and the after-state fetch, so the rows they update or delete stay locked until it commits.
 
 When `awaitWrite: false` and no user-provided transaction exists, these operations run without transaction isolation. The audit log is best-effort in this case.
+
+Either way, the audit covers the rows the filter matched when they were read before the write. Outside a transaction, a row another writer deletes between the update and the re-read of the updated rows gets no audit log. Inside one or not, a row another writer changes to match the filter after that read is updated or deleted without an audit log unless the isolation level prevents it (Serializable does).
 
 #### Batch Creates (createMany / createManyAndReturn)
 
@@ -1180,6 +1182,7 @@ Supports the following operations, including deep nesting:
 - `connect` - Links existing records
   - Creates audit logs for join table entities (e.g., PostTag) if defined in `aggregateMapping`
   - Does not create audit logs for the connected entity itself (e.g., Tag, Profile, Comment)
+- `set` - Replaces the records linked through an optional foreign key; like `connect`, creates no audit log for the linked records
 - `connectOrCreate` - Connects to existing record or creates new one
   - If record exists: Same as `connect` (join table audit log only)
   - If record doesn't exist: Creates audit log for the new entity with `action=create`, `before=null`
@@ -1221,6 +1224,14 @@ await prisma.post.update({
 4. **Performance**: Each nested operation may require additional database queries for pre-fetching
    - **Default behavior** (`fetchBeforeOperation: true`): Pre-fetches data to ensure complete and accurate audit trails
    - **Optimization** (`fetchBeforeOperation: false`): Skips pre-fetching for improved performance (trade-off: may miss some nested operation details)
+
+#### Limitations
+
+- A nested `update` that changes a column its own `where` names is found again after the write by the primary key read ahead of it; with `update.fetchBeforeOperation: false`, when that read failed, or when the update changes the primary key itself, it is not audited.
+- A row a nested `create`, `createMany`, `connectOrCreate` or `upsert` inserts is audited from the query result, so a row that the caller's own `where`, `take`, `skip`, `cursor` or `distinct` on that relation leaves out of the result is not audited; read the filtered relation in a separate query instead.
+- `connect`, `set` and `disconnect` change the foreign keys of related records without an audit log for those records.
+- A to-one nested `upsert` repeated under several parent rows in one call (for example inside a to-many `update` list) takes one branch for all of them when detecting the writes nested inside it: the upserted records themselves are audited correctly, but the writes nested in its `create` / `update` data are reliable only when every parent row either has or lacks the related record.
+- A to-one relation written below a to-many relation that is read back whole (one with a nested `create`, for example) is attributed the related record of every returned parent row, including parent rows the call did not write: `postTags: { create: { tag: { create } } }` on a post that already has tags records those existing tags as created too, and a created record reached through several elements of a `create` list is recorded once per element.
 
 ## Complete Example
 
