@@ -13,9 +13,8 @@ import { AUDIT_ACTION, type AuditAction } from '../grammar/operations.js';
 import type { GetOperationConfig } from '../grammar/pre-fetch-selection.js';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../internal-types.js';
 import type { AuditErrorContext } from '../types.js';
+import { beforeStateOf, NO_BEFORE_STATE } from '../utils/before-state.js';
 import { getModelDelegate, hasOperation } from '../utils/model-accessor.js';
-
-const NO_BEFORE_STATE: BeforeState = { kind: 'none' };
 
 /**
  * The branch a top-level upsert executed: `update` when its before state was captured, `create`
@@ -85,7 +84,7 @@ const findExistingRow = async (
     return NO_BEFORE_STATE;
   }
   const row = await delegate.findUnique({ where });
-  return isRow(row) ? { kind: 'captured', row } : NO_BEFORE_STATE;
+  return beforeStateOf(isRow(row) ? row : null);
 };
 
 /**

@@ -25,6 +25,7 @@ import { identityOf, toMutationAction } from '../nested/events/event-fields.js';
 import type { NestedWriteSets } from '../nested/events/write-set.js';
 import type { PreExistingRows } from '../nested/pre-fetch/pre-existing-rows.js';
 import type { SchemaMetadata } from '../schema/types.js';
+import { beforeStateOf } from '../utils/before-state.js';
 import { executedUpsertBranch } from './before-state.js';
 
 type Row = Record<string, unknown>;
@@ -108,9 +109,6 @@ const toSingularAction = (action: AuditAction): MutationAction => {
   return singular;
 };
 
-/** A batch operation reads the rows it updates or deletes, so a row without a before row had none */
-const beforeOf = (row: Row | null | undefined): BeforeState => (row ? { kind: 'captured', row } : { kind: 'none' });
-
 export const collectBatchOperationEvents = (
   outcome: BatchOperationOutcome,
   schemaMetadata: SchemaMetadata,
@@ -119,11 +117,12 @@ export const collectBatchOperationEvents = (
   const singularAction = toSingularAction(action);
   const pkFields = getPrimaryKeyConstraint(schemaMetadata, modelName)?.fields;
 
+  // A batch operation reads every row it updates or deletes, so a row without a before row had none
   return rows.map((row, index) => ({
     model: modelName,
     identity: identityOf(row, pkFields, { model: modelName, path: '' }),
     action: singularAction,
-    before: beforeOf(beforeStates?.[index]),
+    before: beforeStateOf(beforeStates?.[index]),
     after: singularAction === 'delete' ? undefined : row,
     origin: { path: '', op: action },
   }));

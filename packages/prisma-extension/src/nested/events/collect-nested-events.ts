@@ -28,6 +28,7 @@ import {
 import type { GetOperationConfig } from '../../grammar/pre-fetch-selection.js';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../internal-types.js';
 import type { SchemaMetadata, UniqueConstraint } from '../../schema/types.js';
+import { NO_BEFORE_STATE } from '../../utils/before-state.js';
 import { matchesUniqueWhere } from '../../utils/compound-where.js';
 import { nestedLog } from '../../utils/debug.js';
 import type { EntityIdentityKey } from '../../utils/identity-key.js';
@@ -48,8 +49,6 @@ import { insertsRows, type NestedWriteSet, type NestedWriteSets, type NestedWrit
 type Row = Record<string, unknown>;
 
 const isRow = (value: unknown): value is Row => typeof value === 'object' && value !== null;
-
-const NO_BEFORE_STATE: BeforeState = { kind: 'none' };
 
 export interface NestedEventCollectorDependencies {
   schemaMetadata: SchemaMetadata;

@@ -16,6 +16,7 @@ import {
 } from '../../grammar/nested-operations.js';
 import { AUDIT_ACTION } from '../../grammar/operations.js';
 import type { UniqueConstraint } from '../../schema/types.js';
+import { NO_BEFORE_STATE } from '../../utils/before-state.js';
 import { nestedLog } from '../../utils/debug.js';
 import { extractDeleteOperationEntityId } from '../../utils/extension-utils.js';
 import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID } from '../../utils/identity-key.js';
@@ -149,7 +150,7 @@ export const collectToOneDeleteRecords = async (
     {
       entity,
       action: AUDIT_ACTION.DELETE,
-      beforeState: { kind: 'none' },
+      beforeState: NO_BEFORE_STATE,
       relatedModel: nestedOp.relatedModel,
     },
   ];

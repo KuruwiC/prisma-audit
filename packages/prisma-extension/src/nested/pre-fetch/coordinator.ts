@@ -30,6 +30,7 @@ import type {
 } from '../../internal-types.js';
 import type { SchemaMetadata, UniqueConstraint } from '../../schema/types.js';
 import type { AuditErrorObserver } from '../../types.js';
+import { beforeStateOf } from '../../utils/before-state.js';
 import { preFetchLog } from '../../utils/debug.js';
 import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID } from '../../utils/identity-key.js';
 import {
@@ -46,7 +47,7 @@ import {
 } from './one-to-many-fetcher.js';
 import { preFetchOneToOneRelation, resolveToOneRelationLink } from './one-to-one-fetcher.js';
 import { isRecord, parentKeysFromOperationWheres, parentPathOf } from './parent-rows.js';
-import { beforeStateOf, extractEntityId, storePreFetchResult } from './pre-fetch-result-store.js';
+import { extractEntityId, storePreFetchResult } from './pre-fetch-result-store.js';
 
 type PrismaDMMF = PrismaNamespace['dmmf'];
 

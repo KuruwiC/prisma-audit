@@ -15,13 +15,12 @@ import {
 } from '../../grammar/nested-state.js';
 import { AUDIT_ACTION } from '../../grammar/operations.js';
 import type { GetOperationConfig } from '../../grammar/pre-fetch-selection.js';
+import { NO_BEFORE_STATE } from '../../utils/before-state.js';
 
 export type ResolvedState = {
   action: MutationAction;
   beforeState: BeforeState;
 };
-
-const NO_BEFORE_STATE: BeforeState = { kind: 'none' };
 
 const resolveUpsertRow = (
   nestedOp: NestedOperationInfo,

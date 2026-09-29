@@ -7,6 +7,7 @@
  */
 
 import type { BeforeState, MutationAction } from '@kuruwic/db-audit-core';
+import { NO_BEFORE_STATE } from '../utils/before-state.js';
 import { AUDIT_ACTION } from './operations.js';
 
 /** What the pre-fetch knows of one row before the operation */
@@ -18,8 +19,6 @@ export type ResolvedNestedState = {
   action: MutationAction;
   before: BeforeState;
 };
-
-const NO_BEFORE_STATE: BeforeState = { kind: 'none' };
 
 /**
  * Resolves an upsert: action `update` when a before state was captured, `create` when there was

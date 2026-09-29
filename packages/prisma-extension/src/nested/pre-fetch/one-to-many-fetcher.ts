@@ -17,12 +17,13 @@ import {
 } from '../../grammar/nested-operations.js';
 import type { DMMFField, DMMFModel } from '../../internal-types.js';
 import type { UniqueConstraint } from '../../schema/types.js';
+import { beforeStateOf } from '../../utils/before-state.js';
 import { preFetchLog } from '../../utils/debug.js';
 import { extractEntityIdentity } from '../../utils/id-generation.js';
 import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID } from '../../utils/identity-key.js';
 import type { PreFetchListClient, PreFetchModelClient, PreFetchRecord } from './model-client.js';
 import { parentKeyOf, type ResolveParentRowsInput, resolveParentRows } from './parent-rows.js';
-import { beforeStateOf, extractEntityId, storePreFetchResult } from './pre-fetch-result-store.js';
+import { extractEntityId, storePreFetchResult } from './pre-fetch-result-store.js';
 
 /** A related row belongs to the parent row when `backField` matches the parent's `parentFields`. */
 export interface ToManyRelationScope {

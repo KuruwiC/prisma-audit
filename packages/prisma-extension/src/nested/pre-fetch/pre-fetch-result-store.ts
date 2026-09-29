@@ -7,6 +7,7 @@ import type { BeforeState } from '@kuruwic/db-audit-core';
 import type { NestedPreFetchResults } from '../../grammar/nested-operations.js';
 import type { NestedPreFetchResult } from '../../grammar/nested-state.js';
 import type { UniqueConstraint } from '../../schema/types.js';
+import { NO_BEFORE_STATE } from '../../utils/before-state.js';
 import { matchesUniqueWhere, unwrapCompoundWhere } from '../../utils/compound-where.js';
 import { extractEntityIdentity } from '../../utils/id-generation.js';
 import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID } from '../../utils/identity-key.js';
@@ -25,12 +26,6 @@ export const getPreFetchResult = (
 
   return pathMap.get(entityId) || pathMap.get(UNRESOLVED_ENTITY_ID);
 };
-
-const NO_BEFORE_STATE: BeforeState = { kind: 'none' };
-
-/** The before state a pre-fetch read yields: the row it found as captured, none when it found no row */
-export const beforeStateOf = (row: Record<string, unknown> | null): BeforeState =>
-  row ? { kind: 'captured', row } : NO_BEFORE_STATE;
 
 /**
  * The pre-fetched before state of a row a nested operation at `path` targets: with `where`, the
