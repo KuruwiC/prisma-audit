@@ -9,7 +9,7 @@
 
 import type { AuditRecord, WriteExecutor } from '@kuruwic/db-audit-core';
 import type { DMMFModel } from '../internal-types.js';
-import { uncapitalizeFirst } from '../utils/extension-utils.js';
+import { getModelAccessor } from '../utils/model-accessor.js';
 
 /** The audit-log field that stores {@link AuditRecord.beforeUnavailable} when the model declares it */
 const BEFORE_UNAVAILABLE_FIELD = 'beforeUnavailable';
@@ -30,7 +30,7 @@ export const declaresBeforeUnavailableColumn = (
   dmmf: { readonly datamodel: { readonly models: readonly Pick<DMMFModel, 'name' | 'fields'>[] } },
   auditLogModel: string,
 ): boolean => {
-  const model = dmmf.datamodel.models.find((candidate) => uncapitalizeFirst(candidate.name) === auditLogModel);
+  const model = dmmf.datamodel.models.find((candidate) => getModelAccessor(candidate.name) === auditLogModel);
   const field = model?.fields.find((candidate) => candidate.name === BEFORE_UNAVAILABLE_FIELD);
   if (model === undefined || field === undefined) {
     return false;

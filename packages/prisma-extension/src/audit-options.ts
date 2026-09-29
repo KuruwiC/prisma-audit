@@ -20,7 +20,8 @@ import type { GetOperationConfig } from './grammar/pre-fetch-selection.js';
 import type { PrismaNamespace } from './internal-types.js';
 import type { SchemaMetadata } from './schema/types.js';
 import type { AuditErrorObserver, PrismaAuditExtensionOptions, WriteFailurePolicy } from './types.js';
-import { shouldAuditModel, uncapitalizeFirst } from './utils/extension-utils.js';
+import { shouldAuditModel } from './utils/extension-utils.js';
+import { getModelAccessor } from './utils/model-accessor.js';
 import { createSchemaMetadataFromDMMF } from './utils/schema-metadata.js';
 
 export interface AuditOptions {
@@ -68,7 +69,7 @@ export const normalizeAuditOptions = (options: PrismaAuditExtensionOptions): Aud
     }
     return names;
   };
-  const auditLogModel = options.auditLogModel ? uncapitalizeFirst(options.auditLogModel) : 'auditLog';
+  const auditLogModel = options.auditLogModel ? getModelAccessor(options.auditLogModel) : 'auditLog';
 
   return {
     provider,
