@@ -147,9 +147,9 @@ const groupByModel = <TModelName extends string>(
 // Id resolution
 // ============================================================================
 
-const ENTITY_RESOLVER: FailedResolver = { kind: 'entity' };
+const FAILED_ENTITY_RESOLVER: FailedResolver = { kind: 'entity' };
 
-const aggregateResolver = (aggregate: AggregateRoot): FailedResolver => ({
+const failedAggregateResolver = (aggregate: AggregateRoot): FailedResolver => ({
   kind: 'aggregate',
   aggregateCategory: aggregate.category,
   aggregateType: aggregate.type,
@@ -201,7 +201,7 @@ const identifyEntries = async <TModelName extends string, TDbHandle>(
   for (const entry of entries) {
     const entityId = await callResolver(
       () => entity.idResolver(entry.row, read()),
-      reporterFor(failures, entry, ENTITY_RESOLVER),
+      reporterFor(failures, entry, FAILED_ENTITY_RESOLVER),
     );
     if (entityId !== null) {
       identified.push({ ...entry, entityId });
@@ -228,10 +228,10 @@ const resolveRootsInBatch = async <TModelName extends string, TDbHandle>(
   read: ReadHandle<TDbHandle>,
   failures: ResolverFailure<TModelName>[],
 ): Promise<(ResolvedRoot | undefined)[]> => {
-  const resolver = aggregateResolver(aggregate);
+  const failedResolver = failedAggregateResolver(aggregate);
   const reportEveryRow = (error: Error): void => {
     for (const entry of entries) {
-      reporterFor(failures, entry, resolver)(error);
+      reporterFor(failures, entry, failedResolver)(error);
     }
   };
 
@@ -254,7 +254,7 @@ const resolveRootsInBatch = async <TModelName extends string, TDbHandle>(
     return [];
   }
   return entries.map((entry, index) => {
-    const aggregateId = normalizeResolvedId(rawIds[index], reporterFor(failures, entry, resolver));
+    const aggregateId = normalizeResolvedId(rawIds[index], reporterFor(failures, entry, failedResolver));
     return aggregateId === null ? undefined : toRoot(aggregate, aggregateId);
   });
 };
@@ -267,12 +267,12 @@ const resolveRootsRowByRow = async <TModelName extends string, TDbHandle>(
   failures: ResolverFailure<TModelName>[],
 ): Promise<(ResolvedRoot | undefined)[]> => {
   warnAboutUnbatchedResolver(entityType, aggregate, entries.length);
-  const resolver = aggregateResolver(aggregate);
+  const failedResolver = failedAggregateResolver(aggregate);
   const roots: (ResolvedRoot | undefined)[] = [];
   for (const entry of entries) {
     const aggregateId = await callResolver(
       () => aggregate.resolve(entry.row, read()),
-      reporterFor(failures, entry, resolver),
+      reporterFor(failures, entry, failedResolver),
     );
     roots.push(aggregateId === null ? undefined : toRoot(aggregate, aggregateId));
   }
