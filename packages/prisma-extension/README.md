@@ -1148,7 +1148,7 @@ Controls whether an `update` or `delete` operation, top-level or nested, fetches
 #### `models`
 **Type:** `{ [Model]?: { update?: { fetchBeforeOperation?: boolean }; delete?: { fetchBeforeOperation?: boolean } } }`
 
-Per-model settings, keyed by model name like `aggregateMapping` (the keys are checked against the client's model names). For each operation, the written model's setting wins, then the global setting, then the default.
+Per-model settings, keyed by model name like `aggregateMapping`: the key type offers the client's model names, and a key is matched to a model case-insensitively, so `AuditEvent` also configures a model declared as `model auditEvent`. For each operation, the written model's setting wins, then the global setting, then the default.
 
 ```typescript
 {

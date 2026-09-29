@@ -141,7 +141,10 @@ export interface FetchBeforeConfig {
  * ```
  */
 export interface NestedOperationsConfig<TModelName extends string = string> extends FetchBeforeConfig {
-  /** Per-model settings, keyed by model name like the aggregate mapping */
+  /**
+   * Per-model settings, keyed by model name like the aggregate mapping, and like it matched to a
+   * model case-insensitively
+   */
   models?: { readonly [K in TModelName]?: FetchBeforeConfig };
 }
 

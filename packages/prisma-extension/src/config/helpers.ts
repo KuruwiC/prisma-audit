@@ -7,7 +7,17 @@
  * @module config/helpers
  */
 
-import type { NestedOperationsConfig } from '../types.js';
+import type { FetchBeforeConfig, NestedOperationsConfig } from '../types.js';
+
+/**
+ * The setting `models` holds for `modelName`, matched case-insensitively like the aggregate
+ * mapping: the key type spells a model with an uppercase first letter, while a model declared
+ * with a lowercase one (`model auditEvent`) reaches the extension under its declared name
+ */
+const modelSettingOf = (models: NestedOperationsConfig['models'], modelName: string): FetchBeforeConfig | undefined => {
+  const normalizedName = modelName.toLowerCase();
+  return Object.entries(models ?? {}).find(([key]) => key.toLowerCase() === normalizedName)?.[1];
+};
 
 /**
  * Get the before-state configuration of an operation with priority resolution
@@ -40,7 +50,7 @@ export const getNestedOperationConfig = (
   }
 
   const fetchBeforeOperation =
-    nestedOperations?.models?.[modelName]?.[operation]?.fetchBeforeOperation ??
+    modelSettingOf(nestedOperations?.models, modelName)?.[operation]?.fetchBeforeOperation ??
     nestedOperations?.[operation]?.fetchBeforeOperation ??
     true;
 

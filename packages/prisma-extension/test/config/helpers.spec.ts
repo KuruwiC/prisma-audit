@@ -50,6 +50,13 @@ describe('getNestedOperationConfig', () => {
     expect(fetchBefore('User', 'update', config)).toBe(false);
   });
 
+  it('applies a model setting to a model declared with a lowercase first letter, like the aggregate mapping', () => {
+    const config: NestedOperationsConfig = { models: { AuditEvent: { update: { fetchBeforeOperation: false } } } };
+
+    expect(fetchBefore('auditEvent', 'update', config)).toBe(false);
+    expect(fetchBefore('AuditEvent', 'update', config)).toBe(false);
+  });
+
   it('reads no before state for the other operations', () => {
     const config: NestedOperationsConfig = { models: { Post: { update: { fetchBeforeOperation: true } } } };
 
