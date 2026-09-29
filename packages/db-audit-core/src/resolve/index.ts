@@ -28,7 +28,7 @@ import type {
 } from '../aggregate/types.js';
 import type { GlobalContextEnricherConfig } from '../config.types.js';
 import { ENRICHMENT_TIMEOUTS } from '../constants.js';
-import type { MutationEvent, ResolvedEvent } from '../domain/mutation-event.js';
+import { aggregateRootKey, type MutationEvent, type ResolvedEvent } from '../domain/mutation-event.js';
 import { runBatchEnricher, runEnricher } from '../enrichment/run-enricher.js';
 import type {
   AggregateContextEnricherConfig,
@@ -278,8 +278,7 @@ const resolveRootsRowByRow = async <TModelName extends string, TDbHandle>(
   return roots;
 };
 
-const isSameRoot = (a: ResolvedRoot, b: ResolvedRoot): boolean =>
-  a.aggregateCategory === b.aggregateCategory && a.aggregateType === b.aggregateType && a.aggregateId === b.aggregateId;
+const isSameRoot = (a: ResolvedRoot, b: ResolvedRoot): boolean => aggregateRootKey(a) === aggregateRootKey(b);
 
 /**
  * Resolve the aggregate roots of every identified row and keep the rows that have at least one:
@@ -344,10 +343,7 @@ const mergeAggregateContexts = (rootContext: unknown, projectionContext: unknown
   return projectionContext;
 };
 
-const rootContextKey = (category: string, type: string, aggregateId: string): string =>
-  `${category}:${type}:${aggregateId}`;
-
-/** One root-side enricher call per (category, type) with the unique aggregate ids; keyed by `category:type:id`. */
+/** One root-side enricher call per (category, type) with the unique aggregate ids; keyed by `aggregateRootKey`. */
 const enrichRootContexts = async <TDbHandle>(
   survivors: readonly Survivor[],
   read: ReadHandle<TDbHandle>,
@@ -379,7 +375,10 @@ const enrichRootContexts = async <TDbHandle>(
       }
       const enriched = await runBatchEnricher(enricher, group.ids, read(), ENRICHMENT_TIMEOUTS.BATCH);
       group.ids.forEach((id, i) => {
-        contexts.set(rootContextKey(group.category, group.type, id), enriched[i] ?? null);
+        contexts.set(
+          aggregateRootKey({ aggregateCategory: group.category, aggregateType: group.type, aggregateId: id }),
+          enriched[i] ?? null,
+        );
       });
     }),
   );
@@ -388,27 +387,14 @@ const enrichRootContexts = async <TDbHandle>(
 };
 
 /**
- * Group the survivors' roots by the projection declaration that produced them, keeping the
- * first declaration when a row resolved the same (type, id) through several.
+ * Group the survivors' roots by the projection declaration that produced them. A row's roots are
+ * distinct (see `resolveSurvivors`), so each root is enriched by the declaration that kept it.
  */
 const groupByProjection = (survivors: readonly Survivor[]): ProjectionGroup[] => {
   const groups = new Map<AggregateRoot | typeof SELF_PROJECTION, ProjectionGroup>();
-  const seen = new Set<string>();
 
   for (const { index, row, roots } of survivors) {
     for (const root of roots) {
-      const dedupeKey = `${index}:${root.aggregateType}:${root.aggregateId}`;
-      if (seen.has(dedupeKey)) {
-        coreLog(
-          'Duplicate aggregate %s:%s for entity index %d — keeping the first projection declaration for context',
-          root.aggregateType,
-          root.aggregateId,
-          index,
-        );
-        continue;
-      }
-      seen.add(dedupeKey);
-
       const groupKey = root.source ?? SELF_PROJECTION;
       let group = groups.get(groupKey);
       if (!group) {
@@ -444,7 +430,7 @@ const enrichProjectionContexts = async <TDbHandle>(
   return runBatchEnricher(enricher, rows, read(), ENRICHMENT_TIMEOUTS.BATCH, meta);
 };
 
-/** Root-side and projection-side contexts merged per root, keyed `${index}:${aggregateType}:${aggregateId}`. */
+/** Root-side and projection-side contexts merged per root, keyed `${index}:${aggregateRootKey(root)}`. */
 const enrichAggregateContexts = async <TDbHandle>(
   survivors: readonly Survivor[],
   entity: EntityResolveConfig<TDbHandle>,
@@ -471,12 +457,14 @@ const enrichAggregateContexts = async <TDbHandle>(
   const contexts = new Map<string, unknown>();
   for (const { group, contexts: projectionContexts } of projectionResults) {
     group.entries.forEach((entry, i) => {
-      const rootContext = rootContexts.get(
-        rootContextKey(group.aggregateCategory, group.aggregateType, entry.aggregateId),
-      );
+      const rootKey = aggregateRootKey({
+        aggregateCategory: group.aggregateCategory,
+        aggregateType: group.aggregateType,
+        aggregateId: entry.aggregateId,
+      });
       contexts.set(
-        `${entry.index}:${group.aggregateType}:${entry.aggregateId}`,
-        mergeAggregateContexts(rootContext ?? null, projectionContexts[i] ?? null),
+        `${entry.index}:${rootKey}`,
+        mergeAggregateContexts(rootContexts.get(rootKey) ?? null, projectionContexts[i] ?? null),
       );
     });
   }
@@ -501,7 +489,7 @@ const contextsOfRoots = (
 ): Map<string, unknown> => {
   const contexts = new Map<string, unknown>();
   for (const root of roots) {
-    const rootKey = `${root.aggregateType}:${root.aggregateId}`;
+    const rootKey = aggregateRootKey(root);
     contexts.set(rootKey, aggregateContexts.get(`${index}:${rootKey}`));
   }
   return contexts;

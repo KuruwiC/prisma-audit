@@ -59,9 +59,16 @@ export interface ResolvedEvent<TModelName extends string = string> extends Mutat
   readonly roots: readonly ResolvedId[];
   readonly actorContext: unknown;
   readonly entityContext: unknown;
-  /** Keyed `${aggregateType}:${aggregateId}`. */
+  /** Keyed `${aggregateCategory}:${aggregateType}:${aggregateId}` of each root ({@link aggregateRootKey}). */
   readonly aggregateContexts: ReadonlyMap<string, unknown>;
 }
+
+/**
+ * The key of a root's aggregate context: its category, type and id, the identity that makes two
+ * roots of one row distinct
+ */
+export const aggregateRootKey = ({ aggregateCategory, aggregateType, aggregateId }: ResolvedId): string =>
+  `${aggregateCategory}:${aggregateType}:${aggregateId}`;
 
 /** One audit row, with branded identifiers. Write executors consume it as-is. */
 export interface AuditRecord {

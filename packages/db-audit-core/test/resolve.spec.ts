@@ -473,8 +473,8 @@ describe('resolve', () => {
 
       expect(resolved[0]?.aggregateContexts).toEqual(
         new Map([
-          ['Post:p1', null],
-          ['User:u1', null],
+          ['model:Post:p1', null],
+          ['model:User:u1', null],
         ]),
       );
     });
@@ -507,7 +507,7 @@ describe('resolve', () => {
         read,
       );
 
-      expect(resolved[0]?.aggregateContexts.get('User:u1')).toEqual({
+      expect(resolved[0]?.aggregateContexts.get('model:User:u1')).toEqual({
         userName: 'name-u1',
         shared: 'projection',
         postTitle: 'T1',
@@ -530,7 +530,7 @@ describe('resolve', () => {
 
       expect(rootEnricher).toHaveBeenCalledTimes(1);
       expect(rootEnricher.mock.calls[0]?.slice(0, 2)).toEqual([['u1', 'u2'], handle]);
-      expect(resolved.map((e) => e.aggregateContexts.get(`User:${e.after?.authorId}`))).toEqual([
+      expect(resolved.map((e) => e.aggregateContexts.get(`model:User:${e.after?.authorId}`))).toEqual([
         { userName: 'name-u1' },
         { userName: 'name-u1' },
         { userName: 'name-u2' },
@@ -556,7 +556,7 @@ describe('resolve', () => {
         aggregateCategory: 'model',
         aggregateIds: ['p1', 'p2'],
       });
-      expect(resolved.map((e) => e.aggregateContexts.get(`Post:${e.identity}`))).toEqual([
+      expect(resolved.map((e) => e.aggregateContexts.get(`model:Post:${e.identity}`))).toEqual([
         { selfCtx: 'p1' },
         { selfCtx: 'p2' },
       ]);
@@ -591,8 +591,8 @@ describe('resolve', () => {
       expect(enricherB).toHaveBeenCalledTimes(1);
       expect(enricherA.mock.calls[0]?.[2]).toMatchObject({ aggregateType: 'User', aggregateIds: ['u1'] });
       expect(enricherB.mock.calls[0]?.[2]).toMatchObject({ aggregateType: 'User', aggregateIds: ['u2'] });
-      expect(resolved[0]?.aggregateContexts.get('User:u1')).toEqual({ side: 'A' });
-      expect(resolved[0]?.aggregateContexts.get('User:u2')).toEqual({ side: 'B' });
+      expect(resolved[0]?.aggregateContexts.get('model:User:u1')).toEqual({ side: 'A' });
+      expect(resolved[0]?.aggregateContexts.get('model:User:u2')).toEqual({ side: 'B' });
     });
 
     it('keeps the first to() declaration when two resolve the same aggregate id for a row', async () => {
@@ -623,7 +623,7 @@ describe('resolve', () => {
       expect(enricherA).toHaveBeenCalledTimes(1);
       expect(enricherA.mock.calls[0]?.[2]).toMatchObject({ aggregateType: 'User', aggregateIds: ['u1'] });
       expect(enricherB).not.toHaveBeenCalled();
-      expect(resolved[0]?.aggregateContexts.get('User:u1')).toEqual({ side: 'A' });
+      expect(resolved[0]?.aggregateContexts.get('model:User:u1')).toEqual({ side: 'A' });
       expect(resolved[0]?.roots).toEqual([{ aggregateCategory: 'model', aggregateType: 'User', aggregateId: 'u1' }]);
     });
 
@@ -660,6 +660,41 @@ describe('resolve', () => {
         { aggregateCategory: 'member', aggregateType: 'User', aggregateId: 'u1' },
         { aggregateCategory: 'guest', aggregateType: 'User', aggregateId: 'u1' },
       ]);
+    });
+    it('runs the enricher of each category and keys its context by the root when two to() declarations resolve the same id', async () => {
+      const memberEnricher = vi.fn(async (rows: Row[], _db: unknown, _meta: ProjectionEnrichmentMeta) =>
+        rows.map(() => ({ side: 'member' })),
+      );
+      const guestEnricher = vi.fn(async (rows: Row[], _db: unknown, _meta: ProjectionEnrichmentMeta) =>
+        rows.map(() => ({ side: 'guest' })),
+      );
+      const config = configOf({
+        Friendship: defineEntity({
+          type: 'Friendship',
+          self: false,
+          aggregates: [
+            to('User', foreignKey('userAId'), { category: 'member', context: { enricher: memberEnricher } }),
+            to('User', foreignKey('userBId'), { category: 'guest', context: { enricher: guestEnricher } }),
+          ],
+        }),
+      });
+
+      const { resolved } = await resolve(
+        [event('Friendship', { id: 'f1', userAId: 'u1', userBId: 'u1' })],
+        auditContext,
+        config,
+        read,
+      );
+
+      expect(memberEnricher).toHaveBeenCalledTimes(1);
+      expect(guestEnricher).toHaveBeenCalledTimes(1);
+      expect(guestEnricher.mock.calls[0]?.[2]).toMatchObject({ aggregateCategory: 'guest', aggregateIds: ['u1'] });
+      expect(resolved[0]?.aggregateContexts).toEqual(
+        new Map([
+          ['member:User:u1', { side: 'member' }],
+          ['guest:User:u1', { side: 'guest' }],
+        ]),
+      );
     });
   });
 

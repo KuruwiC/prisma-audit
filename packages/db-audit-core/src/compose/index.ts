@@ -2,7 +2,7 @@
 
 import type { SerializationConfig } from '../config.types.js';
 import { createActorId, createAggregateId, createEntityId } from '../domain/branded-types.js';
-import type { AuditRecord, ResolvedEvent } from '../domain/mutation-event.js';
+import { type AuditRecord, aggregateRootKey, type ResolvedEvent } from '../domain/mutation-event.js';
 import type { AuditContext } from '../types.js';
 import { createDiffCalculator, type DiffResult } from '../utils/diff-calculator.js';
 import { type RedactConfig, redactSensitiveData } from '../utils/redaction.js';
@@ -161,7 +161,7 @@ const composeEvent = <TModelName extends string>(
         aggregateCategory: root.aggregateCategory,
         aggregateType: root.aggregateType,
         aggregateId: createAggregateId(root.aggregateId),
-        aggregateContext: event.aggregateContexts.get(`${root.aggregateType}:${root.aggregateId}`) ?? null,
+        aggregateContext: event.aggregateContexts.get(aggregateRootKey(root)) ?? null,
 
         action: event.action,
         before: states.before,

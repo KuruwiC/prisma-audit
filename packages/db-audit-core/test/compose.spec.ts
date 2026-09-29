@@ -136,16 +136,34 @@ describe('compose', () => {
       expect(() => compose([event()], ambientWithoutActorId, now)).toThrow(IdValidationError);
     });
 
-    it('looks up each root aggregate context by type and id, null when absent', () => {
+    it('looks up each root aggregate context by category, type and id, null when absent', () => {
       const roots: ResolvedId[] = [
         postRoot('post-1'),
         { aggregateCategory: 'model', aggregateType: 'User', aggregateId: 'user-9' },
       ];
-      const aggregateContexts = new Map<string, unknown>([['User:user-9', { name: 'Owner' }]]);
+      const aggregateContexts = new Map<string, unknown>([['model:User:user-9', { name: 'Owner' }]]);
 
       const records = compose([event({ roots, aggregateContexts })], ambient(), now);
 
       expect(records.map((r) => r.aggregateContext)).toEqual([null, { name: 'Owner' }]);
+    });
+
+    it('gives each root the context keyed by its category, type and id', () => {
+      const roots: ResolvedId[] = [
+        { aggregateCategory: 'member', aggregateType: 'User', aggregateId: 'u1' },
+        { aggregateCategory: 'guest', aggregateType: 'User', aggregateId: 'u1' },
+      ];
+      const aggregateContexts = new Map<string, unknown>([
+        ['member:User:u1', { side: 'member' }],
+        ['guest:User:u1', { side: 'guest' }],
+      ]);
+
+      const records = compose([event({ roots, aggregateContexts })], ambient(), now);
+
+      expect(records.map((r) => [r.aggregateCategory, r.aggregateContext])).toEqual([
+        ['member', { side: 'member' }],
+        ['guest', { side: 'guest' }],
+      ]);
     });
 
     it('stores the actor and entity contexts of the event', () => {
@@ -401,7 +419,7 @@ describe('compose', () => {
       const resolved = event({
         actorContext: { walletId: 999n, lastLogin },
         entityContext: { blockNumber: 12345n },
-        aggregateContexts: new Map([['Post:post-1', { total: 7n }]]),
+        aggregateContexts: new Map([['model:Post:post-1', { total: 7n }]]),
       });
       const withBigIntRequest: ComposeAmbient = {
         ...ambient(),
