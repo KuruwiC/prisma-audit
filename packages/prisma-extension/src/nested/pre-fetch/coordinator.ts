@@ -61,8 +61,10 @@ export interface PreFetchCoordinatorDependencies {
    * `unavailable` under the `UNRESOLVED_ENTITY_ID` sentinel, so a row of the path without a
    * captured row of its own reads as unavailable, and the caller's own operation continues.
    * Mirrors the top-level equivalent, `fetchBeforeState` in pipeline/before-state.ts, which
-   * reports the same failure class through the same observer. Optional: when omitted, the failure is visible only via
-   * `preFetchLog`.
+   * reports the same failure class through the same observer. Optional: when omitted, the
+   * failure is visible only via `preFetchLog`. The filter read of an `updateMany` /
+   * `deleteMany` is not reported here: it identifies the rows the keyword writes, so its
+   * failure rejects the pre-fetch, like the read of a top-level batch operation.
    */
   readonly onPreFetchFailure?: AuditErrorObserver;
 }
@@ -158,6 +160,7 @@ const reportNestedPreFetchFailure = async (
  * must be the client of the transaction the operation runs in.
  *
  * @returns The before-states read and the rows each batch keyword's filter matched
+ * @throws The error of a failed batch keyword filter read
  */
 export const preFetchNestedRecordsBeforeOperation = async (
   prismaClient: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
@@ -229,6 +232,9 @@ export const preFetchNestedRecordsBeforeOperation = async (
     try {
       await preFetchNestedOperation(context, nestedOp);
     } catch (error) {
+      if (isNestedBatchKeyword(nestedOp.operation)) {
+        throw error;
+      }
       storePreFetchResult(preFetchResults, nestedOp.path, UNRESOLVED_ENTITY_ID, { kind: 'unavailable' });
       preFetchLog('pre-fetch failed: path=%s error=%o', nestedOp.path, error);
       await reportNestedPreFetchFailure(onPreFetchFailure, nestedOp, error);

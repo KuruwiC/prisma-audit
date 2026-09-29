@@ -436,6 +436,28 @@ describe('nested to-many batch pre-read', () => {
     expect(batchTargets.get('members.notes')?.get('updateMany')).toEqual(new Map([['n1', { id: 'n1' }]]));
   });
 
+  it("rejects with the error of a batch keyword's failed filter read instead of reporting it as a pre-fetch failure", async () => {
+    const { client, delegates } = createClient({ member: draftOrFinal });
+    const readError = new Error('filter read failed');
+    delegates.member?.findMany.mockRejectedValueOnce(readError);
+    const onPreFetchFailure = vi.fn();
+
+    await expect(
+      preFetchNestedRecordsBeforeOperation(
+        client,
+        'Account',
+        { where: { id: 'a1' }, data: { members: { deleteMany: { name: 'draft' } } } },
+        {
+          Prisma,
+          schemaMetadata: createSchemaMetadataFromDMMF(Prisma),
+          getNestedOperationConfig: fetchBefore,
+          onPreFetchFailure,
+        },
+      ),
+    ).rejects.toBe(readError);
+    expect(onPreFetchFailure).not.toHaveBeenCalled();
+  });
+
   it('queries nothing for a batch keyword whose parent row does not exist', async () => {
     const { client, delegates } = createClient({ account: [], member: draftOrFinal });
 
