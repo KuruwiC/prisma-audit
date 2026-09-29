@@ -23,6 +23,7 @@ import {
   targetWhereClauses,
   type UpsertBranch,
 } from '../../grammar/nested-operations.js';
+import { upsertBranchOf } from '../../grammar/nested-state.js';
 import type { SchemaMetadata } from '../../schema/types.js';
 import { preFetchedStateAt } from '../pre-fetch/pre-fetch-result-store.js';
 
@@ -60,25 +61,6 @@ export interface NestedWriteSet {
 export type NestedWriteSets = ReadonlyMap<string, NestedWriteSet>;
 
 /**
- * The branch an upsert or connectOrCreate took, from the pre-fetched state of its target: `update`
- * (a connect) when it existed, `create` when it did not, unknown when the pre-fetch failed
- */
-const branchOf = (before: BeforeState): UpsertBranch | undefined => {
-  switch (before.kind) {
-    case 'captured':
-      return 'update';
-    case 'none':
-      return 'create';
-    case 'unavailable':
-      return undefined;
-    default: {
-      const exhaustiveCheck: never = before;
-      throw new Error(`[@prisma-audit] Unhandled before state: ${JSON.stringify(exhaustiveCheck)}`);
-    }
-  }
-};
-
-/**
  * The nested operations an operation executes: the executed pass of the detection, with each
  * upsert and connectOrCreate taking the branch its pre-fetched target decides, and none when that
  * target could not be read.
@@ -93,7 +75,7 @@ export const detectExecutedNestedOperations = (
   detectNestedOperations(schemaMetadata, modelName, args, {
     kind: 'executed',
     topLevelUpsertBranch,
-    branchAt: (path, where) => branchOf(preFetchedStateAt(nestedPreFetchResults, path, where)),
+    branchAt: (path, where) => upsertBranchOf(preFetchedStateAt(nestedPreFetchResults, path, where)),
   });
 
 const INSERTING_KEYWORDS: ReadonlySet<NestedOperationKeyword> = new Set(['create', 'createMany']);

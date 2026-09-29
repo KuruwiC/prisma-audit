@@ -8,6 +8,7 @@
 
 import type { BeforeState, MutationAction } from '@kuruwic/db-audit-core';
 import { NO_BEFORE_STATE } from '../utils/before-state.js';
+import type { UpsertBranch } from './nested-operations.js';
 import { AUDIT_ACTION } from './operations.js';
 
 /** What the pre-fetch knows of one row before the operation */
@@ -21,15 +22,36 @@ export type ResolvedNestedState = {
 };
 
 /**
+ * The branch an upsert took, from the read of its target made before the write: `update` when
+ * the row was captured, `create` when there was none, undefined when the read failed. A
+ * connectOrCreate takes its `update` branch as a connect.
+ */
+export const upsertBranchOf = (before: BeforeState): UpsertBranch | undefined => {
+  switch (before.kind) {
+    case 'captured':
+      return 'update';
+    case 'none':
+      return 'create';
+    case 'unavailable':
+      return undefined;
+    default: {
+      const exhaustiveCheck: never = before;
+      throw new Error(`[@prisma-audit] Unhandled before state: ${JSON.stringify(exhaustiveCheck)}`);
+    }
+  }
+};
+
+/**
  * Resolves an upsert: action `update` when a before state was captured, `create` when there was
  * none, `null` when its target could not be read (which branch ran is unknown, so it is not
  * audited)
  */
 export const resolveUpsertState = (before: BeforeState): ResolvedNestedState | null => {
-  if (before.kind === 'unavailable') {
+  const branch = upsertBranchOf(before);
+  if (branch === undefined) {
     return null;
   }
-  const action = before.kind === 'captured' ? AUDIT_ACTION.UPDATE : AUDIT_ACTION.CREATE;
+  const action = branch === 'update' ? AUDIT_ACTION.UPDATE : AUDIT_ACTION.CREATE;
 
   return { action, before };
 };

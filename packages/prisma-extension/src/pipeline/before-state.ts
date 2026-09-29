@@ -9,6 +9,7 @@
 import type { BeforeState } from '@kuruwic/db-audit-core';
 import { toError } from '../failure-sink.js';
 import type { UpsertBranch } from '../grammar/nested-operations.js';
+import { upsertBranchOf } from '../grammar/nested-state.js';
 import { AUDIT_ACTION, type AuditAction } from '../grammar/operations.js';
 import type { GetOperationConfig } from '../grammar/pre-fetch-selection.js';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../internal-types.js';
@@ -21,23 +22,8 @@ import { getModelDelegate, hasOperation } from '../utils/model-accessor.js';
  * when no row existed (an upsert always reads it, so `none` means the row was absent). Undefined
  * when the read failed (the branch is unknown) or the operation is not an upsert.
  */
-export const executedUpsertBranch = (action: AuditAction, before: BeforeState): UpsertBranch | undefined => {
-  if (action !== AUDIT_ACTION.UPSERT) {
-    return undefined;
-  }
-  switch (before.kind) {
-    case 'captured':
-      return 'update';
-    case 'none':
-      return 'create';
-    case 'unavailable':
-      return undefined;
-    default: {
-      const exhaustiveCheck: never = before;
-      throw new Error(`[@prisma-audit] Unhandled before state: ${JSON.stringify(exhaustiveCheck)}`);
-    }
-  }
-};
+export const executedUpsertBranch = (action: AuditAction, before: BeforeState): UpsertBranch | undefined =>
+  action === AUDIT_ACTION.UPSERT ? upsertBranchOf(before) : undefined;
 
 /**
  * Whether the row a single operation targets exists before the operation runs: a create inserts
