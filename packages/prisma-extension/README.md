@@ -4,13 +4,14 @@ Audit logging for Prisma. Tracks who changed what and when.
 
 ## Installation
 
-> **Note**: This package is not yet published to npm. You can install it from the GitHub repository.
+> **Note**: This package is not yet published to npm. Install from GitHub Releases.
+
+Each release attaches one tarball per package; `@kuruwic/prisma-audit` depends on `@kuruwic/db-audit-core`, so install both together:
 
 ```bash
-# Install from GitHub
-pnpm add github:kuruwic/prisma-audit#main
-# or npm/yarn
-npm install github:kuruwic/prisma-audit#main
+pnpm add \
+  https://github.com/KuruwiC/prisma-audit/releases/download/v0.1.6/kuruwic-db-audit-core-0.1.6.tgz \
+  https://github.com/KuruwiC/prisma-audit/releases/download/v0.1.6/kuruwic-prisma-audit-0.1.6.tgz
 ```
 
 ## Quick Start
@@ -658,9 +659,9 @@ Configure sensitive data protection.
 
 #### `redact.fields`
 **Type:** `string[]`
-**Default:** 24 fields automatically redacted
+**Default:** 17 fields automatically redacted
 
-Additional fields to redact in audit logs.
+Additional fields to redact in audit logs, on top of the defaults. A field is redacted when its name matches an entry exactly (case-sensitive), at any depth of the before / after / changes data.
 
 ```typescript
 {
@@ -672,12 +673,11 @@ Additional fields to redact in audit logs.
 }
 ```
 
-**Default redacted fields:**
+**Default redacted fields** (`DEFAULT_SENSITIVE_FIELDS` in `@kuruwic/db-audit-core`'s `src/utils/redaction.ts`):
 ```
-password, token, apiKey, apiSecret, accessToken, refreshToken,
-secret, privateKey, publicKey, sessionId, sessionToken, authToken,
-bearerToken, jwt, ssn, sin, taxId, nationalId, passportNumber,
-driversLicense, creditCard, cvv, pin, securityCode
+password, passwordHash, hashedPassword, salt, token, accessToken,
+refreshToken, apiKey, secret, secretKey, privateKey, ssn,
+socialSecurityNumber, creditCard, cardNumber, cvv, pin
 ```
 
 **Redaction format:**
@@ -704,7 +704,7 @@ Controls whether audit log writes are synchronous or asynchronous.
 ```typescript
 {
   performance: {
-    awaitWrite: true,  // Synchronous (default) - guaranteed atomicity
+    awaitWrite: true,  // Synchronous (default) - written in the operation's transaction
   }
 }
 ```
@@ -1470,10 +1470,10 @@ if (result.success) {
 ## Documentation
 
 See the [main README](../../README.md) for:
-- Aggregate mapping patterns
-- Framework integration (Hono, Express, NestJS)
-- Limitations and caveats
-- Transaction support
+- [Aggregate mapping patterns](../../README.md#aggregate-mapping)
+- [Framework integration](../../README.md#framework-integration) (Hono, Express)
+- [Limitations](../../README.md#limitations)
+- [Transaction safety](../../README.md#transaction-safety)
 
 ## License
 
