@@ -26,21 +26,34 @@ export interface WriteExecutor {
 }
 
 /**
- * Runs in place of the default write, which is passed in as `defaultWrite` so the hook can wrap it.
+ * What a writer hook receives besides the records: where the write runs and the default write
+ *
+ * @template TDbHandle - Database handle type the adapter passes
+ */
+export interface WriteContext<TDbHandle = unknown> {
+  /** Audit context of the operation the records belong to */
+  readonly auditContext: AuditContext;
+  /**
+   * Database handle the write runs on, as the adapter chose it for the write plan: the handle
+   * of the operation's transaction for an immediate write, a handle outside any transaction for
+   * a write after commit or a detached one
+   */
+  readonly handle: TDbHandle;
+  /** Writes records on `handle` with the adapter's {@link WriteExecutor} */
+  readonly defaultWrite: (records: AuditRecord[]) => Promise<void>;
+}
+
+/**
+ * Runs in place of the default write, which the context carries as `defaultWrite` so the hook
+ * can wrap it, with the handle it writes on.
+ *
+ * @template TDbHandle - Database handle type the adapter passes
  *
  * @example
  * ```typescript
- * const customWriter: WriteFn = async (logs, context, defaultWrite) => {
- *   const enrichedLogs = logs.map(log => ({
- *     ...log,
- *     environment: process.env.NODE_ENV,
- *   }));
- *   await defaultWrite(enrichedLogs);
+ * const customWriter: WriteFn<DbHandle> = async (records, { defaultWrite }) => {
+ *   await defaultWrite(records.map((record) => ({ ...record, environment: process.env.NODE_ENV })));
  * };
  * ```
  */
-export type WriteFn = (
-  logs: AuditRecord[],
-  context: AuditContext,
-  defaultWrite: (logs: AuditRecord[]) => Promise<void>,
-) => Promise<void>;
+export type WriteFn<TDbHandle = unknown> = (records: AuditRecord[], context: WriteContext<TDbHandle>) => Promise<void>;

@@ -10,6 +10,7 @@ import {
   createEntityNormalizedWriter,
   createSharedChangeWriter,
   defineEntity,
+  flushAllPendingWrites,
   foreignKey,
   to,
 } from '@kuruwic/prisma-audit';
@@ -77,6 +78,75 @@ describe('Normalized Writer Helpers', () => {
     },
   };
 
+  describe('the handle the helpers write on', () => {
+    const entitySchema = {
+      actorModel: 'Actor',
+      entityModel: 'Entity',
+      aggregateModel: 'Aggregate',
+      eventModel: 'AuditEvent',
+    };
+    const sharedChangeSchema = { changeModel: 'AuditChange', aggregateModel: 'AuditAggregate' };
+
+    it('writes a detached write in a transaction of its own on the base client', async () => {
+      const prisma = createAuditClient(context.basePrisma, {
+        Prisma,
+        provider: context.provider,
+        aggregateMapping: testAggregateMapping,
+        performance: { awaitWrite: false },
+        hooks: { writer: createEntityNormalizedWriter(entitySchema) },
+      });
+
+      await context.provider.runAsync(testActor, () =>
+        prisma.user.create({ data: { email: 'detached@example.com', name: 'Detached' } }),
+      );
+      await flushAllPendingWrites();
+
+      expect(await context.basePrisma.auditEvent.count()).toBe(1);
+      expect(await context.basePrisma.actor.count()).toBe(1);
+    });
+
+    it('writes a write queued until the transaction commits, once it has committed', async () => {
+      const prisma = createAuditClient(context.basePrisma, {
+        Prisma,
+        provider: context.provider,
+        aggregateMapping: testAggregateMapping,
+        performance: { awaitWrite: false },
+        hooks: { writer: createSharedChangeWriter(sharedChangeSchema) },
+      });
+
+      await context.provider.runAsync(testActor, () =>
+        prisma.$transaction(async (tx) => {
+          await tx.user.create({ data: { email: 'after-commit@example.com', name: 'After Commit' } });
+        }),
+      );
+      await flushAllPendingWrites();
+
+      expect(await context.basePrisma.auditChange.count()).toBe(1);
+      expect(await context.basePrisma.auditAggregate.count()).toBe(1);
+    });
+
+    it("writes an awaited write in the operation's transaction, so a rollback undoes it", async () => {
+      const prisma = createAuditClient(context.basePrisma, {
+        Prisma,
+        provider: context.provider,
+        aggregateMapping: testAggregateMapping,
+        performance: { awaitWrite: true },
+        hooks: { writer: createEntityNormalizedWriter(entitySchema) },
+      });
+
+      const rolledBack = context.provider.runAsync(testActor, () =>
+        prisma.$transaction(async (tx) => {
+          await tx.user.create({ data: { email: 'undone@example.com', name: 'Undone' } });
+          throw new Error('Rollback test');
+        }),
+      );
+
+      await expect(rolledBack).rejects.toThrow('Rollback test');
+      expect(await context.basePrisma.auditEvent.count()).toBe(0);
+      expect(await context.basePrisma.actor.count()).toBe(0);
+    });
+  });
+
   describe('Pattern 1: Entity Normalization (createEntityNormalizedWriter)', () => {
     it('should write audit logs to normalized schema (Actor, Entity, Aggregate, AuditEvent)', async () => {
       const prisma = createAuditClient(context.basePrisma, {
@@ -87,15 +157,12 @@ describe('Normalized Writer Helpers', () => {
           awaitWrite: true,
         },
         hooks: {
-          writer: createEntityNormalizedWriter(
-            {
-              actorModel: 'Actor',
-              entityModel: 'Entity',
-              aggregateModel: 'Aggregate',
-              eventModel: 'AuditEvent',
-            },
-            context.basePrisma,
-          ),
+          writer: createEntityNormalizedWriter({
+            actorModel: 'Actor',
+            entityModel: 'Entity',
+            aggregateModel: 'Aggregate',
+            eventModel: 'AuditEvent',
+          }),
         },
       });
 
@@ -151,15 +218,12 @@ describe('Normalized Writer Helpers', () => {
           awaitWrite: true,
         },
         hooks: {
-          writer: createEntityNormalizedWriter(
-            {
-              actorModel: 'Actor',
-              entityModel: 'Entity',
-              aggregateModel: 'Aggregate',
-              eventModel: 'AuditEvent',
-            },
-            context.basePrisma,
-          ),
+          writer: createEntityNormalizedWriter({
+            actorModel: 'Actor',
+            entityModel: 'Entity',
+            aggregateModel: 'Aggregate',
+            eventModel: 'AuditEvent',
+          }),
         },
       });
 
@@ -193,15 +257,12 @@ describe('Normalized Writer Helpers', () => {
           awaitWrite: true,
         },
         hooks: {
-          writer: createEntityNormalizedWriter(
-            {
-              actorModel: 'actor',
-              entityModel: 'entity',
-              aggregateModel: 'aggregate',
-              eventModel: 'auditEvent',
-            },
-            context.basePrisma,
-          ),
+          writer: createEntityNormalizedWriter({
+            actorModel: 'actor',
+            entityModel: 'entity',
+            aggregateModel: 'aggregate',
+            eventModel: 'auditEvent',
+          }),
         },
       });
 
@@ -226,13 +287,10 @@ describe('Normalized Writer Helpers', () => {
           awaitWrite: true,
         },
         hooks: {
-          writer: createSharedChangeWriter(
-            {
-              changeModel: 'AuditChange',
-              aggregateModel: 'AuditAggregate',
-            },
-            context.basePrisma,
-          ),
+          writer: createSharedChangeWriter({
+            changeModel: 'AuditChange',
+            aggregateModel: 'AuditAggregate',
+          }),
         },
       });
 
@@ -278,13 +336,10 @@ describe('Normalized Writer Helpers', () => {
           awaitWrite: true,
         },
         hooks: {
-          writer: createSharedChangeWriter(
-            {
-              changeModel: 'AuditChange',
-              aggregateModel: 'AuditAggregate',
-            },
-            context.basePrisma,
-          ),
+          writer: createSharedChangeWriter({
+            changeModel: 'AuditChange',
+            aggregateModel: 'AuditAggregate',
+          }),
         },
       });
 
@@ -340,13 +395,10 @@ describe('Normalized Writer Helpers', () => {
           awaitWrite: true,
         },
         hooks: {
-          writer: createSharedChangeWriter(
-            {
-              changeModel: 'auditChange',
-              aggregateModel: 'auditAggregate',
-            },
-            context.basePrisma,
-          ),
+          writer: createSharedChangeWriter({
+            changeModel: 'auditChange',
+            aggregateModel: 'auditAggregate',
+          }),
         },
       });
 

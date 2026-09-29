@@ -12,8 +12,7 @@
  * @module utils/normalized-writer
  */
 
-import type { AuditContext, AuditRecord } from '@kuruwic/db-audit-core';
-import { currentScope } from '../runtime/scope.js';
+import type { AuditRecord } from '@kuruwic/db-audit-core';
 import type { AuditLogWriter } from '../types.js';
 
 /**
@@ -301,10 +300,19 @@ type PrismaClientWithTransaction = {
   $transaction: <T>(fn: (tx: TransactionClient) => Promise<T>) => Promise<T>;
 };
 
+/** A client outside any transaction can open one; Prisma omits `$transaction` from a transaction's client */
+const canOpenTransaction = (handle: unknown): handle is PrismaClientWithTransaction =>
+  typeof (handle as Partial<PrismaClientWithTransaction> | null)?.$transaction === 'function';
+
+/** Runs `write` in the transaction `handle` belongs to, or in one it opens when it is outside any */
+const writeInTransaction = (handle: unknown, write: (tx: TransactionClient) => Promise<void>): Promise<void> =>
+  canOpenTransaction(handle) ? handle.$transaction(write) : write(handle as TransactionClient);
+
 /**
  * Creates a writer that stores audit logs in a normalized schema with separate tables for actors,
  * entities, aggregates and events, so their metadata is not duplicated across audit logs. Writes run
- * in the audited operation's transaction when one is open, else in a transaction on `basePrisma`.
+ * on the handle the writer receives: in the audited operation's transaction for an awaited write,
+ * else in a transaction of their own.
  *
  * @example
  * ```typescript
@@ -313,21 +321,18 @@ type PrismaClientWithTransaction = {
  *   aggregateMapping,
  *   Prisma,
  *   hooks: {
- *     writer: createEntityNormalizedWriter(
- *       {
- *         actorModel: 'actor',
- *         entityModel: 'entity',
- *         aggregateModel: 'aggregate',
- *         eventModel: 'auditEvent',
- *       },
- *       basePrisma,
- *     ),
+ *     writer: createEntityNormalizedWriter({
+ *       actorModel: 'actor',
+ *       entityModel: 'entity',
+ *       aggregateModel: 'aggregate',
+ *       eventModel: 'auditEvent',
+ *     }),
  *   },
  * });
  * ```
  */
-export const createEntityNormalizedWriter = (schema: NormalizedSchema, basePrisma: unknown): AuditLogWriter => {
-  return async (logs: AuditRecord[], _context: AuditContext, _defaultWrite: (logs: AuditRecord[]) => Promise<void>) => {
+export const createEntityNormalizedWriter = (schema: NormalizedSchema): AuditLogWriter => {
+  return async (logs, { handle }) => {
     if (logs.length === 0) {
       return;
     }
@@ -342,13 +347,7 @@ export const createEntityNormalizedWriter = (schema: NormalizedSchema, basePrism
       await createAuditEvents(tx, schema.eventModel, logs, actorMap, entityMap, aggregateMap);
     };
 
-    const transactionalClient = currentScope()?.transaction?.client;
-    if (transactionalClient) {
-      await writeWithinTransaction(transactionalClient as TransactionClient);
-    } else {
-      const prismaClient = basePrisma as PrismaClientWithTransaction;
-      await prismaClient.$transaction(writeWithinTransaction);
-    }
+    await writeInTransaction(handle, writeWithinTransaction);
   };
 };
 
@@ -374,8 +373,9 @@ const groupLogsByChange = (logs: AuditRecord[]): Map<string, AuditRecord[]> => {
 
 /**
  * Creates a writer that stores each entity change (before/after/changes) once and links it to every
- * aggregate root it belongs to, so change data is not duplicated across aggregates. Writes run in
- * the audited operation's transaction when one is open, else in a transaction on `basePrisma`.
+ * aggregate root it belongs to, so change data is not duplicated across aggregates. Writes run on
+ * the handle the writer receives: in the audited operation's transaction for an awaited write,
+ * else in a transaction of their own.
  *
  * @example
  * ```typescript
@@ -384,19 +384,16 @@ const groupLogsByChange = (logs: AuditRecord[]): Map<string, AuditRecord[]> => {
  *   aggregateMapping,
  *   Prisma,
  *   hooks: {
- *     writer: createSharedChangeWriter(
- *       {
- *         changeModel: 'auditChange',
- *         aggregateModel: 'auditAggregate',
- *       },
- *       basePrisma,
- *     ),
+ *     writer: createSharedChangeWriter({
+ *       changeModel: 'auditChange',
+ *       aggregateModel: 'auditAggregate',
+ *     }),
  *   },
  * });
  * ```
  */
-export const createSharedChangeWriter = (schema: SharedChangeSchema, basePrisma: unknown): AuditLogWriter => {
-  return async (logs: AuditRecord[], _context: AuditContext, _defaultWrite: (logs: AuditRecord[]) => Promise<void>) => {
+export const createSharedChangeWriter = (schema: SharedChangeSchema): AuditLogWriter => {
+  return async (logs, { handle }) => {
     if (logs.length === 0) {
       return;
     }
@@ -483,12 +480,6 @@ export const createSharedChangeWriter = (schema: SharedChangeSchema, basePrisma:
       );
     };
 
-    const transactionalClient = currentScope()?.transaction?.client;
-    if (transactionalClient) {
-      await writeWithinTransaction(transactionalClient as TransactionClient);
-    } else {
-      const prismaClient = basePrisma as PrismaClientWithTransaction;
-      await prismaClient.$transaction(writeWithinTransaction);
-    }
+    await writeInTransaction(handle, writeWithinTransaction);
   };
 };

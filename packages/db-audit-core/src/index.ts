@@ -45,7 +45,7 @@ export type {
 } from './domain/mutation-event.js';
 export type { Result, ValidationError } from './domain/smart-constructors.js';
 export { createAuditLogData } from './domain/smart-constructors.js';
-export type { WriteExecutor, WriteFn } from './domain/write.js';
+export type { WriteContext, WriteExecutor, WriteFn } from './domain/write.js';
 export type { ProjectionEnrichmentMeta } from './enrichment/types.js';
 // Exported because the adapter package imports it across the package boundary;
 // end users are not meant to call it directly.

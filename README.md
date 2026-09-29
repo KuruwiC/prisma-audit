@@ -267,8 +267,8 @@ createAuditClient(basePrisma, {
 
   // Custom writer hook
   hooks: {
-    writer: async (logs, context, defaultWrite) => {
-      await defaultWrite(logs);
+    writer: async (records, { defaultWrite }) => {
+      await defaultWrite(records);
       await sendToExternalService(logs);
     },
   },

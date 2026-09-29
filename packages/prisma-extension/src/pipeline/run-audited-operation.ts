@@ -18,7 +18,7 @@ import { isBatchOperation } from '../utils/operation-classifier.js';
 import { type ExecutionScope, withExecutionScope } from './execution-scope.js';
 import type { AuditedOperation, OperationExecutor, OperationOutcome } from './executor.js';
 import type { RecordProducer } from './produce-records.js';
-import type { AuditLogWriter } from './write-audit-logs.js';
+import type { WriteAuditLogs } from './write-audit-logs.js';
 
 export interface InterceptedOperation {
   readonly model: string;
@@ -44,7 +44,7 @@ export interface AuditPipelineDependencies {
   readonly singleExecutor: OperationExecutor;
   readonly batchExecutor: OperationExecutor;
   readonly produceRecords: RecordProducer;
-  readonly writeAuditLogs: AuditLogWriter;
+  readonly writeAuditLogs: WriteAuditLogs;
   readonly failureSink: FailureSink;
 }
 

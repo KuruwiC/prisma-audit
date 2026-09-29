@@ -18,7 +18,7 @@ import { createBatchExecutor } from './pipeline/batch-executor.js';
 import { createRecordProducer } from './pipeline/produce-records.js';
 import { type AuditPipelineDependencies, runAuditedOperation } from './pipeline/run-audited-operation.js';
 import { createSingleExecutor } from './pipeline/single-executor.js';
-import { createAuditLogWriter } from './pipeline/write-audit-logs.js';
+import { createWriteAuditLogs } from './pipeline/write-audit-logs.js';
 import { isProcessingAuditLog, withScope } from './runtime/scope.js';
 import { createTransactionProxy } from './runtime/transaction-proxy.js';
 import type { PrismaAuditExtensionOptions } from './types.js';
@@ -36,7 +36,7 @@ const createPipelineDependencies = (audit: AuditOptions): AuditPipelineDependenc
     singleExecutor: createSingleExecutor({ Prisma, schemaMetadata, getNestedOperationConfig, failureSink }),
     batchExecutor: createBatchExecutor({ Prisma, schemaMetadata }),
     produceRecords: createRecordProducer({ ...audit, failureSink }),
-    writeAuditLogs: createAuditLogWriter({
+    writeAuditLogs: createWriteAuditLogs({
       auditLogModel: audit.auditLogModel,
       writeExecutor: createPrismaWriteExecutor(Prisma.DbNull, {
         storesBeforeUnavailable: declaresBeforeUnavailableColumn(Prisma.dmmf, audit.auditLogModel),

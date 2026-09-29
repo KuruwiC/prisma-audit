@@ -18,7 +18,7 @@ import { type FailureSink, toError } from '../failure-sink.js';
 import { trackPendingWrite } from '../runtime/pending-writes.js';
 import type { ExecutionScope } from './execution-scope.js';
 
-export interface AuditLogWriterDependencies {
+export interface WriteAuditLogsDependencies {
   /** Accessor of the audit-log model on the client */
   readonly auditLogModel: string;
   readonly writeExecutor: WriteExecutor;
@@ -26,7 +26,8 @@ export interface AuditLogWriterDependencies {
   readonly failureSink: FailureSink;
 }
 
-export type AuditLogWriter = (plan: WritePlan, scope: ExecutionScope) => Promise<void>;
+/** Executes a write plan in the scope of the operation its records belong to */
+export type WriteAuditLogs = (plan: WritePlan, scope: ExecutionScope) => Promise<void>;
 
 interface PlannedWrite {
   readonly scope: ExecutionScope;
@@ -69,7 +70,7 @@ const startDetached = (planned: PlannedWrite): void => {
   trackPendingWrite(containedBaseWrite(planned, 'async audit log write', 'async write error handler'));
 };
 
-export const createAuditLogWriter = (deps: AuditLogWriterDependencies): AuditLogWriter => {
+export const createWriteAuditLogs = (deps: WriteAuditLogsDependencies): WriteAuditLogs => {
   const { auditLogModel, writeExecutor, writer, failureSink } = deps;
 
   return async (plan, scope) => {
@@ -83,10 +84,10 @@ export const createAuditLogWriter = (deps: AuditLogWriterDependencies): AuditLog
     const planned: PlannedWrite = {
       scope,
       writeOn: async (handle) => {
-        const defaultWrite = (logsToWrite: AuditRecord[]): Promise<void> =>
-          writeExecutor.write(handle, auditLogModel, logsToWrite);
+        const defaultWrite = (records: AuditRecord[]): Promise<void> =>
+          writeExecutor.write(handle, auditLogModel, records);
         if (writer) {
-          await writer(logs, scope.auditContext, defaultWrite);
+          await writer(logs, { auditContext: scope.auditContext, handle, defaultWrite });
         } else {
           await defaultWrite(logs);
         }

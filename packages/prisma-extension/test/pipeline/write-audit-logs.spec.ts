@@ -4,17 +4,15 @@
  * the failure sink under the log-write phase.
  */
 
-import type { AuditContext, WriteExecutor, WritePlan } from '@kuruwic/db-audit-core';
+import type { AuditContext, WriteContext, WriteExecutor, WritePlan } from '@kuruwic/db-audit-core';
 import { createActorId, createAggregateId, createEntityId } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
 import type { FailureSink } from '../../src/failure-sink.js';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../src/internal-types.js';
 import type { ExecutionScope } from '../../src/pipeline/execution-scope.js';
-import { createAuditLogWriter } from '../../src/pipeline/write-audit-logs.js';
+import { createWriteAuditLogs } from '../../src/pipeline/write-audit-logs.js';
 import { flushAllPendingWrites } from '../../src/runtime/pending-writes.js';
 import type { AuditLogData } from '../../src/types.js';
-
-type DefaultWrite = (logs: AuditLogData[]) => Promise<void>;
 
 const auditContext: AuditContext = { actor: { category: 'model', type: 'User', id: 'user-1' } };
 const baseClient: PrismaClientWithDynamicAccess = {
@@ -58,17 +56,17 @@ const transactionScope = (deferredWrites: Array<() => Promise<void>>): Execution
 });
 
 const createWriter = (
-  options: { write?: WriteExecutor['write']; writer?: Parameters<typeof createAuditLogWriter>[0]['writer'] } = {},
+  options: { write?: WriteExecutor['write']; writer?: Parameters<typeof createWriteAuditLogs>[0]['writer'] } = {},
 ) => {
   const writeExecutor: WriteExecutor = { write: vi.fn(options.write ?? (async () => {})) };
   const failureSink: FailureSink = { notify: vi.fn(async () => {}), reportWriteFailure: vi.fn(async () => {}) };
-  const write = createAuditLogWriter({ auditLogModel: 'auditLog', writeExecutor, writer: options.writer, failureSink });
+  const write = createWriteAuditLogs({ auditLogModel: 'auditLog', writeExecutor, writer: options.writer, failureSink });
   return { write, writeExecutor, failureSink };
 };
 
 const plan = (kind: WritePlan['kind']): WritePlan => ({ kind, records: [record] });
 
-describe('createAuditLogWriter', () => {
+describe('createWriteAuditLogs', () => {
   it('writes an immediate plan on the scope handle and awaits it', async () => {
     const { write, writeExecutor } = createWriter();
     const scope = transactionScope([]);
@@ -104,17 +102,18 @@ describe('createAuditLogWriter', () => {
     await flushAllPendingWrites();
   });
 
-  it('hands the writer hook the logs, the context and the default write', async () => {
-    const writer = vi.fn(
-      async (logs: AuditLogData[], _context: AuditContext, defaultWrite: (logs: AuditLogData[]) => Promise<void>) =>
-        defaultWrite(logs),
-    );
+  it('hands the writer hook the records, the audit context, the scope handle and a default write on it', async () => {
+    const writer = vi.fn(async (records: AuditLogData[], { defaultWrite }: WriteContext) => defaultWrite(records));
     const { write, writeExecutor } = createWriter({ writer });
 
-    await write(plan('immediate'), baseScope);
+    await write(plan('immediate'), transactionScope([]));
 
-    expect(writer).toHaveBeenCalledWith([record], auditContext, expect.any(Function));
-    expect(writeExecutor.write).toHaveBeenCalledWith(baseClient, 'auditLog', [record]);
+    expect(writer).toHaveBeenCalledWith([record], {
+      auditContext,
+      handle: transactionClient,
+      defaultWrite: expect.any(Function),
+    });
+    expect(writeExecutor.write).toHaveBeenCalledWith(transactionClient, 'auditLog', [record]);
   });
 
   it('writes nothing for a plan without records', async () => {
@@ -205,10 +204,8 @@ describe('createAuditLogWriter', () => {
     expect(writeExecutor.write).not.toHaveBeenCalled();
   });
 
-  it('hands the writer hook a default write on the base handle for an after-commit plan', async () => {
-    const writer = vi.fn(async (logs: AuditLogData[], _context: AuditContext, defaultWrite: DefaultWrite) =>
-      defaultWrite(logs),
-    );
+  it('hands the writer hook the base handle and a default write on it for an after-commit plan', async () => {
+    const writer = vi.fn(async (records: AuditLogData[], { defaultWrite }: WriteContext) => defaultWrite(records));
     const { write, writeExecutor } = createWriter({ writer });
     const deferredWrites: Array<() => Promise<void>> = [];
 
@@ -216,28 +213,32 @@ describe('createAuditLogWriter', () => {
     expect(writer).not.toHaveBeenCalled();
     await deferredWrites[0]?.();
 
-    expect(writer).toHaveBeenCalledWith([record], auditContext, expect.any(Function));
+    expect(writer).toHaveBeenCalledWith([record], {
+      auditContext,
+      handle: baseClient,
+      defaultWrite: expect.any(Function),
+    });
     expect(writeExecutor.write).toHaveBeenCalledWith(baseClient, 'auditLog', [record]);
   });
 
-  it('hands the writer hook a default write on the base handle for a detached plan', async () => {
-    const writer = vi.fn(async (logs: AuditLogData[], _context: AuditContext, defaultWrite: DefaultWrite) =>
-      defaultWrite(logs),
-    );
+  it('hands the writer hook the base handle and a default write on it for a detached plan', async () => {
+    const writer = vi.fn(async (records: AuditLogData[], { defaultWrite }: WriteContext) => defaultWrite(records));
     const { write, writeExecutor } = createWriter({ writer });
 
     await write(plan('detached'), baseScope);
     await flushAllPendingWrites();
 
-    expect(writer).toHaveBeenCalledWith([record], auditContext, expect.any(Function));
+    expect(writer).toHaveBeenCalledWith([record], {
+      auditContext,
+      handle: baseClient,
+      defaultWrite: expect.any(Function),
+    });
     expect(writeExecutor.write).toHaveBeenCalledWith(baseClient, 'auditLog', [record]);
   });
 
   it('lets the writer hook change the records the executor receives', async () => {
     const changed: AuditLogData = { ...record, actorContext: { source: 'hook' } };
-    const writer = vi.fn(async (_logs: AuditLogData[], _context: AuditContext, defaultWrite: DefaultWrite) =>
-      defaultWrite([changed]),
-    );
+    const writer = vi.fn(async (_records: AuditLogData[], { defaultWrite }: WriteContext) => defaultWrite([changed]));
     const { write, writeExecutor } = createWriter({ writer });
 
     await write(plan('immediate'), baseScope);

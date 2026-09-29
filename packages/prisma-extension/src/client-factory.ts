@@ -77,10 +77,10 @@ export type PrismaClientLike = {
  *     awaitWrite: true,
  *   },
  *   hooks: {
- *     writer: async (logs, context, defaultWrite) => {
+ *     writer: async (records, { defaultWrite }) => {
  *       await Promise.all([
- *         defaultWrite(logs),
- *         sendToExternalService(logs),
+ *         defaultWrite(records),
+ *         sendToExternalService(records),
  *       ]);
  *     },
  *   },

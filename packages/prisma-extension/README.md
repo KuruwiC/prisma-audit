@@ -275,9 +275,9 @@ createAuditClient(basePrisma, {
   Prisma,
   auditLogModel: 'CustomAuditLog',
   hooks: {
-    writer: async (logs, context, defaultWrite) => {
+    writer: async (records, { handle }) => {
       // Transform to custom schema
-      const transformedLogs = logs.map(log => ({
+      const transformedLogs = records.map(log => ({
         userId: log.actorId,
         action: log.action,
         entityName: log.entityType,
@@ -287,8 +287,9 @@ createAuditClient(basePrisma, {
         createdAt: log.createdAt,
       }));
 
-      // Write using basePrisma (not extended client)
-      await basePrisma.customAuditLog.createMany({
+      // Write through the handle: the operation's transaction client for an awaited write,
+      // the base client otherwise (never the extended client)
+      await handle.customAuditLog.createMany({
         data: transformedLogs,
       });
     },
@@ -405,14 +406,7 @@ model AuditEvent {
 
 **Configuration with Built-in Helper:**
 
-Give the writer helper the same client `createAuditClient` uses, by having both pull it from a shared module instead of each constructing their own `PrismaClient`:
-
-```typescript
-// src/client.ts
-import { PrismaClient } from '@prisma/client';
-
-export const basePrisma = new PrismaClient();
-```
+The helper writes on the client each write runs on: in the operation's transaction for an awaited write, in a transaction of its own otherwise.
 
 ```typescript
 // src/audit.config.ts
@@ -426,7 +420,6 @@ import {
 } from '@kuruwic/prisma-audit';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { Prisma, type PrismaClient } from '@prisma/client';
-import { basePrisma } from './client.js';
 
 export const auditProvider = createAsyncLocalStorageProvider();
 
@@ -441,17 +434,12 @@ export default defineConfig({
     }),
   }),
   hooks: {
-    // Use the built-in entity normalized writer helper, on the same client passed to
-    // createAuditClient in src/db.ts
-    writer: createEntityNormalizedWriter(
-      {
-        actorModel: 'Actor',
-        entityModel: 'Entity',
-        aggregateModel: 'Aggregate',
-        eventModel: 'AuditEvent',
-      },
-      basePrisma,
-    ),
+    writer: createEntityNormalizedWriter({
+      actorModel: 'Actor',
+      entityModel: 'Entity',
+      aggregateModel: 'Aggregate',
+      eventModel: 'AuditEvent',
+    }),
   },
 });
 ```
@@ -459,10 +447,10 @@ export default defineConfig({
 ```typescript
 // src/db.ts
 import { createAuditClient } from '@kuruwic/prisma-audit';
-import { basePrisma } from './client.js';
+import { PrismaClient } from '@prisma/client';
 import auditConfig, { auditProvider } from './audit.config.js';
 
-export const prisma = createAuditClient(basePrisma, auditConfig);
+export const prisma = createAuditClient(new PrismaClient(), auditConfig);
 export { auditProvider };
 ```
 
@@ -556,14 +544,7 @@ model AuditAggregate {
 
 **Configuration with Built-in Helper:**
 
-Give the writer helper the same client `createAuditClient` uses, by having both pull it from a shared module instead of each constructing their own `PrismaClient`:
-
-```typescript
-// src/client.ts
-import { PrismaClient } from '@prisma/client';
-
-export const basePrisma = new PrismaClient();
-```
+The helper writes on the client each write runs on: in the operation's transaction for an awaited write, in a transaction of its own otherwise.
 
 ```typescript
 // src/audit.config.ts
@@ -577,7 +558,6 @@ import {
 } from '@kuruwic/prisma-audit';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { Prisma, type PrismaClient } from '@prisma/client';
-import { basePrisma } from './client.js';
 
 export const auditProvider = createAsyncLocalStorageProvider();
 
@@ -599,15 +579,10 @@ export default defineConfig({
     }),
   }),
   hooks: {
-    // Use the built-in shared change writer helper, on the same client passed to
-    // createAuditClient in src/db.ts
-    writer: createSharedChangeWriter(
-      {
-        changeModel: 'AuditChange',
-        aggregateModel: 'AuditAggregate',
-      },
-      basePrisma,
-    ),
+    writer: createSharedChangeWriter({
+      changeModel: 'AuditChange',
+      aggregateModel: 'AuditAggregate',
+    }),
   },
 });
 ```
@@ -615,10 +590,10 @@ export default defineConfig({
 ```typescript
 // src/db.ts
 import { createAuditClient } from '@kuruwic/prisma-audit';
-import { basePrisma } from './client.js';
+import { PrismaClient } from '@prisma/client';
 import auditConfig, { auditProvider } from './audit.config.js';
 
-export const prisma = createAuditClient(basePrisma, auditConfig);
+export const prisma = createAuditClient(new PrismaClient(), auditConfig);
 export { auditProvider };
 ```
 
@@ -948,33 +923,33 @@ Sampling rate per operation. Called once per audited operation with its top-leve
 Hook into the audit log lifecycle.
 
 #### `writer`
-**Type:** `(logs: AuditLog[], context: AuditContext, defaultWrite: Function) => Promise<void>`
+**Type:** `(records: AuditLogData[], context: { auditContext: AuditContext; handle: TClient; defaultWrite: (records: AuditLogData[]) => Promise<void> }) => Promise<void>`
 **Default:** Uses `defaultWrite`
 
-Customize how audit logs are written.
+Customize how audit logs are written. `handle` is the client the write runs on and `defaultWrite` is the default persistence on that client.
 
-**Contract:** with `awaitWrite: true` (the default), the writer runs on the transaction client inside the caller's transaction — before commit — so a later rollback undoes audit rows the writer wrote through `defaultWrite`. With `awaitWrite: false`, the write is deferred inside `$transaction` and drained only after `$transaction` resolves; a transaction that throws discards the queued write, so the writer never runs for it. Either way, side effects the writer performs outside the database transaction — an HTTP call, a queue publish — are never rolled back, because they have already happened by the time a rollback occurs. Use `awaitWrite: false` (or `awaitWriteIf`) to defer that kind of delivery until after commit instead.
+**Contract:** with `awaitWrite: true` (the default), `handle` is the client of the operation's transaction (the caller's `$transaction`, or the one the extension opens around the operation) and the writer runs before commit, so a later rollback undoes rows the writer wrote through `handle` or `defaultWrite`. With `awaitWrite: false`, `handle` is the base client passed to `createAuditClient`: the write starts after the operation, and inside `$transaction` only once `$transaction` has resolved; a transaction that throws discards the queued write, so the writer never runs for it. For an awaited write, `handle` is typed as the client although it is a transaction's client. Either way, side effects the writer performs outside the database transaction — an HTTP call, a queue publish — are never rolled back, because they have already happened by the time a rollback occurs. Use `awaitWrite: false` (or `awaitWriteIf`) to defer that kind of delivery until after commit instead.
 
 ```typescript
 {
   hooks: {
-    writer: async (logs, context, defaultWrite) => {
+    writer: async (records, { defaultWrite }) => {
       // Write to database
-      await defaultWrite(logs);
+      await defaultWrite(records);
 
       // This call is not part of the database transaction, so it is not undone if the
       // transaction later rolls back. For delivery that only happens after commit, use
       // `awaitWrite: false` (or `awaitWriteIf`) instead.
       await fetch('https://audit-service.example.com/logs', {
         method: 'POST',
-        body: JSON.stringify(logs),
+        body: JSON.stringify(records),
       });
     },
   }
 }
 ```
 
-**⚠️ Important:** Always use `defaultWrite` or the client passed to `createAuditClient` to avoid infinite recursion. Never use the extended client inside the writer hook.
+**⚠️ Important:** Write through `defaultWrite` or `handle`. Never use the extended client inside the writer hook: its writes go through the audit extension again.
 
 ### Error Handling (`errorHandling`)
 
@@ -1308,8 +1283,8 @@ export default defineConfig({
 
   // Custom hooks
   hooks: {
-    writer: async (logs, context, defaultWrite) => {
-      await defaultWrite(logs);
+    writer: async (records, { defaultWrite }) => {
+      await defaultWrite(records);
       await sendToExternalService(logs);
     },
   },

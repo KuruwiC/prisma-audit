@@ -3,7 +3,7 @@ import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import type { AggregateMapping, AuditLogData } from '@kuruwic/prisma-audit';
 import { createAuditClient, defineEntity, flushAllPendingWrites, foreignKey, to } from '@kuruwic/prisma-audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
-import { afterAll, beforeAll, beforeEach, describe, expect, inject, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, inject, it } from 'vitest';
 import { cleanDatabase, disposeTestContext, type TestContext } from './helpers/setup.js';
 
 const testAggregateMapping: AggregateMapping = {
@@ -46,13 +46,13 @@ const createAuditedClientWithWriterSpy = (
       delete: { fetchBeforeOperation: config.fetchBeforeOperation ?? false },
     },
     hooks: {
-      writer: async (logs: AuditLogData[], context: AuditContext, defaultWrite) => {
+      writer: async (records: AuditLogData[], { auditContext, defaultWrite }) => {
         writerSpy.callCount++;
         writerSpy.calls.push({
-          logCount: logs.length,
-          contextId: context.actor.id,
+          logCount: records.length,
+          contextId: auditContext.actor.id,
         });
-        await defaultWrite(logs);
+        await defaultWrite(records);
       },
     },
   });
@@ -499,6 +499,98 @@ describe('hooks.writer Coverage', () => {
       expect(context.writerSpy.callCount).toBe(2);
       expect(context.writerSpy.calls[0]?.contextId).toBe('actor-1');
       expect(context.writerSpy.calls[1]?.contextId).toBe('actor-2');
+    });
+  });
+
+  describe("the writer's database handle", () => {
+    const openClients: Array<{ $disconnect: () => Promise<void> }> = [];
+
+    afterEach(async () => {
+      for (const client of openClients.splice(0)) {
+        await client.$disconnect();
+      }
+    });
+
+    /**
+     * An audited client whose writer creates, through the handle it receives, one Tag named after
+     * each audited user's email, then writes the audit logs with the default write
+     */
+    const createClient = (awaitWrite: boolean) => {
+      const basePrisma = new PrismaClient({ datasources: { db: { url: context.databaseUrl } } });
+      const handles: unknown[] = [];
+      const prisma = createAuditClient(basePrisma, {
+        Prisma,
+        provider: context.provider,
+        aggregateMapping: testAggregateMapping,
+        performance: { awaitWrite },
+        hooks: {
+          writer: async (records, { handle, defaultWrite }) => {
+            handles.push(handle);
+            for (const record of records) {
+              if (record.entityType === 'User' && record.aggregateType === 'User') {
+                const { email } = record.after as { email: string };
+                await handle.tag.create({ data: { name: `writer:${email}` } });
+              }
+            }
+            await defaultWrite(records);
+          },
+        },
+      });
+      openClients.push(prisma, basePrisma);
+      return { basePrisma, prisma, handles };
+    };
+
+    const createUser = (client: { user: PrismaClient['user'] }, email: string) =>
+      client.user.create({ data: { email, name: 'User', password: 'secret123' } });
+
+    const tagNames = async () =>
+      (await context.basePrisma.tag.findMany({ orderBy: { name: 'asc' } })).map((tag) => tag.name);
+
+    it('is the transaction client for an awaited write: what the writer writes through it commits and rolls back with the operation', async () => {
+      const { prisma } = createClient(true);
+
+      await context.provider.runAsync(testActor, () =>
+        prisma.$transaction(async (tx) => {
+          await createUser(tx, 'kept@example.com');
+        }),
+      );
+      const rolledBack = context.provider.runAsync(testActor, () =>
+        prisma.$transaction(async (tx) => {
+          await createUser(tx, 'undone@example.com');
+          throw new Error('Rollback test');
+        }),
+      );
+
+      await expect(rolledBack).rejects.toThrow('Rollback test');
+      expect(await tagNames()).toEqual(['writer:kept@example.com']);
+    });
+
+    it('is the base client for a detached write', async () => {
+      const { basePrisma, prisma, handles } = createClient(false);
+
+      await context.provider.runAsync(testActor, () => createUser(prisma, 'detached@example.com'));
+      await flushAllPendingWrites();
+
+      expect(handles).toHaveLength(1);
+      // Compared by identity: a client does not print as a diff.
+      expect(handles[0] === basePrisma).toBe(true);
+      expect(await tagNames()).toEqual(['writer:detached@example.com']);
+    });
+
+    it('is the base client for a write queued until the transaction commits', async () => {
+      const { basePrisma, prisma, handles } = createClient(false);
+
+      await context.provider.runAsync(testActor, () =>
+        prisma.$transaction(async (tx) => {
+          await createUser(tx, 'after-commit@example.com');
+        }),
+      );
+      await flushAllPendingWrites();
+
+      expect(handles).toHaveLength(1);
+      // Compared by identity: a client does not print as a diff.
+      expect(handles[0] === basePrisma).toBe(true);
+      expect(await tagNames()).toEqual(['writer:after-commit@example.com']);
     });
   });
 });

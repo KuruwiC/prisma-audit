@@ -65,9 +65,9 @@ describe('before state requested but unreadable', () => {
       errorHandling: { observer },
       ...options,
       hooks: {
-        writer: async (logs, _context, defaultWrite) => {
-          written.push(...logs);
-          await defaultWrite(logs);
+        writer: async (records, { defaultWrite }) => {
+          written.push(...records);
+          await defaultWrite(records);
         },
       },
     });

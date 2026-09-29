@@ -51,9 +51,9 @@ const createAuditedClientWithAuditLogRowCounter = (
       delete: { fetchBeforeOperation: false },
     },
     hooks: {
-      writer: async (logs, _context, defaultWrite) => {
-        auditLogRowCount.value += logs.length;
-        await defaultWrite(logs);
+      writer: async (records, { defaultWrite }) => {
+        auditLogRowCount.value += records.length;
+        await defaultWrite(records);
       },
     },
   });
@@ -84,9 +84,9 @@ const createAuditedClientWithRefetchFallback = (
       delete: { fetchBeforeOperation: true },
     },
     hooks: {
-      writer: async (logs, _context, defaultWrite) => {
-        auditLogRowCount.value += logs.length;
-        await defaultWrite(logs);
+      writer: async (records, { defaultWrite }) => {
+        auditLogRowCount.value += records.length;
+        await defaultWrite(records);
       },
     },
   });

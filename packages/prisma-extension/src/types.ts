@@ -8,10 +8,12 @@ import type {
   AggregateMapping,
   AuditActor,
   AuditContextProvider,
+  AuditRecord,
   AuditLogData as CoreAuditLogData,
   AuditLogInput as CoreAuditLogInput,
   ErrorStrategy,
   GlobalContextEnricherConfig,
+  WriteContext,
   WriteFn,
 } from '@kuruwic/db-audit-core';
 
@@ -33,8 +35,10 @@ export type AuditLogInput = CoreAuditLogInput;
  * Custom audit log writer callback
  *
  * Re-exported from @kuruwic/db-audit-core's `WriteFn`
+ *
+ * @template TClient - The client type the writer's `handle` is typed as
  */
-export type AuditLogWriter = WriteFn;
+export type AuditLogWriter<TClient = unknown> = WriteFn<TClient>;
 
 /**
  * Change calculation configuration
@@ -79,23 +83,32 @@ export interface PerformanceConfig {
 
 /**
  * Lifecycle hooks configuration
+ *
+ * @template TClient - The audited client type, which the writer's `handle` is typed as
  */
-export interface HooksConfig {
+export interface HooksConfig<TClient = unknown> {
   /**
-   * Custom audit log writer, replacing the default persistence step.
+   * Custom audit log writer, replacing the default persistence step. It receives the records
+   * and a context with the audit context, the client the write runs on (`handle`) and
+   * `defaultWrite`, the default persistence on that client.
    *
-   * With `awaitWrite: true` (the default), the writer runs on the transaction client inside
-   * the caller's transaction — before commit — so a later rollback undoes rows it wrote
-   * through `defaultWrite`. With `awaitWrite: false`, the write is deferred inside
-   * `$transaction` and drained only after `$transaction` resolves; a transaction that throws
-   * discards the queued write unrun, so the writer never runs for it.
+   * With `awaitWrite: true` (the default), `handle` is the client of the operation's transaction
+   * (the caller's `$transaction` or the one the extension opens around the operation), and the
+   * writer runs before commit, so a later rollback undoes rows it wrote through `handle` or
+   * `defaultWrite`. With `awaitWrite: false`, `handle` is the base client: the write starts
+   * after the operation, and inside `$transaction` only once `$transaction` has resolved; a
+   * transaction that throws discards the queued write unrun, so the writer never runs for it.
+   * For an awaited write the handle is typed as the client although it is a transaction's client.
    *
    * Either way, side effects the writer performs outside the database transaction (an HTTP
    * call, a queue publish) are never rolled back — they have already happened by the time a
    * rollback occurs. Use `awaitWrite: false` (or `awaitWriteIf`) to defer such delivery
    * until after commit.
+   *
+   * A method signature: its parameters are bivariant, so a writer typed for the client is
+   * assignable where the handle is erased to `unknown`.
    */
-  writer?: AuditLogWriter;
+  writer?(records: AuditRecord[], context: WriteContext<TClient>): Promise<void>;
 }
 
 /**
@@ -282,7 +295,7 @@ export interface PrismaAuditExtensionOptions<TModelName extends string = string,
   diffing?: DiffingConfig;
   security?: SecurityConfig;
   performance?: PerformanceConfig;
-  hooks?: HooksConfig;
+  hooks?: HooksConfig<TClient>;
   /** Actor enrichment; the enricher receives the operation's `AuditActor` and the client. */
   contextEnricher?: GlobalContextEnricherConfig<AuditActor, unknown, TClient>;
   nestedOperations?: NestedOperationsConfig<TModelName>;
