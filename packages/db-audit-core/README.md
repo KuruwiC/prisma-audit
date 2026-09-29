@@ -166,39 +166,36 @@ under the `aggregate-resolution` phase (`src/pipeline/produce-records.ts`).
 ### A Drizzle adapter on this boundary
 
 Drizzle has no query-extension hook, so an adapter wraps the database object. This walkthrough
-follows the existing `drizzle-audit` adapter (`packages/drizzle-adapter/src` in that repository), whose
-pieces map onto the boundary as follows.
+shows how such an adapter would plug into the boundary.
 
 - **Interception.** A `Proxy` over the Drizzle `db` replaces `insert`, `update`, `delete` and
-  `transaction` with builders that run only when awaited (`createAuditedDb` in `audit-db.ts`).
-  `policy` runs when the builder is awaited, before its first statement.
+  `transaction` with builders that run only when awaited. `policy` runs when the builder is
+  awaited, before its first statement.
 - **Models and mapping.** Drizzle identifies a table by its `Table` object. The adapter names each
   table (the SQL name from `getTableName`, or the schema key) and builds the string-keyed
-  aggregate mapping; a table-level helper translates a parent table into `to(type, resolver)`
-  (`drizzle-entities.ts`). The primary key, and so `identity`, comes from `getTableColumns(table)`
-  (`primary` columns) or a composite `primaryKey` in the table's extra config.
+  aggregate mapping; a table-level helper translates a parent table into `to(type, resolver)`.
+  The primary key, and so `identity`, comes from `getTableColumns(table)` (`primary` columns) or a
+  composite `primaryKey` in the table's extra config.
 - **Change capture and before state.** On PostgreSQL and SQLite, `insert(...).returning()` gives
   the created rows and `delete(...).returning()` the deleted ones (their before state). An update
   reads `select().from(table).where(condition)` in the same transaction before
-  `update(...).returning()` and pairs the rows by primary key (`dialect/pg.ts`). MySQL has no
-  `RETURNING`: inserts use `$returningId()` and re-read by primary key, updates read before and
-  re-read by primary key after, deletes read before (`dialect/mysql.ts`). An upsert
-  (`onConflictDoUpdate` / `onDuplicateKeyUpdate`) reads by the conflict target first to decide per
-  row between `create` (`none`) and `update` (`captured`). A before-read that fails becomes
-  `unavailable` if the adapter lets the write proceed.
+  `update(...).returning()` and pairs the rows by primary key. MySQL has no `RETURNING`: inserts
+  use `$returningId()` and re-read by primary key, updates read before and re-read by primary key
+  after, deletes read before. An upsert (`onConflictDoUpdate` / `onDuplicateKeyUpdate`) reads by
+  the conflict target first to decide per row between `create` (`none`) and `update`
+  (`captured`). A before-read that fails becomes `unavailable` if the adapter lets the write
+  proceed.
 - **The handle thunk.** The adapter's `AsyncLocalStorage` holds the active `tx`; `read` returns it,
   else the root `db`. Lookups and enrichers receive a Drizzle database or transaction and query
   with `select()`.
 - **Transactions.** `db.transaction(async (tx) => ...)` plays the part of Prisma's `$transaction`.
-  The wrapped `transaction` already runs the callback with a proxied `tx` in its scope
-  (`createTransactionMethod` in `audit-db.ts`); on this boundary it also holds the after-commit
-  queue and starts the queued writes once the callback has resolved, discarding them when it
-  throws. The implicit transaction is a `db.transaction` around the audited statement
-  (`withImplicitTransaction` in `transaction.ts`). A nested `tx.transaction(...)` is a savepoint:
-  its queue joins the parent's when it succeeds and is dropped when it rolls back, all inside the
-  adapter.
-- **`WriteExecutor`.** `handle.insert(auditLogTable).values(rows)` (`writeAuditLogs` in
-  `write-executor.ts`), closing over the audit-log `Table`.
+  The wrapped `transaction` runs the callback with a proxied `tx` in its scope, holds the
+  after-commit queue, and starts the queued writes once the callback has resolved, discarding them
+  when it throws. The implicit transaction is a `db.transaction` around the audited statement. A
+  nested `tx.transaction(...)` is a savepoint: its queue joins the parent's when it succeeds and
+  is dropped when it rolls back, all inside the adapter.
+- **`WriteExecutor`.** `handle.insert(auditLogTable).values(rows)`, closing over the audit-log
+  `Table`.
 - **Relation fields.** Rows returned by `insert`, `update` and `delete` hold columns only, so
   `relationFieldNames` returns an empty set.
 
