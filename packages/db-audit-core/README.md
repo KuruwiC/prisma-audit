@@ -91,6 +91,121 @@ await provider.runAsync(
 );
 ```
 
+## Writing an adapter
+
+An adapter owns everything that touches the database: intercepting writes, reading rows, opening
+transactions and persisting records. The core owns the decisions in between. For each intercepted
+write the adapter runs, in order:
+
+1. **`policy(model, tags, policyConfig)`**, before any statement runs, to learn whether the audit
+   rows are written atomically with the write. The tags come from the entity's configuration
+   (`createEntityConfigLookup(mapping).byModel(model)?.tags`).
+2. **The write, in its scope.** When `atomic` is true and no transaction is active, the adapter
+   opens an implicit transaction and runs the write, and everything below, on that transaction's
+   handle. It then captures one `MutationEvent` per written row.
+3. **`resolve(events, auditContext, resolveConfig, read)`**. `read` is a thunk that returns the
+   handle of the scope active when a resolver or enricher runs; the core calls it at each callback,
+   so callbacks read the transaction's uncommitted writes. `resolveConfig` is `entity`
+   (`byModel`), `rootEntity` (`byCategoryAndType`) and the optional `actor` enricher.
+4. **`compose(resolved, { auditContext, config: composeConfig }, now)`** into `AuditRecord`s.
+   `composeConfig` carries the entity lookup, `excludeFields`, `redact`, `serialization` and
+   `relationFieldNames(model)`, the fields of a row that hold related records rather than columns.
+5. **`dispatch(records, atomic, { inTransaction })`** into a `WritePlan`, which the adapter
+   executes: `immediate` on the scope's handle before the write returns, `after-commit` queued on
+   the owning transaction and started once it commits (dropped when it rolls back), `detached`
+   started at once on a handle outside any transaction and tracked so the adapter can wait for it.
+   A user `WriteFn` runs in place of the executor's write and receives the same handle.
+
+What the adapter must provide:
+
+- **Mutation capture.** One `MutationEvent` per written row: `model`, `identity` (the serialized
+  primary key in the adapter's own format; the core only carries it), `action`, `before` as a
+  `BeforeState` (`captured` with the row read before the write; `none` for a create, for a read the
+  configuration does not ask for, or for a read that found no row; `unavailable` when the read was
+  asked for and failed, after the adapter reported the failure itself), `after`, and `origin`.
+- **The handle thunk** passed to `resolve`, reading the adapter's own record of the active
+  transaction. That record stays out of the `AuditContext`, which only carries the actor and
+  request context.
+- **A `WriteExecutor`** whose `write(handle, modelName, logs)` persists records with the database's
+  API on the handle it is given.
+- **Transaction scope ownership.** Tracking the transaction each async flow is inside, opening the
+  implicit transaction, and holding the `after-commit` queue until commit. The core only learns
+  `inTransaction`.
+- **Failure routing.** `resolve` returns `ResolverFailure`s (the row, the failed resolver, the
+  error) instead of throwing; the adapter decides how to report them, as it does for failed
+  before-state reads and failed writes.
+
+`@kuruwic/audit-adapter-memory` (`packages/adapter-memory`) is the smallest complete adapter. Its
+`runAudited` in `src/adapter.ts` is the whole sequence:
+
+```typescript
+const { atomic } = policy(model, tags, policyConfig);
+
+await inScope(atomic, async (scope) => {
+  const mutation = mutate(scope?.handle ?? store);
+  const event: MutationEvent<TModelName> = {
+    model,
+    identity: mutation.identity,
+    action: mutation.action,
+    before: mutation.before ? { kind: 'captured', row: mutation.before } : { kind: 'none' },
+    after: mutation.after,
+    origin: { path: '', op },
+  };
+  const { resolved } = await resolve([event], auditContext, resolveConfig, currentHandle);
+  const records = compose(resolved, { auditContext, config: composeConfig }, new Date());
+  await executePlan(dispatch(records, atomic, { inTransaction: scope !== undefined }), scope);
+});
+```
+
+`inScope` opens the implicit transaction, `currentHandle` reads the active transaction from an
+`AsyncLocalStorage` of its own, `transaction` starts the queued after-commit writes once its
+callback has resolved, and `src/write-executor.ts` appends records to the handle's audit-log rows.
+The memory adapter drops resolver failures; the Prisma adapter reports each one to its observer
+under the `aggregate-resolution` phase (`src/pipeline/produce-records.ts`).
+
+### A Drizzle adapter on this boundary
+
+Drizzle has no query-extension hook, so an adapter wraps the database object. This walkthrough
+follows the existing `drizzle-audit` adapter (`packages/drizzle-adapter/src` in that repository), whose
+pieces map onto the boundary as follows.
+
+- **Interception.** A `Proxy` over the Drizzle `db` replaces `insert`, `update`, `delete` and
+  `transaction` with builders that run only when awaited (`createAuditedDb` in `audit-db.ts`).
+  `policy` runs when the builder is awaited, before its first statement.
+- **Models and mapping.** Drizzle identifies a table by its `Table` object. The adapter names each
+  table (the SQL name from `getTableName`, or the schema key) and builds the string-keyed
+  aggregate mapping; a table-level helper translates a parent table into `to(type, resolver)`
+  (`drizzle-entities.ts`). The primary key, and so `identity`, comes from `getTableColumns(table)`
+  (`primary` columns) or a composite `primaryKey` in the table's extra config.
+- **Change capture and before state.** On PostgreSQL and SQLite, `insert(...).returning()` gives
+  the created rows and `delete(...).returning()` the deleted ones (their before state). An update
+  reads `select().from(table).where(condition)` in the same transaction before
+  `update(...).returning()` and pairs the rows by primary key (`dialect/pg.ts`). MySQL has no
+  `RETURNING`: inserts use `$returningId()` and re-read by primary key, updates read before and
+  re-read by primary key after, deletes read before (`dialect/mysql.ts`). An upsert
+  (`onConflictDoUpdate` / `onDuplicateKeyUpdate`) reads by the conflict target first to decide per
+  row between `create` (`none`) and `update` (`captured`). A before-read that fails becomes
+  `unavailable` if the adapter lets the write proceed.
+- **The handle thunk.** The adapter's `AsyncLocalStorage` holds the active `tx`; `read` returns it,
+  else the root `db`. Lookups and enrichers receive a Drizzle database or transaction and query
+  with `select()`.
+- **Transactions.** `db.transaction(async (tx) => ...)` plays the part of Prisma's `$transaction`.
+  The wrapped `transaction` already runs the callback with a proxied `tx` in its scope
+  (`createTransactionMethod` in `audit-db.ts`); on this boundary it also holds the after-commit
+  queue and starts the queued writes once the callback has resolved, discarding them when it
+  throws. The implicit transaction is a `db.transaction` around the audited statement
+  (`withImplicitTransaction` in `transaction.ts`). A nested `tx.transaction(...)` is a savepoint:
+  its queue joins the parent's when it succeeds and is dropped when it rolls back, all inside the
+  adapter.
+- **`WriteExecutor`.** `handle.insert(auditLogTable).values(rows)` (`writeAuditLogs` in
+  `write-executor.ts`), closing over the audit-log `Table`.
+- **Relation fields.** Rows returned by `insert`, `update` and `delete` hold columns only, so
+  `relationFieldNames` returns an empty set.
+
+Nothing in `policy`, `resolve`, `compose` or `dispatch` needs to change for it: the call-time
+`read` thunk returns the callback-scoped Drizzle `tx` the same way it returns a Prisma transaction
+client.
+
 See the [main README](../../README.md) for the Prisma adapter's documentation.
 
 ## License
