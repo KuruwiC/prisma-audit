@@ -7,7 +7,7 @@ import type { NestedPreFetchResults } from '../../../src/grammar/nested-operatio
 import type { DMMFField, PrismaClientWithDynamicAccess, PrismaNamespace } from '../../../src/internal-types.js';
 import { buildNestedWriteSets, detectExecutedNestedOperations } from '../../../src/nested/events/write-set.js';
 import { snapshotPreExistingRows } from '../../../src/nested/pre-fetch/pre-existing-rows.js';
-import { storePreFetchResult } from '../../../src/nested/pre-fetch/pre-fetch-result-store.js';
+import { storePreFetchResult, storeUnreadRows } from '../../../src/nested/pre-fetch/pre-fetch-result-store.js';
 import { createSchemaMetadataFromDMMF } from '../../../src/utils/schema-metadata.js';
 
 const scalar = (name: string, extra: Partial<DMMFField> = {}): DMMFField => ({
@@ -124,7 +124,7 @@ describe('snapshotPreExistingRows', () => {
 
   it('snapshots a deeper path under the parent rows the pre-fetch found', async () => {
     const results: NestedPreFetchResults = new Map();
-    storePreFetchResult(results, 'posts', 'p1', { kind: 'captured', row: { id: 'p1', authorId: 'u1' } });
+    storePreFetchResult(results, 'posts', 'p1', { before: { kind: 'captured', row: { id: 'p1', authorId: 'u1' } } });
     const findMany = vi.fn(async () => [{ id: 'c1' }]);
 
     const preExisting = await snapshot(
@@ -138,6 +138,41 @@ describe('snapshotPreExistingRows', () => {
 
     expect(findMany).toHaveBeenCalledWith({ where: { post: { is: { id: 'p1' } } }, select: { id: true } });
     expect(preExisting).toEqual(new Map([['posts.comments', new Set(['c1'])]]));
+  });
+
+  const updateWithCommentCreate = {
+    where: { id: 'u1' },
+    data: { posts: { update: { where: { id: 'p1' }, data: { comments: { create: { content: 'x' } } } } } },
+  };
+
+  it('snapshots a deeper path under the key of a parent row whose read failed', async () => {
+    const results: NestedPreFetchResults = new Map();
+    storeUnreadRows(results, 'posts', [{ id: 'p1' }], { type: 'primaryKey', fields: ['id'] });
+    const findMany = vi.fn(async () => [{ id: 'c1' }]);
+
+    const preExisting = await snapshot(
+      updateWithCommentCreate,
+      { user: { findUnique: vi.fn(), findFirst: vi.fn() }, comment: { findMany } },
+      results,
+    );
+
+    expect(findMany).toHaveBeenCalledWith({ where: { post: { is: { id: 'p1' } } }, select: { id: true } });
+    expect(preExisting).toEqual(new Map([['posts.comments', new Set(['c1'])]]));
+  });
+
+  it('rejects for a deeper path under a parent row that could not be read and is not known by its key', async () => {
+    const results: NestedPreFetchResults = new Map();
+    storeUnreadRows(results, 'posts', undefined, { type: 'primaryKey', fields: ['id'] });
+    const findMany = vi.fn(async () => [{ id: 'c1' }]);
+
+    await expect(
+      snapshot(
+        updateWithCommentCreate,
+        { user: { findUnique: vi.fn(), findFirst: vi.fn() }, comment: { findMany } },
+        results,
+      ),
+    ).rejects.toThrow('Cannot snapshot the rows at nested path "posts.comments"');
+    expect(findMany).not.toHaveBeenCalled();
   });
 
   it('records an empty snapshot without a query for a deeper path whose parent the operation creates', async () => {

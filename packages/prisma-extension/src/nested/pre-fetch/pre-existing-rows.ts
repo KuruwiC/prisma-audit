@@ -112,14 +112,21 @@ const snapshotPath = async (
   relation: PathRelation,
 ): Promise<ReadonlySet<EntityIdentityKey>> => {
   const { operation, parentPk, pk, scope, client } = relation;
+  const { rows: readParentRows, allKnown } = await resolveParentRows({
+    path: operation.path,
+    parentFields: scope.parentFields,
+    topLevelWhere: input.topLevelWhere,
+    topLevelModelClient: getPreFetchModelClient(input.prismaClient, input.modelName),
+    preFetchResults: input.nestedPreFetchResults,
+  });
+  if (!allKnown) {
+    throw new Error(
+      `[@prisma-audit] Cannot snapshot the rows at nested path "${operation.path}": ` +
+        'a row it is nested under could not be read',
+    );
+  }
   const parentRows = [
-    ...(await resolveParentRows({
-      path: operation.path,
-      parentFields: scope.parentFields,
-      topLevelWhere: input.topLevelWhere,
-      topLevelModelClient: getPreFetchModelClient(input.prismaClient, input.modelName),
-      preFetchResults: input.nestedPreFetchResults,
-    })),
+    ...readParentRows,
     ...parentKeysFromOperationWheres(
       parentOperationsNotPreFetched(operation.path, input.nestedOperations, deps.getNestedOperationConfig),
       parentPk,
@@ -144,8 +151,9 @@ const snapshotPath = async (
 
 /**
  * Snapshot the primary keys each to-many path with a pending create holds under its parent rows.
- * A path whose relation cannot be resolved gets no entry. A failed snapshot query rejects: without
- * the snapshot the rows that existed before cannot be told apart from the created ones.
+ * A path whose relation cannot be resolved gets no entry. A failed snapshot query rejects, and so
+ * does a path nested under a row that could not be read and is not known by its key: without the
+ * snapshot the rows that existed before cannot be told apart from the created ones.
  */
 export const snapshotPreExistingRows = async (
   input: SnapshotPreExistingRowsInput,

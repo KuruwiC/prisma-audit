@@ -4,17 +4,24 @@
 
 import { describe, expect, it } from 'vitest';
 import type { NestedPreFetchResults } from '../../../src/grammar/nested-operations.js';
-import { preFetchedStateAt, storePreFetchResult } from '../../../src/nested/pre-fetch/pre-fetch-result-store.js';
+import {
+  preFetchedStateAt,
+  storePreFetchResult,
+  storeReadResult,
+  storeUnreadRows,
+} from '../../../src/nested/pre-fetch/pre-fetch-result-store.js';
+import type { UniqueConstraint } from '../../../src/schema/types.js';
 import { UNRESOLVED_ENTITY_ID } from '../../../src/utils/identity-key.js';
+
+const pk: UniqueConstraint = { type: 'primaryKey', fields: ['id'] };
+const compositePk: UniqueConstraint = { type: 'primaryKey', fields: ['postId', 'tagId'] };
 
 describe('preFetchedStateAt', () => {
   const results = (): NestedPreFetchResults => {
     const store: NestedPreFetchResults = new Map();
-    storePreFetchResult(store, 'posts', 'p1', { kind: 'captured', row: { id: 'p1', slug: 'first' } });
-    storePreFetchResult(store, 'posts', 'missing', { kind: 'none' });
-    storePreFetchResult(store, 'comments', 'c1', { kind: 'captured', row: { id: 'c1' } });
-    storePreFetchResult(store, 'comments', UNRESOLVED_ENTITY_ID, { kind: 'unavailable' });
-    storePreFetchResult(store, 'profile', 'pr1', { kind: 'captured', row: { id: 'pr1' } });
+    storeReadResult(store, 'posts', { slug: 'first' }, { id: 'p1', slug: 'first' }, pk);
+    storeReadResult(store, 'posts', { id: 'missing' }, null, pk);
+    storePreFetchResult(store, 'profile', 'pr1', { before: { kind: 'captured', row: { id: 'pr1' } } });
     return store;
   };
 
@@ -34,12 +41,65 @@ describe('preFetchedStateAt', () => {
     expect(preFetchedStateAt(results(), 'tags', { id: 't1' })).toEqual({ kind: 'none' });
     expect(preFetchedStateAt(undefined, 'posts', { id: 'p1' })).toEqual({ kind: 'none' });
   });
+});
 
-  it('gives unavailable for a row without a captured row at a path whose pre-fetch failed', () => {
-    expect(preFetchedStateAt(results(), 'comments', { id: 'c2' })).toEqual({ kind: 'unavailable' });
+describe('storeUnreadRows', () => {
+  it('marks the rows a failed read names by primary key unavailable and keeps what other reads found', () => {
+    const store: NestedPreFetchResults = new Map();
+    storeReadResult(store, 'comments', { id: 'c1' }, { id: 'c1', content: 'one' }, pk);
+    storeReadResult(store, 'comments', { id: 'new' }, null, pk);
+    storeUnreadRows(store, 'comments', [{ id: 'c1' }, { id: 'c2' }], pk);
+
+    expect(preFetchedStateAt(store, 'comments', { id: 'c1' })).toEqual({
+      kind: 'captured',
+      row: { id: 'c1', content: 'one' },
+    });
+    expect(preFetchedStateAt(store, 'comments', { id: 'c2' })).toEqual({ kind: 'unavailable' });
+    expect(preFetchedStateAt(store, 'comments', { id: 'new' })).toEqual({ kind: 'none' });
+    expect(preFetchedStateAt(store, 'comments', { id: 'c3' })).toEqual({ kind: 'none' });
+    expect(store.get('comments')?.get('c2')).toEqual({ before: { kind: 'unavailable' }, key: { id: 'c2' } });
   });
 
-  it('keeps a row captured before the pre-fetch of its path failed', () => {
-    expect(preFetchedStateAt(results(), 'comments', { id: 'c1' })).toEqual({ kind: 'captured', row: { id: 'c1' } });
+  it("matches a composite primary key's compound-unique WHERE to the key it stored", () => {
+    const store: NestedPreFetchResults = new Map();
+    storeUnreadRows(store, 'postTags', [{ postId_tagId: { postId: 'p1', tagId: 't1' } }], compositePk);
+
+    expect(preFetchedStateAt(store, 'postTags', { postId_tagId: { postId: 'p1', tagId: 't1' } })).toEqual({
+      kind: 'unavailable',
+    });
+    expect(preFetchedStateAt(store, 'postTags', { postId_tagId: { postId: 'p1', tagId: 't2' } })).toEqual({
+      kind: 'none',
+    });
+  });
+
+  it('marks the whole path when a failed read names a row by another unique field or targets a to-one row', () => {
+    const store: NestedPreFetchResults = new Map();
+    const c1 = { id: 'c1', slug: 'first' };
+    storeReadResult(store, 'comments', { id: 'c1' }, c1, pk);
+    storeUnreadRows(store, 'comments', [{ slug: 'second' }], pk);
+    storeUnreadRows(store, 'profile', undefined, pk);
+
+    expect(preFetchedStateAt(store, 'comments', { id: 'c1' })).toEqual({ kind: 'captured', row: c1 });
+    expect(preFetchedStateAt(store, 'comments', { id: 'c2' })).toEqual({ kind: 'unavailable' });
+    expect(preFetchedStateAt(store, 'profile', undefined)).toEqual({ kind: 'unavailable' });
+  });
+
+  it('keeps the whole-path mark when a later read finds no row of unknown identity', () => {
+    const store: NestedPreFetchResults = new Map();
+    storeUnreadRows(store, 'comments', undefined, pk);
+    storeReadResult(store, 'comments', { slug: 'other' }, null, pk);
+
+    expect(store.get('comments')?.get(UNRESOLVED_ENTITY_ID)).toEqual({ before: { kind: 'unavailable' } });
+  });
+});
+
+describe('storeReadResult', () => {
+  it('stores a row not found under only some of its possible parent rows as unavailable', () => {
+    const store: NestedPreFetchResults = new Map();
+    storeReadResult(store, 'posts.comments', { id: 'c1' }, null, pk, false);
+    storeReadResult(store, 'posts.comments', { id: 'c2' }, { id: 'c2' }, pk, false);
+
+    expect(preFetchedStateAt(store, 'posts.comments', { id: 'c1' })).toEqual({ kind: 'unavailable' });
+    expect(preFetchedStateAt(store, 'posts.comments', { id: 'c2' })).toEqual({ kind: 'captured', row: { id: 'c2' } });
   });
 });

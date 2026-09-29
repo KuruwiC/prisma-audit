@@ -46,7 +46,7 @@ export interface NestedWriteTarget {
   readonly operation: NestedOperationInfo;
   /**
    * The row's pre-fetched before state: none when it did not exist under the parent or was not
-   * pre-fetched, unavailable when the pre-fetch of the path failed
+   * pre-fetched, unavailable when it could not be read
    */
   readonly before: BeforeState;
 }

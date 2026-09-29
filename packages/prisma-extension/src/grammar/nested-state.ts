@@ -11,8 +11,14 @@ import { NO_BEFORE_STATE } from '../utils/before-state.js';
 import type { UpsertBranch } from './nested-operations.js';
 import { AUDIT_ACTION } from './operations.js';
 
+/**
+ * What the pre-fetch learned of a row at a nested path: its before state and, when that holds no
+ * row, the primary key the operation's WHERE names the row by (absent when the WHERE names it by
+ * another unique field)
+ */
 export type NestedPreFetchResult = {
   readonly before: BeforeState;
+  readonly key?: Record<string, unknown>;
 };
 
 export type ResolvedNestedState = {

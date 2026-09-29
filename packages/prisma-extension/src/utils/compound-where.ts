@@ -58,3 +58,15 @@ export const matchesUniqueWhere = (row: Record<string, unknown>, whereClause: Re
     }
     return isRecord(expected) ? matchesUniqueWhere(row, expected) : true;
   });
+
+/**
+ * Whether `whereClause` names the row whose primary key is `key`: it compares every key field to
+ * the key's value, directly or inside a compound-unique wrapper (`{ a_b: { a, b } }`).
+ */
+export const namesKey = (key: Record<string, unknown>, whereClause: Record<string, unknown>): boolean => {
+  const wrapped = Object.values(whereClause).filter(isRecord);
+  return Object.entries(key).every(([field, value]) => {
+    const named = field in whereClause ? whereClause[field] : wrapped.find((inner) => field in inner)?.[field];
+    return named !== undefined && isComparableValue(named) && valuesEqual(value, named);
+  });
+};

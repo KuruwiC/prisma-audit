@@ -15,6 +15,7 @@ import {
   type NestedBatchTargets,
   type NestedOperationInfo,
   type NestedPreFetchResults,
+  targetWhereClauses,
 } from '../../grammar/nested-operations.js';
 import {
   filterOperationsToPreFetch,
@@ -32,7 +33,7 @@ import type { SchemaMetadata, UniqueConstraint } from '../../schema/types.js';
 import type { AuditErrorObserver } from '../../types.js';
 import { beforeStateOf } from '../../utils/before-state.js';
 import { preFetchLog } from '../../utils/debug.js';
-import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID } from '../../utils/identity-key.js';
+import type { EntityIdentityKey } from '../../utils/identity-key.js';
 import {
   getPreFetchListClient,
   getPreFetchModelClient,
@@ -47,7 +48,7 @@ import {
 } from './one-to-many-fetcher.js';
 import { preFetchOneToOneRelation, resolveToOneRelationLink } from './one-to-one-fetcher.js';
 import { isRecord, parentKeysFromOperationWheres, parentPathOf } from './parent-rows.js';
-import { extractEntityId, storePreFetchResult } from './pre-fetch-result-store.js';
+import { storePreFetchResult, storeReadResult, storeUnreadRows } from './pre-fetch-result-store.js';
 
 type PrismaDMMF = PrismaNamespace['dmmf'];
 
@@ -57,14 +58,13 @@ export interface PreFetchCoordinatorDependencies {
   readonly schemaMetadata: SchemaMetadata;
   readonly getNestedOperationConfig: GetOperationConfig;
   /**
-   * Notified when a single nested operation's pre-fetch query fails. The path is recorded as
-   * `unavailable` under the `UNRESOLVED_ENTITY_ID` sentinel, so a row of the path without a
-   * captured row of its own reads as unavailable, and the caller's own operation continues.
-   * Mirrors the top-level equivalent, `fetchBeforeState` in pipeline/before-state.ts, which
-   * reports the same failure class through the same observer. Optional: when omitted, the
-   * failure is visible only via `preFetchLog`. The filter read of an `updateMany` /
-   * `deleteMany` is not reported here: it identifies the rows the keyword writes, so its
-   * failure rejects the pre-fetch, like the read of a top-level batch operation.
+   * Notified when a single nested operation's pre-fetch query fails. The rows the read left
+   * unknown are recorded as `unavailable` (see pre-fetch-result-store.ts), and the caller's own
+   * operation continues. Mirrors the top-level equivalent, `fetchBeforeState` in
+   * pipeline/before-state.ts, which reports the same failure class through the same observer.
+   * Optional: when omitted, the failure is visible only via `preFetchLog`. The filter read of an
+   * `updateMany` / `deleteMany` is not reported here: it identifies the rows the keyword writes,
+   * so its failure rejects the pre-fetch, like the read of a top-level batch operation.
    */
   readonly onPreFetchFailure?: AuditErrorObserver;
 }
@@ -235,7 +235,12 @@ export const preFetchNestedRecordsBeforeOperation = async (
       if (isNestedBatchKeyword(nestedOp.operation)) {
         throw error;
       }
-      storePreFetchResult(preFetchResults, nestedOp.path, UNRESOLVED_ENTITY_ID, { kind: 'unavailable' });
+      storeUnreadRows(
+        preFetchResults,
+        nestedOp.path,
+        targetsNamedByWhere(nestedOp) ? targetWhereClauses(nestedOp.operation, nestedOp.data) : undefined,
+        context.resolvePkConstraint(nestedOp.relatedModel),
+      );
       preFetchLog('pre-fetch failed: path=%s error=%o', nestedOp.path, error);
       await reportNestedPreFetchFailure(onPreFetchFailure, nestedOp, error);
     }
@@ -243,6 +248,13 @@ export const preFetchNestedRecordsBeforeOperation = async (
 
   return preFetch;
 };
+
+/**
+ * Whether the operation names each row it targets by a unique WHERE; a to-one `update` /
+ * `upsert` / `delete` targets the related row of each parent row instead
+ */
+const targetsNamedByWhere = (nestedOp: NestedOperationInfo): boolean =>
+  nestedOp.isList || nestedOp.operation === 'connectOrCreate';
 
 interface NestedPreFetchContext {
   prismaClient: PrismaClientWithDynamicAccess | TransactionalPrismaClient;
@@ -355,11 +367,9 @@ const handleConnectOrCreate = async (
     }
 
     const beforeRecord = await relatedModelClient.findUnique({ where: whereClause });
-    const entityId = extractEntityId(beforeRecord, whereClause, pkConstraint);
+    storeReadResult(preFetchResults, nestedOp.path, whereClause, beforeRecord, pkConstraint);
 
-    storePreFetchResult(preFetchResults, nestedOp.path, entityId, beforeStateOf(beforeRecord));
-
-    preFetchLog('connectOrCreate added to map: path=%s entityId=%s', nestedOp.path, entityId);
+    preFetchLog('connectOrCreate stored: path=%s found=%s', nestedOp.path, beforeRecord !== null);
   }
 };
 
@@ -371,7 +381,7 @@ const handleOneToOneRelation = async (
   const { topLevelWhere, topLevelModelClient, preFetchResults } = context;
   const { nestedOp, field, relatedModel, pkConstraint } = relation;
 
-  const results = await preFetchOneToOneRelation({
+  const { results, parentsKnown } = await preFetchOneToOneRelation({
     path: nestedOp.path,
     link: resolveToOneRelationLink(field, relatedModel),
     topLevelWhere,
@@ -382,9 +392,14 @@ const handleOneToOneRelation = async (
   });
 
   for (const result of results) {
-    storePreFetchResult(preFetchResults, nestedOp.path, result.entityId, beforeStateOf(result.beforeRecord));
+    storePreFetchResult(preFetchResults, nestedOp.path, result.entityId, {
+      before: beforeStateOf(result.beforeRecord),
+    });
 
     preFetchLog('1:1 added to map: path=%s entityId=%s', nestedOp.path, result.entityId);
+  }
+  if (!parentsKnown) {
+    storeUnreadRows(preFetchResults, nestedOp.path, undefined, pkConstraint);
   }
 };
 

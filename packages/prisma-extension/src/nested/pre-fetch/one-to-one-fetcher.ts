@@ -26,6 +26,12 @@ export interface PreFetchOneToOneResult {
   beforeRecord: PreFetchRecord | null;
 }
 
+export interface PreFetchOneToOneResults {
+  readonly results: PreFetchOneToOneResult[];
+  /** False when a parent row could not be read and is not known by its link fields, so its related row was not read */
+  readonly parentsKnown: boolean;
+}
+
 const pairLinkFields = (
   relationName: string,
   parentFields: readonly string[] | undefined,
@@ -90,10 +96,10 @@ export interface PreFetchOneToOneRelationInput extends Omit<ResolveParentRowsInp
  */
 export const preFetchOneToOneRelation = async (
   input: PreFetchOneToOneRelationInput,
-): Promise<PreFetchOneToOneResult[]> => {
+): Promise<PreFetchOneToOneResults> => {
   const { link, relatedModelClient, pkFields } = input;
 
-  const parentRows = await resolveParentRows({ ...input, parentFields: link.parentFields });
+  const { rows: parentRows, allKnown } = await resolveParentRows({ ...input, parentFields: link.parentFields });
   preFetchLog('1:1 parent rows: path=%s count=%d', input.path, parentRows.length);
 
   const results: PreFetchOneToOneResult[] = [];
@@ -110,5 +116,5 @@ export const preFetchOneToOneRelation = async (
     results.push({ entityId: extractEntityIdOrUnresolved(beforeRecord, pkFields), beforeRecord });
   }
 
-  return results;
+  return { results, parentsKnown: allKnown };
 };

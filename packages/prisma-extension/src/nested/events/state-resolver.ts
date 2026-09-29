@@ -48,11 +48,11 @@ const resolveConnectOrCreateRow = (before: BeforeState): ResolvedState | undefin
  *
  * - **create / createMany**: action=create, no before state
  * - **update / updateMany**: action=update, the pre-fetched before state (`unavailable` when the
- *   pre-fetch of the path failed)
+ *   row could not be read)
  * - **upsert**: action=update when the row existed (its before state included when the update
- *   config asks for it), create when it did not, not audited when its pre-fetch failed
+ *   config asks for it), create when it did not, not audited when it could not be read
  * - **connectOrCreate**: create when the row did not exist; not audited when it existed (it was
- *   connected) or its pre-fetch failed
+ *   connected) or could not be read
  * - **connect / set**: not audited
  * - **delete / deleteMany**: handled separately
  */

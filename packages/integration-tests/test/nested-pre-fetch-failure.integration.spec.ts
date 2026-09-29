@@ -2,8 +2,8 @@
  * Integration Test: nested pre-fetch failures are reported to the observer
  *
  * `preFetchNestedRecordsBeforeOperation` (`nested/pre-fetch/coordinator.ts`) wraps
- * each nested operation's pre-fetch in a per-operation try/catch that falls back to
- * the `UNRESOLVED_ENTITY_ID` sentinel on failure. It reports the failure through
+ * each nested operation's pre-fetch in a per-operation try/catch that records the rows
+ * the failed read left unknown as unavailable. It reports the failure through
  * `errorHandling.observer` with `phase: 'pre-fetch'`, matching the top-level
  * equivalent (`fetchBeforeState` in `pipeline/before-state.ts`): a nested `update`/`delete` whose
  * pre-fetch query fails keeps that notification even though it loses its before-state.

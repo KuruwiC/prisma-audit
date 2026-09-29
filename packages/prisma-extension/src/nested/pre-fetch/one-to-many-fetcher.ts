@@ -17,13 +17,13 @@ import {
 } from '../../grammar/nested-operations.js';
 import type { DMMFField, DMMFModel } from '../../internal-types.js';
 import type { UniqueConstraint } from '../../schema/types.js';
-import { beforeStateOf } from '../../utils/before-state.js';
+import { NO_BEFORE_STATE } from '../../utils/before-state.js';
 import { preFetchLog } from '../../utils/debug.js';
 import { extractEntityIdentity } from '../../utils/id-generation.js';
 import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID } from '../../utils/identity-key.js';
 import type { PreFetchListClient, PreFetchModelClient, PreFetchRecord } from './model-client.js';
-import { parentKeyOf, type ResolveParentRowsInput, resolveParentRows } from './parent-rows.js';
-import { extractEntityId, storePreFetchResult } from './pre-fetch-result-store.js';
+import { type ParentRows, parentKeyOf, type ResolveParentRowsInput, resolveParentRows } from './parent-rows.js';
+import { storePreFetchResult, storeReadResult } from './pre-fetch-result-store.js';
 
 /** A related row belongs to the parent row when `backField` matches the parent's `parentFields`. */
 export interface ToManyRelationScope {
@@ -83,10 +83,10 @@ export interface ToManyScopeInput extends Omit<ResolveParentRowsInput, 'parentFi
   parentKeysFromWhere: readonly PreFetchRecord[];
 }
 
-const resolveScopedParentRows = async (input: ToManyScopeInput): Promise<PreFetchRecord[]> => [
-  ...(await resolveParentRows({ ...input, parentFields: input.scope.parentFields })),
-  ...input.parentKeysFromWhere,
-];
+const resolveScopedParentRows = async (input: ToManyScopeInput): Promise<ParentRows> => {
+  const { rows, allKnown } = await resolveParentRows({ ...input, parentFields: input.scope.parentFields });
+  return { rows: [...rows, ...input.parentKeysFromWhere], allKnown };
+};
 
 export interface PreFetchOneToManyRelationInput extends ToManyScopeInput {
   operation: NestedOperationKeyword;
@@ -100,8 +100,9 @@ export interface PreFetchOneToManyRelationInput extends ToManyScopeInput {
  * The WHERE is a `<Model>WhereUniqueInput`, so it goes to `findUnique` with the back-relation
  * filter added under `AND` — including Prisma's compound-unique shape for composite primary keys
  * (`{ a_b: { a, b } }`, or a custom name from `@@id([a, b], name: "custom")`). Entity-identity
- * derivation (`extractEntityId`) and `matchesUniqueWhere` unwrap that shape. Parent rows are
- * tried in turn until one holds the row; when no parent row exists, nothing is queried or stored.
+ * derivation and `matchesUniqueWhere` unwrap that shape. Parent rows are tried in turn until one
+ * holds the row; when no parent row exists, nothing is queried or stored. When a parent row could
+ * not be read and is not known by its key, a row no known parent holds is stored as unavailable.
  */
 export const preFetchOneToManyRelation = async (input: PreFetchOneToManyRelationInput): Promise<void> => {
   const { path, operation, data, scope, relatedModelClient, pkConstraint, preFetchResults } = input;
@@ -112,10 +113,10 @@ export const preFetchOneToManyRelation = async (input: PreFetchOneToManyRelation
     return;
   }
 
-  const parentRows = await resolveScopedParentRows(input);
-  preFetchLog('1:N parent rows: path=%s count=%d', path, parentRows.length);
+  const { rows: parentRows, allKnown } = await resolveScopedParentRows(input);
+  preFetchLog('1:N parent rows: path=%s count=%d allKnown=%s', path, parentRows.length, allKnown);
 
-  if (parentRows.length === 0) {
+  if (parentRows.length === 0 && allKnown) {
     return;
   }
 
@@ -137,10 +138,8 @@ export const preFetchOneToManyRelation = async (input: PreFetchOneToManyRelation
       }
     }
 
-    const entityId = extractEntityId(beforeRecord, where, pkConstraint);
-    storePreFetchResult(preFetchResults, path, entityId, beforeStateOf(beforeRecord));
-
-    preFetchLog('1:N stored: path=%s entityId=%s', path, entityId);
+    storeReadResult(preFetchResults, path, where, beforeRecord, pkConstraint, allKnown);
+    preFetchLog('1:N stored: path=%s found=%s', path, beforeRecord !== null);
   }
 };
 
@@ -154,17 +153,20 @@ export interface PreFetchToManyBatchInput extends ToManyScopeInput {
 const primaryKeyOf = (row: PreFetchRecord, pkFields: readonly string[]): PreFetchRecord =>
   Object.fromEntries(pkFields.map((fieldName) => [fieldName, row[fieldName]]));
 
-/** An identity-only read (`null`) never replaces a row another operation at the path already read */
+/** An identity-only read never replaces what another operation at the path already read */
 const storeMatchedRow = (
   preFetchResults: PreFetchToManyBatchInput['preFetchResults'],
   path: string,
   identity: EntityIdentityKey,
-  before: PreFetchRecord | null,
+  row: PreFetchRecord,
+  fetchBeforeOperation: boolean,
+  pkFields: readonly string[],
 ): void => {
-  if (before === null && preFetchResults.get(path)?.has(identity)) {
-    return;
+  if (fetchBeforeOperation) {
+    storePreFetchResult(preFetchResults, path, identity, { before: { kind: 'captured', row } });
+  } else if (!preFetchResults.get(path)?.has(identity)) {
+    storePreFetchResult(preFetchResults, path, identity, { before: NO_BEFORE_STATE, key: primaryKeyOf(row, pkFields) });
   }
-  storePreFetchResult(preFetchResults, path, identity, beforeStateOf(before));
 };
 
 const scopeFilterToParents = (
@@ -180,9 +182,11 @@ const scopeFilterToParents = (
 /**
  * Pre-reads the rows a nested `updateMany` / `deleteMany` filter matches, scoped through the
  * back-relation the way Prisma scopes the write. Each matched row is stored whole when
- * `fetchBeforeOperation` asks for its before-state, else as an identity with a `null` before-state.
+ * `fetchBeforeOperation` asks for its before-state, else by its primary key with none.
  *
  * @returns The primary key of every matched row, keyed by its identity
+ * @throws Error when a parent row could not be read and is not known by its key: the rows the
+ *   filter matches under it cannot be identified
  */
 export const preFetchToManyBatch = async (
   input: PreFetchToManyBatchInput,
@@ -190,7 +194,13 @@ export const preFetchToManyBatch = async (
   const { path, operation, data, scope, relatedModelClient, pkConstraint, fetchBeforeOperation, preFetchResults } =
     input;
 
-  const parentRows = await resolveScopedParentRows(input);
+  const { rows: parentRows, allKnown } = await resolveScopedParentRows(input);
+  if (!allKnown) {
+    throw new Error(
+      `[@prisma-audit] Cannot identify the rows the ${operation} at nested path "${path}" writes: ` +
+        'a row it is nested under could not be read',
+    );
+  }
   const wheres = batchFilterClauses(operation, data).flatMap((filter) =>
     scopeFilterToParents(filter, scope, parentRows),
   );
@@ -207,7 +217,7 @@ export const preFetchToManyBatch = async (
         continue;
       }
       matched.set(identity, primaryKeyOf(row, pkConstraint.fields));
-      storeMatchedRow(preFetchResults, path, identity, fetchBeforeOperation ? row : null);
+      storeMatchedRow(preFetchResults, path, identity, row, fetchBeforeOperation, pkConstraint.fields);
     }
   }
 

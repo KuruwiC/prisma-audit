@@ -339,7 +339,7 @@ describe('nested to-many batch pre-read', () => {
     expect(delegates.member?.findMany.mock.calls).toEqual([
       [{ where: underA1({ name: 'draft' }), select: { id: true } }],
     ]);
-    expect(results.get('members')?.get('m1')).toEqual({ before: { kind: 'none' } });
+    expect(results.get('members')?.get('m1')).toEqual({ before: { kind: 'none' }, key: { id: 'm1' } });
     expect(batchTargets.get('members')?.get('updateMany')).toEqual(new Map([['m1', { id: 'm1' }]]));
   });
 
@@ -469,6 +469,85 @@ describe('nested to-many batch pre-read', () => {
     expect(delegates.member?.findMany).not.toHaveBeenCalled();
     expect(results.has('members')).toBe(false);
     expect(batchTargets.get('members')?.get('deleteMany')).toEqual(new Map());
+  });
+});
+
+describe('a failed pre-fetch at the parent path', () => {
+  const notesUpsert = { upsert: { where: { id: 'n1' }, create: { body: 'new' }, update: { body: 'changed' } } };
+  const preFetchReporting = (client: TransactionalPrismaClient, args: Row) => {
+    const onPreFetchFailure = vi.fn();
+    const preFetched = preFetchNestedRecordsBeforeOperation(client, 'Account', args, {
+      Prisma,
+      schemaMetadata: createSchemaMetadataFromDMMF(Prisma),
+      getNestedOperationConfig: fetchBefore,
+      onPreFetchFailure,
+    });
+    return { preFetched, onPreFetchFailure };
+  };
+
+  it('reads the rows nested below a row whose read failed under the primary key its WHERE names', async () => {
+    const { client, delegates } = createClient({
+      member: [{ id: 'm1', accountId: 'a1', name: 'first' }],
+      note: [{ id: 'n1', memberId: 'm1', body: 'note' }],
+    });
+    delegates.member?.findUnique.mockRejectedValueOnce(new Error('member read failed'));
+
+    const { preFetched, onPreFetchFailure } = preFetchReporting(client, {
+      where: { id: 'a1' },
+      data: { members: { update: { where: { id: 'm1' }, data: { notes: notesUpsert } } } },
+    });
+    const { results } = await preFetched;
+
+    expect(onPreFetchFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ phase: 'pre-fetch', modelName: 'Member' }),
+    );
+    expect(results.get('members')?.get('m1')).toEqual({ before: { kind: 'unavailable' }, key: { id: 'm1' } });
+    expect(delegates.note?.findUnique.mock.calls).toEqual([
+      [{ where: { id: 'n1', AND: [{ member: { is: { id: 'm1' } } }] } }],
+    ]);
+    expect(results.get('members.notes')?.get('n1')?.before).toMatchObject({ kind: 'captured', row: { body: 'note' } });
+  });
+
+  const belowUnknownMentor = (notes: Row) => ({
+    where: { id: 'a1' },
+    data: {
+      members: {
+        update: { where: { id: 'm1' }, data: { mentor: { update: { name: 'mentor', notes } } } },
+      },
+    },
+  });
+
+  it('stores the rows nested below a to-one row whose read failed as unavailable without reading them', async () => {
+    const { client, delegates } = createClient({
+      member: [{ id: 'm1', accountId: 'a1', mentorId: 'm0', name: 'first' }],
+      note: [{ id: 'n1', memberId: 'm0', body: 'note' }],
+    });
+    delegates.member?.findFirst.mockRejectedValueOnce(new Error('mentor read failed'));
+
+    const { preFetched } = preFetchReporting(client, belowUnknownMentor(notesUpsert));
+    const { results } = await preFetched;
+
+    expect(results.get('members.mentor')?.get(UNRESOLVED_ENTITY_ID)).toEqual({ before: { kind: 'unavailable' } });
+    expect(delegates.note?.findUnique).not.toHaveBeenCalled();
+    expect(results.get('members.mentor.notes')?.get('n1')).toEqual({
+      before: { kind: 'unavailable' },
+      key: { id: 'n1' },
+    });
+  });
+
+  it('rejects for a batch keyword nested below a to-one row whose read failed', async () => {
+    const { client, delegates } = createClient({
+      member: [{ id: 'm1', accountId: 'a1', mentorId: 'm0', name: 'first' }],
+      note: [{ id: 'n1', memberId: 'm0', body: 'note' }],
+    });
+    delegates.member?.findFirst.mockRejectedValueOnce(new Error('mentor read failed'));
+
+    const { preFetched } = preFetchReporting(client, belowUnknownMentor({ deleteMany: { body: 'note' } }));
+
+    await expect(preFetched).rejects.toThrow(
+      'Cannot identify the rows the deleteMany at nested path "members.mentor.notes"',
+    );
+    expect(delegates.note?.findMany).not.toHaveBeenCalled();
   });
 });
 

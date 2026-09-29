@@ -156,6 +156,12 @@ export interface NestedOperationsConfig<TModelName extends string = string> exte
  *   skipped with the writes of its branches, and so is a nested `connectOrCreate` entry. A
  *   nested delete entry the failed fetch leaves without a primary key (a to-one delete, or a
  *   WHERE naming another unique field) is skipped and also reported as `entity-id-resolution`.
+ *   A failed nested fetch affects only the rows it was for: the other nested operations keep
+ *   what their own fetches read, and the rows nested below a row named by its primary key are
+ *   still read under that key. Below a row that cannot be identified otherwise (a to-one
+ *   relation's row, or one named by another unique field), the nested entries are treated as
+ *   if their own fetch had failed, and a nested create or `updateMany` / `deleteMany` there
+ *   fails the operation under `diff-generation`, since the rows it writes cannot be identified.
  * - `log-write`: persisting the audit log entry itself failed. This is the only phase whose
  *   outcome {@link ErrorHandlingConfig.writeFailurePolicy} decides — see
  *   {@link WriteFailurePolicy} for writes that are queued or detached.
