@@ -9,25 +9,25 @@
 
 import type { AuditRecord } from '@kuruwic/db-audit-core';
 
-export type Row = Record<string, unknown>;
+export type MemoryRow = Record<string, unknown>;
 
 /** The handle every read and write runs on: the store itself, or a transaction's overlay of it */
-export interface MemoryDb<TModelName extends string = string> {
-  find(model: TModelName, identity: string): Row | undefined;
-  put(model: TModelName, identity: string, row: Row): void;
+export interface MemoryHandle<TModelName extends string = string> {
+  find(model: TModelName, identity: string): MemoryRow | undefined;
+  put(model: TModelName, identity: string, row: MemoryRow): void;
   remove(model: TModelName, identity: string): void;
   auditLogs(): readonly AuditRecord[];
   appendAuditLogs(records: readonly AuditRecord[]): void;
 }
 
-export interface MemoryStore<TModelName extends string = string> extends MemoryDb<TModelName> {
+export interface MemoryStore<TModelName extends string = string> extends MemoryHandle<TModelName> {
   /** Runs `fn` on an overlay that merges into the store when `fn` resolves and is discarded when it throws */
-  transaction<T>(fn: (tx: MemoryDb<TModelName>) => Promise<T>): Promise<T>;
+  transaction<T>(fn: (tx: MemoryHandle<TModelName>) => Promise<T>): Promise<T>;
 }
 
 const DELETED = Symbol('deleted');
 
-type Change = Row | typeof DELETED;
+type Change = MemoryRow | typeof DELETED;
 
 const getOrCreate = <K, V>(map: Map<K, V>, key: K, create: () => V): V => {
   const existing = map.get(key);
@@ -40,8 +40,8 @@ const getOrCreate = <K, V>(map: Map<K, V>, key: K, create: () => V): V => {
 };
 
 const createOverlay = <TModelName extends string>(
-  base: MemoryDb<TModelName>,
-): MemoryDb<TModelName> & { commit(): void } => {
+  base: MemoryHandle<TModelName>,
+): MemoryHandle<TModelName> & { commit(): void } => {
   const changes = new Map<TModelName, Map<string, Change>>();
   const buffer: AuditRecord[] = [];
   const changesOf = (model: TModelName): Map<string, Change> => getOrCreate(changes, model, () => new Map());
@@ -80,9 +80,9 @@ const createOverlay = <TModelName extends string>(
 };
 
 export const createMemoryStore = <TModelName extends string = string>(): MemoryStore<TModelName> => {
-  const tables = new Map<TModelName, Map<string, Row>>();
+  const tables = new Map<TModelName, Map<string, MemoryRow>>();
   const auditLogs: AuditRecord[] = [];
-  const tableOf = (model: TModelName): Map<string, Row> => getOrCreate(tables, model, () => new Map());
+  const tableOf = (model: TModelName): Map<string, MemoryRow> => getOrCreate(tables, model, () => new Map());
 
   const store: MemoryStore<TModelName> = {
     find: (model, identity) => tables.get(model)?.get(identity),

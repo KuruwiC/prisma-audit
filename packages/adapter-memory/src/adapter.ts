@@ -26,12 +26,12 @@ import type {
 } from '@kuruwic/db-audit-core';
 import { compose, createEntityConfigLookup, dispatch, policy, resolve } from '@kuruwic/db-audit-core';
 import { identityOf, type MemorySchema } from './schema.js';
-import { createMemoryStore, type MemoryDb, type MemoryStore, type Row } from './store.js';
+import { createMemoryStore, type MemoryHandle, type MemoryRow, type MemoryStore } from './store.js';
 import { AUDIT_LOG_MODEL, memoryWriteExecutor } from './write-executor.js';
 
 export interface MemoryAuditOptions<TModelName extends string> {
   readonly schema: MemorySchema<TModelName>;
-  readonly aggregateMapping: AggregateMapping<TModelName, MemoryDb<TModelName>>;
+  readonly aggregateMapping: AggregateMapping<TModelName, MemoryHandle<TModelName>>;
   readonly provider: AuditContextProvider;
   /** Whether audit rows are written in the operation's transaction by default (default: true) */
   readonly awaitWrite?: boolean;
@@ -39,16 +39,16 @@ export interface MemoryAuditOptions<TModelName extends string> {
   readonly excludeFields?: readonly string[];
   readonly redact?: RedactConfig;
   readonly serialization?: SerializationConfig;
-  readonly contextEnricher?: GlobalContextEnricherConfig<AuditActor, unknown, MemoryDb<TModelName>>;
+  readonly contextEnricher?: GlobalContextEnricherConfig<AuditActor, unknown, MemoryHandle<TModelName>>;
 }
 
 export interface MemoryAuditAdapter<TModelName extends string> {
   readonly store: MemoryStore<TModelName>;
-  create(model: TModelName, data: Row): Promise<void>;
-  update(model: TModelName, identity: string, data: Row): Promise<void>;
+  create(model: TModelName, data: MemoryRow): Promise<void>;
+  update(model: TModelName, identity: string, data: MemoryRow): Promise<void>;
   delete(model: TModelName, identity: string): Promise<void>;
   /** Runs `fn` in a transaction of the store; audit writes queued for after commit start once it has committed */
-  transaction<T>(fn: (db: MemoryDb<TModelName>) => Promise<T>): Promise<T>;
+  transaction<T>(fn: (db: MemoryHandle<TModelName>) => Promise<T>): Promise<T>;
   /** Waits for every audit write no caller awaited that is pending at the time of the call */
   flush(): Promise<void>;
   /** Errors of the detached and after-commit writes that failed; `flush` resolves regardless */
@@ -57,7 +57,7 @@ export interface MemoryAuditAdapter<TModelName extends string> {
 
 /** The transaction the current async flow is inside: its handle and the writes queued until it commits */
 interface TransactionScope<TModelName extends string> {
-  readonly handle: MemoryDb<TModelName>;
+  readonly handle: MemoryHandle<TModelName>;
   readonly deferredWrites: Array<() => Promise<void>>;
 }
 
@@ -65,8 +65,8 @@ interface TransactionScope<TModelName extends string> {
 interface AppliedMutation {
   readonly action: MutationAction;
   readonly identity: string;
-  readonly before?: Row;
-  readonly after?: Row;
+  readonly before?: MemoryRow;
+  readonly after?: MemoryRow;
 }
 
 export const createMemoryAuditAdapter = <TModelName extends string>(
@@ -76,7 +76,7 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
   const store = createMemoryStore<TModelName>();
   const entityConfigs = createEntityConfigLookup(options.aggregateMapping);
   const policyConfig: PolicyConfig = { awaitWrite: options.awaitWrite ?? true, awaitWriteIf: options.awaitWriteIf };
-  const resolveConfig: ResolveConfig<TModelName, MemoryDb<TModelName>> = {
+  const resolveConfig: ResolveConfig<TModelName, MemoryHandle<TModelName>> = {
     entity: entityConfigs.byModel,
     rootEntity: entityConfigs.byCategoryAndType,
     actor: options.contextEnricher?.actor,
@@ -89,11 +89,11 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
     relationFieldNames: () => new Set(),
   };
 
-  const scopes = new AsyncLocalStorage<TransactionScope<TModelName>>();
+  const activeScope = new AsyncLocalStorage<TransactionScope<TModelName>>();
   const pending = new Set<Promise<void>>();
 
   /** The handle of the transaction the current flow is inside, else the store; read at each call */
-  const currentHandle = (): MemoryDb<TModelName> => scopes.getStore()?.handle ?? store;
+  const currentHandle = (): MemoryHandle<TModelName> => activeScope.getStore()?.handle ?? store;
 
   const writeFailures: Error[] = [];
 
@@ -110,9 +110,9 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
     pending.add(promise);
   };
 
-  const transaction = async <T>(fn: (db: MemoryDb<TModelName>) => Promise<T>): Promise<T> => {
+  const transaction = async <T>(fn: (db: MemoryHandle<TModelName>) => Promise<T>): Promise<T> => {
     const deferredWrites: Array<() => Promise<void>> = [];
-    const result = await store.transaction((tx) => scopes.run({ handle: tx, deferredWrites }, () => fn(tx)));
+    const result = await store.transaction((tx) => activeScope.run({ handle: tx, deferredWrites }, () => fn(tx)));
     for (const write of deferredWrites) {
       startDetached(write);
     }
@@ -124,18 +124,18 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
     atomic: boolean,
     run: (scope: TransactionScope<TModelName> | undefined) => Promise<T>,
   ): Promise<T> => {
-    const active = scopes.getStore();
+    const active = activeScope.getStore();
     if (active !== undefined || !atomic) {
       return run(active);
     }
-    return transaction(() => run(scopes.getStore()));
+    return transaction(() => run(activeScope.getStore()));
   };
 
   const executePlan = async (plan: WritePlan, scope: TransactionScope<TModelName> | undefined): Promise<void> => {
     if (plan.records.length === 0) {
       return;
     }
-    const write = (handle: MemoryDb<TModelName>): Promise<void> =>
+    const write = (handle: MemoryHandle<TModelName>): Promise<void> =>
       memoryWriteExecutor.write(handle, AUDIT_LOG_MODEL, [...plan.records]);
 
     switch (plan.kind) {
@@ -161,7 +161,7 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
   const runAudited = async (
     model: TModelName,
     op: string,
-    mutate: (handle: MemoryDb<TModelName>) => AppliedMutation,
+    mutate: (handle: MemoryHandle<TModelName>) => AppliedMutation,
   ): Promise<void> => {
     const auditContext = provider.useContext();
     const tags = entityConfigs.byModel(model)?.tags ?? [];
@@ -183,7 +183,7 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
     });
   };
 
-  const requireRow = (handle: MemoryDb<TModelName>, model: TModelName, identity: string): Row => {
+  const requireRow = (handle: MemoryHandle<TModelName>, model: TModelName, identity: string): MemoryRow => {
     const row = handle.find(model, identity);
     if (row === undefined) {
       throw new Error(`[audit-adapter-memory] ${model} "${identity}" not found`);

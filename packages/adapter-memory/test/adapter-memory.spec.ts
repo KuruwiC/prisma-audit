@@ -7,10 +7,15 @@ import {
   to,
 } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
-import { createMemoryAuditAdapter, type MemoryAuditOptions, type MemoryDb, type MemorySchema } from '../src/index.js';
+import {
+  createMemoryAuditAdapter,
+  type MemoryAuditOptions,
+  type MemoryHandle,
+  type MemorySchema,
+} from '../src/index.js';
 
 type ModelName = 'User' | 'Post';
-type Db = MemoryDb<ModelName>;
+type Db = MemoryHandle<ModelName>;
 type UserRow = { id: string; name: string; email?: string };
 type PostRow = { id: string; authorId: string; title: string };
 

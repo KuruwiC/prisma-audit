@@ -4,6 +4,6 @@ export type { MemoryAuditAdapter, MemoryAuditOptions } from './adapter.js';
 export { createMemoryAuditAdapter } from './adapter.js';
 export type { MemorySchema } from './schema.js';
 export { identityOf } from './schema.js';
-export type { MemoryDb, MemoryStore, Row } from './store.js';
+export type { MemoryHandle, MemoryRow, MemoryStore } from './store.js';
 export { createMemoryStore } from './store.js';
 export { AUDIT_LOG_MODEL, memoryWriteExecutor } from './write-executor.js';

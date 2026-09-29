@@ -4,7 +4,7 @@
  * The primary key of each model: the only schema knowledge the adapter needs.
  */
 
-import type { Row } from './store.js';
+import type { MemoryRow } from './store.js';
 
 export type MemorySchema<TModelName extends string = string> = {
   readonly [K in TModelName]: { readonly primaryKey: readonly string[] };
@@ -14,7 +14,7 @@ export type MemorySchema<TModelName extends string = string> = {
 export const identityOf = <TModelName extends string>(
   schema: MemorySchema<TModelName>,
   model: TModelName,
-  row: Row,
+  row: MemoryRow,
 ): string => {
   const values = schema[model].primaryKey.map((field) => row[field]);
   return values.length === 1

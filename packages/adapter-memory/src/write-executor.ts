@@ -6,12 +6,12 @@
  */
 
 import type { WriteExecutor } from '@kuruwic/db-audit-core';
-import type { MemoryDb } from './store.js';
+import type { MemoryHandle } from './store.js';
 
 /** The one audit-log model of the store */
 export const AUDIT_LOG_MODEL = 'auditLogs';
 
-const isMemoryDb = (handle: unknown): handle is MemoryDb =>
+const isMemoryHandle = (handle: unknown): handle is MemoryHandle =>
   typeof handle === 'object' && handle !== null && 'appendAuditLogs' in handle;
 
 export const memoryWriteExecutor: WriteExecutor = {
@@ -19,7 +19,7 @@ export const memoryWriteExecutor: WriteExecutor = {
     if (modelName !== AUDIT_LOG_MODEL) {
       throw new Error(`[audit-adapter-memory] Unknown audit-log model "${modelName}"`);
     }
-    if (!isMemoryDb(handle)) {
+    if (!isMemoryHandle(handle)) {
       throw new Error('[audit-adapter-memory] The write handle is not a memory store handle');
     }
     handle.appendAuditLogs(logs);
