@@ -5,7 +5,7 @@
  * (`@@id([postId, userId])`, no single `id` field). It exists so composite-key
  * entityId handling can be exercised through the public audit client instead of
  * only through the white-box unit test in
- * `packages/prisma-extension/test/delete-handler.spec.ts`, which constructs a
+ * `packages/prisma-extension/test/nested/events/delete-handler.spec.ts`, which constructs a
  * `NestedPreFetchResults` map by hand to reach `collectToOneDeleteRecords` directly.
  *
  * Because a composite-key entity has no `entity.id` field, the default
@@ -324,7 +324,7 @@ describe('Composite Primary Key (PostLike)', () => {
    * pipeline can hand it a truncated or corrupted JSON string. That branch guards
    * against a hypothetical bug in a different producer, not a state reachable from
    * real Prisma operations — which is exactly why
-   * `packages/prisma-extension/test/delete-handler.spec.ts` covers it directly, by
+   * `packages/prisma-extension/test/nested/events/delete-handler.spec.ts` covers it directly, by
    * constructing the `NestedPreFetchResults` map by hand.
    *
    * With pre-fetch skipped entirely (this describe block), `collectToManyDeleteRecords`
