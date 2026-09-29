@@ -17,9 +17,11 @@ export type {
   AggregateMapping,
   AuditContext,
   AuditContextProvider,
+  AuditRecord,
   EntityId,
   Result,
   ValidationError,
+  WriteContext,
 } from '@kuruwic/db-audit-core';
 
 export {

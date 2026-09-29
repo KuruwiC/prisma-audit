@@ -926,7 +926,7 @@ Sampling rate per operation. Called once per audited operation with its top-leve
 Hook into the audit log lifecycle.
 
 #### `writer`
-**Type:** `(records: AuditLogData[], context: { auditContext: AuditContext; handle: TClient; defaultWrite: (records: AuditLogData[]) => Promise<void> }) => Promise<void>`
+**Type:** `(records: AuditRecord[], context: WriteContext<TClient>) => Promise<void>`, where `WriteContext<TClient>` is `{ auditContext: AuditContext; handle: TClient; defaultWrite: (records: AuditRecord[]) => Promise<void> }`; both types are exported by the package
 **Default:** Uses `defaultWrite`
 
 Customize how audit logs are written. `handle` is the client the write runs on and `defaultWrite` is the default persistence on that client.
