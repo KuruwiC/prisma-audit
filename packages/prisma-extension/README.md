@@ -216,6 +216,9 @@ The Prisma client itself is the first argument of `createAuditClient`. Audited o
   - No atomicity guarantee
   - **Performance optimization**: Use when high-throughput is more important than completeness
 
+**Other query extensions and the implicit transaction:**
+With `awaitWrite: true` (or `awaitWriteIf` returning `true`) and no transaction active, the audit extension opens an implicit transaction on the client passed to `createAuditClient` and runs the operation again on that transaction's client. That client carries the query extensions applied to the base client before `createAuditClient`, and not the ones applied to the audited client after it (`createAuditClient(...).$extends(...)`). So an extension applied before the audit extension sees such an operation twice — once on the caller's call on its way in, once inside the implicit transaction — while an extension applied after it sees the caller's call once and does not see the operation inside the implicit transaction. Outside the implicit transaction (`awaitWrite: false`, or inside your own `$transaction`) the audit extension continues the call through Prisma's `query` on the same chain, and an extension applied before it sees the operation once. `packages/integration-tests/test/extension-chain.integration.spec.ts` ("Extension Chain Guard") pins these counts.
+
 **Infinite recursion prevention:**
 The extension prevents infinite recursion through:
 - An internal processing flag to skip nested interceptions
@@ -1216,6 +1219,7 @@ await prisma.post.update({
 4. **Performance**: Each nested operation may require additional database queries for pre-fetching
    - **Default behavior** (`fetchBeforeOperation: true`): Pre-fetches data to ensure complete and accurate audit trails
    - **Optimization** (`fetchBeforeOperation: false`): Skips pre-fetching for improved performance (trade-off: may miss some nested operation details)
+5. **Primary-key snapshot for nested creates under an existing row**: when the audited row exists before the operation (an `update`, or an `upsert` that takes its update branch) and a to-many relation under it receives a nested `create` or `createMany` — or an `upsert` / `connectOrCreate` whose pre-fetch found no target — the extension reads, before the write, the primary keys of the rows that relation already holds: one `findMany` on the related model per parent row of that relation, selecting the primary-key fields only. A parent row the same operation creates has no rows yet and issues no read. The relation is read back whole after the write, and the snapshot is what tells the created rows apart from their existing siblings. The cost is one primary-key-only query per affected relation path and parent row, and the rows it returns grow linearly with the number of children the parent already has. A failed snapshot fails the operation before the caller's write runs: the observer hears it under `diff-generation` and the original error is rethrown, since without the snapshot existing rows could not be told apart from created ones.
 
 #### Limitations
 
