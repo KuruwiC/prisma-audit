@@ -55,8 +55,6 @@ const resolveConnectOrCreateRow = (before: BeforeState): ResolvedState | undefin
  *   connected) or its pre-fetch failed
  * - **connect / set**: not audited
  * - **delete / deleteMany**: handled separately
- *
- * @param before - The row's pre-fetched before state
  */
 export const resolveNestedRowState = (
   nestedOp: NestedOperationInfo,

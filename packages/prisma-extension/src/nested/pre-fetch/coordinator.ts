@@ -57,11 +57,11 @@ export interface PreFetchCoordinatorDependencies {
   readonly schemaMetadata: SchemaMetadata;
   readonly getNestedOperationConfig: GetOperationConfig;
   /**
-   * Notified when a single nested operation's pre-fetch query fails. The path is recorded
-   * as `unavailable` under the `UNRESOLVED_ENTITY_ID` sentinel, so a row of the path without
-   * a captured row of its own reads as unavailable, and the caller's own operation continues — mirrors the top-level equivalent,
-   * `fetchBeforeState` in pipeline/before-state.ts, which reports the same failure class
-   * through the same observer. Optional: when omitted, the failure is visible only via
+   * Notified when a single nested operation's pre-fetch query fails. The path is recorded as
+   * `unavailable` under the `UNRESOLVED_ENTITY_ID` sentinel, so a row of the path without a
+   * captured row of its own reads as unavailable, and the caller's own operation continues.
+   * Mirrors the top-level equivalent, `fetchBeforeState` in pipeline/before-state.ts, which
+   * reports the same failure class through the same observer. Optional: when omitted, the failure is visible only via
    * `preFetchLog`.
    */
   readonly onPreFetchFailure?: AuditErrorObserver;

@@ -160,13 +160,12 @@ export interface NestedOperationsConfig<TModelName extends string = string> exte
  *   outcome {@link ErrorHandlingConfig.writeFailurePolicy} decides — see
  *   {@link WriteFailurePolicy} for writes that are queued or detached.
  * - `diff-generation`: other audit-support work around the caller's operation failed —
- *   building the entry (enrichment, redaction), reading the primary
- *   keys a to-many relation holds before a nested create under an existing row (the caller's
- *   write is then never attempted), re-reading a nested row the operation updated that its
- *   result did not return, or, for batch operations, fetching the affected rows before or
- *   after the mutation. This phase is NOT
- *   policy-gated: it always propagates to the caller as a thrown error, regardless of
- *   {@link ErrorHandlingConfig.writeFailurePolicy}.
+ *   building the entry (enrichment, redaction), reading the primary keys a to-many relation
+ *   holds before a nested create under an existing row (the caller's write is then never
+ *   attempted), re-reading a nested row the operation updated that its result did not return,
+ *   or, for batch operations, fetching the affected rows before or after the mutation. This
+ *   phase is NOT policy-gated: it always propagates to the caller as a thrown error, regardless
+ *   of {@link ErrorHandlingConfig.writeFailurePolicy}.
  * - `entity-id-resolution`: a nested delete's primary key could not be resolved, from
  *   the pre-fetched row, its WHERE or the operation data. The caller's operation
  *   continues; that record's audit log entry is skipped rather than recorded with a

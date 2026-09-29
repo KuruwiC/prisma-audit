@@ -128,7 +128,6 @@ interface CreateDelegate {
   create: (args: unknown) => Promise<{ id: string }>;
 }
 
-/** The model's delegate on `tx`, which must support `operation` */
 const requireDelegate = <TDelegate extends object>(
   tx: TransactionalPrismaClient,
   modelName: string,

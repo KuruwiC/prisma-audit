@@ -712,9 +712,8 @@ describe('Error Handling Integration', () => {
       // post the nested update writes is absent from the result, and its after state is
       // read again by the primary key read ahead of the write once the write has run. That
       // read is injected to fail (the first `post.findFirst` after the top-level `user.update`
-      // wrote); the
-      // failure is a diff-generation failure like any other, not a nested audit row silently
-      // left out.
+      // wrote); the failure is a diff-generation failure like any other, not a nested audit
+      // row silently left out.
       const REREAD_FAILURE_MESSAGE = 'simulated nested re-read failure';
       const rereadError = new Error(REREAD_FAILURE_MESSAGE);
       const rawBasePrisma = new PrismaClient({ datasources: { db: { url: context.databaseUrl } } });

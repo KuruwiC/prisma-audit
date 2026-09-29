@@ -193,7 +193,7 @@ const connectOrCreateCreateData = (
     .filter(isRecord);
 };
 
-/** @internal Process connectOrCreate operation - explore the create data of the elements that create their row */
+/** @internal Process connectOrCreate operation */
 const processConnectOrCreateOperation = (
   schemaMetadata: SchemaMetadata,
   relationField: { name: string; relatedModel: string; isList: boolean },

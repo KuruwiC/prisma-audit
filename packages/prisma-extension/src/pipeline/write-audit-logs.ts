@@ -26,7 +26,6 @@ export interface WriteAuditLogsDependencies {
   readonly failureSink: FailureSink;
 }
 
-/** Executes a write plan in the scope of the operation its records belong to */
 export type WriteAuditLogs = (plan: WritePlan, scope: ExecutionScope) => Promise<void>;
 
 interface PlannedWrite {

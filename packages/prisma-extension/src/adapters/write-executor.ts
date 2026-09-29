@@ -11,7 +11,6 @@ import type { AuditRecord, WriteExecutor } from '@kuruwic/db-audit-core';
 import type { DMMFModel } from '../internal-types.js';
 import { getModelAccessor } from '../utils/model-accessor.js';
 
-/** The audit-log field that stores {@link AuditRecord.beforeUnavailable} when the model declares it */
 const BEFORE_UNAVAILABLE_FIELD = 'beforeUnavailable';
 
 export interface PrismaWriteExecutorOptions {

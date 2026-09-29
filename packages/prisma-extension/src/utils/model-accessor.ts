@@ -14,7 +14,6 @@ import { uncapitalizeFirst } from './extension-utils.js';
  */
 export const getModelAccessor = (modelName: string): string => uncapitalizeFirst(modelName);
 
-/** The model's delegate on a client (base, extended or transaction client), or undefined */
 export const getModelDelegate = (
   client: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
   modelName: string,

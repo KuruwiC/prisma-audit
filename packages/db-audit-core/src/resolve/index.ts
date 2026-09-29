@@ -97,7 +97,6 @@ interface Entry<TModelName extends string> {
   readonly row: Row;
 }
 
-/** An entry whose entity id resolved */
 interface IdentifiedEntry<TModelName extends string> extends Entry<TModelName> {
   readonly entityId: string;
 }

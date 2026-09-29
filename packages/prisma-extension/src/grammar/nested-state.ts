@@ -11,7 +11,6 @@ import { NO_BEFORE_STATE } from '../utils/before-state.js';
 import type { UpsertBranch } from './nested-operations.js';
 import { AUDIT_ACTION } from './operations.js';
 
-/** What the pre-fetch knows of one row before the operation */
 export type NestedPreFetchResult = {
   readonly before: BeforeState;
 };
