@@ -2,46 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { getModelAccessor } from '../../src/utils/model-accessor.js';
 
 describe('getModelAccessor', () => {
-  it('should return correct accessor for User model (without DMMF)', () => {
-    const accessor = getModelAccessor({}, 'User');
-    expect(accessor).toBe('user');
+  it('lowercases the first letter of a model declared in PascalCase', () => {
+    expect(getModelAccessor('User')).toBe('user');
+    expect(getModelAccessor('UserProfile')).toBe('userProfile');
+    expect(getModelAccessor('UuidV7Item')).toBe('uuidV7Item');
+    expect(getModelAccessor('APIKey')).toBe('aPIKey');
   });
 
-  it('should use DMMF plural when available', () => {
-    const mockClient = {
-      _dmmf: {
-        mappings: {
-          modelOperations: [{ model: 'User', plural: 'users' }],
-        },
-      },
-    };
-
-    const accessor = getModelAccessor(mockClient, 'User');
-    expect(accessor).toBe('users');
-  });
-
-  it('should fallback to camelCase when DMMF mapping not found', () => {
-    const mockClient = {
-      _dmmf: {
-        mappings: {
-          modelOperations: [{ model: 'Post', plural: 'posts' }],
-        },
-      },
-    };
-
-    const accessor = getModelAccessor(mockClient, 'User');
-    expect(accessor).toBe('user');
-  });
-
-  it('should handle missing DMMF gracefully', () => {
-    const mockClient = {} as Record<string, unknown>;
-    const accessor = getModelAccessor(mockClient, 'User');
-    expect(accessor).toBe('user');
-  });
-
-  it('should handle various model name formats', () => {
-    expect(getModelAccessor({}, 'UserProfile')).toBe('userProfile');
-    expect(getModelAccessor({}, 'APIKey')).toBe('aPIKey');
-    expect(getModelAccessor({}, 'Post')).toBe('post');
+  it('returns the name of a model declared with a lowercase first letter unchanged', () => {
+    expect(getModelAccessor('auditEvent')).toBe('auditEvent');
   });
 });

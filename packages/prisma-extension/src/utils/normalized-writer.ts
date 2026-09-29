@@ -13,7 +13,9 @@
  */
 
 import type { AuditRecord } from '@kuruwic/db-audit-core';
+import type { TransactionalPrismaClient } from '../internal-types.js';
 import type { AuditLogWriter } from '../types.js';
+import { getModelDelegate, hasOperation } from './model-accessor.js';
 
 /**
  * Entity-normalized schema configuration
@@ -65,16 +67,6 @@ interface AggregateData {
   externalId: string;
   context: unknown;
 }
-
-/**
- * Capitalizes the first letter of a string to match Prisma model naming convention
- *
- * @internal
- */
-const capitalizeModelName = (name: string): string => {
-  if (!name) return name;
-  return name.charAt(0).toUpperCase() + name.slice(1);
-};
 
 const getActorKey = (log: AuditRecord): string => {
   return `${log.actorCategory}:${log.actorType}:${log.actorId}`;
@@ -128,14 +120,26 @@ const deduplicateData = (logs: AuditRecord[]): DeduplicationResult => {
   return { actors, entities, aggregates };
 };
 
-type TransactionClient = Record<
-  string,
-  {
-    upsert?: (args: unknown) => Promise<{ id: string }>;
-    create?: (args: unknown) => Promise<{ id: string }>;
-    [key: string]: unknown;
+interface UpsertDelegate {
+  upsert: (args: unknown) => Promise<{ id: string }>;
+}
+
+interface CreateDelegate {
+  create: (args: unknown) => Promise<{ id: string }>;
+}
+
+/** The model's delegate on `tx`, which must support `operation` */
+const requireDelegate = <TDelegate extends object>(
+  tx: TransactionalPrismaClient,
+  modelName: string,
+  operation: keyof TDelegate & string,
+): TDelegate => {
+  const delegate = getModelDelegate(tx, modelName);
+  if (!hasOperation<TDelegate>(delegate, operation)) {
+    throw new Error(`Model "${modelName}" not found or does not support ${operation} operation`);
   }
->;
+  return delegate;
+};
 
 /**
  * Batch upserts actors and returns a mapping of keys to IDs
@@ -143,17 +147,12 @@ type TransactionClient = Record<
  * @internal
  */
 const batchUpsertActors = async (
-  tx: TransactionClient,
+  tx: TransactionalPrismaClient,
   modelName: string,
   actors: Map<string, ActorData>,
 ): Promise<Map<string, string>> => {
   const actorMap = new Map<string, string>();
-  const capitalizedModelName = capitalizeModelName(modelName);
-  const model = tx[capitalizedModelName];
-
-  if (!model || typeof model.upsert !== 'function') {
-    throw new Error(`Model "${capitalizedModelName}" not found or does not support upsert operation`);
-  }
+  const model = requireDelegate<UpsertDelegate>(tx, modelName, 'upsert');
 
   for (const [key, actorData] of actors) {
     const actor = await model.upsert({
@@ -179,17 +178,12 @@ const batchUpsertActors = async (
  * @internal
  */
 const batchUpsertEntities = async (
-  tx: TransactionClient,
+  tx: TransactionalPrismaClient,
   modelName: string,
   entities: Map<string, EntityData>,
 ): Promise<Map<string, string>> => {
   const entityMap = new Map<string, string>();
-  const capitalizedModelName = capitalizeModelName(modelName);
-  const model = tx[capitalizedModelName];
-
-  if (!model || typeof model.upsert !== 'function') {
-    throw new Error(`Model "${capitalizedModelName}" not found or does not support upsert operation`);
-  }
+  const model = requireDelegate<UpsertDelegate>(tx, modelName, 'upsert');
 
   for (const [key, entityData] of entities) {
     const entity = await model.upsert({
@@ -215,17 +209,12 @@ const batchUpsertEntities = async (
  * @internal
  */
 const batchUpsertAggregates = async (
-  tx: TransactionClient,
+  tx: TransactionalPrismaClient,
   modelName: string,
   aggregates: Map<string, AggregateData>,
 ): Promise<Map<string, string>> => {
   const aggregateMap = new Map<string, string>();
-  const capitalizedModelName = capitalizeModelName(modelName);
-  const model = tx[capitalizedModelName];
-
-  if (!model || typeof model.upsert !== 'function') {
-    throw new Error(`Model "${capitalizedModelName}" not found or does not support upsert operation`);
-  }
+  const model = requireDelegate<UpsertDelegate>(tx, modelName, 'upsert');
 
   for (const [key, aggregateData] of aggregates) {
     const aggregate = await model.upsert({
@@ -251,19 +240,14 @@ const batchUpsertAggregates = async (
  * @internal
  */
 const createAuditEvents = async (
-  tx: TransactionClient,
+  tx: TransactionalPrismaClient,
   modelName: string,
   logs: AuditRecord[],
   actorMap: Map<string, string>,
   entityMap: Map<string, string>,
   aggregateMap: Map<string, string>,
 ): Promise<void> => {
-  const capitalizedModelName = capitalizeModelName(modelName);
-  const model = tx[capitalizedModelName];
-
-  if (!model || typeof model.create !== 'function') {
-    throw new Error(`Model "${capitalizedModelName}" not found or does not support create operation`);
-  }
+  const model = requireDelegate<CreateDelegate>(tx, modelName, 'create');
 
   for (const log of logs) {
     const actorKey = getActorKey(log);
@@ -297,7 +281,7 @@ const createAuditEvents = async (
 };
 
 type PrismaClientWithTransaction = {
-  $transaction: <T>(fn: (tx: TransactionClient) => Promise<T>) => Promise<T>;
+  $transaction: <T>(fn: (tx: TransactionalPrismaClient) => Promise<T>) => Promise<T>;
 };
 
 /** A client outside any transaction can open one; Prisma omits `$transaction` from a transaction's client */
@@ -305,8 +289,8 @@ const canOpenTransaction = (handle: unknown): handle is PrismaClientWithTransact
   typeof (handle as Partial<PrismaClientWithTransaction> | null)?.$transaction === 'function';
 
 /** Runs `write` in the transaction `handle` belongs to, or in one it opens when it is outside any */
-const writeInTransaction = (handle: unknown, write: (tx: TransactionClient) => Promise<void>): Promise<void> =>
-  canOpenTransaction(handle) ? handle.$transaction(write) : write(handle as TransactionClient);
+const writeInTransaction = (handle: unknown, write: (tx: TransactionalPrismaClient) => Promise<void>): Promise<void> =>
+  canOpenTransaction(handle) ? handle.$transaction(write) : write(handle as TransactionalPrismaClient);
 
 /**
  * Creates a writer that stores audit logs in a normalized schema with separate tables for actors,
@@ -339,7 +323,7 @@ export const createEntityNormalizedWriter = (schema: NormalizedSchema): AuditLog
 
     const { actors, entities, aggregates } = deduplicateData(logs);
 
-    const writeWithinTransaction = async (tx: TransactionClient) => {
+    const writeWithinTransaction = async (tx: TransactionalPrismaClient) => {
       const actorMap = await batchUpsertActors(tx, schema.actorModel, actors);
       const entityMap = await batchUpsertEntities(tx, schema.entityModel, entities);
       const aggregateMap = await batchUpsertAggregates(tx, schema.aggregateModel, aggregates);
@@ -458,26 +442,11 @@ export const createSharedChangeWriter = (schema: SharedChangeSchema): AuditLogWr
       }
     };
 
-    const writeWithinTransaction = async (tx: TransactionClient) => {
-      const capitalizedChangeModel = capitalizeModelName(schema.changeModel);
-      const capitalizedAggregateModel = capitalizeModelName(schema.aggregateModel);
+    const writeWithinTransaction = async (tx: TransactionalPrismaClient) => {
+      const changeModel = requireDelegate<CreateDelegate>(tx, schema.changeModel, 'create');
+      const aggregateModel = requireDelegate<CreateDelegate>(tx, schema.aggregateModel, 'create');
 
-      const changeModel = tx[capitalizedChangeModel];
-      const aggregateModel = tx[capitalizedAggregateModel];
-
-      if (!changeModel || typeof changeModel.create !== 'function') {
-        throw new Error(`Model "${capitalizedChangeModel}" not found or does not support create operation`);
-      }
-
-      if (!aggregateModel || typeof aggregateModel.create !== 'function') {
-        throw new Error(`Model "${capitalizedAggregateModel}" not found or does not support create operation`);
-      }
-
-      await processChangeGroups(
-        changeModel as { create: (args: { data: unknown }) => Promise<{ id: string }> },
-        aggregateModel as { create: (args: { data: unknown }) => Promise<unknown> },
-        changeGroups,
-      );
+      await processChangeGroups(changeModel, aggregateModel, changeGroups);
     };
 
     await writeInTransaction(handle, writeWithinTransaction);
