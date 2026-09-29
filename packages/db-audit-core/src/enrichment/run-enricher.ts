@@ -1,7 +1,7 @@
 /**
- * Enrichment executor
+ * Enricher runs
  *
- * Core logic for executing enrichers with timeout and error handling.
+ * Runs an enricher under a timeout and handles its failure per the enricher's `onError`.
  */
 
 import { ENRICHMENT_TIMEOUTS } from '../constants.js';
@@ -57,7 +57,7 @@ const handleEnricherError = <TContext>(
  * Runs `config.enricher` under `timeoutMs`; null when no enricher is configured. A failure,
  * including a timeout, is handled per `config.onError`.
  */
-export const executeEnricherSafely = async <TInput, TContext, TMeta = void>(
+export const runEnricher = async <TInput, TContext, TMeta = void>(
   config: EnricherConfig<TInput, TContext, unknown, TMeta> | undefined,
   input: TInput,
   db: unknown,
@@ -121,7 +121,7 @@ const handleBatchEnricherError = <TContext>(
  * A failure, including a timeout or a result of the wrong length, is handled per `config.onError`;
  * when it is not rethrown, `fallback` (an array) or nulls stand in for every input.
  */
-export const executeBatchEnricherSafely = async <TInput, TContext, TMeta = void>(
+export const runBatchEnricher = async <TInput, TContext, TMeta = void>(
   config: EnricherConfig<TInput[], (TContext | null)[], unknown, TMeta> | undefined,
   inputs: TInput[],
   db: unknown,

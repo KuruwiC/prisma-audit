@@ -29,7 +29,7 @@ import type {
 import type { GlobalContextEnricherConfig } from '../config.types.js';
 import { ENRICHMENT_TIMEOUTS } from '../constants.js';
 import type { MutationEvent, ResolvedEvent } from '../domain/mutation-event.js';
-import { executeBatchEnricherSafely, executeEnricherSafely } from '../enrichment/executor.js';
+import { runBatchEnricher, runEnricher } from '../enrichment/run-enricher.js';
 import type {
   AggregateContextEnricherConfig,
   EntityEnricherConfig,
@@ -378,7 +378,7 @@ const enrichRootContexts = async <TDbHandle>(
       if (!enricher) {
         return;
       }
-      const enriched = await executeBatchEnricherSafely(enricher, group.ids, read(), ENRICHMENT_TIMEOUTS.BATCH);
+      const enriched = await runBatchEnricher(enricher, group.ids, read(), ENRICHMENT_TIMEOUTS.BATCH);
       group.ids.forEach((id, i) => {
         contexts.set(rootContextKey(group.category, group.type, id), enriched[i] ?? null);
       });
@@ -442,7 +442,7 @@ const enrichProjectionContexts = async <TDbHandle>(
     aggregateCategory: group.aggregateCategory,
     aggregateIds: group.entries.map((entry) => entry.aggregateId),
   };
-  return executeBatchEnricherSafely(enricher, rows, read(), ENRICHMENT_TIMEOUTS.BATCH, meta);
+  return runBatchEnricher(enricher, rows, read(), ENRICHMENT_TIMEOUTS.BATCH, meta);
 };
 
 /** Root-side and projection-side contexts merged per root, keyed `${index}:${aggregateType}:${aggregateId}`. */
@@ -492,7 +492,7 @@ const enrichEntityContexts = async <TDbHandle>(
   if (!enricher) {
     return rows.map(() => null);
   }
-  return executeBatchEnricherSafely(enricher, rows, read(), ENRICHMENT_TIMEOUTS.BATCH);
+  return runBatchEnricher(enricher, rows, read(), ENRICHMENT_TIMEOUTS.BATCH);
 };
 
 const contextsOfRoots = (
@@ -575,7 +575,7 @@ export const resolve = async <TModelName extends string, TDbHandle>(
   config: ResolveConfig<TModelName, TDbHandle>,
   read: ReadHandle<TDbHandle>,
 ): Promise<Resolution<TModelName>> => {
-  const actorContext = config.actor ? await executeEnricherSafely(config.actor, auditContext.actor, read()) : null;
+  const actorContext = config.actor ? await runEnricher(config.actor, auditContext.actor, read()) : null;
 
   const resolved: (ResolvedEvent<TModelName> | undefined)[] = events.map(() => undefined);
   const failures: ResolverFailure<TModelName>[] = [];
