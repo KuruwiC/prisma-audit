@@ -37,10 +37,10 @@
  *     `nested/events/delete-handler.ts` for the general "never guess" rule).
  */
 
-import type { AggregateMapping, AuditContext } from '@kuruwic/db-audit-core';
+import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import type { AuditErrorObserver } from '@kuruwic/prisma-audit';
-import { createAuditClient, defineEntity, foreignKey, to } from '@kuruwic/prisma-audit';
+import { createAuditClient } from '@kuruwic/prisma-audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -351,26 +351,14 @@ describe('Composite Primary Key (PostLike)', () => {
       const basePrisma = new PrismaClient({ datasources: { db: { url: sharedDatabaseUrl } } });
       const provider = createAsyncLocalStorageProvider();
       const observer = vi.fn<AuditErrorObserver>();
-      const mappingWithoutPreFetch: AggregateMapping = {
-        ...testAggregateMapping,
-        PostLike: defineEntity({
-          type: 'PostLike',
-          idResolver: async (entity) => {
-            const record = entity as { postId: string; userId: string };
-            return JSON.stringify([record.postId, record.userId]);
-          },
-          aggregates: [to('Post', foreignKey('postId'))],
-          nestedOperations: { delete: { fetchBeforeOperation: false } },
-        }),
-      };
       const prisma = createAuditClient(basePrisma, {
         Prisma,
         provider,
-        aggregateMapping: mappingWithoutPreFetch,
+        aggregateMapping: testAggregateMapping,
         diffing: { excludeFields: ['createdAt'] },
         security: { redact: { fields: [] } },
         performance: { awaitWrite: true },
-        nestedOperations: { delete: { fetchBeforeOperation: false } },
+        nestedOperations: { models: { PostLike: { delete: { fetchBeforeOperation: false } } } },
         errorHandling: { observer },
       });
       scenario = { basePrisma, prisma };

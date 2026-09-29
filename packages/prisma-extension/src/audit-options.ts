@@ -96,10 +96,7 @@ export const normalizeAuditOptions = (options: PrismaAuditExtensionOptions): Aud
     // An audit library must not break the caller's write by default.
     writeFailurePolicy: errorHandling?.writeFailurePolicy ?? 'log',
     getNestedOperationConfig: (modelName, operation) =>
-      getNestedOperationConfig(modelName, operation, {
-        getEntityConfig: aggregateConfig.getEntityConfig,
-        globalNestedOperations: options.nestedOperations,
-      }),
+      getNestedOperationConfig(modelName, operation, options.nestedOperations),
     modelTags,
     shouldAudit: (modelName, context) =>
       shouldAuditModel({

@@ -4,10 +4,10 @@
  * every path that reads a compound-unique WHERE clause must unwrap it under the declared name.
  */
 
-import type { AggregateMapping, AuditContext } from '@kuruwic/db-audit-core';
+import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import type { AuditErrorObserver } from '@kuruwic/prisma-audit';
-import { createAuditClient, defineEntity, foreignKey, to } from '@kuruwic/prisma-audit';
+import { createAuditClient } from '@kuruwic/prisma-audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanDatabase, getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
@@ -54,28 +54,16 @@ describe('Named Composite Primary Key (PostBookmark)', () => {
     const basePrisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
     const provider = createAsyncLocalStorageProvider();
     const observer = vi.fn<AuditErrorObserver>();
-    const aggregateMapping: AggregateMapping = options.fetchBeforeDelete
-      ? testAggregateMapping
-      : {
-          ...testAggregateMapping,
-          PostBookmark: defineEntity({
-            type: 'PostBookmark',
-            idResolver: async (entity) => {
-              const record = entity as { postId: string; userId: string };
-              return JSON.stringify([record.postId, record.userId]);
-            },
-            aggregates: [to('Post', foreignKey('postId'))],
-            nestedOperations: { delete: { fetchBeforeOperation: false } },
-          }),
-        };
     const prisma = createAuditClient(basePrisma, {
       Prisma,
       provider,
-      aggregateMapping,
+      aggregateMapping: testAggregateMapping,
       diffing: { excludeFields: ['createdAt'] },
       security: { redact: { fields: [] } },
       performance: { awaitWrite: true },
-      ...(options.fetchBeforeDelete ? {} : { nestedOperations: { delete: { fetchBeforeOperation: false } } }),
+      ...(options.fetchBeforeDelete
+        ? {}
+        : { nestedOperations: { models: { PostBookmark: { delete: { fetchBeforeOperation: false } } } } }),
       errorHandling: { observer },
     });
     const scenario = { basePrisma, prisma, provider, observer };

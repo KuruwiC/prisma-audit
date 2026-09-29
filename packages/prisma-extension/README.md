@@ -1167,6 +1167,23 @@ Controls whether an `update` or `delete` operation, top-level or nested, fetches
 }
 ```
 
+#### `models`
+**Type:** `{ [Model]?: { update?: { fetchBeforeOperation?: boolean }; delete?: { fetchBeforeOperation?: boolean } } }`
+
+Per-model settings, keyed by model name like `aggregateMapping` (the keys are checked against the client's model names). For each operation, the written model's setting wins, then the global setting, then the default.
+
+```typescript
+{
+  nestedOperations: {
+    update: { fetchBeforeOperation: false },                          // Every model
+    models: {
+      Post: { update: { fetchBeforeOperation: true } },               // Post updates still read the before state
+      PostTag: { delete: { fetchBeforeOperation: false } },           // PostTag deletes skip it
+    },
+  }
+}
+```
+
 #### Nested Operation Support
 
 Supports the following operations, including deep nesting:

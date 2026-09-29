@@ -479,8 +479,8 @@ describe('Nested Update Operations', () => {
     });
   });
 
-  // NOTE: Per-entity vs global nestedOperations config resolution (getNestedOperationConfig) is not
-  // covered here; every test uses the setup.ts defaults.
+  // NOTE: Every test here uses the setup.ts defaults; the per-model vs global resolution of
+  // nestedOperations is covered by nested-delete.integration.spec.ts.
 
   // NOTE: Audit-pipeline failures reach errorHandling.observer; nested pre-fetch failures are covered
   // by nested-pre-fetch-failure.integration.spec.ts.

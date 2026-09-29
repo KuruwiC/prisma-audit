@@ -99,16 +99,37 @@ export interface HooksConfig {
 }
 
 /**
- * Before-state configuration of update and delete operations
+ * Before-state reads of update and delete operations
  *
  * `fetchBeforeOperation` decides whether the row is read before the write, for a top-level
  * update or delete as well as for one nested in another operation. Default: `true`.
  */
-export interface NestedOperationsConfig {
+export interface FetchBeforeConfig {
   /** Update operations, top-level and nested */
   update?: { fetchBeforeOperation?: boolean };
   /** Delete operations, top-level and nested */
   delete?: { fetchBeforeOperation?: boolean };
+}
+
+/**
+ * Before-state reads of update and delete operations, for every model and per model
+ *
+ * For each operation, the setting of the written model under `models` wins, then the global
+ * setting, then the default (`true`).
+ *
+ * @template TModelName - Model names `models` may be keyed with, as the aggregate mapping spells them
+ *
+ * @example
+ * ```typescript
+ * nestedOperations: {
+ *   update: { fetchBeforeOperation: false },               // every model
+ *   models: { Post: { delete: { fetchBeforeOperation: false } } },  // Post only
+ * }
+ * ```
+ */
+export interface NestedOperationsConfig<TModelName extends string = string> extends FetchBeforeConfig {
+  /** Per-model settings, keyed by model name like the aggregate mapping */
+  models?: { readonly [K in TModelName]?: FetchBeforeConfig };
 }
 
 /**
@@ -264,7 +285,7 @@ export interface PrismaAuditExtensionOptions<TModelName extends string = string,
   hooks?: HooksConfig;
   /** Actor enrichment; the enricher receives the operation's `AuditActor` and the client. */
   contextEnricher?: GlobalContextEnricherConfig<AuditActor, unknown, TClient>;
-  nestedOperations?: NestedOperationsConfig;
+  nestedOperations?: NestedOperationsConfig<TModelName>;
   /** Audit-failure observation and policy. See {@link ErrorHandlingConfig}. */
   errorHandling?: ErrorHandlingConfig;
   /** Custom serialization for non-JSON-safe types (BigInt, Date are handled by default) */

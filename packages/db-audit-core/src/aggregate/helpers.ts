@@ -456,11 +456,6 @@ export type DefineEntityOptions<
   aggregateContext?: AggregateContextEnricherConfig<TDbHandle>;
   /** Tags for tag-based configuration rules */
   tags?: string[];
-  /** Per-entity nested operation settings */
-  nestedOperations?: {
-    update?: { fetchBeforeOperation?: boolean };
-    delete?: { fetchBeforeOperation?: boolean };
-  };
 };
 
 /**
@@ -516,7 +511,6 @@ export const defineEntity = <TEntity extends Record<string, unknown> = Record<st
     context,
     aggregateContext,
     tags,
-    nestedOperations,
   } = options;
 
   return {
@@ -529,7 +523,6 @@ export const defineEntity = <TEntity extends Record<string, unknown> = Record<st
     context,
     aggregateContext,
     tags,
-    nestedOperations,
   };
 };
 

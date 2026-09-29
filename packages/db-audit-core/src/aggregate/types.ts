@@ -193,11 +193,6 @@ export interface LoggableEntity<
   aggregateContext?: AggregateContextEnricherConfig<TDbHandle>;
   /** Tags for tag-based configuration and filtering */
   tags?: string[];
-  /** Per-entity nested operation settings */
-  nestedOperations?: {
-    update?: { fetchBeforeOperation?: boolean };
-    delete?: { fetchBeforeOperation?: boolean };
-  };
 }
 
 // ============================================================================

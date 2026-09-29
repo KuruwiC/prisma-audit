@@ -538,8 +538,67 @@ describe('Nested Delete Operations', () => {
     });
   });
 
-  // NOTE: Per-entity vs global nestedOperations config resolution (getNestedOperationConfig) is not
-  // covered here; every test uses the setup.ts defaults.
+  describe('before-state read configured per model', () => {
+    type NestedOperations = Parameters<typeof createAuditClient>[1]['nestedOperations'];
+
+    /** Deletes one post through its author and returns the `before` of the post's own audit log */
+    const deletePostThroughAuthor = async (email: string, nestedOperations: NestedOperations) => {
+      const user = await context.basePrisma.user.create({ data: { email, name: 'Author', password: 'secret123' } });
+      const post = await context.basePrisma.post.create({
+        data: { title: 'Doomed', content: 'Content', authorId: user.id },
+      });
+      const basePrisma = new PrismaClient({ datasources: { db: { url: context.databaseUrl } } });
+      const provider = createAsyncLocalStorageProvider();
+      const prisma = createAuditClient(basePrisma, {
+        Prisma,
+        provider,
+        aggregateMapping: testAggregateMapping,
+        performance: { awaitWrite: true },
+        nestedOperations,
+      });
+
+      try {
+        await provider.runAsync(testActor, () =>
+          prisma.user.update({ where: { id: user.id }, data: { posts: { delete: { id: post.id } } } }),
+        );
+      } finally {
+        await prisma.$disconnect();
+        await basePrisma.$disconnect();
+      }
+
+      const log = await context.basePrisma.auditLog.findFirstOrThrow({
+        where: { entityType: 'Post', entityId: post.id, aggregateType: 'Post' },
+      });
+      return log.before;
+    };
+
+    it('skips the read for a model whose own setting turns it off, whatever the global setting', async () => {
+      const before = await deletePostThroughAuthor('model-off@example.com', {
+        delete: { fetchBeforeOperation: true },
+        models: { Post: { delete: { fetchBeforeOperation: false } } },
+      });
+
+      expect(before).toBeNull();
+    });
+
+    it('reads the before state of a model whose own setting turns it on, whatever the global setting', async () => {
+      const before = await deletePostThroughAuthor('model-on@example.com', {
+        delete: { fetchBeforeOperation: false },
+        models: { Post: { delete: { fetchBeforeOperation: true } } },
+      });
+
+      expect(before).toMatchObject({ title: 'Doomed' });
+    });
+
+    it('applies the global setting to a model the per-model settings do not name', async () => {
+      const before = await deletePostThroughAuthor('other-model@example.com', {
+        delete: { fetchBeforeOperation: false },
+        models: { Comment: { delete: { fetchBeforeOperation: true } } },
+      });
+
+      expect(before).toBeNull();
+    });
+  });
 
   // NOTE: Audit-pipeline failures reach errorHandling.observer; nested pre-fetch failures are covered
   // by nested-pre-fetch-failure.integration.spec.ts.
