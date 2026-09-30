@@ -36,9 +36,9 @@ export type BeforeState =
 export interface MutationEvent<TModelName extends string = string> {
   readonly model: TModelName;
   /**
-   * Serialized primary key ('42', '["a","b"]'), derived synchronously from the schema; '' when
-   * the adapter could not determine it (a row that lacks a primary-key field, or a model without
-   * one). Not the stored `entityId`, which the idResolver produces.
+   * Identifies the row within its model, in a format the adapter defines; '' when the adapter
+   * could not identify the row. The core never parses it: it carries it unchanged into failure
+   * reports. Not the stored `entityId`, which the idResolver produces.
    */
   readonly identity: string;
   readonly action: MutationAction;

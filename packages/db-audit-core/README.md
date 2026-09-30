@@ -28,7 +28,7 @@ dispatch(records, atomic, { inTransaction })   -> WritePlan
 - **`policy`** decides whether the audit rows are written atomically with the operation:
   `awaitWriteIf(model, tags)` when configured, otherwise `awaitWrite`. It runs before the write
   because an atomic write needs a transaction around the operation when none is active.
-- **`MutationEvent`** is one written row as the adapter saw it: model, primary-key identity, action
+- **`MutationEvent`** is one written row as the adapter saw it: model, identity, action
   (`create` / `update` / `delete`), the before state, the after row, and its origin (nested path and
   the adapter's keyword that wrote it). The before state is a `BeforeState`: `captured` with the row
   as read before the write, `none` when there is nothing to carry (a create, a read the
@@ -118,8 +118,8 @@ write the adapter runs, in order:
 
 What the adapter must provide:
 
-- **Mutation capture.** One `MutationEvent` per written row: `model`, `identity` (the serialized
-  primary key in the adapter's own format; the core only carries it), `action`, `before` as a
+- **Mutation capture.** One `MutationEvent` per written row: `model`, `identity` (identifies the
+  row within its model, in a format the adapter defines; the core never parses it), `action`, `before` as a
   `BeforeState` (`captured` with the row read before the write; `none` for a create, for a read the
   configuration does not ask for, or for a read that found no row; `unavailable` when the read was
   asked for and failed, after the adapter reported the failure itself), `after`, and `origin`.
