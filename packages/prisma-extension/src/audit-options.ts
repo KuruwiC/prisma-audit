@@ -5,14 +5,7 @@
  * shape the audit pipeline consumes.
  */
 
-import type {
-  AuditContext,
-  AuditContextProvider,
-  ComposeConfig,
-  PolicyConfig,
-  ResolveConfig,
-  WriteFn,
-} from '@kuruwic/db-audit-core';
+import type { AuditContextProvider, ComposeConfig, PolicyConfig, ResolveConfig, WriteFn } from '@kuruwic/db-audit-core';
 import { createEntityConfigLookup } from '@kuruwic/db-audit-core';
 import { getNestedOperationConfig } from './config/helpers.js';
 import { validateFieldConflicts } from './config/validation.js';
@@ -38,8 +31,8 @@ export interface AuditOptions {
   readonly writeFailurePolicy: WriteFailurePolicy;
   readonly getNestedOperationConfig: GetOperationConfig;
   readonly modelTags: (modelName: string) => string[];
-  /** Whether an operation on `modelName` is audited at all (audit-log model, loggability, sampling) */
-  readonly shouldAudit: (modelName: string | undefined, context: AuditContext | undefined) => boolean;
+  /** Whether operations on `modelName` are audited at all (not the audit-log model, loggable); sampling is the policy's */
+  readonly shouldAudit: (modelName: string) => boolean;
 }
 
 /**
@@ -52,7 +45,6 @@ export const normalizeAuditOptions = (options: PrismaAuditExtensionOptions): Aud
   const schemaMetadata = createSchemaMetadataFromDMMF(Prisma);
   const excludeFields = diffing?.excludeFields ?? [];
   const redact = security?.redact;
-  const sampling = performance?.sampling ?? 1.0;
   const awaitWriteIf = performance?.awaitWriteIf;
   const samplingIf = performance?.samplingIf;
 
@@ -79,6 +71,8 @@ export const normalizeAuditOptions = (options: PrismaAuditExtensionOptions): Aud
     policyConfig: {
       awaitWrite: performance?.awaitWrite ?? true,
       awaitWriteIf: awaitWriteIf && ((modelName, tags) => awaitWriteIf(modelName, [...tags])),
+      sampling: performance?.sampling ?? 1.0,
+      samplingIf: samplingIf && ((modelName, tags) => samplingIf(modelName, [...tags])),
     },
     resolveConfig: {
       entity: entityConfigs.byModel,
@@ -99,13 +93,6 @@ export const normalizeAuditOptions = (options: PrismaAuditExtensionOptions): Aud
     getNestedOperationConfig: (modelName, operation) =>
       getNestedOperationConfig(modelName, operation, options.nestedOperations),
     modelTags,
-    shouldAudit: (modelName, context) =>
-      shouldAuditModel({
-        modelName,
-        context,
-        auditLogModel,
-        isLoggable: entityConfigs.isLoggable,
-        resolveSamplingRate: (model) => (samplingIf ? samplingIf(model, modelTags(model)) : sampling),
-      }),
+    shouldAudit: (modelName) => shouldAuditModel({ modelName, auditLogModel, isLoggable: entityConfigs.isLoggable }),
   };
 };

@@ -2,11 +2,12 @@
  * Memory audit adapter
  *
  * Audited create, update and delete on an in-memory store. Each operation runs the core
- * pipeline: the write policy decides whether its audit rows join the operation's transaction,
- * an implicit transaction opens when they do and none is active, the mutation is applied on
- * the scope's handle and collected as one mutation event, the event is resolved with the id
- * resolvers and enrichers reading through the scope's handle, composed into audit records,
- * dispatched into a write plan and written.
+ * pipeline: the write policy decides whether the operation is sampled in and whether its audit
+ * rows join the operation's transaction, an implicit transaction opens when they do and none is
+ * active, the mutation is applied on the scope's handle and collected as one mutation event, the
+ * event is resolved with the id resolvers and enrichers reading through the scope's handle,
+ * composed into audit records, dispatched into a write plan and written. A sampled-out operation
+ * is applied on the current handle without an event.
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -36,6 +37,9 @@ export interface MemoryAuditOptions<TModelName extends string> {
   /** Whether audit rows are written in the operation's transaction by default (default: true) */
   readonly awaitWrite?: boolean;
   readonly awaitWriteIf?: PolicyConfig['awaitWriteIf'];
+  /** Share of operations audited, from 0 (none) to 1 (every one; the default) */
+  readonly sampling?: number;
+  readonly samplingIf?: PolicyConfig['samplingIf'];
   readonly excludeFields?: readonly string[];
   readonly redact?: RedactConfig;
   readonly serialization?: SerializationConfig;
@@ -75,7 +79,12 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
   const { schema, provider } = options;
   const store = createMemoryStore<TModelName>();
   const entityConfigs = createEntityConfigLookup(options.aggregateMapping);
-  const policyConfig: PolicyConfig = { awaitWrite: options.awaitWrite ?? true, awaitWriteIf: options.awaitWriteIf };
+  const policyConfig: PolicyConfig = {
+    awaitWrite: options.awaitWrite ?? true,
+    awaitWriteIf: options.awaitWriteIf,
+    sampling: options.sampling ?? 1,
+    samplingIf: options.samplingIf,
+  };
   const resolveConfig: ResolveConfig<TModelName, MemoryHandle<TModelName>> = {
     entity: entityConfigs.byModel,
     rootEntity: entityConfigs.byCategoryAndType,
@@ -165,7 +174,12 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
   ): Promise<void> => {
     const auditContext = provider.useContext();
     const tags = entityConfigs.byModel(model)?.tags ?? [];
-    const { atomic } = policy(model, tags, policyConfig);
+    const writePolicy = policy(model, tags, policyConfig);
+    if (!writePolicy.sampled) {
+      mutate(currentHandle());
+      return;
+    }
+    const { atomic } = writePolicy;
 
     await inScope(atomic, async (scope) => {
       const mutation = mutate(scope?.handle ?? store);

@@ -359,6 +359,36 @@ describe('transaction membership', () => {
   });
 });
 
+describe('sampling', () => {
+  it('sampling 0: the row is written and no record is', async () => {
+    const adapter = createAdapter({ sampling: 0 });
+
+    await withContext(() => adapter.create('User', { id: 'u1', name: 'Alice' }));
+
+    expect(adapter.store.find('User', 'u1')).toEqual({ id: 'u1', name: 'Alice' });
+    expect(adapter.store.auditLogs()).toEqual([]);
+  });
+
+  it('samplingIf by tag: a tagged model is audited, an untagged one is not', async () => {
+    const adapter = createAdapter({
+      sampling: 1,
+      samplingIf: (_model, tags) => (tags.includes('critical') ? 1 : 0),
+      aggregateMapping: defineMapping({
+        User: defineEntity<UserRow, Db>({ type: 'User', tags: ['critical'] }),
+        Post: defineEntity<PostRow, Db>({ type: 'Post' }),
+      }),
+    });
+
+    await withContext(async () => {
+      await adapter.create('User', { id: 'u1', name: 'Alice' });
+      await adapter.create('Post', { id: 'p1', authorId: 'u1', title: 'Hello' });
+    });
+
+    expect(adapter.store.find('Post', 'p1')).toEqual({ id: 'p1', authorId: 'u1', title: 'Hello' });
+    expect(adapter.store.auditLogs().map((log) => log.entityType)).toEqual(['User']);
+  });
+});
+
 describe('record composition', () => {
   it('redaction and serialization: sensitive fields are masked, Date and BigInt become strings', async () => {
     const adapter = createAdapter({ redact: { fields: ['email'] } });

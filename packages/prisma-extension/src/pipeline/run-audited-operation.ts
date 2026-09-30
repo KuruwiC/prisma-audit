@@ -1,14 +1,14 @@
 /**
  * Audited operation
  *
- * The one path every audited write takes, single or batch: the write policy decides whether
- * the audit rows join the operation's transaction, the execution scope opens that transaction
- * when needed, the executor's records are dispatched into a write plan and written, and the
- * caller receives the result.
+ * The one path every audited write takes, single or batch: given the write policy's decision
+ * whether the audit rows join the operation's transaction, the execution scope opens that
+ * transaction when needed, the executor's records are dispatched into a write plan and written,
+ * and the caller receives the result.
  */
 
-import type { AuditContext, AuditContextProvider, PolicyConfig } from '@kuruwic/db-audit-core';
-import { dispatch, policy } from '@kuruwic/db-audit-core';
+import type { AuditContext, AuditContextProvider } from '@kuruwic/db-audit-core';
+import { dispatch } from '@kuruwic/db-audit-core';
 import { type FailureSink, toError } from '../failure-sink.js';
 import type { AuditAction } from '../grammar/operations.js';
 import type { PrismaClientWithDynamicAccess } from '../internal-types.js';
@@ -35,12 +35,12 @@ export interface AuditedOperationInput {
   readonly operation: InterceptedOperation;
   readonly auditContext: AuditContext;
   readonly baseClient: PrismaClientWithDynamicAccess;
+  /** The write policy's decision for the sampled-in operation: its audit rows join its transaction */
+  readonly atomic: boolean;
 }
 
 export interface AuditPipelineDependencies {
   readonly provider: AuditContextProvider;
-  readonly policyConfig: PolicyConfig;
-  readonly modelTags: (modelName: string) => readonly string[];
   readonly singleExecutor: OperationExecutor;
   readonly batchExecutor: OperationExecutor;
   readonly produceRecords: RecordProducer;
@@ -125,8 +125,7 @@ export const runAuditedOperation = (
   input: AuditedOperationInput,
   deps: AuditPipelineDependencies,
 ): Promise<unknown> => {
-  const { operation, auditContext, baseClient } = input;
-  const { atomic } = policy(operation.model, deps.modelTags(operation.model), deps.policyConfig);
+  const { operation, auditContext, baseClient, atomic } = input;
 
   return withExecutionScope({ auditContext, baseClient, atomic, provider: deps.provider }, (scope) =>
     runInScope(operation, scope, deps),

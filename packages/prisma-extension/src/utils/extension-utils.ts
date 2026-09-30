@@ -2,12 +2,11 @@
  * Utility functions for Prisma Audit Extension
  *
  * Provides helper functions for string transformations, operation validation,
- * entity ID extraction, and audit eligibility checks.
+ * entity ID extraction, and the audited-model check.
  *
  * @module utils/extension-utils
  */
 
-import type { AuditContext } from '@kuruwic/db-audit-core';
 import { type AuditAction, SUPPORTED_OPERATIONS } from '../grammar/operations.js';
 import type { UniqueConstraint } from '../schema/types.js';
 import { unwrapCompoundWhere } from './compound-where.js';
@@ -109,55 +108,26 @@ const isAuditLogModel = (modelName: string, auditLogModel: string): boolean => {
   return modelName.toLowerCase() === auditLogModel.toLowerCase();
 };
 
-/** Probabilistic sampling: 1.0 audits every operation, 0.0 none */
-const shouldSample = (samplingRate: number): boolean => {
-  return Math.random() < samplingRate;
-};
-
 export interface ShouldAuditModelInput {
-  modelName: string | undefined;
-  context: AuditContext | undefined;
+  modelName: string;
   auditLogModel: string;
   isLoggable: (modelName: string) => boolean;
-  /** Sampling rate (0-1) for the model's operations */
-  resolveSamplingRate: (modelName: string) => number;
 }
 
 /**
- * Determines if audit logging should be applied to a model and operation
- *
- * Applies checks in order: input validation, self-reference prevention (the audit-log model
- * itself), loggability check, and sampling check.
+ * Whether operations on a model are audited: neither the audit-log model itself nor a model the
+ * aggregate mapping does not declare. Sampling is decided per operation by the core `policy`.
  *
  * @example
  * ```typescript
  * const should = shouldAuditModel({
  *   modelName: 'User',
- *   context,
  *   auditLogModel: 'auditLog',
  *   isLoggable: entityConfigs.isLoggable,
- *   resolveSamplingRate: () => 1.0,
  * });
  * ```
  */
 export const shouldAuditModel = (input: ShouldAuditModelInput): boolean => {
-  const { modelName, context, auditLogModel, isLoggable, resolveSamplingRate } = input;
-
-  if (!modelName || !context) {
-    return false;
-  }
-
-  if (isAuditLogModel(modelName, auditLogModel)) {
-    return false;
-  }
-
-  if (!isLoggable(modelName)) {
-    return false;
-  }
-
-  if (!shouldSample(resolveSamplingRate(modelName))) {
-    return false;
-  }
-
-  return true;
+  const { modelName, auditLogModel, isLoggable } = input;
+  return !isAuditLogModel(modelName, auditLogModel) && isLoggable(modelName);
 };

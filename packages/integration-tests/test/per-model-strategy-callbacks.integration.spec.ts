@@ -111,6 +111,20 @@ describe('Per-model strategy callbacks for models without tags', () => {
         await scenario.dispose();
       }
     });
+    it('does not consult samplingIf for a read operation', async () => {
+      const samplingIf = vi.fn((_modelName: string, _tags: string[]) => 1);
+      const scenario = createScenario(context.databaseUrl, { performance: { awaitWrite: true, samplingIf } });
+
+      try {
+        await scenario.run(async () => {
+          await scenario.prisma.tag.findMany();
+        });
+
+        expect(samplingIf).not.toHaveBeenCalled();
+      } finally {
+        await scenario.dispose();
+      }
+    });
   });
 
   describe('awaitWriteIf', () => {

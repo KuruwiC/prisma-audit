@@ -17,7 +17,7 @@ It is installed as a dependency of `@kuruwic/prisma-audit`. Each GitHub release 
 An adapter calls four functions for each intercepted write:
 
 ```
-policy(model, tags, config)                    -> { atomic }        before the write runs
+policy(model, tags, config)                    -> { sampled, atomic } before the write runs
   adapter runs the write, collects one MutationEvent per written row
 resolve(events, auditContext, config, read)    -> { resolved, failures }
 compose(resolvedEvents, ambient, now)          -> AuditRecord[]
@@ -25,9 +25,12 @@ dispatch(records, atomic, { inTransaction })   -> WritePlan
   adapter executes the WritePlan with its WriteExecutor
 ```
 
-- **`policy`** decides whether the audit rows are written atomically with the operation:
-  `awaitWriteIf(model, tags)` when configured, otherwise `awaitWrite`. It runs before the write
-  because an atomic write needs a transaction around the operation when none is active.
+- **`policy`** decides, once per audited operation, whether the operation is sampled in
+  (`Math.random()` below `samplingIf(model, tags)` when configured, otherwise below `sampling`)
+  and, only when it is, whether the audit rows are written atomically with it:
+  `awaitWriteIf(model, tags)` when configured, otherwise `awaitWrite`. A sampled-out operation
+  gets `{ sampled: false }` and writes no audit rows. It runs before the write because an atomic
+  write needs a transaction around the operation when none is active.
 - **`MutationEvent`** is one written row as the adapter saw it: model, identity, action
   (`create` / `update` / `delete`), the before state, the after row, and its origin (nested path and
   the adapter's keyword that wrote it). The before state is a `BeforeState`: `captured` with the row
@@ -97,9 +100,10 @@ An adapter owns everything that touches the database: intercepting writes, readi
 transactions and persisting records. The core owns the decisions in between. For each intercepted
 write the adapter runs, in order:
 
-1. **`policy(model, tags, policyConfig)`**, before any statement runs, to learn whether the audit
-   rows are written atomically with the write. The tags come from the entity's configuration
-   (`createEntityConfigLookup(mapping).byModel(model)?.tags`).
+1. **`policy(model, tags, policyConfig)`**, before any statement runs, to learn whether the
+   operation is sampled in and, when it is, whether the audit rows are written atomically with the
+   write. A sampled-out operation runs as it would without the adapter. The tags come from the
+   entity's configuration (`createEntityConfigLookup(mapping).byModel(model)?.tags`).
 2. **The write, in its scope.** When `atomic` is true and no transaction is active, the adapter
    opens an implicit transaction and runs the write, and everything below, on that transaction's
    handle. It then captures one `MutationEvent` per written row.
@@ -140,7 +144,12 @@ What the adapter must provide:
 `runAudited` in `src/adapter.ts` is the whole sequence:
 
 ```typescript
-const { atomic } = policy(model, tags, policyConfig);
+const writePolicy = policy(model, tags, policyConfig);
+if (!writePolicy.sampled) {
+  mutate(currentHandle());
+  return;
+}
+const { atomic } = writePolicy;
 
 await inScope(atomic, async (scope) => {
   const mutation = mutate(scope?.handle ?? store);

@@ -1,15 +1,17 @@
 /**
  * Prisma Audit Extension
  *
- * The `$allOperations` hook: decides whether an intercepted operation is audited, selects the
- * relations its nested writes touch, runs it through the audited-operation pipeline on the
- * library-owned runtime context, and returns the result in the shape the caller requested.
+ * The `$allOperations` hook: decides whether an intercepted operation is audited (its model, its
+ * kind, then the write policy's sampling), selects the relations its nested writes touch, runs it
+ * through the audited-operation pipeline on the library-owned runtime context, and returns the
+ * result in the shape the caller requested.
  *
  * @module extension
  * @see {@link createAuditLogExtension}
  * @see {@link PrismaAuditExtensionOptions}
  */
 
+import { policy } from '@kuruwic/db-audit-core';
 import { createPrismaWriteExecutor, declaresBeforeUnavailableColumn } from './adapters/write-executor.js';
 import { type AuditOptions, normalizeAuditOptions } from './audit-options.js';
 import { createFailureSink } from './failure-sink.js';
@@ -31,8 +33,6 @@ const createPipelineDependencies = (audit: AuditOptions): AuditPipelineDependenc
 
   return {
     provider: audit.provider,
-    policyConfig: audit.policyConfig,
-    modelTags: audit.modelTags,
     singleExecutor: createSingleExecutor({ Prisma, schemaMetadata, getNestedOperationConfig, failureSink }),
     batchExecutor: createBatchExecutor({ Prisma, schemaMetadata }),
     produceRecords: createRecordProducer({ ...audit, failureSink }),
@@ -73,10 +73,14 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
             if (isProcessingAuditLog()) {
               return query(args);
             }
-            if (!model || !auditContext || !audit.shouldAudit(model, auditContext)) {
+            if (!model || !auditContext || !audit.shouldAudit(model)) {
               return query(args);
             }
             if (!isAuditableAction(operation)) {
+              return query(args);
+            }
+            const writePolicy = policy(model, audit.modelTags(model), audit.policyConfig);
+            if (!writePolicy.sampled) {
               return query(args);
             }
 
@@ -90,6 +94,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
                   operation: { model, action: operation, args: injection.args as Record<string, unknown>, query },
                   auditContext,
                   baseClient,
+                  atomic: writePolicy.atomic,
                 },
                 deps,
               ),
