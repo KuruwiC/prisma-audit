@@ -105,7 +105,7 @@ export const createSingleExecutor = (deps: SingleExecutorDependencies): Operatio
         // Reported under its own phase: the record's identity is what failed, not a pre-fetch or diff generation.
         onUnresolvedDeleteEntityId: ({ relatedModel, entityId, pkFields, error }) =>
           failureSink.notify({
-            phase: 'entity-id-resolution',
+            phase: 'row-identification',
             modelName: relatedModel,
             operation: 'delete',
             params: { entityId, pkFields },

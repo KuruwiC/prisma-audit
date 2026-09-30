@@ -216,7 +216,7 @@ export interface PrismaAuditExtensionOptions<TModelName extends string = string,
    *   entry, top-level or nested, whose create-vs-update action depends on the before-state, is
    *   skipped with the writes of its branches, and so is a nested `connectOrCreate` entry. A
    *   nested delete entry the failed fetch leaves without a primary key (a to-one delete, or a
-   *   WHERE naming another unique field) is skipped and also reported as `entity-id-resolution`.
+   *   WHERE naming another unique field) is skipped and also reported as `row-identification`.
    *   A failed nested fetch affects only the rows it was for: the other nested operations keep
    *   what their own fetches read, and the rows nested below a row named by its primary key are
    *   still read under that key. Below a row that cannot be identified otherwise (a to-one
@@ -233,13 +233,14 @@ export interface PrismaAuditExtensionOptions<TModelName extends string = string,
    *   nested row the operation updated that its result did not return, or, for batch
    *   operations, fetching the affected rows before or after the mutation. It always propagates
    *   to the caller as a thrown error, regardless of `writeFailurePolicy`.
-   * - `entity-id-resolution`: a nested delete's primary key could not be resolved, from the
+   * - `row-identification`: a nested delete's primary key could not be resolved, from the
    *   pre-fetched row, its WHERE or the operation data. The caller's operation continues; that
    *   record's audit log entry is skipped.
-   * - `aggregate-resolution`: an id resolver threw, or returned an id that cannot be normalized
-   *   to a string. The caller's operation continues; `params` is `{ identity, resolver }` with
-   *   the row's serialized primary key and the failed resolver. A failed `batchLookup` resolver
-   *   is reported once for every row of its call.
+   * - `id-resolver-call`: an id resolver (the entity's `idResolver` or a `to()` resolver) threw,
+   *   returned an id that cannot be normalized to a string, or, for a `batchLookup` resolver,
+   *   returned a different number of ids than rows. The caller's operation continues; `params`
+   *   is `{ identity, resolver }` with the row's serialized primary key and the failed resolver.
+   *   A failed `batchLookup` resolver is reported once for every row of its call.
    */
   errorHandling?: ErrorHandlingConfig;
   /** Custom serialization for non-JSON-safe types (BigInt, Date are handled by default) */

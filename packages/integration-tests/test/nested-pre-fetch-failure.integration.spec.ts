@@ -254,7 +254,7 @@ describe('nested pre-fetch failures — observer notification', () => {
       );
 
       // Every item names its primary key, so none is left unresolved.
-      expect(observer).not.toHaveBeenCalledWith(expect.objectContaining({ phase: 'entity-id-resolution' }));
+      expect(observer).not.toHaveBeenCalledWith(expect.objectContaining({ phase: 'row-identification' }));
 
       const rows = await basePrisma.auditLog.findMany({
         where: { entityType: 'Comment', aggregateType: 'Comment', action: 'delete' },

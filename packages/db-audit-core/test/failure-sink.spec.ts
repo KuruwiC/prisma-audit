@@ -186,7 +186,7 @@ describe('createFailureSink', () => {
   });
 
   describe('reportResolverFailures', () => {
-    it('notifies one aggregate-resolution context per failure with the row identity and the failed resolver', async () => {
+    it('notifies one id-resolver-call context per failure with the row identity and the failed resolver', async () => {
       const observer = vi.fn();
       const sink = createFailureSink({ observer });
       const event: MutationEvent = {
@@ -213,7 +213,7 @@ describe('createFailureSink', () => {
       expect(observer.mock.calls).toEqual([
         [
           {
-            phase: 'aggregate-resolution',
+            phase: 'id-resolver-call',
             modelName: 'Post',
             operation: 'create',
             params: { identity: 'p1', resolver: { kind: 'entity' } },
@@ -222,7 +222,7 @@ describe('createFailureSink', () => {
         ],
         [
           {
-            phase: 'aggregate-resolution',
+            phase: 'id-resolver-call',
             modelName: 'Post',
             operation: 'create',
             params: {

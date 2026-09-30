@@ -2,7 +2,7 @@
  * Integration Test: a failing id resolver is reported, and only what depends on it is not audited
  *
  * A resolver that throws never fails the caller's write. The observer hears about it once per
- * affected row with `phase: 'aggregate-resolution'`: an entity `idResolver` failure leaves the row
+ * affected row with `phase: 'id-resolver-call'`: an entity `idResolver` failure leaves the row
  * without any audit log entry, a `to()` resolver failure leaves it without the entry under that
  * aggregate root only.
  */
@@ -22,12 +22,12 @@ import {
 } from './helpers/setup.js';
 
 const testActor: AuditContext = {
-  actor: { category: 'model', type: 'User', id: 'aggregate-resolution-actor' },
+  actor: { category: 'model', type: 'User', id: 'id-resolver-call-actor' },
 };
 
 const BROKEN_TITLE = 'broken';
 
-describe('aggregate-resolution failures', () => {
+describe('id-resolver-call failures', () => {
   let context: TestContext;
 
   beforeAll(async () => {
@@ -57,7 +57,7 @@ describe('aggregate-resolution failures', () => {
 
   const createAuthor = () =>
     context.provider.runAsync(testActor, async () =>
-      context.prisma.user.create({ data: { email: 'aggregate-resolution@example.com', name: 'Author' } }),
+      context.prisma.user.create({ data: { email: 'id-resolver-call@example.com', name: 'Author' } }),
     );
 
   const postIdsByTitle = async (authorId: string): Promise<Record<string, string>> => {
@@ -109,7 +109,7 @@ describe('aggregate-resolution failures', () => {
       ]);
       expect(observer).toHaveBeenCalledTimes(1);
       expect(observer).toHaveBeenCalledWith({
-        phase: 'aggregate-resolution',
+        phase: 'id-resolver-call',
         modelName: 'Post',
         operation: 'createMany',
         params: { identity: ids[BROKEN_TITLE], resolver: { kind: 'entity' } },
@@ -163,7 +163,7 @@ describe('aggregate-resolution failures', () => {
       expect(await postLogs()).toEqual(expectedLogs);
       expect(observer).toHaveBeenCalledTimes(1);
       expect(observer).toHaveBeenCalledWith({
-        phase: 'aggregate-resolution',
+        phase: 'id-resolver-call',
         modelName: 'Post',
         operation: 'createMany',
         params: {

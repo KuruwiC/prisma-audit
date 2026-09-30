@@ -2,7 +2,7 @@
  * Audit record production
  *
  * The one path from mutation events to audit records: resolve the events through the user's
- * id resolvers and enrichers, report each row a resolver failed for as `aggregate-resolution`,
+ * id resolvers and enrichers, report each row a resolver failed for as `id-resolver-call`,
  * then compose the records. The database handle those callbacks receive is the scope's, looked
  * up when each one runs: the client of the transaction the operation runs in when there is one,
  * else the base client, so a callback inside a transaction reads that transaction's writes.

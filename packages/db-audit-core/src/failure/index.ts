@@ -23,21 +23,19 @@ import { createErrorHandler, type ErrorStrategy } from '../utils/error-handler.j
  *   {@link ErrorHandlingConfig.writeFailurePolicy} decides.
  * - `diff-generation`: other work that builds the records failed. Not policy-gated; the adapter
  *   decides whether the caller's operation fails.
- * - `entity-id-resolution`: the adapter could not identify a row the operation wrote. Observer
- *   only; the row's record is skipped rather than written with a partial or fabricated identity.
- * - `aggregate-resolution`: an id resolver threw, or returned an id that cannot be normalized to
- *   a string. Observer only; the entity's `idResolver` failing leaves the row without any record,
- *   a `to()` resolver failing leaves it without the record under that aggregate root only.
+ * - `row-identification`: the adapter itself could not identify a row the operation wrote (no
+ *   user callback is involved). Observer only; the row's record is skipped rather than written
+ *   with a partial or fabricated identity.
+ * - `id-resolver-call`: a user-supplied id resolver (the entity's `idResolver` or a `to()` root's
+ *   resolver) threw, returned an id that cannot be normalized to a string, or, for a batch
+ *   resolver, returned a different number of ids than rows. Observer only; the entity's
+ *   `idResolver` failing leaves the row without any record, a `to()` resolver failing leaves it
+ *   without the record under that aggregate root only.
  *   Reported once per affected row: `modelName` is the row's model, `operation` the keyword that
  *   wrote it, and `params` is `{ identity, resolver }` with the row's identity and either
  *   `{ kind: 'entity' }` or `{ kind: 'aggregate', aggregateCategory, aggregateType }`.
  */
-export type AuditErrorPhase =
-  | 'pre-fetch'
-  | 'log-write'
-  | 'diff-generation'
-  | 'entity-id-resolution'
-  | 'aggregate-resolution';
+export type AuditErrorPhase = 'pre-fetch' | 'log-write' | 'diff-generation' | 'row-identification' | 'id-resolver-call';
 
 /**
  * Structured context describing a single audit-pipeline failure. Passed in the same shape
@@ -109,9 +107,9 @@ export interface FailureSink {
    * throws and never consults the write-failure policy.
    */
   readonly notify: (
-    context: AuditErrorContext & { readonly phase: Exclude<AuditErrorPhase, 'log-write' | 'aggregate-resolution'> },
+    context: AuditErrorContext & { readonly phase: Exclude<AuditErrorPhase, 'log-write' | 'id-resolver-call'> },
   ) => Promise<void>;
-  /** Notifies the observer once per failure `resolve` returned, under `aggregate-resolution`. Never throws. */
+  /** Notifies the observer once per failure `resolve` returned, under `id-resolver-call`. Never throws. */
   readonly reportResolverFailures: (failures: readonly ResolverFailure[]) => Promise<void>;
   /**
    * Reports a failed write of `plan`: notifies the observer under `log-write`, then applies the
@@ -167,7 +165,7 @@ export const createFailureSink = (config: ErrorHandlingConfig): FailureSink => {
   const reportResolverFailures = async (failures: readonly ResolverFailure[]): Promise<void> => {
     for (const { event, resolver, error } of failures) {
       await observe({
-        phase: 'aggregate-resolution',
+        phase: 'id-resolver-call',
         modelName: event.model,
         operation: event.origin.op,
         params: { identity: event.identity, resolver },

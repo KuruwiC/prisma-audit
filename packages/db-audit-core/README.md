@@ -146,10 +146,11 @@ What the adapter must provide:
   (default `'log'`; a policy function that throws falls back to `'log'`).
   - `notify(context)` for a failure the adapter detects itself: `pre-fetch` (a read before the
     write failed), `diff-generation` (other work that builds the records failed) and
-    `entity-id-resolution` (a row the operation wrote could not be identified). What each does
-    to the operation is the adapter's choice, documented by it.
+    `row-identification` (the adapter could not identify a row the operation wrote). What each
+    does to the operation is the adapter's choice, documented by it.
   - `reportResolverFailures(failures)` with the `ResolverFailure`s `resolve` returned instead of
-    throwing, one `aggregate-resolution` notification each.
+    throwing (an id resolver threw or returned no usable id), one `id-resolver-call` notification
+    each.
   - `reportWriteFailure(plan, error)` when executing a `WritePlan` failed: a `log-write`
     notification, then the policy. `'throw'` rejects with the error only for an `immediate`
     plan, whose caller is still waiting; for `after-commit` and `detached` plans it logs, and the
