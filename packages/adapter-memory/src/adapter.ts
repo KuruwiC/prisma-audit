@@ -7,7 +7,8 @@
  * active, the mutation is applied on the scope's handle and collected as one mutation event, the
  * event is resolved with the id resolvers and enrichers reading through the scope's handle,
  * composed into audit records, dispatched into a write plan and written. A sampled-out operation
- * is applied on the current handle without an event.
+ * is applied on the current handle without an event. Failures go through the core failure sink,
+ * whose observer lists them on the adapter before forwarding them to the user's observer.
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -15,7 +16,9 @@ import type {
   AggregateMapping,
   AuditActor,
   AuditContextProvider,
+  AuditErrorContext,
   ComposeConfig,
+  ErrorHandlingConfig,
   GlobalContextEnricherConfig,
   MutationAction,
   MutationEvent,
@@ -25,7 +28,14 @@ import type {
   SerializationConfig,
   WritePlan,
 } from '@kuruwic/db-audit-core';
-import { compose, createEntityConfigLookup, dispatch, policy, resolve } from '@kuruwic/db-audit-core';
+import {
+  compose,
+  createEntityConfigLookup,
+  createFailureSink,
+  dispatch,
+  policy,
+  resolve,
+} from '@kuruwic/db-audit-core';
 import { identityOf, type MemorySchema } from './schema.js';
 import { createMemoryStore, type MemoryHandle, type MemoryRow, type MemoryStore } from './store.js';
 import { memoryWriteExecutor } from './write-executor.js';
@@ -44,6 +54,11 @@ export interface MemoryAuditOptions<TModelName extends string> {
   readonly redact?: RedactConfig;
   readonly serialization?: SerializationConfig;
   readonly contextEnricher?: GlobalContextEnricherConfig<AuditActor, unknown, MemoryHandle<TModelName>>;
+  /**
+   * The user's observer and write-failure policy. The policy defaults to `'throw'`: a failed
+   * write the operation awaits rejects it; a queued or detached one is logged.
+   */
+  readonly errorHandling?: ErrorHandlingConfig;
 }
 
 export interface MemoryAuditAdapter<TModelName extends string> {
@@ -55,8 +70,10 @@ export interface MemoryAuditAdapter<TModelName extends string> {
   transaction<T>(fn: (db: MemoryHandle<TModelName>) => Promise<T>): Promise<T>;
   /** Waits for every audit write no caller awaited that is pending at the time of the call */
   flush(): Promise<void>;
-  /** Errors of the detached and after-commit writes that failed; `flush` resolves regardless */
-  readonly writeFailures: readonly Error[];
+  /** Every audit write that failed (phase `log-write`), awaited or not; `flush` resolves regardless */
+  readonly writeFailures: readonly AuditErrorContext[];
+  /** Every row an id resolver failed for (phase `id-resolver-call`); that row's records are not written */
+  readonly resolverFailures: readonly AuditErrorContext[];
 }
 
 /** The transaction the current async flow is inside: its handle and the writes queued until it commits */
@@ -104,15 +121,25 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
   /** The handle of the transaction the current flow is inside, else the store; read at each call */
   const currentHandle = (): MemoryHandle<TModelName> => activeScope.getStore()?.handle ?? store;
 
-  const writeFailures: Error[] = [];
+  const writeFailures: AuditErrorContext[] = [];
+  const resolverFailures: AuditErrorContext[] = [];
+  const userObserver = options.errorHandling?.observer;
+  const failureSink = createFailureSink({
+    writeFailurePolicy: options.errorHandling?.writeFailurePolicy ?? 'throw',
+    observer: async (context) => {
+      if (context.phase === 'log-write') {
+        writeFailures.push(context);
+      } else if (context.phase === 'id-resolver-call') {
+        resolverFailures.push(context);
+      }
+      await userObserver?.(context);
+    },
+  });
 
-  /** A write no caller awaits: its failure is recorded, never left as an unhandled rejection */
+  /** A write no caller awaits, tracked until it settles; it reports its own failure and never rejects */
   const startDetached = (write: () => Promise<void>): void => {
     const promise = Promise.resolve()
       .then(write)
-      .catch((error: unknown) => {
-        writeFailures.push(error instanceof Error ? error : new Error(String(error)));
-      })
       .finally(() => {
         pending.delete(promise);
       });
@@ -144,8 +171,14 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
     if (plan.records.length === 0) {
       return;
     }
-    const write = (handle: MemoryHandle<TModelName>): Promise<void> =>
-      memoryWriteExecutor.write(handle, [...plan.records]);
+    /** Rejects only for an immediate plan under `'throw'`: the sink decides what a failure does */
+    const write = async (handle: MemoryHandle<TModelName>): Promise<void> => {
+      try {
+        await memoryWriteExecutor.write(handle, [...plan.records]);
+      } catch (error) {
+        await failureSink.reportWriteFailure(plan, error instanceof Error ? error : new Error(String(error)));
+      }
+    };
 
     switch (plan.kind) {
       case 'immediate':
@@ -191,7 +224,8 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
         after: mutation.after,
         origin: { path: '', op },
       };
-      const { resolved } = await resolve([event], auditContext, resolveConfig, currentHandle);
+      const { resolved, failures } = await resolve([event], auditContext, resolveConfig, currentHandle);
+      await failureSink.reportResolverFailures(failures);
       const records = compose(resolved, { auditContext, config: composeConfig }, new Date());
       await executePlan(dispatch(records, atomic, { inTransaction: scope !== undefined }), scope);
     });
@@ -234,5 +268,6 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
       await Promise.all([...pending]);
     },
     writeFailures,
+    resolverFailures,
   };
 };

@@ -177,7 +177,8 @@ await inScope(atomic, async (scope) => {
     after: mutation.after,
     origin: { path: '', op },
   };
-  const { resolved } = await resolve([event], auditContext, resolveConfig, currentHandle);
+  const { resolved, failures } = await resolve([event], auditContext, resolveConfig, currentHandle);
+  await failureSink.reportResolverFailures(failures);
   const records = compose(resolved, { auditContext, config: composeConfig }, new Date());
   await executePlan(dispatch(records, atomic, { inTransaction: scope !== undefined }), scope);
 });
@@ -186,8 +187,10 @@ await inScope(atomic, async (scope) => {
 `inScope` opens the implicit transaction, `currentHandle` reads the active transaction from an
 `AsyncLocalStorage` of its own, `transaction` starts the queued after-commit writes once its
 callback has resolved, and `src/write-executor.ts` appends records to the handle's audit-log rows.
-The memory adapter drops resolver failures; the Prisma adapter passes them to its failure sink's
-`reportResolverFailures` (`src/pipeline/produce-records.ts`).
+`executePlan` reports a failed write with `failureSink.reportWriteFailure(plan, error)`. The
+adapter builds its sink with an observer of its own that appends each context to
+`writeFailures` or `resolverFailures` and then forwards it to the user's observer, and with
+`'throw'` as its default policy, so a failed write the operation awaits rejects it.
 
 ### A Drizzle adapter on this boundary
 

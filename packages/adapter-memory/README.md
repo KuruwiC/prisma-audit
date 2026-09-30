@@ -12,4 +12,11 @@ transaction's buffer, so they commit and roll back with the data. A non-atomic o
 transaction queues its write until commit; outside one it starts a detached write that `flush()`
 waits for. Id resolvers and enrichers read through the handle of the transaction they run in.
 
+Failures go through the core failure sink. Each failed audit write is listed in `writeFailures`
+(phase `log-write`) and each row an id resolver failed for in `resolverFailures` (phase
+`id-resolver-call`), before the context is forwarded to `errorHandling.observer` when one is
+given. `errorHandling.writeFailurePolicy` defaults to `'throw'`: a failed write the operation
+awaits rejects the operation; a queued or detached one is logged. A resolver failure leaves that
+row without its records and never fails the operation.
+
 The package is not published. `pnpm --filter @kuruwic/audit-adapter-memory test` runs its spec.

@@ -1,4 +1,4 @@
-import type { AuditActor, AuditRecord } from '@kuruwic/db-audit-core';
+import type { AuditActor, AuditErrorObserver, AuditRecord } from '@kuruwic/db-audit-core';
 import {
   createAsyncLocalStorageProvider,
   defineAggregateMapping,
@@ -12,6 +12,7 @@ import {
   type MemoryAuditOptions,
   type MemoryHandle,
   type MemorySchema,
+  memoryWriteExecutor,
 } from '../src/index.js';
 
 type ModelName = 'User' | 'Post';
@@ -125,6 +126,46 @@ describe('aggregate resolution and enrichment', () => {
       { aggregateType: 'Post', aggregateId: 'p1', entityId: 'p1' },
       { aggregateType: 'User', aggregateId: 'u1', entityId: 'p1' },
     ]);
+  });
+
+  it('an idResolver that throws: its row gets no record and is listed in resolverFailures, the write and the other rows are recorded', async () => {
+    const resolverError = new Error('entity id resolver is broken');
+    const observer = vi.fn<AuditErrorObserver>();
+    const adapter = createAdapter({
+      errorHandling: { observer },
+      aggregateMapping: defineMapping({
+        User: defineEntity<UserRow, Db>({ type: 'User' }),
+        Post: defineEntity<PostRow, Db>({
+          type: 'Post',
+          idResolver: async (post) => {
+            if (post.title === 'broken') throw resolverError;
+            return post.id;
+          },
+        }),
+      }),
+    });
+
+    await withContext(async () => {
+      await adapter.create('User', { id: 'u1', name: 'Alice' });
+      await adapter.create('Post', { id: 'p1', authorId: 'u1', title: 'broken' });
+      await adapter.create('Post', { id: 'p2', authorId: 'u1', title: 'Hello' });
+    });
+
+    const failure = {
+      phase: 'id-resolver-call',
+      modelName: 'Post',
+      operation: 'create',
+      params: { identity: 'p1', resolver: { kind: 'entity' } },
+      error: resolverError,
+    };
+    expect(adapter.resolverFailures).toEqual([failure]);
+    expect(observer).toHaveBeenCalledExactlyOnceWith(failure);
+    expect(adapter.store.find('Post', 'p1')).toEqual({ id: 'p1', authorId: 'u1', title: 'broken' });
+    expect(adapter.store.auditLogs().map(({ entityType, entityId }) => `${entityType}:${entityId}`)).toEqual([
+      'User:u1',
+      'Post:p2',
+    ]);
+    expect(adapter.writeFailures).toEqual([]);
   });
 
   it('entity enricher: reads another table through the database handle into entityContext', async () => {
@@ -315,8 +356,25 @@ describe('transaction membership', () => {
     await withContext(() => adapter.create('User', { id: 'u1', name: 'Alice' }));
     await expect(adapter.flush()).resolves.toBeUndefined();
 
-    expect(adapter.writeFailures).toEqual([failure]);
+    expect(adapter.writeFailures).toEqual([
+      { phase: 'log-write', modelName: 'User', operation: 'write', params: [expect.any(Object)], error: failure },
+    ]);
     expect(adapter.store.find('User', 'u1')).toEqual({ id: 'u1', name: 'Alice' });
+  });
+
+  it('an immediate write that fails rejects the operation, rolls it back and is recorded in writeFailures', async () => {
+    const adapter = createAdapter();
+    const failure = new Error('audit-log store unavailable');
+    const write = vi.spyOn(memoryWriteExecutor, 'write').mockRejectedValue(failure);
+
+    try {
+      await expect(withContext(() => adapter.create('User', { id: 'u1', name: 'Alice' }))).rejects.toBe(failure);
+    } finally {
+      write.mockRestore();
+    }
+
+    expect(adapter.writeFailures).toEqual([expect.objectContaining({ phase: 'log-write', error: failure })]);
+    expect(adapter.store.find('User', 'u1')).toBeUndefined();
   });
 
   it('awaitWriteIf by tag: a tagged model writes atomically in an implicit transaction, an untagged one detached', async () => {
