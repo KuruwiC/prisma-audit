@@ -11,7 +11,7 @@ import type {
   AuditRecord,
   AuditLogData as CoreAuditLogData,
   AuditLogInput as CoreAuditLogInput,
-  ErrorStrategy,
+  ErrorHandlingConfig,
   GlobalContextEnricherConfig,
   WriteContext,
   WriteFn,
@@ -149,119 +149,17 @@ export interface NestedOperationsConfig<TModelName extends string = string> exte
 }
 
 /**
- * The stage of the audit pipeline a failure occurred in. Each value has a different
- * consequence for the caller's operation and the audit trail:
- *
- * - `pre-fetch`: fetching the before-state (for update / delete / upsert) failed. The
- *   caller's operation continues. An `update` or `delete` entry, top-level or nested, is
- *   recorded with `beforeUnavailable: true` and a null `before` and `changes`. An `upsert`
- *   entry, top-level or nested, whose create-vs-update action depends on the before-state, is
- *   skipped with the writes of its branches, and so is a nested `connectOrCreate` entry. A
- *   nested delete entry the failed fetch leaves without a primary key (a to-one delete, or a
- *   WHERE naming another unique field) is skipped and also reported as `entity-id-resolution`.
- *   A failed nested fetch affects only the rows it was for: the other nested operations keep
- *   what their own fetches read, and the rows nested below a row named by its primary key are
- *   still read under that key. Below a row that cannot be identified otherwise (a to-one
- *   relation's row, or one named by another unique field), the nested entries are treated as
- *   if their own fetch had failed, and a nested create or `updateMany` / `deleteMany` there
- *   fails the operation under `diff-generation`, since the rows it writes cannot be identified.
- * - `log-write`: persisting the audit log entry itself failed. This is the only phase whose
- *   outcome {@link ErrorHandlingConfig.writeFailurePolicy} decides — see
- *   {@link WriteFailurePolicy} for writes that are queued or detached.
- * - `diff-generation`: other audit-support work around the caller's operation failed —
- *   building the entry (enrichment, redaction), reading the primary keys a to-many relation
- *   holds before a nested create under an existing row or the rows a nested `updateMany` /
- *   `deleteMany` filter matches (the caller's write is then never attempted), re-reading a
- *   nested row the operation updated that its result did not return, or, for batch
- *   operations, fetching the affected rows before or after the mutation. This phase is NOT
- *   policy-gated: it always propagates to the caller as a thrown error, regardless of
- *   {@link ErrorHandlingConfig.writeFailurePolicy}.
- * - `entity-id-resolution`: a nested delete's primary key could not be resolved, from
- *   the pre-fetched row, its WHERE or the operation data. The caller's operation
- *   continues; that record's audit log entry is skipped rather than recorded with a
- *   partial or fabricated identity.
- * - `aggregate-resolution`: an id resolver threw, or returned an id that cannot be normalized
- *   to a string. The entity's `idResolver` failing leaves the row without any audit log
- *   entry; a `to()` resolver failing leaves it without the entry under that aggregate root
- *   only. The caller's operation continues. Reported once per affected row, a failed
- *   `batchLookup` resolver once for every row of its call: `modelName` is the row's
- *   model, `operation` the keyword that wrote the row, and `params` is
- *   `{ identity, resolver }` with the row's serialized primary key and either
- *   `{ kind: 'entity' }` or `{ kind: 'aggregate', aggregateCategory, aggregateType }`.
+ * Audit-failure observation and policy, defined by `@kuruwic/db-audit-core` and re-exported:
+ * the failure phases, the context the observer and a policy function receive, the observer, the
+ * write-failure policy and the `errorHandling` configuration section
  */
-export type AuditErrorPhase =
-  | 'pre-fetch'
-  | 'log-write'
-  | 'diff-generation'
-  | 'entity-id-resolution'
-  | 'aggregate-resolution';
-
-/**
- * Structured context describing a single audit-pipeline failure. Passed in the same shape
- * to {@link ErrorHandlingConfig.observer} and, when it is a function, to
- * {@link ErrorHandlingConfig.writeFailurePolicy}, so a handler that forwards failures to
- * Sentry or similar does not need to know which of the two invoked it.
- */
-export interface AuditErrorContext {
-  phase: AuditErrorPhase;
-  modelName: string;
-  operation: string;
-  params: unknown;
-  error: Error;
-}
-
-/**
- * Observer notified of every audit-pipeline failure — for logging, monitoring, or
- * alerting (e.g. reporting to Sentry).
- *
- * Read-only: it NEVER affects whether the caller's own database operation succeeds or
- * fails. It always runs inside a try/catch; a handler that throws (synchronously or by
- * returning a rejected promise) has that failure logged to the console and otherwise
- * ignored. Use {@link ErrorHandlingConfig.writeFailurePolicy} to control the caller's
- * operation.
- */
-export type AuditErrorObserver = (context: AuditErrorContext) => void | Promise<void>;
-
-/**
- * Decides whether a failed audit-log write also fails the caller's own database
- * operation.
- *
- * A strategy string (`'throw'` re-throws and fails the operation, `'log'` logs to the
- * console and lets the operation succeed, `'ignore'` does neither), or a function that
- * receives the same {@link AuditErrorContext} the observer receives and RETURNS one of
- * those three strings. The function must not throw; if it does, its error is logged to
- * the console and `'log'` applies.
- *
- * **Only the `log-write` phase is policy-gated** — every other {@link AuditErrorPhase} has
- * a fixed outcome.
- *
- * **`awaitWrite: false` (deferred / fire-and-forget writes):** `'throw'` fails the caller
- * only while the caller is still waiting on the write (the `awaitWrite: true` default).
- * Once the write has been queued (inside a transaction) or detached (outside one), the
- * caller has already received its result, so `'throw'` logs instead, like `'log'`.
- */
-export type WriteFailurePolicy =
-  | ErrorStrategy
-  | ((context: AuditErrorContext) => ErrorStrategy | Promise<ErrorStrategy>);
-
-/**
- * Audit-failure observation and policy configuration.
- *
- * Separate from {@link HooksConfig}, which replaces behaviour (the writer): this section
- * only observes failures and decides whether a failed audit-log write also fails the
- * caller's operation.
- */
-export interface ErrorHandlingConfig {
-  /** Observer notified of every audit-pipeline failure. See {@link AuditErrorObserver}. */
-  observer?: AuditErrorObserver;
-  /**
-   * Decides whether a failed audit-log write fails the caller's operation.
-   * See {@link WriteFailurePolicy}.
-   *
-   * @default 'log'
-   */
-  writeFailurePolicy?: WriteFailurePolicy;
-}
+export type {
+  AuditErrorContext,
+  AuditErrorObserver,
+  AuditErrorPhase,
+  ErrorHandlingConfig,
+  WriteFailurePolicy,
+} from '@kuruwic/db-audit-core';
 
 /**
  * Prisma Extension configuration options
@@ -308,7 +206,41 @@ export interface PrismaAuditExtensionOptions<TModelName extends string = string,
   /** Actor enrichment; the enricher receives the operation's `AuditActor` and the client. */
   contextEnricher?: GlobalContextEnricherConfig<AuditActor, unknown, TClient>;
   nestedOperations?: NestedOperationsConfig<TModelName>;
-  /** Audit-failure observation and policy. See {@link ErrorHandlingConfig}. */
+  /**
+   * Audit-failure observation and policy. See {@link ErrorHandlingConfig}. What each phase
+   * means for a Prisma operation:
+   *
+   * - `pre-fetch`: fetching the before-state (for update / delete / upsert) failed. The
+   *   caller's operation continues. An `update` or `delete` entry, top-level or nested, is
+   *   recorded with `beforeUnavailable: true` and a null `before` and `changes`. An `upsert`
+   *   entry, top-level or nested, whose create-vs-update action depends on the before-state, is
+   *   skipped with the writes of its branches, and so is a nested `connectOrCreate` entry. A
+   *   nested delete entry the failed fetch leaves without a primary key (a to-one delete, or a
+   *   WHERE naming another unique field) is skipped and also reported as `entity-id-resolution`.
+   *   A failed nested fetch affects only the rows it was for: the other nested operations keep
+   *   what their own fetches read, and the rows nested below a row named by its primary key are
+   *   still read under that key. Below a row that cannot be identified otherwise (a to-one
+   *   relation's row, or one named by another unique field), the nested entries are treated as
+   *   if their own fetch had failed, and a nested create or `updateMany` / `deleteMany` there
+   *   fails the operation under `diff-generation`, since the rows it writes cannot be identified.
+   * - `log-write`: persisting the audit log entry itself failed. The only phase whose outcome
+   *   `writeFailurePolicy` decides; with `awaitWrite: false` the write is queued or detached and
+   *   `'throw'` logs instead.
+   * - `diff-generation`: other audit-support work around the caller's operation failed —
+   *   building the entry (enrichment, redaction), reading the primary keys a to-many relation
+   *   holds before a nested create under an existing row or the rows a nested `updateMany` /
+   *   `deleteMany` filter matches (the caller's write is then never attempted), re-reading a
+   *   nested row the operation updated that its result did not return, or, for batch
+   *   operations, fetching the affected rows before or after the mutation. It always propagates
+   *   to the caller as a thrown error, regardless of `writeFailurePolicy`.
+   * - `entity-id-resolution`: a nested delete's primary key could not be resolved, from the
+   *   pre-fetched row, its WHERE or the operation data. The caller's operation continues; that
+   *   record's audit log entry is skipped.
+   * - `aggregate-resolution`: an id resolver threw, or returned an id that cannot be normalized
+   *   to a string. The caller's operation continues; `params` is `{ identity, resolver }` with
+   *   the row's serialized primary key and the failed resolver. A failed `batchLookup` resolver
+   *   is reported once for every row of its call.
+   */
   errorHandling?: ErrorHandlingConfig;
   /** Custom serialization for non-JSON-safe types (BigInt, Date are handled by default) */
   serialization?: import('@kuruwic/db-audit-core').SerializationConfig;

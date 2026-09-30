@@ -11,10 +11,9 @@
  * @see {@link PrismaAuditExtensionOptions}
  */
 
-import { policy } from '@kuruwic/db-audit-core';
+import { createFailureSink, policy } from '@kuruwic/db-audit-core';
 import { createPrismaWriteExecutor, declaresBeforeUnavailableColumn } from './adapters/write-executor.js';
 import { type AuditOptions, normalizeAuditOptions } from './audit-options.js';
-import { createFailureSink } from './failure-sink.js';
 import type { ExtensionParams, PrismaClientWithDynamicAccess } from './internal-types.js';
 import { createBatchExecutor } from './pipeline/batch-executor.js';
 import { createRecordProducer } from './pipeline/produce-records.js';
@@ -29,7 +28,7 @@ import { injectNestedWriteSelection, projectToRequestedShape } from './utils/nes
 
 const createPipelineDependencies = (audit: AuditOptions): AuditPipelineDependencies => {
   const { Prisma, schemaMetadata, getNestedOperationConfig } = audit;
-  const failureSink = createFailureSink(audit);
+  const failureSink = createFailureSink(audit.errorHandling);
 
   return {
     provider: audit.provider,

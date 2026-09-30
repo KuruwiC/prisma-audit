@@ -7,14 +7,14 @@
  * and the caller receives the result.
  */
 
-import type { AuditContext, AuditContextProvider } from '@kuruwic/db-audit-core';
+import type { AuditContext, AuditContextProvider, FailureSink } from '@kuruwic/db-audit-core';
 import { dispatch } from '@kuruwic/db-audit-core';
-import { type FailureSink, toError } from '../failure-sink.js';
 import type { AuditAction } from '../grammar/operations.js';
 import type { PrismaClientWithDynamicAccess } from '../internal-types.js';
 import { isCallerMutationError, runCallerMutation } from '../utils/caller-mutation-error.js';
 import { getModelDelegate, getModelOperation } from '../utils/model-accessor.js';
 import { isBatchOperation } from '../utils/operation-classifier.js';
+import { toError } from '../utils/to-error.js';
 import { type ExecutionScope, withExecutionScope } from './execution-scope.js';
 import type { AuditedOperation, OperationExecutor, OperationOutcome } from './executor.js';
 import type { RecordProducer } from './produce-records.js';

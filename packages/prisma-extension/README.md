@@ -1352,7 +1352,7 @@ $allOperations (src/extension.ts)
        └─ write         execute the write plan
 ```
 
-- `src/extension.ts`: the `$allOperations` hook. Decides whether an operation is audited, adds the relations its nested writes touch to the operation's selection, runs it through the pipeline, and returns the result in the shape the caller requested.
+- `src/extension.ts`: the `$allOperations` hook. Decides whether an operation is audited (its model, its kind, then the core write policy, which also samples), adds the relations its nested writes touch to the operation's selection, runs it through the pipeline, and returns the result in the shape the caller requested.
 - `src/audit-options.ts`: validates the extension options once and normalizes them into the write policy, the resolve and compose configs, the schema metadata, the audit-log model accessor, the hooks and the failure-handling settings.
 - `src/pipeline/run-audited-operation.ts`: the pipeline above. A failure of the caller's own mutation propagates untouched; any other failure that escapes the executor is reported as `diff-generation` and rethrown.
 - `src/pipeline/execution-scope.ts`: the client the operation and every audit read and write share (the transaction's client inside a transaction, else the base client) and the transaction it belongs to.
@@ -1361,11 +1361,11 @@ $allOperations (src/extension.ts)
 - `src/nested/pre-fetch/`: the before states read ahead of an operation. The coordinator runs the to-one, to-many and batch fetchers under the parent rows and stores each row's before state by path and identity; `pre-existing-rows.ts` snapshots the primary keys a to-many relation holds before a nested create.
 - `src/nested/events/`: the mutation events of the nested rows an operation wrote. `write-set.ts` names the rows each nested operation targets; `collect-nested-events.ts` attributes the rows the result returned (re-fetching the updated rows it does not hold) and yields one event per row, with `delete-handler.ts` for deletes and `event-fields.ts` for the identity and action shared with the top-level collectors.
 - `src/pipeline/produce-records.ts`: core `resolve` then `compose`. Id resolvers and enrichers receive the scope's client when each one runs, so inside a transaction they read its writes.
-- `src/pipeline/write-audit-logs.ts`: executes the write plan (see [Write Strategies](#write-strategies)) and reports write failures under `log-write`.
+- `src/pipeline/write-audit-logs.ts`: executes the write plan (see [Write Strategies](#write-strategies)) and reports a failed write with its plan to the failure sink.
 - `src/runtime/scope.ts`: the library-owned async-local state of an audited flow: the active transaction with its client and the writes queued until it commits, the re-entrancy guard that keeps the audit's own queries from being audited, and whether the library opened the transaction. It is kept apart from the app-owned audit context.
 - `src/runtime/pending-writes.ts`: the writes no caller awaits; `flushAllPendingWrites` waits for them.
 - `src/runtime/transaction-proxy.ts`: wraps interactive `$transaction` so the operations in its callback share the transaction's client and the queued writes run after it commits.
-- `src/failure-sink.ts`: the one place audit failures are reported. Every phase notifies `errorHandling.observer`; only `log-write` also applies `errorHandling.writeFailurePolicy`.
+- Failures are reported through the core's `createFailureSink(errorHandling)`, built in `src/extension.ts`: every phase notifies `errorHandling.observer`; only `log-write` also applies `errorHandling.writeFailurePolicy`.
 
 ## Type Safety with Branded Types
 

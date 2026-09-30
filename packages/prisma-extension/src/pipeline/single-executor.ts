@@ -7,8 +7,7 @@
  * collects the top-level row and the nested rows it wrote.
  */
 
-import type { BeforeState, MutationEvent } from '@kuruwic/db-audit-core';
-import type { FailureSink } from '../failure-sink.js';
+import type { BeforeState, FailureSink, MutationEvent } from '@kuruwic/db-audit-core';
 import type { NestedOperationInfo, NestedPreFetchResults } from '../grammar/nested-operations.js';
 import type { GetOperationConfig } from '../grammar/pre-fetch-selection.js';
 import type { PrismaNamespace } from '../internal-types.js';

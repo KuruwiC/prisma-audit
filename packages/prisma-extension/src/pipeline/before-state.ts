@@ -6,16 +6,15 @@
  * `fetchBeforeOperation` is configured; never for a create.
  */
 
-import type { BeforeState } from '@kuruwic/db-audit-core';
-import { toError } from '../failure-sink.js';
+import type { BeforeState, FailureSink } from '@kuruwic/db-audit-core';
 import type { UpsertBranch } from '../grammar/nested-operations.js';
 import { upsertBranchOf } from '../grammar/nested-state.js';
 import { AUDIT_ACTION, type AuditAction } from '../grammar/operations.js';
 import type { GetOperationConfig } from '../grammar/pre-fetch-selection.js';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../internal-types.js';
-import type { AuditErrorContext } from '../types.js';
 import { beforeStateOf, NO_BEFORE_STATE } from '../utils/before-state.js';
 import { getModelDelegate, hasOperation } from '../utils/model-accessor.js';
+import { toError } from '../utils/to-error.js';
 
 /**
  * The branch a top-level upsert executed: `update` when its before state was captured, `create`
@@ -42,7 +41,7 @@ export interface BeforeStateInput {
 export interface BeforeStateDependencies {
   readonly getNestedOperationConfig: GetOperationConfig;
   /** Receives a failed fetch under the `pre-fetch` phase; the caller's operation continues */
-  readonly onFetchFailure: (context: AuditErrorContext) => Promise<void>;
+  readonly onFetchFailure: FailureSink['notify'];
 }
 
 type FindUniqueDelegate = { findUnique: (args: { where: unknown }) => Promise<unknown> };

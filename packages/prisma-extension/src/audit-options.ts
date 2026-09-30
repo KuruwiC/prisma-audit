@@ -5,14 +5,21 @@
  * shape the audit pipeline consumes.
  */
 
-import type { AuditContextProvider, ComposeConfig, PolicyConfig, ResolveConfig, WriteFn } from '@kuruwic/db-audit-core';
+import type {
+  AuditContextProvider,
+  ComposeConfig,
+  ErrorHandlingConfig,
+  PolicyConfig,
+  ResolveConfig,
+  WriteFn,
+} from '@kuruwic/db-audit-core';
 import { createEntityConfigLookup } from '@kuruwic/db-audit-core';
 import { getNestedOperationConfig } from './config/helpers.js';
 import { validateFieldConflicts } from './config/validation.js';
 import type { GetOperationConfig } from './grammar/pre-fetch-selection.js';
 import type { PrismaNamespace } from './internal-types.js';
 import type { SchemaMetadata } from './schema/types.js';
-import type { AuditErrorObserver, PrismaAuditExtensionOptions, WriteFailurePolicy } from './types.js';
+import type { PrismaAuditExtensionOptions } from './types.js';
 import { shouldAuditModel } from './utils/extension-utils.js';
 import { getModelAccessor } from './utils/model-accessor.js';
 import { createSchemaMetadataFromDMMF } from './utils/schema-metadata.js';
@@ -27,8 +34,7 @@ export interface AuditOptions {
   readonly resolveConfig: ResolveConfig;
   readonly composeConfig: ComposeConfig;
   readonly writer: WriteFn | undefined;
-  readonly observer: AuditErrorObserver | undefined;
-  readonly writeFailurePolicy: WriteFailurePolicy;
+  readonly errorHandling: ErrorHandlingConfig;
   readonly getNestedOperationConfig: GetOperationConfig;
   readonly modelTags: (modelName: string) => string[];
   /** Whether operations on `modelName` are audited at all (not the audit-log model, loggable); sampling is the policy's */
@@ -87,9 +93,7 @@ export const normalizeAuditOptions = (options: PrismaAuditExtensionOptions): Aud
       relationFieldNames,
     },
     writer: hooks?.writer,
-    observer: errorHandling?.observer,
-    // An audit library must not break the caller's write by default.
-    writeFailurePolicy: errorHandling?.writeFailurePolicy ?? 'log',
+    errorHandling: errorHandling ?? {},
     getNestedOperationConfig: (modelName, operation) =>
       getNestedOperationConfig(modelName, operation, options.nestedOperations),
     modelTags,

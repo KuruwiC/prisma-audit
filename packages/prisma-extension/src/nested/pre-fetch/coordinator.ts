@@ -6,7 +6,7 @@
  * @module nested/pre-fetch/coordinator
  */
 
-import { toError } from '../../failure-sink.js';
+import type { FailureSink } from '@kuruwic/db-audit-core';
 import {
   detectNestedOperations,
   getPrimaryKeyConstraint,
@@ -30,10 +30,10 @@ import type {
   TransactionalPrismaClient,
 } from '../../internal-types.js';
 import type { SchemaMetadata, UniqueConstraint } from '../../schema/types.js';
-import type { AuditErrorObserver } from '../../types.js';
 import { beforeStateOf } from '../../utils/before-state.js';
 import { preFetchLog } from '../../utils/debug.js';
 import type { EntityIdentityKey } from '../../utils/identity-key.js';
+import { toError } from '../../utils/to-error.js';
 import {
   getPreFetchListClient,
   getPreFetchModelClient,
@@ -66,7 +66,7 @@ export interface PreFetchCoordinatorDependencies {
    * `updateMany` / `deleteMany` is not reported here: it identifies the rows the keyword writes,
    * so its failure rejects the pre-fetch, like the read of a top-level batch operation.
    */
-  readonly onPreFetchFailure?: AuditErrorObserver;
+  readonly onPreFetchFailure?: FailureSink['notify'];
 }
 
 export interface NestedPreFetch {
@@ -137,7 +137,7 @@ const categorizeRelationType = (
  * A no-op when no callback is configured.
  */
 const reportNestedPreFetchFailure = async (
-  onPreFetchFailure: AuditErrorObserver | undefined,
+  onPreFetchFailure: FailureSink['notify'] | undefined,
   nestedOp: NestedOperationInfo,
   error: unknown,
 ): Promise<void> => {

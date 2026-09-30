@@ -5,7 +5,7 @@
  * the way its origin requires.
  */
 
-import type { AuditContext, MutationEvent, WritePlan } from '@kuruwic/db-audit-core';
+import type { AuditContext, FailureSink, MutationEvent, WritePlan } from '@kuruwic/db-audit-core';
 import {
   createActorId,
   createAggregateId,
@@ -13,7 +13,6 @@ import {
   createEntityId,
 } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
-import type { FailureSink } from '../../src/failure-sink.js';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../src/internal-types.js';
 import type { ExecutionScope } from '../../src/pipeline/execution-scope.js';
 import {
@@ -100,7 +99,11 @@ const stubExecutor = (run: OperationExecutor['run']): OperationExecutor => ({ ru
 const succeedingExecutor = () => stubExecutor(async () => outcome);
 
 const createDeps = (overrides: Partial<AuditPipelineDependencies> = {}) => {
-  const failureSink: FailureSink = { notify: vi.fn(async () => {}), reportWriteFailure: vi.fn(async () => {}) };
+  const failureSink: FailureSink = {
+    notify: vi.fn(async () => {}),
+    reportResolverFailures: vi.fn(async () => {}),
+    reportWriteFailure: vi.fn(async () => {}),
+  };
   const deps: AuditPipelineDependencies = {
     provider: createAsyncLocalStorageProvider(),
     singleExecutor: succeedingExecutor(),

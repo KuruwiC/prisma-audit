@@ -71,8 +71,11 @@ dispatch(records, atomic, { inTransaction })   -> WritePlan
 - **Context provider**: `createAsyncLocalStorageProvider()` returns an `AuditContextProvider`
   (`run`, `runAsync`, `getContext`, `withActor`) that carries the actor and request context through
   async calls.
-- **Utilities**: `createErrorHandler`, the branded id constructors (`createActorId`,
-  `createEntityId`, `createAggregateId`), `unwrapId`, and `createAuditLogData`.
+- **Failure handling**: `ErrorHandlingConfig` (`observer`, `writeFailurePolicy`, default
+  `'log'`), `AuditErrorPhase`, `AuditErrorContext`, `AuditErrorObserver`, `WriteFailurePolicy`,
+  and `createFailureSink`, which an adapter builds from the user's `ErrorHandlingConfig`.
+- **Utilities**: the branded id constructors (`createActorId`, `createEntityId`,
+  `createAggregateId`), `unwrapId`, and `createAuditLogData`.
 - **Debug output**: the core logs through [`debug`](https://www.npmjs.com/package/debug) under the
   `db-audit-core` namespace (`DEBUG=db-audit-core`).
 
@@ -136,9 +139,21 @@ What the adapter must provide:
 - **Transaction scope ownership.** Tracking the transaction each async flow is inside, opening the
   implicit transaction, and holding the `after-commit` queue until commit. The core only learns
   `inTransaction`.
-- **Failure routing.** `resolve` returns `ResolverFailure`s (the row, the failed resolver, the
-  error) instead of throwing; the adapter decides how to report them, as it does for failed
-  before-state reads and failed writes.
+- **Failure routing.** The adapter builds one `FailureSink` with
+  `createFailureSink(errorHandlingConfig)` and reports every failure through it. The sink owns
+  the user-facing contract: the observer hears every failure and never affects the operation (an
+  observer that throws is logged), and only a failed write consults `writeFailurePolicy`
+  (default `'log'`; a policy function that throws falls back to `'log'`).
+  - `notify(context)` for a failure the adapter detects itself: `pre-fetch` (a read before the
+    write failed), `diff-generation` (other work that builds the records failed) and
+    `entity-id-resolution` (a row the operation wrote could not be identified). What each does
+    to the operation is the adapter's choice, documented by it.
+  - `reportResolverFailures(failures)` with the `ResolverFailure`s `resolve` returned instead of
+    throwing, one `aggregate-resolution` notification each.
+  - `reportWriteFailure(plan, error)` when executing a `WritePlan` failed: a `log-write`
+    notification, then the policy. `'throw'` rejects with the error only for an `immediate`
+    plan, whose caller is still waiting; for `after-commit` and `detached` plans it logs, and the
+    call never rejects.
 
 `@kuruwic/audit-adapter-memory` (`packages/adapter-memory`) is the smallest complete adapter. Its
 `runAudited` in `src/adapter.ts` is the whole sequence:
@@ -170,8 +185,8 @@ await inScope(atomic, async (scope) => {
 `inScope` opens the implicit transaction, `currentHandle` reads the active transaction from an
 `AsyncLocalStorage` of its own, `transaction` starts the queued after-commit writes once its
 callback has resolved, and `src/write-executor.ts` appends records to the handle's audit-log rows.
-The memory adapter drops resolver failures; the Prisma adapter reports each one to its observer
-under the `aggregate-resolution` phase (`src/pipeline/produce-records.ts`).
+The memory adapter drops resolver failures; the Prisma adapter passes them to its failure sink's
+`reportResolverFailures` (`src/pipeline/produce-records.ts`).
 
 ### A Drizzle adapter on this boundary
 
@@ -206,6 +221,10 @@ shows how such an adapter would plug into the boundary.
   is dropped when it rolls back, all inside the adapter.
 - **`WriteExecutor`.** A `WriteExecutor` over the Drizzle database or transaction type, constructed
   with the audit-log `Table`: `write(handle, records)` runs `handle.insert(auditLogTable).values(rows)`.
+- **Sampling and failures.** A per-table sampling rate is `samplingIf(model, tags)` in the policy
+  configuration. A failed before-read goes to the failure sink's `notify` as `pre-fetch` and a
+  failed record build as `diff-generation`; the executed `WritePlan` of a failed write goes to
+  `reportWriteFailure`, which also covers a detached write no caller awaits.
 - **Relation fields.** Rows returned by `insert`, `update` and `delete` hold columns only, so
   `relationFieldNames` returns an empty set.
 

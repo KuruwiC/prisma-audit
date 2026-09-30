@@ -370,7 +370,7 @@ describe('Error Handling Integration', () => {
 
         // The broken policy function itself is reported to the console...
         expect(consoleErrorSpy).toHaveBeenCalledWith(
-          "[@prisma-audit] Error in writeFailurePolicy function; falling back to 'log':",
+          "[db-audit-core] Error in writeFailurePolicy function; falling back to 'log':",
           POLICY_FAILURE_MESSAGE,
         );
         // ...and the fallback ('log') also reports the original audit-write failure it
@@ -429,7 +429,7 @@ describe('Error Handling Integration', () => {
         );
 
         expect(consoleErrorSpy).toHaveBeenCalledWith(
-          '[@prisma-audit] Error in error-handling observer:',
+          '[db-audit-core] Error in error-handling observer:',
           OBSERVER_FAILURE_MESSAGE,
         );
       } finally {

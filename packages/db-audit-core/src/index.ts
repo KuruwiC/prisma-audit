@@ -47,6 +47,15 @@ export type { Result, ValidationError } from './domain/smart-constructors.js';
 export { createAuditLogData } from './domain/smart-constructors.js';
 export type { WriteContext, WriteExecutor, WriteFn } from './domain/write.js';
 export type { ProjectionEnrichmentMeta } from './enrichment/types.js';
+export type {
+  AuditErrorContext,
+  AuditErrorObserver,
+  AuditErrorPhase,
+  ErrorHandlingConfig,
+  FailureSink,
+  WriteFailurePolicy,
+} from './failure/index.js';
+export { createFailureSink } from './failure/index.js';
 // Exported because the adapter package imports it across the package boundary;
 // end users are not meant to call it directly.
 export { getGlobalSingleton } from './global-singleton.js';
@@ -61,8 +70,7 @@ export type {
 } from './resolve/index.js';
 export { resolve } from './resolve/index.js';
 export type { AuditActor, AuditContext, AuditContextProvider } from './types.js';
-export type { ErrorHandler, ErrorStrategy } from './utils/error-handler.js';
-export { createErrorHandler } from './utils/error-handler.js';
+export type { ErrorStrategy } from './utils/error-handler.js';
 export type { RedactConfig } from './utils/redaction.js';
 export type { ValueSerializer } from './utils/serialization.js';
 export { UNHANDLED } from './utils/serialization.js';

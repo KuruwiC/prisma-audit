@@ -9,8 +9,8 @@
 
 /**
  * Error handling strategy
- * - `throw`: Re-throw the error. The effect depends on the caller: the adapter's write-failure policy
- *   fails the caller's operation only while it awaits the write; for a deferred or detached write it acts as `log`.
+ * - `throw`: Re-throw the error. As a write-failure policy it fails the caller's operation only
+ *   while the caller awaits the write; for an after-commit or detached write it acts as `log`.
  * - `log`: Log error and continue
  * - `ignore`: Silent
  */

@@ -4,10 +4,9 @@
  * in when there is one.
  */
 
-import type { MutationEvent } from '@kuruwic/db-audit-core';
+import type { FailureSink, MutationEvent } from '@kuruwic/db-audit-core';
 import { createEntityConfigLookup, defineEntity } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
-import type { FailureSink } from '../../src/failure-sink.js';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../src/internal-types.js';
 import type { ExecutionScope } from '../../src/pipeline/execution-scope.js';
 import { createRecordProducer } from '../../src/pipeline/produce-records.js';
@@ -35,7 +34,7 @@ const event: MutationEvent = {
 
 const producerWith = (
   idResolver: (row: Record<string, unknown>, db: unknown) => Promise<string | null>,
-  failureSink: Pick<FailureSink, 'notify'> = { notify: vi.fn(async () => {}) },
+  failureSink: Pick<FailureSink, 'reportResolverFailures'> = { reportResolverFailures: vi.fn(async () => {}) },
 ) => {
   const entityConfigs = createEntityConfigLookup({ Post: defineEntity({ type: 'Post', idResolver }) });
   return createRecordProducer({
@@ -65,9 +64,9 @@ describe('createRecordProducer', () => {
     });
   });
 
-  it('notifies aggregate-resolution for a row whose id resolver throws and composes the other rows', async () => {
+  it('reports the row whose id resolver throws to the failure sink and composes the other rows', async () => {
     const error = new Error('resolver broken');
-    const notify = vi.fn(async () => {});
+    const reportResolverFailures = vi.fn(async () => {});
     const failing: MutationEvent = {
       ...event,
       identity: 'p2',
@@ -79,20 +78,14 @@ describe('createRecordProducer', () => {
         if (row.id === 'p2') throw error;
         return row.id as string;
       },
-      { notify },
+      { reportResolverFailures },
     );
 
     const records = await produce([event, failing], scopeOn(baseClient));
 
     expect(records.map((record) => record.entityId)).toEqual(['p1']);
-    expect(notify).toHaveBeenCalledTimes(1);
-    expect(notify).toHaveBeenCalledWith({
-      phase: 'aggregate-resolution',
-      modelName: 'Post',
-      operation: 'create',
-      params: { identity: 'p2', resolver: { kind: 'entity' } },
-      error,
-    });
+    expect(reportResolverFailures).toHaveBeenCalledTimes(1);
+    expect(reportResolverFailures).toHaveBeenCalledWith([{ event: failing, resolver: { kind: 'entity' }, error }]);
   });
 
   it('hands the callbacks the base client when the operation runs outside a transaction', async () => {

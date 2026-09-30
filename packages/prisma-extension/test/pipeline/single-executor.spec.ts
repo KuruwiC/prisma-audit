@@ -4,9 +4,8 @@
  * collects, and the error each kind of failure surfaces as.
  */
 
-import type { AuditContext } from '@kuruwic/db-audit-core';
+import type { AuditContext, FailureSink } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
-import type { FailureSink } from '../../src/failure-sink.js';
 import type { DMMFField, PrismaClientWithDynamicAccess, PrismaNamespace } from '../../src/internal-types.js';
 import type { ExecutionScope } from '../../src/pipeline/execution-scope.js';
 import type { AuditedOperation } from '../../src/pipeline/executor.js';
@@ -94,6 +93,7 @@ const scopeOn = (client: PrismaClientWithDynamicAccess): ExecutionScope => ({
 
 const createFailureSink = (): FailureSink => ({
   notify: vi.fn(async () => {}),
+  reportResolverFailures: vi.fn(async () => {}),
   reportWriteFailure: vi.fn(async () => {}),
 });
 

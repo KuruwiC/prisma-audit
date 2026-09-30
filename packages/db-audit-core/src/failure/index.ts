@@ -1,0 +1,194 @@
+/**
+ * Failure contract
+ *
+ * How an audit failure reaches the user: every failure notifies the observer, which never
+ * affects the caller's operation; only a failed write of the records also consults the
+ * write-failure policy, and its `'throw'` fails the caller's operation only while the caller
+ * awaits the write. An adapter detects the failures and decides what each observer-only phase
+ * does to the operation; the {@link FailureSink} applies the rest.
+ */
+
+import type { WritePlan } from '../domain/mutation-event.js';
+import type { ResolverFailure } from '../resolve/index.js';
+import { createErrorHandler, type ErrorStrategy } from '../utils/error-handler.js';
+
+/**
+ * The stage of the audit pipeline a failure occurred in. What each observer-only phase does to
+ * the caller's operation and the audit trail is the adapter's, documented by it.
+ *
+ * - `pre-fetch`: a read the adapter makes before the write (the before state) failed. Observer
+ *   only; the event carries an `unavailable` before state, or the adapter skips a record whose
+ *   action depends on the read.
+ * - `log-write`: persisting the records failed. The only phase whose outcome
+ *   {@link ErrorHandlingConfig.writeFailurePolicy} decides.
+ * - `diff-generation`: other work that builds the records failed. Not policy-gated; the adapter
+ *   decides whether the caller's operation fails.
+ * - `entity-id-resolution`: the adapter could not identify a row the operation wrote. Observer
+ *   only; the row's record is skipped rather than written with a partial or fabricated identity.
+ * - `aggregate-resolution`: an id resolver threw, or returned an id that cannot be normalized to
+ *   a string. Observer only; the entity's `idResolver` failing leaves the row without any record,
+ *   a `to()` resolver failing leaves it without the record under that aggregate root only.
+ *   Reported once per affected row: `modelName` is the row's model, `operation` the keyword that
+ *   wrote it, and `params` is `{ identity, resolver }` with the row's identity and either
+ *   `{ kind: 'entity' }` or `{ kind: 'aggregate', aggregateCategory, aggregateType }`.
+ */
+export type AuditErrorPhase =
+  | 'pre-fetch'
+  | 'log-write'
+  | 'diff-generation'
+  | 'entity-id-resolution'
+  | 'aggregate-resolution';
+
+/**
+ * Structured context describing a single audit-pipeline failure. Passed in the same shape
+ * to {@link ErrorHandlingConfig.observer} and, when it is a function, to
+ * {@link ErrorHandlingConfig.writeFailurePolicy}, so a handler that forwards failures to an
+ * error tracker does not need to know which of the two invoked it.
+ */
+export interface AuditErrorContext {
+  phase: AuditErrorPhase;
+  modelName: string;
+  operation: string;
+  params: unknown;
+  error: Error;
+}
+
+/**
+ * Observer notified of every audit-pipeline failure, for logging, monitoring or alerting.
+ *
+ * Read-only: it NEVER affects whether the caller's own database operation succeeds or
+ * fails. It always runs inside a try/catch; a handler that throws (synchronously or by
+ * returning a rejected promise) has that failure logged to the console and otherwise
+ * ignored. Use {@link ErrorHandlingConfig.writeFailurePolicy} to control the caller's
+ * operation.
+ */
+export type AuditErrorObserver = (context: AuditErrorContext) => void | Promise<void>;
+
+/**
+ * Decides whether a failed audit-log write also fails the caller's own database
+ * operation.
+ *
+ * A strategy string (`'throw'` re-throws and fails the operation, `'log'` logs to the
+ * console and lets the operation succeed, `'ignore'` does neither), or a function that
+ * receives the same {@link AuditErrorContext} the observer receives and RETURNS one of
+ * those three strings. The function must not throw; if it does, its error is logged to
+ * the console and `'log'` applies.
+ *
+ * **Only the `log-write` phase is policy-gated**: every other {@link AuditErrorPhase} has
+ * an outcome the adapter fixes.
+ *
+ * **Writes the caller does not await** (after commit, or detached): `'throw'` fails the
+ * caller only while the caller is still waiting on the write. Once the write has been queued
+ * after the transaction's commit or detached, the caller has already received its result, so
+ * `'throw'` logs instead, like `'log'`.
+ */
+export type WriteFailurePolicy =
+  | ErrorStrategy
+  | ((context: AuditErrorContext) => ErrorStrategy | Promise<ErrorStrategy>);
+
+/**
+ * Audit-failure observation and policy configuration: it observes failures and decides
+ * whether a failed audit-log write also fails the caller's operation.
+ */
+export interface ErrorHandlingConfig {
+  /** Observer notified of every audit-pipeline failure. See {@link AuditErrorObserver}. */
+  observer?: AuditErrorObserver;
+  /**
+   * Decides whether a failed audit-log write fails the caller's operation.
+   * See {@link WriteFailurePolicy}.
+   *
+   * @default 'log'
+   */
+  writeFailurePolicy?: WriteFailurePolicy;
+}
+
+/** The one place an adapter reports audit failures, built from the user's {@link ErrorHandlingConfig} */
+export interface FailureSink {
+  /**
+   * Notifies the observer of a failure the adapter detected in an observer-only phase. Never
+   * throws and never consults the write-failure policy.
+   */
+  readonly notify: (
+    context: AuditErrorContext & { readonly phase: Exclude<AuditErrorPhase, 'log-write' | 'aggregate-resolution'> },
+  ) => Promise<void>;
+  /** Notifies the observer once per failure `resolve` returned, under `aggregate-resolution`. Never throws. */
+  readonly reportResolverFailures: (failures: readonly ResolverFailure[]) => Promise<void>;
+  /**
+   * Reports a failed write of `plan`: notifies the observer under `log-write`, then applies the
+   * write-failure policy. Rejects with `error` only for an `immediate` plan under `'throw'`; the
+   * caller of an `after-commit` or `detached` plan has returned, so there `'throw'` logs.
+   */
+  readonly reportWriteFailure: (plan: WritePlan, error: Error) => Promise<void>;
+}
+
+/** The label the `'log'` strategy prints for a failed write of each plan kind */
+const WRITE_LOG_LABELS: Readonly<Record<WritePlan['kind'], string>> = {
+  immediate: 'audit log write',
+  'after-commit': 'deferred audit log write',
+  detached: 'async audit log write',
+};
+
+const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+
+export const createFailureSink = (config: ErrorHandlingConfig): FailureSink => {
+  const { observer } = config;
+  // An audit library must not break the caller's write by default.
+  const writeFailurePolicy = config.writeFailurePolicy ?? 'log';
+
+  /** A throwing observer (sync or async) is logged and ignored: it never affects the caller's operation. */
+  const observe = async (context: AuditErrorContext): Promise<void> => {
+    if (!observer) return;
+    try {
+      await observer(context);
+    } catch (observerError) {
+      console.error('[db-audit-core] Error in error-handling observer:', messageOf(observerError));
+    }
+  };
+
+  /**
+   * A policy function that throws falls back to `'log'`: unlike `'throw'` it cannot fail the
+   * caller's operation, and unlike `'ignore'` it still surfaces the `log-write` failure.
+   */
+  const resolveStrategy = async (context: AuditErrorContext): Promise<ErrorStrategy> => {
+    if (typeof writeFailurePolicy !== 'function') {
+      return writeFailurePolicy;
+    }
+    try {
+      return await writeFailurePolicy(context);
+    } catch (policyError) {
+      console.error(
+        "[db-audit-core] Error in writeFailurePolicy function; falling back to 'log':",
+        messageOf(policyError),
+      );
+      return 'log';
+    }
+  };
+
+  const reportResolverFailures = async (failures: readonly ResolverFailure[]): Promise<void> => {
+    for (const { event, resolver, error } of failures) {
+      await observe({
+        phase: 'aggregate-resolution',
+        modelName: event.model,
+        operation: event.origin.op,
+        params: { identity: event.identity, resolver },
+        error,
+      });
+    }
+  };
+
+  const reportWriteFailure = async (plan: WritePlan, error: Error): Promise<void> => {
+    const context: AuditErrorContext = {
+      phase: 'log-write',
+      modelName: plan.records[0]?.entityType ?? '',
+      operation: 'write',
+      params: plan.records,
+      error,
+    };
+    await observe(context);
+    const strategy = await resolveStrategy(context);
+    const applied = strategy === 'throw' && plan.kind !== 'immediate' ? 'log' : strategy;
+    createErrorHandler(applied)(error, WRITE_LOG_LABELS[plan.kind]);
+  };
+
+  return { notify: observe, reportResolverFailures, reportWriteFailure };
+};
