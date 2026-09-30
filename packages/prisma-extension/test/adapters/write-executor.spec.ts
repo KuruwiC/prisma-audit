@@ -41,10 +41,25 @@ const dmmfWith = (fields: Array<{ name: string; kind: string; type: string; isLi
 });
 
 describe('createPrismaWriteExecutor', () => {
+  it('writes to the audit-log model it was constructed for', async () => {
+    const create = vi.fn(async (_args: { data: Record<string, unknown> }) => ({}));
+    const client = { activity: { create } };
+
+    await createPrismaWriteExecutor(DbNull, { auditLogModel: 'activity', storesBeforeUnavailable: false }).write(
+      client,
+      [record],
+    );
+
+    expect(create).toHaveBeenCalledWith({ data: expect.objectContaining({ entityId: 'p1' }) });
+  });
+
   it('leaves beforeUnavailable out of the row when the audit-log model has no column for it', async () => {
     const { client, create } = clientWithAuditLog();
 
-    await createPrismaWriteExecutor(DbNull, { storesBeforeUnavailable: false }).write(client, 'auditLog', [record]);
+    await createPrismaWriteExecutor(DbNull, { auditLogModel: 'auditLog', storesBeforeUnavailable: false }).write(
+      client,
+      [record],
+    );
 
     const data = create.mock.calls[0]?.[0].data;
     expect(data).not.toHaveProperty('beforeUnavailable');
@@ -54,7 +69,10 @@ describe('createPrismaWriteExecutor', () => {
   it('writes beforeUnavailable when the audit-log model has a column for it', async () => {
     const { client, create } = clientWithAuditLog();
 
-    await createPrismaWriteExecutor(DbNull, { storesBeforeUnavailable: true }).write(client, 'auditLog', [record]);
+    await createPrismaWriteExecutor(DbNull, { auditLogModel: 'auditLog', storesBeforeUnavailable: true }).write(
+      client,
+      [record],
+    );
 
     expect(create).toHaveBeenCalledWith({ data: expect.objectContaining({ beforeUnavailable: true }) });
   });

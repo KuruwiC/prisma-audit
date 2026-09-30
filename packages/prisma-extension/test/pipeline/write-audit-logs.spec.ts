@@ -60,7 +60,7 @@ const createWriter = (
 ) => {
   const writeExecutor: WriteExecutor = { write: vi.fn(options.write ?? (async () => {})) };
   const failureSink: FailureSink = { notify: vi.fn(async () => {}), reportWriteFailure: vi.fn(async () => {}) };
-  const write = createWriteAuditLogs({ auditLogModel: 'auditLog', writeExecutor, writer: options.writer, failureSink });
+  const write = createWriteAuditLogs({ writeExecutor, writer: options.writer, failureSink });
   return { write, writeExecutor, failureSink };
 };
 
@@ -73,7 +73,7 @@ describe('createWriteAuditLogs', () => {
 
     await write(plan('immediate'), scope);
 
-    expect(writeExecutor.write).toHaveBeenCalledWith(transactionClient, 'auditLog', [record]);
+    expect(writeExecutor.write).toHaveBeenCalledWith(transactionClient, [record]);
   });
 
   it('queues an after-commit plan on the enclosing transaction and writes it on the base handle once it runs', async () => {
@@ -85,7 +85,7 @@ describe('createWriteAuditLogs', () => {
     expect(writeExecutor.write).not.toHaveBeenCalled();
     expect(deferredWrites).toHaveLength(1);
     await deferredWrites[0]?.();
-    expect(writeExecutor.write).toHaveBeenCalledWith(baseClient, 'auditLog', [record]);
+    expect(writeExecutor.write).toHaveBeenCalledWith(baseClient, [record]);
   });
 
   it('starts a detached plan without awaiting it', async () => {
@@ -97,7 +97,7 @@ describe('createWriteAuditLogs', () => {
 
     await write(plan('detached'), baseScope);
 
-    expect(writeExecutor.write).toHaveBeenCalledWith(baseClient, 'auditLog', [record]);
+    expect(writeExecutor.write).toHaveBeenCalledWith(baseClient, [record]);
     finish();
     await flushAllPendingWrites();
   });
@@ -113,7 +113,7 @@ describe('createWriteAuditLogs', () => {
       handle: transactionClient,
       defaultWrite: expect.any(Function),
     });
-    expect(writeExecutor.write).toHaveBeenCalledWith(transactionClient, 'auditLog', [record]);
+    expect(writeExecutor.write).toHaveBeenCalledWith(transactionClient, [record]);
   });
 
   it('writes nothing for a plan without records', async () => {
@@ -176,7 +176,7 @@ describe('createWriteAuditLogs', () => {
   it('queues after-commit plans in order and runs them in that order', async () => {
     const written: AuditLogData[][] = [];
     const { write, writeExecutor } = createWriter({
-      write: async (_handle, _model, logs) => {
+      write: async (_handle, logs) => {
         written.push(logs);
       },
     });
@@ -218,7 +218,7 @@ describe('createWriteAuditLogs', () => {
       handle: baseClient,
       defaultWrite: expect.any(Function),
     });
-    expect(writeExecutor.write).toHaveBeenCalledWith(baseClient, 'auditLog', [record]);
+    expect(writeExecutor.write).toHaveBeenCalledWith(baseClient, [record]);
   });
 
   it('hands the writer hook the base handle and a default write on it for a detached plan', async () => {
@@ -233,7 +233,7 @@ describe('createWriteAuditLogs', () => {
       handle: baseClient,
       defaultWrite: expect.any(Function),
     });
-    expect(writeExecutor.write).toHaveBeenCalledWith(baseClient, 'auditLog', [record]);
+    expect(writeExecutor.write).toHaveBeenCalledWith(baseClient, [record]);
   });
 
   it('lets the writer hook change the records the executor receives', async () => {
@@ -243,7 +243,7 @@ describe('createWriteAuditLogs', () => {
 
     await write(plan('immediate'), baseScope);
 
-    expect(writeExecutor.write).toHaveBeenCalledWith(baseClient, 'auditLog', [changed]);
+    expect(writeExecutor.write).toHaveBeenCalledWith(baseClient, [changed]);
   });
 
   it('reports an after-commit write failure under log-write once the queued write runs', async () => {

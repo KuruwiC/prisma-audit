@@ -6,4 +6,4 @@ export type { MemorySchema } from './schema.js';
 export { identityOf } from './schema.js';
 export type { MemoryHandle, MemoryRow, MemoryStore } from './store.js';
 export { createMemoryStore } from './store.js';
-export { AUDIT_LOG_MODEL, memoryWriteExecutor } from './write-executor.js';
+export { memoryWriteExecutor } from './write-executor.js';

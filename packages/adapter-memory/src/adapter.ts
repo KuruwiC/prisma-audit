@@ -27,7 +27,7 @@ import type {
 import { compose, createEntityConfigLookup, dispatch, policy, resolve } from '@kuruwic/db-audit-core';
 import { identityOf, type MemorySchema } from './schema.js';
 import { createMemoryStore, type MemoryHandle, type MemoryRow, type MemoryStore } from './store.js';
-import { AUDIT_LOG_MODEL, memoryWriteExecutor } from './write-executor.js';
+import { memoryWriteExecutor } from './write-executor.js';
 
 export interface MemoryAuditOptions<TModelName extends string> {
   readonly schema: MemorySchema<TModelName>;
@@ -136,7 +136,7 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
       return;
     }
     const write = (handle: MemoryHandle<TModelName>): Promise<void> =>
-      memoryWriteExecutor.write(handle, AUDIT_LOG_MODEL, [...plan.records]);
+      memoryWriteExecutor.write(handle, [...plan.records]);
 
     switch (plan.kind) {
       case 'immediate':

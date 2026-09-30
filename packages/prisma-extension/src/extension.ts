@@ -37,8 +37,8 @@ const createPipelineDependencies = (audit: AuditOptions): AuditPipelineDependenc
     batchExecutor: createBatchExecutor({ Prisma, schemaMetadata }),
     produceRecords: createRecordProducer({ ...audit, failureSink }),
     writeAuditLogs: createWriteAuditLogs({
-      auditLogModel: audit.auditLogModel,
       writeExecutor: createPrismaWriteExecutor(Prisma.DbNull, {
+        auditLogModel: audit.auditLogModel,
         storesBeforeUnavailable: declaresBeforeUnavailableColumn(Prisma.dmmf, audit.auditLogModel),
       }),
       writer: audit.writer,

@@ -10,19 +10,22 @@ import type { AuditContext } from '../types.js';
 import type { AuditRecord } from './mutation-event.js';
 
 /**
- * Writes audit records with database-specific API calls.
+ * Writes audit records with database-specific API calls, to the audit log the adapter
+ * constructed it for
+ *
+ * @template TDbHandle - Database handle type the adapter writes on
  *
  * @example
  * ```typescript
- * const executor: WriteExecutor = {
- *   write: async (handle, modelName, logs) => {
- *     await (handle as DbHandle).table(modelName).insertMany(logs);
+ * const createExecutor = (auditLogTable: Table): WriteExecutor<DbHandle> => ({
+ *   write: async (handle, records) => {
+ *     await handle.insert(auditLogTable).values(records);
  *   },
- * };
+ * });
  * ```
  */
-export interface WriteExecutor {
-  write: (handle: unknown, modelName: string, logs: AuditRecord[]) => Promise<void>;
+export interface WriteExecutor<TDbHandle = unknown> {
+  write: (handle: TDbHandle, records: AuditRecord[]) => Promise<void>;
 }
 
 /**

@@ -8,12 +8,14 @@
  */
 
 import type { AuditRecord, WriteExecutor } from '@kuruwic/db-audit-core';
-import type { DMMFModel } from '../internal-types.js';
+import type { DMMFModel, TransactionalPrismaClient } from '../internal-types.js';
 import { getModelAccessor } from '../utils/model-accessor.js';
 
 const BEFORE_UNAVAILABLE_FIELD = 'beforeUnavailable';
 
 export interface PrismaWriteExecutorOptions {
+  /** The client property of the audit-log model (`auditLog`, `activity`) the executor writes to */
+  readonly auditLogModel: string;
   /** The audit-log model declares a `beforeUnavailable` column (see {@link declaresBeforeUnavailableColumn}) */
   readonly storesBeforeUnavailable: boolean;
 }
@@ -186,17 +188,22 @@ const writeAuditLogs = async (
  * @example
  * ```typescript
  * const writeExecutor = createPrismaWriteExecutor(Prisma.DbNull, {
+ *   auditLogModel: 'auditLog',
  *   storesBeforeUnavailable: declaresBeforeUnavailableColumn(Prisma.dmmf, 'auditLog'),
  * });
- * await writeExecutor.write(prisma, 'auditLog', logs);
+ * await writeExecutor.write(prisma, logs);
  * ```
  */
-export const createPrismaWriteExecutor = (DbNull: unknown, options: PrismaWriteExecutorOptions): WriteExecutor => {
+export const createPrismaWriteExecutor = (
+  DbNull: unknown,
+  options: PrismaWriteExecutorOptions,
+): WriteExecutor<TransactionalPrismaClient> => {
+  const { auditLogModel } = options;
   return {
-    write: async (client: unknown, modelName: string, logs: AuditRecord[]): Promise<void> => {
-      const model = (client as Record<string, unknown>)[modelName];
+    write: async (client, logs) => {
+      const model = client[auditLogModel];
       const convertedLogs = logs.map((log) => toAuditLogRow(log, DbNull, options));
-      await writeAuditLogs(model as Record<string, unknown>, convertedLogs, modelName);
+      await writeAuditLogs(model as Record<string, unknown>, convertedLogs, auditLogModel);
     },
   };
 };

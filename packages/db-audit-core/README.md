@@ -54,8 +54,8 @@ dispatch(records, atomic, { inTransaction })   -> WritePlan
   required for it.
 - **`dispatch`** wraps the records in a `WritePlan`: `immediate` when atomic, `after-commit` when not
   atomic inside a transaction, `detached` otherwise.
-- **`WriteExecutor`** is the adapter's `write(handle, modelName, logs)`, which persists records with
-  the database's API. **`WriteFn`** is the user hook that runs in place of the default write:
+- **`WriteExecutor<THandle>`** is the adapter's `write(handle, records)`, which persists records
+  with the database's API to the audit log the adapter constructed it for. **`WriteFn`** is the user hook that runs in place of the default write:
   it receives the records and a `WriteContext` with the audit context, the database `handle` the
   write runs on (the transaction's for an immediate plan, one outside any transaction for an
   after-commit or detached plan) and `defaultWrite`, the executor's write on that handle.
@@ -126,8 +126,9 @@ What the adapter must provide:
 - **The handle thunk** passed to `resolve`, reading the adapter's own record of the active
   transaction. That record stays out of the `AuditContext`, which only carries the actor and
   request context.
-- **A `WriteExecutor`** whose `write(handle, modelName, logs)` persists records with the database's
-  API on the handle it is given.
+- **A `WriteExecutor`** whose `write(handle, records)` persists records with the database's API on
+  the handle it is given. The audit-log target (a model name, a table object) is fixed when the
+  adapter constructs the executor; the handle is its type parameter.
 - **Transaction scope ownership.** Tracking the transaction each async flow is inside, opening the
   implicit transaction, and holding the `after-commit` queue until commit. The core only learns
   `inTransaction`.
@@ -194,8 +195,8 @@ shows how such an adapter would plug into the boundary.
   when it throws. The implicit transaction is a `db.transaction` around the audited statement. A
   nested `tx.transaction(...)` is a savepoint: its queue joins the parent's when it succeeds and
   is dropped when it rolls back, all inside the adapter.
-- **`WriteExecutor`.** `handle.insert(auditLogTable).values(rows)`, closing over the audit-log
-  `Table`.
+- **`WriteExecutor`.** A `WriteExecutor` over the Drizzle database or transaction type, constructed
+  with the audit-log `Table`: `write(handle, records)` runs `handle.insert(auditLogTable).values(rows)`.
 - **Relation fields.** Rows returned by `insert`, `update` and `delete` hold columns only, so
   `relationFieldNames` returns an empty set.
 

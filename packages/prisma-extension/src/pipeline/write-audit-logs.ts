@@ -15,13 +15,12 @@
 
 import type { AuditRecord, WriteExecutor, WriteFn, WritePlan } from '@kuruwic/db-audit-core';
 import { type FailureSink, toError } from '../failure-sink.js';
+import type { TransactionalPrismaClient } from '../internal-types.js';
 import { trackPendingWrite } from '../runtime/pending-writes.js';
 import type { ExecutionScope } from './execution-scope.js';
 
 export interface WriteAuditLogsDependencies {
-  /** Accessor of the audit-log model on the client */
-  readonly auditLogModel: string;
-  readonly writeExecutor: WriteExecutor;
+  readonly writeExecutor: WriteExecutor<TransactionalPrismaClient>;
   readonly writer: WriteFn | undefined;
   readonly failureSink: FailureSink;
 }
@@ -30,7 +29,7 @@ export type WriteAuditLogs = (plan: WritePlan, scope: ExecutionScope) => Promise
 
 interface PlannedWrite {
   readonly scope: ExecutionScope;
-  readonly writeOn: (handle: unknown) => Promise<void>;
+  readonly writeOn: (handle: TransactionalPrismaClient) => Promise<void>;
   readonly report: (error: Error, logLabel: string) => Promise<void>;
 }
 
@@ -70,7 +69,7 @@ const startDetached = (planned: PlannedWrite): void => {
 };
 
 export const createWriteAuditLogs = (deps: WriteAuditLogsDependencies): WriteAuditLogs => {
-  const { auditLogModel, writeExecutor, writer, failureSink } = deps;
+  const { writeExecutor, writer, failureSink } = deps;
 
   return async (plan, scope) => {
     const first = plan.records[0];
@@ -83,8 +82,7 @@ export const createWriteAuditLogs = (deps: WriteAuditLogsDependencies): WriteAud
     const planned: PlannedWrite = {
       scope,
       writeOn: async (handle) => {
-        const defaultWrite = (records: AuditRecord[]): Promise<void> =>
-          writeExecutor.write(handle, auditLogModel, records);
+        const defaultWrite = (records: AuditRecord[]): Promise<void> => writeExecutor.write(handle, records);
         if (writer) {
           await writer(logs, { auditContext: scope.auditContext, handle, defaultWrite });
         } else {
