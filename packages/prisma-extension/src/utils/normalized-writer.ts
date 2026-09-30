@@ -12,7 +12,7 @@
  * @module utils/normalized-writer
  */
 
-import type { AuditRecord } from '@kuruwic/db-audit-core';
+import type { AuditRecord, WriteContext } from '@kuruwic/db-audit-core';
 import type { TransactionalPrismaClient } from '../internal-types.js';
 import type { AuditLogWriter } from '../types.js';
 import { getModelDelegate, hasOperation } from './model-accessor.js';
@@ -283,19 +283,23 @@ type PrismaClientWithTransaction = {
   $transaction: <T>(fn: (tx: TransactionalPrismaClient) => Promise<T>) => Promise<T>;
 };
 
-/** A client outside any transaction can open one; Prisma omits `$transaction` from a transaction's client */
-const canOpenTransaction = (handle: unknown): handle is PrismaClientWithTransaction =>
-  typeof (handle as Partial<PrismaClientWithTransaction> | null)?.$transaction === 'function';
-
-/** Runs `write` in the transaction `handle` belongs to, or in one it opens when it is outside any */
-const writeInTransaction = (handle: unknown, write: (tx: TransactionalPrismaClient) => Promise<void>): Promise<void> =>
-  canOpenTransaction(handle) ? handle.$transaction(write) : write(handle as TransactionalPrismaClient);
+/**
+ * Runs `write` on the writer's handle when the write is already inside a transaction, else in a
+ * transaction opened on the handle, which is then a client outside any transaction
+ */
+const writeInTransaction = (
+  { handle, inTransaction }: Pick<WriteContext, 'handle' | 'inTransaction'>,
+  write: (tx: TransactionalPrismaClient) => Promise<void>,
+): Promise<void> =>
+  inTransaction
+    ? write(handle as TransactionalPrismaClient)
+    : (handle as PrismaClientWithTransaction).$transaction(write);
 
 /**
  * Creates a writer that stores audit logs in a normalized schema with separate tables for actors,
  * entities, aggregates and events, so their metadata is not duplicated across audit logs. Writes run
- * on the handle the writer receives: in the audited operation's transaction for an awaited write,
- * else in a transaction of their own.
+ * on the handle the writer receives: in the audited operation's transaction when the write is inside
+ * it (`inTransaction`), else in a transaction of their own.
  *
  * @example
  * ```typescript
@@ -315,7 +319,7 @@ const writeInTransaction = (handle: unknown, write: (tx: TransactionalPrismaClie
  * ```
  */
 export const createEntityNormalizedWriter = (schema: NormalizedSchema): AuditLogWriter => {
-  return async (logs, { handle }) => {
+  return async (logs, context) => {
     if (logs.length === 0) {
       return;
     }
@@ -330,7 +334,7 @@ export const createEntityNormalizedWriter = (schema: NormalizedSchema): AuditLog
       await createAuditEvents(tx, schema.eventModel, logs, actorMap, entityMap, aggregateMap);
     };
 
-    await writeInTransaction(handle, writeWithinTransaction);
+    await writeInTransaction(context, writeWithinTransaction);
   };
 };
 
@@ -357,8 +361,8 @@ const groupLogsByChange = (logs: AuditRecord[]): Map<string, AuditRecord[]> => {
 /**
  * Creates a writer that stores each entity change (before/after/changes) once and links it to every
  * aggregate root it belongs to, so change data is not duplicated across aggregates. Writes run on
- * the handle the writer receives: in the audited operation's transaction for an awaited write,
- * else in a transaction of their own.
+ * the handle the writer receives: in the audited operation's transaction when the write is inside it
+ * (`inTransaction`), else in a transaction of their own.
  *
  * @example
  * ```typescript
@@ -376,7 +380,7 @@ const groupLogsByChange = (logs: AuditRecord[]): Map<string, AuditRecord[]> => {
  * ```
  */
 export const createSharedChangeWriter = (schema: SharedChangeSchema): AuditLogWriter => {
-  return async (logs, { handle }) => {
+  return async (logs, context) => {
     if (logs.length === 0) {
       return;
     }
@@ -448,6 +452,6 @@ export const createSharedChangeWriter = (schema: SharedChangeSchema): AuditLogWr
       await processChangeGroups(changeModel, aggregateModel, changeGroups);
     };
 
-    await writeInTransaction(handle, writeWithinTransaction);
+    await writeInTransaction(context, writeWithinTransaction);
   };
 };

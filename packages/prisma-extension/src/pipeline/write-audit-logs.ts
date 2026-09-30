@@ -28,13 +28,13 @@ export type WriteAuditLogs = (plan: WritePlan, scope: ExecutionScope) => Promise
 
 interface PlannedWrite {
   readonly scope: ExecutionScope;
-  readonly writeOn: (handle: TransactionalPrismaClient) => Promise<void>;
+  readonly writeOn: (handle: TransactionalPrismaClient, inTransaction: boolean) => Promise<void>;
   readonly report: (error: Error) => Promise<void>;
 }
 
 const writeImmediately = async (planned: PlannedWrite): Promise<void> => {
   try {
-    await planned.writeOn(planned.scope.handle);
+    await planned.writeOn(planned.scope.handle, planned.scope.transaction !== undefined);
   } catch (caught) {
     await planned.report(toError(caught));
   }
@@ -43,7 +43,7 @@ const writeImmediately = async (planned: PlannedWrite): Promise<void> => {
 /** A write on the base client once the caller has returned; its report never rejects */
 const baseWrite = (planned: PlannedWrite) => async (): Promise<void> => {
   try {
-    await planned.writeOn(planned.scope.baseClient);
+    await planned.writeOn(planned.scope.baseClient, false);
   } catch (caught) {
     await planned.report(toError(caught));
   }
@@ -72,10 +72,10 @@ export const createWriteAuditLogs = (deps: WriteAuditLogsDependencies): WriteAud
 
     const planned: PlannedWrite = {
       scope,
-      writeOn: async (handle) => {
+      writeOn: async (handle, inTransaction) => {
         const defaultWrite = (records: AuditRecord[]): Promise<void> => writeExecutor.write(handle, records);
         if (writer) {
-          await writer(logs, { auditContext: scope.auditContext, handle, defaultWrite });
+          await writer(logs, { auditContext: scope.auditContext, handle, inTransaction, defaultWrite });
         } else {
           await defaultWrite(logs);
         }

@@ -114,9 +114,54 @@ describe('createWriteAuditLogs', () => {
     expect(writer).toHaveBeenCalledWith([record], {
       auditContext,
       handle: transactionClient,
+      inTransaction: true,
       defaultWrite: expect.any(Function),
     });
     expect(writeExecutor.write).toHaveBeenCalledWith(transactionClient, [record]);
+  });
+
+  describe('the writer hook context reports whether the write runs in the operation transaction', () => {
+    const inTransactionOf = (writer: ReturnType<typeof vi.fn>): unknown =>
+      (writer.mock.calls[0]?.[1] as WriteContext).inTransaction;
+
+    it('is true for an immediate plan written on the transaction handle', async () => {
+      const writer = vi.fn(async () => {});
+      const { write } = createWriter({ writer });
+
+      await write(plan('immediate'), transactionScope([]));
+
+      expect(inTransactionOf(writer)).toBe(true);
+    });
+
+    it('is false for an immediate plan written on a handle outside any transaction', async () => {
+      const writer = vi.fn(async () => {});
+      const { write } = createWriter({ writer });
+
+      await write(plan('immediate'), baseScope);
+
+      expect(inTransactionOf(writer)).toBe(false);
+    });
+
+    it('is false for an after-commit plan, which runs on the base handle once the transaction has committed', async () => {
+      const writer = vi.fn(async () => {});
+      const { write } = createWriter({ writer });
+      const deferredWrites: Array<() => Promise<void>> = [];
+
+      await write(plan('after-commit'), transactionScope(deferredWrites));
+      await deferredWrites[0]?.();
+
+      expect(inTransactionOf(writer)).toBe(false);
+    });
+
+    it('is false for a detached plan', async () => {
+      const writer = vi.fn(async () => {});
+      const { write } = createWriter({ writer });
+
+      await write(plan('detached'), baseScope);
+      await flushAllPendingWrites();
+
+      expect(inTransactionOf(writer)).toBe(false);
+    });
   });
 
   it('writes nothing for a plan without records', async () => {
@@ -213,6 +258,7 @@ describe('createWriteAuditLogs', () => {
     expect(writer).toHaveBeenCalledWith([record], {
       auditContext,
       handle: baseClient,
+      inTransaction: false,
       defaultWrite: expect.any(Function),
     });
     expect(writeExecutor.write).toHaveBeenCalledWith(baseClient, [record]);
@@ -228,6 +274,7 @@ describe('createWriteAuditLogs', () => {
     expect(writer).toHaveBeenCalledWith([record], {
       auditContext,
       handle: baseClient,
+      inTransaction: false,
       defaultWrite: expect.any(Function),
     });
     expect(writeExecutor.write).toHaveBeenCalledWith(baseClient, [record]);

@@ -593,4 +593,78 @@ describe('hooks.writer Coverage', () => {
       expect(await tagNames()).toEqual(['writer:after-commit@example.com']);
     });
   });
+
+  describe("the writer's transaction flag", () => {
+    const openClients: Array<{ $disconnect: () => Promise<void> }> = [];
+
+    afterEach(async () => {
+      for (const client of openClients.splice(0)) {
+        await client.$disconnect();
+      }
+    });
+
+    const createClient = (awaitWrite: boolean) => {
+      const basePrisma = new PrismaClient({ datasources: { db: { url: context.databaseUrl } } });
+      const flags: boolean[] = [];
+      const prisma = createAuditClient(basePrisma, {
+        Prisma,
+        provider: context.provider,
+        aggregateMapping: testAggregateMapping,
+        performance: { awaitWrite },
+        hooks: {
+          writer: async (records, { inTransaction, defaultWrite }) => {
+            flags.push(inTransaction);
+            await defaultWrite(records);
+          },
+        },
+      });
+      openClients.push(prisma, basePrisma);
+      return { prisma, flags };
+    };
+
+    const createUser = (client: { user: PrismaClient['user'] }, email: string) =>
+      client.user.create({ data: { email, name: 'User', password: 'secret123' } });
+
+    it("is true for an awaited write in the caller's transaction", async () => {
+      const { prisma, flags } = createClient(true);
+
+      await context.provider.runAsync(testActor, () =>
+        prisma.$transaction(async (tx) => {
+          await createUser(tx, 'in-transaction@example.com');
+        }),
+      );
+
+      expect(flags).toEqual([true]);
+    });
+
+    it('is true for an awaited write in the transaction the extension opens around the operation', async () => {
+      const { prisma, flags } = createClient(true);
+
+      await context.provider.runAsync(testActor, () => createUser(prisma, 'implicit-transaction@example.com'));
+
+      expect(flags).toEqual([true]);
+    });
+
+    it('is false for a detached write', async () => {
+      const { prisma, flags } = createClient(false);
+
+      await context.provider.runAsync(testActor, () => createUser(prisma, 'detached@example.com'));
+      await flushAllPendingWrites();
+
+      expect(flags).toEqual([false]);
+    });
+
+    it('is false for a write queued until the transaction commits', async () => {
+      const { prisma, flags } = createClient(false);
+
+      await context.provider.runAsync(testActor, () =>
+        prisma.$transaction(async (tx) => {
+          await createUser(tx, 'after-commit@example.com');
+        }),
+      );
+      await flushAllPendingWrites();
+
+      expect(flags).toEqual([false]);
+    });
+  });
 });

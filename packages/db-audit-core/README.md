@@ -61,7 +61,9 @@ dispatch(records, atomic, { inTransaction })   -> WritePlan
   with the database's API to the audit log the adapter constructed it for. **`WriteFn`** is the user hook that runs in place of the default write:
   it receives the records and a `WriteContext` with the audit context, the database `handle` the
   write runs on (the transaction's for an immediate plan, one outside any transaction for an
-  after-commit or detached plan) and `defaultWrite`, the executor's write on that handle.
+  after-commit or detached plan), `inTransaction` (whether the write is part of the operation's
+  transaction: true for an immediate write inside it, false for an after-commit or detached write;
+  the adapter that owns the scope sets it) and `defaultWrite`, the executor's write on that handle.
 
 ## Configuration API
 

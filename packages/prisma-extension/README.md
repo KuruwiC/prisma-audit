@@ -410,7 +410,7 @@ model AuditEvent {
 
 **Configuration with Built-in Helper:**
 
-The helper writes on the client each write runs on: in the operation's transaction for an awaited write, in a transaction of its own otherwise.
+The helper writes on the client each write runs on: in the operation's transaction when `inTransaction` is true (an awaited write), in a transaction of its own otherwise.
 
 ```typescript
 // src/audit.config.ts
@@ -548,7 +548,7 @@ model AuditAggregate {
 
 **Configuration with Built-in Helper:**
 
-The helper writes on the client each write runs on: in the operation's transaction for an awaited write, in a transaction of its own otherwise.
+The helper writes on the client each write runs on: in the operation's transaction when `inTransaction` is true (an awaited write), in a transaction of its own otherwise.
 
 ```typescript
 // src/audit.config.ts
@@ -926,12 +926,12 @@ Sampling rate per operation. Called once per audited operation with its top-leve
 Hook into the audit log lifecycle.
 
 #### `writer`
-**Type:** `(records: AuditRecord[], context: WriteContext<TClient>) => Promise<void>`, where `WriteContext<TClient>` is `{ auditContext: AuditContext; handle: TClient; defaultWrite: (records: AuditRecord[]) => Promise<void> }`; both types are exported by the package
+**Type:** `(records: AuditRecord[], context: WriteContext<TClient>) => Promise<void>`, where `WriteContext<TClient>` is `{ auditContext: AuditContext; handle: TClient; inTransaction: boolean; defaultWrite: (records: AuditRecord[]) => Promise<void> }`; both types are exported by the package
 **Default:** Uses `defaultWrite`
 
-Customize how audit logs are written. `handle` is the client the write runs on and `defaultWrite` is the default persistence on that client.
+Customize how audit logs are written. `handle` is the client the write runs on, `inTransaction` says whether that client belongs to a transaction the write is part of, and `defaultWrite` is the default persistence on that client.
 
-**Contract:** with `awaitWrite: true` (the default), `handle` is the client of the operation's transaction (the caller's `$transaction`, or the one the extension opens around the operation) and the writer runs before commit, so a later rollback undoes rows the writer wrote through `handle` or `defaultWrite`. With `awaitWrite: false`, `handle` is the base client passed to `createAuditClient`: the write starts after the operation, and inside `$transaction` only once `$transaction` has resolved; a transaction that throws discards the queued write, so the writer never runs for it. For an awaited write, `handle` is typed as the client although it is a transaction's client. Either way, side effects the writer performs outside the database transaction — an HTTP call, a queue publish — are never rolled back, because they have already happened by the time a rollback occurs. Use `awaitWrite: false` (or `awaitWriteIf`) to defer that kind of delivery until after commit instead.
+**Contract:** with `awaitWrite: true` (the default), `handle` is the client of the operation's transaction (the caller's `$transaction`, or the one the extension opens around the operation) and the writer runs before commit, so a later rollback undoes rows the writer wrote through `handle` or `defaultWrite`. With `awaitWrite: false`, `handle` is the base client passed to `createAuditClient`: the write starts after the operation, and inside `$transaction` only once `$transaction` has resolved; a transaction that throws discards the queued write, so the writer never runs for it. `inTransaction` is `true` for the awaited write and `false` for a write after commit or a detached one, so a writer that needs several statements to be atomic wraps them in `handle.$transaction(...)` exactly when it is `false`; `createEntityNormalizedWriter` and `createSharedChangeWriter` do this. For an awaited write, `handle` is typed as the client although it is a transaction's client. Either way, side effects the writer performs outside the database transaction — an HTTP call, a queue publish — are never rolled back, because they have already happened by the time a rollback occurs. Use `awaitWrite: false` (or `awaitWriteIf`) to defer that kind of delivery until after commit instead.
 
 ```typescript
 {
