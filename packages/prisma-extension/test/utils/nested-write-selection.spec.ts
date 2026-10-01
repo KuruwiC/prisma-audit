@@ -18,7 +18,7 @@ const schemaMetadata = createSchemaMetadataFromDMMF({
         {
           name: 'User',
           fields: [
-            scalar('id'),
+            { ...scalar('id'), isId: true },
             scalar('email'),
             relation('posts', 'Post', true),
             relation('profile', 'Profile', false),
@@ -192,6 +192,18 @@ describe('injectNestedWriteSelection', () => {
     expect(injectedArgs).not.toHaveProperty('include');
   });
 
+  it('adds the primary key to a caller select that omits it', () => {
+    const args = { where: { id: 'user-1' }, data: commentCreatedInPostUpdate, select: { email: true } };
+
+    const { args: injectedArgs, injected } = injectNestedWriteSelection(schemaMetadata, 'User', args);
+
+    expect(injectedArgs).toEqual({
+      ...args,
+      select: { email: true, posts: { where: { OR: [{ id: 'post-1' }] }, include: { comments: true } }, id: true },
+    });
+    expect(injected?.keys).toEqual(new Set(['posts', 'id']));
+  });
+
   it('adds the related scalar fields and written relations inside a caller relation select', () => {
     const args = {
       where: { id: 'user-1' },
@@ -260,6 +272,14 @@ describe('projectToRequestedShape', () => {
     const result = { id: 'user-1', posts: [{ id: 'post-1', comments: [] }] };
 
     expect(project({ data: commentCreatedInPostUpdate, select: { id: true } }, result)).toEqual({ id: 'user-1' });
+  });
+
+  it('returns exactly a caller select that omits the primary key', () => {
+    const result = { email: 'user@example.com', id: 'user-1', posts: [{ id: 'post-1', comments: [] }] };
+
+    expect(project({ data: commentCreatedInPostUpdate, select: { email: true } }, result)).toEqual({
+      email: 'user@example.com',
+    });
   });
 
   it('returns exactly the caller nested select of a relation', () => {

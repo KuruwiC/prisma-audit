@@ -8,15 +8,17 @@
  * operation only updates by unique WHERE is bounded to the rows the updates name, so its siblings
  * are not read; a relation the operation may insert into is read whole, since the inserted rows
  * have no identity yet, and so is one an `updateMany` writes, since its filter describes the rows
- * as they were before the write. What was added is recorded, so the value handed back to the
- * caller can be projected to the shape the caller requested while audit logs are built from the
- * full result.
+ * as they were before the write. A top-level `select` also gets the model's primary key, which
+ * the rows written below the returned row are found by when the result does not hold them. What
+ * was added is recorded, so the value handed back to the caller can be projected to the shape the
+ * caller requested while audit logs are built from the full result.
  *
  * @module utils/nested-write-selection
  */
 
 import {
   detectNestedOperations,
+  getPrimaryKeyConstraint,
   type NestedOperationInfo,
   type NestedOperationKeyword,
   targetWhereClauses,
@@ -179,6 +181,21 @@ const selectMissingScalarFields = (schemaMetadata: SchemaMetadata, modelName: st
 };
 
 /**
+ * Select the primary-key fields of `modelName` missing from `select`, in place
+ *
+ * @returns The fields added
+ * @internal
+ */
+const selectMissingKeyFields = (schemaMetadata: SchemaMetadata, modelName: string, select: Selection): string[] => {
+  const fields = getPrimaryKeyConstraint(schemaMetadata, modelName)?.fields ?? [];
+  const added = fields.filter((field) => select[field] === undefined || select[field] === false);
+  for (const field of added) {
+    select[field] = true;
+  }
+  return added;
+};
+
+/**
  * Add a written relation to the caller's args for that relation. A nested `select` also gets the
  * related model's scalar fields for the audit entry, since select must enumerate them explicitly.
  *
@@ -264,11 +281,13 @@ export const injectNestedWriteSelection = (
 
   const selectionKey = isRecord(args.select) ? 'select' : 'include';
   const callerSelection = args[selectionKey];
-  const { entries, injected } = mergeWrittenRelations(
+  const { entries, injected: relations } = mergeWrittenRelations(
     schemaMetadata,
     isRecord(callerSelection) ? callerSelection : {},
     buildWrittenRelations(schemaMetadata, modelName, writtenOperations),
   );
+  const keyFields = selectionKey === 'select' ? selectMissingKeyFields(schemaMetadata, modelName, entries) : [];
+  const injected = { keys: new Set([...relations.keys, ...keyFields]), nested: relations.nested };
 
   if (isEmptyInjection(injected)) {
     return { args, injected: undefined };

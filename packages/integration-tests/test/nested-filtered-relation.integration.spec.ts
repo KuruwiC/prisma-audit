@@ -117,6 +117,21 @@ describe('nested rows a relation filter leaves out of the result', () => {
     expect(await afterOf('Post', 'p-new')).toMatchObject({ title: 'New', authorId: 'u1' });
   });
 
+  it("audits a created row the caller's filtered select leaves out when the select omits the parent's key", async () => {
+    const { prisma, run, recordsOf } = await setup();
+
+    const result = await run(() =>
+      prisma.user.update({
+        where: { id: 'u1' },
+        data: { posts: { create: { id: 'p-new', title: 'New' } } },
+        select: { name: true, posts: { where: { published: true }, select: { id: true } } },
+      }),
+    );
+
+    expect(result).toEqual({ name: 'Ada', posts: [{ id: 'p-live' }] });
+    expect(await recordsOf('Post')).toEqual(['p-new:create']);
+  });
+
   it('audits every row a top-level create inserts below it, whatever its include filters', async () => {
     const { prisma, run, recordsOf } = await setup();
 
