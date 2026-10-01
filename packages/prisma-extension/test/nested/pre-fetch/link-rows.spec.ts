@@ -227,6 +227,53 @@ describe('readLinkRows', () => {
     expect(reads.size).toBe(0);
   });
 
+  it('reports a link whose foreign key references no field of the parent model instead of reading every row', async () => {
+    const withoutReferences: DMMFModel[] = models.map((model) =>
+      model.name === 'Label'
+        ? {
+            ...model,
+            fields: model.fields.map((field) => (field.name === 'post' ? { ...field, relationToFields: [] } : field)),
+          }
+        : model,
+    );
+    const unresolved: PrismaNamespace = {
+      defineExtension: () => undefined,
+      DbNull: null,
+      dmmf: { datamodel: { models: withoutReferences } },
+    };
+    const nestedPreFetchResults = twoParents();
+    const findMany = vi.fn(async () => []);
+    const onPreFetchFailure = vi.fn(async () => undefined);
+    const nestedOperations = detectExecutedNestedOperations(
+      schemaMetadata,
+      'User',
+      args,
+      undefined,
+      nestedPreFetchResults,
+    );
+
+    const reads = await readLinkRows(
+      {
+        prismaClient: { label: { findMany } },
+        modelName: 'User',
+        topLevelWhere: args.where,
+        nestedOperations,
+        nestedPreFetchResults,
+      },
+      { Prisma: unresolved, schemaMetadata, shouldFetchBefore: () => true, onPreFetchFailure },
+    );
+
+    expect(findMany).not.toHaveBeenCalled();
+    expect(reads.get('posts.labels')).toMatchObject({ rows: [], failed: true });
+    expect(onPreFetchFailure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        phase: 'pre-fetch',
+        modelName: 'Label',
+        error: expect.objectContaining({ message: expect.stringContaining('"postId"') }),
+      }),
+    );
+  });
+
   it('reports a failed read and marks the path', async () => {
     const nestedPreFetchResults = twoParents();
     const error = new Error('findMany failed');

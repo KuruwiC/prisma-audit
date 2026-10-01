@@ -181,6 +181,21 @@ const readParentKeys = async (
   return keys;
 };
 
+/**
+ * Rejects a link that names fewer referenced fields than foreign-key fields: `attachedFilter`
+ * would filter the missing ones by `undefined`, which Prisma reads as no filter, and match every
+ * row of the related model.
+ */
+const assertReferencesComplete = (link: RelatedSideLink): void => {
+  if (link.references.length < link.fields.length) {
+    throw new Error(
+      `[@prisma-audit] Cannot read the rows linked to a "${link.parentModel}" row: the foreign key ` +
+        `(${link.fields.map((field) => `"${field}"`).join(', ')}) references ` +
+        `${link.references.length} of ${link.fields.length} fields in the schema metadata`,
+    );
+  }
+};
+
 /** The foreign key of the link holding `parentKey`, as a filter on the related model */
 export const attachedFilter = (link: RelatedSideLink, parentKey: Row): Row =>
   Object.fromEntries(link.fields.map((field, index) => [field, parentKey[link.references[index] ?? '']]));
@@ -203,6 +218,7 @@ const readPath = async (
   const relatedModel = first.operation.relatedModel;
   const base = { relatedModel, pkFields, link, writes };
   try {
+    assertReferencesComplete(link);
     const parentKeys = await readParentKeys(input, deps, path, pathWrites);
     const fieldNames = new Set(deps.schemaMetadata.getAllFields(relatedModel).map((field) => field.name));
     const filters = writes.flatMap((write) => {
