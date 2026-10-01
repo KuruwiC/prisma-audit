@@ -243,6 +243,34 @@ describe('foreign-key changes of related rows', () => {
       expect((await recordsOf('Label')).map(({ id, action }) => [id, action])).toEqual([['l2', 'update']]);
     });
 
+    it('keeps the before state a connectOrCreate read when the read of the rows a connect names failed', async () => {
+      const { basePrisma, prisma, run, arm, phases, recordsOf } = await setup({ faultModel: 'Label' });
+      await basePrisma.label.create({ data: { id: 'l2', name: 'l2', postId: 'p-u2' } });
+
+      arm();
+      await run(() =>
+        prisma.post.update({
+          where: { id: 'p-live' },
+          data: {
+            labels: {
+              connect: { id: 'l2' },
+              connectOrCreate: { where: { id: 'l2' }, create: { id: 'l2', name: 'l2' } },
+            },
+          },
+        }),
+      );
+
+      expect(phases()).toEqual([['pre-fetch', 'Label', 'connect']]);
+      expect(await recordsOf('Label')).toEqual([
+        expect.objectContaining({
+          id: 'l2',
+          action: 'update',
+          beforeUnavailable: false,
+          changes: { postId: { old: 'p-u2', new: 'p-live' } },
+        }),
+      ]);
+    });
+
     it('audits a row once when an update under one parent row and a connect under another both write it', async () => {
       const { basePrisma, prisma, run, recordsOf } = await setup();
       await basePrisma.label.create({ data: { id: 'l1', name: 'l1', postId: 'p-draft' } });

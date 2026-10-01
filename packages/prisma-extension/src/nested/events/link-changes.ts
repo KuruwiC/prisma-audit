@@ -132,6 +132,15 @@ const candidatesAt = (
   );
 };
 
+/**
+ * The candidates with a captured before state ahead of the rest, so that of the writes naming one
+ * row the one whose before state was read is the one recorded
+ */
+const capturedFirst = (candidates: readonly LinkCandidate[]): LinkCandidate[] => [
+  ...candidates.filter((candidate) => candidate.before.kind === 'captured'),
+  ...candidates.filter((candidate) => candidate.before.kind !== 'captured'),
+];
+
 const foreignKeyChanged = (before: Row, after: Row, fields: readonly string[]): boolean =>
   fields.some((field) => String(before[field] ?? null) !== String(after[field] ?? null));
 
@@ -194,7 +203,7 @@ export const collectLinkChanges = async (
     nestedLog('re-linked rows read: path=%s rows=%d', path, after.length);
     // Each row once, whichever writes named it, and not a row another nested write audits
     const recorded = new Set(audited);
-    for (const candidate of candidates) {
+    for (const candidate of capturedFirst(candidates)) {
       const record = recordOf(candidate, after, read);
       const identity = record ? extractEntityIdentity(record.entity, read.pkFields) : undefined;
       if (!record || identity === undefined || recorded.has(identity)) {
