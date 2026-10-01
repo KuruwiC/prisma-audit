@@ -553,7 +553,7 @@ describe('extractNestedRecords', () => {
 const executedPass = (existingPaths: readonly string[], topLevelUpsertBranch?: UpsertBranch): NestedDetectionPass => ({
   kind: 'executed',
   topLevelUpsertBranch,
-  branchAt: (path) => (existingPaths.includes(path) ? 'update' : 'create'),
+  branchAt: ({ path }) => (existingPaths.includes(path) ? 'update' : 'create'),
 });
 
 describe('detectNestedOperations with upsert branch filtering', () => {
@@ -1032,7 +1032,7 @@ describe('detectNestedOperations inside nested updates', () => {
       const asked: [string, Record<string, unknown> | undefined][] = [];
       const pass: NestedDetectionPass = {
         kind: 'executed',
-        branchAt: (path, where) => {
+        branchAt: ({ path }, where) => {
           asked.push([path, where]);
           return where?.id === 'post-1' ? 'update' : 'create';
         },
@@ -1052,7 +1052,7 @@ describe('detectNestedOperations inside nested updates', () => {
     it('scans neither branch of an element whose target could not be read', () => {
       const pass: NestedDetectionPass = {
         kind: 'executed',
-        branchAt: (_path, where) => (where?.id === 'post-1' ? undefined : 'create'),
+        branchAt: (_operation, where) => (where?.id === 'post-1' ? undefined : 'create'),
       };
 
       expect(detectedOperations(args, pass)).toEqual(['posts:upsert', 'posts.comments:create']);
@@ -1062,7 +1062,7 @@ describe('detectNestedOperations inside nested updates', () => {
       const asked: unknown[] = [];
       const pass: NestedDetectionPass = {
         kind: 'executed',
-        branchAt: (_path, where) => {
+        branchAt: (_operation, where) => {
           asked.push(where);
           return 'create';
         },
@@ -1087,7 +1087,7 @@ describe('detectNestedOperations inside nested updates', () => {
     };
     const connectsPost1: NestedDetectionPass = {
       kind: 'executed',
-      branchAt: (_path, where) => (where?.id === 'post-1' ? 'update' : 'create'),
+      branchAt: (_operation, where) => (where?.id === 'post-1' ? 'update' : 'create'),
     };
 
     it('is scanned for every element of a list in the discovery pass', () => {
@@ -1119,6 +1119,79 @@ describe('detectNestedOperations inside nested updates', () => {
         'profile:connectOrCreate',
         'profile.avatar:create',
       ]);
+    });
+  });
+
+  describe('the element each operation was detected in', () => {
+    const parentOf = (args: Record<string, unknown>, pass: NestedDetectionPass) =>
+      detectNestedOperations(createSchemaMetadataFromDMMF(Prisma), 'User', args, pass).map((op) =>
+        op.parent
+          ? `${op.path}:${op.operation} in ${op.parent.operation.path}:${op.parent.operation.operation}[${op.parent.element}]`
+          : `${op.path}:${op.operation}`,
+      );
+
+    it('names the list element of a to-many update each nested write sits in', () => {
+      const args = {
+        data: {
+          posts: {
+            update: [
+              { where: { id: 'post-1' }, data: { comments: { create: { content: 'a' } } } },
+              { where: { id: 'post-2' }, data: { comments: { update: { where: { id: 'c' }, data: {} } } } },
+            ],
+          },
+        },
+      };
+
+      expect(parentOf(args, { kind: 'discovery' })).toEqual([
+        'posts:update',
+        'posts.comments:create in posts:update[0]',
+        'posts.comments:update in posts:update[1]',
+      ]);
+    });
+
+    it('keeps the index of an upsert element when other elements are not scanned', () => {
+      const args = {
+        data: {
+          posts: {
+            upsert: [
+              { where: { id: 'post-1' }, create: { comments: { create: { content: 'a' } } }, update: {} },
+              { where: { id: 'missing' }, create: { comments: { create: { content: 'b' } } }, update: {} },
+            ],
+          },
+        },
+      };
+
+      expect(
+        parentOf(args, {
+          kind: 'executed',
+          branchAt: (_operation, where) => (where?.id === 'missing' ? 'create' : undefined),
+        }),
+      ).toEqual(['posts:upsert', 'posts.comments:create in posts:upsert[1]']);
+    });
+
+    it('hands a to-one upsert to the branch decision with the element it is nested in', () => {
+      const asked: string[] = [];
+      const args = {
+        data: {
+          posts: {
+            update: [
+              { where: { id: 'post-1' }, data: {} },
+              { where: { id: 'post-2' }, data: { comments: { update: { where: { id: 'c' }, data: {} } } } },
+            ],
+          },
+          profile: { update: { avatar: { upsert: { create: {}, update: {} } } } },
+        },
+      };
+
+      detectNestedOperations(createSchemaMetadataFromDMMF(Prisma), 'User', args, {
+        kind: 'executed',
+        branchAt: (operation) => {
+          asked.push(`${operation.path} in ${operation.parent?.operation.path}[${operation.parent?.element}]`);
+          return 'update';
+        },
+      });
+
+      expect(asked).toEqual(['profile.avatar in profile[0]']);
     });
   });
 });

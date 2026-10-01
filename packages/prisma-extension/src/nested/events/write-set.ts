@@ -75,7 +75,7 @@ export const detectExecutedNestedOperations = (
   detectNestedOperations(schemaMetadata, modelName, args, {
     kind: 'executed',
     topLevelUpsertBranch,
-    branchAt: (path, where) => upsertBranchOf(preFetchedStateAt(nestedPreFetchResults, path, where)),
+    branchAt: (operation, where) => upsertBranchOf(preFetchedStateAt(nestedPreFetchResults, operation.path, where)),
   });
 
 const INSERTING_KEYWORDS: ReadonlySet<NestedOperationKeyword> = new Set(['create', 'createMany']);

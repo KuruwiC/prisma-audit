@@ -61,6 +61,15 @@ export interface NestedOperationInfo {
   data: unknown;
   /** Full path from root (e.g., 'postTags', 'postTags.tag') */
   path: string;
+  /** The element of the operation this one was detected in; absent for a write on the top-level row */
+  parent?: NestedOperationParent;
+}
+
+/** The element of a nested operation's data that another nested operation was detected in */
+export interface NestedOperationParent {
+  readonly operation: NestedOperationInfo;
+  /** Index of the element in the operation's data; 0 when the data is not a list */
+  readonly element: number;
 }
 
 /** Information about nested records extracted from operation result */
@@ -102,32 +111,45 @@ export type UpsertBranch = 'create' | 'update';
  * - `executed`: the operation ran, and only the writes of the branches that executed are reported.
  *   `topLevelUpsertBranch` is the branch the top-level upsert executed; it is absent when the
  *   operation is not an upsert, and the top-level `create` / `update` args are then not scanned.
- *   `branchAt(path, where)` is the branch a nested upsert or connectOrCreate element at `path`
- *   executed: `update` (a connect, for a connectOrCreate) when the record it targets existed
- *   before the operation, `create` when it did not, undefined when that could not be read, and
- *   then nothing of the element is scanned. `where` is the element's unique WHERE, absent for a
- *   to-one upsert, which targets the single related row. A connectOrCreate's `create` data is
- *   scanned only on its `create` branch.
+ *   `branchAt(operation, where)` is the branch an element of the nested upsert or connectOrCreate
+ *   `operation` executed: `update` (a connect, for a connectOrCreate) when the record it targets
+ *   existed before the operation, `create` when it did not, undefined when that could not be
+ *   read, and then nothing of the element is scanned. `where` is the element's unique WHERE,
+ *   absent for a to-one upsert, which targets the related row of the row `operation.parent`
+ *   names. A connectOrCreate's `create` data is scanned only on its `create` branch.
  */
 export type NestedDetectionPass =
   | { readonly kind: 'discovery' }
   | {
       readonly kind: 'executed';
       readonly topLevelUpsertBranch?: UpsertBranch;
-      readonly branchAt: (path: string, where: Record<string, unknown> | undefined) => UpsertBranch | undefined;
+      readonly branchAt: (
+        operation: NestedOperationInfo,
+        where: Record<string, unknown> | undefined,
+      ) => UpsertBranch | undefined;
     };
 
-/** @internal The branches of one nested upsert or connectOrCreate element at `path` that the pass scans */
+type RelationField = { name: string; relatedModel: string; isList: boolean };
+
+/** An element of a nested operation's data that the scan descends into, by its index in that data */
+interface ScannedElement {
+  readonly element: number;
+  readonly data: Record<string, unknown>;
+}
+
+const elementsOf = (data: unknown): unknown[] => (Array.isArray(data) ? data : [data]);
+
+/** @internal The branches of one nested upsert or connectOrCreate element of `operation` that the pass scans */
 const elementBranches = (
   pass: NestedDetectionPass,
-  path: string,
+  operation: NestedOperationInfo,
   element: Record<string, unknown>,
 ): readonly UpsertBranch[] => {
   if (pass.kind === 'discovery') {
     return ['update', 'create'];
   }
   const where = isRecord(element.where) ? element.where : undefined;
-  const branch = pass.branchAt(path, where);
+  const branch = pass.branchAt(operation, where);
   return branch ? [branch] : [];
 };
 
@@ -135,44 +157,14 @@ const elementBranches = (
  * @internal The data of the upsert branches the pass scans, element by element: a to-many upsert is
  * one `{ where, create, update }` or a list of them, each taking its own branch.
  */
-const upsertBranchData = (pass: NestedDetectionPass, path: string, nestedData: unknown): Record<string, unknown>[] => {
-  const elements = Array.isArray(nestedData) ? nestedData : [nestedData];
-  return elements.filter(isRecord).flatMap((element) =>
-    elementBranches(pass, path, element)
-      .map((branch) => element[branch])
-      .filter(isRecord),
-  );
-};
-
-/** @internal The branches of the top-level upsert whose args the pass scans */
-const topLevelUpsertBranches = (pass: NestedDetectionPass): readonly UpsertBranch[] => {
-  if (pass.kind === 'discovery') {
-    return ['create', 'update'];
-  }
-  return pass.topLevelUpsertBranch ? [pass.topLevelUpsertBranch] : [];
-};
-
-/** @internal Process create/createMany operations recursively */
-const processCreateOperation = (
-  schemaMetadata: SchemaMetadata,
-  relationField: { name: string; relatedModel: string; isList: boolean },
-  nestedData: unknown,
-  currentPath: string,
-  pass: NestedDetectionPass,
-): NestedOperationInfo[] => {
-  return detectDeeplyNestedOperations(schemaMetadata, relationField.relatedModel, nestedData, currentPath, pass);
-};
-
-/** @internal Process upsert operation - explore the branches the pass selects for each element */
-const processUpsertOperation = (
-  schemaMetadata: SchemaMetadata,
-  relationField: { name: string; relatedModel: string; isList: boolean },
-  nestedData: unknown,
-  currentPath: string,
-  pass: NestedDetectionPass,
-): NestedOperationInfo[] =>
-  upsertBranchData(pass, currentPath, nestedData).flatMap((branchData) =>
-    detectDeeplyNestedOperations(schemaMetadata, relationField.relatedModel, branchData, currentPath, pass),
+const upsertBranchData = (pass: NestedDetectionPass, operation: NestedOperationInfo): ScannedElement[] =>
+  elementsOf(operation.data).flatMap((element, index) =>
+    isRecord(element)
+      ? elementBranches(pass, operation, element)
+          .map((branch) => element[branch])
+          .filter(isRecord)
+          .map((data) => ({ element: index, data }))
+      : [],
   );
 
 /**
@@ -180,29 +172,11 @@ const processUpsertOperation = (
  * scans: a to-many connectOrCreate is one `{ where, create }` or a list of them, each creating
  * its row or connecting an existing one on its own.
  */
-const connectOrCreateCreateData = (
-  pass: NestedDetectionPass,
-  path: string,
-  nestedData: unknown,
-): Record<string, unknown>[] => {
-  const elements = Array.isArray(nestedData) ? nestedData : [nestedData];
-  return elements
-    .filter(isRecord)
-    .filter((element) => elementBranches(pass, path, element).includes('create'))
-    .map((element) => element.create)
-    .filter(isRecord);
-};
-
-/** @internal Process connectOrCreate operation */
-const processConnectOrCreateOperation = (
-  schemaMetadata: SchemaMetadata,
-  relationField: { name: string; relatedModel: string; isList: boolean },
-  nestedData: unknown,
-  currentPath: string,
-  pass: NestedDetectionPass,
-): NestedOperationInfo[] =>
-  connectOrCreateCreateData(pass, currentPath, nestedData).flatMap((createData) =>
-    detectDeeplyNestedOperations(schemaMetadata, relationField.relatedModel, createData, currentPath, pass),
+const connectOrCreateCreateData = (pass: NestedDetectionPass, operation: NestedOperationInfo): ScannedElement[] =>
+  elementsOf(operation.data).flatMap((element, index) =>
+    isRecord(element) && isRecord(element.create) && elementBranches(pass, operation, element).includes('create')
+      ? [{ element: index, data: element.create }]
+      : [],
   );
 
 /** @internal Whether a to-one nested `update` value is the `{ where?, data }` form rather than the data itself */
@@ -215,299 +189,90 @@ const isToOneUpdateWithWhere = (update: Record<string, unknown>): boolean =>
  * @internal The data objects a nested `update` writes: a to-many update is one `{ where, data }` or a
  * list of them; a to-one update is either `{ where?, data }` or the data object itself.
  */
-const extractNestedUpdateData = (nestedData: unknown, isList: boolean): Record<string, unknown>[] => {
-  const updates = Array.isArray(nestedData) ? nestedData : [nestedData];
-  const dataObjects: Record<string, unknown>[] = [];
-
-  for (const update of updates) {
-    if (typeof update !== 'object' || update === null) {
-      continue;
+const updateData = (operation: NestedOperationInfo): ScannedElement[] =>
+  elementsOf(operation.data).flatMap((update, index) => {
+    if (!isRecord(update)) {
+      return [];
     }
-    const updateRecord = update as Record<string, unknown>;
-    if (isList || isToOneUpdateWithWhere(updateRecord)) {
-      if (typeof updateRecord.data === 'object' && updateRecord.data !== null) {
-        dataObjects.push(updateRecord.data as Record<string, unknown>);
-      }
-    } else {
-      dataObjects.push(updateRecord);
+    if (operation.isList || isToOneUpdateWithWhere(update)) {
+      return isRecord(update.data) ? [{ element: index, data: update.data }] : [];
     }
-  }
-
-  return dataObjects;
-};
-
-/** @internal Process a single nested operation keyword */
-const processNestedKeyword = (
-  schemaMetadata: SchemaMetadata,
-  relationField: { name: string; relatedModel: string; isList: boolean },
-  keyword: NestedOperationKeyword,
-  nestedData: unknown,
-  currentPath: string,
-  pass: NestedDetectionPass,
-): NestedOperationInfo[] => {
-  const ops: NestedOperationInfo[] = [];
-
-  ops.push({
-    fieldName: relationField.name,
-    relatedModel: relationField.relatedModel,
-    operation: keyword,
-    isList: relationField.isList,
-    data: nestedData,
-    path: currentPath,
+    return [{ element: index, data: update }];
   });
 
-  if (keyword === 'create' || keyword === 'createMany') {
-    const createOps = processCreateOperation(schemaMetadata, relationField, nestedData, currentPath, pass);
-    ops.push(...createOps);
-  } else if (keyword === 'update') {
-    ops.push(
-      ...detectDeeplyNestedOperations(
-        schemaMetadata,
-        relationField.relatedModel,
-        extractNestedUpdateData(nestedData, relationField.isList),
-        currentPath,
-        pass,
-      ),
-    );
-  } else if (keyword === 'upsert') {
-    const upsertOps = processUpsertOperation(schemaMetadata, relationField, nestedData, currentPath, pass);
-    ops.push(...upsertOps);
-  } else if (keyword === 'connectOrCreate') {
-    const connectOrCreateOps = processConnectOrCreateOperation(
-      schemaMetadata,
-      relationField,
-      nestedData,
-      currentPath,
-      pass,
-    );
-    ops.push(...connectOrCreateOps);
+/** @internal The elements of the data the writes nested inside `operation` are detected in */
+const scannedElementsOf = (operation: NestedOperationInfo, pass: NestedDetectionPass): ScannedElement[] => {
+  switch (operation.operation) {
+    case 'create':
+    case 'createMany':
+      return elementsOf(operation.data).flatMap((data, index) => (isRecord(data) ? [{ element: index, data }] : []));
+    case 'update':
+      return updateData(operation);
+    case 'upsert':
+      return upsertBranchData(pass, operation);
+    case 'connectOrCreate':
+      return connectOrCreateCreateData(pass, operation);
+    default:
+      return [];
   }
-
-  return ops;
-};
-
-/** @internal Process a single relation field for nested operations */
-const processRelationField = (
-  schemaMetadata: SchemaMetadata,
-  relationField: { name: string; relatedModel: string; isList: boolean },
-  singleData: Record<string, unknown>,
-  parentPath: string,
-  pass: NestedDetectionPass,
-): NestedOperationInfo[] => {
-  const fieldValue = singleData[relationField.name];
-
-  if (!fieldValue || typeof fieldValue !== 'object') {
-    return [];
-  }
-
-  const currentPath = parentPath ? `${parentPath}.${relationField.name}` : relationField.name;
-
-  const ops: NestedOperationInfo[] = [];
-
-  for (const keyword of NESTED_OPERATION_KEYWORDS) {
-    const nestedData = (fieldValue as Record<string, unknown>)[keyword];
-    if (nestedData === undefined) {
-      continue;
-    }
-
-    const keywordOps = processNestedKeyword(schemaMetadata, relationField, keyword, nestedData, currentPath, pass);
-    ops.push(...keywordOps);
-  }
-
-  return ops;
-};
-
-/** @internal Recursively detect deeply nested operations (e.g., postTags.create.tag.connectOrCreate) */
-const detectDeeplyNestedOperations = (
-  schemaMetadata: SchemaMetadata,
-  modelName: string,
-  operationData: unknown,
-  parentPath: string,
-  pass: NestedDetectionPass,
-): NestedOperationInfo[] => {
-  const deeplyNestedOps: NestedOperationInfo[] = [];
-
-  const dataArray = Array.isArray(operationData) ? operationData : [operationData];
-
-  for (const singleData of dataArray) {
-    if (!singleData || typeof singleData !== 'object') {
-      continue;
-    }
-
-    const relationFields = schemaMetadata.getRelationFields(modelName);
-
-    for (const relationField of relationFields) {
-      const fieldOps = processRelationField(
-        schemaMetadata,
-        relationField,
-        singleData as Record<string, unknown>,
-        parentPath,
-        pass,
-      );
-      deeplyNestedOps.push(...fieldOps);
-    }
-  }
-
-  return deeplyNestedOps;
-};
-
-/** @internal Add data field to data sources if present */
-const addDataFieldIfPresent = (args: Record<string, unknown>, dataSources: Record<string, unknown>[]): void => {
-  if (args.data && typeof args.data === 'object') {
-    dataSources.push(args.data as Record<string, unknown>);
-  }
-};
-
-/** @internal Extract data sources from args: `data`, and the top-level upsert branches the pass selects */
-const extractDataSources = (args: Record<string, unknown>, pass: NestedDetectionPass): Record<string, unknown>[] => {
-  const dataSources: Record<string, unknown>[] = [];
-
-  addDataFieldIfPresent(args, dataSources);
-
-  for (const branch of topLevelUpsertBranches(pass)) {
-    const branchData = args[branch];
-    if (branchData && typeof branchData === 'object') {
-      dataSources.push(branchData as Record<string, unknown>);
-    }
-  }
-
-  return dataSources;
-};
-
-/** @internal Process deeply nested operations for specific keyword types */
-const processDeeplyNestedOperations = (
-  schemaMetadata: SchemaMetadata,
-  relationField: { name: string; relatedModel: string; isList: boolean },
-  keyword: NestedOperationKeyword,
-  nestedData: unknown,
-  pass: NestedDetectionPass,
-): NestedOperationInfo[] => {
-  if (keyword === 'create' || keyword === 'createMany') {
-    return detectDeeplyNestedOperations(
-      schemaMetadata,
-      relationField.relatedModel,
-      nestedData,
-      relationField.name,
-      pass,
-    );
-  }
-
-  if (keyword === 'update') {
-    return detectDeeplyNestedOperations(
-      schemaMetadata,
-      relationField.relatedModel,
-      extractNestedUpdateData(nestedData, relationField.isList),
-      relationField.name,
-      pass,
-    );
-  }
-
-  if (keyword === 'upsert') {
-    return processUpsertOperation(schemaMetadata, relationField, nestedData, relationField.name, pass);
-  }
-
-  if (keyword === 'connectOrCreate') {
-    return processConnectOrCreateOperation(schemaMetadata, relationField, nestedData, relationField.name, pass);
-  }
-
-  return [];
 };
 
 /**
- * Shared scan state for the nested-operation detection call chain
- * (`processDataSource` -> `processRelationFieldKeywords` -> `processKeywordOperation`).
- * `processedOps` and `nestedOperations` are accumulators mutated in place as the scan descends.
+ * @internal A nested operation and, after it, every write detected inside its data, each nested
+ * under the element it was found in
  */
-interface NestedOperationScanContext {
-  schemaMetadata: SchemaMetadata;
-  pass: NestedDetectionPass;
-  processedOps: Set<string>;
-  nestedOperations: NestedOperationInfo[];
-}
-
-interface ProcessKeywordOperationInput extends NestedOperationScanContext {
-  relationField: { name: string; relatedModel: string; isList: boolean };
-  keyword: NestedOperationKeyword;
-  nestedData: unknown;
-}
-
-/** @internal Process a single keyword operation on a relation field */
-const processKeywordOperation = (input: ProcessKeywordOperationInput): void => {
-  const { schemaMetadata, relationField, keyword, nestedData, pass, processedOps, nestedOperations } = input;
-
-  const opKey = `${relationField.name}:${keyword}:${relationField.name}`;
-
-  if (processedOps.has(opKey)) {
-    return;
-  }
-
-  processedOps.add(opKey);
-
-  nestedOperations.push({
+const detectOperationAndNested = (
+  schemaMetadata: SchemaMetadata,
+  relationField: RelationField,
+  keyword: NestedOperationKeyword,
+  nestedData: unknown,
+  parent: NestedOperationParent | undefined,
+  pass: NestedDetectionPass,
+): NestedOperationInfo[] => {
+  const operation: NestedOperationInfo = {
     fieldName: relationField.name,
     relatedModel: relationField.relatedModel,
     operation: keyword,
     isList: relationField.isList,
     data: nestedData,
-    path: relationField.name,
+    path: parent ? `${parent.operation.path}.${relationField.name}` : relationField.name,
+    parent,
+  };
+
+  const nested = scannedElementsOf(operation, pass).flatMap(({ element, data }) =>
+    detectOperationsIn(schemaMetadata, relationField.relatedModel, data, { operation, element }, pass),
+  );
+  return [operation, ...nested];
+};
+
+/** @internal The nested operations one record's data holds, for every relation field and keyword */
+const detectOperationsIn = (
+  schemaMetadata: SchemaMetadata,
+  modelName: string,
+  data: Record<string, unknown>,
+  parent: NestedOperationParent | undefined,
+  pass: NestedDetectionPass,
+  isNew: (relationField: RelationField, keyword: NestedOperationKeyword) => boolean = () => true,
+): NestedOperationInfo[] =>
+  schemaMetadata.getRelationFields(modelName).flatMap((relationField) => {
+    const fieldValue = data[relationField.name];
+    if (!isRecord(fieldValue)) {
+      return [];
+    }
+    return NESTED_OPERATION_KEYWORDS.flatMap((keyword) => {
+      const nestedData = fieldValue[keyword];
+      if (nestedData === undefined || !isNew(relationField, keyword)) {
+        return [];
+      }
+      return detectOperationAndNested(schemaMetadata, relationField, keyword, nestedData, parent, pass);
+    });
   });
 
-  const deepOps = processDeeplyNestedOperations(schemaMetadata, relationField, keyword, nestedData, pass);
-  nestedOperations.push(...deepOps);
-};
-
-interface ProcessRelationFieldKeywordsInput extends NestedOperationScanContext {
-  relationField: { name: string; relatedModel: string; isList: boolean };
-  fieldValue: Record<string, unknown>;
-}
-
-/** @internal Process all keywords for a relation field */
-const processRelationFieldKeywords = (input: ProcessRelationFieldKeywordsInput): void => {
-  const { schemaMetadata, relationField, fieldValue, pass, processedOps, nestedOperations } = input;
-
-  for (const keyword of NESTED_OPERATION_KEYWORDS) {
-    const nestedData = fieldValue[keyword];
-    if (nestedData === undefined) {
-      continue;
-    }
-
-    processKeywordOperation({
-      schemaMetadata,
-      relationField,
-      keyword,
-      nestedData,
-      pass,
-      processedOps,
-      nestedOperations,
-    });
-  }
-};
-
-interface ProcessDataSourceInput extends NestedOperationScanContext {
-  relationFields: { name: string; relatedModel: string; isList: boolean }[];
-  data: Record<string, unknown>;
-}
-
-/** @internal Process a single data source for nested operations */
-const processDataSource = (input: ProcessDataSourceInput): void => {
-  const { schemaMetadata, relationFields, data, pass, processedOps, nestedOperations } = input;
-
-  for (const relationField of relationFields) {
-    const fieldValue = data[relationField.name];
-
-    if (!fieldValue || typeof fieldValue !== 'object') {
-      continue;
-    }
-
-    processRelationFieldKeywords({
-      schemaMetadata,
-      relationField,
-      fieldValue: fieldValue as Record<string, unknown>,
-      pass,
-      processedOps,
-      nestedOperations,
-    });
-  }
+/** @internal Extract data sources from args: `data`, and the top-level upsert branches the pass selects */
+const extractDataSources = (args: Record<string, unknown>, pass: NestedDetectionPass): Record<string, unknown>[] => {
+  const branches =
+    pass.kind === 'discovery' ? ['create', 'update'] : pass.topLevelUpsertBranch ? [pass.topLevelUpsertBranch] : [];
+  return [args.data, ...branches.map((branch) => args[branch])].filter(isRecord);
 };
 
 /**
@@ -515,6 +280,9 @@ const processDataSource = (input: ProcessDataSourceInput): void => {
  *
  * Main entry point for detecting all nested write operations (every keyword in `NESTED_OPERATION_KEYWORDS`)
  * at any depth level. Supports deeply nested operations like `postTags.create.tag.connectOrCreate`.
+ * Each operation is detected once per element of the data it is nested in, and records that
+ * element as its `parent`. A keyword on a top-level relation is detected once even when several
+ * data sources (the two branches of a top-level upsert) hold it.
  *
  * **Upsert branches:** `pass` decides which branches of the top-level upsert and of nested upserts
  * are scanned — all of them in the discovery pass, the executed ones in the executed pass
@@ -541,7 +309,7 @@ const processDataSource = (input: ProcessDataSourceInput): void => {
  * detectNestedOperations(schemaMetadata, 'User', args, {
  *   kind: 'executed',
  *   topLevelUpsertBranch: 'update',
- *   branchAt: (path) => (path === 'profile' ? 'update' : 'create'),
+ *   branchAt: (operation) => (operation.path === 'profile' ? 'update' : 'create'),
  * });
  * // Result: profile upsert, avatar update
  * ```
@@ -552,33 +320,27 @@ export const detectNestedOperations = (
   args: Record<string, unknown>,
   pass: NestedDetectionPass,
 ): NestedOperationInfo[] => {
-  const nestedOperations: NestedOperationInfo[] = [];
+  const detected = new Set<string>();
+  const isNew = (relationField: RelationField, keyword: NestedOperationKeyword): boolean => {
+    const key = `${relationField.name}:${keyword}`;
+    if (detected.has(key)) {
+      return false;
+    }
+    detected.add(key);
+    return true;
+  };
 
-  const relationFields = schemaMetadata.getRelationFields(modelName);
-  if (relationFields.length === 0) {
-    return nestedOperations;
-  }
-
-  const dataSources = extractDataSources(args, pass);
-  if (dataSources.length === 0) {
-    return nestedOperations;
-  }
-
-  const processedOps = new Set<string>();
-
-  for (const data of dataSources) {
-    processDataSource({
-      schemaMetadata,
-      relationFields,
-      data,
-      pass,
-      processedOps,
-      nestedOperations,
-    });
-  }
-
-  return nestedOperations;
+  return extractDataSources(args, pass).flatMap((data) =>
+    detectOperationsIn(schemaMetadata, modelName, data, undefined, pass, isNew),
+  );
 };
+
+/** A row a nested operation names by unique WHERE, with the element of its data that names it */
+export interface NamedTarget {
+  /** Index of the element in the operation's data; 0 when the data is not a list */
+  readonly element: number;
+  readonly where: Record<string, unknown>;
+}
 
 /**
  * The unique WHERE of every row a nested operation names: the `where` of each `update`, `upsert`
@@ -586,19 +348,25 @@ export const detectNestedOperations = (
  * `data` is a list. `updateMany` / `deleteMany` name rows by a filter, not a unique WHERE, and
  * yield none, as do the keywords that only insert.
  */
-export const targetWhereClauses = (operation: NestedOperationKeyword, data: unknown): Record<string, unknown>[] => {
-  const items = Array.isArray(data) ? data : [data];
+export const namedTargets = (operation: NestedOperationKeyword, data: unknown): NamedTarget[] => {
+  const items = elementsOf(data);
 
   if (operation === 'update' || operation === 'upsert' || operation === 'connectOrCreate') {
-    return items.map((item) => (isRecord(item) ? item.where : undefined)).filter(isRecord);
+    return items.flatMap((item, element) =>
+      isRecord(item) && isRecord(item.where) ? [{ element, where: item.where }] : [],
+    );
   }
 
   if (operation === 'delete' || linksNamedRows(operation)) {
-    return items.filter(isRecord);
+    return items.flatMap((item, element) => (isRecord(item) ? [{ element, where: item }] : []));
   }
 
   return [];
 };
+
+/** The unique WHEREs of {@link namedTargets}, without their elements */
+export const targetWhereClauses = (operation: NestedOperationKeyword, data: unknown): Record<string, unknown>[] =>
+  namedTargets(operation, data).map((target) => target.where);
 
 /**
  * The filter of every element of a nested batch keyword: the `where` of each `updateMany` element,
