@@ -271,6 +271,44 @@ describe('Database Round-Trip Guard', () => {
     expect(statements).toHaveLength(10);
   });
 
+  it('update with a nested connect that moves 1 post from another user issues 9 statements', async () => {
+    const user = await provider.runAsync(testActor, async () => {
+      return prisma.user.create({
+        data: { email: 'nested-connect-target@example.com', name: 'Target', password: 'secret123' },
+      });
+    });
+    const other = await provider.runAsync(testActor, async () => {
+      return prisma.user.create({
+        data: {
+          email: 'nested-connect-source@example.com',
+          name: 'Source',
+          password: 'secret123',
+          posts: { create: [{ title: 'Moved', content: 'C1' }] },
+        },
+        include: { posts: true },
+      });
+    });
+    const [moved] = other.posts;
+    statements.length = 0;
+
+    await provider.runAsync(testActor, async () => {
+      await prisma.user.update({ where: { id: user.id }, data: { posts: { connect: { id: moved?.id } } } });
+    });
+
+    console.log(`Update with a nested connect: ${statements.length} SQL statements`);
+    // 1. BEGIN                  — awaitWrite: true (default) wraps the operation in a transaction
+    // 2. SELECT FROM users      — the before-state fetch (fetchBefore, default: true)
+    // 3. SELECT FROM posts      — the connected post read whole before the write: its old authorId
+    // 4. SELECT FROM users      — Prisma's own read of the parent row the connect attaches to
+    // 5. UPDATE posts           — the caller's own connect: the post's authorId (and updatedAt)
+    // 6. SELECT FROM users      — Prisma's read of the update() result
+    // 7. SELECT FROM posts      — the connected post read again by primary key: its new authorId
+    // 8. INSERT INTO audit_logs — one batched write: the post's update (authorId old → new) + its
+    //                             aggregate-owner (User) propagation log
+    // 9. COMMIT
+    expect(statements).toHaveLength(9);
+  });
+
   it('deleteMany (2 rows) issues 5 statements', async () => {
     const user = await provider.runAsync(testActor, async () => {
       return prisma.user.create({

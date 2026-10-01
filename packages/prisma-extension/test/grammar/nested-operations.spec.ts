@@ -7,6 +7,7 @@ import {
   batchFilterClauses,
   detectNestedOperations,
   type NestedDetectionPass,
+  namedTargets,
   type UpsertBranch,
 } from '../../src/grammar/nested-operations.js';
 import { createSchemaMetadataFromDMMF } from '../../src/utils/schema-metadata.js';
@@ -265,6 +266,21 @@ describe('detectNestedOperations', () => {
 
     expect(operations).toHaveLength(1);
     expect(operations[0]?.operation).toBe('connect');
+  });
+
+  it('detects a disconnect, which names its rows like connect', () => {
+    const args = { data: { posts: { disconnect: [{ id: 'post-1' }, { id: 'post-2' }] } } };
+
+    const operations = detectNestedOperations(createSchemaMetadataFromDMMF(Prisma), 'User', args, {
+      kind: 'discovery',
+    });
+
+    expect(operations.map((operation) => operation.operation)).toEqual(['disconnect']);
+    expect(namedTargets('disconnect', operations[0]?.data)).toEqual([
+      { element: 0, where: { id: 'post-1' } },
+      { element: 1, where: { id: 'post-2' } },
+    ]);
+    expect(namedTargets('disconnect', true)).toEqual([]);
   });
 
   it('should handle connectOrCreate operations', () => {

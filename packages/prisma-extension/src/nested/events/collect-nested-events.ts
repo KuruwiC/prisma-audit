@@ -46,6 +46,7 @@ import {
   restrictsRows,
   writtenRelationsInclude,
 } from '../../utils/nested-write-selection.js';
+import type { LinkReads } from '../pre-fetch/link-rows.js';
 import { getPreFetchListClient } from '../pre-fetch/model-client.js';
 import { parentRowIdentityOf } from '../pre-fetch/parent-rows.js';
 import type { PreExistingRows } from '../pre-fetch/pre-existing-rows.js';
@@ -58,6 +59,7 @@ import {
   type UnresolvedDeleteEntityIdReporter,
 } from './delete-handler.js';
 import { identityOf } from './event-fields.js';
+import { collectLinkChanges } from './link-changes.js';
 import { type ParentAtPath, readRowsNotInResult } from './rows-not-in-result.js';
 import { resolveNestedRowState } from './state-resolver.js';
 import { insertsRows, type NestedWriteSet, type NestedWriteSets, type NestedWriteTarget } from './write-set.js';
@@ -89,6 +91,8 @@ export interface NestedEventCollectionInput {
   nestedOperations: readonly NestedOperationInfo[];
   writeSets: NestedWriteSets;
   preExistingRows: PreExistingRows;
+  /** The rows the link writes may re-link, read before the operation */
+  linkReads: LinkReads;
 }
 
 /**
@@ -321,7 +325,13 @@ const candidateRelations = (walk: CollectionWalk, attribution: RowAttribution | 
   const byPath = new Map<string, CandidateRelation>();
   for (const nestedOp of walk.input.nestedOperations) {
     const pkConstraint = walk.pkConstraints.get(nestedOp.path);
-    if (isDelete(nestedOp) || !pkConstraint || !isNestedUnder(nestedOp, attribution)) {
+    // A delete or disconnect leaves no row under the parent to attribute
+    if (
+      isDelete(nestedOp) ||
+      nestedOp.operation === 'disconnect' ||
+      !pkConstraint ||
+      !isNestedUnder(nestedOp, attribution)
+    ) {
       continue;
     }
     const relation = byPath.get(nestedOp.path) ?? {
@@ -490,6 +500,21 @@ const collectDeleteRecords = (
 
 const isRow = (value: unknown): value is Row => typeof value === 'object' && value !== null;
 
+/** The identities of the rows the walk attributed to the operations at `path` */
+const auditedIdentitiesAt = (walk: CollectionWalk, path: string): Set<string> => {
+  const pkFields = walk.pkConstraints.get(path)?.fields;
+  const identities = new Set<string>();
+  for (const [nestedOp, records] of walk.records) {
+    if (nestedOp.path !== path || !pkFields) {
+      continue;
+    }
+    for (const collected of records) {
+      identities.add(identityOf(collected.entity, pkFields, { model: nestedOp.relatedModel, path }));
+    }
+  }
+  return identities;
+};
+
 /**
  * Collect the events of the nested records an operation wrote: one per row each executed nested
  * operation is attributed, operation by operation in detection order.
@@ -520,6 +545,14 @@ export const collectNestedEvents = async (
     await walkLevels(walk, [{ row: result, attribution: undefined, selection: input.args }]);
   }
 
+  const linkRecords = await collectLinkChanges({
+    client: input.client,
+    linkReads: input.linkReads,
+    nestedPreFetchResults: input.nestedPreFetchResults,
+    auditedAt: (path) => auditedIdentitiesAt(walk, path),
+    fieldNamesOf: (model) => new Set(schemaMetadata.getAllFields(model).map((field) => field.name)),
+  });
+
   const events: MutationEvent[] = [];
   for (const nestedOp of nestedOperations) {
     const pkConstraint = pkConstraints.get(nestedOp.path);
@@ -533,7 +566,7 @@ export const collectNestedEvents = async (
     }
     const records = isDelete(nestedOp)
       ? await collectDeleteRecords(nestedOp, input, pkConstraint, deps)
-      : (walk.records.get(nestedOp) ?? []);
+      : [...(walk.records.get(nestedOp) ?? []), ...(linkRecords.get(nestedOp) ?? [])];
     events.push(...records.map((collected) => toEvent(collected, nestedOp, pkConstraint)));
   }
 

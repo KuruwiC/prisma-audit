@@ -90,6 +90,7 @@ const single = (overrides: SingleCase = {}): SingleOperationOutcome => {
     beforeState: { kind: 'none' } as BeforeState,
     nestedPreFetchResults: new Map(),
     preExistingRows: new Map() as PreExistingRows,
+    linkReads: new Map(),
     client,
     ...outcome,
   };

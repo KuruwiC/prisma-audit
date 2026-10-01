@@ -17,6 +17,7 @@ import {
   type NestedWriteSets,
 } from '../nested/events/write-set.js';
 import { preFetchNestedRecordsBeforeOperation } from '../nested/pre-fetch/coordinator.js';
+import { type LinkReads, readLinkRows } from '../nested/pre-fetch/link-rows.js';
 import { type PreExistingRows, snapshotPreExistingRows } from '../nested/pre-fetch/pre-existing-rows.js';
 import type { SchemaMetadata } from '../schema/types.js';
 import { executedUpsertBranch, fetchBeforeState, targetRowExistsBefore } from './before-state.js';
@@ -37,6 +38,7 @@ export interface SinglePrepared {
   readonly nestedOperations: readonly NestedOperationInfo[];
   readonly writeSets: NestedWriteSets;
   readonly preExistingRows: PreExistingRows;
+  readonly linkReads: LinkReads;
 }
 
 export const createSingleExecutor = (deps: SingleExecutorDependencies): OperationExecutor => {
@@ -76,7 +78,17 @@ export const createSingleExecutor = (deps: SingleExecutorDependencies): Operatio
           { Prisma, schemaMetadata, shouldFetchBefore },
         )
       : new Map();
-    return { beforeState, nestedPreFetchResults, nestedOperations, writeSets, preExistingRows };
+    const linkReads = await readLinkRows(
+      {
+        prismaClient: scope.handle,
+        modelName,
+        topLevelWhere: args.where,
+        nestedOperations,
+        nestedPreFetchResults,
+      },
+      { Prisma, schemaMetadata, shouldFetchBefore, onPreFetchFailure: failureSink.notify },
+    );
+    return { beforeState, nestedPreFetchResults, nestedOperations, writeSets, preExistingRows, linkReads };
   };
 
   const execute = (operation: AuditedOperation): Promise<unknown> => operation.execute(operation.args);
@@ -98,6 +110,7 @@ export const createSingleExecutor = (deps: SingleExecutorDependencies): Operatio
         nestedOperations: prepared.nestedOperations,
         writeSets: prepared.writeSets,
         preExistingRows: prepared.preExistingRows,
+        linkReads: prepared.linkReads,
         client: scope.handle,
       },
       {

@@ -23,6 +23,7 @@ import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '.
 import { collectNestedEvents, type NestedEventCollectorDependencies } from '../nested/events/collect-nested-events.js';
 import { identityOf, toMutationAction } from '../nested/events/event-fields.js';
 import type { NestedWriteSets } from '../nested/events/write-set.js';
+import type { LinkReads } from '../nested/pre-fetch/link-rows.js';
 import type { PreExistingRows } from '../nested/pre-fetch/pre-existing-rows.js';
 import type { SchemaMetadata } from '../schema/types.js';
 import { beforeStateOf } from '../utils/before-state.js';
@@ -51,7 +52,8 @@ export interface SingleOperationOutcome {
   readonly nestedOperations: readonly NestedOperationInfo[];
   readonly writeSets: NestedWriteSets;
   readonly preExistingRows: PreExistingRows;
-  /** Client the operation ran on; re-fetches the nested rows the result did not include */
+  readonly linkReads: LinkReads;
+  /** Client the operation ran on; reads the nested rows the result did not include */
   readonly client: PrismaClientWithDynamicAccess | TransactionalPrismaClient;
 }
 
@@ -68,7 +70,7 @@ export const collectSingleOperationEvents = async (
   deps: EventCollectorDependencies,
 ): Promise<MutationEvent[]> => {
   const { modelName, action, args, result, beforeState, client } = outcome;
-  const { nestedPreFetchResults, nestedOperations, writeSets, preExistingRows } = outcome;
+  const { nestedPreFetchResults, nestedOperations, writeSets, preExistingRows, linkReads } = outcome;
 
   if (action === AUDIT_ACTION.UPSERT && executedUpsertBranch(action, beforeState) === undefined) {
     return [];
@@ -88,7 +90,17 @@ export const collectSingleOperationEvents = async (
   };
 
   const nested = await collectNestedEvents(
-    { modelName, args, result, client, nestedPreFetchResults, nestedOperations, writeSets, preExistingRows },
+    {
+      modelName,
+      args,
+      result,
+      client,
+      nestedPreFetchResults,
+      nestedOperations,
+      writeSets,
+      preExistingRows,
+      linkReads,
+    },
     deps,
   );
 

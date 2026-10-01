@@ -15,15 +15,13 @@ import type { NestedPreFetchResult } from './nested-state.js';
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
 
-/**
- * Nested operation keywords that can appear in operation args. `disconnect` is not among them:
- * it rewrites the foreign keys of related rows, which yields no audit event.
- */
+/** Nested operation keywords that can appear in operation args */
 export const NESTED_OPERATION_KEYWORDS = [
   'create',
   'createMany',
   'connect',
   'set',
+  'disconnect',
   'connectOrCreate',
   'update',
   'updateMany',
@@ -41,9 +39,10 @@ export const isNestedBatchKeyword = (keyword: NestedOperationKeyword): keyword i
   keyword === 'updateMany' || keyword === 'deleteMany';
 
 /**
- * Whether `keyword` links existing rows it names by unique WHERE without writing them: `connect`
- * and `set` rewrite only the foreign keys that relate those rows to the parent, which yields no
- * audit event, but the rows they name are theirs and not rows another operation inserted.
+ * Whether `keyword` attaches existing rows it names by unique WHERE to the parent row: `connect`
+ * and `set` write no other column of those rows, which are theirs and not rows another
+ * operation inserted. Their foreign-key change, when the related row holds the foreign key, is
+ * audited from reads of their own (see `nested/pre-fetch/link-rows.ts`).
  */
 export const linksNamedRows = (keyword: NestedOperationKeyword): boolean => keyword === 'connect' || keyword === 'set';
 
@@ -338,9 +337,10 @@ export interface NamedTarget {
 
 /**
  * The unique WHERE of every row a nested operation names: the `where` of each `update`, `upsert`
- * and `connectOrCreate` element, the element itself for `delete`, `connect` and `set`; one per element when
- * `data` is a list. `updateMany` / `deleteMany` name rows by a filter, not a unique WHERE, and
- * yield none, as do the keywords that only insert.
+ * and `connectOrCreate` element, the element itself for `delete`, `connect`, `set` and
+ * `disconnect`; one per element when `data` is a list. `updateMany` / `deleteMany` name rows by a
+ * filter, not a unique WHERE, and yield none, as do the keywords that only insert and a to-one
+ * `disconnect: true`.
  */
 export const namedTargets = (operation: NestedOperationKeyword, data: unknown): NamedTarget[] => {
   const items = elementsOf(data);
@@ -351,7 +351,7 @@ export const namedTargets = (operation: NestedOperationKeyword, data: unknown): 
     );
   }
 
-  if (operation === 'delete' || linksNamedRows(operation)) {
+  if (operation === 'delete' || operation === 'disconnect' || linksNamedRows(operation)) {
     return items.flatMap((item, element) => (isRecord(item) ? [{ element, where: item }] : []));
   }
 

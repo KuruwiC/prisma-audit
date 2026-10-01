@@ -34,6 +34,7 @@ import { beforeStateOf, NO_BEFORE_STATE } from '../../utils/before-state.js';
 import { preFetchLog } from '../../utils/debug.js';
 import type { EntityIdentityKey } from '../../utils/identity-key.js';
 import { toError } from '../../utils/to-error.js';
+import { linkWriteOf } from './link-rows.js';
 import {
   getPreFetchListClient,
   getPreFetchModelClient,
@@ -60,6 +61,7 @@ import {
   storeReadResult,
   storeUnreadRows,
 } from './pre-fetch-result-store.js';
+import { relationLinkOf } from './relation-link.js';
 
 type PrismaDMMF = PrismaNamespace['dmmf'];
 
@@ -196,7 +198,9 @@ export const preFetchNestedRecordsBeforeOperation = async (
   );
 
   const preFetchedOperations = new Set(operationsToPreFetch);
-  const rowsToIdentify = toOneRowsToIdentify(nestedOperations, preFetchedOperations);
+  const rowsToIdentify = toOneRowsToIdentify(nestedOperations, preFetchedOperations, (operation) =>
+    detachesUnderParent(Prisma, modelName, shouldFetchBefore, operation),
+  );
 
   if (operationsToPreFetch.length === 0 && rowsToIdentify.size === 0) {
     return preFetch;
@@ -269,21 +273,42 @@ export const preFetchNestedRecordsBeforeOperation = async (
 const SNAPSHOTTED_INSERTS: ReadonlySet<string> = new Set(['create', 'createMany']);
 
 /**
+ * Whether `operation` is a link write that detaches the rows attached under its parent row and
+ * whose rows are read (see `link-rows.ts`), so its parent row must be known before the write
+ */
+const detachesUnderParent = (
+  Prisma: PrismaNamespace,
+  modelName: string,
+  shouldFetchBefore: ShouldFetchBefore,
+  operation: NestedOperationInfo,
+): boolean => {
+  const link = relationLinkOf(Prisma, modelName, operation);
+  return (
+    link?.side === 'related' &&
+    shouldFetchBefore(operation.relatedModel, 'update') &&
+    linkWriteOf(operation, link)?.detaches === true
+  );
+};
+
+/**
  * The to-one `update`s whose row is not pre-fetched (`fetchBefore` turns it off) but is needed
  * as a parent row: an operation nested below it is read under its parent rows (a pre-fetched
- * operation other than a connectOrCreate, whose WHERE names its row under any parent), or inserts
- * rows at a to-many path whose pre-existing rows are snapshotted under them. Each is
+ * operation other than a connectOrCreate, whose WHERE names its row under any parent, or a link
+ * write that detaches the rows attached under it), or inserts rows at a to-many path whose
+ * pre-existing rows are snapshotted under them. Each is
  * keyed to the relation fields below it those operations go through; one per path, since the
  * read covers every parent row at the parent path.
  */
 const toOneRowsToIdentify = (
   nestedOperations: readonly NestedOperationInfo[],
   preFetchedOperations: ReadonlySet<NestedOperationInfo>,
+  detaches: (operation: NestedOperationInfo) => boolean,
 ): Map<NestedOperationInfo, Set<string>> => {
   const dependents = nestedOperations.filter(
     (op) =>
       (preFetchedOperations.has(op) && op.operation !== 'connectOrCreate') ||
-      (op.isList && SNAPSHOTTED_INSERTS.has(op.operation)),
+      (op.isList && SNAPSHOTTED_INSERTS.has(op.operation)) ||
+      detaches(op),
   );
   const identified = new Map<NestedOperationInfo, Set<string>>();
   const identifiedPaths = new Set<string>();

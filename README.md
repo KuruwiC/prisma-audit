@@ -509,10 +509,10 @@ Nested creates, updates, and deletes are automatically tracked at all depths:
 - **create**: Always logged (before = null)
 - **update / delete**: Before state captured when `fetchBefore.update` / `fetchBefore.delete` is `true` (default)
 - **upsert**: Automatically detects create vs update path
-- **connectOrCreate**: Smart detection — logs only when creating new records
-- **connect**: No entity log (join table log if defined in mapping)
+- **connectOrCreate**: Smart detection — logs a create when creating a new record, and connects like `connect` otherwise
+- **connect / set / disconnect**: an `update` log of each related record whose foreign key the write changed, with the old and new value in `changes` (join table log if defined in mapping)
 
-Nested rows are audited from the operation's own result: the relations a nested write touches are added to its `include` (or `select`) and removed again before the result is returned. A nested row is re-read only when your own `include` / `select` on the written relation leaves out an existing row a nested write updated; the re-read runs on the same client as the operation.
+Nested rows are audited from the operation's own result: the relations a nested write touches are added to its `include` (or `select`) and removed again before the result is returned. A nested row is read again only when your own `include` / `select` on the written relation leaves out a row a nested write updated or inserted (one read per relation path); the read runs on the same client as the operation.
 
 ## Compatibility
 

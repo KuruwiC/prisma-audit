@@ -1000,7 +1000,7 @@ Two independent options, both receiving the same structured failure context (`{ 
 
 #### Before state that could not be read
 
-An `update` or `delete`, top-level or nested, reads its target row before the write when its `fetchBefore` setting is on. When that read fails, the caller's operation still runs, the observer hears about it under `pre-fetch`, and the entry is recorded with `before: null`, `changes: null` and `beforeUnavailable: true`, so it cannot be mistaken for an entry whose before state was never requested (`beforeUnavailable: false`). An `upsert`, top-level or nested, whose read failed is not recorded, and neither are the nested writes of its branches: the before state is what tells whether it created or updated its row. A nested `connectOrCreate` whose read failed is not recorded either, since it cannot tell a connect from a create. A failed read of a nested row leaves unknown only that row: another nested operation keeps what its own read found, and the rows nested below the row are still read under the primary key its WHERE names. When the row cannot be identified that way (a to-one relation's row, or one named by another unique field), the entries nested below it are treated as if their own read had failed, and a nested create or `updateMany` / `deleteMany` below it fails the operation under `diff-generation`, since the rows it writes cannot be told apart from the rows that were already there. A nested `updateMany` / `deleteMany` reads the rows its filter matches before the write whatever `fetchBefore` says, because that read is what identifies the rows it writes: when it fails, the operation fails under `diff-generation` before the write is attempted, like a top-level `updateMany` / `deleteMany`. For the same reason, a nested to-one `update` whose `fetchBefore` setting is off still has the key columns of its row read under its parent row when a write nested below it is identified through that row (a nested create into a to-many relation, an `upsert`, `updateMany` or `deleteMany`, or an `update` / `delete` whose own `fetchBefore` setting is on): one read per parent row, of the primary key and the columns its relations link by. Its own entry still carries no before state; when the read fails, the writes below it are treated as above.
+An `update` or `delete`, top-level or nested, reads its target row before the write when its `fetchBefore` setting is on. When that read fails, the caller's operation still runs, the observer hears about it under `pre-fetch`, and the entry is recorded with `before: null`, `changes: null` and `beforeUnavailable: true`, so it cannot be mistaken for an entry whose before state was never requested (`beforeUnavailable: false`). An `upsert`, top-level or nested, whose read failed is not recorded, and neither are the nested writes of its branches: the before state is what tells whether it created or updated its row. A nested `connectOrCreate` whose read failed is not recorded either, since it cannot tell a connect from a create. A failed read of a nested row leaves unknown only that row: another nested operation keeps what its own read found, and the rows nested below the row are still read under the primary key its WHERE names. When the row cannot be identified that way (a to-one relation's row, or one named by another unique field), the entries nested below it are treated as if their own read had failed, and a nested create or `updateMany` / `deleteMany` below it fails the operation under `diff-generation`, since the rows it writes cannot be told apart from the rows that were already there. A nested `updateMany` / `deleteMany` reads the rows its filter matches before the write whatever `fetchBefore` says, because that read is what identifies the rows it writes: when it fails, the operation fails under `diff-generation` before the write is attempted, like a top-level `updateMany` / `deleteMany`. For the same reason, a nested to-one `update` whose `fetchBefore` setting is off still has the key columns of its row read under its parent row when a write nested below it is identified through that row (a nested create into a to-many relation, an `upsert`, `updateMany` or `deleteMany`, an `update` / `delete` whose own `fetchBefore` setting is on, or a `set` that unlinks the records linked to it): one read per parent row, of the primary key and the columns its relations link by. Its own entry still carries no before state; when the read fails, the writes below it are treated as above. When the read of the records a nested `connect`, `set` or `disconnect` may re-link fails, a record the write names is still recorded, with `beforeUnavailable: true` and its new foreign key in `after` (a `disconnect` only when it left the record unlinked); a record a `set` unlinked without naming it cannot be identified and is not recorded.
 
 Every record carries `beforeUnavailable`. The default write stores it when the audit-log model declares a `beforeUnavailable Boolean` column and leaves it out otherwise, so no column is required; a `hooks.writer` sees it on each record and can store it however it likes. The normalized writers (`createEntityNormalizedWriter`, `createSharedChangeWriter`) store it the same way, in the field their schema config names as `beforeUnavailableField`, and leave it out when the config names none.
 
@@ -1140,7 +1140,7 @@ Control whether `update` and `delete` operations read the affected row's before 
 **Type:** `boolean`
 **Default:** `true`
 
-Controls whether an `update` or `delete` operation, top-level or nested, fetches the affected row's before-state ahead of the operation. Pre-fetching is what lets an `update`'s audit log carry a `before` value and lets a nested `delete` resolve an identity it could not otherwise recover from the operation's own arguments.
+Controls whether an `update` or `delete` operation, top-level or nested, fetches the affected row's before-state ahead of the operation. Pre-fetching is what lets an `update`'s audit log carry a `before` value and lets a nested `delete` resolve an identity it could not otherwise recover from the operation's own arguments. The `update` setting of a related model also decides whether a nested `connect`, `set` or `disconnect` that changes that model's foreign key is audited: the audit log exists to tell the old foreign key, so with `update` off those writes are not read and not audited.
 
 ```typescript
 {
@@ -1183,11 +1183,13 @@ Supports the following operations, including deep nesting:
 - `deleteMany` - Creates audit log for each deleted record
 - `upsert` - Creates audit log as either `create` or `update`
 - `connect` - Links existing records
+  - When the related record holds the foreign key (e.g., `user.posts`, `post.labels`, `user.profile`): creates an `update` audit log for each connected record whose foreign key changed, with the foreign key's old and new value in `changes` (`authorId: u2 → u1`); a record already linked to the parent gets none
+  - When the parent holds the foreign key (e.g., `post.author`): the parent's own `update` audit log carries the change
   - Creates audit logs for join table entities (e.g., PostTag) if defined in `aggregateMapping`
-  - Does not create audit logs for the connected entity itself (e.g., Tag, Profile, Comment)
-- `set` - Replaces the records linked through an optional foreign key; like `connect`, creates no audit log for the linked records
+- `set` - Replaces the records linked through an optional foreign key: an `update` audit log for each record it moves in and for each record it unlinks (foreign key `→ null`); the records it keeps get none
+- `disconnect` - Unlinks records through an optional foreign key: an `update` audit log for each unlinked record (foreign key `→ null`); a record linked to another parent is left as it was and gets none
 - `connectOrCreate` - Connects to existing record or creates new one
-  - If record exists: Same as `connect` (join table audit log only)
+  - If record exists: Same as `connect`
   - If record doesn't exist: Creates audit log for the new entity with `action=create`, `before=null`
 
 #### Deep Nesting
@@ -1215,13 +1217,14 @@ await prisma.post.update({
 #### Important Notes
 
 1. **No `include` needed**: The relations a nested write touches are added to the query's `include` (or to its `select` when the query uses `select`, including a relation's nested `select`) so their rows can be audited. The value returned to the caller keeps the shape the query requested.
-2. **`connect` behavior**:
+2. **`connect`, `set` and `disconnect` behavior**:
+   - A foreign key on the related record is that record's column: each record whose foreign key the write changed gets an `update` audit log, `changes` holding the old and new value. The records the writes at one relation path name, and the records linked to their parent rows when a `set` unlinks those, are read once before the write (whole rows, when `fetchBefore.update` is on for the related model) and once after it by primary key; a record whose foreign key did not change (already linked, kept by a `set`, linked to another parent) gets no audit log. Prisma also sets an `@updatedAt` column on every connected record, so with the foreign key in `excludeFields` such a record is still logged, with `updatedAt` as its only change
    - Creates join table records (e.g., PostTag) for many-to-many relations
    - Creates audit logs for join table entities if defined in `aggregateMapping`
-   - Does not create audit logs for the connected entity itself (e.g., Tag)
+   - Does not create audit logs for a record whose link lives elsewhere (e.g., Tag, linked through PostTag's foreign key)
 3. **`connectOrCreate` behavior**:
    - Uses pre-fetch to check record existence
-   - If exists: Same as `connect` (join table audit log only)
+   - If exists: Same as `connect`
    - If not exists: Creates audit log for the new entity
    - Pre-fetch is enabled by default to ensure accurate detection
 4. **Performance**: Each nested operation may require additional database queries for pre-fetching
@@ -1233,7 +1236,9 @@ await prisma.post.update({
 #### Limitations
 
 - A nested `update` that changes a column its own `where` names is found again after the write by the primary key read ahead of it; with `fetchBefore.update: false`, when that read failed, or when the update changes the primary key itself, it is not audited.
-- `connect`, `set` and `disconnect` change the foreign keys of related records without an audit log for those records.
+- `connect`, `set` and `disconnect` on an implicit many-to-many relation (no relation model, e.g. `categories Category[]` on both sides) change rows of Prisma's join table, which has no model: they are not audited.
+- With `fetchBefore.update` off for the related model, `connect`, `set` and `disconnect` are not audited: the old foreign key is not read, so a record could not tell where the row was linked, and a `connect` of a record already linked (which Prisma still writes) could not be told from a move.
+- The audit log of a record whose foreign key changed is attributed to the aggregates its row names after the write; the parent it was moved away from gets no entry.
 - With `fetchBefore.update` off for the model of a nested to-many `update`, a to-one relation below it whose foreign key sits on that updated row (for example `comments: { update: { where, data: { author: { upsert } } } }`) is not read under it: its `upsert` is recorded as a create even when the related record existed, and the writes nested in its `create` / `update` data follow that branch. A to-one relation whose foreign key sits on the related record (for example `postBookmarks: { update: { where, data: { note: { upsert } } } }`) is read under the primary key the `where` names. Turn `fetchBefore.update` on for that model to have the row, and so the foreign key, read before the write.
 
 ## Complete Example
