@@ -249,6 +249,76 @@ describe('foreign-key changes of related rows', () => {
     });
   });
 
+  describe('a to-one relation with an optional foreign key', () => {
+    const seedBadges = async (basePrisma: PrismaClient) => {
+      await basePrisma.badge.create({ data: { id: 'b1', name: 'b1', userId: 'u1' } });
+      await basePrisma.badge.create({ data: { id: 'b2', name: 'b2' } });
+    };
+
+    it('audits the row a connect replaces as unlinked and the connected row as linked', async () => {
+      const { basePrisma, prisma, run, recordsOf } = await setup();
+      await seedBadges(basePrisma);
+
+      await run(() => prisma.user.update({ where: { id: 'u1' }, data: { badge: { connect: { id: 'b2' } } } }));
+
+      expect(await recordsOf('Badge')).toEqual([
+        expect.objectContaining({ id: 'b1', action: 'update', changes: { userId: { old: 'u1', new: null } } }),
+        expect.objectContaining({ id: 'b2', action: 'update', changes: { userId: { old: null, new: 'u1' } } }),
+      ]);
+    });
+
+    it('audits the row a disconnect unlinks', async () => {
+      const { basePrisma, prisma, run, recordsOf } = await setup();
+      await seedBadges(basePrisma);
+
+      await run(() => prisma.user.update({ where: { id: 'u1' }, data: { badge: { disconnect: true } } }));
+
+      expect(await recordsOf('Badge')).toEqual([
+        expect.objectContaining({ id: 'b1', action: 'update', changes: { userId: { old: 'u1', new: null } } }),
+      ]);
+    });
+
+    it('audits the row a create replaces as unlinked next to the created row', async () => {
+      const { basePrisma, prisma, run, recordsOf } = await setup();
+      await seedBadges(basePrisma);
+
+      await run(() =>
+        prisma.user.update({ where: { id: 'u1' }, data: { badge: { create: { id: 'b-new', name: 'new' } } } }),
+      );
+
+      expect(await recordsOf('Badge')).toEqual([
+        expect.objectContaining({ id: 'b-new', action: 'create' }),
+        expect.objectContaining({ id: 'b1', action: 'update', changes: { userId: { old: 'u1', new: null } } }),
+      ]);
+    });
+
+    it('audits the row a connectOrCreate replaces and the row it connects', async () => {
+      const { basePrisma, prisma, run, recordsOf } = await setup();
+      await seedBadges(basePrisma);
+
+      await run(() =>
+        prisma.user.update({
+          where: { id: 'u1' },
+          data: { badge: { connectOrCreate: { where: { id: 'b2' }, create: { id: 'b2', name: 'b2' } } } },
+        }),
+      );
+
+      expect(await recordsOf('Badge')).toEqual([
+        expect.objectContaining({ id: 'b1', action: 'update', changes: { userId: { old: 'u1', new: null } } }),
+        expect.objectContaining({ id: 'b2', action: 'update', changes: { userId: { old: null, new: 'u1' } } }),
+      ]);
+    });
+
+    it('audits nothing for a connect of the row already linked', async () => {
+      const { basePrisma, prisma, run, recordsOf } = await setup();
+      await seedBadges(basePrisma);
+
+      await run(() => prisma.user.update({ where: { id: 'u1' }, data: { badge: { connect: { id: 'b1' } } } }));
+
+      expect(await recordsOf('Badge')).toEqual([]);
+    });
+  });
+
   describe('a relation without a foreign key on the related model', () => {
     it("audits a connect on the parent's own foreign key as the parent's update only", async () => {
       const { prisma, run, recordsOf } = await setup();

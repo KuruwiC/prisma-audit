@@ -132,6 +132,24 @@ describe('linkWriteOf', () => {
     });
   });
 
+  it('detaches the row the parent held for a to-one connect, create or disconnect on an optional foreign key', () => {
+    expect(linkWriteOf(operation('connect', { id: 'l1' }, false), optional)).toMatchObject({
+      named: [{ id: 'l1' }],
+      detaches: true,
+    });
+    expect(linkWriteOf(operation('create', { name: 'n' }, false), optional)).toMatchObject({
+      named: [],
+      detaches: true,
+    });
+    expect(linkWriteOf(operation('disconnect', true, false), optional)).toMatchObject({ named: [], detaches: true });
+  });
+
+  it('detaches nothing for a to-one write on a required foreign key, which Prisma rejects when it would', () => {
+    expect(linkWriteOf(operation('connect', { id: 'l1' }, false), required)?.detaches).toBe(false);
+    expect(linkWriteOf(operation('create', { name: 'n' }, false), required)).toBeUndefined();
+    expect(linkWriteOf(operation('disconnect', true, false), required)).toBeUndefined();
+  });
+
   it('is no link write for a to-many create', () => {
     expect(linkWriteOf(operation('create', { name: 'n' }), optional)).toBeUndefined();
   });

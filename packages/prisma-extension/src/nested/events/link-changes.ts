@@ -53,16 +53,22 @@ const capturedCandidate = (write: LinkWrite, row: Row, read: LinkPathRead, detac
   detached,
 });
 
-/** The rows one write names or detaches, as the read before the write found them */
-const candidatesOf = (
+/** The unique WHEREs of the rows a write links by name, a connectOrCreate's included */
+const namedWheresOf = (write: LinkWrite): readonly Row[] =>
+  write.operation.operation === 'connectOrCreate'
+    ? namedTargets(write.operation.operation, write.operation.data).map((target) => target.where)
+    : write.named;
+
+/** The rows a write names, as the read before the write (or a connectOrCreate's own pre-fetch) found them */
+const namedCandidates = (
   write: LinkWrite,
   read: LinkPathRead,
   nestedPreFetchResults: NestedPreFetchResults,
+  parentKey: Row | undefined,
 ): LinkCandidate[] => {
   const { operation } = write;
-  const parentKey = read.parentKeys.get(operation);
   if (operation.operation === 'connectOrCreate') {
-    return namedTargets(operation.operation, operation.data).flatMap(({ where }) => {
+    return namedWheresOf(write).flatMap((where) => {
       const before = preFetchedStateNamedBy(nestedPreFetchResults, operation.path, where);
       return before.kind === 'captured' && !isAttachedTo(before.row, read, parentKey)
         ? [capturedCandidate(write, before.row, read, false)]
@@ -78,20 +84,34 @@ const candidatesOf = (
       detached: detachesNamed,
     }));
   }
-  const named = write.named.flatMap((where) => {
+  return write.named.flatMap((where) => {
     const row = read.rows.find((candidate) => matchesUniqueWhere(candidate, where));
     return row && (detachesNamed || !isAttachedTo(row, read, parentKey))
       ? [capturedCandidate(write, row, read, detachesNamed)]
       : [];
   });
-  const detached =
-    write.detaches && parentKey
-      ? read.rows
-          .filter((row) => isAttachedTo(row, read, parentKey))
-          .filter((row) => !write.named.some((where) => matchesUniqueWhere(row, where)))
-          .map((row) => capturedCandidate(write, row, read, true))
-      : [];
-  return [...named, ...detached];
+};
+
+/** The rows linked to the write's parent row before the write that it unlinks without naming them */
+const detachedCandidates = (write: LinkWrite, read: LinkPathRead, parentKey: Row | undefined): LinkCandidate[] =>
+  write.detaches && parentKey && !read.failed
+    ? read.rows
+        .filter((row) => isAttachedTo(row, read, parentKey))
+        .filter((row) => !namedWheresOf(write).some((where) => matchesUniqueWhere(row, where)))
+        .map((row) => capturedCandidate(write, row, read, true))
+    : [];
+
+/** The rows one write names or detaches */
+const candidatesOf = (
+  write: LinkWrite,
+  read: LinkPathRead,
+  nestedPreFetchResults: NestedPreFetchResults,
+): LinkCandidate[] => {
+  const parentKey = read.parentKeys.get(write.operation);
+  return [
+    ...namedCandidates(write, read, nestedPreFetchResults, parentKey),
+    ...detachedCandidates(write, read, parentKey),
+  ];
 };
 
 /** The candidates at a path, each row once (the first write that names or detaches it), leaving out rows another write audits */

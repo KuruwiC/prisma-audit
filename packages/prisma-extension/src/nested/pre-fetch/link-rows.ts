@@ -4,7 +4,8 @@
  * On a relation whose foreign key lives on the related model, a nested `connect`, `set`,
  * `disconnect` or a `connectOrCreate` that connects rewrites the foreign key of existing related
  * rows: the rows it names are attached to the parent row, and the rows a `set` leaves out, or the
- * row a to-one write replaces or disconnects, are detached from it. Each such row is audited as
+ * row a to-one `connect`, `create`, `connectOrCreate` or `disconnect` replaces or unlinks, are
+ * detached from it. Each such row is audited as
  * an update of that row, whose before state is read here: one query per path, whole rows, for
  * every row the writes at the path name by unique WHERE and every row attached under the parent
  * rows a write detaches rows from. A `connectOrCreate` row was already read by its own pre-fetch.
@@ -79,19 +80,28 @@ export type LinkReads = ReadonlyMap<string, LinkPathRead>;
 
 /**
  * The link write `operation` is, on a relation whose foreign key lives on the related model;
- * undefined for a write that rewrites no existing row's foreign key.
+ * undefined for a write that rewrites no existing row's foreign key. On an optional foreign key,
+ * a `set` unlinks the rows it does not name, and a to-one `connect`, `create`,
+ * `connectOrCreate` or `disconnect` unlinks the row the parent held (on a required one Prisma
+ * rejects all of these).
  */
 export const linkWriteOf = (operation: NestedOperationInfo, link: RelatedSideLink): LinkWrite | undefined => {
   const named = () => namedTargets(operation.operation, operation.data).map((target) => target.where);
+  const replacesToOne = !operation.isList && link.optional;
   switch (operation.operation) {
     case 'connect':
-      return { operation, named: named(), detaches: false };
+      return { operation, named: named(), detaches: replacesToOne };
     case 'set':
       return { operation, named: named(), detaches: link.optional };
     case 'disconnect':
-      return operation.isList ? { operation, named: named(), detaches: false } : undefined;
+      if (operation.isList) {
+        return { operation, named: named(), detaches: false };
+      }
+      return replacesToOne ? { operation, named: [], detaches: true } : undefined;
     case 'connectOrCreate':
-      return { operation, named: [], detaches: false };
+      return { operation, named: [], detaches: replacesToOne };
+    case 'create':
+      return replacesToOne ? { operation, named: [], detaches: true } : undefined;
     default:
       return undefined;
   }
