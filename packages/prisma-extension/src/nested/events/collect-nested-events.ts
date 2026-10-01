@@ -2,7 +2,8 @@
  * Nested mutation event collection
  *
  * Attributes the rows an executed operation returned to the nested operations that wrote them,
- * walking the result from the top-level row down: the rows a relation holds under a returned row
+ * walking the result from the top-level row down, one level at a time (each written path is
+ * handled once for all its parent rows): the rows a relation holds under a returned row
  * are candidates only for the operations nested under the operation that row was attributed to,
  * so a row below a row the operation did not write is not audited, and a row is attributed once
  * however many elements of a list carry a write at its path. Each attributed row's action and
@@ -339,16 +340,57 @@ const candidateRelations = (walk: CollectionWalk, attribution: RowAttribution | 
   return [...byPath.values()];
 };
 
-/** Attributes the rows below `row`, which was attributed `attribution` (none for the top-level row) */
-const walkRow = async (walk: CollectionWalk, row: Row, attribution: RowAttribution | undefined): Promise<void> => {
-  for (const relation of candidateRelations(walk, attribution)) {
-    const rows = relationRowsOf(row, { name: relation.fieldName, isList: relation.isList });
-    const attributed = relation.isList
-      ? await attributeToManyRows(walk, relation, rows)
-      : rows.flatMap((related) => attributeToOneRow(walk, relation, related));
-    for (const child of attributed) {
-      await walkRow(walk, child.row, child.attribution);
+/** A row of the walk and the operation it was attributed to; none for the top-level row */
+interface WalkedRow {
+  readonly row: Row;
+  readonly attribution: RowAttribution | undefined;
+}
+
+/** One relation written below a row of the walk, with the operations nested there under that row */
+interface RelationBelow {
+  readonly parent: WalkedRow;
+  readonly relation: CandidateRelation;
+}
+
+/** The relations written below `rows`, grouped by path: each path is handled once for all its parent rows */
+const relationsBelow = (walk: CollectionWalk, rows: readonly WalkedRow[]): Map<string, RelationBelow[]> => {
+  const byPath = new Map<string, RelationBelow[]>();
+  for (const parent of rows) {
+    for (const relation of candidateRelations(walk, parent.attribution)) {
+      const atPath = byPath.get(relation.path) ?? [];
+      byPath.set(relation.path, atPath);
+      atPath.push({ parent, relation });
     }
+  }
+  return byPath;
+};
+
+/** Attributes the rows one written path holds under each of its parent rows */
+const attributePath = async (walk: CollectionWalk, below: readonly RelationBelow[]): Promise<AttributedRow[]> => {
+  const attributed: AttributedRow[] = [];
+  for (const { parent, relation } of below) {
+    const rows = relationRowsOf(parent.row, { name: relation.fieldName, isList: relation.isList });
+    attributed.push(
+      ...(relation.isList
+        ? await attributeToManyRows(walk, relation, rows)
+        : rows.flatMap((related) => attributeToOneRow(walk, relation, related))),
+    );
+  }
+  return attributed;
+};
+
+/**
+ * Attributes the rows below `roots` one level at a time: the rows attributed at one level are the
+ * parent rows of the next.
+ */
+const walkLevels = async (walk: CollectionWalk, roots: readonly WalkedRow[]): Promise<void> => {
+  let level = roots;
+  while (level.length > 0) {
+    const next: WalkedRow[] = [];
+    for (const below of relationsBelow(walk, level).values()) {
+      next.push(...(await attributePath(walk, below)));
+    }
+    level = next;
   }
 };
 
@@ -403,7 +445,7 @@ export const collectNestedEvents = async (
     assigned: new Set(),
   };
   if (isRow(result)) {
-    await walkRow(walk, result, undefined);
+    await walkLevels(walk, [{ row: result, attribution: undefined }]);
   }
 
   const events: MutationEvent[] = [];
