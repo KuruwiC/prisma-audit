@@ -152,8 +152,8 @@ describe('Transaction Consistency Integration', () => {
     });
   });
 
-  describe('RefetchNestedRecords transaction consistency', () => {
-    it('should refetch nested records using transactional client', async () => {
+  describe('Nested before-state transaction consistency', () => {
+    it('should read the before state of a nested update with the transactional client', async () => {
       const auditContext: AuditContext = {
         actor: {
           category: 'model',

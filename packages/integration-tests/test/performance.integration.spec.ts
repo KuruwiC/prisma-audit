@@ -59,7 +59,7 @@ const createAuditedClientWithAuditLogRowCounter = (
   });
 };
 
-const createAuditedClientWithRefetchFallback = (
+const createAuditedClientFetchingBeforeState = (
   basePrisma: PrismaClient,
   provider: AuditContextProvider,
   auditLogRowCount: { value: number },
@@ -446,7 +446,7 @@ describe('Performance Benchmarks', () => {
   });
 });
 
-describe('Refetch Fallback Mechanism', () => {
+describe('Nested update with and without an include of the written relation', () => {
   let context: TestContext & { auditLogRowCount: { value: number } };
 
   beforeAll(async () => {
@@ -461,7 +461,7 @@ describe('Refetch Fallback Mechanism', () => {
     const provider = createAsyncLocalStorageProvider();
     const auditLogRowCount = { value: 0 };
 
-    const prisma = createAuditedClientWithRefetchFallback(basePrisma, provider, auditLogRowCount);
+    const prisma = createAuditedClientFetchingBeforeState(basePrisma, provider, auditLogRowCount);
 
     context = {
       prisma,
@@ -493,12 +493,12 @@ describe('Refetch Fallback Mechanism', () => {
   };
 
   describe('with fetchBefore: true', () => {
-    it('should automatically refetch nested records when include is missing', async () => {
+    it('audits a nested update when the caller does not include the written relation', async () => {
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
-            email: 'refetch-test@example.com',
-            name: 'Refetch Test User',
+            email: 'no-include-test@example.com',
+            name: 'No Include Test User',
             password: 'secret123',
             posts: {
               create: [{ title: 'Post 1', content: 'Content 1' }],
@@ -517,17 +517,17 @@ describe('Refetch Fallback Mechanism', () => {
           where: { id: user.id },
           data: {
             posts: {
-              update: { where: { id: postId }, data: { title: 'Updated via Refetch' } },
+              update: { where: { id: postId }, data: { title: 'Updated without include' } },
             },
           },
         });
       });
 
-      const auditLogsWithRefetch = context.auditLogRowCount.value;
-      console.log(`Update without include (refetch fallback): ${auditLogsWithRefetch} audit logs`);
+      const auditLogsWithoutInclude = context.auditLogRowCount.value;
+      console.log(`Update without include: ${auditLogsWithoutInclude} audit logs`);
 
-      expect(auditLogsWithRefetch).toBeGreaterThan(0);
-      expect(auditLogsWithRefetch).toBe(3);
+      expect(auditLogsWithoutInclude).toBeGreaterThan(0);
+      expect(auditLogsWithoutInclude).toBe(3);
 
       const auditLogs = await context.prisma.auditLog.findMany({
         where: {
@@ -540,11 +540,11 @@ describe('Refetch Fallback Mechanism', () => {
       });
 
       expect(auditLogs).toHaveLength(1);
-      expect(auditLogs[0].after).toMatchObject({ title: 'Updated via Refetch' });
+      expect(auditLogs[0].after).toMatchObject({ title: 'Updated without include' });
       expect(auditLogs[0].before).toMatchObject({ title: 'Post 1' });
     });
 
-    it('should use include data when available', async () => {
+    it('audits a nested update when the caller includes the written relation', async () => {
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -576,7 +576,7 @@ describe('Refetch Fallback Mechanism', () => {
       });
 
       const auditLogsWithInclude = context.auditLogRowCount.value;
-      console.log(`Update with include (no refetch): ${auditLogsWithInclude} audit logs`);
+      console.log(`Update with include: ${auditLogsWithInclude} audit logs`);
 
       expect(auditLogsWithInclude).toBe(3);
 
