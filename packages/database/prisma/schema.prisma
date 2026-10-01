@@ -29,6 +29,7 @@ model User {
   attachments     Attachment[]
   profile         Profile?
   autoIncChildren AutoIncChild[]
+  badge           Badge?
 
   @@map("users")
 }
@@ -49,6 +50,7 @@ model Post {
   postLikes       PostLike[]
   postBookmarks   PostBookmark[]
   labels          Label[]
+  categories      Category[]
 
   @@map("posts")
 }
@@ -92,6 +94,30 @@ model Label {
 
   @@index([postId])
   @@map("labels")
+}
+
+// A one-to-one relation with an optional foreign key on the related side, which connecting,
+// creating or disconnecting a user's badge rewrites
+model Badge {
+  id        String   @id @default(cuid())
+  name      String
+  userId    String?  @unique @map("user_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@map("badges")
+}
+
+// An implicit many-to-many relation: Prisma keeps its links in a join table without a model
+model Category {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
+
+  posts Post[]
+
+  @@map("categories")
 }
 
 model PostTag {
