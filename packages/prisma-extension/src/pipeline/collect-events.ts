@@ -43,7 +43,6 @@ const toRow = (result: unknown): Row => {
 export interface SingleOperationOutcome {
   readonly modelName: string;
   readonly action: AuditAction;
-  /** The args the operation ran with */
   readonly args: Record<string, unknown>;
   readonly result: unknown;
   readonly beforeState: BeforeState;

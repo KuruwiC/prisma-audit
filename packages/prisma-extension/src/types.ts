@@ -148,11 +148,7 @@ export interface FetchBeforeConfig<TModelName extends string = string> extends F
   models?: { readonly [K in TModelName]?: FetchBeforeByOperation };
 }
 
-/**
- * Audit-failure observation and policy, defined by `@kuruwic/db-audit-core` and re-exported:
- * the failure phases, the context the observer and a policy function receive, the observer, the
- * write-failure policy and the `errorHandling` configuration section
- */
+/** Audit-failure observation and policy types, defined by `@kuruwic/db-audit-core` and re-exported */
 export type {
   AuditErrorContext,
   AuditErrorObserver,

@@ -31,13 +31,12 @@ type Row = Record<string, unknown>;
 
 /** One parent row at a to-many path, as the walk reached it */
 export interface ParentAtPath {
-  /** The parent row as returned or read */
   readonly row: Row;
   /** The rows the result holds under it */
   readonly rows: readonly Row[];
   /** The updates nested under it whose row it does not hold */
   readonly absentTargets: readonly NestedWriteTarget[];
-  /** The caller restricted the rows of the relation under it, and an operation nested under it inserts rows */
+  /** The caller restricted the relation's rows under it, and an operation nested under it inserts rows */
   readonly insertsHidden: boolean;
 }
 
@@ -61,7 +60,6 @@ export interface RowsNotInResultInput {
 const primaryKeyFilter = (row: Row, pkFields: readonly string[]): Row =>
   Object.fromEntries(pkFields.map((field) => [field, row[field]]));
 
-/** The primary keys of the rows inserted under the parent rows whose result rows were restricted */
 const readHiddenInsertedKeys = async (
   input: RowsNotInResultInput,
   path: ToManyPath,
@@ -94,7 +92,6 @@ const readHiddenInsertedKeys = async (
   });
 };
 
-/** A target's locator as a filter: its primary key, or its unique WHERE with compound wrappers lifted */
 const locatorFilter = (target: NestedWriteTarget, fieldNames: ReadonlySet<string>): Row =>
   target.locator.by === 'primaryKey' ? target.locator.where : uniqueWhereAsFilter(target.locator.where, fieldNames);
 
@@ -134,10 +131,7 @@ const includeOf = (input: RowsNotInResultInput, path: ToManyPath | undefined, hi
   return { ...input.include, [backField]: { where: { OR: keys }, select } };
 };
 
-/**
- * The rows each parent at the path wrote that the result does not hold, read whole once for the
- * path, in the order of `input.parents`
- */
+/** The rows each parent at the path wrote that the result does not hold, in the order of `input.parents` */
 export const readRowsNotInResult = async (input: RowsNotInResultInput): Promise<Row[][]> => {
   const { client, schemaMetadata, relatedModel, pkFields, parents } = input;
   const hidden = parents.filter((parent) => parent.insertsHidden);

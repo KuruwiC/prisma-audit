@@ -92,8 +92,7 @@ export interface PreFetchOneToOneRelationInput extends Omit<ResolveParentRowsInp
  * model (the referenced key on the owning side, a unique foreign key on the inverse side), so at
  * most one row matches. A parent row with a null key field (an unset optional foreign key) is
  * skipped, and so is a parent row known only by the primary key its operation's WHERE names when
- * the relation links by other fields of it (a foreign key on the parent row): its related row is
- * not read.
+ * the link fields are other fields of it (a foreign key on the parent row).
  *
  * @returns One result per queried parent row, by that row's identity; `beforeRecord` is null when
  *   no related row exists

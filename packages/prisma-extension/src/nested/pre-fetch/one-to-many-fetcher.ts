@@ -32,9 +32,8 @@ export interface ToManyRelationScope {
   readonly filter: 'is' | 'some';
   readonly parentFields: readonly string[];
   /**
-   * The related row's foreign-key columns (`fields`) and the parent fields they hold
-   * (`references`, in the same order); absent for an implicit many-to-many relation, whose links
-   * live in a join table
+   * The related row's foreign-key `fields` and the parent `references` they hold, in the same
+   * order; absent for an implicit many-to-many relation
    */
   readonly foreignKey?: { readonly fields: readonly string[]; readonly references: readonly string[] };
 }

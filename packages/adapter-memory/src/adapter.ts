@@ -6,9 +6,7 @@
  * rows join the operation's transaction, an implicit transaction opens when they do and none is
  * active, the mutation is applied on the scope's handle and collected as one mutation event, the
  * event is resolved with the id resolvers and enrichers reading through the scope's handle,
- * composed into audit records, dispatched into a write plan and written. A sampled-out operation
- * is applied on the current handle without an event. Failures go through the core failure sink,
- * whose observer lists them on the adapter before forwarding them to the user's observer.
+ * composed into audit records, dispatched into a write plan and written.
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -54,10 +52,7 @@ export interface MemoryAuditOptions<TModelName extends string> {
   readonly redact?: RedactConfig;
   readonly serialization?: SerializationConfig;
   readonly contextEnricher?: GlobalContextEnricherConfig<AuditActor, unknown, MemoryHandle<TModelName>>;
-  /**
-   * The user's observer and write-failure policy. The policy defaults to `'throw'`: a failed
-   * write the operation awaits rejects it; a queued or detached one is logged.
-   */
+  /** The user's observer and write-failure policy; the policy defaults to `'throw'` */
   readonly errorHandling?: ErrorHandlingConfig;
 }
 
@@ -72,7 +67,7 @@ export interface MemoryAuditAdapter<TModelName extends string> {
   flush(): Promise<void>;
   /** Every audit write that failed (phase `log-write`), awaited or not; `flush` resolves regardless */
   readonly writeFailures: readonly AuditErrorContext[];
-  /** Every row an id resolver failed for (phase `id-resolver-call`); that row's records are not written */
+  /** Every row an id resolver failed for (phase `id-resolver-call`); the records that resolver gates are not written */
   readonly resolverFailures: readonly AuditErrorContext[];
 }
 

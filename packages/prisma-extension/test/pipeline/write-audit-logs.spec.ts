@@ -1,7 +1,7 @@
 /**
  * Tests for the audit-log write: each write plan kind reaches the write executor on the right
  * handle at the right time, the writer hook wraps the default write, and write failures reach
- * the failure sink with the plan they belong to.
+ * the failure sink with the write plan they belong to.
  */
 
 import type { AuditContext, FailureSink, WriteContext, WriteExecutor, WritePlan } from '@kuruwic/db-audit-core';

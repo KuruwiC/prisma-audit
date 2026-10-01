@@ -30,7 +30,7 @@ export type RelationLink =
   | { readonly side: 'parent' }
   | { readonly side: 'joinTable' };
 
-/** The link of the relation field `field` of `parentModelName`, whose back-relation field is on `relatedFields` */
+/** On a self-relation `relatedFields` include `field` itself, which is not its own back-relation field */
 export const resolveRelationLink = (
   field: DMMFField,
   parentModelName: string,

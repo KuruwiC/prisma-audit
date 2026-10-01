@@ -37,7 +37,10 @@ export interface AuditOptions {
   readonly errorHandling: ErrorHandlingConfig;
   readonly shouldFetchBefore: ShouldFetchBefore;
   readonly modelTags: (modelName: string) => string[];
-  /** Whether operations on `modelName` are audited at all (not the audit-log model, loggable); sampling is the policy's */
+  /**
+   * Whether operations on `modelName` are audited at all: it is not the audit-log model and is
+   * loggable. Sampling is decided by `policyConfig`.
+   */
   readonly shouldAudit: (modelName: string) => boolean;
 }
 

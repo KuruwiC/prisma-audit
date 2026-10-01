@@ -43,11 +43,10 @@ export interface WriteContext<TDbHandle = unknown> {
    */
   readonly handle: TDbHandle;
   /**
-   * Whether `handle` belongs to a transaction the write is part of, so that what the writer
-   * writes through it commits and rolls back with the audited operation. True for an immediate
-   * write inside the operation's transaction; false for a write after commit or a detached one,
-   * which run outside it. A writer that needs several statements to be atomic opens a
-   * transaction of its own exactly when this is false.
+   * Whether `handle` belongs to the audited operation's transaction, so that what the writer
+   * writes through it commits and rolls back with the operation; false for a write after commit
+   * or a detached one. A writer that needs several statements to be atomic opens a transaction
+   * of its own exactly when this is false.
    */
   readonly inTransaction: boolean;
   /** Writes records on `handle` with the adapter's {@link WriteExecutor} */

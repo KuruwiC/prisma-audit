@@ -5,10 +5,10 @@
  * `disconnect` or a `connectOrCreate` that connects rewrites the foreign key of existing related
  * rows: the rows it names are attached to the parent row, and the rows a `set` leaves out, or the
  * row a to-one `connect`, `create`, `connectOrCreate` or `disconnect` replaces or unlinks, are
- * detached from it. Each such row is audited as
- * an update of that row, whose before state is read here: one query per path, whole rows, for
- * every row the writes at the path name by unique WHERE and every row attached under the parent
- * rows a write detaches rows from. A `connectOrCreate` row was already read by its own pre-fetch.
+ * detached from it. Each such row is audited as an update of that row, whose before state is read
+ * here: one related-model query per path, whole rows, for every row the writes at the path name
+ * by unique WHERE and every row attached under the parent rows a write detaches rows from. A
+ * `connectOrCreate` row was already read by its own pre-fetch.
  *
  * The read runs only when `fetchBefore` reads the before state of updates of the related model:
  * the record exists to tell the old foreign key, which nothing else holds. A failed read is
@@ -54,7 +54,7 @@ export interface LinkWrite {
   readonly operation: NestedOperationInfo;
   /** The unique WHEREs of the rows it attaches (or, for a to-many `disconnect`, detaches) by name */
   readonly named: readonly Row[];
-  /** It detaches the rows attached under its parent row before the write */
+  /** It detaches the rows its parent row held before the write */
   readonly detaches: boolean;
 }
 
@@ -79,11 +79,10 @@ export interface LinkPathRead {
 export type LinkReads = ReadonlyMap<string, LinkPathRead>;
 
 /**
- * The link write `operation` is, on a relation whose foreign key lives on the related model;
- * undefined for a write that rewrites no existing row's foreign key. On an optional foreign key,
- * a `set` unlinks the rows it does not name, and a to-one `connect`, `create`,
- * `connectOrCreate` or `disconnect` unlinks the row the parent held (on a required one Prisma
- * rejects all of these).
+ * Undefined for a write that rewrites no existing row's foreign key. On an optional foreign key, a
+ * `set` unlinks the rows it does not name, and a to-one `connect`, `create`, `connectOrCreate` or
+ * `disconnect` unlinks the row the parent held; on a required one Prisma rejects any write that
+ * would unlink a row.
  */
 export const linkWriteOf = (operation: NestedOperationInfo, link: RelatedSideLink): LinkWrite | undefined => {
   const named = () => namedTargets(operation.operation, operation.data).map((target) => target.where);
@@ -128,7 +127,6 @@ interface PathWrites {
   readonly writes: LinkWrite[];
 }
 
-/** The link writes of the executed operations, grouped by path, for the paths whose updates read their before state */
 const linkWritesByPath = (input: ReadLinkRowsInput, deps: ReadLinkRowsDependencies): Map<string, PathWrites> => {
   const byPath = new Map<string, PathWrites>();
   for (const operation of input.nestedOperations) {
@@ -147,7 +145,6 @@ const linkWritesByPath = (input: ReadLinkRowsInput, deps: ReadLinkRowsDependenci
   return byPath;
 };
 
-/** The values each write's parent row held in `references` before the write */
 const readParentKeys = async (
   input: ReadLinkRowsInput,
   deps: ReadLinkRowsDependencies,
@@ -231,7 +228,6 @@ const readPath = async (
   }
 };
 
-/** Reads, once per path, the rows the executed link writes may re-link (see the module comment) */
 export const readLinkRows = async (input: ReadLinkRowsInput, deps: ReadLinkRowsDependencies): Promise<LinkReads> => {
   const reads = new Map<string, LinkPathRead>();
   for (const [path, pathWrites] of linkWritesByPath(input, deps)) {

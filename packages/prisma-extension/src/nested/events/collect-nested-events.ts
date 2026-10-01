@@ -2,23 +2,23 @@
  * Nested mutation event collection
  *
  * Attributes the rows an executed operation returned to the nested operations that wrote them,
- * walking the result from the top-level row down, one level at a time (each written path is
- * handled once for all its parent rows): the rows a relation holds under a returned row
- * are candidates only for the operations nested under the operation that row was attributed to,
- * so a row below a row the operation did not write is not audited, and a row is attributed once
- * however many elements of a list carry a write at its path. Each attributed row's action and
- * before-state are resolved, and one mutation event is yielded per row an operation wrote.
+ * walking the result from the top-level row down one level at a time, each written path once for
+ * all its parent rows. The rows a relation holds under a returned row are candidates only for the
+ * operations nested under the operation that row was attributed to, so a row below a row the
+ * operation did not write is not audited, and a row is attributed once however many elements of a
+ * list carry a write at its path. One mutation event is yielded per row an operation wrote.
  *
  * A to-many relation is returned whole, so a row there is an operation's only when the write set
  * says so: a row a target locates belongs to that operation (by the primary key of the row read
- * ahead of the operation, or else by its unique WHERE; see `NestedRowLocator`); a row that matches no
- * target and did not exist before the operation was inserted, and belongs to the first operation
+ * ahead of the operation, or else by its unique WHERE; see `NestedRowLocator`); a row that matches
+ * no target and did not exist before the operation was inserted, and belongs to the first operation
  * nested under its parent that inserts rows; any other row is a sibling and yields nothing. The
- * rows the operation wrote at a path that the result does not hold (see `rows-not-in-result.ts`)
- * are read once for the path, with the relations written below them. A `deleteMany` yields one
- * delete event per row its filter matched in that read. A to-one relation holds one related row
- * under its parent row: the row of the operation nested there that names it by unique WHERE, else
- * of the one that writes the related row of its parent.
+ * rows the operation wrote at a path that the result does not hold are read once for the path (see
+ * `rows-not-in-result.ts`). A `deleteMany` yields one delete event per row its filter matched in the
+ * read ahead of the operation. A to-one relation holds one related row under its parent row: the
+ * row of the operation nested there that names it by unique WHERE, else of the one that writes the
+ * related row of its parent. The foreign-key changes of `connect` / `set` / `disconnect` come from
+ * `link-changes.ts`.
  */
 
 import type { BeforeState, MutationEvent } from '@kuruwic/db-audit-core';
@@ -119,13 +119,11 @@ interface AttributedRow extends WalkedRow {
   readonly attribution: RowAttribution;
 }
 
-/** A row a relation holds, with the selection node it was read with */
 interface SourcedRow {
   readonly row: Row;
   readonly selection: Row;
 }
 
-/** State shared by the walk over the result */
 interface CollectionWalk {
   readonly input: NestedEventCollectionInput;
   readonly deps: NestedEventCollectorDependencies;
@@ -154,7 +152,10 @@ const toEvent = (
 const isDelete = (nestedOp: NestedOperationInfo): boolean =>
   nestedOp.operation === 'delete' || nestedOp.operation === 'deleteMany';
 
-/** Whether `nestedOp` was detected in the data that wrote a row attributed `attribution`; the top-level row without one */
+/**
+ * Whether `nestedOp` was detected in the data that wrote a row attributed `attribution`; the
+ * top-level row has no attribution
+ */
 const isNestedUnder = (nestedOp: NestedOperationInfo, attribution: RowAttribution | undefined): boolean => {
   if (!attribution) {
     return nestedOp.parent === undefined;
@@ -196,11 +197,6 @@ const isLocatedBy = (row: Row, target: NestedWriteTarget): boolean => matchesUni
 const targetOf = (row: Row, targets: readonly NestedWriteTarget[]): NestedWriteTarget | undefined =>
   targets.find((target) => isLocatedBy(row, target));
 
-/**
- * The rows a to-many relation holds under one parent row that `candidates` wrote: those their
- * targets locate and, for the first candidate that inserts rows, the unclaimed rows that match
- * no target at the path and did not exist before.
- */
 const attributeToManyRows = (
   walk: CollectionWalk,
   relation: CandidateRelation,
@@ -244,7 +240,6 @@ const writeSetAt = (walk: CollectionWalk, path: string): NestedWriteSet =>
 const ownTargetsOf = (writeSet: NestedWriteSet, candidates: readonly NestedOperationInfo[]): NestedWriteTarget[] =>
   writeSet.targets.filter((target) => candidates.includes(target.operation));
 
-/** The first candidate that inserts rows, given the targets of the candidates */
 const insertingCandidateOf = (
   candidates: readonly NestedOperationInfo[],
   targets: readonly NestedWriteTarget[],
@@ -260,9 +255,8 @@ const namesRowByWhere = (nestedOp: NestedOperationInfo): boolean =>
   linksNamedRows(nestedOp.operation) || nestedOp.operation === 'connectOrCreate';
 
 /**
- * The candidate a to-one relation's row under one parent row belongs to: the one whose unique
- * WHERE names the row, else one that writes the related row of its parent, preferring one not
- * attributed a row yet (the elements of a list insert cannot be told apart).
+ * Among the candidates that write the related row of their parent, prefers one not attributed a
+ * row yet: the elements of a list insert cannot be told apart.
  */
 const toOneOperationOf = (
   walk: CollectionWalk,
@@ -299,7 +293,6 @@ const toOneBeforeState = (walk: CollectionWalk, nestedOp: NestedOperationInfo): 
   return preFetchedStateUnder(nestedPreFetchResults, nestedOp.path, parent);
 };
 
-/** The row a to-one relation holds under one parent row, attributed to the candidate that wrote it */
 const attributeToOneRow = (walk: CollectionWalk, relation: CandidateRelation, related: SourcedRow): AttributedRow[] => {
   const { candidates } = relation;
   const nestedOp = toOneOperationOf(walk, related.row, candidates);
@@ -320,7 +313,6 @@ interface CandidateRelation {
   readonly candidates: NestedOperationInfo[];
 }
 
-/** The operations nested under `attribution` that write returned rows, grouped by relation */
 const candidateRelations = (walk: CollectionWalk, attribution: RowAttribution | undefined): CandidateRelation[] => {
   const byPath = new Map<string, CandidateRelation>();
   for (const nestedOp of walk.input.nestedOperations) {
@@ -347,13 +339,11 @@ const candidateRelations = (walk: CollectionWalk, attribution: RowAttribution | 
   return [...byPath.values()];
 };
 
-/** One relation written below a row of the walk, with the operations nested there under that row */
 interface RelationBelow {
   readonly parent: WalkedRow;
   readonly relation: CandidateRelation;
 }
 
-/** The relations written below `rows`, grouped by path: each path is handled once for all its parent rows */
 const relationsBelow = (walk: CollectionWalk, rows: readonly WalkedRow[]): Map<string, RelationBelow[]> => {
   const byPath = new Map<string, RelationBelow[]>();
   for (const parent of rows) {
@@ -366,7 +356,6 @@ const relationsBelow = (walk: CollectionWalk, rows: readonly WalkedRow[]): Map<s
   return byPath;
 };
 
-/** The rows a relation holds under a row of the walk, each with the selection node it was read with */
 const heldRowsOf = (parent: WalkedRow, relation: CandidateRelation): SourcedRow[] => {
   const entry = relationSelectionOf(parent.selection, relation.fieldName);
   const selection = relationNodeOf(entry);
@@ -389,7 +378,6 @@ const updatesExistingRow = (target: NestedWriteTarget): boolean => {
   );
 };
 
-/** One parent row at a to-many path as the read of the rows the result does not hold sees it */
 const parentAtPath = (walk: CollectionWalk, { parent, relation }: RelationBelow, held: readonly SourcedRow[]) => {
   const ownTargets = ownTargetsOf(writeSetAt(walk, relation.path), relation.candidates);
   const restricted = restrictsRows(relationSelectionOf(parent.selection, relation.fieldName));
@@ -403,10 +391,7 @@ const parentAtPath = (walk: CollectionWalk, { parent, relation }: RelationBelow,
   } satisfies ParentAtPath;
 };
 
-/**
- * The rows the operation wrote at a to-many path that the result does not hold, per parent row in
- * the order of `below`, read once for the path
- */
+/** The rows the operation wrote at a to-many path that the result does not hold, in the order of `below` */
 const rowsNotInResult = async (
   walk: CollectionWalk,
   below: readonly RelationBelow[],
@@ -448,7 +433,6 @@ const rowsNotInResult = async (
   return read.map((rows) => rows.map((row) => ({ row, selection })));
 };
 
-/** Attributes the rows one written path holds under each of its parent rows */
 const attributePath = async (walk: CollectionWalk, below: readonly RelationBelow[]): Promise<AttributedRow[]> => {
   const held = below.map(({ parent, relation }) => heldRowsOf(parent, relation));
   if (!below[0]?.relation.isList) {
@@ -462,10 +446,6 @@ const attributePath = async (walk: CollectionWalk, below: readonly RelationBelow
   );
 };
 
-/**
- * Attributes the rows below `roots` one level at a time: the rows attributed at one level are the
- * parent rows of the next.
- */
 const walkLevels = async (walk: CollectionWalk, roots: readonly WalkedRow[]): Promise<void> => {
   let level = roots;
   while (level.length > 0) {
@@ -500,7 +480,6 @@ const collectDeleteRecords = (
 
 const isRow = (value: unknown): value is Row => typeof value === 'object' && value !== null;
 
-/** The identities of the rows the walk attributed to the operations at `path` */
 const auditedIdentitiesAt = (walk: CollectionWalk, path: string): Set<string> => {
   const pkFields = walk.pkConstraints.get(path)?.fields;
   const identities = new Set<string>();

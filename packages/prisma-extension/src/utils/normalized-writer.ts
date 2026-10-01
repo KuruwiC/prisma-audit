@@ -30,9 +30,8 @@ export interface NormalizedSchema {
   /** Model name for audit event table */
   eventModel: string;
   /**
-   * Field of the event model that stores whether the before state was requested and could not be
-   * read (`AuditRecord.beforeUnavailable`). Without it the marker is not stored, so the event
-   * model needs no such column.
+   * Field of the event model that stores `AuditRecord.beforeUnavailable` (the before state was
+   * requested and could not be read). When omitted the marker is not stored.
    */
   beforeUnavailableField?: string;
 }
@@ -46,9 +45,8 @@ export interface SharedChangeSchema {
   /** Model name for aggregate relation table */
   aggregateModel: string;
   /**
-   * Field of the change model that stores whether the before state was requested and could not be
-   * read (`AuditRecord.beforeUnavailable`). Without it the marker is not stored, so the change
-   * model needs no such column.
+   * Field of the change model that stores `AuditRecord.beforeUnavailable` (the before state was
+   * requested and could not be read). When omitted the marker is not stored.
    */
   beforeUnavailableField?: string;
 }
@@ -152,7 +150,6 @@ const requireDelegate = <TDelegate extends object>(
   return delegate;
 };
 
-/** The marker as a column of the row, only when the schema names a field for it */
 const beforeUnavailableColumn = (field: string | undefined, log: AuditRecord): Record<string, boolean> =>
   field === undefined ? {} : { [field]: log.beforeUnavailable };
 

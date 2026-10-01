@@ -26,8 +26,8 @@ import { uniqueWhereAsFilter } from './compound-where.js';
 
 /**
  * Nested write keywords whose written rows are audited from the operation result. Deleted rows are
- * audited from their pre-fetched state, and `connect` and `set` write no audited row of the related
- * model.
+ * audited from their pre-fetched state, and the foreign-key changes of `connect`, `set` and
+ * `disconnect` from their own reads (`nested/events/link-changes.ts`).
  */
 const RESULT_AUDITED_KEYWORDS: ReadonlySet<NestedOperationKeyword> = new Set([
   'create',
@@ -307,13 +307,11 @@ export const projectToRequestedShape = (value: unknown, injected: InjectedSelect
   return projected;
 };
 
-/** The args of a relation entry that restrict which of its rows a query returns */
 const ROW_RESTRICTING_ARGS = ['where', 'take', 'skip', 'cursor', 'distinct'] as const;
 
 /**
  * The entry of the relation `fieldName` in a selection node (operation args, or the args of a
- * relation entry): its `select` entry when the node selects, else its `include` entry; undefined
- * when the node does not read the relation.
+ * relation entry); undefined when the node does not read the relation
  */
 export const relationSelectionOf = (node: Selection, fieldName: string): unknown => {
   const entries = isRecord(node.select) ? node.select : isRecord(node.include) ? node.include : undefined;
@@ -324,8 +322,8 @@ export const relationSelectionOf = (node: Selection, fieldName: string): unknown
 export const relationNodeOf = (entry: unknown): Selection => (isRecord(entry) ? entry : {});
 
 /**
- * Whether a relation entry returns only some of the relation's rows: its args carry `where`,
- * `take`, `skip`, `cursor` or `distinct`
+ * Whether a relation entry returns only some of the relation's rows, so the result may not hold
+ * every row the operation wrote there
  */
 export const restrictsRows = (entry: unknown): boolean =>
   isRecord(entry) && ROW_RESTRICTING_ARGS.some((key) => entry[key] !== undefined);

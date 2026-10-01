@@ -1,11 +1,10 @@
 /**
  * Failure contract
  *
- * How an audit failure reaches the user: every failure notifies the observer, which never
- * affects the caller's operation; only a failed write of the records also consults the
- * write-failure policy, and its `'throw'` fails the caller's operation only while the caller
- * awaits the write. An adapter detects the failures and decides what each observer-only phase
- * does to the operation; the {@link FailureSink} applies the rest.
+ * Every failure notifies the observer, which never affects the caller's operation; only a failed
+ * write of the records also consults the write-failure policy. An adapter detects the failures
+ * and decides what each observer-only phase does to the operation; the {@link FailureSink}
+ * applies the rest.
  */
 
 import type { WritePlan } from '../domain/mutation-event.js';
@@ -38,10 +37,9 @@ import { createErrorHandler, type ErrorStrategy } from '../utils/error-handler.j
 export type AuditErrorPhase = 'pre-fetch' | 'log-write' | 'diff-generation' | 'row-identification' | 'id-resolver-call';
 
 /**
- * Structured context describing a single audit-pipeline failure. Passed in the same shape
- * to {@link ErrorHandlingConfig.observer} and, when it is a function, to
- * {@link ErrorHandlingConfig.writeFailurePolicy}, so a handler that forwards failures to an
- * error tracker does not need to know which of the two invoked it.
+ * A single audit-pipeline failure, passed in the same shape to
+ * {@link ErrorHandlingConfig.observer} and, when it is a function, to
+ * {@link ErrorHandlingConfig.writeFailurePolicy}.
  */
 export interface AuditErrorContext {
   phase: AuditErrorPhase;
@@ -55,10 +53,9 @@ export interface AuditErrorContext {
  * Observer notified of every audit-pipeline failure, for logging, monitoring or alerting.
  *
  * Read-only: it NEVER affects whether the caller's own database operation succeeds or
- * fails. It always runs inside a try/catch; a handler that throws (synchronously or by
- * returning a rejected promise) has that failure logged to the console and otherwise
- * ignored. Use {@link ErrorHandlingConfig.writeFailurePolicy} to control the caller's
- * operation.
+ * fails. A handler that throws (synchronously or by returning a rejected promise) has that
+ * failure logged to the console and otherwise ignored. Use
+ * {@link ErrorHandlingConfig.writeFailurePolicy} to control the caller's operation.
  */
 export type AuditErrorObserver = (context: AuditErrorContext) => void | Promise<void>;
 
@@ -75,19 +72,14 @@ export type AuditErrorObserver = (context: AuditErrorContext) => void | Promise<
  * **Only the `log-write` phase is policy-gated**: every other {@link AuditErrorPhase} has
  * an outcome the adapter fixes.
  *
- * **Writes the caller does not await** (after commit, or detached): `'throw'` fails the
- * caller only while the caller is still waiting on the write. Once the write has been queued
- * after the transaction's commit or detached, the caller has already received its result, so
- * `'throw'` logs instead, like `'log'`.
+ * **Writes the caller does not await** (after commit, or detached): the caller has already
+ * received its result, so `'throw'` logs instead, like `'log'`.
  */
 export type WriteFailurePolicy =
   | ErrorStrategy
   | ((context: AuditErrorContext) => ErrorStrategy | Promise<ErrorStrategy>);
 
-/**
- * Audit-failure observation and policy configuration: it observes failures and decides
- * whether a failed audit-log write also fails the caller's operation.
- */
+/** Audit-failure observation and write-failure policy */
 export interface ErrorHandlingConfig {
   /** Observer notified of every audit-pipeline failure. See {@link AuditErrorObserver}. */
   observer?: AuditErrorObserver;
@@ -119,7 +111,6 @@ export interface FailureSink {
   readonly reportWriteFailure: (plan: WritePlan, error: Error) => Promise<void>;
 }
 
-/** The label the `'log'` strategy prints for a failed write of each plan kind */
 const WRITE_LOG_LABELS: Readonly<Record<WritePlan['kind'], string>> = {
   immediate: 'audit log write',
   'after-commit': 'deferred audit log write',
@@ -133,7 +124,6 @@ export const createFailureSink = (config: ErrorHandlingConfig): FailureSink => {
   // An audit library must not break the caller's write by default.
   const writeFailurePolicy = config.writeFailurePolicy ?? 'log';
 
-  /** A throwing observer (sync or async) is logged and ignored: it never affects the caller's operation. */
   const observe = async (context: AuditErrorContext): Promise<void> => {
     if (!observer) return;
     try {

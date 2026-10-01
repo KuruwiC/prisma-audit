@@ -53,7 +53,8 @@ const resolveConnectOrCreateRow = (before: BeforeState): ResolvedState | undefin
  *   config asks for it), create when it did not, not audited when it could not be read
  * - **connectOrCreate**: create when the row did not exist; not audited when it existed (it was
  *   connected) or could not be read
- * - **connect / set / disconnect**: not audited here (a foreign-key change is audited from its own reads)
+ * - **connect / set / disconnect**: not audited here (their foreign-key changes are audited in
+ *   `link-changes.ts`)
  * - **delete / deleteMany**: handled separately
  */
 export const resolveNestedRowState = (

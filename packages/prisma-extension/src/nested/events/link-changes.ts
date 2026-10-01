@@ -2,14 +2,13 @@
  * Foreign-key changes of related rows
  *
  * The rows a link write may have re-linked (read before the write, see
- * `nested/pre-fetch/link-rows.ts`) are read again after the write, once per path, by primary
- * key. A row whose foreign key differs between the two reads is audited as an `update` of that
- * row, its `changes` carrying the foreign key's old and new value; a row whose foreign key did not
- * change (a `connect` of a row already attached, a `set` keeping a row, a `disconnect` of a row
- * attached elsewhere) yields nothing. A row already attached to the parent row before the write is
- * not read again. When the read before the write failed, a row a write names is read by its
- * unique WHERE and audited with an unavailable before state (a `disconnect` only when it left the
- * row detached); a row detached without being named cannot be told and is not audited.
+ * `nested/pre-fetch/link-rows.ts`) are read again after the write, once per path. A row whose
+ * foreign key differs between the two reads is audited as an `update` of that row; a row whose
+ * foreign key did not change (a `connect` of a row already attached, a `set` keeping a row, a
+ * `disconnect` of a row attached elsewhere) yields nothing. When the read before the write failed,
+ * a row a write names is read by its unique WHERE and audited with an unavailable before state (a
+ * `disconnect` only when it left the row detached); a row detached without being named cannot be
+ * told and is not audited.
  */
 
 import type { BeforeState } from '@kuruwic/db-audit-core';
@@ -40,7 +39,6 @@ interface LinkCandidate {
   readonly detached: boolean;
 }
 
-/** Whether the row holds the foreign key `parentKey` names, i.e. is attached to that parent row */
 const isAttachedTo = (row: Row, read: LinkPathRead, parentKey: Row | undefined): boolean =>
   parentKey !== undefined && matchesUniqueWhere(row, attachedFilter(read.link, parentKey));
 
@@ -51,13 +49,11 @@ const capturedCandidate = (write: LinkWrite, row: Row, read: LinkPathRead, detac
   detached,
 });
 
-/** The unique WHEREs of the rows a write links by name, a connectOrCreate's included */
 const namedWheresOf = (write: LinkWrite): readonly Row[] =>
   write.operation.operation === 'connectOrCreate'
     ? namedTargets(write.operation.operation, write.operation.data).map((target) => target.where)
     : write.named;
 
-/** The rows a write names, as the read before the write (or a connectOrCreate's own pre-fetch) found them */
 const namedCandidates = (
   write: LinkWrite,
   read: LinkPathRead,
@@ -99,7 +95,6 @@ const detachedCandidates = (write: LinkWrite, read: LinkPathRead, parentKey: Row
         .map((row) => capturedCandidate(write, row, read, true))
     : [];
 
-/** The rows one write names or detaches */
 const candidatesOf = (
   write: LinkWrite,
   read: LinkPathRead,
@@ -112,7 +107,10 @@ const candidatesOf = (
   ];
 };
 
-/** The candidates at a path, each row once (the first write that names or detaches it), leaving out rows another write audits */
+/**
+ * The candidates at a path, each row once (the first write that names or detaches it), leaving out
+ * rows another nested write audits
+ */
 const candidatesAt = (
   read: LinkPathRead,
   nestedPreFetchResults: NestedPreFetchResults,
@@ -140,7 +138,7 @@ const foreignKeyChanged = (before: Row, after: Row, fields: readonly string[]): 
 const holdsNoParent = (row: Row, fields: readonly string[]): boolean =>
   fields.every((field) => row[field] === null || row[field] === undefined);
 
-/** The record of one candidate from the rows read after the write; undefined when its link did not change */
+/** The record of one candidate; undefined when its link did not change */
 const recordOf = (
   candidate: LinkCandidate,
   after: readonly Row[],
@@ -171,8 +169,8 @@ export interface LinkChangesInput {
 }
 
 /**
- * The foreign-key changes each link write made, keyed by write: one read per path after the
- * write. A failed read rejects: the rows it would have returned cannot be left out of the audit.
+ * The foreign-key changes each link write made, keyed by write. A failed read rejects: the rows it
+ * would have returned cannot be left out of the audit.
  */
 export const collectLinkChanges = async (
   input: LinkChangesInput,

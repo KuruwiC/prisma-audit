@@ -1,7 +1,7 @@
 /**
  * Pre-fetch coordinator: detects the nested operations in an operation's args, selects the ones
  * whose before state is read ahead of the write, and runs the to-one, to-many and batch fetchers
- * for them parents first, storing each row's before state under its path and identity.
+ * for them parents first, storing what each read learned under the operation's path.
  *
  * @module nested/pre-fetch/coordinator
  */
@@ -83,7 +83,10 @@ export interface PreFetchCoordinatorDependencies {
 }
 
 export interface NestedPreFetch {
-  /** Before-states keyed by operation path, then by entity identity; empty when nothing was pre-fetched */
+  /**
+   * What the reads learned of the rows at each operation path, each result named by how its read
+   * named the row; empty when nothing was pre-fetched
+   */
   readonly results: NestedPreFetchResults;
   /** The primary keys of the rows each nested batch keyword's filter matched under its parent rows */
   readonly batchTargets: NestedBatchTargets;
@@ -269,7 +272,10 @@ export const preFetchNestedRecordsBeforeOperation = async (
   return preFetch;
 };
 
-/** Nested keywords that insert rows at a to-many path whose pre-existing rows are snapshotted under their parent rows */
+/**
+ * Nested keywords that insert rows at a to-many path whose pre-existing rows are snapshotted under
+ * their parent rows
+ */
 const SNAPSHOTTED_INSERTS: ReadonlySet<string> = new Set(['create', 'createMany']);
 
 /**
@@ -291,13 +297,13 @@ const detachesUnderParent = (
 };
 
 /**
- * The to-one `update`s whose row is not pre-fetched (`fetchBefore` turns it off) but is needed
- * as a parent row: an operation nested below it is read under its parent rows (a pre-fetched
+ * The to-one `update`s whose row is not pre-fetched (`fetchBefore` turns it off) but is needed as
+ * a parent row: an operation nested below it is read under its parent rows (a pre-fetched
  * operation other than a connectOrCreate, whose WHERE names its row under any parent, or a link
  * write that detaches the rows attached under it), or inserts rows at a to-many path whose
- * pre-existing rows are snapshotted under them. Each is
- * keyed to the relation fields below it those operations go through; one per path, since the
- * read covers every parent row at the parent path.
+ * pre-existing rows are snapshotted under them. Each is keyed to the relation fields below it
+ * that those operations go through; one per path, since the read covers every parent row at the
+ * parent path.
  */
 const toOneRowsToIdentify = (
   nestedOperations: readonly NestedOperationInfo[],

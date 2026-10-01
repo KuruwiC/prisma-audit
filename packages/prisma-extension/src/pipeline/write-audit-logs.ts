@@ -6,10 +6,10 @@
  * transaction and written on the base client once it has committed; a detached plan starts now
  * on the base client and is never awaited by the caller.
  *
- * A write failure is reported to the failure sink with the plan it belongs to. An immediate
- * plan is reported while the caller is still waiting, so a `'throw'` policy fails the caller's
- * operation; for an after-commit or detached plan the sink logs instead and never rejects, so the
- * write cannot become an unhandled rejection (see `WriteFailurePolicy`).
+ * A write failure is reported to the failure sink with the write plan it belongs to. An
+ * immediate plan is reported while the caller is still waiting, so a `'throw'` policy fails the
+ * caller's operation; for an after-commit or detached plan the sink logs instead and never
+ * rejects, so the write cannot become an unhandled rejection (see `WriteFailurePolicy`).
  */
 
 import type { AuditRecord, FailureSink, WriteExecutor, WriteFn, WritePlan } from '@kuruwic/db-audit-core';

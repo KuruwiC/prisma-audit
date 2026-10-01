@@ -4,12 +4,12 @@
  * its row by the name it uses itself: the unique WHERE of a to-many target or a connectOrCreate,
  * or the parent row of a to-one relation's related row.
  *
- * A read that fails leaves its rows unknown. A row the failed operation names by unique WHERE is
+ * A read that fails leaves its rows unknown. A row the failed read names by unique WHERE is
  * stored as `unavailable` under that WHERE (and the primary key, when the WHERE names it), so
  * another operation at the path keeps what its own read found, and the rows nested below it are
- * still read under that key. A read that names no row on its own (the related rows of a to-one
- * relation under their parent rows) marks the path unread, which every row of the path without a
- * result of its own reads as.
+ * still read under that key. A failed read that names no row on its own (the related rows of a
+ * to-one relation under their parent rows) marks the path unread, so every row of the path
+ * without a result of its own reads as unavailable.
  */
 
 import type { BeforeState } from '@kuruwic/db-audit-core';
@@ -35,19 +35,16 @@ const pathStoreOf = (nestedPreFetchResults: NestedPreFetchResults, path: string)
   return created;
 };
 
-/** The before state of a row of `path` without a result of its own: unavailable when the path is unread, else none */
 const unnamedRowState = (nestedPreFetchResults: NestedPreFetchResults | undefined, path: string): BeforeState =>
   nestedPreFetchResults?.get(path)?.unread ? UNAVAILABLE : NO_BEFORE_STATE;
 
 const isNamedByParent = (result: NestedPreFetchResult): boolean => result.name.by === 'parentRow';
 
-/** Whether a result of unknown identity is the one the unique WHERE `where` was read by */
 const isReadBy = (result: NestedPreFetchResult, where: Row): boolean =>
   result.identity === UNRESOLVED_ENTITY_ID &&
   result.name.by === 'uniqueWhere' &&
   sameUniqueWhere(result.name.where, where);
 
-/** Whether two results are for the same row and the later one replaces the earlier */
 const namesSameRow = (stored: NestedPreFetchResult, result: NestedPreFetchResult): boolean => {
   if (stored.name.by === 'parentRow' || result.name.by === 'parentRow') {
     return (
@@ -79,12 +76,14 @@ export const storePreFetchResult = (
   }
 };
 
-/** Marks `path` unread: a read for rows it could not name failed (see {@link NestedPathPreFetch.unread}) */
 export const markPathUnread = (nestedPreFetchResults: NestedPreFetchResults, path: string): void => {
   pathStoreOf(nestedPreFetchResults, path).unread = true;
 };
 
-/** The result stored at `path` for the row of identity `identity` that a unique WHERE or batch filter named */
+/**
+ * The result stored at `path` for the row of `identity`, among the rows a unique WHERE or batch
+ * filter named
+ */
 export const preFetchedResultFor = (
   nestedPreFetchResults: NestedPreFetchResults | undefined,
   path: string,
@@ -96,10 +95,6 @@ export const preFetchedResultFor = (
         ?.get(path)
         ?.results.find((result) => !isNamedByParent(result) && result.identity === identity);
 
-/**
- * Whether `result` is the row `where` names: its captured row matches the WHERE, the WHERE names
- * its primary key, or, for a row of unknown identity, it was read by that same WHERE
- */
 const isResultNamedBy = (result: NestedPreFetchResult, where: Row): boolean => {
   if (result.before.kind === 'captured' && matchesUniqueWhere(result.before.row, where)) {
     return true;
@@ -110,7 +105,6 @@ const isResultNamedBy = (result: NestedPreFetchResult, where: Row): boolean => {
   return (result.key !== undefined && namesKey(result.key, where)) || isReadBy(result, where);
 };
 
-/** The result stored at `path` for the row the unique WHERE `where` names */
 export const preFetchedResultNamedBy = (
   nestedPreFetchResults: NestedPreFetchResults | undefined,
   path: string,
@@ -129,7 +123,6 @@ export const preFetchedStateNamedBy = (
 ): BeforeState =>
   preFetchedResultNamedBy(nestedPreFetchResults, path, where)?.before ?? unnamedRowState(nestedPreFetchResults, path);
 
-/** The result stored at the to-one path `path` for the related row of the parent row `parent` */
 export const preFetchedResultUnder = (
   nestedPreFetchResults: NestedPreFetchResults | undefined,
   path: string,

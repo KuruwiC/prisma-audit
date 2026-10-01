@@ -19,10 +19,7 @@ export interface ToManyPath {
   readonly scope: ToManyRelationScope;
 }
 
-/**
- * Resolves the relation of the to-many path `operation` writes at, below the top-level model
- * `modelName`; undefined when the DMMF has no such field or a side has no primary key.
- */
+/** `modelName` is the top-level model; undefined when the DMMF has no such field or a side has no primary key */
 export const resolveToManyPath = (
   Prisma: PrismaNamespace,
   schemaMetadata: SchemaMetadata,

@@ -44,7 +44,6 @@ export const parentPathOf = (path: string): string | undefined => {
 export interface ResolveParentRowsInput {
   path: string;
   parentFields: readonly string[];
-  /** The primary-key fields of the parent model, which identify a parent row */
   parentPkFields: readonly string[];
   topLevelWhere: unknown;
   topLevelModelClient: PreFetchModelClient | undefined;
@@ -57,7 +56,6 @@ export interface ResolveParentRowsInput {
   parentKeysFromWhere?: readonly PreFetchRecord[];
 }
 
-/** A row a nested operation is nested under, with its identity */
 export interface ParentRow {
   readonly identity: ParentRowIdentity;
   /** The parent row as read, or the key fields it is known by */
@@ -75,7 +73,9 @@ export interface ParentRows {
 
 /**
  * A row at the parent path as a parent row: the captured row, the key columns of a row a read
- * found without its before state, or the key of a row that could not be read
+ * found without its before state, or the key of a row that could not be read; `'unknown'` when
+ * a row that could not be read is not known by every parent field, `undefined` when the row does
+ * not exist
  */
 const parentRowOf = (
   { before, key, name }: NestedPreFetchResult,
@@ -105,7 +105,6 @@ const distinctParentRows = (rows: readonly PreFetchRecord[], pkFields: readonly 
   });
 };
 
-/** The rows at `parentPath` that exist, each once, and whether every row there is known */
 const rowsAtParentPath = (input: ResolveParentRowsInput, parentPath: string): ParentRows => {
   const pathStore = input.preFetchResults.get(parentPath);
   const parentRows = (pathStore?.results ?? []).map((result) => parentRowOf(result, input.parentFields));
@@ -122,11 +121,11 @@ const rowsAtParentPath = (input: ResolveParentRowsInput, parentPath: string): Pa
 };
 
 /**
- * Returns the rows the nested operation at `path` is nested under: for a deeper path, every row
+ * Returns the rows the nested operation at `path` is nested under. For a deeper path: every row
  * that exists at the parent path and every row a parent operation that was not pre-fetched names
- * by primary key, once, by its key when its read failed or did not run; for a direct child, the
- * top-level row, keyed from `where` without a query when `where` names every key field with a
- * plain value.
+ * by primary key, each once, a row whose read failed or did not run given by its key. For a
+ * direct child: the top-level row, keyed from `where` without a query when `where` names every
+ * key field with a plain value.
  */
 export const resolveParentRows = async (input: ResolveParentRowsInput): Promise<ParentRows> => {
   const { path, parentFields, topLevelWhere, topLevelModelClient } = input;
@@ -184,16 +183,20 @@ export const parentKeysFromOperationWheres = (
 const identityOfResult = (result: NestedPreFetchResult | undefined): EntityIdentityKey | undefined =>
   result && result.identity !== UNRESOLVED_ENTITY_ID ? result.identity : undefined;
 
-/** Whether a nested operation names each row it targets by a unique WHERE rather than as the related row of its parent row */
+/**
+ * Whether a nested operation names each row it targets by a unique WHERE rather than as the
+ * related row of its parent row
+ */
 export const targetsNamedByWhere = (operation: NestedOperationInfo): boolean =>
   operation.isList || operation.operation === 'connectOrCreate';
 
 /**
  * The identity, before the operation, of the row the element `parent` names: the top-level row
- * for none; for an element of a to-many operation or a connectOrCreate, the row its unique WHERE
- * names (as read, else the primary key the WHERE names); for a to-one operation, the related row
- * read under its own parent row. Undefined when that row is unknown: it was not read, does not
- * exist, or the WHERE names it by another unique field and its read found nothing.
+ * when `parent` is absent; for an element of a to-many operation or a connectOrCreate, the row
+ * its unique WHERE names (as read, else the primary key the WHERE names); for a to-one
+ * operation, the related row read under its own parent row. Undefined when that row is unknown:
+ * it was not read, does not exist, or the WHERE names it by another unique field and its read
+ * found nothing.
  */
 export const parentRowIdentityOf = (
   parent: NestedOperationParent | undefined,

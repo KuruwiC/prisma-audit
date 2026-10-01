@@ -15,7 +15,6 @@ import type { NestedPreFetchResult } from './nested-state.js';
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
 
-/** Nested operation keywords that can appear in operation args */
 export const NESTED_OPERATION_KEYWORDS = [
   'create',
   'createMany',
@@ -39,10 +38,9 @@ export const isNestedBatchKeyword = (keyword: NestedOperationKeyword): keyword i
   keyword === 'updateMany' || keyword === 'deleteMany';
 
 /**
- * Whether `keyword` attaches existing rows it names by unique WHERE to the parent row: `connect`
- * and `set` write no other column of those rows, which are theirs and not rows another
- * operation inserted. Their foreign-key change, when the related row holds the foreign key, is
- * audited from reads of their own (see `nested/pre-fetch/link-rows.ts`).
+ * Whether `keyword` attaches existing rows, named by unique WHERE, to the parent row without
+ * writing any other column of them. Their foreign-key change, when the related row holds the
+ * foreign key, is audited from reads of their own (see `nested/pre-fetch/link-rows.ts`).
  */
 export const linksNamedRows = (keyword: NestedOperationKeyword): boolean => keyword === 'connect' || keyword === 'set';
 
@@ -60,7 +58,7 @@ export interface NestedOperationInfo {
   data: unknown;
   /** Full path from root (e.g., 'postTags', 'postTags.tag') */
   path: string;
-  /** The element of the operation this one was detected in; absent for a write on the top-level row */
+  /** Absent for an operation detected directly in the top-level args */
   parent?: NestedOperationParent;
 }
 
@@ -75,14 +73,14 @@ export interface NestedOperationParent {
 export interface NestedPathPreFetch {
   readonly results: NestedPreFetchResult[];
   /**
-   * A read for rows of the path it names by no unique WHERE (the related rows of a to-one
-   * relation) failed or could not run under every parent row: a row without a result of its own
-   * reads as unavailable
+   * A read of the path's rows that names them by no unique WHERE (the related rows of a to-one
+   * relation under their parent rows) failed or could not run under every parent row, so a row of
+   * the path without a result of its own reads as unavailable rather than absent
    */
   unread: boolean;
 }
 
-/** Before-states of nested records pre-fetched ahead of an operation, keyed by operation path */
+/** What the pre-fetch learned of the nested rows of an operation, keyed by operation path */
 export type NestedPreFetchResults = Map<string, NestedPathPreFetch>;
 
 /**
@@ -105,11 +103,11 @@ export type UpsertBranch = 'create' | 'update';
  *   `topLevelUpsertBranch` is the branch the top-level upsert executed; it is absent when the
  *   operation is not an upsert, and the top-level `create` / `update` args are then not scanned.
  *   `branchAt(operation, where)` is the branch an element of the nested upsert or connectOrCreate
- *   `operation` executed: `update` (a connect, for a connectOrCreate) when the record it targets
- *   existed before the operation, `create` when it did not, undefined when that could not be
- *   read, and then nothing of the element is scanned. `where` is the element's unique WHERE,
- *   absent for a to-one upsert, which targets the related row of the row `operation.parent`
- *   names. A connectOrCreate's `create` data is scanned only on its `create` branch.
+ *   `operation` executed: `update` (a connect, for a connectOrCreate) when its target existed
+ *   before the operation, `create` when it did not, undefined when that could not be read, and
+ *   then nothing of the element is scanned. `where` is the element's unique WHERE, absent for a
+ *   to-one upsert, which targets the related row of its parent row. A connectOrCreate's `create`
+ *   data is scanned only on its `create` branch.
  */
 export type NestedDetectionPass =
   | { readonly kind: 'discovery' }
@@ -132,7 +130,6 @@ interface ScannedElement {
 
 const elementsOf = (data: unknown): unknown[] => (Array.isArray(data) ? data : [data]);
 
-/** @internal The branches of one nested upsert or connectOrCreate element of `operation` that the pass scans */
 const elementBranches = (
   pass: NestedDetectionPass,
   operation: NestedOperationInfo,
@@ -193,7 +190,6 @@ const updateData = (operation: NestedOperationInfo): ScannedElement[] =>
     return [{ element: index, data: update }];
   });
 
-/** @internal The elements of the data the writes nested inside `operation` are detected in */
 const scannedElementsOf = (operation: NestedOperationInfo, pass: NestedDetectionPass): ScannedElement[] => {
   switch (operation.operation) {
     case 'create':
@@ -238,7 +234,6 @@ const detectOperationAndNested = (
   return [operation, ...nested];
 };
 
-/** @internal The nested operations one record's data holds, for every relation field and keyword */
 const detectOperationsIn = (
   schemaMetadata: SchemaMetadata,
   modelName: string,
@@ -358,7 +353,6 @@ export const namedTargets = (operation: NestedOperationKeyword, data: unknown): 
   return [];
 };
 
-/** The unique WHEREs of {@link namedTargets}, without their elements */
 export const targetWhereClauses = (operation: NestedOperationKeyword, data: unknown): Record<string, unknown>[] =>
   namedTargets(operation, data).map((target) => target.where);
 
@@ -378,10 +372,6 @@ export const batchFilterClauses = (operation: NestedBatchKeyword, data: unknown)
   return items.filter(isRecord);
 };
 
-/**
- * The rows a relation holds under one returned row: the list of a to-many relation, the related
- * row of a to-one relation; none when the relation was not returned or holds no row.
- */
 export const relationRowsOf = (
   row: Record<string, unknown>,
   relationField: { readonly name: string; readonly isList: boolean },

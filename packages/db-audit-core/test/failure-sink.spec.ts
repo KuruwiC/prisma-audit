@@ -1,9 +1,3 @@
-/**
- * Tests for the failure sink: the observer hears every failure and never affects the caller;
- * only a failed write consults the write-failure policy, whose 'throw' fails the caller only for
- * a write the caller awaits.
- */
-
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createActorId, createAggregateId, createEntityId } from '../src/domain/branded-types.js';
 import type { AuditRecord, MutationEvent, WritePlan } from '../src/domain/mutation-event.js';
