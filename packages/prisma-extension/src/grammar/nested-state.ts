@@ -32,14 +32,19 @@ export type PreFetchedRowName =
 
 /**
  * What the pre-fetch learned of a row at a nested path: its before state, its identity when known
- * (`UNRESOLVED_ENTITY_ID` otherwise), how the read named it and, when the before state holds
- * no row, the primary key the operation's WHERE names the row by (absent when the WHERE names it
- * by another unique field)
+ * (`UNRESOLVED_ENTITY_ID` otherwise) and how the read named it
  */
 export type NestedPreFetchResult = {
   readonly before: BeforeState;
   readonly identity: EntityIdentityKey;
   readonly name: PreFetchedRowName;
+  /**
+   * The key of the row when the before state holds no row. For a row named by unique WHERE, the
+   * primary key the WHERE names (absent when it names the row by another unique field), whether
+   * or not the row exists. For a row a batch filter matched or a to-one relation's row read under
+   * its parent row, the key columns of a row the read found without reading its before state;
+   * absent when it found none.
+   */
   readonly key?: Record<string, unknown>;
 };
 

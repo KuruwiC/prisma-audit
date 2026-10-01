@@ -68,16 +68,19 @@ export interface ParentRows {
   readonly allKnown: boolean;
 }
 
-/** A row at the parent path as a parent row: the captured row, or the key of a row that could not be read */
+/**
+ * A row at the parent path as a parent row: the captured row, the key columns of a row a read
+ * found without its before state, or the key of a row that could not be read
+ */
 const parentRowOf = (
-  { before, key }: NestedPreFetchResult,
+  { before, key, name }: NestedPreFetchResult,
   parentFields: readonly string[],
 ): PreFetchRecord | 'unknown' | undefined => {
   if (before.kind === 'captured') {
     return before.row;
   }
   if (before.kind === 'none') {
-    return undefined;
+    return name.by === 'uniqueWhere' ? undefined : key;
   }
   return key && parentFields.every((fieldName) => isKeyValue(key[fieldName])) ? key : 'unknown';
 };

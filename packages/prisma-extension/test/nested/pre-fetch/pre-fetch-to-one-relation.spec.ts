@@ -119,12 +119,17 @@ const createDelegate = (rows: Row[]) => {
 const createClient = (tables: Record<string, Row[]>): TransactionalPrismaClient =>
   Object.fromEntries(Object.entries(tables).map(([model, rows]) => [model, createDelegate(rows)]));
 
-const preFetch = async (client: TransactionalPrismaClient, modelName: string, args: Row) =>
+const preFetch = async (
+  client: TransactionalPrismaClient,
+  modelName: string,
+  args: Row,
+  shouldFetchBefore: (modelName: string, operation: string) => boolean = () => true,
+) =>
   (
     await preFetchNestedRecordsBeforeOperation(client, modelName, args, {
       Prisma,
       schemaMetadata: createSchemaMetadataFromDMMF(Prisma),
-      shouldFetchBefore: () => true,
+      shouldFetchBefore,
     })
   ).results;
 
@@ -245,6 +250,66 @@ describe('nested to-one pre-fetch relation link and parent rows', () => {
     expect(preFetchedStateUnder(results, 'members.account.primaryContact', 'a1')).toMatchObject({
       kind: 'captured',
       row: { label: 'primary' },
+    });
+  });
+
+  describe('a to-one update whose before state is not read', () => {
+    const noUpdateReads = (_modelName: string, operation: string) => operation !== 'update';
+
+    it('reads its key columns under its parent row when an operation below it reads under its row', async () => {
+      const client = createClient({
+        account: [
+          { id: 'a1', label: 'one' },
+          { id: 'a2', label: 'two' },
+        ],
+        contact: [{ id: 'c-primary', primaryForId: 'a1', backupForId: 'a2', label: 'primary' }],
+      });
+      const contact = client.contact as ReturnType<typeof createDelegate>;
+      const findFirst = vi.spyOn(contact, 'findFirst');
+
+      const results = await preFetch(
+        client,
+        'Account',
+        {
+          where: { id: 'a1' },
+          data: { primaryContact: { update: { backupFor: { upsert: { create: {}, update: {} } } } } },
+        },
+        noUpdateReads,
+      );
+
+      expect(findFirst.mock.calls).toEqual([
+        [{ where: { primaryForId: 'a1' }, select: { id: true, backupForId: true } }],
+      ]);
+      expect(results.get('primaryContact')?.results).toEqual([
+        {
+          before: { kind: 'none' },
+          identity: 'c-primary',
+          name: { by: 'parentRow', parent: TOP_LEVEL_ROW },
+          key: { id: 'c-primary', primaryForId: 'a1', backupForId: 'a2', label: 'primary' },
+        },
+      ]);
+      expect(preFetchedStateUnder(results, 'primaryContact.backupFor', 'c-primary')).toMatchObject({
+        kind: 'captured',
+        row: { id: 'a2' },
+      });
+    });
+
+    it('is not read when nothing below it reads under its row', async () => {
+      const client = createClient({
+        account: [{ id: 'a1' }],
+        contact: [{ id: 'c-primary', primaryForId: 'a1', backupForId: null, label: 'primary' }],
+      });
+      const contact = client.contact as ReturnType<typeof createDelegate>;
+      const findFirst = vi.spyOn(contact, 'findFirst');
+
+      await preFetch(
+        client,
+        'Account',
+        { where: { id: 'a1' }, data: { primaryContact: { update: { label: 'changed' } } } },
+        noUpdateReads,
+      );
+
+      expect(findFirst).not.toHaveBeenCalled();
     });
   });
 });

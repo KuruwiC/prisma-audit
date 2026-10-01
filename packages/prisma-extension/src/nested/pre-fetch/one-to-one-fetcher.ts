@@ -81,6 +81,8 @@ export const resolveToOneRelationLink = (field: DMMFField, relatedModel: DMMFMod
 export interface PreFetchOneToOneRelationInput extends Omit<ResolveParentRowsInput, 'parentFields'> {
   link: ToOneRelationLink;
   relatedModelClient: PreFetchModelClient;
+  /** The columns to read of each related row; the whole row when absent */
+  select?: Record<string, true>;
 }
 
 /**
@@ -97,7 +99,7 @@ export interface PreFetchOneToOneRelationInput extends Omit<ResolveParentRowsInp
 export const preFetchOneToOneRelation = async (
   input: PreFetchOneToOneRelationInput,
 ): Promise<PreFetchOneToOneResults> => {
-  const { link, relatedModelClient } = input;
+  const { link, relatedModelClient, select } = input;
 
   const { rows: parentRows, allKnown } = await resolveParentRows({ ...input, parentFields: link.parentFields });
   preFetchLog('1:1 parent rows: path=%s count=%d', input.path, parentRows.length);
@@ -112,7 +114,9 @@ export const preFetchOneToOneRelation = async (
     const relatedWhere = Object.fromEntries(link.relatedFields.map((fieldName, index) => [fieldName, values[index]]));
     preFetchLog('1:1 related where: %O', relatedWhere);
 
-    const beforeRecord = await relatedModelClient.findFirst({ where: relatedWhere });
+    const beforeRecord = await relatedModelClient.findFirst(
+      select ? { where: relatedWhere, select } : { where: relatedWhere },
+    );
     results.push({ parent, beforeRecord });
   }
 

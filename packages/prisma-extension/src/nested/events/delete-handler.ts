@@ -71,8 +71,8 @@ const reportUnresolvedEntityId = async (
  * `parent` names (the delete's parent element, before the operation).
  *
  * Priority:
- *   1. The row pre-fetched under that parent row (has full record data); none when it had no
- *      related row
+ *   1. The row pre-fetched under that parent row (has full record data), or its key columns
+ *      when only those were read; none when it had no related row
  *   2. The parent row is unknown or its related row could not be read, and the path is marked
  *      unread: reported unresolved
  *   3. Nothing was pre-fetched for it: the entity ID in the operation data (minimal record only)
@@ -100,15 +100,14 @@ export const collectToOneDeleteRecords = async (
   const preFetched = preFetchedResultUnder(nestedPreFetchResults, nestedOp.path, parent);
 
   if (preFetched) {
-    const { before } = preFetched;
-    if (before.kind !== 'captured') {
+    const { before, key } = preFetched;
+    const entity = before.kind === 'captured' ? before.row : key;
+    if (!entity) {
       nestedLog('no related row was read under the parent row (path=%s); nothing to record', nestedOp.path);
       return [];
     }
     nestedLog('collected delete target from prefetch: path=%s', nestedOp.path);
-    return [
-      { entity: before.row, action: AUDIT_ACTION.DELETE, beforeState: before, relatedModel: nestedOp.relatedModel },
-    ];
+    return [{ entity, action: AUDIT_ACTION.DELETE, beforeState: before, relatedModel: nestedOp.relatedModel }];
   }
 
   if (nestedPreFetchResults?.get(nestedOp.path)?.unread) {

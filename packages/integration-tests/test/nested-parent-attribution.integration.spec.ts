@@ -327,4 +327,60 @@ describe('nested rows attributed through their parent row', () => {
     expect(phases()).toEqual([['pre-fetch', 'Tag', 'update']]);
     expect(await recordsOf('Tag')).toEqual(['tag-a:update:beforeUnavailable', 'tag-fresh:create']);
   });
+
+  describe('below a to-one update whose before state is not read', () => {
+    it('audits only the row a nested create inserts below it', async () => {
+      const { basePrisma, prisma, run, recordsOf, author, post } = await setup({ fetchBeforeUpdate: false });
+      await basePrisma.comment.create({ data: { id: 'k-old', content: 'old', postId: post.id, authorId: author.id } });
+
+      await run(() =>
+        prisma.post.update({
+          where: { id: post.id },
+          data: {
+            author: {
+              update: { comments: { create: { id: 'k-new', content: 'new', post: { connect: { id: post.id } } } } },
+            },
+          },
+        }),
+      );
+
+      expect(await recordsOf('Comment')).toEqual(['k-new:create']);
+    });
+
+    it('takes the branch of a nested to-one upsert below it from the row it updates', async () => {
+      const { basePrisma, prisma, run, recordsOf, author } = await setup({ fetchBeforeUpdate: false });
+      await basePrisma.profile.create({ data: { id: 'profile-author', userId: author.id, bio: 'A' } });
+      await basePrisma.avatar.create({ data: { id: 'avatar-author', profileId: 'profile-author', name: 'A' } });
+
+      await run(() =>
+        prisma.user.update({
+          where: { id: author.id },
+          data: {
+            profile: { update: { avatar: { upsert: { create: { name: 'new' }, update: { name: 'updated' } } } } },
+          },
+        }),
+      );
+
+      expect(await basePrisma.avatar.findMany({ select: { id: true, name: true } })).toEqual([
+        { id: 'avatar-author', name: 'updated' },
+      ]);
+      expect(await recordsOf('Avatar')).toEqual(['avatar-author:update']);
+    });
+
+    it('audits the rows a nested updateMany below it matches', async () => {
+      const { basePrisma, prisma, run, recordsOf, author, post } = await setup({ fetchBeforeUpdate: false });
+      await basePrisma.comment.create({ data: { id: 'k-old', content: 'old', postId: post.id, authorId: author.id } });
+
+      await run(() =>
+        prisma.post.update({
+          where: { id: post.id },
+          data: {
+            author: { update: { comments: { updateMany: { where: { content: 'old' }, data: { content: 'bulk' } } } } },
+          },
+        }),
+      );
+
+      expect(await recordsOf('Comment')).toEqual(['k-old:update']);
+    });
+  });
 });

@@ -68,6 +68,25 @@ describe('collectToOneDeleteRecords — the row read under its parent row', () =
     ]);
   });
 
+  it('records the key columns of a related row read without its before state', async () => {
+    const results = preFetched();
+    storePreFetchResult(results, 'bookmarks.note', {
+      before: { kind: 'none' },
+      identity: 'note-4',
+      name: { by: 'parentRow', parent: 'bookmark-4' },
+      key: { id: 'note-4', bookmarkId: 'bookmark-4' },
+    });
+
+    expect(await collectToOneDeleteRecords(notesOp, 'bookmark-4', results, idPrimaryKey)).toEqual([
+      {
+        entity: { id: 'note-4', bookmarkId: 'bookmark-4' },
+        action: 'delete',
+        beforeState: { kind: 'none' },
+        relatedModel: 'Note',
+      },
+    ]);
+  });
+
   it('records nothing under a parent row that had no related row', async () => {
     const onUnresolvedDeleteEntityId = vi.fn().mockResolvedValue(undefined);
 

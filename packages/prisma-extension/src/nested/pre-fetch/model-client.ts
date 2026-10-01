@@ -15,7 +15,7 @@ export type PreFetchRecord = Record<string, unknown>;
  */
 export interface PreFetchModelClient {
   findUnique(args: { where: object; select?: Record<string, true> }): Promise<PreFetchRecord | null>;
-  findFirst(args: { where: PreFetchRecord }): Promise<PreFetchRecord | null>;
+  findFirst(args: { where: PreFetchRecord; select?: Record<string, true> }): Promise<PreFetchRecord | null>;
 }
 
 export interface PreFetchListClient {

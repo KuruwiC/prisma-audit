@@ -30,7 +30,7 @@ import type {
   TransactionalPrismaClient,
 } from '../../internal-types.js';
 import type { SchemaMetadata, UniqueConstraint } from '../../schema/types.js';
-import { beforeStateOf } from '../../utils/before-state.js';
+import { beforeStateOf, NO_BEFORE_STATE } from '../../utils/before-state.js';
 import { preFetchLog } from '../../utils/debug.js';
 import type { EntityIdentityKey } from '../../utils/identity-key.js';
 import { toError } from '../../utils/to-error.js';
@@ -46,11 +46,16 @@ import {
   resolveToManyRelationScope,
   type ToManyScopeInput,
 } from './one-to-many-fetcher.js';
-import { preFetchOneToOneRelation, resolveToOneRelationLink } from './one-to-one-fetcher.js';
+import {
+  type PreFetchOneToOneResult,
+  preFetchOneToOneRelation,
+  resolveToOneRelationLink,
+} from './one-to-one-fetcher.js';
 import { isRecord, parentKeysFromOperationWheres, parentPathOf, targetsNamedByWhere } from './parent-rows.js';
 import {
   extractEntityIdOrUnresolved,
   markPathUnread,
+  preFetchedResultUnder,
   storePreFetchResult,
   storeReadResult,
   storeUnreadRows,
@@ -190,11 +195,14 @@ export const preFetchNestedRecordsBeforeOperation = async (
     operationsToPreFetch.map((op) => ({ operation: op.operation, fieldName: op.fieldName })),
   );
 
-  if (operationsToPreFetch.length === 0) {
+  const preFetchedOperations = new Set(operationsToPreFetch);
+  const rowsToIdentify = toOneRowsToIdentify(nestedOperations, preFetchedOperations);
+
+  if (operationsToPreFetch.length === 0 && rowsToIdentify.size === 0) {
     return preFetch;
   }
 
-  const sortedOperations = sortByPathDepth(operationsToPreFetch);
+  const sortedOperations = sortByPathDepth([...operationsToPreFetch, ...rowsToIdentify.keys()]);
 
   preFetchLog(
     'sorted operations by depth: %O',
@@ -209,7 +217,6 @@ export const preFetchNestedRecordsBeforeOperation = async (
   }
 
   const pkConstraintCache = new Map<string, UniqueConstraint | undefined>();
-  const preFetchedOperations = new Set(operationsToPreFetch);
 
   const context: NestedPreFetchContext = {
     prismaClient,
@@ -236,7 +243,10 @@ export const preFetchNestedRecordsBeforeOperation = async (
 
   for (const nestedOp of sortedOperations) {
     try {
-      await preFetchNestedOperation(context, nestedOp);
+      const childRelations = rowsToIdentify.get(nestedOp);
+      await (childRelations
+        ? identifyToOneRows(context, nestedOp, childRelations)
+        : preFetchNestedOperation(context, nestedOp));
     } catch (error) {
       if (isNestedBatchKeyword(nestedOp.operation)) {
         throw error;
@@ -253,6 +263,46 @@ export const preFetchNestedRecordsBeforeOperation = async (
   }
 
   return preFetch;
+};
+
+/** Nested keywords that insert rows at a to-many path whose pre-existing rows are snapshotted under their parent rows */
+const SNAPSHOTTED_INSERTS: ReadonlySet<string> = new Set(['create', 'createMany']);
+
+/**
+ * The to-one `update`s whose row is not pre-fetched (`fetchBefore` turns it off) but is needed
+ * as a parent row: an operation nested below it is read under its parent rows (a pre-fetched
+ * operation other than a connectOrCreate, whose WHERE names its row under any parent), or inserts
+ * rows at a to-many path whose pre-existing rows are snapshotted under them. Each is
+ * keyed to the relation fields below it those operations go through; one per path, since the
+ * read covers every parent row at the parent path.
+ */
+const toOneRowsToIdentify = (
+  nestedOperations: readonly NestedOperationInfo[],
+  preFetchedOperations: ReadonlySet<NestedOperationInfo>,
+): Map<NestedOperationInfo, Set<string>> => {
+  const dependents = nestedOperations.filter(
+    (op) =>
+      (preFetchedOperations.has(op) && op.operation !== 'connectOrCreate') ||
+      (op.isList && SNAPSHOTTED_INSERTS.has(op.operation)),
+  );
+  const identified = new Map<NestedOperationInfo, Set<string>>();
+  const identifiedPaths = new Set<string>();
+  for (const op of nestedOperations) {
+    if (op.isList || op.operation !== 'update' || preFetchedOperations.has(op) || identifiedPaths.has(op.path)) {
+      continue;
+    }
+    const prefix = `${op.path}.`;
+    const childRelations = new Set(
+      dependents
+        .filter((dependent) => dependent.path.startsWith(prefix))
+        .map((dependent) => dependent.path.slice(prefix.length).split('.')[0] ?? ''),
+    );
+    if (childRelations.size > 0) {
+      identified.set(op, childRelations);
+      identifiedPaths.add(op.path);
+    }
+  }
+  return identified;
 };
 
 interface NestedPreFetchContext {
@@ -372,10 +422,40 @@ const handleConnectOrCreate = async (
   }
 };
 
+/**
+ * Stores what a to-one read found under each parent row: the related row as its before state,
+ * or, for a read of its key columns only, its key without a before state, which never replaces
+ * what another read found under that parent row.
+ */
+const storeToOneResults = (
+  preFetchResults: NestedPreFetchResults,
+  path: string,
+  results: readonly PreFetchOneToOneResult[],
+  pkFields: readonly string[],
+  keyColumnsOnly: boolean,
+): void => {
+  for (const { parent, beforeRecord } of results) {
+    const name = { by: 'parentRow', parent } as const;
+    const identity = extractEntityIdOrUnresolved(beforeRecord, pkFields);
+    if (!keyColumnsOnly) {
+      storePreFetchResult(preFetchResults, path, { before: beforeStateOf(beforeRecord), identity, name });
+    } else if (!preFetchedResultUnder(preFetchResults, path, parent)) {
+      storePreFetchResult(preFetchResults, path, {
+        before: NO_BEFORE_STATE,
+        identity,
+        name,
+        ...(beforeRecord ? { key: beforeRecord } : {}),
+      });
+    }
+    preFetchLog('1:1 added to map: path=%s found=%s', path, beforeRecord !== null);
+  }
+};
+
 const handleOneToOneRelation = async (
   context: NestedPreFetchContext,
   relation: NestedRelation,
   relatedModelClient: PreFetchModelClient,
+  keyColumns?: Record<string, true>,
 ): Promise<void> => {
   const { topLevelWhere, topLevelModelClient, preFetchResults, resolvePkConstraint } = context;
   const { nestedOp, field, parentModel, relatedModel, pkConstraint } = relation;
@@ -388,20 +468,56 @@ const handleOneToOneRelation = async (
     topLevelModelClient,
     relatedModelClient,
     preFetchResults,
+    ...(keyColumns ? { select: keyColumns } : {}),
   });
 
-  for (const { parent, beforeRecord } of results) {
-    storePreFetchResult(preFetchResults, nestedOp.path, {
-      before: beforeStateOf(beforeRecord),
-      identity: extractEntityIdOrUnresolved(beforeRecord, pkConstraint.fields),
-      name: { by: 'parentRow', parent },
-    });
-
-    preFetchLog('1:1 added to map: path=%s found=%s', nestedOp.path, beforeRecord !== null);
-  }
+  storeToOneResults(preFetchResults, nestedOp.path, results, pkConstraint.fields, keyColumns !== undefined);
   if (!parentsKnown) {
     markPathUnread(preFetchResults, nestedOp.path);
   }
+};
+
+/**
+ * The key columns of a to-one `update`'s row the operations below it need: its primary key, and
+ * the fields each to-one relation below it links by (a to-many relation below it links by the
+ * primary key)
+ */
+const keyColumnsOf = (
+  context: NestedPreFetchContext,
+  relation: NestedRelation,
+  childRelations: ReadonlySet<string>,
+): Record<string, true> => {
+  const { relatedModel, pkConstraint } = relation;
+  const fields = new Set(pkConstraint.fields);
+  for (const fieldName of childRelations) {
+    const childField = findDMMFField(relatedModel, fieldName);
+    if (!childField || childField.isList) {
+      continue;
+    }
+    const childModel = context.dmmf.datamodel.models.find((model) => model.name === childField.type);
+    for (const linkField of resolveToOneRelationLink(childField, childModel).parentFields) {
+      fields.add(linkField);
+    }
+  }
+  return Object.fromEntries([...fields].map((fieldName) => [fieldName, true as const]));
+};
+
+/**
+ * Reads the key columns of the row of a to-one `update` whose before state is not read, under
+ * each of its parent rows, so the operations below it can be read and snapshotted under it: the
+ * read that identifies the rows a write touches runs whatever `fetchBefore` says.
+ */
+const identifyToOneRows = async (
+  context: NestedPreFetchContext,
+  nestedOp: NestedOperationInfo,
+  childRelations: ReadonlySet<string>,
+): Promise<void> => {
+  const relation = resolveNestedRelation(context, nestedOp);
+  const relatedModelClient = getPreFetchModelClient(context.prismaClient, nestedOp.relatedModel);
+  if (!relation || !relatedModelClient) {
+    return;
+  }
+  await handleOneToOneRelation(context, relation, relatedModelClient, keyColumnsOf(context, relation, childRelations));
 };
 
 const resolveToManyScopeInput = (
