@@ -204,7 +204,7 @@ describe('Nested ConnectOrCreate Operations', () => {
       const tsTagLogs = await context.prisma.auditLog.findMany({
         where: { entityType: 'Tag', entityId: tsTag?.id, action: 'create' },
       });
-      expect(tsTagLogs.length).toBeGreaterThanOrEqual(1);
+      expect(tsTagLogs.length).toBe(1);
     });
   });
 

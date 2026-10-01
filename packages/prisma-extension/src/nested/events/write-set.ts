@@ -20,7 +20,7 @@ import {
   type NestedOperationInfo,
   type NestedOperationKeyword,
   type NestedPreFetchResults,
-  targetWhereClauses,
+  namedTargets,
   type UpsertBranch,
 } from '../../grammar/nested-operations.js';
 import { upsertBranchOf } from '../../grammar/nested-state.js';
@@ -44,6 +44,11 @@ export interface NestedRowLocator {
 export interface NestedWriteTarget {
   readonly locator: NestedRowLocator;
   readonly operation: NestedOperationInfo;
+  /**
+   * The element of the operation's data that names the row; undefined for a row a batch filter
+   * matched, which no element names on its own
+   */
+  readonly element: number | undefined;
   /**
    * The row's pre-fetched before state: none when it did not exist under the parent or was not
    * pre-fetched, unavailable when it could not be read
@@ -104,15 +109,17 @@ const targetsOf = (
     return Array.from(matched, (key) => ({
       locator: { by: 'primaryKey', where: key },
       operation,
+      element: undefined,
       before: preFetchedStateAt(nestedPreFetchResults, operation.path, key),
     }));
   }
-  return targetWhereClauses(operation.operation, operation.data).map((where) => {
+  return namedTargets(operation.operation, operation.data).map(({ element, where }) => {
     const before = preFetchedStateAt(nestedPreFetchResults, operation.path, where);
     const key = before.kind === 'captured' ? primaryKeyOf(before.row, pkFields) : undefined;
     return {
       locator: key ? { by: 'primaryKey', where: key } : { by: 'uniqueWhere', where },
       operation,
+      element,
       before,
     };
   });

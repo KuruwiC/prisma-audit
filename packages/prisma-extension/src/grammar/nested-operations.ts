@@ -5,7 +5,7 @@
  *
  * @remarks
  * Detects the nested write operations (`create`, `connectOrCreate`, `upsert`, ...) inside
- * Prisma operation args and extracts the nested records from an operation result.
+ * Prisma operation args and reads the rows a relation holds in an operation result.
  * Supports deep nesting (e.g., `postTags.create.tag.connectOrCreate`).
  */
 
@@ -70,20 +70,6 @@ export interface NestedOperationParent {
   readonly operation: NestedOperationInfo;
   /** Index of the element in the operation's data; 0 when the data is not a list */
   readonly element: number;
-}
-
-/** Information about nested records extracted from operation result */
-export interface NestedRecordInfo {
-  /** Relation field name (e.g., 'posts') */
-  fieldName: string;
-  /** Related model name (e.g., 'Post') */
-  relatedModel: string;
-  /** Whether this is a list/array relation */
-  isList: boolean;
-  /** Extracted nested records */
-  records: unknown[];
-  /** Full path from root (e.g., 'postTags', 'postTags.tag') */
-  path: string;
 }
 
 /**
@@ -384,157 +370,16 @@ export const batchFilterClauses = (operation: NestedBatchKeyword, data: unknown)
   return items.filter(isRecord);
 };
 
-/** @internal Convert field value to array based on isList flag */
-const convertToRecordsList = (fieldValue: unknown, isList: boolean): unknown[] => {
-  if (isList) {
-    return Array.isArray(fieldValue) ? fieldValue : [];
-  }
-  return [fieldValue];
-};
-
-/** @internal Process a single relation field for deeply nested record extraction */
-const processRelationFieldForRecords = (
-  schemaMetadata: SchemaMetadata,
-  relationField: { name: string; relatedModel: string; isList: boolean },
-  record: Record<string, unknown>,
-  parentPath: string,
-  deeplyNestedRecords: NestedRecordInfo[],
-): void => {
-  const fieldValue = record[relationField.name];
-
-  if (fieldValue === undefined || fieldValue === null) {
-    return;
-  }
-
-  const currentPath = parentPath ? `${parentPath}.${relationField.name}` : relationField.name;
-  const nestedRecordsList = convertToRecordsList(fieldValue, relationField.isList);
-
-  if (nestedRecordsList.length === 0) {
-    return;
-  }
-
-  deeplyNestedRecords.push({
-    fieldName: relationField.name,
-    relatedModel: relationField.relatedModel,
-    isList: relationField.isList,
-    records: nestedRecordsList,
-    path: currentPath,
-  });
-
-  const deeperRecords = extractDeeplyNestedRecords(
-    schemaMetadata,
-    relationField.relatedModel,
-    nestedRecordsList,
-    currentPath,
-  );
-  deeplyNestedRecords.push(...deeperRecords);
-};
-
-/** @internal Process a single record for deeply nested record extraction */
-const processRecordForExtraction = (
-  schemaMetadata: SchemaMetadata,
-  modelName: string,
-  record: unknown,
-  parentPath: string,
-  deeplyNestedRecords: NestedRecordInfo[],
-): void => {
-  if (!record || typeof record !== 'object') {
-    return;
-  }
-
-  const relationFields = schemaMetadata.getRelationFields(modelName);
-
-  for (const relationField of relationFields) {
-    processRelationFieldForRecords(
-      schemaMetadata,
-      relationField,
-      record as Record<string, unknown>,
-      parentPath,
-      deeplyNestedRecords,
-    );
-  }
-};
-
-/** @internal Recursively extract nested records from operation results */
-const extractDeeplyNestedRecords = (
-  schemaMetadata: SchemaMetadata,
-  modelName: string,
-  records: unknown[],
-  parentPath: string,
-): NestedRecordInfo[] => {
-  const deeplyNestedRecords: NestedRecordInfo[] = [];
-
-  for (const record of records) {
-    processRecordForExtraction(schemaMetadata, modelName, record, parentPath, deeplyNestedRecords);
-  }
-
-  return deeplyNestedRecords;
-};
-
 /**
- * Extract nested records from operation result
- *
- * Reads the relations the operation's selection returned (see `injectNestedWriteSelection`).
- *
- * @example
- * ```typescript
- * const nestedRecords = extractNestedRecords(schemaMetadata, 'User', {
- *   id: 'user-id',
- *   posts: [
- *     { id: 'post-1', title: 'Post 1' },
- *     { id: 'post-2', title: 'Post 2' }
- *   ]
- * });
- * // Returns: [{ fieldName: 'posts', relatedModel: 'Post', isList: true, records: [...], path: 'posts' }]
- * ```
+ * The rows a relation holds under one returned row: the list of a to-many relation, the related
+ * row of a to-one relation; none when the relation was not returned or holds no row.
  */
-export const extractNestedRecords = (
-  schemaMetadata: SchemaMetadata,
-  modelName: string,
-  result: unknown,
-): NestedRecordInfo[] => {
-  const nestedRecords: NestedRecordInfo[] = [];
-
-  if (!result || typeof result !== 'object') {
-    return nestedRecords;
-  }
-
-  const relationFields = schemaMetadata.getRelationFields(modelName);
-  if (relationFields.length === 0) {
-    return nestedRecords;
-  }
-
-  const resultObj = result as Record<string, unknown>;
-
-  for (const relationField of relationFields) {
-    const fieldValue = resultObj[relationField.name];
-
-    if (fieldValue === undefined || fieldValue === null) {
-      continue;
-    }
-
-    const records = relationField.isList ? (Array.isArray(fieldValue) ? fieldValue : []) : [fieldValue];
-
-    if (records.length > 0) {
-      nestedRecords.push({
-        fieldName: relationField.name,
-        relatedModel: relationField.relatedModel,
-        isList: relationField.isList,
-        records,
-        path: relationField.name,
-      });
-
-      const deeperRecords = extractDeeplyNestedRecords(
-        schemaMetadata,
-        relationField.relatedModel,
-        records,
-        relationField.name,
-      );
-      nestedRecords.push(...deeperRecords);
-    }
-  }
-
-  return nestedRecords;
+export const relationRowsOf = (
+  row: Record<string, unknown>,
+  relationField: { readonly name: string; readonly isList: boolean },
+): Record<string, unknown>[] => {
+  const value = row[relationField.name];
+  return (relationField.isList ? (Array.isArray(value) ? value : []) : [value]).filter(isRecord);
 };
 
 /**

@@ -1,0 +1,167 @@
+/**
+ * Integration Test: nested rows are attributed through the row they hang under
+ *
+ * A relation is read back under every row the result holds at its parent path, including rows
+ * the call did not write (a to-many relation with a nested create is read whole). A returned row
+ * is audited only when an operation nested under the operation that wrote its parent row wrote
+ * it, and once, however many elements of a list carry a write at its path.
+ */
+
+import type { AuditContext } from '@kuruwic/db-audit-core';
+import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
+import { createAuditClient } from '@kuruwic/prisma-audit';
+import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
+import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { cleanDatabase, getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
+
+const testActor: AuditContext = {
+  actor: { category: 'model', type: 'User', id: 'parent-attribution-actor' },
+};
+
+describe('nested rows attributed through their parent row', () => {
+  let databaseUrl: string;
+  const disconnects: Array<() => Promise<void>> = [];
+
+  beforeAll(async () => {
+    databaseUrl = await getSharedDatabaseUrl();
+  });
+
+  afterEach(async () => {
+    for (const disconnect of disconnects.splice(0)) {
+      await disconnect();
+    }
+  });
+
+  const setup = async (options: { readonly fetchBeforeUpdate?: boolean } = {}) => {
+    const basePrisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
+    const provider = createAsyncLocalStorageProvider();
+    const prisma = createAuditClient(basePrisma, {
+      Prisma,
+      provider,
+      aggregateMapping: testAggregateMapping,
+      diffing: { excludeFields: ['createdAt', 'updatedAt'] },
+      security: { redact: { fields: [] } },
+      fetchBefore: { update: options.fetchBeforeUpdate ?? true },
+    });
+    disconnects.push(async () => {
+      await prisma.$disconnect();
+      await basePrisma.$disconnect();
+    });
+    await cleanDatabase(basePrisma);
+
+    const run = <T>(operation: () => Promise<T>) => provider.runAsync(testActor, operation);
+    /** One `entityId:action` per record of `entityType` (its own aggregate row), sorted */
+    const recordsOf = async (entityType: string) =>
+      (
+        await basePrisma.auditLog.findMany({
+          where: { entityType, aggregateType: entityType },
+          select: { entityId: true, action: true },
+        })
+      )
+        .map((log) => `${log.entityId}:${log.action}`)
+        .sort();
+    const author = await basePrisma.user.create({ data: { id: 'author', email: 'author@example.com', name: 'A' } });
+    const post = await basePrisma.post.create({ data: { id: 'post', title: 'Post', authorId: author.id } });
+
+    return { basePrisma, prisma, run, recordsOf, author, post };
+  };
+
+  it('does not audit the related row of a sibling the call did not write', async () => {
+    const { basePrisma, prisma, run, recordsOf, post } = await setup();
+    await basePrisma.tag.create({ data: { id: 'tag-old', name: 'old' } });
+    await basePrisma.postTag.create({ data: { id: 'pt-old', postId: post.id, tagId: 'tag-old' } });
+
+    await run(() =>
+      prisma.post.update({
+        where: { id: post.id },
+        data: { postTags: { create: { id: 'pt-new', tag: { create: { id: 'tag-new', name: 'new' } } } } },
+      }),
+    );
+
+    expect(await recordsOf('Tag')).toEqual(['tag-new:create']);
+    expect(await recordsOf('PostTag')).toEqual(['pt-new:create']);
+  });
+
+  it('audits the related row each element of a to-many update writes once, with its own before state', async () => {
+    const { basePrisma, prisma, run, recordsOf, post } = await setup();
+    for (const name of ['a', 'b']) {
+      await basePrisma.tag.create({ data: { id: `tag-${name}`, name } });
+      await basePrisma.postTag.create({ data: { id: `pt-${name}`, postId: post.id, tagId: `tag-${name}` } });
+    }
+
+    await run(() =>
+      prisma.post.update({
+        where: { id: post.id },
+        data: {
+          postTags: {
+            update: [
+              { where: { id: 'pt-a' }, data: { tag: { update: { name: 'a2' } } } },
+              { where: { id: 'pt-b' }, data: { tag: { update: { name: 'b2' } } } },
+            ],
+          },
+        },
+      }),
+    );
+
+    expect(await recordsOf('Tag')).toEqual(['tag-a:update', 'tag-b:update']);
+    const befores = await basePrisma.auditLog.findMany({
+      where: { entityType: 'Tag', aggregateType: 'Tag' },
+      select: { entityId: true, before: true },
+      orderBy: { entityId: 'asc' },
+    });
+    expect(befores.map((log) => [log.entityId, (log.before as { name: string }).name])).toEqual([
+      ['tag-a', 'a'],
+      ['tag-b', 'b'],
+    ]);
+  });
+
+  it('does not audit the related row under an element that does not write it', async () => {
+    // Without a before state, a row the call did not change cannot be told from an update by its diff
+    const { basePrisma, prisma, run, recordsOf, post } = await setup({ fetchBeforeUpdate: false });
+    for (const name of ['a', 'b']) {
+      await basePrisma.tag.create({ data: { id: `tag-${name}`, name } });
+      await basePrisma.postTag.create({ data: { id: `pt-${name}`, postId: post.id, tagId: `tag-${name}` } });
+    }
+
+    await run(() =>
+      prisma.post.update({
+        where: { id: post.id },
+        data: {
+          postTags: {
+            update: [
+              { where: { id: 'pt-a' }, data: { tag: { update: { name: 'a2' } } } },
+              { where: { id: 'pt-b' }, data: { createdAt: new Date('2026-01-01T00:00:00Z') } },
+            ],
+          },
+        },
+      }),
+    );
+
+    expect(await recordsOf('Tag')).toEqual(['tag-a:update']);
+  });
+
+  it('does not audit the existing rows below a sibling a to-many relation read whole returns', async () => {
+    const { basePrisma, prisma, run, recordsOf, author } = await setup();
+    await basePrisma.post.create({ data: { id: 'p1', title: 'p1', authorId: author.id } });
+    await basePrisma.post.create({ data: { id: 'p2', title: 'p2', authorId: author.id } });
+    await basePrisma.comment.create({ data: { id: 'k2', content: 'k2', postId: 'p2', authorId: author.id } });
+
+    await run(() =>
+      prisma.user.update({
+        where: { id: author.id },
+        data: {
+          posts: {
+            create: { id: 'p3', title: 'p3' },
+            update: {
+              where: { id: 'p1' },
+              data: { comments: { create: { id: 'k-new', content: 'new', authorId: author.id } } },
+            },
+          },
+        },
+      }),
+    );
+
+    expect(await recordsOf('Comment')).toEqual(['k-new:create']);
+    expect(await recordsOf('Post')).toEqual(['p1:update', 'p3:create']);
+  });
+});

@@ -98,9 +98,15 @@ describe('buildNestedWriteSets', () => {
         {
           locator: { by: 'primaryKey', where: { id: 'p1' } },
           operation: operations[0],
+          element: 0,
           before: { kind: 'captured', row: p1 },
         },
-        { locator: { by: 'uniqueWhere', where: { id: 'p2' } }, operation: operations[0], before: { kind: 'none' } },
+        {
+          locator: { by: 'uniqueWhere', where: { id: 'p2' } },
+          operation: operations[0],
+          element: 1,
+          before: { kind: 'none' },
+        },
       ],
       createsPending: false,
     });
@@ -173,7 +179,14 @@ describe('buildNestedWriteSets', () => {
     const connect = operations.find((op) => op.operation === 'connect');
 
     expect(writeSets.get('posts')).toEqual({
-      targets: [{ locator: { by: 'uniqueWhere', where: { id: 'p1' } }, operation: connect, before: { kind: 'none' } }],
+      targets: [
+        {
+          locator: { by: 'uniqueWhere', where: { id: 'p1' } },
+          operation: connect,
+          element: 0,
+          before: { kind: 'none' },
+        },
+      ],
       createsPending: true,
     });
   });
@@ -183,7 +196,9 @@ describe('buildNestedWriteSets', () => {
     const set = operations.find((op) => op.operation === 'set');
 
     expect(writeSets.get('posts')).toEqual({
-      targets: [{ locator: { by: 'uniqueWhere', where: { id: 'p1' } }, operation: set, before: { kind: 'none' } }],
+      targets: [
+        { locator: { by: 'uniqueWhere', where: { id: 'p1' } }, operation: set, element: 0, before: { kind: 'none' } },
+      ],
       createsPending: true,
     });
   });

@@ -236,6 +236,7 @@ describe('collectToManyDeleteRecords', () => {
           {
             locator: { by: 'primaryKey', where: { id: 'post-1' } },
             operation: deleteManyOp,
+            element: undefined,
             before: { kind: 'captured', row: before },
           },
         ],
@@ -250,7 +251,14 @@ describe('collectToManyDeleteRecords', () => {
     expect(
       await collectToManyDeleteRecords(
         deleteManyOp,
-        [{ locator: { by: 'primaryKey', where: { id: 'post-1' } }, operation: deleteManyOp, before: { kind: 'none' } }],
+        [
+          {
+            locator: { by: 'primaryKey', where: { id: 'post-1' } },
+            operation: deleteManyOp,
+            element: undefined,
+            before: { kind: 'none' },
+          },
+        ],
         idPrimaryKey,
       ),
     ).toEqual([{ entity: { id: 'post-1' }, action: 'delete', beforeState: { kind: 'none' }, relatedModel: 'Post' }]);
@@ -260,7 +268,14 @@ describe('collectToManyDeleteRecords', () => {
     expect(
       await collectToManyDeleteRecords(
         deleteManyOp,
-        [{ locator: { by: 'uniqueWhere', where: { id: 'post-9' } }, operation: deleteOp, before: { kind: 'none' } }],
+        [
+          {
+            locator: { by: 'uniqueWhere', where: { id: 'post-9' } },
+            operation: deleteOp,
+            element: 0,
+            before: { kind: 'none' },
+          },
+        ],
         idPrimaryKey,
       ),
     ).toEqual([]);
@@ -276,6 +291,7 @@ describe('collectToManyDeleteRecords', () => {
           {
             locator: { by: 'uniqueWhere', where: { tenantId_itemId: { tenantId: 'tenant-1', itemId: 'item-1' } } },
             operation: itemsOp,
+            element: 0,
             before: { kind: 'unavailable' },
           },
         ],
@@ -301,6 +317,7 @@ describe('collectToManyDeleteRecords', () => {
         {
           locator: { by: 'uniqueWhere', where: { title: 'unique title' } },
           operation: byTitle,
+          element: 0,
           before: { kind: 'unavailable' },
         },
       ],
