@@ -79,8 +79,6 @@ export interface ToManyScopeInput extends Omit<ResolveParentRowsInput, 'parentFi
   scope: ToManyRelationScope;
   /** The related model's primary key (fields + DMMF name) */
   pkConstraint: UniqueConstraint;
-  /** Parent keys named by the WHERE of parent-path operations that were not pre-fetched */
-  parentKeysFromWhere: readonly PreFetchRecord[];
 }
 
 interface ScopedParentRows {
@@ -90,7 +88,7 @@ interface ScopedParentRows {
 
 const resolveScopedParentRows = async (input: ToManyScopeInput): Promise<ScopedParentRows> => {
   const { rows, allKnown } = await resolveParentRows({ ...input, parentFields: input.scope.parentFields });
-  return { rows: [...rows.map((parent) => parent.row), ...input.parentKeysFromWhere], allKnown };
+  return { rows: rows.map((parent) => parent.row), allKnown };
 };
 
 export interface PreFetchOneToManyRelationInput extends ToManyScopeInput {

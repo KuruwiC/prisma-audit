@@ -383,4 +383,30 @@ describe('nested rows attributed through their parent row', () => {
       expect(await recordsOf('Comment')).toEqual(['k-old:update']);
     });
   });
+
+  describe('below a to-many update whose before state is not read', () => {
+    it('takes the branch of a to-one upsert under each element from the row its WHERE names', async () => {
+      const { basePrisma, prisma, run, recordsOf, author, post } = await setup({ fetchBeforeUpdate: false });
+      const other = await basePrisma.user.create({ data: { id: 'other', email: 'other@example.com', name: 'B' } });
+      for (const user of [author, other]) {
+        await basePrisma.postBookmark.create({ data: { postId: post.id, userId: user.id } });
+      }
+      await basePrisma.postBookmarkNote.create({
+        data: { id: 'note-author', postId: post.id, userId: author.id, body: 'old' },
+      });
+      const upsertNote = (userId: string) => ({
+        where: { bookmarkKey: { postId: post.id, userId } },
+        data: { note: { upsert: { create: { id: `note-${userId}-new`, body: 'new' }, update: { body: 'updated' } } } },
+      });
+
+      await run(() =>
+        prisma.post.update({
+          where: { id: post.id },
+          data: { postBookmarks: { update: [upsertNote(author.id), upsertNote(other.id)] } },
+        }),
+      );
+
+      expect(await recordsOf('PostBookmarkNote')).toEqual(['note-author:update', 'note-other-new:create']);
+    });
+  });
 });

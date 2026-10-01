@@ -1234,6 +1234,7 @@ await prisma.post.update({
 - A nested `update` that changes a column its own `where` names is found again after the write by the primary key read ahead of it; with `fetchBefore.update: false`, when that read failed, or when the update changes the primary key itself, it is not audited.
 - A row a nested `create`, `createMany`, `connectOrCreate` or `upsert` inserts is audited from the query result, so a row that the caller's own `where`, `take`, `skip`, `cursor` or `distinct` on that relation leaves out of the result is not audited; read the filtered relation in a separate query instead.
 - `connect`, `set` and `disconnect` change the foreign keys of related records without an audit log for those records.
+- With `fetchBefore.update` off for the model of a nested to-many `update`, a to-one relation below it whose foreign key sits on that updated row (for example `comments: { update: { where, data: { author: { upsert } } } }`) is not read under it: its `upsert` is recorded as a create even when the related record existed, and the writes nested in its `create` / `update` data follow that branch. A to-one relation whose foreign key sits on the related record (for example `postBookmarks: { update: { where, data: { note: { upsert } } } }`) is read under the primary key the `where` names. Turn `fetchBefore.update` on for that model to have the row, and so the foreign key, read before the write.
 
 ## Complete Example
 

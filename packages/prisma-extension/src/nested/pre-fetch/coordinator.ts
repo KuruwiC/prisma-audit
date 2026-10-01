@@ -459,11 +459,14 @@ const handleOneToOneRelation = async (
 ): Promise<void> => {
   const { topLevelWhere, topLevelModelClient, preFetchResults, resolvePkConstraint } = context;
   const { nestedOp, field, parentModel, relatedModel, pkConstraint } = relation;
-
+  const parentPkConstraint = resolvePkConstraint(parentModel.name);
   const { results, parentsKnown } = await preFetchOneToOneRelation({
     path: nestedOp.path,
     link: resolveToOneRelationLink(field, relatedModel),
-    parentPkFields: resolvePkConstraint(parentModel.name)?.fields ?? [],
+    parentPkFields: parentPkConstraint?.fields ?? [],
+    parentKeysFromWhere: parentPkConstraint
+      ? parentKeysFromOperationWheres(context.parentOperationsNotPreFetched(nestedOp.path), parentPkConstraint)
+      : [],
     topLevelWhere,
     topLevelModelClient,
     relatedModelClient,

@@ -50,6 +50,11 @@ export interface ResolveParentRowsInput {
   topLevelModelClient: PreFetchModelClient | undefined;
   /** Read for the parent path's rows, so operations must be pre-fetched shallowest path first */
   preFetchResults: NestedPreFetchResults;
+  /**
+   * Primary keys of parent rows the WHERE of an operation at the parent path names when that
+   * operation was not pre-fetched (see {@link parentKeysFromOperationWheres})
+   */
+  parentKeysFromWhere?: readonly PreFetchRecord[];
 }
 
 /** A row a nested operation is nested under, with its identity */
@@ -106,7 +111,10 @@ const rowsAtParentPath = (input: ResolveParentRowsInput, parentPath: string): Pa
   const parentRows = (pathStore?.results ?? []).map((result) => parentRowOf(result, input.parentFields));
   return {
     rows: distinctParentRows(
-      parentRows.filter((row): row is PreFetchRecord => typeof row === 'object'),
+      [
+        ...parentRows.filter((row): row is PreFetchRecord => typeof row === 'object'),
+        ...(input.parentKeysFromWhere ?? []),
+      ],
       input.parentPkFields,
     ),
     allKnown: !pathStore?.unread && !parentRows.includes('unknown'),
@@ -115,7 +123,8 @@ const rowsAtParentPath = (input: ResolveParentRowsInput, parentPath: string): Pa
 
 /**
  * Returns the rows the nested operation at `path` is nested under: for a deeper path, every row
- * that exists at the parent path, once, by its key when its read failed; for a direct child, the
+ * that exists at the parent path and every row a parent operation that was not pre-fetched names
+ * by primary key, once, by its key when its read failed or did not run; for a direct child, the
  * top-level row, keyed from `where` without a query when `where` names every key field with a
  * plain value.
  */
