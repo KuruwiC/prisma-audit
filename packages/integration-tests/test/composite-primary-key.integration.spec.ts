@@ -25,7 +25,7 @@
  *     that WHERE to `findUnique`, which accepts the compound-unique shape natively;
  *     `unwrapCompoundWhere` then flattens it to derive the composite entityId from the
  *     WHERE when the row itself was not found.
- *   - `fetchBeforeOperation: false`: with pre-fetch skipped, `extractEntityId`
+ *   - `fetchBefore.delete: false`: with pre-fetch skipped, `extractEntityId`
  *     (`nested/pre-fetch/pre-fetch-result-store.ts`) unwraps the same compound-unique WHERE shape via
  *     `unwrapCompoundWhere`, keyed by the primary key's declared name or, for this
  *     fixture's unnamed `@@id([postId, userId])`, by `postId_userId`. The real composite
@@ -334,7 +334,7 @@ describe('Composite Primary Key (PostLike)', () => {
    * flattens it the same way the pre-fetch path does, so the real composite entityId is
    * still resolved and recorded — no fabricated entry, and no dropped one either.
    */
-  describe('nested delete from Post (fetchBeforeOperation: false)', () => {
+  describe('nested delete from Post (fetchBefore.delete: false)', () => {
     let sharedDatabaseUrl: string;
     let scenario: { basePrisma: PrismaClient; prisma: ReturnType<typeof createAuditClient> } | undefined;
 
@@ -358,7 +358,7 @@ describe('Composite Primary Key (PostLike)', () => {
         diffing: { excludeFields: ['createdAt'] },
         security: { redact: { fields: [] } },
         performance: { awaitWrite: true },
-        nestedOperations: { models: { PostLike: { delete: { fetchBeforeOperation: false } } } },
+        fetchBefore: { models: { PostLike: { delete: false } } },
         errorHandling: { observer },
       });
       scenario = { basePrisma, prisma };
@@ -388,7 +388,7 @@ describe('Composite Primary Key (PostLike)', () => {
         });
       });
 
-      // The row is genuinely gone — the write itself is unaffected by fetchBeforeOperation.
+      // The row is genuinely gone — the write itself is unaffected by fetchBefore.delete.
       const stillExists = await basePrisma.postLike.findUnique({
         where: { postId_userId: { postId: post.id, userId: user.id } },
       });
@@ -396,7 +396,7 @@ describe('Composite Primary Key (PostLike)', () => {
 
       // The real composite entityId is recorded — reconstructed from the compound-unique
       // WHERE clause alone, without a pre-fetch round-trip. `beforeState` is `null` (no
-      // `findUnique` ran), matching what `fetchBeforeOperation: false` promises. Same
+      // `findUnique` ran), matching what `fetchBefore.delete: false` promises. Same
       // self + Post-aggregate projection as the "nested delete from Post" test above
       // (with pre-fetch enabled) — both logs share the real entityId.
       const realEntityId = compositeEntityId(post.id, user.id);

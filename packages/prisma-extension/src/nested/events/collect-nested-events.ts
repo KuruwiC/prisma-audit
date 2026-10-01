@@ -25,7 +25,7 @@ import {
   type NestedPreFetchResults,
   type NestedRecordInfo,
 } from '../../grammar/nested-operations.js';
-import type { GetOperationConfig } from '../../grammar/pre-fetch-selection.js';
+import type { ShouldFetchBefore } from '../../grammar/pre-fetch-selection.js';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../internal-types.js';
 import type { SchemaMetadata, UniqueConstraint } from '../../schema/types.js';
 import { NO_BEFORE_STATE } from '../../utils/before-state.js';
@@ -52,7 +52,7 @@ const isRow = (value: unknown): value is Row => typeof value === 'object' && val
 
 export interface NestedEventCollectorDependencies {
   schemaMetadata: SchemaMetadata;
-  getNestedOperationConfig: GetOperationConfig;
+  shouldFetchBefore: ShouldFetchBefore;
   /**
    * Notified when a nested delete's primary key cannot be resolved (see `delete-handler.ts`);
    * that entry is skipped instead of being recorded with a partial or guessed key. Optional:
@@ -100,9 +100,9 @@ const resolveRow = (
   nestedOp: NestedOperationInfo,
   row: Row,
   before: BeforeState,
-  getNestedOperationConfig: GetOperationConfig,
+  shouldFetchBefore: ShouldFetchBefore,
 ): CollectedNestedRecord | undefined => {
-  const resolved = resolveNestedRowState(nestedOp, before, getNestedOperationConfig);
+  const resolved = resolveNestedRowState(nestedOp, before, shouldFetchBefore);
   if (resolved === undefined) {
     nestedLog(
       'no audit log for the %s row at path=%s (connected, or its target could not be read)',
@@ -141,7 +141,7 @@ const claimUnnamedRows = (
   nestedOp: NestedOperationInfo,
   attribution: PathAttribution,
   accept: (row: Row) => boolean,
-  getNestedOperationConfig: GetOperationConfig,
+  shouldFetchBefore: ShouldFetchBefore,
 ): CollectedNestedRecord[] => {
   const { rows, writeSet, claimed } = attribution;
   const collected: CollectedNestedRecord[] = [];
@@ -150,7 +150,7 @@ const claimUnnamedRows = (
       continue;
     }
     claimed.add(row);
-    const record = resolveRow(nestedOp, row, NO_BEFORE_STATE, getNestedOperationConfig);
+    const record = resolveRow(nestedOp, row, NO_BEFORE_STATE, shouldFetchBefore);
     if (record) collected.push(record);
   }
   return collected;
@@ -163,7 +163,7 @@ const claimUnnamedRows = (
 const collectToManyRows = (
   nestedOp: NestedOperationInfo,
   attribution: PathAttribution,
-  getNestedOperationConfig: GetOperationConfig,
+  shouldFetchBefore: ShouldFetchBefore,
 ): CollectedNestedRecord[] => {
   const { rows, writeSet, preExisting, pkFields, claimed } = attribution;
   const ownTargets = writeSet.targets.filter((target) => target.operation === nestedOp);
@@ -175,14 +175,14 @@ const collectToManyRows = (
       continue;
     }
     claimed.add(row);
-    const record = resolveRow(nestedOp, row, target.before, getNestedOperationConfig);
+    const record = resolveRow(nestedOp, row, target.before, shouldFetchBefore);
     if (record) collected.push(record);
   }
 
   if (insertsRows(nestedOp, ownTargets)) {
     const origin = { model: nestedOp.relatedModel, path: nestedOp.path };
     const isNew = (row: Row) => !(preExisting?.has(identityOf(row, pkFields, origin)) ?? false);
-    return [...collected, ...claimUnnamedRows(nestedOp, attribution, isNew, getNestedOperationConfig)];
+    return [...collected, ...claimUnnamedRows(nestedOp, attribution, isNew, shouldFetchBefore)];
   }
   return collected;
 };
@@ -192,12 +192,12 @@ const collectToOneRows = (
   nestedOp: NestedOperationInfo,
   attribution: PathAttribution,
   nestedPreFetchResults: NestedPreFetchResults,
-  getNestedOperationConfig: GetOperationConfig,
+  shouldFetchBefore: ShouldFetchBefore,
 ): CollectedNestedRecord[] =>
   attribution.rows.flatMap((row) => {
     const identity = extractEntityIdOrUnresolved(row, [...attribution.pkFields]);
     const before = getPreFetchResult(nestedPreFetchResults, nestedOp.path, identity)?.before ?? NO_BEFORE_STATE;
-    return resolveRow(nestedOp, row, before, getNestedOperationConfig) ?? [];
+    return resolveRow(nestedOp, row, before, shouldFetchBefore) ?? [];
   });
 
 const collectRecordsOf = async (
@@ -208,7 +208,7 @@ const collectRecordsOf = async (
   deps: NestedEventCollectorDependencies,
 ): Promise<CollectedNestedRecord[]> => {
   const { nestedPreFetchResults } = input;
-  const { getNestedOperationConfig } = deps;
+  const { shouldFetchBefore } = deps;
 
   if (nestedOp.operation === 'delete' || nestedOp.operation === 'deleteMany') {
     return nestedOp.isList
@@ -229,9 +229,9 @@ const collectRecordsOf = async (
     return [];
   }
   if (!nestedOp.isList) {
-    return collectToOneRows(nestedOp, attribution, nestedPreFetchResults, getNestedOperationConfig);
+    return collectToOneRows(nestedOp, attribution, nestedPreFetchResults, shouldFetchBefore);
   }
-  return collectToManyRows(nestedOp, attribution, getNestedOperationConfig);
+  return collectToManyRows(nestedOp, attribution, shouldFetchBefore);
 };
 
 const attributionsOf = (

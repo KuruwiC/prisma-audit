@@ -26,9 +26,9 @@ const createClients = (databaseUrl: string, observer: AuditErrorObserver) => {
     aggregateMapping: testAggregateMapping,
     diffing: { excludeFields: ['createdAt'] },
     security: { redact: { fields: [] } },
-    nestedOperations: {
-      update: { fetchBeforeOperation: true },
-      delete: { fetchBeforeOperation: true },
+    fetchBefore: {
+      update: true,
+      delete: true,
     },
     errorHandling: { observer },
   });

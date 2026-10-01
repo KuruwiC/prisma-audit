@@ -35,7 +35,7 @@ describe('Nested Delete Operations', () => {
     },
   };
 
-  describe('with fetchBeforeOperation: true (test setup)', () => {
+  describe('with fetchBefore.delete: true (test setup)', () => {
     it('should create audit log with before state for nested delete', async () => {
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
@@ -80,7 +80,7 @@ describe('Nested Delete Operations', () => {
 
       expect(postLogs.length).toBeGreaterThanOrEqual(1);
       for (const log of postLogs) {
-        expect(log.before).not.toBeNull(); // fetchBeforeOperation=true (test setup)
+        expect(log.before).not.toBeNull(); // fetchBefore.delete=true (test setup)
         expect(log.after).toBeNull(); // Delete always has null 'after'
       }
 
@@ -89,8 +89,8 @@ describe('Nested Delete Operations', () => {
     });
   });
 
-  // NOTE: The tests in this file use the setup.ts configuration (fetchBeforeOperation: true).
-  // The fetchBeforeOperation: false path is covered by performance.integration.spec.ts with its own client.
+  // NOTE: The tests in this file use the setup.ts configuration (fetchBefore.delete: true).
+  // The fetchBefore.delete: false path is covered by performance.integration.spec.ts with its own client.
 
   describe('Transaction Atomicity', () => {
     it('should NOT create audit log if main operation fails in transaction', async () => {
@@ -419,7 +419,7 @@ describe('Nested Delete Operations', () => {
 
       expect(post2Logs.length).toBeGreaterThanOrEqual(1);
 
-      // All delete logs should have before state (fetchBeforeOperation=true)
+      // All delete logs should have before state (fetchBefore.delete=true)
       for (const log of post2Logs) {
         expect(log.before).not.toBeNull();
         expect(log.after).toBeNull(); // Delete operation has no after state
@@ -539,10 +539,10 @@ describe('Nested Delete Operations', () => {
   });
 
   describe('before-state read configured per model', () => {
-    type NestedOperations = Parameters<typeof createAuditClient>[1]['nestedOperations'];
+    type FetchBeforeConfig = Parameters<typeof createAuditClient>[1]['fetchBefore'];
 
     /** Deletes one post through its author and returns the `before` of the post's own audit log */
-    const deletePostThroughAuthor = async (email: string, nestedOperations: NestedOperations) => {
+    const deletePostThroughAuthor = async (email: string, fetchBefore: FetchBeforeConfig) => {
       const user = await context.basePrisma.user.create({ data: { email, name: 'Author', password: 'secret123' } });
       const post = await context.basePrisma.post.create({
         data: { title: 'Doomed', content: 'Content', authorId: user.id },
@@ -554,7 +554,7 @@ describe('Nested Delete Operations', () => {
         provider,
         aggregateMapping: testAggregateMapping,
         performance: { awaitWrite: true },
-        nestedOperations,
+        fetchBefore,
       });
 
       try {
@@ -574,8 +574,8 @@ describe('Nested Delete Operations', () => {
 
     it('skips the read for a model whose own setting turns it off, whatever the global setting', async () => {
       const before = await deletePostThroughAuthor('model-off@example.com', {
-        delete: { fetchBeforeOperation: true },
-        models: { Post: { delete: { fetchBeforeOperation: false } } },
+        delete: true,
+        models: { Post: { delete: false } },
       });
 
       expect(before).toBeNull();
@@ -583,8 +583,8 @@ describe('Nested Delete Operations', () => {
 
     it('reads the before state of a model whose own setting turns it on, whatever the global setting', async () => {
       const before = await deletePostThroughAuthor('model-on@example.com', {
-        delete: { fetchBeforeOperation: false },
-        models: { Post: { delete: { fetchBeforeOperation: true } } },
+        delete: false,
+        models: { Post: { delete: true } },
       });
 
       expect(before).toMatchObject({ title: 'Doomed' });
@@ -592,8 +592,8 @@ describe('Nested Delete Operations', () => {
 
     it('applies the global setting to a model the per-model settings do not name', async () => {
       const before = await deletePostThroughAuthor('other-model@example.com', {
-        delete: { fetchBeforeOperation: false },
-        models: { Comment: { delete: { fetchBeforeOperation: true } } },
+        delete: false,
+        models: { Comment: { delete: true } },
       });
 
       expect(before).toBeNull();
@@ -673,7 +673,7 @@ describe('Nested Delete Operations', () => {
         provider,
         aggregateMapping: testAggregateMapping,
         performance: { awaitWrite: true },
-        nestedOperations: { delete: { fetchBeforeOperation: false } },
+        fetchBefore: { delete: false },
       });
 
       try {

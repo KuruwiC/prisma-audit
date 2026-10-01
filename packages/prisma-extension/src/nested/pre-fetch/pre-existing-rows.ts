@@ -16,7 +16,7 @@ import {
   type NestedOperationInfo,
   type NestedPreFetchResults,
 } from '../../grammar/nested-operations.js';
-import { filterOperationsToPreFetch, type GetOperationConfig } from '../../grammar/pre-fetch-selection.js';
+import { filterOperationsToPreFetch, type ShouldFetchBefore } from '../../grammar/pre-fetch-selection.js';
 import type {
   PrismaClientWithDynamicAccess,
   PrismaNamespace,
@@ -48,7 +48,7 @@ export interface SnapshotPreExistingRowsInput {
 export interface SnapshotPreExistingRowsDependencies {
   readonly Prisma: PrismaNamespace;
   readonly schemaMetadata: SchemaMetadata;
-  readonly getNestedOperationConfig: GetOperationConfig;
+  readonly shouldFetchBefore: ShouldFetchBefore;
 }
 
 interface PathRelation {
@@ -96,13 +96,13 @@ const resolvePathRelation = (
 const parentOperationsNotPreFetched = (
   path: string,
   nestedOperations: readonly NestedOperationInfo[],
-  getNestedOperationConfig: GetOperationConfig,
+  shouldFetchBefore: ShouldFetchBefore,
 ): NestedOperationInfo[] => {
   const parentPath = parentPathOf(path);
   if (parentPath === undefined) {
     return [];
   }
-  const preFetched = new Set(filterOperationsToPreFetch(nestedOperations, getNestedOperationConfig));
+  const preFetched = new Set(filterOperationsToPreFetch(nestedOperations, shouldFetchBefore));
   return nestedOperations.filter((operation) => operation.path === parentPath && !preFetched.has(operation));
 };
 
@@ -128,7 +128,7 @@ const snapshotPath = async (
   const parentRows = [
     ...readParentRows,
     ...parentKeysFromOperationWheres(
-      parentOperationsNotPreFetched(operation.path, input.nestedOperations, deps.getNestedOperationConfig),
+      parentOperationsNotPreFetched(operation.path, input.nestedOperations, deps.shouldFetchBefore),
       parentPk,
     ),
   ];

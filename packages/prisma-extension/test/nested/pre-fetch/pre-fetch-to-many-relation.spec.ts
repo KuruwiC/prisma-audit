@@ -4,7 +4,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import type { GetOperationConfig } from '../../../src/grammar/pre-fetch-selection.js';
+import type { ShouldFetchBefore } from '../../../src/grammar/pre-fetch-selection.js';
 import type { DMMFField, PrismaNamespace, TransactionalPrismaClient } from '../../../src/internal-types.js';
 import { preFetchNestedRecordsBeforeOperation } from '../../../src/nested/pre-fetch/coordinator.js';
 import { preFetchOneToManyRelation } from '../../../src/nested/pre-fetch/one-to-many-fetcher.js';
@@ -103,19 +103,19 @@ const createClient = (tables: Record<string, Row[]>) => {
   return { client: delegates as TransactionalPrismaClient, delegates };
 };
 
-const fetchBefore: GetOperationConfig = () => ({ fetchBeforeOperation: true });
-const identityOnly: GetOperationConfig = () => ({ fetchBeforeOperation: false });
+const fetchBefore: ShouldFetchBefore = () => true;
+const identityOnly: ShouldFetchBefore = () => false;
 
 const preFetch = (
   client: TransactionalPrismaClient,
   modelName: string,
   args: Row,
-  getNestedOperationConfig: GetOperationConfig = fetchBefore,
+  shouldFetchBefore: ShouldFetchBefore = fetchBefore,
 ) =>
   preFetchNestedRecordsBeforeOperation(client, modelName, args, {
     Prisma,
     schemaMetadata: createSchemaMetadataFromDMMF(Prisma),
-    getNestedOperationConfig,
+    shouldFetchBefore,
   });
 
 describe('nested to-many pre-fetch parent scope', () => {
@@ -352,7 +352,7 @@ describe('nested to-many batch pre-read', () => {
       client,
       'Account',
       { where: { id: 'a1' }, data: { members: { deleteMany: [{ name: 'draft' }, { name: 'stale' }] } } },
-      (_model, operation) => ({ fetchBeforeOperation: operation === 'delete' }),
+      (_model, operation) => operation === 'delete',
     );
 
     expect(delegates.member?.findMany.mock.calls).toEqual([
@@ -450,7 +450,7 @@ describe('nested to-many batch pre-read', () => {
         {
           Prisma,
           schemaMetadata: createSchemaMetadataFromDMMF(Prisma),
-          getNestedOperationConfig: fetchBefore,
+          shouldFetchBefore: fetchBefore,
           onPreFetchFailure,
         },
       ),
@@ -479,7 +479,7 @@ describe('a failed pre-fetch at the parent path', () => {
     const preFetched = preFetchNestedRecordsBeforeOperation(client, 'Account', args, {
       Prisma,
       schemaMetadata: createSchemaMetadataFromDMMF(Prisma),
-      getNestedOperationConfig: fetchBefore,
+      shouldFetchBefore: fetchBefore,
       onPreFetchFailure,
     });
     return { preFetched, onPreFetchFailure };

@@ -28,9 +28,9 @@ const createClients = (databaseUrl: string, fetchBeforeUpdate = true) => {
     aggregateMapping: testAggregateMapping,
     diffing: { excludeFields: ['createdAt'] },
     security: { redact: { fields: [] } },
-    nestedOperations: {
-      update: { fetchBeforeOperation: fetchBeforeUpdate },
-      delete: { fetchBeforeOperation: true },
+    fetchBefore: {
+      update: fetchBeforeUpdate,
+      delete: true,
     },
   });
   return { basePrisma, provider, prisma };

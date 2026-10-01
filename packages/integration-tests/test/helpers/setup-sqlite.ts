@@ -67,9 +67,9 @@ export const setupSQLiteDatabase = async (): Promise<SQLiteTestContext> => {
     performance: {
       awaitWrite: true,
     },
-    nestedOperations: {
-      update: { fetchBeforeOperation: true },
-      delete: { fetchBeforeOperation: true },
+    fetchBefore: {
+      update: true,
+      delete: true,
     },
     contextEnricher: {
       actor: {

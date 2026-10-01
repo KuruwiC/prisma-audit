@@ -1,18 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { getNestedOperationConfig } from '../../src/config/helpers.js';
-import type { NestedOperationsConfig } from '../../src/types.js';
+import { resolveFetchBefore } from '../../src/config/helpers.js';
+import type { FetchBeforeConfig } from '../../src/types.js';
 
-const fetchBefore = (modelName: string, operation: string, nestedOperations?: NestedOperationsConfig) =>
-  getNestedOperationConfig(modelName, operation, nestedOperations).fetchBeforeOperation;
+const fetchBefore = (modelName: string, operation: string, config?: FetchBeforeConfig) =>
+  resolveFetchBefore(modelName, operation, config);
 
-describe('getNestedOperationConfig', () => {
+describe('resolveFetchBefore', () => {
   it('reads the before state of updates and deletes when nothing is configured', () => {
     expect(fetchBefore('Post', 'update')).toBe(true);
     expect(fetchBefore('Post', 'delete')).toBe(true);
   });
 
   it('applies the global setting to every model', () => {
-    const config: NestedOperationsConfig = { update: { fetchBeforeOperation: false } };
+    const config: FetchBeforeConfig = { update: false };
 
     expect(fetchBefore('Post', 'update', config)).toBe(false);
     expect(fetchBefore('User', 'update', config)).toBe(false);
@@ -20,9 +20,9 @@ describe('getNestedOperationConfig', () => {
   });
 
   it('lets a model setting win over the global one, for that model only', () => {
-    const config: NestedOperationsConfig = {
-      delete: { fetchBeforeOperation: true },
-      models: { Post: { delete: { fetchBeforeOperation: false } } },
+    const config: FetchBeforeConfig = {
+      delete: true,
+      models: { Post: { delete: false } },
     };
 
     expect(fetchBefore('Post', 'delete', config)).toBe(false);
@@ -30,9 +30,9 @@ describe('getNestedOperationConfig', () => {
   });
 
   it('falls back to the global setting for an operation the model setting leaves out', () => {
-    const config: NestedOperationsConfig = {
-      update: { fetchBeforeOperation: false },
-      models: { Post: { delete: { fetchBeforeOperation: false } } },
+    const config: FetchBeforeConfig = {
+      update: false,
+      models: { Post: { delete: false } },
     };
 
     expect(fetchBefore('Post', 'update', config)).toBe(false);
@@ -41,9 +41,9 @@ describe('getNestedOperationConfig', () => {
   });
 
   it('turns the read on for a model when the global setting turns it off', () => {
-    const config: NestedOperationsConfig = {
-      update: { fetchBeforeOperation: false },
-      models: { Post: { update: { fetchBeforeOperation: true } } },
+    const config: FetchBeforeConfig = {
+      update: false,
+      models: { Post: { update: true } },
     };
 
     expect(fetchBefore('Post', 'update', config)).toBe(true);
@@ -51,14 +51,14 @@ describe('getNestedOperationConfig', () => {
   });
 
   it('applies a model setting to a model declared with a lowercase first letter, like the aggregate mapping', () => {
-    const config: NestedOperationsConfig = { models: { AuditEvent: { update: { fetchBeforeOperation: false } } } };
+    const config: FetchBeforeConfig = { models: { AuditEvent: { update: false } } };
 
     expect(fetchBefore('auditEvent', 'update', config)).toBe(false);
     expect(fetchBefore('AuditEvent', 'update', config)).toBe(false);
   });
 
   it('reads no before state for the other operations', () => {
-    const config: NestedOperationsConfig = { models: { Post: { update: { fetchBeforeOperation: true } } } };
+    const config: FetchBeforeConfig = { models: { Post: { update: true } } };
 
     for (const operation of ['create', 'upsert', 'connectOrCreate']) {
       expect(fetchBefore('Post', operation, config)).toBe(false);

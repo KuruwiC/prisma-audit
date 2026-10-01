@@ -19,7 +19,7 @@ import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/c
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
 
-type NestedOperationsConfig = Parameters<typeof createAuditClient>[1]['nestedOperations'];
+type FetchBeforeConfig = Parameters<typeof createAuditClient>[1]['fetchBefore'];
 
 const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'entity-id-collision-actor' },
@@ -45,7 +45,7 @@ describe('nested delete of a row whose primary key is "__default__"', () => {
     await basePrisma.auditLog.deleteMany({ where: { entityId: COLLIDING_ID } });
   });
 
-  const createClient = (nestedOperations: NestedOperationsConfig | undefined) => {
+  const createClient = (fetchBefore: FetchBeforeConfig | undefined) => {
     const provider = createAsyncLocalStorageProvider();
     const prisma = createAuditClient(basePrisma, {
       Prisma,
@@ -53,7 +53,7 @@ describe('nested delete of a row whose primary key is "__default__"', () => {
       aggregateMapping: testAggregateMapping,
       diffing: { excludeFields: ['createdAt'] },
       security: { redact: { fields: [] } },
-      nestedOperations,
+      fetchBefore,
       errorHandling: { observer },
     });
     return { provider, prisma };
@@ -68,8 +68,8 @@ describe('nested delete of a row whose primary key is "__default__"', () => {
     return { user, post, tag };
   };
 
-  const deleteThroughParent = async (nestedOperations: NestedOperationsConfig | undefined, postTagId: string) => {
-    const { provider, prisma } = createClient(nestedOperations);
+  const deleteThroughParent = async (fetchBefore: FetchBeforeConfig | undefined, postTagId: string) => {
+    const { provider, prisma } = createClient(fetchBefore);
     const seed = await seedPostTag(postTagId);
 
     await provider.runAsync(testActor, async () =>
@@ -90,7 +90,7 @@ describe('nested delete of a row whose primary key is "__default__"', () => {
   };
 
   it('logs the delete when the before-state fetch is disabled, as for any other id', async () => {
-    const config: NestedOperationsConfig = { delete: { fetchBeforeOperation: false } };
+    const config: FetchBeforeConfig = { delete: false };
     const regularId = `regular-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
     const regular = await deleteThroughParent(config, regularId);

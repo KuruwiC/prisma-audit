@@ -122,7 +122,7 @@ const preFetch = async (client: TransactionalPrismaClient, modelName: string, ar
     await preFetchNestedRecordsBeforeOperation(client, modelName, args, {
       Prisma,
       schemaMetadata: createSchemaMetadataFromDMMF(Prisma),
-      getNestedOperationConfig: () => ({ fetchBeforeOperation: true }),
+      shouldFetchBefore: () => true,
     })
   ).results;
 

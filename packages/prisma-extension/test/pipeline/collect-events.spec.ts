@@ -49,7 +49,7 @@ const schemaMetadata = createSchemaMetadataFromDMMF({
   },
 });
 
-const deps = { schemaMetadata, getNestedOperationConfig: () => ({ fetchBeforeOperation: true }) };
+const deps = { schemaMetadata, shouldFetchBefore: () => true };
 const client: PrismaClientWithDynamicAccess = Object.create(null);
 
 type SingleCase = Partial<

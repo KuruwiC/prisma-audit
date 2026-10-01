@@ -41,9 +41,9 @@ describe('nested to-many pre-fetch — parent row scope', () => {
       diffing: { excludeFields: ['createdAt'] },
       security: { redact: { fields: [] } },
       performance: { awaitWrite: true },
-      nestedOperations: {
-        update: { fetchBeforeOperation: true },
-        delete: { fetchBeforeOperation: true },
+      fetchBefore: {
+        update: true,
+        delete: true,
       },
       errorHandling: { observer },
     });

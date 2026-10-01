@@ -114,14 +114,14 @@ export interface HooksConfig<TClient = unknown> {
 /**
  * Before-state reads of update and delete operations
  *
- * `fetchBeforeOperation` decides whether the row is read before the write, for a top-level
- * update or delete as well as for one nested in another operation. Default: `true`.
+ * `true` reads the row's `before` value ahead of the write, for a top-level update or delete as
+ * well as for one nested in another operation. Default: `true`.
  */
-export interface FetchBeforeConfig {
+export interface FetchBeforeByOperation {
   /** Update operations, top-level and nested */
-  update?: { fetchBeforeOperation?: boolean };
+  update?: boolean;
   /** Delete operations, top-level and nested */
-  delete?: { fetchBeforeOperation?: boolean };
+  delete?: boolean;
 }
 
 /**
@@ -134,18 +134,18 @@ export interface FetchBeforeConfig {
  *
  * @example
  * ```typescript
- * nestedOperations: {
- *   update: { fetchBeforeOperation: false },               // every model
- *   models: { Post: { delete: { fetchBeforeOperation: false } } },  // Post only
+ * fetchBefore: {
+ *   update: false,                      // every model
+ *   models: { Post: { delete: false } },  // Post only
  * }
  * ```
  */
-export interface NestedOperationsConfig<TModelName extends string = string> extends FetchBeforeConfig {
+export interface FetchBeforeConfig<TModelName extends string = string> extends FetchBeforeByOperation {
   /**
    * Per-model settings, keyed by model name like the aggregate mapping, and like it matched to a
    * model case-insensitively
    */
-  models?: { readonly [K in TModelName]?: FetchBeforeConfig };
+  models?: { readonly [K in TModelName]?: FetchBeforeByOperation };
 }
 
 /**
@@ -205,7 +205,7 @@ export interface PrismaAuditExtensionOptions<TModelName extends string = string,
   hooks?: HooksConfig<TClient>;
   /** Actor enrichment; the enricher receives the operation's `AuditActor` and the client. */
   contextEnricher?: GlobalContextEnricherConfig<AuditActor, unknown, TClient>;
-  nestedOperations?: NestedOperationsConfig<TModelName>;
+  fetchBefore?: FetchBeforeConfig<TModelName>;
   /**
    * Audit-failure observation and policy. See {@link ErrorHandlingConfig}. What each phase
    * means for a Prisma operation:

@@ -14,9 +14,9 @@ import type {
   WriteFn,
 } from '@kuruwic/db-audit-core';
 import { createEntityConfigLookup } from '@kuruwic/db-audit-core';
-import { getNestedOperationConfig } from './config/helpers.js';
+import { resolveFetchBefore } from './config/helpers.js';
 import { validateFieldConflicts } from './config/validation.js';
-import type { GetOperationConfig } from './grammar/pre-fetch-selection.js';
+import type { ShouldFetchBefore } from './grammar/pre-fetch-selection.js';
 import type { PrismaNamespace } from './internal-types.js';
 import type { SchemaMetadata } from './schema/types.js';
 import type { PrismaAuditExtensionOptions } from './types.js';
@@ -35,7 +35,7 @@ export interface AuditOptions {
   readonly composeConfig: ComposeConfig;
   readonly writer: WriteFn | undefined;
   readonly errorHandling: ErrorHandlingConfig;
-  readonly getNestedOperationConfig: GetOperationConfig;
+  readonly shouldFetchBefore: ShouldFetchBefore;
   readonly modelTags: (modelName: string) => string[];
   /** Whether operations on `modelName` are audited at all (not the audit-log model, loggable); sampling is the policy's */
   readonly shouldAudit: (modelName: string) => boolean;
@@ -94,8 +94,7 @@ export const normalizeAuditOptions = (options: PrismaAuditExtensionOptions): Aud
     },
     writer: hooks?.writer,
     errorHandling: errorHandling ?? {},
-    getNestedOperationConfig: (modelName, operation) =>
-      getNestedOperationConfig(modelName, operation, options.nestedOperations),
+    shouldFetchBefore: (modelName, operation) => resolveFetchBefore(modelName, operation, options.fetchBefore),
     modelTags,
     shouldAudit: (modelName) => shouldAuditModel({ modelName, auditLogModel, isLoggable: entityConfigs.isLoggable }),
   };

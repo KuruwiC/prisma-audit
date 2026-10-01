@@ -9,7 +9,7 @@
 
 import type { BeforeState, FailureSink, MutationEvent } from '@kuruwic/db-audit-core';
 import type { NestedOperationInfo, NestedPreFetchResults } from '../grammar/nested-operations.js';
-import type { GetOperationConfig } from '../grammar/pre-fetch-selection.js';
+import type { ShouldFetchBefore } from '../grammar/pre-fetch-selection.js';
 import type { PrismaNamespace } from '../internal-types.js';
 import {
   buildNestedWriteSets,
@@ -27,7 +27,7 @@ import { type AuditedOperation, createExecutor, type OperationExecutor } from '.
 export interface SingleExecutorDependencies {
   readonly Prisma: PrismaNamespace;
   readonly schemaMetadata: SchemaMetadata;
-  readonly getNestedOperationConfig: GetOperationConfig;
+  readonly shouldFetchBefore: ShouldFetchBefore;
   readonly failureSink: FailureSink;
 }
 
@@ -40,19 +40,19 @@ export interface SinglePrepared {
 }
 
 export const createSingleExecutor = (deps: SingleExecutorDependencies): OperationExecutor => {
-  const { Prisma, schemaMetadata, getNestedOperationConfig, failureSink } = deps;
+  const { Prisma, schemaMetadata, shouldFetchBefore, failureSink } = deps;
 
   const prepare = async (operation: AuditedOperation, scope: ExecutionScope): Promise<SinglePrepared> => {
     const { model: modelName, action, args } = operation;
     const beforeState = await fetchBeforeState(
       { handle: scope.handle, modelName, action, args },
-      { getNestedOperationConfig, onFetchFailure: failureSink.notify },
+      { shouldFetchBefore, onFetchFailure: failureSink.notify },
     );
     const { results: nestedPreFetchResults, batchTargets } = await preFetchNestedRecordsBeforeOperation(
       scope.handle,
       modelName,
       args,
-      { Prisma, schemaMetadata, getNestedOperationConfig, onPreFetchFailure: failureSink.notify },
+      { Prisma, schemaMetadata, shouldFetchBefore, onPreFetchFailure: failureSink.notify },
     );
     const nestedOperations = detectExecutedNestedOperations(
       schemaMetadata,
@@ -73,7 +73,7 @@ export const createSingleExecutor = (deps: SingleExecutorDependencies): Operatio
             writeSets,
             nestedPreFetchResults,
           },
-          { Prisma, schemaMetadata, getNestedOperationConfig },
+          { Prisma, schemaMetadata, shouldFetchBefore },
         )
       : new Map();
     return { beforeState, nestedPreFetchResults, nestedOperations, writeSets, preExistingRows };
@@ -101,7 +101,7 @@ export const createSingleExecutor = (deps: SingleExecutorDependencies): Operatio
       },
       {
         schemaMetadata,
-        getNestedOperationConfig,
+        shouldFetchBefore,
         // Reported under its own phase: the record's identity is what failed, not a pre-fetch or diff generation.
         onUnresolvedDeleteEntityId: ({ relatedModel, entityId, pkFields, error }) =>
           failureSink.notify({

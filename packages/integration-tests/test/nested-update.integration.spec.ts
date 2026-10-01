@@ -26,7 +26,7 @@ describe('Nested Update Operations', () => {
     },
   };
 
-  describe('with fetchBeforeOperation: true (test setup)', () => {
+  describe('with fetchBefore.update: true (test setup)', () => {
     it('should create audit log with before state for nested update', async () => {
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
@@ -67,12 +67,12 @@ describe('Nested Update Operations', () => {
         });
       });
 
-      // Note: Top-level update operations also use the fetchBeforeOperation config
+      // Note: Top-level update operations also use the fetchBefore.update config
       const userLogs = await context.prisma.auditLog.findMany({
         where: { entityType: 'User', entityId: user.id, action: 'update' },
       });
       expect(userLogs).toHaveLength(1);
-      expect(userLogs[0].before).not.toBeNull(); // fetchBeforeOperation=true (test setup)
+      expect(userLogs[0].before).not.toBeNull(); // fetchBefore.update=true (test setup)
       expect(userLogs[0].after).not.toBeNull();
 
       const postLogs = await context.prisma.auditLog.findMany({
@@ -80,7 +80,7 @@ describe('Nested Update Operations', () => {
       });
       expect(postLogs).toHaveLength(2); // One entity log, one aggregate log
       for (const log of postLogs) {
-        expect(log.before).not.toBeNull(); // fetchBeforeOperation=true (test setup)
+        expect(log.before).not.toBeNull(); // fetchBefore.update=true (test setup)
         expect(log.after).not.toBeNull();
         expect(log.changes).not.toBeNull(); // changes is available with before state
         const after = log.after as { title?: string };
@@ -89,8 +89,8 @@ describe('Nested Update Operations', () => {
     });
   });
 
-  // NOTE: The tests in this file use the setup.ts configuration (fetchBeforeOperation: true).
-  // The fetchBeforeOperation: false path is covered by nested-batch-parent-scope.integration.spec.ts
+  // NOTE: The tests in this file use the setup.ts configuration (fetchBefore.update: true).
+  // The fetchBefore.update: false path is covered by nested-batch-parent-scope.integration.spec.ts
   // and performance.integration.spec.ts, each with its own client.
 
   describe('Transaction Atomicity', () => {
@@ -375,7 +375,7 @@ describe('Nested Update Operations', () => {
       expect(postLogs.map((log) => log.entityId)).not.toContain(post1.id);
       expect(postLogs.map((log) => log.entityId)).not.toContain(post3.id);
 
-      // With fetchBeforeOperation: true (test setup), the updated post carries its before state.
+      // With fetchBefore.update: true (test setup), the updated post carries its before state.
       for (const log of postLogs) {
         expect((log.before as { title: string }).title).toBe('Post 2');
         expect((log.after as { title: string }).title).toBe('Updated Post 2');
@@ -480,7 +480,7 @@ describe('Nested Update Operations', () => {
   });
 
   // NOTE: Every test here uses the setup.ts defaults; the per-model vs global resolution of
-  // nestedOperations is covered by nested-delete.integration.spec.ts.
+  // fetchBefore is covered by nested-delete.integration.spec.ts.
 
   // NOTE: Audit-pipeline failures reach errorHandling.observer; nested pre-fetch failures are covered
   // by nested-pre-fetch-failure.integration.spec.ts.

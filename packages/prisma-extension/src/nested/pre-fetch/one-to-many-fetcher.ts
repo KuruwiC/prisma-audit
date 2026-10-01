@@ -147,7 +147,7 @@ export interface PreFetchToManyBatchInput extends ToManyScopeInput {
   operation: NestedBatchKeyword;
   relatedModelClient: PreFetchListClient;
   /** Whether the matched rows are read whole, as their before-state, or by primary key only */
-  fetchBeforeOperation: boolean;
+  fetchBefore: boolean;
 }
 
 const primaryKeyOf = (row: PreFetchRecord, pkFields: readonly string[]): PreFetchRecord =>
@@ -159,10 +159,10 @@ const storeMatchedRow = (
   path: string,
   identity: EntityIdentityKey,
   row: PreFetchRecord,
-  fetchBeforeOperation: boolean,
+  fetchBefore: boolean,
   pkFields: readonly string[],
 ): void => {
-  if (fetchBeforeOperation) {
+  if (fetchBefore) {
     storePreFetchResult(preFetchResults, path, identity, { before: { kind: 'captured', row } });
   } else if (!preFetchResults.get(path)?.has(identity)) {
     storePreFetchResult(preFetchResults, path, identity, { before: NO_BEFORE_STATE, key: primaryKeyOf(row, pkFields) });
@@ -182,7 +182,7 @@ const scopeFilterToParents = (
 /**
  * Pre-reads the rows a nested `updateMany` / `deleteMany` filter matches, scoped through the
  * back-relation the way Prisma scopes the write. Each matched row is stored whole when
- * `fetchBeforeOperation` asks for its before-state, else by its primary key with none.
+ * `fetchBefore` asks for its before-state, else by its primary key with none.
  *
  * @returns The primary key of every matched row, keyed by its identity
  * @throws Error when a parent row could not be read and is not known by its key: the rows the
@@ -191,8 +191,7 @@ const scopeFilterToParents = (
 export const preFetchToManyBatch = async (
   input: PreFetchToManyBatchInput,
 ): Promise<Map<EntityIdentityKey, PreFetchRecord>> => {
-  const { path, operation, data, scope, relatedModelClient, pkConstraint, fetchBeforeOperation, preFetchResults } =
-    input;
+  const { path, operation, data, scope, relatedModelClient, pkConstraint, fetchBefore, preFetchResults } = input;
 
   const { rows: parentRows, allKnown } = await resolveScopedParentRows(input);
   if (!allKnown) {
@@ -210,14 +209,14 @@ export const preFetchToManyBatch = async (
   const matched = new Map<EntityIdentityKey, PreFetchRecord>();
 
   for (const where of wheres) {
-    const rows = await relatedModelClient.findMany(fetchBeforeOperation ? { where } : { where, select });
+    const rows = await relatedModelClient.findMany(fetchBefore ? { where } : { where, select });
     for (const row of rows) {
       const identity = extractEntityIdentity(row, pkConstraint.fields);
       if (identity === UNRESOLVED_ENTITY_ID) {
         continue;
       }
       matched.set(identity, primaryKeyOf(row, pkConstraint.fields));
-      storeMatchedRow(preFetchResults, path, identity, row, fetchBeforeOperation, pkConstraint.fields);
+      storeMatchedRow(preFetchResults, path, identity, row, fetchBefore, pkConstraint.fields);
     }
   }
 

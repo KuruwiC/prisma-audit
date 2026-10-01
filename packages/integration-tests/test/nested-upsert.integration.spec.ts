@@ -230,7 +230,7 @@ describe('Nested Upsert Operations', () => {
   });
 
   // NOTE: Upsert always pre-fetches to decide between create and update, regardless of
-  // fetchBeforeOperation, so these tests cover its pre-fetch under the setup.ts defaults.
+  // fetchBefore, so these tests cover its pre-fetch under the setup.ts defaults.
 
   describe('Mixed Create and Update', () => {
     it('should handle upsert operations with different paths in same transaction', async () => {
@@ -587,7 +587,7 @@ describe('Nested Upsert Operations', () => {
   });
 
   // NOTE: Every test here uses the setup.ts defaults; the per-model vs global resolution of
-  // nestedOperations is covered by nested-delete.integration.spec.ts.
+  // fetchBefore is covered by nested-delete.integration.spec.ts.
 
   // NOTE: Audit-pipeline failures reach errorHandling.observer; nested pre-fetch failures are covered
   // by nested-pre-fetch-failure.integration.spec.ts.

@@ -19,7 +19,7 @@ import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/c
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
 
-type NestedOperationsConfig = Parameters<typeof createAuditClient>[1]['nestedOperations'];
+type FetchBeforeConfig = Parameters<typeof createAuditClient>[1]['fetchBefore'];
 
 const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'before-state-unavailable-actor' },
@@ -34,7 +34,7 @@ describe('before state requested but unreadable', () => {
     sharedDatabaseUrl = await getSharedDatabaseUrl();
   });
 
-  const createClient = (options: { nestedOperations?: NestedOperationsConfig } = {}) => {
+  const createClient = (options: { fetchBefore?: FetchBeforeConfig } = {}) => {
     const rawBasePrisma = new PrismaClient({ datasources: { db: { url: sharedDatabaseUrl } } });
 
     let failNextFindUnique = false;
@@ -81,7 +81,7 @@ describe('before state requested but unreadable', () => {
 
   let scenario: ReturnType<typeof createClient> | undefined;
 
-  const setUp = async (options?: { nestedOperations?: NestedOperationsConfig }) => {
+  const setUp = async (options?: { fetchBefore?: FetchBeforeConfig }) => {
     scenario = createClient(options);
     const { basePrisma, provider, prisma } = scenario;
     await basePrisma.auditLog.deleteMany();
@@ -157,7 +157,7 @@ describe('before state requested but unreadable', () => {
 
   it('does not mark an update whose before state was not requested', async () => {
     const { provider, prisma, observer, postRecords, post } = await setUp({
-      nestedOperations: { update: { fetchBeforeOperation: false } },
+      fetchBefore: { update: false },
     });
 
     await provider.runAsync(testActor, () =>

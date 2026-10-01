@@ -284,9 +284,9 @@ createAuditClient(basePrisma, {
   },
 
   // Nested operation behavior
-  nestedOperations: {
-    update: { fetchBeforeOperation: true },
-    delete: { fetchBeforeOperation: true },
+  fetchBefore: {
+    update: true,
+    delete: true,
   },
 });
 ```
@@ -507,7 +507,7 @@ Add custom fields via `security.redact.fields`.
 Nested creates, updates, and deletes are automatically tracked at all depths:
 
 - **create**: Always logged (before = null)
-- **update / delete**: Before state captured when `fetchBeforeOperation: true` (default)
+- **update / delete**: Before state captured when `fetchBefore.update` / `fetchBefore.delete` is `true` (default)
 - **upsert**: Automatically detects create vs update path
 - **connectOrCreate**: Smart detection — logs only when creating new records
 - **connect**: No entity log (join table log if defined in mapping)

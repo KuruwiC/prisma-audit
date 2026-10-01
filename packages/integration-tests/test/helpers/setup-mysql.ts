@@ -65,9 +65,9 @@ export const setupMySQLDatabase = async (): Promise<MySQLTestContext> => {
     performance: {
       awaitWrite: true,
     },
-    nestedOperations: {
-      update: { fetchBeforeOperation: true },
-      delete: { fetchBeforeOperation: true },
+    fetchBefore: {
+      update: true,
+      delete: true,
     },
     contextEnricher: {
       actor: {

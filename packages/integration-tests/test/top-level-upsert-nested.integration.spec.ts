@@ -20,9 +20,9 @@ const testActor: AuditContext = {
 
 const FAILURE_MESSAGE = 'simulated before-state fetch failure';
 
-type NestedOperationsConfig = NonNullable<PrismaAuditExtensionOptions['nestedOperations']>;
+type FetchBeforeConfig = NonNullable<PrismaAuditExtensionOptions['fetchBefore']>;
 
-const createClients = (databaseUrl: string, nestedOperations: NestedOperationsConfig) => {
+const createClients = (databaseUrl: string, fetchBefore: FetchBeforeConfig) => {
   const rawBasePrisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
 
   let failNextPostFindUnique = false;
@@ -50,7 +50,7 @@ const createClients = (databaseUrl: string, nestedOperations: NestedOperationsCo
     diffing: { excludeFields: ['createdAt'] },
     security: { redact: { fields: [] } },
     performance: { awaitWrite: true },
-    nestedOperations,
+    fetchBefore,
     errorHandling: { observer },
   });
 
@@ -70,8 +70,8 @@ describe('top-level upsert nested audit entries', () => {
   let databaseUrl: string;
   let clients: ReturnType<typeof createClients> | undefined;
 
-  const setUp = async (nestedOperations: NestedOperationsConfig) => {
-    clients = createClients(databaseUrl, nestedOperations);
+  const setUp = async (fetchBefore: FetchBeforeConfig) => {
+    clients = createClients(databaseUrl, fetchBefore);
     await cleanDatabase(clients.rawBasePrisma);
     return clients;
   };
@@ -88,8 +88,8 @@ describe('top-level upsert nested audit entries', () => {
 
   it('audits the nested creates of the create branch when the upsert creates the row', async () => {
     const { basePrisma, prisma, asActor } = await setUp({
-      update: { fetchBeforeOperation: true },
-      delete: { fetchBeforeOperation: true },
+      update: true,
+      delete: true,
     });
     const author = await basePrisma.user.create({
       data: { email: 'upsert-create-author@example.com', name: 'Author', password: 'secret123' },
@@ -130,7 +130,7 @@ describe('top-level upsert nested audit entries', () => {
   });
 
   it('records the nested write of the update branch as update when the upsert updates the row', async () => {
-    const { basePrisma, prisma, asActor } = await setUp({ update: { fetchBeforeOperation: false } });
+    const { basePrisma, prisma, asActor } = await setUp({ update: false });
     const user = await basePrisma.user.create({
       data: {
         email: 'upsert-update-user@example.com',
@@ -159,8 +159,8 @@ describe('top-level upsert nested audit entries', () => {
 
   it('skips the nested entries of an upsert whose before-state fetch failed, and the caller still succeeds', async () => {
     const { basePrisma, prisma, asActor, observer, armPostFindUniqueFailure } = await setUp({
-      update: { fetchBeforeOperation: true },
-      delete: { fetchBeforeOperation: true },
+      update: true,
+      delete: true,
     });
     const author = await basePrisma.user.create({
       data: { email: 'upsert-failure-author@example.com', name: 'Author', password: 'secret123' },

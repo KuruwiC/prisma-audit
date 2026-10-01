@@ -61,9 +61,7 @@ describe('Named Composite Primary Key (PostBookmark)', () => {
       diffing: { excludeFields: ['createdAt'] },
       security: { redact: { fields: [] } },
       performance: { awaitWrite: true },
-      ...(options.fetchBeforeDelete
-        ? {}
-        : { nestedOperations: { models: { PostBookmark: { delete: { fetchBeforeOperation: false } } } } }),
+      ...(options.fetchBeforeDelete ? {} : { fetchBefore: { models: { PostBookmark: { delete: false } } } }),
       errorHandling: { observer },
     });
     const scenario = { basePrisma, prisma, provider, observer };
@@ -113,7 +111,7 @@ describe('Named Composite Primary Key (PostBookmark)', () => {
       expect(observer).not.toHaveBeenCalled();
     });
 
-    it('records the real composite entityId from the WHERE clause alone when fetchBeforeOperation is false', async () => {
+    it('records the real composite entityId from the WHERE clause alone when fetchBefore.delete is false', async () => {
       const { basePrisma, prisma, provider, observer } = createScenario({ fetchBeforeDelete: false });
       const { user, post } = await createUserAndPost(basePrisma);
       await basePrisma.postBookmark.create({ data: { postId: post.id, userId: user.id, label: 'to-delete' } });

@@ -122,16 +122,16 @@ const operationOn = (
 const updateArgs = { where: { id: 'u1' }, data: { name: 'Anne' } };
 
 interface ExecutorOptions {
-  fetchBeforeOperation?: boolean;
+  fetchBefore?: boolean;
   failureSink?: FailureSink;
 }
 
 const executorWith = (options: ExecutorOptions = {}) => {
-  const getNestedOperationConfig = vi.fn(() => ({ fetchBeforeOperation: options.fetchBeforeOperation ?? true }));
+  const shouldFetchBefore = vi.fn(() => options.fetchBefore ?? true);
   const failureSink = options.failureSink ?? createFailureSink();
-  const executor = createSingleExecutor({ Prisma, schemaMetadata, getNestedOperationConfig, failureSink });
+  const executor = createSingleExecutor({ Prisma, schemaMetadata, shouldFetchBefore, failureSink });
   const produceRecords = vi.fn<RecordProducer>(async () => []);
-  return { executor, produceRecords, getNestedOperationConfig, failureSink };
+  return { executor, produceRecords, shouldFetchBefore, failureSink };
 };
 
 const topLevelEvent = (fields: Row) => [
@@ -143,12 +143,12 @@ describe('createSingleExecutor', () => {
     it('requests no before state for a create and consults no nested-operation config', async () => {
       const findUnique = vi.fn();
       const client = clientWith({ user: { findUnique, create: vi.fn(async () => user) } });
-      const { executor, produceRecords, getNestedOperationConfig } = executorWith();
+      const { executor, produceRecords, shouldFetchBefore } = executorWith();
 
       await executor.run(operationOn(client, 'create', { data: { name: 'Ann' } }), scopeOn(client), produceRecords);
 
       expect(findUnique).not.toHaveBeenCalled();
-      expect(getNestedOperationConfig).not.toHaveBeenCalled();
+      expect(shouldFetchBefore).not.toHaveBeenCalled();
       expect(produceRecords).toHaveBeenCalledWith(
         topLevelEvent({ identity: 'u1', action: 'create', before: { kind: 'none' }, after: user }),
         expect.anything(),
@@ -158,14 +158,14 @@ describe('createSingleExecutor', () => {
     it.each([
       { action: 'update' as const, args: updateArgs, returns: { id: 'u1', name: 'Anne' } },
       { action: 'delete' as const, args: { where: { id: 'u1' } }, returns: user },
-    ])('fetches the before state of $action when fetchBeforeOperation is on', async ({ action, args, returns }) => {
+    ])('fetches the before state of $action when fetchBefore is on', async ({ action, args, returns }) => {
       const findUnique = vi.fn(async () => user);
       const client = clientWith({ user: { findUnique, [action]: vi.fn(async () => returns) } });
-      const { executor, produceRecords, getNestedOperationConfig } = executorWith({ fetchBeforeOperation: true });
+      const { executor, produceRecords, shouldFetchBefore } = executorWith({ fetchBefore: true });
 
       await executor.run(operationOn(client, action, args), scopeOn(client), produceRecords);
 
-      expect(getNestedOperationConfig).toHaveBeenCalledWith('User', action);
+      expect(shouldFetchBefore).toHaveBeenCalledWith('User', action);
       expect(findUnique).toHaveBeenCalledWith({ where: { id: 'u1' } });
       expect(produceRecords).toHaveBeenCalledWith(
         topLevelEvent({ identity: 'u1', action, before: { kind: 'captured', row: user } }),
@@ -176,10 +176,10 @@ describe('createSingleExecutor', () => {
     it.each([
       { action: 'update' as const, args: updateArgs },
       { action: 'delete' as const, args: { where: { id: 'u1' } } },
-    ])('skips the before state of $action when fetchBeforeOperation is off', async ({ action, args }) => {
+    ])('skips the before state of $action when fetchBefore is off', async ({ action, args }) => {
       const findUnique = vi.fn();
       const client = clientWith({ user: { findUnique, [action]: vi.fn(async () => user) } });
-      const { executor, produceRecords } = executorWith({ fetchBeforeOperation: false });
+      const { executor, produceRecords } = executorWith({ fetchBefore: false });
 
       await executor.run(operationOn(client, action, args), scopeOn(client), produceRecords);
 
@@ -193,12 +193,12 @@ describe('createSingleExecutor', () => {
     it('always fetches the before state of an upsert and records an update when the row existed', async () => {
       const findUnique = vi.fn(async () => user);
       const client = clientWith({ user: { findUnique, upsert: vi.fn(async () => ({ id: 'u1', name: 'Anne' })) } });
-      const { executor, produceRecords, getNestedOperationConfig } = executorWith({ fetchBeforeOperation: false });
+      const { executor, produceRecords, shouldFetchBefore } = executorWith({ fetchBefore: false });
       const args = { where: { id: 'u1' }, create: { name: 'Ann' }, update: { name: 'Anne' } };
 
       await executor.run(operationOn(client, 'upsert', args), scopeOn(client), produceRecords);
 
-      expect(getNestedOperationConfig).not.toHaveBeenCalled();
+      expect(shouldFetchBefore).not.toHaveBeenCalled();
       expect(findUnique).toHaveBeenCalledWith({ where: { id: 'u1' } });
       expect(produceRecords).toHaveBeenCalledWith(
         topLevelEvent({ action: 'update', before: { kind: 'captured', row: user }, after: { id: 'u1', name: 'Anne' } }),
@@ -298,7 +298,7 @@ describe('createSingleExecutor', () => {
           }),
         },
       });
-      const { executor, produceRecords } = executorWith({ fetchBeforeOperation: true });
+      const { executor, produceRecords } = executorWith({ fetchBefore: true });
 
       await executor.run(operationOn(client, 'update', nestedUpdateArgs), scopeOn(client), produceRecords);
 
@@ -331,7 +331,7 @@ describe('createSingleExecutor', () => {
           }),
         },
       });
-      const { executor, produceRecords, failureSink } = executorWith({ fetchBeforeOperation: true });
+      const { executor, produceRecords, failureSink } = executorWith({ fetchBefore: true });
 
       await executor.run(operationOn(client, 'update', nestedUpdateArgs), scopeOn(client), produceRecords);
 
@@ -496,7 +496,7 @@ describe('createSingleExecutor', () => {
         user: { findUnique: vi.fn(), update: vi.fn(async () => ({ ...user, posts: [p1After, sibling] })) },
         post: { findMany },
       });
-      const { executor, produceRecords } = executorWith({ fetchBeforeOperation: false });
+      const { executor, produceRecords } = executorWith({ fetchBefore: false });
 
       await executor.run(operationOn(client, 'update', updateManyArgs), scopeOn(client), produceRecords);
 

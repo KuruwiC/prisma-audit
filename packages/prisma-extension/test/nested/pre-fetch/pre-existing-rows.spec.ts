@@ -62,7 +62,7 @@ const Prisma: PrismaNamespace = {
 };
 
 const schemaMetadata = createSchemaMetadataFromDMMF(Prisma);
-const getNestedOperationConfig = () => ({ fetchBeforeOperation: true });
+const shouldFetchBefore = () => true;
 
 const clientWith = (delegates: Record<string, Record<string, unknown>>): PrismaClientWithDynamicAccess => ({
   $transaction: async () => {
@@ -93,7 +93,7 @@ const snapshot = (
       writeSets: buildNestedWriteSets(schemaMetadata, nestedOperations, nestedPreFetchResults, new Map()),
       nestedPreFetchResults,
     },
-    { Prisma, schemaMetadata, getNestedOperationConfig },
+    { Prisma, schemaMetadata, shouldFetchBefore },
   );
 };
 

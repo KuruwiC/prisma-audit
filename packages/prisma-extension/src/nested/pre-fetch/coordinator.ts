@@ -19,7 +19,7 @@ import {
 } from '../../grammar/nested-operations.js';
 import {
   filterOperationsToPreFetch,
-  type GetOperationConfig,
+  type ShouldFetchBefore,
   sortByPathDepth,
 } from '../../grammar/pre-fetch-selection.js';
 import type {
@@ -56,7 +56,7 @@ export interface PreFetchCoordinatorDependencies {
   /** Prisma namespace given as the extension's `Prisma` option; read for the DMMF relation details */
   readonly Prisma: PrismaNamespace;
   readonly schemaMetadata: SchemaMetadata;
-  readonly getNestedOperationConfig: GetOperationConfig;
+  readonly shouldFetchBefore: ShouldFetchBefore;
   /**
    * Notified when a single nested operation's pre-fetch query fails. The rows the read left
    * unknown are recorded as `unavailable` (see pre-fetch-result-store.ts), and the caller's own
@@ -168,7 +168,7 @@ export const preFetchNestedRecordsBeforeOperation = async (
   args: Record<string, unknown>,
   dependencies: PreFetchCoordinatorDependencies,
 ): Promise<NestedPreFetch> => {
-  const { Prisma, schemaMetadata, getNestedOperationConfig, onPreFetchFailure } = dependencies;
+  const { Prisma, schemaMetadata, shouldFetchBefore, onPreFetchFailure } = dependencies;
 
   const preFetchResults: NestedPreFetchResults = new Map();
   const batchTargets: NestedBatchTargets = new Map();
@@ -177,7 +177,7 @@ export const preFetchNestedRecordsBeforeOperation = async (
   const nestedOperations = detectNestedOperations(schemaMetadata, modelName, args, { kind: 'discovery' });
   preFetchLog('pre-fetch nested records for model=%s operations=%d', modelName, nestedOperations.length);
 
-  const operationsToPreFetch = filterOperationsToPreFetch(nestedOperations, getNestedOperationConfig);
+  const operationsToPreFetch = filterOperationsToPreFetch(nestedOperations, shouldFetchBefore);
   preFetchLog(
     'operations to pre-fetch: count=%d operations=%O',
     operationsToPreFetch.length,
@@ -214,7 +214,7 @@ export const preFetchNestedRecordsBeforeOperation = async (
     topLevelWhere: args.where,
     preFetchResults,
     batchTargets,
-    getNestedOperationConfig,
+    shouldFetchBefore,
     resolvePkConstraint: (model) => {
       if (!pkConstraintCache.has(model)) {
         pkConstraintCache.set(model, getPrimaryKeyConstraint(schemaMetadata, model));
@@ -265,7 +265,7 @@ interface NestedPreFetchContext {
   topLevelWhere: unknown;
   preFetchResults: NestedPreFetchResults;
   batchTargets: NestedBatchTargets;
-  getNestedOperationConfig: GetOperationConfig;
+  shouldFetchBefore: ShouldFetchBefore;
   resolvePkConstraint: (model: string) => UniqueConstraint | undefined;
   /** Operations at the parent path of `path` that were not pre-fetched; none for a direct child */
   parentOperationsNotPreFetched: (path: string) => NestedOperationInfo[];
@@ -449,7 +449,7 @@ const handleOneToManyRelation = async (
   await preFetchOneToManyRelation({ ...scopeInput, operation: relation.nestedOp.operation, relatedModelClient });
 };
 
-/** The configured operation whose `fetchBeforeOperation` decides whether a batch keyword reads whole rows */
+/** The operation whose `fetchBefore` setting decides whether a batch keyword reads whole rows */
 const BATCH_CONFIG_OPERATION: Record<NestedBatchKeyword, 'update' | 'delete'> = {
   updateMany: 'update',
   deleteMany: 'delete',
@@ -492,15 +492,12 @@ const handleToManyBatch = async (
     return;
   }
 
-  const { fetchBeforeOperation } = context.getNestedOperationConfig(
-    nestedOp.relatedModel,
-    BATCH_CONFIG_OPERATION[keyword],
-  );
+  const fetchBefore = context.shouldFetchBefore(nestedOp.relatedModel, BATCH_CONFIG_OPERATION[keyword]);
   const matched = await preFetchToManyBatch({
     ...scopeInput,
     operation: keyword,
     relatedModelClient,
-    fetchBeforeOperation,
+    fetchBefore,
   });
   recordBatchTargets(context.batchTargets, nestedOp.path, keyword, matched);
 };

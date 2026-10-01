@@ -3,14 +3,14 @@
  *
  * Read with `findUnique` on the operation's `where` before the write: always for an upsert,
  * whose executed branch is what the before state tells; for an update or a delete only when
- * `fetchBeforeOperation` is configured; never for a create.
+ * its `fetchBefore` setting is on; never for a create.
  */
 
 import type { BeforeState, FailureSink } from '@kuruwic/db-audit-core';
 import type { UpsertBranch } from '../grammar/nested-operations.js';
 import { upsertBranchOf } from '../grammar/nested-state.js';
 import { AUDIT_ACTION, type AuditAction } from '../grammar/operations.js';
-import type { GetOperationConfig } from '../grammar/pre-fetch-selection.js';
+import type { ShouldFetchBefore } from '../grammar/pre-fetch-selection.js';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../internal-types.js';
 import { beforeStateOf, NO_BEFORE_STATE } from '../utils/before-state.js';
 import { getModelDelegate, hasOperation } from '../utils/model-accessor.js';
@@ -39,7 +39,7 @@ export interface BeforeStateInput {
 }
 
 export interface BeforeStateDependencies {
-  readonly getNestedOperationConfig: GetOperationConfig;
+  readonly shouldFetchBefore: ShouldFetchBefore;
   /** Receives a failed fetch under the `pre-fetch` phase; the caller's operation continues */
   readonly onFetchFailure: FailureSink['notify'];
 }
@@ -49,12 +49,12 @@ type FindUniqueDelegate = { findUnique: (args: { where: unknown }) => Promise<un
 const isRow = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
-const shouldFetch = (action: AuditAction, modelName: string, getConfig: GetOperationConfig): boolean => {
+const shouldFetch = (action: AuditAction, modelName: string, shouldFetchBefore: ShouldFetchBefore): boolean => {
   if (action === AUDIT_ACTION.UPSERT) {
     return true;
   }
   if (action === AUDIT_ACTION.UPDATE || action === AUDIT_ACTION.DELETE) {
-    return getConfig(modelName, action).fetchBeforeOperation;
+    return shouldFetchBefore(modelName, action);
   }
   return false;
 };
@@ -87,7 +87,7 @@ export const fetchBeforeState = async (
 ): Promise<BeforeState> => {
   const { handle, modelName, action, args } = input;
 
-  if (!shouldFetch(action, modelName, deps.getNestedOperationConfig) || !args.where) {
+  if (!shouldFetch(action, modelName, deps.shouldFetchBefore) || !args.where) {
     return NO_BEFORE_STATE;
   }
 

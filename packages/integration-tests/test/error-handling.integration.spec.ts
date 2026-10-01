@@ -747,7 +747,7 @@ describe('Error Handling Integration', () => {
         provider,
         aggregateMapping: testAggregateMapping,
         performance: { awaitWrite: true },
-        nestedOperations: { update: { fetchBeforeOperation: true } },
+        fetchBefore: { update: true },
         errorHandling: { writeFailurePolicy: policy, observer },
       });
 

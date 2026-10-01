@@ -138,9 +138,9 @@ export const createTestClients = (databaseUrl: string): TestContext => {
     performance: {
       awaitWrite: true,
     },
-    nestedOperations: {
-      update: { fetchBeforeOperation: true },
-      delete: { fetchBeforeOperation: true },
+    fetchBefore: {
+      update: true,
+      delete: true,
     },
     contextEnricher: {
       actor: {

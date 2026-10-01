@@ -46,9 +46,9 @@ const createAuditedClientWithAuditLogRowCounter = (
     performance: {
       awaitWrite: true,
     },
-    nestedOperations: {
-      update: { fetchBeforeOperation: false },
-      delete: { fetchBeforeOperation: false },
+    fetchBefore: {
+      update: false,
+      delete: false,
     },
     hooks: {
       writer: async (records, { defaultWrite }) => {
@@ -79,9 +79,9 @@ const createAuditedClientWithRefetchFallback = (
     performance: {
       awaitWrite: true,
     },
-    nestedOperations: {
-      update: { fetchBeforeOperation: true },
-      delete: { fetchBeforeOperation: true },
+    fetchBefore: {
+      update: true,
+      delete: true,
     },
     hooks: {
       writer: async (records, { defaultWrite }) => {
@@ -165,7 +165,7 @@ describe('Performance Benchmarks', () => {
     });
   });
 
-  describe('fetchBeforeOperation: false', () => {
+  describe('fetchBefore: false', () => {
     it('should minimize audit log rows for nested update without pre-fetch', async () => {
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
@@ -492,7 +492,7 @@ describe('Refetch Fallback Mechanism', () => {
     },
   };
 
-  describe('with fetchBeforeOperation: true', () => {
+  describe('with fetchBefore: true', () => {
     it('should automatically refetch nested records when include is missing', async () => {
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({

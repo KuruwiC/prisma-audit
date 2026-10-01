@@ -23,7 +23,7 @@ const createAuditedClientWithWriterSpy = (
   writerSpy: { callCount: number; calls: Array<{ logCount: number; contextId: string }> },
   config: {
     awaitWrite?: boolean;
-    fetchBeforeOperation?: boolean;
+    fetchBefore?: boolean;
   } = {},
 ) => {
   return createAuditClient(basePrisma, {
@@ -41,9 +41,9 @@ const createAuditedClientWithWriterSpy = (
     performance: {
       awaitWrite: config.awaitWrite ?? true,
     },
-    nestedOperations: {
-      update: { fetchBeforeOperation: config.fetchBeforeOperation ?? false },
-      delete: { fetchBeforeOperation: config.fetchBeforeOperation ?? false },
+    fetchBefore: {
+      update: config.fetchBefore ?? false,
+      delete: config.fetchBefore ?? false,
     },
     hooks: {
       writer: async (records: AuditLogData[], { auditContext, defaultWrite }) => {
@@ -432,7 +432,7 @@ describe('hooks.writer Coverage', () => {
       context.writerSpy.callCount = 0;
       context.writerSpy.calls = [];
 
-      // Delete with fetchBeforeOperation: false (before state will be null)
+      // Delete with fetchBefore.delete: false (before state will be null)
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.user.delete({
           where: { id: user.id },

@@ -1000,7 +1000,7 @@ Two independent options, both receiving the same structured failure context (`{ 
 
 #### Before state that could not be read
 
-An `update` or `delete`, top-level or nested, reads its target row before the write when `fetchBeforeOperation` is on. When that read fails, the caller's operation still runs, the observer hears about it under `pre-fetch`, and the entry is recorded with `before: null`, `changes: null` and `beforeUnavailable: true`, so it cannot be mistaken for an entry whose before state was never requested (`beforeUnavailable: false`). An `upsert`, top-level or nested, whose read failed is not recorded, and neither are the nested writes of its branches: the before state is what tells whether it created or updated its row. A nested `connectOrCreate` whose read failed is not recorded either, since it cannot tell a connect from a create. A failed read of a nested row leaves unknown only that row: another nested operation keeps what its own read found, and the rows nested below the row are still read under the primary key its WHERE names. When the row cannot be identified that way (a to-one relation's row, or one named by another unique field), the entries nested below it are treated as if their own read had failed, and a nested create or `updateMany` / `deleteMany` below it fails the operation under `diff-generation`, since the rows it writes cannot be told apart from the rows that were already there. A nested `updateMany` / `deleteMany` reads the rows its filter matches before the write whatever `fetchBeforeOperation` says, because that read is what identifies the rows it writes: when it fails, the operation fails under `diff-generation` before the write is attempted, like a top-level `updateMany` / `deleteMany`.
+An `update` or `delete`, top-level or nested, reads its target row before the write when its `fetchBefore` setting is on. When that read fails, the caller's operation still runs, the observer hears about it under `pre-fetch`, and the entry is recorded with `before: null`, `changes: null` and `beforeUnavailable: true`, so it cannot be mistaken for an entry whose before state was never requested (`beforeUnavailable: false`). An `upsert`, top-level or nested, whose read failed is not recorded, and neither are the nested writes of its branches: the before state is what tells whether it created or updated its row. A nested `connectOrCreate` whose read failed is not recorded either, since it cannot tell a connect from a create. A failed read of a nested row leaves unknown only that row: another nested operation keeps what its own read found, and the rows nested below the row are still read under the primary key its WHERE names. When the row cannot be identified that way (a to-one relation's row, or one named by another unique field), the entries nested below it are treated as if their own read had failed, and a nested create or `updateMany` / `deleteMany` below it fails the operation under `diff-generation`, since the rows it writes cannot be told apart from the rows that were already there. A nested `updateMany` / `deleteMany` reads the rows its filter matches before the write whatever `fetchBefore` says, because that read is what identifies the rows it writes: when it fails, the operation fails under `diff-generation` before the write is attempted, like a top-level `updateMany` / `deleteMany`.
 
 Every record carries `beforeUnavailable`. The default write stores it when the audit-log model declares a `beforeUnavailable Boolean` column and leaves it out otherwise, so no column is required; a `hooks.writer` sees it on each record and can store it however it likes. The normalized writers (`createEntityNormalizedWriter`, `createSharedChangeWriter`) store it the same way, in the field their schema config names as `beforeUnavailableField`, and leave it out when the config names none.
 
@@ -1132,11 +1132,11 @@ The stored `aggregateContext` is the shallow merge of the root-side and projecti
 
 **⚠️ Performance Note:** Enrichers execute database queries per operation (batched, N+1 free). Root-side enrichers run once per aggregate type with unique IDs.
 
-### Nested Operations (`nestedOperations`)
+### Before-State Reads (`fetchBefore`)
 
-Control nested operation audit logging.
+Control whether `update` and `delete` operations read the affected row's before state.
 
-#### `update.fetchBeforeOperation` / `delete.fetchBeforeOperation`
+#### `update` / `delete`
 **Type:** `boolean`
 **Default:** `true`
 
@@ -1144,29 +1144,31 @@ Controls whether an `update` or `delete` operation, top-level or nested, fetches
 
 ```typescript
 {
-  nestedOperations: {
-    update: { fetchBeforeOperation: false },  // Skip the before-state read of updates
-    delete: { fetchBeforeOperation: true },   // Read the before state of deletes (default)
+  fetchBefore: {
+    update: false,  // Skip the before-state read of updates
+    delete: true,   // Read the before state of deletes (default)
   }
 }
 ```
 
 #### `models`
-**Type:** `{ [Model]?: { update?: { fetchBeforeOperation?: boolean }; delete?: { fetchBeforeOperation?: boolean } } }`
+**Type:** `{ [Model]?: { update?: boolean; delete?: boolean } }`
 
 Per-model settings, keyed by model name like `aggregateMapping`: the key type offers the client's model names, and a key is matched to a model case-insensitively, so `AuditEvent` also configures a model declared as `model auditEvent`. For each operation, the written model's setting wins, then the global setting, then the default.
 
 ```typescript
 {
-  nestedOperations: {
-    update: { fetchBeforeOperation: false },                          // Every model
+  fetchBefore: {
+    update: false,                 // Every model
     models: {
-      Post: { update: { fetchBeforeOperation: true } },               // Post updates still read the before state
-      PostTag: { delete: { fetchBeforeOperation: false } },           // PostTag deletes skip it
+      Post: { update: true },      // Post updates still read the before state
+      PostTag: { delete: false },  // PostTag deletes skip it
     },
   }
 }
 ```
+
+### Nested Operations
 
 #### Nested Operation Support
 
@@ -1175,7 +1177,7 @@ Supports the following operations, including deep nesting:
 **Write Operations:**
 - `create` - Creates audit log with `action=create`, `before=null`
 - `createMany` - Creates audit log for each created record
-- `update` - Creates audit log with `before` state (requires `fetchBeforeOperation`)
+- `update` - Creates audit log with `before` state (requires `fetchBefore.update`)
 - `updateMany` - Creates audit log for each updated record
 - `delete` - Creates audit log with `before` state, `after=null`
 - `deleteMany` - Creates audit log for each deleted record
@@ -1223,13 +1225,13 @@ await prisma.post.update({
    - If not exists: Creates audit log for the new entity
    - Pre-fetch is enabled by default to ensure accurate detection
 4. **Performance**: Each nested operation may require additional database queries for pre-fetching
-   - **Default behavior** (`fetchBeforeOperation: true`): Pre-fetches data to ensure complete and accurate audit trails
-   - **Optimization** (`fetchBeforeOperation: false`): Skips pre-fetching for improved performance (trade-off: may miss some nested operation details)
+   - **Default behavior** (`fetchBefore` `update` / `delete`: `true`): Pre-fetches data to ensure complete and accurate audit trails
+   - **Optimization** (`fetchBefore` `update` / `delete`: `false`): Skips pre-fetching for improved performance (trade-off: may miss some nested operation details)
 5. **Primary-key snapshot for nested creates under an existing row**: when the audited row exists before the operation (an `update`, or an `upsert` that takes its update branch) and a to-many relation under it receives a nested `create` or `createMany` — or an `upsert` / `connectOrCreate` whose pre-fetch found no target — the extension reads, before the write, the primary keys of the rows that relation already holds: one `findMany` on the related model per parent row of that relation, selecting the primary-key fields only. A parent row the same operation creates has no rows yet and issues no read. The relation is read back whole after the write, and the snapshot is what tells the created rows apart from their existing siblings. The cost is one primary-key-only query per affected relation path and parent row, and the rows it returns grow linearly with the number of children the parent already has. A failed snapshot fails the operation before the caller's write runs: the observer hears it under `diff-generation` and the original error is rethrown, since without the snapshot existing rows could not be told apart from created ones.
 
 #### Limitations
 
-- A nested `update` that changes a column its own `where` names is found again after the write by the primary key read ahead of it; with `update.fetchBeforeOperation: false`, when that read failed, or when the update changes the primary key itself, it is not audited.
+- A nested `update` that changes a column its own `where` names is found again after the write by the primary key read ahead of it; with `fetchBefore.update: false`, when that read failed, or when the update changes the primary key itself, it is not audited.
 - A row a nested `create`, `createMany`, `connectOrCreate` or `upsert` inserts is audited from the query result, so a row that the caller's own `where`, `take`, `skip`, `cursor` or `distinct` on that relation leaves out of the result is not audited; read the filtered relation in a separate query instead.
 - `connect`, `set` and `disconnect` change the foreign keys of related records without an audit log for those records.
 - A to-one nested `upsert` repeated under several parent rows in one call (for example inside a to-many `update` list) takes one branch for all of them when detecting the writes nested inside it: the upserted records themselves are audited correctly, but the writes nested in its `create` / `update` data are reliable only when every parent row either has or lacks the related record.
@@ -1320,10 +1322,10 @@ export default defineConfig({
     },
   },
 
-  // Nested operations (defaults shown)
-  nestedOperations: {
-    update: { fetchBeforeOperation: true },
-    delete: { fetchBeforeOperation: true },
+  // Before-state reads (defaults shown)
+  fetchBefore: {
+    update: true,
+    delete: true,
   },
 });
 ```

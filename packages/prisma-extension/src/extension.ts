@@ -27,12 +27,12 @@ import { isAuditableAction } from './utils/extension-utils.js';
 import { injectNestedWriteSelection, projectToRequestedShape } from './utils/nested-write-selection.js';
 
 const createPipelineDependencies = (audit: AuditOptions): AuditPipelineDependencies => {
-  const { Prisma, schemaMetadata, getNestedOperationConfig } = audit;
+  const { Prisma, schemaMetadata, shouldFetchBefore } = audit;
   const failureSink = createFailureSink(audit.errorHandling);
 
   return {
     provider: audit.provider,
-    singleExecutor: createSingleExecutor({ Prisma, schemaMetadata, getNestedOperationConfig, failureSink }),
+    singleExecutor: createSingleExecutor({ Prisma, schemaMetadata, shouldFetchBefore, failureSink }),
     batchExecutor: createBatchExecutor({ Prisma, schemaMetadata }),
     produceRecords: createRecordProducer({ ...audit, failureSink }),
     writeAuditLogs: createWriteAuditLogs({

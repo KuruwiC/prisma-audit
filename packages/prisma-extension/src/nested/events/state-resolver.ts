@@ -14,7 +14,7 @@ import {
   resolveUpsertState,
 } from '../../grammar/nested-state.js';
 import { AUDIT_ACTION } from '../../grammar/operations.js';
-import type { GetOperationConfig } from '../../grammar/pre-fetch-selection.js';
+import type { ShouldFetchBefore } from '../../grammar/pre-fetch-selection.js';
 import { NO_BEFORE_STATE } from '../../utils/before-state.js';
 
 export type ResolvedState = {
@@ -25,14 +25,14 @@ export type ResolvedState = {
 const resolveUpsertRow = (
   nestedOp: NestedOperationInfo,
   before: BeforeState,
-  getNestedOperationConfig: GetOperationConfig,
+  shouldFetchBefore: ShouldFetchBefore,
 ): ResolvedState | undefined => {
   const resolved = resolveUpsertState(before);
   if (resolved === null) {
     return undefined;
   }
-  const config = getNestedOperationConfig(nestedOp.relatedModel, 'update');
-  const shouldIncludeBeforeState = config.fetchBeforeOperation && resolved.action === AUDIT_ACTION.UPDATE;
+  const shouldIncludeBeforeState =
+    shouldFetchBefore(nestedOp.relatedModel, 'update') && resolved.action === AUDIT_ACTION.UPDATE;
 
   return { action: resolved.action, beforeState: shouldIncludeBeforeState ? resolved.before : NO_BEFORE_STATE };
 };
@@ -59,7 +59,7 @@ const resolveConnectOrCreateRow = (before: BeforeState): ResolvedState | undefin
 export const resolveNestedRowState = (
   nestedOp: NestedOperationInfo,
   before: BeforeState,
-  getNestedOperationConfig: GetOperationConfig,
+  shouldFetchBefore: ShouldFetchBefore,
 ): ResolvedState | undefined => {
   switch (nestedOp.operation) {
     case 'update':
@@ -68,7 +68,7 @@ export const resolveNestedRowState = (
       return { action: resolved.action, beforeState: resolved.before };
     }
     case 'upsert':
-      return resolveUpsertRow(nestedOp, before, getNestedOperationConfig);
+      return resolveUpsertRow(nestedOp, before, shouldFetchBefore);
     case 'connectOrCreate':
       return resolveConnectOrCreateRow(before);
     case 'connect':

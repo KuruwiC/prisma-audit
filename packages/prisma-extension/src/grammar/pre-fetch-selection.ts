@@ -9,16 +9,12 @@
 
 import { isNestedBatchKeyword, type NestedOperationInfo } from './nested-operations.js';
 
-export type OperationPreFetchConfig = {
-  fetchBeforeOperation: boolean;
-};
-
 /**
  * Whether the before state of an `update` or a `delete` on `modelName` is read ahead of the
  * write. It gates the nested operations selected here and a top-level update or delete alike,
- * from the `update` / `delete` entry of the nested-operations config.
+ * from the `update` / `delete` entry of the `fetchBefore` option.
  */
-export type GetOperationConfig = (modelName: string, operation: string) => OperationPreFetchConfig;
+export type ShouldFetchBefore = (modelName: string, operation: string) => boolean;
 
 /**
  * Filters nested operations to identify those requiring pre-fetch.
@@ -33,7 +29,7 @@ export type GetOperationConfig = (modelName: string, operation: string) => Opera
  */
 export const filterOperationsToPreFetch = (
   operations: readonly NestedOperationInfo[],
-  getConfig: GetOperationConfig,
+  shouldFetchBefore: ShouldFetchBefore,
 ): NestedOperationInfo[] => {
   return operations.filter((op) => {
     if (op.operation === 'upsert') {
@@ -49,13 +45,11 @@ export const filterOperationsToPreFetch = (
     }
 
     if (op.operation === 'update') {
-      const config = getConfig(op.relatedModel, 'update');
-      return config.fetchBeforeOperation;
+      return shouldFetchBefore(op.relatedModel, 'update');
     }
 
     if (op.operation === 'delete') {
-      const config = getConfig(op.relatedModel, 'delete');
-      return config.fetchBeforeOperation;
+      return shouldFetchBefore(op.relatedModel, 'delete');
     }
 
     return false;

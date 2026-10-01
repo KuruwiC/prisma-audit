@@ -113,7 +113,7 @@ describe('Database Round-Trip Guard', () => {
 
     console.log(`Single-record update: ${statements.length} SQL statements`);
     // 1. BEGIN                  — awaitWrite: true (default) wraps the operation in a transaction
-    // 2. SELECT FROM users      — the before-state fetch (fetchBeforeOperation, default: true)
+    // 2. SELECT FROM users      — the before-state fetch (fetchBefore, default: true)
     // 3. UPDATE users           — the caller's own update
     // 4. INSERT INTO audit_logs — the audit log write
     // 5. COMMIT
@@ -168,7 +168,7 @@ describe('Database Round-Trip Guard', () => {
 
     console.log(`Update with nested create: ${statements.length} SQL statements`);
     // 1. BEGIN                  — awaitWrite: true (default) wraps the operation in a transaction
-    // 2. SELECT FROM users      — the before-state fetch (fetchBeforeOperation, default: true)
+    // 2. SELECT FROM users      — the before-state fetch (fetchBefore, default: true)
     // 3. SELECT id FROM posts   — the snapshot of the posts the user already holds, primary key
     //                             only, so the created post is told apart from its sibling in the
     //                             included relation
@@ -212,10 +212,10 @@ describe('Database Round-Trip Guard', () => {
 
     console.log(`Update with nested updateMany: ${statements.length} SQL statements`);
     // 1. BEGIN                  — awaitWrite: true (default) wraps the operation in a transaction
-    // 2. SELECT FROM users      — the before-state fetch (fetchBeforeOperation, default: true)
+    // 2. SELECT FROM users      — the before-state fetch (fetchBefore, default: true)
     // 3. SELECT FROM posts      — the pre-read of the rows the nested updateMany filter matches
     //                             under this user (the filter plus the back-relation to the
-    //                             parent), whole rows since fetchBeforeOperation defaults to
+    //                             parent), whole rows since fetchBefore defaults to
     //                             true; the updateMany is attributed to these rows
     // 4. SELECT FROM users      — Prisma's own read of the parent row the nested write applies to
     // 5. SELECT id FROM posts   — Prisma's own resolution of the rows the nested updateMany
