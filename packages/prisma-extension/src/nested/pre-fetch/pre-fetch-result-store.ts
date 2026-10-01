@@ -16,14 +16,12 @@ import type { BeforeState } from '@kuruwic/db-audit-core';
 import type { NestedPathPreFetch, NestedPreFetchResults } from '../../grammar/nested-operations.js';
 import type { NestedPreFetchResult, ParentRowIdentity } from '../../grammar/nested-state.js';
 import type { UniqueConstraint } from '../../schema/types.js';
-import { NO_BEFORE_STATE } from '../../utils/before-state.js';
+import { NO_BEFORE_STATE, UNAVAILABLE_BEFORE_STATE } from '../../utils/before-state.js';
 import { matchesUniqueWhere, namesKey, sameUniqueWhere, unwrapCompoundWhere } from '../../utils/compound-where.js';
-import { extractEntityIdentity } from '../../utils/id-generation.js';
+import { extractEntityIdentity, primaryKeyOf } from '../../utils/id-generation.js';
 import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID } from '../../utils/identity-key.js';
 
 type Row = Record<string, unknown>;
-
-const UNAVAILABLE: BeforeState = { kind: 'unavailable' };
 
 const pathStoreOf = (nestedPreFetchResults: NestedPreFetchResults, path: string): NestedPathPreFetch => {
   const existing = nestedPreFetchResults.get(path);
@@ -36,7 +34,7 @@ const pathStoreOf = (nestedPreFetchResults: NestedPreFetchResults, path: string)
 };
 
 const unnamedRowState = (nestedPreFetchResults: NestedPreFetchResults | undefined, path: string): BeforeState =>
-  nestedPreFetchResults?.get(path)?.unread ? UNAVAILABLE : NO_BEFORE_STATE;
+  nestedPreFetchResults?.get(path)?.unread ? UNAVAILABLE_BEFORE_STATE : NO_BEFORE_STATE;
 
 const isNamedByParent = (result: NestedPreFetchResult): boolean => result.name.by === 'parentRow';
 
@@ -152,7 +150,7 @@ export const preFetchedStateUnder = (
  */
 export const primaryKeyNamedBy = (where: Row, pkConstraint: UniqueConstraint): Row | undefined => {
   const unwrapped = unwrapCompoundWhere(where, pkConstraint);
-  const key = Object.fromEntries(pkConstraint.fields.map((field) => [field, unwrapped[field]]));
+  const key = primaryKeyOf(unwrapped, pkConstraint.fields);
   return extractEntityIdentity(key, pkConstraint.fields) === UNRESOLVED_ENTITY_ID ? undefined : key;
 };
 
@@ -177,7 +175,7 @@ export const storeReadResult = (
     return;
   }
   const key = primaryKeyNamedBy(where, pkConstraint);
-  const before = parentsKnown ? NO_BEFORE_STATE : UNAVAILABLE;
+  const before = parentsKnown ? NO_BEFORE_STATE : UNAVAILABLE_BEFORE_STATE;
   storePreFetchResult(
     nestedPreFetchResults,
     path,

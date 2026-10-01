@@ -19,7 +19,7 @@ import type { DMMFField, DMMFModel } from '../../internal-types.js';
 import type { UniqueConstraint } from '../../schema/types.js';
 import { NO_BEFORE_STATE } from '../../utils/before-state.js';
 import { preFetchLog } from '../../utils/debug.js';
-import { extractEntityIdentity } from '../../utils/id-generation.js';
+import { extractEntityIdentity, primaryKeyOf } from '../../utils/id-generation.js';
 import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID } from '../../utils/identity-key.js';
 import type { PreFetchListClient, PreFetchModelClient, PreFetchRecord } from './model-client.js';
 import { parentKeyOf, type ResolveParentRowsInput, resolveParentRows } from './parent-rows.js';
@@ -163,9 +163,6 @@ export interface PreFetchToManyBatchInput extends ToManyScopeInput {
   /** Whether the matched rows are read whole, as their before-state, or by primary key only */
   fetchBefore: boolean;
 }
-
-const primaryKeyOf = (row: PreFetchRecord, pkFields: readonly string[]): PreFetchRecord =>
-  Object.fromEntries(pkFields.map((fieldName) => [fieldName, row[fieldName]]));
 
 /** An identity-only read never replaces what another operation at the path already read */
 const storeMatchedRow = (

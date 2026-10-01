@@ -25,6 +25,7 @@ import {
 } from '../../grammar/nested-operations.js';
 import { upsertBranchOf } from '../../grammar/nested-state.js';
 import type { SchemaMetadata } from '../../schema/types.js';
+import { primaryKeyOf } from '../../utils/id-generation.js';
 import { parentRowIdentityOf, targetsNamedByWhere } from '../pre-fetch/parent-rows.js';
 import { preFetchedStateNamedBy, preFetchedStateUnder } from '../pre-fetch/pre-fetch-result-store.js';
 
@@ -100,12 +101,10 @@ export const insertsRows = (operation: NestedOperationInfo, targets: readonly Ne
   (INSERTING_WHEN_TARGET_MISSING.has(operation.operation) && targets.some((target) => target.before.kind === 'none'));
 
 /** The primary key of `row`, or undefined when the model has none or the row lacks one of its fields */
-const primaryKeyOf = (row: Row, pkFields: readonly string[] | undefined): Row | undefined => {
-  if (!pkFields || pkFields.some((field) => row[field] === undefined || row[field] === null)) {
-    return undefined;
-  }
-  return Object.fromEntries(pkFields.map((field) => [field, row[field]]));
-};
+const completePrimaryKeyOf = (row: Row, pkFields: readonly string[] | undefined): Row | undefined =>
+  !pkFields || pkFields.some((field) => row[field] === undefined || row[field] === null)
+    ? undefined
+    : primaryKeyOf(row, pkFields);
 
 const targetsOf = (
   operation: NestedOperationInfo,
@@ -124,7 +123,7 @@ const targetsOf = (
   }
   return namedTargets(operation.operation, operation.data).map(({ element, where }) => {
     const before = preFetchedStateNamedBy(nestedPreFetchResults, operation.path, where);
-    const key = before.kind === 'captured' ? primaryKeyOf(before.row, pkFields) : undefined;
+    const key = before.kind === 'captured' ? completePrimaryKeyOf(before.row, pkFields) : undefined;
     return {
       locator: key ? { by: 'primaryKey', where: key } : { by: 'uniqueWhere', where },
       operation,

@@ -20,7 +20,7 @@
 import type { SchemaMetadata } from '../../schema/types.js';
 import { matchesUniqueWhere, uniqueWhereAsFilter } from '../../utils/compound-where.js';
 import { nestedLog } from '../../utils/debug.js';
-import { extractEntityIdentity } from '../../utils/id-generation.js';
+import { extractEntityIdentity, primaryKeyOf } from '../../utils/id-generation.js';
 import type { EntityIdentityKey } from '../../utils/identity-key.js';
 import type { PreFetchListClient } from '../pre-fetch/model-client.js';
 import { parentKeyOf } from '../pre-fetch/parent-rows.js';
@@ -56,9 +56,6 @@ export interface RowsNotInResultInput {
   /** The relations the operation writes below the path */
   readonly include: Row | undefined;
 }
-
-const primaryKeyFilter = (row: Row, pkFields: readonly string[]): Row =>
-  Object.fromEntries(pkFields.map((field) => [field, row[field]]));
 
 const readHiddenInsertedKeys = async (
   input: RowsNotInResultInput,
@@ -145,7 +142,7 @@ export const readRowsNotInResult = async (input: RowsNotInResultInput): Promise<
   const fieldNames = new Set(schemaMetadata.getAllFields(relatedModel).map((field) => field.name));
   const filters = [
     ...absentTargets.map((target) => locatorFilter(target, fieldNames)),
-    ...insertedKeys.map((key) => primaryKeyFilter(key, pkFields)),
+    ...insertedKeys.map((key) => primaryKeyOf(key, pkFields)),
   ];
   const include = includeOf(input, path, insertedKeys.length > 0 ? hidden : []);
   const rows = await client.findMany({ where: { OR: filters }, ...(include ? { include } : {}) });

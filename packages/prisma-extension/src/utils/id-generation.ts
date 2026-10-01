@@ -260,6 +260,10 @@ export const extractEntityIdentity = (
   );
 };
 
+/** The fields `pkFields` of `row`, as a key or a filter; a field the row lacks reads `undefined` */
+export const primaryKeyOf = (row: Record<string, unknown>, pkFields: readonly string[]): Record<string, unknown> =>
+  Object.fromEntries(pkFields.map((field) => [field, row[field]]));
+
 export const buildEntityMap = (
   entities: ReadonlyArray<Record<string, unknown>>,
   pkFields: string[],

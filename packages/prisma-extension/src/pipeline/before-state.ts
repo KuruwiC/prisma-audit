@@ -12,7 +12,7 @@ import { upsertBranchOf } from '../grammar/nested-state.js';
 import { AUDIT_ACTION, type AuditAction } from '../grammar/operations.js';
 import type { ShouldFetchBefore } from '../grammar/pre-fetch-selection.js';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../internal-types.js';
-import { beforeStateOf, NO_BEFORE_STATE } from '../utils/before-state.js';
+import { beforeStateOf, NO_BEFORE_STATE, UNAVAILABLE_BEFORE_STATE } from '../utils/before-state.js';
 import { getModelDelegate, hasOperation } from '../utils/model-accessor.js';
 import { toError } from '../utils/to-error.js';
 
@@ -96,6 +96,6 @@ export const fetchBeforeState = async (
   } catch (caughtError) {
     const error = toError(caughtError);
     await deps.onFetchFailure({ phase: 'pre-fetch', modelName, operation: action, params: args, error });
-    return { kind: 'unavailable' };
+    return UNAVAILABLE_BEFORE_STATE;
   }
 };

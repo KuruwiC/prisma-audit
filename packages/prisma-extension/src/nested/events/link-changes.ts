@@ -16,9 +16,10 @@ import type { NestedOperationInfo, NestedPreFetchResults } from '../../grammar/n
 import { namedTargets } from '../../grammar/nested-operations.js';
 import { AUDIT_ACTION } from '../../grammar/operations.js';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../internal-types.js';
+import { UNAVAILABLE_BEFORE_STATE } from '../../utils/before-state.js';
 import { matchesUniqueWhere, uniqueWhereAsFilter } from '../../utils/compound-where.js';
 import { nestedLog } from '../../utils/debug.js';
-import { extractEntityIdentity } from '../../utils/id-generation.js';
+import { extractEntityIdentity, primaryKeyOf } from '../../utils/id-generation.js';
 import type { EntityIdentityKey } from '../../utils/identity-key.js';
 import { attachedFilter, type LinkPathRead, type LinkReads, type LinkWrite } from '../pre-fetch/link-rows.js';
 import { getPreFetchListClient } from '../pre-fetch/model-client.js';
@@ -26,8 +27,6 @@ import { preFetchedStateNamedBy } from '../pre-fetch/pre-fetch-result-store.js';
 import type { CollectedNestedRecord } from './collected-record.js';
 
 type Row = Record<string, unknown>;
-
-const UNAVAILABLE: BeforeState = { kind: 'unavailable' };
 
 /** A row a link write may have re-linked, and how to find it after the write */
 interface LinkCandidate {
@@ -45,7 +44,7 @@ const isAttachedTo = (row: Row, read: LinkPathRead, parentKey: Row | undefined):
 const capturedCandidate = (write: LinkWrite, row: Row, read: LinkPathRead, detached: boolean): LinkCandidate => ({
   write,
   before: { kind: 'captured', row },
-  locator: { by: 'primaryKey', where: Object.fromEntries(read.pkFields.map((field) => [field, row[field]])) },
+  locator: { by: 'primaryKey', where: primaryKeyOf(row, read.pkFields) },
   detached,
 });
 
@@ -73,7 +72,7 @@ const namedCandidates = (
   if (read.failed) {
     return write.named.map((where) => ({
       write,
-      before: UNAVAILABLE,
+      before: UNAVAILABLE_BEFORE_STATE,
       locator: { by: 'uniqueWhere', where },
       detached: detachesNamed,
     }));
