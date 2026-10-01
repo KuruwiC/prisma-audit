@@ -301,6 +301,30 @@ describe('foreign-key changes of related rows', () => {
       ]);
     });
 
+    it.each([
+      ['already attached to the parent', 'p-live', { name: { old: 'l1', new: 'renamed' } }],
+      [
+        'attached to another parent',
+        'p-u2',
+        { name: { old: 'l1', new: 'renamed' }, postId: { old: 'p-u2', new: 'p-live' } },
+      ],
+    ])(
+      'audits a row a connect and an update both name once, with every change, when it is %s',
+      async (_, postId, changes) => {
+        const { basePrisma, prisma, run, recordsOf } = await setup();
+        await basePrisma.label.create({ data: { id: 'l1', name: 'l1', postId } });
+
+        await run(() =>
+          prisma.post.update({
+            where: { id: 'p-live' },
+            data: { labels: { connect: { id: 'l1' }, update: { where: { id: 'l1' }, data: { name: 'renamed' } } } },
+          }),
+        );
+
+        expect(await recordsOf('Label')).toEqual([expect.objectContaining({ id: 'l1', action: 'update', changes })]);
+      },
+    );
+
     it('audits no foreign-key change when the before state of the related model is not read', async () => {
       const { basePrisma, prisma, run, recordsOf } = await setup({ fetchBeforeLabelUpdate: false });
       await basePrisma.label.create({ data: { id: 'l1', name: 'l1', postId: 'p-live' } });

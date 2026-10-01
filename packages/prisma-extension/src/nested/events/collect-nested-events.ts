@@ -10,8 +10,9 @@
  *
  * A to-many relation is returned whole, so a row there is an operation's only when the write set
  * says so: a row a target locates belongs to that operation (by the primary key of the row read
- * ahead of the operation, or else by its unique WHERE; see `NestedRowLocator`); a row that matches
- * no target and did not exist before the operation was inserted: it is recorded for the first
+ * ahead of the operation, or else by its unique WHERE; see `NestedRowLocator`), and a row several
+ * targets locate is recorded once, for the first whose write is audited from the row; a row that
+ * matches no target and did not exist before the operation was inserted: it is recorded for the first
  * operation nested under its parent that inserts rows, and attributed to every such operation,
  * since which of them inserted it cannot be told; any other row is a sibling and yields nothing. The
  * rows the operation wrote at a path that the result does not hold are read once for the path (see
@@ -41,6 +42,7 @@ import type { SchemaMetadata, UniqueConstraint } from '../../schema/types.js';
 import { NO_BEFORE_STATE } from '../../utils/before-state.js';
 import { matchesUniqueWhere } from '../../utils/compound-where.js';
 import { nestedLog } from '../../utils/debug.js';
+import { extractEntityIdentity } from '../../utils/id-generation.js';
 import {
   relationNodeOf,
   relationSelectionOf,
@@ -203,6 +205,40 @@ const isLocatedBy = (row: Row, target: NestedWriteTarget): boolean => matchesUni
 const targetOf = (row: Row, targets: readonly NestedWriteTarget[]): NestedWriteTarget | undefined =>
   targets.find((target) => isLocatedBy(row, target));
 
+/**
+ * The target a row is recorded for. Several writes at a path can name one row (a `connect` next
+ * to an `update` of it); the row is recorded once, for the first of them whose write is audited
+ * from the row's before state and its state after the write, so that one record carries every
+ * change the writes made. A row only linking writes name yields no record here.
+ */
+const recordedTargetOf = (
+  walk: CollectionWalk,
+  row: Row,
+  targets: readonly NestedWriteTarget[],
+): NestedWriteTarget | undefined => {
+  const locating = targets.filter((target) => isLocatedBy(row, target));
+  return (
+    locating.find(
+      (target) => resolveNestedRowState(target.operation, target.before, walk.deps.shouldFetchBefore) !== undefined,
+    ) ?? locating[0]
+  );
+};
+
+/**
+ * The before state of a row a target locates: what the target's own read found, else, when that
+ * read found no row under the parent (a row a `connect` next to the write moves in from another
+ * parent), the row as the read of the rows the path's link writes may re-link found it
+ */
+const locatedBeforeState = (walk: CollectionWalk, path: string, row: Row, before: BeforeState): BeforeState => {
+  const read = walk.input.linkReads.get(path);
+  if (before.kind !== 'none' || !read) {
+    return before;
+  }
+  const identity = extractEntityIdentity(row, read.pkFields);
+  const linked = read.rows.find((candidate) => extractEntityIdentity(candidate, read.pkFields) === identity);
+  return linked ? { kind: 'captured', row: linked } : before;
+};
+
 const attributeToManyRows = (
   walk: CollectionWalk,
   relation: CandidateRelation,
@@ -215,10 +251,10 @@ const attributeToManyRows = (
   const attributed: AttributedRow[] = [];
 
   for (const { row, selection } of rows) {
-    const target = targetOf(row, ownTargets);
+    const target = recordedTargetOf(walk, row, ownTargets);
     if (target) {
       claimed.add(row);
-      record(walk, target.operation, row, target.before);
+      record(walk, target.operation, row, locatedBeforeState(walk, path, row, target.before));
       attributed.push({ row, selection, attribution: { operations: [target.operation], element: target.element } });
     }
   }
