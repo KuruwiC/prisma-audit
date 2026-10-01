@@ -95,10 +95,12 @@ export type UpsertBranch = 'create' | 'update';
 /**
  * Which upsert and connectOrCreate branches {@link detectNestedOperations} scans.
  *
- * - `discovery`: the operation has not run, so which branch of an upsert executes, or whether a
- *   connectOrCreate creates its row, is unknown. Every branch of every upsert and the `create`
- *   data of every connectOrCreate are scanned, so every nested record the operation could write
- *   is found (e.g. to pre-fetch its before-state).
+ * - `discovery`: the operation has not run, so which branch of a nested upsert executes, or
+ *   whether a connectOrCreate creates its row, is unknown. Every branch of every nested upsert and
+ *   the `create` data of every connectOrCreate are scanned, so every nested record the operation
+ *   could write is found (e.g. to pre-fetch its before-state). `topLevelUpsertBranch` is the
+ *   branch the top-level upsert will execute when its row was read ahead of the operation, and
+ *   only that branch's top-level args are scanned; absent, both are.
  * - `executed`: the operation ran, and only the writes of the branches that executed are reported.
  *   `topLevelUpsertBranch` is the branch the top-level upsert executed; it is absent when the
  *   operation is not an upsert, and the top-level `create` / `update` args are then not scanned.
@@ -110,7 +112,7 @@ export type UpsertBranch = 'create' | 'update';
  *   data is scanned only on its `create` branch.
  */
 export type NestedDetectionPass =
-  | { readonly kind: 'discovery' }
+  | { readonly kind: 'discovery'; readonly topLevelUpsertBranch?: UpsertBranch }
   | {
       readonly kind: 'executed';
       readonly topLevelUpsertBranch?: UpsertBranch;
@@ -240,7 +242,7 @@ const detectOperationsIn = (
   data: Record<string, unknown>,
   parent: NestedOperationParent | undefined,
   pass: NestedDetectionPass,
-  isNew: (relationField: RelationField, keyword: NestedOperationKeyword) => boolean = () => true,
+  isNew: (relationField: RelationField, keyword: NestedOperationKeyword, nestedData: unknown) => boolean = () => true,
 ): NestedOperationInfo[] =>
   schemaMetadata.getRelationFields(modelName).flatMap((relationField) => {
     const fieldValue = data[relationField.name];
@@ -249,7 +251,7 @@ const detectOperationsIn = (
     }
     return NESTED_OPERATION_KEYWORDS.flatMap((keyword) => {
       const nestedData = fieldValue[keyword];
-      if (nestedData === undefined || !isNew(relationField, keyword)) {
+      if (nestedData === undefined || !isNew(relationField, keyword, nestedData)) {
         return [];
       }
       return detectOperationAndNested(schemaMetadata, relationField, keyword, nestedData, parent, pass);
@@ -258,8 +260,11 @@ const detectOperationsIn = (
 
 /** @internal Extract data sources from args: `data`, and the top-level upsert branches the pass selects */
 const extractDataSources = (args: Record<string, unknown>, pass: NestedDetectionPass): Record<string, unknown>[] => {
-  const branches =
-    pass.kind === 'discovery' ? ['create', 'update'] : pass.topLevelUpsertBranch ? [pass.topLevelUpsertBranch] : [];
+  const branches = pass.topLevelUpsertBranch
+    ? [pass.topLevelUpsertBranch]
+    : pass.kind === 'discovery'
+      ? ['create', 'update']
+      : [];
   return [args.data, ...branches.map((branch) => args[branch])].filter(isRecord);
 };
 
@@ -269,8 +274,9 @@ const extractDataSources = (args: Record<string, unknown>, pass: NestedDetection
  * Main entry point for detecting all nested write operations (every keyword in `NESTED_OPERATION_KEYWORDS`)
  * at any depth level. Supports deeply nested operations like `postTags.create.tag.connectOrCreate`.
  * Each operation is detected once per element of the data it is nested in, and records that
- * element as its `parent`. A keyword on a top-level relation is detected once even when several
- * data sources (the two branches of a top-level upsert) hold it.
+ * element as its `parent`. Both branches of a top-level upsert are scanned whole, the same keyword
+ * on the same relation included, since either branch may hold writes the other does not; one
+ * value both branches share is detected once.
  *
  * **Upsert branches:** `pass` decides which branches of the top-level upsert and of nested upserts
  * are scanned — all of them in the discovery pass, the executed ones in the executed pass
@@ -308,13 +314,15 @@ export const detectNestedOperations = (
   args: Record<string, unknown>,
   pass: NestedDetectionPass,
 ): NestedOperationInfo[] => {
-  const detected = new Set<string>();
-  const isNew = (relationField: RelationField, keyword: NestedOperationKeyword): boolean => {
+  const detected = new Map<string, Set<unknown>>();
+  const isNew = (relationField: RelationField, keyword: NestedOperationKeyword, nestedData: unknown): boolean => {
     const key = `${relationField.name}:${keyword}`;
-    if (detected.has(key)) {
+    const values = detected.get(key) ?? new Set<unknown>();
+    detected.set(key, values);
+    if (values.has(nestedData)) {
       return false;
     }
-    detected.add(key);
+    values.add(nestedData);
     return true;
   };
 

@@ -705,6 +705,41 @@ describe('detectNestedOperations top-level upsert branches', () => {
   it('scans neither branch in the executed pass of an operation that is not an upsert', () => {
     expect(detectedOperations(executedPass([]))).toEqual([]);
   });
+
+  it.each(['create', 'update'] as const)(
+    'scans only the %s branch in the discovery pass when the top-level branch is known',
+    (branch) => {
+      expect(detectedOperations({ kind: 'discovery', topLevelUpsertBranch: branch })).toEqual([`profile:${branch}`]);
+    },
+  );
+
+  it('scans the same keyword on the same relation in both branches in the discovery pass', () => {
+    const sameKeyword = {
+      where: { id: 'user-1' },
+      create: { email: 'user@example.com', profile: { create: { bio: 'Created bio' } } },
+      update: { profile: { create: { bio: 'Replacing bio' } } },
+    };
+
+    const operations = detectNestedOperations(createSchemaMetadataFromDMMF(Prisma), 'User', sameKeyword, {
+      kind: 'discovery',
+    });
+
+    expect(operations.map((op) => [op.path, op.operation, op.data])).toEqual([
+      ['profile', 'create', { bio: 'Created bio' }],
+      ['profile', 'create', { bio: 'Replacing bio' }],
+    ]);
+  });
+
+  it('detects a value both branches share once', () => {
+    const profile = { create: { bio: 'Shared bio' } };
+    const shared = { where: { id: 'user-1' }, create: { email: 'user@example.com', profile }, update: { profile } };
+
+    expect(
+      detectNestedOperations(createSchemaMetadataFromDMMF(Prisma), 'User', shared, { kind: 'discovery' }).map(
+        (op) => `${op.path}:${op.operation}`,
+      ),
+    ).toEqual(['profile:create']);
+  });
 });
 
 describe('detectNestedOperations inside nested updates', () => {

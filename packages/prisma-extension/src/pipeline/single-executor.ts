@@ -50,17 +50,19 @@ export const createSingleExecutor = (deps: SingleExecutorDependencies): Operatio
       { handle: scope.handle, modelName, action, args },
       { shouldFetchBefore, onFetchFailure: failureSink.notify },
     );
+    const topLevelUpsertBranch = executedUpsertBranch(action, beforeState);
     const { results: nestedPreFetchResults, batchTargets } = await preFetchNestedRecordsBeforeOperation(
       scope.handle,
       modelName,
       args,
       { Prisma, schemaMetadata, shouldFetchBefore, onPreFetchFailure: failureSink.notify },
+      topLevelUpsertBranch,
     );
     const nestedOperations = detectExecutedNestedOperations(
       schemaMetadata,
       modelName,
       args,
-      executedUpsertBranch(action, beforeState),
+      topLevelUpsertBranch,
       nestedPreFetchResults,
     );
     const writeSets = buildNestedWriteSets(schemaMetadata, nestedOperations, nestedPreFetchResults, batchTargets);

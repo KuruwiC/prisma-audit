@@ -204,4 +204,87 @@ describe('top-level upsert nested audit entries', () => {
     const logs = await basePrisma.auditLog.findMany();
     expect(logs.map((log) => `${log.entityType}:${log.action}`)).toEqual([]);
   });
+
+  describe('with the same keyword on the same relation in both branches', () => {
+    const seed = async () => {
+      const seeded = await setUp({ update: true, delete: true });
+      await seeded.basePrisma.user.create({ data: { id: 'u1', email: 'ada@example.com', name: 'Ada' } });
+      await seeded.basePrisma.user.create({ data: { id: 'u2', email: 'ben@example.com', name: 'Ben' } });
+      await seeded.basePrisma.post.create({ data: { id: 'p-u2', title: 'Other', authorId: 'u2' } });
+      /** One `entityId:action` per record of `entityType` (its own aggregate row), sorted */
+      const recordsOf = async (entityType: string) =>
+        (
+          await seeded.basePrisma.auditLog.findMany({
+            where: { entityType, aggregateType: entityType },
+            select: { entityId: true, action: true },
+          })
+        )
+          .map((log) => `${log.entityId}:${log.action}`)
+          .sort();
+      return { ...seeded, recordsOf };
+    };
+
+    it('audits the row the update branch connects as an update, not a create', async () => {
+      const { basePrisma, prisma, asActor, recordsOf } = await seed();
+
+      await asActor(() =>
+        prisma.user.upsert({
+          where: { id: 'u1' },
+          create: {
+            id: 'u1',
+            email: 'never-created@example.com',
+            posts: { connectOrCreate: { where: { id: 'p-none' }, create: { id: 'p-none', title: 'None' } } },
+          },
+          update: { posts: { connectOrCreate: { where: { id: 'p-u2' }, create: { id: 'p-u2', title: 'x' } } } },
+        }),
+      );
+
+      expect(await recordsOf('Post')).toEqual(['p-u2:update']);
+      const moved = await basePrisma.auditLog.findFirst({
+        where: { entityType: 'Post', entityId: 'p-u2', aggregateType: 'Post' },
+        select: { changes: true },
+      });
+      expect(moved?.changes).toMatchObject({ authorId: { old: 'u2', new: 'u1' } });
+    });
+
+    it('audits the rows written below the update branch copy of the relation', async () => {
+      const { prisma, asActor, recordsOf } = await seed();
+
+      await asActor(() =>
+        prisma.user.upsert({
+          where: { id: 'u1' },
+          create: { id: 'u1', email: 'never-created@example.com', posts: { create: { id: 'p-c', title: 'c' } } },
+          update: {
+            posts: {
+              create: { id: 'p-n', title: 'n', comments: { create: { id: 'k-n', content: 'n', authorId: 'u1' } } },
+            },
+          },
+        }),
+      );
+
+      expect(await recordsOf('Post')).toEqual(['p-n:create']);
+      expect(await recordsOf('Comment')).toEqual(['k-n:create']);
+    });
+
+    it('audits the rows written below the create branch copy of the relation', async () => {
+      const { prisma, asActor, recordsOf } = await seed();
+
+      await asActor(() =>
+        prisma.user.upsert({
+          where: { id: 'u-new' },
+          create: {
+            id: 'u-new',
+            email: 'new@example.com',
+            posts: {
+              create: { id: 'p-c', title: 'c', comments: { create: { id: 'k-c', content: 'c', authorId: 'u1' } } },
+            },
+          },
+          update: { posts: { create: { id: 'p-n', title: 'n' } } },
+        }),
+      );
+
+      expect(await recordsOf('Post')).toEqual(['p-c:create']);
+      expect(await recordsOf('Comment')).toEqual(['k-c:create']);
+    });
+  });
 });

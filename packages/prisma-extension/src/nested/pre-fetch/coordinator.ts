@@ -16,6 +16,7 @@ import {
   type NestedOperationInfo,
   type NestedPreFetchResults,
   targetWhereClauses,
+  type UpsertBranch,
 } from '../../grammar/nested-operations.js';
 import {
   filterOperationsToPreFetch,
@@ -171,9 +172,10 @@ const reportNestedPreFetchFailure = async (
 /**
  * Pre-fetches nested records before operation execution.
  *
- * Detects nested operations with the discovery pass, which scans every upsert branch, so the
- * before-state of every nested record the operation could write is captured. `prismaClient`
- * must be the client of the transaction the operation runs in.
+ * Detects nested operations with the discovery pass, which scans every nested upsert branch, so
+ * the before-state of every nested record the operation could write is captured. Of a top-level
+ * upsert only `topLevelUpsertBranch` is scanned, the branch its row read decided; both when it is
+ * absent. `prismaClient` must be the client of the transaction the operation runs in.
  *
  * @returns The before-states read and the rows each batch keyword's filter matched
  * @throws The error of a failed batch keyword filter read
@@ -183,6 +185,7 @@ export const preFetchNestedRecordsBeforeOperation = async (
   modelName: string,
   args: Record<string, unknown>,
   dependencies: PreFetchCoordinatorDependencies,
+  topLevelUpsertBranch?: UpsertBranch,
 ): Promise<NestedPreFetch> => {
   const { Prisma, schemaMetadata, shouldFetchBefore, onPreFetchFailure } = dependencies;
 
@@ -190,7 +193,10 @@ export const preFetchNestedRecordsBeforeOperation = async (
   const batchTargets: NestedBatchTargets = new Map();
   const preFetch: NestedPreFetch = { results: preFetchResults, batchTargets };
 
-  const nestedOperations = detectNestedOperations(schemaMetadata, modelName, args, { kind: 'discovery' });
+  const nestedOperations = detectNestedOperations(schemaMetadata, modelName, args, {
+    kind: 'discovery',
+    topLevelUpsertBranch,
+  });
   preFetchLog('pre-fetch nested records for model=%s operations=%d', modelName, nestedOperations.length);
 
   const operationsToPreFetch = filterOperationsToPreFetch(nestedOperations, shouldFetchBefore);
