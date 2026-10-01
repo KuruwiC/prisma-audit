@@ -226,6 +226,23 @@ describe('foreign-key changes of related rows', () => {
       expect((await recordsOf('Label'))[0]?.after).toMatchObject({ postId: null });
     });
 
+    it.each([
+      ['connect twice', { connect: [{ id: 'l2' }, { id: 'l2' }] }],
+      [
+        'connect and connectOrCreate',
+        { connect: { id: 'l2' }, connectOrCreate: { where: { id: 'l2' }, create: { id: 'l2', name: 'l2' } } },
+      ],
+    ])('audits a row two link writes name once when the read of the rows failed (%s)', async (_, labels) => {
+      const { basePrisma, prisma, run, arm, phases, recordsOf } = await setup({ faultModel: 'Label' });
+      await basePrisma.label.create({ data: { id: 'l2', name: 'l2', postId: 'p-u2' } });
+
+      arm();
+      await run(() => prisma.post.update({ where: { id: 'p-live' }, data: { labels } }));
+
+      expect(phases()).toEqual([['pre-fetch', 'Label', 'connect']]);
+      expect((await recordsOf('Label')).map(({ id, action }) => [id, action])).toEqual([['l2', 'update']]);
+    });
+
     it('audits no foreign-key change when the before state of the related model is not read', async () => {
       const { basePrisma, prisma, run, recordsOf } = await setup({ fetchBeforeLabelUpdate: false });
       await basePrisma.label.create({ data: { id: 'l1', name: 'l1', postId: 'p-live' } });

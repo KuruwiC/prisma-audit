@@ -108,8 +108,9 @@ const candidatesOf = (
 };
 
 /**
- * The candidates at a path, each row once (the first write that names or detaches it), leaving out
- * rows another nested write audits
+ * The candidates at a path, each row read before the write once (the first write that names or
+ * detaches it), leaving out rows another nested write audits. A row named without a before state
+ * is identified only by the read after the write, which de-duplicates it.
  */
 const candidatesAt = (
   read: LinkPathRead,
@@ -177,7 +178,8 @@ export const collectLinkChanges = async (
 ): Promise<Map<NestedOperationInfo, CollectedNestedRecord[]>> => {
   const records = new Map<NestedOperationInfo, CollectedNestedRecord[]>();
   for (const [path, read] of input.linkReads) {
-    const candidates = candidatesAt(read, input.nestedPreFetchResults, input.auditedAt(path));
+    const audited = input.auditedAt(path);
+    const candidates = candidatesAt(read, input.nestedPreFetchResults, audited);
     if (candidates.length === 0) {
       continue;
     }
@@ -191,13 +193,18 @@ export const collectLinkChanges = async (
     );
     const after = await client.findMany({ where: { OR: filters } });
     nestedLog('re-linked rows read: path=%s rows=%d', path, after.length);
+    // Each row once, whichever writes named it, and not a row another nested write audits
+    const recorded = new Set(audited);
     for (const candidate of candidates) {
       const record = recordOf(candidate, after, read);
-      if (record) {
-        const own = records.get(candidate.write.operation) ?? [];
-        records.set(candidate.write.operation, own);
-        own.push(record);
+      const identity = record ? extractEntityIdentity(record.entity, read.pkFields) : undefined;
+      if (!record || identity === undefined || recorded.has(identity)) {
+        continue;
       }
+      recorded.add(identity);
+      const own = records.get(candidate.write.operation) ?? [];
+      records.set(candidate.write.operation, own);
+      own.push(record);
     }
   }
   return records;
