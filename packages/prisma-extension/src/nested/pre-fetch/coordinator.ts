@@ -607,8 +607,8 @@ const handleOneToManyRelation = async (
   await preFetchOneToManyRelation({ ...scopeInput, operation: relation.nestedOp.operation, relatedModelClient });
 };
 
-/** The operation whose `fetchBefore` setting decides whether a batch keyword reads whole rows */
-const BATCH_CONFIG_OPERATION: Record<NestedBatchKeyword, 'update' | 'delete'> = {
+/** The `fetchBefore` operation (`update` or `delete`) whose setting decides whether a batch keyword reads whole rows */
+const FETCH_BEFORE_OPERATION_OF_BATCH_KEYWORD: Record<NestedBatchKeyword, 'update' | 'delete'> = {
   updateMany: 'update',
   deleteMany: 'delete',
 };
@@ -650,7 +650,10 @@ const handleToManyBatch = async (
     return;
   }
 
-  const fetchBefore = context.shouldFetchBefore(nestedOp.relatedModel, BATCH_CONFIG_OPERATION[keyword]);
+  const fetchBefore = context.shouldFetchBefore(
+    nestedOp.relatedModel,
+    FETCH_BEFORE_OPERATION_OF_BATCH_KEYWORD[keyword],
+  );
   const matched = await preFetchToManyBatch({
     ...scopeInput,
     operation: keyword,

@@ -140,7 +140,7 @@ const topLevelEvent = (fields: Row) => [
 
 describe('createSingleExecutor', () => {
   describe('before state', () => {
-    it('requests no before state for a create and consults no nested-operation config', async () => {
+    it('requests no before state for a create and does not consult fetchBefore', async () => {
       const findUnique = vi.fn();
       const client = clientWith({ user: { findUnique, create: vi.fn(async () => user) } });
       const { executor, produceRecords, shouldFetchBefore } = executorWith();

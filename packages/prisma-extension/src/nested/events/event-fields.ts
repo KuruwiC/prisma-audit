@@ -25,7 +25,7 @@ export const identityOf = (row: Row, pkFields: readonly string[] | undefined, or
     nestedLog('model=%s has no primary key; the identity of the row at path=%s is unknown', origin.model, origin.path);
     return UNKNOWN_IDENTITY;
   }
-  const identity = extractEntityIdentity(row, [...pkFields]);
+  const identity = extractEntityIdentity(row, pkFields);
   if (identity === UNRESOLVED_ENTITY_ID) {
     nestedLog(
       'model=%s row at path=%s lacks a primary-key field (a select that omits one?); its identity is unknown',

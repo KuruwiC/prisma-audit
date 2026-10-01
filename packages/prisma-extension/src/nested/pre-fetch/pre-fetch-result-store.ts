@@ -38,7 +38,8 @@ const unnamedRowState = (nestedPreFetchResults: NestedPreFetchResults | undefine
 
 const isNamedByParent = (result: NestedPreFetchResult): boolean => result.name.by === 'parentRow';
 
-const isReadBy = (result: NestedPreFetchResult, where: Row): boolean =>
+/** Whether `result` is the result of a read of a row of unknown identity that named it by exactly the unique WHERE `where` */
+const isUnidentifiedRowNamedBy = (result: NestedPreFetchResult, where: Row): boolean =>
   result.identity === UNRESOLVED_ENTITY_ID &&
   result.name.by === 'uniqueWhere' &&
   sameUniqueWhere(result.name.where, where);
@@ -52,7 +53,7 @@ const namesSameRow = (stored: NestedPreFetchResult, result: NestedPreFetchResult
   if (stored.identity !== UNRESOLVED_ENTITY_ID) {
     return stored.identity === result.identity;
   }
-  return result.name.by === 'uniqueWhere' && isReadBy(stored, result.name.where);
+  return result.name.by === 'uniqueWhere' && isUnidentifiedRowNamedBy(stored, result.name.where);
 };
 
 /**
@@ -100,7 +101,7 @@ const isResultNamedBy = (result: NestedPreFetchResult, where: Row): boolean => {
   if (isNamedByParent(result)) {
     return false;
   }
-  return (result.key !== undefined && namesKey(result.key, where)) || isReadBy(result, where);
+  return (result.key !== undefined && namesKey(result.key, where)) || isUnidentifiedRowNamedBy(result, where);
 };
 
 export const preFetchedResultNamedBy = (
