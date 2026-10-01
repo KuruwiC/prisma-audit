@@ -24,6 +24,7 @@ import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID } from '../../utils/identi
 import type { PreFetchListClient, PreFetchModelClient, PreFetchRecord } from './model-client.js';
 import { parentKeyOf, type ResolveParentRowsInput, resolveParentRows } from './parent-rows.js';
 import { preFetchedResultFor, storePreFetchResult, storeReadResult } from './pre-fetch-result-store.js';
+import { findBackRelationField } from './relation-link.js';
 
 /** A related row belongs to the parent row when `backField` matches the parent's `parentFields`. */
 export interface ToManyRelationScope {
@@ -56,12 +57,8 @@ export const resolveToManyRelationScope = (
     throw new Error(`[@prisma-audit] Relation field "${field.name}" has no relation name in the DMMF`);
   }
 
-  const backField = relatedModel?.fields.find(
-    (candidate) =>
-      candidate.kind === 'object' &&
-      candidate.relationName === relationName &&
-      !(relatedModel.name === parentModelName && candidate.name === field.name),
-  );
+  const backField =
+    relatedModel && findBackRelationField(field, parentModelName, relatedModel.name, relatedModel.fields);
   if (!backField) {
     throw new Error(`[@prisma-audit] Relation "${relationName}" has no back-relation field on model "${field.type}"`);
   }

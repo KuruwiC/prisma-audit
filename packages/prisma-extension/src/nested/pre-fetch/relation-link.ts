@@ -30,7 +30,23 @@ export type RelationLink =
   | { readonly side: 'parent' }
   | { readonly side: 'joinTable' };
 
-/** On a self-relation `relatedFields` include `field` itself, which is not its own back-relation field */
+/**
+ * The field of the related model that points back along `field`'s relation. On a self-relation
+ * `relatedFields` include `field` itself, which is not its own back-relation field.
+ */
+export const findBackRelationField = (
+  field: DMMFField,
+  parentModelName: string,
+  relatedModelName: string,
+  relatedFields: readonly DMMFField[],
+): DMMFField | undefined =>
+  relatedFields.find(
+    (candidate) =>
+      candidate.kind === 'object' &&
+      candidate.relationName === field.relationName &&
+      !(relatedModelName === parentModelName && candidate.name === field.name),
+  );
+
 export const resolveRelationLink = (
   field: DMMFField,
   parentModelName: string,
@@ -40,12 +56,7 @@ export const resolveRelationLink = (
   if (field.relationFromFields && field.relationFromFields.length > 0) {
     return { side: 'parent' };
   }
-  const backField = relatedFields.find(
-    (candidate) =>
-      candidate.kind === 'object' &&
-      candidate.relationName === field.relationName &&
-      !(relatedModelName === parentModelName && candidate.name === field.name),
-  );
+  const backField = findBackRelationField(field, parentModelName, relatedModelName, relatedFields);
   if (!backField) {
     return undefined;
   }
