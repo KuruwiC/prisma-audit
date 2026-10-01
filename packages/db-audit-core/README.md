@@ -57,7 +57,7 @@ dispatch(records, atomic, { inTransaction })   -> WritePlan
   required for it.
 - **`dispatch`** wraps the records in a `WritePlan`: `immediate` when atomic, `after-commit` when not
   atomic inside a transaction, `detached` otherwise.
-- **`WriteExecutor<THandle>`** is the adapter's `write(handle, records)`, which persists records
+- **`WriteExecutor<TDbHandle>`** is the adapter's `write(handle, records)`, which persists records
   with the database's API to the audit log the adapter constructed it for. **`WriteFn`** is the user hook that runs in place of the default write:
   it receives the records and a `WriteContext` with the audit context, the database `handle` the
   write runs on (the transaction's for an immediate plan, one outside any transaction for an

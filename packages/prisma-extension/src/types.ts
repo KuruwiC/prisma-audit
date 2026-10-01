@@ -206,9 +206,10 @@ export interface PrismaAuditExtensionOptions<TModelName extends string = string,
    * Audit-failure observation and policy. See {@link ErrorHandlingConfig}. What each phase
    * means for a Prisma operation:
    *
-   * - `pre-fetch`: fetching the before-state (for update / delete / upsert) failed. The
-   *   caller's operation continues. An `update` or `delete` entry, top-level or nested, is
-   *   recorded with `beforeUnavailable: true` and a null `before` and `changes`. An `upsert`
+   * - `pre-fetch`: fetching the before-state (for update / delete / upsert), or reading the rows a
+   *   nested `connect`, `set` or `disconnect` may re-link, failed. The caller's operation
+   *   continues. An `update` or `delete` entry, top-level or nested, is recorded with
+   *   `beforeUnavailable: true` and a null `before` and `changes`. An `upsert`
    *   entry, top-level or nested, whose create-vs-update action depends on the before-state, is
    *   skipped with the writes of its branches, and so is a nested `connectOrCreate` entry. A
    *   nested delete entry the failed fetch leaves without a primary key (a to-one delete, or a
@@ -219,14 +220,18 @@ export interface PrismaAuditExtensionOptions<TModelName extends string = string,
    *   relation's row, or one named by another unique field), the nested entries are treated as
    *   if their own fetch had failed, and a nested create or `updateMany` / `deleteMany` there
    *   fails the operation under `diff-generation`, since the rows it writes cannot be identified.
+   *   When the read of the re-linked rows fails, a row the write names is still recorded, with
+   *   `beforeUnavailable: true` (a `disconnect` only when it left the row unlinked); a row unlinked
+   *   without being named is not recorded.
    * - `log-write`: persisting the audit log entry itself failed. The only phase whose outcome
    *   `writeFailurePolicy` decides; with `awaitWrite: false` the write is queued or detached and
    *   `'throw'` logs instead.
    * - `diff-generation`: other audit-support work around the caller's operation failed —
    *   building the entry (enrichment, redaction), reading the primary keys a to-many relation
    *   holds before a nested create under an existing row or the rows a nested `updateMany` /
-   *   `deleteMany` filter matches (the caller's write is then never attempted), re-reading a
-   *   nested row the operation updated that its result did not return, or, for batch
+   *   `deleteMany` filter matches (the caller's write is then never attempted), reading again,
+   *   after the write, a nested row the operation updated or inserted that its result did not
+   *   return, or a row a nested `connect`, `set` or `disconnect` re-linked, or, for batch
    *   operations, fetching the affected rows before or after the mutation. It always propagates
    *   to the caller as a thrown error, regardless of `writeFailurePolicy`.
    * - `row-identification`: a nested delete's primary key could not be resolved, from the

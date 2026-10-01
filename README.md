@@ -512,7 +512,7 @@ Nested creates, updates, and deletes are automatically tracked at all depths:
 - **connectOrCreate**: Smart detection — logs a create when creating a new record, and connects like `connect` otherwise
 - **connect / set / disconnect**: an `update` log of each related record whose foreign key the write changed, with the old and new value in `changes` (join table log if defined in mapping)
 
-Nested rows are audited from the operation's own result: the relations a nested write touches are added to its `include` (or `select`) and removed again before the result is returned. A nested row is read again only when your own `include` / `select` on the written relation leaves out a row a nested write updated or inserted (one read per relation path); the read runs on the same client as the operation.
+Nested rows are audited from the operation's own result: the relations a nested write touches are added to its `include` (or `select`) and removed again before the result is returned. A nested row is read again after the write in two cases, on the same client as the operation: your own `include` / `select` on the written relation leaves out a row a nested write updated or inserted (one read per relation path, preceded by a primary-key-only read of the relation when an inserted row may be hidden by a filter on it, so up to two), and a `connect`, `set` or `disconnect` may have re-linked rows (one read per relation path, after a read of the same rows before the write; both only when `fetchBefore.update` is on for the related model).
 
 ## Compatibility
 
@@ -527,7 +527,7 @@ Nested rows are audited from the operation's own result: the relations a nested 
 - **Edge runtimes**: No AsyncLocalStorage support (Vercel Edge, Cloudflare Workers)
 - **Raw queries**: `$executeRaw` / `$queryRaw` are not intercepted
 - **Many-to-many with multiple aggregates**: Not currently supported
-- **Nested re-read consistency**: An existing row a nested write updated that your own `include` / `select` leaves out is re-read after the operation on the same client. For a non-atomic write (`awaitWrite: false`, or `awaitWriteIf` returning `false`) outside `$transaction`, that re-read is a separate query and may observe concurrent changes
+- **Nested re-read consistency**: A row a nested write updated or inserted that your own `include` / `select` leaves out, and a row a nested `connect`, `set` or `disconnect` re-linked, is read again after the operation on the same client. For a non-atomic write (`awaitWrite: false`, or `awaitWriteIf` returning `false`) outside `$transaction`, that re-read is a separate query and may observe concurrent changes
 
 ## Development
 
