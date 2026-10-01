@@ -70,3 +70,26 @@ export const namesKey = (key: Record<string, unknown>, whereClause: Record<strin
     return named !== undefined && isComparableValue(named) && valuesEqual(value, named);
   });
 };
+
+const sameWhereValue = (left: unknown, right: unknown): boolean => {
+  if (isRecord(left) && isRecord(right)) {
+    return sameUniqueWhere(left, right);
+  }
+  if (isRecord(left) || isRecord(right) || Array.isArray(left) || Array.isArray(right)) {
+    return false;
+  }
+  return valuesEqual(left, right);
+};
+
+/**
+ * Whether two unique WHEREs are the same WHERE: the same fields, each compared to the same value
+ * (a compound-unique wrapper or a filter object compared field by field). Two WHEREs that name
+ * the same row by different unique fields are not the same WHERE.
+ */
+export const sameUniqueWhere = (left: Record<string, unknown>, right: Record<string, unknown>): boolean => {
+  const leftKeys = Object.keys(left);
+  return (
+    leftKeys.length === Object.keys(right).length &&
+    leftKeys.every((key) => key in right && sameWhereValue(left[key], right[key]))
+  );
+};

@@ -9,9 +9,10 @@
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
+import type { AuditErrorObserver } from '@kuruwic/prisma-audit';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { cleanDatabase, getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
 
 const testActor: AuditContext = {
@@ -32,16 +33,36 @@ describe('nested rows attributed through their parent row', () => {
     }
   });
 
-  const setup = async (options: { readonly fetchBeforeUpdate?: boolean } = {}) => {
+  /** The read made on the audit's behalf that fails once after `arm()` */
+  type FaultTarget = { readonly model: 'PostTag' | 'Tag'; readonly operation: 'findUnique' | 'findFirst' };
+
+  const setup = async (options: { readonly fetchBeforeUpdate?: boolean; readonly fault?: FaultTarget } = {}) => {
     const basePrisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
+    let armed = false;
+    const faultyPrisma = basePrisma.$extends({
+      name: 'fault-injection',
+      query: {
+        $allModels: {
+          async $allOperations({ model, operation, args, query }) {
+            if (armed && model === options.fault?.model && operation === options.fault.operation) {
+              armed = false;
+              throw new Error(`simulated ${model}.${operation} failure`);
+            }
+            return query(args);
+          },
+        },
+      },
+    });
+    const observer = vi.fn<AuditErrorObserver>();
     const provider = createAsyncLocalStorageProvider();
-    const prisma = createAuditClient(basePrisma, {
+    const prisma = createAuditClient(faultyPrisma, {
       Prisma,
       provider,
       aggregateMapping: testAggregateMapping,
       diffing: { excludeFields: ['createdAt', 'updatedAt'] },
       security: { redact: { fields: [] } },
       fetchBefore: { update: options.fetchBeforeUpdate ?? true },
+      errorHandling: { observer },
     });
     disconnects.push(async () => {
       await prisma.$disconnect();
@@ -50,20 +71,24 @@ describe('nested rows attributed through their parent row', () => {
     await cleanDatabase(basePrisma);
 
     const run = <T>(operation: () => Promise<T>) => provider.runAsync(testActor, operation);
+    const arm = () => {
+      armed = true;
+    };
+    const phases = () => observer.mock.calls.map(([context]) => [context.phase, context.modelName, context.operation]);
     /** One `entityId:action` per record of `entityType` (its own aggregate row), sorted */
     const recordsOf = async (entityType: string) =>
       (
         await basePrisma.auditLog.findMany({
           where: { entityType, aggregateType: entityType },
-          select: { entityId: true, action: true },
+          select: { entityId: true, action: true, beforeUnavailable: true },
         })
       )
-        .map((log) => `${log.entityId}:${log.action}`)
+        .map((log) => `${log.entityId}:${log.action}${log.beforeUnavailable ? ':beforeUnavailable' : ''}`)
         .sort();
     const author = await basePrisma.user.create({ data: { id: 'author', email: 'author@example.com', name: 'A' } });
     const post = await basePrisma.post.create({ data: { id: 'post', title: 'Post', authorId: author.id } });
 
-    return { basePrisma, prisma, run, recordsOf, author, post };
+    return { basePrisma, prisma, run, arm, phases, recordsOf, author, post };
   };
 
   it('does not audit the related row of a sibling the call did not write', async () => {
@@ -240,5 +265,66 @@ describe('nested rows attributed through their parent row', () => {
 
     expect(await basePrisma.postBookmarkNote.findMany({ select: { id: true } })).toEqual([{ id: 'note-author' }]);
     expect(await recordsOf('PostBookmarkNote')).toEqual(['note-author:update', 'note-other:delete']);
+  });
+
+  it('keeps the read of a row named by a unique field next to a failed read at the same path', async () => {
+    const { basePrisma, prisma, run, arm, phases, recordsOf, post } = await setup({
+      fault: { model: 'PostTag', operation: 'findUnique' },
+    });
+    await basePrisma.tag.create({ data: { id: 'tag-1', name: 't1' } });
+    await basePrisma.tag.create({ data: { id: 'tag-2', name: 't2' } });
+
+    arm();
+    await run(() =>
+      prisma.post.update({
+        where: { id: post.id },
+        data: {
+          postTags: {
+            connectOrCreate: {
+              where: { postId_tagId: { postId: post.id, tagId: 'tag-1' } },
+              create: { id: 'pt-1', tagId: 'tag-1' },
+            },
+            upsert: {
+              where: { postId_tagId: { postId: post.id, tagId: 'tag-2' } },
+              create: { id: 'pt-2', tagId: 'tag-2' },
+              update: {},
+            },
+          },
+        },
+      }),
+    );
+
+    expect(
+      (await basePrisma.postTag.findMany({ select: { id: true }, orderBy: { id: 'asc' } })).map((row) => row.id),
+    ).toEqual(['pt-1', 'pt-2']);
+    expect(phases()).toEqual([['pre-fetch', 'PostTag', 'connectOrCreate']]);
+    expect(await recordsOf('PostTag')).toEqual(['pt-2:create']);
+  });
+
+  it('keeps the read of a row named by a unique field at a to-one path whose other read failed', async () => {
+    const { basePrisma, prisma, run, arm, phases, recordsOf, post } = await setup({
+      fault: { model: 'Tag', operation: 'findFirst' },
+    });
+    await basePrisma.tag.create({ data: { id: 'tag-a', name: 'a' } });
+    await basePrisma.postTag.create({ data: { id: 'pt-a', postId: post.id, tagId: 'tag-a' } });
+
+    arm();
+    await run(() =>
+      prisma.post.update({
+        where: { id: post.id },
+        data: {
+          postTags: {
+            create: {
+              id: 'pt-new',
+              tag: { connectOrCreate: { where: { name: 'fresh' }, create: { id: 'tag-fresh', name: 'fresh' } } },
+            },
+            update: { where: { id: 'pt-a' }, data: { tag: { update: { name: 'a2' } } } },
+          },
+        },
+      }),
+    );
+
+    expect(phases()).toEqual([['pre-fetch', 'Tag', 'update']]);
+    expect(await recordsOf('Tag')).toEqual(['tag-a:update:beforeUnavailable', 'tag-fresh:create']);
   });
 });

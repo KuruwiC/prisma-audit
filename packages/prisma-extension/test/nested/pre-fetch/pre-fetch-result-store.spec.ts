@@ -109,7 +109,7 @@ describe('storeUnreadRows', () => {
     });
   });
 
-  it('marks the whole path when a failed read names a row by another unique field or targets a to-one row', () => {
+  it('keeps a row a failed read names by another unique field apart, and marks the whole path for a to-one row', () => {
     const store: NestedPreFetchResults = new Map();
     const c1 = { id: 'c1', slug: 'first' };
     storeReadResult(store, 'comments', { id: 'c1' }, c1, pk);
@@ -117,16 +117,34 @@ describe('storeUnreadRows', () => {
     storeUnreadRows(store, 'profile', undefined, pk);
 
     expect(preFetchedStateNamedBy(store, 'comments', { id: 'c1' })).toEqual({ kind: 'captured', row: c1 });
-    expect(preFetchedStateNamedBy(store, 'comments', { id: 'c2' })).toEqual({ kind: 'unavailable' });
+    expect(preFetchedStateNamedBy(store, 'comments', { slug: 'second' })).toEqual({ kind: 'unavailable' });
+    expect(preFetchedStateNamedBy(store, 'comments', { id: 'c2' })).toEqual({ kind: 'none' });
+    expect(store.get('comments')?.unread).toBe(false);
     expect(preFetchedStateUnder(store, 'profile', TOP_LEVEL_ROW)).toEqual({ kind: 'unavailable' });
   });
 
-  it('keeps the whole-path mark when a later read finds no row of unknown identity', () => {
+  it('keeps the read of a row named by another unique field at a path marked unread', () => {
     const store: NestedPreFetchResults = new Map();
     storeUnreadRows(store, 'comments', undefined, pk);
     storeReadResult(store, 'comments', { slug: 'other' }, null, pk);
 
-    expect(store.get('comments')).toEqual({ results: [], unread: true });
+    expect(preFetchedStateNamedBy(store, 'comments', { slug: 'other' })).toEqual({ kind: 'none' });
+    expect(preFetchedStateNamedBy(store, 'comments', { slug: 'third' })).toEqual({ kind: 'unavailable' });
+    expect(store.get('comments')?.unread).toBe(true);
+  });
+
+  it('replaces the read of a row named by another unique field with a failed read by the same WHERE', () => {
+    const store: NestedPreFetchResults = new Map();
+    storeReadResult(store, 'comments', { slug: 'other' }, null, pk);
+    storeUnreadRows(store, 'comments', [{ slug: 'other' }], pk);
+
+    expect(store.get('comments')?.results).toEqual([
+      {
+        before: { kind: 'unavailable' },
+        identity: UNRESOLVED_ENTITY_ID,
+        name: { by: 'uniqueWhere', where: { slug: 'other' } },
+      },
+    ]);
   });
 });
 

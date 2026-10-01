@@ -4,11 +4,12 @@
  * its row by the name it uses itself: the unique WHERE of a to-many target or a connectOrCreate,
  * or the parent row of a to-one relation's related row.
  *
- * A read that fails leaves its rows unknown. A row the failed operation names by its primary key
- * is stored as `unavailable` under that key, so another operation at the path keeps what its own
- * read found, and the rows nested below it are still read under that key. A row the failed read
- * cannot name on its own (a to-one relation's row, or one named by another unique field) marks
- * the path unread, which every row of the path without a result of its own reads as.
+ * A read that fails leaves its rows unknown. A row the failed operation names by unique WHERE is
+ * stored as `unavailable` under that WHERE (and the primary key, when the WHERE names it), so
+ * another operation at the path keeps what its own read found, and the rows nested below it are
+ * still read under that key. A read that names no row on its own (the related rows of a to-one
+ * relation under their parent rows) marks the path unread, which every row of the path without a
+ * result of its own reads as.
  */
 
 import type { BeforeState } from '@kuruwic/db-audit-core';
@@ -16,7 +17,7 @@ import type { NestedPathPreFetch, NestedPreFetchResults } from '../../grammar/ne
 import type { NestedPreFetchResult, ParentRowIdentity } from '../../grammar/nested-state.js';
 import type { UniqueConstraint } from '../../schema/types.js';
 import { NO_BEFORE_STATE } from '../../utils/before-state.js';
-import { matchesUniqueWhere, namesKey, unwrapCompoundWhere } from '../../utils/compound-where.js';
+import { matchesUniqueWhere, namesKey, sameUniqueWhere, unwrapCompoundWhere } from '../../utils/compound-where.js';
 import { extractEntityIdentity } from '../../utils/id-generation.js';
 import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID } from '../../utils/identity-key.js';
 
@@ -40,6 +41,12 @@ const unnamedRowState = (nestedPreFetchResults: NestedPreFetchResults | undefine
 
 const isNamedByParent = (result: NestedPreFetchResult): boolean => result.name.by === 'parentRow';
 
+/** Whether a result of unknown identity is the one the unique WHERE `where` was read by */
+const isReadBy = (result: NestedPreFetchResult, where: Row): boolean =>
+  result.identity === UNRESOLVED_ENTITY_ID &&
+  result.name.by === 'uniqueWhere' &&
+  sameUniqueWhere(result.name.where, where);
+
 /** Whether two results are for the same row and the later one replaces the earlier */
 const namesSameRow = (stored: NestedPreFetchResult, result: NestedPreFetchResult): boolean => {
   if (stored.name.by === 'parentRow' || result.name.by === 'parentRow') {
@@ -47,23 +54,22 @@ const namesSameRow = (stored: NestedPreFetchResult, result: NestedPreFetchResult
       stored.name.by === 'parentRow' && result.name.by === 'parentRow' && stored.name.parent === result.name.parent
     );
   }
-  return stored.identity !== UNRESOLVED_ENTITY_ID && stored.identity === result.identity;
+  if (stored.identity !== UNRESOLVED_ENTITY_ID) {
+    return stored.identity === result.identity;
+  }
+  return result.name.by === 'uniqueWhere' && isReadBy(stored, result.name.where);
 };
 
 /**
  * Stores `result` under `path`, replacing the result stored for the same row: the same parent row
- * for a to-one relation's row, else the same identity. A row of unknown identity that a unique
- * WHERE names is stored only when it could not be read: a missing row adds nothing to the default
- * (none).
+ * for a to-one relation's row, else the same identity, else, for a row of unknown identity, the
+ * same unique WHERE.
  */
 export const storePreFetchResult = (
   nestedPreFetchResults: NestedPreFetchResults,
   path: string,
   result: NestedPreFetchResult,
 ): void => {
-  if (!isNamedByParent(result) && result.identity === UNRESOLVED_ENTITY_ID && result.before.kind === 'none') {
-    return;
-  }
   const { results } = pathStoreOf(nestedPreFetchResults, path);
   const index = results.findIndex((stored) => namesSameRow(stored, result));
   if (index === -1) {
@@ -90,12 +96,18 @@ export const preFetchedResultFor = (
         ?.get(path)
         ?.results.find((result) => !isNamedByParent(result) && result.identity === identity);
 
-/** Whether `result` is the row `where` names: its captured row matches the WHERE, or the WHERE names its primary key */
+/**
+ * Whether `result` is the row `where` names: its captured row matches the WHERE, the WHERE names
+ * its primary key, or, for a row of unknown identity, it was read by that same WHERE
+ */
 const isResultNamedBy = (result: NestedPreFetchResult, where: Row): boolean => {
   if (result.before.kind === 'captured' && matchesUniqueWhere(result.before.row, where)) {
     return true;
   }
-  return !isNamedByParent(result) && result.key !== undefined && namesKey(result.key, where);
+  if (isNamedByParent(result)) {
+    return false;
+  }
+  return (result.key !== undefined && namesKey(result.key, where)) || isReadBy(result, where);
 };
 
 /** The result stored at `path` for the row the unique WHERE `where` names */
@@ -152,10 +164,10 @@ export const primaryKeyNamedBy = (where: Row, pkConstraint: UniqueConstraint): R
 };
 
 /**
- * Stores what a read of the row `where` names found: the row, or none with the primary key the
- * WHERE names. `parentsKnown` false means the read ran under only some of the parent rows the row
- * may belong to, so a row it did not find is unavailable rather than missing; such a row that the
- * WHERE names by another unique field cannot be stored on its own and marks the path unread.
+ * Stores what a read of the row `where` names found: the row, or none, under the WHERE and the
+ * primary key it names (when it names one). `parentsKnown` false means the read ran under only
+ * some of the parent rows the row may belong to, so a row it did not find is unavailable rather
+ * than missing.
  */
 export const storeReadResult = (
   nestedPreFetchResults: NestedPreFetchResults,
@@ -173,24 +185,19 @@ export const storeReadResult = (
   }
   const key = primaryKeyNamedBy(where, pkConstraint);
   const before = parentsKnown ? NO_BEFORE_STATE : UNAVAILABLE;
-  if (!key) {
-    if (!parentsKnown) {
-      markPathUnread(nestedPreFetchResults, path);
-    }
-    return;
-  }
-  storePreFetchResult(nestedPreFetchResults, path, {
-    before,
-    identity: extractEntityIdentity(key, pkConstraint.fields),
-    name,
-    key,
-  });
+  storePreFetchResult(
+    nestedPreFetchResults,
+    path,
+    key
+      ? { before, identity: extractEntityIdentity(key, pkConstraint.fields), name, key }
+      : { before, identity: UNRESOLVED_ENTITY_ID, name },
+  );
 };
 
 /**
  * Records the rows a failed read of `path` left unknown: each row a `where` names that no read
- * captured, under the primary key it names, and the path as a whole when there is no `where`
- * (a to-one relation) or one names no primary key.
+ * captured, under that WHERE and the primary key it names, and the path as a whole when there is
+ * no `where` (the related rows of a to-one relation) or the model has no primary key.
  */
 export const storeUnreadRows = (
   nestedPreFetchResults: NestedPreFetchResults,
