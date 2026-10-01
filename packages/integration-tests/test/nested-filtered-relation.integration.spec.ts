@@ -65,7 +65,7 @@ describe('nested rows a relation filter leaves out of the result', () => {
           select: { after: true },
         })
       )?.after;
-    await basePrisma.user.create({ data: { id: 'u1', email: 'u1@example.com', name: 'U1' } });
+    await basePrisma.user.create({ data: { id: 'u1', email: 'ada@example.com', name: 'Ada' } });
     await basePrisma.post.create({ data: { id: 'p-live', title: 'Live', published: true, authorId: 'u1' } });
     await basePrisma.post.create({ data: { id: 'p-draft', title: 'Draft', published: false, authorId: 'u1' } });
 

@@ -101,8 +101,8 @@ describe('foreign-key changes of related rows', () => {
         beforeUnavailable: log.beforeUnavailable,
       }));
 
-    await basePrisma.user.create({ data: { id: 'u1', email: 'u1@example.com', name: 'U1' } });
-    await basePrisma.user.create({ data: { id: 'u2', email: 'u2@example.com', name: 'U2' } });
+    await basePrisma.user.create({ data: { id: 'u1', email: 'ada@example.com', name: 'Ada' } });
+    await basePrisma.user.create({ data: { id: 'u2', email: 'ben@example.com', name: 'Ben' } });
     await basePrisma.post.create({ data: { id: 'p-live', title: 'Live', published: true, authorId: 'u1' } });
     await basePrisma.post.create({ data: { id: 'p-draft', title: 'Draft', authorId: 'u1' } });
     await basePrisma.post.create({ data: { id: 'p-u2', title: 'Other', authorId: 'u2' } });
