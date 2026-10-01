@@ -283,7 +283,7 @@ createAuditClient(basePrisma, {
     ],
   },
 
-  // Nested operation behavior
+  // Before-state reads (defaults shown)
   fetchBefore: {
     update: true,
     delete: true,

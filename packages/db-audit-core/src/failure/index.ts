@@ -23,8 +23,7 @@ import { createErrorHandler, type ErrorStrategy } from '../utils/error-handler.j
  * - `diff-generation`: other work that builds the records failed. Not policy-gated; the adapter
  *   decides whether the caller's operation fails.
  * - `row-identification`: the adapter itself could not identify a row the operation wrote (no
- *   user callback is involved). Observer only; the row's record is skipped rather than written
- *   with a partial or fabricated identity.
+ *   user callback is involved). Observer only; the row's record is skipped.
  * - `id-resolver-call`: a user-supplied id resolver (the entity's `idResolver` or a `to()` root's
  *   resolver) threw, returned an id that cannot be normalized to a string, or, for a batch
  *   resolver, returned a different number of ids than rows. Observer only; the entity's
