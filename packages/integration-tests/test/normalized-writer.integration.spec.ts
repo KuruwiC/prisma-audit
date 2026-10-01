@@ -466,28 +466,34 @@ describe('Normalized Writer Helpers', () => {
       );
     };
 
+    /** One row per aggregate the post belongs to (the post and its author), as `[action, beforeUnavailable, aggregate type]` */
+    const eventsOfPost = async () =>
+      (await context.basePrisma.auditEvent.findMany({ include: { aggregate: true } }))
+        .map((event) => [event.action, event.beforeUnavailable, event.aggregate.type] as const)
+        .sort();
+
     it('is stored by the entity-normalized writer in the event field the schema names', async () => {
       await updatePostAfterFailedBeforeRead(
         createEntityNormalizedWriter({ ...entitySchema, beforeUnavailableField: 'beforeUnavailable' }),
       );
 
-      const events = await context.basePrisma.auditEvent.findMany({ orderBy: { createdAt: 'asc' } });
-      expect(events.map((event) => [event.action, event.beforeUnavailable])).toEqual(
-        expect.arrayContaining([
-          ['create', false],
-          ['update', true],
-        ]),
-      );
+      expect(await eventsOfPost()).toEqual([
+        ['create', false, 'Post'],
+        ['create', false, 'User'],
+        ['update', true, 'Post'],
+        ['update', true, 'User'],
+      ]);
     });
 
     it('is not stored by the entity-normalized writer when the schema names no field for it', async () => {
       await updatePostAfterFailedBeforeRead(createEntityNormalizedWriter(entitySchema));
 
-      const events = await context.basePrisma.auditEvent.findMany({ where: { action: 'update' } });
-      expect(events.length).toBeGreaterThan(0);
-      for (const event of events) {
-        expect(event.beforeUnavailable).toBe(false);
-      }
+      expect(await eventsOfPost()).toEqual([
+        ['create', false, 'Post'],
+        ['create', false, 'User'],
+        ['update', false, 'Post'],
+        ['update', false, 'User'],
+      ]);
     });
 
     it('is stored by the shared-change writer in the change field the schema names', async () => {
@@ -495,23 +501,21 @@ describe('Normalized Writer Helpers', () => {
         createSharedChangeWriter({ ...sharedChangeSchema, beforeUnavailableField: 'beforeUnavailable' }),
       );
 
-      const changes = await context.basePrisma.auditChange.findMany({ where: { entityType: 'Post' } });
-      expect(changes.map((change) => [change.action, change.beforeUnavailable])).toEqual(
-        expect.arrayContaining([
-          ['create', false],
-          ['update', true],
-        ]),
-      );
+      const changes = await context.basePrisma.auditChange.findMany({
+        where: { entityType: 'Post' },
+        orderBy: { createdAt: 'asc' },
+      });
+      expect(changes.map((change) => [change.action, change.beforeUnavailable])).toEqual([
+        ['create', false],
+        ['update', true],
+      ]);
     });
 
     it('is not stored by the shared-change writer when the schema names no field for it', async () => {
       await updatePostAfterFailedBeforeRead(createSharedChangeWriter(sharedChangeSchema));
 
       const changes = await context.basePrisma.auditChange.findMany({ where: { action: 'update' } });
-      expect(changes.length).toBeGreaterThan(0);
-      for (const change of changes) {
-        expect(change.beforeUnavailable).toBe(false);
-      }
+      expect(changes.map((change) => [change.action, change.beforeUnavailable])).toEqual([['update', false]]);
     });
   });
 });
