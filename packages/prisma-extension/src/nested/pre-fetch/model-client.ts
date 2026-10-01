@@ -19,7 +19,11 @@ export interface PreFetchModelClient {
 }
 
 export interface PreFetchListClient {
-  findMany(args: { where: PreFetchRecord; select?: Record<string, true> }): Promise<PreFetchRecord[]>;
+  findMany(args: {
+    where: PreFetchRecord;
+    select?: Record<string, unknown>;
+    include?: Record<string, unknown>;
+  }): Promise<PreFetchRecord[]>;
 }
 
 /** `modelName` is PascalCase, as in the DMMF. */

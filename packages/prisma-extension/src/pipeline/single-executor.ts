@@ -91,6 +91,7 @@ export const createSingleExecutor = (deps: SingleExecutorDependencies): Operatio
       {
         modelName: operation.model,
         action: operation.action,
+        args: operation.args,
         result: executed,
         beforeState: prepared.beforeState,
         nestedPreFetchResults: prepared.nestedPreFetchResults,
@@ -100,6 +101,7 @@ export const createSingleExecutor = (deps: SingleExecutorDependencies): Operatio
         client: scope.handle,
       },
       {
+        Prisma,
         schemaMetadata,
         shouldFetchBefore,
         // Reported under its own phase: the record's identity is what failed, not a pre-fetch or diff generation.

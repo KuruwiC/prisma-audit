@@ -42,6 +42,8 @@ const toRow = (result: unknown): Row => {
 export interface SingleOperationOutcome {
   readonly modelName: string;
   readonly action: AuditAction;
+  /** The args the operation ran with */
+  readonly args: Record<string, unknown>;
   readonly result: unknown;
   readonly beforeState: BeforeState;
   readonly nestedPreFetchResults: NestedPreFetchResults;
@@ -65,7 +67,7 @@ export const collectSingleOperationEvents = async (
   outcome: SingleOperationOutcome,
   deps: EventCollectorDependencies,
 ): Promise<MutationEvent[]> => {
-  const { modelName, action, result, beforeState, client } = outcome;
+  const { modelName, action, args, result, beforeState, client } = outcome;
   const { nestedPreFetchResults, nestedOperations, writeSets, preExistingRows } = outcome;
 
   if (action === AUDIT_ACTION.UPSERT && executedUpsertBranch(action, beforeState) === undefined) {
@@ -86,7 +88,7 @@ export const collectSingleOperationEvents = async (
   };
 
   const nested = await collectNestedEvents(
-    { modelName, result, client, nestedPreFetchResults, nestedOperations, writeSets, preExistingRows },
+    { modelName, args, result, client, nestedPreFetchResults, nestedOperations, writeSets, preExistingRows },
     deps,
   );
 

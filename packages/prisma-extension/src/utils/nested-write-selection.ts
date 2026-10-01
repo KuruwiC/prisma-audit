@@ -22,6 +22,7 @@ import {
   targetWhereClauses,
 } from '../grammar/nested-operations.js';
 import type { SchemaMetadata } from '../schema/types.js';
+import { uniqueWhereAsFilter } from './compound-where.js';
 
 /**
  * Nested write keywords whose written rows are audited from the operation result. Deleted rows are
@@ -136,23 +137,6 @@ const buildWrittenRelations = (
   return root;
 };
 
-/**
- * A unique WHERE as a relation filter: the compound-unique wrapper (`{ a_b: { a, b } }`) is a
- * WHERE-unique shape only, so its fields are lifted out; a key that is neither a field nor such
- * a wrapper is dropped.
- *
- * @internal
- */
-const toRelationFilter = (where: Selection, fieldNames: ReadonlySet<string>): Selection =>
-  Object.fromEntries(
-    Object.entries(where).flatMap(([key, value]) => {
-      if (fieldNames.has(key)) {
-        return [[key, value]];
-      }
-      return isRecord(value) ? Object.entries(value) : [];
-    }),
-  );
-
 const buildIncludeTree = (schemaMetadata: SchemaMetadata, relations: WrittenRelations): Selection =>
   Object.fromEntries(
     Array.from(relations, ([field, relation]) => [field, buildRelationEntry(schemaMetadata, relation)]),
@@ -168,7 +152,7 @@ const buildRelationEntry = (schemaMetadata: SchemaMetadata, relation: WrittenRel
   const entry: Selection = {};
   if (relation.rows.kind === 'rows' && relation.rows.wheres.length > 0) {
     const fieldNames = new Set(schemaMetadata.getAllFields(relation.relatedModel).map((field) => field.name));
-    entry.where = { OR: relation.rows.wheres.map((where) => toRelationFilter(where, fieldNames)) };
+    entry.where = { OR: relation.rows.wheres.map((where) => uniqueWhereAsFilter(where, fieldNames)) };
   }
   if (relation.children.size > 0) {
     entry.include = buildIncludeTree(schemaMetadata, relation.children);
@@ -321,4 +305,48 @@ export const projectToRequestedShape = (value: unknown, injected: InjectedSelect
     projected[key] = nestedInjection ? projectToRequestedShape(fieldValue, nestedInjection) : fieldValue;
   }
   return projected;
+};
+
+/** The args of a relation entry that restrict which of its rows a query returns */
+const ROW_RESTRICTING_ARGS = ['where', 'take', 'skip', 'cursor', 'distinct'] as const;
+
+/**
+ * The entry of the relation `fieldName` in a selection node (operation args, or the args of a
+ * relation entry): its `select` entry when the node selects, else its `include` entry; undefined
+ * when the node does not read the relation.
+ */
+export const relationSelectionOf = (node: Selection, fieldName: string): unknown => {
+  const entries = isRecord(node.select) ? node.select : isRecord(node.include) ? node.include : undefined;
+  return entries?.[fieldName];
+};
+
+/** The selection node the rows of a relation entry were read with: the entry's own args, or none for `true` */
+export const relationNodeOf = (entry: unknown): Selection => (isRecord(entry) ? entry : {});
+
+/**
+ * Whether a relation entry returns only some of the relation's rows: its args carry `where`,
+ * `take`, `skip`, `cursor` or `distinct`
+ */
+export const restrictsRows = (entry: unknown): boolean =>
+  isRecord(entry) && ROW_RESTRICTING_ARGS.some((key) => entry[key] !== undefined);
+
+/**
+ * The `include` that reads the relations the operation writes below the rows at `path`, as
+ * {@link injectNestedWriteSelection} adds them; undefined when nothing below `path` is written.
+ */
+export const writtenRelationsInclude = (
+  schemaMetadata: SchemaMetadata,
+  modelName: string,
+  operations: readonly NestedOperationInfo[],
+  path: string,
+): Selection | undefined => {
+  const prefix = `${path}.`;
+  const below = operations.filter(
+    (operation) => RESULT_AUDITED_KEYWORDS.has(operation.operation) && operation.path.startsWith(prefix),
+  );
+  let relations: WrittenRelations | undefined = buildWrittenRelations(schemaMetadata, modelName, below);
+  for (const segment of path.split('.')) {
+    relations = relations?.get(segment)?.children;
+  }
+  return relations && relations.size > 0 ? buildIncludeTree(schemaMetadata, relations) : undefined;
 };

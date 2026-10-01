@@ -185,6 +185,46 @@ describe('Database Round-Trip Guard', () => {
     expect(statements).toHaveLength(9);
   });
 
+  it("update with a nested create the caller's include filters out (1 existing post) issues 11 statements", async () => {
+    const user = await provider.runAsync(testActor, async () => {
+      return prisma.user.create({
+        data: {
+          email: 'nested-create-filtered@example.com',
+          name: 'Filtered',
+          password: 'secret123',
+          posts: { create: [{ title: 'Live', content: 'C1', published: true }] },
+        },
+      });
+    });
+    statements.length = 0;
+
+    await provider.runAsync(testActor, async () => {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { posts: { create: [{ title: 'Draft', content: 'C2' }] } },
+        include: { posts: { where: { published: true } } },
+      });
+    });
+
+    console.log(`Update with a filtered nested create: ${statements.length} SQL statements`);
+    // 1. BEGIN                  — awaitWrite: true (default) wraps the operation in a transaction
+    // 2. SELECT FROM users      — the before-state fetch (fetchBefore, default: true)
+    // 3. SELECT id FROM posts   — the snapshot of the posts the user already holds, primary key only
+    // 4. SELECT FROM users      — Prisma's own read of the parent row the nested create attaches to
+    // 5. INSERT INTO posts      — the caller's own nested create
+    // 6. SELECT FROM users      — Prisma's resolution of the caller's `include` on the update()
+    //                             result: base record...
+    // 7. SELECT FROM posts      — ...and the included relation, filtered to published posts, so
+    //                             the created draft is not among the returned rows
+    // 8. SELECT id FROM posts   — the primary keys the relation holds under the user after the
+    //                             write; the one the snapshot does not hold is the created post
+    // 9. SELECT FROM posts      — the created post read whole, since the result left it out
+    // 10. INSERT INTO audit_logs — one batched write: user + the created post + the post's
+    //                             aggregate-owner (User) propagation log
+    // 11. COMMIT
+    expect(statements).toHaveLength(11);
+  });
+
   it('update with a nested updateMany under an existing parent (1 matching post, 1 other) issues 10 statements', async () => {
     const user = await provider.runAsync(testActor, async () => {
       return prisma.user.create({

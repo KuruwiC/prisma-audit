@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { matchesUniqueWhere } from '../../src/utils/compound-where.js';
+import { matchesUniqueWhere, uniqueWhereAsFilter } from '../../src/utils/compound-where.js';
 
 describe('matchesUniqueWhere', () => {
   const row = { id: 'p1', slug: 'hello', authorId: 'u1', postId: 'p1', userId: 'u1', publishedAt: new Date(0) };
@@ -34,5 +34,21 @@ describe('matchesUniqueWhere', () => {
     expect(matchesUniqueWhere({ id: 42n }, { id: 42n })).toBe(true);
     expect(matchesUniqueWhere({ id: 42n }, { id: 42 })).toBe(true);
     expect(matchesUniqueWhere({ id: 42n }, { id: 43 })).toBe(false);
+  });
+});
+
+describe('uniqueWhereAsFilter', () => {
+  const fieldNames = new Set(['id', 'postId', 'userId', 'title']);
+
+  it('keeps the fields and lifts a compound unique key out of its wrapper', () => {
+    expect(uniqueWhereAsFilter({ postId_userId: { postId: 'p1', userId: 'u1' }, title: 'T' }, fieldNames)).toEqual({
+      postId: 'p1',
+      userId: 'u1',
+      title: 'T',
+    });
+  });
+
+  it('drops a key that is neither a field nor a wrapper', () => {
+    expect(uniqueWhereAsFilter({ id: 'p1', unknown: 'x' }, fieldNames)).toEqual({ id: 'p1' });
   });
 });

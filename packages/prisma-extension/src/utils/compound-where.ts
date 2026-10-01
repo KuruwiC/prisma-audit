@@ -93,3 +93,21 @@ export const sameUniqueWhere = (left: Record<string, unknown>, right: Record<str
     leftKeys.every((key) => key in right && sameWhereValue(left[key], right[key]))
   );
 };
+
+/**
+ * A unique WHERE as a filter (`<Model>WhereInput`), for a query that names several rows at once:
+ * the compound-unique wrapper (`{ a_b: { a, b } }`) is a WHERE-unique shape only, so its fields
+ * are lifted out; a key that is neither one of `fieldNames` nor such a wrapper is dropped.
+ */
+export const uniqueWhereAsFilter = (
+  whereClause: Record<string, unknown>,
+  fieldNames: ReadonlySet<string>,
+): Record<string, unknown> =>
+  Object.fromEntries(
+    Object.entries(whereClause).flatMap(([key, value]) => {
+      if (fieldNames.has(key)) {
+        return [[key, value]];
+      }
+      return isRecord(value) ? Object.entries(value) : [];
+    }),
+  );

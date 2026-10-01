@@ -14,7 +14,8 @@
  * ahead of the operation, or else by its unique WHERE; see `NestedRowLocator`); a row that matches no
  * target and did not exist before the operation was inserted, and belongs to the first operation
  * nested under its parent that inserts rows; any other row is a sibling and yields nothing. The
- * rows an update targets that the result does not hold are read again. A `deleteMany` yields one
+ * rows the operation wrote at a path that the result does not hold (see `rows-not-in-result.ts`)
+ * are read once for the path, with the relations written below them. A `deleteMany` yields one
  * delete event per row its filter matched in that read. A to-one relation holds one related row
  * under its parent row: the row of the operation nested there that names it by unique WHERE, else
  * of the one that writes the related row of its parent.
@@ -30,15 +31,26 @@ import {
   targetWhereClauses,
 } from '../../grammar/nested-operations.js';
 import type { ShouldFetchBefore } from '../../grammar/pre-fetch-selection.js';
-import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../internal-types.js';
+import type {
+  PrismaClientWithDynamicAccess,
+  PrismaNamespace,
+  TransactionalPrismaClient,
+} from '../../internal-types.js';
 import type { SchemaMetadata, UniqueConstraint } from '../../schema/types.js';
 import { NO_BEFORE_STATE } from '../../utils/before-state.js';
 import { matchesUniqueWhere } from '../../utils/compound-where.js';
 import { nestedLog } from '../../utils/debug.js';
-import { getPreFetchModelClient } from '../pre-fetch/model-client.js';
+import {
+  relationNodeOf,
+  relationSelectionOf,
+  restrictsRows,
+  writtenRelationsInclude,
+} from '../../utils/nested-write-selection.js';
+import { getPreFetchListClient } from '../pre-fetch/model-client.js';
 import { parentRowIdentityOf } from '../pre-fetch/parent-rows.js';
 import type { PreExistingRows } from '../pre-fetch/pre-existing-rows.js';
 import { preFetchedStateNamedBy, preFetchedStateUnder } from '../pre-fetch/pre-fetch-result-store.js';
+import { resolveToManyPath } from '../pre-fetch/to-many-path.js';
 import type { CollectedNestedRecord } from './collected-record.js';
 import {
   collectToManyDeleteRecords,
@@ -46,13 +58,15 @@ import {
   type UnresolvedDeleteEntityIdReporter,
 } from './delete-handler.js';
 import { identityOf } from './event-fields.js';
-import { refetchNestedRecords } from './refetch-nested-records.js';
+import { type ParentAtPath, readRowsNotInResult } from './rows-not-in-result.js';
 import { resolveNestedRowState } from './state-resolver.js';
 import { insertsRows, type NestedWriteSet, type NestedWriteSets, type NestedWriteTarget } from './write-set.js';
 
 type Row = Record<string, unknown>;
 
 export interface NestedEventCollectorDependencies {
+  /** Prisma namespace given as the extension's `Prisma` option; read for the DMMF relation details */
+  Prisma: PrismaNamespace;
   schemaMetadata: SchemaMetadata;
   shouldFetchBefore: ShouldFetchBefore;
   /**
@@ -65,8 +79,10 @@ export interface NestedEventCollectorDependencies {
 
 export interface NestedEventCollectionInput {
   modelName: string;
+  /** The args the operation ran with: their `include` / `select` decide which rows the result holds */
+  args: Record<string, unknown>;
   result: unknown;
-  /** Client the operation ran on; re-fetches the nested rows the result does not hold */
+  /** Client the operation ran on; reads the nested rows the result does not hold */
   client: PrismaClientWithDynamicAccess | TransactionalPrismaClient;
   nestedPreFetchResults: NestedPreFetchResults;
   /** The nested operations the operation executed, in detection order */
@@ -85,9 +101,24 @@ interface RowAttribution {
   readonly element: number | undefined;
 }
 
-interface AttributedRow {
+/**
+ * A row of the walk: the operation it was attributed to (none for the top-level row), and the
+ * selection node it was read with, which tells whether the relations below it hold every row
+ */
+interface WalkedRow {
   readonly row: Row;
+  readonly attribution: RowAttribution | undefined;
+  readonly selection: Row;
+}
+
+interface AttributedRow extends WalkedRow {
   readonly attribution: RowAttribution;
+}
+
+/** A row a relation holds, with the selection node it was read with */
+interface SourcedRow {
+  readonly row: Row;
+  readonly selection: Row;
 }
 
 /** State shared by the walk over the result */
@@ -99,8 +130,6 @@ interface CollectionWalk {
   readonly records: Map<NestedOperationInfo, CollectedNestedRecord[]>;
   /** The rows already attributed at each path */
   readonly claimed: Map<string, Set<Row>>;
-  /** The targets already read again, so a target is read once */
-  readonly refetched: Set<NestedWriteTarget>;
   /** The to-one operations already attributed a row */
   readonly assigned: Set<NestedOperationInfo>;
 }
@@ -164,96 +193,64 @@ const targetOf = (row: Row, targets: readonly NestedWriteTarget[]): NestedWriteT
   targets.find((target) => isLocatedBy(row, target));
 
 /**
- * Whether `target` updated a row that existed before the operation: such a row is audited from its
- * after state, which only the result or a re-fetch holds.
- */
-const updatesExistingRow = (target: NestedWriteTarget): boolean => {
-  const { operation } = target.operation;
-  return (
-    operation === 'update' ||
-    operation === 'updateMany' ||
-    (operation === 'upsert' && target.before.kind === 'captured')
-  );
-};
-
-/**
- * The rows `targets` updated that `rows` does not hold, read again. The caller's own `include` or
- * `select` on a written relation keeps its filter, and an update may change the columns its own
- * WHERE names, so the result may hold the siblings of an updated row but not the row itself.
- */
-const refetchAbsentRows = async (
-  walk: CollectionWalk,
-  rows: readonly Row[],
-  targets: readonly NestedWriteTarget[],
-): Promise<Row[]> => {
-  const absent = targets.filter(
-    (target) =>
-      updatesExistingRow(target) && !walk.refetched.has(target) && !rows.some((row) => isLocatedBy(row, target)),
-  );
-  const relatedModel = absent[0]?.operation.relatedModel;
-  if (relatedModel === undefined) {
-    return [];
-  }
-  const modelClient = getPreFetchModelClient(walk.input.client, relatedModel);
-  if (!modelClient) {
-    throw new Error(`[@prisma-audit] Cannot re-fetch nested records: no model client for "${relatedModel}"`);
-  }
-  for (const target of absent) {
-    walk.refetched.add(target);
-  }
-  return refetchNestedRecords(
-    modelClient,
-    absent.map((target) => target.locator),
-  );
-};
-
-/**
  * The rows a to-many relation holds under one parent row that `candidates` wrote: those their
  * targets locate and, for the first candidate that inserts rows, the unclaimed rows that match
  * no target at the path and did not exist before.
  */
-const attributeToManyRows = async (
+const attributeToManyRows = (
   walk: CollectionWalk,
   relation: CandidateRelation,
-  parentRows: readonly Row[],
-): Promise<AttributedRow[]> => {
+  rows: readonly SourcedRow[],
+): AttributedRow[] => {
   const { path, candidates, pkFields } = relation;
-  const writeSet: NestedWriteSet = walk.input.writeSets.get(path) ?? { targets: [], createsPending: false };
-  const ownTargets = writeSet.targets.filter((target) => candidates.includes(target.operation));
-  const rows = [...parentRows, ...(await refetchAbsentRows(walk, parentRows, ownTargets))];
+  const writeSet = writeSetAt(walk, path);
+  const ownTargets = ownTargetsOf(writeSet, candidates);
   const claimed = claimedAt(walk, path);
   const attributed: AttributedRow[] = [];
 
-  for (const row of rows) {
+  for (const { row, selection } of rows) {
     const target = targetOf(row, ownTargets);
     if (target) {
       claimed.add(row);
       record(walk, target.operation, row, target.before);
-      attributed.push({ row, attribution: { operation: target.operation, element: target.element } });
+      attributed.push({ row, selection, attribution: { operation: target.operation, element: target.element } });
     }
   }
 
-  const inserting = candidates.find((candidate) =>
-    insertsRows(
-      candidate,
-      ownTargets.filter((target) => target.operation === candidate),
-    ),
-  );
+  const inserting = insertingCandidateOf(candidates, ownTargets);
   if (!inserting) {
     return attributed;
   }
   const preExisting = walk.input.preExistingRows.get(path);
   const origin = { model: inserting.relatedModel, path };
-  for (const row of rows) {
+  for (const { row, selection } of rows) {
     if (claimed.has(row) || targetOf(row, writeSet.targets) || preExisting?.has(identityOf(row, pkFields, origin))) {
       continue;
     }
     claimed.add(row);
     record(walk, inserting, row, NO_BEFORE_STATE);
-    attributed.push({ row, attribution: { operation: inserting, element: undefined } });
+    attributed.push({ row, selection, attribution: { operation: inserting, element: undefined } });
   }
   return attributed;
 };
+
+const writeSetAt = (walk: CollectionWalk, path: string): NestedWriteSet =>
+  walk.input.writeSets.get(path) ?? { targets: [], createsPending: false };
+
+const ownTargetsOf = (writeSet: NestedWriteSet, candidates: readonly NestedOperationInfo[]): NestedWriteTarget[] =>
+  writeSet.targets.filter((target) => candidates.includes(target.operation));
+
+/** The first candidate that inserts rows, given the targets of the candidates */
+const insertingCandidateOf = (
+  candidates: readonly NestedOperationInfo[],
+  targets: readonly NestedWriteTarget[],
+): NestedOperationInfo | undefined =>
+  candidates.find((candidate) =>
+    insertsRows(
+      candidate,
+      targets.filter((target) => target.operation === candidate),
+    ),
+  );
 
 const namesRowByWhere = (nestedOp: NestedOperationInfo): boolean =>
   linksNamedRows(nestedOp.operation) || nestedOp.operation === 'connectOrCreate';
@@ -299,15 +296,15 @@ const toOneBeforeState = (walk: CollectionWalk, nestedOp: NestedOperationInfo): 
 };
 
 /** The row a to-one relation holds under one parent row, attributed to the candidate that wrote it */
-const attributeToOneRow = (walk: CollectionWalk, relation: CandidateRelation, row: Row): AttributedRow[] => {
+const attributeToOneRow = (walk: CollectionWalk, relation: CandidateRelation, related: SourcedRow): AttributedRow[] => {
   const { candidates } = relation;
-  const nestedOp = toOneOperationOf(walk, row, candidates);
+  const nestedOp = toOneOperationOf(walk, related.row, candidates);
   if (!nestedOp) {
     return [];
   }
   walk.assigned.add(nestedOp);
-  record(walk, nestedOp, row, toOneBeforeState(walk, nestedOp));
-  return [{ row, attribution: { operation: nestedOp, element: 0 } }];
+  record(walk, nestedOp, related.row, toOneBeforeState(walk, nestedOp));
+  return [{ ...related, attribution: { operation: nestedOp, element: 0 } }];
 };
 
 /** A relation written below one attributed row: its path and the operations nested there */
@@ -340,12 +337,6 @@ const candidateRelations = (walk: CollectionWalk, attribution: RowAttribution | 
   return [...byPath.values()];
 };
 
-/** A row of the walk and the operation it was attributed to; none for the top-level row */
-interface WalkedRow {
-  readonly row: Row;
-  readonly attribution: RowAttribution | undefined;
-}
-
 /** One relation written below a row of the walk, with the operations nested there under that row */
 interface RelationBelow {
   readonly parent: WalkedRow;
@@ -365,18 +356,100 @@ const relationsBelow = (walk: CollectionWalk, rows: readonly WalkedRow[]): Map<s
   return byPath;
 };
 
-/** Attributes the rows one written path holds under each of its parent rows */
-const attributePath = async (walk: CollectionWalk, below: readonly RelationBelow[]): Promise<AttributedRow[]> => {
-  const attributed: AttributedRow[] = [];
-  for (const { parent, relation } of below) {
-    const rows = relationRowsOf(parent.row, { name: relation.fieldName, isList: relation.isList });
-    attributed.push(
-      ...(relation.isList
-        ? await attributeToManyRows(walk, relation, rows)
-        : rows.flatMap((related) => attributeToOneRow(walk, relation, related))),
+/** The rows a relation holds under a row of the walk, each with the selection node it was read with */
+const heldRowsOf = (parent: WalkedRow, relation: CandidateRelation): SourcedRow[] => {
+  const entry = relationSelectionOf(parent.selection, relation.fieldName);
+  const selection = relationNodeOf(entry);
+  return relationRowsOf(parent.row, { name: relation.fieldName, isList: relation.isList }).map((row) => ({
+    row,
+    selection,
+  }));
+};
+
+/**
+ * Whether an update `target` wrote a row that existed before the operation: such a row is audited
+ * from its after state, which only the result or a read after the write holds.
+ */
+const updatesExistingRow = (target: NestedWriteTarget): boolean => {
+  const { operation } = target.operation;
+  return (
+    operation === 'update' ||
+    operation === 'updateMany' ||
+    (operation === 'upsert' && target.before.kind === 'captured')
+  );
+};
+
+/** One parent row at a to-many path as the read of the rows the result does not hold sees it */
+const parentAtPath = (walk: CollectionWalk, { parent, relation }: RelationBelow, held: readonly SourcedRow[]) => {
+  const ownTargets = ownTargetsOf(writeSetAt(walk, relation.path), relation.candidates);
+  const restricted = restrictsRows(relationSelectionOf(parent.selection, relation.fieldName));
+  return {
+    row: parent.row,
+    rows: held.map(({ row }) => row),
+    absentTargets: ownTargets.filter(
+      (target) => updatesExistingRow(target) && !held.some(({ row }) => isLocatedBy(row, target)),
+    ),
+    insertsHidden: restricted && insertingCandidateOf(relation.candidates, ownTargets) !== undefined,
+  } satisfies ParentAtPath;
+};
+
+/**
+ * The rows the operation wrote at a to-many path that the result does not hold, per parent row in
+ * the order of `below`, read once for the path
+ */
+const rowsNotInResult = async (
+  walk: CollectionWalk,
+  below: readonly RelationBelow[],
+  held: readonly SourcedRow[][],
+): Promise<SourcedRow[][]> => {
+  const [first] = below;
+  if (!first) {
+    return [];
+  }
+  const { path, pkFields, candidates } = first.relation;
+  const [operation] = candidates;
+  const parents = below.map((entry, index) => parentAtPath(walk, entry, held[index] ?? []));
+  if (parents.every((parent) => parent.absentTargets.length === 0 && !parent.insertsHidden)) {
+    return parents.map(() => []);
+  }
+  const { input, deps } = walk;
+  const relatedModel = operation?.relatedModel ?? '';
+  const client = getPreFetchListClient(input.client, relatedModel);
+  if (!client) {
+    throw new Error(
+      `[@prisma-audit] Cannot read the nested rows at path "${path}": no model client for "${relatedModel}"`,
     );
   }
-  return attributed;
+  const include = writtenRelationsInclude(deps.schemaMetadata, input.modelName, input.nestedOperations, path);
+  const read = await readRowsNotInResult({
+    client,
+    schemaMetadata: deps.schemaMetadata,
+    relatedModel,
+    path,
+    pkFields,
+    targets: writeSetAt(walk, path).targets,
+    preExisting: input.preExistingRows.get(path),
+    parents,
+    resolvePath: () =>
+      operation ? resolveToManyPath(deps.Prisma, deps.schemaMetadata, input.modelName, operation) : undefined,
+    include,
+  });
+  const selection = include ? { include } : {};
+  return read.map((rows) => rows.map((row) => ({ row, selection })));
+};
+
+/** Attributes the rows one written path holds under each of its parent rows */
+const attributePath = async (walk: CollectionWalk, below: readonly RelationBelow[]): Promise<AttributedRow[]> => {
+  const held = below.map(({ parent, relation }) => heldRowsOf(parent, relation));
+  if (!below[0]?.relation.isList) {
+    return below.flatMap(({ relation }, index) =>
+      (held[index] ?? []).flatMap((related) => attributeToOneRow(walk, relation, related)),
+    );
+  }
+  const read = await rowsNotInResult(walk, below, held);
+  return below.flatMap(({ relation }, index) =>
+    attributeToManyRows(walk, relation, [...(held[index] ?? []), ...(read[index] ?? [])]),
+  );
 };
 
 /**
@@ -441,11 +514,10 @@ export const collectNestedEvents = async (
     pkConstraints,
     records: new Map(),
     claimed: new Map(),
-    refetched: new Set(),
     assigned: new Set(),
   };
   if (isRow(result)) {
-    await walkLevels(walk, [{ row: result, attribution: undefined }]);
+    await walkLevels(walk, [{ row: result, attribution: undefined, selection: input.args }]);
   }
 
   const events: MutationEvent[] = [];

@@ -1,10 +1,9 @@
 /**
- * Primary-key derivation and entity-identity helpers of the nested-write grammar, and the post-operation re-fetch of nested rows
+ * Primary-key derivation and entity-identity helpers of the nested-write grammar
  */
 
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { deserializeEntityId, getPrimaryKeyConstraint } from '../../src/grammar/nested-operations.js';
-import { refetchNestedRecords } from '../../src/nested/events/refetch-nested-records.js';
 import type { FieldMetadata, SchemaMetadata, UniqueConstraint } from '../../src/schema/types.js';
 import { UNRESOLVED_ENTITY_ID } from '../../src/utils/identity-key.js';
 
@@ -111,62 +110,5 @@ describe('deserializeEntityId', () => {
 
   it('returns null for the unresolved identity', () => {
     expect(deserializeEntityId(UNRESOLVED_ENTITY_ID, ['id'])).toBeNull();
-  });
-});
-
-describe('refetchNestedRecords', () => {
-  const stored = [
-    { id: 'row-1', key: 'k-1' },
-    { id: 'row-2', key: 'k-2' },
-  ];
-  const clientStoring = () => ({
-    findUnique: vi.fn(
-      async ({ where }: { where: Record<string, unknown> }) =>
-        stored.find((row) => row.id === where.id || row.key === where.key) ?? null,
-    ),
-    findFirst: vi.fn(
-      async ({ where }: { where: Record<string, unknown> }) => stored.find((row) => row.id === where.id) ?? null,
-    ),
-  });
-
-  it('reads a row located by its unique WHERE with findUnique', async () => {
-    const client = clientStoring();
-
-    const rows = await refetchNestedRecords(client, [{ by: 'uniqueWhere', where: { key: 'k-2' } }]);
-
-    expect(client.findUnique).toHaveBeenCalledWith({ where: { key: 'k-2' } });
-    expect(client.findFirst).not.toHaveBeenCalled();
-    expect(rows).toEqual([{ id: 'row-2', key: 'k-2' }]);
-  });
-
-  it('reads a row located by its primary key with findFirst', async () => {
-    const client = clientStoring();
-
-    const rows = await refetchNestedRecords(client, [{ by: 'primaryKey', where: { id: 'row-1' } }]);
-
-    expect(client.findFirst).toHaveBeenCalledWith({ where: { id: 'row-1' } });
-    expect(client.findUnique).not.toHaveBeenCalled();
-    expect(rows).toEqual([{ id: 'row-1', key: 'k-1' }]);
-  });
-
-  it('yields nothing for a row not found after the operation', async () => {
-    const rows = await refetchNestedRecords(clientStoring(), [
-      { by: 'uniqueWhere', where: { id: 'gone' } },
-      { by: 'uniqueWhere', where: { id: 'row-1' } },
-    ]);
-
-    expect(rows).toEqual([{ id: 'row-1', key: 'k-1' }]);
-  });
-
-  it('propagates a failed read', async () => {
-    const readError = new Error('findUnique failed');
-    const client = {
-      findUnique: vi.fn(async () => {
-        throw readError;
-      }),
-      findFirst: vi.fn(),
-    };
-
-    await expect(refetchNestedRecords(client, [{ by: 'uniqueWhere', where: { id: 'row-1' } }])).rejects.toBe(readError);
   });
 });

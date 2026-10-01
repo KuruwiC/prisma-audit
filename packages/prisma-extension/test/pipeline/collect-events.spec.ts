@@ -10,7 +10,12 @@ import type {
   NestedBatchTargets,
   NestedPreFetchResults,
 } from '../../src/grammar/nested-operations.js';
-import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../src/internal-types.js';
+import type {
+  DMMFModel,
+  PrismaClientWithDynamicAccess,
+  PrismaNamespace,
+  TransactionalPrismaClient,
+} from '../../src/internal-types.js';
 import { buildNestedWriteSets, detectExecutedNestedOperations } from '../../src/nested/events/write-set.js';
 import type { PreExistingRows } from '../../src/nested/pre-fetch/pre-existing-rows.js';
 import { markPathUnread, storePreFetchResult } from '../../src/nested/pre-fetch/pre-fetch-result-store.js';
@@ -30,37 +35,42 @@ const unreadAt = (path: string): NestedPreFetchResults => {
   return results;
 };
 
-const schemaMetadata = createSchemaMetadataFromDMMF({
-  dmmf: {
-    datamodel: {
-      models: [
-        {
-          name: 'User',
-          fields: [
-            { name: 'id', kind: 'scalar', type: 'String', isId: true },
-            { name: 'name', kind: 'scalar', type: 'String' },
-            { name: 'posts', kind: 'object', type: 'Post', isList: true, relationName: 'UserPosts' },
-          ],
-        },
-        {
-          name: 'Post',
-          fields: [
-            { name: 'id', kind: 'scalar', type: 'String', isId: true },
-            { name: 'title', kind: 'scalar', type: 'String' },
-            { name: 'authorId', kind: 'scalar', type: 'String' },
-            { name: 'author', kind: 'object', type: 'User', isList: false, relationName: 'UserPosts' },
-          ],
-        },
-        {
-          name: 'Legacy',
-          fields: [{ name: 'code', kind: 'scalar', type: 'String' }],
-        },
-      ],
-    },
+const models: DMMFModel[] = [
+  {
+    name: 'User',
+    fields: [
+      { name: 'id', kind: 'scalar', type: 'String', isId: true },
+      { name: 'name', kind: 'scalar', type: 'String' },
+      { name: 'posts', kind: 'object', type: 'Post', isList: true, relationName: 'UserPosts' },
+    ],
   },
-});
+  {
+    name: 'Post',
+    fields: [
+      { name: 'id', kind: 'scalar', type: 'String', isId: true },
+      { name: 'title', kind: 'scalar', type: 'String' },
+      { name: 'authorId', kind: 'scalar', type: 'String' },
+      {
+        name: 'author',
+        kind: 'object',
+        type: 'User',
+        isList: false,
+        relationName: 'UserPosts',
+        relationFromFields: ['authorId'],
+        relationToFields: ['id'],
+      },
+    ],
+  },
+  {
+    name: 'Legacy',
+    fields: [{ name: 'code', kind: 'scalar', type: 'String' }],
+  },
+];
 
-const deps = { schemaMetadata, shouldFetchBefore: () => true };
+const Prisma: PrismaNamespace = { defineExtension: () => undefined, DbNull: null, dmmf: { datamodel: { models } } };
+const schemaMetadata = createSchemaMetadataFromDMMF(Prisma);
+
+const deps = { Prisma, schemaMetadata, shouldFetchBefore: () => true };
 const client: PrismaClientWithDynamicAccess = Object.create(null);
 
 type SingleCase = Partial<
@@ -92,6 +102,7 @@ const single = (overrides: SingleCase = {}): SingleOperationOutcome => {
   );
   return {
     ...base,
+    args,
     nestedOperations,
     writeSets: buildNestedWriteSets(schemaMetadata, nestedOperations, base.nestedPreFetchResults, batchTargets),
   };
@@ -500,9 +511,9 @@ describe('collectSingleOperationEvents', () => {
       // operation updated can be missing from the rows returned at its path.
 
       const clientStoring = (stored: Record<string, unknown>[]) => {
-        const byId = async ({ where }: { where: Record<string, unknown> }) =>
-          stored.find((row) => row.id === where.id) ?? null;
-        const post = { findUnique: vi.fn(byId), findFirst: vi.fn(byId) };
+        const byIds = async ({ where }: { where: { OR: Record<string, unknown>[] } }) =>
+          stored.filter((row) => where.OR.some((filter) => filter.id === row.id));
+        const post = { findMany: vi.fn(byIds) };
         const rereadClient: TransactionalPrismaClient = { post };
         return { rereadClient, post };
       };
@@ -515,9 +526,8 @@ describe('collectSingleOperationEvents', () => {
           client: rereadClient,
         });
 
-        expect(post.findFirst).toHaveBeenCalledTimes(1);
-        expect(post.findFirst).toHaveBeenCalledWith({ where: { id: 'p1' } });
-        expect(post.findUnique).not.toHaveBeenCalled();
+        expect(post.findMany).toHaveBeenCalledTimes(1);
+        expect(post.findMany).toHaveBeenCalledWith({ where: { OR: [{ id: 'p1' }] } });
         expect(events).toEqual([
           {
             model: 'Post',
@@ -551,7 +561,7 @@ describe('collectSingleOperationEvents', () => {
           client: rereadClient,
         });
 
-        expect(post.findFirst).toHaveBeenCalledWith({ where: { id: 'p2' } });
+        expect(post.findMany).toHaveBeenCalledWith({ where: { OR: [{ id: 'p2' }] } });
         expect(events).toEqual([
           expect.objectContaining({
             identity: 'p2',
@@ -581,18 +591,54 @@ describe('collectSingleOperationEvents', () => {
           },
         );
 
-        expect(post.findUnique).not.toHaveBeenCalled();
-        expect(post.findFirst).not.toHaveBeenCalled();
+        expect(post.findMany).not.toHaveBeenCalled();
+      });
+
+      it("reads the rows a create inserted that the caller's restricted relation leaves out, once for the path", async () => {
+        const stored = [p1, p3];
+        const findMany = vi.fn(
+          async ({ where, select }: { where: { OR: Record<string, unknown>[] }; select?: unknown }) =>
+            select
+              ? stored.map(({ id }) => ({ id }))
+              : stored.filter((row) => where.OR.some((filter) => filter.id === row.id)),
+        );
+
+        const events = await postEvents({ create: { title: 'C' } }, [], {
+          args: {
+            where: { id: 'u1' },
+            data: { posts: { create: { title: 'C' } } },
+            include: { posts: { where: { title: 'none' } } },
+          },
+          preExistingRows: new Map([['posts', new Set(['p1'])]]),
+          client: { post: { findMany } },
+        });
+
+        expect(findMany.mock.calls).toEqual([
+          [{ where: { OR: [{ author: { is: { id: 'u1' } } }] }, select: { id: true } }],
+          [{ where: { OR: [{ id: 'p3' }] } }],
+        ]);
+        expect(events).toEqual([expect.objectContaining({ identity: 'p3', action: 'create', after: p3 })]);
+      });
+
+      it('reads nothing again when the caller does not restrict the rows of the relation', async () => {
+        const findMany = vi.fn();
+
+        await postEvents({ create: { title: 'C' } }, [p3], {
+          args: { where: { id: 'u1' }, data: { posts: { create: { title: 'C' } } }, include: { posts: true } },
+          preExistingRows: new Map([['posts', new Set(['p1'])]]),
+          client: { post: { findMany } },
+        });
+
+        expect(findMany).not.toHaveBeenCalled();
       });
 
       it('propagates a failed read', async () => {
-        const readError = new Error('findUnique failed');
+        const readError = new Error('findMany failed');
         const rereadClient: TransactionalPrismaClient = {
           post: {
-            findUnique: vi.fn(async () => {
+            findMany: vi.fn(async () => {
               throw readError;
             }),
-            findFirst: vi.fn(),
           },
         };
 

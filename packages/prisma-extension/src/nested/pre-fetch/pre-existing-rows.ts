@@ -11,26 +11,21 @@
  * @module nested/pre-fetch/pre-existing-rows
  */
 
-import {
-  getPrimaryKeyConstraint,
-  type NestedOperationInfo,
-  type NestedPreFetchResults,
-} from '../../grammar/nested-operations.js';
+import type { NestedOperationInfo, NestedPreFetchResults } from '../../grammar/nested-operations.js';
 import { filterOperationsToPreFetch, type ShouldFetchBefore } from '../../grammar/pre-fetch-selection.js';
 import type {
   PrismaClientWithDynamicAccess,
   PrismaNamespace,
   TransactionalPrismaClient,
 } from '../../internal-types.js';
-import type { SchemaMetadata, UniqueConstraint } from '../../schema/types.js';
+import type { SchemaMetadata } from '../../schema/types.js';
 import { preFetchLog } from '../../utils/debug.js';
 import { extractEntityIdentity } from '../../utils/id-generation.js';
 import type { EntityIdentityKey } from '../../utils/identity-key.js';
 import type { NestedWriteSets } from '../events/write-set.js';
-import { findDMMFField, resolveParentModelFromPath } from './coordinator.js';
 import { getPreFetchListClient, getPreFetchModelClient, type PreFetchListClient } from './model-client.js';
-import { resolveToManyRelationScope, type ToManyRelationScope } from './one-to-many-fetcher.js';
 import { parentKeyOf, parentKeysFromOperationWheres, parentPathOf, resolveParentRows } from './parent-rows.js';
+import { resolveToManyPath, type ToManyPath } from './to-many-path.js';
 
 /** Primary-key identities of the rows each to-many path held before the operation, keyed by path */
 export type PreExistingRows = ReadonlyMap<string, ReadonlySet<EntityIdentityKey>>;
@@ -51,12 +46,8 @@ export interface SnapshotPreExistingRowsDependencies {
   readonly shouldFetchBefore: ShouldFetchBefore;
 }
 
-interface PathRelation {
+interface PathRelation extends ToManyPath {
   readonly operation: NestedOperationInfo;
-  readonly parentModelName: string;
-  readonly parentPk: UniqueConstraint;
-  readonly pk: UniqueConstraint;
-  readonly scope: ToManyRelationScope;
   readonly client: PreFetchListClient;
 }
 
@@ -65,32 +56,17 @@ const resolvePathRelation = (
   deps: SnapshotPreExistingRowsDependencies,
   operation: NestedOperationInfo,
 ): PathRelation | undefined => {
-  const { dmmf } = deps.Prisma;
-  const topLevelModel = dmmf.datamodel.models.find((model) => model.name === input.modelName);
-  const parentModel = resolveParentModelFromPath(operation.path, topLevelModel, dmmf);
-  const field = findDMMFField(parentModel, operation.fieldName);
-  if (!parentModel || !field) {
-    preFetchLog('snapshot: field not found in model: field=%s path=%s', operation.fieldName, operation.path);
-    return undefined;
-  }
-
-  const parentPk = getPrimaryKeyConstraint(deps.schemaMetadata, parentModel.name);
-  const pk = getPrimaryKeyConstraint(deps.schemaMetadata, operation.relatedModel);
+  const path = resolveToManyPath(deps.Prisma, deps.schemaMetadata, input.modelName, operation);
   const client = getPreFetchListClient(input.prismaClient, operation.relatedModel);
-  if (!parentPk || !pk || !client) {
-    preFetchLog('snapshot: no primary key or model client: model=%s path=%s', operation.relatedModel, operation.path);
+  if (!path || !client) {
+    preFetchLog(
+      'snapshot: relation or model client not found: model=%s path=%s',
+      operation.relatedModel,
+      operation.path,
+    );
     return undefined;
   }
-
-  const relatedModel = dmmf.datamodel.models.find((model) => model.name === operation.relatedModel);
-  return {
-    operation,
-    parentModelName: parentModel.name,
-    parentPk,
-    pk,
-    scope: resolveToManyRelationScope(field, parentModel.name, relatedModel, parentPk.fields),
-    client,
-  };
+  return { ...path, operation, client };
 };
 
 const parentOperationsNotPreFetched = (

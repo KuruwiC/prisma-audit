@@ -31,6 +31,12 @@ export interface ToManyRelationScope {
   /** `some` when the back field is a list (implicit many-to-many), else `is` */
   readonly filter: 'is' | 'some';
   readonly parentFields: readonly string[];
+  /**
+   * The related row's foreign-key columns (`fields`) and the parent fields they hold
+   * (`references`, in the same order); absent for an implicit many-to-many relation, whose links
+   * live in a join table
+   */
+  readonly foreignKey?: { readonly fields: readonly string[]; readonly references: readonly string[] };
 }
 
 /**
@@ -61,7 +67,16 @@ export const resolveToManyRelationScope = (
     throw new Error(`[@prisma-audit] Relation "${relationName}" has no back-relation field on model "${field.type}"`);
   }
 
-  return { backField: backField.name, filter: backField.isList ? 'some' : 'is', parentFields: parentPkFields };
+  const foreignKey =
+    backField.relationFromFields && backField.relationFromFields.length > 0
+      ? { fields: backField.relationFromFields, references: backField.relationToFields ?? [] }
+      : undefined;
+  return {
+    backField: backField.name,
+    filter: backField.isList ? 'some' : 'is',
+    parentFields: parentPkFields,
+    ...(foreignKey ? { foreignKey } : {}),
+  };
 };
 
 const scopeWhereToParent = (
