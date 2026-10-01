@@ -29,6 +29,12 @@ export interface NormalizedSchema {
   aggregateModel: string;
   /** Model name for audit event table */
   eventModel: string;
+  /**
+   * Field of the event model that stores whether the before state was requested and could not be
+   * read (`AuditRecord.beforeUnavailable`). Without it the marker is not stored, so the event
+   * model needs no such column.
+   */
+  beforeUnavailableField?: string;
 }
 
 /**
@@ -39,6 +45,12 @@ export interface SharedChangeSchema {
   changeModel: string;
   /** Model name for aggregate relation table */
   aggregateModel: string;
+  /**
+   * Field of the change model that stores whether the before state was requested and could not be
+   * read (`AuditRecord.beforeUnavailable`). Without it the marker is not stored, so the change
+   * model needs no such column.
+   */
+  beforeUnavailableField?: string;
 }
 
 interface DeduplicationResult {
@@ -140,6 +152,10 @@ const requireDelegate = <TDelegate extends object>(
   return delegate;
 };
 
+/** The marker as a column of the row, only when the schema names a field for it */
+const beforeUnavailableColumn = (field: string | undefined, log: AuditRecord): Record<string, boolean> =>
+  field === undefined ? {} : { [field]: log.beforeUnavailable };
+
 /**
  * Batch upserts actors and returns a mapping of keys to IDs
  *
@@ -240,13 +256,13 @@ const batchUpsertAggregates = async (
  */
 const createAuditEvents = async (
   tx: TransactionalPrismaClient,
-  modelName: string,
+  schema: Pick<NormalizedSchema, 'eventModel' | 'beforeUnavailableField'>,
   logs: AuditRecord[],
   actorMap: Map<string, string>,
   entityMap: Map<string, string>,
   aggregateMap: Map<string, string>,
 ): Promise<void> => {
-  const model = requireDelegate<CreateDelegate>(tx, modelName, 'create');
+  const model = requireDelegate<CreateDelegate>(tx, schema.eventModel, 'create');
 
   for (const log of logs) {
     const actorKey = getActorKey(log);
@@ -272,6 +288,7 @@ const createAuditEvents = async (
         before: log.before,
         after: log.after,
         changes: log.changes,
+        ...beforeUnavailableColumn(schema.beforeUnavailableField, log),
         requestContext: log.requestContext,
         createdAt: log.createdAt,
       },
@@ -331,7 +348,7 @@ export const createEntityNormalizedWriter = (schema: NormalizedSchema): AuditLog
       const entityMap = await batchUpsertEntities(tx, schema.entityModel, entities);
       const aggregateMap = await batchUpsertAggregates(tx, schema.aggregateModel, aggregates);
 
-      await createAuditEvents(tx, schema.eventModel, logs, actorMap, entityMap, aggregateMap);
+      await createAuditEvents(tx, schema, logs, actorMap, entityMap, aggregateMap);
     };
 
     await writeInTransaction(context, writeWithinTransaction);
@@ -400,6 +417,7 @@ export const createSharedChangeWriter = (schema: SharedChangeSchema): AuditLogWr
           before: representativeLog.before,
           after: representativeLog.after,
           changes: representativeLog.changes,
+          ...beforeUnavailableColumn(schema.beforeUnavailableField, representativeLog),
           createdAt: representativeLog.createdAt,
         },
       });

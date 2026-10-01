@@ -391,6 +391,7 @@ model AuditEvent {
   before          Json?
   after           Json?
   changes         Json?
+  beforeUnavailable Boolean    @default(false) // optional: name it as `beforeUnavailableField`
 
   requestContext  Json?
   createdAt       DateTime     @default(now()) @map("created_at")
@@ -411,6 +412,8 @@ model AuditEvent {
 **Configuration with Built-in Helper:**
 
 The helper writes on the client each write runs on: in the operation's transaction when `inTransaction` is true (an awaited write), in a transaction of its own otherwise.
+
+`beforeUnavailableField` is optional: name a Boolean field of `AuditEvent` and the helper stores `beforeUnavailable` (the before state was requested and could not be read) in it; without it the marker is not stored and the model needs no such field.
 
 ```typescript
 // src/audit.config.ts
@@ -503,6 +506,7 @@ model AuditChange {
   before          Json?
   after           Json?
   changes         Json?
+  beforeUnavailable Boolean         @default(false) // optional: name it as `beforeUnavailableField`
 
   createdAt       DateTime          @default(now()) @map("created_at")
 
@@ -549,6 +553,8 @@ model AuditAggregate {
 **Configuration with Built-in Helper:**
 
 The helper writes on the client each write runs on: in the operation's transaction when `inTransaction` is true (an awaited write), in a transaction of its own otherwise.
+
+`beforeUnavailableField` is optional: name a Boolean field of `AuditChange` and the helper stores `beforeUnavailable` (the before state was requested and could not be read) in it; without it the marker is not stored and the model needs no such field.
 
 ```typescript
 // src/audit.config.ts
@@ -996,7 +1002,7 @@ Two independent options, both receiving the same structured failure context (`{ 
 
 An `update` or `delete`, top-level or nested, reads its target row before the write when `fetchBeforeOperation` is on. When that read fails, the caller's operation still runs, the observer hears about it under `pre-fetch`, and the entry is recorded with `before: null`, `changes: null` and `beforeUnavailable: true`, so it cannot be mistaken for an entry whose before state was never requested (`beforeUnavailable: false`). An `upsert`, top-level or nested, whose read failed is not recorded, and neither are the nested writes of its branches: the before state is what tells whether it created or updated its row. A nested `connectOrCreate` whose read failed is not recorded either, since it cannot tell a connect from a create. A failed read of a nested row leaves unknown only that row: another nested operation keeps what its own read found, and the rows nested below the row are still read under the primary key its WHERE names. When the row cannot be identified that way (a to-one relation's row, or one named by another unique field), the entries nested below it are treated as if their own read had failed, and a nested create or `updateMany` / `deleteMany` below it fails the operation under `diff-generation`, since the rows it writes cannot be told apart from the rows that were already there. A nested `updateMany` / `deleteMany` reads the rows its filter matches before the write whatever `fetchBeforeOperation` says, because that read is what identifies the rows it writes: when it fails, the operation fails under `diff-generation` before the write is attempted, like a top-level `updateMany` / `deleteMany`.
 
-Every record carries `beforeUnavailable`. The default write stores it when the audit-log model declares a `beforeUnavailable Boolean` column and leaves it out otherwise, so no column is required; a `hooks.writer` sees it on each record and can store it however it likes. The normalized writers (`createEntityNormalizedWriter`, `createSharedChangeWriter`) do not store it.
+Every record carries `beforeUnavailable`. The default write stores it when the audit-log model declares a `beforeUnavailable Boolean` column and leaves it out otherwise, so no column is required; a `hooks.writer` sees it on each record and can store it however it likes. The normalized writers (`createEntityNormalizedWriter`, `createSharedChangeWriter`) store it the same way, in the field their schema config names as `beforeUnavailableField`, and leave it out when the config names none.
 
 ### Concurrency Considerations
 

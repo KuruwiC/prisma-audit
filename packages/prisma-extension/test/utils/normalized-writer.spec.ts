@@ -42,7 +42,7 @@ const contextOn = (handle: unknown, inTransaction = true): WriteContext => ({
 
 const modelDelegate = (id: string) => ({
   upsert: vi.fn(async () => ({ id })),
-  create: vi.fn(async () => ({ id })),
+  create: vi.fn(async (_args: { data: Record<string, unknown> }) => ({ id })),
 });
 
 describe('createEntityNormalizedWriter', () => {
@@ -141,4 +141,61 @@ describe('the transaction the normalized writers write in', () => {
       expect(clientModels[created]?.create).toHaveBeenCalledTimes(1);
     },
   );
+});
+
+describe('the beforeUnavailable marker of the normalized writers', () => {
+  const unavailableRecord: AuditRecord = { ...record, action: 'update', before: null, beforeUnavailable: true };
+
+  const entityModels = () => ({
+    actor: modelDelegate('actor-1'),
+    entity: modelDelegate('entity-1'),
+    aggregate: modelDelegate('aggregate-1'),
+    auditEvent: modelDelegate('event-1'),
+  });
+  const entitySchema = {
+    actorModel: 'actor',
+    entityModel: 'entity',
+    aggregateModel: 'aggregate',
+    eventModel: 'auditEvent',
+  };
+  const sharedChangeSchema = { changeModel: 'auditChange', aggregateModel: 'auditAggregate' };
+
+  it('is stored in the event field the entity-normalized schema names', async () => {
+    const tx = entityModels();
+    const writer = createEntityNormalizedWriter({ ...entitySchema, beforeUnavailableField: 'beforeMissing' });
+
+    await writer([unavailableRecord], contextOn(tx));
+
+    expect(tx.auditEvent.create).toHaveBeenCalledWith({ data: expect.objectContaining({ beforeMissing: true }) });
+  });
+
+  it('is left out of the event when the entity-normalized schema names no field for it', async () => {
+    const tx = entityModels();
+    const writer = createEntityNormalizedWriter(entitySchema);
+
+    await writer([unavailableRecord], contextOn(tx));
+
+    const data = tx.auditEvent.create.mock.calls[0]?.[0].data ?? {};
+    expect(Object.keys(data)).not.toContain('beforeUnavailable');
+    expect(Object.keys(data)).not.toContain('beforeMissing');
+  });
+
+  it('is stored in the change field the shared-change schema names', async () => {
+    const tx = { auditChange: modelDelegate('change-1'), auditAggregate: modelDelegate('link-1') };
+    const writer = createSharedChangeWriter({ ...sharedChangeSchema, beforeUnavailableField: 'beforeUnavailable' });
+
+    await writer([unavailableRecord], contextOn(tx));
+
+    expect(tx.auditChange.create).toHaveBeenCalledWith({ data: expect.objectContaining({ beforeUnavailable: true }) });
+  });
+
+  it('is left out of the change when the shared-change schema names no field for it', async () => {
+    const tx = { auditChange: modelDelegate('change-1'), auditAggregate: modelDelegate('link-1') };
+    const writer = createSharedChangeWriter(sharedChangeSchema);
+
+    await writer([unavailableRecord], contextOn(tx));
+
+    const data = tx.auditChange.create.mock.calls[0]?.[0].data ?? {};
+    expect(Object.keys(data)).not.toContain('beforeUnavailable');
+  });
 });

@@ -400,16 +400,17 @@ model Aggregate {
 }
 
 model AuditEvent {
-  id             String   @id @default(cuid())
-  actorId        String   @map("actor_id")
-  entityId       String   @map("entity_id")
-  aggregateId    String   @map("aggregate_id")
-  action         String
-  before         Json?
-  after          Json?
-  changes        Json?
-  requestContext Json?    @map("request_context")
-  createdAt      DateTime @default(now()) @map("created_at")
+  id                String   @id @default(cuid())
+  actorId           String   @map("actor_id")
+  entityId          String   @map("entity_id")
+  aggregateId       String   @map("aggregate_id")
+  action            String
+  before            Json?
+  after             Json?
+  changes           Json?
+  beforeUnavailable Boolean  @default(false) @map("before_unavailable")
+  requestContext    Json?    @map("request_context")
+  createdAt         DateTime @default(now()) @map("created_at")
 
   actor     Actor     @relation(fields: [actorId], references: [id])
   entity    Entity    @relation(fields: [entityId], references: [id])
@@ -427,15 +428,16 @@ model AuditEvent {
 // ============================================
 
 model AuditChange {
-  id             String   @id @default(cuid())
-  entityCategory String   @map("entity_category")
-  entityType     String   @map("entity_type")
-  entityId       String   @map("entity_id")
-  action         String
-  before         Json?
-  after          Json?
-  changes        Json?
-  createdAt      DateTime @default(now()) @map("created_at")
+  id                String   @id @default(cuid())
+  entityCategory    String   @map("entity_category")
+  entityType        String   @map("entity_type")
+  entityId          String   @map("entity_id")
+  action            String
+  before            Json?
+  after             Json?
+  changes           Json?
+  beforeUnavailable Boolean  @default(false) @map("before_unavailable")
+  createdAt         DateTime @default(now()) @map("created_at")
 
   aggregates AuditAggregate[]
 

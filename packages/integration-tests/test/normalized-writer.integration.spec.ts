@@ -4,7 +4,7 @@
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
-import type { AggregateMapping } from '@kuruwic/prisma-audit';
+import type { AggregateMapping, AuditLogWriter } from '@kuruwic/prisma-audit';
 import {
   createAuditClient,
   createEntityNormalizedWriter,
@@ -410,6 +410,108 @@ describe('Normalized Writer Helpers', () => {
 
       const changes = await context.basePrisma.auditChange.findMany();
       expect(changes).toHaveLength(1);
+    });
+  });
+
+  describe('the beforeUnavailable marker', () => {
+    const entitySchema = {
+      actorModel: 'Actor',
+      entityModel: 'Entity',
+      aggregateModel: 'Aggregate',
+      eventModel: 'AuditEvent',
+    };
+    const sharedChangeSchema = { changeModel: 'AuditChange', aggregateModel: 'AuditAggregate' };
+
+    /** An audited client whose before-state read of a Post update is failed once it is armed */
+    const createClientFailingBeforeRead = (writer: AuditLogWriter) => {
+      let failNextFindUnique = false;
+      const basePrisma = context.basePrisma.$extends({
+        name: 'fault-injection',
+        query: {
+          post: {
+            async findUnique({ args, query }) {
+              if (failNextFindUnique) {
+                failNextFindUnique = false;
+                throw new Error('simulated before-state read failure');
+              }
+              return query(args);
+            },
+          },
+        },
+      });
+      const prisma = createAuditClient(basePrisma, {
+        Prisma,
+        provider: context.provider,
+        aggregateMapping: testAggregateMapping,
+        performance: { awaitWrite: true },
+        hooks: { writer },
+      });
+      return {
+        prisma,
+        armFindUniqueFailure: () => {
+          failNextFindUnique = true;
+        },
+      };
+    };
+
+    const updatePostAfterFailedBeforeRead = async (writer: AuditLogWriter) => {
+      const { prisma, armFindUniqueFailure } = createClientFailingBeforeRead(writer);
+      const user = await context.basePrisma.user.create({ data: { email: 'author@example.com', name: 'Author' } });
+      const post = await context.provider.runAsync(testActor, () =>
+        prisma.post.create({ data: { title: 'Original', content: 'original', authorId: user.id } }),
+      );
+      armFindUniqueFailure();
+      await context.provider.runAsync(testActor, () =>
+        prisma.post.update({ where: { id: post.id }, data: { title: 'Updated' } }),
+      );
+    };
+
+    it('is stored by the entity-normalized writer in the event field the schema names', async () => {
+      await updatePostAfterFailedBeforeRead(
+        createEntityNormalizedWriter({ ...entitySchema, beforeUnavailableField: 'beforeUnavailable' }),
+      );
+
+      const events = await context.basePrisma.auditEvent.findMany({ orderBy: { createdAt: 'asc' } });
+      expect(events.map((event) => [event.action, event.beforeUnavailable])).toEqual(
+        expect.arrayContaining([
+          ['create', false],
+          ['update', true],
+        ]),
+      );
+    });
+
+    it('is not stored by the entity-normalized writer when the schema names no field for it', async () => {
+      await updatePostAfterFailedBeforeRead(createEntityNormalizedWriter(entitySchema));
+
+      const events = await context.basePrisma.auditEvent.findMany({ where: { action: 'update' } });
+      expect(events.length).toBeGreaterThan(0);
+      for (const event of events) {
+        expect(event.beforeUnavailable).toBe(false);
+      }
+    });
+
+    it('is stored by the shared-change writer in the change field the schema names', async () => {
+      await updatePostAfterFailedBeforeRead(
+        createSharedChangeWriter({ ...sharedChangeSchema, beforeUnavailableField: 'beforeUnavailable' }),
+      );
+
+      const changes = await context.basePrisma.auditChange.findMany({ where: { entityType: 'Post' } });
+      expect(changes.map((change) => [change.action, change.beforeUnavailable])).toEqual(
+        expect.arrayContaining([
+          ['create', false],
+          ['update', true],
+        ]),
+      );
+    });
+
+    it('is not stored by the shared-change writer when the schema names no field for it', async () => {
+      await updatePostAfterFailedBeforeRead(createSharedChangeWriter(sharedChangeSchema));
+
+      const changes = await context.basePrisma.auditChange.findMany({ where: { action: 'update' } });
+      expect(changes.length).toBeGreaterThan(0);
+      for (const change of changes) {
+        expect(change.beforeUnavailable).toBe(false);
+      }
     });
   });
 });
