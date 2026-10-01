@@ -243,7 +243,10 @@ export const getPrimaryKeyFields = (Prisma: PrismaWithDMMF, modelName: string): 
  * a string, or the JSON array of a composite key's values (BigInt values as strings), which keeps
  * `["a:b", "c"]` and `["a", "b:c"]` apart. `UNRESOLVED_ENTITY_ID` when any field is absent or null.
  */
-export const extractEntityIdentity = (record: Record<string, unknown>, pkFields: string[]): EntityIdentityKey => {
+export const extractEntityIdentity = (
+  record: Record<string, unknown>,
+  pkFields: readonly string[],
+): EntityIdentityKey => {
   const allPresent = pkFields.every((f) => f in record && record[f] != null);
   if (!allPresent) return UNRESOLVED_ENTITY_ID;
 

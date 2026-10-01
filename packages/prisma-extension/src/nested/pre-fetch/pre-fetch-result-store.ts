@@ -237,7 +237,7 @@ export const extractEntityIdOrUnresolved = (record: unknown, pkFields: readonly 
     return UNRESOLVED_ENTITY_ID;
   }
 
-  return extractEntityIdentity(record as Record<string, unknown>, [...pkFields]);
+  return extractEntityIdentity(record as Record<string, unknown>, pkFields);
 };
 
 /**

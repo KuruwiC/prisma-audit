@@ -40,8 +40,6 @@ interface LinkCandidate {
   readonly detached: boolean;
 }
 
-const keyOf = (row: Row, fields: readonly string[]): EntityIdentityKey => extractEntityIdentity(row, [...fields]);
-
 /** Whether the row holds the foreign key `parentKey` names, i.e. is attached to that parent row */
 const isAttachedTo = (row: Row, read: LinkPathRead, parentKey: Row | undefined): boolean =>
   parentKey !== undefined && matchesUniqueWhere(row, attachedFilter(read.link, parentKey));
@@ -126,7 +124,7 @@ const candidatesAt = (
       if (candidate.before.kind !== 'captured') {
         return true;
       }
-      const identity = keyOf(candidate.before.row, read.pkFields);
+      const identity = extractEntityIdentity(candidate.before.row, read.pkFields);
       if (seen.has(identity)) {
         return false;
       }

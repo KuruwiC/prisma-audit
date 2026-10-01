@@ -58,9 +58,6 @@ export interface RowsNotInResultInput {
   readonly include: Row | undefined;
 }
 
-const identityOfRow = (row: Row, fields: readonly string[]): EntityIdentityKey =>
-  extractEntityIdentity(row, [...fields]);
-
 const primaryKeyFilter = (row: Row, pkFields: readonly string[]): Row =>
   Object.fromEntries(pkFields.map((field) => [field, row[field]]));
 
@@ -81,14 +78,17 @@ const readHiddenInsertedKeys = async (
   }
   const select = Object.fromEntries(pkFields.map((field) => [field, true]));
   const keys = await client.findMany({ where: { OR: parentScopes }, select });
-  const held = new Set(input.parents.flatMap((parent) => parent.rows.map((row) => identityOfRow(row, pkFields))));
+  const held = new Set(
+    input.parents.flatMap((parent) => parent.rows.map((row) => extractEntityIdentity(row, pkFields))),
+  );
   return keys.filter((key) => {
-    const identity = identityOfRow(key, pkFields);
+    const identity = extractEntityIdentity(key, pkFields);
     return (
       !held.has(identity) &&
       !preExisting?.has(identity) &&
       !targets.some(
-        (target) => target.locator.by === 'primaryKey' && identityOfRow(target.locator.where, pkFields) === identity,
+        (target) =>
+          target.locator.by === 'primaryKey' && extractEntityIdentity(target.locator.where, pkFields) === identity,
       )
     );
   });
@@ -104,14 +104,18 @@ const hangsUnder = (row: Row, parent: Row, path: ToManyPath): boolean => {
   if (scope.foreignKey) {
     const { fields, references } = scope.foreignKey;
     return (
-      identityOfRow(row, fields) ===
-      identityOfRow(Object.fromEntries(references.map((field, index) => [fields[index], parent[field]])), fields)
+      extractEntityIdentity(row, fields) ===
+      extractEntityIdentity(
+        Object.fromEntries(references.map((field, index) => [fields[index], parent[field]])),
+        fields,
+      )
     );
   }
   const linked = row[scope.backField];
-  const parentIdentity = identityOfRow(parent, scope.parentFields);
+  const parentIdentity = extractEntityIdentity(parent, scope.parentFields);
   return (
-    Array.isArray(linked) && linked.some((link: Row) => identityOfRow(link, scope.parentFields) === parentIdentity)
+    Array.isArray(linked) &&
+    linked.some((link: Row) => extractEntityIdentity(link, scope.parentFields) === parentIdentity)
   );
 };
 
@@ -153,14 +157,14 @@ export const readRowsNotInResult = async (input: RowsNotInResultInput): Promise<
   const rows = await client.findMany({ where: { OR: filters }, ...(include ? { include } : {}) });
   nestedLog('read %d rows the result does not hold at path=%s', rows.length, input.path);
 
-  const inserted = new Set(insertedKeys.map((key) => identityOfRow(key, pkFields)));
+  const inserted = new Set(insertedKeys.map((key) => extractEntityIdentity(key, pkFields)));
   return parents.map((parent) =>
     rows.flatMap((row) => {
       const ownTarget = parent.absentTargets.some((target) => matchesUniqueWhere(row, target.locator.where));
       const insertedHere =
         path !== undefined &&
         parent.insertsHidden &&
-        inserted.has(identityOfRow(row, pkFields)) &&
+        inserted.has(extractEntityIdentity(row, pkFields)) &&
         hangsUnder(row, parent.row, path);
       if (!ownTarget && !insertedHere) {
         return [];
