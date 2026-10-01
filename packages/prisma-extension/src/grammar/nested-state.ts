@@ -8,16 +8,38 @@
 
 import type { BeforeState, MutationAction } from '@kuruwic/db-audit-core';
 import { NO_BEFORE_STATE } from '../utils/before-state.js';
+import type { EntityIdentityKey } from '../utils/identity-key.js';
 import type { UpsertBranch } from './nested-operations.js';
 import { AUDIT_ACTION } from './operations.js';
 
 /**
- * What the pre-fetch learned of a row at a nested path: its before state and, when that holds no
- * row, the primary key the operation's WHERE names the row by (absent when the WHERE names it by
- * another unique field)
+ * The row a nested operation's rows hang under: the primary-key identity of a row at the parent
+ * path (`UNRESOLVED_ENTITY_ID` when that row lacks a key field), or {@link TOP_LEVEL_ROW} for
+ * the row of the operation itself
+ */
+export const TOP_LEVEL_ROW: unique symbol = Symbol('TOP_LEVEL_ROW');
+
+export type ParentRowIdentity = EntityIdentityKey | typeof TOP_LEVEL_ROW;
+
+/**
+ * How a pre-fetch read named the row it was for: by the unique WHERE of the operation that targets
+ * it, as the related row of a to-one relation under a parent row, or as a row a batch filter matched
+ */
+export type PreFetchedRowName =
+  | { readonly by: 'uniqueWhere'; readonly where: Record<string, unknown> }
+  | { readonly by: 'parentRow'; readonly parent: ParentRowIdentity }
+  | { readonly by: 'batchFilter' };
+
+/**
+ * What the pre-fetch learned of a row at a nested path: its before state, its identity when known
+ * (`UNRESOLVED_ENTITY_ID` otherwise), how the read named it and, when the before state holds
+ * no row, the primary key the operation's WHERE names the row by (absent when the WHERE names it
+ * by another unique field)
  */
 export type NestedPreFetchResult = {
   readonly before: BeforeState;
+  readonly identity: EntityIdentityKey;
+  readonly name: PreFetchedRowName;
   readonly key?: Record<string, unknown>;
 };
 

@@ -5,10 +5,15 @@
 
 import type { BeforeState } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
-import type { NestedBatchKeyword, NestedBatchTargets } from '../../src/grammar/nested-operations.js';
+import type {
+  NestedBatchKeyword,
+  NestedBatchTargets,
+  NestedPreFetchResults,
+} from '../../src/grammar/nested-operations.js';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../src/internal-types.js';
 import { buildNestedWriteSets, detectExecutedNestedOperations } from '../../src/nested/events/write-set.js';
 import type { PreExistingRows } from '../../src/nested/pre-fetch/pre-existing-rows.js';
+import { markPathUnread, storePreFetchResult } from '../../src/nested/pre-fetch/pre-fetch-result-store.js';
 import { executedUpsertBranch } from '../../src/pipeline/before-state.js';
 import {
   type BatchOperationOutcome,
@@ -16,8 +21,14 @@ import {
   collectSingleOperationEvents,
   type SingleOperationOutcome,
 } from '../../src/pipeline/collect-events.js';
-import { UNRESOLVED_ENTITY_ID } from '../../src/utils/identity-key.js';
 import { createSchemaMetadataFromDMMF } from '../../src/utils/schema-metadata.js';
+
+/** Pre-fetch results in which `path` is unread: a read for rows it could not name failed */
+const unreadAt = (path: string): NestedPreFetchResults => {
+  const results: NestedPreFetchResults = new Map();
+  markPathUnread(results, path);
+  return results;
+};
 
 const schemaMetadata = createSchemaMetadataFromDMMF({
   dmmf: {
@@ -274,15 +285,15 @@ describe('collectSingleOperationEvents', () => {
     const batchTargetsOf = (keyword: NestedBatchKeyword, ids: string[]): NestedBatchTargets =>
       new Map([['posts', new Map([[keyword, new Map(ids.map((id) => [id, { id }]))]])]]);
 
-    const preFetched = (entries: [string, Record<string, unknown> | null][]) => {
-      const results = new Map();
+    const preFetched = (entries: [string, Record<string, unknown> | null][]): NestedPreFetchResults => {
+      const results: NestedPreFetchResults = new Map();
       for (const [identity, before] of entries) {
-        results.set(
-          'posts',
-          (results.get('posts') ?? new Map()).set(identity, {
-            before: before ? { kind: 'captured', row: before } : { kind: 'none' },
-          }),
-        );
+        storePreFetchResult(results, 'posts', {
+          before: before ? { kind: 'captured', row: before } : { kind: 'none' },
+          identity,
+          name: { by: 'uniqueWhere', where: { id: identity } },
+          ...(before ? {} : { key: { id: identity } }),
+        });
       }
       return results;
     };
@@ -324,9 +335,7 @@ describe('collectSingleOperationEvents', () => {
 
     it('attributes an update at a path whose pre-fetch failed the row with an unavailable before state', async () => {
       const events = await postEvents({ update: { where: { id: 'p1' }, data: { title: 'A' } } }, [p1, p2], {
-        nestedPreFetchResults: new Map([
-          ['posts', new Map([[UNRESOLVED_ENTITY_ID, { before: { kind: 'unavailable' } }]])],
-        ]),
+        nestedPreFetchResults: unreadAt('posts'),
       });
 
       expect(events).toEqual([
@@ -364,9 +373,7 @@ describe('collectSingleOperationEvents', () => {
       ['connectOrCreate', { connectOrCreate: { where: { id: 'p1' }, create: { title: 'C' } } }],
     ])('gives the row of a nested %s whose target could not be read no event', async (_keyword, posts) => {
       const events = await postEvents(posts, [p1, p2], {
-        nestedPreFetchResults: new Map([
-          ['posts', new Map([[UNRESOLVED_ENTITY_ID, { before: { kind: 'unavailable' } }]])],
-        ]),
+        nestedPreFetchResults: unreadAt('posts'),
       });
 
       expect(events).toEqual([]);
@@ -636,9 +643,7 @@ describe('collectSingleOperationEvents — a to-one relation', () => {
         args: { where: { id: 'p1' }, data: { author: { update: { name: 'Anne' } } } },
         result: { id: 'p1', title: 'A', authorId: 'u1', author },
         beforeState: { kind: 'captured', row: { id: 'p1', title: 'A', authorId: 'u1' } },
-        nestedPreFetchResults: new Map([
-          ['author', new Map([[UNRESOLVED_ENTITY_ID, { before: { kind: 'unavailable' } }]])],
-        ]),
+        nestedPreFetchResults: unreadAt('author'),
       }),
       deps,
     );
@@ -661,9 +666,7 @@ describe('collectSingleOperationEvents — an upsert of a to-one relation', () =
         },
         result: { id: 'p1', title: 'A', authorId: 'u1', author: { id: 'u1', name: 'Anne' } },
         beforeState: { kind: 'captured', row: { id: 'p1', title: 'A', authorId: 'u1' } },
-        nestedPreFetchResults: new Map([
-          ['author', new Map([[UNRESOLVED_ENTITY_ID, { before: { kind: 'unavailable' } }]])],
-        ]),
+        nestedPreFetchResults: unreadAt('author'),
       }),
       deps,
     );

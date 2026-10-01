@@ -72,11 +72,19 @@ export interface NestedOperationParent {
   readonly element: number;
 }
 
-/**
- * Before-states of nested records pre-fetched ahead of an operation, keyed by operation path,
- * then by entity identity (`UNRESOLVED_ENTITY_ID` when the identity is unknown)
- */
-export type NestedPreFetchResults = Map<string, Map<EntityIdentityKey, NestedPreFetchResult>>;
+/** What the pre-fetch learned of the rows at one nested path */
+export interface NestedPathPreFetch {
+  readonly results: NestedPreFetchResult[];
+  /**
+   * A read for rows of the path it names by no unique WHERE (the related rows of a to-one
+   * relation) failed or could not run under every parent row: a row without a result of its own
+   * reads as unavailable
+   */
+  unread: boolean;
+}
+
+/** Before-states of nested records pre-fetched ahead of an operation, keyed by operation path */
+export type NestedPreFetchResults = Map<string, NestedPathPreFetch>;
 
 /**
  * The primary key of every row each nested batch keyword's filter matched under its parent rows

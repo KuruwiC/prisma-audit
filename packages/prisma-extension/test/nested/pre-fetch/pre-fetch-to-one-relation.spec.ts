@@ -3,9 +3,11 @@
  * schema shapes the integration fixtures do not have.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { TOP_LEVEL_ROW } from '../../../src/grammar/nested-state.js';
 import type { DMMFField, PrismaNamespace, TransactionalPrismaClient } from '../../../src/internal-types.js';
 import { preFetchNestedRecordsBeforeOperation } from '../../../src/nested/pre-fetch/coordinator.js';
+import { preFetchedStateUnder } from '../../../src/nested/pre-fetch/pre-fetch-result-store.js';
 import { createSchemaMetadataFromDMMF } from '../../../src/utils/schema-metadata.js';
 
 type Row = Record<string, unknown>;
@@ -141,9 +143,11 @@ describe('nested to-one pre-fetch relation link and parent rows', () => {
       data: { backupContact: { update: { label: 'changed' } } },
     });
 
-    const entries = results?.get('backupContact');
-    expect([...(entries?.keys() ?? [])]).toEqual(['c-backup']);
-    expect(entries?.get('c-backup')?.before).toMatchObject({ kind: 'captured', row: { label: 'backup' } });
+    expect(results.get('backupContact')?.results.map((result) => result.identity)).toEqual(['c-backup']);
+    expect(preFetchedStateUnder(results, 'backupContact', TOP_LEVEL_ROW)).toMatchObject({
+      kind: 'captured',
+      row: { label: 'backup' },
+    });
   });
 
   it('pre-fetches the to-one child of every row pre-fetched at the parent path', async () => {
@@ -173,9 +177,74 @@ describe('nested to-one pre-fetch relation link and parent rows', () => {
       },
     });
 
-    expect(results?.get('members.badge')?.get('b1')?.before).toMatchObject({
+    expect(preFetchedStateUnder(results, 'members.badge', 'm1')).toMatchObject({
       kind: 'captured',
       row: { label: 'badge-1' },
+    });
+    expect(preFetchedStateUnder(results, 'members.badge', 'm2')).toMatchObject({
+      kind: 'captured',
+      row: { label: 'badge-2' },
+    });
+  });
+
+  it('keeps the read of each parent row apart, a parent row without a related row included', async () => {
+    const client = createClient({
+      account: [{ id: 'a1' }],
+      member: [
+        { id: 'm1', accountId: 'a1', name: 'first' },
+        { id: 'm2', accountId: 'a1', name: 'second' },
+      ],
+      badge: [{ id: 'b1', memberId: 'm1', label: 'badge-1' }],
+    });
+    const upsertBadge = { badge: { upsert: { create: { label: 'new' }, update: { label: 'changed' } } } };
+
+    const results = await preFetch(client, 'Account', {
+      where: { id: 'a1' },
+      data: {
+        members: {
+          update: [
+            { where: { id: 'm1' }, data: upsertBadge },
+            { where: { id: 'm2' }, data: upsertBadge },
+          ],
+        },
+      },
+    });
+
+    expect(preFetchedStateUnder(results, 'members.badge', 'm1')).toMatchObject({ kind: 'captured' });
+    expect(preFetchedStateUnder(results, 'members.badge', 'm2')).toEqual({ kind: 'none' });
+  });
+
+  it('reads the related row of a parent row once when several rows at the parent path share it', async () => {
+    const client = createClient({
+      account: [{ id: 'a1' }],
+      member: [
+        { id: 'm1', accountId: 'a1', name: 'first' },
+        { id: 'm2', accountId: 'a1', name: 'second' },
+      ],
+      contact: [{ id: 'c-primary', primaryForId: 'a1', backupForId: null, label: 'primary' }],
+    });
+    const contact = client.contact as ReturnType<typeof createDelegate>;
+    const findFirst = vi.spyOn(contact, 'findFirst');
+
+    const results = await preFetch(client, 'Account', {
+      where: { id: 'a1' },
+      data: {
+        members: {
+          update: [
+            {
+              where: { id: 'm1' },
+              data: { account: { update: { primaryContact: { update: { label: 'changed' } } } } },
+            },
+            { where: { id: 'm2' }, data: { account: { update: {} } } },
+          ],
+        },
+      },
+    });
+
+    expect(findFirst).toHaveBeenCalledTimes(1);
+    expect(preFetchedStateUnder(results, 'members.account.primaryContact', 'a1')).toMatchObject({
+      kind: 'captured',
+      row: { label: 'primary' },
     });
   });
 });

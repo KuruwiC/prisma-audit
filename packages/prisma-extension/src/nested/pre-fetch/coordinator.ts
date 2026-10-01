@@ -47,8 +47,14 @@ import {
   type ToManyScopeInput,
 } from './one-to-many-fetcher.js';
 import { preFetchOneToOneRelation, resolveToOneRelationLink } from './one-to-one-fetcher.js';
-import { isRecord, parentKeysFromOperationWheres, parentPathOf } from './parent-rows.js';
-import { storePreFetchResult, storeReadResult, storeUnreadRows } from './pre-fetch-result-store.js';
+import { isRecord, parentKeysFromOperationWheres, parentPathOf, targetsNamedByWhere } from './parent-rows.js';
+import {
+  extractEntityIdOrUnresolved,
+  markPathUnread,
+  storePreFetchResult,
+  storeReadResult,
+  storeUnreadRows,
+} from './pre-fetch-result-store.js';
 
 type PrismaDMMF = PrismaNamespace['dmmf'];
 
@@ -249,13 +255,6 @@ export const preFetchNestedRecordsBeforeOperation = async (
   return preFetch;
 };
 
-/**
- * Whether the operation names each row it targets by a unique WHERE; a to-one `update` /
- * `upsert` / `delete` targets the related row of each parent row instead
- */
-const targetsNamedByWhere = (nestedOp: NestedOperationInfo): boolean =>
-  nestedOp.isList || nestedOp.operation === 'connectOrCreate';
-
 interface NestedPreFetchContext {
   prismaClient: PrismaClientWithDynamicAccess | TransactionalPrismaClient;
   modelName: string;
@@ -378,28 +377,30 @@ const handleOneToOneRelation = async (
   relation: NestedRelation,
   relatedModelClient: PreFetchModelClient,
 ): Promise<void> => {
-  const { topLevelWhere, topLevelModelClient, preFetchResults } = context;
-  const { nestedOp, field, relatedModel, pkConstraint } = relation;
+  const { topLevelWhere, topLevelModelClient, preFetchResults, resolvePkConstraint } = context;
+  const { nestedOp, field, parentModel, relatedModel, pkConstraint } = relation;
 
   const { results, parentsKnown } = await preFetchOneToOneRelation({
     path: nestedOp.path,
     link: resolveToOneRelationLink(field, relatedModel),
+    parentPkFields: resolvePkConstraint(parentModel.name)?.fields ?? [],
     topLevelWhere,
     topLevelModelClient,
     relatedModelClient,
     preFetchResults,
-    pkFields: pkConstraint.fields,
   });
 
-  for (const result of results) {
-    storePreFetchResult(preFetchResults, nestedOp.path, result.entityId, {
-      before: beforeStateOf(result.beforeRecord),
+  for (const { parent, beforeRecord } of results) {
+    storePreFetchResult(preFetchResults, nestedOp.path, {
+      before: beforeStateOf(beforeRecord),
+      identity: extractEntityIdOrUnresolved(beforeRecord, pkConstraint.fields),
+      name: { by: 'parentRow', parent },
     });
 
-    preFetchLog('1:1 added to map: path=%s entityId=%s', nestedOp.path, result.entityId);
+    preFetchLog('1:1 added to map: path=%s found=%s', nestedOp.path, beforeRecord !== null);
   }
   if (!parentsKnown) {
-    storeUnreadRows(preFetchResults, nestedOp.path, undefined, pkConstraint);
+    markPathUnread(preFetchResults, nestedOp.path);
   }
 };
 
@@ -425,6 +426,7 @@ const resolveToManyScopeInput = (
     path: nestedOp.path,
     data: nestedOp.data,
     scope: resolveToManyRelationScope(field, parentModel.name, relatedModel, parentPkConstraint.fields),
+    parentPkFields: parentPkConstraint.fields,
     topLevelWhere,
     topLevelModelClient,
     preFetchResults,

@@ -8,12 +8,11 @@
  * @module nested/pre-fetch/one-to-one-fetcher
  */
 
+import type { ParentRowIdentity } from '../../grammar/nested-state.js';
 import type { DMMFField, DMMFModel } from '../../internal-types.js';
 import { preFetchLog } from '../../utils/debug.js';
-import type { EntityIdentityKey } from '../../utils/identity-key.js';
 import type { PreFetchModelClient, PreFetchRecord } from './model-client.js';
 import { type ResolveParentRowsInput, resolveParentRows } from './parent-rows.js';
-import { extractEntityIdOrUnresolved } from './pre-fetch-result-store.js';
 
 /** The related row holds the parent row's `parentFields[i]` value in `relatedFields[i]`. */
 export interface ToOneRelationLink {
@@ -22,8 +21,9 @@ export interface ToOneRelationLink {
 }
 
 export interface PreFetchOneToOneResult {
-  entityId: EntityIdentityKey;
-  beforeRecord: PreFetchRecord | null;
+  /** The parent row the related row was read under */
+  readonly parent: ParentRowIdentity;
+  readonly beforeRecord: PreFetchRecord | null;
 }
 
 export interface PreFetchOneToOneResults {
@@ -81,7 +81,6 @@ export const resolveToOneRelationLink = (field: DMMFField, relatedModel: DMMFMod
 export interface PreFetchOneToOneRelationInput extends Omit<ResolveParentRowsInput, 'parentFields'> {
   link: ToOneRelationLink;
   relatedModelClient: PreFetchModelClient;
-  pkFields: string[];
 }
 
 /**
@@ -92,18 +91,19 @@ export interface PreFetchOneToOneRelationInput extends Omit<ResolveParentRowsInp
  * most one row matches. A parent row with a null key field (an unset optional foreign key) is
  * skipped.
  *
- * @returns One result per queried parent row; `beforeRecord` is null when no related row exists
+ * @returns One result per queried parent row, by that row's identity; `beforeRecord` is null when
+ *   no related row exists
  */
 export const preFetchOneToOneRelation = async (
   input: PreFetchOneToOneRelationInput,
 ): Promise<PreFetchOneToOneResults> => {
-  const { link, relatedModelClient, pkFields } = input;
+  const { link, relatedModelClient } = input;
 
   const { rows: parentRows, allKnown } = await resolveParentRows({ ...input, parentFields: link.parentFields });
   preFetchLog('1:1 parent rows: path=%s count=%d', input.path, parentRows.length);
 
   const results: PreFetchOneToOneResult[] = [];
-  for (const parentRow of parentRows) {
+  for (const { identity: parent, row: parentRow } of parentRows) {
     const values = link.parentFields.map((fieldName) => parentRow[fieldName]);
     if (values.some((value) => value === null || value === undefined)) {
       continue;
@@ -113,7 +113,7 @@ export const preFetchOneToOneRelation = async (
     preFetchLog('1:1 related where: %O', relatedWhere);
 
     const beforeRecord = await relatedModelClient.findFirst({ where: relatedWhere });
-    results.push({ entityId: extractEntityIdOrUnresolved(beforeRecord, pkFields), beforeRecord });
+    results.push({ parent, beforeRecord });
   }
 
   return { results, parentsKnown: allKnown };

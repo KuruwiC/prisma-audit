@@ -9,15 +9,26 @@
  */
 
 import {
+  getPrimaryKeyConstraint,
   type NestedOperationInfo,
+  type NestedOperationParent,
   type NestedPreFetchResults,
+  namedTargets,
   targetWhereClauses,
 } from '../../grammar/nested-operations.js';
-import type { NestedPreFetchResult } from '../../grammar/nested-state.js';
-import type { UniqueConstraint } from '../../schema/types.js';
+import { type NestedPreFetchResult, type ParentRowIdentity, TOP_LEVEL_ROW } from '../../grammar/nested-state.js';
+import type { SchemaMetadata, UniqueConstraint } from '../../schema/types.js';
 import { unwrapCompoundWhere } from '../../utils/compound-where.js';
 import { preFetchLog } from '../../utils/debug.js';
+import { extractEntityIdentity } from '../../utils/id-generation.js';
+import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID } from '../../utils/identity-key.js';
 import type { PreFetchModelClient, PreFetchRecord } from './model-client.js';
+import {
+  extractEntityIdOrUnresolved,
+  preFetchedResultNamedBy,
+  preFetchedResultUnder,
+  primaryKeyNamedBy,
+} from './pre-fetch-result-store.js';
 
 export const isRecord = (value: unknown): value is PreFetchRecord => typeof value === 'object' && value !== null;
 
@@ -33,14 +44,23 @@ export const parentPathOf = (path: string): string | undefined => {
 export interface ResolveParentRowsInput {
   path: string;
   parentFields: readonly string[];
+  /** The primary-key fields of the parent model, which identify a parent row */
+  parentPkFields: readonly string[];
   topLevelWhere: unknown;
   topLevelModelClient: PreFetchModelClient | undefined;
   /** Read for the parent path's rows, so operations must be pre-fetched shallowest path first */
   preFetchResults: NestedPreFetchResults;
 }
 
+/** A row a nested operation is nested under, with its identity */
+export interface ParentRow {
+  readonly identity: ParentRowIdentity;
+  /** The parent row as read, or the key fields it is known by */
+  readonly row: PreFetchRecord;
+}
+
 export interface ParentRows {
-  readonly rows: PreFetchRecord[];
+  readonly rows: ParentRow[];
   /**
    * False when a row at the parent path could not be read and is not known by the key fields
    * the relation compares, so the rows nested under it cannot be read
@@ -62,24 +82,46 @@ const parentRowOf = (
   return key && parentFields.every((fieldName) => isKeyValue(key[fieldName])) ? key : 'unknown';
 };
 
+/** `rows` with one row per identity; a row of unknown identity is kept */
+const distinctParentRows = (rows: readonly PreFetchRecord[], pkFields: readonly string[]): ParentRow[] => {
+  const seen = new Set<string>();
+  return rows.flatMap((row) => {
+    const identity = extractEntityIdOrUnresolved(row, pkFields);
+    if (identity !== UNRESOLVED_ENTITY_ID) {
+      if (seen.has(identity)) {
+        return [];
+      }
+      seen.add(identity);
+    }
+    return [{ identity, row }];
+  });
+};
+
+/** The rows at `parentPath` that exist, each once, and whether every row there is known */
+const rowsAtParentPath = (input: ResolveParentRowsInput, parentPath: string): ParentRows => {
+  const pathStore = input.preFetchResults.get(parentPath);
+  const parentRows = (pathStore?.results ?? []).map((result) => parentRowOf(result, input.parentFields));
+  return {
+    rows: distinctParentRows(
+      parentRows.filter((row): row is PreFetchRecord => typeof row === 'object'),
+      input.parentPkFields,
+    ),
+    allKnown: !pathStore?.unread && !parentRows.includes('unknown'),
+  };
+};
+
 /**
  * Returns the rows the nested operation at `path` is nested under: for a deeper path, every row
- * that exists at the parent path, by its key when its read failed; for a direct child, the
+ * that exists at the parent path, once, by its key when its read failed; for a direct child, the
  * top-level row, keyed from `where` without a query when `where` names every key field with a
  * plain value.
  */
 export const resolveParentRows = async (input: ResolveParentRowsInput): Promise<ParentRows> => {
-  const { path, parentFields, topLevelWhere, topLevelModelClient, preFetchResults } = input;
+  const { path, parentFields, topLevelWhere, topLevelModelClient } = input;
 
   const parentPath = parentPathOf(path);
   if (parentPath !== undefined) {
-    const parentRows = Array.from(preFetchResults.get(parentPath)?.values() ?? [], (entry) =>
-      parentRowOf(entry, parentFields),
-    );
-    return {
-      rows: parentRows.filter((row): row is PreFetchRecord => typeof row === 'object'),
-      allKnown: !parentRows.includes('unknown'),
-    };
+    return rowsAtParentPath(input, parentPath);
   }
 
   if (!isRecord(topLevelWhere)) {
@@ -87,10 +129,8 @@ export const resolveParentRows = async (input: ResolveParentRowsInput): Promise<
   }
 
   if (parentFields.every((fieldName) => isKeyValue(topLevelWhere[fieldName]))) {
-    return {
-      rows: [Object.fromEntries(parentFields.map((fieldName) => [fieldName, topLevelWhere[fieldName]]))],
-      allKnown: true,
-    };
+    const row = Object.fromEntries(parentFields.map((fieldName) => [fieldName, topLevelWhere[fieldName]]));
+    return { rows: [{ identity: TOP_LEVEL_ROW, row }], allKnown: true };
   }
 
   if (!topLevelModelClient) {
@@ -100,7 +140,7 @@ export const resolveParentRows = async (input: ResolveParentRowsInput): Promise<
   const select: Record<string, true> = Object.fromEntries(parentFields.map((fieldName) => [fieldName, true]));
   const parentRow = await topLevelModelClient.findUnique({ where: topLevelWhere, select });
   preFetchLog('fetched top-level parent key: path=%s found=%s', path, parentRow !== null);
-  return { rows: parentRow ? [parentRow] : [], allKnown: true };
+  return { rows: parentRow ? [{ identity: TOP_LEVEL_ROW, row: parentRow }] : [], allKnown: true };
 };
 
 /**
@@ -128,3 +168,43 @@ export const parentKeysFromOperationWheres = (
     .map((flatWhere) =>
       Object.fromEntries(parentPkConstraint.fields.map((fieldName) => [fieldName, flatWhere[fieldName]])),
     );
+
+const identityOfResult = (result: NestedPreFetchResult | undefined): EntityIdentityKey | undefined =>
+  result && result.identity !== UNRESOLVED_ENTITY_ID ? result.identity : undefined;
+
+/** Whether a nested operation names each row it targets by a unique WHERE rather than as the related row of its parent row */
+export const targetsNamedByWhere = (operation: NestedOperationInfo): boolean =>
+  operation.isList || operation.operation === 'connectOrCreate';
+
+/**
+ * The identity, before the operation, of the row the element `parent` names: the top-level row
+ * for none; for an element of a to-many operation or a connectOrCreate, the row its unique WHERE
+ * names (as read, else the primary key the WHERE names); for a to-one operation, the related row
+ * read under its own parent row. Undefined when that row is unknown: it was not read, does not
+ * exist, or the WHERE names it by another unique field and its read found nothing.
+ */
+export const parentRowIdentityOf = (
+  parent: NestedOperationParent | undefined,
+  preFetchResults: NestedPreFetchResults,
+  schemaMetadata: SchemaMetadata,
+): ParentRowIdentity | undefined => {
+  if (!parent) {
+    return TOP_LEVEL_ROW;
+  }
+  const { operation, element } = parent;
+  if (!targetsNamedByWhere(operation)) {
+    const grandparent = parentRowIdentityOf(operation.parent, preFetchResults, schemaMetadata);
+    return identityOfResult(preFetchedResultUnder(preFetchResults, operation.path, grandparent));
+  }
+  const where = namedTargets(operation.operation, operation.data).find((target) => target.element === element)?.where;
+  if (!where) {
+    return undefined;
+  }
+  const read = identityOfResult(preFetchedResultNamedBy(preFetchResults, operation.path, where));
+  if (read !== undefined) {
+    return read;
+  }
+  const pkConstraint = getPrimaryKeyConstraint(schemaMetadata, operation.relatedModel);
+  const key = pkConstraint ? primaryKeyNamedBy(where, pkConstraint) : undefined;
+  return key && pkConstraint ? extractEntityIdentity(key, pkConstraint.fields) : undefined;
+};

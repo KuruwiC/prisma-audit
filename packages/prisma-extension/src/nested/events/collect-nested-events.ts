@@ -35,8 +35,9 @@ import { NO_BEFORE_STATE } from '../../utils/before-state.js';
 import { matchesUniqueWhere } from '../../utils/compound-where.js';
 import { nestedLog } from '../../utils/debug.js';
 import { getPreFetchModelClient } from '../pre-fetch/model-client.js';
+import { parentRowIdentityOf } from '../pre-fetch/parent-rows.js';
 import type { PreExistingRows } from '../pre-fetch/pre-existing-rows.js';
-import { extractEntityIdOrUnresolved, getPreFetchResult } from '../pre-fetch/pre-fetch-result-store.js';
+import { preFetchedStateNamedBy, preFetchedStateUnder } from '../pre-fetch/pre-fetch-result-store.js';
 import type { CollectedNestedRecord } from './collected-record.js';
 import {
   collectToManyDeleteRecords,
@@ -278,20 +279,33 @@ const toOneOperationOf = (
   return writers.find((candidate) => !walk.assigned.has(candidate)) ?? writers[0];
 };
 
+/**
+ * The before state of the row a to-one operation wrote: a connectOrCreate's row as its unique
+ * WHERE named it, an update's or upsert's as the related row of the row its parent element names
+ * (the read that also decided the upsert's branch); none for a create.
+ */
+const toOneBeforeState = (walk: CollectionWalk, nestedOp: NestedOperationInfo): BeforeState => {
+  const { nestedPreFetchResults } = walk.input;
+  if (nestedOp.operation === 'create') {
+    return NO_BEFORE_STATE;
+  }
+  if (namesRowByWhere(nestedOp)) {
+    const [where] = targetWhereClauses(nestedOp.operation, nestedOp.data);
+    return where ? preFetchedStateNamedBy(nestedPreFetchResults, nestedOp.path, where) : NO_BEFORE_STATE;
+  }
+  const parent = parentRowIdentityOf(nestedOp.parent, nestedPreFetchResults, walk.deps.schemaMetadata);
+  return preFetchedStateUnder(nestedPreFetchResults, nestedOp.path, parent);
+};
+
 /** The row a to-one relation holds under one parent row, attributed to the candidate that wrote it */
 const attributeToOneRow = (walk: CollectionWalk, relation: CandidateRelation, row: Row): AttributedRow[] => {
-  const { candidates, pkFields } = relation;
+  const { candidates } = relation;
   const nestedOp = toOneOperationOf(walk, row, candidates);
   if (!nestedOp) {
     return [];
   }
   walk.assigned.add(nestedOp);
-  const identity = extractEntityIdOrUnresolved(row, [...pkFields]);
-  const before =
-    nestedOp.operation === 'create'
-      ? NO_BEFORE_STATE
-      : (getPreFetchResult(walk.input.nestedPreFetchResults, nestedOp.path, identity)?.before ?? NO_BEFORE_STATE);
-  record(walk, nestedOp, row, before);
+  record(walk, nestedOp, row, toOneBeforeState(walk, nestedOp));
   return [{ row, attribution: { operation: nestedOp, element: 0 } }];
 };
 
@@ -351,7 +365,13 @@ const collectDeleteRecords = (
         pkConstraint,
         deps.onUnresolvedDeleteEntityId,
       )
-    : collectToOneDeleteRecords(nestedOp, input.nestedPreFetchResults, pkConstraint, deps.onUnresolvedDeleteEntityId);
+    : collectToOneDeleteRecords(
+        nestedOp,
+        parentRowIdentityOf(nestedOp.parent, input.nestedPreFetchResults, deps.schemaMetadata),
+        input.nestedPreFetchResults,
+        pkConstraint,
+        deps.onUnresolvedDeleteEntityId,
+      );
 
 const isRow = (value: unknown): value is Row => typeof value === 'object' && value !== null;
 

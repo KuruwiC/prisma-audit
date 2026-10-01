@@ -22,8 +22,8 @@ import { preFetchLog } from '../../utils/debug.js';
 import { extractEntityIdentity } from '../../utils/id-generation.js';
 import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID } from '../../utils/identity-key.js';
 import type { PreFetchListClient, PreFetchModelClient, PreFetchRecord } from './model-client.js';
-import { type ParentRows, parentKeyOf, type ResolveParentRowsInput, resolveParentRows } from './parent-rows.js';
-import { storePreFetchResult, storeReadResult } from './pre-fetch-result-store.js';
+import { parentKeyOf, type ResolveParentRowsInput, resolveParentRows } from './parent-rows.js';
+import { preFetchedResultFor, storePreFetchResult, storeReadResult } from './pre-fetch-result-store.js';
 
 /** A related row belongs to the parent row when `backField` matches the parent's `parentFields`. */
 export interface ToManyRelationScope {
@@ -83,9 +83,14 @@ export interface ToManyScopeInput extends Omit<ResolveParentRowsInput, 'parentFi
   parentKeysFromWhere: readonly PreFetchRecord[];
 }
 
-const resolveScopedParentRows = async (input: ToManyScopeInput): Promise<ParentRows> => {
+interface ScopedParentRows {
+  readonly rows: readonly PreFetchRecord[];
+  readonly allKnown: boolean;
+}
+
+const resolveScopedParentRows = async (input: ToManyScopeInput): Promise<ScopedParentRows> => {
   const { rows, allKnown } = await resolveParentRows({ ...input, parentFields: input.scope.parentFields });
-  return { rows: [...rows, ...input.parentKeysFromWhere], allKnown };
+  return { rows: [...rows.map((parent) => parent.row), ...input.parentKeysFromWhere], allKnown };
 };
 
 export interface PreFetchOneToManyRelationInput extends ToManyScopeInput {
@@ -162,10 +167,16 @@ const storeMatchedRow = (
   fetchBefore: boolean,
   pkFields: readonly string[],
 ): void => {
+  const name = { by: 'batchFilter' } as const;
   if (fetchBefore) {
-    storePreFetchResult(preFetchResults, path, identity, { before: { kind: 'captured', row } });
-  } else if (!preFetchResults.get(path)?.has(identity)) {
-    storePreFetchResult(preFetchResults, path, identity, { before: NO_BEFORE_STATE, key: primaryKeyOf(row, pkFields) });
+    storePreFetchResult(preFetchResults, path, { before: { kind: 'captured', row }, identity, name });
+  } else if (!preFetchedResultFor(preFetchResults, path, identity)) {
+    storePreFetchResult(preFetchResults, path, {
+      before: NO_BEFORE_STATE,
+      identity,
+      name,
+      key: primaryKeyOf(row, pkFields),
+    });
   }
 };
 

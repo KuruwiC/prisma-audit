@@ -115,6 +115,7 @@ const snapshotPath = async (
   const { rows: readParentRows, allKnown } = await resolveParentRows({
     path: operation.path,
     parentFields: scope.parentFields,
+    parentPkFields: parentPk.fields,
     topLevelWhere: input.topLevelWhere,
     topLevelModelClient: getPreFetchModelClient(input.prismaClient, input.modelName),
     preFetchResults: input.nestedPreFetchResults,
@@ -126,7 +127,7 @@ const snapshotPath = async (
     );
   }
   const parentRows = [
-    ...readParentRows,
+    ...readParentRows.map((parent) => parent.row),
     ...parentKeysFromOperationWheres(
       parentOperationsNotPreFetched(operation.path, input.nestedOperations, deps.shouldFetchBefore),
       parentPk,

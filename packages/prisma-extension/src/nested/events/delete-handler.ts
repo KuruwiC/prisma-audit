@@ -4,8 +4,8 @@
  * Collects the rows a nested `delete` or `deleteMany` deleted. On a to-many relation these are the
  * operation's own write-set targets: the rows a `delete` names by unique WHERE, or the rows a
  * `deleteMany` filter matched when read ahead of the write. On a to-one relation, where the
- * target is the related row of each parent row, they are the rows pre-fetched at the path,
- * falling back to the entity ID in the operation data when nothing was pre-fetched.
+ * target is the related row of the parent row, it is the row pre-fetched under the delete's own
+ * parent row, falling back to the entity ID in the operation data when nothing was pre-fetched.
  * The collected records become mutation events in collect-nested-events.ts.
  */
 
@@ -14,13 +14,14 @@ import {
   type NestedOperationInfo,
   type NestedPreFetchResults,
 } from '../../grammar/nested-operations.js';
+import type { ParentRowIdentity } from '../../grammar/nested-state.js';
 import { AUDIT_ACTION } from '../../grammar/operations.js';
 import type { UniqueConstraint } from '../../schema/types.js';
 import { NO_BEFORE_STATE } from '../../utils/before-state.js';
 import { nestedLog } from '../../utils/debug.js';
 import { extractDeleteOperationEntityId } from '../../utils/extension-utils.js';
 import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID } from '../../utils/identity-key.js';
-import { extractEntityId } from '../pre-fetch/pre-fetch-result-store.js';
+import { extractEntityId, preFetchedResultUnder } from '../pre-fetch/pre-fetch-result-store.js';
 import type { CollectedNestedRecord } from './collected-record.js';
 import type { NestedWriteTarget } from './write-set.js';
 
@@ -66,11 +67,15 @@ const reportUnresolvedEntityId = async (
 };
 
 /**
- * Collect the rows a to-one nested `delete` deleted, from pre-fetched results or operation data.
+ * Collect the row a to-one nested `delete` deleted: the related row pre-fetched under the row
+ * `parent` names (the delete's parent element, before the operation).
  *
  * Priority:
- *   1. Use pre-fetched before states (has full record data)
- *   2. Fallback: extract entity ID from nestedOp.data (minimal record only)
+ *   1. The row pre-fetched under that parent row (has full record data); none when it had no
+ *      related row
+ *   2. The parent row is unknown or its related row could not be read, and the path is marked
+ *      unread: reported unresolved
+ *   3. Nothing was pre-fetched for it: the entity ID in the operation data (minimal record only)
  *
  * A delete whose primary key cannot be fully resolved (`deserializeEntityId` returns
  * `null` for an unresolved identity or a malformed composite key), or whose operation data
@@ -84,6 +89,7 @@ const reportUnresolvedEntityId = async (
  */
 export const collectToOneDeleteRecords = async (
   nestedOp: NestedOperationInfo,
+  parent: ParentRowIdentity | undefined,
   nestedPreFetchResults: NestedPreFetchResults | undefined,
   pkConstraint: UniqueConstraint,
   onUnresolvedDeleteEntityId?: UnresolvedDeleteEntityIdReporter,
@@ -91,37 +97,24 @@ export const collectToOneDeleteRecords = async (
   nestedLog('delete operation detected, collecting targets');
 
   const pkFields = pkConstraint.fields;
+  const preFetched = preFetchedResultUnder(nestedPreFetchResults, nestedOp.path, parent);
 
-  const pathMap = nestedPreFetchResults?.get(nestedOp.path);
-
-  if (pathMap && pathMap.size > 0) {
-    const collected: CollectedNestedRecord[] = [];
-
-    for (const [entityId, preFetchResult] of pathMap) {
-      const beforeState = preFetchResult.before;
-      const entity = beforeState.kind === 'captured' ? beforeState.row : deserializeEntityId(entityId, pkFields);
-
-      if (entity === null) {
-        nestedLog(
-          'cannot resolve primary key for entityId=%s (path=%s); skipping delete audit entry',
-          entityId,
-          nestedOp.path,
-        );
-        await reportUnresolvedEntityId(nestedOp.relatedModel, entityId, pkFields, onUnresolvedDeleteEntityId);
-        continue;
-      }
-
-      collected.push({
-        entity,
-        action: AUDIT_ACTION.DELETE,
-        beforeState,
-        relatedModel: nestedOp.relatedModel,
-      });
-
-      nestedLog('collected delete target from prefetch: path=%s entityId=%s', nestedOp.path, entityId);
+  if (preFetched) {
+    const { before } = preFetched;
+    if (before.kind !== 'captured') {
+      nestedLog('no related row was read under the parent row (path=%s); nothing to record', nestedOp.path);
+      return [];
     }
+    nestedLog('collected delete target from prefetch: path=%s', nestedOp.path);
+    return [
+      { entity: before.row, action: AUDIT_ACTION.DELETE, beforeState: before, relatedModel: nestedOp.relatedModel },
+    ];
+  }
 
-    return collected;
+  if (nestedPreFetchResults?.get(nestedOp.path)?.unread) {
+    nestedLog('the deleted row at path=%s could not be read; skipping delete audit entry', nestedOp.path);
+    await reportUnresolvedEntityId(nestedOp.relatedModel, UNRESOLVED_ENTITY_ID, pkFields, onUnresolvedDeleteEntityId);
+    return [];
   }
 
   nestedLog('no pre-fetch results for path=%s, falling back to operation data', nestedOp.path);

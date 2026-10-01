@@ -164,4 +164,81 @@ describe('nested rows attributed through their parent row', () => {
     expect(await recordsOf('Comment')).toEqual(['k-new:create']);
     expect(await recordsOf('Post')).toEqual(['p1:update', 'p3:create']);
   });
+
+  it('takes the branch of a to-one upsert under each parent row from that parent row', async () => {
+    const { basePrisma, prisma, run, recordsOf, author, post } = await setup();
+    const other = await basePrisma.user.create({ data: { id: 'other', email: 'other@example.com', name: 'B' } });
+    await basePrisma.profile.create({ data: { id: 'profile-author', userId: author.id, bio: 'A' } });
+    await basePrisma.avatar.create({ data: { id: 'avatar-author', profileId: 'profile-author', name: 'A' } });
+    await basePrisma.comment.create({ data: { id: 'c-author', content: 'a', postId: post.id, authorId: author.id } });
+    await basePrisma.comment.create({ data: { id: 'c-other', content: 'b', postId: post.id, authorId: other.id } });
+    const upsertProfile = (who: string) => ({
+      author: {
+        update: {
+          profile: {
+            upsert: {
+              create: {
+                id: `profile-${who}-new`,
+                bio: 'new',
+                avatar: { create: { id: `avatar-${who}-new`, name: 'new' } },
+              },
+              update: { bio: 'updated', avatar: { update: { name: 'updated' } } },
+            },
+          },
+        },
+      },
+    });
+
+    await run(() =>
+      prisma.post.update({
+        where: { id: post.id },
+        data: {
+          comments: {
+            update: [
+              { where: { id: 'c-author' }, data: upsertProfile('author') },
+              { where: { id: 'c-other' }, data: upsertProfile('other') },
+            ],
+          },
+        },
+      }),
+    );
+
+    expect(await basePrisma.avatar.findMany({ select: { id: true, name: true }, orderBy: { id: 'asc' } })).toEqual([
+      { id: 'avatar-author', name: 'updated' },
+      { id: 'avatar-other-new', name: 'new' },
+    ]);
+    expect(await recordsOf('Profile')).toEqual(['profile-author:update', 'profile-other-new:create']);
+    expect(await recordsOf('Avatar')).toEqual(['avatar-author:update', 'avatar-other-new:create']);
+  });
+
+  it('records a to-one delete for the related row of its own parent row only', async () => {
+    const { basePrisma, prisma, run, recordsOf, author, post } = await setup();
+    const other = await basePrisma.user.create({ data: { id: 'other', email: 'other@example.com', name: 'B' } });
+    for (const user of [author, other]) {
+      await basePrisma.postBookmark.create({ data: { postId: post.id, userId: user.id } });
+      await basePrisma.postBookmarkNote.create({
+        data: { id: `note-${user.id}`, postId: post.id, userId: user.id, body: user.id },
+      });
+    }
+
+    await run(() =>
+      prisma.post.update({
+        where: { id: post.id },
+        data: {
+          postBookmarks: {
+            update: [
+              {
+                where: { bookmarkKey: { postId: post.id, userId: author.id } },
+                data: { note: { update: { body: 'kept' } } },
+              },
+              { where: { bookmarkKey: { postId: post.id, userId: other.id } }, data: { note: { delete: true } } },
+            ],
+          },
+        },
+      }),
+    );
+
+    expect(await basePrisma.postBookmarkNote.findMany({ select: { id: true } })).toEqual([{ id: 'note-author' }]);
+    expect(await recordsOf('PostBookmarkNote')).toEqual(['note-author:update', 'note-other:delete']);
+  });
 });

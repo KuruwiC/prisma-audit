@@ -36,8 +36,11 @@ const p1 = { id: 'p1', title: 'First' };
 const preFetched = (entries: [string, string, Record<string, unknown> | null][]): NestedPreFetchResults => {
   const results: NestedPreFetchResults = new Map();
   for (const [path, identity, before] of entries) {
-    storePreFetchResult(results, path, identity, {
+    storePreFetchResult(results, path, {
       before: before ? { kind: 'captured', row: before } : { kind: 'none' },
+      identity,
+      name: { by: 'uniqueWhere', where: { id: identity } },
+      ...(before ? {} : { key: { id: identity } }),
     });
   }
   return results;

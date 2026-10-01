@@ -4,12 +4,13 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
+import type { NestedPreFetchResults } from '../../../src/grammar/nested-operations.js';
 import type { ShouldFetchBefore } from '../../../src/grammar/pre-fetch-selection.js';
 import type { DMMFField, PrismaNamespace, TransactionalPrismaClient } from '../../../src/internal-types.js';
 import { preFetchNestedRecordsBeforeOperation } from '../../../src/nested/pre-fetch/coordinator.js';
 import { preFetchOneToManyRelation } from '../../../src/nested/pre-fetch/one-to-many-fetcher.js';
 import { parentKeysFromOperationWheres } from '../../../src/nested/pre-fetch/parent-rows.js';
-import { UNRESOLVED_ENTITY_ID } from '../../../src/utils/identity-key.js';
+import { preFetchedResultFor } from '../../../src/nested/pre-fetch/pre-fetch-result-store.js';
 import { createSchemaMetadataFromDMMF } from '../../../src/utils/schema-metadata.js';
 
 type Row = Record<string, unknown>;
@@ -134,7 +135,10 @@ describe('nested to-many pre-fetch parent scope', () => {
     expect(delegates.member?.findUnique.mock.calls).toEqual([
       [{ where: { id: 'm1', AND: [{ account: { is: { id: 'a1' } } }] } }],
     ]);
-    expect(results.get('members')?.get('m1')?.before).toMatchObject({ kind: 'captured', row: { name: 'first' } });
+    expect(preFetchedResultFor(results, 'members', 'm1')?.before).toMatchObject({
+      kind: 'captured',
+      row: { name: 'first' },
+    });
   });
 
   it('reads the parent key when the top-level WHERE names the parent by another unique field', async () => {
@@ -193,7 +197,10 @@ describe('nested to-many pre-fetch parent scope', () => {
     expect(delegates.note?.findUnique.mock.calls).toEqual([
       [{ where: { id: 'n1', AND: [{ member: { is: { id: 'm1' } } }] } }],
     ]);
-    expect(results.get('members.notes')?.get('n1')?.before).toMatchObject({ kind: 'captured', row: { body: 'note' } });
+    expect(preFetchedResultFor(results, 'members.notes', 'n1')?.before).toMatchObject({
+      kind: 'captured',
+      row: { body: 'note' },
+    });
   });
 
   it('queries and stores nothing for a deeper path when no row exists at the parent path', async () => {
@@ -265,7 +272,10 @@ describe('nested to-many pre-fetch parent scope', () => {
     });
 
     expect(delegates.member?.findUnique.mock.calls).toEqual([[{ where: { id: 'm9' } }]]);
-    expect(results.get('members')?.get('m9')?.before).toMatchObject({ kind: 'captured', row: { name: 'elsewhere' } });
+    expect(preFetchedResultFor(results, 'members', 'm9')?.before).toMatchObject({
+      kind: 'captured',
+      row: { name: 'elsewhere' },
+    });
   });
 
   it('tries each parent key in turn and stores the row the first parent holding it returns', async () => {
@@ -274,13 +284,14 @@ describe('nested to-many pre-fetch parent scope', () => {
       const [scope] = where.AND as [{ member: { is: { id: string } } }];
       return scope.member.is.id === 'm2' ? { id: 'n1', memberId: 'm2', body: 'note' } : null;
     });
-    const preFetchResults = new Map();
+    const preFetchResults: NestedPreFetchResults = new Map();
 
     await preFetchOneToManyRelation({
       path: 'members.notes',
       operation: 'update',
       data: { where: { id: 'n1' }, data: { body: 'changed' } },
       scope: { backField: 'member', filter: 'is', parentFields: ['id'] },
+      parentPkFields: ['id'],
       topLevelWhere: { id: 'a1' },
       topLevelModelClient: undefined,
       relatedModelClient: note,
@@ -293,11 +304,11 @@ describe('nested to-many pre-fetch parent scope', () => {
       [{ where: { id: 'n1', AND: [{ member: { is: { id: 'm1' } } }] } }],
       [{ where: { id: 'n1', AND: [{ member: { is: { id: 'm2' } } }] } }],
     ]);
-    expect(preFetchResults.get('members.notes')?.get('n1')?.before).toMatchObject({
+    expect(preFetchedResultFor(preFetchResults, 'members.notes', 'n1')?.before).toMatchObject({
       kind: 'captured',
       row: { memberId: 'm2' },
     });
-    expect(preFetchResults.get('members.notes')?.has(UNRESOLVED_ENTITY_ID)).toBe(false);
+    expect(preFetchResults.get('members.notes')?.unread).toBe(false);
   });
 });
 
@@ -318,11 +329,11 @@ describe('nested to-many batch pre-read', () => {
     });
 
     expect(delegates.member?.findMany.mock.calls).toEqual([[{ where: underA1({ name: 'draft' }) }]]);
-    expect(results.get('members')?.get('m1')?.before).toEqual({
+    expect(preFetchedResultFor(results, 'members', 'm1')?.before).toEqual({
       kind: 'captured',
       row: { id: 'm1', accountId: 'a1', name: 'draft' },
     });
-    expect(results.get('members')?.has('m2')).toBe(false);
+    expect(preFetchedResultFor(results, 'members', 'm2')).toBeUndefined();
     expect(batchTargets).toEqual(new Map([['members', new Map([['updateMany', new Map([['m1', { id: 'm1' }]])]])]]));
   });
 
@@ -339,7 +350,12 @@ describe('nested to-many batch pre-read', () => {
     expect(delegates.member?.findMany.mock.calls).toEqual([
       [{ where: underA1({ name: 'draft' }), select: { id: true } }],
     ]);
-    expect(results.get('members')?.get('m1')).toEqual({ before: { kind: 'none' }, key: { id: 'm1' } });
+    expect(preFetchedResultFor(results, 'members', 'm1')).toEqual({
+      before: { kind: 'none' },
+      identity: 'm1',
+      name: { by: 'batchFilter' },
+      key: { id: 'm1' },
+    });
     expect(batchTargets.get('members')?.get('updateMany')).toEqual(new Map([['m1', { id: 'm1' }]]));
   });
 
@@ -359,7 +375,10 @@ describe('nested to-many batch pre-read', () => {
       [{ where: underA1({ name: 'draft' }) }],
       [{ where: underA1({ name: 'stale' }) }],
     ]);
-    expect(results.get('members')?.get('m3')?.before).toMatchObject({ kind: 'captured', row: { name: 'stale' } });
+    expect(preFetchedResultFor(results, 'members', 'm3')?.before).toMatchObject({
+      kind: 'captured',
+      row: { name: 'stale' },
+    });
     expect(batchTargets.get('members')?.get('deleteMany')).toEqual(
       new Map([
         ['m1', { id: 'm1' }],
@@ -386,7 +405,10 @@ describe('nested to-many batch pre-read', () => {
       identityOnly,
     );
 
-    expect(results.get('members')?.get('m1')?.before).toMatchObject({ kind: 'captured', row: { name: 'draft' } });
+    expect(preFetchedResultFor(results, 'members', 'm1')?.before).toMatchObject({
+      kind: 'captured',
+      row: { name: 'draft' },
+    });
   });
 
   it('scopes a deeper path by the parent row a parent-path update names when the pre-fetch did not read it', async () => {
@@ -501,11 +523,19 @@ describe('a failed pre-fetch at the parent path', () => {
     expect(onPreFetchFailure).toHaveBeenCalledWith(
       expect.objectContaining({ phase: 'pre-fetch', modelName: 'Member' }),
     );
-    expect(results.get('members')?.get('m1')).toEqual({ before: { kind: 'unavailable' }, key: { id: 'm1' } });
+    expect(preFetchedResultFor(results, 'members', 'm1')).toEqual({
+      before: { kind: 'unavailable' },
+      identity: 'm1',
+      name: { by: 'uniqueWhere', where: { id: 'm1' } },
+      key: { id: 'm1' },
+    });
     expect(delegates.note?.findUnique.mock.calls).toEqual([
       [{ where: { id: 'n1', AND: [{ member: { is: { id: 'm1' } } }] } }],
     ]);
-    expect(results.get('members.notes')?.get('n1')?.before).toMatchObject({ kind: 'captured', row: { body: 'note' } });
+    expect(preFetchedResultFor(results, 'members.notes', 'n1')?.before).toMatchObject({
+      kind: 'captured',
+      row: { body: 'note' },
+    });
   });
 
   const belowUnknownMentor = (notes: Row) => ({
@@ -527,10 +557,12 @@ describe('a failed pre-fetch at the parent path', () => {
     const { preFetched } = preFetchReporting(client, belowUnknownMentor(notesUpsert));
     const { results } = await preFetched;
 
-    expect(results.get('members.mentor')?.get(UNRESOLVED_ENTITY_ID)).toEqual({ before: { kind: 'unavailable' } });
+    expect(results.get('members.mentor')).toEqual({ results: [], unread: true });
     expect(delegates.note?.findUnique).not.toHaveBeenCalled();
-    expect(results.get('members.mentor.notes')?.get('n1')).toEqual({
+    expect(preFetchedResultFor(results, 'members.mentor.notes', 'n1')).toEqual({
       before: { kind: 'unavailable' },
+      identity: 'n1',
+      name: { by: 'uniqueWhere', where: { id: 'n1' } },
       key: { id: 'n1' },
     });
   });

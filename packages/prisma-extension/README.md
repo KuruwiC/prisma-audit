@@ -1234,7 +1234,6 @@ await prisma.post.update({
 - A nested `update` that changes a column its own `where` names is found again after the write by the primary key read ahead of it; with `fetchBefore.update: false`, when that read failed, or when the update changes the primary key itself, it is not audited.
 - A row a nested `create`, `createMany`, `connectOrCreate` or `upsert` inserts is audited from the query result, so a row that the caller's own `where`, `take`, `skip`, `cursor` or `distinct` on that relation leaves out of the result is not audited; read the filtered relation in a separate query instead.
 - `connect`, `set` and `disconnect` change the foreign keys of related records without an audit log for those records.
-- A to-one nested `upsert` repeated under several parent rows in one call (for example inside a to-many `update` list) takes one branch for all of them when detecting the writes nested inside it: the upserted records themselves are audited correctly, but the writes nested in its `create` / `update` data are reliable only when every parent row either has or lacks the related record.
 
 ## Complete Example
 
