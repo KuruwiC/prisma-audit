@@ -190,6 +190,67 @@ describe('nested rows attributed through their parent row', () => {
     expect(await recordsOf('Post')).toEqual(['p1:update', 'p3:create']);
   });
 
+  it('audits the rows written below every element of a list create, each once', async () => {
+    const { basePrisma, prisma, run, recordsOf, author } = await setup();
+    await basePrisma.attachment.create({ data: { id: 'att', fileUrl: 'f', fileName: 'f', ownerId: author.id } });
+
+    await run(() =>
+      prisma.user.update({
+        where: { id: author.id },
+        data: {
+          posts: {
+            create: [
+              { id: 'p-a', title: 'a', comments: { create: { id: 'k-a', content: 'a', authorId: author.id } } },
+              {
+                id: 'p-b',
+                title: 'b',
+                comments: {
+                  create: {
+                    id: 'k-b',
+                    content: 'b',
+                    authorId: author.id,
+                    commentAttachments: { create: { id: 'ca-b', attachmentId: 'att' } },
+                  },
+                },
+              },
+            ],
+          },
+        },
+      }),
+    );
+
+    expect(await recordsOf('Post')).toEqual(['p-a:create', 'p-b:create']);
+    expect(await recordsOf('Comment')).toEqual(['k-a:create', 'k-b:create']);
+    expect(await recordsOf('CommentAttachment')).toEqual(['ca-b:create']);
+  });
+
+  it('audits the rows written below the related row of every element of a list create', async () => {
+    const { prisma, run, recordsOf, post } = await setup();
+
+    // The elements are listed against the order of their ids, which the result may follow instead
+    await run(() =>
+      prisma.post.update({
+        where: { id: post.id },
+        data: {
+          comments: {
+            create: [
+              { id: 'k-z', content: 'z', author: { create: { id: 'u-z', email: 'z@example.com' } } },
+              {
+                id: 'k-a',
+                content: 'a',
+                author: { create: { id: 'u-a', email: 'a@example.com', profile: { create: { id: 'pr-a' } } } },
+              },
+            ],
+          },
+        },
+      }),
+    );
+
+    expect(await recordsOf('Comment')).toEqual(['k-a:create', 'k-z:create']);
+    expect(await recordsOf('User')).toEqual(['u-a:create', 'u-z:create']);
+    expect(await recordsOf('Profile')).toEqual(['pr-a:create']);
+  });
+
   it('takes the branch of a to-one upsert under each parent row from that parent row', async () => {
     const { basePrisma, prisma, run, recordsOf, author, post } = await setup();
     const other = await basePrisma.user.create({ data: { id: 'other', email: 'other@example.com', name: 'B' } });
