@@ -595,6 +595,27 @@ describe('collectSingleOperationEvents', () => {
         expect(post.findMany).not.toHaveBeenCalled();
       });
 
+      it('reads the row again that an upsert whose target existed updated', async () => {
+        const { rereadClient, post } = clientStoring([p1, p2]);
+
+        const events = await postEvents(
+          { upsert: { where: { id: 'p1' }, create: { title: 'A' }, update: { title: 'A' } } },
+          [p2],
+          { nestedPreFetchResults: preFetched([['p1', p1Before]]), client: rereadClient },
+        );
+
+        expect(post.findMany).toHaveBeenCalledWith({ where: { OR: [{ id: 'p1' }] } });
+        expect(events).toEqual([
+          expect.objectContaining({
+            identity: 'p1',
+            action: 'update',
+            before: { kind: 'captured', row: p1Before },
+            after: p1,
+            origin: { path: 'posts', op: 'upsert' },
+          }),
+        ]);
+      });
+
       it("reads the rows a create inserted that the caller's restricted relation leaves out, once for the path", async () => {
         const stored = [p1, p3];
         const findMany = vi.fn(
@@ -697,6 +718,60 @@ describe('collectSingleOperationEvents — a to-one relation', () => {
 
     expect(events.filter((event) => event.model === 'User')).toEqual([
       expect.objectContaining({ identity: 'u1', action: 'update', before: { kind: 'unavailable' }, after: author }),
+    ]);
+  });
+});
+
+describe('collectSingleOperationEvents — a to-one relation below the rows a list create inserted', () => {
+  const withoutRow = (identity: string): NestedPreFetchResults => {
+    const results: NestedPreFetchResults = new Map();
+    storePreFetchResult(results, 'posts.author', {
+      before: { kind: 'none' },
+      identity,
+      name: { by: 'uniqueWhere', where: { id: identity } },
+      key: { id: identity },
+    });
+    return results;
+  };
+
+  it('records each related row for the operation that wrote it, not for the first writer', async () => {
+    const first = { id: 'ua', name: 'A' };
+    const second = { id: 'ub', name: 'B' };
+    const events = await collectSingleOperationEvents(
+      single({
+        action: 'update',
+        args: {
+          where: { id: 'u1' },
+          data: {
+            posts: {
+              create: [
+                { title: 'A', author: { connectOrCreate: { where: { id: 'ua' }, create: first } } },
+                { title: 'B', author: { create: second } },
+              ],
+            },
+          },
+        },
+        result: {
+          id: 'u1',
+          name: 'Ann',
+          posts: [
+            { id: 'p1', title: 'A', authorId: 'ua', author: first },
+            { id: 'p2', title: 'B', authorId: 'ub', author: second },
+          ],
+        },
+        beforeState: { kind: 'captured', row: { id: 'u1', name: 'Ann' } },
+        nestedPreFetchResults: withoutRow('ua'),
+      }),
+      deps,
+    );
+
+    expect(events.filter((event) => event.origin.path === 'posts.author')).toEqual([
+      expect.objectContaining({
+        identity: 'ua',
+        action: 'create',
+        origin: { path: 'posts.author', op: 'connectOrCreate' },
+      }),
+      expect.objectContaining({ identity: 'ub', action: 'create', origin: { path: 'posts.author', op: 'create' } }),
     ]);
   });
 });

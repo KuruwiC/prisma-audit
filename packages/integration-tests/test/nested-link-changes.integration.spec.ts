@@ -243,6 +243,36 @@ describe('foreign-key changes of related rows', () => {
       expect((await recordsOf('Label')).map(({ id, action }) => [id, action])).toEqual([['l2', 'update']]);
     });
 
+    it('audits a row once when an update under one parent row and a connect under another both write it', async () => {
+      const { basePrisma, prisma, run, recordsOf } = await setup();
+      await basePrisma.label.create({ data: { id: 'l1', name: 'l1', postId: 'p-draft' } });
+
+      await run(() =>
+        prisma.user.update({
+          where: { id: 'u1' },
+          data: {
+            posts: {
+              update: [
+                {
+                  where: { id: 'p-draft' },
+                  data: { labels: { update: { where: { id: 'l1' }, data: { name: 'renamed' } } } },
+                },
+                { where: { id: 'p-live' }, data: { labels: { connect: { id: 'l1' } } } },
+              ],
+            },
+          },
+        }),
+      );
+
+      expect(await recordsOf('Label')).toEqual([
+        expect.objectContaining({
+          id: 'l1',
+          action: 'update',
+          changes: { name: { old: 'l1', new: 'renamed' }, postId: { old: 'p-draft', new: 'p-live' } },
+        }),
+      ]);
+    });
+
     it('audits no foreign-key change when the before state of the related model is not read', async () => {
       const { basePrisma, prisma, run, recordsOf } = await setup({ fetchBeforeLabelUpdate: false });
       await basePrisma.label.create({ data: { id: 'l1', name: 'l1', postId: 'p-live' } });

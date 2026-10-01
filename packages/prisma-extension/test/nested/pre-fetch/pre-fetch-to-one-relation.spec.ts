@@ -325,6 +325,83 @@ describe('nested to-one pre-fetch relation link and parent rows', () => {
       });
     });
 
+    it('reads its key columns under its parent row when a write below it detaches the rows attached to the row', async () => {
+      const client = createClient({
+        account: [{ id: 'a1' }],
+        member: [
+          { id: 'm1', accountId: 'a1', name: 'first' },
+          { id: 'm2', accountId: 'a1', name: 'second' },
+        ],
+      });
+      const account = client.account as ReturnType<typeof createDelegate>;
+      const findFirst = vi.spyOn(account, 'findFirst');
+      const readsOnlyMembers = (modelName: string, operation: string) =>
+        !(modelName === 'Account' && operation === 'update');
+
+      const results = await preFetch(
+        client,
+        'Member',
+        { where: { id: 'm1' }, data: { account: { update: { members: { set: [{ id: 'm2' }] } } } } },
+        readsOnlyMembers,
+      );
+
+      expect(findFirst.mock.calls).toEqual([[{ where: { id: 'a1' }, select: { id: true } }]]);
+      expect(results.get('account')?.results).toEqual([
+        {
+          before: { kind: 'none' },
+          identity: 'a1',
+          name: { by: 'parentRow', parent: TOP_LEVEL_ROW },
+          key: { id: 'a1' },
+        },
+      ]);
+    });
+
+    it('keeps the before state another operation at the path read under the same parent row', async () => {
+      const client = createClient({
+        account: [{ id: 'a1' }],
+        member: [
+          { id: 'm1', accountId: 'a1', name: 'first' },
+          { id: 'm2', accountId: 'a1', name: 'second' },
+        ],
+        badge: [
+          { id: 'b1', memberId: 'm1', label: 'badge-1' },
+          { id: 'b2', memberId: 'm2', label: 'badge-2' },
+        ],
+      });
+
+      const results = await preFetch(
+        client,
+        'Account',
+        {
+          where: { id: 'a1' },
+          data: {
+            members: {
+              update: [
+                {
+                  where: { id: 'm1' },
+                  data: { badge: { update: { member: { upsert: { create: {}, update: {} } } } } },
+                },
+                {
+                  where: { id: 'm2' },
+                  data: { badge: { upsert: { create: { label: 'new' }, update: { label: 'changed' } } } },
+                },
+              ],
+            },
+          },
+        },
+        noUpdateReads,
+      );
+
+      expect(preFetchedStateUnder(results, 'members.badge', 'm1')).toMatchObject({
+        kind: 'captured',
+        row: { label: 'badge-1' },
+      });
+      expect(preFetchedStateUnder(results, 'members.badge', 'm2')).toMatchObject({
+        kind: 'captured',
+        row: { label: 'badge-2' },
+      });
+    });
+
     it('is not read when nothing below it reads under its row', async () => {
       const client = createClient({
         account: [{ id: 'a1' }],
