@@ -18,8 +18,8 @@
  * `rows-not-in-result.ts`). A `deleteMany` yields one delete event per row its filter matched in the
  * read ahead of the operation. A to-one relation holds one related row under its parent row: the
  * row of the operation nested there that names it by unique WHERE, else of the one that writes the
- * related row of its parent. The foreign-key changes of `connect` / `set` / `disconnect` come from
- * `link-changes.ts`.
+ * related row of its parent (a connectOrCreate whose WHERE found no row created it). The
+ * foreign-key changes of `connect` / `set` / `disconnect` come from `link-changes.ts`.
  */
 
 import type { BeforeState, MutationEvent } from '@kuruwic/db-audit-core';
@@ -268,9 +268,19 @@ interface ToOneWriter {
 }
 
 /**
+ * Whether a to-one candidate writes the related row of its parent without naming it by unique
+ * WHERE: a create, update or upsert, or a connectOrCreate whose WHERE found no row before the
+ * write, which created its row from `create` data that need not match the WHERE.
+ */
+const writesUnnamedRow = (walk: CollectionWalk, candidate: NestedOperationInfo): boolean =>
+  !namesRowByWhere(candidate) ||
+  (candidate.operation === 'connectOrCreate' && toOneBeforeState(walk, candidate).kind === 'none');
+
+/**
  * The candidate that names the row by unique WHERE; else the candidates that write the related
- * row of their parent. Those cannot be told apart when the elements of a list insert each write
- * one, so the row is recorded for one not recorded yet, and every one of them may have written it.
+ * row of their parent without naming it. Those cannot be told apart when the elements of a list
+ * insert each write one, so the row is recorded for one not recorded yet, and every one of them
+ * may have written it.
  */
 const toOneWriterOf = (
   walk: CollectionWalk,
@@ -285,7 +295,7 @@ const toOneWriterOf = (
   if (named) {
     return { recorded: named, attribution: { operations: [named], element: 0 } };
   }
-  const writers = candidates.filter((candidate) => !namesRowByWhere(candidate));
+  const writers = candidates.filter((candidate) => writesUnnamedRow(walk, candidate));
   const recorded = writers.find((candidate) => !walk.assigned.has(candidate)) ?? writers[0];
   return recorded && { recorded, attribution: { operations: writers, element: 0 } };
 };

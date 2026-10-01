@@ -561,4 +561,52 @@ describe('Nested ConnectOrCreate Operations', () => {
       ]);
     });
   });
+
+  describe('a to-one connectOrCreate whose create data names another row than its WHERE', () => {
+    /** One `entityId:action` per record of `entityType` (its own aggregate row), sorted */
+    const recordsOf = async (entityType: string) =>
+      (
+        await context.basePrisma.auditLog.findMany({
+          where: { entityType, aggregateType: entityType },
+          select: { entityId: true, action: true },
+        })
+      )
+        .map((log) => `${log.entityId}:${log.action}`)
+        .sort();
+
+    it('records the row it created when the foreign key is on the related row', async () => {
+      await context.basePrisma.user.create({ data: { id: 'u1', email: 'u1@example.com' } });
+
+      await context.provider.runAsync(testActor, () =>
+        context.prisma.user.update({
+          where: { id: 'u1' },
+          data: { profile: { connectOrCreate: { where: { id: 'pr-x' }, create: { id: 'pr-b', bio: 'b' } } } },
+        }),
+      );
+
+      expect(await recordsOf('Profile')).toEqual(['pr-b:create']);
+    });
+
+    it('records the row it created and the writes nested in its create data when the foreign key is on the parent row', async () => {
+      await context.basePrisma.user.create({ data: { id: 'u1', email: 'u1@example.com' } });
+      await context.basePrisma.post.create({ data: { id: 'p1', title: 'Post', authorId: 'u1' } });
+
+      await context.provider.runAsync(testActor, () =>
+        context.prisma.post.update({
+          where: { id: 'p1' },
+          data: {
+            author: {
+              connectOrCreate: {
+                where: { id: 'u-x' },
+                create: { id: 'u-b', email: 'u-b@example.com', profile: { create: { id: 'pr-u-b' } } },
+              },
+            },
+          },
+        }),
+      );
+
+      expect(await recordsOf('User')).toEqual(['u-b:create']);
+      expect(await recordsOf('Profile')).toEqual(['pr-u-b:create']);
+    });
+  });
 });
