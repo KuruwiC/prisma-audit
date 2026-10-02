@@ -362,6 +362,29 @@ describe('transaction membership', () => {
     expect(adapter.store.find('User', 'u1')).toEqual({ id: 'u1', name: 'Alice' });
   });
 
+  it('a write after commit that fails is recorded in writeFailures, the transaction stays committed and flush resolves', async () => {
+    const adapter = createAdapter({ awaitWrite: false });
+    const failure = new Error('audit-log store unavailable');
+    const write = vi.spyOn(memoryWriteExecutor, 'write').mockRejectedValue(failure);
+
+    try {
+      await withContext(() =>
+        adapter.transaction(async () => {
+          await adapter.create('User', { id: 'u1', name: 'Alice' });
+        }),
+      );
+      await expect(adapter.flush()).resolves.toBeUndefined();
+    } finally {
+      write.mockRestore();
+    }
+
+    expect(adapter.writeFailures).toEqual([
+      { phase: 'log-write', modelName: 'User', operation: 'write', params: [expect.any(Object)], error: failure },
+    ]);
+    expect(adapter.store.find('User', 'u1')).toEqual({ id: 'u1', name: 'Alice' });
+    expect(adapter.store.auditLogs()).toEqual([]);
+  });
+
   it('an immediate write that fails rejects the operation, rolls it back and is recorded in writeFailures', async () => {
     const adapter = createAdapter();
     const failure = new Error('audit-log store unavailable');
