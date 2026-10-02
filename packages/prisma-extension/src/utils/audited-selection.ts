@@ -209,7 +209,7 @@ const liftOmittedFields = (omit: unknown): { omit: Selection | undefined; lifted
  *
  * @internal
  */
-const selectWholeRows = (
+const selectAuditedRows = (
   schemaMetadata: SchemaMetadata,
   modelName: string,
   callerArgs: Selection,
@@ -260,7 +260,7 @@ const mergeWrittenRelations = (
       entries[field] = buildRelationEntry(schemaMetadata, relation);
       keys.add(field);
     } else if (callerValue === true || isRecord(callerValue)) {
-      const requested = selectWholeRows(
+      const requested = selectAuditedRows(
         schemaMetadata,
         relation.relatedModel,
         callerValue === true ? {} : callerValue,
@@ -296,7 +296,7 @@ export const injectAuditedSelection = (
   const writtenOperations = detectNestedOperations(schemaMetadata, modelName, args, { kind: 'discovery' }).filter(
     (operation) => RESULT_AUDITED_KEYWORDS.has(operation.operation),
   );
-  const { value, injected } = selectWholeRows(
+  const { value, injected } = selectAuditedRows(
     schemaMetadata,
     modelName,
     args,
