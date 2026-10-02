@@ -292,6 +292,47 @@ describe('nested to-one pre-fetch relation link and parent rows', () => {
     });
   });
 
+  it('reads the row a connect names only under the element whose update or upsert writes it', async () => {
+    const client = createClient({
+      account: [{ id: 'a1' }],
+      member: [
+        { id: 'm1', accountId: 'a1', name: 'first' },
+        { id: 'm2', accountId: 'a1', name: 'second' },
+        { id: 'm3', accountId: 'a1', name: 'third' },
+      ],
+      badge: [
+        { id: 'b1', memberId: 'm1', label: 'badge-1' },
+        { id: 'b2', memberId: 'm2', label: 'badge-2' },
+        { id: 'b3', memberId: 'm3', label: 'badge-3' },
+        { id: 'b-named-1', memberId: null, label: 'named-1' },
+        { id: 'b-named-3', memberId: null, label: 'named-3' },
+      ],
+    });
+    const badge = client.badge as ReturnType<typeof createDelegate>;
+    const findUnique = vi.spyOn(badge, 'findUnique');
+
+    const results = await preFetch(client, 'Account', {
+      where: { id: 'a1' },
+      data: {
+        members: {
+          update: [
+            { where: { id: 'm1' }, data: { badge: { connect: { id: 'b-named-1' } } } },
+            { where: { id: 'm2' }, data: { badge: { update: { label: 'changed' } } } },
+            { where: { id: 'm3' }, data: { badge: { connect: { id: 'b-named-3' }, update: { label: 'changed' } } } },
+          ],
+        },
+      },
+    });
+
+    expect(findUnique).not.toHaveBeenCalledWith({ where: { id: 'b-named-1' } });
+    expect(
+      ['m1', 'm2', 'm3'].map((member) => {
+        const state = preFetchedStateUnder(results, 'members.badge', member);
+        return state.kind === 'captured' ? state.row.id : state.kind;
+      }),
+    ).toEqual(['b1', 'b2', 'b-named-3']);
+  });
+
   describe('a to-one update whose before state is not read', () => {
     const noUpdateReads = (_modelName: string, operation: string) => operation !== 'update';
 
