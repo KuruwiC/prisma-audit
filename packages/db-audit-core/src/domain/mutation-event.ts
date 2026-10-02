@@ -3,7 +3,8 @@
  *
  * An adapter collects one {@link MutationEvent} per written row; resolution adds the entity id,
  * aggregate roots and contexts to make a {@link ResolvedEvent}; `compose` turns resolved events
- * into {@link AuditRecord}s; `dispatch` writes the records by a {@link WritePlan}.
+ * into {@link AuditRecord}s; `dispatch` runs that build once the operation's write has run and
+ * writes the records by a {@link WritePlan}.
  */
 
 import type { ResolvedId } from '../aggregate/types.js';

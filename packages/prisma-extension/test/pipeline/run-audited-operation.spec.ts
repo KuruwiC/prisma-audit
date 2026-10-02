@@ -395,7 +395,7 @@ describe('runAuditedOperation', () => {
       ['single', 'update'],
       ['batch', 'updateMany'],
     ] as const)(
-      'reports any other %s executor failure once as diff-generation and rethrows the original error',
+      'reports any other %s executor failure before the write once as diff-generation and rethrows the original error',
       async (_path, action) => {
         const auditError = new Error('diff calculation failed');
         const failingExecutor = stubExecutor(async () => {
@@ -419,6 +419,72 @@ describe('runAuditedOperation', () => {
         expect(auditWriteOf(deps)).not.toHaveBeenCalled();
       },
     );
+
+    describe('a failed build of the records after the write', () => {
+      const buildError = new Error('read after the write failed');
+      const failingBuildExecutor = () =>
+        stubExecutor(async () => ({
+          result: outcome.result,
+          buildRecords: async () => {
+            throw buildError;
+          },
+        }));
+      const buildFailure = {
+        phase: 'diff-generation',
+        modelName: 'User',
+        operation: 'update',
+        params: args,
+        error: buildError,
+      };
+
+      it('rejects with the original error when the policy is atomic', async () => {
+        const deps = createDeps({ singleExecutor: failingBuildExecutor() });
+
+        await expect(
+          runAuditedOperation(
+            { operation: interceptedOf(), auditContext, baseClient: createBaseClient(), atomic: true },
+            deps,
+          ),
+        ).rejects.toBe(buildError);
+
+        expect(deps.failureSink.notify).toHaveBeenCalledTimes(1);
+        expect(deps.failureSink.notify).toHaveBeenCalledWith(buildFailure);
+        expect(auditWriteOf(deps)).not.toHaveBeenCalled();
+      });
+
+      it('rejects with the original error when the policy is not atomic inside a transaction', async () => {
+        const deps = createDeps({ singleExecutor: failingBuildExecutor() });
+        const deferredWrites: Array<() => Promise<void>> = [];
+
+        await expect(
+          withScope({ transaction: { client: transactionClient, deferredWrites } }, () =>
+            runAuditedOperation(
+              { operation: interceptedOf(), auditContext, baseClient: createBaseClient(), atomic: false },
+              deps,
+            ),
+          ),
+        ).rejects.toBe(buildError);
+
+        expect(deps.failureSink.notify).toHaveBeenCalledTimes(1);
+        expect(deferredWrites).toHaveLength(0);
+      });
+
+      it('returns the result and writes nothing when the policy is not atomic outside any transaction', async () => {
+        const deps = createDeps({ singleExecutor: failingBuildExecutor() });
+
+        await expect(
+          runAuditedOperation(
+            { operation: interceptedOf(), auditContext, baseClient: createBaseClient(), atomic: false },
+            deps,
+          ),
+        ).resolves.toBe(outcome.result);
+
+        expect(deps.failureSink.notify).toHaveBeenCalledTimes(1);
+        expect(deps.failureSink.notify).toHaveBeenCalledWith(buildFailure);
+        expect(getPendingWriteCount()).toBe(0);
+        expect(auditWriteOf(deps)).not.toHaveBeenCalled();
+      });
+    });
 
     it('lets a write failure propagate without reporting it as diff-generation', async () => {
       const writeError = new Error('DB write failed');

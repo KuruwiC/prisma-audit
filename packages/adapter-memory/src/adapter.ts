@@ -4,9 +4,10 @@
  * Audited create, update and delete on an in-memory store. Each operation runs the core
  * pipeline: the write policy decides whether the operation is sampled in and whether its audit
  * rows join the operation's transaction, an implicit transaction opens when they do and none is
- * active, the mutation is applied on the scope's handle and collected as one mutation event, the
- * event is resolved with the id resolvers and enrichers reading through the scope's handle,
- * composed into audit records and dispatched with the scope as the transaction runtime.
+ * active, and the mutation is applied on the scope's handle and collected as one mutation event.
+ * Core's `dispatch` then builds the records, resolving the event with the id resolvers and
+ * enrichers reading through the scope's handle and composing it, and writes them with the scope as
+ * the transaction runtime.
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -203,10 +204,23 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
         after: mutation.after,
         origin: { path: '', op },
       };
-      const { resolved, failures } = await resolve([event], auditContext, resolveConfig, currentHandle);
-      await failureSink.reportResolverFailures(failures);
-      const records = compose(resolved, { auditContext, config: composeConfig }, new Date());
-      await dispatch(records, atomic, auditContext, dispatchConfig, runtimeOf(scope));
+      const buildRecords = async () => {
+        const { resolved, failures } = await resolve([event], auditContext, resolveConfig, currentHandle);
+        await failureSink.reportResolverFailures(failures);
+        return compose(resolved, { auditContext, config: composeConfig }, new Date());
+      };
+      await dispatch(
+        {
+          buildRecords,
+          modelName: model,
+          operation: op,
+          params: { identity: mutation.identity },
+          atomic,
+          auditContext,
+        },
+        dispatchConfig,
+        runtimeOf(scope),
+      );
     });
   };
 

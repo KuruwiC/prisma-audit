@@ -400,6 +400,53 @@ describe('transaction membership', () => {
     expect(adapter.store.find('User', 'u1')).toBeUndefined();
   });
 
+  describe('a record build that fails after the write', () => {
+    const failure = new Error('actor enricher is broken');
+    const adapterWithFailingEnricher = (awaitWrite: boolean) => {
+      const observer = vi.fn<AuditErrorObserver>();
+      const adapter = createAdapter({
+        awaitWrite,
+        errorHandling: { observer },
+        contextEnricher: {
+          actor: {
+            enricher: async () => {
+              throw failure;
+            },
+          },
+        },
+      });
+      return { adapter, observer };
+    };
+    const diffGeneration = {
+      phase: 'diff-generation',
+      modelName: 'User',
+      operation: 'create',
+      params: { identity: 'u1' },
+      error: failure,
+    };
+
+    it('awaitWrite false outside a transaction: keeps the write, notifies diff-generation once and writes no record', async () => {
+      const { adapter, observer } = adapterWithFailingEnricher(false);
+
+      await expect(withContext(() => adapter.create('User', { id: 'u1', name: 'Alice' }))).resolves.toBeUndefined();
+      await adapter.flush();
+
+      expect(observer.mock.calls).toEqual([[diffGeneration]]);
+      expect(adapter.store.find('User', 'u1')).toEqual({ id: 'u1', name: 'Alice' });
+      expect(adapter.store.auditLogs()).toEqual([]);
+    });
+
+    it('atomic: rejects with the error, rolls the write back, notifies diff-generation once and writes no record', async () => {
+      const { adapter, observer } = adapterWithFailingEnricher(true);
+
+      await expect(withContext(() => adapter.create('User', { id: 'u1', name: 'Alice' }))).rejects.toBe(failure);
+
+      expect(observer.mock.calls).toEqual([[diffGeneration]]);
+      expect(adapter.store.find('User', 'u1')).toBeUndefined();
+      expect(adapter.store.auditLogs()).toEqual([]);
+    });
+  });
+
   it('awaitWriteIf by tag: a tagged model writes atomically in an implicit transaction, an untagged one detached', async () => {
     const handles = new Map<string, unknown>();
     const adapter = createAdapter({

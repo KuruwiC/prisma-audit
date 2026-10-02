@@ -3,17 +3,12 @@
  *
  * The one path every audited write takes, single or batch: given the write policy's decision
  * whether the audit rows join the operation's transaction, the execution scope opens that
- * transaction when needed, the executor's records are dispatched with the scope as the
- * transaction runtime, and the caller receives the result.
+ * transaction when needed, the executor runs the reads before the write and the write, core's
+ * `dispatch` builds the records and writes them with the scope as the transaction runtime, and
+ * the caller receives the result.
  */
 
-import type {
-  AuditContext,
-  AuditContextProvider,
-  AuditRecord,
-  DispatchConfig,
-  FailureSink,
-} from '@kuruwic/db-audit-core';
+import type { AuditContext, AuditContextProvider, DispatchConfig, FailureSink } from '@kuruwic/db-audit-core';
 import { dispatch } from '@kuruwic/db-audit-core';
 import type { AuditAction } from '../grammar/operations.js';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../internal-types.js';
@@ -22,7 +17,7 @@ import { getModelDelegate, getModelOperation } from '../utils/model-accessor.js'
 import { isBatchOperation } from '../utils/operation-classifier.js';
 import { toError } from '../utils/to-error.js';
 import { type ExecutionScope, transactionRuntimeOf, withExecutionScope } from './execution-scope.js';
-import type { AuditedOperation, OperationExecutor } from './executor.js';
+import type { AuditedOperation, ExecutedOperation, OperationExecutor } from './executor.js';
 import type { RecordProducer } from './produce-records.js';
 
 export interface InterceptedOperation {
@@ -79,20 +74,19 @@ const operationContinuation =
   };
 
 /**
- * The caller's own mutation error (see `isCallerMutationError`) propagates untouched, without
- * reaching the observer. Any other failure is an audit failure: it is reported as
- * `diff-generation` (observer-only, since it always propagates and leaves the write-failure
- * policy nothing to decide) and rethrown as the original error.
+ * The reads before the write and the write. The caller's own mutation error (see
+ * `isCallerMutationError`) propagates untouched, without reaching the observer. Any other failure
+ * happened before the caller's write took effect: it is reported as `diff-generation` and rethrown
+ * as the original error.
  */
 const runExecutor = async (
   executor: OperationExecutor,
   operation: AuditedOperation,
   scope: ExecutionScope,
   deps: AuditPipelineDependencies,
-): Promise<{ readonly result: unknown; readonly records: AuditRecord[] }> => {
+): Promise<ExecutedOperation> => {
   try {
-    const executed = await executor.run(operation, scope, deps.produceRecords);
-    return { result: executed.result, records: await executed.buildRecords() };
+    return await executor.run(operation, scope, deps.produceRecords);
   } catch (caughtError) {
     if (isCallerMutationError(caughtError)) {
       throw caughtError;
@@ -110,8 +104,9 @@ const runExecutor = async (
 };
 
 /**
- * The write stays outside `runExecutor`'s try/catch: it reports `log-write` failures itself,
- * and a `'throw'` policy's rethrow would otherwise be re-reported as `diff-generation`.
+ * The build of the records and their write stay outside `runExecutor`'s try/catch: `dispatch`
+ * reports a failed build as `diff-generation` and a failed write as `log-write`, and decides from
+ * the write plan whether either fails the caller.
  */
 const runInScope = async (
   intercepted: InterceptedOperation,
@@ -121,9 +116,20 @@ const runInScope = async (
   const { model, action, args } = intercepted;
   const operation: AuditedOperation = { model, action, args, execute: operationContinuation(intercepted, scope) };
   const executor = isBatchOperation(action) ? deps.batchExecutor : deps.singleExecutor;
-  const outcome = await runExecutor(executor, operation, scope, deps);
-  await dispatch(outcome.records, scope.atomic, scope.auditContext, deps.dispatchConfig, transactionRuntimeOf(scope));
-  return outcome.result;
+  const executed = await runExecutor(executor, operation, scope, deps);
+  await dispatch(
+    {
+      buildRecords: executed.buildRecords,
+      modelName: model,
+      operation: action,
+      params: args,
+      atomic: scope.atomic,
+      auditContext: scope.auditContext,
+    },
+    deps.dispatchConfig,
+    transactionRuntimeOf(scope),
+  );
+  return executed.result;
 };
 
 export const runAuditedOperation = (

@@ -64,7 +64,9 @@ export const withExecutionScope = <T>(
 
 /**
  * The scope as core's `dispatch` reads it: writes after commit queue on the transaction and run on
- * the base client once it has committed; detached writes start at once as pending writes.
+ * the base client once it has committed; detached writes start at once as pending writes. A batch
+ * `$transaction([...])` is not a transaction of the scope: Prisma commits it before any of its
+ * operations returns, so each operation's write has committed by the time its audit is built.
  */
 export const transactionRuntimeOf = (scope: ExecutionScope): TransactionRuntime<TransactionalPrismaClient> => {
   const { transaction } = scope;

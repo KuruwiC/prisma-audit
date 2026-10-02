@@ -37,7 +37,11 @@ export interface WriteExecutor<TDbHandle = unknown> {
 export interface TransactionRuntime<TDbHandle = unknown> {
   /** A handle outside any transaction: writes after commit and detached writes run on it */
   readonly baseHandle: TDbHandle;
-  /** The transaction the operation runs in; absent outside any transaction */
+  /**
+   * The transaction the operation runs in; absent when the operation's write has committed once it
+   * has returned (outside any transaction). `dispatch` then writes a non-atomic operation's records
+   * detached, and a failure to build them does not fail the operation.
+   */
   readonly transaction?: {
     /** The transaction's handle: an immediate write runs on it and commits or rolls back with the operation */
     readonly handle: TDbHandle;

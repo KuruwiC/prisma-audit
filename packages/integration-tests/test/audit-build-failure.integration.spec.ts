@@ -1,11 +1,14 @@
 /**
- * A failure while building an operation's audit rows after its write: inside a transaction, or
- * with an awaited audit, the write can still be rolled back, so the operation fails with the
- * original error and keeps no audit rows.
+ * A failure while building an operation's audit rows after its write. With `awaitWrite: false`
+ * outside any transaction the write has committed by then, so the operation resolves with its
+ * result, the observer hears `diff-generation` once and the operation keeps no audit rows. Inside
+ * a transaction, or with an awaited audit, the write can still be rolled back, so the operation
+ * fails with the original error and keeps no audit rows.
  *
  * Faults are injected on the client passed to `createAuditClient`, which every audit read runs
  * on: its `findMany` on a model fails the first time it returns the state the caller's write
- * produced, which only a read after the write can see.
+ * produced, which only a read after the write can see; or the actor enricher, which runs once the
+ * write has run, throws.
  */
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
@@ -33,15 +36,16 @@ interface FailingRead {
 interface ScenarioOptions {
   readonly databaseUrl: string;
   readonly awaitWrite: boolean;
-  readonly failingRead: FailingRead;
+  readonly fault: FailingRead | 'actor-enricher';
 }
 
 const createScenario = (options: ScenarioOptions) => {
-  const error = new Error('simulated read after the write');
+  const error = new Error('simulated failure after the write');
   const rawBasePrisma = new PrismaClient({ datasources: { db: { url: options.databaseUrl } } });
   let failed = false;
+  const { fault } = options;
   const failOnWrittenState = (model: FailingRead['model'], rows: readonly Row[]): void => {
-    if (!failed && options.failingRead.model === model && options.failingRead.seesWrite(rows)) {
+    if (!failed && fault !== 'actor-enricher' && fault.model === model && fault.seesWrite(rows)) {
       failed = true;
       throw error;
     }
@@ -75,6 +79,17 @@ const createScenario = (options: ScenarioOptions) => {
     performance: { awaitWrite: options.awaitWrite },
     fetchBefore: { update: true },
     errorHandling: { writeFailurePolicy: policy, observer },
+    ...(fault === 'actor-enricher'
+      ? {
+          contextEnricher: {
+            actor: {
+              enricher: async () => {
+                throw error;
+              },
+            },
+          },
+        }
+      : {}),
   });
   const dispose = async () => {
     await prisma.$disconnect();
@@ -132,12 +147,181 @@ describe('A failed audit build after the write', () => {
   const renamed = (rows: readonly Row[]) => rows.some((row) => row.name === 'Renamed');
   const retitled = (rows: readonly Row[]) => rows.some((row) => row.title === 'Updated');
 
+  describe('keeps the write and drops its audit rows when the caller does not await them outside any transaction', () => {
+    it('a failed re-read of the rows a batch update wrote', async () => {
+      const scenario = createScenario({
+        databaseUrl: context.databaseUrl,
+        awaitWrite: false,
+        fault: { model: 'user', seesWrite: renamed },
+      });
+      try {
+        const user = await seedUser('batch-reread@example.com');
+        const auditRowsBefore = await auditRowCount();
+
+        await expect(
+          scenario.provider.runAsync(actor, () =>
+            scenario.prisma.user.updateMany({ where: { id: user.id }, data: { name: 'Renamed' } }),
+          ),
+        ).resolves.toEqual({ count: 1 });
+
+        expect((await context.basePrisma.user.findUnique({ where: { id: user.id } }))?.name).toBe('Renamed');
+        expect(await auditRowCount()).toBe(auditRowsBefore);
+        expectOneDiffGenerationFailure(scenario, 'User', 'updateMany');
+      } finally {
+        await scenario.dispose();
+      }
+    });
+
+    it('a failed re-read of a nested row the result does not hold', async () => {
+      const scenario = createScenario({
+        databaseUrl: context.databaseUrl,
+        awaitWrite: false,
+        fault: { model: 'post', seesWrite: retitled },
+      });
+      try {
+        const user = await seedUser('nested-reread@example.com');
+        const post = await seedPost(user.id, 'Original');
+        const auditRowsBefore = await auditRowCount();
+
+        await expect(
+          scenario.provider.runAsync(actor, () =>
+            scenario.prisma.user.update({
+              where: { id: user.id },
+              data: { posts: { update: { where: { id: post.id }, data: { title: 'Updated' } } } },
+              include: { posts: { where: { published: true } } },
+            }),
+          ),
+        ).resolves.toMatchObject({ id: user.id, posts: [] });
+
+        expect((await context.basePrisma.post.findUnique({ where: { id: post.id } }))?.title).toBe('Updated');
+        expect(await auditRowCount()).toBe(auditRowsBefore);
+        expectOneDiffGenerationFailure(scenario, 'User', 'update');
+      } finally {
+        await scenario.dispose();
+      }
+    });
+
+    it('a failed read of the rows a nested connect re-linked', async () => {
+      const previousOwner = await seedUser('previous-owner@example.com');
+      const newOwner = await seedUser('new-owner@example.com');
+      const post = await seedPost(previousOwner.id, 'Moved');
+      const scenario = createScenario({
+        databaseUrl: context.databaseUrl,
+        awaitWrite: false,
+        fault: { model: 'post', seesWrite: (rows) => rows.some((row) => row.authorId === newOwner.id) },
+      });
+      try {
+        const auditRowsBefore = await auditRowCount();
+
+        await expect(
+          scenario.provider.runAsync(actor, () =>
+            scenario.prisma.user.update({
+              where: { id: newOwner.id },
+              data: { posts: { connect: { id: post.id } } },
+            }),
+          ),
+        ).resolves.toMatchObject({ id: newOwner.id });
+
+        expect((await context.basePrisma.post.findUnique({ where: { id: post.id } }))?.authorId).toBe(newOwner.id);
+        expect(await auditRowCount()).toBe(auditRowsBefore);
+        expectOneDiffGenerationFailure(scenario, 'User', 'update');
+      } finally {
+        await scenario.dispose();
+      }
+    });
+
+    it('a failed read of the primary keys a filtered relation holds after a nested create', async () => {
+      const user = await seedUser('hidden-insert@example.com');
+      const existing = await seedPost(user.id, 'Existing');
+      const scenario = createScenario({
+        databaseUrl: context.databaseUrl,
+        awaitWrite: false,
+        fault: { model: 'post', seesWrite: (rows) => rows.some((row) => row.id !== existing.id) },
+      });
+      try {
+        const auditRowsBefore = await auditRowCount();
+
+        await expect(
+          scenario.provider.runAsync(actor, () =>
+            scenario.prisma.user.update({
+              where: { id: user.id },
+              data: { posts: { create: { title: 'Hidden', content: 'hidden' } } },
+              include: { posts: { where: { published: true } } },
+            }),
+          ),
+        ).resolves.toMatchObject({ id: user.id, posts: [] });
+
+        expect(
+          await context.basePrisma.post.findMany({
+            where: { authorId: user.id },
+            orderBy: { title: 'asc' },
+            select: { title: true },
+          }),
+        ).toEqual([{ title: 'Existing' }, { title: 'Hidden' }]);
+        expect(await auditRowCount()).toBe(auditRowsBefore);
+        expectOneDiffGenerationFailure(scenario, 'User', 'update');
+      } finally {
+        await scenario.dispose();
+      }
+    });
+
+    it('an actor enricher that throws', async () => {
+      const scenario = createScenario({
+        databaseUrl: context.databaseUrl,
+        awaitWrite: false,
+        fault: 'actor-enricher',
+      });
+      try {
+        const user = await seedUser('enricher@example.com');
+        const auditRowsBefore = await auditRowCount();
+
+        await expect(
+          scenario.provider.runAsync(actor, () =>
+            scenario.prisma.user.update({ where: { id: user.id }, data: { name: 'Renamed' } }),
+          ),
+        ).resolves.toMatchObject({ id: user.id, name: 'Renamed' });
+
+        expect((await context.basePrisma.user.findUnique({ where: { id: user.id } }))?.name).toBe('Renamed');
+        expect(await auditRowCount()).toBe(auditRowsBefore);
+        expectOneDiffGenerationFailure(scenario, 'User', 'update');
+      } finally {
+        await scenario.dispose();
+      }
+    });
+
+    it('a failed re-read inside a batch transaction, which Prisma commits before its operations return', async () => {
+      const scenario = createScenario({
+        databaseUrl: context.databaseUrl,
+        awaitWrite: false,
+        fault: { model: 'user', seesWrite: renamed },
+      });
+      try {
+        const user = await seedUser('batch-transaction@example.com');
+        const auditRowsBefore = await auditRowCount();
+
+        await expect(
+          scenario.provider.runAsync(actor, () =>
+            scenario.prisma.$transaction([
+              scenario.prisma.user.updateMany({ where: { id: user.id }, data: { name: 'Renamed' } }),
+            ]),
+          ),
+        ).resolves.toEqual([{ count: 1 }]);
+
+        expect((await context.basePrisma.user.findUnique({ where: { id: user.id } }))?.name).toBe('Renamed');
+        expect(await auditRowCount()).toBe(auditRowsBefore);
+        expectOneDiffGenerationFailure(scenario, 'User', 'updateMany');
+      } finally {
+        await scenario.dispose();
+      }
+    });
+  });
+
   describe('rejects the operation and rolls its write back', () => {
     it('inside a transaction, with an audit written after commit: a failed re-read of a nested row', async () => {
       const scenario = createScenario({
         databaseUrl: context.databaseUrl,
         awaitWrite: false,
-        failingRead: { model: 'post', seesWrite: retitled },
+        fault: { model: 'post', seesWrite: retitled },
       });
       try {
         const user = await seedUser('in-transaction@example.com');
@@ -168,7 +352,7 @@ describe('A failed audit build after the write', () => {
       const scenario = createScenario({
         databaseUrl: context.databaseUrl,
         awaitWrite: true,
-        failingRead: { model: 'user', seesWrite: renamed },
+        fault: { model: 'user', seesWrite: renamed },
       });
       try {
         const user = await seedUser('awaited@example.com');

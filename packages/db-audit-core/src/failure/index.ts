@@ -4,7 +4,8 @@
  * Every failure notifies the observer, which never affects the caller's operation; only a failed
  * write of the records also consults the write-failure policy. An adapter detects the failures of
  * its own phases and decides what each observer-only phase does to the operation, `dispatch`
- * reports the failed writes, and the {@link FailureSink} applies the rest.
+ * reports a failed build of the records and the failed writes, and the {@link FailureSink} applies
+ * the rest.
  */
 
 import type { WritePlan } from '../domain/mutation-event.js';
@@ -20,8 +21,12 @@ import { createErrorHandler, type ErrorStrategy } from '../utils/error-handler.j
  *   action depends on the read.
  * - `log-write`: persisting the records failed. The only phase whose outcome
  *   {@link ErrorHandlingConfig.writeFailurePolicy} decides.
- * - `diff-generation`: other work that builds the records failed. Not policy-gated; the adapter
- *   decides whether the caller's operation fails.
+ * - `diff-generation`: other work that builds the records failed. Not policy-gated. Before the
+ *   operation's write, the adapter reports it and decides whether the caller's operation fails.
+ *   The build `dispatch` runs once the write has run is reported by `dispatch`: it fails the
+ *   caller's operation with the original error, except when the records would be written detached
+ *   (not atomic, outside any transaction), where the write has committed and the caller does not
+ *   wait for its audit: the operation's records are dropped and the operation succeeds.
  * - `row-identification`: the adapter itself could not identify a row the operation wrote (no
  *   user callback is involved). Observer only; the row's record is skipped.
  * - `id-resolver-call`: a user-supplied id resolver (the entity's `idResolver` or a `to()` root's
@@ -94,8 +99,9 @@ export interface ErrorHandlingConfig {
 /** The one place an adapter reports audit failures, built from the user's {@link ErrorHandlingConfig} */
 export interface FailureSink {
   /**
-   * Notifies the observer of a failure the adapter detected in an observer-only phase. Never
-   * throws and never consults the write-failure policy.
+   * Notifies the observer of a failure in an observer-only phase, detected by the adapter or, for a
+   * failed build of the records, by `dispatch`. Never throws and never consults the write-failure
+   * policy.
    */
   readonly notify: (
     context: AuditErrorContext & { readonly phase: Exclude<AuditErrorPhase, 'log-write' | 'id-resolver-call'> },

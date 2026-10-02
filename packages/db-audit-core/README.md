@@ -18,11 +18,13 @@ An adapter calls four functions for each intercepted write:
 
 ```
 policy(model, tags, config)                    -> { sampled, atomic } before the write runs
-  adapter runs the write, collects one MutationEvent per written row
-resolve(events, auditContext, config, read)    -> { resolved, failures }
-compose(resolvedEvents, ambient, now)          -> AuditRecord[]
-dispatch(records, atomic, auditContext, config, runtime)
-                                               -> writes the records immediately, after commit, or detached
+  adapter runs the write
+dispatch({ buildRecords, modelName, operation, params, atomic, auditContext }, config, runtime)
+                                               -> builds the records, then writes them immediately, after commit, or detached
+  buildRecords, the adapter's build that dispatch runs once the write has run:
+    adapter collects one MutationEvent per written row
+    resolve(events, auditContext, config, read)  -> { resolved, failures }
+    compose(resolvedEvents, ambient, now)        -> AuditRecord[]
 ```
 
 - **`policy`** decides, once per audited operation, whether the operation is sampled in
@@ -55,16 +57,22 @@ dispatch(records, atomic, auditContext, config, runtime)
   and a null `before` and `changes`; every other record has `false`. How it is stored is the
   `WriteExecutor`'s or the `WriteFn`'s choice: the audit-log model is the user's, and no column is
   required for it.
-- **`dispatch`** writes the records by a `WritePlan` it chooses from `atomic` and the adapter's
-  `TransactionRuntime`: `immediate` when atomic (on the transaction's handle, or the base handle
-  outside any transaction, awaited), `after-commit` when not atomic inside a transaction (registered
-  with the transaction, run on the base handle once it commits), `detached` otherwise (handed to the
-  runtime's `detach`, run on the base handle). A failed write goes to the failure sink with its plan.
+- **`dispatch`** chooses a `WritePlan` from `atomic` and the adapter's `TransactionRuntime`, runs
+  the adapter's `buildRecords`, and writes the records by that write plan: `immediate` when atomic
+  (on the transaction's handle, or the base handle outside any transaction, awaited), `after-commit`
+  when not atomic inside a transaction (registered with the transaction, run on the base handle once
+  it commits), `detached` otherwise (handed to the runtime's `detach`, run on the base handle). The
+  build runs before `dispatch` resolves whatever the write plan, right after the write. A failed
+  build notifies the observer as `diff-generation` with the operation's `modelName`, `operation` and
+  `params`, and rejects with its error, except under a `detached` plan: the operation's write has
+  committed and its caller does not wait for its audit, so its records are dropped and `dispatch`
+  resolves. A failed write goes to the failure sink with its plan.
 - **`TransactionRuntime<TDbHandle>`** is what the adapter knows about where the operation's write
   can run: `baseHandle` (a handle outside any transaction), `transaction` when the operation runs in
   one (its `handle` and `afterCommit(work)`, which starts the work once the transaction has
   committed and drops it when it rolls back), and `detach(work)`, which starts work no caller awaits
-  and tracks it so the adapter can wait for it.
+  and tracks it so the adapter can wait for it. `transaction` is absent exactly when the operation's
+  write has committed once it has returned.
 - **`WriteExecutor<TDbHandle>`** is the adapter's `write(handle, records)`, which persists records
   with the database's API to the audit log the adapter constructed it for. **`WriteFn`** is the user hook that runs in place of the default write:
   it receives the records and a `WriteContext` with the audit context, the database `handle` the
@@ -119,21 +127,27 @@ write the adapter runs, in order:
    entity's configuration (`createEntityConfigLookup(mapping).byModel(model)?.tags`).
 2. **The write, in its scope.** When `atomic` is true and no transaction is active, the adapter
    opens an implicit transaction and runs the write, and everything below, on that transaction's
-   handle. It then captures one `MutationEvent` per written row.
-3. **`resolve(events, auditContext, resolveConfig, read)`**. `read` is a thunk that returns the
+   handle.
+3. **`dispatch({ buildRecords, modelName, operation, params, atomic, auditContext }, dispatchConfig,
+   runtime)`**, which runs `buildRecords` (steps 4 to 6) and writes the records: `immediate` on the
+   transaction's handle before it resolves, `after-commit` registered with
+   `runtime.transaction.afterCommit` and run on `runtime.baseHandle` once the transaction commits,
+   `detached` handed to `runtime.detach` and run on `runtime.baseHandle`. `modelName`, `operation`
+   and `params` name the operation in a failure report. `dispatchConfig` is the adapter's
+   `writeExecutor`, the user's optional `writer` (a `WriteFn` run in place of the executor's write,
+   on the same handle) and the `failureSink`. It rejects when the build failed, unless the write
+   plan is `detached` (the records are dropped), and when an immediate write failed and the
+   write-failure policy rethrows.
+4. **The mutation events**, inside `buildRecords`: one `MutationEvent` per written row, with what
+   the adapter reads after the write when the write itself does not return it.
+5. **`resolve(events, auditContext, resolveConfig, read)`**. `read` is a thunk that returns the
    handle of the scope active when a resolver or enricher runs; the core calls it at each callback,
    so callbacks read the transaction's uncommitted writes. `resolveConfig` is `entity`
    (`byModel`), `rootEntity` (`byCategoryAndType`) and the optional `actor` enricher.
-4. **`compose(resolved, { auditContext, config: composeConfig }, now)`** into `AuditRecord`s.
-   `composeConfig` carries the entity lookup, `excludeFields`, `redact`, `serialization` and
-   `relationFieldNames(model)`, the fields of a row that hold related records rather than columns.
-5. **`dispatch(records, atomic, auditContext, dispatchConfig, runtime)`**, which writes the
-   records: `immediate` on the transaction's handle before it resolves, `after-commit` registered
-   with `runtime.transaction.afterCommit` and run on `runtime.baseHandle` once the transaction
-   commits, `detached` handed to `runtime.detach` and run on `runtime.baseHandle`.
-   `dispatchConfig` is the adapter's `writeExecutor`, the user's optional `writer` (a `WriteFn` run
-   in place of the executor's write, on the same handle) and the `failureSink`. It rejects only when
-   an immediate write failed and the write-failure policy rethrows.
+6. **`compose(resolved, { auditContext, config: composeConfig }, now)`** into the `AuditRecord`s
+   `buildRecords` returns. `composeConfig` carries the entity lookup, `excludeFields`, `redact`,
+   `serialization` and `relationFieldNames(model)`, the fields of a row that hold related records
+   rather than columns.
 
 What the adapter must provide:
 
@@ -158,9 +172,10 @@ What the adapter must provide:
   observer that throws is logged), and only a failed write consults `writeFailurePolicy`
   (default `'log'`; a policy function that throws falls back to `'log'`).
   - `notify(context)` for a failure the adapter detects itself: `pre-fetch` (a read before the
-    write failed), `diff-generation` (other work that builds the records failed) and
-    `row-identification` (the adapter could not identify a row the operation wrote). What each
-    does to the operation is the adapter's choice, documented by it.
+    write failed), `diff-generation` (other work that builds the records failed before the write)
+    and `row-identification` (the adapter could not identify a row the operation wrote). What each
+    does to the operation is the adapter's choice, documented by it. A failure of `buildRecords`
+    is notified by `dispatch` as `diff-generation`, and the adapter does not report it again.
   - `reportResolverFailures(failures)` with the `ResolverFailure`s `resolve` returned instead of
     throwing (an id resolver threw or returned no usable id), one `id-resolver-call` notification
     each.
@@ -190,10 +205,16 @@ await inScope(atomic, async (scope) => {
     after: mutation.after,
     origin: { path: '', op },
   };
-  const { resolved, failures } = await resolve([event], auditContext, resolveConfig, currentHandle);
-  await failureSink.reportResolverFailures(failures);
-  const records = compose(resolved, { auditContext, config: composeConfig }, new Date());
-  await dispatch(records, atomic, auditContext, dispatchConfig, runtimeOf(scope));
+  const buildRecords = async () => {
+    const { resolved, failures } = await resolve([event], auditContext, resolveConfig, currentHandle);
+    await failureSink.reportResolverFailures(failures);
+    return compose(resolved, { auditContext, config: composeConfig }, new Date());
+  };
+  await dispatch(
+    { buildRecords, modelName: model, operation: op, params: { identity: mutation.identity }, atomic, auditContext },
+    dispatchConfig,
+    runtimeOf(scope),
+  );
 });
 ```
 
@@ -242,9 +263,9 @@ shows how such an adapter would plug into the boundary.
 - **`WriteExecutor`.** A `WriteExecutor` over the Drizzle database or transaction type, constructed
   with the audit-log `Table`: `write(handle, records)` runs `handle.insert(auditLogTable).values(rows)`.
 - **Sampling and failures.** A per-table sampling rate is `samplingIf(model, tags)` in the policy
-  configuration. A failed before-read goes to the failure sink's `notify` as `pre-fetch` and a
-  failed record build as `diff-generation`; a failed audit write is reported by `dispatch`, a
-  detached one no caller awaits included.
+  configuration. A failed before-read goes to the failure sink's `notify` as `pre-fetch`; a failed
+  record build (the statement's returned rows resolved and composed inside `buildRecords`) and a
+  failed audit write are reported by `dispatch`, a detached one no caller awaits included.
 - **Relation fields.** Rows returned by `insert`, `update` and `delete` hold columns only, so
   `relationFieldNames` returns an empty set.
 
