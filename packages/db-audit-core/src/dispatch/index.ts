@@ -47,9 +47,10 @@ const planOf = <TDbHandle>(
  * write has committed and its caller does not wait for its audit, so the records are dropped and
  * `dispatch` resolves.
  *
- * Otherwise resolves once an immediate write has finished, or once the write is handed to the
- * runtime. Rejects only with the error of a failed immediate write that the write-failure policy
- * rethrows; the work handed to `afterCommit` or `detach` reports its own failure and never rejects.
+ * Resolves once an immediate write has finished, or once the write is handed to the runtime.
+ * Rejects with the error of a failed build, as above, and with the error of a failed immediate
+ * write that the write-failure policy rethrows; the work handed to `afterCommit` or `detach`
+ * reports its own failure and never rejects.
  */
 export const dispatch = async <TDbHandle>(
   audited: {
