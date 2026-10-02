@@ -3,7 +3,9 @@
  * outside any transaction the write has committed by then, so the operation resolves with its
  * result, the observer hears `diff-generation` once and the operation keeps no audit rows. Inside
  * a transaction, or with an awaited audit, the write can still be rolled back, so the operation
- * fails with the original error and keeps no audit rows.
+ * fails with the original error and keeps no audit rows. The operations of a batch
+ * `$transaction([...])` do not share a transaction: with an awaited audit each runs in one of its
+ * own, so only the failed operation rolls back.
  *
  * Faults are injected on the client passed to `createAuditClient`, which every audit read runs
  * on: its `findMany` on a model fails the first time it returns the state the caller's write
@@ -371,5 +373,41 @@ describe('A failed audit build after the write', () => {
         await scenario.dispose();
       }
     });
+  });
+
+  it('rolls back only the operation of a batch transaction whose awaited audit failed, keeping the operations that committed', async () => {
+    const scenario = createScenario({
+      databaseUrl: context.databaseUrl,
+      awaitWrite: true,
+      fault: { model: 'user', seesWrite: (rows) => rows.some((row) => row.name === 'Second') },
+    });
+    try {
+      const first = await seedUser('batch-first@example.com');
+      const second = await seedUser('batch-second@example.com');
+      const auditRowsBefore = await auditRowCount();
+
+      await expect(
+        scenario.provider.runAsync(actor, () =>
+          scenario.prisma.$transaction([
+            scenario.prisma.user.updateMany({ where: { id: first.id }, data: { name: 'First' } }),
+            scenario.prisma.user.updateMany({ where: { id: second.id }, data: { name: 'Second' } }),
+          ]),
+        ),
+      ).rejects.toBe(scenario.error);
+
+      const names = await context.basePrisma.user.findMany({
+        where: { id: { in: [first.id, second.id] } },
+        select: { id: true, name: true },
+      });
+      expect(Object.fromEntries(names.map((row) => [row.id, row.name]))).toEqual({
+        [first.id]: 'First',
+        [second.id]: 'Owner',
+      });
+      expect(await auditRowCount()).toBe(auditRowsBefore + 1);
+      expect(await context.basePrisma.auditLog.count({ where: { entityId: first.id, action: 'update' } })).toBe(1);
+      expectOneDiffGenerationFailure(scenario, 'User', 'updateMany');
+    } finally {
+      await scenario.dispose();
+    }
   });
 });
