@@ -1,8 +1,9 @@
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
+import type { AuditErrorObserver } from '@kuruwic/prisma-audit';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   cleanDatabase,
   createTestContext,
@@ -698,6 +699,50 @@ describe('Nested Delete Operations', () => {
       for (const log of logs) {
         expect(log.before).toBeNull();
       }
+    });
+  });
+
+  describe('a nested delete whose row cannot be identified', () => {
+    it('notifies the observer under row-identification, records nothing for it and keeps the write', async () => {
+      const user = await context.basePrisma.user.create({
+        data: { email: 'unidentified-delete@example.com', name: 'Author', password: 'secret123' },
+      });
+      await context.basePrisma.profile.create({ data: { id: 'unidentified-profile', userId: user.id, bio: 'bio' } });
+      const basePrisma = new PrismaClient({ datasources: { db: { url: context.databaseUrl } } });
+      const provider = createAsyncLocalStorageProvider();
+      const observer = vi.fn<AuditErrorObserver>();
+      const prisma = createAuditClient(basePrisma, {
+        Prisma,
+        provider,
+        aggregateMapping: testAggregateMapping,
+        performance: { awaitWrite: true },
+        // Without the read ahead of the write, a to-one delete (`delete: true`) names no row
+        fetchBefore: { delete: false },
+        errorHandling: { observer },
+      });
+
+      try {
+        const updated = await provider.runAsync(testActor, () =>
+          prisma.user.update({ where: { id: user.id }, data: { profile: { delete: true } } }),
+        );
+        expect(updated).toMatchObject({ id: user.id });
+      } finally {
+        await prisma.$disconnect();
+        await basePrisma.$disconnect();
+      }
+
+      expect(observer).toHaveBeenCalledTimes(1);
+      expect(observer).toHaveBeenCalledWith(
+        expect.objectContaining({
+          phase: 'row-identification',
+          modelName: 'Profile',
+          operation: 'delete',
+          params: { entityId: undefined, pkFields: ['id'] },
+          error: expect.any(Error),
+        }),
+      );
+      expect(await context.basePrisma.profile.findUnique({ where: { id: 'unidentified-profile' } })).toBeNull();
+      expect(await context.basePrisma.auditLog.findMany({ where: { entityType: 'Profile' } })).toEqual([]);
     });
   });
 });
