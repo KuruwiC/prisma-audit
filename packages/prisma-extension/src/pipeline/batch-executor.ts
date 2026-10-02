@@ -31,9 +31,9 @@ export interface BatchExecutorDependencies {
 }
 
 export type BatchPrepared =
-  /** createManyAndReturn without select/omit: Prisma generates the ids and returns the rows it created */
+  /** createManyAndReturn: Prisma generates the ids and returns the rows it created */
   | { readonly kind: 'create-returning' }
-  /** createMany, or createManyAndReturn narrowed by select/omit: the rows to insert, with client-generated ids */
+  /** createMany: the rows to insert, with client-generated ids */
   | { readonly kind: 'create'; readonly rows: Row[] }
   /** A `limit`ed update on a connector with updateManyAndReturn: its returned rows are exactly the updated ones */
   | { readonly kind: 'update-returning'; readonly beforeRows: Row[]; readonly pkFields: string[] }
@@ -75,18 +75,17 @@ const pairByPrimaryKey = (afterRows: Row[], beforeRows: Row[], pkFields: string[
 };
 
 /**
- * `createMany` returns only `{ count }`, and select/omit narrow returned rows below what
- * aggregate resolvers may need; both leave client-side id injection as the only way for the
- * audit rows to record the created ids. `createManyAndReturn` without select/omit relies on
- * Prisma's own id generation and audits the rows it actually created, which supports
- * database-generated defaults (autoincrement, dbgenerated) and stays correct under
- * skipDuplicates.
+ * `createMany` returns only `{ count }`, which leaves client-side id injection as the only way for
+ * the audit rows to record the created ids. `createManyAndReturn` relies on Prisma's own id
+ * generation and audits the rows it actually created, read whole whatever the caller selects
+ * (see `injectAuditedSelection`), which supports database-generated defaults (autoincrement,
+ * dbgenerated) and stays correct under skipDuplicates.
  */
 const prepareCreate = (operation: AuditedOperation, schemaMetadata: SchemaMetadata): BatchPrepared => {
-  const { select, omit, data } = operation.args;
-  if (operation.action === AUDIT_ACTION.CREATE_MANY_AND_RETURN && select == null && omit == null) {
+  if (operation.action === AUDIT_ACTION.CREATE_MANY_AND_RETURN) {
     return { kind: 'create-returning' };
   }
+  const { data } = operation.args;
   // Single-object data is normalized to an array so `data: {...}` is logged like `data: [...]`
   const rows = Array.isArray(data) ? (data as Row[]) : [data as Row];
   return { kind: 'create', rows: ensureIds(schemaMetadata, operation.model, rows) };

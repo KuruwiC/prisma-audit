@@ -6,9 +6,9 @@
  * are built from the returned rows. This makes database-generated defaults
  * (autoincrement) auditable and keeps logs correct under skipDuplicates.
  *
- * createMany (count-only result) requires client-side ID injection, as does
- * createManyAndReturn with select/omit (narrowed rows may lack the fields
- * aggregate resolvers need).
+ * createMany (count-only result) requires client-side ID injection.
+ * createManyAndReturn audits its returned rows whatever the caller selects:
+ * the rows are read whole and handed back in the shape the caller asked for.
  */
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
@@ -107,7 +107,7 @@ describe('createManyAndReturn relies on Prisma-generated IDs', () => {
     expect(after.createdAt).toBeTruthy();
   });
 
-  it('falls back to ID injection when select narrows the returned rows', async () => {
+  it('audits the rows it returns when select narrows them', async () => {
     const rows = await context.provider.runAsync(testActor, async () => {
       return await context.prisma.user.createManyAndReturn({
         data: [{ email: 'selected@example.com', name: 'Sel', password: 'secret' }],
@@ -122,5 +122,53 @@ describe('createManyAndReturn relies on Prisma-generated IDs', () => {
     });
     expect(logs).toHaveLength(1);
     expect(logs[0]?.entityId).toBeTruthy();
+    // createdAt comes from @default(now()) — present only if logs use the returned rows
+    expect((logs[0]?.after as Record<string, unknown>).createdAt).toBeTruthy();
+  });
+
+  it('supports autoincrement IDs when select narrows the returned rows', async () => {
+    const rows = await context.provider.runAsync(testActor, async () => {
+      return await context.prisma.autoIncItem.createManyAndReturn({
+        data: [{ label: 'auto-a' }, { label: 'auto-b' }],
+        select: { label: true },
+      });
+    });
+
+    expect(rows).toEqual([{ label: 'auto-a' }, { label: 'auto-b' }]);
+
+    const created = await context.basePrisma.autoIncItem.findMany({ orderBy: { id: 'asc' } });
+    const logs = await context.prisma.auditLog.findMany({
+      where: { entityType: 'AutoIncItem', action: 'create' },
+    });
+    expect(logs.map((l: { entityId: string }) => l.entityId).sort()).toEqual(
+      created.map((item: { id: number }) => String(item.id)).sort(),
+    );
+  });
+
+  it('logs only the rows actually created under skipDuplicates when select narrows them', async () => {
+    await context.provider.runAsync(testActor, async () => {
+      return await context.prisma.user.create({
+        data: { email: 'dup-selected@example.com', name: 'Existing', password: 'secret' },
+      });
+    });
+
+    const rows = await context.provider.runAsync(testActor, async () => {
+      return await context.prisma.user.createManyAndReturn({
+        data: [
+          { email: 'dup-selected@example.com', name: 'Skipped', password: 'secret' },
+          { email: 'fresh-selected@example.com', name: 'Created', password: 'secret' },
+        ],
+        skipDuplicates: true,
+        select: { email: true },
+      });
+    });
+
+    expect(rows).toEqual([{ email: 'fresh-selected@example.com' }]);
+
+    const createLogs = await context.prisma.auditLog.findMany({
+      where: { entityType: 'User', action: 'create' },
+    });
+    const emails = createLogs.map((l: { after: unknown }) => (l.after as Record<string, unknown>)?.email).sort();
+    expect(emails).toEqual(['dup-selected@example.com', 'fresh-selected@example.com']);
   });
 });

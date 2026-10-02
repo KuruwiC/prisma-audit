@@ -173,25 +173,23 @@ describe('createBatchExecutor', () => {
       );
     });
 
-    it('injects ids into a createManyAndReturn narrowed by select and audits the injected rows', async () => {
-      const createManyAndReturn = vi.fn(async () => [{ email: 'a@1' }]);
+    it('audits the rows a createManyAndReturn with a select returns, without injecting ids', async () => {
+      const createManyAndReturn = vi.fn(async () => [a1]);
       const client = clientWith({ user: { createManyAndReturn } });
       const produceRecords = produce();
+      const args = { data: [{ email: 'a@1' }], select: { email: true, id: true } };
 
       const outcome = await runWithRecords(
         executor,
-        operationOn(client, 'createManyAndReturn', { data: [{ email: 'a@1' }], select: { email: true } }),
+        operationOn(client, 'createManyAndReturn', args),
         scopeOn(client),
         produceRecords,
       );
 
-      expect(createManyAndReturn).toHaveBeenCalledWith({
-        data: [{ email: 'a@1', id: expect.any(String) }],
-        select: { email: true },
-      });
-      expect(outcome.result).toEqual([{ email: 'a@1' }]);
+      expect(createManyAndReturn).toHaveBeenCalledWith(args);
+      expect(outcome.result).toEqual([a1]);
       expect(produceRecords).toHaveBeenCalledWith(
-        [eventOf({ action: 'create', after: { email: 'a@1', id: expect.any(String) } })],
+        [eventOf({ identity: 'a', action: 'create', after: a1 })],
         expect.anything(),
       );
     });
