@@ -187,7 +187,8 @@ describe('nested rows attributed through their parent row', () => {
     );
 
     expect(await recordsOf('Comment')).toEqual(['k-new:create']);
-    expect(await recordsOf('Post')).toEqual(['p1:update', 'p3:create']);
+    // p1's update writes only below it, so none of its columns changed
+    expect(await recordsOf('Post')).toEqual(['p3:create']);
   });
 
   it('audits the rows written below every element of a list create, each once', async () => {

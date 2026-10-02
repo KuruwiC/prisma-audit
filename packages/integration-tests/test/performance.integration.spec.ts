@@ -527,7 +527,8 @@ describe('Nested update with and without an include of the written relation', ()
       console.log(`Update without include: ${auditLogsWithoutInclude} audit logs`);
 
       expect(auditLogsWithoutInclude).toBeGreaterThan(0);
-      expect(auditLogsWithoutInclude).toBe(3);
+      // The post's update under its own aggregate and under its author; the user's columns did not change
+      expect(auditLogsWithoutInclude).toBe(2);
 
       const auditLogs = await context.prisma.auditLog.findMany({
         where: {
@@ -578,7 +579,8 @@ describe('Nested update with and without an include of the written relation', ()
       const auditLogsWithInclude = context.auditLogRowCount.value;
       console.log(`Update with include: ${auditLogsWithInclude} audit logs`);
 
-      expect(auditLogsWithInclude).toBe(3);
+      // The post's update under its own aggregate and under its author; the user's columns did not change
+      expect(auditLogsWithInclude).toBe(2);
 
       const auditLogs = await context.prisma.auditLog.findMany({
         where: {

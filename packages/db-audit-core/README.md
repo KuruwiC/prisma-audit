@@ -155,7 +155,8 @@ write the adapter runs, in order:
 6. **`compose(resolved, { auditContext, config: composeConfig }, now)`** into the `AuditRecord`s
    `buildRecords` returns. `composeConfig` carries the entity lookup, `excludeFields`, `redact`,
    `serialization` and `relationFieldNames(model)`, the fields of a row that hold related records
-   rather than columns.
+   rather than columns. An update's `changes` compares the row's columns only: those fields are
+   left out of the comparison, so an update whose columns are unchanged yields no record.
 
 What the adapter must provide:
 

@@ -23,7 +23,7 @@ export interface ComposeConfig<TModelName extends string = string> {
   readonly excludeFields: readonly string[];
   readonly redact?: RedactConfig;
   readonly serialization?: SerializationConfig;
-  /** Whether relation objects stay in the stored states (default: false, they are stripped) */
+  /** Whether relation objects stay in the stored states (default: false, they are stripped); `changes` never compares them */
   readonly includeRelations?: boolean;
   /** Relation field names of a model, as the adapter derives them from its schema; undefined strips nothing. */
   readonly relationFieldNames: (model: TModelName) => ReadonlySet<string> | undefined;
@@ -95,6 +95,11 @@ const serializeRecord = (record: AuditRecord, customSerializers?: ValueSerialize
   requestContext: serializeForAuditJson(record.requestContext, customSerializers),
 });
 
+/**
+ * `changes` compares the row's columns: the relation fields a state holds are what the adapter
+ * read with the row, not columns of it, so they are left out of the comparison whether or not
+ * they stay in the stored states.
+ */
 const resolveStates = <TModelName extends string>(
   event: ResolvedEvent<TModelName>,
   entity: EntityComposeConfig,
@@ -103,26 +108,23 @@ const resolveStates = <TModelName extends string>(
   const before = event.action !== 'create' && event.before.kind === 'captured' ? event.before.row : null;
   const after = event.action === 'delete' ? null : (event.after ?? null);
 
+  const relationFieldNames = config.relationFieldNames(event.model);
+  const columnsOf = (state: State): State => state && removeRelations(state, relationFieldNames);
+  const beforeColumns = columnsOf(before);
+  const afterColumns = columnsOf(after);
+
   const isUpdate = event.action === 'update';
   const excludeFields = entity.excludeFields ?? config.excludeFields;
-  const changes = isUpdate ? createDiffCalculator(new Set(excludeFields))(before, after) : null;
+  const changes = isUpdate ? createDiffCalculator(new Set(excludeFields))(beforeColumns, afterColumns) : null;
 
   if (isUpdate && changedOnlyExcludedFields(changes, before)) {
     return undefined;
   }
 
-  const states = config.redact ? redactStates({ before, after, changes }, config.redact) : { before, after, changes };
-
-  if (config.includeRelations) {
-    return states;
-  }
-
-  const relationFieldNames = config.relationFieldNames(event.model);
-  return {
-    before: states.before && removeRelations(states.before, relationFieldNames),
-    after: states.after && removeRelations(states.after, relationFieldNames),
-    changes: states.changes,
-  };
+  const states = config.includeRelations
+    ? { before, after, changes }
+    : { before: beforeColumns, after: afterColumns, changes };
+  return config.redact ? redactStates(states, config.redact) : states;
 };
 
 const composeEvent = <TModelName extends string>(

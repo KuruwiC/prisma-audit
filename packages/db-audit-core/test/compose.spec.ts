@@ -403,6 +403,42 @@ describe('compose', () => {
     it('strips relations by default', () => {
       expect(composeOne(event({ after: row }), authorRelation).after).toEqual(stripped);
     });
+
+    describe('changes of an update', () => {
+      it('skips an update whose states differ only in a relation field', () => {
+        const resolved = updateEvent(stripped, row);
+
+        expect(compose([resolved], ambient(authorRelation), now)).toEqual([]);
+      });
+
+      it('compares the columns only, leaving the relation read with the row out', () => {
+        const resolved = updateEvent(stripped, { ...row, authorId: 'user-2' });
+
+        expect(composeOne(resolved, authorRelation).changes).toEqual({ authorId: { old: 'user-9', new: 'user-2' } });
+      });
+
+      it('compares the columns only when relations are included in the stored states', () => {
+        const resolved = updateEvent(stripped, { ...row, authorId: 'user-2' });
+        const record = composeOne(resolved, { ...authorRelation, includeRelations: true });
+
+        expect(record.changes).toEqual({ authorId: { old: 'user-9', new: 'user-2' } });
+        expect(record.after).toEqual({ ...row, authorId: 'user-2' });
+      });
+
+      it('skips an update whose states differ only in a relation field when relations are included', () => {
+        const resolved = updateEvent(stripped, row);
+
+        expect(compose([resolved], ambient({ ...authorRelation, includeRelations: true }), now)).toEqual([]);
+      });
+
+      it('records an update without a before state whose row holds a relation, without changes', () => {
+        const resolved = event({ action: 'update', after: row, origin: { path: '', op: 'update' } });
+        const record = composeOne(resolved, authorRelation);
+
+        expect(record.changes).toBeNull();
+        expect(record.after).toEqual(stripped);
+      });
+    });
   });
 
   describe('serialization', () => {

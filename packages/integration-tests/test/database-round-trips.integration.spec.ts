@@ -178,9 +178,9 @@ describe('Database Round-Trip Guard', () => {
     // 6. SELECT FROM users      — Prisma's resolution of the injected `include: { posts: true }`
     //                             on the update() result: base record...
     // 7. SELECT FROM posts      — ...and the included relation, fetched as a separate query
-    // 8. INSERT INTO audit_logs — one batched write: user + the created post + the post's
-    //                             aggregate-owner (User) propagation log — 3 rows, 1 statement;
-    //                             the existing post gets no row
+    // 8. INSERT INTO audit_logs — one batched write: the created post + its aggregate-owner
+    //                             (User) propagation log — 2 rows, 1 statement; the user's
+    //                             columns did not change and the existing post gets no row
     // 9. COMMIT
     expect(statements).toHaveLength(9);
   });
@@ -219,8 +219,8 @@ describe('Database Round-Trip Guard', () => {
     // 8. SELECT id FROM posts   — the primary keys the relation holds under the user after the
     //                             write; the one the snapshot does not hold is the created post
     // 9. SELECT FROM posts      — the created post read whole, since the result left it out
-    // 10. INSERT INTO audit_logs — one batched write: user + the created post + the post's
-    //                             aggregate-owner (User) propagation log
+    // 10. INSERT INTO audit_logs — one batched write: the created post + its aggregate-owner
+    //                             (User) propagation log — 2 rows; the user's columns did not change
     // 11. COMMIT
     expect(statements).toHaveLength(11);
   });
@@ -264,9 +264,10 @@ describe('Database Round-Trip Guard', () => {
     // 7. SELECT FROM users      — Prisma's resolution of the injected `include: { posts: true }`
     //                             on the update() result: base record...
     // 8. SELECT FROM posts      — ...and the included relation, fetched as a separate query
-    // 9. INSERT INTO audit_logs — one batched write: user + the matched post + the post's
-    //                             aggregate-owner (User) propagation log — 3 rows, 1 statement;
-    //                             the post the filter did not match gets no row
+    // 9. INSERT INTO audit_logs — one batched write: the matched post + its aggregate-owner
+    //                             (User) propagation log — 2 rows, 1 statement; the user's
+    //                             columns did not change and the post the filter did not match
+    //                             gets no row
     // 10. COMMIT
     expect(statements).toHaveLength(10);
   });
