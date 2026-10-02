@@ -36,8 +36,9 @@ import { createErrorHandler, type ErrorStrategy } from '../utils/error-handler.j
  *   without the record under the root it failed to resolve only (a `to()` resolver runs on the
  *   row after the write and, for an update whose row was read before it, on that row too).
  *   Reported once per affected row and resolver, however many of the row's states it failed
- *   for: `modelName` is the row's model, `operation` the keyword that wrote it, and `params` is `{ identity, resolver }` with the row's identity and either
- *   `{ kind: 'entity' }` or `{ kind: 'aggregate', aggregateCategory, aggregateType }`.
+ *   for: `modelName` is the row's model, `operation` the keyword that wrote it, and `params` is
+ *   `{ identity, resolver }` with the row's identity and either `{ kind: 'entity' }` or
+ *   `{ kind: 'aggregate', aggregateCategory, aggregateType }`.
  */
 export type AuditErrorPhase = 'pre-fetch' | 'log-write' | 'diff-generation' | 'row-identification' | 'id-resolver-call';
 
