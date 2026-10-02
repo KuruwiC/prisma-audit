@@ -640,7 +640,7 @@ Use shared change normalization if:
 
 Control how changes are tracked and recorded.
 
-An update's `changes` compares the columns of the row. The audited row is read with every column whatever the query's `select` or `omit` (the value returned keeps the shape the query requested), so a column the query does not read is still compared and a change to it is recorded; the relation fields read with the row are neither compared nor stored. An update whose columns did not change, such as one that writes only nested relations, gets no audit log.
+An update's `changes` compares the columns of the row. The audited row is read with every column whatever the query's `select` or `omit` (the value returned keeps the shape the query requested), so a column the query does not read is still compared and a change to it is recorded; the relation fields and relation counts (`_count`) read with the row are neither compared nor stored. An update whose columns did not change, such as one that writes only nested relations, gets no audit log.
 
 #### `excludeFields`
 **Type:** `string[]`

@@ -44,6 +44,9 @@ export interface AuditOptions {
   readonly shouldAudit: (modelName: string) => boolean;
 }
 
+/** The relation counts Prisma returns with a row when a query includes or selects `_count` */
+const RELATION_COUNT_FIELD = '_count';
+
 /**
  * @throws {Error} If the aggregate mapping is invalid or the diffing and redaction settings conflict
  */
@@ -65,7 +68,10 @@ export const normalizeAuditOptions = (options: PrismaAuditExtensionOptions): Aud
   const relationFieldNames = (modelName: string): ReadonlySet<string> => {
     let names = relationFieldNamesByModel.get(modelName);
     if (names === undefined) {
-      names = new Set(schemaMetadata.getRelationFields(modelName).map((field) => field.name));
+      names = new Set([
+        ...schemaMetadata.getRelationFields(modelName).map((field) => field.name),
+        RELATION_COUNT_FIELD,
+      ]);
       relationFieldNamesByModel.set(modelName, names);
     }
     return names;

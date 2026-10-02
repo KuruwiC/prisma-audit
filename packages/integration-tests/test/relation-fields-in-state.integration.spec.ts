@@ -77,6 +77,28 @@ describe('relation fields in audited entity state', () => {
     expect(log?.changes).toEqual({ name: { old: 'Before Rename', new: 'After Rename' } });
   });
 
+  it('keeps an included relation count out of a single update log', async () => {
+    const { prisma, basePrisma, provider } = scenario;
+    const user = await basePrisma.user.create({
+      data: {
+        email: 'relation-count-update@example.com',
+        name: 'Before Rename',
+        posts: { create: { title: 'Existing Post' } },
+      },
+    });
+
+    const updated = await provider.runAsync(testActor, async () =>
+      prisma.user.update({ where: { id: user.id }, data: { name: 'After Rename' }, include: { _count: true } }),
+    );
+    expect(updated._count.posts).toBe(1);
+
+    const [log] = await basePrisma.auditLog.findMany({
+      where: { entityType: 'User', entityId: user.id, action: 'update' },
+    });
+    expect(stateKeys(log?.after)).not.toContain('_count');
+    expect(log?.changes).toEqual({ name: { old: 'Before Rename', new: 'After Rename' } });
+  });
+
   it('records no update of a row whose update writes only below it', async () => {
     const { prisma, basePrisma, provider } = scenario;
     const user = await basePrisma.user.create({ data: { email: 'relation-fields-nested@example.com', name: 'Ada' } });
