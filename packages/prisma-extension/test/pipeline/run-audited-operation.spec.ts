@@ -5,7 +5,7 @@
  * failure sink the way its origin requires.
  */
 
-import type { AuditContext, FailureSink, MutationEvent } from '@kuruwic/db-audit-core';
+import type { AuditContext, AuditRecord, FailureSink, MutationEvent } from '@kuruwic/db-audit-core';
 import {
   createActorId,
   createAggregateId,
@@ -19,8 +19,8 @@ import type { ExecutionScope } from '../../src/pipeline/execution-scope.js';
 import {
   type AuditedOperation,
   createExecutor,
+  type ExecutedOperation,
   type OperationExecutor,
-  type OperationOutcome,
 } from '../../src/pipeline/executor.js';
 import {
   type AuditPipelineDependencies,
@@ -94,7 +94,12 @@ const operationOf = (action: AuditedOperation['action'] = 'update'): AuditedOper
   execute: vi.fn(),
 });
 
-const outcome: OperationOutcome = { result: { id: 'u1', name: 'Anne' }, records: [record] };
+const executedWith = (records: AuditRecord[]): ExecutedOperation => ({
+  result: { id: 'u1', name: 'Anne' },
+  buildRecords: async () => records,
+});
+
+const outcome = executedWith([record]);
 
 const stubExecutor = (run: OperationExecutor['run']): OperationExecutor => ({ run: vi.fn(run) });
 
@@ -192,7 +197,7 @@ describe('runAuditedOperation', () => {
 
     it('queues the writes after commit of several operations in one transaction in order', async () => {
       const second: AuditLogData = { ...record, entityId: createEntityId('u2') };
-      const outcomes = [outcome, { ...outcome, records: [second] }];
+      const outcomes = [outcome, executedWith([second])];
       const deps = createDeps({ singleExecutor: stubExecutor(async () => outcomes.shift() ?? outcome) });
       const baseClient = createBaseClient();
       const deferredWrites: Array<() => Promise<void>> = [];
@@ -448,7 +453,7 @@ describe('createExecutor', () => {
     atomic: true,
   };
 
-  it('runs prepare, execute, collect, produce and result in order and returns the result with the records', async () => {
+  it('runs prepare, execute and result, then collect and produce only when the records are built', async () => {
     const calls: string[] = [];
     const step = <T>(name: string, value: T) =>
       vi.fn(async (): Promise<T> => {
@@ -472,14 +477,18 @@ describe('createExecutor', () => {
     });
     const operation = operationOf();
 
-    const result = await createExecutor(steps).run(operation, scope, produceRecords);
+    const run = await createExecutor(steps).run(operation, scope, produceRecords);
 
-    expect(calls).toEqual(['prepare', 'execute', 'collect', 'produce', 'result']);
+    expect(calls).toEqual(['prepare', 'execute', 'result']);
+    expect(run.result).toBe('returned');
     expect(steps.execute).toHaveBeenCalledWith(operation, scope, prepared);
+    expect(steps.result).toHaveBeenCalledWith(executed);
+
+    await expect(run.buildRecords()).resolves.toEqual([record]);
+
+    expect(calls).toEqual(['prepare', 'execute', 'result', 'collect', 'produce']);
     expect(steps.collect).toHaveBeenCalledWith(operation, scope, prepared, executed);
     expect(produceRecords).toHaveBeenCalledWith(events, scope);
-    expect(steps.result).toHaveBeenCalledWith(executed);
-    expect(result).toEqual({ result: 'returned', records: [record] });
   });
 
   it('stops at the first failing step', async () => {

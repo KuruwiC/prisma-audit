@@ -12,6 +12,7 @@ import type { ExecutionScope } from '../../src/pipeline/execution-scope.js';
 import type { AuditedOperation } from '../../src/pipeline/executor.js';
 import type { RecordProducer } from '../../src/pipeline/produce-records.js';
 import { createSchemaMetadataFromDMMF } from '../../src/utils/schema-metadata.js';
+import { runWithRecords } from './run-with-records.js';
 
 type Row = Record<string, unknown>;
 
@@ -105,7 +106,12 @@ describe('createBatchExecutor', () => {
       const produceRecords = produce();
       const args = { data: [{ email: 'a@1' }, { email: 'b@1' }] };
 
-      const outcome = await executor.run(operationOn(client, 'createMany', args), scopeOn(client), produceRecords);
+      const outcome = await runWithRecords(
+        executor,
+        operationOn(client, 'createMany', args),
+        scopeOn(client),
+        produceRecords,
+      );
 
       const inserted = createMany.mock.calls[0]?.[0].data ?? [];
       expect(inserted).toEqual([
@@ -132,7 +138,8 @@ describe('createBatchExecutor', () => {
       const client = clientWith({ user: { createMany } });
       const produceRecords = produce();
 
-      await executor.run(
+      await runWithRecords(
+        executor,
         operationOn(client, 'createMany', { data: { email: 'a@1' } }),
         scopeOn(client),
         produceRecords,
@@ -148,7 +155,8 @@ describe('createBatchExecutor', () => {
       const produceRecords = produce();
       const args = { data: [{ email: 'a@1' }, { email: 'b@1' }], skipDuplicates: true };
 
-      const outcome = await executor.run(
+      const outcome = await runWithRecords(
+        executor,
         operationOn(client, 'createManyAndReturn', args),
         scopeOn(client),
         produceRecords,
@@ -170,7 +178,8 @@ describe('createBatchExecutor', () => {
       const client = clientWith({ user: { createManyAndReturn } });
       const produceRecords = produce();
 
-      const outcome = await executor.run(
+      const outcome = await runWithRecords(
+        executor,
         operationOn(client, 'createManyAndReturn', { data: [{ email: 'a@1' }], select: { email: true } }),
         scopeOn(client),
         produceRecords,
@@ -196,7 +205,12 @@ describe('createBatchExecutor', () => {
       const produceRecords = produce();
       const args = { where: { email: { contains: '@' } }, data: { email: 'x' } };
 
-      const outcome = await executor.run(operationOn(client, 'updateMany', args), scopeOn(client), produceRecords);
+      const outcome = await runWithRecords(
+        executor,
+        operationOn(client, 'updateMany', args),
+        scopeOn(client),
+        produceRecords,
+      );
 
       expect(findMany.mock.calls).toEqual([[{ where: args.where }], [{ where: { id: { in: ['a', 'b'] } } }]]);
       expect(updateMany).toHaveBeenCalledWith(args);
@@ -227,7 +241,12 @@ describe('createBatchExecutor', () => {
       const client = clientWith({ user: { findMany, updateMany: vi.fn(async () => ({ count: 0 })) } });
       const produceRecords = produce();
 
-      await executor.run(operationOn(client, 'updateMany', { where: {}, data: {} }), scopeOn(client), produceRecords);
+      await runWithRecords(
+        executor,
+        operationOn(client, 'updateMany', { where: {}, data: {} }),
+        scopeOn(client),
+        produceRecords,
+      );
 
       expect(findMany).toHaveBeenCalledTimes(1);
       expect(produceRecords).toHaveBeenCalledWith([], expect.anything());
@@ -237,7 +256,7 @@ describe('createBatchExecutor', () => {
       const findMany = vi.fn(async () => []);
       const client = clientWith({ user: { findMany, updateMany: vi.fn(async () => ({ count: 0 })) } });
 
-      await executor.run(operationOn(client, 'updateMany', { data: {} }), scopeOn(client), produce());
+      await runWithRecords(executor, operationOn(client, 'updateMany', { data: {} }), scopeOn(client), produce());
 
       expect(findMany).toHaveBeenCalledWith({ where: {} });
     });
@@ -252,7 +271,7 @@ describe('createBatchExecutor', () => {
 
       const operation = operationOn(client, 'updateMany', args);
 
-      const outcome = await executor.run(operation, scopeOn(client), produceRecords);
+      const outcome = await runWithRecords(executor, operation, scopeOn(client), produceRecords);
 
       expect(findMany).toHaveBeenCalledWith({ where: {} });
       expect(operation.execute).toHaveBeenCalledWith(args, 'updateManyAndReturn');
@@ -277,7 +296,8 @@ describe('createBatchExecutor', () => {
       const updateManyAndReturn = vi.fn(async () => [b2]);
       const client = clientWith({ user: { findMany: vi.fn(async () => [b1]), updateManyAndReturn } });
 
-      const outcome = await executor.run(
+      const outcome = await runWithRecords(
+        executor,
         operationOn(client, 'updateManyAndReturn', { where: {}, data: {}, limit: 1 }),
         scopeOn(client),
         produce(),
@@ -292,7 +312,7 @@ describe('createBatchExecutor', () => {
       const client = clientWith({ user: { findMany, updateMany } });
       const args = { where: {}, data: { email: 'x' }, limit: 1 };
 
-      await executor.run(operationOn(client, 'updateMany', args), scopeOn(client), produce());
+      await runWithRecords(executor, operationOn(client, 'updateMany', args), scopeOn(client), produce());
 
       expect(findMany).toHaveBeenNthCalledWith(1, { where: {}, take: 1 });
       expect(updateMany).toHaveBeenCalledWith(args);
@@ -307,7 +327,12 @@ describe('createBatchExecutor', () => {
       const produceRecords = produce();
       const args = { where: { email: { contains: '@' } } };
 
-      const outcome = await executor.run(operationOn(client, 'deleteMany', args), scopeOn(client), produceRecords);
+      const outcome = await runWithRecords(
+        executor,
+        operationOn(client, 'deleteMany', args),
+        scopeOn(client),
+        produceRecords,
+      );
 
       expect(findMany).toHaveBeenCalledTimes(1);
       expect(deleteMany).toHaveBeenCalledWith(args);
@@ -337,7 +362,12 @@ describe('createBatchExecutor', () => {
       const findMany = vi.fn(async () => [a1]);
       const client = clientWith({ user: { findMany, deleteMany: vi.fn(async () => ({ count: 1 })) } });
 
-      await executor.run(operationOn(client, 'deleteMany', { where: {}, limit: 1 }), scopeOn(client), produce());
+      await runWithRecords(
+        executor,
+        operationOn(client, 'deleteMany', { where: {}, limit: 1 }),
+        scopeOn(client),
+        produce(),
+      );
 
       expect(findMany).toHaveBeenCalledWith({ where: {}, take: 1 });
     });
@@ -348,7 +378,12 @@ describe('createBatchExecutor', () => {
       const client = clientWith({ user: { updateMany: vi.fn() } });
 
       await expect(
-        executor.run(operationOn(client, 'updateMany', { where: {}, data: {} }), scopeOn(client), produce()),
+        runWithRecords(
+          executor,
+          operationOn(client, 'updateMany', { where: {}, data: {} }),
+          scopeOn(client),
+          produce(),
+        ),
       ).rejects.toThrow('Model User does not have findMany operation');
     });
 
@@ -364,7 +399,12 @@ describe('createBatchExecutor', () => {
       const produceRecords = produce();
 
       await expect(
-        executor.run(operationOn(client, 'createMany', { data: [{ email: 'a@1' }] }), scopeOn(client), produceRecords),
+        runWithRecords(
+          executor,
+          operationOn(client, 'createMany', { data: [{ email: 'a@1' }] }),
+          scopeOn(client),
+          produceRecords,
+        ),
       ).rejects.toBe(callerError);
 
       expect(produceRecords).not.toHaveBeenCalled();

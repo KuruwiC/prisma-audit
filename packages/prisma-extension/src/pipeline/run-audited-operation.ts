@@ -7,7 +7,13 @@
  * transaction runtime, and the caller receives the result.
  */
 
-import type { AuditContext, AuditContextProvider, DispatchConfig, FailureSink } from '@kuruwic/db-audit-core';
+import type {
+  AuditContext,
+  AuditContextProvider,
+  AuditRecord,
+  DispatchConfig,
+  FailureSink,
+} from '@kuruwic/db-audit-core';
 import { dispatch } from '@kuruwic/db-audit-core';
 import type { AuditAction } from '../grammar/operations.js';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../internal-types.js';
@@ -16,7 +22,7 @@ import { getModelDelegate, getModelOperation } from '../utils/model-accessor.js'
 import { isBatchOperation } from '../utils/operation-classifier.js';
 import { toError } from '../utils/to-error.js';
 import { type ExecutionScope, transactionRuntimeOf, withExecutionScope } from './execution-scope.js';
-import type { AuditedOperation, OperationExecutor, OperationOutcome } from './executor.js';
+import type { AuditedOperation, OperationExecutor } from './executor.js';
 import type { RecordProducer } from './produce-records.js';
 
 export interface InterceptedOperation {
@@ -83,9 +89,10 @@ const runExecutor = async (
   operation: AuditedOperation,
   scope: ExecutionScope,
   deps: AuditPipelineDependencies,
-): Promise<OperationOutcome> => {
+): Promise<{ readonly result: unknown; readonly records: AuditRecord[] }> => {
   try {
-    return await executor.run(operation, scope, deps.produceRecords);
+    const executed = await executor.run(operation, scope, deps.produceRecords);
+    return { result: executed.result, records: await executed.buildRecords() };
   } catch (caughtError) {
     if (isCallerMutationError(caughtError)) {
       throw caughtError;

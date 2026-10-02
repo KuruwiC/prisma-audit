@@ -3,8 +3,9 @@
  *
  * A single operation (create, update, upsert, delete) and a batch operation (createMany,
  * updateMany, deleteMany and their returning variants) read, mutate and collect differently.
- * An executor is those steps behind one `run`, which performs them in order and hands the
- * collected events to the record producer.
+ * An executor is those steps behind one `run`, which performs the reads before the write and the
+ * write, and hands back the caller's result with the build of the audit records: collecting the
+ * events the write left behind and handing them to the record producer, run once the write has run.
  */
 
 import type { AuditRecord, MutationEvent } from '@kuruwic/db-audit-core';
@@ -39,9 +40,11 @@ export interface OperationSteps<TPrepared, TExecuted> {
   readonly result: (executed: TExecuted) => Promise<unknown>;
 }
 
-export interface OperationOutcome {
+export interface ExecutedOperation {
+  /** The value the caller receives */
   readonly result: unknown;
-  readonly records: AuditRecord[];
+  /** Reads what the write left behind and builds the audit records from it */
+  readonly buildRecords: () => Promise<AuditRecord[]>;
 }
 
 export interface OperationExecutor {
@@ -49,7 +52,7 @@ export interface OperationExecutor {
     operation: AuditedOperation,
     scope: ExecutionScope,
     produceRecords: RecordProducer,
-  ) => Promise<OperationOutcome>;
+  ) => Promise<ExecutedOperation>;
 }
 
 export const createExecutor = <TPrepared, TExecuted>(
@@ -58,9 +61,9 @@ export const createExecutor = <TPrepared, TExecuted>(
   run: async (operation, scope, produceRecords) => {
     const prepared = await steps.prepare(operation, scope);
     const executed = await steps.execute(operation, scope, prepared);
-    const events = await steps.collect(operation, scope, prepared, executed);
-    const records = await produceRecords(events, scope);
     const result = await steps.result(executed);
-    return { result, records };
+    const buildRecords = async (): Promise<AuditRecord[]> =>
+      produceRecords(await steps.collect(operation, scope, prepared, executed), scope);
+    return { result, buildRecords };
   },
 });

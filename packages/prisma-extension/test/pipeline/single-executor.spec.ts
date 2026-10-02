@@ -12,6 +12,7 @@ import type { AuditedOperation } from '../../src/pipeline/executor.js';
 import type { RecordProducer } from '../../src/pipeline/produce-records.js';
 import { createSingleExecutor } from '../../src/pipeline/single-executor.js';
 import { createSchemaMetadataFromDMMF } from '../../src/utils/schema-metadata.js';
+import { runWithRecords } from './run-with-records.js';
 
 type Row = Record<string, unknown>;
 
@@ -145,7 +146,12 @@ describe('createSingleExecutor', () => {
       const client = clientWith({ user: { findUnique, create: vi.fn(async () => user) } });
       const { executor, produceRecords, shouldFetchBefore } = executorWith();
 
-      await executor.run(operationOn(client, 'create', { data: { name: 'Ann' } }), scopeOn(client), produceRecords);
+      await runWithRecords(
+        executor,
+        operationOn(client, 'create', { data: { name: 'Ann' } }),
+        scopeOn(client),
+        produceRecords,
+      );
 
       expect(findUnique).not.toHaveBeenCalled();
       expect(shouldFetchBefore).not.toHaveBeenCalled();
@@ -163,7 +169,7 @@ describe('createSingleExecutor', () => {
       const client = clientWith({ user: { findUnique, [action]: vi.fn(async () => returns) } });
       const { executor, produceRecords, shouldFetchBefore } = executorWith({ fetchBefore: true });
 
-      await executor.run(operationOn(client, action, args), scopeOn(client), produceRecords);
+      await runWithRecords(executor, operationOn(client, action, args), scopeOn(client), produceRecords);
 
       expect(shouldFetchBefore).toHaveBeenCalledWith('User', action);
       expect(findUnique).toHaveBeenCalledWith({ where: { id: 'u1' } });
@@ -181,7 +187,7 @@ describe('createSingleExecutor', () => {
       const client = clientWith({ user: { findUnique, [action]: vi.fn(async () => user) } });
       const { executor, produceRecords } = executorWith({ fetchBefore: false });
 
-      await executor.run(operationOn(client, action, args), scopeOn(client), produceRecords);
+      await runWithRecords(executor, operationOn(client, action, args), scopeOn(client), produceRecords);
 
       expect(findUnique).not.toHaveBeenCalled();
       expect(produceRecords).toHaveBeenCalledWith(
@@ -196,7 +202,7 @@ describe('createSingleExecutor', () => {
       const { executor, produceRecords, shouldFetchBefore } = executorWith({ fetchBefore: false });
       const args = { where: { id: 'u1' }, create: { name: 'Ann' }, update: { name: 'Anne' } };
 
-      await executor.run(operationOn(client, 'upsert', args), scopeOn(client), produceRecords);
+      await runWithRecords(executor, operationOn(client, 'upsert', args), scopeOn(client), produceRecords);
 
       expect(shouldFetchBefore).not.toHaveBeenCalled();
       expect(findUnique).toHaveBeenCalledWith({ where: { id: 'u1' } });
@@ -210,7 +216,8 @@ describe('createSingleExecutor', () => {
       const client = clientWith({ user: { findUnique: vi.fn(async () => null), upsert: vi.fn(async () => user) } });
       const { executor, produceRecords } = executorWith();
 
-      await executor.run(
+      await runWithRecords(
+        executor,
         operationOn(client, 'upsert', { where: { id: 'u1' }, create: { name: 'Ann' }, update: {} }),
         scopeOn(client),
         produceRecords,
@@ -236,7 +243,7 @@ describe('createSingleExecutor', () => {
       const { executor, produceRecords, failureSink } = executorWith();
       const operation = operationOn(client, 'update', updateArgs);
 
-      const outcome = await executor.run(operation, scopeOn(client), produceRecords);
+      const outcome = await runWithRecords(executor, operation, scopeOn(client), produceRecords);
 
       expect(failureSink.notify).toHaveBeenCalledWith({
         phase: 'pre-fetch',
@@ -264,7 +271,8 @@ describe('createSingleExecutor', () => {
       });
       const { executor, produceRecords, failureSink } = executorWith();
 
-      await executor.run(
+      await runWithRecords(
+        executor,
         operationOn(client, 'upsert', { where: { id: 'u1' }, create: { name: 'Ann' }, update: {} }),
         scopeOn(client),
         produceRecords,
@@ -300,7 +308,7 @@ describe('createSingleExecutor', () => {
       });
       const { executor, produceRecords } = executorWith({ fetchBefore: true });
 
-      await executor.run(operationOn(client, 'update', nestedUpdateArgs), scopeOn(client), produceRecords);
+      await runWithRecords(executor, operationOn(client, 'update', nestedUpdateArgs), scopeOn(client), produceRecords);
 
       expect(calls).toEqual(['pre-fetch', 'update']);
       expect(produceRecords).toHaveBeenCalledWith(
@@ -333,7 +341,7 @@ describe('createSingleExecutor', () => {
       });
       const { executor, produceRecords, failureSink } = executorWith({ fetchBefore: true });
 
-      await executor.run(operationOn(client, 'update', nestedUpdateArgs), scopeOn(client), produceRecords);
+      await runWithRecords(executor, operationOn(client, 'update', nestedUpdateArgs), scopeOn(client), produceRecords);
 
       expect(failureSink.notify).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -369,7 +377,8 @@ describe('createSingleExecutor', () => {
       });
       const { executor, produceRecords } = executorWith();
 
-      await executor.run(
+      await runWithRecords(
+        executor,
         operationOn(client, 'update', { where: { id: 'u1' }, data: { posts: { create: { title: 'B' } } } }),
         scopeOn(client),
         produceRecords,
@@ -405,7 +414,8 @@ describe('createSingleExecutor', () => {
       const { executor, produceRecords, failureSink } = executorWith();
 
       await expect(
-        executor.run(
+        runWithRecords(
+          executor,
           operationOn(client, 'update', { where: { id: 'u1' }, data: { posts: { create: { title: 'B' } } } }),
           scopeOn(client),
           produceRecords,
@@ -425,7 +435,8 @@ describe('createSingleExecutor', () => {
       });
       const { executor, produceRecords } = executorWith();
 
-      await executor.run(
+      await runWithRecords(
+        executor,
         operationOn(client, 'create', { data: { name: 'Ann', posts: { create: { title: 'B' } } } }),
         scopeOn(client),
         produceRecords,
@@ -470,7 +481,7 @@ describe('createSingleExecutor', () => {
       });
       const { executor, produceRecords } = executorWith();
 
-      await executor.run(operationOn(client, 'update', updateManyArgs), scopeOn(client), produceRecords);
+      await runWithRecords(executor, operationOn(client, 'update', updateManyArgs), scopeOn(client), produceRecords);
 
       expect(calls).toEqual(['pre-read', 'update']);
       expect(findMany).toHaveBeenCalledWith({ where: underU1({ title: 'A' }) });
@@ -498,7 +509,7 @@ describe('createSingleExecutor', () => {
       });
       const { executor, produceRecords } = executorWith({ fetchBefore: false });
 
-      await executor.run(operationOn(client, 'update', updateManyArgs), scopeOn(client), produceRecords);
+      await runWithRecords(executor, operationOn(client, 'update', updateManyArgs), scopeOn(client), produceRecords);
 
       expect(findMany).toHaveBeenCalledWith({ where: underU1({ title: 'A' }), select: { id: true } });
       expect(produceRecords).toHaveBeenCalledWith(
@@ -525,7 +536,8 @@ describe('createSingleExecutor', () => {
       });
       const { executor, produceRecords } = executorWith();
 
-      await executor.run(
+      await runWithRecords(
+        executor,
         operationOn(client, 'update', { where: { id: 'u1' }, data: { posts: { deleteMany: { title: 'A' } } } }),
         scopeOn(client),
         produceRecords,
@@ -555,7 +567,7 @@ describe('createSingleExecutor', () => {
       const { executor, produceRecords } = executorWith();
       const operation = operationOn(client, 'create', { data: { name: 'Ann' } });
 
-      const outcome = await executor.run(operation, scopeOn(client), produceRecords);
+      const outcome = await runWithRecords(executor, operation, scopeOn(client), produceRecords);
 
       expect(operation.execute).toHaveBeenCalledWith(operation.args);
       expect(create).toHaveBeenCalledWith(operation.args);
@@ -573,7 +585,8 @@ describe('createSingleExecutor', () => {
       });
       const { executor, produceRecords } = executorWith();
 
-      const run = executor.run(
+      const run = runWithRecords(
+        executor,
         operationOn(client, 'create', { data: { name: 'Ann' } }),
         scopeOn(client),
         produceRecords,
