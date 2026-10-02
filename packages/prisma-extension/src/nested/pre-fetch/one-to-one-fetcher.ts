@@ -84,8 +84,8 @@ export interface PreFetchOneToOneRelationInput extends Omit<ResolveParentRowsInp
   /** The columns to read of each related row; the whole row when absent */
   select?: Record<string, true>;
   /**
-   * The unique WHERE of the row a `connect` links to a parent row ahead of the write read under
-   * it, keyed by that parent row; read instead of the row linked to it before the write
+   * The unique WHERE of the row a `connect` or `connectOrCreate` links to a parent row ahead of the
+   * write read under it, keyed by that parent row; read instead of the row linked to it before the write
    */
   connectedRowWheres?: ReadonlyMap<ParentRowIdentity, PreFetchRecord>;
 }
@@ -106,7 +106,8 @@ const linkWhereOf = (link: ToOneRelationLink, parentRow: PreFetchRecord): PreFet
  * most one row matches. A parent row with a null key field (an unset optional foreign key) is
  * skipped, and so is a parent row known only by the primary key its operation's WHERE names when
  * the link fields are other fields of it (a foreign key on the parent row). Under a parent row a
- * `connect` links a row to ahead of the write, the row it names is read by its unique WHERE.
+ * `connect` or `connectOrCreate` links a row to ahead of the write, the row it names is read by its
+ * unique WHERE.
  *
  * @returns One result per queried parent row, by that row's identity; `beforeRecord` is null when
  *   no related row exists

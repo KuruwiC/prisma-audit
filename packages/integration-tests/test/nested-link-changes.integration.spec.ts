@@ -65,7 +65,7 @@ describe('foreign-key changes of related rows', () => {
       Prisma,
       provider,
       aggregateMapping: options.aggregateMapping ?? testAggregateMapping,
-      diffing: { excludeFields: ['createdAt'] },
+      diffing: { excludeFields: ['createdAt', 'updatedAt'] },
       security: { redact: { fields: [] } },
       fetchBefore: {
         update: true,
@@ -470,6 +470,52 @@ describe('foreign-key changes of related rows', () => {
       const users = await recordsOf('User');
       expect(users.map(({ id, action }) => [id, action])).toEqual([['u2', 'update']]);
       expect(users[0]?.changes).toMatchObject({ name: { old: 'Ben', new: 'Ben renamed' } });
+    });
+
+    it('audits the row a connectOrCreate names and an update writes as the update of that row', async () => {
+      const { prisma, run, recordsOf } = await setup();
+
+      await run(() =>
+        prisma.post.update({
+          where: { id: 'p-live' },
+          data: {
+            author: {
+              connectOrCreate: { where: { id: 'u2' }, create: { id: 'u2', email: 'ben@example.com' } },
+              update: { name: 'Ben renamed' },
+            },
+          },
+        }),
+      );
+
+      const posts = await recordsOf('Post');
+      expect(posts.map(({ id, action }) => [id, action])).toEqual([['p-live', 'update']]);
+      expect(posts[0]?.changes).toEqual({ authorId: { old: 'u1', new: 'u2' } });
+      const users = await recordsOf('User');
+      expect(users.map(({ id, action }) => [id, action])).toEqual([['u2', 'update']]);
+      expect(users[0]?.changes).toEqual({ name: { old: 'Ben', new: 'Ben renamed' } });
+    });
+
+    it('audits the row a connectOrCreate creates and an update writes as created, without the previously linked row', async () => {
+      const { prisma, run, recordsOf } = await setup();
+
+      await run(() =>
+        prisma.post.update({
+          where: { id: 'p-live' },
+          data: {
+            author: {
+              connectOrCreate: {
+                where: { id: 'u-new' },
+                create: { id: 'u-new', email: 'new@example.com', name: 'New' },
+              },
+              update: { name: 'New renamed' },
+            },
+          },
+        }),
+      );
+
+      const users = await recordsOf('User');
+      expect(users.map(({ id, action }) => [id, action])).toEqual([['u-new', 'create']]);
+      expect(users[0]?.after).toMatchObject({ id: 'u-new', name: 'New renamed' });
     });
 
     it('audits nothing for a connect through an implicit many-to-many relation', async () => {

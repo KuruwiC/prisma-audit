@@ -544,15 +544,16 @@ const sameParent = (a: NestedOperationInfo, b: NestedOperationInfo): boolean =>
   a.parent?.operation === b.parent?.operation && a.parent?.element === b.parent?.element;
 
 /**
- * The unique WHERE of the row a to-one `connect` names, keyed by its parent row, for each parent
- * row an `update` or `upsert` next to it writes the linked row of: Prisma links the named row
- * first, so that row, not the one linked before the write, is the row the write's before state
- * is read from
+ * The unique WHERE of the row a to-one `connect` or `connectOrCreate` names, keyed by its parent
+ * row, for each parent row an `update` or `upsert` next to it writes the linked row of: Prisma
+ * links the named row first, so that row, not the one linked before the write, is the row the
+ * write's before state is read from. A `connectOrCreate` whose row does not exist creates it, and
+ * the read finds no row.
  */
 const connectedRowWheresAt = (context: NestedPreFetchContext, path: string): Map<ParentRowIdentity, PreFetchRecord> => {
   const atPath = context.nestedOperations.filter((op) => op.path === path && !op.isList);
   const wheres = new Map<ParentRowIdentity, PreFetchRecord>();
-  for (const connect of atPath.filter((op) => op.operation === 'connect')) {
+  for (const connect of atPath.filter((op) => op.operation === 'connect' || op.operation === 'connectOrCreate')) {
     const [where] = targetWhereClauses(connect.operation, connect.data);
     const linkedRowWritten = atPath.some((op) => writesLinkedRow(op) && sameParent(op, connect));
     const parent = parentRowIdentityOf(connect.parent, context.preFetchResults, context.schemaMetadata);
