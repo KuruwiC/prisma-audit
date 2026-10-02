@@ -39,16 +39,16 @@ import type {
   TransactionalPrismaClient,
 } from '../../internal-types.js';
 import type { SchemaMetadata, UniqueConstraint } from '../../schema/types.js';
-import { NO_BEFORE_STATE } from '../../utils/before-state.js';
-import { matchesUniqueWhere } from '../../utils/compound-where.js';
-import { nestedLog } from '../../utils/debug.js';
-import { extractEntityIdentity } from '../../utils/id-generation.js';
 import {
   relationNodeOf,
   relationSelectionOf,
   restrictsRows,
   writtenRelationsInclude,
-} from '../../utils/nested-write-selection.js';
+} from '../../utils/audited-selection.js';
+import { NO_BEFORE_STATE } from '../../utils/before-state.js';
+import { matchesUniqueWhere } from '../../utils/compound-where.js';
+import { nestedLog } from '../../utils/debug.js';
+import { extractEntityIdentity } from '../../utils/id-generation.js';
 import type { LinkReads } from '../pre-fetch/link-rows.js';
 import { getPreFetchListClient } from '../pre-fetch/model-client.js';
 import { parentRowIdentityOf } from '../pre-fetch/parent-rows.js';

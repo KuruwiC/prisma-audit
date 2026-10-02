@@ -22,8 +22,8 @@ import { createSingleExecutor } from './pipeline/single-executor.js';
 import { isProcessingAuditLog, withScope } from './runtime/scope.js';
 import { createTransactionProxy } from './runtime/transaction-proxy.js';
 import type { PrismaAuditExtensionOptions } from './types.js';
+import { injectAuditedSelection, projectToRequestedShape } from './utils/audited-selection.js';
 import { isAuditableAction } from './utils/extension-utils.js';
-import { injectNestedWriteSelection, projectToRequestedShape } from './utils/nested-write-selection.js';
 
 const createPipelineDependencies = (audit: AuditOptions): AuditPipelineDependencies => {
   const { Prisma, schemaMetadata, shouldFetchBefore } = audit;
@@ -82,7 +82,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
               return query(args);
             }
 
-            const injection = injectNestedWriteSelection(audit.schemaMetadata, model, args);
+            const injection = injectAuditedSelection(audit.schemaMetadata, model, args);
 
             // Mark the re-entrancy guard on the library-owned runtime store; the app context
             // stays untouched so downstream code keeps the caller's actor and request metadata.

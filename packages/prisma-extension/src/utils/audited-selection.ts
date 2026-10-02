@@ -1,5 +1,5 @@
 /**
- * Nested-Write Selection Injection
+ * The selection an audited operation runs with
  *
  * Nested writes are audited from the records the operation returns, so the relations an operation
  * writes are added to its selection: into `select` when the caller selects, else into `include`.
@@ -13,7 +13,7 @@
  * was added is recorded, so the value handed back to the caller can be projected to the shape the
  * caller requested while audit logs are built from the full result.
  *
- * @module utils/nested-write-selection
+ * @module utils/audited-selection
  */
 
 import {
@@ -65,7 +65,7 @@ export interface InjectedSelection {
 }
 
 /** Operation args with the written relations selected, and what that added to the caller's selection */
-export interface NestedWriteSelectionInjection {
+export interface AuditedSelectionInjection {
   readonly args: unknown;
   /** `undefined` when the caller's selection already covered every written relation */
   readonly injected: InjectedSelection | undefined;
@@ -262,11 +262,11 @@ const mergeWrittenRelations = (
  * @returns The args to execute (`args` itself when nothing had to be added) and what was added to the
  *   caller's selection, for {@link projectToRequestedShape}
  */
-export const injectNestedWriteSelection = (
+export const injectAuditedSelection = (
   schemaMetadata: SchemaMetadata,
   modelName: string,
   args: unknown,
-): NestedWriteSelectionInjection => {
+): AuditedSelectionInjection => {
   if (!isRecord(args)) {
     return { args, injected: undefined };
   }
@@ -297,7 +297,7 @@ export const injectNestedWriteSelection = (
 };
 
 /**
- * Remove what {@link injectNestedWriteSelection} added from an operation result, recursively, leaving
+ * Remove what {@link injectAuditedSelection} added from an operation result, recursively, leaving
  * everything the caller requested
  *
  * @param injected - What the injection added; `undefined` returns `value` itself
@@ -349,7 +349,7 @@ export const restrictsRows = (entry: unknown): boolean =>
 
 /**
  * The `include` that reads the relations the operation writes below the rows at `path`, as
- * {@link injectNestedWriteSelection} adds them; undefined when nothing below `path` is written.
+ * {@link injectAuditedSelection} adds them; undefined when nothing below `path` is written.
  */
 export const writtenRelationsInclude = (
   schemaMetadata: SchemaMetadata,

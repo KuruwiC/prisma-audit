@@ -1,9 +1,9 @@
 /**
- * Unit tests for the selection injected for nested writes and the projection back to the caller's shape
+ * Unit tests for the selection an audited operation runs with and the projection back to the caller's shape
  */
 
 import { describe, expect, it } from 'vitest';
-import { injectNestedWriteSelection, projectToRequestedShape } from '../../src/utils/nested-write-selection.js';
+import { injectAuditedSelection, projectToRequestedShape } from '../../src/utils/audited-selection.js';
 import { createSchemaMetadataFromDMMF } from '../../src/utils/schema-metadata.js';
 
 type Selection = Record<string, unknown>;
@@ -39,11 +39,11 @@ const commentCreatedInPostUpdate = {
   posts: { update: { where: { id: 'post-1' }, data: { comments: { create: { content: 'Comment' } } } } },
 };
 
-describe('injectNestedWriteSelection', () => {
+describe('injectAuditedSelection', () => {
   it('leaves args without nested writes untouched', () => {
     const args = { where: { id: 'user-1' }, data: { email: 'user@example.com' } };
 
-    expect(injectNestedWriteSelection(schemaMetadata, 'User', args)).toEqual({ args, injected: undefined });
+    expect(injectAuditedSelection(schemaMetadata, 'User', args)).toEqual({ args, injected: undefined });
   });
 
   it('leaves args untouched when no nested write is audited from the result', () => {
@@ -54,7 +54,7 @@ describe('injectNestedWriteSelection', () => {
       },
     };
 
-    const injection = injectNestedWriteSelection(schemaMetadata, 'User', args);
+    const injection = injectAuditedSelection(schemaMetadata, 'User', args);
 
     expect(injection.args).toBe(args);
     expect(injection.injected).toBeUndefined();
@@ -66,7 +66,7 @@ describe('injectNestedWriteSelection', () => {
       data: { ...commentCreatedInPostUpdate, profile: { create: { bio: 'B' } } },
     };
 
-    const { args: injectedArgs } = injectNestedWriteSelection(schemaMetadata, 'User', args);
+    const { args: injectedArgs } = injectAuditedSelection(schemaMetadata, 'User', args);
 
     expect(injectedArgs).toEqual({
       ...args,
@@ -77,7 +77,7 @@ describe('injectNestedWriteSelection', () => {
   describe('bounding a to-many relation to the rows its updates name', () => {
     const postsOf = (data: Record<string, unknown>) =>
       (
-        injectNestedWriteSelection(schemaMetadata, 'User', { where: { id: 'user-1' }, data }).args as {
+        injectAuditedSelection(schemaMetadata, 'User', { where: { id: 'user-1' }, data }).args as {
           include: Selection;
         }
       ).include.posts;
@@ -126,7 +126,7 @@ describe('injectNestedWriteSelection', () => {
     });
 
     it('never bounds a to-one relation', () => {
-      const injection = injectNestedWriteSelection(schemaMetadata, 'User', {
+      const injection = injectAuditedSelection(schemaMetadata, 'User', {
         where: { id: 'user-1' },
         data: { profile: { update: { where: { id: 'profile-1' }, data: { bio: 'B' } } } },
       });
@@ -135,7 +135,7 @@ describe('injectNestedWriteSelection', () => {
     });
 
     it('leaves a relation the caller requested unbounded', () => {
-      const injection = injectNestedWriteSelection(schemaMetadata, 'User', {
+      const injection = injectAuditedSelection(schemaMetadata, 'User', {
         where: { id: 'user-1' },
         data: commentCreatedInPostUpdate,
         include: { posts: true },
@@ -152,7 +152,7 @@ describe('injectNestedWriteSelection', () => {
       update: { profile: { update: { bio: 'Updated' } } },
     };
 
-    const { args: injectedArgs } = injectNestedWriteSelection(schemaMetadata, 'User', args);
+    const { args: injectedArgs } = injectAuditedSelection(schemaMetadata, 'User', args);
 
     expect(injectedArgs).toEqual({ ...args, include: { posts: true, profile: true } });
   });
@@ -164,7 +164,7 @@ describe('injectNestedWriteSelection', () => {
       include: { posts: { orderBy: { title: 'asc' } }, profile: true },
     };
 
-    const { args: injectedArgs } = injectNestedWriteSelection(schemaMetadata, 'User', args);
+    const { args: injectedArgs } = injectAuditedSelection(schemaMetadata, 'User', args);
 
     expect(injectedArgs).toEqual({
       ...args,
@@ -175,7 +175,7 @@ describe('injectNestedWriteSelection', () => {
   it('expands a caller relation given as true with the relations written below it', () => {
     const args = { where: { id: 'user-1' }, data: commentCreatedInPostUpdate, include: { posts: true } };
 
-    const { args: injectedArgs } = injectNestedWriteSelection(schemaMetadata, 'User', args);
+    const { args: injectedArgs } = injectAuditedSelection(schemaMetadata, 'User', args);
 
     expect(injectedArgs).toEqual({ ...args, include: { posts: { include: { comments: true } } } });
   });
@@ -183,7 +183,7 @@ describe('injectNestedWriteSelection', () => {
   it('puts the written relations into the caller select', () => {
     const args = { where: { id: 'user-1' }, data: commentCreatedInPostUpdate, select: { id: true } };
 
-    const { args: injectedArgs } = injectNestedWriteSelection(schemaMetadata, 'User', args);
+    const { args: injectedArgs } = injectAuditedSelection(schemaMetadata, 'User', args);
 
     expect(injectedArgs).toEqual({
       ...args,
@@ -195,7 +195,7 @@ describe('injectNestedWriteSelection', () => {
   it('adds the primary key to a caller select that omits it', () => {
     const args = { where: { id: 'user-1' }, data: commentCreatedInPostUpdate, select: { email: true } };
 
-    const { args: injectedArgs, injected } = injectNestedWriteSelection(schemaMetadata, 'User', args);
+    const { args: injectedArgs, injected } = injectAuditedSelection(schemaMetadata, 'User', args);
 
     expect(injectedArgs).toEqual({
       ...args,
@@ -211,7 +211,7 @@ describe('injectNestedWriteSelection', () => {
       include: { posts: { select: { title: true } } },
     };
 
-    const { args: injectedArgs } = injectNestedWriteSelection(schemaMetadata, 'User', args);
+    const { args: injectedArgs } = injectAuditedSelection(schemaMetadata, 'User', args);
 
     expect(injectedArgs).toEqual({
       ...args,
@@ -222,7 +222,7 @@ describe('injectNestedWriteSelection', () => {
 
 describe('projectToRequestedShape', () => {
   const project = (args: Record<string, unknown>, result: unknown) =>
-    projectToRequestedShape(result, injectNestedWriteSelection(schemaMetadata, 'User', args).injected);
+    projectToRequestedShape(result, injectAuditedSelection(schemaMetadata, 'User', args).injected);
 
   it('returns the value itself when nothing was injected', () => {
     const result = { id: 'user-1', posts: [] };
