@@ -882,7 +882,7 @@ createAuditClient(prisma, {
 
 #### Internal Architecture
 
-Before the operation runs, core's `policy` decides from `awaitWrite` / `awaitWriteIf` whether the model's audit rows are written atomically with it: `awaitWriteIf(modelName, tags)` when it is set, otherwise `awaitWrite`. An atomic write outside any transaction runs the operation inside an implicit transaction. Once the records are built, core's `dispatch` wraps them in a `WritePlan`, and `src/pipeline/write-audit-logs.ts` executes it:
+Before the operation runs, core's `policy` decides from `awaitWrite` / `awaitWriteIf` whether the model's audit rows are written atomically with it: `awaitWriteIf(modelName, tags)` when it is set, otherwise `awaitWrite`. An atomic write outside any transaction runs the operation inside an implicit transaction. Once the records are built, core's `dispatch` writes them by a `WritePlan`, with the operation's execution scope as its transaction runtime (`transactionRuntimeOf` in `src/pipeline/execution-scope.ts`):
 
 | `WritePlan` kind | Selected when                                                  | Strategy        | Write                                                                                                        |
 | ---------------- | -------------------------------------------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------ |
@@ -891,9 +891,9 @@ Before the operation runs, core's `policy` decides from `awaitWrite` / `awaitWri
 | `detached`       | not atomic, outside any transaction                            | Fire-and-Forget | Started on the client passed to `createAuditClient`; the operation returns without waiting                    |
 
 **Source Files:**
-- `policy/index.ts`, `dispatch/index.ts`, `domain/mutation-event.ts` (`WritePlan`) in `@kuruwic/db-audit-core`
+- `policy/index.ts`, `dispatch/index.ts`, `domain/mutation-event.ts` (`WritePlan`), `domain/write.ts` (`TransactionRuntime`) in `@kuruwic/db-audit-core`
 - [pipeline/run-audited-operation.ts](./src/pipeline/run-audited-operation.ts) - Calls `policy` and `dispatch` around the operation
-- [pipeline/write-audit-logs.ts](./src/pipeline/write-audit-logs.ts) - Executes the write plan
+- [pipeline/execution-scope.ts](./src/pipeline/execution-scope.ts) - The transaction runtime `dispatch` writes with: the base client, the transaction's client and its after-commit queue
 - [runtime/pending-writes.ts](./src/runtime/pending-writes.ts) - Tracks the writes no caller awaits
 
 #### `sampling`
@@ -1350,7 +1350,7 @@ export { auditProvider };
 
 This section is for readers of the source. None of the modules below is public API; only the exports of `src/index.ts` are.
 
-Every audited write, single or batch, goes through `runAuditedOperation` (`src/pipeline/run-audited-operation.ts`). The extension collects what the operation wrote as mutation events; `@kuruwic/db-audit-core` resolves them, composes the audit records and chooses the write plan; the extension executes that plan with Prisma.
+Every audited write, single or batch, goes through `runAuditedOperation` (`src/pipeline/run-audited-operation.ts`). The extension collects what the operation wrote as mutation events; `@kuruwic/db-audit-core` resolves them, composes the audit records and writes them by a write plan, through the Prisma write executor and the transaction runtime the extension supplies.
 
 ```
 $allOperations (src/extension.ts)
@@ -1361,20 +1361,18 @@ $allOperations (src/extension.ts)
        ├─ execute       the caller's own mutation
        ├─ collect       one mutation event per written row
        ├─ records       core resolve, then compose
-       ├─ dispatch      core: immediate / after-commit / detached write plan
-       └─ write         execute the write plan
+       └─ dispatch      core: write immediately, after commit or detached
 ```
 
 - `src/extension.ts`: the `$allOperations` hook. Decides whether an operation is audited (its model, its kind, then the core write policy, which also samples), adds the relations its nested writes touch to the operation's selection, runs it through the pipeline, and returns the result in the shape the caller requested.
 - `src/audit-options.ts`: validates the extension options once and normalizes them into the write policy, the resolve and compose configs, the schema metadata, the audit-log model accessor, the hooks and the failure-handling settings.
 - `src/pipeline/run-audited-operation.ts`: the pipeline above. A failure of the caller's own mutation propagates untouched; any other failure that escapes the executor is reported as `diff-generation` and rethrown.
-- `src/pipeline/execution-scope.ts`: the client the operation and every audit read and write share (the transaction's client inside a transaction, else the base client) and the transaction it belongs to.
+- `src/pipeline/execution-scope.ts`: the client the operation and every audit read and write share (the transaction's client inside a transaction, else the base client) and the transaction it belongs to; `transactionRuntimeOf` hands it to core's `dispatch` as the transaction runtime (see [Write Strategies](#write-strategies)).
 - `src/pipeline/single-executor.ts`, `src/pipeline/batch-executor.ts`: the prepare, execute and collect steps of a single operation (create, update, upsert, delete, with nested writes) and of a batch operation (createMany, updateMany, deleteMany and their returning variants), run in order by `src/pipeline/executor.ts`.
 - `src/grammar/`: the Prisma nested-write grammar. `nested-operations.ts` detects the nested operations in an operation's args, names the rows each one targets by unique WHERE or batch filter, and reads the rows a relation holds in an operation result; `pre-fetch-selection.ts` selects the operations whose before state is read ahead of the write; `nested-state.ts` defines what a pre-fetch learned of a row and resolves a nested row's action from that before state; `operations.ts` is the top-level operation vocabulary.
 - `src/nested/pre-fetch/`: the reads made ahead of an operation. The coordinator runs the to-one, to-many and batch fetchers parents first, each scoped to the parent rows its operation is nested under (`parent-rows.ts`), and stores each row's before state by path under the name the read used for it, its unique WHERE or its parent row (`pre-fetch-result-store.ts`); `pre-existing-rows.ts` snapshots the primary keys a to-many relation holds before a nested create; `link-rows.ts` reads the rows a nested `connect`, `set`, `disconnect`, `connectOrCreate` or to-one `create` may re-link, on a relation whose foreign key `relation-link.ts` places on the related model.
 - `src/nested/events/`: the mutation events of the nested rows an operation wrote. `write-set.ts` names the rows each nested operation targets; `collect-nested-events.ts` walks the result one level at a time, attributes the rows each relation holds to the operations nested under their parent row's operation, and yields one event per row, with `rows-not-in-result.ts` reading the written rows the result does not hold, `link-changes.ts` recording a re-linked row's foreign-key change as an update of that row, `delete-handler.ts` for deletes and `event-fields.ts` for the identity and action shared with the top-level collectors.
 - `src/pipeline/produce-records.ts`: core `resolve` then `compose`. Id resolvers and enrichers receive the scope's client when each one runs, so inside a transaction they read its writes.
-- `src/pipeline/write-audit-logs.ts`: executes the write plan (see [Write Strategies](#write-strategies)) and reports a failed write with its plan to the failure sink.
 - `src/runtime/scope.ts`: the library-owned async-local state of an audited flow: the active transaction with its client and the writes queued until it commits, the re-entrancy guard that keeps the audit's own queries from being audited, and whether the library opened the transaction. It is kept apart from the app-owned audit context.
 - `src/runtime/pending-writes.ts`: the writes no caller awaits; `flushAllPendingWrites` waits for them.
 - `src/runtime/transaction-proxy.ts`: wraps interactive `$transaction` so the operations in its callback share the transaction's client and the queued writes run after it commits.

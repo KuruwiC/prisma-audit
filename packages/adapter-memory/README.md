@@ -3,8 +3,8 @@
 A private, in-memory audit adapter built only on the public API of `@kuruwic/db-audit-core`. It
 keeps tables in maps keyed by model and serialized primary key, appends audit records to an
 in-memory list, and runs every audited `create`, `update` and `delete` through `policy`,
-`resolve`, `compose` and `dispatch`, executing the resulting write plan with its own
-`WriteExecutor`.
+`resolve`, `compose` and `dispatch`, handing `dispatch` its own `WriteExecutor` and its store and
+transactions as the transaction runtime.
 
 Transactions are copy-on-write overlays of the store. An operation whose policy is atomic runs in
 the active transaction or opens an implicit one, and its audit rows are written into that

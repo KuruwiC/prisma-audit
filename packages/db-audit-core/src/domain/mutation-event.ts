@@ -3,8 +3,7 @@
  *
  * An adapter collects one {@link MutationEvent} per written row; resolution adds the entity id,
  * aggregate roots and contexts to make a {@link ResolvedEvent}; `compose` turns resolved events
- * into {@link AuditRecord}s; `dispatch` wraps the records in a {@link WritePlan} that the adapter
- * executes.
+ * into {@link AuditRecord}s; `dispatch` writes the records by a {@link WritePlan}.
  */
 
 import type { ResolvedId } from '../aggregate/types.js';
@@ -99,11 +98,12 @@ export interface AuditRecord {
 }
 
 /**
- * How and when the adapter writes a set of records
+ * How and when `dispatch` writes a set of records
  *
- * - `immediate`: write now on the active handle; the caller awaits it
- * - `after-commit`: enqueue on the enclosing transaction scope; run on the base handle after commit
- * - `detached`: start now, never awaited by the caller
+ * - `immediate`: write immediately on the transaction's handle (the base handle outside any
+ *   transaction); the caller awaits it
+ * - `after-commit`: registered with the enclosing transaction; run on the base handle after commit
+ * - `detached`: started on the base handle, never awaited by the caller
  */
 export type WritePlan =
   | { readonly kind: 'immediate'; readonly records: readonly AuditRecord[] }

@@ -2,8 +2,8 @@
  * Write boundary
  *
  * What an adapter supplies to persist audit records: the executor that writes them with the
- * database's own API, and the writer hook a user may configure to run in place of the default
- * write.
+ * database's own API, and the transaction runtime that says where and when a write can run; and
+ * the writer hook a user may configure to run in place of the default write.
  */
 
 import type { AuditContext } from '../types.js';
@@ -29,6 +29,29 @@ export interface WriteExecutor<TDbHandle = unknown> {
 }
 
 /**
+ * What the adapter knows about where one operation's audit write can run, read once per
+ * `dispatch`
+ *
+ * @template TDbHandle - Database handle type the adapter writes on
+ */
+export interface TransactionRuntime<TDbHandle = unknown> {
+  /** A handle outside any transaction: writes after commit and detached writes run on it */
+  readonly baseHandle: TDbHandle;
+  /** The transaction the operation runs in; absent outside any transaction */
+  readonly transaction?: {
+    /** The transaction's handle: an immediate write runs on it and commits or rolls back with the operation */
+    readonly handle: TDbHandle;
+    /**
+     * Registers work to start once the transaction has committed (for a nested transaction, the
+     * outermost one). Work registered in a transaction that rolls back never starts.
+     */
+    readonly afterCommit: (work: () => Promise<void>) => void;
+  };
+  /** Starts work no caller awaits and keeps track of it until it settles, so the adapter can wait for it */
+  readonly detach: (work: () => Promise<void>) => void;
+}
+
+/**
  * What a writer hook receives besides the records: where the write runs and the default write
  *
  * @template TDbHandle - Database handle type the adapter passes
@@ -37,16 +60,17 @@ export interface WriteContext<TDbHandle = unknown> {
   /** Audit context of the operation the records belong to */
   readonly auditContext: AuditContext;
   /**
-   * Database handle the write runs on, as the adapter chose it for the write plan: the handle
-   * of the operation's transaction for an immediate write, a handle outside any transaction for
-   * a write after commit or a detached one
+   * Database handle the write runs on: the handle of the operation's transaction for an
+   * immediate write inside one, the {@link TransactionRuntime.baseHandle} otherwise
    */
   readonly handle: TDbHandle;
   /**
    * Whether `handle` belongs to the audited operation's transaction, so that what the writer
-   * writes through it commits and rolls back with the operation; false for a write after commit
-   * or a detached one. A writer that needs several statements to be atomic opens a transaction
-   * of its own exactly when this is false.
+   * writes through it commits and rolls back with the operation: true for an immediate write
+   * inside a transaction; false for a write after commit, a detached one, and an immediate one
+   * outside any transaction. `dispatch` derives it from the adapter's {@link TransactionRuntime}.
+   * A writer that needs several statements to be atomic opens a transaction of its own exactly
+   * when this is false.
    */
   readonly inTransaction: boolean;
   /** Writes records on `handle` with the adapter's {@link WriteExecutor} */

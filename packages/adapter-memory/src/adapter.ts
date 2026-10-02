@@ -6,7 +6,7 @@
  * rows join the operation's transaction, an implicit transaction opens when they do and none is
  * active, the mutation is applied on the scope's handle and collected as one mutation event, the
  * event is resolved with the id resolvers and enrichers reading through the scope's handle,
- * composed into audit records, dispatched into a write plan and written.
+ * composed into audit records and dispatched with the scope as the transaction runtime.
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -16,6 +16,7 @@ import type {
   AuditContextProvider,
   AuditErrorContext,
   ComposeConfig,
+  DispatchConfig,
   ErrorHandlingConfig,
   GlobalContextEnricherConfig,
   MutationAction,
@@ -24,7 +25,7 @@ import type {
   RedactConfig,
   ResolveConfig,
   SerializationConfig,
-  WritePlan,
+  TransactionRuntime,
 } from '@kuruwic/db-audit-core';
 import {
   compose,
@@ -162,38 +163,21 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
     return transaction(() => run(activeScope.getStore()));
   };
 
-  const executePlan = async (plan: WritePlan, scope: TransactionScope<TModelName> | undefined): Promise<void> => {
-    if (plan.records.length === 0) {
-      return;
-    }
-    /** Rejects only for an immediate plan under `'throw'`: the sink decides what a failure does */
-    const write = async (handle: MemoryHandle<TModelName>): Promise<void> => {
-      try {
-        await memoryWriteExecutor.write(handle, [...plan.records]);
-      } catch (error) {
-        await failureSink.reportWriteFailure(plan, error instanceof Error ? error : new Error(String(error)));
-      }
-    };
+  const dispatchConfig: DispatchConfig<MemoryHandle<TModelName>> = { writeExecutor: memoryWriteExecutor, failureSink };
 
-    switch (plan.kind) {
-      case 'immediate':
-        await write(scope?.handle ?? store);
-        return;
-      case 'after-commit':
-        if (scope === undefined) {
-          throw new Error('[audit-adapter-memory] An after-commit write plan needs a transaction to queue on');
-        }
-        scope.deferredWrites.push(() => write(store));
-        return;
-      case 'detached':
-        startDetached(() => write(store));
-        return;
-      default: {
-        const exhaustiveCheck: never = plan;
-        throw new Error(`[audit-adapter-memory] Unknown write plan kind: ${JSON.stringify(exhaustiveCheck)}`);
-      }
-    }
-  };
+  /** Writes after commit queue on the transaction; detached ones start on the store, tracked for `flush` */
+  const runtimeOf = (
+    scope: TransactionScope<TModelName> | undefined,
+  ): TransactionRuntime<MemoryHandle<TModelName>> => ({
+    baseHandle: store,
+    transaction: scope && {
+      handle: scope.handle,
+      afterCommit: (work) => {
+        scope.deferredWrites.push(work);
+      },
+    },
+    detach: startDetached,
+  });
 
   const runAudited = async (
     model: TModelName,
@@ -222,7 +206,7 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
       const { resolved, failures } = await resolve([event], auditContext, resolveConfig, currentHandle);
       await failureSink.reportResolverFailures(failures);
       const records = compose(resolved, { auditContext, config: composeConfig }, new Date());
-      await executePlan(dispatch(records, atomic, { inTransaction: scope !== undefined }), scope);
+      await dispatch(records, atomic, auditContext, dispatchConfig, runtimeOf(scope));
     });
   };
 

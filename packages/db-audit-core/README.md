@@ -21,8 +21,8 @@ policy(model, tags, config)                    -> { sampled, atomic } before the
   adapter runs the write, collects one MutationEvent per written row
 resolve(events, auditContext, config, read)    -> { resolved, failures }
 compose(resolvedEvents, ambient, now)          -> AuditRecord[]
-dispatch(records, atomic, { inTransaction })   -> WritePlan
-  adapter executes the WritePlan with its WriteExecutor
+dispatch(records, atomic, auditContext, config, runtime)
+                                               -> writes the records immediately, after commit, or detached
 ```
 
 - **`policy`** decides, once per audited operation, whether the operation is sampled in
@@ -55,15 +55,23 @@ dispatch(records, atomic, { inTransaction })   -> WritePlan
   and a null `before` and `changes`; every other record has `false`. How it is stored is the
   `WriteExecutor`'s or the `WriteFn`'s choice: the audit-log model is the user's, and no column is
   required for it.
-- **`dispatch`** wraps the records in a `WritePlan`: `immediate` when atomic, `after-commit` when not
-  atomic inside a transaction, `detached` otherwise.
+- **`dispatch`** writes the records by a `WritePlan` it chooses from `atomic` and the adapter's
+  `TransactionRuntime`: `immediate` when atomic (on the transaction's handle, or the base handle
+  outside any transaction, awaited), `after-commit` when not atomic inside a transaction (registered
+  with the transaction, run on the base handle once it commits), `detached` otherwise (handed to the
+  runtime's `detach`, run on the base handle). A failed write goes to the failure sink with its plan.
+- **`TransactionRuntime<TDbHandle>`** is what the adapter knows about where the operation's write
+  can run: `baseHandle` (a handle outside any transaction), `transaction` when the operation runs in
+  one (its `handle` and `afterCommit(work)`, which starts the work once the transaction has
+  committed and drops it when it rolls back), and `detach(work)`, which starts work no caller awaits
+  and tracks it so the adapter can wait for it.
 - **`WriteExecutor<TDbHandle>`** is the adapter's `write(handle, records)`, which persists records
   with the database's API to the audit log the adapter constructed it for. **`WriteFn`** is the user hook that runs in place of the default write:
   it receives the records and a `WriteContext` with the audit context, the database `handle` the
-  write runs on (the transaction's for an immediate plan, one outside any transaction for an
-  after-commit or detached plan), `inTransaction` (whether the write is part of the operation's
-  transaction: true for an immediate write inside it, false for an after-commit or detached write;
-  the adapter that owns the scope sets it) and `defaultWrite`, the executor's write on that handle.
+  write runs on (the transaction's for an immediate write inside one, the base handle otherwise),
+  `inTransaction` (whether the write is part of the operation's transaction: true for an immediate
+  write inside it, false otherwise; `dispatch` derives it from the runtime) and `defaultWrite`, the
+  executor's write on that handle.
 
 ## Configuration API
 
@@ -119,11 +127,13 @@ write the adapter runs, in order:
 4. **`compose(resolved, { auditContext, config: composeConfig }, now)`** into `AuditRecord`s.
    `composeConfig` carries the entity lookup, `excludeFields`, `redact`, `serialization` and
    `relationFieldNames(model)`, the fields of a row that hold related records rather than columns.
-5. **`dispatch(records, atomic, { inTransaction })`** into a `WritePlan`, which the adapter
-   executes: `immediate` on the scope's handle before the write returns, `after-commit` queued on
-   the owning transaction and started once it commits (dropped when it rolls back), `detached`
-   started at once on a handle outside any transaction and tracked so the adapter can wait for it.
-   A user `WriteFn` runs in place of the executor's write and receives the same handle.
+5. **`dispatch(records, atomic, auditContext, dispatchConfig, runtime)`**, which writes the
+   records: `immediate` on the transaction's handle before it resolves, `after-commit` registered
+   with `runtime.transaction.afterCommit` and run on `runtime.baseHandle` once the transaction
+   commits, `detached` handed to `runtime.detach` and run on `runtime.baseHandle`.
+   `dispatchConfig` is the adapter's `writeExecutor`, the user's optional `writer` (a `WriteFn` run
+   in place of the executor's write, on the same handle) and the `failureSink`. It rejects only when
+   an immediate write failed and the write-failure policy rethrows.
 
 What the adapter must provide:
 
@@ -138,9 +148,10 @@ What the adapter must provide:
 - **A `WriteExecutor`** whose `write(handle, records)` persists records with the database's API on
   the handle it is given. The audit-log target (a model name, a table object) is fixed when the
   adapter constructs the executor; the handle is its type parameter.
-- **Transaction scope ownership.** Tracking the transaction each async flow is inside, opening the
-  implicit transaction, and holding the `after-commit` queue until commit. The core only learns
-  `inTransaction`.
+- **A `TransactionRuntime` per dispatch.** Tracking the transaction each async flow is inside,
+  opening the implicit transaction, holding the after-commit queue until commit (and dropping it on
+  rollback), and tracking detached work are the adapter's; `dispatch` sees only the runtime's
+  `baseHandle`, `transaction` and `detach`.
 - **Failure routing.** The adapter builds one `FailureSink` with
   `createFailureSink(errorHandlingConfig)` and reports every failure through it. The sink owns
   the user-facing contract: the observer hears every failure and never affects the operation (an
@@ -153,10 +164,10 @@ What the adapter must provide:
   - `reportResolverFailures(failures)` with the `ResolverFailure`s `resolve` returned instead of
     throwing (an id resolver threw or returned no usable id), one `id-resolver-call` notification
     each.
-  - `reportWriteFailure(plan, error)` when executing a `WritePlan` failed: a `log-write`
-    notification, then the policy. `'throw'` rejects with the error only for an `immediate`
-    plan, whose caller is still waiting; for `after-commit` and `detached` plans it logs, and the
-    call never rejects.
+  - `reportWriteFailure(plan, error)`, which `dispatch` calls when a write it executes failed (the
+    adapter does not): a `log-write` notification, then the policy. `'throw'` rejects with the
+    error only for an `immediate` plan, whose caller is still waiting; for `after-commit` and
+    `detached` plans it logs, and the call never rejects.
 
 `@kuruwic/audit-adapter-memory` (`packages/adapter-memory`) is the smallest complete adapter. Its
 `runAudited` in `src/adapter.ts` is the whole sequence:
@@ -182,14 +193,15 @@ await inScope(atomic, async (scope) => {
   const { resolved, failures } = await resolve([event], auditContext, resolveConfig, currentHandle);
   await failureSink.reportResolverFailures(failures);
   const records = compose(resolved, { auditContext, config: composeConfig }, new Date());
-  await executePlan(dispatch(records, atomic, { inTransaction: scope !== undefined }), scope);
+  await dispatch(records, atomic, auditContext, dispatchConfig, runtimeOf(scope));
 });
 ```
 
 `inScope` opens the implicit transaction, `currentHandle` reads the active transaction from an
 `AsyncLocalStorage` of its own, `transaction` starts the queued after-commit writes once its
 callback has resolved, and `src/write-executor.ts` appends records to the handle's audit-log rows.
-`executePlan` reports a failed write with `failureSink.reportWriteFailure(plan, error)`. The
+`runtimeOf(scope)` is the runtime: the store as `baseHandle`, the scope's handle and queue as
+`transaction`, and `detach` adding the write to the set `flush()` waits for. The
 adapter builds its sink with an observer of its own that appends each context to
 `writeFailures` or `resolverFailures` and then forwards it to the user's observer, and with
 `'throw'` as its default policy, so a failed write the operation awaits rejects it.
@@ -224,19 +236,21 @@ shows how such an adapter would plug into the boundary.
   after-commit queue, and starts the queued writes once the callback has resolved, discarding them
   when it throws. The implicit transaction is a `db.transaction` around the audited statement. A
   nested `tx.transaction(...)` is a savepoint: its queue joins the parent's when it succeeds and
-  is dropped when it rolls back, all inside the adapter.
+  is dropped when it rolls back, all inside the adapter. The `TransactionRuntime` it passes to
+  `dispatch` is the root `db` as `baseHandle`, the active `tx` and a push onto its queue as
+  `transaction`, and a `detach` that tracks the write in a set the adapter can wait on.
 - **`WriteExecutor`.** A `WriteExecutor` over the Drizzle database or transaction type, constructed
   with the audit-log `Table`: `write(handle, records)` runs `handle.insert(auditLogTable).values(rows)`.
 - **Sampling and failures.** A per-table sampling rate is `samplingIf(model, tags)` in the policy
   configuration. A failed before-read goes to the failure sink's `notify` as `pre-fetch` and a
-  failed record build as `diff-generation`; the executed `WritePlan` of a failed write goes to
-  `reportWriteFailure`, which also covers a detached write no caller awaits.
+  failed record build as `diff-generation`; a failed audit write is reported by `dispatch`, a
+  detached one no caller awaits included.
 - **Relation fields.** Rows returned by `insert`, `update` and `delete` hold columns only, so
   `relationFieldNames` returns an empty set.
 
 Nothing in `policy`, `resolve`, `compose` or `dispatch` needs to change for it: the call-time
 `read` thunk returns the callback-scoped Drizzle `tx` the same way it returns a Prisma transaction
-client.
+client, and the `TransactionRuntime` carries it to `dispatch` the same way.
 
 See the [main README](../../README.md) for the Prisma adapter's documentation.
 

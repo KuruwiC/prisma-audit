@@ -2,9 +2,9 @@
  * Failure contract
  *
  * Every failure notifies the observer, which never affects the caller's operation; only a failed
- * write of the records also consults the write-failure policy. An adapter detects the failures
- * and decides what each observer-only phase does to the operation; the {@link FailureSink}
- * applies the rest.
+ * write of the records also consults the write-failure policy. An adapter detects the failures of
+ * its own phases and decides what each observer-only phase does to the operation, `dispatch`
+ * reports the failed writes, and the {@link FailureSink} applies the rest.
  */
 
 import type { WritePlan } from '../domain/mutation-event.js';
@@ -106,6 +106,7 @@ export interface FailureSink {
    * Reports a failed write of `plan`: notifies the observer under `log-write`, then applies the
    * write-failure policy. Rejects with `error` only for an `immediate` plan under `'throw'`; the
    * caller of an `after-commit` or `detached` plan has returned, so there `'throw'` logs.
+   * `dispatch` calls it for every write it executes; an adapter does not.
    */
   readonly reportWriteFailure: (plan: WritePlan, error: Error) => Promise<void>;
 }

@@ -3,22 +3,21 @@
  *
  * The one path every audited write takes, single or batch: given the write policy's decision
  * whether the audit rows join the operation's transaction, the execution scope opens that
- * transaction when needed, the executor's records are dispatched into a write plan and written,
- * and the caller receives the result.
+ * transaction when needed, the executor's records are dispatched with the scope as the
+ * transaction runtime, and the caller receives the result.
  */
 
-import type { AuditContext, AuditContextProvider, FailureSink } from '@kuruwic/db-audit-core';
+import type { AuditContext, AuditContextProvider, DispatchConfig, FailureSink } from '@kuruwic/db-audit-core';
 import { dispatch } from '@kuruwic/db-audit-core';
 import type { AuditAction } from '../grammar/operations.js';
-import type { PrismaClientWithDynamicAccess } from '../internal-types.js';
+import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../internal-types.js';
 import { isCallerMutationError, runCallerMutation } from '../utils/caller-mutation-error.js';
 import { getModelDelegate, getModelOperation } from '../utils/model-accessor.js';
 import { isBatchOperation } from '../utils/operation-classifier.js';
 import { toError } from '../utils/to-error.js';
-import { type ExecutionScope, withExecutionScope } from './execution-scope.js';
+import { type ExecutionScope, transactionRuntimeOf, withExecutionScope } from './execution-scope.js';
 import type { AuditedOperation, OperationExecutor, OperationOutcome } from './executor.js';
 import type { RecordProducer } from './produce-records.js';
-import type { WriteAuditLogs } from './write-audit-logs.js';
 
 export interface InterceptedOperation {
   readonly model: string;
@@ -44,7 +43,7 @@ export interface AuditPipelineDependencies {
   readonly singleExecutor: OperationExecutor;
   readonly batchExecutor: OperationExecutor;
   readonly produceRecords: RecordProducer;
-  readonly writeAuditLogs: WriteAuditLogs;
+  readonly dispatchConfig: DispatchConfig<TransactionalPrismaClient>;
   readonly failureSink: FailureSink;
 }
 
@@ -116,8 +115,7 @@ const runInScope = async (
   const operation: AuditedOperation = { model, action, args, execute: operationContinuation(intercepted, scope) };
   const executor = isBatchOperation(action) ? deps.batchExecutor : deps.singleExecutor;
   const outcome = await runExecutor(executor, operation, scope, deps);
-  const plan = dispatch(outcome.records, scope.atomic, { inTransaction: scope.transaction !== undefined });
-  await deps.writeAuditLogs(plan, scope);
+  await dispatch(outcome.records, scope.atomic, scope.auditContext, deps.dispatchConfig, transactionRuntimeOf(scope));
   return outcome.result;
 };
 

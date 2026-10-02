@@ -1,16 +1,17 @@
 /**
  * Tests for the audited-operation pipeline: the write policy decides the scope, the executor
- * runs inside it through the continuation the scope calls for, its records are dispatched into
- * a write plan and written, and each kind of failure reaches the caller and the failure sink
- * the way its origin requires.
+ * runs inside it through the continuation the scope calls for, its records are dispatched with
+ * the scope as the transaction runtime, and each kind of failure reaches the caller and the
+ * failure sink the way its origin requires.
  */
 
-import type { AuditContext, FailureSink, MutationEvent, WritePlan } from '@kuruwic/db-audit-core';
+import type { AuditContext, FailureSink, MutationEvent } from '@kuruwic/db-audit-core';
 import {
   createActorId,
   createAggregateId,
   createAsyncLocalStorageProvider,
   createEntityId,
+  createFailureSink,
 } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../src/internal-types.js';
@@ -26,6 +27,7 @@ import {
   type InterceptedOperation,
   runAuditedOperation,
 } from '../../src/pipeline/run-audited-operation.js';
+import { flushAllPendingWrites, getPendingWriteCount } from '../../src/runtime/pending-writes.js';
 import { withScope } from '../../src/runtime/scope.js';
 import type { AuditLogData } from '../../src/types.js';
 import { isCallerMutationError, runCallerMutation } from '../../src/utils/caller-mutation-error.js';
@@ -109,7 +111,7 @@ const createDeps = (overrides: Partial<AuditPipelineDependencies> = {}) => {
     singleExecutor: succeedingExecutor(),
     batchExecutor: succeedingExecutor(),
     produceRecords: vi.fn(async () => [record]),
-    writeAuditLogs: vi.fn(async () => {}),
+    dispatchConfig: { writeExecutor: { write: vi.fn(async () => {}) }, failureSink },
     failureSink,
     ...overrides,
   };
@@ -122,11 +124,7 @@ const scopeSeenBy = (executor: OperationExecutor): ExecutionScope => {
   return call[1];
 };
 
-const planWrittenBy = (deps: AuditPipelineDependencies): WritePlan => {
-  const call = vi.mocked(deps.writeAuditLogs).mock.calls[0];
-  if (!call) throw new Error('nothing was written');
-  return call[0];
-};
+const auditWriteOf = (deps: AuditPipelineDependencies) => vi.mocked(deps.dispatchConfig.writeExecutor.write);
 
 describe('runAuditedOperation', () => {
   describe('policy and scope', () => {
@@ -142,22 +140,35 @@ describe('runAuditedOperation', () => {
       expect(scope.baseClient).toBe(baseClient);
       expect(scope.transaction?.implicit).toBe(true);
       expect(scope.atomic).toBe(true);
-      expect(planWrittenBy(deps)).toEqual({ kind: 'immediate', records: [record] });
-      expect(deps.writeAuditLogs).toHaveBeenCalledWith(expect.anything(), scope);
+      expect(auditWriteOf(deps)).toHaveBeenCalledWith(transactionClient, [record]);
     });
 
     it('runs on the base client without a transaction when the policy is not atomic, and detaches the write', async () => {
       const baseClient = createBaseClient();
+      let finishWrite: () => void = () => {};
+      const write = vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            finishWrite = resolve;
+          }),
+      );
       const deps = createDeps();
+      const dispatchConfig = { ...deps.dispatchConfig, writeExecutor: { write } };
 
-      await runAuditedOperation({ operation: interceptedOf(), auditContext, baseClient, atomic: false }, deps);
+      await runAuditedOperation(
+        { operation: interceptedOf(), auditContext, baseClient, atomic: false },
+        { ...deps, dispatchConfig },
+      );
 
       expect(baseClient.transactionsOpened.count).toBe(0);
       const scope = scopeSeenBy(deps.singleExecutor);
       expect(scope.handle).toBe(baseClient);
       expect(scope.transaction).toBeUndefined();
       expect(scope.atomic).toBe(false);
-      expect(planWrittenBy(deps).kind).toBe('detached');
+      expect(getPendingWriteCount()).toBe(1);
+      finishWrite();
+      await flushAllPendingWrites();
+      expect(write).toHaveBeenCalledWith(baseClient, [record]);
     });
 
     it('runs on the active transaction client and writes after commit when the policy is not atomic inside a transaction', async () => {
@@ -173,7 +184,30 @@ describe('runAuditedOperation', () => {
       const scope = scopeSeenBy(deps.singleExecutor);
       expect(scope.handle).toBe(transactionClient);
       expect(scope.transaction).toEqual({ deferredWrites, implicit: false });
-      expect(planWrittenBy(deps).kind).toBe('after-commit');
+      expect(deferredWrites).toHaveLength(1);
+      expect(auditWriteOf(deps)).not.toHaveBeenCalled();
+      await deferredWrites[0]?.();
+      expect(auditWriteOf(deps)).toHaveBeenCalledWith(baseClient, [record]);
+    });
+
+    it('queues the writes after commit of several operations in one transaction in order', async () => {
+      const second: AuditLogData = { ...record, entityId: createEntityId('u2') };
+      const outcomes = [outcome, { ...outcome, records: [second] }];
+      const deps = createDeps({ singleExecutor: stubExecutor(async () => outcomes.shift() ?? outcome) });
+      const baseClient = createBaseClient();
+      const deferredWrites: Array<() => Promise<void>> = [];
+
+      await withScope({ transaction: { client: transactionClient, deferredWrites } }, async () => {
+        await runAuditedOperation({ operation: interceptedOf(), auditContext, baseClient, atomic: false }, deps);
+        await runAuditedOperation({ operation: interceptedOf(), auditContext, baseClient, atomic: false }, deps);
+      });
+
+      expect(deferredWrites).toHaveLength(2);
+      expect(auditWriteOf(deps)).not.toHaveBeenCalled();
+      for (const deferredWrite of deferredWrites) {
+        await deferredWrite();
+      }
+      expect(auditWriteOf(deps).mock.calls.map(([, written]) => written)).toEqual([[record], [second]]);
     });
   });
 
@@ -288,7 +322,7 @@ describe('runAuditedOperation', () => {
 
       expect(isCallerMutationError(callerError)).toBe(true);
       expect(deps.failureSink.notify).not.toHaveBeenCalled();
-      expect(deps.writeAuditLogs).not.toHaveBeenCalled();
+      expect(auditWriteOf(deps)).not.toHaveBeenCalled();
     });
   });
 
@@ -349,7 +383,7 @@ describe('runAuditedOperation', () => {
       ).rejects.toBe(callerError);
 
       expect(deps.failureSink.notify).not.toHaveBeenCalled();
-      expect(deps.writeAuditLogs).not.toHaveBeenCalled();
+      expect(auditWriteOf(deps)).not.toHaveBeenCalled();
     });
 
     it.each([
@@ -377,16 +411,21 @@ describe('runAuditedOperation', () => {
           params: operation.args,
           error: auditError,
         });
-        expect(deps.writeAuditLogs).not.toHaveBeenCalled();
+        expect(auditWriteOf(deps)).not.toHaveBeenCalled();
       },
     );
 
     it('lets a write failure propagate without reporting it as diff-generation', async () => {
       const writeError = new Error('DB write failed');
       const deps = createDeps({
-        writeAuditLogs: vi.fn(async () => {
-          throw writeError;
-        }),
+        dispatchConfig: {
+          writeExecutor: {
+            write: vi.fn(async () => {
+              throw writeError;
+            }),
+          },
+          failureSink: createFailureSink({ writeFailurePolicy: 'throw' }),
+        },
       });
 
       await expect(

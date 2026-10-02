@@ -23,7 +23,7 @@ export type { ComposeAmbient, ComposeConfig, EntityComposeConfig } from './compo
 export { compose } from './compose/index.js';
 export type { GlobalContextEnricherConfig, SerializationConfig } from './config.types.js';
 export { createAsyncLocalStorageProvider } from './context-provider.js';
-export type { DispatchScope } from './dispatch/index.js';
+export type { DispatchConfig } from './dispatch/index.js';
 export { dispatch } from './dispatch/index.js';
 export type { AuditLogData, AuditLogInput } from './domain/audit-log-types.js';
 export type { ActorId, AggregateId, EntityId } from './domain/branded-types.js';
@@ -45,7 +45,7 @@ export type {
 } from './domain/mutation-event.js';
 export type { Result, ValidationError } from './domain/smart-constructors.js';
 export { createAuditLogData } from './domain/smart-constructors.js';
-export type { WriteContext, WriteExecutor, WriteFn } from './domain/write.js';
+export type { TransactionRuntime, WriteContext, WriteExecutor, WriteFn } from './domain/write.js';
 export type { ProjectionEnrichmentMeta } from './enrichment/types.js';
 export type {
   AuditErrorContext,
