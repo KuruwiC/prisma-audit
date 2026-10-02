@@ -68,12 +68,26 @@ const Prisma: PrismaNamespace = {
           fields: [
             scalar('id', { isId: true }),
             scalar('accountId'),
+            scalar('code', { isUnique: true }),
+            scalar('deskId'),
             scalar('name'),
             relation('account', 'Account', 'AccountMembers', {
               relationFromFields: ['accountId'],
               relationToFields: ['id'],
             }),
             relation('badge', 'Badge', 'MemberBadge'),
+            relation('desk', 'Desk', 'MemberDesk', {
+              relationFromFields: ['deskId'],
+              relationToFields: ['id'],
+            }),
+          ],
+        },
+        {
+          name: 'Desk',
+          fields: [
+            scalar('id', { isId: true }),
+            scalar('label'),
+            relation('members', 'Member', 'MemberDesk', { isList: true }),
           ],
         },
         {
@@ -418,6 +432,99 @@ describe('nested to-one pre-fetch relation link and parent rows', () => {
       );
 
       expect(findFirst).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('a to-many update whose before state is not read', () => {
+    const noUpdateReads = (_modelName: string, operation: string) => operation !== 'update';
+    const upsertDesk = (where: Row) => ({
+      where,
+      data: { desk: { upsert: { create: { label: 'new' }, update: { label: 'changed' } } } },
+    });
+
+    it('reads the key columns of the row each element names when a to-one relation below it links by a column of that row', async () => {
+      const client = createClient({
+        account: [{ id: 'a1' }],
+        member: [
+          { id: 'm1', accountId: 'a1', deskId: 'd1', name: 'first' },
+          { id: 'm2', accountId: 'a1', deskId: 'd2', name: 'second' },
+        ],
+        desk: [
+          { id: 'd1', label: 'desk-1' },
+          { id: 'd2', label: 'desk-2' },
+        ],
+      });
+      const member = client.member as ReturnType<typeof createDelegate>;
+      const findUnique = vi.spyOn(member, 'findUnique');
+
+      const results = await preFetch(
+        client,
+        'Account',
+        { where: { id: 'a1' }, data: { members: { update: [upsertDesk({ id: 'm1' }), upsertDesk({ id: 'm2' })] } } },
+        noUpdateReads,
+      );
+
+      expect(findUnique.mock.calls).toEqual([
+        [{ where: { id: 'm1' }, select: { id: true, deskId: true } }],
+        [{ where: { id: 'm2' }, select: { id: true, deskId: true } }],
+      ]);
+      expect(results.get('members')).toBeUndefined();
+      expect(preFetchedStateUnder(results, 'members.desk', 'm1')).toMatchObject({
+        kind: 'captured',
+        row: { label: 'desk-1' },
+      });
+      expect(preFetchedStateUnder(results, 'members.desk', 'm2')).toMatchObject({
+        kind: 'captured',
+        row: { label: 'desk-2' },
+      });
+    });
+
+    it('does not read an element whose WHERE names its row by another unique field', async () => {
+      const client = createClient({
+        account: [{ id: 'a1' }],
+        member: [{ id: 'm1', accountId: 'a1', code: 'first', deskId: 'd1' }],
+        desk: [{ id: 'd1', label: 'desk-1' }],
+      });
+      const member = client.member as ReturnType<typeof createDelegate>;
+      const findUnique = vi.spyOn(member, 'findUnique');
+
+      await preFetch(
+        client,
+        'Account',
+        { where: { id: 'a1' }, data: { members: { update: upsertDesk({ code: 'first' }) } } },
+        noUpdateReads,
+      );
+
+      expect(findUnique).not.toHaveBeenCalled();
+    });
+
+    it('is not read when every relation below it links by the primary key its WHERE names', async () => {
+      const client = createClient({
+        account: [{ id: 'a1' }],
+        member: [{ id: 'm1', accountId: 'a1', deskId: 'd1' }],
+        badge: [{ id: 'b1', memberId: 'm1', label: 'badge-1' }],
+      });
+      const member = client.member as ReturnType<typeof createDelegate>;
+      const findUnique = vi.spyOn(member, 'findUnique');
+
+      await preFetch(
+        client,
+        'Account',
+        {
+          where: { id: 'a1' },
+          data: {
+            members: {
+              update: {
+                where: { id: 'm1' },
+                data: { badge: { upsert: { create: { label: 'new' }, update: { label: 'changed' } } } },
+              },
+            },
+          },
+        },
+        noUpdateReads,
+      );
+
+      expect(findUnique).not.toHaveBeenCalled();
     });
   });
 });

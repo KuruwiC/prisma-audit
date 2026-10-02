@@ -34,7 +34,10 @@ describe('nested rows attributed through their parent row', () => {
   });
 
   /** The read made on the audit's behalf that fails once after `arm()` */
-  type FaultTarget = { readonly model: 'PostTag' | 'Tag'; readonly operation: 'findUnique' | 'findFirst' };
+  type FaultTarget = {
+    readonly model: 'Comment' | 'PostTag' | 'Tag';
+    readonly operation: 'findUnique' | 'findFirst';
+  };
 
   const setup = async (options: { readonly fetchBeforeUpdate?: boolean; readonly fault?: FaultTarget } = {}) => {
     const basePrisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
@@ -469,6 +472,78 @@ describe('nested rows attributed through their parent row', () => {
       );
 
       expect(await recordsOf('PostBookmarkNote')).toEqual(['note-author:update', 'note-other-new:create']);
+    });
+
+    it('takes the branch of a to-one upsert under each element from the foreign key of the row its WHERE names', async () => {
+      const { basePrisma, prisma, run, recordsOf, phases, post } = await setup({ fetchBeforeUpdate: false });
+      for (const name of ['first', 'second']) {
+        await basePrisma.user.create({ data: { id: `${name}-commenter`, email: `${name}@example.com`, name } });
+        await basePrisma.comment.create({
+          data: { id: `${name}-comment`, content: 'old', postId: post.id, authorId: `${name}-commenter` },
+        });
+      }
+      const upsertAuthor = (name: string) => ({
+        where: { id: `${name}-comment` },
+        data: {
+          author: {
+            upsert: {
+              create: { id: `${name}-new`, email: `${name}-new@example.com`, name: 'new' },
+              update: { name: `${name} renamed` },
+            },
+          },
+        },
+      });
+
+      await run(() =>
+        prisma.post.update({
+          where: { id: post.id },
+          data: { comments: { update: [upsertAuthor('first'), upsertAuthor('second')] } },
+        }),
+      );
+
+      expect(await recordsOf('User')).toEqual(['first-commenter:update', 'second-commenter:update']);
+      expect(await recordsOf('Comment')).toEqual(['first-comment:update', 'second-comment:update']);
+      expect(phases()).toEqual([]);
+    });
+
+    it('does not record the to-one upsert under an element when the read of the key columns of its row fails', async () => {
+      const { basePrisma, prisma, run, arm, recordsOf, phases, post } = await setup({
+        fetchBeforeUpdate: false,
+        fault: { model: 'Comment', operation: 'findUnique' },
+      });
+      await basePrisma.user.create({ data: { id: 'commenter', email: 'commenter@example.com', name: 'C' } });
+      await basePrisma.comment.create({
+        data: { id: 'comment', content: 'old', postId: post.id, authorId: 'commenter' },
+      });
+
+      arm();
+      await run(() =>
+        prisma.post.update({
+          where: { id: post.id },
+          data: {
+            comments: {
+              update: {
+                where: { id: 'comment' },
+                data: {
+                  author: {
+                    upsert: {
+                      create: { id: 'commenter-new', email: 'new@example.com', name: 'new' },
+                      update: { name: 'renamed' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        }),
+      );
+
+      expect(await basePrisma.user.findUniqueOrThrow({ where: { id: 'commenter' } })).toMatchObject({
+        name: 'renamed',
+      });
+      expect(await recordsOf('User')).toEqual([]);
+      expect(await recordsOf('Comment')).toEqual(['comment:update:beforeUnavailable']);
+      expect(phases()).toEqual([['pre-fetch', 'Comment', 'update']]);
     });
   });
 });
