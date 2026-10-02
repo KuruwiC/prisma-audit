@@ -3,7 +3,7 @@
  *
  * A caller's `select` or `omit` decides the shape of the value it receives, not the row the
  * audit records: the before and after states, `changes` and the resolvers see every column of
- * the row, and the caller receives exactly the keys it asked for.
+ * the row the client reads by default, and the caller receives exactly the keys it asked for.
  */
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
@@ -37,8 +37,8 @@ describe('an audited row read whole whatever the caller selects', () => {
     }
   });
 
-  const setup = async () => {
-    const basePrisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
+  const setup = async (clientOmit: Prisma.GlobalOmitConfig = {}) => {
+    const basePrisma = new PrismaClient({ datasources: { db: { url: databaseUrl } }, omit: clientOmit });
     const provider = createAsyncLocalStorageProvider();
     const prisma = createAuditClient(basePrisma, {
       Prisma,
@@ -208,6 +208,116 @@ describe('an audited row read whole whatever the caller selects', () => {
       expect(keysOf(result)).toEqual([...USER_COLUMNS, 'posts'].sort());
       expect(result.posts.map((post) => keysOf(post))).toEqual([POST_COLUMNS.filter((column) => column !== 'content')]);
       expect((await recordOf('Post', 'p1'))?.changes).toEqual({ title: { old: 'T1', new: 'T1b' } });
+    });
+  });
+
+  describe('a field the client omits for every query', () => {
+    const clientOmit = { user: { password: true }, post: { content: true } };
+    const USER_DEFAULT_COLUMNS = USER_COLUMNS.filter((column) => column !== 'password');
+    const POST_DEFAULT_COLUMNS = POST_COLUMNS.filter((column) => column !== 'content');
+
+    it('is neither read into the after state nor recorded as a change under a top-level select', async () => {
+      const { basePrisma, prisma, run, recordOf } = await setup(clientOmit);
+      await basePrisma.user.update({ where: { id: 'u1' }, data: { password: 'hash-secret' } });
+
+      const result = await run(() =>
+        prisma.user.update({
+          where: { id: 'u1' },
+          data: { name: 'Bea' },
+          select: { id: true, posts: false, _count: { select: { posts: true } } },
+        }),
+      );
+
+      expect(result).toEqual({ id: 'u1', _count: { posts: 1 } });
+      const record = await recordOf('User', 'u1');
+      expect(record?.changes).toEqual({ name: { old: 'Ada', new: 'Bea' } });
+      expect(keysOf(record?.before)).toEqual(USER_DEFAULT_COLUMNS);
+      expect(keysOf(record?.after)).toEqual(USER_DEFAULT_COLUMNS);
+    });
+
+    it('is neither read into a nested row nor recorded as its change under a select of the written relation', async () => {
+      const { prisma, run, recordOf } = await setup(clientOmit);
+
+      const result = await run(() =>
+        prisma.user.update({
+          where: { id: 'u1' },
+          data: { posts: { update: { where: { id: 'p1' }, data: { title: 'T1b' } } } },
+          select: { id: true, posts: { select: { id: true } } },
+        }),
+      );
+
+      expect(result).toEqual({ id: 'u1', posts: [{ id: 'p1' }] });
+      const record = await recordOf('Post', 'p1');
+      expect(record?.changes).toEqual({ title: { old: 'T1', new: 'T1b' } });
+      expect(keysOf(record?.before)).toEqual(POST_DEFAULT_COLUMNS);
+      expect(keysOf(record?.after)).toEqual(POST_DEFAULT_COLUMNS);
+    });
+
+    it('is not read into the rows a limited updateManyAndReturn returns under a select', async () => {
+      const { basePrisma, prisma, run, recordsOf } = await setup(clientOmit);
+      await basePrisma.post.create({ data: { id: 'p2', title: 'T2', content: 'Body', authorId: 'u1' } });
+
+      const result = await run(() =>
+        prisma.post.updateManyAndReturn({
+          where: { authorId: 'u1' },
+          data: { published: true },
+          limit: 2,
+          select: { id: true },
+        }),
+      );
+
+      expect(result.map((row) => keysOf(row))).toEqual([['id'], ['id']]);
+      const records = await recordsOf('Post');
+      expect(records.map((record) => record.changes)).toEqual([
+        { published: { old: false, new: true } },
+        { published: { old: false, new: true } },
+      ]);
+      expect(records.map((record) => keysOf(record.after))).toEqual([POST_DEFAULT_COLUMNS, POST_DEFAULT_COLUMNS]);
+    });
+
+    it('is not read into the rows createManyAndReturn returns under a select', async () => {
+      const { prisma, run, recordOf } = await setup(clientOmit);
+
+      const result = await run(() =>
+        prisma.user.createManyAndReturn({
+          data: [{ id: 'u2', email: 'u2@example.com', password: 'hash-secret' }],
+          select: { id: true },
+        }),
+      );
+
+      expect(result).toEqual([{ id: 'u2' }]);
+      expect(keysOf((await recordOf('User', 'u2'))?.after)).toEqual(USER_DEFAULT_COLUMNS);
+    });
+
+    it('reaches the caller that names it in a select, and is recorded as added', async () => {
+      const { basePrisma, prisma, run, recordOf } = await setup(clientOmit);
+      await basePrisma.user.update({ where: { id: 'u1' }, data: { password: 'hash-secret' } });
+
+      const result = await run(() =>
+        prisma.user.update({ where: { id: 'u1' }, data: { name: 'Bea' }, select: { id: true, password: true } }),
+      );
+
+      expect(result).toEqual({ id: 'u1', password: 'hash-secret' });
+      expect((await recordOf('User', 'u1'))?.changes).toEqual({
+        name: { old: 'Ada', new: 'Bea' },
+        password: { new: 'hash-secret' },
+      });
+    });
+
+    it('reaches the caller that sets it to false in an omit, and is recorded as added', async () => {
+      const { basePrisma, prisma, run, recordOf } = await setup(clientOmit);
+      await basePrisma.user.update({ where: { id: 'u1' }, data: { password: 'hash-secret' } });
+
+      const result = await run(() =>
+        prisma.user.update({ where: { id: 'u1' }, data: { name: 'Bea' }, omit: { password: false } }),
+      );
+
+      expect(keysOf(result)).toEqual(USER_COLUMNS);
+      expect(result.password).toBe('hash-secret');
+      expect((await recordOf('User', 'u1'))?.changes).toEqual({
+        name: { old: 'Ada', new: 'Bea' },
+        password: { new: 'hash-secret' },
+      });
     });
   });
 

@@ -43,7 +43,7 @@ describe('injectAuditedSelection', () => {
   it('leaves args without nested writes untouched', () => {
     const args = { where: { id: 'user-1' }, data: { email: 'user@example.com' } };
 
-    expect(injectAuditedSelection(schemaMetadata, 'User', args)).toEqual({ args, injected: undefined });
+    expect(injectAuditedSelection(schemaMetadata, 'User', args, true)).toEqual({ args, injected: undefined });
   });
 
   it('leaves args untouched when no nested write is audited from the result', () => {
@@ -54,7 +54,7 @@ describe('injectAuditedSelection', () => {
       },
     };
 
-    const injection = injectAuditedSelection(schemaMetadata, 'User', args);
+    const injection = injectAuditedSelection(schemaMetadata, 'User', args, true);
 
     expect(injection.args).toBe(args);
     expect(injection.injected).toBeUndefined();
@@ -66,7 +66,7 @@ describe('injectAuditedSelection', () => {
       data: { ...commentCreatedInPostUpdate, profile: { create: { bio: 'B' } } },
     };
 
-    const { args: injectedArgs } = injectAuditedSelection(schemaMetadata, 'User', args);
+    const { args: injectedArgs } = injectAuditedSelection(schemaMetadata, 'User', args, true);
 
     expect(injectedArgs).toEqual({
       ...args,
@@ -77,7 +77,7 @@ describe('injectAuditedSelection', () => {
   describe('bounding a to-many relation to the rows its updates name', () => {
     const postsOf = (data: Record<string, unknown>) =>
       (
-        injectAuditedSelection(schemaMetadata, 'User', { where: { id: 'user-1' }, data }).args as {
+        injectAuditedSelection(schemaMetadata, 'User', { where: { id: 'user-1' }, data }, true).args as {
           include: Selection;
         }
       ).include.posts;
@@ -126,20 +126,30 @@ describe('injectAuditedSelection', () => {
     });
 
     it('never bounds a to-one relation', () => {
-      const injection = injectAuditedSelection(schemaMetadata, 'User', {
-        where: { id: 'user-1' },
-        data: { profile: { update: { where: { id: 'profile-1' }, data: { bio: 'B' } } } },
-      });
+      const injection = injectAuditedSelection(
+        schemaMetadata,
+        'User',
+        {
+          where: { id: 'user-1' },
+          data: { profile: { update: { where: { id: 'profile-1' }, data: { bio: 'B' } } } },
+        },
+        true,
+      );
 
       expect((injection.args as { include: Selection }).include).toEqual({ profile: true });
     });
 
     it('leaves a relation the caller requested unbounded', () => {
-      const injection = injectAuditedSelection(schemaMetadata, 'User', {
-        where: { id: 'user-1' },
-        data: commentCreatedInPostUpdate,
-        include: { posts: true },
-      });
+      const injection = injectAuditedSelection(
+        schemaMetadata,
+        'User',
+        {
+          where: { id: 'user-1' },
+          data: commentCreatedInPostUpdate,
+          include: { posts: true },
+        },
+        true,
+      );
 
       expect((injection.args as { include: Selection }).include).toEqual({ posts: { include: { comments: true } } });
     });
@@ -152,7 +162,7 @@ describe('injectAuditedSelection', () => {
       update: { profile: { update: { bio: 'Updated' } } },
     };
 
-    const { args: injectedArgs } = injectAuditedSelection(schemaMetadata, 'User', args);
+    const { args: injectedArgs } = injectAuditedSelection(schemaMetadata, 'User', args, true);
 
     expect(injectedArgs).toEqual({ ...args, include: { posts: true, profile: true } });
   });
@@ -164,7 +174,7 @@ describe('injectAuditedSelection', () => {
       include: { posts: { orderBy: { title: 'asc' } }, profile: true },
     };
 
-    const { args: injectedArgs } = injectAuditedSelection(schemaMetadata, 'User', args);
+    const { args: injectedArgs } = injectAuditedSelection(schemaMetadata, 'User', args, true);
 
     expect(injectedArgs).toEqual({
       ...args,
@@ -175,49 +185,127 @@ describe('injectAuditedSelection', () => {
   it('expands a caller relation given as true with the relations written below it', () => {
     const args = { where: { id: 'user-1' }, data: commentCreatedInPostUpdate, include: { posts: true } };
 
-    const { args: injectedArgs } = injectAuditedSelection(schemaMetadata, 'User', args);
+    const { args: injectedArgs } = injectAuditedSelection(schemaMetadata, 'User', args, true);
 
     expect(injectedArgs).toEqual({ ...args, include: { posts: { include: { comments: true } } } });
   });
 
-  it('puts the written relations into the caller select', () => {
-    const args = { where: { id: 'user-1' }, data: commentCreatedInPostUpdate, select: { id: true } };
+  describe('a caller select, read in the default shape', () => {
+    it('includes the relations it selects and the written relations, keeping its scalars by omit entries set to false', () => {
+      const args = {
+        where: { id: 'user-1' },
+        data: commentCreatedInPostUpdate,
+        select: { id: true, profile: { select: { bio: true } }, _count: { select: { posts: true } } },
+      };
 
-    const { args: injectedArgs } = injectAuditedSelection(schemaMetadata, 'User', args);
+      const { args: injectedArgs, injected } = injectAuditedSelection(schemaMetadata, 'User', args, true);
 
-    expect(injectedArgs).toEqual({
-      ...args,
-      select: {
-        id: true,
-        email: true,
-        posts: { where: { OR: [{ id: 'post-1' }] }, include: { comments: true } },
-      },
+      expect(injectedArgs).toEqual({
+        where: args.where,
+        data: args.data,
+        include: {
+          profile: { select: { bio: true } },
+          _count: { select: { posts: true } },
+          posts: { where: { OR: [{ id: 'post-1' }] }, include: { comments: true } },
+        },
+        omit: { id: false },
+      });
+      expect(injected).toEqual({ keys: new Set(['posts', 'email']), nested: new Map() });
     });
-    expect(injectedArgs).not.toHaveProperty('include');
+
+    it('leaves out the entries it sets to false, and enumerates no scalar it does not select', () => {
+      const args = { where: { id: 'user-1' }, data: {}, select: { id: true, email: false, profile: false } };
+
+      const { args: injectedArgs, injected } = injectAuditedSelection(schemaMetadata, 'User', args, true);
+
+      expect(injectedArgs).toEqual({ where: args.where, data: args.data, omit: { id: false } });
+      expect(injected?.keys).toEqual(new Set(['email']));
+    });
+
+    it('reads a written relation it selects in the default shape too', () => {
+      const args = {
+        where: { id: 'user-1' },
+        data: commentCreatedInPostUpdate,
+        include: { posts: { select: { title: true }, orderBy: { title: 'asc' } } },
+      };
+
+      const { args: injectedArgs, injected } = injectAuditedSelection(schemaMetadata, 'User', args, true);
+
+      expect(injectedArgs).toEqual({
+        ...args,
+        include: { posts: { orderBy: { title: 'asc' }, include: { comments: true }, omit: { title: false } } },
+      });
+      expect(injected?.nested.get('posts')?.keys).toEqual(new Set(['comments', 'id', 'authorId']));
+    });
   });
 
-  it('selects every scalar column a caller select leaves out, without nested writes', () => {
-    const args = { where: { id: 'user-1' }, data: { email: 'user@example.com' }, select: { id: true } };
+  describe('a caller select, on a client that cannot omit a field', () => {
+    it('puts the written relations into the caller select', () => {
+      const args = { where: { id: 'user-1' }, data: commentCreatedInPostUpdate, select: { id: true } };
 
-    const { args: injectedArgs, injected } = injectAuditedSelection(schemaMetadata, 'User', args);
+      const { args: injectedArgs } = injectAuditedSelection(schemaMetadata, 'User', args, false);
 
-    expect(injectedArgs).toEqual({ ...args, select: { id: true, email: true } });
-    expect(injected).toEqual({ keys: new Set(['email']), nested: new Map() });
-  });
+      expect(injectedArgs).toEqual({
+        ...args,
+        select: {
+          id: true,
+          email: true,
+          posts: { where: { OR: [{ id: 'post-1' }] }, include: { comments: true } },
+        },
+      });
+      expect(injectedArgs).not.toHaveProperty('include');
+    });
 
-  it('selects a scalar column the caller select sets to false', () => {
-    const args = { where: { id: 'user-1' }, data: {}, select: { id: true, email: false } };
+    it('selects every scalar column a caller select leaves out, without nested writes', () => {
+      const args = { where: { id: 'user-1' }, data: { email: 'user@example.com' }, select: { id: true } };
 
-    const { args: injectedArgs, injected } = injectAuditedSelection(schemaMetadata, 'User', args);
+      const { args: injectedArgs, injected } = injectAuditedSelection(schemaMetadata, 'User', args, false);
 
-    expect(injectedArgs).toEqual({ ...args, select: { id: true, email: true } });
-    expect(injected?.keys).toEqual(new Set(['email']));
+      expect(injectedArgs).toEqual({ ...args, select: { id: true, email: true } });
+      expect(injected).toEqual({ keys: new Set(['email']), nested: new Map() });
+    });
+
+    it('selects a scalar column the caller select sets to false', () => {
+      const args = { where: { id: 'user-1' }, data: {}, select: { id: true, email: false } };
+
+      const { args: injectedArgs, injected } = injectAuditedSelection(schemaMetadata, 'User', args, false);
+
+      expect(injectedArgs).toEqual({ ...args, select: { id: true, email: true } });
+      expect(injected?.keys).toEqual(new Set(['email']));
+    });
+
+    it('adds the primary key to a caller select that omits it', () => {
+      const args = { where: { id: 'user-1' }, data: commentCreatedInPostUpdate, select: { email: true } };
+
+      const { args: injectedArgs, injected } = injectAuditedSelection(schemaMetadata, 'User', args, false);
+
+      expect(injectedArgs).toEqual({
+        ...args,
+        select: { email: true, posts: { where: { OR: [{ id: 'post-1' }] }, include: { comments: true } }, id: true },
+      });
+      expect(injected?.keys).toEqual(new Set(['posts', 'id']));
+    });
+
+    it('adds the related scalar fields and written relations inside a caller relation select', () => {
+      const args = {
+        where: { id: 'user-1' },
+        data: commentCreatedInPostUpdate,
+        include: { posts: { select: { title: true } } },
+      };
+
+      const { args: injectedArgs } = injectAuditedSelection(schemaMetadata, 'User', args, false);
+
+      expect(injectedArgs).toEqual({
+        ...args,
+        include: { posts: { select: { title: true, id: true, authorId: true, comments: true } } },
+      });
+    });
   });
 
   it('reads the fields a caller omits, keeping an omit entry it sets to false', () => {
     const args = { where: { id: 'user-1' }, data: {}, omit: { email: true, id: false } };
 
-    const { args: injectedArgs, injected } = injectAuditedSelection(schemaMetadata, 'User', args);
+    const { args: injectedArgs, injected } = injectAuditedSelection(schemaMetadata, 'User', args, true);
 
     expect(injectedArgs).toEqual({ where: args.where, data: args.data, omit: { id: false } });
     expect(injected).toEqual({ keys: new Set(['email']), nested: new Map() });
@@ -226,7 +314,7 @@ describe('injectAuditedSelection', () => {
   it('drops an omit that names only fields the caller omits', () => {
     const args = { where: { id: 'user-1' }, data: {}, omit: { email: true } };
 
-    const { args: injectedArgs } = injectAuditedSelection(schemaMetadata, 'User', args);
+    const { args: injectedArgs } = injectAuditedSelection(schemaMetadata, 'User', args, true);
 
     expect(injectedArgs).toEqual({ where: args.where, data: args.data });
   });
@@ -238,43 +326,16 @@ describe('injectAuditedSelection', () => {
       include: { posts: { omit: { title: true } } },
     };
 
-    const { args: injectedArgs, injected } = injectAuditedSelection(schemaMetadata, 'User', args);
+    const { args: injectedArgs, injected } = injectAuditedSelection(schemaMetadata, 'User', args, true);
 
     expect(injectedArgs).toEqual({ ...args, include: { posts: { include: { comments: true } } } });
     expect(injected?.nested.get('posts')?.keys).toEqual(new Set(['title', 'comments']));
-  });
-
-  it('adds the primary key to a caller select that omits it', () => {
-    const args = { where: { id: 'user-1' }, data: commentCreatedInPostUpdate, select: { email: true } };
-
-    const { args: injectedArgs, injected } = injectAuditedSelection(schemaMetadata, 'User', args);
-
-    expect(injectedArgs).toEqual({
-      ...args,
-      select: { email: true, posts: { where: { OR: [{ id: 'post-1' }] }, include: { comments: true } }, id: true },
-    });
-    expect(injected?.keys).toEqual(new Set(['posts', 'id']));
-  });
-
-  it('adds the related scalar fields and written relations inside a caller relation select', () => {
-    const args = {
-      where: { id: 'user-1' },
-      data: commentCreatedInPostUpdate,
-      include: { posts: { select: { title: true } } },
-    };
-
-    const { args: injectedArgs } = injectAuditedSelection(schemaMetadata, 'User', args);
-
-    expect(injectedArgs).toEqual({
-      ...args,
-      include: { posts: { select: { title: true, id: true, authorId: true, comments: true } } },
-    });
   });
 });
 
 describe('projectToRequestedShape', () => {
   const project = (args: Record<string, unknown>, result: unknown) =>
-    projectToRequestedShape(result, injectAuditedSelection(schemaMetadata, 'User', args).injected);
+    projectToRequestedShape(result, injectAuditedSelection(schemaMetadata, 'User', args, true).injected);
 
   it('returns the value itself when nothing was injected', () => {
     const result = { id: 'user-1', posts: [] };

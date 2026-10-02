@@ -28,6 +28,8 @@ export interface AuditOptions {
   readonly provider: AuditContextProvider;
   readonly Prisma: PrismaNamespace;
   readonly schemaMetadata: SchemaMetadata;
+  /** Whether the client accepts a query `omit`, which reads an audited row in its default shape */
+  readonly queryOmitSupported: boolean;
   /** Accessor of the audit-log model on the client (camelCase) */
   readonly auditLogModel: string;
   readonly policyConfig: PolicyConfig;
@@ -43,6 +45,15 @@ export interface AuditOptions {
    */
   readonly shouldAudit: (modelName: string) => boolean;
 }
+
+/**
+ * Whether the client accepts a query `omit`: generally available from Prisma 6.2.0; earlier
+ * clients reject it unless the `omitApi` preview is on, which the client does not expose
+ */
+const supportsQueryOmit = (Prisma: PrismaNamespace): boolean => {
+  const [major = Number.NaN, minor = Number.NaN] = (Prisma.prismaVersion?.client ?? '').split('.').map(Number);
+  return major > 6 || (major === 6 && minor >= 2);
+};
 
 /** The relation counts Prisma returns with a row when a query includes or selects `_count` */
 const RELATION_COUNT_FIELD = '_count';
@@ -82,6 +93,7 @@ export const normalizeAuditOptions = (options: PrismaAuditExtensionOptions): Aud
     provider,
     Prisma,
     schemaMetadata,
+    queryOmitSupported: supportsQueryOmit(Prisma),
     auditLogModel,
     policyConfig: {
       awaitWrite: performance?.awaitWrite ?? true,

@@ -82,7 +82,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
               return query(args);
             }
 
-            const injection = injectAuditedSelection(audit.schemaMetadata, model, args);
+            const injection = injectAuditedSelection(audit.schemaMetadata, model, args, audit.queryOmitSupported);
 
             // Mark the re-entrancy guard on the library-owned runtime store; the app context
             // stays untouched so downstream code keeps the caller's actor and request metadata.
