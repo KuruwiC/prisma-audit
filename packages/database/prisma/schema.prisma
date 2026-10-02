@@ -30,6 +30,7 @@ model User {
   profile         Profile?
   autoIncChildren AutoIncChild[]
   badge           Badge?
+  subscriptions   Subscription[]
 
   @@map("users")
 }
@@ -302,6 +303,22 @@ model AutoIncChild {
 
   @@index([parentId])
   @@map("auto_inc_children")
+}
+
+// ============================================
+// Subscription Model (foreign key referencing a non-key unique field)
+// ============================================
+
+model Subscription {
+  id        String   @id @default(cuid())
+  topic     String
+  userEmail String   @map("user_email")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userEmail], references: [email], onDelete: Cascade)
+
+  @@index([userEmail])
+  @@map("subscriptions")
 }
 
 // ============================================

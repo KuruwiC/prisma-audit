@@ -1,6 +1,11 @@
 /**
  * The selection an audited operation runs with
  *
+ * An audited row is recorded whole, whatever shape the caller reads it in: its before state is
+ * read whole, so its after state and `changes` must be too, and the entity's resolvers read the
+ * columns they name. A caller `select` at a level whose rows are audited therefore gets every
+ * scalar field of the model, and the fields a caller `omit` leaves out are read.
+ *
  * Nested writes are audited from the records the operation returns, so the relations an operation
  * writes are added to its selection: into `select` when the caller selects, else into `include`.
  * The written relations come from `detectNestedOperations` in the discovery pass, which scans
@@ -8,17 +13,16 @@
  * operation only updates by unique WHERE is bounded to the rows the updates name, so its siblings
  * are not read; a relation the operation may insert into is read whole, since the inserted rows
  * have no identity yet, and so is one an `updateMany` writes, since its filter describes the rows
- * as they were before the write. A top-level `select` also gets the model's primary key, which
- * the rows written below the returned row are found by when the result does not hold them. What
- * was added is recorded, so the value handed back to the caller can be projected to the shape the
- * caller requested while audit logs are built from the full result.
+ * as they were before the write.
+ *
+ * What was added is recorded, so the value handed back to the caller can be projected to the shape
+ * the caller requested while audit logs are built from the full result.
  *
  * @module utils/audited-selection
  */
 
 import {
   detectNestedOperations,
-  getPrimaryKeyConstraint,
   type NestedOperationInfo,
   type NestedOperationKeyword,
   targetWhereClauses,
@@ -64,10 +68,10 @@ export interface InjectedSelection {
   readonly nested: ReadonlyMap<string, InjectedSelection>;
 }
 
-/** Operation args with the written relations selected, and what that added to the caller's selection */
+/** Operation args that read the audited rows whole, and what that added to the caller's selection */
 export interface AuditedSelectionInjection {
   readonly args: unknown;
-  /** `undefined` when the caller's selection already covered every written relation */
+  /** `undefined` when the caller's selection already read the audited rows whole */
   readonly injected: InjectedSelection | undefined;
 }
 
@@ -181,45 +185,57 @@ const selectMissingScalarFields = (schemaMetadata: SchemaMetadata, modelName: st
 };
 
 /**
- * Select the primary-key fields of `modelName` missing from `select`, in place
+ * The caller's `omit` without the fields it leaves out: the audit reads them, and records their
+ * names so they are left out of the value handed back. An entry set to `false` stays.
  *
- * @returns The fields added
  * @internal
  */
-const selectMissingKeyFields = (schemaMetadata: SchemaMetadata, modelName: string, select: Selection): string[] => {
-  const fields = getPrimaryKeyConstraint(schemaMetadata, modelName)?.fields ?? [];
-  const added = fields.filter((field) => select[field] === undefined || select[field] === false);
-  for (const field of added) {
-    select[field] = true;
+const liftOmittedFields = (omit: unknown): { omit: Selection | undefined; lifted: string[] } => {
+  if (!isRecord(omit)) {
+    return { omit: undefined, lifted: [] };
   }
-  return added;
+  const kept = Object.entries(omit).filter(([, value]) => value !== true);
+  return {
+    omit: kept.length > 0 ? Object.fromEntries(kept) : undefined,
+    lifted: Object.keys(omit).filter((field) => omit[field] === true),
+  };
 };
 
 /**
- * Add a written relation to the caller's args for that relation. A nested `select` also gets the
- * related model's scalar fields for the audit entry, since select must enumerate them explicitly.
+ * The args the rows of `modelName` at one level are read whole with, and what that adds to the
+ * caller's: a caller `select` gets every scalar field, since select must enumerate them
+ * explicitly; the fields a caller `omit` leaves out are read; the written relations are merged
+ * into the caller's `select`, else into its `include`.
  *
  * @internal
  */
-const mergeIntoRequestedRelation = (
+const selectWholeRows = (
   schemaMetadata: SchemaMetadata,
+  modelName: string,
   callerArgs: Selection,
-  relation: WrittenRelation,
+  relations: WrittenRelations,
 ): { value: Selection; injected: InjectedSelection } => {
   if (isRecord(callerArgs.select)) {
-    const select: Selection = { ...callerArgs.select };
-    const addedFields = selectMissingScalarFields(schemaMetadata, relation.relatedModel, select);
-
-    const children = mergeWrittenRelations(schemaMetadata, select, relation.children);
+    const children = mergeWrittenRelations(schemaMetadata, callerArgs.select, relations);
+    const addedFields = selectMissingScalarFields(schemaMetadata, modelName, children.entries);
     return {
       value: { ...callerArgs, select: children.entries },
-      injected: { keys: new Set([...addedFields, ...children.injected.keys]), nested: children.injected.nested },
+      injected: { keys: new Set([...children.injected.keys, ...addedFields]), nested: children.injected.nested },
     };
   }
 
-  const callerInclude = isRecord(callerArgs.include) ? callerArgs.include : {};
-  const children = mergeWrittenRelations(schemaMetadata, callerInclude, relation.children);
-  return { value: { ...callerArgs, include: children.entries }, injected: children.injected };
+  const { omit: callerOmit, ...callerRest } = callerArgs;
+  const { omit, lifted } = liftOmittedFields(callerOmit);
+  const callerInclude = isRecord(callerArgs.include) ? callerArgs.include : undefined;
+  const children = mergeWrittenRelations(schemaMetadata, callerInclude ?? {}, relations);
+  const value: Selection = omit ? { ...callerRest, omit } : callerRest;
+  if (callerInclude || Object.keys(children.entries).length > 0) {
+    value.include = children.entries;
+  }
+  return {
+    value,
+    injected: { keys: new Set([...lifted, ...children.injected.keys]), nested: children.injected.nested },
+  };
 };
 
 /**
@@ -244,7 +260,12 @@ const mergeWrittenRelations = (
       entries[field] = buildRelationEntry(schemaMetadata, relation);
       keys.add(field);
     } else if (callerValue === true || isRecord(callerValue)) {
-      const requested = mergeIntoRequestedRelation(schemaMetadata, callerValue === true ? {} : callerValue, relation);
+      const requested = selectWholeRows(
+        schemaMetadata,
+        relation.relatedModel,
+        callerValue === true ? {} : callerValue,
+        relation.children,
+      );
       if (!isEmptyInjection(requested.injected)) {
         entries[field] = requested.value;
         nested.set(field, requested.injected);
@@ -256,8 +277,9 @@ const mergeWrittenRelations = (
 };
 
 /**
- * Select the relations the operation writes, so their rows are in the result the audit logs are
- * built from
+ * The selection an audited operation runs with: its rows read whole, every scalar field whatever
+ * the caller's `select` or `omit`, together with the relations it writes, so the audit logs are
+ * built from the whole rows and nested rows it wrote
  *
  * @returns The args to execute (`args` itself when nothing had to be added) and what was added to the
  *   caller's selection, for {@link projectToRequestedShape}
@@ -274,26 +296,14 @@ export const injectAuditedSelection = (
   const writtenOperations = detectNestedOperations(schemaMetadata, modelName, args, { kind: 'discovery' }).filter(
     (operation) => RESULT_AUDITED_KEYWORDS.has(operation.operation),
   );
-
-  if (writtenOperations.length === 0) {
-    return { args, injected: undefined };
-  }
-
-  const selectionKey = isRecord(args.select) ? 'select' : 'include';
-  const callerSelection = args[selectionKey];
-  const { entries, injected: relations } = mergeWrittenRelations(
+  const { value, injected } = selectWholeRows(
     schemaMetadata,
-    isRecord(callerSelection) ? callerSelection : {},
+    modelName,
+    args,
     buildWrittenRelations(schemaMetadata, modelName, writtenOperations),
   );
-  const keyFields = selectionKey === 'select' ? selectMissingKeyFields(schemaMetadata, modelName, entries) : [];
-  const injected = { keys: new Set([...relations.keys, ...keyFields]), nested: relations.nested };
 
-  if (isEmptyInjection(injected)) {
-    return { args, injected: undefined };
-  }
-
-  return { args: { ...args, [selectionKey]: entries }, injected };
+  return isEmptyInjection(injected) ? { args, injected: undefined } : { args: value, injected };
 };
 
 /**

@@ -529,6 +529,7 @@ Nested rows are audited from the operation's own result: the relations a nested 
 - **Edge runtimes**: No AsyncLocalStorage support (Vercel Edge, Cloudflare Workers)
 - **Raw queries**: `$executeRaw` / `$queryRaw` are not intercepted
 - **Many-to-many with multiple aggregates**: Not currently supported
+- **Client-level `omit`**: A field the Prisma client omits for every query (`new PrismaClient({ omit })`) is missing from the before state the audit reads, while a query that names it in `select` or `omit: { field: false }` (or a `select` the audit widens to every column) reads it after the write, so it appears in `changes` as added. List it in `excludeFields` to keep it out of `changes`, and in `security.redact` to mask its value in the stored states
 - **Nested re-read consistency**: A row a nested write updated or inserted that your own `include` / `select` leaves out, and a row a nested `connect`, `set` or `disconnect` re-linked, is read again after the operation on the same client. For a non-atomic write (`awaitWrite: false`, or `awaitWriteIf` returning `false`) outside `$transaction`, that re-read is a separate query and may observe concurrent changes
 
 ## Development

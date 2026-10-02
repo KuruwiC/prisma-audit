@@ -187,9 +187,61 @@ describe('injectAuditedSelection', () => {
 
     expect(injectedArgs).toEqual({
       ...args,
-      select: { id: true, posts: { where: { OR: [{ id: 'post-1' }] }, include: { comments: true } } },
+      select: {
+        id: true,
+        email: true,
+        posts: { where: { OR: [{ id: 'post-1' }] }, include: { comments: true } },
+      },
     });
     expect(injectedArgs).not.toHaveProperty('include');
+  });
+
+  it('selects every scalar column a caller select leaves out, without nested writes', () => {
+    const args = { where: { id: 'user-1' }, data: { email: 'user@example.com' }, select: { id: true } };
+
+    const { args: injectedArgs, injected } = injectAuditedSelection(schemaMetadata, 'User', args);
+
+    expect(injectedArgs).toEqual({ ...args, select: { id: true, email: true } });
+    expect(injected).toEqual({ keys: new Set(['email']), nested: new Map() });
+  });
+
+  it('selects a scalar column the caller select sets to false', () => {
+    const args = { where: { id: 'user-1' }, data: {}, select: { id: true, email: false } };
+
+    const { args: injectedArgs, injected } = injectAuditedSelection(schemaMetadata, 'User', args);
+
+    expect(injectedArgs).toEqual({ ...args, select: { id: true, email: true } });
+    expect(injected?.keys).toEqual(new Set(['email']));
+  });
+
+  it('reads the fields a caller omits, keeping an omit entry it sets to false', () => {
+    const args = { where: { id: 'user-1' }, data: {}, omit: { email: true, id: false } };
+
+    const { args: injectedArgs, injected } = injectAuditedSelection(schemaMetadata, 'User', args);
+
+    expect(injectedArgs).toEqual({ where: args.where, data: args.data, omit: { id: false } });
+    expect(injected).toEqual({ keys: new Set(['email']), nested: new Map() });
+  });
+
+  it('drops an omit that names only fields the caller omits', () => {
+    const args = { where: { id: 'user-1' }, data: {}, omit: { email: true } };
+
+    const { args: injectedArgs } = injectAuditedSelection(schemaMetadata, 'User', args);
+
+    expect(injectedArgs).toEqual({ where: args.where, data: args.data });
+  });
+
+  it('reads the fields a caller omits inside a written relation', () => {
+    const args = {
+      where: { id: 'user-1' },
+      data: commentCreatedInPostUpdate,
+      include: { posts: { omit: { title: true } } },
+    };
+
+    const { args: injectedArgs, injected } = injectAuditedSelection(schemaMetadata, 'User', args);
+
+    expect(injectedArgs).toEqual({ ...args, include: { posts: { include: { comments: true } } } });
+    expect(injected?.nested.get('posts')?.keys).toEqual(new Set(['title', 'comments']));
   });
 
   it('adds the primary key to a caller select that omits it', () => {
@@ -280,6 +332,26 @@ describe('projectToRequestedShape', () => {
     expect(project({ data: commentCreatedInPostUpdate, select: { email: true } }, result)).toEqual({
       email: 'user@example.com',
     });
+  });
+
+  it('returns exactly the caller select of an operation without nested writes', () => {
+    const result = { id: 'user-1', email: 'user@example.com' };
+
+    expect(project({ data: { email: 'user@example.com' }, select: { id: true } }, result)).toEqual({ id: 'user-1' });
+  });
+
+  it('leaves out the fields the caller omits', () => {
+    const result = { id: 'user-1', email: 'user@example.com' };
+
+    expect(project({ data: {}, omit: { email: true } }, result)).toEqual({ id: 'user-1' });
+  });
+
+  it('leaves out the fields the caller omits inside a written relation', () => {
+    const result = { id: 'user-1', email: 'user@example.com', posts: [{ id: 'post-1', title: 'First', comments: [] }] };
+
+    expect(
+      project({ data: commentCreatedInPostUpdate, include: { posts: { omit: { title: true } } } }, result),
+    ).toEqual({ id: 'user-1', email: 'user@example.com', posts: [{ id: 'post-1' }] });
   });
 
   it('returns exactly the caller nested select of a relation', () => {

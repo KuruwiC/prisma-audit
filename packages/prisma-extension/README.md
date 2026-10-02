@@ -640,6 +640,8 @@ Use shared change normalization if:
 
 Control how changes are tracked and recorded.
 
+An update's `changes` compares the columns of the row. The audited row is read with every column whatever the query's `select` or `omit` (the value returned keeps the shape the query requested), so a column the query does not read is still compared and a change to it is recorded; the relation fields read with the row are neither compared nor stored. An update whose columns did not change, such as one that writes only nested relations, gets no audit log.
+
 #### `excludeFields`
 **Type:** `string[]`
 **Default:** `[]`
@@ -1219,7 +1221,7 @@ await prisma.post.update({
 
 #### Important Notes
 
-1. **No `include` needed**: The relations a nested write touches are added to the query's `include` (or to its `select` when the query uses `select`, including a relation's nested `select`) so their rows can be audited; a top-level `select` also gets the model's primary key, by which the rows written below the returned record are found when the result leaves them out. The value returned to the caller keeps the shape the query requested.
+1. **No `include` needed**: The relations a nested write touches are added to the query's `include` (or to its `select` when the query uses `select`, including a relation's nested `select`) so their rows can be audited; a `select` on the audited record or on a written relation also gets every scalar field of its model, and the fields an `omit` there leaves out are read, so the records are audited whole and the rows written below a returned record are found by its keys when the result leaves them out. The value returned to the caller keeps the shape the query requested.
 2. **`connect`, `set` and `disconnect` behavior**:
    - A foreign key on the related record is that record's column: each record whose foreign key the write changed gets an `update` audit log, `changes` holding the old and new value. The records the writes at one relation path name, and the records linked to their parent rows when a write unlinks those (a `set`, or a to-one `connect`, `create`, `connectOrCreate` or `disconnect` on an optional foreign key), are read once before the write (whole rows, when `fetchBefore.update` is on for the related model) and once after it by primary key; a record whose foreign key did not change (already linked, kept by a `set`, linked to another parent) gets no audit log. Prisma also sets an `@updatedAt` column on every connected record, so with the foreign key in `excludeFields` such a record is still logged, with `updatedAt` as its only change
    - Creates join table records (e.g., PostTag) for many-to-many relations
