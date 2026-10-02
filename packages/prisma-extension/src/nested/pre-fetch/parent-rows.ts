@@ -78,14 +78,14 @@ export interface ParentRows {
  * not exist
  */
 const parentRowOf = (
-  { before, key, name }: NestedPreFetchResult,
+  { before, key }: NestedPreFetchResult,
   parentFields: readonly string[],
 ): PreFetchRecord | 'unknown' | undefined => {
   if (before.kind === 'captured') {
     return before.row;
   }
   if (before.kind === 'none') {
-    return name.by === 'uniqueWhere' ? undefined : key;
+    return key;
   }
   return key && parentFields.every((fieldName) => isKeyValue(key[fieldName])) ? key : 'unknown';
 };

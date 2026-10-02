@@ -39,7 +39,14 @@ describe('nested rows attributed through their parent row', () => {
     readonly operation: 'findUnique' | 'findFirst';
   };
 
-  const setup = async (options: { readonly fetchBeforeUpdate?: boolean; readonly fault?: FaultTarget } = {}) => {
+  const setup = async (
+    options: {
+      readonly fetchBeforeUpdate?: boolean;
+      /** Models whose `fetchBefore.update` is off while the default stays on */
+      readonly unreadModels?: readonly string[];
+      readonly fault?: FaultTarget;
+    } = {},
+  ) => {
     const basePrisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
     let armed = false;
     const faultyPrisma = basePrisma.$extends({
@@ -64,7 +71,10 @@ describe('nested rows attributed through their parent row', () => {
       aggregateMapping: testAggregateMapping,
       diffing: { excludeFields: ['createdAt', 'updatedAt'] },
       security: { redact: { fields: [] } },
-      fetchBefore: { update: options.fetchBeforeUpdate ?? true },
+      fetchBefore: {
+        update: options.fetchBeforeUpdate ?? true,
+        models: Object.fromEntries((options.unreadModels ?? []).map((model) => [model, { update: false }])),
+      },
       errorHandling: { observer },
     });
     disconnects.push(async () => {
@@ -504,6 +514,55 @@ describe('nested rows attributed through their parent row', () => {
       expect(await recordsOf('User')).toEqual(['first-commenter:update', 'second-commenter:update']);
       expect(await recordsOf('Comment')).toEqual(['first-comment:update', 'second-comment:update']);
       expect(phases()).toEqual([]);
+    });
+
+    describe('an element whose WHERE names its row by a unique field other than the primary key', () => {
+      const seedCategory = async (basePrisma: PrismaClient, postId: string) => {
+        await basePrisma.category.create({
+          data: { id: 'category', name: 'news', posts: { connect: { id: postId } } },
+        });
+        for (const id of ['alias-old', 'alias-kept']) {
+          await basePrisma.categoryAlias.create({ data: { id, name: id, categoryId: 'category' } });
+        }
+      };
+
+      it('audits only the row a nested create inserts below it', async () => {
+        const { basePrisma, prisma, run, recordsOf, phases, post } = await setup({ unreadModels: ['Category'] });
+        await seedCategory(basePrisma, post.id);
+
+        await run(() =>
+          prisma.post.update({
+            where: { id: post.id },
+            data: {
+              categories: {
+                update: { where: { name: 'news' }, data: { aliases: { create: { id: 'alias-new', name: 'new' } } } },
+              },
+            },
+          }),
+        );
+
+        expect(await recordsOf('CategoryAlias')).toEqual(['alias-new:create']);
+        expect(phases()).toEqual([]);
+      });
+
+      it('audits the row a nested set below it detaches', async () => {
+        const { basePrisma, prisma, run, recordsOf, phases, post } = await setup({ unreadModels: ['Category'] });
+        await seedCategory(basePrisma, post.id);
+
+        await run(() =>
+          prisma.post.update({
+            where: { id: post.id },
+            data: {
+              categories: {
+                update: { where: { name: 'news' }, data: { aliases: { set: [{ id: 'alias-kept' }] } } },
+              },
+            },
+          }),
+        );
+
+        expect(await recordsOf('CategoryAlias')).toEqual(['alias-old:update']);
+        expect(phases()).toEqual([]);
+      });
     });
 
     it('takes the branch of a to-one upsert under an element whose WHERE names its row by a compound unique', async () => {

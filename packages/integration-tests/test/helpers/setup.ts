@@ -42,6 +42,9 @@ export const testAggregateMapping: AggregateMapping = {
   Category: defineEntity({
     type: 'Category',
   }),
+  CategoryAlias: defineEntity({
+    type: 'CategoryAlias',
+  }),
   PostTag: defineEntity({
     type: 'PostTag',
     aggregates: [to('Post', foreignKey('postId')), to('Tag', foreignKey('tagId'))],

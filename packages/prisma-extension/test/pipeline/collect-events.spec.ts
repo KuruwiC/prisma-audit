@@ -304,7 +304,6 @@ describe('collectSingleOperationEvents', () => {
           before: before ? { kind: 'captured', row: before } : { kind: 'none' },
           identity,
           name: { by: 'uniqueWhere', where: { id: identity } },
-          ...(before ? {} : { key: { id: identity } }),
         });
       }
       return results;
@@ -729,7 +728,6 @@ describe('collectSingleOperationEvents — a to-one relation below the rows a li
       before: { kind: 'none' },
       identity,
       name: { by: 'uniqueWhere', where: { id: identity } },
-      key: { id: identity },
     });
     return results;
   };

@@ -494,8 +494,18 @@ describe('nested to-one pre-fetch relation link and parent rows', () => {
         [{ where: { id: 'm2' }, select: { id: true, deskId: true } }],
       ]);
       expect(results.get('members')?.results).toEqual([
-        { before: { kind: 'none' }, identity: 'm1', name: { by: 'uniqueWhere', where: { id: 'm1' } } },
-        { before: { kind: 'none' }, identity: 'm2', name: { by: 'uniqueWhere', where: { id: 'm2' } } },
+        {
+          before: { kind: 'none' },
+          identity: 'm1',
+          name: { by: 'uniqueWhere', where: { id: 'm1' } },
+          key: expect.objectContaining({ id: 'm1', deskId: 'd1' }),
+        },
+        {
+          before: { kind: 'none' },
+          identity: 'm2',
+          name: { by: 'uniqueWhere', where: { id: 'm2' } },
+          key: expect.objectContaining({ id: 'm2', deskId: 'd2' }),
+        },
       ]);
       expect(preFetchedStateUnder(results, 'members.desk', 'm1')).toMatchObject({
         kind: 'captured',
@@ -535,7 +545,12 @@ describe('nested to-one pre-fetch relation link and parent rows', () => {
 
       expect(findUnique.mock.calls).toEqual([[{ where: { code: 'first' }, select: { id: true } }]]);
       expect(results.get('members')?.results).toEqual([
-        { before: { kind: 'none' }, identity: 'm1', name: { by: 'uniqueWhere', where: { code: 'first' } } },
+        {
+          before: { kind: 'none' },
+          identity: 'm1',
+          name: { by: 'uniqueWhere', where: { code: 'first' } },
+          key: expect.objectContaining({ id: 'm1' }),
+        },
       ]);
       expect(preFetchedStateUnder(results, 'members.badge', 'm1')).toMatchObject({
         kind: 'captured',

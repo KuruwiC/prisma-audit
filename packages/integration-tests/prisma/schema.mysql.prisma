@@ -116,9 +116,23 @@ model Category {
   name      String   @unique
   createdAt DateTime @default(now()) @map("created_at")
 
-  posts Post[]
+  posts   Post[]
+  aliases CategoryAlias[]
 
   @@map("categories")
+}
+
+// A to-many relation below a model a nested update can name by a non-key unique field
+model CategoryAlias {
+  id         String   @id @default(cuid())
+  name       String
+  categoryId String?  @map("category_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  category Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  @@index([categoryId])
+  @@map("category_aliases")
 }
 
 model PostTag {

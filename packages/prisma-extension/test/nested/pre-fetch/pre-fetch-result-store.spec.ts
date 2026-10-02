@@ -167,14 +167,15 @@ describe('storeReadResult', () => {
 describe('storeIdentifiedRow', () => {
   const where = { postId_tagId: { postId: 'p1', tagId: 't1' } };
 
-  it('finds the row by the unique WHERE its read named it by, without a before state', () => {
+  it('finds the row by the unique WHERE its read named it by, with its key and without a before state', () => {
     const store: NestedPreFetchResults = new Map();
-    storeIdentifiedRow(store, 'postTags', where, 'pt-1');
+    storeIdentifiedRow(store, 'postTags', where, { id: 'pt-1', postId: 'p1' }, pk);
 
     expect(preFetchedResultNamedBy(store, 'postTags', { postId_tagId: { postId: 'p1', tagId: 't1' } })).toEqual({
       before: { kind: 'none' },
       identity: 'pt-1',
       name: { by: 'uniqueWhere', where },
+      key: { id: 'pt-1', postId: 'p1' },
     });
     expect(preFetchedResultNamedBy(store, 'postTags', { postId_tagId: { postId: 'p1', tagId: 't2' } })).toBeUndefined();
   });
@@ -182,7 +183,7 @@ describe('storeIdentifiedRow', () => {
   it('keeps what another read at the path learned of the row', () => {
     const store: NestedPreFetchResults = new Map();
     storeReadResult(store, 'postTags', { id: 'pt-1' }, { id: 'pt-1', postId: 'p1', tagId: 't1' }, pk);
-    storeIdentifiedRow(store, 'postTags', where, 'pt-1');
+    storeIdentifiedRow(store, 'postTags', where, { id: 'pt-1' }, pk);
 
     expect(preFetchedStateNamedBy(store, 'postTags', where)).toEqual({
       kind: 'captured',

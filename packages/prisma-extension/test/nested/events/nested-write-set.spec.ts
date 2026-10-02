@@ -40,7 +40,6 @@ const preFetched = (entries: [string, string, Record<string, unknown> | null][])
       before: before ? { kind: 'captured', row: before } : { kind: 'none' },
       identity,
       name: { by: 'uniqueWhere', where: { id: identity } },
-      ...(before ? {} : { key: { id: identity } }),
     });
   }
   return results;

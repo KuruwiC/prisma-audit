@@ -161,7 +161,8 @@ export const primaryKeyNamedBy = (where: Row, pkConstraint: UniqueConstraint): R
  * Stores what a read of the row `where` names found: the row, or none, under the WHERE and the
  * primary key it names (when it names one). `parentsKnown` false means the read ran under only
  * some of the parent rows the row may belong to, so a row it did not find is unavailable rather
- * than missing.
+ * than missing, and keeps the primary key the WHERE names so the rows below it are still read
+ * under it.
  */
 export const storeReadResult = (
   nestedPreFetchResults: NestedPreFetchResults,
@@ -178,27 +179,29 @@ export const storeReadResult = (
     return;
   }
   const key = primaryKeyNamedBy(where, pkConstraint);
-  const before = parentsKnown ? NO_BEFORE_STATE : UNAVAILABLE_BEFORE_STATE;
+  const identity = key ? extractEntityIdentity(key, pkConstraint.fields) : UNRESOLVED_ENTITY_ID;
   storePreFetchResult(
     nestedPreFetchResults,
     path,
-    key
-      ? { before, identity: extractEntityIdentity(key, pkConstraint.fields), name, key }
-      : { before, identity: UNRESOLVED_ENTITY_ID, name },
+    parentsKnown
+      ? { before: NO_BEFORE_STATE, identity, name }
+      : { before: UNAVAILABLE_BEFORE_STATE, identity, name, ...(key ? { key } : {}) },
   );
 };
 
 /**
- * Stores the identity a read of the key columns of the row `where` names found, without a before
- * state, under that WHERE, so an operation naming the row by it finds the row's identity. It never
- * replaces what another read at the path learned of the row.
+ * Stores the key columns a read of the row `where` names found, without a before state, under that
+ * WHERE, so an operation naming the row by it finds the row's identity and the operations below it
+ * are read under its key. It never replaces what another read at the path learned of the row.
  */
 export const storeIdentifiedRow = (
   nestedPreFetchResults: NestedPreFetchResults,
   path: string,
   where: Row,
-  identity: EntityIdentityKey,
+  key: Row,
+  pkConstraint: UniqueConstraint,
 ): void => {
+  const identity = extractEntityIdOrUnresolved(key, pkConstraint.fields);
   if (
     preFetchedResultFor(nestedPreFetchResults, path, identity) ||
     preFetchedResultNamedBy(nestedPreFetchResults, path, where)
@@ -209,6 +212,7 @@ export const storeIdentifiedRow = (
     before: NO_BEFORE_STATE,
     identity,
     name: { by: 'uniqueWhere', where },
+    key,
   });
 };
 
