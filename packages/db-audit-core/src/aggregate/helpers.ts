@@ -64,7 +64,7 @@ export const warnAboutUnbatchedResolver = (entityType: string, aggregate: Aggreg
   }
   warnedAggregateTypes.add(aggregate.type);
   console.warn(
-    `[db-audit-core] ${entityType} → aggregate "${aggregate.type}" uses lookup() for ${rowCount} entities. ` +
+    `[db-audit-core] ${entityType} → aggregate "${aggregate.type}" uses lookup() for ${rowCount} rows. ` +
       `Consider using batchLookup() to avoid N+1 queries.`,
   );
 };
