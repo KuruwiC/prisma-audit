@@ -123,7 +123,7 @@ interface Survivor {
 /** A row a `to()` resolver runs on: the row of an identified entry, or the row before its update */
 interface Subject {
   /** Position of the entry among the identified entries of its model group */
-  readonly entry: number;
+  readonly entryIndex: number;
   readonly row: Row;
   readonly former: boolean;
 }
@@ -187,15 +187,15 @@ const aggregateReporterFor = <TModelName extends string>(
   entries: readonly Entry<TModelName>[],
   aggregate: AggregateRoot,
   failures: ResolverFailure<TModelName>[],
-): ((entry: number) => ReportFailure) => {
+): ((entryIndex: number) => ReportFailure) => {
   const resolver = failedAggregateResolver(aggregate);
   const reported = new Set<number>();
-  return (entry) => (error) => {
-    const failed = entries[entry];
-    if (failed === undefined || reported.has(entry)) {
+  return (entryIndex) => (error) => {
+    const failed = entries[entryIndex];
+    if (failed === undefined || reported.has(entryIndex)) {
       return;
     }
-    reported.add(entry);
+    reported.add(entryIndex);
     failures.push({ event: failed.event, resolver, error });
   };
 };
@@ -272,11 +272,11 @@ const resolveRootsInBatch = async <TDbHandle>(
   aggregate: AggregateRoot,
   batchResolver: BatchIdResolver<Row>,
   read: ReadHandle<TDbHandle>,
-  report: (entry: number) => ReportFailure,
+  report: (entryIndex: number) => ReportFailure,
 ): Promise<(ResolvedRoot | undefined)[]> => {
   const reportEveryRow = (error: Error): void => {
     for (const subject of subjects) {
-      report(subject.entry)(error);
+      report(subject.entryIndex)(error);
     }
   };
 
@@ -299,7 +299,7 @@ const resolveRootsInBatch = async <TDbHandle>(
     return [];
   }
   return subjects.map((subject, index) => {
-    const aggregateId = normalizeResolvedId(rawIds[index], report(subject.entry));
+    const aggregateId = normalizeResolvedId(rawIds[index], report(subject.entryIndex));
     return aggregateId === null ? undefined : toRoot(aggregate, aggregateId, subject.row);
   });
 };
@@ -309,12 +309,12 @@ const resolveRootsRowByRow = async <TDbHandle>(
   entityType: string,
   aggregate: AggregateRoot,
   read: ReadHandle<TDbHandle>,
-  report: (entry: number) => ReportFailure,
+  report: (entryIndex: number) => ReportFailure,
 ): Promise<(ResolvedRoot | undefined)[]> => {
   warnAboutUnbatchedResolver(entityType, aggregate, subjects.length);
   const roots: (ResolvedRoot | undefined)[] = [];
   for (const subject of subjects) {
-    const aggregateId = await callResolver(() => aggregate.resolve(subject.row, read()), report(subject.entry));
+    const aggregateId = await callResolver(() => aggregate.resolve(subject.row, read()), report(subject.entryIndex));
     roots.push(aggregateId === null ? undefined : toRoot(aggregate, aggregateId, subject.row));
   }
   return roots;
@@ -322,9 +322,9 @@ const resolveRootsRowByRow = async <TDbHandle>(
 
 /** The rows the `to()` resolvers run on: every entry's row, then the rows before the updates */
 const subjectsOf = <TModelName extends string>(entries: readonly IdentifiedEntry<TModelName>[]): Subject[] => [
-  ...entries.map((entry, index) => ({ entry: index, row: entry.row, former: false })),
+  ...entries.map((entry, index) => ({ entryIndex: index, row: entry.row, former: false })),
   ...entries.flatMap((entry, index) =>
-    entry.formerRow === undefined ? [] : [{ entry: index, row: entry.formerRow, former: true }],
+    entry.formerRow === undefined ? [] : [{ entryIndex: index, row: entry.formerRow, former: true }],
   ),
 ];
 
@@ -369,7 +369,7 @@ const resolveSurvivors = async <TModelName extends string, TDbHandle>(
   }
 
   const keep = (subject: Subject, root: ResolvedRoot | undefined): void => {
-    const rowRoots = perRowRoots[subject.entry];
+    const rowRoots = perRowRoots[subject.entryIndex];
     if (root && rowRoots && !rowRoots.some((known) => isSameRoot(known, root))) {
       rowRoots.push(root);
     }
