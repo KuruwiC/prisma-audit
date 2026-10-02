@@ -372,7 +372,7 @@ interface NestedPreFetchContext {
   batchTargets: NestedBatchTargets;
   /**
    * The key columns read, by path, of the rows the elements of a to-many `update` whose before
-   * state is not read name (see {@link identifyNamedRows})
+   * state is not read name (see {@link identifyRowsNamedByElements})
    */
   identifiedRowKeys: Map<string, PreFetchRecord[]>;
   shouldFetchBefore: ShouldFetchBefore;
@@ -596,7 +596,7 @@ const keyColumnsOf = (
  * WHERE, so the element's row is identified by it. A WHERE that names the primary key is enough
  * for every other relation below it.
  */
-const identifyNamedRows = async (
+const identifyRowsNamedByElements = async (
   context: NestedPreFetchContext,
   relation: NestedRelation,
   relatedModelClient: PreFetchModelClient,
@@ -642,7 +642,7 @@ const identifyUpdatedRows = async (
   }
   const keyColumns = keyColumnsOf(context, relation, childRelations);
   await (nestedOp.isList
-    ? identifyNamedRows(context, relation, relatedModelClient, keyColumns)
+    ? identifyRowsNamedByElements(context, relation, relatedModelClient, keyColumns)
     : handleOneToOneRelation(context, relation, relatedModelClient, keyColumns));
 };
 
