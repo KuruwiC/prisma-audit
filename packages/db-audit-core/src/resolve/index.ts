@@ -7,15 +7,19 @@
  * enrichers are user callbacks that receive the database handle through a thunk evaluated at
  * each call, so a callback running inside a transaction reads that transaction's writes.
  *
- * The entity id is resolved first, once per row; the self root is that id. A resolver that
- * throws, or returns an id `normalizeId` rejects, is returned as a failure of its row instead of
- * failing the resolution: the entity's id resolver leaves the row without records, a `to()`
- * resolver leaves it without the record under that root.
+ * The entity id is resolved first, once per row; the self root is that id. Each `to()` root is
+ * resolved from the row after the write and, for an update whose row was read before the write,
+ * from that row too: a row moved to another parent belongs to the aggregate it left as well as
+ * the one it joined. A resolver that throws, or returns an id `normalizeId` rejects, is returned
+ * as a failure of its row instead of failing the resolution: the entity's id resolver leaves the
+ * row without records, a `to()` resolver leaves it without the record under the root it failed
+ * to resolve.
  *
  * Aggregate contexts are composed from two layers: the root entity's `aggregateContext`
  * enricher, called once per (category, type) with the unique aggregate ids of the call, and
  * the `context` enricher of the `to()` declaration (or of `self`), called once per projection
- * with the written rows. The stored value is the shallow merge of both, projection keys winning.
+ * with, for each root, the row that resolved it. The stored value is the shallow merge of both,
+ * projection keys winning.
  */
 
 import { normalizeId, warnAboutUnbatchedResolver } from '../aggregate/helpers.js';
@@ -85,16 +89,24 @@ type Row = Record<string, unknown>;
 type ReadHandle<TDbHandle> = () => TDbHandle;
 type ReportFailure = (error: Error) => void;
 
-/** A resolved root and, for a `to()` root, the projection declaration that produced it. */
+/**
+ * A resolved root, the row that resolved it, and, for a `to()` root, the projection declaration
+ * that produced it.
+ */
 interface ResolvedRoot extends ResolvedId {
+  readonly row: Row;
   readonly source?: AggregateRoot;
 }
 
-/** An event with a row for its callbacks, and its position in the input of `resolve` */
+/**
+ * An event with a row for its callbacks, its position in the input of `resolve`, and, for an
+ * update whose row was read before the write, that row
+ */
 interface Entry<TModelName extends string> {
   readonly position: number;
   readonly event: MutationEvent<TModelName>;
   readonly row: Row;
+  readonly formerRow?: Row;
 }
 
 interface IdentifiedEntry<TModelName extends string> extends Entry<TModelName> {
@@ -105,8 +117,15 @@ interface IdentifiedEntry<TModelName extends string> extends Entry<TModelName> {
 interface Survivor {
   /** Position of the row among the identified entries of its model group */
   readonly index: number;
-  readonly row: Row;
   readonly roots: readonly ResolvedRoot[];
+}
+
+/** A row a `to()` resolver runs on: the row of an identified entry, or the row before its update */
+interface Subject {
+  /** Position of the entry among the identified entries of its model group */
+  readonly entry: number;
+  readonly row: Row;
+  readonly former: boolean;
 }
 
 /** The events of one written model, in event order. */
@@ -118,6 +137,12 @@ interface ModelGroup<TModelName extends string> {
 /** The row a user callback receives: the written row, or the before row when nothing was written back. */
 const rowOf = (event: MutationEvent): Row | undefined =>
   event.after ?? (event.before.kind === 'captured' ? event.before.row : undefined);
+
+/** The row before the write of an update that also carries the row after it */
+const formerRowOf = (event: MutationEvent): Row | undefined =>
+  event.action === 'update' && event.after !== undefined && event.before.kind === 'captured'
+    ? event.before.row
+    : undefined;
 
 const groupByModel = <TModelName extends string>(
   events: readonly MutationEvent<TModelName>[],
@@ -136,7 +161,7 @@ const groupByModel = <TModelName extends string>(
       entries = [];
       groups.set(event.model, entries);
     }
-    entries.push({ position, event, row });
+    entries.push({ position, event, row, formerRow: formerRowOf(event) });
   });
 
   return Array.from(groups, ([model, entries]) => ({ model, entries }));
@@ -153,6 +178,27 @@ const failedAggregateResolver = (aggregate: AggregateRoot): FailedResolver => ({
   aggregateCategory: aggregate.category,
   aggregateType: aggregate.type,
 });
+
+/**
+ * The reporter of a `to()` declaration's failures, per entry: an entry is reported once however
+ * many of its rows the declaration failed for, with the first error
+ */
+const aggregateReporterFor = <TModelName extends string>(
+  entries: readonly Entry<TModelName>[],
+  aggregate: AggregateRoot,
+  failures: ResolverFailure<TModelName>[],
+): ((entry: number) => ReportFailure) => {
+  const resolver = failedAggregateResolver(aggregate);
+  const reported = new Set<number>();
+  return (entry) => (error) => {
+    const failed = entries[entry];
+    if (failed === undefined || reported.has(entry)) {
+      return;
+    }
+    reported.add(entry);
+    failures.push({ event: failed.event, resolver, error });
+  };
+};
 
 const reporterFor =
   <TModelName extends string>(
@@ -213,79 +259,84 @@ const identifyEntries = async <TModelName extends string, TDbHandle>(
 // Aggregate root resolution
 // ============================================================================
 
-const toRoot = (aggregate: AggregateRoot, aggregateId: string): ResolvedRoot => ({
+const toRoot = (aggregate: AggregateRoot, aggregateId: string, row: Row): ResolvedRoot => ({
   aggregateCategory: aggregate.category,
   aggregateType: aggregate.type,
   aggregateId,
+  row,
   source: aggregate,
 });
 
-const resolveRootsInBatch = async <TModelName extends string, TDbHandle>(
-  entries: readonly IdentifiedEntry<TModelName>[],
+const resolveRootsInBatch = async <TDbHandle>(
+  subjects: readonly Subject[],
   aggregate: AggregateRoot,
   batchResolver: BatchIdResolver<Row>,
   read: ReadHandle<TDbHandle>,
-  failures: ResolverFailure<TModelName>[],
+  report: (entry: number) => ReportFailure,
 ): Promise<(ResolvedRoot | undefined)[]> => {
-  const failedResolver = failedAggregateResolver(aggregate);
   const reportEveryRow = (error: Error): void => {
-    for (const entry of entries) {
-      reporterFor(failures, entry, failedResolver)(error);
+    for (const subject of subjects) {
+      report(subject.entry)(error);
     }
   };
 
   let rawIds: (string | null | undefined)[];
   try {
     rawIds = await batchResolver(
-      entries.map((entry) => entry.row),
+      subjects.map((subject) => subject.row),
       read(),
     );
   } catch (error) {
     reportEveryRow(toError(error));
     return [];
   }
-  if (rawIds.length !== entries.length) {
+  if (rawIds.length !== subjects.length) {
     reportEveryRow(
       new Error(
-        `The batch resolver of aggregate "${aggregate.type}" returned ${rawIds.length} ids for ${entries.length} rows`,
+        `The batch resolver of aggregate "${aggregate.type}" returned ${rawIds.length} ids for ${subjects.length} rows`,
       ),
     );
     return [];
   }
-  return entries.map((entry, index) => {
-    const aggregateId = normalizeResolvedId(rawIds[index], reporterFor(failures, entry, failedResolver));
-    return aggregateId === null ? undefined : toRoot(aggregate, aggregateId);
+  return subjects.map((subject, index) => {
+    const aggregateId = normalizeResolvedId(rawIds[index], report(subject.entry));
+    return aggregateId === null ? undefined : toRoot(aggregate, aggregateId, subject.row);
   });
 };
 
-const resolveRootsRowByRow = async <TModelName extends string, TDbHandle>(
-  entries: readonly IdentifiedEntry<TModelName>[],
+const resolveRootsRowByRow = async <TDbHandle>(
+  subjects: readonly Subject[],
   entityType: string,
   aggregate: AggregateRoot,
   read: ReadHandle<TDbHandle>,
-  failures: ResolverFailure<TModelName>[],
+  report: (entry: number) => ReportFailure,
 ): Promise<(ResolvedRoot | undefined)[]> => {
-  warnAboutUnbatchedResolver(entityType, aggregate, entries.length);
-  const failedResolver = failedAggregateResolver(aggregate);
+  warnAboutUnbatchedResolver(entityType, aggregate, subjects.length);
   const roots: (ResolvedRoot | undefined)[] = [];
-  for (const entry of entries) {
-    const aggregateId = await callResolver(
-      () => aggregate.resolve(entry.row, read()),
-      reporterFor(failures, entry, failedResolver),
-    );
-    roots.push(aggregateId === null ? undefined : toRoot(aggregate, aggregateId));
+  for (const subject of subjects) {
+    const aggregateId = await callResolver(() => aggregate.resolve(subject.row, read()), report(subject.entry));
+    roots.push(aggregateId === null ? undefined : toRoot(aggregate, aggregateId, subject.row));
   }
   return roots;
 };
+
+/** The rows the `to()` resolvers run on: every entry's row, then the rows before the updates */
+const subjectsOf = <TModelName extends string>(entries: readonly IdentifiedEntry<TModelName>[]): Subject[] => [
+  ...entries.map((entry, index) => ({ entry: index, row: entry.row, former: false })),
+  ...entries.flatMap((entry, index) =>
+    entry.formerRow === undefined ? [] : [{ entry: index, row: entry.formerRow, former: true }],
+  ),
+];
 
 const isSameRoot = (a: ResolvedRoot, b: ResolvedRoot): boolean => aggregateRootKey(a) === aggregateRootKey(b);
 
 /**
  * Resolve the aggregate roots of every identified row and keep the rows that have at least one:
  * the self projection unless `self` is `false`, whose id is the entity id, then each `to()` root
- * in declaration order. A resolver that fails or returns no id contributes no root, and a root
- * equal in category, type and id to one the row already has is kept once, from the first
- * declaration.
+ * of the row in declaration order, then each `to()` root of the row before an update in
+ * declaration order. A resolver that fails or returns no id contributes no root, and a root equal
+ * in category, type and id to one the row already has is kept once, from the first it was
+ * resolved by: a root the row names both before and after an update is the current row's.
  */
 const resolveSurvivors = async <TModelName extends string, TDbHandle>(
   entries: readonly IdentifiedEntry<TModelName>[],
@@ -296,24 +347,46 @@ const resolveSurvivors = async <TModelName extends string, TDbHandle>(
   const perRowRoots: ResolvedRoot[][] = entries.map((entry) =>
     entity.self === false
       ? []
-      : [{ aggregateCategory: entity.category, aggregateType: entity.type, aggregateId: entry.entityId }],
+      : [
+          {
+            aggregateCategory: entity.category,
+            aggregateType: entity.type,
+            aggregateId: entry.entityId,
+            row: entry.row,
+          },
+        ],
   );
 
+  const subjects = subjectsOf(entries);
+  const perDeclaration: (ResolvedRoot | undefined)[][] = [];
   for (const aggregate of entity.aggregates) {
-    const roots = aggregate.batchResolve
-      ? await resolveRootsInBatch(entries, aggregate, aggregate.batchResolve, read, failures)
-      : await resolveRootsRowByRow(entries, entity.type, aggregate, read, failures);
-    roots.forEach((root, index) => {
-      const rowRoots = perRowRoots[index];
-      if (root && rowRoots && !rowRoots.some((known) => isSameRoot(known, root))) {
-        rowRoots.push(root);
-      }
-    });
+    const report = aggregateReporterFor(entries, aggregate, failures);
+    perDeclaration.push(
+      aggregate.batchResolve
+        ? await resolveRootsInBatch(subjects, aggregate, aggregate.batchResolve, read, report)
+        : await resolveRootsRowByRow(subjects, entity.type, aggregate, read, report),
+    );
   }
 
-  return entries.flatMap((entry, index) => {
+  const keep = (subject: Subject, root: ResolvedRoot | undefined): void => {
+    const rowRoots = perRowRoots[subject.entry];
+    if (root && rowRoots && !rowRoots.some((known) => isSameRoot(known, root))) {
+      rowRoots.push(root);
+    }
+  };
+  for (const former of [false, true]) {
+    for (const roots of perDeclaration) {
+      subjects.forEach((subject, index) => {
+        if (subject.former === former) {
+          keep(subject, roots[index]);
+        }
+      });
+    }
+  }
+
+  return entries.flatMap((_entry, index) => {
     const roots = perRowRoots[index];
-    return roots && roots.length > 0 ? [{ index, row: entry.row, roots }] : [];
+    return roots && roots.length > 0 ? [{ index, roots }] : [];
   });
 };
 
@@ -393,7 +466,7 @@ const enrichRootContexts = async <TDbHandle>(
 const groupByProjection = (survivors: readonly Survivor[]): ProjectionGroup[] => {
   const groups = new Map<AggregateRoot | typeof SELF_PROJECTION, ProjectionGroup>();
 
-  for (const { index, row, roots } of survivors) {
+  for (const { index, roots } of survivors) {
     for (const root of roots) {
       const groupKey = root.source ?? SELF_PROJECTION;
       let group = groups.get(groupKey);
@@ -406,7 +479,7 @@ const groupByProjection = (survivors: readonly Survivor[]): ProjectionGroup[] =>
         };
         groups.set(groupKey, group);
       }
-      group.entries.push({ index, row, aggregateId: root.aggregateId });
+      group.entries.push({ index, row: root.row, aggregateId: root.aggregateId });
     }
   }
 
@@ -549,9 +622,11 @@ const resolveModelGroup = async <TModelName extends string, TDbHandle>(
  * The actor context is enriched once per call. Events are then resolved per written model, in
  * order of first appearance: the entity's id resolver runs once per row, then the entity
  * enricher and each aggregate resolver and enricher run once per model with the rows whose
- * entity id resolved. An event yields nothing when its model has no entity configuration, when
- * the entity's id resolver returns no id or fails, or when no aggregate root resolves for its
- * row. A resolver that fails is returned in `failures`, never thrown.
+ * entity id resolved; an aggregate resolver also receives the row before the write of each
+ * update that carries it. An event yields nothing when its model has no entity configuration,
+ * when the entity's id resolver returns no id or fails, or when no aggregate root resolves for
+ * its row. A resolver that fails is returned in `failures`, never thrown, once per row and
+ * resolver.
  *
  * @param read - Returns the database handle for a user callback; evaluated at each call, never ahead of it
  * @throws Whatever an enricher with the `fail` strategy throws

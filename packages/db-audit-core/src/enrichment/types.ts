@@ -58,7 +58,8 @@ export interface ProjectionEnrichmentMeta {
  * Declared on a `to()` projection (or on `self.context`). Receives the rows of
  * the entity being written (NOT the aggregate root rows) and must return an
  * array of the same length and order. `meta.aggregateIds[i]` is the aggregate
- * ID resolved for `childRows[i]`.
+ * ID resolved for `childRows[i]`: for the aggregate a row left in an update,
+ * `childRows[i]` is the row as it was before the write.
  */
 export type ProjectionEnricherConfig<
   TDbHandle = unknown,

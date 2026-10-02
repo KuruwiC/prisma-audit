@@ -55,7 +55,11 @@ export interface MutationEvent<TModelName extends string = string> {
 export interface ResolvedEvent<TModelName extends string = string> extends MutationEvent<TModelName> {
   /** Output of the entity's idResolver, normalized with `normalizeId`. */
   readonly entityId: string;
-  /** Self projection (unless `self: false`) plus every `to()` root that resolved. Empty means no record. */
+  /**
+   * Self projection (unless `self: false`) plus every `to()` root that resolved from the row after
+   * the write and, for an update whose before state was captured, from the row before it.
+   * Empty means no record.
+   */
   readonly roots: readonly ResolvedId[];
   readonly actorContext: unknown;
   readonly entityContext: unknown;

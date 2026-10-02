@@ -44,11 +44,19 @@ dispatch({ buildRecords, modelName, operation, params, atomic, auditContext }, c
   every `to()` root that resolves), and the actor, entity and aggregate contexts from the configured
   enrichers. Id resolvers and enrichers receive the database handle through the `read` thunk,
   evaluated at each call, so a callback running inside a transaction reads that transaction's writes.
-  The entity's id resolver runs once per row and the self root is its id. A resolver that throws,
-  or returns an id `normalizeId` rejects, is returned in `failures` (the row, which resolver, the
-  error) instead of failing the call: the entity's id resolver leaves the row without records, a
-  `to()` resolver leaves it without the record under that root. The adapter decides how to report
-  them.
+  The entity's id resolver runs once per row, on the row after the write, and the self root is its
+  id. Each `to()` root is resolved from the row after the write and, for an update whose before
+  state is `captured`, from the row before it too: a row moved to another parent gets a record under
+  the aggregate it left as well as the one it joined. The roots of the row before the update come
+  after the others, and roots equal in category, type and id are kept once. A resolver that reads
+  the database (`lookup()`, `batchLookup()`) runs for the row before the update too and reads the
+  database as it is after the write; a projection's `context` enricher receives, for each root, the
+  row that resolved it. Without a captured before state (a read not asked for, or one that failed)
+  only the aggregates the row names after the write are known. A resolver that throws, or returns
+  an id `normalizeId` rejects, is returned in `failures` (the row, which resolver, the error),
+  once per row and resolver, instead of failing the call: the entity's id resolver leaves the row
+  without records, a `to()` resolver leaves it without the record under the root it failed to
+  resolve. The adapter decides how to report them.
 - **`compose`** builds one `AuditRecord` per aggregate root: before and after states by action, the
   field-level diff of an update (an update that changed only excluded fields of an existing before
   state yields no record),

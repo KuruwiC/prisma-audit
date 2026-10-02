@@ -401,6 +401,261 @@ describe('resolve', () => {
     });
   });
 
+  describe('roots of the row before an update', () => {
+    const updated = (model: string, before: Row, after: Row): MutationEvent =>
+      event(model, after, {
+        action: 'update',
+        before: { kind: 'captured', row: before },
+        origin: { path: '', op: 'update' },
+      });
+    const root = (aggregateType: string, aggregateId: string) => ({
+      aggregateCategory: 'model',
+      aggregateType,
+      aggregateId,
+    });
+    const postOfAuthor = (resolver = foreignKey('authorId')) =>
+      configOf({ Post: defineEntity({ type: 'Post', aggregates: [to('User', resolver)] }) });
+
+    it('adds the roots only the row before the update names after the roots of the row after it', async () => {
+      const config = configOf({
+        Comment: defineEntity({
+          type: 'Comment',
+          aggregates: [to('Post', foreignKey('postId')), to('User', foreignKey('authorId'))],
+        }),
+      });
+
+      const { resolved } = await resolve(
+        [
+          updated(
+            'Comment',
+            { id: 'c1', postId: 'p-old', authorId: 'u1' },
+            { id: 'c1', postId: 'p-new', authorId: 'u1' },
+          ),
+        ],
+        auditContext,
+        config,
+        read,
+      );
+
+      expect(resolved[0]?.roots).toEqual([
+        root('Comment', 'c1'),
+        root('Post', 'p-new'),
+        root('User', 'u1'),
+        root('Post', 'p-old'),
+      ]);
+    });
+
+    it('keeps one root when the rows before and after the update name the same aggregate', async () => {
+      const { resolved } = await resolve(
+        [updated('Post', { id: 'p1', authorId: 'u1', title: 'old' }, { id: 'p1', authorId: 'u1', title: 'new' })],
+        auditContext,
+        postOfAuthor(),
+        read,
+      );
+
+      expect(resolved[0]?.roots).toEqual([root('Post', 'p1'), root('User', 'u1')]);
+    });
+
+    it('resolves only the old root of a row whose foreign key the update cleared', async () => {
+      const { resolved } = await resolve(
+        [updated('Post', { id: 'p1', authorId: 'u1' }, { id: 'p1', authorId: null })],
+        auditContext,
+        postOfAuthor(),
+        read,
+      );
+
+      expect(resolved[0]?.roots).toEqual([root('Post', 'p1'), root('User', 'u1')]);
+    });
+
+    it('resolves only the new root of a row whose foreign key the update set', async () => {
+      const { resolved } = await resolve(
+        [updated('Post', { id: 'p1', authorId: null }, { id: 'p1', authorId: 'u1' })],
+        auditContext,
+        postOfAuthor(),
+        read,
+      );
+
+      expect(resolved[0]?.roots).toEqual([root('Post', 'p1'), root('User', 'u1')]);
+    });
+
+    it('resolves a to() root from the one row of a create, a delete and an update without a captured before row', async () => {
+      const resolver = vi.fn(async (row: Row) => row.authorId as string);
+      const after = { id: 'p1', authorId: 'u-new' };
+      const before = { id: 'p1', authorId: 'u-old' };
+      const events: MutationEvent[] = [
+        event('Post', after),
+        event('Post', after, { action: 'update', before: { kind: 'none' } }),
+        event('Post', after, { action: 'update', before: { kind: 'unavailable' } }),
+        event('Post', before, { action: 'delete', before: { kind: 'captured', row: before } }),
+      ];
+
+      const { resolved } = await resolve(events, auditContext, postOfAuthor(lookup(resolver)), read);
+
+      expect(resolver.mock.calls.map(([row]) => row)).toEqual([after, after, after, before]);
+      expect(resolved.map((e) => e.roots.map((r) => r.aggregateId))).toEqual([
+        ['p1', 'u-new'],
+        ['p1', 'u-new'],
+        ['p1', 'u-new'],
+        ['p1', 'u-old'],
+      ]);
+    });
+
+    it('identifies the row by the row after the update only', async () => {
+      const idResolver = vi.fn(async (row: Row) => row.id as string);
+      const config = configOf({
+        Post: defineEntity({ type: 'Post', idResolver, aggregates: [to('User', foreignKey('authorId'))] }),
+      });
+      const after = { id: 'p1', authorId: 'u-new' };
+
+      await resolve([updated('Post', { id: 'p1', authorId: 'u-old' }, after)], auditContext, config, read);
+
+      expect(idResolver.mock.calls).toEqual([[after, handle]]);
+    });
+
+    it('runs a row-by-row resolver on the row before the update with the same handle', async () => {
+      const resolver = vi.fn(async (row: Row) => row.authorId as string);
+      const before = { id: 'p1', authorId: 'u-old' };
+      const after = { id: 'p1', authorId: 'u-new' };
+
+      const { resolved } = await resolve(
+        [updated('Post', before, after)],
+        auditContext,
+        postOfAuthor(lookup(resolver)),
+        read,
+      );
+
+      expect(resolver.mock.calls).toEqual([
+        [after, handle],
+        [before, handle],
+      ]);
+      expect(resolved[0]?.roots).toEqual([root('Post', 'p1'), root('User', 'u-new'), root('User', 'u-old')]);
+    });
+
+    it('drops only the old root when the resolver fails on the row before the update', async () => {
+      const error = new Error('old author unreadable');
+      const resolver = lookup(async (row: Row) => {
+        if (row.authorId === 'u-old') {
+          throw error;
+        }
+        return row.authorId as string;
+      });
+      const events = [updated('Post', { id: 'p1', authorId: 'u-old' }, { id: 'p1', authorId: 'u-new' })];
+
+      const { resolved, failures } = await resolve(events, auditContext, postOfAuthor(resolver), read);
+
+      expect(resolved[0]?.roots).toEqual([root('Post', 'p1'), root('User', 'u-new')]);
+      expect(failures).toEqual([
+        { event: events[0], resolver: { kind: 'aggregate', aggregateCategory: 'model', aggregateType: 'User' }, error },
+      ]);
+    });
+
+    it('reports a resolver failing on both rows of an update once, with the error of the row after it', async () => {
+      const resolver = lookup(async (row: Row) => {
+        throw new Error(`unreadable ${String(row.authorId)}`);
+      });
+      const events = [updated('Post', { id: 'p1', authorId: 'u-old' }, { id: 'p1', authorId: 'u-new' })];
+
+      const { resolved, failures } = await resolve(events, auditContext, postOfAuthor(resolver), read);
+
+      expect(resolved[0]?.roots).toEqual([root('Post', 'p1')]);
+      expect(failures.map((failure) => [failure.event, failure.error.message])).toEqual([
+        [events[0], 'unreadable u-new'],
+      ]);
+    });
+
+    describe('batchLookup', () => {
+      const moves = [
+        updated('Post', { id: 'p1', authorId: 'u1' }, { id: 'p1', authorId: 'u2' }),
+        updated('Post', { id: 'p2', authorId: 'u3' }, { id: 'p2', authorId: 'u4' }),
+      ];
+
+      it('calls the batch resolver once with the rows after the updates followed by the rows before them', async () => {
+        const batchFn = vi.fn(async (rows: { authorId?: string }[]) => rows.map((row) => row.authorId ?? null));
+
+        const { resolved } = await resolve(moves, auditContext, postOfAuthor(batchLookup(batchFn)), read);
+
+        expect(batchFn).toHaveBeenCalledTimes(1);
+        expect(batchFn).toHaveBeenCalledWith(
+          [
+            { id: 'p1', authorId: 'u2' },
+            { id: 'p2', authorId: 'u4' },
+            { id: 'p1', authorId: 'u1' },
+            { id: 'p2', authorId: 'u3' },
+          ],
+          handle,
+        );
+        expect(resolved.map((e) => e.roots.map((r) => r.aggregateId))).toEqual([
+          ['p1', 'u2', 'u1'],
+          ['p2', 'u4', 'u3'],
+        ]);
+      });
+
+      it('reports each update once when the batch resolver throws', async () => {
+        const error = new Error('DB down');
+        const resolver = batchLookup(async () => {
+          throw error;
+        });
+
+        const { failures } = await resolve(moves, auditContext, postOfAuthor(resolver), read);
+
+        const failed = { kind: 'aggregate', aggregateCategory: 'model', aggregateType: 'User' };
+        expect(failures).toEqual([
+          { event: moves[0], resolver: failed, error },
+          { event: moves[1], resolver: failed, error },
+        ]);
+      });
+
+      it('reports each update once when the batch resolver returns the wrong number of ids', async () => {
+        const { failures } = await resolve(moves, auditContext, postOfAuthor(batchLookup(async () => ['u1'])), read);
+
+        expect(failures.map((failure) => [failure.event, failure.error.message])).toEqual(
+          moves.map((e) => [e, 'The batch resolver of aggregate "User" returned 1 ids for 4 rows']),
+        );
+      });
+    });
+
+    it('enriches an old root of a projection with the row before the update', async () => {
+      const enricher = vi.fn(async (rows: Row[], _db: unknown, _meta: ProjectionEnrichmentMeta) =>
+        rows.map((row) => ({ title: row.title })),
+      );
+      const config = configOf({
+        Post: defineEntity({
+          type: 'Post',
+          aggregates: [to('User', foreignKey('authorId'), { context: { enricher } })],
+        }),
+      });
+      const before = { id: 'p1', authorId: 'u-old', title: 'old' };
+      const after = { id: 'p1', authorId: 'u-new', title: 'new' };
+
+      const { resolved } = await resolve([updated('Post', before, after)], auditContext, config, read);
+
+      expect(enricher).toHaveBeenCalledTimes(1);
+      expect(enricher.mock.calls[0]?.[0]).toEqual([after, before]);
+      expect(enricher.mock.calls[0]?.[2]).toMatchObject({ aggregateIds: ['u-new', 'u-old'] });
+      expect(resolved[0]?.aggregateContexts.get('model:User:u-new')).toEqual({ title: 'new' });
+      expect(resolved[0]?.aggregateContexts.get('model:User:u-old')).toEqual({ title: 'old' });
+    });
+
+    it('enriches the old and the new root in one root-side call', async () => {
+      const rootEnricher = vi.fn(async (ids: string[]) => ids.map((id) => ({ userName: `name-${id}` })));
+      const config = configOf({
+        User: defineEntity({ type: 'User', aggregateContext: { enricher: rootEnricher } }),
+        Post: defineEntity({ type: 'Post', aggregates: [to('User', foreignKey('authorId'))] }),
+      });
+
+      const { resolved } = await resolve(
+        [updated('Post', { id: 'p1', authorId: 'u-old' }, { id: 'p1', authorId: 'u-new' })],
+        auditContext,
+        config,
+        read,
+      );
+
+      expect(rootEnricher).toHaveBeenCalledTimes(1);
+      expect(rootEnricher.mock.calls[0]?.[0]).toEqual(['u-new', 'u-old']);
+      expect(resolved[0]?.aggregateContexts.get('model:User:u-old')).toEqual({ userName: 'name-u-old' });
+    });
+  });
+
   describe('N+1 warning for row-by-row lookup() resolvers', () => {
     const postWithResolveId = () =>
       configOf({
