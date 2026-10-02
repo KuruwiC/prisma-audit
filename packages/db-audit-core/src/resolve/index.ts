@@ -138,7 +138,6 @@ interface ModelGroup<TModelName extends string> {
 const rowOf = (event: MutationEvent): Row | undefined =>
   event.after ?? (event.before.kind === 'captured' ? event.before.row : undefined);
 
-/** The row before the write of an update that also carries the row after it */
 const formerRowOf = (event: MutationEvent): Row | undefined =>
   event.action === 'update' && event.after !== undefined && event.before.kind === 'captured'
     ? event.before.row

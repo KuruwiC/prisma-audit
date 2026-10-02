@@ -41,7 +41,6 @@ export interface OperationSteps<TPrepared, TExecuted> {
 }
 
 export interface ExecutedOperation {
-  /** The value the caller receives */
   readonly result: unknown;
   /** Reads what the write left behind and builds the audit records from it */
   readonly buildRecords: () => Promise<AuditRecord[]>;

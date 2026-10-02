@@ -3,9 +3,6 @@
  *
  * Builds one operation's audit records once its write has run and writes them relative to that
  * write and its commit, from the write policy and the transaction runtime the adapter supplies.
- * The write plan is decided before the build, and the outcome of a failure of either the build or
- * the write follows from it: a failed build is reported as `diff-generation`, a failed write to the
- * failure sink with the write plan it belongs to.
  */
 
 import type { AuditRecord } from '../domain/mutation-event.js';
@@ -16,17 +13,12 @@ import { toError } from '../utils/to-error.js';
 
 export interface DispatchConfig<TDbHandle = unknown> {
   readonly writeExecutor: WriteExecutor<TDbHandle>;
-  /** The user's hook, run in place of the default write */
   readonly writer?: WriteFn<TDbHandle>;
   readonly failureSink: FailureSink;
 }
 
 type Work = () => Promise<void>;
 
-/**
- * The write plan, decided from the policy and the runtime before the records are built: written
- * immediately, or handed to the runtime to run after commit or detached
- */
 const planOf = <TDbHandle>(
   atomic: boolean,
   runtime: TransactionRuntime<TDbHandle>,
@@ -63,11 +55,8 @@ export const dispatch = async <TDbHandle>(
   audited: {
     /** Builds the operation's audit records from what its write left behind */
     readonly buildRecords: () => Promise<readonly AuditRecord[]>;
-    /** The model the operation wrote, as a failure report names it */
     readonly modelName: string;
-    /** The keyword of the operation, as a failure report names it */
     readonly operation: string;
-    /** The arguments of the operation, as a failure report carries them */
     readonly params: unknown;
     /** The write policy's decision: the records are written in the operation's transaction */
     readonly atomic: boolean;

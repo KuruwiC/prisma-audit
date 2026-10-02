@@ -90,7 +90,6 @@ export interface PreFetchOneToOneRelationInput extends Omit<ResolveParentRowsInp
   connectedRowWheres?: ReadonlyMap<ParentRowIdentity, PreFetchRecord>;
 }
 
-/** The flat link key of the related row of `parentRow`, or undefined when a link field of it is unset */
 const linkWhereOf = (link: ToOneRelationLink, parentRow: PreFetchRecord): PreFetchRecord | undefined => {
   const values = link.parentFields.map((fieldName) => parentRow[fieldName]);
   if (values.some((value) => value === null || value === undefined)) {

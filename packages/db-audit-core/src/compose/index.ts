@@ -95,11 +95,6 @@ const serializeRecord = (record: AuditRecord, customSerializers?: ValueSerialize
   requestContext: serializeForAuditJson(record.requestContext, customSerializers),
 });
 
-/**
- * `changes` compares the row's columns: the relation fields a state holds are what the adapter
- * read with the row, not columns of it, so they are left out of the comparison whether or not
- * they stay in the stored states.
- */
 const resolveStates = <TModelName extends string>(
   event: ResolvedEvent<TModelName>,
   entity: EntityComposeConfig,

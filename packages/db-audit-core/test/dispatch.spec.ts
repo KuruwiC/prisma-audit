@@ -114,7 +114,6 @@ const logWriteContext: AuditErrorContext = {
 /** How a failure report names the dispatched operation */
 const operationFacts = { modelName: 'Post', operation: 'create', params: { id: 'post-1' } };
 
-/** The audited operation as dispatch receives it */
 const audited = (atomic: boolean, buildRecords: () => Promise<readonly AuditRecord[]> = async () => records) => ({
   buildRecords,
   ...operationFacts,
