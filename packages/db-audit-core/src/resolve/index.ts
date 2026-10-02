@@ -106,7 +106,7 @@ interface Entry<TModelName extends string> {
   readonly position: number;
   readonly event: MutationEvent<TModelName>;
   readonly row: Row;
-  readonly formerRow?: Row;
+  readonly rowBeforeUpdate?: Row;
 }
 
 interface IdentifiedEntry<TModelName extends string> extends Entry<TModelName> {
@@ -125,7 +125,7 @@ interface Subject {
   /** Position of the entry among the identified entries of its model group */
   readonly entryIndex: number;
   readonly row: Row;
-  readonly former: boolean;
+  readonly isRowBeforeUpdate: boolean;
 }
 
 /** The events of one written model, in event order. */
@@ -138,7 +138,7 @@ interface ModelGroup<TModelName extends string> {
 const rowOf = (event: MutationEvent): Row | undefined =>
   event.after ?? (event.before.kind === 'captured' ? event.before.row : undefined);
 
-const formerRowOf = (event: MutationEvent): Row | undefined =>
+const rowBeforeUpdateOf = (event: MutationEvent): Row | undefined =>
   event.action === 'update' && event.after !== undefined && event.before.kind === 'captured'
     ? event.before.row
     : undefined;
@@ -160,7 +160,7 @@ const groupByModel = <TModelName extends string>(
       entries = [];
       groups.set(event.model, entries);
     }
-    entries.push({ position, event, row, formerRow: formerRowOf(event) });
+    entries.push({ position, event, row, rowBeforeUpdate: rowBeforeUpdateOf(event) });
   });
 
   return Array.from(groups, ([model, entries]) => ({ model, entries }));
@@ -321,9 +321,11 @@ const resolveRootsRowByRow = async <TDbHandle>(
 
 /** The rows the `to()` resolvers run on: every entry's row, then the rows before the updates */
 const subjectsOf = <TModelName extends string>(entries: readonly IdentifiedEntry<TModelName>[]): Subject[] => [
-  ...entries.map((entry, index) => ({ entryIndex: index, row: entry.row, former: false })),
+  ...entries.map((entry, index) => ({ entryIndex: index, row: entry.row, isRowBeforeUpdate: false })),
   ...entries.flatMap((entry, index) =>
-    entry.formerRow === undefined ? [] : [{ entryIndex: index, row: entry.formerRow, former: true }],
+    entry.rowBeforeUpdate === undefined
+      ? []
+      : [{ entryIndex: index, row: entry.rowBeforeUpdate, isRowBeforeUpdate: true }],
   ),
 ];
 
@@ -373,10 +375,10 @@ const resolveSurvivors = async <TModelName extends string, TDbHandle>(
       rowRoots.push(root);
     }
   };
-  for (const former of [false, true]) {
+  for (const isRowBeforeUpdate of [false, true]) {
     for (const roots of perDeclaration) {
       subjects.forEach((subject, index) => {
-        if (subject.former === former) {
+        if (subject.isRowBeforeUpdate === isRowBeforeUpdate) {
           keep(subject, roots[index]);
         }
       });
