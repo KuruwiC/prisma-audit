@@ -565,6 +565,45 @@ describe('nested rows attributed through their parent row', () => {
       });
     });
 
+    it('takes the branch of a to-one upsert under the elements of to-many updates at one path below different rows', async () => {
+      const { basePrisma, prisma, run, recordsOf, phases, author } = await setup({ fetchBeforeUpdate: false });
+      for (const name of ['first', 'second']) {
+        await basePrisma.post.create({ data: { id: `${name}-post`, title: name, authorId: author.id } });
+        await basePrisma.user.create({ data: { id: `${name}-commenter`, email: `${name}@example.com`, name } });
+        await basePrisma.comment.create({
+          data: { id: `${name}-comment`, content: 'old', postId: `${name}-post`, authorId: `${name}-commenter` },
+        });
+      }
+      const updateCommentAuthor = (name: string) => ({
+        where: { id: `${name}-post` },
+        data: {
+          comments: {
+            update: {
+              where: { id: `${name}-comment` },
+              data: {
+                author: {
+                  upsert: {
+                    create: { id: `${name}-new`, email: `${name}-new@example.com`, name: 'new' },
+                    update: { name: `${name} renamed` },
+                  },
+                },
+              },
+            },
+          },
+        },
+      });
+
+      await run(() =>
+        prisma.user.update({
+          where: { id: author.id },
+          data: { posts: { update: [updateCommentAuthor('first'), updateCommentAuthor('second')] } },
+        }),
+      );
+
+      expect(await recordsOf('User')).toEqual(['author:update', 'first-commenter:update', 'second-commenter:update']);
+      expect(phases()).toEqual([]);
+    });
+
     it('takes the branch of a to-one upsert under an element whose WHERE names its row by a compound unique', async () => {
       const { basePrisma, prisma, run, recordsOf, phases, post } = await setup({ fetchBeforeUpdate: false });
       await basePrisma.tag.create({ data: { id: 'tag-a', name: 'a' } });
