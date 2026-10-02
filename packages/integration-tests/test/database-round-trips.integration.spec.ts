@@ -304,7 +304,8 @@ describe('Database Round-Trip Guard', () => {
     // 6. SELECT FROM users      — Prisma's read of the update() result
     // 7. SELECT FROM posts      — the connected post read again by primary key: its new authorId
     // 8. INSERT INTO audit_logs — one batched write: the post's update (authorId old → new) + its
-    //                             aggregate-owner (User) propagation log
+    //                             aggregate-owner (User) propagation logs, under the user it
+    //                             joined and the user it left — 3 rows, 1 statement
     // 9. COMMIT
     expect(statements).toHaveLength(9);
   });

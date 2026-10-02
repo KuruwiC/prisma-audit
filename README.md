@@ -432,7 +432,7 @@ User: defineEntity({
 }),
 ```
 
-**Projection-side — `context` on the `to()` declaration.** Specific to one projection; the enricher receives the _written_ rows (not the root rows), with `meta.aggregateIds[i]` holding the aggregate ID resolved for row `i`:
+**Projection-side — `context` on the `to()` declaration.** Specific to one projection; the enricher receives the _written_ rows (not the root rows), with `meta.aggregateIds[i]` holding the aggregate ID resolved for row `i` (for the aggregate a row left in an update, row `i` is the row as it was before the write):
 
 ```typescript
 PostTag: defineEntity({
@@ -487,6 +487,8 @@ When an OrderItem is updated, the audit log records both:
 - **Aggregate**: Order (order-123) — the business context it belongs to
 
 This enables queries like "show me all changes related to Order #123" across OrderItem, Payment, and Order itself.
+
+When an update moves a row to another parent (an OrderItem whose `orderId` changes), the log is recorded under both the Order it left and the Order it joined, from the row read before the write (`fetchBefore.update`, on by default). With that read off, or when it fails, only the Order it joined gets the log.
 
 ## PII Redaction
 
