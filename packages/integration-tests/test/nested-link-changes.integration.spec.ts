@@ -321,7 +321,9 @@ describe('foreign-key changes of related rows', () => {
           }),
         );
 
-        expect(await recordsOf('Label')).toEqual([expect.objectContaining({ id: 'l1', action: 'update', changes })]);
+        const labels = await recordsOf('Label');
+        expect(labels.map(({ id, action }) => [id, action])).toEqual([['l1', 'update']]);
+        expect(labels[0]?.changes).toEqual(changes);
       },
     );
 
@@ -434,7 +436,9 @@ describe('foreign-key changes of related rows', () => {
           }),
         );
 
-        expect(await recordsOf('Badge')).toEqual([expect.objectContaining({ id: 'b1', action: 'update', changes })]);
+        const badges = await recordsOf('Badge');
+        expect(badges.map(({ id, action }) => [id, action])).toEqual([['b1', 'update']]);
+        expect(badges[0]?.changes).toEqual(changes);
       },
     );
   });
@@ -447,7 +451,7 @@ describe('foreign-key changes of related rows', () => {
 
       const posts = await recordsOf('Post');
       expect(posts.map(({ id, action }) => [id, action])).toEqual([['p-live', 'update']]);
-      expect(posts[0]?.changes).toMatchObject({ authorId: { old: 'u1', new: 'u2' } });
+      expect(posts[0]?.changes).toEqual({ authorId: { old: 'u1', new: 'u2' } });
       expect(await recordsOf('User')).toEqual([]);
     });
 
@@ -466,10 +470,10 @@ describe('foreign-key changes of related rows', () => {
 
       const posts = await recordsOf('Post');
       expect(posts.map(({ id, action }) => [id, action])).toEqual([['p-live', 'update']]);
-      expect(posts[0]?.changes).toMatchObject({ authorId: { old: 'u1', new: 'u2' } });
+      expect(posts[0]?.changes).toEqual({ authorId: { old: 'u1', new: 'u2' } });
       const users = await recordsOf('User');
       expect(users.map(({ id, action }) => [id, action])).toEqual([['u2', 'update']]);
-      expect(users[0]?.changes).toMatchObject({ name: { old: 'Ben', new: 'Ben renamed' } });
+      expect(users[0]?.changes).toEqual({ name: { old: 'Ben', new: 'Ben renamed' } });
     });
 
     it('audits the row a connectOrCreate names and an update writes as the update of that row', async () => {
