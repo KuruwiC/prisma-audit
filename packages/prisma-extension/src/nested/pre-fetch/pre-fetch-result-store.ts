@@ -94,6 +94,10 @@ export const preFetchedResultFor = (
         ?.get(path)
         ?.results.find((result) => !isNamedByParent(result) && result.identity === identity);
 
+/** Whether the read of `result` named its row by exactly the unique WHERE `where` */
+const isNamedByWhere = (result: NestedPreFetchResult, where: Row): boolean =>
+  result.name.by === 'uniqueWhere' && sameUniqueWhere(result.name.where, where);
+
 const isResultNamedBy = (result: NestedPreFetchResult, where: Row): boolean => {
   if (result.before.kind === 'captured' && matchesUniqueWhere(result.before.row, where)) {
     return true;
@@ -101,7 +105,7 @@ const isResultNamedBy = (result: NestedPreFetchResult, where: Row): boolean => {
   if (isNamedByParent(result)) {
     return false;
   }
-  return (result.key !== undefined && namesKey(result.key, where)) || isUnidentifiedRowNamedBy(result, where);
+  return (result.key !== undefined && namesKey(result.key, where)) || isNamedByWhere(result, where);
 };
 
 export const preFetchedResultNamedBy = (
@@ -184,6 +188,30 @@ export const storeReadResult = (
       ? { before, identity: extractEntityIdentity(key, pkConstraint.fields), name, key }
       : { before, identity: UNRESOLVED_ENTITY_ID, name },
   );
+};
+
+/**
+ * Stores the identity a read of the key columns of the row `where` names found, without a before
+ * state, under that WHERE, so an operation naming the row by it finds the row's identity. It never
+ * replaces what another read at the path learned of the row.
+ */
+export const storeIdentifiedRow = (
+  nestedPreFetchResults: NestedPreFetchResults,
+  path: string,
+  where: Row,
+  identity: EntityIdentityKey,
+): void => {
+  if (
+    preFetchedResultFor(nestedPreFetchResults, path, identity) ||
+    preFetchedResultNamedBy(nestedPreFetchResults, path, where)
+  ) {
+    return;
+  }
+  storePreFetchResult(nestedPreFetchResults, path, {
+    before: NO_BEFORE_STATE,
+    identity,
+    name: { by: 'uniqueWhere', where },
+  });
 };
 
 /**

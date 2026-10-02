@@ -7,8 +7,10 @@ import type { NestedPreFetchResults } from '../../../src/grammar/nested-operatio
 import { TOP_LEVEL_ROW } from '../../../src/grammar/nested-state.js';
 import {
   preFetchedResultFor,
+  preFetchedResultNamedBy,
   preFetchedStateNamedBy,
   preFetchedStateUnder,
+  storeIdentifiedRow,
   storePreFetchResult,
   storeReadResult,
   storeUnreadRows,
@@ -158,6 +160,33 @@ describe('storeReadResult', () => {
     expect(preFetchedStateNamedBy(store, 'posts.comments', { id: 'c2' })).toEqual({
       kind: 'captured',
       row: { id: 'c2' },
+    });
+  });
+});
+
+describe('storeIdentifiedRow', () => {
+  const where = { postId_tagId: { postId: 'p1', tagId: 't1' } };
+
+  it('finds the row by the unique WHERE its read named it by, without a before state', () => {
+    const store: NestedPreFetchResults = new Map();
+    storeIdentifiedRow(store, 'postTags', where, 'pt-1');
+
+    expect(preFetchedResultNamedBy(store, 'postTags', { postId_tagId: { postId: 'p1', tagId: 't1' } })).toEqual({
+      before: { kind: 'none' },
+      identity: 'pt-1',
+      name: { by: 'uniqueWhere', where },
+    });
+    expect(preFetchedResultNamedBy(store, 'postTags', { postId_tagId: { postId: 'p1', tagId: 't2' } })).toBeUndefined();
+  });
+
+  it('keeps what another read at the path learned of the row', () => {
+    const store: NestedPreFetchResults = new Map();
+    storeReadResult(store, 'postTags', { id: 'pt-1' }, { id: 'pt-1', postId: 'p1', tagId: 't1' }, pk);
+    storeIdentifiedRow(store, 'postTags', where, 'pt-1');
+
+    expect(preFetchedStateNamedBy(store, 'postTags', where)).toEqual({
+      kind: 'captured',
+      row: { id: 'pt-1', postId: 'p1', tagId: 't1' },
     });
   });
 });

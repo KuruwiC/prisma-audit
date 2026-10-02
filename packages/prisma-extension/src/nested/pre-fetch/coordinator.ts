@@ -67,6 +67,7 @@ import {
   markPathUnread,
   preFetchedResultUnder,
   primaryKeyNamedBy,
+  storeIdentifiedRow,
   storePreFetchResult,
   storeReadResult,
   storeUnreadRows,
@@ -589,9 +590,11 @@ const keyColumnsOf = (
 
 /**
  * Reads the key columns of the row each element of a to-many `update` whose before state is not
- * read names by primary key, when a to-one relation below it links by another column of that row
- * (a foreign key on the row): one read per element, so bounded by the caller's args. The primary
- * key the WHERE names is enough for every other relation below it.
+ * read names, when its WHERE names the row by a unique field other than the primary key, or a
+ * to-one relation below it links by another column of that row (a foreign key on the row): one
+ * read per element, so bounded by the caller's args. The read row is stored under the element's
+ * WHERE, so the element's row is identified by it. A WHERE that names the primary key is enough
+ * for every other relation below it.
  */
 const identifyNamedRows = async (
   context: NestedPreFetchContext,
@@ -600,19 +603,23 @@ const identifyNamedRows = async (
   keyColumns: Record<string, true>,
 ): Promise<void> => {
   const { nestedOp, pkConstraint } = relation;
-  if (Object.keys(keyColumns).length === pkConstraint.fields.length) {
-    return;
-  }
+  const linksByPrimaryKey = Object.keys(keyColumns).length === pkConstraint.fields.length;
   const keys = context.identifiedRowKeys.get(nestedOp.path) ?? [];
   context.identifiedRowKeys.set(nestedOp.path, keys);
   for (const where of targetWhereClauses(nestedOp.operation, nestedOp.data)) {
-    if (!primaryKeyNamedBy(where, pkConstraint)) {
+    if (linksByPrimaryKey && primaryKeyNamedBy(where, pkConstraint)) {
       continue;
     }
     const row = await relatedModelClient.findUnique({ where, select: keyColumns });
     preFetchLog('key columns of a to-many update row: path=%s found=%s', nestedOp.path, row !== null);
     if (row) {
       keys.push(row);
+      storeIdentifiedRow(
+        context.preFetchResults,
+        nestedOp.path,
+        where,
+        extractEntityIdOrUnresolved(row, pkConstraint.fields),
+      );
     }
   }
 };

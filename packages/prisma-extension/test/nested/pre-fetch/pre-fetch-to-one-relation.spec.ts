@@ -493,7 +493,10 @@ describe('nested to-one pre-fetch relation link and parent rows', () => {
         [{ where: { id: 'm1' }, select: { id: true, deskId: true } }],
         [{ where: { id: 'm2' }, select: { id: true, deskId: true } }],
       ]);
-      expect(results.get('members')).toBeUndefined();
+      expect(results.get('members')?.results).toEqual([
+        { before: { kind: 'none' }, identity: 'm1', name: { by: 'uniqueWhere', where: { id: 'm1' } } },
+        { before: { kind: 'none' }, identity: 'm2', name: { by: 'uniqueWhere', where: { id: 'm2' } } },
+      ]);
       expect(preFetchedStateUnder(results, 'members.desk', 'm1')).toMatchObject({
         kind: 'captured',
         row: { label: 'desk-1' },
@@ -504,23 +507,40 @@ describe('nested to-one pre-fetch relation link and parent rows', () => {
       });
     });
 
-    it('does not read an element whose WHERE names its row by another unique field', async () => {
+    it('reads the row an element names by another unique field and keeps it under that WHERE', async () => {
       const client = createClient({
         account: [{ id: 'a1' }],
         member: [{ id: 'm1', accountId: 'a1', code: 'first', deskId: 'd1' }],
-        desk: [{ id: 'd1', label: 'desk-1' }],
+        badge: [{ id: 'b1', memberId: 'm1', label: 'badge-1' }],
       });
       const member = client.member as ReturnType<typeof createDelegate>;
       const findUnique = vi.spyOn(member, 'findUnique');
 
-      await preFetch(
+      const results = await preFetch(
         client,
         'Account',
-        { where: { id: 'a1' }, data: { members: { update: upsertDesk({ code: 'first' }) } } },
+        {
+          where: { id: 'a1' },
+          data: {
+            members: {
+              update: {
+                where: { code: 'first' },
+                data: { badge: { upsert: { create: { label: 'new' }, update: { label: 'changed' } } } },
+              },
+            },
+          },
+        },
         noUpdateReads,
       );
 
-      expect(findUnique).not.toHaveBeenCalled();
+      expect(findUnique.mock.calls).toEqual([[{ where: { code: 'first' }, select: { id: true } }]]);
+      expect(results.get('members')?.results).toEqual([
+        { before: { kind: 'none' }, identity: 'm1', name: { by: 'uniqueWhere', where: { code: 'first' } } },
+      ]);
+      expect(preFetchedStateUnder(results, 'members.badge', 'm1')).toMatchObject({
+        kind: 'captured',
+        row: { label: 'badge-1' },
+      });
     });
 
     it('is not read when every relation below it links by the primary key its WHERE names', async () => {

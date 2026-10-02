@@ -506,6 +506,30 @@ describe('nested rows attributed through their parent row', () => {
       expect(phases()).toEqual([]);
     });
 
+    it('takes the branch of a to-one upsert under an element whose WHERE names its row by a compound unique', async () => {
+      const { basePrisma, prisma, run, recordsOf, phases, post } = await setup({ fetchBeforeUpdate: false });
+      await basePrisma.tag.create({ data: { id: 'tag-a', name: 'a' } });
+      await basePrisma.postTag.create({ data: { id: 'pt-a', postId: post.id, tagId: 'tag-a' } });
+
+      await run(() =>
+        prisma.post.update({
+          where: { id: post.id },
+          data: {
+            postTags: {
+              update: {
+                where: { postId_tagId: { postId: post.id, tagId: 'tag-a' } },
+                data: { tag: { upsert: { create: { id: 'tag-new', name: 'new' }, update: { name: 'a2' } } } },
+              },
+            },
+          },
+        }),
+      );
+
+      expect(await recordsOf('Tag')).toEqual(['tag-a:update']);
+      expect(await recordsOf('PostTag')).toEqual(['pt-a:update']);
+      expect(phases()).toEqual([]);
+    });
+
     it('does not record the to-one upsert under an element when the read of the key columns of its row fails', async () => {
       const { basePrisma, prisma, run, arm, recordsOf, phases, post } = await setup({
         fetchBeforeUpdate: false,
