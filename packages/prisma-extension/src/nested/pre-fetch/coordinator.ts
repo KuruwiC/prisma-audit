@@ -18,6 +18,7 @@ import {
   targetWhereClauses,
   type UpsertBranch,
 } from '../../grammar/nested-operations.js';
+import type { ParentRowIdentity } from '../../grammar/nested-state.js';
 import {
   filterOperationsToPreFetch,
   type ShouldFetchBefore,
@@ -53,7 +54,14 @@ import {
   preFetchOneToOneRelation,
   resolveToOneRelationLink,
 } from './one-to-one-fetcher.js';
-import { isRecord, parentKeysFromOperationWheres, parentPathOf, targetsNamedByWhere } from './parent-rows.js';
+import {
+  isRecord,
+  parentKeysFromOperationWheres,
+  parentPathOf,
+  parentRowIdentityOf,
+  targetsNamedByWhere,
+  writesLinkedRow,
+} from './parent-rows.js';
 import {
   extractEntityIdOrUnresolved,
   markPathUnread,
@@ -235,6 +243,8 @@ export const preFetchNestedRecordsBeforeOperation = async (
   const context: NestedPreFetchContext = {
     prismaClient,
     modelName,
+    schemaMetadata,
+    nestedOperations,
     dmmf,
     topLevelModel: dmmf.datamodel.models.find((m) => m.name === modelName),
     topLevelModelClient: getPreFetchModelClient(prismaClient, modelName),
@@ -350,6 +360,9 @@ const updatedRowsToIdentify = (
 interface NestedPreFetchContext {
   prismaClient: PrismaClientWithDynamicAccess | TransactionalPrismaClient;
   modelName: string;
+  schemaMetadata: SchemaMetadata;
+  /** Every nested operation the discovery pass detected */
+  nestedOperations: readonly NestedOperationInfo[];
   dmmf: PrismaDMMF;
   topLevelModel: DMMFModel | undefined;
   topLevelModelClient: PreFetchModelClient | undefined;
@@ -516,6 +529,7 @@ const handleOneToOneRelation = async (
     topLevelModelClient,
     relatedModelClient,
     preFetchResults,
+    connectedRowWheres: connectedRowWheresAt(context, nestedOp.path),
     ...(keyColumns ? { select: keyColumns } : {}),
   });
 
@@ -523,6 +537,29 @@ const handleOneToOneRelation = async (
   if (!parentsKnown) {
     markPathUnread(preFetchResults, nestedOp.path);
   }
+};
+
+const sameParent = (a: NestedOperationInfo, b: NestedOperationInfo): boolean =>
+  a.parent?.operation === b.parent?.operation && a.parent?.element === b.parent?.element;
+
+/**
+ * The unique WHERE of the row a to-one `connect` names, keyed by its parent row, for each parent
+ * row an `update` or `upsert` next to it writes the linked row of: Prisma links the named row
+ * first, so that row, not the one linked before the write, is the row the write's before state
+ * is read from
+ */
+const connectedRowWheresAt = (context: NestedPreFetchContext, path: string): Map<ParentRowIdentity, PreFetchRecord> => {
+  const atPath = context.nestedOperations.filter((op) => op.path === path && !op.isList);
+  const wheres = new Map<ParentRowIdentity, PreFetchRecord>();
+  for (const connect of atPath.filter((op) => op.operation === 'connect')) {
+    const [where] = targetWhereClauses(connect.operation, connect.data);
+    const linkedRowWritten = atPath.some((op) => writesLinkedRow(op) && sameParent(op, connect));
+    const parent = parentRowIdentityOf(connect.parent, context.preFetchResults, context.schemaMetadata);
+    if (where && linkedRowWritten && parent !== undefined) {
+      wheres.set(parent, where);
+    }
+  }
+  return wheres;
 };
 
 /**

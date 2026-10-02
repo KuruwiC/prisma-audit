@@ -267,6 +267,31 @@ describe('nested to-one pre-fetch relation link and parent rows', () => {
     });
   });
 
+  it('reads the row a connect next to an update names instead of the row linked before the write', async () => {
+    const client = createClient({
+      account: [{ id: 'a1' }],
+      contact: [
+        { id: 'c-linked', primaryForId: 'a1', backupForId: null, label: 'linked' },
+        { id: 'c-named', primaryForId: null, backupForId: null, label: 'named' },
+      ],
+    });
+    const contact = client.contact as ReturnType<typeof createDelegate>;
+    const findUnique = vi.spyOn(contact, 'findUnique');
+    const findFirst = vi.spyOn(contact, 'findFirst');
+
+    const results = await preFetch(client, 'Account', {
+      where: { id: 'a1' },
+      data: { primaryContact: { connect: { id: 'c-named' }, update: { label: 'changed' } } },
+    });
+
+    expect(findUnique.mock.calls).toEqual([[{ where: { id: 'c-named' } }]]);
+    expect(findFirst).not.toHaveBeenCalled();
+    expect(preFetchedStateUnder(results, 'primaryContact', TOP_LEVEL_ROW)).toMatchObject({
+      kind: 'captured',
+      row: { id: 'c-named' },
+    });
+  });
+
   describe('a to-one update whose before state is not read', () => {
     const noUpdateReads = (_modelName: string, operation: string) => operation !== 'update';
 

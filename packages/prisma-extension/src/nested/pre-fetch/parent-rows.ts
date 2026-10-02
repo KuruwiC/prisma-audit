@@ -191,6 +191,13 @@ export const targetsNamedByWhere = (operation: NestedOperationInfo): boolean =>
   operation.isList || operation.operation === 'connectOrCreate';
 
 /**
+ * Whether a to-one operation writes the row linked to its parent row, whichever row that is: a
+ * `connect` next to it links the row it names first
+ */
+export const writesLinkedRow = (operation: NestedOperationInfo): boolean =>
+  !operation.isList && (operation.operation === 'update' || operation.operation === 'upsert');
+
+/**
  * The identity, before the operation, of the row the element `parent` names: the top-level row
  * when `parent` is absent; for an element of a to-many operation or a connectOrCreate, the row
  * its unique WHERE names (as read, else the primary key the WHERE names); for a to-one

@@ -51,7 +51,7 @@ import { nestedLog } from '../../utils/debug.js';
 import { extractEntityIdentity } from '../../utils/id-generation.js';
 import type { LinkReads } from '../pre-fetch/link-rows.js';
 import { getPreFetchListClient } from '../pre-fetch/model-client.js';
-import { parentRowIdentityOf } from '../pre-fetch/parent-rows.js';
+import { parentRowIdentityOf, writesLinkedRow } from '../pre-fetch/parent-rows.js';
 import type { PreExistingRows } from '../pre-fetch/pre-existing-rows.js';
 import { preFetchedStateNamedBy, preFetchedStateUnder } from '../pre-fetch/pre-fetch-result-store.js';
 import { resolveToManyPath } from '../pre-fetch/to-many-path.js';
@@ -313,10 +313,13 @@ const writesUnnamedRow = (walk: CollectionWalk, candidate: NestedOperationInfo):
   (candidate.operation === 'connectOrCreate' && toOneBeforeState(walk, candidate).kind === 'none');
 
 /**
- * The candidate that names the row by unique WHERE; else the candidates that write the related
- * row of their parent without naming it. Those cannot be told apart when the elements of a list
- * insert each write one, so the row is recorded for one not recorded yet, and every one of them
- * may have written it.
+ * The candidate that names the row by unique WHERE, together with an `update` or `upsert` next to
+ * it, which Prisma applies to the row the candidate linked; else the candidates that write the
+ * related row of their parent without naming it. Those cannot be told apart when the elements of
+ * a list insert each write one, so the row is recorded for one not recorded yet, and every one of
+ * them may have written it. Of a named row's writers, the row is recorded for the first whose
+ * write is audited from the row's before state and its state after the write, so that one record
+ * carries every change they made.
  */
 const toOneWriterOf = (
   walk: CollectionWalk,
@@ -329,7 +332,14 @@ const toOneWriterOf = (
       targetWhereClauses(candidate.operation, candidate.data).some((where) => matchesUniqueWhere(row, where)),
   );
   if (named) {
-    return { recorded: named, attribution: { operations: [named], element: 0 } };
+    const writing = [named, ...candidates.filter(writesLinkedRow)];
+    const recorded =
+      writing.find(
+        (candidate) =>
+          resolveNestedRowState(candidate, toOneBeforeState(walk, candidate), walk.deps.shouldFetchBefore) !==
+          undefined,
+      ) ?? named;
+    return { recorded, attribution: { operations: writing, element: 0 } };
   }
   const writers = candidates.filter((candidate) => writesUnnamedRow(walk, candidate));
   const recorded = writers.find((candidate) => !walk.assigned.has(candidate)) ?? writers[0];

@@ -416,6 +416,27 @@ describe('foreign-key changes of related rows', () => {
 
       expect(await recordsOf('Badge')).toEqual([]);
     });
+
+    it.each([
+      ['already linked to the parent', 'u1', { name: { old: 'b1', new: 'renamed' } }],
+      ['linked to another parent', 'u2', { name: { old: 'b1', new: 'renamed' }, userId: { old: 'u2', new: 'u1' } }],
+      ['unlinked', null, { name: { old: 'b1', new: 'renamed' }, userId: { old: null, new: 'u1' } }],
+    ])(
+      'audits a row a connect and an update both name once, with every change, when it is %s',
+      async (_, userId, changes) => {
+        const { basePrisma, prisma, run, recordsOf } = await setup();
+        await basePrisma.badge.create({ data: { id: 'b1', name: 'b1', userId } });
+
+        await run(() =>
+          prisma.user.update({
+            where: { id: 'u1' },
+            data: { badge: { connect: { id: 'b1' }, update: { name: 'renamed' } } },
+          }),
+        );
+
+        expect(await recordsOf('Badge')).toEqual([expect.objectContaining({ id: 'b1', action: 'update', changes })]);
+      },
+    );
   });
 
   describe('a relation without a foreign key on the related model', () => {
@@ -428,6 +449,27 @@ describe('foreign-key changes of related rows', () => {
       expect(posts.map(({ id, action }) => [id, action])).toEqual([['p-live', 'update']]);
       expect(posts[0]?.changes).toMatchObject({ authorId: { old: 'u1', new: 'u2' } });
       expect(await recordsOf('User')).toEqual([]);
+    });
+
+    it.each([
+      ['an update', { update: { name: 'Ben renamed' } }],
+      [
+        'an upsert',
+        { upsert: { create: { id: 'u-new', email: 'new@example.com', name: 'New' }, update: { name: 'Ben renamed' } } },
+      ],
+    ])('audits the row a connect and %s both name as the update of the connected row', async (_, write) => {
+      const { prisma, run, recordsOf } = await setup();
+
+      await run(() =>
+        prisma.post.update({ where: { id: 'p-live' }, data: { author: { connect: { id: 'u2' }, ...write } } }),
+      );
+
+      const posts = await recordsOf('Post');
+      expect(posts.map(({ id, action }) => [id, action])).toEqual([['p-live', 'update']]);
+      expect(posts[0]?.changes).toMatchObject({ authorId: { old: 'u1', new: 'u2' } });
+      const users = await recordsOf('User');
+      expect(users.map(({ id, action }) => [id, action])).toEqual([['u2', 'update']]);
+      expect(users[0]?.changes).toMatchObject({ name: { old: 'Ben', new: 'Ben renamed' } });
     });
 
     it('audits nothing for a connect through an implicit many-to-many relation', async () => {

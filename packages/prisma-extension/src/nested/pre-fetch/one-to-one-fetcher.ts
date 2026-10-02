@@ -83,7 +83,21 @@ export interface PreFetchOneToOneRelationInput extends Omit<ResolveParentRowsInp
   relatedModelClient: PreFetchModelClient;
   /** The columns to read of each related row; the whole row when absent */
   select?: Record<string, true>;
+  /**
+   * The unique WHERE of the row a `connect` links to a parent row ahead of the write read under
+   * it, keyed by that parent row; read instead of the row linked to it before the write
+   */
+  connectedRowWheres?: ReadonlyMap<ParentRowIdentity, PreFetchRecord>;
 }
+
+/** The flat link key of the related row of `parentRow`, or undefined when a link field of it is unset */
+const linkWhereOf = (link: ToOneRelationLink, parentRow: PreFetchRecord): PreFetchRecord | undefined => {
+  const values = link.parentFields.map((fieldName) => parentRow[fieldName]);
+  if (values.some((value) => value === null || value === undefined)) {
+    return undefined;
+  }
+  return Object.fromEntries(link.relatedFields.map((fieldName, index) => [fieldName, values[index]]));
+};
 
 /**
  * Pre-fetches the related row of every parent row the nested to-one operation is nested under.
@@ -92,7 +106,8 @@ export interface PreFetchOneToOneRelationInput extends Omit<ResolveParentRowsInp
  * model (the referenced key on the owning side, a unique foreign key on the inverse side), so at
  * most one row matches. A parent row with a null key field (an unset optional foreign key) is
  * skipped, and so is a parent row known only by the primary key its operation's WHERE names when
- * the link fields are other fields of it (a foreign key on the parent row).
+ * the link fields are other fields of it (a foreign key on the parent row). Under a parent row a
+ * `connect` links a row to ahead of the write, the row it names is read by its unique WHERE.
  *
  * @returns One result per queried parent row, by that row's identity; `beforeRecord` is null when
  *   no related row exists
@@ -100,19 +115,27 @@ export interface PreFetchOneToOneRelationInput extends Omit<ResolveParentRowsInp
 export const preFetchOneToOneRelation = async (
   input: PreFetchOneToOneRelationInput,
 ): Promise<PreFetchOneToOneResults> => {
-  const { link, relatedModelClient, select } = input;
+  const { link, relatedModelClient, select, connectedRowWheres } = input;
 
   const { rows: parentRows, allKnown } = await resolveParentRows({ ...input, parentFields: link.parentFields });
   preFetchLog('1:1 parent rows: path=%s count=%d', input.path, parentRows.length);
 
   const results: PreFetchOneToOneResult[] = [];
   for (const { identity: parent, row: parentRow } of parentRows) {
-    const values = link.parentFields.map((fieldName) => parentRow[fieldName]);
-    if (values.some((value) => value === null || value === undefined)) {
+    const connectedWhere = connectedRowWheres?.get(parent);
+    if (connectedWhere) {
+      preFetchLog('1:1 connected row where: %O', connectedWhere);
+      const beforeRecord = await relatedModelClient.findUnique(
+        select ? { where: connectedWhere, select } : { where: connectedWhere },
+      );
+      results.push({ parent, beforeRecord });
       continue;
     }
 
-    const relatedWhere = Object.fromEntries(link.relatedFields.map((fieldName, index) => [fieldName, values[index]]));
+    const relatedWhere = linkWhereOf(link, parentRow);
+    if (!relatedWhere) {
+      continue;
+    }
     preFetchLog('1:1 related where: %O', relatedWhere);
 
     const beforeRecord = await relatedModelClient.findFirst(
