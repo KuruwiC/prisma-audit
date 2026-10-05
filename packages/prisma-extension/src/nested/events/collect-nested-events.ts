@@ -617,7 +617,7 @@ const linkColumnsOf = (
 const LINKING_KEYWORDS: ReadonlySet<NestedOperationKeyword> = new Set(['connect', 'set', 'connectOrCreate']);
 
 /** Whether a keyword the relation field lists before `nestedOp`, and so runs before it, links `row` to the parent */
-const linkedEarlierInWrite = (nestedOp: NestedOperationInfo, row: Row): boolean =>
+const linkedByPrecedingWrite = (nestedOp: NestedOperationInfo, row: Row): boolean =>
   nestedOp.precedingWrites.some(
     ({ operation, data }) =>
       LINKING_KEYWORDS.has(operation) &&
@@ -658,7 +658,7 @@ const withRowAsWritten = (
   record: CollectedNestedRecord,
   linkColumns: Row,
 ): CollectedNestedRecord => {
-  if (record.beforeState.kind !== 'captured' || !linkedEarlierInWrite(nestedOp, record.beforeState.row)) {
+  if (record.beforeState.kind !== 'captured' || !linkedByPrecedingWrite(nestedOp, record.beforeState.row)) {
     return record;
   }
   return linksDiffer(record.beforeState.row, linkColumns)

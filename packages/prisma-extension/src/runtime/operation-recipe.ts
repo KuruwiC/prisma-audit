@@ -141,7 +141,7 @@ const decisionOf = (recipe: Recipe, config: RecipeConfig): WritePolicyDecision |
  * calls and the method Prisma's own batch starts it with alike, so the queries the operation runs
  * reach the audit extension with the decision made for it, whoever starts it
  */
-const withDecidedWritePolicy = (decision: WritePolicyDecision | undefined, operation: unknown): unknown =>
+const withWritePolicyDecision = (decision: WritePolicyDecision | undefined, operation: unknown): unknown =>
   isObject(operation)
     ? new Proxy(operation, {
         get(target, prop) {
@@ -163,9 +163,9 @@ const createRecipeFactory = (config: RecipeConfig) => {
     return awaitsAudit(decision)
       ? await runInTransaction(
           recipe.receiver,
-          async (tx) => await withDecidedWritePolicy(decision, replay(recipe, tx)),
+          async (tx) => await withWritePolicyDecision(decision, replay(recipe, tx)),
         )
-      : await withDecidedWritePolicy(decision, replay(recipe, recipe.target));
+      : await withWritePolicyDecision(decision, replay(recipe, recipe.target));
   };
 
   const start = (recipe: Recipe): Promise<unknown> => {
@@ -366,6 +366,6 @@ export const takeBatchRecipes = (items: readonly unknown[], receiver: object, co
   return {
     awaitsAudit: decisions.some(awaitsAudit),
     operationsOn: (client) =>
-      taken.map((recipe, index) => withDecidedWritePolicy(decisions[index], replay(recipe, client))),
+      taken.map((recipe, index) => withWritePolicyDecision(decisions[index], replay(recipe, client))),
   };
 };
