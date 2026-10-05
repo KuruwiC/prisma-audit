@@ -367,6 +367,65 @@ describe('compose', () => {
     });
   });
 
+  describe('masked columns', () => {
+    const masked = { redacted: true, hadValue: true };
+    const maskedSecret: Partial<ComposeConfig> = {
+      maskedFieldNames: (model) => (model === 'Post' ? new Set(['secret']) : undefined),
+    };
+
+    it('masks the columns named for the model in before, after and changes, without a redact config', () => {
+      const resolved = updateEvent({ id: 'post-1', secret: 'old' }, { id: 'post-1', secret: 'new' });
+
+      const record = composeOne(resolved, maskedSecret);
+
+      expect(record.before).toEqual({ id: 'post-1', secret: masked });
+      expect(record.after).toEqual({ id: 'post-1', secret: masked });
+      expect(record.changes).toEqual({ secret: { old: masked, new: { ...masked, isDifferent: true } } });
+    });
+
+    it('records no change of a masked column that did not change', () => {
+      const resolved = updateEvent(
+        { id: 'post-1', title: 'Old', secret: 'same' },
+        { id: 'post-1', title: 'New', secret: 'same' },
+      );
+
+      const record = composeOne(resolved, maskedSecret);
+
+      expect(record.changes).toEqual({ title: { old: 'Old', new: 'New' } });
+      expect(record.after).toEqual({ id: 'post-1', title: 'New', secret: masked });
+    });
+
+    it('records a masked column that became null as a change with a null new side', () => {
+      const resolved = updateEvent({ id: 'post-1', secret: 'old' }, { id: 'post-1', secret: null });
+
+      const record = composeOne(resolved, maskedSecret);
+
+      expect(record.after).toEqual({ id: 'post-1', secret: null });
+      expect(record.changes).toEqual({ secret: { old: masked, new: null } });
+    });
+
+    it('leaves a column of the same name on another model unmasked', () => {
+      const record = composeOne(event({ model: 'Comment', after: { id: 'c-1', secret: 'plain' } }), maskedSecret);
+
+      expect(record.after).toEqual({ id: 'c-1', secret: 'plain' });
+    });
+
+    it('masks top-level columns only, not a key of that name inside a column value', () => {
+      const record = composeOne(event({ after: { id: 'post-1', meta: { secret: 'inner' } } }), maskedSecret);
+
+      expect(record.after).toEqual({ id: 'post-1', meta: { secret: 'inner' } });
+    });
+
+    it('masks a column that the redact config also names once', () => {
+      const resolved = updateEvent({ id: 'post-1', secret: 'old' }, { id: 'post-1', secret: 'new' });
+
+      const record = composeOne(resolved, { ...maskedSecret, redact: { fields: ['secret'] } });
+
+      expect(record.after).toEqual({ id: 'post-1', secret: masked });
+      expect(record.changes).toEqual({ secret: { old: masked, new: { ...masked, isDifferent: true } } });
+    });
+  });
+
   describe('relations', () => {
     const row = { id: 'post-1', authorId: 'user-9', author: { id: 'user-9', name: 'Owner' } };
     const stripped = { id: 'post-1', authorId: 'user-9' };

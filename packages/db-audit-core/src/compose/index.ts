@@ -5,7 +5,7 @@ import { createActorId, createAggregateId, createEntityId } from '../domain/bran
 import { type AuditRecord, aggregateRootKey, type ResolvedEvent } from '../domain/mutation-event.js';
 import type { AuditContext } from '../types.js';
 import { createDiffCalculator, type DiffResult } from '../utils/diff-calculator.js';
-import { type RedactConfig, redactSensitiveData } from '../utils/redaction.js';
+import { maskChanges, maskColumns, type RedactConfig, redactSensitiveData } from '../utils/redaction.js';
 import { removeRelations } from '../utils/remove-relations.js';
 import { serializeForAuditJson, type ValueSerializer } from '../utils/serialization.js';
 
@@ -22,6 +22,12 @@ export interface ComposeConfig<TModelName extends string = string> {
   /** Fields excluded from change tracking for every entity without its own list. */
   readonly excludeFields: readonly string[];
   readonly redact?: RedactConfig;
+  /**
+   * Columns of a model whose values are masked in the stored states and changes, as the adapter
+   * knows them (such as the columns its client hides from reads); undefined masks none. Masked
+   * after the diff, so a change to such a column is still recorded, without its values.
+   */
+  readonly maskedFieldNames?: (model: TModelName) => ReadonlySet<string> | undefined;
   readonly serialization?: SerializationConfig;
   /** Relation field names of a model, as the adapter derives them from its schema; undefined strips nothing. */
   readonly relationFieldNames: (model: TModelName) => ReadonlySet<string> | undefined;
@@ -67,6 +73,12 @@ const redactStates = (states: RecordStates, redactConfig: RedactConfig): RecordS
 
   return { before: before ?? null, after: after ?? null, changes };
 };
+
+const maskStates = (states: RecordStates, fields: ReadonlySet<string>): RecordStates => ({
+  before: states.before && maskColumns(states.before, fields),
+  after: states.after && maskColumns(states.after, fields),
+  changes: states.changes && maskChanges(states.changes, fields),
+});
 
 /** An update whose diff is empty against an existing before state changed only excluded fields. */
 const changedOnlyExcludedFields = (changes: DiffResult, before: State): boolean => {
@@ -114,7 +126,9 @@ const resolveStates = <TModelName extends string>(
     return undefined;
   }
 
-  const states = { before: beforeColumns, after: afterColumns, changes };
+  const maskedFields = config.maskedFieldNames?.(event.model);
+  const columns = { before: beforeColumns, after: afterColumns, changes };
+  const states = maskedFields && maskedFields.size > 0 ? maskStates(columns, maskedFields) : columns;
   return config.redact ? redactStates(states, config.redact) : states;
 };
 
