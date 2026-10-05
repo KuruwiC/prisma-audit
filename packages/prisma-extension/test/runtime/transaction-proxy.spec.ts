@@ -372,7 +372,7 @@ describe('createTransactionProxy', () => {
       return { target, tx, ran, $transaction };
     };
 
-    const recipesAwaiting = (awaitsAudit: boolean) => ({
+    const recipeConfigAwaiting = (awaitsAudit: boolean) => ({
       modelOfAccessor: new Map([['user', 'User']]),
       relatedModel: () => undefined,
       awaitsAudit: () => awaitsAudit,
@@ -382,7 +382,7 @@ describe('createTransactionProxy', () => {
       const { target } = createRecipeTarget();
       const proxy = createTransactionProxy(target, {
         provider: createAsyncLocalStorageProvider(),
-        recipes: recipesAwaiting(true),
+        recipeConfig: recipeConfigAwaiting(true),
       });
 
       expect(proxy.user).toBe(proxy.user);
@@ -392,7 +392,7 @@ describe('createTransactionProxy', () => {
     it('runs nothing until a call is awaited, then runs a write whose audit is awaited in an interactive transaction of the client', async () => {
       const provider = createAsyncLocalStorageProvider();
       const { target, tx, ran, $transaction } = createRecipeTarget();
-      const proxy = createTransactionProxy(target, { provider, recipes: recipesAwaiting(true) });
+      const proxy = createTransactionProxy(target, { provider, recipeConfig: recipeConfigAwaiting(true) });
 
       const created = proxy.user.create({ email: 'a' });
       expect(ran).toEqual([]);
@@ -407,7 +407,7 @@ describe('createTransactionProxy', () => {
     it('runs a call whose audit is not awaited on the client itself', async () => {
       const provider = createAsyncLocalStorageProvider();
       const { target, ran, $transaction } = createRecipeTarget();
-      const proxy = createTransactionProxy(target, { provider, recipes: recipesAwaiting(false) });
+      const proxy = createTransactionProxy(target, { provider, recipeConfig: recipeConfigAwaiting(false) });
 
       await provider.runAsync(baseContext, async () => await proxy.user.create({ email: 'a' }));
 
@@ -418,7 +418,7 @@ describe('createTransactionProxy', () => {
     it("runs a batch of the client's calls in one interactive transaction, in order, at the caller's isolation level", async () => {
       const provider = createAsyncLocalStorageProvider();
       const { target, tx, ran, $transaction } = createRecipeTarget();
-      const proxy = createTransactionProxy(target, { provider, recipes: recipesAwaiting(true) });
+      const proxy = createTransactionProxy(target, { provider, recipeConfig: recipeConfigAwaiting(true) });
 
       const results = await provider.runAsync(baseContext, () =>
         proxy.$transaction([proxy.user.create({ email: 'a' }), proxy.user.findMany()], {
@@ -439,7 +439,7 @@ describe('createTransactionProxy', () => {
     it("runs a batch of the client's calls none of which awaits an audit as Prisma's own batch", async () => {
       const provider = createAsyncLocalStorageProvider();
       const { target, ran, $transaction } = createRecipeTarget();
-      const proxy = createTransactionProxy(target, { provider, recipes: recipesAwaiting(false) });
+      const proxy = createTransactionProxy(target, { provider, recipeConfig: recipeConfigAwaiting(false) });
 
       await provider.runAsync(baseContext, () => proxy.$transaction([proxy.user.create({ email: 'a' })]));
 
@@ -450,7 +450,7 @@ describe('createTransactionProxy', () => {
     it('rejects a batch holding an operation that is not a call of the client before running anything', async () => {
       const provider = createAsyncLocalStorageProvider();
       const { target, ran, $transaction } = createRecipeTarget();
-      const proxy = createTransactionProxy(target, { provider, recipes: recipesAwaiting(true) });
+      const proxy = createTransactionProxy(target, { provider, recipeConfig: recipeConfigAwaiting(true) });
       const foreign = vi.fn(() => 'foreign');
 
       await expect(

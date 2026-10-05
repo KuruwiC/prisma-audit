@@ -105,7 +105,7 @@ interface BaseClientPipeline {
 export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) => {
   const audit = normalizeAuditOptions(options);
 
-  const recipes = audit.openImplicitTransaction ? recipeConfigOf(audit) : undefined;
+  const recipeConfig = audit.openImplicitTransaction ? recipeConfigOf(audit) : undefined;
 
   const auditOperation = async (params: ExtensionParams, { baseClient, deps, shape }: BaseClientPipeline) => {
     const { operation, model, args, query } = params;
@@ -167,7 +167,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
       },
     });
 
-    return createTransactionProxy(extendedClient as object, { provider: audit.provider, recipes });
+    return createTransactionProxy(extendedClient as object, { provider: audit.provider, recipeConfig });
   };
 
   return audit.Prisma.defineExtension(extensionDefinition);

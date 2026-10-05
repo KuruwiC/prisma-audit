@@ -23,12 +23,12 @@ import type { TransactionalPrismaClient } from '../internal-types.js';
 import { createRecipeClient, type RecipeConfig, takeBatchRecipes } from './operation-recipe.js';
 import { drainAfterCommit, enterTransaction } from './scope.js';
 
-export type TransactionMethod = (...args: unknown[]) => Promise<unknown>;
+type TransactionMethod = (...args: unknown[]) => Promise<unknown>;
 
 export interface TransactionProxyConfig {
   readonly provider: AuditContextProvider;
   /** Present with `openImplicitTransaction`: how the client's operations open their transaction */
-  readonly recipes?: RecipeConfig;
+  readonly recipeConfig?: RecipeConfig;
 }
 
 type TransactionProxyDependencies = TransactionProxyConfig & {
@@ -82,7 +82,7 @@ export const createWrappedTransactionCallback = (
 export const createTransactionProxyHandler = (
   deps: TransactionProxyDependencies,
 ): ((...args: unknown[]) => Promise<unknown>) => {
-  const { provider, recipes, originalTransaction, target, receiver } = deps;
+  const { provider, recipeConfig, originalTransaction, target, receiver } = deps;
 
   const runInteractive = async (
     callback: (tx: TransactionalPrismaClient) => Promise<unknown>,
@@ -103,9 +103,9 @@ export const createTransactionProxyHandler = (
   const runRecipeBatch = async (
     items: readonly unknown[],
     options: unknown,
-    recipeConfig: RecipeConfig,
+    config: RecipeConfig,
   ): Promise<unknown> => {
-    const { awaitsAudit, operationsOn } = takeBatchRecipes(items, receiver, recipeConfig);
+    const { awaitsAudit, operationsOn } = takeBatchRecipes(items, receiver, config);
     if (!awaitsAudit) {
       return originalTransaction.apply(
         target,
@@ -124,8 +124,8 @@ export const createTransactionProxyHandler = (
   return async (...args: unknown[]): Promise<unknown> => {
     const [first, options] = args;
     if (typeof first !== 'function') {
-      return recipes && Array.isArray(first) && first.length > 0
-        ? runRecipeBatch(first, options, recipes)
+      return recipeConfig && Array.isArray(first) && first.length > 0
+        ? runRecipeBatch(first, options, recipeConfig)
         : originalTransaction.apply(target, args);
     }
     const callback = first as (tx: TransactionalPrismaClient) => Promise<unknown>;
@@ -145,7 +145,7 @@ export const createTransactionProxy = <TClient extends object>(
   extendedClient: TClient,
   config: TransactionProxyConfig,
 ): TClient => {
-  const recipeClient = config.recipes && createRecipeClient(config.recipes);
+  const recipeClient = config.recipeConfig && createRecipeClient(config.recipeConfig);
   return new Proxy(extendedClient, {
     get(target, prop, receiver: object) {
       if (prop === '$transaction') {
