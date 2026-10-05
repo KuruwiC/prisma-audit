@@ -9,7 +9,8 @@
  * client-level `omit` hides, which the before state lacks.
  *
  * Nested writes are audited from the records the operation returns, so the relations an operation
- * writes are added to its selection: into `select` when the caller selects, else into `include`.
+ * writes are added to its selection: into `include`, or into the caller's `select` on a client that
+ * cannot `omit` a field.
  * The written relations come from `detectNestedOperations` in the discovery pass, which scans
  * every branch the operation could execute (both branches of an upsert). A to-many relation the
  * operation only updates by unique WHERE is bounded to the rows the updates name, so its siblings
@@ -70,10 +71,13 @@ export interface InjectedSelection {
   readonly nested: ReadonlyMap<string, InjectedSelection>;
 }
 
-/** Operation args that read the audited rows whole, and what that added to the caller's selection */
+/**
+ * Operation args that read the audited rows in the client's default shape, and what that added to
+ * the caller's selection
+ */
 export interface AuditedSelectionInjection {
   readonly args: unknown;
-  /** `undefined` when the caller's selection already read the audited rows whole */
+  /** `undefined` when the caller's selection already read the audited rows in the default shape */
   readonly injected: InjectedSelection | undefined;
 }
 
@@ -249,7 +253,6 @@ const selectionInDefaultShape = (
  * cannot `omit` a field, by selecting every scalar field, which is that shape there); the fields a
  * caller `omit` leaves out are read; the written relations are merged into the caller's selection.
  *
- * @param queryOmitSupported - Whether the client accepts a query `omit`
  * @internal
  */
 const selectAuditedRows = (

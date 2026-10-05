@@ -28,7 +28,7 @@ export interface AuditOptions {
   readonly provider: AuditContextProvider;
   readonly Prisma: PrismaNamespace;
   readonly schemaMetadata: SchemaMetadata;
-  /** Whether the client accepts a query `omit`, which reads an audited row in its default shape */
+  /** Whether the client accepts a query `omit`, used to read a caller `select` in the default shape */
   readonly queryOmitSupported: boolean;
   /** Accessor of the audit-log model on the client (camelCase) */
   readonly auditLogModel: string;
