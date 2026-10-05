@@ -196,7 +196,8 @@ describe('CRUD Smoke Tests (MySQL)', () => {
       await context.prisma.post.create({ data: { id: 'p1', title: 'Post', authorId: 'case-user' } });
       await context.prisma.auditLog.deleteMany();
 
-      // MySQL's default collation compares strings case-insensitively, so 'CASE-USER' finds the row stored as 'case-user'
+      // MySQL's default collation compares strings case-insensitively, so 'CASE-USER' finds the row stored
+      // as 'case-user'
       await context.provider.runAsync(testActor, () =>
         context.prisma.user.update({ where: { id: 'CASE-USER' }, data: { posts: { delete: { id: 'p1' } } } }),
       );

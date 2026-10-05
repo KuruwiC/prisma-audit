@@ -229,13 +229,15 @@ export const parentRowIdentityOf = (
   return key && pkConstraint ? extractEntityIdentity(key, pkConstraint.fields) : undefined;
 };
 
-/** The unique WHERE by which the element `parent` names its row; undefined for a row named as the related row of its own parent */
+/**
+ * The unique WHERE by which the element `parent` names its row; undefined for a row named as the related row of its
+ * own parent
+ */
 const parentWhereOf = ({ operation, element }: NestedOperationParent): PreFetchRecord | undefined =>
   targetsNamedByWhere(operation)
     ? namedTargets(operation.operation, operation.data).find((target) => target.element === element)?.where
     : undefined;
 
-/** What the read ahead of the operation found for the row the element `parent` names */
 const parentReadResultOf = (
   parent: NestedOperationParent,
   preFetchResults: NestedPreFetchResults,
