@@ -15,10 +15,8 @@
 
 import type { AuditContext, AuditContextProvider } from '@kuruwic/db-audit-core';
 import type { TransactionalPrismaClient } from '../internal-types.js';
-import { batchOperationsOf, runBatchAsInteractiveTransaction } from './batch-transaction.js';
+import { batchOperationsOf, runBatchAsInteractiveTransaction, type TransactionMethod } from './batch-transaction.js';
 import { drainAfterCommit, enterTransaction } from './scope.js';
-
-type OriginalTransactionMethod = (...args: unknown[]) => Promise<unknown>;
 
 export interface TransactionProxyConfig {
   readonly provider: AuditContextProvider;
@@ -30,7 +28,7 @@ export interface TransactionProxyConfig {
 }
 
 type TransactionProxyDependencies = TransactionProxyConfig & {
-  originalTransaction: OriginalTransactionMethod;
+  originalTransaction: TransactionMethod;
   target: object;
 };
 
@@ -122,7 +120,7 @@ export const createTransactionProxy = <TClient extends object>(
   return new Proxy(extendedClient, {
     get(target, prop) {
       if (prop === '$transaction') {
-        const originalTransaction = Reflect.get(target, prop) as OriginalTransactionMethod;
+        const originalTransaction = Reflect.get(target, prop) as TransactionMethod;
         return createTransactionProxyHandler({ ...config, originalTransaction, target });
       }
       if (prop === '$extends') {

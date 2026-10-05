@@ -16,7 +16,7 @@ import type { TransactionalPrismaClient } from '../internal-types.js';
 import { getModelDelegate, getModelOperation } from '../utils/model-accessor.js';
 import { drainAfterCommit, enterTransaction, withScope } from './scope.js';
 
-type TransactionMethod = (...args: unknown[]) => Promise<unknown>;
+export type TransactionMethod = (...args: unknown[]) => Promise<unknown>;
 
 /** The one option of a batch `$transaction([...])`, which an interactive transaction takes as well */
 interface BatchTransactionOptions {
