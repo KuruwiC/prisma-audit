@@ -219,7 +219,7 @@ The Prisma client itself is the first argument of `createAuditClient`. Audited o
   - **Performance optimization**: Use when high-throughput is more important than completeness
 
 **Other query extensions and the implicit transaction:**
-With `awaitWrite: true` (or `awaitWriteIf` returning `true`) and no transaction active, the audit extension opens an implicit transaction on the client passed to `createAuditClient` and runs the operation again on that transaction's client. That client carries the query extensions applied to the base client before `createAuditClient`, and not the ones applied to the audited client after it (`createAuditClient(...).$extends(...)`). So an extension applied before the audit extension sees such an operation twice — once on the caller's call on its way in, once inside the implicit transaction — while an extension applied after it sees the caller's call once and does not see the operation inside the implicit transaction. Outside the implicit transaction (`awaitWrite: false`, or inside your own `$transaction`) the audit extension continues the call through Prisma's `query` on the same chain, and an extension applied before it sees the operation once. `packages/integration-tests/test/extension-chain.integration.spec.ts` ("Extension Chain Guard") pins these counts.
+With `awaitWrite: true` (or `awaitWriteIf` returning `true`) and no transaction active, the audit extension opens an implicit transaction on the client passed to `createAuditClient` and runs the operation again on that transaction's client. That client carries the query extensions applied to the base client before `createAuditClient`, and not the ones applied to the audited client after it (`createAuditClient(...).$extends(...)`). So an extension applied before the audit extension sees such an operation twice — once on the caller's call on its way in, once inside the implicit transaction — while an extension applied after it sees the caller's call once and does not see the operation inside the implicit transaction. Outside the implicit transaction (`awaitWrite: false`, or inside your own interactive `$transaction`) the audit extension continues the call through Prisma's `query` on the same chain, and an extension applied before it sees the operation once. `packages/integration-tests/test/extension-chain.integration.spec.ts` ("Extension Chain Guard") pins these counts.
 
 **Infinite recursion prevention:**
 The extension prevents infinite recursion through:
@@ -787,7 +787,7 @@ createAuditClient(prisma, {
 
 #### 2. Deferred Strategy (`awaitWrite: false` inside transactions)
 
-When the write is not awaited (`awaitWrite: false`, or `awaitWriteIf` returning `false` for the model) and the operation runs inside `$transaction`, the audit log write is queued and runs after the transaction commits successfully. With the default `awaitWrite: true`, an operation inside `$transaction` uses the synchronous strategy on the transaction client instead.
+When the write is not awaited (`awaitWrite: false`, or `awaitWriteIf` returning `false` for the model) and the operation runs inside an interactive `$transaction`, the audit log write is queued and runs after the transaction commits successfully. With the default `awaitWrite: true`, an operation inside `$transaction` uses the synchronous strategy on the transaction client instead.
 
 **Use cases:**
 - Operations inside `$transaction` that should not wait for the audit write
