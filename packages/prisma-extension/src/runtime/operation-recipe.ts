@@ -12,7 +12,7 @@
  */
 
 import type { WritePolicy } from '@kuruwic/db-audit-core';
-import { decidedWritePoliciesOf, isProcessingAuditLog, withScope } from './scope.js';
+import { decidedWritePoliciesOf, isProcessingAuditLog, type WritePolicyDecision, withScope } from './scope.js';
 
 /** The model actions Prisma's delegates expose as lazy operations */
 const MODEL_ACTIONS: ReadonlySet<string> = new Set([
@@ -68,7 +68,7 @@ export interface RecipeConfig {
    * The write policy of a call of `action` on `model`, decided now, sampling included; undefined
    * when the call is not audited
    */
-  readonly decide: (model: string, action: string) => WritePolicy | undefined;
+  readonly decideWritePolicy: (model: string, action: string) => WritePolicy | undefined;
 }
 
 interface RecipeCall {
@@ -88,13 +88,13 @@ interface Recipe {
   readonly relationCalls: readonly RecipeCall[];
   /** The model a further fluent relation call starts from; absent when none can follow */
   readonly fluentModel: string | undefined;
-  /** Whether the recipe has run, once it was first awaited, or was taken by a batch to run */
+  /** Pending until the recipe is first awaited, which starts it, or taken by a batch, which runs it */
   state: RecipeState;
 }
 
 type RecipeState =
   | { readonly kind: 'pending' }
-  | { readonly kind: 'running'; readonly result: Promise<unknown> }
+  | { readonly kind: 'started'; readonly result: Promise<unknown> }
   | { readonly kind: 'taken-by-batch' };
 
 /** What `Object.prototype.toString` names a recipe; not `PrismaPromise`, which Prisma's own batch accepts */
@@ -126,18 +126,12 @@ const replay = (recipe: Recipe, client: object): unknown => {
 const runInTransaction = (receiver: object, run: (tx: object) => Promise<unknown>): Promise<unknown> =>
   Promise.resolve(invoke(receiver, { method: '$transaction', args: [run] }));
 
-interface Decision {
-  readonly model: string;
-  readonly action: string;
-  readonly policy: WritePolicy;
-}
-
 /** The write policy of the recipe's call, decided now; undefined when the call is not audited */
-const decisionOf = (recipe: Recipe, config: RecipeConfig): Decision | undefined => {
+const decisionOf = (recipe: Recipe, config: RecipeConfig): WritePolicyDecision | undefined => {
   if (recipe.model === undefined || isProcessingAuditLog()) {
     return undefined;
   }
-  const policy = config.decide(recipe.model, recipe.call.method);
+  const policy = config.decideWritePolicy(recipe.model, recipe.call.method);
   return policy && { model: recipe.model, action: recipe.call.method, policy };
 };
 
@@ -146,7 +140,7 @@ const decisionOf = (recipe: Recipe, config: RecipeConfig): Decision | undefined 
  * client inside a callback of your interactive `$transaction` is one too: the call is not made on
  * the transaction's client, so it runs in a transaction of its own, together with its audit.
  */
-const awaitsAudit = (decision: Decision | undefined): boolean =>
+const awaitsAudit = (decision: WritePolicyDecision | undefined): boolean =>
   decision?.policy.sampled === true && decision.policy.atomic;
 
 const createRecipeFactory = (config: RecipeConfig) => {
@@ -163,10 +157,10 @@ const createRecipeFactory = (config: RecipeConfig) => {
     switch (recipe.state.kind) {
       case 'pending': {
         const result = run(recipe);
-        recipe.state = { kind: 'running', result };
+        recipe.state = { kind: 'started', result };
         return result;
       }
-      case 'running':
+      case 'started':
         return recipe.state.result;
       case 'taken-by-batch':
         return Promise.reject(new Error('The operation was given to a batch $transaction, which runs it'));

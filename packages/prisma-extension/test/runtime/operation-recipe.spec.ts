@@ -61,7 +61,7 @@ const createClients = () => {
 const configAwaiting = (atomic: boolean): RecipeConfig => ({
   modelOfAccessor: new Map([['user', 'User']]),
   relatedModel: () => undefined,
-  decide: vi.fn(() => ({ sampled: true as const, atomic })),
+  decideWritePolicy: vi.fn(() => ({ sampled: true as const, atomic })),
 });
 
 /** `receiver.user.create(args)` as the client proxy returns it */
@@ -93,8 +93,8 @@ describe('operation recipes', () => {
 
     await createUserOn(config, clients, { email: 'a' });
 
-    expect(config.decide).toHaveBeenCalledTimes(1);
-    expect(config.decide).toHaveBeenCalledWith('User', 'create');
+    expect(config.decideWritePolicy).toHaveBeenCalledTimes(1);
+    expect(config.decideWritePolicy).toHaveBeenCalledWith('User', 'create');
     expect(clients.ran).toEqual([
       { client: 'client', transactionClient: undefined, decided: { sampled: true, atomic: false } },
     ]);

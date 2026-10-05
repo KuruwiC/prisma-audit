@@ -46,10 +46,10 @@ export type BatchPrepared =
   | { readonly kind: 'limited'; readonly limit: number; readonly pkFields: string[]; readonly rounds: number }
   /**
    * updateMany or deleteMany with a `limit`, run as given: inside a batch `$transaction([...])`
-   * Prisma runs, whose rows no read can name (`reportsRows`), or with a limit that is not a
+   * Prisma runs, whose rows no read can name (`reportsUnidentified`), or with a limit that is not a
    * positive integer, which Prisma rejects
    */
-  | { readonly kind: 'limited-as-given'; readonly reportsRows: boolean }
+  | { readonly kind: 'limited-as-given'; readonly reportsUnidentified: boolean }
   | { readonly kind: 'delete'; readonly beforeRows: Row[] };
 
 export interface BatchExecuted {
@@ -160,10 +160,10 @@ const prepareUpdateOrDelete = async (
 
   if ((action === AUDIT_ACTION.UPDATE_MANY || action === AUDIT_ACTION.DELETE_MANY) && limit !== undefined) {
     if (typeof limit !== 'number' || !Number.isInteger(limit) || limit <= 0) {
-      return { kind: 'limited-as-given', reportsRows: false };
+      return { kind: 'limited-as-given', reportsUnidentified: false };
     }
     if (scope.inPrismaBatch) {
-      return { kind: 'limited-as-given', reportsRows: true };
+      return { kind: 'limited-as-given', reportsUnidentified: true };
     }
     const rounds = scope.transaction ? LIMITED_WRITE_ROUNDS : 1;
     return { kind: 'limited', limit, pkFields: getPrimaryKeyFields(Prisma, model), rounds };
@@ -362,7 +362,7 @@ export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationE
       case 'update-returning':
         return pairByPrimaryKey(executed.returnedRows ?? [], prepared.beforeRows, prepared.pkFields);
       case 'limited-as-given':
-        if (prepared.reportsRows) {
+        if (prepared.reportsUnidentified) {
           await reportUnidentified(operation, countOf(executed.result), failureSink);
         }
         return { rows: [] };

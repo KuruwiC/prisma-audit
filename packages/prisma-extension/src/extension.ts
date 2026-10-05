@@ -76,7 +76,7 @@ const recipeConfigOf = (audit: AuditOptions): RecipeConfig => {
   return {
     modelOfAccessor: new Map(modelNames.map((modelName) => [getModelAccessor(modelName), modelName])),
     relatedModel: (modelName, field) => relatedModels.get(modelName)?.get(field),
-    decide: (modelName, action) =>
+    decideWritePolicy: (modelName, action) =>
       audit.provider.getContext() !== undefined && isAuditableAction(action) && audit.shouldAudit(modelName)
         ? policy(modelName, audit.modelTags(modelName), policyConfig)
         : undefined,
