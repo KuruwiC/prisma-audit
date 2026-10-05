@@ -308,9 +308,7 @@ const resolveRootsInBatch = async <TModelName extends string, TDbHandle>(
  * than missing.
  */
 const isUnreadRow = <TModelName extends string>(subject: Subject<TModelName>): boolean =>
-  !subject.isRowBeforeUpdate &&
-  subject.entry.event.action === 'delete' &&
-  subject.entry.event.before.kind !== 'captured';
+  subject.entry.event.action === 'delete' && subject.entry.event.before.kind !== 'captured';
 
 const resolveRootsRowByRow = async <TModelName extends string, TDbHandle>(
   subjects: readonly Subject<TModelName>[],
