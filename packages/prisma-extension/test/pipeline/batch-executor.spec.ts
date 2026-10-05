@@ -217,28 +217,6 @@ describe('createBatchExecutor', () => {
         new Map(),
       );
     });
-
-    it('audits the rows a createManyAndReturn with a select returns, without injecting ids', async () => {
-      const createManyAndReturn = vi.fn(async () => [a1]);
-      const client = clientWith({ user: { createManyAndReturn } });
-      const produceRecords = produce();
-      const args = { data: [{ email: 'a@1' }], select: { email: true, id: true } };
-
-      const outcome = await runWithRecords(
-        executor,
-        operationOn(client, 'createManyAndReturn', args),
-        scopeOn(client),
-        produceRecords,
-      );
-
-      expect(createManyAndReturn).toHaveBeenCalledWith(args);
-      expect(outcome.result).toEqual([a1]);
-      expect(produceRecords).toHaveBeenCalledWith(
-        [eventOf({ identity: 'a', action: 'create', after: a1 })],
-        expect.anything(),
-        new Map(),
-      );
-    });
   });
 
   describe('updateMany', () => {

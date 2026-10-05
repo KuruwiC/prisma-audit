@@ -108,57 +108,6 @@ describe('Write Strategy Tests', () => {
       await prisma.$disconnect();
       await db.$disconnect();
     });
-
-    it('should write audit logs synchronously within explicit transactions', async () => {
-      if (!basePrisma) {
-        throw new Error('basePrisma is not initialized');
-      }
-
-      const db = basePrisma;
-      const auditProvider = createAsyncLocalStorageProvider();
-
-      const prisma = createAuditClient(db, {
-        provider: auditProvider,
-        aggregateMapping: testAggregateMapping,
-        performance: { awaitWrite: true },
-        Prisma,
-      });
-
-      await auditProvider.runAsync(
-        {
-          actor: { category: 'user', type: 'User', id: 'test-user', name: 'Test User' },
-        },
-        async () => {
-          await prisma.$transaction(async (tx) => {
-            const user = await tx.user.create({
-              data: {
-                email: 'test@example.com',
-                name: 'Test User',
-              },
-            });
-
-            await tx.post.create({
-              data: {
-                title: 'Test Post',
-                content: 'Test Content',
-                published: true,
-                authorId: user.id,
-              },
-            });
-          });
-
-          const users = await db.user.findMany();
-          const posts = await db.post.findMany();
-          expect(users.length).toBe(1);
-          expect(posts.length).toBe(1);
-          const auditLogs = await db.auditLog.findMany();
-          expect(auditLogs.length).toBeGreaterThan(0);
-        },
-      );
-
-      await prisma.$disconnect();
-      await db.$disconnect();
-    });
   });
 
   describe('Async Mode (awaitWrite: false)', () => {

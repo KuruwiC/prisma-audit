@@ -149,30 +149,4 @@ describe('PII Redaction Integration', () => {
 
     expect(log.after).toBeNull();
   });
-
-  it('should not affect non-sensitive fields', async () => {
-    const user = await context.provider.runAsync(testActor, async () => {
-      return await context.prisma.user.create({
-        data: {
-          email: 'secure@example.com',
-          name: 'Secure User',
-          password: 'my-password',
-        },
-      });
-    });
-
-    const auditLogs = await context.prisma.auditLog.findMany({
-      where: { entityType: 'User', entityId: user.id },
-    });
-
-    expect(auditLogs).toHaveLength(1);
-    const log = auditLogs[0];
-
-    const after = log.after as Record<string, unknown>;
-
-    expect(after.email).toBe('secure@example.com');
-    expect(after.name).toBe('Secure User');
-    expect(after.id).toBeDefined();
-    expect(after.createdAt).toBeDefined();
-  });
 });

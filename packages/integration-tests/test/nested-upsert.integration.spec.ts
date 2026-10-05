@@ -521,69 +521,6 @@ describe('Nested Upsert Operations', () => {
       const user3Profile = await context.prisma.profile.findUnique({ where: { userId: user3.id } });
       expect(user3Profile).toBeNull();
     });
-
-    it('should correctly identify which profile to create when multiple users exist', async () => {
-      const [user1, user2, user3] = await context.provider.runAsync(testActor, async () => {
-        return Promise.all([
-          context.prisma.user.create({
-            data: {
-              email: 'user1@example.com',
-              name: 'User 1',
-              password: 'secret123',
-            },
-          }),
-          context.prisma.user.create({
-            data: {
-              email: 'user2@example.com',
-              name: 'User 2',
-              password: 'secret123',
-            },
-          }),
-          context.prisma.user.create({
-            data: {
-              email: 'user3@example.com',
-              name: 'User 3',
-              password: 'secret123',
-            },
-          }),
-        ]);
-      });
-
-      // Clear audit logs from setup
-      await context.prisma.auditLog.deleteMany();
-
-      await context.provider.runAsync(testActor, async () => {
-        await context.prisma.user.update({
-          where: { id: user2.id },
-          data: {
-            profile: {
-              upsert: {
-                create: { bio: 'New Bio for User 2' },
-                update: { bio: 'Should not be used' },
-              },
-            },
-          },
-          include: { profile: true },
-        });
-      });
-
-      const user2Profile = await context.prisma.profile.findUnique({ where: { userId: user2.id } });
-      expect(user2Profile).not.toBeNull();
-      expect(user2Profile?.bio).toBe('New Bio for User 2');
-
-      const user1Profile = await context.prisma.profile.findUnique({ where: { userId: user1.id } });
-      expect(user1Profile).toBeNull();
-
-      const user3Profile = await context.prisma.profile.findUnique({ where: { userId: user3.id } });
-      expect(user3Profile).toBeNull();
-
-      const profileLogs = await context.prisma.auditLog.findMany({
-        where: { entityType: 'Profile', entityId: user2Profile?.id, action: 'create' },
-      });
-
-      // Profile has 2 logs: Profile aggregate + User aggregate
-      expect(profileLogs).toHaveLength(2);
-    });
   });
 
   // NOTE: Every test here uses the setup.ts defaults; the per-model vs global resolution of

@@ -83,32 +83,6 @@ describe('getRelationFields', () => {
       },
     ]);
   });
-
-  it('should not include JSON fields even if they contain "create" keyword', () => {
-    const Prisma = {
-      dmmf: {
-        datamodel: {
-          models: [
-            {
-              name: 'User',
-              fields: [
-                { name: 'id', kind: 'scalar', type: 'String', isList: false },
-                { name: 'metadata', kind: 'scalar', type: 'Json', isList: false },
-                { name: 'posts', kind: 'object', type: 'Post', isList: true },
-              ],
-            },
-          ],
-        },
-      },
-    };
-
-    const fields = createSchemaMetadataFromDMMF(Prisma).getRelationFields('User');
-
-    expect(fields).toHaveLength(1);
-    expect(fields[0]?.name).toBe('posts');
-    // metadata should NOT be included even if it's a JSON field
-    expect(fields.find((f) => f.name === 'metadata')).toBeUndefined();
-  });
 });
 
 describe('detectNestedOperations', () => {

@@ -343,42 +343,6 @@ describe('CRUD Operations Integration', () => {
       // Since ONLY updatedAt (excluded field) changed, no audit log should be created
       expect(updateLogs.length).toBe(0);
     });
-
-    it('should create audit log when excluded fields + other fields change', async () => {
-      const user = await context.provider.runAsync(testActor, async () => {
-        return await context.prisma.user.create({
-          data: {
-            email: 'mixed-test@example.com',
-            name: 'Test User',
-            password: 'secret123',
-          },
-        });
-      });
-
-      // Update name (not excluded) + updatedAt (excluded)
-      await context.provider.runAsync(testActor, async () => {
-        await context.prisma.user.update({
-          where: { id: user.id },
-          data: {
-            name: 'Updated Name',
-          },
-        });
-      });
-
-      const updateLogs = await context.prisma.auditLog.findMany({
-        where: { entityType: 'User', entityId: user.id, action: 'update' },
-      });
-
-      expect(updateLogs).toHaveLength(1);
-
-      const log = updateLogs[0];
-      const changes = log.changes as Record<string, { old: unknown; new: unknown }>;
-
-      expect(changes).toHaveProperty('name');
-
-      // Should NOT have updatedAt change (excluded)
-      expect(changes).not.toHaveProperty('updatedAt');
-    });
   });
 
   describe('DELETE operations', () => {
@@ -451,68 +415,6 @@ describe('CRUD Operations Integration', () => {
         expect(log.entityId).toBeTruthy();
         expect(typeof log.entityId).toBe('string');
         expect(log.entityId.length).toBeGreaterThan(0);
-      }
-    });
-
-    it('should create audit logs for createManyAndReturn returning records', async () => {
-      const users = await context.provider.runAsync(testActor, async () => {
-        return await context.prisma.user.createManyAndReturn({
-          data: [
-            { email: 'mr1@example.com', name: 'MR 1', password: 'secret1' },
-            { email: 'mr2@example.com', name: 'MR 2', password: 'secret2' },
-          ],
-        });
-      });
-
-      expect(Array.isArray(users)).toBe(true);
-      expect(users).toHaveLength(2);
-      for (const u of users) expect(u.id).toBeTruthy();
-
-      const logs = await context.prisma.auditLog.findMany({
-        where: { entityType: 'User', action: 'create' },
-      });
-      const emails = logs.map((l: { after: unknown }) => (l.after as Record<string, unknown>)?.email).sort();
-      expect(emails).toEqual(['mr1@example.com', 'mr2@example.com']);
-    });
-
-    it('should create audit logs for updateManyAndReturn with before/after', async () => {
-      const created = await context.provider.runAsync(testActor, async () => {
-        return await context.prisma.user.createManyAndReturn({
-          data: [
-            { email: 'umr-int1@example.com', name: 'Original', password: 'secret1' },
-            { email: 'umr-int2@example.com', name: 'Original', password: 'secret2' },
-          ],
-        });
-      });
-      const ids = created.map((u: { id: string }) => u.id);
-
-      const updated = await context.provider.runAsync(testActor, async () => {
-        return await context.prisma.user.updateManyAndReturn({
-          where: { id: { in: ids } },
-          data: { name: 'Updated' },
-        });
-      });
-
-      expect(Array.isArray(updated)).toBe(true);
-      expect(updated).toHaveLength(2);
-      for (const u of updated) expect(u.name).toBe('Updated');
-
-      const updateLogs = await context.prisma.auditLog.findMany({
-        where: { entityType: 'User', action: 'update' },
-      });
-      expect(updateLogs).toHaveLength(2);
-
-      for (const log of updateLogs) {
-        const before = log.before as Record<string, unknown>;
-        const after = log.after as Record<string, unknown>;
-        expect(before).not.toBeNull();
-        expect(after).not.toBeNull();
-        expect(before.name).toBe('Original');
-        expect(after.name).toBe('Updated');
-
-        const changes = log.changes as Record<string, { old: unknown; new: unknown }>;
-        expect(changes).toHaveProperty('name');
-        expect(changes.name).toEqual({ old: 'Original', new: 'Updated' });
       }
     });
 

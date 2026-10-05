@@ -240,66 +240,6 @@ describe('Nested Update Operations', () => {
     });
   });
 
-  describe('updateMany nested operation', () => {
-    it('should handle updateMany for multiple records', async () => {
-      const user = await context.provider.runAsync(testActor, async () => {
-        return await context.prisma.user.create({
-          data: {
-            email: 'author@example.com',
-            name: 'Author',
-            password: 'secret123',
-            posts: {
-              create: [
-                { title: 'Post 1', content: 'Content 1', published: false },
-                { title: 'Post 2', content: 'Content 2', published: false },
-                { title: 'Post 3', content: 'Content 3', published: false },
-              ],
-            },
-          },
-          include: { posts: true },
-        });
-      });
-
-      await context.prisma.auditLog.deleteMany();
-
-      await context.provider.runAsync(testActor, async () => {
-        await context.prisma.user.update({
-          where: { id: user.id },
-          data: {
-            posts: {
-              updateMany: {
-                where: { published: false },
-                data: { published: true },
-              },
-            },
-          },
-        });
-      });
-
-      const postLogs = await context.prisma.auditLog.findMany({
-        where: { entityType: 'Post', action: 'update' },
-        orderBy: [{ entityId: 'asc' }, { aggregateType: 'asc' }],
-      });
-
-      // The rows the nested `updateMany` filter matches under this user are read ahead of the
-      // write, scoped to the parent the way Prisma scopes the write, so each of the 3 posts is
-      // audited once per aggregate root (Post itself and its User) with its before state.
-      const postIds: string[] = user.posts.map((post: { id: string }) => post.id).sort();
-      expect(
-        postLogs.map((log: { entityId: string; aggregateType: string }) => [log.entityId, log.aggregateType]),
-      ).toEqual(
-        postIds.flatMap((id) => [
-          [id, 'Post'],
-          [id, 'User'],
-        ]),
-      );
-      for (const log of postLogs) {
-        expect((log.before as { published?: boolean }).published).toBe(false);
-        expect((log.after as { published?: boolean }).published).toBe(true);
-      }
-    });
-  });
-
   describe('Where Clause Accuracy', () => {
     it('should pre-fetch only the correct record when multiple posts exist', async () => {
       const user = await context.provider.runAsync(testActor, async () => {

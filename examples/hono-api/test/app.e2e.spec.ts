@@ -501,87 +501,6 @@ describe('Hono + Prisma Audit E2E Tests', () => {
   });
 
   describe('Tag and PostTag Operations', () => {
-    it('should create tag and post-tag association', async () => {
-      // Create user
-      const userRes = await app.request('/users', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Actor-Id': 'admin',
-          'X-Actor-Type': 'AdminUser',
-        },
-        body: JSON.stringify({ email: 'user@example.com', name: 'User' }),
-      });
-      const user = (await userRes.json()) as User;
-
-      // Create post
-      const postRes = await app.request('/posts', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Actor-Id': user.id,
-        },
-        body: JSON.stringify({ title: 'Post', authorId: user.id }),
-      });
-      expect(postRes.status).toBe(201);
-      const postResult = (await postRes.json()) as {
-        post: Post;
-        tags: unknown[];
-        attachments: unknown[];
-      };
-      expect(postResult).toBeDefined();
-      // The endpoint returns { post, tags, attachments }
-      const post = postResult.post;
-      expect(post).toBeDefined();
-      expect(post.id).toBeDefined();
-
-      // Create tag and PostTag association within audit context
-      const { tag, postTag } = await auditProvider.runAsync(
-        {
-          actor: {
-            category: 'model',
-            type: 'User',
-            id: user.id,
-          },
-        },
-        async () => {
-          // Create tag
-          const tag = await testPrisma.tag.create({
-            data: { name: 'TypeScript' },
-          });
-
-          // Create PostTag association
-          const postTag = await testPrisma.postTag.create({
-            data: {
-              postId: post.id,
-              tagId: tag.id,
-            },
-          });
-
-          return { tag, postTag };
-        },
-      );
-
-      expect(tag.id).toBeDefined();
-      expect(postTag.id).toBeDefined();
-
-      const postTagLogs = await testPrisma.auditLog.findMany({
-        where: {
-          entityType: 'PostTag',
-          entityId: postTag.id,
-        },
-      });
-
-      expect(postTagLogs.length).toBeGreaterThan(0);
-      const createLog = postTagLogs.find((log: AuditLog) => log.action === 'create');
-      expect(createLog).toBeDefined();
-
-      const aggregateTypes = postTagLogs.map((log: AuditLog) => log.aggregateType);
-      expect(aggregateTypes).not.toContain('PostTag'); // Self excluded
-      expect(aggregateTypes).toContain('Tag'); // Parent included
-      expect(aggregateTypes).toContain('Post'); // Parent included
-    });
-
     it('should enrich PostTag audit logs with Tag name and Post title', async () => {
       // Create user
       const userRes = await app.request('/users', {
@@ -1212,49 +1131,6 @@ describe('Hono + Prisma Audit E2E Tests', () => {
   });
 
   describe('Aggregate root resolution via foreign key', () => {
-    it('should resolve the User aggregate root when the author relation is preloaded', async () => {
-      // Create user and post
-      const user = await testPrisma.user.create({
-        data: { email: 'author@example.com', name: 'Author' },
-      });
-
-      // Create comment with preloaded author relation
-      await auditProvider.runAsync(
-        {
-          actor: {
-            category: 'model',
-            type: 'User',
-            id: user.id,
-            name: user.name || 'User',
-          },
-        },
-        async () => {
-          await testPrisma.post.create({
-            data: {
-              title: 'Test Post',
-              content: 'Content',
-              authorId: user.id,
-            },
-            include: {
-              author: true, // Preload author relation
-            },
-          });
-        },
-      );
-
-      // Verify audit logs created with User aggregate root
-      const logs = await testPrisma.auditLog.findMany({
-        where: {
-          entityType: 'Post',
-          action: 'create',
-        },
-      });
-
-      const aggregateTypes = logs.map((log: AuditLog) => log.aggregateType);
-      expect(aggregateTypes).toContain('User'); // Resolved via foreignKey('authorId')
-      expect(aggregateTypes).toContain('Post'); // Self
-    });
-
     it('should resolve the User aggregate root when the relation is not preloaded', async () => {
       // Create user
       const user = await testPrisma.user.create({

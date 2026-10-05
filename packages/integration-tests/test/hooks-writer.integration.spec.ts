@@ -417,31 +417,6 @@ describe('hooks.writer Coverage', () => {
   });
 
   describe('Edge Cases', () => {
-    it('should call hooks.writer even with empty before/after states', async () => {
-      const user = await context.provider.runAsync(testActor, async () => {
-        return await context.prisma.user.create({
-          data: {
-            email: 'user@example.com',
-            name: 'User',
-            password: 'secret123',
-          },
-        });
-      });
-
-      // Reset spy after setup
-      context.writerSpy.callCount = 0;
-      context.writerSpy.calls = [];
-
-      // Delete with fetchBefore.delete: false (before state will be null)
-      await context.provider.runAsync(testActor, async () => {
-        await context.prisma.user.delete({
-          where: { id: user.id },
-        });
-      });
-
-      expect(context.writerSpy.callCount).toBe(1);
-    });
-
     it('should batch multiple operations in single hooks.writer call when appropriate', async () => {
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.user.create({

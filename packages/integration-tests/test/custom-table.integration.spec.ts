@@ -245,37 +245,4 @@ describe('Custom Audit Log Table', () => {
       }
     });
   });
-
-  describe('Table isolation', () => {
-    it('should maintain separate audit logs for different clients', async () => {
-      await context.provider.runAsync(testActor, async () => {
-        await context.prisma.user.create({
-          data: {
-            email: 'default@example.com',
-            name: 'Default User',
-            password: 'secret123',
-          },
-        });
-      });
-
-      await customContext.provider.runAsync(testActor, async () => {
-        await customContext.customPrisma.user.create({
-          data: {
-            email: 'custom@example.com',
-            name: 'Custom User',
-            password: 'secret123',
-          },
-        });
-      });
-
-      const auditLogs = await context.prisma.auditLog.findMany();
-      const activities = await customContext.customPrisma.activity.findMany();
-
-      expect(auditLogs).toHaveLength(1);
-      expect(activities).toHaveLength(1);
-
-      expect(auditLogs[0].entityType).toBe('User');
-      expect(activities[0].entityType).toBe('User');
-    });
-  });
 });

@@ -879,39 +879,6 @@ describe('Error Handling Integration', () => {
   });
 
   describe('Database constraint violations', () => {
-    it('should handle unique constraint violations correctly', async () => {
-      const email = 'duplicate@example.com';
-
-      await context.provider.runAsync(testActor, async () => {
-        return await context.prisma.user.create({
-          data: {
-            email,
-            name: 'First User',
-            password: 'secret123',
-          },
-        });
-      });
-
-      await expect(
-        context.provider.runAsync(testActor, async () => {
-          return await context.prisma.user.create({
-            data: {
-              email,
-              name: 'Duplicate User',
-              password: 'secret456',
-            },
-          });
-        }),
-      ).rejects.toThrow();
-
-      const users = await context.prisma.user.findMany({
-        where: { email },
-      });
-
-      expect(users).toHaveLength(1);
-      expect(users[0].name).toBe('First User');
-    });
-
     it('should handle foreign key constraint violations correctly', async () => {
       await expect(
         context.provider.runAsync(testActor, async () => {

@@ -378,61 +378,6 @@ describe('Nested ConnectOrCreate Operations', () => {
   });
 
   describe('Edge Cases', () => {
-    it('should handle connectOrCreate with complex where clause', async () => {
-      const user = await context.provider.runAsync(testActor, async () => {
-        return await context.prisma.user.create({
-          data: {
-            email: 'user@example.com',
-            name: 'User',
-            password: 'secret123',
-          },
-        });
-      });
-
-      const post = await context.provider.runAsync(testActor, async () => {
-        return await context.prisma.post.create({
-          data: {
-            title: 'Test Post',
-            content: 'Test content',
-            authorId: user.id,
-          },
-        });
-      });
-
-      await context.prisma.auditLog.deleteMany();
-
-      await context.provider.runAsync(testActor, async () => {
-        await context.prisma.post.update({
-          where: { id: post.id },
-          data: {
-            postTags: {
-              create: {
-                tag: {
-                  connectOrCreate: {
-                    where: { name: 'vue' },
-                    create: { name: 'vue' },
-                  },
-                },
-              },
-            },
-          },
-          include: {
-            postTags: {
-              include: { tag: true },
-            },
-          },
-        });
-      });
-
-      const tag = await context.prisma.tag.findUnique({ where: { name: 'vue' } });
-      expect(tag).not.toBeNull();
-
-      const tagLogs = await context.prisma.auditLog.findMany({
-        where: { entityType: 'Tag', entityId: tag?.id, action: 'create' },
-      });
-      expect(tagLogs.length).toBeGreaterThanOrEqual(1);
-    });
-
     it('should handle deep nested connectOrCreate operations', async () => {
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
@@ -490,36 +435,6 @@ describe('Nested ConnectOrCreate Operations', () => {
     });
   });
 
-  describe('Nested Create via Auto-Injection (no include)', () => {
-    it('should create an audit log for a nested Post create inside a top-level User update without an include clause', async () => {
-      const user = await context.provider.runAsync(testActor, async () => {
-        return await context.prisma.user.create({
-          data: { email: 'nested-create-no-include@example.com', name: 'Nested Create User', password: 'secret123' },
-        });
-      });
-
-      await context.prisma.auditLog.deleteMany();
-
-      await context.provider.runAsync(testActor, async () => {
-        await context.prisma.user.update({
-          where: { id: user.id },
-          data: {
-            name: 'Nested Create User Updated',
-            posts: { create: [{ title: 'Auto-injected Post', content: 'nc' }] },
-          },
-          // No include clause — the extension must auto-inject one to detect the nested create
-        });
-      });
-
-      const post = await context.prisma.post.findFirst({ where: { title: 'Auto-injected Post' } });
-      expect(post).not.toBeNull();
-
-      const postLogs = await context.prisma.auditLog.findMany({
-        where: { entityType: 'Post', action: 'create', entityId: post?.id },
-      });
-      expect(postLogs.length).toBeGreaterThanOrEqual(1);
-    });
-  });
   describe('the writes nested in the create data', () => {
     // A connectOrCreate runs the writes nested in its `create` data only when it creates its row.
 

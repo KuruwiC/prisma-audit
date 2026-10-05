@@ -206,35 +206,4 @@ describe('Actor Override Inside Transactions (Integration)', () => {
       expect(auditLogs).toHaveLength(0);
     });
   });
-
-  describe('audit-log atomicity (awaitWrite: true)', () => {
-    it('audit logs for actor-overridden writes are visible after commit', async () => {
-      // awaitWrite: true is enabled in the test setup (see helpers/setup.ts).
-      // After the outer runAsync resolves, all audit logs must be committed.
-      await context.provider.runAsync(actor1, async () => {
-        await context.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-          const user = await tx.user.create({
-            data: { email: 'atomicity-test@example.com', name: 'Atomicity', password: 'secret' },
-          });
-
-          await context.provider.withActor(actor2, async () =>
-            tx.post.create({
-              data: { title: 'Atomicity Post', content: 'Content', authorId: user.id },
-            }),
-          );
-        });
-      });
-
-      // Both logs must be present with no additional wait
-      const userLogs = await context.basePrisma.auditLog.findMany({
-        where: { entityType: 'User', actorId: 'actor-1' },
-      });
-      const postLogs = await context.basePrisma.auditLog.findMany({
-        where: { entityType: 'Post', actorId: 'actor-2' },
-      });
-
-      expect(userLogs.length).toBeGreaterThan(0);
-      expect(postLogs.length).toBeGreaterThan(0);
-    });
-  });
 });

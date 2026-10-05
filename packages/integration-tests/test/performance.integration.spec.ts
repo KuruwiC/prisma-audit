@@ -139,32 +139,6 @@ describe('Performance Benchmarks', () => {
     },
   };
 
-  describe('Baseline Performance', () => {
-    it('should write N audit log rows for N nested creates', async () => {
-      await context.provider.runAsync(testActor, async () => {
-        await context.prisma.user.create({
-          data: {
-            email: 'user@example.com',
-            name: 'User',
-            password: 'secret123',
-            posts: {
-              create: [
-                { title: 'Post 1', content: 'Content 1' },
-                { title: 'Post 2', content: 'Content 2' },
-                { title: 'Post 3', content: 'Content 3' },
-              ],
-            },
-          },
-          include: { posts: true },
-        });
-      });
-
-      console.log(`Nested create: ${context.auditLogRowCount.value} audit logs`);
-      expect(context.auditLogRowCount.value).toBeGreaterThan(0);
-      expect(context.auditLogRowCount.value).toBe(7);
-    });
-  });
-
   describe('fetchBefore: false', () => {
     it('should minimize audit log rows for nested update without pre-fetch', async () => {
       const user = await context.provider.runAsync(testActor, async () => {

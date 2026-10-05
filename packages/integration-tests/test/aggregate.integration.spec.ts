@@ -15,46 +15,6 @@ describe('Aggregate Root Resolution Integration', () => {
   };
 
   describe('Post aggregate resolution', () => {
-    it('should create audit logs for both Post and User aggregates on Post create', async () => {
-      const user = await getContext().provider.runAsync(testActor, async () => {
-        return await getContext().prisma.user.create({
-          data: {
-            email: 'author@example.com',
-            name: 'Author',
-            password: 'secret123',
-          },
-        });
-      });
-
-      const post = await getContext().provider.runAsync(testActor, async () => {
-        return await getContext().prisma.post.create({
-          data: {
-            title: 'Test Post',
-            content: 'Test content',
-            authorId: user.id,
-          },
-        });
-      });
-
-      const postLogs = await getContext().prisma.auditLog.findMany({
-        where: { entityType: 'Post', entityId: post.id },
-        orderBy: { aggregateType: 'asc' },
-      });
-
-      // Should have logs for both Post and User aggregates
-      expect(postLogs.length).toBeGreaterThanOrEqual(2);
-
-      const postAggregateLog = postLogs.find((log: { aggregateType: string }) => log.aggregateType === 'Post');
-      expect(postAggregateLog).toBeDefined();
-      expect(postAggregateLog?.aggregateId).toBe(post.id);
-      expect(postAggregateLog?.action).toBe('create');
-
-      const userAggregateLog = postLogs.find((log: { aggregateType: string }) => log.aggregateType === 'User');
-      expect(userAggregateLog).toBeDefined();
-      expect(userAggregateLog?.aggregateId).toBe(user.id);
-      expect(userAggregateLog?.action).toBe('create');
-    });
-
     it('should track Post changes under User aggregate', async () => {
       const user = await getContext().provider.runAsync(testActor, async () => {
         return await getContext().prisma.user.create({

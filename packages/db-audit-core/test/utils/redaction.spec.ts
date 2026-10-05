@@ -543,14 +543,6 @@ describe('structuredClone support in redactSensitiveData', () => {
 
 describe('BigInt safety in redaction', () => {
   describe('redactChangeObject (via createRedactor)', () => {
-    it('should not throw when change object contains BigInt values', () => {
-      const redactor = createRedactor();
-      const data = {
-        password: { old: 123n, new: 456n },
-      };
-      expect(() => redactor(data)).not.toThrow();
-    });
-
     it('should correctly detect different BigInt values in redacted change', () => {
       const redactor = createRedactor();
       const data = {

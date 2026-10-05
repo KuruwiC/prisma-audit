@@ -152,14 +152,14 @@ describe('Resolver helper functions', () => {
 });
 
 describe('defineEntity', () => {
-  it('should create entity with self id resolution (no aggregates)', () => {
+  it('should create entity with self id resolution (no aggregates)', async () => {
     const entity = defineEntity({
       type: 'User',
     });
 
     expect(entity.category).toBe('model');
     expect(entity.type).toBe('User');
-    expect(entity.idResolver).toBeDefined();
+    await expect(entity.idResolver({ id: 'user-1' }, null)).resolves.toBe('user-1');
     expect(entity.aggregates).toHaveLength(0);
     expect(entity.self).toBeUndefined();
   });

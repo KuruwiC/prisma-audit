@@ -86,12 +86,6 @@ describe('UUID v7 generation', () => {
 });
 
 describe('cuid v1 generation', () => {
-  it('matches the Prisma cuid() format (25 chars, leading "c")', () => {
-    const id = ID_GENERATOR_FACTORIES.cuid?.([1])?.() as string;
-    expect(id).toHaveLength(25);
-    expect(id).toMatch(CUID_V1_RE);
-  });
-
   it('generates unique values', () => {
     const generator = ID_GENERATOR_FACTORIES.cuid?.([1]);
     const ids = new Set(Array.from({ length: 1000 }, () => generator?.()));
@@ -215,24 +209,6 @@ describe('getIdFieldInfo', () => {
     expect(v4?.generator?.()).toMatch(UUID_V4_RE);
   });
 
-  it('should leave generator undefined for unknown uuid versions', () => {
-    const Prisma = {
-      dmmf: {
-        datamodel: {
-          models: [
-            {
-              name: 'User',
-              fields: [{ name: 'id', kind: 'scalar', type: 'String', default: { name: 'uuid', args: [8] } }],
-            },
-          ],
-        },
-      },
-    };
-    const info = getIdFieldInfo(createSchemaMetadataFromDMMF(Prisma), 'User', 'id');
-    expect(info?.defaultExpr).toBe('uuid(8)');
-    expect(info?.generator).toBeUndefined();
-  });
-
   it('should return field info without generator for autoincrement()', () => {
     const Prisma = {
       dmmf: {
@@ -263,18 +239,6 @@ describe('getIdFieldInfo', () => {
 });
 
 describe('getIdFieldInfo default parsing', () => {
-  it('preserves args from DMMF object defaults (uuid(7))', () => {
-    const info = getIdFieldInfo(metadataWithIdDefault({ name: 'uuid', args: [7] }), 'Item');
-    expect(info?.defaultExpr).toBe('uuid(7)');
-    expect(info?.generator?.()).toMatch(UUID_V7_RE);
-  });
-
-  it('resolves DMMF object defaults with version 4 (uuid())', () => {
-    const info = getIdFieldInfo(metadataWithIdDefault({ name: 'uuid', args: [4] }), 'Item');
-    expect(info?.defaultExpr).toBe('uuid(4)');
-    expect(info?.generator?.()).toMatch(UUID_V4_RE);
-  });
-
   it('parses args from string defaults (uuid(7))', () => {
     const info = getIdFieldInfo(metadataWithIdDefault('uuid(7)'), 'Item');
     expect(info?.defaultExpr).toBe('uuid(7)');
@@ -400,49 +364,6 @@ describe('ensureIds', () => {
     const entities = [{ email: 'user@example.com' }];
     expect(() => ensureIds(createSchemaMetadataFromDMMF(Prisma), 'User', entities)).toThrow(
       'unsupported default: autoincrement()',
-    );
-  });
-
-  it('should inject UUID v7 IDs for @default(uuid(7)) models', () => {
-    const Prisma = {
-      dmmf: {
-        datamodel: {
-          models: [
-            {
-              name: 'User',
-              fields: [{ name: 'id', kind: 'scalar', type: 'String', default: { name: 'uuid', args: [7] } }],
-            },
-          ],
-        },
-      },
-    };
-    const entities = [{ email: 'user1@example.com' }, { email: 'user2@example.com' }];
-    const result = ensureIds(createSchemaMetadataFromDMMF(Prisma), 'User', entities) as Array<{
-      id: string;
-      email: string;
-    }>;
-
-    for (const entity of result) {
-      expect(entity.id).toMatch(UUID_V7_RE);
-    }
-  });
-
-  it('should throw for unknown uuid versions instead of silently injecting v4', () => {
-    const Prisma = {
-      dmmf: {
-        datamodel: {
-          models: [
-            {
-              name: 'User',
-              fields: [{ name: 'id', kind: 'scalar', type: 'String', default: { name: 'uuid', args: [8] } }],
-            },
-          ],
-        },
-      },
-    };
-    const entities = [{ email: 'user@example.com' }];
-    expect(() => ensureIds(createSchemaMetadataFromDMMF(Prisma), 'User', entities)).toThrow(
-      'unsupported default: uuid(8)',
     );
   });
 

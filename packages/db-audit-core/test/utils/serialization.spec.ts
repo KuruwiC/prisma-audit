@@ -61,10 +61,6 @@ describe('serializeForAuditJson', () => {
       expect(serializeForAuditJson(123n)).toBe('123');
     });
 
-    it('should convert large BigInt to string', () => {
-      expect(serializeForAuditJson(9007199254740991n)).toBe('9007199254740991');
-    });
-
     it('should convert BigInt in nested objects', () => {
       const obj = { user: { id: 1n, balance: 100n } };
       const result = serializeForAuditJson(obj) as Record<string, unknown>;

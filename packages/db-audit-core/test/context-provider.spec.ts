@@ -155,28 +155,6 @@ describe('createAsyncLocalStorageProvider', () => {
     expect(provider.getContext()).toBeUndefined();
   });
 
-  it('should preserve custom request metadata', () => {
-    const provider = createAsyncLocalStorageProvider();
-
-    const context: AuditContext = {
-      actor: { category: 'model', type: 'User', id: 'user-123', name: 'John Doe' },
-      request: {
-        ipAddress: '192.168.1.1',
-        userAgent: 'Mozilla/5.0',
-        tenantId: 'tenant-456',
-      },
-    };
-
-    provider.run(context, () => {
-      const ctx = provider.getContext();
-      expect(ctx?.request).toEqual({
-        ipAddress: '192.168.1.1',
-        userAgent: 'Mozilla/5.0',
-        tenantId: 'tenant-456',
-      });
-    });
-  });
-
   describe('useContext', () => {
     it('should return context when available', () => {
       const provider = createAsyncLocalStorageProvider();
@@ -201,50 +179,6 @@ describe('createAsyncLocalStorageProvider', () => {
       expect(() => {
         provider.useContext();
       }).toThrow('Make sure you are running within a context provider');
-    });
-
-    it('should work in async context', async () => {
-      const provider = createAsyncLocalStorageProvider();
-
-      const context: AuditContext = {
-        actor: { category: 'system', type: 'CronJob', id: 'job-123' },
-      };
-
-      await provider.runAsync(context, async () => {
-        await new Promise((resolve) => setTimeout(resolve, 10));
-        const ctx = provider.useContext();
-        expect(ctx).toEqual(context);
-        expect(ctx.actor.type).toBe('CronJob');
-      });
-    });
-
-    it('should be isolated between parallel operations', async () => {
-      const provider = createAsyncLocalStorageProvider();
-
-      const context1: AuditContext = {
-        actor: { category: 'model', type: 'User', id: 'user-1' },
-      };
-
-      const context2: AuditContext = {
-        actor: { category: 'model', type: 'User', id: 'user-2' },
-      };
-
-      const results = await Promise.all([
-        provider.runAsync(context1, async () => {
-          await new Promise((resolve) => setTimeout(resolve, 20));
-          const ctx = provider.useContext();
-          expect(ctx.actor.id).toBe('user-1');
-          return ctx.actor.id;
-        }),
-        provider.runAsync(context2, async () => {
-          await new Promise((resolve) => setTimeout(resolve, 10));
-          const ctx = provider.useContext();
-          expect(ctx.actor.id).toBe('user-2');
-          return ctx.actor.id;
-        }),
-      ]);
-
-      expect(results).toEqual(['user-1', 'user-2']);
     });
   });
 

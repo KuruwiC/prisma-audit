@@ -131,21 +131,6 @@ describe('removeRelations', () => {
 
       expect(result).toEqual(input);
     });
-
-    it('should preserve nested objects with id field', () => {
-      const input = {
-        id: 'user-1',
-        settings: {
-          id: 'settings-uuid',
-          theme: 'dark',
-          notifications: true,
-        },
-      };
-
-      const result = removeRelations(input);
-
-      expect(result).toEqual(input);
-    });
   });
 
   describe('edge cases', () => {

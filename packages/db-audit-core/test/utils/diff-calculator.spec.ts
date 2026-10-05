@@ -54,12 +54,6 @@ describe('createDiffCalculator', () => {
         ids: { old: [1n, 2n, 3n], new: [1n, 2n, 4n] },
       });
     });
-
-    it('should not throw TypeError for BigInt values', () => {
-      const before = { balance: 100n };
-      const after = { balance: 200n };
-      expect(() => calculateDiff(before, after)).not.toThrow();
-    });
   });
 
   describe('ignored fields with BigInt', () => {

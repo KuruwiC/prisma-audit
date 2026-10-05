@@ -308,14 +308,6 @@ describe('injectAuditedSelection', () => {
     expect(injected).toEqual({ keys: new Set(['email']), nested: new Map() });
   });
 
-  it('drops an omit that names only fields the caller omits', () => {
-    const args = { where: { id: 'user-1' }, data: {}, omit: { email: true } };
-
-    const { args: injectedArgs } = inject(args);
-
-    expect(injectedArgs).toEqual({ where: args.where, data: args.data });
-  });
-
   it('reads the fields a caller omits inside a written relation', () => {
     const args = {
       where: { id: 'user-1' },

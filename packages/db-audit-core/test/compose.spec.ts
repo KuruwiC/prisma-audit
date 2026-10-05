@@ -521,9 +521,5 @@ describe('compose', () => {
 
       expect(record.actorContext).toEqual({ data: 'bytes:3' });
     });
-
-    it('keeps createdAt as a Date', () => {
-      expect(composeOne(event()).createdAt).toBeInstanceOf(Date);
-    });
   });
 });

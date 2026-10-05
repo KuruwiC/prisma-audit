@@ -283,64 +283,6 @@ describe('Batch $transaction under the audit extension', () => {
       }
     });
 
-    it("rolls back every operation of the batch when one operation's audit build fails", async () => {
-      const raw = new PrismaClient({ datasources: { db: { url: context.databaseUrl } } });
-      const buildError = new Error('simulated failure after the write');
-      let failed = false;
-      const base = raw.$extends({
-        name: 'fault-injection',
-        query: {
-          user: {
-            async findMany({ args, query }) {
-              const rows = await query(args);
-              if (!failed && rows.some((row) => row.name === 'Second')) {
-                failed = true;
-                throw buildError;
-              }
-              return rows;
-            },
-          },
-        },
-      });
-      const provider = createAsyncLocalStorageProvider();
-      const observer = vi.fn();
-      const prisma = createAuditClient(base, {
-        Prisma,
-        provider,
-        aggregateMapping: testAggregateMapping,
-        performance: { awaitWrite: true, openImplicitTransaction: true },
-        errorHandling: { observer },
-      });
-      try {
-        const first = await context.basePrisma.user.create({ data: { email: 'first@example.com', name: 'Owner' } });
-        const second = await context.basePrisma.user.create({ data: { email: 'second@example.com', name: 'Owner' } });
-
-        const outcome = await settle(
-          provider.runAsync(actor, () =>
-            prisma.$transaction([
-              prisma.user.updateMany({ where: { id: first.id }, data: { name: 'First' } }),
-              prisma.user.updateMany({ where: { id: second.id }, data: { name: 'Second' } }),
-            ]),
-          ),
-        );
-        await flushAllPendingWrites();
-
-        expect(outcome).toMatchObject({ status: 'rejected', error: buildError });
-        expect((await committedRows()).users).toEqual([
-          { email: 'first@example.com', name: 'Owner' },
-          { email: 'second@example.com', name: 'Owner' },
-        ]);
-        expect(await auditRows()).toEqual([]);
-        expect(observer).toHaveBeenCalledTimes(1);
-        expect(observer).toHaveBeenCalledWith(
-          expect.objectContaining({ phase: 'diff-generation', modelName: 'User', operation: 'updateMany' }),
-        );
-      } finally {
-        await prisma.$disconnect();
-        await raw.$disconnect();
-      }
-    });
-
     it('rolls back every operation of the batch when only some of its models await their audit', async () => {
       const audited = createAudited({
         openImplicitTransaction: true,

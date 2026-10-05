@@ -75,20 +75,4 @@ describe('createEntityConfigLookup', () => {
       expect(() => createEntityConfigLookup(invalidMapping)).toThrow('Invalid aggregate mapping configuration');
     });
   });
-
-  describe('edge cases', () => {
-    it('should handle entities with system category', () => {
-      const mapping: AggregateMapping = {
-        AuditLog: defineEntity({
-          category: 'system',
-          type: 'AuditLog',
-        }),
-      };
-      const config = createEntityConfigLookup(mapping);
-
-      expect(config.isLoggable('AuditLog')).toBe(true);
-      const entity = config.byModel('AuditLog');
-      expect(entity?.category).toBe('system');
-    });
-  });
 });

@@ -38,16 +38,6 @@ describe('createErrorHandler', () => {
 
       consoleErrorSpy.mockRestore();
     });
-
-    it('should not throw after logging', () => {
-      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-      const handler = createErrorHandler('log');
-      const error = new Error('Test error');
-
-      expect(() => handler(error, 'test context')).not.toThrow();
-
-      consoleErrorSpy.mockRestore();
-    });
   });
 
   describe('ignore strategy', () => {

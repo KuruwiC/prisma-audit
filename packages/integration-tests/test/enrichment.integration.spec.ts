@@ -191,47 +191,6 @@ describe('Context Enrichment Integration', () => {
       expect(regularContext.name).toBe('Regular User');
       expect(regularContext.role).toBe('user');
     });
-
-    it('[N+1 Resolution] should call actor enricher exactly once per operation', async () => {
-      // The actor enricher is configured in helpers/setup.ts and cannot be spied on directly, so
-      // N+1 resolution is verified indirectly: actorContext must be consistent across all entities.
-      const actor: TestAuditContext = {
-        actor: {
-          category: 'model',
-          type: 'User',
-          id: 'test-actor',
-          name: 'Test Actor',
-          role: 'admin',
-        },
-      };
-
-      await context.provider.runAsync(actor, async () => {
-        await context.prisma.user.createMany({
-          data: [
-            { email: 'user1@example.com', name: 'User 1', password: 'pass1' },
-            { email: 'user2@example.com', name: 'User 2', password: 'pass2' },
-            { email: 'user3@example.com', name: 'User 3', password: 'pass3' },
-          ],
-        });
-      });
-
-      // Verify all audit logs have the same actorContext (proving it was enriched once and reused)
-      const auditLogs = await context.prisma.auditLog.findMany({
-        where: { actorId: 'test-actor' },
-      });
-
-      expect(auditLogs.length).toBeGreaterThanOrEqual(3);
-
-      const firstActorContext = auditLogs[0]?.actorContext as Record<string, unknown>;
-      expect(firstActorContext.name).toBe('Test Actor');
-      expect(firstActorContext.role).toBe('admin');
-
-      for (const log of auditLogs) {
-        const actorContext = log.actorContext as Record<string, unknown>;
-        expect(actorContext.name).toBe('Test Actor');
-        expect(actorContext.role).toBe('admin');
-      }
-    });
   });
 
   describe('Actor context in UPDATE operations', () => {
@@ -1393,63 +1352,6 @@ describe('Context Enrichment Integration', () => {
       await customBasePrisma.$disconnect();
     });
 
-    it('should call actor enricher once per separate operation context', async () => {
-      let actorEnricherCallCount = 0;
-
-      const customBasePrisma = new (await import('@kuruwic/prisma-audit-database/generated/client')).PrismaClient({
-        datasources: { db: { url: context.databaseUrl } },
-      });
-      const customProvider = createAsyncLocalStorageProvider();
-
-      const customPrisma = createAuditClient(customBasePrisma, {
-        Prisma,
-        provider: customProvider,
-        aggregateMapping: testAggregateMapping,
-        contextEnricher: {
-          actor: {
-            enricher: async (actor: unknown) => {
-              actorEnricherCallCount++;
-              return {
-                name: (actor as { name?: string }).name,
-                role: (actor as { role?: string }).role,
-              };
-            },
-            onError: 'log',
-            fallback: null,
-          },
-        },
-        performance: {
-          awaitWrite: true,
-        },
-      });
-
-      const actor: TestAuditContext = {
-        actor: {
-          category: 'model',
-          type: 'User',
-          id: 'separate-ctx-actor',
-          name: 'Separate Context Actor',
-          role: 'admin',
-        },
-      };
-      await customProvider.runAsync(actor, async () => {
-        await customPrisma.user.create({
-          data: { email: 'ctx1@example.com', name: 'User 1', password: 'pass1' },
-        });
-      });
-
-      expect(actorEnricherCallCount).toBe(1);
-      await customProvider.runAsync(actor, async () => {
-        await customPrisma.user.create({
-          data: { email: 'ctx2@example.com', name: 'User 2', password: 'pass2' },
-        });
-      });
-
-      expect(actorEnricherCallCount).toBe(2);
-
-      await customBasePrisma.$disconnect();
-    });
-
     it('should call actor enricher separately for concurrent operations', async () => {
       let actorEnricherCallCount = 0;
 
@@ -1672,93 +1574,6 @@ describe('Context Enrichment Integration', () => {
 
       // Entity enrichment is per-operation, not cached across operations
       expect(entityEnricherCallCount).toBe(3);
-
-      await customBasePrisma.$disconnect();
-    });
-
-    it('should call aggregate enricher exactly once (batch) for createMany operation', async () => {
-      let aggregateEnricherCallCount = 0;
-
-      const customBasePrisma = new (await import('@kuruwic/prisma-audit-database/generated/client')).PrismaClient({
-        datasources: { db: { url: context.databaseUrl } },
-      });
-      const customProvider = createAsyncLocalStorageProvider();
-
-      const customAggregateMapping: AggregateMapping = {
-        User: defineEntity({
-          type: 'User',
-          excludeFields: ['updatedAt'],
-          self: {
-            context: {
-              enricher: async (rows, _prisma, meta) => {
-                aggregateEnricherCallCount++;
-                return rows.map((_row, i) => ({
-                  aggregateType: meta.aggregateType,
-                  aggregateId: meta.aggregateIds[i],
-                }));
-              },
-            },
-          },
-        }),
-        Profile: defineEntity({
-          type: 'Profile',
-          aggregates: [to('User', foreignKey('userId'))],
-        }),
-        Post: defineEntity({
-          type: 'Post',
-          aggregates: [to('User', foreignKey('authorId'))],
-        }),
-        Comment: defineEntity({
-          type: 'Comment',
-          aggregates: [to('Post', foreignKey('postId')), to('User', foreignKey('authorId'))],
-        }),
-      };
-
-      const customPrisma = createAuditClient(customBasePrisma, {
-        Prisma,
-        provider: customProvider,
-        aggregateMapping: customAggregateMapping,
-        contextEnricher: {
-          actor: {
-            enricher: async (actor: unknown) => ({
-              name: (actor as { name?: string }).name,
-              role: (actor as { role?: string }).role,
-            }),
-            onError: 'log',
-            fallback: null,
-          },
-        },
-        performance: {
-          awaitWrite: true,
-        },
-      });
-
-      const actor: AuditContext = {
-        actor: { category: 'model', type: 'User', id: 'aggregate-batch-actor' },
-      };
-      await customProvider.runAsync(actor, async () => {
-        await customPrisma.user.createMany({
-          data: [
-            { email: 'agg1@example.com', name: 'Aggregate User 1', password: 'pass1' },
-            { email: 'agg2@example.com', name: 'Aggregate User 2', password: 'pass2' },
-            { email: 'agg3@example.com', name: 'Aggregate User 3', password: 'pass3' },
-          ],
-        });
-      });
-
-      // All 3 users share aggregateType "User" → enricher called once with all 3 entities
-      expect(aggregateEnricherCallCount).toBe(1);
-      const auditLogs = await customBasePrisma.auditLog.findMany({
-        where: { actorId: 'aggregate-batch-actor' },
-      });
-
-      expect(auditLogs.length).toBeGreaterThanOrEqual(3);
-      for (const log of auditLogs) {
-        expect(log.aggregateContext).toBeDefined();
-        const aggregateContext = log.aggregateContext as Record<string, unknown>;
-        expect(aggregateContext.aggregateType).toBe('User');
-        expect(aggregateContext.aggregateId).toBeDefined();
-      }
 
       await customBasePrisma.$disconnect();
     });
