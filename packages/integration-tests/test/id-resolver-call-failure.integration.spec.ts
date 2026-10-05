@@ -242,5 +242,35 @@ describe('id-resolver-call failures', () => {
       expect(await aggregatesOf('Comment')).toEqual(['c-deleted:Comment:c-deleted', 'c-deleted:Post:p-deleted']);
       expect(await aggregatesOf('Post')).toEqual(['p-deleted:Post:p-deleted', `p-deleted:User:${author.id}`]);
     });
+
+    it('records a row a nested delete removes without reading it under the nested parent it was deleted from', async () => {
+      const author = await createAuthor();
+      const post = await context.basePrisma.post.create({ data: { id: 'p-parent', title: 'P', authorId: author.id } });
+      await context.basePrisma.comment.create({
+        data: { id: 'c-grandchild', content: 'C', postId: post.id, authorId: author.id },
+      });
+      const observer = vi.fn<AuditErrorObserver>();
+      const { basePrisma, provider, prisma } = createClientWith(false, observer);
+      try {
+        await provider.runAsync(testActor, () =>
+          prisma.user.update({
+            where: { id: author.id },
+            data: {
+              posts: { update: { where: { id: post.id }, data: { comments: { delete: { id: 'c-grandchild' } } } } },
+            },
+          }),
+        );
+      } finally {
+        await prisma.$disconnect();
+        await basePrisma.$disconnect();
+      }
+
+      expect(observer).not.toHaveBeenCalled();
+      // The post it was deleted through is known by the primary key its read encodes
+      expect(await aggregatesOf('Comment')).toEqual([
+        'c-grandchild:Comment:c-grandchild',
+        'c-grandchild:Post:p-parent',
+      ]);
+    });
   });
 });

@@ -8,7 +8,7 @@
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
-import { type AggregateMapping, createAuditClient, defineEntity } from '@kuruwic/prisma-audit';
+import { type AggregateMapping, type AuditErrorObserver, createAuditClient, defineEntity } from '@kuruwic/prisma-audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { cleanDatabase, getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
@@ -32,6 +32,7 @@ const keysOf = (value: unknown): string[] =>
 
 interface Options {
   readonly Prisma?: typeof Prisma;
+  readonly errorHandling?: { readonly observer?: AuditErrorObserver };
   readonly aggregateMapping?: AggregateMapping;
   readonly security?: { readonly redact?: { readonly fields?: string[] } };
 }
@@ -454,6 +455,27 @@ describe('fields a client-level omit hides', () => {
       expect(record?.changes).toEqual({ name: { old: 'Ada', new: 'Bea' } });
       expect(warn).toHaveBeenCalledTimes(1);
       expect(warn.mock.calls[0]?.[0]).toContain('left out of audit logs');
+    });
+
+    it('fails a foreignKey root on a hidden column the rows lack, reports it, and records the row under its own root', async () => {
+      const observer = vi.fn<AuditErrorObserver>();
+      const { prisma, run, aggregatesOf } = await setup(
+        { errorHandling: { observer } },
+        CLIENT_OMIT,
+        hidingOmitSetting,
+      );
+
+      await run(() => prisma.post.update({ where: { id: 'p1' }, data: { title: 'T1b' } }));
+
+      expect(await aggregatesOf('Post')).toEqual(['p1:Post:p1']);
+      expect(observer).toHaveBeenCalledTimes(1);
+      expect(observer).toHaveBeenCalledWith(
+        expect.objectContaining({
+          phase: 'id-resolver-call',
+          modelName: 'Post',
+          params: expect.objectContaining({ resolver: expect.objectContaining({ aggregateType: 'User' }) }),
+        }),
+      );
     });
 
     it('masks only the hidden field when the setting is readable on a client before 6.2', async () => {
