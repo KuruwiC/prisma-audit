@@ -586,7 +586,7 @@ describe('Error Handling Integration', () => {
       }
     });
 
-    it('a diff-generation failure on the batch path inside the transaction the client opens still propagates to the caller, regardless of writeFailurePolicy', async () => {
+    it('a diff-generation failure on the batch path inside the transaction the client opens propagates to the caller, regardless of writeFailurePolicy', async () => {
       // `diff-generation` is never policy-gated, unlike `log-write` (see
       // `AuditErrorPhase` / `WriteFailurePolicy` in the audit extension's types.ts): it
       // propagates to the caller even under `writeFailurePolicy: 'ignore'`, and the policy
