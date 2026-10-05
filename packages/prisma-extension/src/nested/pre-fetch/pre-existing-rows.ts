@@ -19,6 +19,7 @@ import type {
   TransactionalPrismaClient,
 } from '../../internal-types.js';
 import type { SchemaMetadata } from '../../schema/types.js';
+import type { ClientOmittedFields } from '../../utils/client-omit.js';
 import { preFetchLog } from '../../utils/debug.js';
 import { extractEntityIdentity } from '../../utils/id-generation.js';
 import type { EntityIdentityKey } from '../../utils/identity-key.js';
@@ -44,6 +45,8 @@ export interface SnapshotPreExistingRowsDependencies {
   readonly Prisma: PrismaNamespace;
   readonly schemaMetadata: SchemaMetadata;
   readonly shouldFetchBefore: ShouldFetchBefore;
+  /** The fields the client omits for every query, which the whole rows it reads include */
+  readonly clientOmittedFields: ClientOmittedFields;
 }
 
 interface PathRelation extends ToManyPath {
@@ -57,7 +60,7 @@ const resolvePathRelation = (
   operation: NestedOperationInfo,
 ): PathRelation | undefined => {
   const path = resolveToManyPath(deps.Prisma, deps.schemaMetadata, input.modelName, operation);
-  const client = getPreFetchListClient(input.prismaClient, operation.relatedModel);
+  const client = getPreFetchListClient(input.prismaClient, operation.relatedModel, deps.clientOmittedFields);
   if (!path || !client) {
     preFetchLog(
       'snapshot: relation or model client not found: model=%s path=%s',
@@ -93,7 +96,7 @@ const snapshotPath = async (
     parentFields: scope.parentFields,
     parentPkFields: parentPk.fields,
     topLevelWhere: input.topLevelWhere,
-    topLevelModelClient: getPreFetchModelClient(input.prismaClient, input.modelName),
+    topLevelModelClient: getPreFetchModelClient(input.prismaClient, input.modelName, deps.clientOmittedFields),
     preFetchResults: input.nestedPreFetchResults,
   });
   if (!allKnown) {

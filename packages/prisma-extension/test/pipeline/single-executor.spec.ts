@@ -11,6 +11,7 @@ import type { ExecutionScope } from '../../src/pipeline/execution-scope.js';
 import type { AuditedOperation } from '../../src/pipeline/executor.js';
 import type { RecordProducer } from '../../src/pipeline/produce-records.js';
 import { createSingleExecutor } from '../../src/pipeline/single-executor.js';
+import { NO_CLIENT_OMITTED_FIELDS } from '../../src/utils/client-omit.js';
 import { createSchemaMetadataFromDMMF } from '../../src/utils/schema-metadata.js';
 import { runWithRecords } from './run-with-records.js';
 
@@ -131,7 +132,13 @@ interface ExecutorOptions {
 const executorWith = (options: ExecutorOptions = {}) => {
   const shouldFetchBefore = vi.fn(() => options.fetchBefore ?? true);
   const failureSink = options.failureSink ?? createFailureSink();
-  const executor = createSingleExecutor({ Prisma, schemaMetadata, shouldFetchBefore, failureSink });
+  const executor = createSingleExecutor({
+    Prisma,
+    schemaMetadata,
+    shouldFetchBefore,
+    clientOmittedFields: NO_CLIENT_OMITTED_FIELDS,
+    failureSink,
+  });
   const produceRecords = vi.fn<RecordProducer>(async () => []);
   return { executor, produceRecords, shouldFetchBefore, failureSink };
 };

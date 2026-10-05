@@ -17,6 +17,7 @@ import { namedTargets } from '../../grammar/nested-operations.js';
 import { AUDIT_ACTION } from '../../grammar/operations.js';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../internal-types.js';
 import { UNAVAILABLE_BEFORE_STATE } from '../../utils/before-state.js';
+import type { ClientOmittedFields } from '../../utils/client-omit.js';
 import { matchesUniqueWhere, uniqueWhereAsFilter } from '../../utils/compound-where.js';
 import { nestedLog } from '../../utils/debug.js';
 import { extractEntityIdentity, primaryKeyOf } from '../../utils/id-generation.js';
@@ -172,6 +173,8 @@ export interface LinkChangesInput {
   readonly client: PrismaClientWithDynamicAccess | TransactionalPrismaClient;
   readonly linkReads: LinkReads;
   readonly nestedPreFetchResults: NestedPreFetchResults;
+  /** The fields the client omits for every query, which the whole rows it reads include */
+  readonly clientOmittedFields: ClientOmittedFields;
   /** The rows other nested writes audit at a path, whose own record already carries the new foreign key */
   readonly auditedAt: (path: string) => ReadonlySet<EntityIdentityKey>;
   readonly fieldNamesOf: (modelName: string) => ReadonlySet<string>;
@@ -191,7 +194,7 @@ export const collectLinkChanges = async (
     if (candidates.length === 0) {
       continue;
     }
-    const client = getPreFetchListClient(input.client, read.relatedModel);
+    const client = getPreFetchListClient(input.client, read.relatedModel, input.clientOmittedFields);
     if (!client) {
       throw new Error(`[@prisma-audit] Cannot read the re-linked rows at path "${path}": no model client`);
     }

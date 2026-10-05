@@ -1,12 +1,14 @@
 /**
  * The selection an audited operation runs with
  *
- * An audited row is recorded in the client's default shape, whatever shape the caller reads it in:
- * its before state is read in that shape, so its after state and `changes` must be too, and the
- * entity's resolvers read the columns they name. A caller `select` at a level whose rows are audited
- * is therefore read as the default shape with the relations it selects included, and the fields a
- * caller `omit` leaves out are read. Enumerating the columns instead would read the fields a
- * client-level `omit` hides, which the before state lacks.
+ * An audited row is recorded in the client's default shape together with the fields a client-level
+ * `omit` hides, whatever shape the caller reads it in: its before state is read in that shape, so
+ * its after state and `changes` must be too, and the entity's resolvers read the columns they name.
+ * A caller `select` at a level whose rows are audited is therefore read as the default shape with
+ * the relations it selects included, the fields a caller `omit` leaves out are read, and so are the
+ * fields the client omits (`utils/client-omit.ts`). Enumerating the columns instead would read a
+ * field the client hides even when the audit could not learn that it does, which the before state
+ * then lacks.
  *
  * Nested writes are audited from the records the operation returns, so the relations an operation
  * writes are added to its selection: into `include`, or into the caller's `select` on a client that
@@ -31,6 +33,7 @@ import {
   targetWhereClauses,
 } from '../grammar/nested-operations.js';
 import type { SchemaMetadata } from '../schema/types.js';
+import { type ClientOmittedFields, omitEntriesReading } from './client-omit.js';
 import { uniqueWhereAsFilter } from './compound-where.js';
 
 /**
@@ -46,6 +49,27 @@ const RESULT_AUDITED_KEYWORDS: ReadonlySet<NestedOperationKeyword> = new Set([
   'upsert',
   'connectOrCreate',
 ]);
+
+/** Operations that return the records they write, the only ones that take a selection */
+const RECORD_RETURNING_ACTIONS: ReadonlySet<string> = new Set([
+  'create',
+  'update',
+  'upsert',
+  'delete',
+  'createManyAndReturn',
+  'updateManyAndReturn',
+]);
+
+/** What decides how the audited rows of an operation are read */
+export interface SelectionReading {
+  readonly schemaMetadata: SchemaMetadata;
+  /** Whether the client accepts a query `omit` (Prisma 6.2 and later) */
+  readonly queryOmitSupported: boolean;
+  readonly clientOmittedFields: ClientOmittedFields;
+}
+
+/** What decides how the rows of a written relation are read */
+type RelationReading = Pick<SelectionReading, 'schemaMetadata' | 'clientOmittedFields'>;
 
 /**
  * The rows of a written relation to read: `rows` bounds a to-many relation to the unique WHEREs
@@ -149,25 +173,28 @@ const buildWrittenRelations = (
   return root;
 };
 
-const buildIncludeTree = (schemaMetadata: SchemaMetadata, relations: WrittenRelations): Selection =>
-  Object.fromEntries(
-    Array.from(relations, ([field, relation]) => [field, buildRelationEntry(schemaMetadata, relation)]),
-  );
+const buildIncludeTree = (reading: RelationReading, relations: WrittenRelations): Selection =>
+  Object.fromEntries(Array.from(relations, ([field, relation]) => [field, buildRelationEntry(reading, relation)]));
 
 /**
- * Entry for one written relation. Nested relations always use `include`, which is valid even when
- * this entry is placed under a `select` field.
+ * Entry for one written relation, reading the fields the client omits on its model. Nested
+ * relations always use `include`, which is valid even when this entry is placed under a `select`
+ * field.
  *
  * @internal
  */
-const buildRelationEntry = (schemaMetadata: SchemaMetadata, relation: WrittenRelation): true | Selection => {
+const buildRelationEntry = (reading: RelationReading, relation: WrittenRelation): true | Selection => {
   const entry: Selection = {};
   if (relation.rows.kind === 'rows' && relation.rows.wheres.length > 0) {
-    const fieldNames = new Set(schemaMetadata.getAllFields(relation.relatedModel).map((field) => field.name));
+    const fieldNames = new Set(reading.schemaMetadata.getAllFields(relation.relatedModel).map((field) => field.name));
     entry.where = { OR: relation.rows.wheres.map((where) => uniqueWhereAsFilter(where, fieldNames)) };
   }
   if (relation.children.size > 0) {
-    entry.include = buildIncludeTree(schemaMetadata, relation.children);
+    entry.include = buildIncludeTree(reading, relation.children);
+  }
+  const omit = omitEntriesReading(reading.clientOmittedFields.of(relation.relatedModel));
+  if (omit) {
+    entry.omit = omit;
   }
   return Object.keys(entry).length === 0 ? true : entry;
 };
@@ -213,32 +240,34 @@ const liftOmittedFields = (omit: unknown): { omit: Selection | undefined; lifted
 /**
  * The args reading the rows a caller `select` reads, in the client's default shape: the relations and
  * `_count` it selects are included with their own args, the written relations merged in; each
- * scalar it selects is kept by an `omit` entry set to `false`, which reads it even when the client
- * omits it for every query; every other scalar is left out of the value handed back.
+ * scalar it selects, and each field the client omits, is kept by an `omit` entry set to `false`,
+ * which reads it even when the client omits it for every query; every other scalar is left out of
+ * the value handed back.
  *
  * @internal
  */
 const selectionInDefaultShape = (
-  schemaMetadata: SchemaMetadata,
+  reading: SelectionReading,
   modelName: string,
-  callerArgs: Selection,
+  callerRest: Selection,
+  selected: Selection,
   relations: WrittenRelations,
 ): { value: Selection; injected: InjectedSelection } => {
-  const { select, ...callerRest } = callerArgs;
-  const selected = isRecord(select) ? select : {};
-  const scalarFields = new Set(scalarFieldNamesOf(schemaMetadata, modelName));
+  const scalarFields = new Set(scalarFieldNamesOf(reading.schemaMetadata, modelName));
   const selectedScalars = [...scalarFields].filter((field) => selected[field] === true);
   const selectedRelations = Object.fromEntries(
     Object.entries(selected).filter(([field, entry]) => !scalarFields.has(field) && entry !== false),
   );
-  const children = mergeWrittenRelations(schemaMetadata, selectedRelations, relations, true);
+  const children = mergeWrittenRelations(reading, selectedRelations, relations);
 
   const value: Selection = { ...callerRest };
   if (Object.keys(children.entries).length > 0) {
     value.include = children.entries;
   }
-  if (selectedScalars.length > 0) {
-    value.omit = Object.fromEntries(selectedScalars.map((field) => [field, false]));
+  const kept = new Set([...selectedScalars, ...reading.clientOmittedFields.of(modelName)]);
+  const omit = omitEntriesReading(kept);
+  if (omit) {
+    value.omit = omit;
   }
   const unselectedScalars = [...scalarFields].filter((field) => selected[field] !== true);
   return {
@@ -248,43 +277,49 @@ const selectionInDefaultShape = (
 };
 
 /**
- * The args the rows of `modelName` at one level are read with in the client's default shape, and
- * what that adds to the caller's: a caller `select` is read as the default shape (on a client that
- * cannot `omit` a field, by selecting every scalar field, which is that shape there); the fields a
- * caller `omit` leaves out are read; the written relations are merged into the caller's selection.
+ * The args the rows of `modelName` at one level are read with in the client's default shape, together
+ * with the fields the client omits, and what that adds to the caller's: a caller `select` is read
+ * as the default shape (on a client that cannot `omit` a field, by selecting every scalar field,
+ * which is that shape there); the fields a caller `omit` leaves out are read; the written relations
+ * are merged into the caller's selection.
  *
  * @internal
  */
 const selectAuditedRows = (
-  schemaMetadata: SchemaMetadata,
+  reading: SelectionReading,
   modelName: string,
   callerArgs: Selection,
   relations: WrittenRelations,
-  queryOmitSupported: boolean,
 ): { value: Selection; injected: InjectedSelection } => {
-  if (isRecord(callerArgs.select)) {
-    if (queryOmitSupported) {
-      return selectionInDefaultShape(schemaMetadata, modelName, callerArgs, relations);
+  const { select, ...callerRest } = callerArgs;
+  if (isRecord(select)) {
+    if (reading.queryOmitSupported) {
+      return selectionInDefaultShape(reading, modelName, callerRest, select, relations);
     }
-    const children = mergeWrittenRelations(schemaMetadata, callerArgs.select, relations, false);
-    const addedFields = selectMissingScalarFields(schemaMetadata, modelName, children.entries);
+    const children = mergeWrittenRelations(reading, select, relations);
+    const addedFields = selectMissingScalarFields(reading.schemaMetadata, modelName, children.entries);
     return {
       value: { ...callerArgs, select: children.entries },
       injected: { keys: new Set([...children.injected.keys, ...addedFields]), nested: children.injected.nested },
     };
   }
 
-  const { omit: callerOmit, ...callerRest } = callerArgs;
-  const { omit, lifted } = liftOmittedFields(callerOmit);
+  const { omit: callerOmit, ...rest } = callerArgs;
+  const { omit: callerKept, lifted } = liftOmittedFields(callerOmit);
+  const clientOmitted = [...reading.clientOmittedFields.of(modelName)].filter((field) => callerKept?.[field] !== false);
+  const omit = { ...omitEntriesReading(new Set(clientOmitted)), ...callerKept };
   const callerInclude = isRecord(callerArgs.include) ? callerArgs.include : undefined;
-  const children = mergeWrittenRelations(schemaMetadata, callerInclude ?? {}, relations, queryOmitSupported);
-  const value: Selection = omit ? { ...callerRest, omit } : callerRest;
+  const children = mergeWrittenRelations(reading, callerInclude ?? {}, relations);
+  const value: Selection = Object.keys(omit).length > 0 ? { ...rest, omit } : rest;
   if (callerInclude || Object.keys(children.entries).length > 0) {
     value.include = children.entries;
   }
   return {
     value,
-    injected: { keys: new Set([...lifted, ...children.injected.keys]), nested: children.injected.nested },
+    injected: {
+      keys: new Set([...lifted, ...clientOmitted, ...children.injected.keys]),
+      nested: children.injected.nested,
+    },
   };
 };
 
@@ -295,10 +330,9 @@ const selectAuditedRows = (
  * @internal
  */
 const mergeWrittenRelations = (
-  schemaMetadata: SchemaMetadata,
+  reading: SelectionReading,
   callerEntries: Selection,
   relations: WrittenRelations,
-  queryOmitSupported: boolean,
 ): { entries: Selection; injected: InjectedSelection } => {
   const entries: Selection = { ...callerEntries };
   const keys = new Set<string>();
@@ -308,15 +342,14 @@ const mergeWrittenRelations = (
     const callerValue = entries[field];
 
     if (callerValue === undefined || callerValue === false) {
-      entries[field] = buildRelationEntry(schemaMetadata, relation);
+      entries[field] = buildRelationEntry(reading, relation);
       keys.add(field);
     } else if (callerValue === true || isRecord(callerValue)) {
       const requested = selectAuditedRows(
-        schemaMetadata,
+        reading,
         relation.relatedModel,
         callerValue === true ? {} : callerValue,
         relation.children,
-        queryOmitSupported,
       );
       if (!isEmptyInjection(requested.injected)) {
         entries[field] = requested.value;
@@ -329,33 +362,34 @@ const mergeWrittenRelations = (
 };
 
 /**
- * The selection an audited operation runs with: its rows read in the client's default shape whatever
- * the caller's `select` or `omit`, together with the relations it writes, so the audit logs are
- * built from the rows and nested rows it wrote in the shape their before states are read in
+ * The selection an audited operation runs with: its rows read in the client's default shape, with
+ * the fields the client omits, whatever the caller's `select` or `omit`, together with the relations
+ * it writes, so the audit logs are built from the rows and nested rows it wrote in the shape their
+ * before states are read in. An operation that returns no records takes no selection and is left
+ * as it is.
  *
- * @param queryOmitSupported - Whether the client accepts a query `omit` (Prisma 6.2 and later)
  * @returns The args to execute (`args` itself when nothing had to be added) and what was added to the
  *   caller's selection, for {@link projectToRequestedShape}
  */
 export const injectAuditedSelection = (
-  schemaMetadata: SchemaMetadata,
+  reading: SelectionReading,
   modelName: string,
+  action: string,
   args: unknown,
-  queryOmitSupported: boolean,
 ): AuditedSelectionInjection => {
-  if (!isRecord(args)) {
+  if (!isRecord(args) || !RECORD_RETURNING_ACTIONS.has(action)) {
     return { args, injected: undefined };
   }
 
+  const { schemaMetadata } = reading;
   const writtenOperations = detectNestedOperations(schemaMetadata, modelName, args, { kind: 'discovery' }).filter(
     (operation) => RESULT_AUDITED_KEYWORDS.has(operation.operation),
   );
   const { value, injected } = selectAuditedRows(
-    schemaMetadata,
+    reading,
     modelName,
     args,
     buildWrittenRelations(schemaMetadata, modelName, writtenOperations),
-    queryOmitSupported,
   );
 
   return isEmptyInjection(injected) ? { args, injected: undefined } : { args: value, injected };
@@ -417,7 +451,7 @@ export const restrictsRows = (entry: unknown): boolean =>
  * {@link injectAuditedSelection} adds them; undefined when nothing below `path` is written.
  */
 export const writtenRelationsInclude = (
-  schemaMetadata: SchemaMetadata,
+  reading: RelationReading,
   modelName: string,
   operations: readonly NestedOperationInfo[],
   path: string,
@@ -426,9 +460,9 @@ export const writtenRelationsInclude = (
   const below = operations.filter(
     (operation) => RESULT_AUDITED_KEYWORDS.has(operation.operation) && operation.path.startsWith(prefix),
   );
-  let relations: WrittenRelations | undefined = buildWrittenRelations(schemaMetadata, modelName, below);
+  let relations: WrittenRelations | undefined = buildWrittenRelations(reading.schemaMetadata, modelName, below);
   for (const segment of path.split('.')) {
     relations = relations?.get(segment)?.children;
   }
-  return relations && relations.size > 0 ? buildIncludeTree(schemaMetadata, relations) : undefined;
+  return relations && relations.size > 0 ? buildIncludeTree(reading, relations) : undefined;
 };

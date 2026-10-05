@@ -25,18 +25,33 @@ import { reissueOnBatchClient } from './runtime/batch-transaction.js';
 import { currentScope, isProcessingAuditLog, withScope } from './runtime/scope.js';
 import { createTransactionProxy } from './runtime/transaction-proxy.js';
 import type { PrismaAuditExtensionOptions } from './types.js';
-import { injectAuditedSelection, projectToRequestedShape } from './utils/audited-selection.js';
+import { injectAuditedSelection, projectToRequestedShape, type SelectionReading } from './utils/audited-selection.js';
+import { type ClientOmittedFields, readClientOmittedFields } from './utils/client-omit.js';
 import { isAuditableAction } from './utils/extension-utils.js';
 
-const createPipelineDependencies = (audit: AuditOptions): AuditPipelineDependencies => {
+const createPipelineDependencies = (
+  audit: AuditOptions,
+  clientOmittedFields: ClientOmittedFields,
+): AuditPipelineDependencies => {
   const { Prisma, schemaMetadata, shouldFetchBefore } = audit;
   const failureSink = createFailureSink(audit.errorHandling);
 
   return {
     provider: audit.provider,
-    singleExecutor: createSingleExecutor({ Prisma, schemaMetadata, shouldFetchBefore, failureSink }),
-    batchExecutor: createBatchExecutor({ Prisma, schemaMetadata }),
-    produceRecords: createRecordProducer({ ...audit, failureSink }),
+    singleExecutor: createSingleExecutor({
+      Prisma,
+      schemaMetadata,
+      shouldFetchBefore,
+      clientOmittedFields,
+      failureSink,
+    }),
+    batchExecutor: createBatchExecutor({ Prisma, schemaMetadata, clientOmittedFields }),
+    produceRecords: createRecordProducer({
+      ...audit,
+      // The fields the client omits are read, and recorded with their values masked.
+      composeConfig: { ...audit.composeConfig, maskedFieldNames: clientOmittedFields.of },
+      failureSink,
+    }),
     dispatchConfig: {
       writeExecutor: createPrismaWriteExecutor(Prisma.DbNull, {
         auditLogModel: audit.auditLogModel,
@@ -49,6 +64,13 @@ const createPipelineDependencies = (audit: AuditOptions): AuditPipelineDependenc
   };
 };
 
+/** What the audit of operations on one client is run with */
+interface ClientAudit {
+  readonly baseClient: PrismaClientWithDynamicAccess;
+  readonly deps: AuditPipelineDependencies;
+  readonly reading: SelectionReading;
+}
+
 /**
  * Creates the Prisma Client Extension for automatic audit logging
  *
@@ -60,13 +82,12 @@ const createPipelineDependencies = (audit: AuditOptions): AuditPipelineDependenc
  */
 export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) => {
   const audit = normalizeAuditOptions(options);
-  const deps = createPipelineDependencies(audit);
 
   // `awaitWriteIf` may return true for any model, so its presence counts as making an audit awaitable.
   const batchAuditMayBeAwaited = audit.policyConfig.awaitWrite || audit.policyConfig.awaitWriteIf !== undefined;
 
   /** Audits an intercepted operation, or continues it untouched when it is not audited */
-  const auditOperation = async (params: ExtensionParams, baseClient: PrismaClientWithDynamicAccess) => {
+  const auditOperation = async (params: ExtensionParams, { baseClient, deps, reading }: ClientAudit) => {
     const { operation, model, args, query } = params;
     const auditContext = audit.provider.getContext();
 
@@ -84,7 +105,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
       return query(args);
     }
 
-    const injection = injectAuditedSelection(audit.schemaMetadata, model, args, audit.queryOmitSupported);
+    const injection = injectAuditedSelection(reading, model, operation, args);
 
     // Mark the re-entrancy guard on the library-owned runtime store; the app context
     // stays untouched so downstream code keeps the caller's actor and request metadata.
@@ -105,12 +126,26 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
   };
 
   const extensionDefinition = (baseClient: PrismaClientWithDynamicAccess) => {
+    const clientOmittedFields = readClientOmittedFields(
+      baseClient,
+      audit.schemaMetadata,
+      audit.Prisma.prismaVersion?.client,
+    );
+    const clientAudit: ClientAudit = {
+      baseClient,
+      deps: createPipelineDependencies(audit, clientOmittedFields),
+      reading: {
+        schemaMetadata: audit.schemaMetadata,
+        queryOmitSupported: audit.queryOmitSupported,
+        clientOmittedFields,
+      },
+    };
     const extendedClient = baseClient.$extends({
       name: 'prisma-audit',
       query: {
         async $allOperations(params: ExtensionParams) {
           const batchClient = currentScope()?.batchClient;
-          return batchClient ? reissueOnBatchClient(batchClient, params) : auditOperation(params, baseClient);
+          return batchClient ? reissueOnBatchClient(batchClient, params) : auditOperation(params, clientAudit);
         },
       },
     });

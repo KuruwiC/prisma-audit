@@ -5,6 +5,7 @@
  */
 
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../internal-types.js';
+import { type ClientOmittedFields, readingEveryColumn } from '../../utils/client-omit.js';
 import { getModelDelegate, hasOperation } from '../../utils/model-accessor.js';
 
 export type PreFetchRecord = Record<string, unknown>;
@@ -26,23 +27,33 @@ export interface PreFetchListClient {
   }): Promise<PreFetchRecord[]>;
 }
 
-/** `modelName` is PascalCase, as in the DMMF. */
+/**
+ * `modelName` is PascalCase, as in the DMMF. A read without `select` returns the whole row,
+ * including the fields the client omits for every query.
+ */
 export const getPreFetchModelClient = (
   prismaClient: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
   modelName: string,
+  clientOmittedFields: ClientOmittedFields,
 ): PreFetchModelClient | undefined => {
   const delegate = getModelDelegate(prismaClient, modelName);
   return hasOperation<PreFetchModelClient>(delegate, 'findUnique') &&
     hasOperation<PreFetchModelClient>(delegate, 'findFirst')
-    ? delegate
+    ? readingEveryColumn(delegate, clientOmittedFields.of(modelName))
     : undefined;
 };
 
-/** `modelName` is PascalCase, as in the DMMF. */
+/**
+ * `modelName` is PascalCase, as in the DMMF. A read without `select` returns whole rows,
+ * including the fields the client omits for every query.
+ */
 export const getPreFetchListClient = (
   prismaClient: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
   modelName: string,
+  clientOmittedFields: ClientOmittedFields,
 ): PreFetchListClient | undefined => {
   const delegate = getModelDelegate(prismaClient, modelName);
-  return hasOperation<PreFetchListClient>(delegate, 'findMany') ? delegate : undefined;
+  return hasOperation<PreFetchListClient>(delegate, 'findMany')
+    ? readingEveryColumn(delegate, clientOmittedFields.of(modelName))
+    : undefined;
 };

@@ -10,6 +10,7 @@ import type { MutationEvent } from '@kuruwic/db-audit-core';
 import { AUDIT_ACTION } from '../grammar/operations.js';
 import type { PrismaNamespace } from '../internal-types.js';
 import type { SchemaMetadata } from '../schema/types.js';
+import { type ClientOmittedFields, omitEntriesReading, readingEveryColumn } from '../utils/client-omit.js';
 import {
   buildEntityMap,
   ensureIds,
@@ -28,6 +29,8 @@ type Row = Record<string, unknown>;
 export interface BatchExecutorDependencies {
   readonly Prisma: PrismaNamespace;
   readonly schemaMetadata: SchemaMetadata;
+  /** The fields the client omits for every query, which the whole rows it reads include */
+  readonly clientOmittedFields: ClientOmittedFields;
 }
 
 export type BatchPrepared =
@@ -56,12 +59,17 @@ interface BatchDelegate {
   readonly findMany: (args: { where: unknown; take?: number }) => Promise<Row[]>;
 }
 
-const batchDelegate = (scope: ExecutionScope, modelName: string): BatchDelegate => {
+/** The delegate the rows of `modelName` are read through, whole rows including the fields the client omits */
+const batchDelegate = (
+  scope: ExecutionScope,
+  modelName: string,
+  clientOmittedFields: ClientOmittedFields,
+): BatchDelegate => {
   const delegate = getModelDelegate(scope.handle, modelName);
   if (!hasOperation<BatchDelegate>(delegate, 'findMany')) {
     throw new Error(`Model ${modelName} does not have findMany operation. This is required for batch operations.`);
   }
-  return delegate;
+  return readingEveryColumn(delegate, clientOmittedFields.of(modelName));
 };
 
 const rowsOf = (value: unknown): Row[] => (Array.isArray(value) ? (value as Row[]) : []);
@@ -100,10 +108,11 @@ const prepareCreate = (operation: AuditedOperation, schemaMetadata: SchemaMetada
 const prepareUpdateOrDelete = async (
   operation: AuditedOperation,
   scope: ExecutionScope,
-  Prisma: PrismaNamespace,
+  deps: BatchExecutorDependencies,
 ): Promise<BatchPrepared> => {
+  const { Prisma } = deps;
   const { model, action, args } = operation;
-  const delegate = batchDelegate(scope, model);
+  const delegate = batchDelegate(scope, model, deps.clientOmittedFields);
   const where = args.where ?? {};
   const limit = typeof args.limit === 'number' ? args.limit : undefined;
 
@@ -120,12 +129,23 @@ const prepareUpdateOrDelete = async (
 };
 
 export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationExecutor => {
-  const { Prisma, schemaMetadata } = deps;
+  const { schemaMetadata, clientOmittedFields } = deps;
 
   const prepare = (operation: AuditedOperation, scope: ExecutionScope): Promise<BatchPrepared> =>
     requiresBeforeState(operation.action)
-      ? prepareUpdateOrDelete(operation, scope, Prisma)
+      ? prepareUpdateOrDelete(operation, scope, deps)
       : Promise.resolve(prepareCreate(operation, schemaMetadata));
+
+  /**
+   * The args an `updateMany` runs with as `updateManyAndReturn`, reading the fields the client omits
+   * into the rows it returns, as an `updateManyAndReturn` the caller issues reads them
+   */
+  const returningArgs = (operation: AuditedOperation): Record<string, unknown> => {
+    const omit = omitEntriesReading(clientOmittedFields.of(operation.model));
+    return operation.action === AUDIT_ACTION.UPDATE_MANY_AND_RETURN || !omit
+      ? operation.args
+      : { ...operation.args, omit };
+  };
 
   const execute = async (
     operation: AuditedOperation,
@@ -141,7 +161,7 @@ export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationE
         return { result, returnedRows: rowsOf(result) };
       }
       case 'update-returning': {
-        const rows = rowsOf(await operation.execute(args, AUDIT_ACTION.UPDATE_MANY_AND_RETURN));
+        const rows = rowsOf(await operation.execute(returningArgs(operation), AUDIT_ACTION.UPDATE_MANY_AND_RETURN));
         // Each action keeps its contract: updateMany returns { count }, updateManyAndReturn the rows.
         const result = action === AUDIT_ACTION.UPDATE_MANY_AND_RETURN ? rows : { count: rows.length };
         return { result, returnedRows: rows };
@@ -175,7 +195,7 @@ export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationE
         }
         // Re-fetched by primary key, not by the original where, so a row whose where-field
         // the update changed still pairs with its before row.
-        const delegate = batchDelegate(scope, operation.model);
+        const delegate = batchDelegate(scope, operation.model, clientOmittedFields);
         const afterRows = await findManyByPKs(delegate, prepared.pkFields, prepared.beforeRows);
         return pairByPrimaryKey(afterRows, prepared.beforeRows, prepared.pkFields);
       }

@@ -26,6 +26,7 @@ import {
   collectSingleOperationEvents,
   type SingleOperationOutcome,
 } from '../../src/pipeline/collect-events.js';
+import { NO_CLIENT_OMITTED_FIELDS } from '../../src/utils/client-omit.js';
 import { createSchemaMetadataFromDMMF } from '../../src/utils/schema-metadata.js';
 
 /** Pre-fetch results in which `path` is unread: a read for rows it could not name failed */
@@ -70,7 +71,7 @@ const models: DMMFModel[] = [
 const Prisma: PrismaNamespace = { defineExtension: () => undefined, DbNull: null, dmmf: { datamodel: { models } } };
 const schemaMetadata = createSchemaMetadataFromDMMF(Prisma);
 
-const deps = { Prisma, schemaMetadata, shouldFetchBefore: () => true };
+const deps = { Prisma, schemaMetadata, shouldFetchBefore: () => true, clientOmittedFields: NO_CLIENT_OMITTED_FIELDS };
 const client: PrismaClientWithDynamicAccess = Object.create(null);
 
 type SingleCase = Partial<

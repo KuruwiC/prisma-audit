@@ -8,6 +8,7 @@ import { TOP_LEVEL_ROW } from '../../../src/grammar/nested-state.js';
 import type { DMMFField, PrismaNamespace, TransactionalPrismaClient } from '../../../src/internal-types.js';
 import { preFetchNestedRecordsBeforeOperation } from '../../../src/nested/pre-fetch/coordinator.js';
 import { preFetchedStateUnder } from '../../../src/nested/pre-fetch/pre-fetch-result-store.js';
+import { NO_CLIENT_OMITTED_FIELDS } from '../../../src/utils/client-omit.js';
 import { createSchemaMetadataFromDMMF } from '../../../src/utils/schema-metadata.js';
 
 type Row = Record<string, unknown>;
@@ -143,6 +144,7 @@ const preFetch = async (
     await preFetchNestedRecordsBeforeOperation(client, modelName, args, {
       Prisma,
       schemaMetadata: createSchemaMetadataFromDMMF(Prisma),
+      clientOmittedFields: NO_CLIENT_OMITTED_FIELDS,
       shouldFetchBefore,
     })
   ).results;

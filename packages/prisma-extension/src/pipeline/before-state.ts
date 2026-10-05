@@ -13,6 +13,7 @@ import { AUDIT_ACTION, type AuditAction } from '../grammar/operations.js';
 import type { ShouldFetchBefore } from '../grammar/pre-fetch-selection.js';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../internal-types.js';
 import { beforeStateOf, NO_BEFORE_STATE, UNAVAILABLE_BEFORE_STATE } from '../utils/before-state.js';
+import { type ClientOmittedFields, readingEveryColumn } from '../utils/client-omit.js';
 import { getModelDelegate, hasOperation } from '../utils/model-accessor.js';
 import { toError } from '../utils/to-error.js';
 
@@ -40,6 +41,8 @@ export interface BeforeStateInput {
 
 export interface BeforeStateDependencies {
   readonly shouldFetchBefore: ShouldFetchBefore;
+  /** The fields the client omits for every query, which the whole rows it reads include */
+  readonly clientOmittedFields: ClientOmittedFields;
   /** Receives a failed fetch under the `pre-fetch` phase; the caller's operation continues */
   readonly onFetchFailure: FailureSink['notify'];
 }
@@ -63,12 +66,13 @@ const findExistingRow = async (
   handle: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
   modelName: string,
   where: unknown,
+  clientOmittedFields: ClientOmittedFields,
 ): Promise<BeforeState> => {
   const delegate = getModelDelegate(handle, modelName);
   if (!hasOperation<FindUniqueDelegate>(delegate, 'findUnique')) {
     return NO_BEFORE_STATE;
   }
-  const row = await delegate.findUnique({ where });
+  const row = await readingEveryColumn(delegate, clientOmittedFields.of(modelName)).findUnique({ where });
   return beforeStateOf(isRow(row) ? row : null);
 };
 
@@ -92,7 +96,7 @@ export const fetchBeforeState = async (
   }
 
   try {
-    return await findExistingRow(handle, modelName, args.where);
+    return await findExistingRow(handle, modelName, args.where, deps.clientOmittedFields);
   } catch (caughtError) {
     const error = toError(caughtError);
     await deps.onFetchFailure({ phase: 'pre-fetch', modelName, operation: action, params: args, error });

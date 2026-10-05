@@ -11,6 +11,7 @@ import { createBatchExecutor } from '../../src/pipeline/batch-executor.js';
 import type { ExecutionScope } from '../../src/pipeline/execution-scope.js';
 import type { AuditedOperation } from '../../src/pipeline/executor.js';
 import type { RecordProducer } from '../../src/pipeline/produce-records.js';
+import { NO_CLIENT_OMITTED_FIELDS } from '../../src/utils/client-omit.js';
 import { createSchemaMetadataFromDMMF } from '../../src/utils/schema-metadata.js';
 import { runWithRecords } from './run-with-records.js';
 
@@ -82,7 +83,7 @@ const operationOn = (
   ),
 });
 
-const executor = createBatchExecutor({ Prisma, schemaMetadata });
+const executor = createBatchExecutor({ Prisma, schemaMetadata, clientOmittedFields: NO_CLIENT_OMITTED_FIELDS });
 const produce = () => vi.fn<RecordProducer>(async () => []);
 const eventOf = (fields: Row) => expect.objectContaining({ model: 'User', ...fields });
 const findManyReturning = (...results: Row[][]) => {
