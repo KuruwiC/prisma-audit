@@ -138,9 +138,9 @@ export const resolveParentRows = async (input: ResolveParentRowsInput): Promise<
     return { rows: [], allKnown: true };
   }
 
-  if (parentFields.every((fieldName) => isKeyValue(topLevelWhere[fieldName]))) {
-    const row = Object.fromEntries(parentFields.map((fieldName) => [fieldName, topLevelWhere[fieldName]]));
-    return { rows: [{ identity: TOP_LEVEL_ROW, row }], allKnown: true };
+  const keyFromWhere = keyNamedByWhere(topLevelWhere, parentFields);
+  if (keyFromWhere) {
+    return { rows: [{ identity: TOP_LEVEL_ROW, row: keyFromWhere }], allKnown: true };
   }
 
   if (!topLevelModelClient) {
@@ -152,6 +152,12 @@ export const resolveParentRows = async (input: ResolveParentRowsInput): Promise<
   preFetchLog('fetched top-level parent key: path=%s found=%s', path, parentRow !== null);
   return { rows: parentRow ? [{ identity: TOP_LEVEL_ROW, row: parentRow }] : [], allKnown: true };
 };
+
+/** The values `where` gives `fields`, when it names each of them with a plain value */
+export const keyNamedByWhere = (where: unknown, fields: readonly string[]): PreFetchRecord | undefined =>
+  isRecord(where) && fields.every((fieldName) => isKeyValue(where[fieldName]))
+    ? Object.fromEntries(fields.map((fieldName) => [fieldName, where[fieldName]]))
+    : undefined;
 
 /**
  * The key fields of `parentRow` a related row's back-relation filter compares to, or `undefined`

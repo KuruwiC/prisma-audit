@@ -1,7 +1,7 @@
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import type { AuditErrorObserver } from '@kuruwic/prisma-audit';
-import { createAuditClient } from '@kuruwic/prisma-audit';
+import { createAuditClient, defineEntity, foreignKey, to } from '@kuruwic/prisma-audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -699,6 +699,67 @@ describe('Nested Delete Operations', () => {
       for (const log of logs) {
         expect(log.before).toBeNull();
       }
+    });
+  });
+
+  describe('a nested delete whose row is not read, below a top-level row the update re-keys', () => {
+    // A subscription's foreign key references the user's email, which the same update changes; the
+    // unread row is given the email its user held before the write.
+    const BEFORE_EMAIL = 'rekeyed-before@example.com';
+    const AFTER_EMAIL = 'rekeyed-after@example.com';
+
+    const deleteSubscriptionWhileRekeying = async (
+      where: Prisma.UserWhereUniqueInput,
+      fetchBefore: Parameters<typeof createAuditClient>[1]['fetchBefore'],
+    ) => {
+      await context.basePrisma.user.create({
+        data: { id: 'rekeyed-user', email: BEFORE_EMAIL, name: 'Author', password: 'secret123' },
+      });
+      await context.basePrisma.subscription.create({
+        data: { id: 'rekeyed-subscription', topic: 'news', userEmail: BEFORE_EMAIL },
+      });
+      const basePrisma = new PrismaClient({ datasources: { db: { url: context.databaseUrl } } });
+      const provider = createAsyncLocalStorageProvider();
+      const prisma = createAuditClient(basePrisma, {
+        Prisma,
+        provider,
+        aggregateMapping: {
+          ...testAggregateMapping,
+          Subscription: defineEntity({ type: 'Subscription', aggregates: [to('User', foreignKey('userEmail'))] }),
+        },
+        performance: { awaitWrite: true },
+        fetchBefore,
+      });
+
+      try {
+        await provider.runAsync(testActor, () =>
+          prisma.user.update({
+            where,
+            data: { email: AFTER_EMAIL, subscriptions: { delete: { id: 'rekeyed-subscription' } } },
+          }),
+        );
+      } finally {
+        await prisma.$disconnect();
+        await basePrisma.$disconnect();
+      }
+
+      const logs = await context.basePrisma.auditLog.findMany({ where: { entityType: 'Subscription' } });
+      return logs.map((log) => `${log.aggregateType}:${log.aggregateId}`).sort();
+    };
+
+    it("takes the referenced column from the top-level row's before state", async () => {
+      const aggregates = await deleteSubscriptionWhileRekeying({ id: 'rekeyed-user' }, { delete: false });
+
+      expect(aggregates).toEqual(['Subscription:rekeyed-subscription', `User:${BEFORE_EMAIL}`]);
+    });
+
+    it('takes the referenced column from the where of a top-level row whose before state is not read', async () => {
+      const aggregates = await deleteSubscriptionWhileRekeying(
+        { email: BEFORE_EMAIL },
+        { update: false, delete: false },
+      );
+
+      expect(aggregates).toEqual(['Subscription:rekeyed-subscription', `User:${BEFORE_EMAIL}`]);
     });
   });
 

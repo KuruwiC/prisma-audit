@@ -54,7 +54,7 @@ import { nestedLog } from '../../utils/debug.js';
 import { extractEntityIdentity } from '../../utils/id-generation.js';
 import { attachedFilter, type LinkReads } from '../pre-fetch/link-rows.js';
 import { getPreFetchListClient } from '../pre-fetch/model-client.js';
-import { parentKeyOf, parentRowIdentityOf, writesLinkedRow } from '../pre-fetch/parent-rows.js';
+import { keyNamedByWhere, parentKeyOf, parentRowIdentityOf, writesLinkedRow } from '../pre-fetch/parent-rows.js';
 import type { PreExistingRows } from '../pre-fetch/pre-existing-rows.js';
 import { preFetchedStateNamedBy, preFetchedStateUnder } from '../pre-fetch/pre-fetch-result-store.js';
 import { relationLinkOf } from '../pre-fetch/relation-link.js';
@@ -92,6 +92,8 @@ export interface NestedEventCollectionInput {
   /** The args the operation ran with: their `include` / `select` decide which rows the result holds */
   args: Record<string, unknown>;
   result: unknown;
+  /** The top-level row before the write, as read */
+  topLevelBefore: BeforeState;
   /** Client the operation ran on; reads the nested rows the result does not hold */
   client: PrismaClientWithDynamicAccess | TransactionalPrismaClient;
   nestedPreFetchResults: NestedPreFetchResults;
@@ -534,10 +536,32 @@ const walkLevels = async (walk: CollectionWalk, roots: readonly WalkedRow[]): Pr
 
 const isRow = (value: unknown): value is Row => typeof value === 'object' && value !== null;
 
+/** Whether the top-level operation's data sets one of `fields` */
+const writesTopLevelField = (args: Row, fields: readonly string[]): boolean =>
+  [args.data, args.update].some((data) => isRow(data) && fields.some((field) => data[field] !== undefined));
+
 /**
- * The values of `fields` on the parent row of `nestedOp`: from the top-level result, or, for a
- * nested parent, from the primary key its identity encodes when `fields` are among that key's
- * fields. Undefined when neither covers them.
+ * The values of `fields` on the top-level row before the write: from the `where` when it names
+ * each of them, else from the before state when it was read, else from the result when the
+ * operation sets none of them. Undefined when none of those gives them.
+ */
+const topLevelKeyBeforeWrite = (input: NestedEventCollectionInput, fields: readonly string[]): Row | undefined => {
+  const named = keyNamedByWhere(input.args.where, fields);
+  if (named) {
+    return named;
+  }
+  if (input.topLevelBefore.kind === 'captured') {
+    return parentKeyOf(input.topLevelBefore.row, fields);
+  }
+  return isRow(input.result) && !writesTopLevelField(input.args, fields)
+    ? parentKeyOf(input.result, fields)
+    : undefined;
+};
+
+/**
+ * The values of `fields` on the parent row of `nestedOp` before the write: for the top-level row,
+ * see {@link topLevelKeyBeforeWrite}; for a nested parent, from the primary key its identity
+ * encodes when `fields` are among that key's fields. Undefined when neither covers them.
  */
 const knownParentKey = (
   nestedOp: NestedOperationInfo,
@@ -548,7 +572,7 @@ const knownParentKey = (
 ): Row | undefined => {
   const identity = parentRowIdentityOf(nestedOp.parent, input.nestedPreFetchResults, deps.schemaMetadata);
   if (identity === TOP_LEVEL_ROW) {
-    return isRow(input.result) ? parentKeyOf(input.result, fields) : undefined;
+    return topLevelKeyBeforeWrite(input, fields);
   }
   const pkFields = getPrimaryKeyConstraint(deps.schemaMetadata, parentModel)?.fields;
   if (identity === undefined || !pkFields || !fields.every((field) => pkFields.includes(field))) {

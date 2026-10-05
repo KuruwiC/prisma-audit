@@ -93,6 +93,7 @@ export const collectSingleOperationEvents = async (
       modelName,
       args,
       result,
+      topLevelBefore: beforeState,
       client,
       nestedPreFetchResults,
       nestedOperations,
