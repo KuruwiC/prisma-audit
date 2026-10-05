@@ -152,7 +152,12 @@ write the adapter runs, in order:
    carries holds every column of the table, `null` where the row has no value: a `foreignKey`
    resolver fails for a row that lacks its column. The exception is the row of a delete whose
    before state is not `captured`, which may hold only what the adapter knows without reading it;
-   a `foreignKey` root on a column it lacks is left out without a failure.
+   a `foreignKey` root on a column it lacks is left out without a failure. Two other rows may lack
+   columns of a written row, and a `foreignKey` resolver on such a column fails for them like for
+   any row: a created row the adapter builds from the write's input because the write returns no
+   rows (such as Prisma's `createMany`) lacks the columns the database fills itself (`@default`,
+   `@updatedAt`); a row read through a client that leaves some columns out of every read lacks
+   them when the adapter cannot learn which columns those are.
 5. **`resolve(events, auditContext, resolveConfig, read)`**. `read` is a thunk that returns the
    handle of the scope active when a resolver or enricher runs; the core calls it at each callback,
    so callbacks read the transaction's uncommitted writes. `resolveConfig` is `entity`
