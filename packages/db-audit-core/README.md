@@ -155,8 +155,9 @@ write the adapter runs, in order:
    (`byModel`), `rootEntity` (`byCategoryAndType`) and the optional `actor` enricher.
 6. **`compose(resolved, { auditContext, config: composeConfig }, now)`** into the `AuditRecord`s
    `buildRecords` returns. `composeConfig` carries the entity lookup, `excludeFields`, `redact`,
-   `serialization`, `relationFieldNames(model)`, the fields of a row that hold related records
-   rather than columns, and the optional `maskedFieldNames(model)`, the columns whose values are
+   `serialization`, `relationFieldNames(model)`, the keys of a row that are not its columns (the
+   relation fields, and any aggregate of related records the ORM returns with the row, such as
+   Prisma's `_count`), and the optional `maskedFieldNames(model)`, the columns whose values are
    masked in the stored states and changes whether or not `redact` is set (such as the columns
    the adapter's client hides from reads). An update's `changes` compares the row's columns only: those fields are
    left out of the comparison, so an update whose columns are unchanged yields no record.

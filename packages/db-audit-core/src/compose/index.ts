@@ -29,7 +29,11 @@ export interface ComposeConfig<TModelName extends string = string> {
    */
   readonly maskedFieldNames?: (model: TModelName) => ReadonlySet<string> | undefined;
   readonly serialization?: SerializationConfig;
-  /** Relation field names of a model, as the adapter derives them from its schema; undefined strips nothing. */
+  /**
+   * The keys of a row of a model that are not its columns, as the adapter knows them: its relation
+   * fields, and any aggregate of related records the ORM returns with the row (such as a `_count`
+   * of relations). They are neither compared nor stored; undefined strips nothing.
+   */
   readonly relationFieldNames: (model: TModelName) => ReadonlySet<string> | undefined;
 }
 
