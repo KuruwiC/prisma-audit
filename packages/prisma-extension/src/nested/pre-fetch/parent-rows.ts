@@ -22,6 +22,7 @@ import { unwrapCompoundWhere } from '../../utils/compound-where.js';
 import { preFetchLog } from '../../utils/debug.js';
 import { extractEntityIdentity } from '../../utils/id-generation.js';
 import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID } from '../../utils/identity-key.js';
+import { isRecord } from '../../utils/is-record.js';
 import type { PreFetchModelClient, PreFetchRecord } from './model-client.js';
 import {
   extractEntityIdOrUnresolved,
@@ -29,8 +30,6 @@ import {
   preFetchedResultUnder,
   primaryKeyNamedBy,
 } from './pre-fetch-result-store.js';
-
-export const isRecord = (value: unknown): value is PreFetchRecord => typeof value === 'object' && value !== null;
 
 const isKeyValue = (value: unknown): boolean =>
   typeof value === 'string' || typeof value === 'number' || typeof value === 'bigint';

@@ -35,6 +35,7 @@ import {
 import type { SchemaMetadata } from '../schema/types.js';
 import { type ClientOmittedFields, omitEntriesReading } from './client-omit.js';
 import { uniqueWhereAsFilter } from './compound-where.js';
+import { isRecord } from './is-record.js';
 
 /**
  * Nested write keywords whose written rows are audited from the operation result. Deleted rows are
@@ -104,9 +105,6 @@ export interface AuditedSelectionInjection {
 }
 
 type Selection = Record<string, unknown>;
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
 
 const isEmptyInjection = (injected: InjectedSelection): boolean =>
   injected.keys.size === 0 && injected.nested.size === 0;

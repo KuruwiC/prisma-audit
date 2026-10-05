@@ -13,7 +13,9 @@
  */
 
 import type { SchemaMetadata } from '../schema/types.js';
+import { isRecord } from './is-record.js';
 import { getModelAccessor } from './model-accessor.js';
+import { supportsClientOmit } from './prisma-version.js';
 
 /** The fields of each model the client omits from every read that does not name them */
 export interface ClientOmittedFields {
@@ -27,9 +29,6 @@ export const NO_CLIENT_OMITTED_FIELDS: ClientOmittedFields = { of: () => NONE };
 /** The client field Prisma keeps the `omit` option in, from Prisma 5.16 */
 const GLOBAL_OMIT_FIELD = '_globalOmit';
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
-
 type GlobalOmit = Record<string, Record<string, boolean>>;
 
 const isGlobalOmit = (value: unknown): value is GlobalOmit =>
@@ -37,11 +36,6 @@ const isGlobalOmit = (value: unknown): value is GlobalOmit =>
   Object.values(value).every(
     (fields) => isRecord(fields) && Object.values(fields).every((omitted) => typeof omitted === 'boolean'),
   );
-
-const keepsOmitOption = (version: string | undefined): boolean => {
-  const [major = Number.NaN, minor = Number.NaN] = (version ?? '').split('.').map(Number);
-  return major > 5 || (major === 5 && minor >= 16);
-};
 
 /** The `omit` option of `client`, `{}` for a client created without it; undefined when it cannot be read */
 const globalOmitOf = (client: object): GlobalOmit | undefined => {
@@ -65,7 +59,7 @@ export const readClientOmittedFields = (
   schemaMetadata: SchemaMetadata,
   clientVersion: string | undefined,
 ): ClientOmittedFields => {
-  if (!keepsOmitOption(clientVersion)) {
+  if (supportsClientOmit(clientVersion) !== true) {
     return NO_CLIENT_OMITTED_FIELDS;
   }
   const globalOmit = globalOmitOf(client);

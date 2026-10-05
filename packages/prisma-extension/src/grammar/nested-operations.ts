@@ -11,9 +11,8 @@
 
 import type { SchemaMetadata, UniqueConstraint } from '../schema/types.js';
 import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID } from '../utils/identity-key.js';
+import { isRecord } from '../utils/is-record.js';
 import type { NestedPreFetchResult } from './nested-state.js';
-
-const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
 
 export const NESTED_OPERATION_KEYWORDS = [
   'create',

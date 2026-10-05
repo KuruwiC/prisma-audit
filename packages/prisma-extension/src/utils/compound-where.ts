@@ -6,6 +6,7 @@
  */
 
 import type { UniqueConstraint } from '../schema/types.js';
+import { isRecord } from './is-record.js';
 
 /**
  * Unwraps Prisma's compound-unique WHERE wrapper (`{ a_b: { a, b } }`) into the flat
@@ -26,9 +27,6 @@ export const unwrapCompoundWhere = (
   const compoundKey = pkConstraint.name ?? pkConstraint.fields.join('_');
   return (whereClause[compoundKey] as Record<string, unknown> | undefined) ?? whereClause;
 };
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
 
 /** A value a unique WHERE compares a field to; a filter object (`{ contains }`) is not one */
 const isComparableValue = (value: unknown): boolean =>

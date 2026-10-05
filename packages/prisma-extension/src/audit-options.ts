@@ -22,6 +22,7 @@ import type { SchemaMetadata } from './schema/types.js';
 import type { PrismaAuditExtensionOptions } from './types.js';
 import { shouldAuditModel } from './utils/extension-utils.js';
 import { getModelAccessor } from './utils/model-accessor.js';
+import { supportsQueryOmit } from './utils/prisma-version.js';
 import { createSchemaMetadataFromDMMF } from './utils/schema-metadata.js';
 
 export interface AuditOptions {
@@ -45,15 +46,6 @@ export interface AuditOptions {
    */
   readonly shouldAudit: (modelName: string) => boolean;
 }
-
-/**
- * Whether the client accepts a query `omit`: generally available from Prisma 6.2.0; earlier
- * clients reject it unless the `omitApi` preview is on, which the client does not expose
- */
-const supportsQueryOmit = (Prisma: PrismaNamespace): boolean => {
-  const [major = Number.NaN, minor = Number.NaN] = (Prisma.prismaVersion?.client ?? '').split('.').map(Number);
-  return major > 6 || (major === 6 && minor >= 2);
-};
 
 /** The relation counts Prisma returns with a row when a query includes or selects `_count` */
 const RELATION_COUNT_FIELD = '_count';
@@ -93,7 +85,7 @@ export const normalizeAuditOptions = (options: PrismaAuditExtensionOptions): Aud
     provider,
     Prisma,
     schemaMetadata,
-    queryOmitSupported: supportsQueryOmit(Prisma),
+    queryOmitSupported: supportsQueryOmit(Prisma.prismaVersion?.client),
     auditLogModel,
     policyConfig: {
       awaitWrite: performance?.awaitWrite ?? true,

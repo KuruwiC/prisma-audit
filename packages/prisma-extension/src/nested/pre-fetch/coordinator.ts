@@ -36,6 +36,7 @@ import { beforeStateOf, NO_BEFORE_STATE } from '../../utils/before-state.js';
 import type { ClientOmittedFields } from '../../utils/client-omit.js';
 import { preFetchLog } from '../../utils/debug.js';
 import type { EntityIdentityKey } from '../../utils/identity-key.js';
+import { isRecord } from '../../utils/is-record.js';
 import { toError } from '../../utils/to-error.js';
 import { linkWriteOf } from './link-rows.js';
 import {
@@ -56,7 +57,6 @@ import {
   resolveToOneRelationLink,
 } from './one-to-one-fetcher.js';
 import {
-  isRecord,
   parentKeysFromOperationWheres,
   parentPathOf,
   parentRowIdentityOf,
