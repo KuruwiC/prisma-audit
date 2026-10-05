@@ -62,7 +62,8 @@ const isColumn = (kind: string | undefined): boolean => kind === 'scalar' || kin
  * audit's reads before the write use to read them
  *
  * @param modelNames - The models of the schema, which mapping keys match case-insensitively
- * @throws {Error} If a listed field is not a column of the model, or the client takes no query `omit`
+ * @throws {Error} If the client takes no query `omit`, the mapping key matches no model, or a listed
+ *   field is not a column of the model
  */
 export const validateAuditOmittedFields = (
   aggregateMapping: AggregateMapping,
@@ -82,9 +83,13 @@ export const validateAuditOmittedFields = (
       );
     }
     const modelName = modelNames.find((name) => name.toLowerCase() === mappingKey.toLowerCase());
-    const kindOf = (field: string) =>
-      modelName === undefined ? undefined : schemaMetadata.getFieldMetadata(modelName, field)?.kind;
-    const notColumns = listed.filter((field) => !isColumn(kindOf(field)));
+    if (modelName === undefined) {
+      throw new Error(
+        `Configuration error for model '${mappingKey}': 'auditOmittedFields' is set on a mapping key that ` +
+          'matches no model of the schema.',
+      );
+    }
+    const notColumns = listed.filter((field) => !isColumn(schemaMetadata.getFieldMetadata(modelName, field)?.kind));
     if (notColumns.length > 0) {
       throw new Error(
         `Configuration error for model '${mappingKey}': 'auditOmittedFields' names fields that are not columns ` +

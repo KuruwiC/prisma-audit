@@ -593,6 +593,17 @@ describe('fields a client-level omit hides', () => {
         await expect(setup(listing(['posts']))).rejects.toThrow(/User.*auditOmittedFields.*posts/);
       });
 
+      it('rejects the option on a mapping key that names no model', async () => {
+        const options: Options = {
+          aggregateMapping: {
+            ...testAggregateMapping,
+            Usr: defineEntity({ type: 'Usr', auditOmittedFields: ['password'] }),
+          },
+        };
+
+        await expect(setup(options)).rejects.toThrow(/'Usr'.*auditOmittedFields.*matches no model/);
+      });
+
       it.each([
         ['before 6.2', '6.1.0'],
         ['of an unknown version', undefined],
