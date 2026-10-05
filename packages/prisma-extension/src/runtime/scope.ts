@@ -3,8 +3,9 @@
  *
  * The library-owned state of the async flow an audited operation runs in: the transaction it is
  * inside, with the client of that transaction and the writes queued until it commits; the
- * re-entrancy guard raised while audit logs are being processed; and whether the flow is inside
- * a transaction the library opened itself. The state lives on its own async-local store, apart
+ * re-entrancy guard raised while audit logs are being processed; whether the flow is inside a
+ * transaction the library opened itself; and the client a batch transaction's operations are
+ * re-issued on. The state lives on its own async-local store, apart
  * from the app-owned audit context, so re-attributing the actor mid-flow cannot drop it. This
  * module is the only reader and writer of that store.
  */
@@ -28,6 +29,12 @@ export interface RuntimeScope {
   readonly isProcessingAuditLog?: boolean;
   /** Raised inside the transaction the library opened around one operation, so that it is not opened twice */
   readonly isInImplicitTransaction?: boolean;
+  /**
+   * Set while the operations of a batch `$transaction([...])` are triggered inside the interactive
+   * transaction the batch runs in: the client of that transaction, on which the extension hook
+   * re-issues each triggered operation
+   */
+  readonly batchClient?: TransactionalPrismaClient;
 }
 
 type ContextRunner = Pick<AuditContextProvider, 'runAsync'>;

@@ -6,7 +6,8 @@
  * sees the operation a second time depends on the client the audit runs it on: the `query`
  * continuation carries on down the same chain, while a model delegate call starts a new chain
  * on the client it is made on. This spec pins how many times such an extension sees one audited
- * `user.update` in each execution scope; the per-scenario comments state where the entries come
+ * `user.update` in each execution scope, and how many times an extension applied after the audit
+ * extension sees it in a batch transaction; the per-scenario comments state where the entries come
  * from. A change that moves a count must update the number and its comment — never loosen the
  * assertion instead.
  */
@@ -135,6 +136,48 @@ describe('Extension Chain Guard', () => {
     // 1. the caller's call on its interactive transaction client; the audit extension continues
     //    it through `query`, which is already bound to that client
     expect(awaited.userUpdatesSeen()).toHaveLength(1);
+    expect(await auditRowsForUpdate(awaited)).toHaveLength(1);
+  });
+
+  it('an update in a batch $transaction with an awaited audit reaches the extension twice', async () => {
+    const user = await createUser(awaited, 'batch-transaction@example.com');
+    awaited.seen.length = 0;
+
+    await awaited.provider.runAsync(testActor, () =>
+      awaited.prisma.$transaction([awaited.prisma.user.update({ where: { id: user.id }, data: { name: 'After' } })]),
+    );
+
+    // 1. the caller's call, triggered inside the interactive transaction the batch runs in, on its
+    //    way in through the base client's chain to the audit extension
+    // 2. the audit extension's re-issue of the call on that transaction's client, which starts a
+    //    new chain that includes this extension; the re-issued call is audited through `query`
+    expect(awaited.userUpdatesSeen()).toHaveLength(2);
+    expect(await auditRowsForUpdate(awaited)).toHaveLength(1);
+  });
+
+  it('an update in a batch $transaction with an awaited audit reaches an extension applied after the audit extension once', async () => {
+    const user = await createUser(awaited, 'batch-transaction-later@example.com');
+    const seenLater: SeenOperation[] = [];
+    const later = awaited.prisma.$extends({
+      name: 'later-operation-recorder',
+      query: {
+        $allModels: {
+          async $allOperations({ model, operation, args, query }) {
+            seenLater.push({ model, operation });
+            return query(args);
+          },
+        },
+      },
+    });
+
+    await awaited.provider.runAsync(testActor, () =>
+      later.$transaction([later.user.update({ where: { id: user.id }, data: { name: 'After' } })]),
+    );
+
+    // 1. the re-issued call on the interactive transaction client of the client the batch was
+    //    called on, which the audit extension continues through `query` down the chain; the
+    //    caller's own call stops at the audit extension, which re-issues it instead of continuing
+    expect(seenLater.filter((call) => call.model === 'User' && call.operation === 'update')).toHaveLength(1);
     expect(await auditRowsForUpdate(awaited)).toHaveLength(1);
   });
 });

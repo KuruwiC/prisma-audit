@@ -6,20 +6,30 @@
  * `$transaction` is called: the audit reads and writes of the operations in the callback share
  * the client, and the writes that must wait for the commit queue on the scope. The queue is
  * drained strictly after `$transaction` resolves; on rejection it is discarded unrun. The
- * sequential form, `$transaction([...])`, passes through untouched: a list of operations carries
- * no callback, hence no interactive scope to establish.
+ * sequential form, `$transaction([...])`, runs as one interactive transaction when an audit
+ * context is set and an audit can be awaited (see `batch-transaction.ts`); otherwise Prisma runs
+ * it untouched, and each of its operations has committed by the time its audit is built.
  *
  * @module runtime/transaction-proxy
  */
 
 import type { AuditContext, AuditContextProvider } from '@kuruwic/db-audit-core';
 import type { TransactionalPrismaClient } from '../internal-types.js';
+import { batchOperationsOf, runBatchAsInteractiveTransaction } from './batch-transaction.js';
 import { drainAfterCommit, enterTransaction } from './scope.js';
 
 type OriginalTransactionMethod = (...args: unknown[]) => Promise<unknown>;
 
-type TransactionProxyDependencies = {
-  provider: AuditContextProvider;
+export interface TransactionProxyConfig {
+  readonly provider: AuditContextProvider;
+  /**
+   * Whether the configuration can make an audit awaited for some operation, so that a batch
+   * `$transaction([...])` under an audit context runs as one interactive transaction
+   */
+  readonly batchAuditMayBeAwaited: boolean;
+}
+
+type TransactionProxyDependencies = TransactionProxyConfig & {
   originalTransaction: OriginalTransactionMethod;
   target: object;
 };
@@ -61,11 +71,27 @@ export const createWrappedTransactionCallback = (
 export const createTransactionProxyHandler = (
   deps: TransactionProxyDependencies,
 ): ((...args: unknown[]) => Promise<unknown>) => {
-  const { provider, originalTransaction, target } = deps;
+  const { provider, batchAuditMayBeAwaited, originalTransaction, target } = deps;
+
+  const runBatch = (args: unknown[]): Promise<unknown> => {
+    const auditContext = provider.getContext();
+    const operations = batchAuditMayBeAwaited && auditContext ? batchOperationsOf(args) : undefined;
+    if (!auditContext || !operations) {
+      return originalTransaction.apply(target, args);
+    }
+    return runBatchAsInteractiveTransaction({
+      operations,
+      options: args[1],
+      auditContext,
+      provider,
+      originalTransaction,
+      target,
+    });
+  };
 
   return async (...args: unknown[]): Promise<unknown> => {
     if (typeof args[0] !== 'function') {
-      return originalTransaction.apply(target, args);
+      return runBatch(args);
     }
 
     const callback = args[0] as (tx: TransactionalPrismaClient) => Promise<unknown>;
@@ -91,19 +117,19 @@ export const createTransactionProxyHandler = (
  */
 export const createTransactionProxy = <TClient extends object>(
   extendedClient: TClient,
-  provider: AuditContextProvider,
+  config: TransactionProxyConfig,
 ): TClient => {
   return new Proxy(extendedClient, {
     get(target, prop) {
       if (prop === '$transaction') {
         const originalTransaction = Reflect.get(target, prop) as OriginalTransactionMethod;
-        return createTransactionProxyHandler({ provider, originalTransaction, target });
+        return createTransactionProxyHandler({ ...config, originalTransaction, target });
       }
       if (prop === '$extends') {
         const originalExtends = Reflect.get(target, prop) as (...args: unknown[]) => unknown;
         return (...args: unknown[]): unknown => {
           const derived = originalExtends.apply(target, args);
-          return typeof derived === 'object' && derived !== null ? createTransactionProxy(derived, provider) : derived;
+          return typeof derived === 'object' && derived !== null ? createTransactionProxy(derived, config) : derived;
         };
       }
       return Reflect.get(target, prop);

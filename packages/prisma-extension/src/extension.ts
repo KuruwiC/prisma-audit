@@ -4,7 +4,9 @@
  * The `$allOperations` hook: decides whether an intercepted operation is audited (its model, its
  * kind, then the write policy's sampling), selects the relations its nested writes touch, runs it
  * through the audited-operation pipeline on the library-owned runtime context, and returns the
- * result in the shape the caller requested.
+ * result in the shape the caller requested. An operation of a batch transaction that runs as an
+ * interactive one is first re-issued on that transaction's client, where the hook sees it again
+ * as an operation of the transaction.
  *
  * @module extension
  * @see {@link createAuditLogExtension}
@@ -19,7 +21,8 @@ import { createBatchExecutor } from './pipeline/batch-executor.js';
 import { createRecordProducer } from './pipeline/produce-records.js';
 import { type AuditPipelineDependencies, runAuditedOperation } from './pipeline/run-audited-operation.js';
 import { createSingleExecutor } from './pipeline/single-executor.js';
-import { isProcessingAuditLog, withScope } from './runtime/scope.js';
+import { reissueOnBatchClient } from './runtime/batch-transaction.js';
+import { currentScope, isProcessingAuditLog, withScope } from './runtime/scope.js';
 import { createTransactionProxy } from './runtime/transaction-proxy.js';
 import type { PrismaAuditExtensionOptions } from './types.js';
 import { injectAuditedSelection, projectToRequestedShape } from './utils/audited-selection.js';
@@ -59,53 +62,60 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
   const audit = normalizeAuditOptions(options);
   const deps = createPipelineDependencies(audit);
 
+  // `awaitWriteIf` may return true for any model, so its presence counts as making an audit awaitable.
+  const batchAuditMayBeAwaited = audit.policyConfig.awaitWrite || audit.policyConfig.awaitWriteIf !== undefined;
+
+  /** Audits an intercepted operation, or continues it untouched when it is not audited */
+  const auditOperation = async (params: ExtensionParams, baseClient: PrismaClientWithDynamicAccess) => {
+    const { operation, model, args, query } = params;
+    const auditContext = audit.provider.getContext();
+
+    if (isProcessingAuditLog()) {
+      return query(args);
+    }
+    if (!model || !auditContext || !audit.shouldAudit(model)) {
+      return query(args);
+    }
+    if (!isAuditableAction(operation)) {
+      return query(args);
+    }
+    const writePolicy = policy(model, audit.modelTags(model), audit.policyConfig);
+    if (!writePolicy.sampled) {
+      return query(args);
+    }
+
+    const injection = injectAuditedSelection(audit.schemaMetadata, model, args, audit.queryOmitSupported);
+
+    // Mark the re-entrancy guard on the library-owned runtime store; the app context
+    // stays untouched so downstream code keeps the caller's actor and request metadata.
+    const result = await withScope({ isProcessingAuditLog: true }, () =>
+      runAuditedOperation(
+        {
+          operation: { model, action: operation, args: injection.args as Record<string, unknown>, query },
+          auditContext,
+          baseClient,
+          atomic: writePolicy.atomic,
+        },
+        deps,
+      ),
+    );
+
+    // The audit logs were built from the full result; the caller receives the shape it requested.
+    return projectToRequestedShape(result, injection.injected);
+  };
+
   const extensionDefinition = (baseClient: PrismaClientWithDynamicAccess) => {
     const extendedClient = baseClient.$extends({
       name: 'prisma-audit',
       query: {
-        $allModels: {
-          async $allOperations(params: ExtensionParams) {
-            const { operation, model, args, query } = params;
-            const auditContext = audit.provider.getContext();
-
-            if (isProcessingAuditLog()) {
-              return query(args);
-            }
-            if (!model || !auditContext || !audit.shouldAudit(model)) {
-              return query(args);
-            }
-            if (!isAuditableAction(operation)) {
-              return query(args);
-            }
-            const writePolicy = policy(model, audit.modelTags(model), audit.policyConfig);
-            if (!writePolicy.sampled) {
-              return query(args);
-            }
-
-            const injection = injectAuditedSelection(audit.schemaMetadata, model, args, audit.queryOmitSupported);
-
-            // Mark the re-entrancy guard on the library-owned runtime store; the app context
-            // stays untouched so downstream code keeps the caller's actor and request metadata.
-            const result = await withScope({ isProcessingAuditLog: true }, () =>
-              runAuditedOperation(
-                {
-                  operation: { model, action: operation, args: injection.args as Record<string, unknown>, query },
-                  auditContext,
-                  baseClient,
-                  atomic: writePolicy.atomic,
-                },
-                deps,
-              ),
-            );
-
-            // The audit logs were built from the full result; the caller receives the shape it requested.
-            return projectToRequestedShape(result, injection.injected);
-          },
+        async $allOperations(params: ExtensionParams) {
+          const batchClient = currentScope()?.batchClient;
+          return batchClient ? reissueOnBatchClient(batchClient, params) : auditOperation(params, baseClient);
         },
       },
     });
 
-    return createTransactionProxy(extendedClient as object, audit.provider);
+    return createTransactionProxy(extendedClient as object, { provider: audit.provider, batchAuditMayBeAwaited });
   };
 
   return audit.Prisma.defineExtension(extensionDefinition);
