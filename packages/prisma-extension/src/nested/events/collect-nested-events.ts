@@ -549,6 +549,17 @@ const writesTopLevelField = (args: Row, fields: readonly string[]): boolean =>
   [args.data, args.update].some((data) => isRow(data) && fields.some((field) => data[field] !== undefined));
 
 /**
+ * The top-level row as the database holds it: the row read before the write, else the row the
+ * operation returned when it writes none of `fields`
+ */
+const topLevelRowAsStored = (input: NestedEventCollectionInput, fields: readonly string[]): Row | undefined => {
+  if (input.topLevelBefore.kind === 'captured') {
+    return input.topLevelBefore.row;
+  }
+  return isRow(input.result) && !writesTopLevelField(input.args, fields) ? input.result : undefined;
+};
+
+/**
  * The values of `fields` on the top-level row before the write: from the `where` when it names
  * each of them, else from the before state when it was read, else from the result when the
  * operation sets none of them. Undefined when none of those gives them.
@@ -558,12 +569,8 @@ const topLevelKeyBeforeWrite = (input: NestedEventCollectionInput, fields: reado
   if (named) {
     return named;
   }
-  if (input.topLevelBefore.kind === 'captured') {
-    return parentKeyOf(input.topLevelBefore.row, fields);
-  }
-  return isRow(input.result) && !writesTopLevelField(input.args, fields)
-    ? parentKeyOf(input.result, fields)
-    : undefined;
+  const row = topLevelRowAsStored(input, fields);
+  return row ? parentKeyOf(row, fields) : undefined;
 };
 
 /**
@@ -616,17 +623,6 @@ const linkedEarlierInWrite = (nestedOp: NestedOperationInfo, row: Row): boolean 
       LINKING_KEYWORDS.has(operation) &&
       namedTargets(operation, data).some(({ where }) => matchesUniqueWhere(row, where)),
   );
-
-/**
- * The top-level row as the database holds it: the row read before the write, else the row the
- * operation returned when it writes none of `fields`
- */
-const topLevelRowAsStored = (input: NestedEventCollectionInput, fields: readonly string[]): Row | undefined => {
-  if (input.topLevelBefore.kind === 'captured') {
-    return input.topLevelBefore.row;
-  }
-  return isRow(input.result) && !writesTopLevelField(input.args, fields) ? input.result : undefined;
-};
 
 /**
  * The link columns a row linked to the parent of `nestedOp` holds, from the parent row as the
