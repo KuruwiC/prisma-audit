@@ -11,7 +11,7 @@ import { preFetchNestedRecordsBeforeOperation } from '../../../src/nested/pre-fe
 import { preFetchOneToManyRelation } from '../../../src/nested/pre-fetch/one-to-many-fetcher.js';
 import { parentKeysFromOperationWheres } from '../../../src/nested/pre-fetch/parent-rows.js';
 import { preFetchedResultFor } from '../../../src/nested/pre-fetch/pre-fetch-result-store.js';
-import { NO_CLIENT_OMITTED_FIELDS } from '../../../src/utils/client-omit.js';
+import { NO_AUDITED_OMITTED_FIELDS } from '../../../src/utils/audited-omitted-fields.js';
 import { createSchemaMetadataFromDMMF } from '../../../src/utils/schema-metadata.js';
 
 type Row = Record<string, unknown>;
@@ -117,7 +117,7 @@ const preFetch = (
   preFetchNestedRecordsBeforeOperation(client, modelName, args, {
     Prisma,
     schemaMetadata: createSchemaMetadataFromDMMF(Prisma),
-    clientOmittedFields: NO_CLIENT_OMITTED_FIELDS,
+    auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS,
     shouldFetchBefore,
   });
 
@@ -474,7 +474,7 @@ describe('nested to-many batch pre-read', () => {
         {
           Prisma,
           schemaMetadata: createSchemaMetadataFromDMMF(Prisma),
-          clientOmittedFields: NO_CLIENT_OMITTED_FIELDS,
+          auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS,
           shouldFetchBefore: fetchBefore,
           onPreFetchFailure,
         },
@@ -504,7 +504,7 @@ describe('a failed pre-fetch at the parent path', () => {
     const preFetched = preFetchNestedRecordsBeforeOperation(client, 'Account', args, {
       Prisma,
       schemaMetadata: createSchemaMetadataFromDMMF(Prisma),
-      clientOmittedFields: NO_CLIENT_OMITTED_FIELDS,
+      auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS,
       shouldFetchBefore: fetchBefore,
       onPreFetchFailure,
     });

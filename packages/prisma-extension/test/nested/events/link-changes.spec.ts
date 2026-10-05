@@ -8,7 +8,7 @@ import type { NestedOperationInfo, NestedPreFetchResults } from '../../../src/gr
 import { collectLinkChanges, type LinkChangesInput } from '../../../src/nested/events/link-changes.js';
 import type { LinkPathRead, LinkWrite, RelatedSideLink } from '../../../src/nested/pre-fetch/link-rows.js';
 import { storeReadResult } from '../../../src/nested/pre-fetch/pre-fetch-result-store.js';
-import { NO_CLIENT_OMITTED_FIELDS } from '../../../src/utils/client-omit.js';
+import { NO_AUDITED_OMITTED_FIELDS } from '../../../src/utils/audited-omitted-fields.js';
 import { extractEntityIdentity } from '../../../src/utils/id-generation.js';
 
 type Row = Record<string, unknown>;
@@ -55,7 +55,7 @@ const collect = async (
     client: { label: { findMany } },
     linkReads: new Map([['labels', read]]),
     nestedPreFetchResults,
-    clientOmittedFields: NO_CLIENT_OMITTED_FIELDS,
+    auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS,
     auditedAt: () => new Set(audited.map((id) => extractEntityIdentity({ id }, ['id']))),
     fieldNamesOf: () => new Set(['id', 'name', 'postId']),
   };

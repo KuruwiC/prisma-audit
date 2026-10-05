@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { supportsClientOmit, supportsQueryOmit } from '../../src/utils/prisma-version.js';
+import { supportsQueryOmit } from '../../src/utils/prisma-version.js';
 
 describe('supportsQueryOmit', () => {
   it.each([
@@ -12,18 +12,5 @@ describe('supportsQueryOmit', () => {
     [undefined, false],
   ])('%s: %s', (version, expected) => {
     expect(supportsQueryOmit(version)).toBe(expected);
-  });
-});
-
-describe('supportsClientOmit', () => {
-  it.each([
-    ['5.16.0', true],
-    ['6.0.0', true],
-    ['5.15.2', false],
-    ['4.16.0', false],
-    ['dev', undefined],
-    [undefined, undefined],
-  ])('%s: %s', (version, expected) => {
-    expect(supportsClientOmit(version)).toBe(expected);
   });
 });

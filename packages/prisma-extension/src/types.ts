@@ -263,7 +263,9 @@ export interface PrismaAuditExtensionOptions<TModelName extends string = string,
    *   caller's operation continues; those audit log entries are skipped.
    * - `id-resolver-call`: an id resolver (the entity's `idResolver` or a `to()` resolver) threw,
    *   returned an id that cannot be normalized to a string, or, for a `batchLookup` resolver,
-   *   returned a different number of ids than rows. The caller's operation continues; `params`
+   *   returned a different number of ids than rows. A `foreignKey` resolver throws for a row that
+   *   lacks its column, such as one a client-level `omit` hides that the entity does not list in
+   *   `auditOmittedFields`. The caller's operation continues; `params`
    *   is `{ identity, resolver }` with the row's serialized primary key and the failed resolver.
    *   A failed `batchLookup` resolver is reported once for every row of its call.
    */

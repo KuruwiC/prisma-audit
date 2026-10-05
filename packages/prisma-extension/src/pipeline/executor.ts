@@ -10,6 +10,7 @@
 
 import type { AuditRecord, MutationEvent } from '@kuruwic/db-audit-core';
 import type { AuditAction } from '../grammar/operations.js';
+import type { WidenedColumns } from '../utils/audited-selection.js';
 import type { ExecutionScope } from './execution-scope.js';
 import type { RecordProducer } from './produce-records.js';
 
@@ -22,6 +23,8 @@ export interface AuditedOperation {
    * run-audited-operation.ts)
    */
   readonly execute: (args: Record<string, unknown>) => Promise<unknown>;
+  /** The columns reading the caller's `select` in the default shape added (see `injectAuditedSelection`) */
+  readonly widened: WidenedColumns;
 }
 
 export interface OperationSteps<TPrepared, TExecuted> {
@@ -61,7 +64,7 @@ export const createExecutor = <TPrepared, TExecuted>(
     const executed = await steps.execute(operation, scope, prepared);
     const result = await steps.result(executed);
     const buildRecords = async (): Promise<AuditRecord[]> =>
-      produceRecords(await steps.collect(operation, scope, prepared, executed), scope);
+      produceRecords(await steps.collect(operation, scope, prepared, executed), scope, operation.widened);
     return { result, buildRecords };
   },
 });

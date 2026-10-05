@@ -16,8 +16,8 @@ import type { NestedOperationInfo, NestedPreFetchResults } from '../../grammar/n
 import { namedTargets } from '../../grammar/nested-operations.js';
 import { AUDIT_ACTION } from '../../grammar/operations.js';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../internal-types.js';
+import type { AuditedOmittedFields } from '../../utils/audited-omitted-fields.js';
 import { UNAVAILABLE_BEFORE_STATE } from '../../utils/before-state.js';
-import type { ClientOmittedFields } from '../../utils/client-omit.js';
 import { matchesUniqueWhere, uniqueWhereAsFilter } from '../../utils/compound-where.js';
 import { nestedLog } from '../../utils/debug.js';
 import { extractEntityIdentity, primaryKeyOf } from '../../utils/id-generation.js';
@@ -173,7 +173,7 @@ export interface LinkChangesInput {
   readonly client: PrismaClientWithDynamicAccess | TransactionalPrismaClient;
   readonly linkReads: LinkReads;
   readonly nestedPreFetchResults: NestedPreFetchResults;
-  readonly clientOmittedFields: ClientOmittedFields;
+  readonly auditedOmittedFields: AuditedOmittedFields;
   /** The rows other nested writes audit at a path, whose own record already carries the new foreign key */
   readonly auditedAt: (path: string) => ReadonlySet<EntityIdentityKey>;
   readonly fieldNamesOf: (modelName: string) => ReadonlySet<string>;
@@ -193,7 +193,7 @@ export const collectLinkChanges = async (
     if (candidates.length === 0) {
       continue;
     }
-    const client = getPreFetchListClient(input.client, read.relatedModel, input.clientOmittedFields);
+    const client = getPreFetchListClient(input.client, read.relatedModel, input.auditedOmittedFields);
     if (!client) {
       throw new Error(`[@prisma-audit] Cannot read the re-linked rows at path "${path}": no model client`);
     }

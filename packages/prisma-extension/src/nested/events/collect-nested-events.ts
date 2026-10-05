@@ -41,6 +41,7 @@ import type {
   TransactionalPrismaClient,
 } from '../../internal-types.js';
 import type { SchemaMetadata, UniqueConstraint } from '../../schema/types.js';
+import type { AuditedOmittedFields } from '../../utils/audited-omitted-fields.js';
 import {
   relationNodeOf,
   relationSelectionOf,
@@ -48,7 +49,6 @@ import {
   writtenRelationsInclude,
 } from '../../utils/audited-selection.js';
 import { NO_BEFORE_STATE } from '../../utils/before-state.js';
-import type { ClientOmittedFields } from '../../utils/client-omit.js';
 import { matchesUniqueWhere } from '../../utils/compound-where.js';
 import { nestedLog } from '../../utils/debug.js';
 import { extractEntityIdentity } from '../../utils/id-generation.js';
@@ -78,7 +78,7 @@ export interface NestedEventCollectorDependencies {
   Prisma: PrismaNamespace;
   schemaMetadata: SchemaMetadata;
   shouldFetchBefore: ShouldFetchBefore;
-  clientOmittedFields: ClientOmittedFields;
+  auditedOmittedFields: AuditedOmittedFields;
   /**
    * Notified when a nested delete's primary key cannot be resolved (see `delete-handler.ts`);
    * that entry is skipped instead of being recorded with a partial or guessed key. Optional:
@@ -485,7 +485,7 @@ const rowsNotInResult = async (
   }
   const { input, deps } = walk;
   const relatedModel = operation?.relatedModel ?? '';
-  const client = getPreFetchListClient(input.client, relatedModel, deps.clientOmittedFields);
+  const client = getPreFetchListClient(input.client, relatedModel, deps.auditedOmittedFields);
   if (!client) {
     throw new Error(
       `[@prisma-audit] Cannot read the nested rows at path "${path}": no model client for "${relatedModel}"`,
@@ -687,7 +687,7 @@ export const collectNestedEvents = async (
     client: input.client,
     linkReads: input.linkReads,
     nestedPreFetchResults: input.nestedPreFetchResults,
-    clientOmittedFields: deps.clientOmittedFields,
+    auditedOmittedFields: deps.auditedOmittedFields,
     auditedAt: (path) => auditedIdentitiesAt(walk, path),
     fieldNamesOf: (model) => new Set(schemaMetadata.getAllFields(model).map((field) => field.name)),
   });

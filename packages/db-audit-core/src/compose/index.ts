@@ -27,12 +27,6 @@ export interface ComposeConfig<TModelName extends string = string> {
   /** Fields excluded from change tracking for every entity without its own list. */
   readonly excludeFields: readonly string[];
   readonly redact?: RedactConfig;
-  /**
-   * Columns of a model masked in the stored states and changes (such as the columns the adapter's
-   * client hides from reads); undefined masks none. Masked after the diff, so a change to such a
-   * column is still recorded, without its values.
-   */
-  readonly maskedFieldNames?: (model: TModelName) => ReadonlySet<string> | undefined;
   readonly serialization?: SerializationConfig;
   /**
    * The keys of a row of a model that are not its columns: its relation fields and any aggregate
@@ -135,10 +129,7 @@ const resolveStates = <TModelName extends string>(
     return undefined;
   }
 
-  const maskedFields = new Set([
-    ...(entity.auditOmittedFields ?? []),
-    ...(config.maskedFieldNames?.(event.model) ?? []),
-  ]);
+  const maskedFields = new Set(entity.auditOmittedFields);
   const columns = { before: beforeColumns, after: afterColumns, changes };
   const states = maskedFields.size > 0 ? maskStates(columns, maskedFields) : columns;
   return config.redact ? redactStates(states, config.redact) : states;

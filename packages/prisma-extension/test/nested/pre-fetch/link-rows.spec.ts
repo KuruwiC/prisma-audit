@@ -10,7 +10,7 @@ import { detectExecutedNestedOperations } from '../../../src/nested/events/write
 import { linkWriteOf, readLinkRows } from '../../../src/nested/pre-fetch/link-rows.js';
 import { storeReadResult } from '../../../src/nested/pre-fetch/pre-fetch-result-store.js';
 import { relationLinkOf, resolveRelationLink } from '../../../src/nested/pre-fetch/relation-link.js';
-import { NO_CLIENT_OMITTED_FIELDS } from '../../../src/utils/client-omit.js';
+import { NO_AUDITED_OMITTED_FIELDS } from '../../../src/utils/audited-omitted-fields.js';
 import { createSchemaMetadataFromDMMF } from '../../../src/utils/schema-metadata.js';
 
 const scalar = (name: string, extra: Partial<DMMFField> = {}): DMMFField => ({
@@ -195,7 +195,7 @@ describe('readLinkRows', () => {
         nestedOperations,
         nestedPreFetchResults,
       },
-      { Prisma, schemaMetadata, clientOmittedFields: NO_CLIENT_OMITTED_FIELDS, shouldFetchBefore: () => true },
+      { Prisma, schemaMetadata, auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS, shouldFetchBefore: () => true },
     );
 
     expect(findMany.mock.calls).toEqual([[{ where: { OR: [{ id: 'la' }, { postId: 'p1' }, { id: 'lb' }] } }]]);
@@ -224,7 +224,7 @@ describe('readLinkRows', () => {
       {
         Prisma,
         schemaMetadata,
-        clientOmittedFields: NO_CLIENT_OMITTED_FIELDS,
+        auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS,
         shouldFetchBefore: (model) => model !== 'Label',
       },
     );
@@ -269,7 +269,7 @@ describe('readLinkRows', () => {
       {
         Prisma: unresolved,
         schemaMetadata,
-        clientOmittedFields: NO_CLIENT_OMITTED_FIELDS,
+        auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS,
         shouldFetchBefore: () => true,
         onPreFetchFailure,
       },
@@ -315,7 +315,7 @@ describe('readLinkRows', () => {
       {
         Prisma,
         schemaMetadata,
-        clientOmittedFields: NO_CLIENT_OMITTED_FIELDS,
+        auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS,
         shouldFetchBefore: () => true,
         onPreFetchFailure,
       },

@@ -10,6 +10,8 @@ import { describe, expect, it, vi } from 'vitest';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../src/internal-types.js';
 import type { ExecutionScope } from '../../src/pipeline/execution-scope.js';
 import { createRecordProducer } from '../../src/pipeline/produce-records.js';
+import { NO_AUDITED_OMITTED_FIELDS } from '../../src/utils/audited-omitted-fields.js';
+import { createSchemaMetadataFromDMMF } from '../../src/utils/schema-metadata.js';
 
 const baseClient: PrismaClientWithDynamicAccess = Object.assign(Object.create(null), { name: 'base' });
 const transactionClient: TransactionalPrismaClient = Object.assign(Object.create(null), { name: 'transaction' });
@@ -41,6 +43,12 @@ const producerWith = (
   return createRecordProducer({
     resolveConfig: { entity: entityConfigs.byModel, rootEntity: entityConfigs.byCategoryAndType },
     composeConfig: { entity: entityConfigs.byModel, excludeFields: [], relationFieldNames: () => undefined },
+    omittedFieldReads: {
+      schemaMetadata: createSchemaMetadataFromDMMF({ dmmf: { datamodel: { models: [] } } } as Parameters<
+        typeof createSchemaMetadataFromDMMF
+      >[0]),
+      auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS,
+    },
     failureSink,
   });
 };
@@ -49,7 +57,7 @@ describe('createRecordProducer', () => {
   it('composes the records of the resolved events', async () => {
     const produce = producerWith(async (row) => row.id as string);
 
-    const records = await produce([event], scopeOn(baseClient));
+    const records = await produce([event], scopeOn(baseClient), new Map());
 
     expect(records).toHaveLength(1);
     expect(records[0]).toMatchObject({
@@ -82,7 +90,7 @@ describe('createRecordProducer', () => {
       { reportResolverFailures },
     );
 
-    const records = await produce([event, failing], scopeOn(baseClient));
+    const records = await produce([event, failing], scopeOn(baseClient), new Map());
 
     expect(records.map((record) => record.entityId)).toEqual(['p1']);
     expect(reportResolverFailures).toHaveBeenCalledTimes(1);
@@ -92,7 +100,7 @@ describe('createRecordProducer', () => {
   it('hands the callbacks the base client when the operation runs outside a transaction', async () => {
     const idResolver = vi.fn(async (row: Record<string, unknown>) => row.id as string);
 
-    await producerWith(idResolver)([event], scopeOn(baseClient));
+    await producerWith(idResolver)([event], scopeOn(baseClient), new Map());
 
     expect(idResolver).toHaveBeenCalledWith(event.after, baseClient);
   });
@@ -100,7 +108,7 @@ describe('createRecordProducer', () => {
   it('hands the callbacks the transaction client when the operation runs in a transaction', async () => {
     const idResolver = vi.fn(async (row: Record<string, unknown>) => row.id as string);
 
-    await producerWith(idResolver)([event], scopeOn(transactionClient));
+    await producerWith(idResolver)([event], scopeOn(transactionClient), new Map());
 
     expect(idResolver).toHaveBeenCalledWith(event.after, transactionClient);
     expect(idResolver).not.toHaveBeenCalledWith(event.after, baseClient);

@@ -32,8 +32,8 @@ import type {
   TransactionalPrismaClient,
 } from '../../internal-types.js';
 import type { SchemaMetadata, UniqueConstraint } from '../../schema/types.js';
+import type { AuditedOmittedFields } from '../../utils/audited-omitted-fields.js';
 import { beforeStateOf, NO_BEFORE_STATE } from '../../utils/before-state.js';
-import type { ClientOmittedFields } from '../../utils/client-omit.js';
 import { preFetchLog } from '../../utils/debug.js';
 import type { EntityIdentityKey } from '../../utils/identity-key.js';
 import { isRecord } from '../../utils/is-record.js';
@@ -82,7 +82,7 @@ export interface PreFetchCoordinatorDependencies {
   readonly Prisma: PrismaNamespace;
   readonly schemaMetadata: SchemaMetadata;
   readonly shouldFetchBefore: ShouldFetchBefore;
-  readonly clientOmittedFields: ClientOmittedFields;
+  readonly auditedOmittedFields: AuditedOmittedFields;
   /**
    * Notified when a single nested operation's pre-fetch query fails. The rows the read left
    * unknown are recorded as `unavailable` (see pre-fetch-result-store.ts), and the caller's own
@@ -199,7 +199,7 @@ export const preFetchNestedRecordsBeforeOperation = async (
   dependencies: PreFetchCoordinatorDependencies,
   topLevelUpsertBranch?: UpsertBranch,
 ): Promise<NestedPreFetch> => {
-  const { Prisma, schemaMetadata, shouldFetchBefore, clientOmittedFields, onPreFetchFailure } = dependencies;
+  const { Prisma, schemaMetadata, shouldFetchBefore, auditedOmittedFields, onPreFetchFailure } = dependencies;
 
   const preFetchResults: NestedPreFetchResults = new Map();
   const batchTargets: NestedBatchTargets = new Map();
@@ -250,12 +250,12 @@ export const preFetchNestedRecordsBeforeOperation = async (
     nestedOperations,
     dmmf,
     topLevelModel: dmmf.datamodel.models.find((m) => m.name === modelName),
-    topLevelModelClient: getPreFetchModelClient(prismaClient, modelName, clientOmittedFields),
+    topLevelModelClient: getPreFetchModelClient(prismaClient, modelName, auditedOmittedFields),
     topLevelWhere: args.where,
     preFetchResults,
     batchTargets,
     shouldFetchBefore,
-    clientOmittedFields,
+    auditedOmittedFields,
     resolvePkConstraint: (model) => {
       if (!pkConstraintCache.has(model)) {
         pkConstraintCache.set(model, getPrimaryKeyConstraint(schemaMetadata, model));
@@ -373,7 +373,7 @@ interface NestedPreFetchContext {
   preFetchResults: NestedPreFetchResults;
   batchTargets: NestedBatchTargets;
   shouldFetchBefore: ShouldFetchBefore;
-  clientOmittedFields: ClientOmittedFields;
+  auditedOmittedFields: AuditedOmittedFields;
   resolvePkConstraint: (model: string) => UniqueConstraint | undefined;
   /** Operations at the parent path of `path` that were not pre-fetched; none for a direct child */
   parentOperationsNotPreFetched: (path: string) => NestedOperationInfo[];
@@ -427,7 +427,7 @@ const preFetchNestedOperation = async (
   const relatedModelClient = getPreFetchModelClient(
     context.prismaClient,
     nestedOp.relatedModel,
-    context.clientOmittedFields,
+    context.auditedOmittedFields,
   );
   if (!relatedModelClient) {
     preFetchLog('model client not found: model=%s', nestedOp.relatedModel);
@@ -637,7 +637,7 @@ const identifyUpdatedRows = async (
   const relatedModelClient = getPreFetchModelClient(
     context.prismaClient,
     nestedOp.relatedModel,
-    context.clientOmittedFields,
+    context.auditedOmittedFields,
   );
   if (!relation || !relatedModelClient) {
     return;
@@ -729,7 +729,7 @@ const handleToManyBatch = async (
   const relatedModelClient = getPreFetchListClient(
     context.prismaClient,
     nestedOp.relatedModel,
-    context.clientOmittedFields,
+    context.auditedOmittedFields,
   );
   if (!relatedModelClient) {
     preFetchLog('model client has no findMany: model=%s', nestedOp.relatedModel);

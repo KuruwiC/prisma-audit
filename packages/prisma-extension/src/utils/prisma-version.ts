@@ -26,12 +26,3 @@ export const supportsQueryOmit = (version: string | undefined): boolean => {
   const parsed = majorMinorOf(version);
   return parsed !== undefined && isAtLeast(parsed, { major: 6, minor: 2 });
 };
-
-/**
- * Whether a client of `version` has the client-level `omit` option, from Prisma 5.16.0;
- * undefined when the version is unknown
- */
-export const supportsClientOmit = (version: string | undefined): boolean | undefined => {
-  const parsed = majorMinorOf(version);
-  return parsed && isAtLeast(parsed, { major: 5, minor: 16 });
-};

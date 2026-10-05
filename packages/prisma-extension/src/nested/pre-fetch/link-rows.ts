@@ -31,7 +31,7 @@ import type {
   TransactionalPrismaClient,
 } from '../../internal-types.js';
 import type { SchemaMetadata } from '../../schema/types.js';
-import type { ClientOmittedFields } from '../../utils/client-omit.js';
+import type { AuditedOmittedFields } from '../../utils/audited-omitted-fields.js';
 import { uniqueWhereAsFilter } from '../../utils/compound-where.js';
 import { preFetchLog } from '../../utils/debug.js';
 import { toError } from '../../utils/to-error.js';
@@ -120,7 +120,7 @@ export interface ReadLinkRowsDependencies {
   readonly Prisma: PrismaNamespace;
   readonly schemaMetadata: SchemaMetadata;
   readonly shouldFetchBefore: ShouldFetchBefore;
-  readonly clientOmittedFields: ClientOmittedFields;
+  readonly auditedOmittedFields: AuditedOmittedFields;
   readonly onPreFetchFailure?: FailureSink['notify'];
 }
 
@@ -167,7 +167,7 @@ const readParentKeys = async (
     parentFields: link.references,
     parentPkFields: parentPk.fields,
     topLevelWhere: input.topLevelWhere,
-    topLevelModelClient: getPreFetchModelClient(input.prismaClient, input.modelName, deps.clientOmittedFields),
+    topLevelModelClient: getPreFetchModelClient(input.prismaClient, input.modelName, deps.auditedOmittedFields),
     preFetchResults: input.nestedPreFetchResults,
     parentKeysFromWhere: parentKeysFromOperationWheres(notPreFetched, parentPk),
   });
@@ -214,7 +214,7 @@ const readPath = async (
     ? getPrimaryKeyConstraint(deps.schemaMetadata, first.operation.relatedModel)?.fields
     : undefined;
   const client = first
-    ? getPreFetchListClient(input.prismaClient, first.operation.relatedModel, deps.clientOmittedFields)
+    ? getPreFetchListClient(input.prismaClient, first.operation.relatedModel, deps.auditedOmittedFields)
     : undefined;
   if (!first || !pkFields || !client) {
     return undefined;

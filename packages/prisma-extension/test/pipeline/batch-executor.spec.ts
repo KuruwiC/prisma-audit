@@ -11,7 +11,7 @@ import { createBatchExecutor } from '../../src/pipeline/batch-executor.js';
 import type { ExecutionScope } from '../../src/pipeline/execution-scope.js';
 import type { AuditedOperation } from '../../src/pipeline/executor.js';
 import type { RecordProducer } from '../../src/pipeline/produce-records.js';
-import { NO_CLIENT_OMITTED_FIELDS } from '../../src/utils/client-omit.js';
+import { NO_AUDITED_OMITTED_FIELDS } from '../../src/utils/audited-omitted-fields.js';
 import { createSchemaMetadataFromDMMF } from '../../src/utils/schema-metadata.js';
 import { runWithRecords } from './run-with-records.js';
 
@@ -87,6 +87,7 @@ const operationOn = (
   model: 'User',
   action,
   args,
+  widened: new Map(),
   execute: vi.fn(async (runArgs: Row, runAction: AuditedOperation['action'] = action) =>
     mutationOn(client, runAction)(runArgs),
   ),
@@ -102,7 +103,7 @@ const failureSink: FailureSink = {
 const executor = createBatchExecutor({
   Prisma,
   schemaMetadata,
-  clientOmittedFields: NO_CLIENT_OMITTED_FIELDS,
+  auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS,
   failureSink,
 });
 const produce = () => vi.fn<RecordProducer>(async () => []);
@@ -152,6 +153,7 @@ describe('createBatchExecutor', () => {
           }),
         ),
         expect.anything(),
+        new Map(),
       );
     });
 
@@ -171,6 +173,7 @@ describe('createBatchExecutor', () => {
       expect(produceRecords).toHaveBeenCalledWith(
         [eventOf({ action: 'create', after: { id: expect.any(String), email: null } })],
         expect.anything(),
+        new Map(),
       );
     });
 
@@ -187,7 +190,7 @@ describe('createBatchExecutor', () => {
       );
 
       expect(createMany).toHaveBeenCalledWith({ data: [{ email: 'a@1', id: expect.any(String) }] });
-      expect(produceRecords).toHaveBeenCalledWith([eventOf({ action: 'create' })], expect.anything());
+      expect(produceRecords).toHaveBeenCalledWith([eventOf({ action: 'create' })], expect.anything(), new Map());
     });
 
     it('audits the rows createManyAndReturn returned when no select or omit narrows them', async () => {
@@ -211,6 +214,7 @@ describe('createBatchExecutor', () => {
           eventOf({ identity: 'b', action: 'create', after: b1 }),
         ],
         expect.anything(),
+        new Map(),
       );
     });
 
@@ -232,6 +236,7 @@ describe('createBatchExecutor', () => {
       expect(produceRecords).toHaveBeenCalledWith(
         [eventOf({ identity: 'a', action: 'create', after: a1 })],
         expect.anything(),
+        new Map(),
       );
     });
   });
@@ -272,6 +277,7 @@ describe('createBatchExecutor', () => {
           }),
         ],
         expect.anything(),
+        new Map(),
       );
     });
 
@@ -288,7 +294,7 @@ describe('createBatchExecutor', () => {
       );
 
       expect(findMany).toHaveBeenCalledTimes(1);
-      expect(produceRecords).toHaveBeenCalledWith([], expect.anything());
+      expect(produceRecords).toHaveBeenCalledWith([], expect.anything(), new Map());
     });
 
     it('reads without a where clause as an unfiltered findMany', async () => {
@@ -326,7 +332,11 @@ describe('createBatchExecutor', () => {
         expect(operation.execute).toHaveBeenCalledTimes(1);
         expect(operation.execute).toHaveBeenCalledWith({ where: narrowedTo(['a', 'b']), data });
         expect(outcome.result).toEqual({ count: 2 });
-        expect(produceRecords).toHaveBeenCalledWith([updateEvent(a1, a2), updateEvent(b1, b2)], expect.anything());
+        expect(produceRecords).toHaveBeenCalledWith(
+          [updateEvent(a1, a2), updateEvent(b1, b2)],
+          expect.anything(),
+          new Map(),
+        );
       });
 
       it('tops up, inside an interactive transaction, a round that updated fewer rows than it read with rows read the same way, leaving out the rows already read', async () => {
@@ -352,7 +362,11 @@ describe('createBatchExecutor', () => {
           [{ where: narrowedTo(['c']), data }],
         ]);
         expect(outcome.result).toEqual({ count: 2 });
-        expect(produceRecords).toHaveBeenCalledWith([updateEvent(a1, a2), updateEvent(c1, c2)], expect.anything());
+        expect(produceRecords).toHaveBeenCalledWith(
+          [updateEvent(a1, a2), updateEvent(c1, c2)],
+          expect.anything(),
+          new Map(),
+        );
       });
 
       it('writes one round outside any transaction, and reports the rows of a short round it cannot tell apart as row-identification', async () => {
@@ -374,7 +388,7 @@ describe('createBatchExecutor', () => {
         expect(failureSink.notify).toHaveBeenCalledWith(
           expect.objectContaining({ phase: 'row-identification', modelName: 'User', operation: 'updateMany' }),
         );
-        expect(produceRecords).toHaveBeenCalledWith([], expect.anything());
+        expect(produceRecords).toHaveBeenCalledWith([], expect.anything(), new Map());
       });
 
       it('stops after three rounds inside an interactive transaction', async () => {
@@ -416,7 +430,7 @@ describe('createBatchExecutor', () => {
         expect(updateMany).toHaveBeenCalledWith(args);
         expect(findMany).not.toHaveBeenCalled();
         expect(outcome.result).toEqual({ count: 2 });
-        expect(produceRecords).toHaveBeenCalledWith([], expect.anything());
+        expect(produceRecords).toHaveBeenCalledWith([], expect.anything(), new Map());
         if (reported) {
           expect(notify).toHaveBeenCalledWith(
             expect.objectContaining({ phase: 'row-identification', operation: 'updateMany', params: reported }),
@@ -478,6 +492,7 @@ describe('createBatchExecutor', () => {
           }),
         ],
         expect.anything(),
+        new Map(),
       );
     });
 
@@ -504,7 +519,7 @@ describe('createBatchExecutor', () => {
         expect(findMany.mock.calls).toEqual([[{ where, take: 2 }]]);
         expect(operation.execute).toHaveBeenCalledWith({ where: narrowedTo(['a', 'b']) });
         expect(outcome.result).toEqual({ count: 2 });
-        expect(produceRecords).toHaveBeenCalledWith([deleteEvent(a1), deleteEvent(b1)], expect.anything());
+        expect(produceRecords).toHaveBeenCalledWith([deleteEvent(a1), deleteEvent(b1)], expect.anything(), new Map());
       });
 
       it('tops up, inside an interactive transaction, a round that deleted fewer rows than it read, auditing the read rows that are gone when as many are gone as it deleted', async () => {
@@ -528,7 +543,7 @@ describe('createBatchExecutor', () => {
           [{ where: narrowedTo(['c']) }],
         ]);
         expect(outcome.result).toEqual({ count: 2 });
-        expect(produceRecords).toHaveBeenCalledWith([deleteEvent(a1), deleteEvent(c1)], expect.anything());
+        expect(produceRecords).toHaveBeenCalledWith([deleteEvent(a1), deleteEvent(c1)], expect.anything(), new Map());
       });
 
       it('reports the rows of a short round it cannot tell apart as row-identification, and audits none of them', async () => {
@@ -548,7 +563,7 @@ describe('createBatchExecutor', () => {
         expect(failureSink.notify).toHaveBeenCalledWith(
           expect.objectContaining({ phase: 'row-identification', modelName: 'User', operation: 'deleteMany' }),
         );
-        expect(produceRecords).toHaveBeenCalledWith([], expect.anything());
+        expect(produceRecords).toHaveBeenCalledWith([], expect.anything(), new Map());
       });
     });
   });

@@ -10,7 +10,7 @@ import type { FailureSink, MutationEvent } from '@kuruwic/db-audit-core';
 import { AUDIT_ACTION } from '../grammar/operations.js';
 import type { PrismaNamespace } from '../internal-types.js';
 import type { SchemaMetadata } from '../schema/types.js';
-import { type ClientOmittedFields, withOmittedFieldsInFinds } from '../utils/client-omit.js';
+import { type AuditedOmittedFields, withOmittedFieldsInFinds } from '../utils/audited-omitted-fields.js';
 import {
   buildEntityMap,
   buildPKWhereClause,
@@ -30,7 +30,7 @@ type Row = Record<string, unknown>;
 export interface BatchExecutorDependencies {
   readonly Prisma: PrismaNamespace;
   readonly schemaMetadata: SchemaMetadata;
-  readonly clientOmittedFields: ClientOmittedFields;
+  readonly auditedOmittedFields: AuditedOmittedFields;
   readonly failureSink: FailureSink;
 }
 
@@ -75,13 +75,13 @@ const LIMITED_WRITE_ROUNDS = 3;
 const batchDelegate = (
   scope: ExecutionScope,
   modelName: string,
-  clientOmittedFields: ClientOmittedFields,
+  auditedOmittedFields: AuditedOmittedFields,
 ): BatchDelegate => {
   const delegate = getModelDelegate(scope.handle, modelName);
   if (!hasOperation<BatchDelegate>(delegate, 'findMany')) {
     throw new Error(`Model ${modelName} does not have findMany operation. This is required for batch operations.`);
   }
-  return withOmittedFieldsInFinds(delegate, clientOmittedFields.of(modelName));
+  return withOmittedFieldsInFinds(delegate, auditedOmittedFields.of(modelName));
 };
 
 const rowsOf = (value: unknown): Row[] => (Array.isArray(value) ? (value as Row[]) : []);
@@ -153,7 +153,7 @@ const prepareUpdateOrDelete = async (
 ): Promise<BatchPrepared> => {
   const { Prisma } = deps;
   const { model, action, args } = operation;
-  const delegate = batchDelegate(scope, model, deps.clientOmittedFields);
+  const delegate = batchDelegate(scope, model, deps.auditedOmittedFields);
   const where = args.where ?? {};
   const { limit } = args;
 
@@ -310,7 +310,7 @@ const limitedWrittenRows = async (
 };
 
 export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationExecutor => {
-  const { schemaMetadata, clientOmittedFields, failureSink } = deps;
+  const { schemaMetadata, auditedOmittedFields, failureSink } = deps;
 
   const prepare = (operation: AuditedOperation, scope: ExecutionScope): Promise<BatchPrepared> =>
     requiresBeforeState(operation.action)
@@ -335,7 +335,7 @@ export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationE
         return { result, returnedRows: rowsOf(result) };
       }
       case 'limited':
-        return runLimitedWrite(operation, batchDelegate(scope, operation.model, clientOmittedFields), prepared);
+        return runLimitedWrite(operation, batchDelegate(scope, operation.model, auditedOmittedFields), prepared);
       case 'limited-as-given':
       case 'update':
       case 'delete':
@@ -366,7 +366,7 @@ export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationE
         }
         return { rows: [] };
       case 'limited': {
-        const delegate = batchDelegate(scope, operation.model, clientOmittedFields);
+        const delegate = batchDelegate(scope, operation.model, auditedOmittedFields);
         const written = await limitedWrittenRows(operation, delegate, executed.limitedRounds ?? [], failureSink);
         if (operation.action === AUDIT_ACTION.DELETE_MANY) {
           // A deleted row cannot be read again: its state is the one read before the delete.
@@ -381,7 +381,7 @@ export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationE
         }
         // Re-fetched by primary key, not by the original where, so a row whose where-field
         // the update changed still pairs with its before row.
-        const delegate = batchDelegate(scope, operation.model, clientOmittedFields);
+        const delegate = batchDelegate(scope, operation.model, auditedOmittedFields);
         const afterRows = await findManyByPKs(delegate, prepared.pkFields, prepared.beforeRows);
         return pairByPrimaryKey(afterRows, prepared.beforeRows, prepared.pkFields);
       }

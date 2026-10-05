@@ -11,7 +11,7 @@ import type { ExecutionScope } from '../../src/pipeline/execution-scope.js';
 import type { AuditedOperation } from '../../src/pipeline/executor.js';
 import type { RecordProducer } from '../../src/pipeline/produce-records.js';
 import { createSingleExecutor } from '../../src/pipeline/single-executor.js';
-import { NO_CLIENT_OMITTED_FIELDS } from '../../src/utils/client-omit.js';
+import { NO_AUDITED_OMITTED_FIELDS } from '../../src/utils/audited-omitted-fields.js';
 import { createSchemaMetadataFromDMMF } from '../../src/utils/schema-metadata.js';
 import { runWithRecords } from './run-with-records.js';
 
@@ -118,6 +118,7 @@ const operationOn = (
   model: 'User',
   action,
   args,
+  widened: new Map(),
   execute: vi.fn(async (runArgs: Row, runAction: AuditedOperation['action'] = action) =>
     mutationOn(client, runAction)(runArgs),
   ),
@@ -137,7 +138,7 @@ const executorWith = (options: ExecutorOptions = {}) => {
     Prisma,
     schemaMetadata,
     shouldFetchBefore,
-    clientOmittedFields: NO_CLIENT_OMITTED_FIELDS,
+    auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS,
     failureSink,
   });
   const produceRecords = vi.fn<RecordProducer>(async () => []);
@@ -167,6 +168,7 @@ describe('createSingleExecutor', () => {
       expect(produceRecords).toHaveBeenCalledWith(
         topLevelEvent({ identity: 'u1', action: 'create', before: { kind: 'none' }, after: user }),
         expect.anything(),
+        new Map(),
       );
     });
 
@@ -185,6 +187,7 @@ describe('createSingleExecutor', () => {
       expect(produceRecords).toHaveBeenCalledWith(
         topLevelEvent({ identity: 'u1', action, before: { kind: 'captured', row: user } }),
         expect.anything(),
+        new Map(),
       );
     });
 
@@ -202,6 +205,7 @@ describe('createSingleExecutor', () => {
       expect(produceRecords).toHaveBeenCalledWith(
         topLevelEvent({ action, before: { kind: 'none' } }),
         expect.anything(),
+        new Map(),
       );
     });
 
@@ -218,6 +222,7 @@ describe('createSingleExecutor', () => {
       expect(produceRecords).toHaveBeenCalledWith(
         topLevelEvent({ action: 'update', before: { kind: 'captured', row: user }, after: { id: 'u1', name: 'Anne' } }),
         expect.anything(),
+        new Map(),
       );
     });
 
@@ -235,6 +240,7 @@ describe('createSingleExecutor', () => {
       expect(produceRecords).toHaveBeenCalledWith(
         topLevelEvent({ action: 'create', before: { kind: 'none' }, after: user }),
         expect.anything(),
+        new Map(),
       );
     });
 
@@ -266,6 +272,7 @@ describe('createSingleExecutor', () => {
       expect(produceRecords).toHaveBeenCalledWith(
         topLevelEvent({ action: 'update', before: { kind: 'unavailable' } }),
         expect.anything(),
+        new Map(),
       );
     });
 
@@ -288,7 +295,7 @@ describe('createSingleExecutor', () => {
       );
 
       expect(failureSink.notify).toHaveBeenCalledWith(expect.objectContaining({ phase: 'pre-fetch' }));
-      expect(produceRecords).toHaveBeenCalledWith([], expect.anything());
+      expect(produceRecords).toHaveBeenCalledWith([], expect.anything(), new Map());
     });
   });
 
@@ -333,6 +340,7 @@ describe('createSingleExecutor', () => {
           }),
         ],
         expect.anything(),
+        new Map(),
       );
     });
 
@@ -406,6 +414,7 @@ describe('createSingleExecutor', () => {
           }),
         ],
         expect.anything(),
+        new Map(),
       );
     });
 
@@ -458,6 +467,7 @@ describe('createSingleExecutor', () => {
           expect.objectContaining({ model: 'Post', identity: 'p2', action: 'create' }),
         ],
         expect.anything(),
+        new Map(),
       );
     });
   });
@@ -507,6 +517,7 @@ describe('createSingleExecutor', () => {
           },
         ],
         expect.anything(),
+        new Map(),
       );
     });
 
@@ -534,6 +545,7 @@ describe('createSingleExecutor', () => {
           }),
         ],
         expect.anything(),
+        new Map(),
       );
     });
 
@@ -565,6 +577,7 @@ describe('createSingleExecutor', () => {
           }),
         ],
         expect.anything(),
+        new Map(),
       );
     });
   });

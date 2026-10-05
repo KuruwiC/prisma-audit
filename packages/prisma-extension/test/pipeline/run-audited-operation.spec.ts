@@ -79,11 +79,12 @@ const args = { where: { id: 'u1' }, data: { name: 'Anne' } };
 const interceptedOf = (
   action: InterceptedOperation['action'] = 'update',
   query: InterceptedOperation['query'] = vi.fn(),
-): InterceptedOperation => ({ model: 'User', action, args, query });
+): InterceptedOperation => ({ model: 'User', action, args, query, widened: new Map() });
 
 const operationOf = (action: AuditedOperation['action'] = 'update'): AuditedOperation => ({
   model: 'User',
   action,
+  widened: new Map(),
   args,
   execute: vi.fn(),
 });
@@ -524,7 +525,7 @@ describe('createExecutor', () => {
 
     expect(calls).toEqual(['prepare', 'execute', 'result', 'collect', 'produce']);
     expect(steps.collect).toHaveBeenCalledWith(operation, scope, prepared, executed);
-    expect(produceRecords).toHaveBeenCalledWith(events, scope);
+    expect(produceRecords).toHaveBeenCalledWith(events, scope, new Map());
   });
 
   it('stops at the first failing step', async () => {

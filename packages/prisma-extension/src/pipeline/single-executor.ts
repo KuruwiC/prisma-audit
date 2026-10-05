@@ -20,7 +20,7 @@ import { preFetchNestedRecordsBeforeOperation } from '../nested/pre-fetch/coordi
 import { type LinkReads, readLinkRows } from '../nested/pre-fetch/link-rows.js';
 import { type PreExistingRows, snapshotPreExistingRows } from '../nested/pre-fetch/pre-existing-rows.js';
 import type { SchemaMetadata } from '../schema/types.js';
-import type { ClientOmittedFields } from '../utils/client-omit.js';
+import type { AuditedOmittedFields } from '../utils/audited-omitted-fields.js';
 import { executedUpsertBranch, fetchBeforeState, targetRowExistsBefore } from './before-state.js';
 import { collectSingleOperationEvents } from './collect-events.js';
 import type { ExecutionScope } from './execution-scope.js';
@@ -30,7 +30,7 @@ export interface SingleExecutorDependencies {
   readonly Prisma: PrismaNamespace;
   readonly schemaMetadata: SchemaMetadata;
   readonly shouldFetchBefore: ShouldFetchBefore;
-  readonly clientOmittedFields: ClientOmittedFields;
+  readonly auditedOmittedFields: AuditedOmittedFields;
   readonly failureSink: FailureSink;
 }
 
@@ -44,20 +44,20 @@ export interface SinglePrepared {
 }
 
 export const createSingleExecutor = (deps: SingleExecutorDependencies): OperationExecutor => {
-  const { Prisma, schemaMetadata, shouldFetchBefore, clientOmittedFields, failureSink } = deps;
+  const { Prisma, schemaMetadata, shouldFetchBefore, auditedOmittedFields, failureSink } = deps;
 
   const prepare = async (operation: AuditedOperation, scope: ExecutionScope): Promise<SinglePrepared> => {
     const { model: modelName, action, args } = operation;
     const beforeState = await fetchBeforeState(
       { handle: scope.handle, modelName, action, args },
-      { shouldFetchBefore, clientOmittedFields, onFetchFailure: failureSink.notify },
+      { shouldFetchBefore, auditedOmittedFields, onFetchFailure: failureSink.notify },
     );
     const topLevelUpsertBranch = executedUpsertBranch(action, beforeState);
     const { results: nestedPreFetchResults, batchTargets } = await preFetchNestedRecordsBeforeOperation(
       scope.handle,
       modelName,
       args,
-      { Prisma, schemaMetadata, shouldFetchBefore, clientOmittedFields, onPreFetchFailure: failureSink.notify },
+      { Prisma, schemaMetadata, shouldFetchBefore, auditedOmittedFields, onPreFetchFailure: failureSink.notify },
       topLevelUpsertBranch,
     );
     const nestedOperations = detectExecutedNestedOperations(
@@ -79,7 +79,7 @@ export const createSingleExecutor = (deps: SingleExecutorDependencies): Operatio
             writeSets,
             nestedPreFetchResults,
           },
-          { Prisma, schemaMetadata, shouldFetchBefore, clientOmittedFields },
+          { Prisma, schemaMetadata, shouldFetchBefore, auditedOmittedFields },
         )
       : new Map();
     const linkReads = await readLinkRows(
@@ -90,7 +90,7 @@ export const createSingleExecutor = (deps: SingleExecutorDependencies): Operatio
         nestedOperations,
         nestedPreFetchResults,
       },
-      { Prisma, schemaMetadata, shouldFetchBefore, clientOmittedFields, onPreFetchFailure: failureSink.notify },
+      { Prisma, schemaMetadata, shouldFetchBefore, auditedOmittedFields, onPreFetchFailure: failureSink.notify },
     );
     return { beforeState, nestedPreFetchResults, nestedOperations, writeSets, preExistingRows, linkReads };
   };
@@ -121,7 +121,7 @@ export const createSingleExecutor = (deps: SingleExecutorDependencies): Operatio
         Prisma,
         schemaMetadata,
         shouldFetchBefore,
-        clientOmittedFields,
+        auditedOmittedFields,
         // Reported under its own phase: the record's identity is what failed, not a pre-fetch or diff generation.
         onUnresolvedDeleteEntityId: ({ relatedModel, entityId, pkFields, error }) =>
           failureSink.notify({

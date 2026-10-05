@@ -1,0 +1,129 @@
+/**
+ * Unit tests for the read, after the write, of the omitted fields an entity audits
+ */
+
+import type { MutationEvent } from '@kuruwic/db-audit-core';
+import { describe, expect, it, vi } from 'vitest';
+import type { PrismaClientWithDynamicAccess } from '../../src/internal-types.js';
+import { readOmittedFieldsAfterWrite } from '../../src/pipeline/omitted-fields-after-write.js';
+import { createAuditedOmittedFields } from '../../src/utils/audited-omitted-fields.js';
+import { createSchemaMetadataFromDMMF } from '../../src/utils/schema-metadata.js';
+
+const scalar = (name: string) => ({ name, kind: 'scalar', type: 'String', isList: false });
+
+const schemaMetadata = createSchemaMetadataFromDMMF({
+  dmmf: {
+    datamodel: {
+      models: [
+        { name: 'User', fields: [{ ...scalar('id'), isId: true }, scalar('name'), scalar('password')] },
+        { name: 'Post', fields: [{ ...scalar('id'), isId: true }, scalar('title'), scalar('content')] },
+        { name: 'Tag', fields: [{ ...scalar('id'), isId: true }, scalar('label')] },
+      ],
+    },
+  },
+} as Parameters<typeof createSchemaMetadataFromDMMF>[0]);
+
+const listed: Record<string, string[]> = { User: ['password'], Post: ['content'] };
+const auditedOmittedFields = createAuditedOmittedFields(
+  (model) => (listed[model] ? { auditOmittedFields: listed[model] } : undefined),
+  [],
+);
+
+const stored: Record<string, Array<Record<string, unknown>>> = {
+  user: [
+    { id: 'u1', password: 'hash-1' },
+    { id: 'u2', password: 'hash-2' },
+  ],
+  post: [{ id: 'p1', content: 'Body' }],
+};
+
+const clientOf = () => {
+  const findMany = (model: string) =>
+    vi.fn(async (args: { where: { id: { in: string[] } }; select: Record<string, true> }) =>
+      (stored[model] ?? [])
+        .filter((row) => args.where.id.in.includes(row.id as string))
+        .map((row) => Object.fromEntries(Object.keys(args.select).map((key) => [key, row[key]]))),
+    );
+  return {
+    user: { findMany: findMany('user') },
+    post: { findMany: findMany('post') },
+    tag: { findMany: findMany('tag') },
+  };
+};
+
+const eventOf = (
+  model: string,
+  action: MutationEvent['action'],
+  after: Record<string, unknown> | undefined,
+): MutationEvent => ({
+  model,
+  identity: String(after?.id ?? ''),
+  action,
+  before: { kind: 'none' },
+  after,
+  origin: { path: '', op: action },
+});
+
+const read = async (events: MutationEvent[]) => {
+  const client = clientOf();
+  const handle: PrismaClientWithDynamicAccess = Object.assign(Object.create(null), client);
+  const completed = await readOmittedFieldsAfterWrite(events, handle, { schemaMetadata, auditedOmittedFields });
+  return { completed, client };
+};
+
+describe('readOmittedFieldsAfterWrite', () => {
+  it('reads the listed fields of the written rows of a model in one query, by primary key', async () => {
+    const { completed, client } = await read([
+      eventOf('User', 'create', { id: 'u1', name: 'Ada' }),
+      eventOf('User', 'update', { id: 'u2', name: 'Bob' }),
+    ]);
+
+    expect(client.user.findMany).toHaveBeenCalledTimes(1);
+    expect(client.user.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ['u1', 'u2'] } },
+      select: { id: true, password: true },
+    });
+    expect(completed.map((event) => event.after)).toEqual([
+      { id: 'u1', name: 'Ada', password: 'hash-1' },
+      { id: 'u2', name: 'Bob', password: 'hash-2' },
+    ]);
+  });
+
+  it('reads once per model that lists fields', async () => {
+    const { client } = await read([
+      eventOf('User', 'create', { id: 'u1' }),
+      eventOf('Post', 'create', { id: 'p1', title: 'T' }),
+      eventOf('Tag', 'create', { id: 't1', label: 'L' }),
+    ]);
+
+    expect(client.user.findMany).toHaveBeenCalledTimes(1);
+    expect(client.post.findMany).toHaveBeenCalledTimes(1);
+    expect(client.tag.findMany).not.toHaveBeenCalled();
+  });
+
+  it('keeps a value the row already holds, and reads nothing for a row that holds every listed field', async () => {
+    const holding = eventOf('User', 'update', { id: 'u1', password: 'from-the-write' });
+
+    const { completed, client } = await read([holding]);
+
+    expect(client.user.findMany).not.toHaveBeenCalled();
+    expect(completed[0]).toBe(holding);
+  });
+
+  it('reads nothing for a delete, whose after state is not stored', async () => {
+    const deleted = eventOf('User', 'delete', { id: 'u1' });
+
+    const { completed, client } = await read([deleted]);
+
+    expect(client.user.findMany).not.toHaveBeenCalled();
+    expect(completed).toEqual([deleted]);
+  });
+
+  it('keeps a row the read does not find as it is', async () => {
+    const gone = eventOf('User', 'update', { id: 'u9', name: 'Gone' });
+
+    const { completed } = await read([gone]);
+
+    expect(completed[0]?.after).toEqual({ id: 'u9', name: 'Gone' });
+  });
+});

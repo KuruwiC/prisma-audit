@@ -26,15 +26,11 @@ import { isProcessingAuditLog, takeDecidedWritePolicy, withScope } from './runti
 import { createTransactionProxy } from './runtime/transaction-proxy.js';
 import type { PrismaAuditExtensionOptions } from './types.js';
 import { type ClientShape, injectAuditedSelection, projectToRequestedShape } from './utils/audited-selection.js';
-import { type ClientOmittedFields, readClientOmittedFields } from './utils/client-omit.js';
 import { isAuditableAction } from './utils/extension-utils.js';
 import { getModelAccessor } from './utils/model-accessor.js';
 
-const createPipelineDependencies = (
-  audit: AuditOptions,
-  clientOmittedFields: ClientOmittedFields,
-): AuditPipelineDependencies => {
-  const { Prisma, schemaMetadata, shouldFetchBefore } = audit;
+const createPipelineDependencies = (audit: AuditOptions): AuditPipelineDependencies => {
+  const { Prisma, schemaMetadata, shouldFetchBefore, auditedOmittedFields } = audit;
   const failureSink = createFailureSink(audit.errorHandling);
 
   return {
@@ -42,13 +38,13 @@ const createPipelineDependencies = (
       Prisma,
       schemaMetadata,
       shouldFetchBefore,
-      clientOmittedFields,
+      auditedOmittedFields,
       failureSink,
     }),
-    batchExecutor: createBatchExecutor({ Prisma, schemaMetadata, clientOmittedFields, failureSink }),
+    batchExecutor: createBatchExecutor({ Prisma, schemaMetadata, auditedOmittedFields, failureSink }),
     produceRecords: createRecordProducer({
       ...audit,
-      composeConfig: { ...audit.composeConfig, maskedFieldNames: clientOmittedFields.masked },
+      omittedFieldReads: { schemaMetadata, auditedOmittedFields },
       failureSink,
     }),
     dispatchConfig: {
@@ -83,13 +79,6 @@ const recipeConfigOf = (audit: AuditOptions): RecipeConfig => {
   };
 };
 
-/** The pipeline dependencies and client shape built for the client the extension is applied to */
-interface BaseClientPipeline {
-  readonly baseClient: PrismaClientWithDynamicAccess;
-  readonly deps: AuditPipelineDependencies;
-  readonly shape: ClientShape;
-}
-
 /**
  * Creates the Prisma Client Extension for automatic audit logging
  *
@@ -103,8 +92,10 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
   const audit = normalizeAuditOptions(options);
 
   const recipeConfig = audit.openImplicitTransaction ? recipeConfigOf(audit) : undefined;
+  const deps = createPipelineDependencies(audit);
+  const shape: ClientShape = { schemaMetadata: audit.schemaMetadata, queryOmitSupported: audit.queryOmitSupported };
 
-  const auditOperation = async (params: ExtensionParams, { baseClient, deps, shape }: BaseClientPipeline) => {
+  const auditOperation = async (params: ExtensionParams, baseClient: PrismaClientWithDynamicAccess) => {
     const { operation, model, args, query } = params;
     const auditContext = audit.provider.getContext();
 
@@ -130,7 +121,13 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     const result = await withScope({ isProcessingAuditLog: true }, () =>
       runAuditedOperation(
         {
-          operation: { model, action: operation, args: injection.args as Record<string, unknown>, query },
+          operation: {
+            model,
+            action: operation,
+            args: injection.args as Record<string, unknown>,
+            query,
+            widened: injection.widened,
+          },
           auditContext,
           baseClient,
           atomic: writePolicy.atomic,
@@ -144,24 +141,10 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
   };
 
   const extensionDefinition = (baseClient: PrismaClientWithDynamicAccess) => {
-    const clientOmittedFields = readClientOmittedFields(
-      baseClient,
-      audit.schemaMetadata,
-      audit.Prisma.prismaVersion?.client,
-    );
-    const pipeline: BaseClientPipeline = {
-      baseClient,
-      deps: createPipelineDependencies(audit, clientOmittedFields),
-      shape: {
-        schemaMetadata: audit.schemaMetadata,
-        queryOmitSupported: audit.queryOmitSupported,
-        clientOmittedFields,
-      },
-    };
     const extendedClient = baseClient.$extends({
       name: 'prisma-audit',
       query: {
-        $allOperations: (params: ExtensionParams) => auditOperation(params, pipeline),
+        $allOperations: (params: ExtensionParams) => auditOperation(params, baseClient),
       },
     });
 

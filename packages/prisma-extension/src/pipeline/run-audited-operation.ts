@@ -11,6 +11,7 @@ import type { AuditContext, DispatchConfig, FailureSink } from '@kuruwic/db-audi
 import { dispatch } from '@kuruwic/db-audit-core';
 import type { AuditAction } from '../grammar/operations.js';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../internal-types.js';
+import type { WidenedColumns } from '../utils/audited-selection.js';
 import { isCallerMutationError, runCallerMutation } from '../utils/caller-mutation-error.js';
 import { isBatchOperation } from '../utils/operation-classifier.js';
 import { toError } from '../utils/to-error.js';
@@ -27,6 +28,8 @@ export interface InterceptedOperation {
    * the client the caller invoked it on, through the extensions applied after this one.
    */
   readonly query: (args: Record<string, unknown>) => Promise<unknown>;
+  /** The columns reading the caller's `select` in the default shape added (see `injectAuditedSelection`) */
+  readonly widened: WidenedColumns;
 }
 
 export interface AuditedOperationInput {
@@ -101,8 +104,8 @@ export const runAuditedOperation = async (
 ): Promise<unknown> => {
   const { operation: intercepted, auditContext, baseClient, atomic } = input;
   const scope = executionScopeOf({ auditContext, baseClient, atomic });
-  const { model, action, args } = intercepted;
-  const operation: AuditedOperation = { model, action, args, execute: operationContinuation(intercepted) };
+  const { model, action, args, widened } = intercepted;
+  const operation: AuditedOperation = { model, action, args, widened, execute: operationContinuation(intercepted) };
   const executor = isBatchOperation(action) ? deps.batchExecutor : deps.singleExecutor;
   const executed = await runExecutor(executor, operation, scope, deps);
   await dispatch(

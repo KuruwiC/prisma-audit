@@ -385,3 +385,95 @@ describe('Database Round-Trip Guard', () => {
     expect(statements).toHaveLength(7);
   });
 });
+
+describe('Database Round-Trip Guard: fields an entity lists in auditOmittedFields', () => {
+  let basePrisma: PrismaClient;
+  let provider: AuditContextProvider;
+  let prisma: ReturnType<typeof createAuditClient>;
+  const statements: string[] = [];
+
+  beforeAll(async () => {
+    const loggingPrisma = new PrismaClient({
+      datasources: { db: { url: inject('databaseUrl') } },
+      log: [{ emit: 'event', level: 'query' }],
+      omit: { user: { password: true }, post: { content: true } },
+    });
+    loggingPrisma.$on('query', (event) => {
+      statements.push(event.query);
+    });
+    basePrisma = loggingPrisma;
+    provider = createAsyncLocalStorageProvider();
+    prisma = createAuditClient(basePrisma, {
+      Prisma,
+      provider,
+      aggregateMapping: {
+        User: defineEntity({ type: 'User', excludeFields: ['updatedAt'], auditOmittedFields: ['password'] }),
+        Post: defineEntity({
+          type: 'Post',
+          aggregates: [to('User', foreignKey('authorId'))],
+          auditOmittedFields: ['content'],
+        }),
+      },
+    });
+  });
+
+  afterAll(async () => {
+    await prisma.$disconnect();
+    await basePrisma.$disconnect();
+  });
+
+  beforeEach(async () => {
+    await cleanDatabase(prisma);
+    statements.length = 0;
+  });
+
+  it('single-record update issues 4 statements (the listed field read before and after the write)', async () => {
+    const user = await provider.runAsync(testActor, async () => {
+      return prisma.user.create({
+        data: { email: 'omitted-update@example.com', name: 'Original', password: 'secret123' },
+      });
+    });
+    statements.length = 0;
+
+    await provider.runAsync(testActor, async () => {
+      await prisma.user.update({ where: { id: user.id }, data: { password: 'secret456' } });
+    });
+
+    console.log(`Update with an omitted field: ${statements.length} SQL statements`);
+    // 1. SELECT FROM users      — the before-state fetch, with the listed field
+    // 2. UPDATE users           — the caller's own update, in the client's default shape
+    // 3. SELECT FROM users      — the listed field of the updated row, read by primary key
+    // 4. INSERT INTO audit_logs — the audit log write, awaited once the update has committed
+    expect(statements).toHaveLength(4);
+  });
+
+  it.each([2, 3])('updateManyAndReturn (%i rows) issues 8 statements, one read of the listed field', async (rows) => {
+    const user = await provider.runAsync(testActor, async () => {
+      return prisma.user.create({
+        data: {
+          email: `omitted-update-many-${rows}@example.com`,
+          name: 'UpdManyRet',
+          posts: {
+            create: Array.from({ length: rows }, (_, index) => ({ title: `Post ${index}`, content: `Body ${index}` })),
+          },
+        },
+      });
+    });
+    statements.length = 0;
+
+    await provider.runAsync(testActor, async () => {
+      await prisma.post.updateManyAndReturn({ where: { authorId: user.id }, data: { content: 'Changed' } });
+    });
+
+    console.log(`updateManyAndReturn with an omitted field (${rows} rows): ${statements.length} SQL statements`);
+    // 1. SELECT FROM posts      — the batch executor's findMany, with the listed field
+    // 2. BEGIN                  — Prisma's own transaction around the update
+    // 3. UPDATE posts RETURNING — the caller's own updateManyAndReturn, in the client's default shape
+    // 4. COMMIT
+    // 5. SELECT FROM posts      — the listed field of every updated row, read by primary key at once
+    // 6. BEGIN                  — Prisma's own transaction around a write of several rows
+    // 7. INSERT INTO audit_logs — one batched write covering every updated row
+    // 8. COMMIT
+    expect(statements).toHaveLength(8);
+  });
+});

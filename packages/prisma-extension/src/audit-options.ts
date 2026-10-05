@@ -15,11 +15,12 @@ import type {
 } from '@kuruwic/db-audit-core';
 import { createEntityConfigLookup } from '@kuruwic/db-audit-core';
 import { resolveFetchBefore } from './config/helpers.js';
-import { validateFieldConflicts } from './config/validation.js';
+import { validateAuditOmittedFields, validateFieldConflicts } from './config/validation.js';
 import type { ShouldFetchBefore } from './grammar/pre-fetch-selection.js';
 import type { PrismaNamespace } from './internal-types.js';
 import type { SchemaMetadata } from './schema/types.js';
 import type { PrismaAuditExtensionOptions } from './types.js';
+import { type AuditedOmittedFields, createAuditedOmittedFields } from './utils/audited-omitted-fields.js';
 import { shouldAuditModel } from './utils/extension-utils.js';
 import { getModelAccessor } from './utils/model-accessor.js';
 import { supportsQueryOmit } from './utils/prisma-version.js';
@@ -31,6 +32,8 @@ export interface AuditOptions {
   readonly schemaMetadata: SchemaMetadata;
   /** Whether the client accepts a query `omit`, used to read a caller `select` in the default shape */
   readonly queryOmitSupported: boolean;
+  /** The fields a client-level `omit` hides that the audit reads, from the entities' `auditOmittedFields` */
+  readonly auditedOmittedFields: AuditedOmittedFields;
   /** Accessor of the audit-log model on the client (camelCase) */
   readonly auditLogModel: string;
   readonly policyConfig: PolicyConfig;
@@ -53,7 +56,8 @@ export interface AuditOptions {
 const RELATION_COUNT_FIELD = '_count';
 
 /**
- * @throws {Error} If the aggregate mapping is invalid or the diffing and redaction settings conflict
+ * @throws {Error} If the aggregate mapping is invalid, the diffing and redaction settings conflict, or
+ *   an entity's `auditOmittedFields` names a field the audit cannot read
  */
 export const normalizeAuditOptions = (options: PrismaAuditExtensionOptions): AuditOptions => {
   const { provider, aggregateMapping, diffing, security, performance, hooks, contextEnricher, errorHandling } = options;
@@ -67,6 +71,13 @@ export const normalizeAuditOptions = (options: PrismaAuditExtensionOptions): Aud
 
   const entityConfigs = createEntityConfigLookup(aggregateMapping);
   validateFieldConflicts(excludeFields, redact, aggregateMapping);
+  const queryOmitSupported = supportsQueryOmit(Prisma.prismaVersion?.client);
+  validateAuditOmittedFields(
+    aggregateMapping,
+    schemaMetadata,
+    Prisma.dmmf.datamodel.models.map((model) => model.name),
+    queryOmitSupported,
+  );
 
   const modelTags = (modelName: string): string[] => entityConfigs.byModel(modelName)?.tags ?? [];
   const relationFieldNamesByModel = new Map<string, ReadonlySet<string>>();
@@ -87,7 +98,8 @@ export const normalizeAuditOptions = (options: PrismaAuditExtensionOptions): Aud
     provider,
     Prisma,
     schemaMetadata,
-    queryOmitSupported: supportsQueryOmit(Prisma.prismaVersion?.client),
+    queryOmitSupported,
+    auditedOmittedFields: createAuditedOmittedFields(entityConfigs.byModel, excludeFields),
     auditLogModel,
     openImplicitTransaction: performance?.openImplicitTransaction ?? false,
     policyConfig: {

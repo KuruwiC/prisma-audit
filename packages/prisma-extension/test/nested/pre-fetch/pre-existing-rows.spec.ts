@@ -8,7 +8,7 @@ import type { DMMFField, PrismaClientWithDynamicAccess, PrismaNamespace } from '
 import { buildNestedWriteSets, detectExecutedNestedOperations } from '../../../src/nested/events/write-set.js';
 import { snapshotPreExistingRows } from '../../../src/nested/pre-fetch/pre-existing-rows.js';
 import { storePreFetchResult, storeUnreadRows } from '../../../src/nested/pre-fetch/pre-fetch-result-store.js';
-import { NO_CLIENT_OMITTED_FIELDS } from '../../../src/utils/client-omit.js';
+import { NO_AUDITED_OMITTED_FIELDS } from '../../../src/utils/audited-omitted-fields.js';
 import { createSchemaMetadataFromDMMF } from '../../../src/utils/schema-metadata.js';
 
 const scalar = (name: string, extra: Partial<DMMFField> = {}): DMMFField => ({
@@ -94,7 +94,7 @@ const snapshot = (
       writeSets: buildNestedWriteSets(schemaMetadata, nestedOperations, nestedPreFetchResults, new Map()),
       nestedPreFetchResults,
     },
-    { Prisma, schemaMetadata, shouldFetchBefore, clientOmittedFields: NO_CLIENT_OMITTED_FIELDS },
+    { Prisma, schemaMetadata, shouldFetchBefore, auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS },
   );
 };
 

@@ -12,8 +12,8 @@ import { upsertBranchOf } from '../grammar/nested-state.js';
 import { AUDIT_ACTION, type AuditAction } from '../grammar/operations.js';
 import type { ShouldFetchBefore } from '../grammar/pre-fetch-selection.js';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../internal-types.js';
+import { type AuditedOmittedFields, withOmittedFieldsInFinds } from '../utils/audited-omitted-fields.js';
 import { beforeStateOf, NO_BEFORE_STATE, UNAVAILABLE_BEFORE_STATE } from '../utils/before-state.js';
-import { type ClientOmittedFields, withOmittedFieldsInFinds } from '../utils/client-omit.js';
 import { getModelDelegate, hasOperation } from '../utils/model-accessor.js';
 import { toError } from '../utils/to-error.js';
 
@@ -41,7 +41,7 @@ export interface BeforeStateInput {
 
 export interface BeforeStateDependencies {
   readonly shouldFetchBefore: ShouldFetchBefore;
-  readonly clientOmittedFields: ClientOmittedFields;
+  readonly auditedOmittedFields: AuditedOmittedFields;
   /** Receives a failed fetch under the `pre-fetch` phase; the caller's operation continues */
   readonly onFetchFailure: FailureSink['notify'];
 }
@@ -65,13 +65,13 @@ const findExistingRow = async (
   handle: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
   modelName: string,
   where: unknown,
-  clientOmittedFields: ClientOmittedFields,
+  auditedOmittedFields: AuditedOmittedFields,
 ): Promise<BeforeState> => {
   const delegate = getModelDelegate(handle, modelName);
   if (!hasOperation<FindUniqueDelegate>(delegate, 'findUnique')) {
     return NO_BEFORE_STATE;
   }
-  const row = await withOmittedFieldsInFinds(delegate, clientOmittedFields.of(modelName)).findUnique({ where });
+  const row = await withOmittedFieldsInFinds(delegate, auditedOmittedFields.of(modelName)).findUnique({ where });
   return beforeStateOf(isRow(row) ? row : null);
 };
 
@@ -95,7 +95,7 @@ export const fetchBeforeState = async (
   }
 
   try {
-    return await findExistingRow(handle, modelName, args.where, deps.clientOmittedFields);
+    return await findExistingRow(handle, modelName, args.where, deps.auditedOmittedFields);
   } catch (caughtError) {
     const error = toError(caughtError);
     await deps.onFetchFailure({ phase: 'pre-fetch', modelName, operation: action, params: args, error });

@@ -19,7 +19,7 @@ import type {
   TransactionalPrismaClient,
 } from '../../internal-types.js';
 import type { SchemaMetadata } from '../../schema/types.js';
-import type { ClientOmittedFields } from '../../utils/client-omit.js';
+import type { AuditedOmittedFields } from '../../utils/audited-omitted-fields.js';
 import { preFetchLog } from '../../utils/debug.js';
 import { extractEntityIdentity } from '../../utils/id-generation.js';
 import type { EntityIdentityKey } from '../../utils/identity-key.js';
@@ -45,7 +45,7 @@ export interface SnapshotPreExistingRowsDependencies {
   readonly Prisma: PrismaNamespace;
   readonly schemaMetadata: SchemaMetadata;
   readonly shouldFetchBefore: ShouldFetchBefore;
-  readonly clientOmittedFields: ClientOmittedFields;
+  readonly auditedOmittedFields: AuditedOmittedFields;
 }
 
 interface PathRelation extends ToManyPath {
@@ -59,7 +59,7 @@ const resolvePathRelation = (
   operation: NestedOperationInfo,
 ): PathRelation | undefined => {
   const path = resolveToManyPath(deps.Prisma, deps.schemaMetadata, input.modelName, operation);
-  const client = getPreFetchListClient(input.prismaClient, operation.relatedModel, deps.clientOmittedFields);
+  const client = getPreFetchListClient(input.prismaClient, operation.relatedModel, deps.auditedOmittedFields);
   if (!path || !client) {
     preFetchLog(
       'snapshot: relation or model client not found: model=%s path=%s',
@@ -95,7 +95,7 @@ const snapshotPath = async (
     parentFields: scope.parentFields,
     parentPkFields: parentPk.fields,
     topLevelWhere: input.topLevelWhere,
-    topLevelModelClient: getPreFetchModelClient(input.prismaClient, input.modelName, deps.clientOmittedFields),
+    topLevelModelClient: getPreFetchModelClient(input.prismaClient, input.modelName, deps.auditedOmittedFields),
     preFetchResults: input.nestedPreFetchResults,
   });
   if (!allKnown) {
