@@ -157,6 +157,13 @@ export interface LoggableEntity<
   self?: SelfProjectionConfig<TDbHandle, TEntity>;
   /** Field names to exclude from change tracking */
   excludeFields?: string[];
+  /**
+   * Fields the client leaves out of its default reads (such as the fields an ORM client is
+   * configured to omit) that the audit reads in its own queries and records anyway, their values
+   * masked in the stored states and changes. A field also in the entity's `excludeFields` is not
+   * read.
+   */
+  auditOmittedFields?: string[];
 
   /**
    * Entity-log context enrichment, stored in AuditLog.entityContext

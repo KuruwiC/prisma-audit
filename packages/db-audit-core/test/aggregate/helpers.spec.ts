@@ -205,6 +205,13 @@ describe('defineEntity', () => {
     expect(entity.self).toEqual({ context: selfContext });
   });
 
+  it('keeps the fields the entity excludes and the omitted fields it audits', () => {
+    const entity = defineEntity({ type: 'User', excludeFields: ['updatedAt'], auditOmittedFields: ['password'] });
+
+    expect(entity.excludeFields).toEqual(['updatedAt']);
+    expect(entity.auditOmittedFields).toEqual(['password']);
+  });
+
   it('should support system category', () => {
     const entity = defineEntity({
       category: 'system',

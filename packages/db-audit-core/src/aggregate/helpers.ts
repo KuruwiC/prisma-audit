@@ -451,6 +451,12 @@ export type DefineEntityOptions<
   self?: SelfProjectionConfig<TDbHandle, TEntity>;
   /** Fields to exclude when calculating changes for this entity */
   excludeFields?: string[];
+  /**
+   * Fields the client leaves out of its default reads (such as the fields an ORM client is
+   * configured to omit) that the audit reads and records anyway, values masked. `excludeFields`
+   * wins over this list.
+   */
+  auditOmittedFields?: string[];
 
   /** Entity-log context enrichment, stored in AuditLog.entityContext */
   context?: EntityEnricherConfig<TDbHandle, TEntity>;
@@ -514,6 +520,7 @@ export const defineEntity = <TEntity extends Record<string, unknown> = Record<st
     aggregates = [],
     self: selfProjection,
     excludeFields,
+    auditOmittedFields,
     context,
     aggregateContext,
     tags,
@@ -526,6 +533,7 @@ export const defineEntity = <TEntity extends Record<string, unknown> = Record<st
     aggregates,
     self: selfProjection,
     excludeFields,
+    auditOmittedFields,
     context,
     aggregateContext,
     tags,

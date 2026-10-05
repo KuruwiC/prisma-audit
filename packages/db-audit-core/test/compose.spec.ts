@@ -367,13 +367,16 @@ describe('compose', () => {
     });
   });
 
-  describe('masked columns', () => {
+  describe('omitted fields the entity audits', () => {
     const masked = { redacted: true, hadValue: true };
     const maskedSecret: Partial<ComposeConfig> = {
-      maskedFieldNames: (model) => (model === 'Post' ? new Set(['secret']) : undefined),
+      entity: (model) =>
+        model === 'Post'
+          ? { category: 'model', type: 'Post', auditOmittedFields: ['secret'] }
+          : { category: 'model', type: model },
     };
 
-    it('masks the columns named for the model in before, after and changes, without a redact config', () => {
+    it('masks them in before, after and changes, without a redact config', () => {
       const resolved = updateEvent({ id: 'post-1', secret: 'old' }, { id: 'post-1', secret: 'new' });
 
       const record = composeOne(resolved, maskedSecret);
@@ -383,7 +386,7 @@ describe('compose', () => {
       expect(record.changes).toEqual({ secret: { old: masked, new: { ...masked, isDifferent: true } } });
     });
 
-    it('records no change of a masked column that did not change', () => {
+    it('records no change of one that did not change', () => {
       const resolved = updateEvent(
         { id: 'post-1', title: 'Old', secret: 'same' },
         { id: 'post-1', title: 'New', secret: 'same' },
@@ -395,7 +398,7 @@ describe('compose', () => {
       expect(record.after).toEqual({ id: 'post-1', title: 'New', secret: masked });
     });
 
-    it('records a masked column that became null as a change with a null new side', () => {
+    it('records one that became null as a change with a null new side', () => {
       const resolved = updateEvent({ id: 'post-1', secret: 'old' }, { id: 'post-1', secret: null });
 
       const record = composeOne(resolved, maskedSecret);
@@ -404,7 +407,7 @@ describe('compose', () => {
       expect(record.changes).toEqual({ secret: { old: masked, new: null } });
     });
 
-    it('leaves a column of the same name on another model unmasked', () => {
+    it('leaves a column of the same name on another entity unmasked', () => {
       const record = composeOne(event({ model: 'Comment', after: { id: 'c-1', secret: 'plain' } }), maskedSecret);
 
       expect(record.after).toEqual({ id: 'c-1', secret: 'plain' });
@@ -416,7 +419,7 @@ describe('compose', () => {
       expect(record.after).toEqual({ id: 'post-1', meta: { secret: 'inner' } });
     });
 
-    it('masks a column that the redact config also names once', () => {
+    it('masks one that the redact config also names once', () => {
       const resolved = updateEvent({ id: 'post-1', secret: 'old' }, { id: 'post-1', secret: 'new' });
 
       const record = composeOne(resolved, { ...maskedSecret, redact: { fields: ['secret'] } });

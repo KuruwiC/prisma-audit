@@ -14,6 +14,11 @@ export interface EntityComposeConfig {
   readonly type: string;
   /** Fields excluded from change tracking; overrides the global list when present. */
   readonly excludeFields?: readonly string[];
+  /**
+   * Fields the client leaves out of its default reads that the adapter reads anyway: masked in the
+   * stored states and changes after the diff, so a change to one is recorded without its values.
+   */
+  readonly auditOmittedFields?: readonly string[];
 }
 
 export interface ComposeConfig<TModelName extends string = string> {
@@ -130,9 +135,12 @@ const resolveStates = <TModelName extends string>(
     return undefined;
   }
 
-  const maskedFields = config.maskedFieldNames?.(event.model);
+  const maskedFields = new Set([
+    ...(entity.auditOmittedFields ?? []),
+    ...(config.maskedFieldNames?.(event.model) ?? []),
+  ]);
   const columns = { before: beforeColumns, after: afterColumns, changes };
-  const states = maskedFields && maskedFields.size > 0 ? maskStates(columns, maskedFields) : columns;
+  const states = maskedFields.size > 0 ? maskStates(columns, maskedFields) : columns;
   return config.redact ? redactStates(states, config.redact) : states;
 };
 
