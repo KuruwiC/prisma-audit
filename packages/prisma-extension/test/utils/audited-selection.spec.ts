@@ -52,9 +52,9 @@ const inject = (args: Record<string, unknown>, shape: Partial<ClientShape> = {},
     args,
   );
 
-const omittedByClient: ClientOmittedFields = {
-  of: (model) => new Set({ User: ['email'], Post: ['title'], Comment: ['content'] }[model] ?? []),
-};
+const omittedFieldsOf = (model: string): ReadonlySet<string> =>
+  new Set({ User: ['email'], Post: ['title'], Comment: ['content'] }[model] ?? []);
+const omittedByClient: ClientOmittedFields = { of: omittedFieldsOf, masked: omittedFieldsOf };
 
 describe('injectAuditedSelection', () => {
   it('leaves args without nested writes untouched', () => {

@@ -6,9 +6,11 @@
  * its after state and `changes` must be too, and the entity's resolvers read the columns they name.
  * A caller `select` at a level whose rows are audited is therefore read as the default shape with
  * the relations it selects included, the fields a caller `omit` leaves out are read, and so are the
- * fields the client omits (`utils/client-omit.ts`). Enumerating the columns instead would read a
- * field the client hides even when the audit could not learn that it does, which the before state
- * then lacks.
+ * fields the client omits (`utils/client-omit.ts`). On a client that takes a query `omit`, that
+ * shape is read without naming its columns, so a field the client hides is not read when the audit
+ * could not learn that it does. A client that takes no query `omit` is read in that shape only by
+ * selecting every scalar field, which reads such a field too; every column is masked then
+ * (`utils/client-omit.ts`).
  *
  * Nested writes are audited from the records the operation returns, so the relations an operation
  * writes are added to its selection: into `include`, or into the caller's `select` on a client that

@@ -31,9 +31,21 @@ const keysOf = (value: unknown): string[] =>
   value !== null && typeof value === 'object' ? Object.keys(value).sort() : [];
 
 interface Options {
+  readonly Prisma?: typeof Prisma;
   readonly aggregateMapping?: AggregateMapping;
   readonly security?: { readonly redact?: { readonly fields?: string[] } };
 }
+
+/** The Prisma namespace with its client version reported as `version` */
+const prismaReportingVersion = (version: string | undefined): typeof Prisma =>
+  new Proxy(Prisma, {
+    get: (target, key) =>
+      key === 'prismaVersion' ? { ...target.prismaVersion, client: version } : Reflect.get(target, key),
+  });
+
+/** The client with the internal field Prisma keeps its `omit` option in out of sight */
+const hidingOmitSetting = (client: PrismaClient): PrismaClient =>
+  new Proxy(client, { has: (target, key) => key !== '_globalOmit' && Reflect.has(target, key) });
 
 describe('fields a client-level omit hides', () => {
   let databaseUrl: string;
@@ -50,10 +62,14 @@ describe('fields a client-level omit hides', () => {
     }
   });
 
-  const setup = async (options: Options = {}, clientOmit: Prisma.GlobalOmitConfig = CLIENT_OMIT) => {
+  const setup = async (
+    options: Options = {},
+    clientOmit: Prisma.GlobalOmitConfig = CLIENT_OMIT,
+    audited: (client: PrismaClient) => PrismaClient = (client) => client,
+  ) => {
     const basePrisma = new PrismaClient({ datasources: { db: { url: databaseUrl } }, omit: clientOmit });
     const provider = createAsyncLocalStorageProvider();
-    const prisma = createAuditClient(basePrisma, {
+    const prisma = createAuditClient(audited(basePrisma), {
       Prisma,
       provider,
       aggregateMapping: testAggregateMapping,
@@ -380,6 +396,85 @@ describe('fields a client-level omit hides', () => {
       const record = await recordOf('Post', 'p1');
       expect(keysOf(record?.before)).toEqual(POST_COLUMNS);
       expect(record?.before).toMatchObject({ content: MASKED, authorId: MASKED });
+    });
+  });
+
+  describe('a client whose omit setting cannot be read', () => {
+    const SECRETS = ['hash-old', 'hash-new'];
+    const everyColumnMasked = Object.fromEntries(USER_COLUMNS.map((column) => [column, MASKED]));
+
+    it.each([
+      ['before 6.2', '6.1.0'],
+      ['of an unknown version', undefined],
+    ])(
+      'masks every column of a row a select is read by listing every column on a client %s, and warns',
+      async (_label, version) => {
+        const warn = vi.spyOn(console, 'warn');
+        const { prisma, run, recordOf } = await setup(
+          { Prisma: prismaReportingVersion(version) },
+          CLIENT_OMIT,
+          hidingOmitSetting,
+        );
+
+        const result = await run(() =>
+          prisma.user.update({
+            where: { id: 'u1' },
+            data: { name: 'Bea', password: 'hash-new' },
+            select: { name: true },
+          }),
+        );
+
+        expect(result).toEqual({ name: 'Bea' });
+        const record = await recordOf('User', 'u1');
+        for (const secret of SECRETS) {
+          expect(JSON.stringify(record)).not.toContain(secret);
+        }
+        expect(record?.after).toEqual(everyColumnMasked);
+        expect(Object.keys(record?.changes ?? {}).sort()).toEqual(['name', 'password']);
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn.mock.calls[0]?.[0]).toContain('every column value is masked');
+      },
+    );
+
+    it('reads the default shape of a client from 6.2, leaving the hidden field out, and warns', async () => {
+      const warn = vi.spyOn(console, 'warn');
+      const { prisma, run, recordOf } = await setup({}, CLIENT_OMIT, hidingOmitSetting);
+
+      await run(() =>
+        prisma.user.update({
+          where: { id: 'u1' },
+          data: { name: 'Bea', password: 'hash-new' },
+          select: { name: true },
+        }),
+      );
+
+      const record = await recordOf('User', 'u1');
+      expect(keysOf(record?.before)).toEqual(USER_DEFAULT_COLUMNS);
+      expect(keysOf(record?.after)).toEqual(USER_DEFAULT_COLUMNS);
+      expect(record?.changes).toEqual({ name: { old: 'Ada', new: 'Bea' } });
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0]?.[0]).toContain('left out of audit logs');
+    });
+
+    it('masks only the hidden field when the setting is readable on a client before 6.2', async () => {
+      const warn = vi.spyOn(console, 'warn');
+      const { prisma, run, recordOf } = await setup({ Prisma: prismaReportingVersion('6.1.0') });
+
+      await run(() =>
+        prisma.user.update({
+          where: { id: 'u1' },
+          data: { name: 'Bea', password: 'hash-new' },
+          select: { name: true },
+        }),
+      );
+
+      const record = await recordOf('User', 'u1');
+      expect(record?.changes).toEqual({
+        name: { old: 'Ada', new: 'Bea' },
+        password: { old: MASKED, new: MASKED_CHANGED },
+      });
+      expect(record?.after).toMatchObject({ name: 'Bea', password: MASKED });
+      expect(warn).not.toHaveBeenCalled();
     });
   });
 

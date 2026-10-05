@@ -49,7 +49,7 @@ const createPipelineDependencies = (
     produceRecords: createRecordProducer({
       ...audit,
       // The fields the client omits are read, and recorded with their values masked.
-      composeConfig: { ...audit.composeConfig, maskedFieldNames: clientOmittedFields.of },
+      composeConfig: { ...audit.composeConfig, maskedFieldNames: clientOmittedFields.masked },
       failureSink,
     }),
     dispatchConfig: {

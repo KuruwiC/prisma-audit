@@ -43,6 +43,7 @@ describe('readClientOmittedFields', () => {
     expect(fields.of('User')).toEqual(new Set(['password']));
     expect(fields.of('UuidV7Item')).toEqual(new Set(['token']));
     expect(fields.of('Post')).toEqual(new Set());
+    expect(fields.masked('User')).toEqual(new Set(['password']));
     expect(warn).not.toHaveBeenCalled();
   });
 
@@ -67,12 +68,37 @@ describe('readClientOmittedFields', () => {
     expect(readClientOmittedFields(client, schemaMetadata, '6.19.0').of('User')).toEqual(new Set(['password']));
   });
 
-  it('reads no field and warns once when a client that should carry the setting lacks it', () => {
+  it('reads and masks no field, and warns once, when a client that takes a query omit lacks the setting', () => {
     const fields = readClientOmittedFields({}, schemaMetadata, '6.19.0');
 
     expect(fields.of('User')).toEqual(new Set());
+    expect(fields.masked('User')).toEqual(new Set());
     expect(warn).toHaveBeenCalledTimes(1);
-    expect(warn.mock.calls[0]?.[0]).toContain('client-level omit');
+    expect(warn.mock.calls[0]?.[0]).toContain('left out of audit logs');
+  });
+
+  it.each([
+    ['before 6.2', '6.1.0'],
+    ['of an unknown version', undefined],
+  ])(
+    'reads no field, masks every scalar field and warns once when a client %s lacks the setting',
+    (_label, version) => {
+      const fields = readClientOmittedFields({}, schemaMetadata, version);
+
+      expect(fields.of('User')).toEqual(new Set());
+      expect(fields.masked('User')).toEqual(new Set(['id', 'email', 'password']));
+      expect(fields.masked('Post')).toEqual(new Set(['id', 'content']));
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0]?.[0]).toContain('every column value is masked');
+    },
+  );
+
+  it('reads the setting of a client of an unknown version that carries it', () => {
+    const fields = readClientOmittedFields({ _globalOmit: { user: { password: true } } }, schemaMetadata, undefined);
+
+    expect(fields.of('User')).toEqual(new Set(['password']));
+    expect(fields.masked('User')).toEqual(new Set(['password']));
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it.each([
