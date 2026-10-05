@@ -53,22 +53,20 @@ export interface AuditPipelineDependencies {
  *
  * `query` continues the intercepted operation on the client the caller invoked it on (the
  * caller's interactive transaction client inside `$transaction`, the base client outside any
- * transaction), which in both cases is the client the audit reads and writes run on. Two cases
- * cannot go through `query` and run the model delegate of the scope's handle instead: inside
- * the transaction the scope opened, because that transaction began after interception and no
- * public Prisma API rebinds `query` to its client; and an `action` other than the intercepted
- * one, because `query` is bound to the operation it was handed for. Both paths run through
- * `runCallerMutation`, so a failure of the caller's own write reaches the caller raw.
+ * transaction), which in both cases is the client the audit reads and writes run on. Inside the
+ * transaction the scope opened, which began after interception and which no public Prisma API
+ * rebinds `query` to, the model delegate of the scope's handle runs it instead. Both paths run
+ * through `runCallerMutation`, so a failure of the caller's own write reaches the caller raw.
  */
 const operationContinuation =
   (operation: InterceptedOperation, scope: ExecutionScope): AuditedOperation['execute'] =>
-  async (args, action = operation.action) => {
-    if (scope.transaction?.implicit !== true && action === operation.action) {
+  async (args) => {
+    if (scope.transaction?.implicit !== true) {
       return runCallerMutation(() => operation.query(args));
     }
-    const mutation = getModelOperation(getModelDelegate(scope.handle, operation.model), action);
+    const mutation = getModelOperation(getModelDelegate(scope.handle, operation.model), operation.action);
     if (!mutation) {
-      throw new Error(`Model "${operation.model}" or action "${action}" not found`);
+      throw new Error(`Model "${operation.model}" or action "${operation.action}" not found`);
     }
     return runCallerMutation(() => mutation(args));
   };

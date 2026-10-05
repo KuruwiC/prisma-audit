@@ -18,11 +18,10 @@ export interface AuditedOperation {
   readonly action: AuditAction;
   readonly args: Record<string, unknown>;
   /**
-   * Runs the caller's mutation with `args` on the client the execution scope selected (see
-   * `operationContinuation` in run-audited-operation.ts). `action` substitutes another action
-   * of the same model for the intercepted one.
+   * Runs the caller's mutation with `args` (see `operationContinuation` in
+   * run-audited-operation.ts)
    */
-  readonly execute: (args: Record<string, unknown>, action?: AuditAction) => Promise<unknown>;
+  readonly execute: (args: Record<string, unknown>) => Promise<unknown>;
 }
 
 export interface OperationSteps<TPrepared, TExecuted> {

@@ -4,7 +4,7 @@
  * written rows with their before rows, and each action's return-value contract.
  */
 
-import type { AuditContext } from '@kuruwic/db-audit-core';
+import type { AuditContext, FailureSink } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
 import type { DMMFField, PrismaClientWithDynamicAccess, PrismaNamespace } from '../../src/internal-types.js';
 import { createBatchExecutor } from '../../src/pipeline/batch-executor.js';
@@ -85,7 +85,19 @@ const operationOn = (
   ),
 });
 
-const executor = createBatchExecutor({ Prisma, schemaMetadata, clientOmittedFields: NO_CLIENT_OMITTED_FIELDS });
+const failureSink: FailureSink = {
+  notify: vi.fn(async () => {}),
+  reportResolverFailures: vi.fn(async () => {}),
+  reportDroppedBuild: vi.fn(async () => {}),
+  reportWriteFailure: vi.fn(async () => {}),
+};
+
+const executor = createBatchExecutor({
+  Prisma,
+  schemaMetadata,
+  clientOmittedFields: NO_CLIENT_OMITTED_FIELDS,
+  failureSink,
+});
 const produce = () => vi.fn<RecordProducer>(async () => []);
 const eventOf = (fields: Row) => expect.objectContaining({ model: 'User', ...fields });
 const findManyReturning = (...results: Row[][]) => {
@@ -281,35 +293,98 @@ describe('createBatchExecutor', () => {
       expect(findMany).toHaveBeenCalledWith({ where: {} });
     });
 
-    it('audits exactly the rows updateManyAndReturn returns for a limited update and keeps the count contract', async () => {
-      const findMany = vi.fn(async () => [a1, b1]);
-      const updateMany = vi.fn();
-      const updateManyAndReturn = vi.fn(async () => [b2]);
-      const client = clientWith({ user: { findMany, updateMany, updateManyAndReturn } });
-      const produceRecords = produce();
-      const args = { where: {}, data: { email: 'x' }, limit: 1 };
+    describe('with a limit', () => {
+      const where = { email: { contains: '@' } };
+      const data = { email: 'x' };
+      const narrowedTo = (ids: string[]) => ({ AND: [where, { id: { in: ids } }] });
+      const updateEvent = (before: Row, after: Row) =>
+        eventOf({
+          identity: before.id,
+          action: 'update',
+          before: { kind: 'captured', row: before },
+          after,
+          origin: { path: '', op: 'updateMany' },
+        });
 
-      const operation = operationOn(client, 'updateMany', args);
+      it('reads the primary keys the limit selects, continues the update without the limit narrowed to them, and audits those rows', async () => {
+        const findMany = findManyReturning([a1, b1], [a2, b2]);
+        const updateMany = vi.fn(async () => ({ count: 2 }));
+        const client = clientWith({ user: { findMany, updateMany } });
+        const produceRecords = produce();
+        const operation = operationOn(client, 'updateMany', { where, data, limit: 2 });
 
-      const outcome = await runWithRecords(executor, operation, scopeOn(client), produceRecords);
+        const outcome = await runWithRecords(executor, operation, scopeOn(client), produceRecords);
 
-      expect(findMany).toHaveBeenCalledWith({ where: {} });
-      expect(operation.execute).toHaveBeenCalledWith(args, 'updateManyAndReturn');
-      expect(updateManyAndReturn).toHaveBeenCalledWith(args);
-      expect(updateMany).not.toHaveBeenCalled();
-      expect(outcome.result).toEqual({ count: 1 });
-      expect(produceRecords).toHaveBeenCalledWith(
-        [
-          eventOf({
-            identity: 'b',
-            action: 'update',
-            before: { kind: 'captured', row: b1 },
-            after: b2,
-            origin: { path: '', op: 'updateMany' },
-          }),
-        ],
-        expect.anything(),
-      );
+        expect(findMany.mock.calls).toEqual([[{ where, take: 2 }], [{ where: { id: { in: ['a', 'b'] } } }]]);
+        expect(operation.execute).toHaveBeenCalledTimes(1);
+        expect(operation.execute).toHaveBeenCalledWith({ where: narrowedTo(['a', 'b']), data });
+        expect(outcome.result).toEqual({ count: 2 });
+        expect(produceRecords).toHaveBeenCalledWith([updateEvent(a1, a2), updateEvent(b1, b2)], expect.anything());
+      });
+
+      it('tops up a round that updated fewer rows than it read with rows read the same way, leaving out the rows already read', async () => {
+        const c1: Row = { id: 'c', email: 'c@1' };
+        const c2: Row = { id: 'c', email: 'c@2' };
+        const findMany = findManyReturning([a1, b1], [a1], [c1], [a2, c2]);
+        const updateMany = vi.fn<() => Promise<{ count: number }>>();
+        updateMany.mockResolvedValueOnce({ count: 1 }).mockResolvedValueOnce({ count: 1 });
+        const client = clientWith({ user: { findMany, updateMany } });
+        const produceRecords = produce();
+        const operation = operationOn(client, 'updateMany', { where, data, limit: 2 });
+
+        const outcome = await runWithRecords(executor, operation, scopeOn(client), produceRecords);
+
+        expect(findMany.mock.calls).toEqual([
+          [{ where, take: 2 }],
+          [{ where: narrowedTo(['a', 'b']) }],
+          [{ where: { AND: [where, { NOT: { id: { in: ['a', 'b'] } } }] }, take: 1 }],
+          [{ where: { id: { in: ['a', 'c'] } } }],
+        ]);
+        expect(vi.mocked(operation.execute).mock.calls).toEqual([
+          [{ where: narrowedTo(['a', 'b']), data }],
+          [{ where: narrowedTo(['c']), data }],
+        ]);
+        expect(outcome.result).toEqual({ count: 2 });
+        expect(produceRecords).toHaveBeenCalledWith([updateEvent(a1, a2), updateEvent(c1, c2)], expect.anything());
+      });
+
+      it('reports the rows of a short round it cannot tell apart as row-identification, and audits none of them', async () => {
+        const findMany = findManyReturning([a1, b1], [], []);
+        const updateMany = vi.fn(async () => ({ count: 1 }));
+        const client = clientWith({ user: { findMany, updateMany } });
+        const produceRecords = produce();
+
+        const outcome = await runWithRecords(
+          executor,
+          operationOn(client, 'updateMany', { where, data, limit: 2 }),
+          scopeOn(client),
+          produceRecords,
+        );
+
+        expect(outcome.result).toEqual({ count: 1 });
+        expect(findMany).toHaveBeenCalledTimes(3);
+        expect(failureSink.notify).toHaveBeenCalledWith(
+          expect.objectContaining({ phase: 'row-identification', modelName: 'User', operation: 'updateMany' }),
+        );
+        expect(produceRecords).toHaveBeenCalledWith([], expect.anything());
+      });
+
+      it('stops after three rounds', async () => {
+        const findMany = findManyReturning([a1], [b1], [{ id: 'c', email: 'c@1' }]);
+        const updateMany = vi.fn(async () => ({ count: 0 }));
+        const client = clientWith({ user: { findMany, updateMany } });
+
+        const outcome = await runWithRecords(
+          executor,
+          operationOn(client, 'updateMany', { where, data, limit: 1 }),
+          scopeOn(client),
+          produce(),
+        );
+
+        expect(outcome.result).toEqual({ count: 0 });
+        expect(updateMany).toHaveBeenCalledTimes(3);
+        expect(findMany).toHaveBeenCalledTimes(3);
+      });
     });
 
     it('returns the rows for a limited updateManyAndReturn', async () => {
@@ -324,18 +399,6 @@ describe('createBatchExecutor', () => {
       );
 
       expect(outcome.result).toEqual([b2]);
-    });
-
-    it('limits the before read with take on a connector without updateManyAndReturn', async () => {
-      const findMany = findManyReturning([a1], [a2]);
-      const updateMany = vi.fn(async () => ({ count: 1 }));
-      const client = clientWith({ user: { findMany, updateMany } });
-      const args = { where: {}, data: { email: 'x' }, limit: 1 };
-
-      await runWithRecords(executor, operationOn(client, 'updateMany', args), scopeOn(client), produce());
-
-      expect(findMany).toHaveBeenNthCalledWith(1, { where: {}, take: 1 });
-      expect(updateMany).toHaveBeenCalledWith(args);
     });
   });
 

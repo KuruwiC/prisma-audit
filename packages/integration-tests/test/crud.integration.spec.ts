@@ -547,8 +547,6 @@ describe('CRUD Operations Integration', () => {
       expect((logs[0].after as Record<string, unknown>).email).toBe('single2@example.com');
     });
 
-    // On connectors with updateManyAndReturn (PostgreSQL here), a limited update is audited via
-    // updateManyAndReturn so the audited rows are exactly the ones the DB updated.
     it('should record audit logs matching the limit on updateMany with limit', async () => {
       const created = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.createManyAndReturn({

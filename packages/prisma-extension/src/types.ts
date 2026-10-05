@@ -235,8 +235,9 @@ export interface PrismaAuditExtensionOptions<TModelName extends string = string,
    *   operations, fetching the affected rows before or after the mutation. It always propagates
    *   to the caller as a thrown error, regardless of `writeFailurePolicy`.
    * - `row-identification`: a nested delete's primary key could not be resolved, from the
-   *   pre-fetched row, its WHERE or the operation data. The caller's operation continues; that
-   *   record's audit log entry is skipped.
+   *   pre-fetched row, its WHERE or the operation data; or an `updateMany` with a `limit` wrote
+   *   rows it cannot tell apart from rows another writer changed (`params` is `{ unidentified }`,
+   *   their number). The caller's operation continues; those audit log entries are skipped.
    * - `id-resolver-call`: an id resolver (the entity's `idResolver` or a `to()` resolver) threw,
    *   returned an id that cannot be normalized to a string, or, for a `batchLookup` resolver,
    *   returned a different number of ids than rows. The caller's operation continues; `params`

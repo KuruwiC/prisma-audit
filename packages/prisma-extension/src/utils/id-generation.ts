@@ -276,14 +276,14 @@ export const buildEntityMap = (
 };
 
 /**
- * Build a Prisma WHERE clause to re-fetch entities by their primary keys.
+ * Build a Prisma WHERE clause naming entities by their primary keys.
  *
  * - Single PK: `{ id: { in: [...] } }`
  * - Composite PK: `{ OR: [{ pk1: v1, pk2: v2 }, ...] }`
  *
  * Returns null for empty entity lists to signal callers to skip the query.
  */
-const buildPKWhereClause = (
+export const buildPKWhereClause = (
   pkFields: string[],
   entities: ReadonlyArray<Record<string, unknown>>,
 ): Record<string, unknown> | null => {

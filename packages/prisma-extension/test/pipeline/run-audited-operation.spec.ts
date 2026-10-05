@@ -218,9 +218,9 @@ describe('runAuditedOperation', () => {
   });
 
   describe('continuation', () => {
-    const runningTheOperation = (action?: AuditedOperation['action']) =>
+    const runningTheOperation = () =>
       stubExecutor(async (operation) => {
-        await operation.execute(operation.args, action);
+        await operation.execute(operation.args);
         return outcome;
       });
 
@@ -260,20 +260,6 @@ describe('runAuditedOperation', () => {
 
       expect(operation.query).toHaveBeenCalledWith(args);
       expect(update).not.toHaveBeenCalled();
-    });
-
-    it("runs a substituted action on the scope handle's model delegate", async () => {
-      const updateManyAndReturn = vi.fn(async () => []);
-      const baseClient = createBaseClient(transactionClient, { user: { updateManyAndReturn } });
-      const deps = createDeps({
-        batchExecutor: runningTheOperation('updateManyAndReturn'),
-      });
-      const operation = interceptedOf('updateMany');
-
-      await runAuditedOperation({ operation, auditContext, baseClient, atomic: false }, deps);
-
-      expect(updateManyAndReturn).toHaveBeenCalledWith(args);
-      expect(operation.query).not.toHaveBeenCalled();
     });
 
     it('fails when the model delegate has no such action', async () => {

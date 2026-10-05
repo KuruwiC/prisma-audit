@@ -6,13 +6,14 @@
  * event per written row, paired with its before row by primary key.
  */
 
-import type { MutationEvent } from '@kuruwic/db-audit-core';
+import type { FailureSink, MutationEvent } from '@kuruwic/db-audit-core';
 import { AUDIT_ACTION } from '../grammar/operations.js';
 import type { PrismaNamespace } from '../internal-types.js';
 import type { SchemaMetadata } from '../schema/types.js';
-import { type ClientOmittedFields, omitFalseEntries, withOmittedFieldsInFinds } from '../utils/client-omit.js';
+import { type ClientOmittedFields, withOmittedFieldsInFinds } from '../utils/client-omit.js';
 import {
   buildEntityMap,
+  buildPKWhereClause,
   ensureIds,
   extractEntityIdentity,
   findManyByPKs,
@@ -30,6 +31,7 @@ export interface BatchExecutorDependencies {
   readonly Prisma: PrismaNamespace;
   readonly schemaMetadata: SchemaMetadata;
   readonly clientOmittedFields: ClientOmittedFields;
+  readonly failureSink: FailureSink;
 }
 
 export type BatchPrepared =
@@ -37,15 +39,19 @@ export type BatchPrepared =
   | { readonly kind: 'create-returning' }
   /** createMany: the rows to insert, with client-generated ids */
   | { readonly kind: 'create'; readonly rows: Row[] }
-  /** updateManyAndReturn, or a `limit`ed update on a connector with it: its returned rows are exactly the updated ones */
+  /** updateManyAndReturn: its returned rows are exactly the updated ones */
   | { readonly kind: 'update-returning'; readonly beforeRows: Row[]; readonly pkFields: string[] }
   | { readonly kind: 'update'; readonly beforeRows: Row[]; readonly pkFields: string[] }
+  /** updateMany with a `limit`: the rows are read round by round as the update runs */
+  | { readonly kind: 'update-limited'; readonly limit: number; readonly pkFields: string[] }
   | { readonly kind: 'delete'; readonly beforeRows: Row[] };
 
 export interface BatchExecuted {
   readonly result: unknown;
   /** The rows the mutation itself returned (createManyAndReturn, updateManyAndReturn) */
   readonly returnedRows: Row[] | undefined;
+  /** The before state of each row a limited updateMany is known to have updated */
+  readonly updatedRows?: Row[];
 }
 
 interface WrittenRows {
@@ -57,6 +63,9 @@ interface WrittenRows {
 interface BatchDelegate {
   readonly findMany: (args: { where: unknown; take?: number }) => Promise<Row[]>;
 }
+
+/** How many times a limited updateMany reads and updates rows before it settles for its count */
+const LIMITED_UPDATE_ROUNDS = 3;
 
 const batchDelegate = (
   scope: ExecutionScope,
@@ -127,10 +136,8 @@ const prepareCreate = (operation: AuditedOperation, schemaMetadata: SchemaMetada
 
 /**
  * An `updateManyAndReturn` is audited from the rows it returns, so the after rows are not read
- * again. `updateMany({ limit })` and a separate `findMany({ take })` are not guaranteed to select
- * the same rows, so pre-limiting the before fetch desyncs before/after counts: a connector with
- * `updateManyAndReturn` runs the update through it and audits the exact updated rows; without it
- * (MySQL), `take` propagates to the before fetch as a best effort.
+ * again. An `updateMany` with a `limit` reads its rows as it runs (see `runLimitedUpdate`). A
+ * `deleteMany` with a `limit` reads its before rows with the limit as `take`.
  */
 const prepareUpdateOrDelete = async (
   operation: AuditedOperation,
@@ -143,10 +150,10 @@ const prepareUpdateOrDelete = async (
   const where = args.where ?? {};
   const limit = typeof args.limit === 'number' ? args.limit : undefined;
 
-  const returnsUpdatedRows =
-    action === AUDIT_ACTION.UPDATE_MANY_AND_RETURN ||
-    (action !== AUDIT_ACTION.DELETE_MANY && limit !== undefined && hasOperation(delegate, 'updateManyAndReturn'));
-  if (returnsUpdatedRows) {
+  if (action === AUDIT_ACTION.UPDATE_MANY && limit !== undefined) {
+    return { kind: 'update-limited', limit, pkFields: getPrimaryKeyFields(Prisma, model) };
+  }
+  if (action === AUDIT_ACTION.UPDATE_MANY_AND_RETURN) {
     const beforeRows = await delegate.findMany({ where });
     return { kind: 'update-returning', beforeRows, pkFields: getPrimaryKeyFields(Prisma, model) };
   }
@@ -158,28 +165,103 @@ const prepareUpdateOrDelete = async (
   return { kind: 'update', beforeRows, pkFields: getPrimaryKeyFields(Prisma, model) };
 };
 
+const countOf = (result: unknown): number => {
+  const count: unknown = typeof result === 'object' && result !== null ? Reflect.get(result, 'count') : undefined;
+  return typeof count === 'number' ? count : 0;
+};
+
+/**
+ * The rows of a round that updated fewer rows than it read, which the update is known to have
+ * written: a read row that still matches the caller's `where` after the update did match it when
+ * the update ran, so the update wrote it. A written row the update made stop matching cannot be
+ * told apart from a read row another writer changed before the update; the number of such rows
+ * is reported as `row-identification`, and they are not audited.
+ */
+const rowsKnownUpdated = async (
+  operation: AuditedOperation,
+  delegate: BatchDelegate,
+  round: { readonly rows: Row[]; readonly narrowed: unknown; readonly updated: number; readonly pkFields: string[] },
+  failureSink: FailureSink,
+): Promise<Row[]> => {
+  if (round.updated === 0) {
+    return [];
+  }
+  const readByPk = buildEntityMap(round.rows, round.pkFields);
+  const stillMatching = await delegate.findMany({ where: round.narrowed });
+  const known = stillMatching.flatMap((row): Row[] => {
+    const readRow = readByPk.get(extractEntityIdentity(row, round.pkFields));
+    return readRow ? [readRow] : [];
+  });
+  const unidentified = round.updated - known.length;
+  if (unidentified > 0) {
+    await failureSink.notify({
+      phase: 'row-identification',
+      modelName: operation.model,
+      operation: operation.action,
+      params: { unidentified },
+      error: new Error(
+        `${unidentified} of the rows a limited ${operation.action} updated cannot be told apart from rows another writer changed`,
+      ),
+    });
+  }
+  return known;
+};
+
+/**
+ * Runs an `updateMany` with a `limit` as the caller's own `updateMany`, without the limit and
+ * narrowed to the primary keys of the rows a read with the caller's `where` and the limit as
+ * `take` selected, so the rows it audits are the rows it wrote. A round that updates fewer rows
+ * than it read (another writer changed some of them in between) is topped up with rows read the
+ * same way, leaving out every row already read, at most `LIMITED_UPDATE_ROUNDS` rounds in all:
+ * the count is a plain `updateMany`'s, except under contention past the last round.
+ */
+const runLimitedUpdate = async (
+  operation: AuditedOperation,
+  delegate: BatchDelegate,
+  prepared: { readonly limit: number; readonly pkFields: string[] },
+  failureSink: FailureSink,
+): Promise<BatchExecuted> => {
+  const { limit, pkFields } = prepared;
+  const where = operation.args.where ?? {};
+  const unlimited = Object.fromEntries(Object.entries(operation.args).filter(([key]) => key !== 'limit'));
+  const read: Row[] = [];
+  const updatedRows: Row[] = [];
+  let count = 0;
+  for (let round = 0; round < LIMITED_UPDATE_ROUNDS && count < limit; round++) {
+    const unread = read.length === 0 ? where : { AND: [where, { NOT: buildPKWhereClause(pkFields, read) }] };
+    const rows = await delegate.findMany({ where: unread, take: limit - count });
+    if (rows.length === 0) {
+      break;
+    }
+    read.push(...rows);
+    const narrowed = { AND: [where, buildPKWhereClause(pkFields, rows)] };
+    const updated = countOf(await operation.execute({ ...unlimited, where: narrowed }));
+    count += updated;
+    if (updated === rows.length) {
+      updatedRows.push(...rows);
+      break;
+    }
+    updatedRows.push(
+      ...(await rowsKnownUpdated(operation, delegate, { rows, narrowed, updated, pkFields }, failureSink)),
+    );
+  }
+  return { result: { count }, returnedRows: undefined, updatedRows };
+};
+
 export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationExecutor => {
-  const { schemaMetadata, clientOmittedFields } = deps;
+  const { schemaMetadata, clientOmittedFields, failureSink } = deps;
 
   const prepare = (operation: AuditedOperation, scope: ExecutionScope): Promise<BatchPrepared> =>
     requiresBeforeState(operation.action)
       ? prepareUpdateOrDelete(operation, scope, deps)
       : Promise.resolve(prepareCreate(operation, schemaMetadata));
 
-  /** Adds the `omit` that reads the fields the client omits, so the returned rows hold them */
-  const returningArgs = (operation: AuditedOperation): Record<string, unknown> => {
-    const omit = omitFalseEntries(clientOmittedFields.of(operation.model));
-    return operation.action === AUDIT_ACTION.UPDATE_MANY_AND_RETURN || !omit
-      ? operation.args
-      : { ...operation.args, omit };
-  };
-
   const execute = async (
     operation: AuditedOperation,
-    _scope: ExecutionScope,
+    scope: ExecutionScope,
     prepared: BatchPrepared,
   ): Promise<BatchExecuted> => {
-    const { action, args } = operation;
+    const { args } = operation;
     switch (prepared.kind) {
       case 'create':
         return { result: await operation.execute({ ...args, data: prepared.rows }), returnedRows: undefined };
@@ -188,11 +270,16 @@ export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationE
         return { result, returnedRows: rowsOf(result) };
       }
       case 'update-returning': {
-        const rows = rowsOf(await operation.execute(returningArgs(operation), AUDIT_ACTION.UPDATE_MANY_AND_RETURN));
-        // Each action keeps its contract: updateMany returns { count }, updateManyAndReturn the rows.
-        const result = action === AUDIT_ACTION.UPDATE_MANY_AND_RETURN ? rows : { count: rows.length };
-        return { result, returnedRows: rows };
+        const result = await operation.execute(args);
+        return { result, returnedRows: rowsOf(result) };
       }
+      case 'update-limited':
+        return runLimitedUpdate(
+          operation,
+          batchDelegate(scope, operation.model, clientOmittedFields),
+          prepared,
+          failureSink,
+        );
       case 'update':
       case 'delete':
         return { result: await operation.execute(args), returnedRows: undefined };
@@ -216,6 +303,12 @@ export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationE
         return { rows: storedCreateRows(schemaMetadata, operation.model, prepared.rows) };
       case 'update-returning':
         return pairByPrimaryKey(executed.returnedRows ?? [], prepared.beforeRows, prepared.pkFields);
+      case 'update-limited': {
+        const updatedRows = executed.updatedRows ?? [];
+        const delegate = batchDelegate(scope, operation.model, clientOmittedFields);
+        const afterRows = await findManyByPKs(delegate, prepared.pkFields, updatedRows);
+        return pairByPrimaryKey(afterRows, updatedRows, prepared.pkFields);
+      }
       case 'update': {
         if (prepared.beforeRows.length === 0) {
           return { rows: [] };

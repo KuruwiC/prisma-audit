@@ -45,7 +45,7 @@ const createPipelineDependencies = (
       clientOmittedFields,
       failureSink,
     }),
-    batchExecutor: createBatchExecutor({ Prisma, schemaMetadata, clientOmittedFields }),
+    batchExecutor: createBatchExecutor({ Prisma, schemaMetadata, clientOmittedFields, failureSink }),
     produceRecords: createRecordProducer({
       ...audit,
       // The fields the client omits are read, and recorded with their values masked.
