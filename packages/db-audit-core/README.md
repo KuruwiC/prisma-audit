@@ -31,8 +31,8 @@ dispatch({ buildRecords, modelName, operation, params, atomic, auditContext }, c
   (`Math.random()` below `samplingIf(model, tags)` when configured, otherwise below `sampling`)
   and, only when it is, whether the audit rows are written atomically with it:
   `awaitWriteIf(model, tags)` when configured, otherwise `awaitWrite`. A sampled-out operation
-  gets `{ sampled: false }` and writes no audit rows. It runs before the write because an atomic
-  write needs a transaction around the operation when none is active.
+  gets `{ sampled: false }` and writes no audit rows. It runs before the write so that an adapter
+  may open a transaction around an atomic operation when none is active.
 - **`MutationEvent`** is one written row as the adapter saw it: model, identity, action
   (`create` / `update` / `delete`), the before state, the after row, and its origin (nested path and
   the adapter's keyword that wrote it). The before state is a `BeforeState`: `captured` with the row
@@ -138,8 +138,9 @@ write the adapter runs, in order:
    write. A sampled-out operation runs as it would without the adapter. The tags come from the
    entity's configuration (`createEntityConfigLookup(mapping).byModel(model)?.tags`).
 2. **The write, in its scope.** When `atomic` is true and no transaction is active, the adapter
-   opens an implicit transaction and runs the write, and everything below, on that transaction's
-   handle.
+   may open an implicit transaction and run the write, and everything below, on that transaction's
+   handle; otherwise the write runs on the base handle and `dispatch` writes the atomic records
+   once it has committed (`awaited-after-commit`).
 3. **`dispatch({ buildRecords, modelName, operation, params, atomic, auditContext }, dispatchConfig,
    runtime)`**, which runs `buildRecords` (steps 4 to 6) and writes the records: `immediate` on the
    transaction's handle before it resolves, `awaited-after-commit` on `runtime.baseHandle` before it
@@ -190,9 +191,9 @@ What the adapter must provide:
   the handle it is given. The audit-log target (a model name, a table object) is fixed when the
   adapter constructs the executor; the handle is its type parameter.
 - **A `TransactionRuntime` per dispatch.** Tracking the transaction each async flow is inside,
-  opening the implicit transaction, holding the after-commit queue until commit (and dropping it on
-  rollback), and tracking detached work are the adapter's; `dispatch` sees only the runtime's
-  `baseHandle`, `transaction` and `detach`.
+  opening an implicit transaction when the adapter opens one, holding the after-commit queue until
+  commit (and dropping it on rollback), and tracking detached work are the adapter's; `dispatch`
+  sees only the runtime's `baseHandle`, `transaction` and `detach`.
 - **Failure routing.** The adapter builds one `FailureSink` with
   `createFailureSink(errorHandlingConfig)` and reports every failure through it. The sink owns
   the user-facing contract: the observer hears every failure and never affects the operation (an
