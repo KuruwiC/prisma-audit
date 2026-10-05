@@ -25,6 +25,7 @@ export interface DMMFField {
   isId?: boolean;
   hasDefaultValue?: boolean;
   default?: unknown;
+  isUpdatedAt?: boolean;
   relationName?: string;
   relationFromFields?: string[];
   relationToFields?: string[];

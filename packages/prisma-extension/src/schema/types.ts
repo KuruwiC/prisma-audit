@@ -48,6 +48,8 @@ export interface FieldMetadata {
   isId: boolean;
   isList: boolean;
   hasDefaultValue: boolean;
+  /** `@updatedAt`: Prisma sets the column on every write */
+  isUpdatedAt: boolean;
   default?: unknown;
   defaultExpr?: string;
 }

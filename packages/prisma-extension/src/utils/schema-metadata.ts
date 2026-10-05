@@ -87,6 +87,7 @@ export const createSchemaMetadataFromDMMF = (Prisma: PrismaWithDMMF): SchemaMeta
         isId: f.isId ?? false,
         isList: f.isList ?? false,
         hasDefaultValue: !!f.hasDefaultValue || !!f.default,
+        isUpdatedAt: f.isUpdatedAt ?? false,
         default: f.default,
         defaultExpr: undefined,
       }));
@@ -108,6 +109,7 @@ export const createSchemaMetadataFromDMMF = (Prisma: PrismaWithDMMF): SchemaMeta
         isId: field.isId ?? false,
         isList: field.isList ?? false,
         hasDefaultValue: !!field.hasDefaultValue || !!field.default,
+        isUpdatedAt: field.isUpdatedAt ?? false,
         default: field.default,
         defaultExpr: undefined,
       };

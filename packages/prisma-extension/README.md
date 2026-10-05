@@ -1048,6 +1048,8 @@ Either way, the audit covers the rows the filter matched when they were read bef
 | `uuid()` / `uuid(4)` | UUID v4 |
 | `uuid(7)` | UUID v7 |
 
+Its audit logs record each row of `data` with the injected ID and, for every optional column the row leaves out that has no `@default` and is not `@updatedAt`, `null`, which is what the database stores. A column the database fills (a `@default`, or `@updatedAt`) is left out of the row, since its value is not known without reading the row back.
+
 Database-generated defaults (`autoincrement()`, `dbgenerated()`) cannot be pre-generated, so `createMany` on such models throws. Use `createManyAndReturn` or individual `create` calls instead.
 
 Known limitation: with `createMany` + `skipDuplicates`, rows skipped by the database still produce audit logs, because the extension cannot observe which rows were skipped. `createManyAndReturn` does not have this limitation.

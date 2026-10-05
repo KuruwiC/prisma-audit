@@ -36,6 +36,8 @@ const Prisma: PrismaNamespace = {
           fields: [
             scalar('id', { isId: true, hasDefaultValue: true, default: { name: 'cuid', args: [] } }),
             scalar('email'),
+            scalar('nickname', { hasDefaultValue: true, default: 'anonymous' }),
+            scalar('updatedAt', { type: 'DateTime', isUpdatedAt: true }),
           ],
         },
       ],
@@ -130,6 +132,25 @@ describe('createBatchExecutor', () => {
             origin: { path: '', op: 'createMany' },
           }),
         ),
+        expect.anything(),
+      );
+    });
+
+    it('audits an optional column the data leaves out as null, and leaves out the columns the database fills', async () => {
+      const createMany = vi.fn(async () => ({ count: 1 }));
+      const client = clientWith({ user: { createMany } });
+      const produceRecords = produce();
+
+      await runWithRecords(
+        executor,
+        operationOn(client, 'createMany', { data: [{}] }),
+        scopeOn(client),
+        produceRecords,
+      );
+
+      expect(createMany).toHaveBeenCalledWith({ data: [{ id: expect.any(String) }] });
+      expect(produceRecords).toHaveBeenCalledWith(
+        [eventOf({ action: 'create', after: { id: expect.any(String), email: null } })],
         expect.anything(),
       );
     });

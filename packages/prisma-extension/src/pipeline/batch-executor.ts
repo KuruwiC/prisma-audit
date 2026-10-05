@@ -83,6 +83,35 @@ const pairByPrimaryKey = (afterRows: Row[], beforeRows: Row[], pkFields: string[
 };
 
 /**
+ * A `createMany` row as the database stores it, as far as the schema tells without a read: each
+ * optional column the data leaves out that has no default and is not `@updatedAt` holds null. A
+ * column the database fills (a default, `@updatedAt`) stays left out, its value unknown without a
+ * read.
+ */
+const storedCreateRows = (schemaMetadata: SchemaMetadata, modelName: string, rows: readonly Row[]): Row[] => {
+  const nullWhenUnset = schemaMetadata
+    .getAllFields(modelName)
+    .filter(
+      (field) =>
+        (field.kind === 'scalar' || field.kind === 'enum') &&
+        !field.isList &&
+        !field.isRequired &&
+        !field.hasDefaultValue &&
+        !field.isUpdatedAt,
+    )
+    .map((field) => field.name);
+  return rows.map((row) => {
+    const stored = { ...row };
+    for (const fieldName of nullWhenUnset) {
+      if (stored[fieldName] === undefined) {
+        stored[fieldName] = null;
+      }
+    }
+    return stored;
+  });
+};
+
+/**
  * `createMany` returns only `{ count }`, which leaves client-side id injection as the only way for
  * the audit rows to record the created ids. `createManyAndReturn` relies on Prisma's own id
  * generation and audits the rows it actually created, read whole whatever the caller selects
@@ -190,7 +219,7 @@ export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationE
       case 'create-returning':
         return { rows: executed.returnedRows ?? [] };
       case 'create':
-        return { rows: prepared.rows };
+        return { rows: storedCreateRows(schemaMetadata, operation.model, prepared.rows) };
       case 'update-returning':
         return pairByPrimaryKey(executed.returnedRows ?? [], prepared.beforeRows, prepared.pkFields);
       case 'update': {

@@ -45,6 +45,7 @@ const metadataWithIdDefault = (defaultValue: unknown): SchemaMetadata => ({
           isId: true,
           isList: false,
           hasDefaultValue: defaultValue !== undefined,
+          isUpdatedAt: false,
           default: defaultValue,
         }
       : undefined,

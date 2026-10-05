@@ -16,6 +16,7 @@ const scalarField = (name: string, isId = false): FieldMetadata => ({
   isId,
   isList: false,
   hasDefaultValue: false,
+  isUpdatedAt: false,
 });
 
 interface ModelShape {
