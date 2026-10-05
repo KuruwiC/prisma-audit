@@ -59,7 +59,7 @@ const isColumn = (kind: string | undefined): boolean => kind === 'scalar' || kin
 /**
  * Validates every entity's `auditOmittedFields`: each names a scalar or enum field of its model,
  * the only fields a client-level `omit` hides, and the client takes a query `omit`, which the
- * audit's reads before the write use to read them
+ * audit's own whole-row reads use to read them
  *
  * @param modelNames - The models of the schema, which mapping keys match case-insensitively
  * @throws {Error} If the client takes no query `omit`, the mapping key matches no model, or a listed

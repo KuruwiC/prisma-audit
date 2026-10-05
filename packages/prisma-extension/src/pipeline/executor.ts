@@ -23,7 +23,6 @@ export interface AuditedOperation {
    * run-audited-operation.ts)
    */
   readonly execute: (args: Record<string, unknown>) => Promise<unknown>;
-  /** The columns reading the caller's `select` in the default shape added (see `injectAuditedSelection`) */
   readonly widened: WidenedColumns;
 }
 

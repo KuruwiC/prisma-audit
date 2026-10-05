@@ -28,7 +28,6 @@ export interface InterceptedOperation {
    * the client the caller invoked it on, through the extensions applied after this one.
    */
   readonly query: (args: Record<string, unknown>) => Promise<unknown>;
-  /** The columns reading the caller's `select` in the default shape added (see `injectAuditedSelection`) */
   readonly widened: WidenedColumns;
 }
 

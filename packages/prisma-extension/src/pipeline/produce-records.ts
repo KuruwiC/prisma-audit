@@ -25,7 +25,6 @@ export interface RecordProducerConfig {
   readonly failureSink: Pick<FailureSink, 'reportResolverFailures'>;
 }
 
-/** @param widened - The columns the operation's widened `select` added (see `injectAuditedSelection`) */
 export type RecordProducer = (
   events: readonly MutationEvent[],
   scope: ExecutionScope,
