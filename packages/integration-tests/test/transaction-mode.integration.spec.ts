@@ -146,6 +146,8 @@ describe('openImplicitTransaction', () => {
     readonly audited?: 'User' | 'Post';
     /** Whether the batch writes a User before its slow read */
     readonly writes?: boolean;
+    /** Whether an audit context is set when the batch runs (default: true) */
+    readonly withContext?: boolean;
   }
 
   /**
@@ -178,7 +180,9 @@ describe('openImplicitTransaction', () => {
     if (options.writes) {
       operations.unshift(audited.user.create({ data: { email: 'slow@example.com', name: 'Slow' } }));
     }
-    return provider.runAsync(testActor, () => audited.$transaction(operations));
+    return options.withContext === false
+      ? audited.$transaction(operations)
+      : provider.runAsync(testActor, () => audited.$transaction(operations));
   };
 
   describe.each([
@@ -327,6 +331,25 @@ describe('openImplicitTransaction', () => {
       await expect(
         runSlowBatch({ openImplicitTransaction: true, audited: 'Post', writes: true }),
       ).resolves.toHaveLength(2);
+    });
+
+    it("runs a batch without an audit context as Prisma's own batch", async () => {
+      await expect(
+        runSlowBatch({ openImplicitTransaction: true, writes: true, withContext: false }),
+      ).resolves.toHaveLength(2);
+    });
+
+    it("runs Prisma's own batch at the caller's isolation level", async () => {
+      const clients = createClients({ openImplicitTransaction: true });
+
+      const [, isolation] = await clients.run(() =>
+        clients.client.$transaction(
+          [clients.client.user.count(), clients.client.$queryRaw`SHOW transaction_isolation`],
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+        ),
+      );
+
+      expect(isolation).toEqual([{ transaction_isolation: 'serializable' }]);
     });
 
     it("runs a batch whose write does not await its audit as Prisma's own batch", async () => {
