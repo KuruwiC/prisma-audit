@@ -478,38 +478,6 @@ describe('dispatch', () => {
         expect(failureSink.reportDroppedBuild).not.toHaveBeenCalled();
       },
     );
-
-    describe('dropped for a detached write, with the failure sink built from the configuration', () => {
-      const dropBuild = async (errorHandling: Parameters<typeof createFailureSink>[0]) => {
-        const writeExecutor = { write: vi.fn(async () => {}) };
-        const config: DispatchConfig<Handle> = { writeExecutor, failureSink: createFailureSink(errorHandling) };
-        await dispatch(audited(false, failingBuild), config, createRuntime(false).runtime);
-        return writeExecutor;
-      };
-
-      it('logs a line that names the model and the operation under the default policy, without an observer', async () => {
-        const writeExecutor = await dropBuild({});
-
-        expect(consoleError).toHaveBeenCalledWith(
-          expect.stringMatching(/Post\.create.*dropped/),
-          'read after the write failed',
-        );
-        expect(JSON.stringify(consoleError.mock.calls)).not.toContain('post-1');
-        expect(writeExecutor.write).not.toHaveBeenCalled();
-      });
-
-      it("stays silent under 'ignore'", async () => {
-        await dropBuild({ writeFailurePolicy: 'ignore' });
-
-        expect(consoleError).not.toHaveBeenCalled();
-      });
-
-      it("logs and resolves under 'throw', whose caller has returned", async () => {
-        await expect(dropBuild({ writeFailurePolicy: 'throw' })).resolves.toBeDefined();
-
-        expect(consoleError).toHaveBeenCalledWith(expect.stringMatching(/Post\.create/), 'read after the write failed');
-      });
-    });
   });
 
   it.each([

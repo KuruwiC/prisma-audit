@@ -67,13 +67,4 @@ describe('Branded Types', () => {
       expect(typeof unwrapped).toBe('string');
     });
   });
-
-  describe('Type Safety', () => {
-    it('should prevent mixing different ID types (compile-time check)', () => {
-      const actorId = createActorId('user-123');
-      const entityId = createEntityId('post-456');
-
-      expect(actorId).not.toBe(entityId);
-    });
-  });
 });

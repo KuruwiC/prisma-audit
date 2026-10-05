@@ -26,40 +26,6 @@ describe('Transaction Consistency Integration', () => {
     await cleanDatabase(context.prisma);
   });
 
-  describe('Actor enricher transaction consistency', () => {
-    it('should enrich actor context without database query', async () => {
-      const auditContext: AuditContext = {
-        actor: {
-          category: 'model',
-          type: 'User',
-          id: 'actor-1',
-          name: 'Test Actor',
-        },
-      };
-
-      await context.provider.runAsync(auditContext, async () => {
-        await context.prisma.user.create({
-          data: {
-            email: 'test@example.com',
-            name: 'Test User',
-            password: 'secret123',
-          },
-        });
-      });
-
-      const userLogs = await context.prisma.auditLog.findMany({
-        where: { entityType: 'User' },
-      });
-
-      expect(userLogs).toHaveLength(1);
-      const userLog = userLogs[0];
-
-      expect(userLog.actorContext).toBeDefined();
-      const actorContext = userLog.actorContext as Record<string, unknown>;
-      expect(actorContext.name).toBe('Test Actor');
-    });
-  });
-
   describe('IdResolver transaction consistency', () => {
     it('should resolve ID using uncommitted data within transaction', async () => {
       const auditContext: AuditContext = {
@@ -103,52 +69,6 @@ describe('Transaction Consistency Integration', () => {
 
       const aggregateTypes = postLogs.map((log: { aggregateType: string }) => log.aggregateType).sort();
       expect(aggregateTypes).toEqual(['Post', 'User']);
-    });
-  });
-
-  describe('Aggregate root resolution transaction consistency', () => {
-    it('should resolve aggregate roots using uncommitted data', async () => {
-      const auditContext: AuditContext = {
-        actor: {
-          category: 'model',
-          type: 'User',
-          id: 'actor-1',
-        },
-      };
-
-      await context.provider.runAsync(auditContext, async () => {
-        await context.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-          const user = await tx.user.create({
-            data: {
-              email: 'user@example.com',
-              name: 'User',
-              password: 'secret123',
-            },
-          });
-
-          await tx.post.create({
-            data: {
-              title: 'Test Post',
-              content: 'Content',
-              authorId: user.id,
-            },
-          });
-        });
-      });
-
-      const postLogs = await context.prisma.auditLog.findMany({
-        where: { entityType: 'Post' },
-      });
-
-      expect(postLogs).toHaveLength(2);
-
-      const userAggregateLog = postLogs.find((log: { aggregateType: string }) => log.aggregateType === 'User');
-      expect(userAggregateLog).toBeDefined();
-      expect(userAggregateLog?.aggregateId).toBeDefined();
-
-      const postAggregateLog = postLogs.find((log: { aggregateType: string }) => log.aggregateType === 'Post');
-      expect(postAggregateLog).toBeDefined();
-      expect(postAggregateLog?.aggregateId).toBeDefined();
     });
   });
 

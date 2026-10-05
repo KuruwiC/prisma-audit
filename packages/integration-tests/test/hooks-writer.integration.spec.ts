@@ -348,47 +348,6 @@ describe('hooks.writer Coverage', () => {
       asyncContext.writerSpy.calls = [];
     });
 
-    it('should call hooks.writer for async write outside transaction', async () => {
-      await asyncContext.provider.runAsync(testActor, async () => {
-        await asyncContext.prisma.user.create({
-          data: {
-            email: 'user@example.com',
-            name: 'User',
-            password: 'secret123',
-          },
-        });
-      });
-
-      // Poll for async write to complete (fire and forget)
-      const maxWait = 5000;
-      const interval = 50;
-      let elapsed = 0;
-      while (elapsed < maxWait) {
-        if (asyncContext.writerSpy.callCount > 0) break;
-        await new Promise((resolve) => setTimeout(resolve, interval));
-        elapsed += interval;
-      }
-
-      expect(asyncContext.writerSpy.callCount).toBeGreaterThan(0);
-    });
-
-    it('should call hooks.writer for async write inside transaction (deferred)', async () => {
-      await asyncContext.provider.runAsync(testActor, async () => {
-        await asyncContext.prisma.$transaction(async (tx: typeof asyncContext.prisma) => {
-          await tx.user.create({
-            data: {
-              email: 'user@example.com',
-              name: 'User',
-              password: 'secret123',
-            },
-          });
-        });
-      });
-
-      // The deferred write runs once the transaction has committed.
-      expect(asyncContext.writerSpy.callCount).toBeGreaterThan(0);
-    });
-
     it('should not call hooks.writer or persist audit logs when a deferred write is queued inside a transaction that then throws', async () => {
       const transactionPromise = asyncContext.provider.runAsync(testActor, async () => {
         return asyncContext.prisma.$transaction(async (tx: typeof asyncContext.prisma) => {

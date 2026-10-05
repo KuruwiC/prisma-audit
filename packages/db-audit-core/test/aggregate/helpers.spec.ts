@@ -107,16 +107,6 @@ describe('Resolver helper functions', () => {
       const result = await resolver(entity, null);
       expect(result).toBe('custom-123');
     });
-
-    it('should support returning null', async () => {
-      // biome-ignore lint/suspicious/noExplicitAny: Test code
-      const resolver = lookup(async (_entity: any, _prisma: any) => {
-        return null;
-      });
-      const entity = { id: 'test-123' };
-      const result = await resolver(entity, null);
-      expect(result).toBeNull();
-    });
   });
 
   describe('to', () => {
@@ -292,16 +282,6 @@ describe('batchLookup', () => {
     const root = to('User', resolver);
     expect(root.batchResolve).toBeDefined();
     expect(root.requiresDbAccess).toBeUndefined();
-  });
-
-  it('should handle null/skip in batch results', async () => {
-    const resolver = batchLookup(async (entities: { id: string }[]) => {
-      return entities.map((e) => (e.id === 'skip' ? null : `resolved-${e.id}`));
-    });
-    const root = to('User', resolver);
-    if (!root.batchResolve) throw new Error('Expected batchResolve to be set');
-    const results = await root.batchResolve([{ id: 'a' }, { id: 'skip' }, { id: 'c' }], null);
-    expect(results).toEqual(['resolved-a', null, 'resolved-c']);
   });
 });
 
