@@ -53,12 +53,12 @@ dispatch({ buildRecords, modelName, operation, params, atomic, auditContext }, c
   before the write come after the others, and roots equal in category, type and id are kept once. A
   resolver that reads the database (`lookup()`, `batchLookup()`) runs for the row before the write
   too and reads the database as it is after the write; a projection's `context` enricher receives,
-  for each root, the row that resolved it. Without a captured before state (a read not asked for, or one that failed)
-  only the aggregates the row names after the write are known. A resolver that throws, or returns
-  an id `normalizeId` rejects, is returned in `failures` (the row, which resolver, the error),
-  once per row and resolver, instead of failing the call: the entity's id resolver leaves the row
-  without records, a `to()` resolver leaves it without the record under the root it failed to
-  resolve. The adapter decides how to report them.
+  for each root, the row that resolved it. Without a captured before state (a read not asked for,
+  or one that failed) only the aggregates the row names after the write are known. A resolver that
+  throws, or returns an id `normalizeId` rejects, is returned in `failures` (the row, which
+  resolver, the error), once per row and resolver, instead of failing the call: the entity's id
+  resolver leaves the row without records, a `to()` resolver leaves it without the record under
+  the root it failed to resolve. The adapter decides how to report them.
 - **`compose`** builds one `AuditRecord` per aggregate root: before and after states by action, the
   field-level diff of an update (an update that changed only excluded fields of an existing before
   state yields no record),
@@ -174,10 +174,11 @@ write the adapter runs, in order:
    `buildRecords` returns. `composeConfig` carries the entity lookup, `excludeFields`, `redact`,
    `serialization`, `relationFieldNames(model)`, the keys of a row that are not its columns (the
    relation fields, and any aggregate of related records the ORM returns with the row, such as
-   Prisma's `_count`). An entity's `auditOmittedFields`, the fields its client leaves out of its
+   Prisma's `_count`). An update's `changes` compares the row's columns only: the relation fields
+   and those aggregates are left out of the comparison, so an update whose columns are unchanged
+   yields no record. An entity's `auditOmittedFields`, the fields its client leaves out of its
    default reads that the adapter reads anyway, are masked in the stored states and changes
-   whether or not `redact` is set. An update's `changes` compares the row's columns only: those fields are
-   left out of the comparison, so an update whose columns are unchanged yields no record.
+   whether or not `redact` is set.
 
 What the adapter must provide:
 
