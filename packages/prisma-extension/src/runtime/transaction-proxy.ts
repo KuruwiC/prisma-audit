@@ -5,30 +5,49 @@
  * the runtime scope of its transactional client, whether or not an audit context is set when
  * `$transaction` is called: the audit reads and writes of the operations in the callback share
  * the client, and the writes that must wait for the commit queue on the scope. The queue is
- * drained strictly after `$transaction` resolves; on rejection it is discarded unrun. The
- * sequential form, `$transaction([...])`, is handed to `batch-transaction.ts` when an audit
- * context is set and an audit can be awaited; otherwise it passes through untouched.
+ * drained strictly after `$transaction` resolves; on rejection it is discarded unrun. The proxy
+ * also wraps every client derived from the client by `$extends`.
+ *
+ * With `openImplicitTransaction`, the proxy also wraps the client's model delegates and raw-query
+ * methods (`operation-recipe.ts`): a write whose audit is awaited runs in an interactive
+ * transaction of the client it was called on, and a batch `$transaction([...])` of the client's
+ * operations runs as one interactive transaction when an audit context is set and an audit may be
+ * awaited, as Prisma's own batch otherwise. Without it, the sequential form passes through
+ * untouched.
  *
  * @module runtime/transaction-proxy
  */
 
 import type { AuditContext, AuditContextProvider } from '@kuruwic/db-audit-core';
 import type { TransactionalPrismaClient } from '../internal-types.js';
-import { batchOperationsOf, runBatchAsInteractiveTransaction, type TransactionMethod } from './batch-transaction.js';
+import { createRecipeClient, type RecipeConfig, takeBatchRecipes } from './operation-recipe.js';
 import { drainAfterCommit, enterTransaction } from './scope.js';
+
+export type TransactionMethod = (...args: unknown[]) => Promise<unknown>;
+
+export interface RecipeTransactionConfig extends RecipeConfig {
+  /** Whether an audit can be awaited for some operation, which makes a batch run as an interactive transaction */
+  readonly auditMayBeAwaited: boolean;
+}
 
 export interface TransactionProxyConfig {
   readonly provider: AuditContextProvider;
-  /**
-   * Whether an audit can be awaited for some operation, which a batch `$transaction([...])` needs
-   * to run as an interactive transaction
-   */
-  readonly batchAuditMayBeAwaited: boolean;
+  /** Present with `openImplicitTransaction`: how the client's operations open their transaction */
+  readonly recipes?: RecipeTransactionConfig;
 }
 
 type TransactionProxyDependencies = TransactionProxyConfig & {
   originalTransaction: TransactionMethod;
   target: object;
+  /** The proxy `$transaction` was read from */
+  receiver: object;
+};
+
+/** The one option of a batch `$transaction([...])`, which an interactive transaction takes as well */
+const interactiveOptionsOf = (options: unknown): Array<{ readonly isolationLevel: unknown }> => {
+  const isolationLevel: unknown =
+    typeof options === 'object' && options !== null ? Reflect.get(options, 'isolationLevel') : undefined;
+  return isolationLevel === undefined ? [] : [{ isolationLevel }];
 };
 
 /**
@@ -68,39 +87,50 @@ export const createWrappedTransactionCallback = (
 export const createTransactionProxyHandler = (
   deps: TransactionProxyDependencies,
 ): ((...args: unknown[]) => Promise<unknown>) => {
-  const { provider, batchAuditMayBeAwaited, originalTransaction, target } = deps;
+  const { provider, recipes, originalTransaction, target, receiver } = deps;
 
-  const runBatch = (args: unknown[]): Promise<unknown> => {
-    const auditContext = provider.getContext();
-    const operations = batchAuditMayBeAwaited && auditContext ? batchOperationsOf(args) : undefined;
-    if (!auditContext || !operations) {
-      return originalTransaction.apply(target, args);
+  const runInteractive = async (
+    callback: (tx: TransactionalPrismaClient) => Promise<unknown>,
+    options: unknown[],
+  ): Promise<unknown> => {
+    const deferredWrites: Array<() => Promise<void>> = [];
+    const wrappedCallback = createWrappedTransactionCallback(callback, provider.getContext(), provider, deferredWrites);
+    const result = await originalTransaction.apply(target, [wrappedCallback, ...options]);
+    drainAfterCommit(deferredWrites);
+    return result;
+  };
+
+  /**
+   * The batch's recipes run one after another, in the order of the list, in one interactive
+   * transaction of the client when an audit context is set and an audit may be awaited, and as
+   * Prisma's own batch of the same operations otherwise.
+   */
+  const runRecipeBatch = async (items: readonly unknown[], options: unknown): Promise<unknown> => {
+    const operationsOn = takeBatchRecipes(items, receiver);
+    if (!recipes?.auditMayBeAwaited || !provider.getContext()) {
+      return originalTransaction.apply(
+        target,
+        options === undefined ? [operationsOn(target)] : [operationsOn(target), options],
+      );
     }
-    return runBatchAsInteractiveTransaction({
-      operations,
-      options: args[1],
-      auditContext,
-      provider,
-      originalTransaction,
-      target,
-    });
+    return runInteractive(async (tx) => {
+      const results: unknown[] = [];
+      for (const operation of operationsOn(tx)) {
+        results.push(await operation);
+      }
+      return results;
+    }, interactiveOptionsOf(options));
   };
 
   return async (...args: unknown[]): Promise<unknown> => {
-    if (typeof args[0] !== 'function') {
-      return runBatch(args);
+    const [first, options] = args;
+    if (typeof first !== 'function') {
+      return recipes && Array.isArray(first) && first.length > 0
+        ? runRecipeBatch(first, options)
+        : originalTransaction.apply(target, args);
     }
-
-    const callback = args[0] as (tx: TransactionalPrismaClient) => Promise<unknown>;
-    const options = args[1] as Record<string, unknown> | undefined;
-
-    const deferredWrites: Array<() => Promise<void>> = [];
-    const wrappedCallback = createWrappedTransactionCallback(callback, provider.getContext(), provider, deferredWrites);
-
-    const transactionArgs = options ? [wrappedCallback, options] : [wrappedCallback];
-    const result = await originalTransaction.apply(target, transactionArgs);
-    drainAfterCommit(deferredWrites);
-    return result;
+    const callback = first as (tx: TransactionalPrismaClient) => Promise<unknown>;
+    return runInteractive(callback, options ? [options] : []);
   };
 };
 
@@ -116,11 +146,12 @@ export const createTransactionProxy = <TClient extends object>(
   extendedClient: TClient,
   config: TransactionProxyConfig,
 ): TClient => {
+  const recipeClient = config.recipes && createRecipeClient(config.recipes);
   return new Proxy(extendedClient, {
-    get(target, prop) {
+    get(target, prop, receiver: object) {
       if (prop === '$transaction') {
         const originalTransaction = Reflect.get(target, prop) as TransactionMethod;
-        return createTransactionProxyHandler({ ...config, originalTransaction, target });
+        return createTransactionProxyHandler({ ...config, originalTransaction, target, receiver });
       }
       if (prop === '$extends') {
         const originalExtends = Reflect.get(target, prop) as (...args: unknown[]) => unknown;
@@ -129,7 +160,8 @@ export const createTransactionProxy = <TClient extends object>(
           return typeof derived === 'object' && derived !== null ? createTransactionProxy(derived, config) : derived;
         };
       }
-      return Reflect.get(target, prop);
+      const wrapped = recipeClient?.propertyOf(receiver, target, prop);
+      return wrapped ? wrapped.value : Reflect.get(target, prop);
     },
   });
 };

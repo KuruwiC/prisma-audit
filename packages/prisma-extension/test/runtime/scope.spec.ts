@@ -60,13 +60,13 @@ describe('runtime scope', () => {
       const outerClient = client('outer');
 
       withScope({ transaction: { client: outerClient, deferredWrites: [] } }, () => {
-        withScope({ isInImplicitTransaction: true }, () => {
-          expect(currentScope()?.isInImplicitTransaction).toBe(true);
+        withScope({ isProcessingAuditLog: true }, () => {
+          expect(currentScope()?.isProcessingAuditLog).toBe(true);
         });
 
         const scope = currentScope();
         expect(scope?.transaction?.client).toBe(outerClient);
-        expect(scope?.isInImplicitTransaction).toBeUndefined();
+        expect(scope?.isProcessingAuditLog).toBeUndefined();
       });
     });
 

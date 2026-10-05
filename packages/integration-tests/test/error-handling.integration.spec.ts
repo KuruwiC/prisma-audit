@@ -43,8 +43,11 @@ const createFailingWriterClient = (databaseUrl: string, options: FailingWriterCl
         fields: [],
       },
     },
+    // Every write runs in the transaction the client opens around it, which an awaited audit
+    // write that fails under 'throw' rolls back.
     performance: {
       awaitWrite: true,
+      openImplicitTransaction: true,
     },
     hooks: {
       writer: async () => {
@@ -583,7 +586,7 @@ describe('Error Handling Integration', () => {
       }
     });
 
-    it('a diff-generation failure on the batch path still propagates to the caller, regardless of writeFailurePolicy', async () => {
+    it('a diff-generation failure on the batch path inside the transaction the client opens still propagates to the caller, regardless of writeFailurePolicy', async () => {
       // `diff-generation` is never policy-gated, unlike `log-write` (see
       // `AuditErrorPhase` / `WriteFailurePolicy` in the audit extension's types.ts): it
       // propagates to the caller even under `writeFailurePolicy: 'ignore'`, and the policy
@@ -599,7 +602,7 @@ describe('Error Handling Integration', () => {
         Prisma,
         provider,
         aggregateMapping: testAggregateMapping,
-        performance: { awaitWrite: true },
+        performance: { awaitWrite: true, openImplicitTransaction: true },
         errorHandling: { writeFailurePolicy: policy, observer },
         contextEnricher: {
           actor: {
@@ -652,7 +655,7 @@ describe('Error Handling Integration', () => {
     // failure reaches the caller as the original error, the observer
     // is notified once, and the write-failure policy is never consulted.
 
-    it('a diff-generation failure on the single-operation path propagates the original error to the caller, regardless of writeFailurePolicy', async () => {
+    it('a diff-generation failure on the single-operation path inside the transaction the client opens propagates the original error to the caller, regardless of writeFailurePolicy', async () => {
       const ENRICHER_FAILURE_MESSAGE = 'actor enricher is broken';
       const enricherError = new Error(ENRICHER_FAILURE_MESSAGE);
       const basePrisma = new PrismaClient({ datasources: { db: { url: context.databaseUrl } } });
@@ -663,7 +666,7 @@ describe('Error Handling Integration', () => {
         Prisma,
         provider,
         aggregateMapping: testAggregateMapping,
-        performance: { awaitWrite: true },
+        performance: { awaitWrite: true, openImplicitTransaction: true },
         errorHandling: { writeFailurePolicy: policy, observer },
         contextEnricher: {
           actor: {
@@ -707,7 +710,7 @@ describe('Error Handling Integration', () => {
       }
     });
 
-    it('a failed re-read of the nested rows the result did not return propagates the original error and leaves no audit rows', async () => {
+    it('a failed re-read of the nested rows the result did not return, inside the transaction the client opens, propagates the original error and leaves no audit rows', async () => {
       // The caller's own `include` narrows `posts` to published rows, so the unpublished
       // post the nested update writes is absent from the result, and its after state is
       // read again by the primary key read ahead of the write once the write has run. That
@@ -718,7 +721,9 @@ describe('Error Handling Integration', () => {
       const rereadError = new Error(REREAD_FAILURE_MESSAGE);
       const rawBasePrisma = new PrismaClient({ datasources: { db: { url: context.databaseUrl } } });
       let rereadArmed = false;
-      const basePrisma = rawBasePrisma.$extends({
+      // Applied after the audit extension, so it sees the caller's update come back from the
+      // database before the audit reads the nested rows again in the same transaction.
+      const faultInjection = Prisma.defineExtension({
         name: 'fault-injection',
         query: {
           user: {
@@ -742,14 +747,14 @@ describe('Error Handling Integration', () => {
       const provider = createAsyncLocalStorageProvider();
       const observer = vi.fn();
       const policy = vi.fn((_context: AuditErrorContext) => 'ignore' as const);
-      const prisma = createAuditClient(basePrisma, {
+      const prisma = createAuditClient(rawBasePrisma, {
         Prisma,
         provider,
         aggregateMapping: testAggregateMapping,
-        performance: { awaitWrite: true },
+        performance: { awaitWrite: true, openImplicitTransaction: true },
         fetchBefore: { update: true },
         errorHandling: { writeFailurePolicy: policy, observer },
-      });
+      }).$extends(faultInjection);
 
       try {
         const user = await context.provider.runAsync(testActor, async () =>

@@ -603,14 +603,14 @@ describe('hooks.writer Coverage', () => {
       }
     });
 
-    const createClient = (awaitWrite: boolean) => {
+    const createClient = (awaitWrite: boolean, openImplicitTransaction = false) => {
       const basePrisma = new PrismaClient({ datasources: { db: { url: context.databaseUrl } } });
       const flags: boolean[] = [];
       const prisma = createAuditClient(basePrisma, {
         Prisma,
         provider: context.provider,
         aggregateMapping: testAggregateMapping,
-        performance: { awaitWrite },
+        performance: { awaitWrite, openImplicitTransaction },
         hooks: {
           writer: async (records, { inTransaction, defaultWrite }) => {
             flags.push(inTransaction);
@@ -637,12 +637,20 @@ describe('hooks.writer Coverage', () => {
       expect(flags).toEqual([true]);
     });
 
-    it('is true for an awaited write in the transaction the extension opens around the operation', async () => {
-      const { prisma, flags } = createClient(true);
+    it('is true for an awaited write in the transaction the client opens around the operation with openImplicitTransaction', async () => {
+      const { prisma, flags } = createClient(true, true);
 
       await context.provider.runAsync(testActor, () => createUser(prisma, 'implicit-transaction@example.com'));
 
       expect(flags).toEqual([true]);
+    });
+
+    it('is false for an awaited write outside any transaction, written once the operation has committed', async () => {
+      const { prisma, flags } = createClient(true);
+
+      await context.provider.runAsync(testActor, () => createUser(prisma, 'after-commit@example.com'));
+
+      expect(flags).toEqual([false]);
     });
 
     it('is false for a detached write', async () => {

@@ -19,7 +19,7 @@ const scopeOn = (handle: ExecutionScope['handle']): ExecutionScope => ({
   auditContext,
   handle,
   baseClient,
-  transaction: handle === baseClient ? undefined : { deferredWrites: [], implicit: true },
+  transaction: handle === baseClient ? undefined : { deferredWrites: [] },
   atomic: true,
 });
 

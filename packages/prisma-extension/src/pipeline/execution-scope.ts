@@ -2,22 +2,18 @@
  * Execution scope
  *
  * What one audited operation runs in: its audit context, the client the operation and every
- * audit read and write share, and the transaction it is part of, if any. When the write policy
- * is atomic and no transaction is active, the scope opens an implicit one around the operation.
- * The scope is also the transaction runtime core's `dispatch` writes the audit records with.
+ * audit read and write share, and the interactive transaction it is part of, if any. The scope is
+ * also the transaction runtime core's `dispatch` writes the audit records with.
  */
 
-import type { AuditContext, AuditContextProvider, TransactionRuntime } from '@kuruwic/db-audit-core';
+import type { AuditContext, TransactionRuntime } from '@kuruwic/db-audit-core';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../internal-types.js';
 import { trackPendingWrite } from '../runtime/pending-writes.js';
 import { currentScope } from '../runtime/scope.js';
-import { withOptionalTransaction } from '../runtime/transaction-wrapper.js';
 
 export interface TransactionScope {
   /** Writes queued here run on the base client once the transaction has committed */
   readonly deferredWrites: Array<() => Promise<void>>;
-  /** Opened by the scope around this one operation, as opposed to the caller's own `$transaction` */
-  readonly implicit: boolean;
 }
 
 export interface ExecutionScope {
@@ -37,29 +33,19 @@ export interface ExecutionScopeInput {
   readonly auditContext: AuditContext;
   readonly baseClient: PrismaClientWithDynamicAccess;
   readonly atomic: boolean;
-  readonly provider: AuditContextProvider;
 }
 
-export const withExecutionScope = <T>(
-  input: ExecutionScopeInput,
-  run: (scope: ExecutionScope) => Promise<T>,
-): Promise<T> => {
-  const { auditContext, baseClient, atomic, provider } = input;
-  const inScope = withOptionalTransaction<T>({ shouldWrap: atomic, context: auditContext, baseClient }, provider);
-
-  return inScope((handle) => {
-    const runtime = currentScope();
-    const transaction = runtime?.transaction;
-    return run({
-      auditContext,
-      handle,
-      baseClient,
-      transaction: transaction
-        ? { deferredWrites: transaction.deferredWrites, implicit: runtime?.isInImplicitTransaction === true }
-        : undefined,
-      atomic,
-    });
-  });
+/** The scope of an operation that runs now: inside the interactive transaction the runtime scope holds, if any */
+export const executionScopeOf = (input: ExecutionScopeInput): ExecutionScope => {
+  const { auditContext, baseClient, atomic } = input;
+  const transaction = currentScope()?.transaction;
+  return {
+    auditContext,
+    handle: transaction?.client ?? baseClient,
+    baseClient,
+    transaction: transaction ? { deferredWrites: transaction.deferredWrites } : undefined,
+    atomic,
+  };
 };
 
 /**

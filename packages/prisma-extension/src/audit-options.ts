@@ -34,6 +34,8 @@ export interface AuditOptions {
   /** Accessor of the audit-log model on the client (camelCase) */
   readonly auditLogModel: string;
   readonly policyConfig: PolicyConfig;
+  /** Whether the client proxy opens an interactive transaction for an operation whose audit is awaited */
+  readonly openImplicitTransaction: boolean;
   readonly resolveConfig: ResolveConfig;
   readonly composeConfig: ComposeConfig;
   readonly writer: WriteFn | undefined;
@@ -87,6 +89,7 @@ export const normalizeAuditOptions = (options: PrismaAuditExtensionOptions): Aud
     schemaMetadata,
     queryOmitSupported: supportsQueryOmit(Prisma.prismaVersion?.client),
     auditLogModel,
+    openImplicitTransaction: performance?.openImplicitTransaction ?? false,
     policyConfig: {
       awaitWrite: performance?.awaitWrite ?? true,
       awaitWriteIf: awaitWriteIf && ((modelName, tags) => awaitWriteIf(modelName, [...tags])),

@@ -2,10 +2,10 @@
  * Write policy
  *
  * Decides, before the caller's operation executes, whether the operation is audited at all
- * (sampling) and, when it is, whether its audit rows are written inside the same transaction as
- * the operation. It has to be known before execution so that an adapter can open an implicit
- * transaction around the operation when the policy is atomic and none is active; the core itself
- * opens none.
+ * (sampling) and, when it is, whether its audit rows are atomic: written, awaited, inside the
+ * operation's transaction when it runs in one and once it has committed otherwise. It is known
+ * before execution so that an adapter may open a transaction around an atomic operation when none
+ * is active; the core itself opens none.
  */
 
 export interface PolicyConfig {

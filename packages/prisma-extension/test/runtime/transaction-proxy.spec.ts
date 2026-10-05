@@ -57,9 +57,9 @@ const runThroughHandler = (
   };
   const handler = createTransactionProxyHandler({
     provider,
-    batchAuditMayBeAwaited: true,
     originalTransaction,
     target,
+    receiver: target,
   });
   return provider.runAsync(baseContext, () => handler(callback));
 };
@@ -205,9 +205,9 @@ describe('createTransactionProxyHandler (deferred-write drain timing)', () => {
     };
     const handler = createTransactionProxyHandler({
       provider,
-      batchAuditMayBeAwaited: true,
       originalTransaction,
       target,
+      receiver: target,
     });
 
     await provider.runAsync(baseContext, () => handler(callback));
@@ -259,9 +259,9 @@ describe('createTransactionProxyHandler (deferred-write drain timing)', () => {
     };
     const handler = createTransactionProxyHandler({
       provider,
-      batchAuditMayBeAwaited: true,
       originalTransaction,
       target,
+      receiver: target,
     });
 
     await expect(provider.runAsync(baseContext, () => handler(callback))).rejects.toThrow('commit failed');
@@ -290,7 +290,6 @@ describe('createTransactionProxy', () => {
     const target = new FakeClient();
     const proxy = createTransactionProxy(target, {
       provider: createAsyncLocalStorageProvider(),
-      batchAuditMayBeAwaited: true,
     });
 
     expect(proxy.user).toBe(target.user);
@@ -302,7 +301,6 @@ describe('createTransactionProxy', () => {
     const target = new FakeClient();
     const proxy = createTransactionProxy(target, {
       provider: createAsyncLocalStorageProvider(),
-      batchAuditMayBeAwaited: true,
     });
 
     expect('user' in proxy).toBe(true);
@@ -324,15 +322,11 @@ describe('createTransactionProxy', () => {
     };
   };
 
-  const passesThrough = async (
-    proxyConfig: { readonly batchAuditMayBeAwaited: boolean },
-    operations: unknown,
-    auditContext: AuditContext | undefined,
-  ) => {
+  const passesThrough = async (operations: unknown, auditContext: AuditContext | undefined) => {
     const provider = createAsyncLocalStorageProvider();
     const target = new FakeClient();
     const original = vi.spyOn(target, '$transaction');
-    const proxy = createTransactionProxy(target, { provider, ...proxyConfig });
+    const proxy = createTransactionProxy(target, { provider });
 
     await (auditContext
       ? provider.runAsync(auditContext, () => proxy.$transaction(operations))
@@ -343,73 +337,133 @@ describe('createTransactionProxy', () => {
     expect(original.mock.instances[0]).toBe(target);
   };
 
-  it('passes the array form of $transaction through untouched without an audit context', async () => {
-    await passesThrough({ batchAuditMayBeAwaited: true }, [lazyOperation(() => 'a')], undefined);
-  });
-
-  it('passes the array form of $transaction through untouched when no audit can be awaited', async () => {
-    await passesThrough({ batchAuditMayBeAwaited: false }, [lazyOperation(() => 'a')], baseContext);
+  it('passes the array form of $transaction through untouched, with an audit context', async () => {
+    await passesThrough([lazyOperation(() => 'a')], baseContext);
   });
 
   it('passes an array form Prisma would reject through untouched, for Prisma to reject it', async () => {
-    await passesThrough({ batchAuditMayBeAwaited: true }, [Promise.resolve('a')], baseContext);
+    await passesThrough([Promise.resolve('a')], baseContext);
   });
 
-  it('runs the array form of $transaction as one interactive transaction, its operations in order with the batch client in scope', async () => {
-    const provider = createAsyncLocalStorageProvider();
-    const txClient: TransactionalPrismaClient = { _isTx: true };
-    const target = new FakeClient();
-    const original = vi.spyOn(target, '$transaction').mockImplementation(async (...args: unknown[]) => {
-      const callback = args[0] as (tx: TransactionalPrismaClient) => Promise<unknown>;
-      return callback(txClient);
+  describe('with operation recipes', () => {
+    /** A client whose `user` operations are lazy and record the client they ran on */
+    const createRecipeTarget = () => {
+      const ran: Array<{ readonly action: string; readonly client: string; readonly inScope: unknown }> = [];
+      const clientNamed = (name: string) => ({
+        user: {
+          create: (args: unknown) =>
+            lazyOperation(() => {
+              ran.push({ action: 'create', client: name, inScope: resolveTxClientFromRuntime() });
+              return { created: args };
+            }),
+          findMany: () =>
+            lazyOperation(() => {
+              ran.push({ action: 'findMany', client: name, inScope: resolveTxClientFromRuntime() });
+              return [];
+            }),
+        },
+      });
+      const tx = clientNamed('transaction');
+      const $transaction = vi.fn(async (...args: unknown[]): Promise<unknown> => {
+        const [first] = args;
+        return typeof first === 'function' ? first(tx) : Promise.all(first as unknown[]);
+      });
+      const target = { ...clientNamed('client'), $transaction, $extends: () => undefined };
+      return { target, tx, ran, $transaction };
+    };
+
+    const recipesAwaiting = (awaitsAudit: boolean) => ({
+      modelOfAccessor: new Map([['user', 'User']]),
+      relatedModel: () => undefined,
+      awaitsAudit: () => awaitsAudit,
+      auditMayBeAwaited: true,
     });
-    const proxy = createTransactionProxy(target, { provider, batchAuditMayBeAwaited: true });
-    const seen: Array<{ readonly name: string; readonly batchClient: unknown; readonly client: unknown }> = [];
-    const operation = (name: string) =>
-      lazyOperation(() => {
-        seen.push({ name, batchClient: currentScope()?.batchClient, client: resolveTxClientFromRuntime() });
-        return name;
+
+    it('returns the same delegate and the same action for a property read twice', () => {
+      const { target } = createRecipeTarget();
+      const proxy = createTransactionProxy(target, {
+        provider: createAsyncLocalStorageProvider(),
+        recipes: recipesAwaiting(true),
       });
 
-    const results = await provider.runAsync(baseContext, () =>
-      proxy.$transaction([operation('first'), operation('second')], { isolationLevel: 'Serializable' }),
-    );
-
-    expect(results).toEqual(['first', 'second']);
-    expect(seen).toEqual([
-      { name: 'first', batchClient: txClient, client: txClient },
-      { name: 'second', batchClient: txClient, client: txClient },
-    ]);
-    expect(original).toHaveBeenCalledTimes(1);
-    expect(typeof original.mock.calls[0]?.[0]).toBe('function');
-    expect(original.mock.calls[0]?.[1]).toEqual({ isolationLevel: 'Serializable' });
-  });
-
-  it('drains the writes queued in a batch run as an interactive transaction only after it resolves', async () => {
-    const provider = createAsyncLocalStorageProvider();
-    const target = new FakeClient();
-    let resolveCommit: (() => void) | undefined;
-    vi.spyOn(target, '$transaction').mockImplementation(async (...args: unknown[]) => {
-      const callback = args[0] as (tx: TransactionalPrismaClient) => Promise<unknown>;
-      const result = await callback({});
-      await new Promise<void>((resolve) => {
-        resolveCommit = resolve;
-      });
-      return result;
+      expect(proxy.user).toBe(proxy.user);
+      expect(proxy.user.create).toBe(proxy.user.create);
     });
-    const proxy = createTransactionProxy(target, { provider, batchAuditMayBeAwaited: true });
-    const deferredWrite = vi.fn(async () => {});
 
-    const batch = provider.runAsync(baseContext, () =>
-      proxy.$transaction([lazyOperation(() => enqueueDeferredWrite(deferredWrite))]),
-    );
-    await vi.waitFor(() => expect(resolveCommit).toBeDefined());
-    expect(deferredWrite).not.toHaveBeenCalled();
+    it('runs nothing until a call is awaited, then runs a write whose audit is awaited in an interactive transaction of the client', async () => {
+      const provider = createAsyncLocalStorageProvider();
+      const { target, tx, ran, $transaction } = createRecipeTarget();
+      const proxy = createTransactionProxy(target, { provider, recipes: recipesAwaiting(true) });
 
-    resolveCommit?.();
-    await batch;
-    await flushAllPendingWrites();
-    expect(deferredWrite).toHaveBeenCalledTimes(1);
+      const created = proxy.user.create({ email: 'a' });
+      expect(ran).toEqual([]);
+
+      await expect(provider.runAsync(baseContext, async () => await created)).resolves.toEqual({
+        created: { email: 'a' },
+      });
+      expect($transaction).toHaveBeenCalledTimes(1);
+      expect(ran).toEqual([{ action: 'create', client: 'transaction', inScope: tx }]);
+    });
+
+    it('runs a call whose audit is not awaited on the client itself', async () => {
+      const provider = createAsyncLocalStorageProvider();
+      const { target, ran, $transaction } = createRecipeTarget();
+      const proxy = createTransactionProxy(target, { provider, recipes: recipesAwaiting(false) });
+
+      await provider.runAsync(baseContext, async () => await proxy.user.create({ email: 'a' }));
+
+      expect($transaction).not.toHaveBeenCalled();
+      expect(ran).toEqual([{ action: 'create', client: 'client', inScope: undefined }]);
+    });
+
+    it("runs a batch of the client's calls in one interactive transaction, in order, at the caller's isolation level", async () => {
+      const provider = createAsyncLocalStorageProvider();
+      const { target, tx, ran, $transaction } = createRecipeTarget();
+      const proxy = createTransactionProxy(target, { provider, recipes: recipesAwaiting(true) });
+
+      const results = await provider.runAsync(baseContext, () =>
+        proxy.$transaction([proxy.user.create({ email: 'a' }), proxy.user.findMany()], {
+          isolationLevel: 'Serializable',
+        }),
+      );
+
+      expect(results).toEqual([{ created: { email: 'a' } }, []]);
+      expect(ran).toEqual([
+        { action: 'create', client: 'transaction', inScope: tx },
+        { action: 'findMany', client: 'transaction', inScope: tx },
+      ]);
+      expect($transaction).toHaveBeenCalledTimes(1);
+      expect(typeof $transaction.mock.calls[0]?.[0]).toBe('function');
+      expect($transaction.mock.calls[0]?.[1]).toEqual({ isolationLevel: 'Serializable' });
+    });
+
+    it("runs a batch of the client's calls as Prisma's own batch without an audit context", async () => {
+      const provider = createAsyncLocalStorageProvider();
+      const { target, ran, $transaction } = createRecipeTarget();
+      const proxy = createTransactionProxy(target, { provider, recipes: recipesAwaiting(true) });
+
+      await proxy.$transaction([proxy.user.create({ email: 'a' })]);
+
+      expect(Array.isArray($transaction.mock.calls[0]?.[0])).toBe(true);
+      expect(ran).toEqual([{ action: 'create', client: 'client', inScope: undefined }]);
+    });
+
+    it('rejects a batch holding an operation that is not a call of the client before running anything', async () => {
+      const provider = createAsyncLocalStorageProvider();
+      const { target, ran, $transaction } = createRecipeTarget();
+      const proxy = createTransactionProxy(target, { provider, recipes: recipesAwaiting(true) });
+      const foreign = vi.fn(() => 'foreign');
+
+      await expect(
+        provider.runAsync(baseContext, () =>
+          proxy.$transaction([proxy.user.create({ email: 'a' }), lazyOperation(foreign)]),
+        ),
+      ).rejects.toThrow('The operation at index 1 of the batch $transaction was not created by an audited client');
+
+      expect($transaction).not.toHaveBeenCalled();
+      expect(foreign).not.toHaveBeenCalled();
+      expect(ran).toEqual([]);
+    });
   });
 
   it('runs an interactive $transaction callback inside the scope of its transactional client', async () => {
@@ -420,7 +474,7 @@ describe('createTransactionProxy', () => {
       const callback = args[0] as (tx: TransactionalPrismaClient) => Promise<unknown>;
       return callback(txClient);
     });
-    const proxy = createTransactionProxy(target, { provider, batchAuditMayBeAwaited: true });
+    const proxy = createTransactionProxy(target, { provider });
     let clientInsideCallback: unknown;
 
     const result = await provider.runAsync(baseContext, () =>
@@ -442,7 +496,7 @@ describe('createTransactionProxy', () => {
       const callback = args[0] as (tx: TransactionalPrismaClient) => Promise<unknown>;
       return callback(txClient);
     });
-    const proxy = createTransactionProxy(target, { provider, batchAuditMayBeAwaited: true });
+    const proxy = createTransactionProxy(target, { provider });
     let clientInsideCallback: unknown;
     let contextInsideCallback: AuditContext | undefined;
 
@@ -460,7 +514,7 @@ describe('createTransactionProxy', () => {
   it('proxies a client derived by $extends, so that its interactive $transaction runs inside the scope', async () => {
     const provider = createAsyncLocalStorageProvider();
     const txClient: TransactionalPrismaClient = { _isTx: true };
-    const proxy = createTransactionProxy(new FakeClient(), { provider, batchAuditMayBeAwaited: true });
+    const proxy = createTransactionProxy(new FakeClient(), { provider });
     const extension = { name: 'derived' };
 
     const derived = proxy.$extends(extension);

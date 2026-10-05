@@ -6,13 +6,7 @@
  */
 
 import type { AuditContext, AuditRecord, FailureSink, MutationEvent } from '@kuruwic/db-audit-core';
-import {
-  createActorId,
-  createAggregateId,
-  createAsyncLocalStorageProvider,
-  createEntityId,
-  createFailureSink,
-} from '@kuruwic/db-audit-core';
+import { createActorId, createAggregateId, createEntityId, createFailureSink } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../src/internal-types.js';
 import type { ExecutionScope } from '../../src/pipeline/execution-scope.js';
@@ -113,7 +107,6 @@ const createDeps = (overrides: Partial<AuditPipelineDependencies> = {}) => {
     reportWriteFailure: vi.fn(async () => {}),
   };
   const deps: AuditPipelineDependencies = {
-    provider: createAsyncLocalStorageProvider(),
     singleExecutor: succeedingExecutor(),
     batchExecutor: succeedingExecutor(),
     produceRecords: vi.fn(async () => [record]),
@@ -134,18 +127,33 @@ const auditWriteOf = (deps: AuditPipelineDependencies) => vi.mocked(deps.dispatc
 
 describe('runAuditedOperation', () => {
   describe('policy and scope', () => {
-    it('opens an implicit transaction when the policy is atomic and none is active, and writes immediately in it', async () => {
+    it('runs on the base client without opening a transaction when the policy is atomic outside any, and awaits the write', async () => {
       const baseClient = createBaseClient();
       const deps = createDeps();
 
       await runAuditedOperation({ operation: interceptedOf(), auditContext, baseClient, atomic: true }, deps);
 
-      expect(baseClient.transactionsOpened.count).toBe(1);
+      expect(baseClient.transactionsOpened.count).toBe(0);
       const scope = scopeSeenBy(deps.singleExecutor);
-      expect(scope.handle).toBe(transactionClient);
+      expect(scope.handle).toBe(baseClient);
       expect(scope.baseClient).toBe(baseClient);
-      expect(scope.transaction?.implicit).toBe(true);
+      expect(scope.transaction).toBeUndefined();
       expect(scope.atomic).toBe(true);
+      expect(getPendingWriteCount()).toBe(0);
+      expect(auditWriteOf(deps)).toHaveBeenCalledWith(baseClient, [record]);
+    });
+
+    it('runs on the active transaction client and writes immediately in it when the policy is atomic inside a transaction', async () => {
+      const baseClient = createBaseClient();
+      const deps = createDeps();
+      const deferredWrites: Array<() => Promise<void>> = [];
+
+      await withScope({ transaction: { client: transactionClient, deferredWrites } }, () =>
+        runAuditedOperation({ operation: interceptedOf(), auditContext, baseClient, atomic: true }, deps),
+      );
+
+      expect(scopeSeenBy(deps.singleExecutor).handle).toBe(transactionClient);
+      expect(deferredWrites).toHaveLength(0);
       expect(auditWriteOf(deps)).toHaveBeenCalledWith(transactionClient, [record]);
     });
 
@@ -189,7 +197,7 @@ describe('runAuditedOperation', () => {
       expect(baseClient.transactionsOpened.count).toBe(0);
       const scope = scopeSeenBy(deps.singleExecutor);
       expect(scope.handle).toBe(transactionClient);
-      expect(scope.transaction).toEqual({ deferredWrites, implicit: false });
+      expect(scope.transaction).toEqual({ deferredWrites });
       expect(deferredWrites).toHaveLength(1);
       expect(auditWriteOf(deps)).not.toHaveBeenCalled();
       await deferredWrites[0]?.();
@@ -224,18 +232,6 @@ describe('runAuditedOperation', () => {
         return outcome;
       });
 
-    it("runs the operation on the implicit transaction client's model delegate when the scope opened the transaction", async () => {
-      const update = vi.fn(async () => outcome.result);
-      const baseClient = createBaseClient(transactionClientWith({ user: { update } }));
-      const deps = createDeps({ singleExecutor: runningTheOperation() });
-      const operation = interceptedOf();
-
-      await runAuditedOperation({ operation, auditContext, baseClient, atomic: true }, deps);
-
-      expect(update).toHaveBeenCalledWith(args);
-      expect(operation.query).not.toHaveBeenCalled();
-    });
-
     it("continues the operation through query inside the caller's own transaction", async () => {
       const update = vi.fn();
       const deps = createDeps({ singleExecutor: runningTheOperation() });
@@ -262,55 +258,22 @@ describe('runAuditedOperation', () => {
       expect(update).not.toHaveBeenCalled();
     });
 
-    it('fails when the model delegate has no such action', async () => {
+    it.each([
+      { path: 'outside any transaction', atomic: false },
+      { path: 'with an atomic policy', atomic: true },
+    ])("tags the caller's own mutation error thrown through query $path so it propagates raw", async ({ atomic }) => {
+      const callerError = new Error('Unique constraint failed on the fields: (`email`)');
+      const operation = interceptedOf(
+        'update',
+        vi.fn(async () => {
+          throw callerError;
+        }),
+      );
       const deps = createDeps({ singleExecutor: runningTheOperation() });
 
       await expect(
-        runAuditedOperation(
-          { operation: interceptedOf(), auditContext, baseClient: createBaseClient(), atomic: true },
-          deps,
-        ),
-      ).rejects.toThrow('Model "User" or action "update" not found');
-    });
-
-    it.each([
-      {
-        path: 'query',
-        setup: (callerError: Error) => ({
-          baseClient: createBaseClient(),
-          atomic: false,
-          operation: interceptedOf(
-            'update',
-            vi.fn(async () => {
-              throw callerError;
-            }),
-          ),
-        }),
-      },
-      {
-        path: 'the model delegate',
-        setup: (callerError: Error) => ({
-          baseClient: createBaseClient(
-            transactionClientWith({
-              user: {
-                update: vi.fn(async () => {
-                  throw callerError;
-                }),
-              },
-            }),
-          ),
-          atomic: true,
-          operation: interceptedOf(),
-        }),
-      },
-    ])("tags the caller's own mutation error thrown through $path so it propagates raw", async ({ setup }) => {
-      const callerError = new Error('Unique constraint failed on the fields: (`email`)');
-      const { baseClient, atomic, operation } = setup(callerError);
-      const deps = createDeps({ singleExecutor: runningTheOperation() });
-
-      await expect(runAuditedOperation({ operation, auditContext, baseClient, atomic }, deps)).rejects.toBe(
-        callerError,
-      );
+        runAuditedOperation({ operation, auditContext, baseClient: createBaseClient(), atomic }, deps),
+      ).rejects.toBe(callerError);
 
       expect(isCallerMutationError(callerError)).toBe(true);
       expect(deps.failureSink.notify).not.toHaveBeenCalled();
@@ -424,7 +387,24 @@ describe('runAuditedOperation', () => {
         error: buildError,
       };
 
-      it('rejects with the original error when the policy is atomic', async () => {
+      it('rejects with the original error when the policy is atomic inside a transaction', async () => {
+        const deps = createDeps({ singleExecutor: failingBuildExecutor() });
+
+        await expect(
+          withScope({ transaction: { client: transactionClient, deferredWrites: [] } }, () =>
+            runAuditedOperation(
+              { operation: interceptedOf(), auditContext, baseClient: createBaseClient(), atomic: true },
+              deps,
+            ),
+          ),
+        ).rejects.toBe(buildError);
+
+        expect(deps.failureSink.notify).toHaveBeenCalledTimes(1);
+        expect(deps.failureSink.notify).toHaveBeenCalledWith(buildFailure);
+        expect(auditWriteOf(deps)).not.toHaveBeenCalled();
+      });
+
+      it('returns the result and reports the dropped records when the policy is atomic outside any transaction', async () => {
         const deps = createDeps({ singleExecutor: failingBuildExecutor() });
 
         await expect(
@@ -432,10 +412,9 @@ describe('runAuditedOperation', () => {
             { operation: interceptedOf(), auditContext, baseClient: createBaseClient(), atomic: true },
             deps,
           ),
-        ).rejects.toBe(buildError);
+        ).resolves.toBe(outcome.result);
 
-        expect(deps.failureSink.notify).toHaveBeenCalledTimes(1);
-        expect(deps.failureSink.notify).toHaveBeenCalledWith(buildFailure);
+        expect(deps.failureSink.reportDroppedBuild).toHaveBeenCalledWith(buildFailure);
         expect(auditWriteOf(deps)).not.toHaveBeenCalled();
       });
 
@@ -474,7 +453,7 @@ describe('runAuditedOperation', () => {
       });
     });
 
-    it('lets a write failure propagate without reporting it as diff-generation', async () => {
+    it('lets a write failure inside a transaction propagate without reporting it as diff-generation', async () => {
       const writeError = new Error('DB write failed');
       const deps = createDeps({
         dispatchConfig: {
@@ -488,9 +467,11 @@ describe('runAuditedOperation', () => {
       });
 
       await expect(
-        runAuditedOperation(
-          { operation: interceptedOf(), auditContext, baseClient: createBaseClient(), atomic: true },
-          deps,
+        withScope({ transaction: { client: transactionClient, deferredWrites: [] } }, () =>
+          runAuditedOperation(
+            { operation: interceptedOf(), auditContext, baseClient: createBaseClient(), atomic: true },
+            deps,
+          ),
         ),
       ).rejects.toBe(writeError);
 

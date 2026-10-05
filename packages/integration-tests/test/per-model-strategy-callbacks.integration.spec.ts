@@ -134,7 +134,9 @@ describe('Per-model strategy callbacks for models without tags', () => {
     const createAwaitWriteIfScenario = () => {
       const awaitWriteIf = vi.fn((modelName: string, _tags: string[]) => modelName === 'Tag');
       const scenario = createScenario(context.databaseUrl, {
-        performance: { awaitWrite: false, awaitWriteIf },
+        // The client opens a transaction around a write whose audit is awaited, which the writer's
+        // error rolls back under 'throw'.
+        performance: { awaitWrite: false, awaitWriteIf, openImplicitTransaction: true },
         failingWriter: true,
       });
       return { awaitWriteIf, scenario };

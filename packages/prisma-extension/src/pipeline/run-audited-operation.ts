@@ -1,22 +1,20 @@
 /**
  * Audited operation
  *
- * The one path every audited write takes, single or batch: given the write policy's decision
- * whether the audit rows join the operation's transaction, the execution scope opens that
- * transaction when needed, the executor runs the reads before the write and the write, core's
- * `dispatch` builds the records and writes them with the scope as the transaction runtime, and
- * the caller receives the result.
+ * The one path every audited write takes, single or batch: the execution scope names the
+ * interactive transaction the operation runs in, if any, the executor runs the reads before the
+ * write and the write, core's `dispatch` builds the records and writes them by the write policy's
+ * decision with the scope as the transaction runtime, and the caller receives the result.
  */
 
-import type { AuditContext, AuditContextProvider, DispatchConfig, FailureSink } from '@kuruwic/db-audit-core';
+import type { AuditContext, DispatchConfig, FailureSink } from '@kuruwic/db-audit-core';
 import { dispatch } from '@kuruwic/db-audit-core';
 import type { AuditAction } from '../grammar/operations.js';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../internal-types.js';
 import { isCallerMutationError, runCallerMutation } from '../utils/caller-mutation-error.js';
-import { getModelDelegate, getModelOperation } from '../utils/model-accessor.js';
 import { isBatchOperation } from '../utils/operation-classifier.js';
 import { toError } from '../utils/to-error.js';
-import { type ExecutionScope, transactionRuntimeOf, withExecutionScope } from './execution-scope.js';
+import { type ExecutionScope, executionScopeOf, transactionRuntimeOf } from './execution-scope.js';
 import type { AuditedOperation, ExecutedOperation, OperationExecutor } from './executor.js';
 import type { RecordProducer } from './produce-records.js';
 
@@ -35,12 +33,14 @@ export interface AuditedOperationInput {
   readonly operation: InterceptedOperation;
   readonly auditContext: AuditContext;
   readonly baseClient: PrismaClientWithDynamicAccess;
-  /** The write policy's decision for the sampled-in operation: its audit rows join its transaction */
+  /**
+   * The write policy's decision for the sampled-in operation: its audit rows are written before it
+   * returns, in its transaction inside one and once it has committed outside any
+   */
   readonly atomic: boolean;
 }
 
 export interface AuditPipelineDependencies {
-  readonly provider: AuditContextProvider;
   readonly singleExecutor: OperationExecutor;
   readonly batchExecutor: OperationExecutor;
   readonly produceRecords: RecordProducer;
@@ -49,27 +49,16 @@ export interface AuditPipelineDependencies {
 }
 
 /**
- * How the executors run the caller's mutation.
- *
- * `query` continues the intercepted operation on the client the caller invoked it on (the
- * caller's interactive transaction client inside `$transaction`, the base client outside any
- * transaction), which in both cases is the client the audit reads and writes run on. Inside the
- * transaction the scope opened, which began after interception and which no public Prisma API
- * rebinds `query` to, the model delegate of the scope's handle runs it instead. Both paths run
- * through `runCallerMutation`, so a failure of the caller's own write reaches the caller raw.
+ * How the executors run the caller's mutation: `query` continues the intercepted operation down
+ * the extension chain on the client the caller invoked it on (the interactive transaction's client
+ * inside `$transaction`, the client itself outside any), which is the client the audit reads and
+ * writes run on. It runs through `runCallerMutation`, so a failure of the caller's own write
+ * reaches the caller raw.
  */
 const operationContinuation =
-  (operation: InterceptedOperation, scope: ExecutionScope): AuditedOperation['execute'] =>
-  async (args) => {
-    if (scope.transaction?.implicit !== true) {
-      return runCallerMutation(() => operation.query(args));
-    }
-    const mutation = getModelOperation(getModelDelegate(scope.handle, operation.model), operation.action);
-    if (!mutation) {
-      throw new Error(`Model "${operation.model}" or action "${operation.action}" not found`);
-    }
-    return runCallerMutation(() => mutation(args));
-  };
+  (operation: InterceptedOperation): AuditedOperation['execute'] =>
+  (args) =>
+    runCallerMutation(() => operation.query(args));
 
 /**
  * The reads before the write and the write. The caller's own mutation error (see
@@ -112,7 +101,7 @@ const runInScope = async (
   deps: AuditPipelineDependencies,
 ): Promise<unknown> => {
   const { model, action, args } = intercepted;
-  const operation: AuditedOperation = { model, action, args, execute: operationContinuation(intercepted, scope) };
+  const operation: AuditedOperation = { model, action, args, execute: operationContinuation(intercepted) };
   const executor = isBatchOperation(action) ? deps.batchExecutor : deps.singleExecutor;
   const executed = await runExecutor(executor, operation, scope, deps);
   await dispatch(
@@ -136,7 +125,5 @@ export const runAuditedOperation = (
 ): Promise<unknown> => {
   const { operation, auditContext, baseClient, atomic } = input;
 
-  return withExecutionScope({ auditContext, baseClient, atomic, provider: deps.provider }, (scope) =>
-    runInScope(operation, scope, deps),
-  );
+  return runInScope(operation, executionScopeOf({ auditContext, baseClient, atomic }), deps);
 };

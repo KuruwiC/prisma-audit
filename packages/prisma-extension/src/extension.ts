@@ -4,9 +4,9 @@
  * The `$allOperations` hook: decides whether an intercepted operation is audited (its model, its
  * kind, then the write policy's sampling), selects the relations its nested writes touch, runs it
  * through the audited-operation pipeline on the library-owned runtime context, and returns the
- * result in the shape the caller requested. An operation of a batch transaction that runs as an
- * interactive one is first re-issued on that transaction's client, where the hook sees it again
- * as an operation of the transaction.
+ * result in the shape the caller requested. The hook always continues the caller's operation
+ * through `query`; with `openImplicitTransaction` the client proxy opens the interactive
+ * transaction before the operation enters the extension chain.
  *
  * @module extension
  * @see {@link createAuditLogExtension}
@@ -21,13 +21,13 @@ import { createBatchExecutor } from './pipeline/batch-executor.js';
 import { createRecordProducer } from './pipeline/produce-records.js';
 import { type AuditPipelineDependencies, runAuditedOperation } from './pipeline/run-audited-operation.js';
 import { createSingleExecutor } from './pipeline/single-executor.js';
-import { reissueOnBatchClient } from './runtime/batch-transaction.js';
-import { currentScope, isProcessingAuditLog, withScope } from './runtime/scope.js';
-import { createTransactionProxy } from './runtime/transaction-proxy.js';
+import { isProcessingAuditLog, withScope } from './runtime/scope.js';
+import { createTransactionProxy, type RecipeTransactionConfig } from './runtime/transaction-proxy.js';
 import type { PrismaAuditExtensionOptions } from './types.js';
 import { type ClientShape, injectAuditedSelection, projectToRequestedShape } from './utils/audited-selection.js';
 import { type ClientOmittedFields, readClientOmittedFields } from './utils/client-omit.js';
 import { isAuditableAction } from './utils/extension-utils.js';
+import { getModelAccessor } from './utils/model-accessor.js';
 
 const createPipelineDependencies = (
   audit: AuditOptions,
@@ -37,7 +37,6 @@ const createPipelineDependencies = (
   const failureSink = createFailureSink(audit.errorHandling);
 
   return {
-    provider: audit.provider,
     singleExecutor: createSingleExecutor({
       Prisma,
       schemaMetadata,
@@ -64,6 +63,31 @@ const createPipelineDependencies = (
   };
 };
 
+/** What the client proxy needs to open the interactive transaction of an operation whose audit is awaited */
+const recipeConfigOf = (audit: AuditOptions): RecipeTransactionConfig => {
+  const { policyConfig, schemaMetadata } = audit;
+  const modelNames = audit.Prisma.dmmf.datamodel.models.map((model) => model.name);
+  const relatedModels = new Map(
+    modelNames.map((modelName) => [
+      modelName,
+      new Map(schemaMetadata.getRelationFields(modelName).map((field) => [field.name, field.relatedModel])),
+    ]),
+  );
+  return {
+    modelOfAccessor: new Map(modelNames.map((modelName) => [getModelAccessor(modelName), modelName])),
+    relatedModel: (modelName, field) => relatedModels.get(modelName)?.get(field),
+    awaitsAudit: (modelName, action) =>
+      audit.provider.getContext() !== undefined &&
+      isAuditableAction(action) &&
+      audit.shouldAudit(modelName) &&
+      (policyConfig.awaitWriteIf
+        ? policyConfig.awaitWriteIf(modelName, audit.modelTags(modelName))
+        : policyConfig.awaitWrite),
+    // `awaitWriteIf` may return true for any model, so its presence counts as making an audit awaitable.
+    auditMayBeAwaited: policyConfig.awaitWrite || policyConfig.awaitWriteIf !== undefined,
+  };
+};
+
 interface ClientAudit {
   readonly baseClient: PrismaClientWithDynamicAccess;
   readonly deps: AuditPipelineDependencies;
@@ -82,8 +106,7 @@ interface ClientAudit {
 export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) => {
   const audit = normalizeAuditOptions(options);
 
-  // `awaitWriteIf` may return true for any model, so its presence counts as making an audit awaitable.
-  const batchAuditMayBeAwaited = audit.policyConfig.awaitWrite || audit.policyConfig.awaitWriteIf !== undefined;
+  const recipes = audit.openImplicitTransaction ? recipeConfigOf(audit) : undefined;
 
   const auditOperation = async (params: ExtensionParams, { baseClient, deps, reading }: ClientAudit) => {
     const { operation, model, args, query } = params;
@@ -141,14 +164,11 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     const extendedClient = baseClient.$extends({
       name: 'prisma-audit',
       query: {
-        async $allOperations(params: ExtensionParams) {
-          const batchClient = currentScope()?.batchClient;
-          return batchClient ? reissueOnBatchClient(batchClient, params) : auditOperation(params, clientAudit);
-        },
+        $allOperations: (params: ExtensionParams) => auditOperation(params, clientAudit),
       },
     });
 
-    return createTransactionProxy(extendedClient as object, { provider: audit.provider, batchAuditMayBeAwaited });
+    return createTransactionProxy(extendedClient as object, { provider: audit.provider, recipes });
   };
 
   return audit.Prisma.defineExtension(extensionDefinition);

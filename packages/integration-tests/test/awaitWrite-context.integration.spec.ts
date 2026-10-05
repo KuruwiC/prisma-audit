@@ -2,7 +2,7 @@
  * Integration Tests: awaitWrite Context Preservation
  *
  * Verifies that AsyncLocalStorage context is preserved when awaitWrite: true,
- * ensuring audit logs are correctly written within implicit transactions.
+ * outside a transaction and inside the caller's own, so that audit logs are written.
  *
  * Context must survive $transaction boundaries; if it were lost, audit logs would be
  * silently skipped.
@@ -27,8 +27,8 @@ describe('awaitWrite Context Preservation Integration', () => {
     await cleanDatabase(context.prisma);
   });
 
-  describe('awaitWrite: true implicit transaction', () => {
-    it('should write audit logs when awaitWrite is true (implicit transaction)', async () => {
+  describe('awaitWrite: true outside any transaction', () => {
+    it('should write audit logs when awaitWrite is true', async () => {
       const auditContext: AuditContext = {
         actor: {
           category: 'model',
@@ -38,8 +38,8 @@ describe('awaitWrite Context Preservation Integration', () => {
         },
       };
 
-      // Create user with awaitWrite: true (default in test setup)
-      // This triggers an implicit transaction for synchronous audit log writing
+      // Create user with awaitWrite: true (default in test setup): the audit log is written,
+      // awaited, once the create has committed
       await context.provider.runAsync(auditContext, async () => {
         await context.prisma.user.create({
           data: {
