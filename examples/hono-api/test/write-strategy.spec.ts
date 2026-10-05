@@ -63,7 +63,7 @@ describe('Write Strategy Tests', () => {
   });
 
   describe('Sync Mode (awaitWrite: true)', () => {
-    it('should write operation and audit log atomically within implicit transaction', async () => {
+    it('should write operation and audit log atomically in the transaction the client opens (openImplicitTransaction)', async () => {
       if (!basePrisma) {
         throw new Error('basePrisma is not initialized');
       }
@@ -74,7 +74,7 @@ describe('Write Strategy Tests', () => {
       const prisma = createAuditClient(db, {
         provider: auditProvider,
         aggregateMapping: testAggregateMapping,
-        performance: { awaitWrite: true },
+        performance: { awaitWrite: true, openImplicitTransaction: true },
         Prisma,
       });
 
@@ -270,7 +270,7 @@ describe('Write Strategy Tests', () => {
   });
 
   describe('Transaction Coverage', () => {
-    it('should create audit logs for multiple sequential operations with implicit transactions (sync)', async () => {
+    it('should create audit logs for multiple sequential operations (sync)', async () => {
       if (!basePrisma) {
         throw new Error('basePrisma is not initialized');
       }
