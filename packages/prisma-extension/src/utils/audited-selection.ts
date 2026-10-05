@@ -249,7 +249,7 @@ const liftOmittedFields = (omit: unknown): { omit: Selection | undefined; lifted
 const selectionInDefaultShape = (
   reading: SelectionReading,
   modelName: string,
-  callerRest: Selection,
+  argsWithoutSelect: Selection,
   selected: Selection,
   relations: WrittenRelations,
 ): { value: Selection; injected: InjectedSelection } => {
@@ -260,7 +260,7 @@ const selectionInDefaultShape = (
   );
   const children = mergeWrittenRelations(reading, selectedRelations, relations);
 
-  const value: Selection = { ...callerRest };
+  const value: Selection = { ...argsWithoutSelect };
   if (Object.keys(children.entries).length > 0) {
     value.include = children.entries;
   }
@@ -291,10 +291,10 @@ const selectAuditedRows = (
   callerArgs: Selection,
   relations: WrittenRelations,
 ): { value: Selection; injected: InjectedSelection } => {
-  const { select, ...callerRest } = callerArgs;
+  const { select, ...argsWithoutSelect } = callerArgs;
   if (isRecord(select)) {
     if (reading.queryOmitSupported) {
-      return selectionInDefaultShape(reading, modelName, callerRest, select, relations);
+      return selectionInDefaultShape(reading, modelName, argsWithoutSelect, select, relations);
     }
     const children = mergeWrittenRelations(reading, select, relations);
     const addedFields = selectMissingScalarFields(reading.schemaMetadata, modelName, children.entries);
@@ -304,13 +304,13 @@ const selectAuditedRows = (
     };
   }
 
-  const { omit: callerOmit, ...rest } = callerArgs;
+  const { omit: callerOmit, ...argsWithoutOmit } = callerArgs;
   const { omit: callerKept, lifted } = liftOmittedFields(callerOmit);
   const clientOmitted = [...reading.clientOmittedFields.of(modelName)].filter((field) => callerKept?.[field] !== false);
   const omit = { ...omitEntriesReading(new Set(clientOmitted)), ...callerKept };
   const callerInclude = isRecord(callerArgs.include) ? callerArgs.include : undefined;
   const children = mergeWrittenRelations(reading, callerInclude ?? {}, relations);
-  const value: Selection = Object.keys(omit).length > 0 ? { ...rest, omit } : rest;
+  const value: Selection = Object.keys(omit).length > 0 ? { ...argsWithoutOmit, omit } : argsWithoutOmit;
   if (callerInclude || Object.keys(children.entries).length > 0) {
     value.include = children.entries;
   }
