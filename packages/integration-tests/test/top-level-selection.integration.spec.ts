@@ -1,5 +1,5 @@
 /**
- * Integration Test: an audited row read whole whatever the caller selects
+ * Integration Test: an audited row read in the client's default shape whatever the caller selects
  *
  * A caller's `select` or `omit` decides the shape of the value it receives, not the row the
  * audit records: the before and after states, `changes` and the resolvers see every column of
@@ -23,7 +23,7 @@ const POST_COLUMNS = ['authorId', 'content', 'createdAt', 'id', 'published', 'ti
 const keysOf = (value: unknown): string[] =>
   value !== null && typeof value === 'object' ? Object.keys(value).sort() : [];
 
-describe('an audited row read whole whatever the caller selects', () => {
+describe("an audited row read in the client's default shape whatever the caller selects", () => {
   let databaseUrl: string;
   const disconnects: Array<() => Promise<void>> = [];
 
