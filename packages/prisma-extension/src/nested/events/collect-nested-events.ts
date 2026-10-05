@@ -29,7 +29,9 @@ import {
   getPrimaryKeyConstraint,
   linksNamedRows,
   type NestedOperationInfo,
+  type NestedOperationKeyword,
   type NestedPreFetchResults,
+  namedTargets,
   relationRowsOf,
   targetWhereClauses,
 } from '../../grammar/nested-operations.js';
@@ -55,7 +57,13 @@ import { nestedLog } from '../../utils/debug.js';
 import { extractEntityIdentity } from '../../utils/id-generation.js';
 import { attachedFilter, type LinkReads } from '../pre-fetch/link-rows.js';
 import { getPreFetchListClient } from '../pre-fetch/model-client.js';
-import { keyNamedByWhere, parentKeyOf, parentRowIdentityOf, writesLinkedRow } from '../pre-fetch/parent-rows.js';
+import {
+  keyNamedByWhere,
+  parentKeyOf,
+  parentRowAsStoredOf,
+  parentRowIdentityOf,
+  writesLinkedRow,
+} from '../pre-fetch/parent-rows.js';
 import type { PreExistingRows } from '../pre-fetch/pre-existing-rows.js';
 import { preFetchedStateNamedBy, preFetchedStateUnder } from '../pre-fetch/pre-fetch-result-store.js';
 import { relationLinkOf } from '../pre-fetch/relation-link.js';
@@ -599,28 +607,82 @@ const linkColumnsOf = (
   return parentKey ? attachedFilter(link, parentKey) : {};
 };
 
+const LINKING_KEYWORDS: ReadonlySet<NestedOperationKeyword> = new Set(['connect', 'set', 'connectOrCreate']);
+
+/** Whether a keyword the relation field lists before `nestedOp`, and so runs before it, links `row` to the parent */
+const linkedEarlierInWrite = (nestedOp: NestedOperationInfo, row: Row): boolean =>
+  nestedOp.precedingWrites.some(
+    ({ operation, data }) =>
+      LINKING_KEYWORDS.has(operation) &&
+      namedTargets(operation, data).some(({ where }) => matchesUniqueWhere(row, where)),
+  );
+
+/**
+ * The top-level row as the database holds it: the row read before the write, else the row the
+ * operation returned when it writes none of `fields`
+ */
+const topLevelRowAsStored = (input: NestedEventCollectionInput, fields: readonly string[]): Row | undefined => {
+  if (input.topLevelBefore.kind === 'captured') {
+    return input.topLevelBefore.row;
+  }
+  return isRow(input.result) && !writesTopLevelField(input.args, fields) ? input.result : undefined;
+};
+
+/**
+ * The link columns a row linked to the parent of `nestedOp` holds, from the parent row as the
+ * database holds it; empty when the parent holds the foreign key or no read holds that row
+ */
+const linkColumnsAsStoredOf = (
+  nestedOp: NestedOperationInfo,
+  input: NestedEventCollectionInput,
+  deps: NestedEventCollectorDependencies,
+): Row => {
+  const link = relationLinkOf(deps.Prisma, input.modelName, nestedOp);
+  if (link?.side !== 'related') {
+    return {};
+  }
+  const parentRow = nestedOp.parent
+    ? parentRowAsStoredOf(nestedOp.parent, input.nestedPreFetchResults, deps.schemaMetadata)
+    : topLevelRowAsStored(input, link.references);
+  const parentKey = parentRow ? parentKeyOf(parentRow, link.references) : undefined;
+  return parentKey ? attachedFilter(link, parentKey) : {};
+};
+
 const linksDiffer = (row: Row, linkColumns: Row): boolean =>
   Object.entries(linkColumns).some(([field, value]) => String(row[field] ?? null) !== String(value ?? null));
 
 /**
- * A deleted row with the row the write left it as: a nested delete removes a row linked to its
- * parent, so that row holds the relation's link columns. A row read before the write that held
- * other link columns was linked to the parent by the write first; its after state is the read row
- * linked to the parent, so it is recorded under the parent it left and the one it was deleted
- * from. A row whose before state was not read holds only the key the operation names, completed
- * with the link columns, so its parent is known without a read.
+ * A row read before the write that a keyword listed before the delete linked to the parent, with
+ * the row the write deleted: the read row holding the parent's link columns as stored, so it is
+ * recorded under the parent it left and the one it was deleted from. Any other row read before
+ * the write was deleted as read and carries no row after the write.
  */
-const withRowAsWritten = (record: CollectedNestedRecord, linkColumns: Row): CollectedNestedRecord => {
-  if (record.beforeState.kind !== 'captured') {
-    const entity = { ...linkColumns, ...record.entity };
-    return { ...record, entity, rowAsWritten: entity };
+const withRowAsWritten = (
+  nestedOp: NestedOperationInfo,
+  record: CollectedNestedRecord,
+  linkColumns: Row,
+): CollectedNestedRecord => {
+  if (record.beforeState.kind !== 'captured' || !linkedEarlierInWrite(nestedOp, record.beforeState.row)) {
+    return record;
   }
   return linksDiffer(record.beforeState.row, linkColumns)
     ? { ...record, rowAsWritten: { ...record.beforeState.row, ...linkColumns } }
     : record;
 };
 
-/** The rows a nested delete removed, each with the row the write left it as (see {@link withRowAsWritten}) */
+/**
+ * A row whose before state was not read: the key the operation names, completed with the
+ * relation's link columns so its parent is known without a read, also as its row after the write
+ */
+const withLinkColumns = (record: CollectedNestedRecord, linkColumns: Row): CollectedNestedRecord => {
+  if (record.beforeState.kind === 'captured') {
+    return record;
+  }
+  const entity = { ...linkColumns, ...record.entity };
+  return { ...record, entity, rowAsWritten: entity };
+};
+
+/** The rows a nested delete removed (see {@link withRowAsWritten} and {@link withLinkColumns}) */
 const collectDeleteRecordsWithLinkColumns = async (
   nestedOp: NestedOperationInfo,
   input: NestedEventCollectionInput,
@@ -632,7 +694,8 @@ const collectDeleteRecordsWithLinkColumns = async (
     return records;
   }
   const linkColumns = linkColumnsOf(nestedOp, input, deps);
-  return records.map((record) => withRowAsWritten(record, linkColumns));
+  const linkColumnsAsStored = linkColumnsAsStoredOf(nestedOp, input, deps);
+  return records.map((record) => withLinkColumns(withRowAsWritten(nestedOp, record, linkColumnsAsStored), linkColumns));
 };
 
 const linkedRowNamedByAt = (

@@ -190,6 +190,30 @@ describe('CRUD Smoke Tests (MySQL)', () => {
     });
   });
 
+  describe('nested delete', () => {
+    it('records a nested deleted row under the parent as stored when the where names it in another case', async () => {
+      await context.prisma.user.create({ data: { id: 'case-user', email: 'case@example.com', name: 'Case' } });
+      await context.prisma.post.create({ data: { id: 'p1', title: 'Post', authorId: 'case-user' } });
+      await context.prisma.auditLog.deleteMany();
+
+      // MySQL's default collation compares strings case-insensitively, so 'CASE-USER' finds the row stored as 'case-user'
+      await context.provider.runAsync(testActor, () =>
+        context.prisma.user.update({ where: { id: 'CASE-USER' }, data: { posts: { delete: { id: 'p1' } } } }),
+      );
+
+      const auditLogs = await context.prisma.auditLog.findMany({
+        where: { entityType: 'Post', entityId: 'p1' },
+        orderBy: [{ aggregateType: 'asc' }, { aggregateId: 'asc' }],
+      });
+      expect(
+        auditLogs.map((log: Prisma.AuditLogGetPayload<object>) => [log.action, log.aggregateType, log.aggregateId]),
+      ).toEqual([
+        ['delete', 'Post', 'p1'],
+        ['delete', 'User', 'case-user'],
+      ]);
+    });
+  });
+
   describe('BATCH operations', () => {
     it('should create audit logs for createMany with auto-generated IDs', async () => {
       const result = await context.provider.runAsync(testActor, async () => {

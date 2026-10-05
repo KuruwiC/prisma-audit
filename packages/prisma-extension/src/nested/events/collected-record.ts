@@ -21,9 +21,9 @@ export interface CollectedNestedRecord {
   relatedModel: string;
   /**
    * For a delete, the event's after state: the row as the write left it before deleting it, where
-   * the before state does not show it. That is the row linked to the parent it was deleted from
-   * when the write linked it there first, or what is known of a row whose before state was not
-   * read. Undefined for a row deleted as it was read.
+   * the before state does not show it. That is the row holding the stored key of the parent it was
+   * deleted from when a keyword listed before the delete linked it there, or what is known of a
+   * row whose before state was not read. Undefined for a row deleted as it was read.
    */
   rowAsWritten?: Record<string, unknown>;
 }

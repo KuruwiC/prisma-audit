@@ -227,6 +227,17 @@ describe('fields a client-level omit hides', () => {
     });
   });
 
+  it('fails a foreignKey root on a hidden column of a nested deleted row the same way, recording it under its own root only', async () => {
+    const observer = vi.fn<AuditErrorObserver>();
+    const { basePrisma, prisma, run } = await setup({ errorHandling: { observer } });
+
+    await run(() => prisma.user.update({ where: { id: 'u1' }, data: { posts: { delete: { id: 'p1' } } } }));
+
+    expect(await aggregatesOf(basePrisma, 'Post')).toEqual(['p1:Post:p1']);
+    expect(observer).toHaveBeenCalledTimes(1);
+    expect(observer).toHaveBeenCalledWith(expect.objectContaining({ phase: 'id-resolver-call', modelName: 'Post' }));
+  });
+
   describe('fields an entity lists in auditOmittedFields', () => {
     describe('a top-level row', () => {
       it('records a change of a listed field masked, and returns the default fields', async () => {

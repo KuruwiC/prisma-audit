@@ -219,20 +219,46 @@ export const parentRowIdentityOf = (
   if (!parent) {
     return TOP_LEVEL_ROW;
   }
-  const { operation, element } = parent;
-  if (!targetsNamedByWhere(operation)) {
-    const grandparent = parentRowIdentityOf(operation.parent, preFetchResults, schemaMetadata);
-    return identityOfResult(preFetchedResultUnder(preFetchResults, operation.path, grandparent));
-  }
-  const where = namedTargets(operation.operation, operation.data).find((target) => target.element === element)?.where;
-  if (!where) {
-    return undefined;
-  }
-  const read = identityOfResult(preFetchedResultNamedBy(preFetchResults, operation.path, where));
-  if (read !== undefined) {
+  const read = identityOfResult(parentReadResultOf(parent, preFetchResults, schemaMetadata));
+  const where = parentWhereOf(parent);
+  if (read !== undefined || !where) {
     return read;
   }
-  const pkConstraint = getPrimaryKeyConstraint(schemaMetadata, operation.relatedModel);
+  const pkConstraint = getPrimaryKeyConstraint(schemaMetadata, parent.operation.relatedModel);
   const key = pkConstraint ? primaryKeyNamedBy(where, pkConstraint) : undefined;
   return key && pkConstraint ? extractEntityIdentity(key, pkConstraint.fields) : undefined;
+};
+
+/** The unique WHERE by which the element `parent` names its row; undefined for a row named as the related row of its own parent */
+const parentWhereOf = ({ operation, element }: NestedOperationParent): PreFetchRecord | undefined =>
+  targetsNamedByWhere(operation)
+    ? namedTargets(operation.operation, operation.data).find((target) => target.element === element)?.where
+    : undefined;
+
+/** What the read ahead of the operation found for the row the element `parent` names */
+const parentReadResultOf = (
+  parent: NestedOperationParent,
+  preFetchResults: NestedPreFetchResults,
+  schemaMetadata: SchemaMetadata,
+): NestedPreFetchResult | undefined => {
+  const { operation } = parent;
+  if (!targetsNamedByWhere(operation)) {
+    const grandparent = parentRowIdentityOf(operation.parent, preFetchResults, schemaMetadata);
+    return preFetchedResultUnder(preFetchResults, operation.path, grandparent);
+  }
+  const where = parentWhereOf(parent);
+  return where ? preFetchedResultNamedBy(preFetchResults, operation.path, where) : undefined;
+};
+
+/**
+ * The row the element `parent` names as the database held it before the write: the row read
+ * whole ahead of the operation; undefined when it was not read whole
+ */
+export const parentRowAsStoredOf = (
+  parent: NestedOperationParent,
+  preFetchResults: NestedPreFetchResults,
+  schemaMetadata: SchemaMetadata,
+): PreFetchRecord | undefined => {
+  const before = parentReadResultOf(parent, preFetchResults, schemaMetadata)?.before;
+  return before?.kind === 'captured' ? before.row : undefined;
 };
