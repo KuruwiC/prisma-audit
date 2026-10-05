@@ -86,11 +86,11 @@ const recipeConfigOf = (audit: AuditOptions): RecipeConfig => {
   };
 };
 
-/** The pipeline dependencies and selection reading built for the client the extension is applied to */
+/** The pipeline dependencies and client shape built for the client the extension is applied to */
 interface BaseClientPipeline {
   readonly baseClient: PrismaClientWithDynamicAccess;
   readonly deps: AuditPipelineDependencies;
-  readonly reading: ClientShape;
+  readonly shape: ClientShape;
 }
 
 /**
@@ -107,7 +107,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
 
   const recipes = audit.openImplicitTransaction ? recipeConfigOf(audit) : undefined;
 
-  const auditOperation = async (params: ExtensionParams, { baseClient, deps, reading }: BaseClientPipeline) => {
+  const auditOperation = async (params: ExtensionParams, { baseClient, deps, shape }: BaseClientPipeline) => {
     const { operation, model, args, query } = params;
     const auditContext = audit.provider.getContext();
 
@@ -125,7 +125,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
       return query(args);
     }
 
-    const injection = injectAuditedSelection(reading, model, operation, args);
+    const injection = injectAuditedSelection(shape, model, operation, args);
 
     // Mark the re-entrancy guard on the library-owned runtime store; the app context
     // stays untouched so downstream code keeps the caller's actor and request metadata.
@@ -154,7 +154,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     const pipeline: BaseClientPipeline = {
       baseClient,
       deps: createPipelineDependencies(audit, clientOmittedFields),
-      reading: {
+      shape: {
         schemaMetadata: audit.schemaMetadata,
         queryOmitSupported: audit.queryOmitSupported,
         clientOmittedFields,
