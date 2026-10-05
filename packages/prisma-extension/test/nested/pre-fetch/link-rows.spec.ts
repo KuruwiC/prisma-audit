@@ -109,7 +109,7 @@ describe('linkWriteOf', () => {
   const required = { ...optional, optional: false } as const;
   const operation = (keyword: 'connect' | 'set' | 'disconnect' | 'create', data: unknown, isList = true) => ({
     fieldName: 'labels',
-    writesBefore: [],
+    precedingWrites: [],
     relatedModel: 'Label',
     operation: keyword,
     isList,

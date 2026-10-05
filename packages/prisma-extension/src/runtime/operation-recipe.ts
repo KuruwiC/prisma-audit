@@ -141,14 +141,14 @@ const decisionOf = (recipe: Recipe, config: RecipeConfig): WritePolicyDecision |
  * calls and the method Prisma's own batch starts it with alike, so the queries the operation runs
  * reach the audit extension with the decision made for it, whoever starts it
  */
-const startingIn = (decision: WritePolicyDecision | undefined, operation: unknown): unknown =>
+const withDecidedWritePolicy = (decision: WritePolicyDecision | undefined, operation: unknown): unknown =>
   isObject(operation)
     ? new Proxy(operation, {
         get(target, prop) {
           const value: unknown = Reflect.get(target, prop);
           return typeof value === 'function'
             ? (...args: unknown[]) =>
-                withScope({ decidedWritePolicy: decision }, () => Reflect.apply(value, target, args))
+                withScope({ writePolicyDecision: decision }, () => Reflect.apply(value, target, args))
             : value;
         },
       })
@@ -161,8 +161,11 @@ const createRecipeFactory = (config: RecipeConfig) => {
   const run = async (recipe: Recipe): Promise<unknown> => {
     const decision = decisionOf(recipe, config);
     return awaitsAudit(decision)
-      ? await runInTransaction(recipe.receiver, async (tx) => await startingIn(decision, replay(recipe, tx)))
-      : await startingIn(decision, replay(recipe, recipe.target));
+      ? await runInTransaction(
+          recipe.receiver,
+          async (tx) => await withDecidedWritePolicy(decision, replay(recipe, tx)),
+        )
+      : await withDecidedWritePolicy(decision, replay(recipe, recipe.target));
   };
 
   const start = (recipe: Recipe): Promise<unknown> => {
@@ -362,6 +365,7 @@ export const takeBatchRecipes = (items: readonly unknown[], receiver: object, co
   const decisions = taken.map((recipe) => decisionOf(recipe, config));
   return {
     awaitsAudit: decisions.some(awaitsAudit),
-    operationsOn: (client) => taken.map((recipe, index) => startingIn(decisions[index], replay(recipe, client))),
+    operationsOn: (client) =>
+      taken.map((recipe, index) => withDecidedWritePolicy(decisions[index], replay(recipe, client))),
   };
 };

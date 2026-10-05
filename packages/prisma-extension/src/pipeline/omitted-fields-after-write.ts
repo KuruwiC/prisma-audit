@@ -53,7 +53,7 @@ const readFields = async (
   return new Map(read.map((row) => [extractEntityIdentity(row, pkFields), row]));
 };
 
-const completed = (after: Row, read: Row | undefined, fields: ReadonlySet<string>): Row => {
+const withReadFields = (after: Row, read: Row | undefined, fields: ReadonlySet<string>): Row => {
   if (!read) {
     return after;
   }
@@ -98,7 +98,7 @@ export const readOmittedFieldsAfterWrite = async (
     }
     return {
       ...event,
-      after: completed(event.after, read.rows.get(extractEntityIdentity(event.after, read.pkFields)), fields),
+      after: withReadFields(event.after, read.rows.get(extractEntityIdentity(event.after, read.pkFields)), fields),
     };
   });
 };

@@ -5,7 +5,7 @@
 
 import type { MutationEvent } from '@kuruwic/db-audit-core';
 import { describe, expect, it } from 'vitest';
-import { auditedColumnsOf } from '../../src/pipeline/audited-columns.js';
+import { keepAuditedColumns } from '../../src/pipeline/audited-columns.js';
 
 const update = (before: MutationEvent['before'], after: Record<string, unknown>): MutationEvent => ({
   model: 'User',
@@ -18,20 +18,20 @@ const update = (before: MutationEvent['before'], after: Record<string, unknown>)
 
 const NOTHING_WIDENED = new Map<string, ReadonlySet<string>>();
 
-describe('auditedColumnsOf', () => {
+describe('keepAuditedColumns', () => {
   it('leaves out of the after state a column its captured before state does not hold', () => {
     const event = update(
       { kind: 'captured', row: { id: 'u1', name: 'Ada' } },
       { id: 'u1', name: 'Bea', password: 'hash' },
     );
 
-    expect(auditedColumnsOf(event, NOTHING_WIDENED).after).toEqual({ id: 'u1', name: 'Bea' });
+    expect(keepAuditedColumns(event, NOTHING_WIDENED).after).toEqual({ id: 'u1', name: 'Bea' });
   });
 
   it('returns the event itself when the before state holds every column of the after state', () => {
     const event = update({ kind: 'captured', row: { id: 'u1', name: 'Ada' } }, { id: 'u1', name: 'Bea' });
 
-    expect(auditedColumnsOf(event, NOTHING_WIDENED)).toBe(event);
+    expect(keepAuditedColumns(event, NOTHING_WIDENED)).toBe(event);
   });
 
   it('leaves out the widened columns of a row without a captured before state', () => {
@@ -41,8 +41,8 @@ describe('auditedColumnsOf', () => {
       action: 'create',
     };
 
-    expect(auditedColumnsOf(created, widened).after).toEqual({ id: 'u1' });
-    expect(auditedColumnsOf(update({ kind: 'unavailable' }, { id: 'u1', password: 'hash' }), widened).after).toEqual({
+    expect(keepAuditedColumns(created, widened).after).toEqual({ id: 'u1' });
+    expect(keepAuditedColumns(update({ kind: 'unavailable' }, { id: 'u1', password: 'hash' }), widened).after).toEqual({
       id: 'u1',
     });
   });
@@ -51,6 +51,6 @@ describe('auditedColumnsOf', () => {
     const widened = new Map([['Post', new Set(['title'])]]);
     const event = update({ kind: 'none' }, { id: 'u1', password: 'hash' });
 
-    expect(auditedColumnsOf(event, widened)).toBe(event);
+    expect(keepAuditedColumns(event, widened)).toBe(event);
   });
 });

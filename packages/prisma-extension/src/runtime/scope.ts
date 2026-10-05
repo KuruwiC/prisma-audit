@@ -32,7 +32,7 @@ export interface RuntimeScope {
    * The write policy decided at the client boundary for the operation this scope runs, set only
    * around that operation, so a nested operation's scope replaces it
    */
-  readonly decidedWritePolicy?: WritePolicyDecision | undefined;
+  readonly writePolicyDecision?: WritePolicyDecision | undefined;
   /** Raised while an audited operation is being processed, so that the audit's own queries are not audited */
   readonly isProcessingAuditLog?: boolean;
 }
@@ -81,7 +81,7 @@ export interface WritePolicyDecision {
  * action.
  */
 export const decidedWritePolicyFor = (model: string, action: string): WritePolicy | undefined => {
-  const decision = currentScope()?.decidedWritePolicy;
+  const decision = currentScope()?.writePolicyDecision;
   return decision?.model === model && decision.action === action ? decision.policy : undefined;
 };
 

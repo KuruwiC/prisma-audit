@@ -23,7 +23,7 @@ const link: RelatedSideLink = {
 
 const connect: NestedOperationInfo = {
   fieldName: 'labels',
-  writesBefore: [],
+  precedingWrites: [],
   relatedModel: 'Label',
   operation: 'connect',
   isList: true,

@@ -64,11 +64,11 @@ export interface NestedOperationInfo {
    * data. Prisma runs the keywords of one relation field in the order its data lists them, so
    * these are the writes to the relation that run before this one.
    */
-  writesBefore: readonly NestedWriteBefore[];
+  precedingWrites: readonly PrecedingNestedWrite[];
 }
 
 /** A keyword of a relation field's data and its data, listed before another keyword of that field */
-export interface NestedWriteBefore {
+export interface PrecedingNestedWrite {
   readonly operation: NestedOperationKeyword;
   readonly data: unknown;
 }
@@ -77,10 +77,10 @@ const isNestedOperationKeyword = (key: string): key is NestedOperationKeyword =>
   (NESTED_OPERATION_KEYWORDS as readonly string[]).includes(key);
 
 /** The keywords `fieldValue` lists before `keyword`, with their data */
-const writesListedBefore = (
+const precedingWritesOf = (
   fieldValue: Record<string, unknown>,
   keyword: NestedOperationKeyword,
-): NestedWriteBefore[] => {
+): PrecedingNestedWrite[] => {
   const keys = Object.keys(fieldValue);
   return keys
     .slice(0, keys.indexOf(keyword))
@@ -254,7 +254,7 @@ const detectOperationAndNested = (
     data: fieldValue[keyword],
     path: parent ? `${parent.operation.path}.${relationField.name}` : relationField.name,
     parent,
-    writesBefore: writesListedBefore(fieldValue, keyword),
+    precedingWrites: precedingWritesOf(fieldValue, keyword),
   };
 
   const nested = scannedElementsOf(operation, pass).flatMap(({ element, data }) =>

@@ -14,7 +14,7 @@
 import type { AuditRecord, ComposeConfig, FailureSink, MutationEvent, ResolveConfig } from '@kuruwic/db-audit-core';
 import { compose, resolve } from '@kuruwic/db-audit-core';
 import type { WidenedColumns } from '../utils/audited-selection.js';
-import { auditedColumnsOf } from './audited-columns.js';
+import { keepAuditedColumns } from './audited-columns.js';
 import type { ExecutionScope } from './execution-scope.js';
 import { type OmittedFieldReadDependencies, readOmittedFieldsAfterWrite } from './omitted-fields-after-write.js';
 
@@ -37,7 +37,7 @@ export const createRecordProducer = (config: RecordProducerConfig): RecordProduc
     const written = await readOmittedFieldsAfterWrite(events, scope.handle, config.omittedFieldReads);
     const { resolved, failures } = await resolve(written, scope.auditContext, config.resolveConfig, () => scope.handle);
     await config.failureSink.reportResolverFailures(failures);
-    const stored = resolved.map((event) => auditedColumnsOf(event, widened));
+    const stored = resolved.map((event) => keepAuditedColumns(event, widened));
     return compose(stored, { auditContext: scope.auditContext, config: config.composeConfig }, new Date());
   };
 };

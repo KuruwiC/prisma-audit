@@ -13,8 +13,8 @@ import {
   batchFilterClauses,
   type NestedBatchKeyword,
   type NestedOperationKeyword,
-  type NestedWriteBefore,
   namedTargets,
+  type PrecedingNestedWrite,
   targetWhereClauses,
 } from '../../grammar/nested-operations.js';
 import type { DMMFField, DMMFModel } from '../../internal-types.js';
@@ -78,15 +78,23 @@ export const resolveToManyRelationScope = (
   };
 };
 
+/** The filter of the rows related to the parent row `parentKey` through the back-relation */
+const relatedToParent = (scope: ToManyRelationScope, parentKey: PreFetchRecord): PreFetchRecord => ({
+  [scope.backField]: { [scope.filter]: parentKey },
+});
+
+/** `where` with `condition` added to its `AND` */
+const andWhere = (where: PreFetchRecord, condition: PreFetchRecord): PreFetchRecord => {
+  const existingAnd = where.AND;
+  const and = existingAnd === undefined ? [] : Array.isArray(existingAnd) ? existingAnd : [existingAnd];
+  return { ...where, AND: [...and, condition] };
+};
+
 const scopeWhereToParent = (
   where: PreFetchRecord,
   scope: ToManyRelationScope,
   parentKey: PreFetchRecord,
-): PreFetchRecord => {
-  const existingAnd = where.AND;
-  const and = existingAnd === undefined ? [] : Array.isArray(existingAnd) ? existingAnd : [existingAnd];
-  return { ...where, AND: [...and, { [scope.backField]: { [scope.filter]: parentKey } }] };
-};
+): PreFetchRecord => andWhere(where, relatedToParent(scope, parentKey));
 
 export interface ToManyScopeInput extends Omit<ResolveParentRowsInput, 'parentFields'> {
   data: unknown;
@@ -165,8 +173,8 @@ export interface PreFetchToManyBatchInput extends ToManyScopeInput {
   relatedModelClient: PreFetchListClient;
   /** Whether the matched rows are read whole, as their before-state, or by primary key only */
   fetchBefore: boolean;
-  /** The writes to the relation that run before the operation (see `NestedOperationInfo.writesBefore`) */
-  writesBefore: readonly NestedWriteBefore[];
+  /** The writes to the relation that run before the operation (see `NestedOperationInfo.precedingWrites`) */
+  precedingWrites: readonly PrecedingNestedWrite[];
   /** The related model's field names, to turn a unique WHERE into a filter */
   fieldNames: ReadonlySet<string>;
 }
@@ -200,12 +208,12 @@ const storeMatchedRow = (
  * names removed, and only the rows a `set` names kept. Rows a write inserts are unknown before the
  * write and are not included, and filters match the rows as they were before the write.
  */
-const relatedWhenRun = (input: PreFetchToManyBatchInput, parentKey: PreFetchRecord): PreFetchRecord => {
-  const { scope, writesBefore, fieldNames, pkConstraint } = input;
+const whereRelatedWhenRun = (input: PreFetchToManyBatchInput, parentKey: PreFetchRecord): PreFetchRecord => {
+  const { scope, precedingWrites, fieldNames, pkConstraint } = input;
   // Prisma reads an empty `OR` nested under `AND` as no condition, so a `set` naming no row keeps
   // no row through a primary-key `in` with no values
   const noRow = { [pkConstraint.fields[0] ?? '']: { in: [] } };
-  return writesBefore.reduce<PreFetchRecord>(
+  return precedingWrites.reduce<PreFetchRecord>(
     (related, { operation, data }) => {
       const named = namedTargets(operation, data).map(({ where }) => uniqueWhereAsFilter(where, fieldNames));
       switch (operation) {
@@ -221,7 +229,7 @@ const relatedWhenRun = (input: PreFetchToManyBatchInput, parentKey: PreFetchReco
           return related;
       }
     },
-    { [scope.backField]: { [scope.filter]: parentKey } },
+    relatedToParent(scope, parentKey),
   );
 };
 
@@ -232,18 +240,13 @@ const scopeFilterToParents = (
 ): PreFetchRecord[] =>
   parentRows.flatMap((parentRow) => {
     const parentKey = parentKeyOf(parentRow, input.scope.parentFields);
-    if (!parentKey) {
-      return [];
-    }
-    const existingAnd = filter.AND;
-    const and = existingAnd === undefined ? [] : Array.isArray(existingAnd) ? existingAnd : [existingAnd];
-    return [{ ...filter, AND: [...and, relatedWhenRun(input, parentKey)] }];
+    return parentKey ? [andWhere(filter, whereRelatedWhenRun(input, parentKey))] : [];
   });
 
 /**
  * Pre-reads the rows a nested `updateMany` / `deleteMany` filter matches, scoped through the
  * back-relation the way Prisma scopes the write, to the rows related to the parent row when the
- * operation runs (see {@link relatedWhenRun}). Each matched row is stored whole when
+ * operation runs (see {@link whereRelatedWhenRun}). Each matched row is stored whole when
  * `fetchBefore` asks for its before-state, else by its primary key with none.
  *
  * @returns The primary key of every matched row, keyed by its identity

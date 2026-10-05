@@ -159,7 +159,10 @@ export type LinkedRowNamedBy = (where: Record<string, unknown>) => Record<string
  * removes a row linked to its parent, so a row its own read did not find there is one the write
  * linked to the parent before deleting it.
  */
-const beforeStateOf = (target: NestedWriteTarget, linkedRowNamedBy: LinkedRowNamedBy | undefined): BeforeState => {
+const deleteTargetBeforeState = (
+  target: NestedWriteTarget,
+  linkedRowNamedBy: LinkedRowNamedBy | undefined,
+): BeforeState => {
   if (target.before.kind !== 'none') {
     return target.before;
   }
@@ -188,10 +191,10 @@ const deletedEntityOf = (
 /**
  * The rows a to-many nested `delete` or `deleteMany` deleted: the operation's own targets, each
  * with the before-state read ahead of the write (unavailable when that read failed; see
- * {@link beforeStateOf} for a row the write linked to the parent first), or its primary key alone
- * when the before-state was not requested. A `delete` target whose WHERE names no primary key and
- * whose row was not read is skipped and reported through `onUnresolvedDeleteEntityId`, like an
- * unresolved to-one delete.
+ * {@link deleteTargetBeforeState} for a row the write linked to the parent first), or its primary
+ * key alone when the before-state was not requested. A `delete` target whose WHERE names no primary
+ * key and whose row was not read is skipped and reported through `onUnresolvedDeleteEntityId`, like
+ * an unresolved to-one delete.
  *
  * @param linkedRowNamedBy - The rows the link read at the path found; undefined when the
  *   before-state of the delete is not requested
@@ -208,7 +211,7 @@ export const collectToManyDeleteRecords = async (
     if (target.operation !== nestedOp) {
       continue;
     }
-    const before = beforeStateOf(target, linkedRowNamedBy);
+    const before = deleteTargetBeforeState(target, linkedRowNamedBy);
     const entity = deletedEntityOf(target, before, pkConstraint);
     if (entity === null) {
       nestedLog('cannot resolve primary key of a delete target (path=%s); skipping delete audit entry', nestedOp.path);

@@ -617,7 +617,7 @@ describe('parentKeysFromOperationWheres', () => {
       [
         {
           fieldName: 'members',
-          writesBefore: [],
+          precedingWrites: [],
           relatedModel: 'Member',
           operation: 'update',
           isList: true,
@@ -629,7 +629,7 @@ describe('parentKeysFromOperationWheres', () => {
         },
         {
           fieldName: 'members',
-          writesBefore: [],
+          precedingWrites: [],
           relatedModel: 'Member',
           operation: 'delete',
           isList: true,
@@ -638,7 +638,7 @@ describe('parentKeysFromOperationWheres', () => {
         },
         {
           fieldName: 'members',
-          writesBefore: [],
+          precedingWrites: [],
           relatedModel: 'Member',
           operation: 'create',
           isList: true,
@@ -657,7 +657,7 @@ describe('parentKeysFromOperationWheres', () => {
       [
         {
           fieldName: 'items',
-          writesBefore: [],
+          precedingWrites: [],
           relatedModel: 'Item',
           operation: 'update',
           isList: true,

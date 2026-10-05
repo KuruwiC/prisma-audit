@@ -21,7 +21,7 @@ import { UNRESOLVED_ENTITY_ID } from '../../../src/utils/identity-key.js';
 const nestedOp: NestedOperationInfo = {
   operation: 'delete',
   fieldName: 'items',
-  writesBefore: [],
+  precedingWrites: [],
   relatedModel: 'OrderItem',
   isList: false,
   data: true,
@@ -190,7 +190,7 @@ describe('collectToOneDeleteRecords — a delete whose data names no identity', 
     const singleDeleteOp: NestedOperationInfo = {
       operation: 'delete',
       fieldName: 'profile',
-      writesBefore: [],
+      precedingWrites: [],
       relatedModel: 'Post',
       isList: false,
       data: true,
@@ -223,7 +223,7 @@ describe('collectToManyDeleteRecords', () => {
   const deleteManyOp: NestedOperationInfo = {
     operation: 'deleteMany',
     fieldName: 'posts',
-    writesBefore: [],
+    precedingWrites: [],
     relatedModel: 'Post',
     isList: true,
     data: { published: false },

@@ -22,5 +22,5 @@ export interface CollectedNestedRecord {
    * when the write linked it there first, or what is known of a row whose before state was not
    * read. Undefined for a row deleted as it was read.
    */
-  rowLeft?: Record<string, unknown>;
+  rowAsWritten?: Record<string, unknown>;
 }

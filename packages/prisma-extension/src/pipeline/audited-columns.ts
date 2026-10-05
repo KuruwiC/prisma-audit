@@ -14,11 +14,11 @@
 import type { MutationEvent } from '@kuruwic/db-audit-core';
 import type { WidenedColumns } from '../utils/audited-selection.js';
 
-const withoutColumns = (row: Record<string, unknown>, kept: (column: string) => boolean): Record<string, unknown> =>
+const pickColumns = (row: Record<string, unknown>, kept: (column: string) => boolean): Record<string, unknown> =>
   Object.fromEntries(Object.entries(row).filter(([column]) => kept(column)));
 
 /** `event` with its after state left to the columns a record stores; `event` itself when it holds no other */
-export const auditedColumnsOf = <TEvent extends MutationEvent>(event: TEvent, widened: WidenedColumns): TEvent => {
+export const keepAuditedColumns = <TEvent extends MutationEvent>(event: TEvent, widened: WidenedColumns): TEvent => {
   const { after, before } = event;
   if (!after) {
     return event;
@@ -27,5 +27,5 @@ export const auditedColumnsOf = <TEvent extends MutationEvent>(event: TEvent, wi
     before.kind === 'captured'
       ? (column) => column in before.row
       : (column) => !(widened.get(event.model)?.has(column) ?? false);
-  return Object.keys(after).every(kept) ? event : { ...event, after: withoutColumns(after, kept) };
+  return Object.keys(after).every(kept) ? event : { ...event, after: pickColumns(after, kept) };
 };

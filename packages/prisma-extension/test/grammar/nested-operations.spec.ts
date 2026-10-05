@@ -159,7 +159,7 @@ describe('detectNestedOperations', () => {
         { title: 'Post 2', content: 'Content 2' },
       ],
       path: 'posts',
-      writesBefore: [],
+      precedingWrites: [],
     });
   });
 
@@ -173,7 +173,7 @@ describe('detectNestedOperations', () => {
       kind: 'discovery',
     });
 
-    expect(Object.fromEntries(operations.map((op) => [op.operation, op.writesBefore]))).toEqual({
+    expect(Object.fromEntries(operations.map((op) => [op.operation, op.precedingWrites]))).toEqual({
       delete: [],
       connect: [{ operation: 'delete', data: { id: 'p2' } }],
       deleteMany: [
