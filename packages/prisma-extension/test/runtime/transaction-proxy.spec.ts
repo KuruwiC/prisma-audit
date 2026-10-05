@@ -375,7 +375,7 @@ describe('createTransactionProxy', () => {
     const recipeConfigAwaiting = (awaitsAudit: boolean) => ({
       modelOfAccessor: new Map([['user', 'User']]),
       relatedModel: () => undefined,
-      awaitsAudit: () => awaitsAudit,
+      decide: () => ({ sampled: true, atomic: awaitsAudit }),
     });
 
     it('returns the same delegate and the same action for a property read twice', () => {

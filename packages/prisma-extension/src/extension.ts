@@ -22,7 +22,7 @@ import { createRecordProducer } from './pipeline/produce-records.js';
 import { type AuditPipelineDependencies, runAuditedOperation } from './pipeline/run-audited-operation.js';
 import { createSingleExecutor } from './pipeline/single-executor.js';
 import type { RecipeConfig } from './runtime/operation-recipe.js';
-import { isProcessingAuditLog, withScope } from './runtime/scope.js';
+import { isProcessingAuditLog, takeDecidedWritePolicy, withScope } from './runtime/scope.js';
 import { createTransactionProxy } from './runtime/transaction-proxy.js';
 import type { PrismaAuditExtensionOptions } from './types.js';
 import { type ClientShape, injectAuditedSelection, projectToRequestedShape } from './utils/audited-selection.js';
@@ -76,13 +76,10 @@ const recipeConfigOf = (audit: AuditOptions): RecipeConfig => {
   return {
     modelOfAccessor: new Map(modelNames.map((modelName) => [getModelAccessor(modelName), modelName])),
     relatedModel: (modelName, field) => relatedModels.get(modelName)?.get(field),
-    awaitsAudit: (modelName, action) =>
-      audit.provider.getContext() !== undefined &&
-      isAuditableAction(action) &&
-      audit.shouldAudit(modelName) &&
-      (policyConfig.awaitWriteIf
-        ? policyConfig.awaitWriteIf(modelName, audit.modelTags(modelName))
-        : policyConfig.awaitWrite),
+    decide: (modelName, action) =>
+      audit.provider.getContext() !== undefined && isAuditableAction(action) && audit.shouldAudit(modelName)
+        ? policy(modelName, audit.modelTags(modelName), policyConfig)
+        : undefined,
   };
 };
 
@@ -120,7 +117,8 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     if (!isAuditableAction(operation)) {
       return query(args);
     }
-    const writePolicy = policy(model, audit.modelTags(model), audit.policyConfig);
+    const writePolicy =
+      takeDecidedWritePolicy(model, operation) ?? policy(model, audit.modelTags(model), audit.policyConfig);
     if (!writePolicy.sampled) {
       return query(args);
     }

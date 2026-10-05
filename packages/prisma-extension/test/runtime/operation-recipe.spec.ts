@@ -3,10 +3,11 @@
  * how a batch takes it.
  */
 
+import type { WritePolicy } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
 import type { TransactionalPrismaClient } from '../../src/internal-types.js';
 import { createRecipeClient, type RecipeConfig, takeBatchRecipes } from '../../src/runtime/operation-recipe.js';
-import { currentScope, withScope } from '../../src/runtime/scope.js';
+import { currentScope, takeDecidedWritePolicy, withScope } from '../../src/runtime/scope.js';
 
 /** A lazy operation, as Prisma's operations are: it runs, once, when it is awaited */
 const lazyOperation = (run: () => unknown) => {
@@ -23,6 +24,8 @@ const lazyOperation = (run: () => unknown) => {
 interface Ran {
   readonly client: string;
   readonly transactionClient: unknown;
+  /** The write policy the hook would take for the operation */
+  readonly decided: WritePolicy | undefined;
 }
 
 /**
@@ -37,7 +40,11 @@ const createClients = () => {
     user: {
       create: (args: unknown) =>
         lazyOperation(() => {
-          ran.push({ client: name, transactionClient: currentScope()?.transaction?.client });
+          ran.push({
+            client: name,
+            transactionClient: currentScope()?.transaction?.client,
+            decided: takeDecidedWritePolicy('User', 'create'),
+          });
           return { created: args };
         }),
     },
@@ -51,10 +58,10 @@ const createClients = () => {
   return { receiver, target, tx, ran, $transaction };
 };
 
-const configAwaiting = (awaitsAudit: boolean): RecipeConfig => ({
+const configAwaiting = (atomic: boolean): RecipeConfig => ({
   modelOfAccessor: new Map([['user', 'User']]),
   relatedModel: () => undefined,
-  awaitsAudit: () => awaitsAudit,
+  decide: vi.fn(() => ({ sampled: true as const, atomic })),
 });
 
 /** `receiver.user.create(args)` as the client proxy returns it */
@@ -75,7 +82,22 @@ describe('operation recipes', () => {
     });
 
     expect(clients.$transaction).toHaveBeenCalledTimes(1);
-    expect(clients.ran).toEqual([{ client: 'transaction', transactionClient: clients.tx }]);
+    expect(clients.ran).toEqual([
+      { client: 'transaction', transactionClient: clients.tx, decided: { sampled: true, atomic: true } },
+    ]);
+  });
+
+  it('decides the write policy of its call once and carries it to the hook', async () => {
+    const clients = createClients();
+    const config = configAwaiting(false);
+
+    await createUserOn(config, clients, { email: 'a' });
+
+    expect(config.decide).toHaveBeenCalledTimes(1);
+    expect(config.decide).toHaveBeenCalledWith('User', 'create');
+    expect(clients.ran).toEqual([
+      { client: 'client', transactionClient: undefined, decided: { sampled: true, atomic: false } },
+    ]);
   });
 
   it('runs a write on the client itself while the audit processes an operation', async () => {
@@ -86,7 +108,7 @@ describe('operation recipes', () => {
     });
 
     expect(clients.$transaction).not.toHaveBeenCalled();
-    expect(clients.ran).toEqual([{ client: 'client', transactionClient: undefined }]);
+    expect(clients.ran).toEqual([{ client: 'client', transactionClient: undefined, decided: undefined }]);
   });
 
   it('rejects when awaited after a batch has taken it, without running it', async () => {

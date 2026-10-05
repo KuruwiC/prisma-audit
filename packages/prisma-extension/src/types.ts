@@ -81,9 +81,10 @@ export interface PerformanceConfig {
    */
   openImplicitTransaction?: boolean;
   /**
-   * Dynamic `awaitWrite` decision, called once per audited operation with the name of its
-   * top-level model and that model's `tags` from `aggregateMapping` (`tags` is `[]` for a
-   * model whose entity config declares no tags). Its return value replaces
+   * Dynamic `awaitWrite` decision, called once per operation the audit records, once sampling
+   * has kept it (with `openImplicitTransaction` too, where the client decides before the call
+   * runs), with the name of its top-level model and that model's `tags` from `aggregateMapping`
+   * (`tags` is `[]` for a model whose entity config declares no tags). Its return value replaces
    * {@link PerformanceConfig.awaitWrite} for the whole operation, the audit rows of its nested
    * writes to other models included.
    */

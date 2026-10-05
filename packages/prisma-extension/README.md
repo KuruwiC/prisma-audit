@@ -750,7 +750,7 @@ Controls whether audit log writes are synchronous or asynchronous.
 #### `awaitWriteIf`
 **Type:** `(modelName: string, tags: string[]) => boolean`
 
-Conditionally control the write strategy per operation. Called once per audited operation with its top-level model and that model's `tags` from `aggregateMapping` (`[]` for a model without tags); its return value replaces `performance.awaitWrite` for the whole operation, the audit rows of its nested writes to other models included.
+Conditionally control the write strategy per operation. Called once per operation the audit records, once sampling has kept it (with `openImplicitTransaction` too, where the client decides before the call runs), with its top-level model and that model's `tags` from `aggregateMapping` (`[]` for a model without tags); its return value replaces `performance.awaitWrite` for the whole operation, the audit rows of its nested writes to other models included.
 
 ```typescript
 {
@@ -892,7 +892,7 @@ createAuditClient(prisma, {
 
 #### Tag-based Conditional Writing
 
-Override the global `awaitWrite` with `awaitWriteIf(modelName, tags)`, which is called once per operation with its top-level model — the decision covers the operation's nested writes too, and `tags` is `[]` for a model without tags.
+Override the global `awaitWrite` with `awaitWriteIf(modelName, tags)`, which is called once per operation sampling keeps, with its top-level model — the decision covers the operation's nested writes too, and `tags` is `[]` for a model without tags.
 
 **Configuration:**
 ```typescript

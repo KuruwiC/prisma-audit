@@ -26,6 +26,7 @@ interface ClientOptions {
   readonly openImplicitTransaction: boolean;
   readonly awaitWrite?: boolean;
   readonly awaitWriteIf?: (modelName: string) => boolean;
+  readonly sampling?: number;
   readonly writer?: (records: AuditRecord[]) => Promise<void>;
   readonly failingEnricher?: boolean;
 }
@@ -99,6 +100,7 @@ describe('openImplicitTransaction', () => {
       performance: {
         awaitWrite: options.awaitWrite ?? true,
         ...(options.awaitWriteIf ? { awaitWriteIf: options.awaitWriteIf } : {}),
+        ...(options.sampling === undefined ? {} : { sampling: options.sampling }),
         openImplicitTransaction: options.openImplicitTransaction,
       },
       errorHandling: { observer, writeFailurePolicy: 'throw' },
@@ -354,6 +356,51 @@ describe('openImplicitTransaction', () => {
 
       expect(await raw.user.count()).toBe(1);
       expect(await auditRows()).toEqual(['User.create']);
+    });
+
+    describe('decides the write policy of a call once', () => {
+      const userCalls = (awaitWriteIf: ReturnType<typeof vi.fn>) =>
+        awaitWriteIf.mock.calls.filter(([modelName]) => modelName === 'User');
+
+      it('for a single write', async () => {
+        const user = await seedUser();
+        const awaitWriteIf = vi.fn((_modelName: string) => true);
+        const clients = createClients({ openImplicitTransaction: true, awaitWriteIf });
+
+        await clients.run(() => clients.client.user.update({ where: { id: user.id }, data: { name: 'Once' } }));
+
+        expect(userCalls(awaitWriteIf)).toHaveLength(1);
+        expect(await auditRows()).toEqual(['User.update']);
+      });
+
+      it.each([
+        { batch: 'that runs as an interactive transaction', awaited: true },
+        { batch: 'that Prisma runs', awaited: false },
+      ])('for each write of a batch $batch', async ({ awaited }) => {
+        const awaitWriteIf = vi.fn((_modelName: string) => awaited);
+        const clients = createClients({ openImplicitTransaction: true, awaitWriteIf });
+
+        await clients.run(() =>
+          clients.client.$transaction([
+            clients.client.user.create({ data: { email: 'a@example.com', name: 'A' } }),
+            clients.client.user.create({ data: { email: 'b@example.com', name: 'B' } }),
+          ]),
+        );
+
+        expect(userCalls(awaitWriteIf)).toHaveLength(2);
+        expect(await auditRows()).toEqual(['User.create', 'User.create']);
+      });
+
+      it('and not at all for a write sampling leaves out', async () => {
+        const user = await seedUser();
+        const awaitWriteIf = vi.fn((_modelName: string) => true);
+        const clients = createClients({ openImplicitTransaction: true, awaitWriteIf, sampling: 0 });
+
+        await clients.run(() => clients.client.user.update({ where: { id: user.id }, data: { name: 'Unsampled' } }));
+
+        expect(userCalls(awaitWriteIf)).toHaveLength(0);
+        expect(await auditRows()).toEqual([]);
+      });
     });
 
     it('rolls a write back when its awaited audit write fails', async () => {

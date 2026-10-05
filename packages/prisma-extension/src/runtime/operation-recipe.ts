@@ -11,7 +11,8 @@
  * recipe is not a PrismaPromise: Prisma's own `$transaction` rejects it.
  */
 
-import { isProcessingAuditLog } from './scope.js';
+import type { WritePolicy } from '@kuruwic/db-audit-core';
+import { decidedWritePoliciesOf, isProcessingAuditLog, withScope } from './scope.js';
 
 /** The model actions Prisma's delegates expose as lazy operations */
 const MODEL_ACTIONS: ReadonlySet<string> = new Set([
@@ -63,8 +64,11 @@ export interface RecipeConfig {
   readonly modelOfAccessor: ReadonlyMap<string, string>;
   /** The model a relation field of `model` leads to */
   readonly relatedModel: (model: string, field: string) => string | undefined;
-  /** Whether a call of `action` on `model` is audited with an audit that is awaited */
-  readonly awaitsAudit: (model: string, action: string) => boolean;
+  /**
+   * The write policy of a call of `action` on `model`, decided now, sampling included; undefined
+   * when the call is not audited
+   */
+  readonly decide: (model: string, action: string) => WritePolicy | undefined;
 }
 
 interface RecipeCall {
@@ -114,20 +118,40 @@ const replay = (recipe: Recipe, client: object): unknown => {
 const runInTransaction = (receiver: object, run: (tx: object) => Promise<unknown>): Promise<unknown> =>
   Promise.resolve(invoke(receiver, { method: '$transaction', args: [run] }));
 
+interface Decision {
+  readonly model: string;
+  readonly action: string;
+  readonly policy: WritePolicy;
+}
+
+/** The write policy of the recipe's call, decided now; undefined when the call is not audited */
+const decisionOf = (recipe: Recipe, config: RecipeConfig): Decision | undefined => {
+  if (recipe.model === undefined || isProcessingAuditLog()) {
+    return undefined;
+  }
+  const policy = config.decide(recipe.model, recipe.call.method);
+  return policy && { model: recipe.model, action: recipe.call.method, policy };
+};
+
 /**
- * Whether the recipe, run now, is an audited write whose audit is awaited. A call of the audited
+ * Whether the decision is for an audited write whose audit is awaited. A call of the audited
  * client inside a callback of your interactive `$transaction` is one too: the call is not made on
  * the transaction's client, so it runs in a transaction of its own, together with its audit.
  */
-const awaitsAuditNow = (recipe: Recipe, config: RecipeConfig): boolean =>
-  recipe.model !== undefined && !isProcessingAuditLog() && config.awaitsAudit(recipe.model, recipe.call.method);
+const awaitsAudit = (decision: Decision | undefined): boolean =>
+  decision?.policy.sampled === true && decision.policy.atomic;
 
 const createRecipeFactory = (config: RecipeConfig) => {
   const start = (recipe: Recipe): Promise<unknown> => {
     if (recipe.started === undefined) {
-      recipe.started = awaitsAuditNow(recipe, config)
-        ? runInTransaction(recipe.receiver, async (tx) => await replay(recipe, tx))
-        : Promise.resolve(replay(recipe, recipe.target));
+      const decision = decisionOf(recipe, config);
+      recipe.started = withScope(
+        { decidedWritePolicies: decidedWritePoliciesOf(decision ? [decision] : []) },
+        async () =>
+          awaitsAudit(decision)
+            ? await runInTransaction(recipe.receiver, async (tx) => await replay(recipe, tx))
+            : await replay(recipe, recipe.target),
+      );
     }
     if (recipe.started === 'taken-by-batch') {
       return Promise.reject(new Error('The operation was given to a batch $transaction, which runs it'));
@@ -270,6 +294,8 @@ export const createRecipeClient = (config: RecipeConfig) => {
 export interface BatchRecipes {
   /** Whether some operation of the batch is an audited write whose audit is awaited */
   readonly awaitsAudit: boolean;
+  /** The write policies decided for the batch's operations, to run them under */
+  readonly decidedWritePolicies: ReadonlyMap<string, WritePolicy[]>;
   /** The batch's operations made on `client`, not yet started */
   readonly operationsOn: (client: object) => unknown[];
 }
@@ -300,8 +326,10 @@ export const takeBatchRecipes = (items: readonly unknown[], receiver: object, co
   for (const recipe of taken) {
     recipe.started = 'taken-by-batch';
   }
+  const decisions = taken.flatMap((recipe) => decisionOf(recipe, config) ?? []);
   return {
-    awaitsAudit: taken.some((recipe) => awaitsAuditNow(recipe, config)),
+    awaitsAudit: decisions.some(awaitsAudit),
+    decidedWritePolicies: decidedWritePoliciesOf(decisions),
     operationsOn: (client) => taken.map((recipe) => replay(recipe, client)),
   };
 };

@@ -9,7 +9,7 @@
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
-import type { AuditContext, AuditContextProvider } from '@kuruwic/db-audit-core';
+import type { AuditContext, AuditContextProvider, WritePolicy } from '@kuruwic/db-audit-core';
 import { getGlobalSingleton } from '@kuruwic/db-audit-core';
 import type { TransactionalPrismaClient } from '../internal-types.js';
 import { trackPendingWrite } from './pending-writes.js';
@@ -28,6 +28,11 @@ export interface RuntimeScope {
    * parts of one request that no audit query can join
    */
   readonly isInPrismaBatch?: boolean;
+  /**
+   * Write policies decided at the client boundary for the operations about to run, keyed by model
+   * and action, each for the next such operation that reaches the hook
+   */
+  readonly decidedWritePolicies?: ReadonlyMap<string, WritePolicy[]>;
   /** Raised while an audited operation is being processed, so that the audit's own queries are not audited */
   readonly isProcessingAuditLog?: boolean;
 }
@@ -61,6 +66,28 @@ export const enterTransaction = <T>(
   const inScope = () => withScope({ transaction }, async () => await fn());
   return auditContext ? provider.runAsync(auditContext, inScope) : inScope();
 };
+
+const operationKey = (model: string, action: string): string => `${model}.${action}`;
+
+/** The write policies decided for `decisions`, to run operations under with `withScope` */
+export const decidedWritePoliciesOf = (
+  decisions: ReadonlyArray<{ readonly model: string; readonly action: string; readonly policy: WritePolicy }>,
+): ReadonlyMap<string, WritePolicy[]> => {
+  const byOperation = new Map<string, WritePolicy[]>();
+  for (const { model, action, policy } of decisions) {
+    const key = operationKey(model, action);
+    byOperation.set(key, [...(byOperation.get(key) ?? []), policy]);
+  }
+  return byOperation;
+};
+
+/**
+ * Takes the write policy decided at the client boundary for an operation of `model` and `action`,
+ * if any. Operations of one model and action take theirs in the order they reach the hook; they
+ * share the policy configuration, so which of them takes which decision does not matter.
+ */
+export const takeDecidedWritePolicy = (model: string, action: string): WritePolicy | undefined =>
+  currentScope()?.decidedWritePolicies?.get(operationKey(model, action))?.shift();
 
 /** Starts the writes queued on a committed transaction on the base client, as pending writes no caller awaits */
 export const drainAfterCommit = (deferredWrites: ReadonlyArray<() => Promise<void>>): void => {
