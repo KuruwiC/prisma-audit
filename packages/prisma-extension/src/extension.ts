@@ -64,7 +64,6 @@ const createPipelineDependencies = (
   };
 };
 
-/** What the audit of operations on one client is run with */
 interface ClientAudit {
   readonly baseClient: PrismaClientWithDynamicAccess;
   readonly deps: AuditPipelineDependencies;
@@ -86,7 +85,6 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
   // `awaitWriteIf` may return true for any model, so its presence counts as making an audit awaitable.
   const batchAuditMayBeAwaited = audit.policyConfig.awaitWrite || audit.policyConfig.awaitWriteIf !== undefined;
 
-  /** Audits an intercepted operation, or continues it untouched when it is not audited */
   const auditOperation = async (params: ExtensionParams, { baseClient, deps, reading }: ClientAudit) => {
     const { operation, model, args, query } = params;
     const auditContext = audit.provider.getContext();

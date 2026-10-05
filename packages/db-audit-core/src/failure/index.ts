@@ -1,11 +1,11 @@
 /**
  * Failure contract
  *
- * Every failure notifies the observer, which never affects the caller's operation; a failed write
- * of the records, and a build of the records dropped because its write has committed, also consult
- * the write-failure policy. An adapter detects the failures of its own phases and decides what each
- * observer-only phase does to the operation, `dispatch` reports a failed build of the records and
- * the failed writes, and the {@link FailureSink} applies the rest.
+ * Every failure notifies the observer, which never affects the caller's operation; only the phases
+ * {@link WriteFailurePolicy} lists also consult the write-failure policy. An adapter detects the
+ * failures of its own phases and decides what each observer-only phase does to the operation,
+ * `dispatch` reports a failed build of the records and the failed writes, and the
+ * {@link FailureSink} applies the rest.
  */
 
 import type { WritePlan } from '../domain/mutation-event.js';
@@ -19,16 +19,14 @@ import { createErrorHandler, type ErrorStrategy } from '../utils/error-handler.j
  * - `pre-fetch`: a read the adapter makes before the write (the before state) failed. Observer
  *   only; the event carries an `unavailable` before state, or the adapter skips a record whose
  *   action depends on the read.
- * - `log-write`: persisting the records failed. Its outcome, like that of a `diff-generation`
- *   failure that dropped the records of a committed write, is decided by
- *   {@link ErrorHandlingConfig.writeFailurePolicy}.
+ * - `log-write`: persisting the records failed. Decided by {@link ErrorHandlingConfig.writeFailurePolicy}.
  * - `diff-generation`: other work that builds the records failed. Before the operation's write, the
  *   adapter reports it and decides whether the caller's operation fails; it is observer only
  *   there. The build `dispatch` runs once the write has run is reported by `dispatch`: it fails the
  *   caller's operation with the original error, except when the records would be written detached
  *   (not atomic, outside any transaction), where the write has committed and the caller does not
- *   wait for its audit: the operation's records are dropped, the operation succeeds and the
- *   write-failure policy applies to the drop as it does to a failed detached write.
+ *   wait for its audit: the operation's records are dropped and the operation succeeds; only
+ *   this drop is policy-gated.
  * - `row-identification`: the adapter itself could not identify a row the operation wrote (no
  *   user callback is involved). Observer only; the row's record is skipped.
  * - `id-resolver-call`: a user-supplied id resolver (the entity's `idResolver` or a `to()` root's
@@ -115,10 +113,9 @@ export interface FailureSink {
   /** Notifies the observer once per failure `resolve` returned, under `id-resolver-call`. Never throws. */
   readonly reportResolverFailures: (failures: readonly ResolverFailure[]) => Promise<void>;
   /**
-   * Reports the records of a committed write that `dispatch` dropped because building them failed
-   * and no write was left to await: notifies the observer under `diff-generation`, then applies
-   * the write-failure policy. Never rejects: the caller has returned, so `'throw'` logs.
-   * `dispatch` calls it; an adapter does not.
+   * Reports the dropped records of a committed write whose build failed: notifies the observer
+   * under `diff-generation`, then applies the write-failure policy. Never rejects: the caller has
+   * returned, so `'throw'` logs. `dispatch` calls it; an adapter does not.
    */
   readonly reportDroppedBuild: (context: AuditErrorContext & { readonly phase: 'diff-generation' }) => Promise<void>;
   /**
@@ -183,10 +180,6 @@ export const createFailureSink = (config: ErrorHandlingConfig): FailureSink => {
     }
   };
 
-  /**
-   * Notifies the observer, then applies the write-failure policy to `context.error`. `'throw'`
-   * rethrows only while the caller still awaits (`awaited`); otherwise it logs.
-   */
   const applyWriteFailurePolicy = async (
     context: AuditErrorContext,
     awaited: boolean,

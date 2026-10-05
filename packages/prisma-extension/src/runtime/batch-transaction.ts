@@ -52,10 +52,9 @@ const interactiveOptionsOf = (options: unknown): BatchTransactionOptions[] => {
 };
 
 /**
- * Runs the batch as one interactive transaction and resolves with the operations' results in
- * order. The transaction takes the caller's `isolationLevel` and otherwise the client's own
- * interactive transaction options. The writes queued on it start once it has committed; when it
- * rolls back, they are discarded unrun.
+ * The transaction takes the caller's `isolationLevel` and otherwise the client's own interactive
+ * transaction options. The writes queued on it start once it has committed and are discarded unrun
+ * when it rolls back.
  */
 export const runBatchAsInteractiveTransaction = async (input: BatchTransactionInput): Promise<unknown[]> => {
   const { operations, options, auditContext, provider, originalTransaction, target } = input;
@@ -87,11 +86,10 @@ export interface TriggeredOperation {
 }
 
 /**
- * Re-issues an operation of the batch on the batch client and resolves with its result. The
- * re-issued call runs outside the batch client's scope, as an operation of the interactive
- * transaction, and is awaited there so that Prisma starts it inside that scope. A model operation
- * runs on the model's delegate; a raw one on the client's method of the same name, with the
- * arguments the hook received (the `[query, ...values]` list of the unsafe variants spread).
+ * Re-issues an operation of the batch on the batch client and resolves with its result. The call
+ * runs outside the batch client's scope, so the hook does not re-issue it again, and is awaited
+ * there so that Prisma starts it inside that scope. A raw operation receives the arguments the
+ * hook received, the `[query, ...values]` list of the unsafe variants spread.
  */
 export const reissueOnBatchClient = (batchClient: TransactionalPrismaClient, triggered: TriggeredOperation) =>
   withScope({ batchClient: undefined }, async (): Promise<unknown> => {

@@ -27,10 +27,7 @@ export interface PreFetchListClient {
   }): Promise<PreFetchRecord[]>;
 }
 
-/**
- * `modelName` is PascalCase, as in the DMMF. A read without `select` returns the whole row,
- * including the fields the client omits for every query.
- */
+/** `modelName` is PascalCase, as in the DMMF. */
 export const getPreFetchModelClient = (
   prismaClient: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
   modelName: string,
@@ -43,10 +40,7 @@ export const getPreFetchModelClient = (
     : undefined;
 };
 
-/**
- * `modelName` is PascalCase, as in the DMMF. A read without `select` returns whole rows,
- * including the fields the client omits for every query.
- */
+/** `modelName` is PascalCase, as in the DMMF. */
 export const getPreFetchListClient = (
   prismaClient: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
   modelName: string,

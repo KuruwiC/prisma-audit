@@ -78,7 +78,6 @@ export interface NestedEventCollectorDependencies {
   Prisma: PrismaNamespace;
   schemaMetadata: SchemaMetadata;
   shouldFetchBefore: ShouldFetchBefore;
-  /** The fields the client omits for every query, which the whole rows it reads include */
   clientOmittedFields: ClientOmittedFields;
   /**
    * Notified when a nested delete's primary key cannot be resolved (see `delete-handler.ts`);
@@ -536,9 +535,9 @@ const walkLevels = async (walk: CollectionWalk, roots: readonly WalkedRow[]): Pr
 const isRow = (value: unknown): value is Row => typeof value === 'object' && value !== null;
 
 /**
- * The key, before the operation, of the parent row of `nestedOp` in the fields `fields`: from the
- * top-level row the operation returned, or from the primary key that identifies a nested parent
- * row when `fields` are that primary key's fields. Undefined when neither tells.
+ * The values of `fields` on the parent row of `nestedOp`: from the top-level result, or, for a
+ * nested parent, from the primary key its identity encodes when `fields` are among that key's
+ * fields. Undefined when neither covers them.
  */
 const knownParentKey = (
   nestedOp: NestedOperationInfo,
@@ -560,9 +559,8 @@ const knownParentKey = (
 };
 
 /**
- * The foreign-key columns of a row `nestedOp` deletes through a relation whose foreign key the
- * deleted row holds, from its parent row: they equal the parent's referenced columns. Empty when
- * the parent holds the foreign key, or its referenced columns are unknown.
+ * The foreign-key columns of a row `nestedOp` deletes, when the deleted row holds the foreign key:
+ * they equal the parent's referenced columns. Empty when the parent holds it or they are unknown.
  */
 const linkColumnsOf = (
   nestedOp: NestedOperationInfo,
@@ -578,9 +576,9 @@ const linkColumnsOf = (
 };
 
 /**
- * The rows a nested delete removed. A row whose before state was not read holds what the
- * operation names, its key; it is completed with the columns the relation it was deleted through
- * links by, so the parent it belonged to is known without a read.
+ * The rows a nested delete removed. A row whose before state was not read holds only the key the
+ * operation names; it is completed with the relation's link columns, so its parent is known
+ * without a read.
  */
 const collectDeleteRecordsWithLinkColumns = async (
   nestedOp: NestedOperationInfo,

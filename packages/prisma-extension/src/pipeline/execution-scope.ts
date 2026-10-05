@@ -63,10 +63,9 @@ export const withExecutionScope = <T>(
 };
 
 /**
- * The scope as core's `dispatch` reads it. A batch `$transaction([...])` that can await an audit
- * runs as one interactive transaction, which is the transaction of the scope for each of its
- * operations; a batch Prisma runs itself is not a transaction of the scope, and each of its
- * operations' writes has committed by the time its audit is built.
+ * The scope as core's `dispatch` reads it. A batch `$transaction([...])` Prisma runs itself is not
+ * a transaction of the scope: each of its operations' writes has committed by the time its audit
+ * is built.
  */
 export const transactionRuntimeOf = (scope: ExecutionScope): TransactionRuntime<TransactionalPrismaClient> => {
   const { transaction } = scope;

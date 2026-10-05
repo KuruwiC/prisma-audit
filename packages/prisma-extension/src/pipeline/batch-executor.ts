@@ -29,7 +29,6 @@ type Row = Record<string, unknown>;
 export interface BatchExecutorDependencies {
   readonly Prisma: PrismaNamespace;
   readonly schemaMetadata: SchemaMetadata;
-  /** The fields the client omits for every query, which the whole rows it reads include */
   readonly clientOmittedFields: ClientOmittedFields;
 }
 
@@ -59,7 +58,6 @@ interface BatchDelegate {
   readonly findMany: (args: { where: unknown; take?: number }) => Promise<Row[]>;
 }
 
-/** The delegate the rows of `modelName` are read through, whole rows including the fields the client omits */
 const batchDelegate = (
   scope: ExecutionScope,
   modelName: string,
@@ -83,10 +81,9 @@ const pairByPrimaryKey = (afterRows: Row[], beforeRows: Row[], pkFields: string[
 };
 
 /**
- * A `createMany` row as the database stores it, as far as the schema tells without a read: each
- * optional column the data leaves out that has no default and is not `@updatedAt` holds null. A
- * column the database fills (a default, `@updatedAt`) stays left out, its value unknown without a
- * read.
+ * A `createMany` row as stored, as far as the schema tells without a read: an optional column the
+ * data leaves out holds null unless it has a default or is `@updatedAt`, which the database fills,
+ * so such a column stays left out.
  */
 const storedCreateRows = (schemaMetadata: SchemaMetadata, modelName: string, rows: readonly Row[]): Row[] => {
   const nullWhenUnset = schemaMetadata
@@ -129,11 +126,11 @@ const prepareCreate = (operation: AuditedOperation, schemaMetadata: SchemaMetada
 };
 
 /**
- * An `updateManyAndReturn` is audited from the rows it returns, paired with the rows read before
- * it, so they are not read again. `updateMany({ limit })` and a separate `findMany({ take })` are
- * not guaranteed to select the same rows, so pre-limiting the before fetch desyncs before/after
- * counts: a connector with `updateManyAndReturn` audits the exact updated rows by running the
- * update through it; without it (MySQL), `take` propagates to the before fetch as a best effort.
+ * An `updateManyAndReturn` is audited from the rows it returns, so the after rows are not read
+ * again. `updateMany({ limit })` and a separate `findMany({ take })` are not guaranteed to select
+ * the same rows, so pre-limiting the before fetch desyncs before/after counts: a connector with
+ * `updateManyAndReturn` runs the update through it and audits the exact updated rows; without it
+ * (MySQL), `take` propagates to the before fetch as a best effort.
  */
 const prepareUpdateOrDelete = async (
   operation: AuditedOperation,
@@ -169,10 +166,7 @@ export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationE
       ? prepareUpdateOrDelete(operation, scope, deps)
       : Promise.resolve(prepareCreate(operation, schemaMetadata));
 
-  /**
-   * The args an `updateMany` runs with as `updateManyAndReturn`, reading the fields the client omits
-   * into the rows it returns, as an `updateManyAndReturn` the caller issues reads them
-   */
+  /** Adds the `omit` that reads the fields the client omits, so the returned rows hold them */
   const returningArgs = (operation: AuditedOperation): Record<string, unknown> => {
     const omit = omitEntriesReading(clientOmittedFields.of(operation.model));
     return operation.action === AUDIT_ACTION.UPDATE_MANY_AND_RETURN || !omit

@@ -23,16 +23,16 @@ export interface ComposeConfig<TModelName extends string = string> {
   readonly excludeFields: readonly string[];
   readonly redact?: RedactConfig;
   /**
-   * Columns of a model whose values are masked in the stored states and changes, as the adapter
-   * knows them (such as the columns its client hides from reads); undefined masks none. Masked
-   * after the diff, so a change to such a column is still recorded, without its values.
+   * Columns of a model masked in the stored states and changes (such as the columns the adapter's
+   * client hides from reads); undefined masks none. Masked after the diff, so a change to such a
+   * column is still recorded, without its values.
    */
   readonly maskedFieldNames?: (model: TModelName) => ReadonlySet<string> | undefined;
   readonly serialization?: SerializationConfig;
   /**
-   * The keys of a row of a model that are not its columns, as the adapter knows them: its relation
-   * fields, and any aggregate of related records the ORM returns with the row (such as a `_count`
-   * of relations). They are neither compared nor stored; undefined strips nothing.
+   * The keys of a row of a model that are not its columns: its relation fields and any aggregate
+   * the ORM returns with the row (such as `_count`). Neither compared nor stored; undefined strips
+   * nothing.
    */
   readonly relationFieldNames: (model: TModelName) => ReadonlySet<string> | undefined;
 }

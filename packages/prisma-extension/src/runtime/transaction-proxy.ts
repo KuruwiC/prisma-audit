@@ -6,9 +6,8 @@
  * `$transaction` is called: the audit reads and writes of the operations in the callback share
  * the client, and the writes that must wait for the commit queue on the scope. The queue is
  * drained strictly after `$transaction` resolves; on rejection it is discarded unrun. The
- * sequential form, `$transaction([...])`, runs as one interactive transaction when an audit
- * context is set and an audit can be awaited (see `batch-transaction.ts`); otherwise Prisma runs
- * it untouched, and each of its operations has committed by the time its audit is built.
+ * sequential form, `$transaction([...])`, is handed to `batch-transaction.ts` when an audit
+ * context is set and an audit can be awaited; otherwise it passes through untouched.
  *
  * @module runtime/transaction-proxy
  */
@@ -21,8 +20,8 @@ import { drainAfterCommit, enterTransaction } from './scope.js';
 export interface TransactionProxyConfig {
   readonly provider: AuditContextProvider;
   /**
-   * Whether the configuration can make an audit awaited for some operation, so that a batch
-   * `$transaction([...])` under an audit context runs as one interactive transaction
+   * Whether an audit can be awaited for some operation, which a batch `$transaction([...])` needs
+   * to run as an interactive transaction
    */
   readonly batchAuditMayBeAwaited: boolean;
 }
@@ -107,7 +106,7 @@ export const createTransactionProxyHandler = (
 
 /**
  * Creates a Proxy over the extended client that traps `$transaction`, and `$extends` so that a
- * client derived from it is proxied the same way and its transactions are scoped too.
+ * client derived from it is proxied the same way.
  *
  * Every other property is returned as the client holds it, so method identity
  * (`client.user.findMany === client.user.findMany`), `in` checks and the prototype chain are

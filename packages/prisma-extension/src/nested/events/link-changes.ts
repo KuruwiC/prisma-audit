@@ -173,7 +173,6 @@ export interface LinkChangesInput {
   readonly client: PrismaClientWithDynamicAccess | TransactionalPrismaClient;
   readonly linkReads: LinkReads;
   readonly nestedPreFetchResults: NestedPreFetchResults;
-  /** The fields the client omits for every query, which the whole rows it reads include */
   readonly clientOmittedFields: ClientOmittedFields;
   /** The rows other nested writes audit at a path, whose own record already carries the new foreign key */
   readonly auditedAt: (path: string) => ReadonlySet<EntityIdentityKey>;

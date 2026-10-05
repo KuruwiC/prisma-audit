@@ -38,7 +38,6 @@ const isGlobalOmit = (value: unknown): value is GlobalOmit =>
     (fields) => isRecord(fields) && Object.values(fields).every((omitted) => typeof omitted === 'boolean'),
   );
 
-/** Whether a client of `version` keeps its `omit` option, which Prisma added in 5.16 */
 const keepsOmitOption = (version: string | undefined): boolean => {
   const [major = Number.NaN, minor = Number.NaN] = (version ?? '').split('.').map(Number);
   return major > 5 || (major === 5 && minor >= 16);
@@ -57,12 +56,9 @@ const globalOmitOf = (client: object): GlobalOmit | undefined => {
 };
 
 /**
- * Read the fields `client` omits for every query
- *
- * @param clientVersion - The client's Prisma version; a client older than 5.16 has no `omit`
- *   option, so nothing is read from it
- * @returns The scalar fields each model's entry sets to `true`. When a client that should keep the
- *   option does not expose it in the expected shape, no field, with one warning.
+ * @param clientVersion - A client older than 5.16 has no `omit` option, so nothing is read from it
+ * @returns The scalar fields each model's entry sets to `true`; no field, with one warning, when a
+ *   client that should keep the option does not expose it in the expected shape
  */
 export const readClientOmittedFields = (
   client: object,

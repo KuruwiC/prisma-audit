@@ -41,7 +41,6 @@ export interface BeforeStateInput {
 
 export interface BeforeStateDependencies {
   readonly shouldFetchBefore: ShouldFetchBefore;
-  /** The fields the client omits for every query, which the whole rows it reads include */
   readonly clientOmittedFields: ClientOmittedFields;
   /** Receives a failed fetch under the `pre-fetch` phase; the caller's operation continues */
   readonly onFetchFailure: FailureSink['notify'];

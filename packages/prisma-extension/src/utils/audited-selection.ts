@@ -60,7 +60,6 @@ const RECORD_RETURNING_ACTIONS: ReadonlySet<string> = new Set([
   'updateManyAndReturn',
 ]);
 
-/** What decides how the audited rows of an operation are read */
 export interface SelectionReading {
   readonly schemaMetadata: SchemaMetadata;
   /** Whether the client accepts a query `omit` (Prisma 6.2 and later) */
@@ -68,7 +67,6 @@ export interface SelectionReading {
   readonly clientOmittedFields: ClientOmittedFields;
 }
 
-/** What decides how the rows of a written relation are read */
 type RelationReading = Pick<SelectionReading, 'schemaMetadata' | 'clientOmittedFields'>;
 
 /**
@@ -365,8 +363,7 @@ const mergeWrittenRelations = (
  * The selection an audited operation runs with: its rows read in the client's default shape, with
  * the fields the client omits, whatever the caller's `select` or `omit`, together with the relations
  * it writes, so the audit logs are built from the rows and nested rows it wrote in the shape their
- * before states are read in. An operation that returns no records takes no selection and is left
- * as it is.
+ * before states are read in.
  *
  * @returns The args to execute (`args` itself when nothing had to be added) and what was added to the
  *   caller's selection, for {@link projectToRequestedShape}

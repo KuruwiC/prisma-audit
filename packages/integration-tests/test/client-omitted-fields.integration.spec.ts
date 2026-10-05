@@ -67,7 +67,6 @@ describe('fields a client-level omit hides', () => {
     await cleanDatabase(basePrisma);
 
     const run = <T>(operation: () => Promise<T>) => provider.runAsync(testActor, operation);
-    /** The records of `entityType` under its own aggregate, by entity id */
     const recordsOf = async (entityType: string) =>
       basePrisma.auditLog.findMany({ where: { entityType, aggregateType: entityType }, orderBy: { entityId: 'asc' } });
     const recordOf = async (entityType: string, entityId: string) => {

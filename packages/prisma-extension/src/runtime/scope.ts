@@ -5,9 +5,9 @@
  * inside, with the client of that transaction and the writes queued until it commits; the
  * re-entrancy guard raised while audit logs are being processed; whether the flow is inside a
  * transaction the library opened itself; and the client a batch transaction's operations are
- * re-issued on. The state lives on its own async-local store, apart
- * from the app-owned audit context, so re-attributing the actor mid-flow cannot drop it. This
- * module is the only reader and writer of that store.
+ * re-issued on. The state lives on its own async-local store, apart from the app-owned audit
+ * context, so re-attributing the actor mid-flow cannot drop it. This module is the only reader and
+ * writer of that store.
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -30,9 +30,8 @@ export interface RuntimeScope {
   /** Raised inside the transaction the library opened around one operation, so that it is not opened twice */
   readonly isInImplicitTransaction?: boolean;
   /**
-   * Set while the operations of a batch `$transaction([...])` are triggered inside the interactive
-   * transaction the batch runs in: the client of that transaction, on which the extension hook
-   * re-issues each triggered operation
+   * The client of the interactive transaction a batch `$transaction([...])` runs in, while its
+   * operations are triggered; the extension hook re-issues each on it
    */
   readonly batchClient?: TransactionalPrismaClient;
 }
@@ -53,8 +52,8 @@ export const isProcessingAuditLog = (): boolean => currentScope()?.isProcessingA
 /**
  * Runs `fn` inside `transaction`, re-establishing the audit context alongside it when there is
  * one: a `$transaction` callback may start on a different microtask than its caller, and both
- * stores must be present when it does. Without an audit context the transaction is entered all
- * the same, so that an audit context set later inside `fn` finds it.
+ * stores must be present when it does. Without one the transaction is entered all the same, so an
+ * audit context set later inside `fn` finds it.
  */
 export const enterTransaction = <T>(
   provider: ContextRunner,

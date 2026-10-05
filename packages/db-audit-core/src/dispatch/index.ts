@@ -44,9 +44,8 @@ const planOf = <TDbHandle>(
  * The build runs before `dispatch` resolves, whatever the write plan. A failed build notifies the
  * observer under `diff-generation` with the operation's `modelName`, `operation` and `params`, and
  * rejects with its error, except when the records would be written detached: the operation's
- * write has committed and its caller does not wait for its audit, so the records are dropped,
- * the write-failure policy is applied to the drop (see {@link FailureSink.reportDroppedBuild}) and
- * `dispatch` resolves.
+ * write has committed and its caller does not wait for its audit, so the records are dropped
+ * (reported through {@link FailureSink.reportDroppedBuild}) and `dispatch` resolves.
  *
  * Resolves once an immediate write has finished, or once the write is handed to the runtime.
  * Rejects with the error of a failed build, as above, and with the error of a failed immediate

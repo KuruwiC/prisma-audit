@@ -42,11 +42,7 @@ function isAsyncResolver(resolver: IdResolver): boolean {
   return asyncResolverRegistry.has(resolver);
 }
 
-/**
- * The column a resolver created by `foreignKey(field)` reads, if `resolver` is one: resolution
- * leaves a row of a delete whose before state was not read without that root when the row lacks
- * the column, instead of calling the resolver, which fails for a row without it.
- */
+/** The column a resolver created by `foreignKey(field)` reads; undefined for any other resolver */
 export function columnReadBy(resolver: object): string | undefined {
   return foreignKeyColumnRegistry.get(resolver);
 }
@@ -188,9 +184,9 @@ export const self = (idKey: string | IdTransformer = 'id'): IdResolver => {
  * Create an ID resolver that extracts a foreign key field
  *
  * A field that holds `null` is a row without a parent: no id, nothing reported. A row that lacks
- * the field fails the resolver, which leaves the row without the record under that root and is
- * reported like any resolver failure; resolution does not call it for the row of a delete whose
- * before state was not read, which holds only what the adapter knows without reading it.
+ * the field fails the resolver, reported like any resolver failure, except the row of a delete
+ * whose before state was not read: it holds only what the adapter knows without reading it, so
+ * the resolver is not called and the row is left out of that root silently.
  *
  * @param foreignKeyField - Field name (string) or transformation function to extract the foreign key
  *

@@ -47,8 +47,7 @@ export interface MutationEvent<TModelName extends string = string> {
    * Row after the write. Resolvers and enrichers receive `after ?? before`, so a delete event may
    * carry the deleted row here as the adapter last saw it; `compose` stores no after state for a
    * delete. A delete whose before state is not `captured` may carry only what the adapter knows of
-   * the row without reading it, such as its key: a `foreignKey` root on a column it lacks is left
-   * out without a failure, where any other row that lacks the column fails that resolver.
+   * the row without reading it, such as its key; see `foreignKey` for how that affects resolution.
    */
   readonly after?: Record<string, unknown>;
   readonly origin: MutationOrigin;

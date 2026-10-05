@@ -30,7 +30,6 @@ export interface SingleExecutorDependencies {
   readonly Prisma: PrismaNamespace;
   readonly schemaMetadata: SchemaMetadata;
   readonly shouldFetchBefore: ShouldFetchBefore;
-  /** The fields the client omits for every query, which the whole rows it reads include */
   readonly clientOmittedFields: ClientOmittedFields;
   readonly failureSink: FailureSink;
 }

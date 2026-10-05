@@ -4,7 +4,6 @@
  * A caller's `select` or `omit` decides the shape of the value it receives, not the row the
  * audit records: the before and after states, `changes` and the resolvers see every column of
  * the row the client reads by default, and the caller receives exactly the keys it asked for.
- * The fields a client-level `omit` hides are covered by client-omitted-fields.integration.spec.ts.
  */
 
 import type { AuditContext } from '@kuruwic/db-audit-core';

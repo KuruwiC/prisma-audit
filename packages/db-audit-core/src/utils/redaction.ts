@@ -89,16 +89,12 @@ const redactSingleValue = (value: unknown): RedactedFieldInfo | null => {
   return hadValue ? ({ redacted: true, hadValue: true } as RedactedFieldInfo) : null;
 };
 
-/**
- * The columns of a row with the values of `fields` replaced by redaction metadata. Top level
- * only: a key of that name inside a column value is left as it is.
- */
+/** Replaces the values of `fields` in a row with redaction metadata; top level only, unlike the deep redactor */
 export const maskColumns = (row: Record<string, unknown>, fields: ReadonlySet<string>): Record<string, unknown> =>
   Object.fromEntries(
     Object.entries(row).map(([key, value]) => [key, fields.has(key) ? redactSingleValue(value) : value]),
   );
 
-/** Field-level changes with the changes of `fields` replaced by redaction metadata */
 export const maskChanges = (
   changes: Readonly<Record<string, FieldChange>>,
   fields: ReadonlySet<string>,

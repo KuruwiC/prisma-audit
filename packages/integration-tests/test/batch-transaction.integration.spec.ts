@@ -70,7 +70,6 @@ interface AuditedClientOptions {
   readonly awaitWrite?: boolean;
   readonly awaitWriteIf?: (modelName: string) => boolean;
   readonly writer?: (records: AuditRecord[], context: WriteContext<PrismaClient>) => Promise<void>;
-  /** The client-level interactive transaction options of the client passed to `createAuditClient` */
   readonly transactionOptions?: { readonly timeout: number };
 }
 
@@ -140,7 +139,6 @@ describe('Batch $transaction under the audit extension', () => {
       })
     ).map((row) => `${row.entityType}.${row.action} under ${row.aggregateType}`);
 
-  /** Runs the batch on a plain client from freshly seeded rows */
   const runPlain = async (batchOf: BatchOf, options?: BatchOptions) => {
     await cleanDatabase(context.basePrisma);
     const seeded = await seed();
@@ -148,7 +146,6 @@ describe('Batch $transaction under the audit extension', () => {
     return { outcome, rows: await committedRows() };
   };
 
-  /** Runs the batch on the audited client from freshly seeded rows, inside an audit context */
   const runAudited = async (audited: ReturnType<typeof createAudited>, batchOf: BatchOf, options?: BatchOptions) => {
     await cleanDatabase(context.basePrisma);
     const seeded = await seed();

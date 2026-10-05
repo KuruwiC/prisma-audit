@@ -52,7 +52,6 @@ const inject = (args: Record<string, unknown>, reading: Partial<SelectionReading
     args,
   );
 
-/** A client that omits `User.email`, `Post.title` and `Comment.content` for every query */
 const omittedByClient: ClientOmittedFields = {
   of: (model) => new Set({ User: ['email'], Post: ['title'], Comment: ['content'] }[model] ?? []),
 };

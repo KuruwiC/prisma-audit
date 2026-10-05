@@ -28,15 +28,14 @@ const processObjectEntry = <T>(
 };
 
 /**
- * Remove the fields of a row that hold related data rather than the row's own columns
+ * Remove the keys of a row that hold related data rather than its own columns
  *
  * Only the top-level keys named in `relationFieldNames` are removed; nested values are copied as
  * they are. Without it, the data comes back unchanged: relations are not detected heuristically,
  * to avoid false positives.
  *
- * @param relationFieldNames - The keys of a row of the model that are not its columns, as the
- *   adapter knows them: its relation fields, and any aggregate of related records the ORM returns
- *   with the row (such as a `_count` of relations)
+ * @param relationFieldNames - The keys of a row that are not its columns: relation fields and
+ *   ORM-returned aggregates such as `_count`
  *
  * @example
  * ```typescript
