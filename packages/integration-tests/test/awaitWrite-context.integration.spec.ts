@@ -38,8 +38,8 @@ describe('awaitWrite Context Preservation Integration', () => {
         },
       };
 
-      // Create user with awaitWrite: true (default in test setup): the audit log is written,
-      // awaited, once the create has committed
+      // awaitWrite: true (the test setup's default): the audit log is written, awaited, once the
+      // create has committed
       await context.provider.runAsync(auditContext, async () => {
         await context.prisma.user.create({
           data: {

@@ -9,7 +9,6 @@ interface MajorMinor {
   readonly minor: number;
 }
 
-/** The major and minor of `version`; undefined when it does not start with them */
 const majorMinorOf = (version: string | undefined): MajorMinor | undefined => {
   const match = /^(\d+)\.(\d+)/.exec(version ?? '');
   return match ? { major: Number(match[1]), minor: Number(match[2]) } : undefined;

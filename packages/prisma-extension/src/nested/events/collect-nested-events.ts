@@ -92,7 +92,6 @@ export interface NestedEventCollectionInput {
   /** The args the operation ran with: their `include` / `select` decide which rows the result holds */
   args: Record<string, unknown>;
   result: unknown;
-  /** The top-level row before the write, as read */
   topLevelBefore: BeforeState;
   /** Client the operation ran on; reads the nested rows the result does not hold */
   client: PrismaClientWithDynamicAccess | TransactionalPrismaClient;
@@ -536,7 +535,6 @@ const walkLevels = async (walk: CollectionWalk, roots: readonly WalkedRow[]): Pr
 
 const isRow = (value: unknown): value is Row => typeof value === 'object' && value !== null;
 
-/** Whether the top-level operation's data sets one of `fields` */
 const writesTopLevelField = (args: Row, fields: readonly string[]): boolean =>
   [args.data, args.update].some((data) => isRow(data) && fields.some((field) => data[field] !== undefined));
 

@@ -178,7 +178,7 @@ interface LimitedRound {
   readonly pkFields: string[];
 }
 
-/** Reads which rows of a round that wrote fewer rows than it read the write is known to have written */
+/** Names the rows a round that wrote fewer rows than it read is known to have written */
 type WrittenRowsOfShortRound = (delegate: BatchDelegate, round: LimitedRound) => Promise<Row[]>;
 
 /**

@@ -95,11 +95,7 @@ export const createTransactionProxyHandler = (
     return result;
   };
 
-  /**
-   * The batch's recipes run one after another, in the order of the list, in one interactive
-   * transaction of the client when one of them is an audited write whose audit is awaited, and as
-   * Prisma's own batch of the same operations otherwise.
-   */
+  /** In the interactive transaction, the recipes run one after another in list order, as Prisma runs a batch */
   const runRecipeBatch = async (
     items: readonly unknown[],
     options: unknown,
