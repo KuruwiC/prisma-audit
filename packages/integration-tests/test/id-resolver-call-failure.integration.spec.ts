@@ -177,4 +177,70 @@ describe('id-resolver-call failures', () => {
       await basePrisma.$disconnect();
     }
   });
+  describe('a foreignKey root and the columns of the row', () => {
+    const createClientWith = (fetchBeforeDelete: boolean, observer: AuditErrorObserver) => {
+      const basePrisma = new PrismaClient({ datasources: { db: { url: context.databaseUrl } } });
+      const provider = createAsyncLocalStorageProvider();
+      const prisma = createAuditClient(basePrisma, {
+        Prisma,
+        provider,
+        aggregateMapping: {
+          ...testAggregateMapping,
+          Label: defineEntity({ type: 'Label', aggregates: [to('Post', foreignKey('postId'))] }),
+        },
+        performance: { awaitWrite: true },
+        fetchBefore: { update: true, delete: fetchBeforeDelete },
+        errorHandling: { observer },
+      });
+      return { basePrisma, provider, prisma };
+    };
+
+    const aggregatesOf = async (entityType: string) =>
+      (await context.basePrisma.auditLog.findMany({ where: { entityType } }))
+        .map((log) => `${log.entityId}:${log.aggregateType}:${log.aggregateId}`)
+        .sort();
+
+    it('records a createMany row that leaves an optional foreign key out with null, and reports nothing', async () => {
+      const observer = vi.fn<AuditErrorObserver>();
+      const { basePrisma, provider, prisma } = createClientWith(true, observer);
+      try {
+        await provider.runAsync(testActor, () => prisma.label.createMany({ data: [{ id: 'l-unlinked', name: 'l' }] }));
+      } finally {
+        await prisma.$disconnect();
+        await basePrisma.$disconnect();
+      }
+
+      expect(observer).not.toHaveBeenCalled();
+      expect(await aggregatesOf('Label')).toEqual(['l-unlinked:Label:l-unlinked']);
+      const [record] = await context.basePrisma.auditLog.findMany({ where: { entityType: 'Label' } });
+      expect(record?.after).toMatchObject({ id: 'l-unlinked', postId: null });
+    });
+
+    it('records a row a nested delete removes without reading it under the parent it was deleted from, and reports nothing', async () => {
+      const author = await createAuthor();
+      const post = await context.basePrisma.post.create({ data: { id: 'p-deleted', title: 'P', authorId: author.id } });
+      await context.basePrisma.comment.create({
+        data: { id: 'c-deleted', content: 'C', postId: post.id, authorId: author.id },
+      });
+      const observer = vi.fn<AuditErrorObserver>();
+      const { basePrisma, provider, prisma } = createClientWith(false, observer);
+      try {
+        await provider.runAsync(testActor, () =>
+          prisma.post.update({ where: { id: post.id }, data: { comments: { delete: { id: 'c-deleted' } } } }),
+        );
+        await provider.runAsync(testActor, () =>
+          prisma.user.update({ where: { id: author.id }, data: { posts: { delete: { id: post.id } } } }),
+        );
+      } finally {
+        await prisma.$disconnect();
+        await basePrisma.$disconnect();
+      }
+
+      expect(observer).not.toHaveBeenCalled();
+      // The comment's author is not a column of the relation it was deleted through, so its
+      // User root is unknown without the read and is left out
+      expect(await aggregatesOf('Comment')).toEqual(['c-deleted:Comment:c-deleted', 'c-deleted:Post:p-deleted']);
+      expect(await aggregatesOf('Post')).toEqual(['p-deleted:Post:p-deleted', `p-deleted:User:${author.id}`]);
+    });
+  });
 });

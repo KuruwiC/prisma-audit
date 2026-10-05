@@ -32,10 +32,23 @@ const batchResolverRegistry = getGlobalSingleton(
   () => new WeakMap<IdResolver, BatchIdResolver>(),
 );
 const asyncResolverRegistry = getGlobalSingleton('aggregate-async-resolver-registry', () => new WeakSet<IdResolver>());
+const foreignKeyColumnRegistry = getGlobalSingleton(
+  'aggregate-foreign-key-column-registry',
+  () => new WeakMap<object, string>(),
+);
 
 /** Check if a resolver was created by lookup() (performs DB queries) */
 function isAsyncResolver(resolver: IdResolver): boolean {
   return asyncResolverRegistry.has(resolver);
+}
+
+/**
+ * The column a resolver created by `foreignKey(field)` reads, if `resolver` is one: resolution
+ * leaves a row of a delete whose before state was not read without that root when the row lacks
+ * the column, instead of calling the resolver, which fails for a row without it.
+ */
+export function columnReadBy(resolver: object): string | undefined {
+  return foreignKeyColumnRegistry.get(resolver);
 }
 
 /** Get the batch resolver attached by batchLookup(), if any */
@@ -174,6 +187,11 @@ export const self = (idKey: string | IdTransformer = 'id'): IdResolver => {
 /**
  * Create an ID resolver that extracts a foreign key field
  *
+ * A field that holds `null` is a row without a parent: no id, nothing reported. A row that lacks
+ * the field fails the resolver, which leaves the row without the record under that root and is
+ * reported like any resolver failure; resolution does not call it for the row of a delete whose
+ * before state was not read, which holds only what the adapter knows without reading it.
+ *
  * @param foreignKeyField - Field name (string) or transformation function to extract the foreign key
  *
  * @example Simple foreign key extraction
@@ -203,21 +221,19 @@ export const self = (idKey: string | IdTransformer = 'id'): IdResolver => {
  * ```
  */
 export const foreignKey = (foreignKeyField: string | IdTransformer): IdResolver => {
-  return async (entity) => {
-    if (typeof foreignKeyField === 'function') {
-      const transformedId = foreignKeyField(entity);
-      return normalizeId(transformedId);
+  if (typeof foreignKeyField === 'function') {
+    return async (entity) => normalizeId(foreignKeyField(entity));
+  }
+
+  const resolver: IdResolver = async (entity) => {
+    const fieldValue = (entity as Record<string, unknown>)[foreignKeyField];
+    if (fieldValue === undefined) {
+      throw new Error(`The row has no "${foreignKeyField}" column`);
     }
-
-    const entityRecord = entity as Record<string, unknown>;
-    const fieldValue = entityRecord[foreignKeyField];
-
-    if (fieldValue === undefined || fieldValue === null) {
-      return null;
-    }
-
-    return normalizeId(fieldValue);
+    return fieldValue === null ? null : normalizeId(fieldValue);
   };
+  foreignKeyColumnRegistry.set(resolver, foreignKeyField);
+  return resolver;
 };
 
 /**

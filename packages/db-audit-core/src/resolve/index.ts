@@ -22,7 +22,7 @@
  * projection keys winning.
  */
 
-import { normalizeId, warnAboutUnbatchedResolver } from '../aggregate/helpers.js';
+import { columnReadBy, normalizeId, warnAboutUnbatchedResolver } from '../aggregate/helpers.js';
 import type {
   AggregateRoot,
   BatchIdResolver,
@@ -302,6 +302,16 @@ const resolveRootsInBatch = async <TModelName extends string, TDbHandle>(
   });
 };
 
+/**
+ * Whether `subject` is the row of a delete whose before state was not read: the adapter hands what
+ * it knows of the row without reading it, such as its key, so a column it lacks is unknown rather
+ * than missing.
+ */
+const isUnreadRow = <TModelName extends string>(subject: Subject<TModelName>): boolean =>
+  !subject.isRowBeforeUpdate &&
+  subject.entry.event.action === 'delete' &&
+  subject.entry.event.before.kind !== 'captured';
+
 const resolveRootsRowByRow = async <TModelName extends string, TDbHandle>(
   subjects: readonly Subject<TModelName>[],
   entityType: string,
@@ -310,8 +320,13 @@ const resolveRootsRowByRow = async <TModelName extends string, TDbHandle>(
   report: (entry: Entry<TModelName>) => ReportFailure,
 ): Promise<(ResolvedRoot | undefined)[]> => {
   warnAboutUnbatchedResolver(entityType, aggregate, subjects.length);
+  const column = columnReadBy(aggregate.resolve);
   const roots: (ResolvedRoot | undefined)[] = [];
   for (const subject of subjects) {
+    if (column !== undefined && subject.row[column] === undefined && isUnreadRow(subject)) {
+      roots.push(undefined);
+      continue;
+    }
     const aggregateId = await callResolver(() => aggregate.resolve(subject.row, read()), report(subject.entry));
     roots.push(aggregateId === null ? undefined : toRoot(aggregate, aggregateId, subject.row));
   }

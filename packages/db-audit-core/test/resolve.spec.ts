@@ -283,6 +283,83 @@ describe('resolve', () => {
       ]);
     });
 
+    describe('a foreignKey root and its column', () => {
+      const commentConfig = () =>
+        configOf({
+          Comment: defineEntity({
+            type: 'Comment',
+            aggregates: [to('Post', foreignKey('postId')), to('User', foreignKey('authorId'))],
+          }),
+        });
+      const userRoot = { kind: 'aggregate', aggregateCategory: 'model', aggregateType: 'User' };
+
+      it('reports a written row that lacks the column, and keeps the roots of its other columns', async () => {
+        const events = [event('Comment', { id: 'c1', postId: 'p1' })];
+
+        const { resolved, failures } = await resolve(events, auditContext, commentConfig(), read);
+
+        expect(resolved[0]?.roots.map((r) => [r.aggregateType, r.aggregateId])).toEqual([
+          ['Comment', 'c1'],
+          ['Post', 'p1'],
+        ]);
+        expect(failures).toEqual([
+          { event: events[0], resolver: userRoot, error: new Error('The row has no "authorId" column') },
+        ]);
+      });
+
+      it('reports a row read before a delete that lacks the column', async () => {
+        const events = [
+          event(
+            'Comment',
+            { id: 'c1', postId: 'p1' },
+            {
+              action: 'delete',
+              before: { kind: 'captured', row: { id: 'c1', postId: 'p1' } },
+            },
+          ),
+        ];
+
+        const { failures } = await resolve(events, auditContext, commentConfig(), read);
+
+        expect(failures.map((failure) => [failure.resolver, failure.error.message])).toEqual([
+          [userRoot, 'The row has no "authorId" column'],
+        ]);
+      });
+
+      it('resolves no root and reports nothing for a column that holds null', async () => {
+        const { resolved, failures } = await resolve(
+          [event('Comment', { id: 'c1', postId: 'p1', authorId: null })],
+          auditContext,
+          commentConfig(),
+          read,
+        );
+
+        expect(resolved[0]?.roots.map((r) => r.aggregateType)).toEqual(['Comment', 'Post']);
+        expect(failures).toEqual([]);
+      });
+
+      it.each([
+        ['not read', { kind: 'none' } as const],
+        ['unavailable', { kind: 'unavailable' } as const],
+      ])(
+        'resolves no root and reports nothing for a column the row of a delete whose before state is %s lacks',
+        async (_, before) => {
+          const { resolved, failures } = await resolve(
+            [event('Comment', { id: 'c1', postId: 'p1' }, { action: 'delete', before })],
+            auditContext,
+            commentConfig(),
+            read,
+          );
+
+          expect(resolved[0]?.roots.map((r) => [r.aggregateType, r.aggregateId])).toEqual([
+            ['Comment', 'c1'],
+            ['Post', 'p1'],
+          ]);
+          expect(failures).toEqual([]);
+        },
+      );
+    });
+
     it('resolves no self root when self is false', async () => {
       const config = configOf({
         PostTag: defineEntity({

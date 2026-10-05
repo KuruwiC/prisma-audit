@@ -76,11 +76,14 @@ describe('Resolver helper functions', () => {
       expect(result).toBe('user-456');
     });
 
-    it('should return null when foreign key field is missing', async () => {
+    it('rejects a row that lacks the foreign key field', async () => {
       const resolver = foreignKey('authorId');
-      const entity = { id: 'post-123' };
-      const result = await resolver(entity, null);
-      expect(result).toBeNull();
+      await expect(resolver({ id: 'post-123' }, null)).rejects.toThrow('The row has no "authorId" column');
+    });
+
+    it('returns null for a foreign key that holds null', async () => {
+      const resolver = foreignKey('authorId');
+      await expect(resolver({ id: 'post-123', authorId: null }, null)).resolves.toBeNull();
     });
 
     it('should apply transformation function to foreign key value', async () => {

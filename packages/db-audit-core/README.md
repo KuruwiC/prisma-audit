@@ -148,7 +148,11 @@ write the adapter runs, in order:
    plan is `detached` (the records are dropped), and when an immediate write failed and the
    write-failure policy rethrows.
 4. **The mutation events**, inside `buildRecords`: one `MutationEvent` per written row, with what
-   the adapter reads after the write when the write itself does not return it.
+   the adapter reads after the write when the write itself does not return it. Each row an event
+   carries holds every column of the table, `null` where the row has no value: a `foreignKey`
+   resolver fails for a row that lacks its column. The exception is the row of a delete whose
+   before state is not `captured`, which may hold only what the adapter knows without reading it;
+   a `foreignKey` root on a column it lacks is left out without a failure.
 5. **`resolve(events, auditContext, resolveConfig, read)`**. `read` is a thunk that returns the
    handle of the scope active when a resolver or enricher runs; the core calls it at each callback,
    so callbacks read the transaction's uncommitted writes. `resolveConfig` is `entity`
