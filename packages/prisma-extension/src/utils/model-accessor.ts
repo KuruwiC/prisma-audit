@@ -19,10 +19,7 @@ export const getModelDelegate = (
   modelName: string,
 ): unknown => client[getModelAccessor(modelName)];
 
-export const getModelOperation = (
-  delegate: unknown,
-  operation: string,
-): ((args: unknown) => Promise<unknown>) | undefined => {
+const getModelOperation = (delegate: unknown, operation: string): ((args: unknown) => Promise<unknown>) | undefined => {
   if (typeof delegate !== 'object' || delegate === null) {
     return undefined;
   }

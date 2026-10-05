@@ -95,11 +95,12 @@ const runExecutor = async (
  * reports a failed build as `diff-generation` and a failed write as `log-write`, and decides from
  * the write plan whether either fails the caller.
  */
-const runInScope = async (
-  intercepted: InterceptedOperation,
-  scope: ExecutionScope,
+export const runAuditedOperation = async (
+  input: AuditedOperationInput,
   deps: AuditPipelineDependencies,
 ): Promise<unknown> => {
+  const { operation: intercepted, auditContext, baseClient, atomic } = input;
+  const scope = executionScopeOf({ auditContext, baseClient, atomic });
   const { model, action, args } = intercepted;
   const operation: AuditedOperation = { model, action, args, execute: operationContinuation(intercepted) };
   const executor = isBatchOperation(action) ? deps.batchExecutor : deps.singleExecutor;
@@ -117,13 +118,4 @@ const runInScope = async (
     transactionRuntimeOf(scope),
   );
   return executed.result;
-};
-
-export const runAuditedOperation = (
-  input: AuditedOperationInput,
-  deps: AuditPipelineDependencies,
-): Promise<unknown> => {
-  const { operation, auditContext, baseClient, atomic } = input;
-
-  return runInScope(operation, executionScopeOf({ auditContext, baseClient, atomic }), deps);
 };
