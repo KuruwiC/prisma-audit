@@ -348,6 +348,18 @@ describe('foreign-key changes of related rows', () => {
       expect(records.map(({ id, action }) => [id, action])).toEqual([['pr2', 'update']]);
       expect(records[0]?.changes).toMatchObject({ userId: { old: 'u2', new: 'u1' } });
     });
+
+    it('audits the row a connect and a delete both name as the deleted row', async () => {
+      const { basePrisma, prisma, run, recordsOf } = await setup();
+      await basePrisma.profile.create({ data: { id: 'pr2', userId: 'u2', bio: 'b' } });
+
+      await run(() =>
+        prisma.user.update({ where: { id: 'u1' }, data: { profile: { connect: { id: 'pr2' }, delete: true } } }),
+      );
+
+      expect(await basePrisma.profile.findMany()).toEqual([]);
+      expect(await recordsOf('Profile')).toEqual([expect.objectContaining({ id: 'pr2', action: 'delete' })]);
+    });
   });
 
   describe('a to-one relation with an optional foreign key', () => {
@@ -409,6 +421,30 @@ describe('foreign-key changes of related rows', () => {
         expect.objectContaining({ id: 'b2', action: 'update', changes: { userId: { old: null, new: 'u1' } } }),
       ]);
     });
+
+    it.each([
+      ['unlinked', 'b2'],
+      ['linked to another parent', 'b3'],
+    ])(
+      'audits the row a connect replaces as unlinked and the connected row, %s, as deleted when a delete is next to it',
+      async (_, connectedId) => {
+        const { basePrisma, prisma, run, recordsOf } = await setup();
+        await seedBadges(basePrisma);
+        await basePrisma.badge.create({ data: { id: 'b3', name: 'b3', userId: 'u2' } });
+
+        await run(() =>
+          prisma.user.update({ where: { id: 'u1' }, data: { badge: { connect: { id: connectedId }, delete: true } } }),
+        );
+
+        expect((await basePrisma.badge.findMany({ orderBy: { id: 'asc' } })).map(({ id }) => id)).not.toContain(
+          connectedId,
+        );
+        expect(await recordsOf('Badge')).toEqual([
+          expect.objectContaining({ id: 'b1', action: 'update', changes: { userId: { old: 'u1', new: null } } }),
+          expect.objectContaining({ id: connectedId, action: 'delete', changes: null }),
+        ]);
+      },
+    );
 
     it('audits nothing for a connect of the row already linked', async () => {
       const { basePrisma, prisma, run, recordsOf } = await setup();
@@ -474,6 +510,24 @@ describe('foreign-key changes of related rows', () => {
       const users = await recordsOf('User');
       expect(users.map(({ id, action }) => [id, action])).toEqual([['u2', 'update']]);
       expect(users[0]?.changes).toEqual({ name: { old: 'Ben', new: 'Ben renamed' } });
+    });
+
+    it('audits the row a connect and a delete both name as the deleted row, and the parent as unlinked', async () => {
+      const { basePrisma, prisma, run, recordsOf } = await setup();
+      await basePrisma.label.create({ data: { id: 'l1', name: 'l1', postId: 'p-live' } });
+
+      await run(() =>
+        prisma.label.update({ where: { id: 'l1' }, data: { post: { connect: { id: 'p-u2' }, delete: true } } }),
+      );
+
+      expect((await basePrisma.post.findMany({ orderBy: { id: 'asc' } })).map(({ id }) => id)).toEqual([
+        'p-draft',
+        'p-live',
+      ]);
+      expect(await recordsOf('Post')).toEqual([expect.objectContaining({ id: 'p-u2', action: 'delete' })]);
+      const labels = await recordsOf('Label');
+      expect(labels.map(({ id, action }) => [id, action])).toEqual([['l1', 'update']]);
+      expect(labels[0]?.changes).toEqual({ postId: { old: 'p-live', new: null } });
     });
 
     it('audits the row a connectOrCreate names and an update writes as the update of that row', async () => {

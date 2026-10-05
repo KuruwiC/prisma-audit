@@ -1198,6 +1198,7 @@ Supports the following operations, including deep nesting:
   - When the related record holds the foreign key (e.g., `user.posts`, `post.labels`, `user.profile`): creates an `update` audit log for each connected record whose foreign key changed, with the foreign key's old and new value in `changes` (`authorId: u2 → u1`); a record already linked to the parent gets none
   - On a to-one relation whose optional foreign key is on the related record, the record the parent held before is unlinked: it gets an `update` audit log too (foreign key `→ null`), and so does the record a to-one `create` or `connectOrCreate` replaces
   - When the parent holds the foreign key (e.g., `post.author`): the parent's own `update` audit log carries the change
+  - A to-one `update`, `upsert` or `delete` next to a `connect` applies to the record the `connect` names, which Prisma links first: that record gets the `update` or `delete` audit log, with its state before the operation
   - Creates audit logs for join table entities (e.g., PostTag) if defined in `aggregateMapping`
 - `set` - Replaces the records linked through an optional foreign key: an `update` audit log for each record it moves in and for each record it unlinks (foreign key `→ null`); the records it keeps get none
 - `disconnect` - Unlinks records through an optional foreign key (the named records of a to-many relation, the parent's record of a to-one relation): an `update` audit log for each unlinked record (foreign key `→ null`); a record linked to another parent is left as it was and gets none

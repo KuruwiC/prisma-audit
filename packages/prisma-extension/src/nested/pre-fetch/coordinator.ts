@@ -550,9 +550,9 @@ const sameParent = (a: NestedOperationInfo, b: NestedOperationInfo): boolean =>
 
 /**
  * The unique WHERE of the row a to-one `connect` or `connectOrCreate` names, keyed by its parent
- * row, for each parent row an `update` or `upsert` next to it writes the linked row of: Prisma
- * links the named row first, so that row, not the one linked before the write, is the row the
- * write's before state is read from. A `connectOrCreate` whose row does not exist creates it, and
+ * row, for each parent row an `update`, `upsert` or `delete` next to it writes the linked row of:
+ * Prisma links the named row first, so that row, not the one linked before the write, is the row
+ * the write's before state is read from. A `connectOrCreate` whose row does not exist creates it, and
  * the read finds no row.
  */
 const connectedRowWheresAt = (context: NestedPreFetchContext, path: string): Map<ParentRowIdentity, PreFetchRecord> => {
