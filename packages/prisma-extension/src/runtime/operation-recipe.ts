@@ -11,7 +11,7 @@
  * recipe is not a PrismaPromise: Prisma's own `$transaction` rejects it.
  */
 
-import { currentScope, isProcessingAuditLog } from './scope.js';
+import { isProcessingAuditLog } from './scope.js';
 
 /** The model actions Prisma's delegates expose as lazy operations */
 const MODEL_ACTIONS: ReadonlySet<string> = new Set([
@@ -114,12 +114,13 @@ const replay = (recipe: Recipe, client: object): unknown => {
 const runInTransaction = (receiver: object, run: (tx: object) => Promise<unknown>): Promise<unknown> =>
   Promise.resolve(invoke(receiver, { method: '$transaction', args: [run] }));
 
-/** Whether the recipe, run now, is an audited write whose audit is awaited outside any transaction */
+/**
+ * Whether the recipe, run now, is an audited write whose audit is awaited. A call of the audited
+ * client inside a callback of your interactive `$transaction` is one too: the call is not made on
+ * the transaction's client, so it runs in a transaction of its own, together with its audit.
+ */
 const awaitsAuditNow = (recipe: Recipe, config: RecipeConfig): boolean =>
-  recipe.model !== undefined &&
-  currentScope()?.transaction === undefined &&
-  !isProcessingAuditLog() &&
-  config.awaitsAudit(recipe.model, recipe.call.method);
+  recipe.model !== undefined && !isProcessingAuditLog() && config.awaitsAudit(recipe.model, recipe.call.method);
 
 const createRecipeFactory = (config: RecipeConfig) => {
   const start = (recipe: Recipe): Promise<unknown> => {

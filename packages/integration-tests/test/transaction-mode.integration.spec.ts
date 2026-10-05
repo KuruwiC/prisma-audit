@@ -340,6 +340,22 @@ describe('openImplicitTransaction', () => {
       expect(await raw.user.count()).toBe(0);
     });
 
+    it('runs a write through the audited client inside a callback of your transaction in a transaction of its own, together with its audit', async () => {
+      const clients = createClients({ openImplicitTransaction: true });
+
+      await expect(
+        clients.run(() =>
+          clients.client.$transaction(async () => {
+            await clients.client.user.create({ data: { email: 'outer@example.com', name: 'Outer' } });
+            throw new Error('rollback');
+          }),
+        ),
+      ).rejects.toThrow('rollback');
+
+      expect(await raw.user.count()).toBe(1);
+      expect(await auditRows()).toEqual(['User.create']);
+    });
+
     it('rolls a write back when its awaited audit write fails', async () => {
       const user = await seedUser();
       const clients = createClients({ openImplicitTransaction: true, writer: failingWriter });

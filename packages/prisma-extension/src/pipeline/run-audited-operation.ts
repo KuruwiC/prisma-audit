@@ -50,10 +50,10 @@ export interface AuditPipelineDependencies {
 
 /**
  * How the executors run the caller's mutation: `query` continues the intercepted operation down
- * the extension chain on the client the caller invoked it on (the interactive transaction's client
- * inside `$transaction`, the client itself outside any), which is the client the audit reads and
- * writes run on. It runs through `runCallerMutation`, so a failure of the caller's own write
- * reaches the caller raw.
+ * the extension chain on the client the caller invoked it on. The audit reads and writes run on
+ * the scope's handle, the client of the transaction the runtime scope holds, which is that client
+ * when the caller writes through the transaction's client inside `$transaction`. It runs through
+ * `runCallerMutation`, so a failure of the caller's own write reaches the caller raw.
  */
 const operationContinuation =
   (operation: InterceptedOperation): AuditedOperation['execute'] =>
