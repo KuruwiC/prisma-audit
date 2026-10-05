@@ -39,7 +39,7 @@ type TransactionProxyDependencies = TransactionProxyConfig & {
 };
 
 /** The one option of a batch `$transaction([...])`, which an interactive transaction takes as well */
-const interactiveOptionsOf = (options: unknown): Array<{ readonly isolationLevel: unknown }> => {
+const isolationLevelOptionOf = (options: unknown): Array<{ readonly isolationLevel: unknown }> => {
   const isolationLevel: unknown =
     typeof options === 'object' && options !== null ? Reflect.get(options, 'isolationLevel') : undefined;
   return isolationLevel === undefined ? [] : [{ isolationLevel }];
@@ -53,10 +53,9 @@ const interactiveOptionsOf = (options: unknown): Array<{ readonly isolationLevel
  * from the app-owned audit context), so re-attributing the actor mid-transaction via
  * `runAsync` / `withActor` never drops them.
  *
- * The caller owns `deferredWrites` and is responsible for draining it AFTER the transaction
- * commits, so audit logs never persist for a transaction whose commit subsequently fails. The
- * callback clears the array at the start of each invocation (defensive against callback
- * re-invocation) and never drains itself.
+ * The caller owns `deferredWrites` and drains it once the transaction has committed, so audit
+ * logs never persist for a transaction whose commit fails. The callback empties the queue each
+ * time it runs.
  */
 export const createWrappedTransactionCallback = (
   callback: (tx: TransactionalPrismaClient) => Promise<unknown>,
@@ -74,10 +73,8 @@ export const createWrappedTransactionCallback = (
 /**
  * Creates a transaction proxy handler that intercepts $transaction calls
  *
- * Deferred writes are drained strictly AFTER `$transaction` resolves (i.e. after commit), so an
- * audit log never persists for a transaction whose commit subsequently fails. On rejection the
- * locally-owned queue is discarded with the thrown error (no drain). This matches the
- * implicit transaction `openImplicitTransaction` opens.
+ * Deferred writes are drained once `$transaction` has resolved, after commit, so an audit log
+ * never persists for a transaction whose commit fails; on rejection the queue is discarded.
  */
 export const createTransactionProxyHandler = (
   deps: TransactionProxyDependencies,
@@ -118,7 +115,7 @@ export const createTransactionProxyHandler = (
           results.push(await operation);
         }
         return results;
-      }, interactiveOptionsOf(options)),
+      }, isolationLevelOptionOf(options)),
     );
   };
 

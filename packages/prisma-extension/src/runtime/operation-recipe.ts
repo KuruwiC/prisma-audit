@@ -88,9 +88,17 @@ interface Recipe {
   readonly relationCalls: readonly RecipeCall[];
   /** The model a further fluent relation call starts from; absent when none can follow */
   readonly fluentModel: string | undefined;
-  /** The run the recipe started when it was first awaited or taken by a batch */
-  started?: Promise<unknown> | 'taken-by-batch';
+  /** Whether the recipe has run, once it was first awaited, or was taken by a batch to run */
+  state: RecipeState;
 }
+
+type RecipeState =
+  | { readonly kind: 'pending' }
+  | { readonly kind: 'running'; readonly result: Promise<unknown> }
+  | { readonly kind: 'taken-by-batch' };
+
+/** What `Object.prototype.toString` names a recipe; not `PrismaPromise`, which Prisma's own batch accepts */
+const RECIPE_TAG = 'PrismaAuditOperation';
 
 const recipes = new WeakMap<object, Recipe>();
 
@@ -142,21 +150,31 @@ const awaitsAudit = (decision: Decision | undefined): boolean =>
   decision?.policy.sampled === true && decision.policy.atomic;
 
 const createRecipeFactory = (config: RecipeConfig) => {
+  const run = (recipe: Recipe): Promise<unknown> => {
+    const decision = decisionOf(recipe, config);
+    return withScope({ decidedWritePolicies: decidedWritePoliciesOf(decision ? [decision] : []) }, async () =>
+      awaitsAudit(decision)
+        ? await runInTransaction(recipe.receiver, async (tx) => await replay(recipe, tx))
+        : await replay(recipe, recipe.target),
+    );
+  };
+
   const start = (recipe: Recipe): Promise<unknown> => {
-    if (recipe.started === undefined) {
-      const decision = decisionOf(recipe, config);
-      recipe.started = withScope(
-        { decidedWritePolicies: decidedWritePoliciesOf(decision ? [decision] : []) },
-        async () =>
-          awaitsAudit(decision)
-            ? await runInTransaction(recipe.receiver, async (tx) => await replay(recipe, tx))
-            : await replay(recipe, recipe.target),
-      );
+    switch (recipe.state.kind) {
+      case 'pending': {
+        const result = run(recipe);
+        recipe.state = { kind: 'running', result };
+        return result;
+      }
+      case 'running':
+        return recipe.state.result;
+      case 'taken-by-batch':
+        return Promise.reject(new Error('The operation was given to a batch $transaction, which runs it'));
+      default: {
+        const exhaustiveCheck: never = recipe.state;
+        throw new Error(`[@prisma-audit] Unhandled recipe state: ${JSON.stringify(exhaustiveCheck)}`);
+      }
     }
-    if (recipe.started === 'taken-by-batch') {
-      return Promise.reject(new Error('The operation was given to a batch $transaction, which runs it'));
-    }
-    return recipe.started;
   };
 
   /** The `then`, `catch` or `finally` of the recipe, each of which starts it */
@@ -174,12 +192,15 @@ const createRecipeFactory = (config: RecipeConfig) => {
     }
   };
 
+  /** The model the fluent relation call `prop` leads to, when one can follow the recipe */
+  const relatedModelOf = (recipe: Recipe, prop: string | symbol): string | undefined =>
+    typeof prop === 'string' && recipe.fluentModel !== undefined
+      ? config.relatedModel(recipe.fluentModel, prop)
+      : undefined;
+
   /** The fluent relation call `prop` names on the recipe's result, when one can follow */
   const relationCallOf = (recipe: Recipe, prop: string | symbol): unknown => {
-    const relatedModel =
-      typeof prop === 'string' && recipe.fluentModel !== undefined
-        ? config.relatedModel(recipe.fluentModel, prop)
-        : undefined;
+    const relatedModel = relatedModelOf(recipe, prop);
     if (typeof prop !== 'string' || relatedModel === undefined) {
       return undefined;
     }
@@ -188,14 +209,21 @@ const createRecipeFactory = (config: RecipeConfig) => {
         ...recipe,
         relationCalls: [...recipe.relationCalls, { method: prop, args }],
         fluentModel: relatedModel,
-        started: undefined,
+        state: { kind: 'pending' },
       });
   };
 
   const create = (recipe: Recipe): object => {
     const handle: object = new Proxy(
       {},
-      { get: (_target, prop) => promiseMethodOf(recipe, prop) ?? relationCallOf(recipe, prop) },
+      {
+        get: (_target, prop) =>
+          prop === Symbol.toStringTag ? RECIPE_TAG : (promiseMethodOf(recipe, prop) ?? relationCallOf(recipe, prop)),
+        has: (_target, prop) =>
+          prop === Symbol.toStringTag ||
+          promiseMethodOf(recipe, prop) !== undefined ||
+          relatedModelOf(recipe, prop) !== undefined,
+      },
     );
     recipes.set(handle, recipe);
     return handle;
@@ -245,6 +273,7 @@ export const createRecipeClient = (config: RecipeConfig) => {
               call: { method: prop, args },
               relationCalls: [],
               fluentModel: FLUENT_ACTIONS.has(prop) ? model : undefined,
+              state: { kind: 'pending' },
             }),
           );
         }
@@ -281,6 +310,7 @@ export const createRecipeClient = (config: RecipeConfig) => {
                 call: { method: prop, args },
                 relationCalls: [],
                 fluentModel: undefined,
+                state: { kind: 'pending' },
               }),
         ),
       };
@@ -313,7 +343,7 @@ export const takeBatchRecipes = (items: readonly unknown[], receiver: object, co
         ? 'was not created by an audited client'
         : recipe.receiver !== receiver
           ? 'was created by another client than the one $transaction is called on'
-          : recipe.started !== undefined
+          : recipe.state.kind !== 'pending'
             ? 'has already run'
             : undefined;
     if (recipe === undefined || problem !== undefined) {
@@ -324,7 +354,7 @@ export const takeBatchRecipes = (items: readonly unknown[], receiver: object, co
     return recipe;
   });
   for (const recipe of taken) {
-    recipe.started = 'taken-by-batch';
+    recipe.state = { kind: 'taken-by-batch' };
   }
   const decisions = taken.flatMap((recipe) => decisionOf(recipe, config) ?? []);
   return {

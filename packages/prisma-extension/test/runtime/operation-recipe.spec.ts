@@ -120,4 +120,20 @@ describe('operation recipes', () => {
     await expect(Promise.resolve(created)).rejects.toThrow('given to a batch $transaction');
     expect(clients.ran).toEqual([]);
   });
+
+  it('answers in and Symbol.toStringTag as a promise of its own kind, with its fluent relations', () => {
+    const clients = createClients();
+    const config: RecipeConfig = {
+      ...configAwaiting(true),
+      relatedModel: (model, field) => (model === 'User' && field === 'posts' ? 'Post' : undefined),
+    };
+    const created = createUserOn(config, clients, { email: 'a' });
+
+    expect('then' in created).toBe(true);
+    expect('catch' in created).toBe(true);
+    expect('finally' in created).toBe(true);
+    expect('posts' in created).toBe(true);
+    expect('comments' in created).toBe(false);
+    expect(Object.prototype.toString.call(created)).toBe('[object PrismaAuditOperation]');
+  });
 });
