@@ -95,6 +95,7 @@ const scopeOn = (client: PrismaClientWithDynamicAccess): ExecutionScope => ({
 const createFailureSink = (): FailureSink => ({
   notify: vi.fn(async () => {}),
   reportResolverFailures: vi.fn(async () => {}),
+  reportDroppedBuild: vi.fn(async () => {}),
   reportWriteFailure: vi.fn(async () => {}),
 });
 

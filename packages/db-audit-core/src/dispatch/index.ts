@@ -44,7 +44,8 @@ const planOf = <TDbHandle>(
  * The build runs before `dispatch` resolves, whatever the write plan. A failed build notifies the
  * observer under `diff-generation` with the operation's `modelName`, `operation` and `params`, and
  * rejects with its error, except when the records would be written detached: the operation's
- * write has committed and its caller does not wait for its audit, so the records are dropped and
+ * write has committed and its caller does not wait for its audit, so the records are dropped,
+ * the write-failure policy is applied to the drop (see {@link FailureSink.reportDroppedBuild}) and
  * `dispatch` resolves.
  *
  * Resolves once an immediate write has finished, or once the write is handed to the runtime.
@@ -75,10 +76,12 @@ export const dispatch = async <TDbHandle>(
     records = await buildRecords();
   } catch (caught) {
     const error = toError(caught);
-    await config.failureSink.notify({ phase: 'diff-generation', modelName, operation, params, error });
+    const failure = { phase: 'diff-generation', modelName, operation, params, error } as const;
     if (plan.kind === 'detached') {
+      await config.failureSink.reportDroppedBuild(failure);
       return;
     }
+    await config.failureSink.notify(failure);
     throw error;
   }
   if (records.length === 0) {

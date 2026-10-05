@@ -1,11 +1,11 @@
 /**
  * Failure contract
  *
- * Every failure notifies the observer, which never affects the caller's operation; only a failed
- * write of the records also consults the write-failure policy. An adapter detects the failures of
- * its own phases and decides what each observer-only phase does to the operation, `dispatch`
- * reports a failed build of the records and the failed writes, and the {@link FailureSink} applies
- * the rest.
+ * Every failure notifies the observer, which never affects the caller's operation; a failed write
+ * of the records, and a build of the records dropped because its write has committed, also consult
+ * the write-failure policy. An adapter detects the failures of its own phases and decides what each
+ * observer-only phase does to the operation, `dispatch` reports a failed build of the records and
+ * the failed writes, and the {@link FailureSink} applies the rest.
  */
 
 import type { WritePlan } from '../domain/mutation-event.js';
@@ -19,14 +19,16 @@ import { createErrorHandler, type ErrorStrategy } from '../utils/error-handler.j
  * - `pre-fetch`: a read the adapter makes before the write (the before state) failed. Observer
  *   only; the event carries an `unavailable` before state, or the adapter skips a record whose
  *   action depends on the read.
- * - `log-write`: persisting the records failed. The only phase whose outcome
- *   {@link ErrorHandlingConfig.writeFailurePolicy} decides.
- * - `diff-generation`: other work that builds the records failed. Not policy-gated. Before the
- *   operation's write, the adapter reports it and decides whether the caller's operation fails.
- *   The build `dispatch` runs once the write has run is reported by `dispatch`: it fails the
+ * - `log-write`: persisting the records failed. Its outcome, like that of a `diff-generation`
+ *   failure that dropped the records of a committed write, is decided by
+ *   {@link ErrorHandlingConfig.writeFailurePolicy}.
+ * - `diff-generation`: other work that builds the records failed. Before the operation's write, the
+ *   adapter reports it and decides whether the caller's operation fails; it is observer only
+ *   there. The build `dispatch` runs once the write has run is reported by `dispatch`: it fails the
  *   caller's operation with the original error, except when the records would be written detached
  *   (not atomic, outside any transaction), where the write has committed and the caller does not
- *   wait for its audit: the operation's records are dropped and the operation succeeds.
+ *   wait for its audit: the operation's records are dropped, the operation succeeds and the
+ *   write-failure policy applies to the drop as it does to a failed detached write.
  * - `row-identification`: the adapter itself could not identify a row the operation wrote (no
  *   user callback is involved). Observer only; the row's record is skipped.
  * - `id-resolver-call`: a user-supplied id resolver (the entity's `idResolver` or a `to()` root's
@@ -67,7 +69,7 @@ export type AuditErrorObserver = (context: AuditErrorContext) => void | Promise<
 
 /**
  * Decides whether a failed audit-log write also fails the caller's own database
- * operation.
+ * operation, and whether the drop of the audit records of a committed write is logged.
  *
  * A strategy string (`'throw'` re-throws and fails the operation, `'log'` logs to the
  * console and lets the operation succeed, `'ignore'` does neither), or a function that
@@ -75,11 +77,13 @@ export type AuditErrorObserver = (context: AuditErrorContext) => void | Promise<
  * those three strings. The function must not throw; if it does, its error is logged to
  * the console and `'log'` applies.
  *
- * **Only the `log-write` phase is policy-gated**: every other {@link AuditErrorPhase} has
- * an outcome the adapter fixes.
+ * **Policy-gated phases**: `log-write`, and `diff-generation` when `dispatch` dropped the
+ * records of a write that has already committed (the context then names the operation's
+ * `modelName` and `operation`, and its `params` are the operation's arguments). Every other
+ * {@link AuditErrorPhase} has an outcome the adapter fixes.
  *
- * **Writes the caller does not await** (after commit, or detached): the caller has already
- * received its result, so `'throw'` logs instead, like `'log'`.
+ * **Writes the caller does not await** (after commit, or detached) and **dropped builds**: the
+ * caller has already received its result, so `'throw'` logs instead, like `'log'`.
  */
 export type WriteFailurePolicy =
   | ErrorStrategy
@@ -110,6 +114,13 @@ export interface FailureSink {
   ) => Promise<void>;
   /** Notifies the observer once per failure `resolve` returned, under `id-resolver-call`. Never throws. */
   readonly reportResolverFailures: (failures: readonly ResolverFailure[]) => Promise<void>;
+  /**
+   * Reports the records of a committed write that `dispatch` dropped because building them failed
+   * and no write was left to await: notifies the observer under `diff-generation`, then applies
+   * the write-failure policy. Never rejects: the caller has returned, so `'throw'` logs.
+   * `dispatch` calls it; an adapter does not.
+   */
+  readonly reportDroppedBuild: (context: AuditErrorContext & { readonly phase: 'diff-generation' }) => Promise<void>;
   /**
    * Reports a failed write of `plan`: notifies the observer under `log-write`, then applies the
    * write-failure policy. Rejects with `error` only for an `immediate` plan under `'throw'`; the
@@ -172,19 +183,44 @@ export const createFailureSink = (config: ErrorHandlingConfig): FailureSink => {
     }
   };
 
-  const reportWriteFailure = async (plan: WritePlan, error: Error): Promise<void> => {
-    const context: AuditErrorContext = {
-      phase: 'log-write',
-      modelName: plan.records[0]?.entityType ?? '',
-      operation: 'write',
-      params: plan.records,
-      error,
-    };
+  /**
+   * Notifies the observer, then applies the write-failure policy to `context.error`. `'throw'`
+   * rethrows only while the caller still awaits (`awaited`); otherwise it logs.
+   */
+  const applyWriteFailurePolicy = async (
+    context: AuditErrorContext,
+    awaited: boolean,
+    label: string,
+  ): Promise<void> => {
     await observe(context);
     const strategy = await resolveStrategy(context);
-    const applied = strategy === 'throw' && plan.kind !== 'immediate' ? 'log' : strategy;
-    createErrorHandler(applied)(error, WRITE_LOG_LABELS[plan.kind]);
+    const applied = strategy === 'throw' && !awaited ? 'log' : strategy;
+    createErrorHandler(applied)(context.error, label);
   };
 
-  return { notify: observe, reportResolverFailures, reportWriteFailure };
+  const reportWriteFailure = async (plan: WritePlan, error: Error): Promise<void> => {
+    await applyWriteFailurePolicy(
+      {
+        phase: 'log-write',
+        modelName: plan.records[0]?.entityType ?? '',
+        operation: 'write',
+        params: plan.records,
+        error,
+      },
+      plan.kind === 'immediate',
+      WRITE_LOG_LABELS[plan.kind],
+    );
+  };
+
+  const reportDroppedBuild = async (
+    context: AuditErrorContext & { readonly phase: 'diff-generation' },
+  ): Promise<void> => {
+    await applyWriteFailurePolicy(
+      context,
+      false,
+      `build of the audit records of ${context.modelName}.${context.operation}; the committed write's records are dropped`,
+    );
+  };
+
+  return { notify: observe, reportResolverFailures, reportDroppedBuild, reportWriteFailure };
 };

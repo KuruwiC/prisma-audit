@@ -17,6 +17,8 @@ Failures go through the core failure sink. Each failed audit write is listed in 
 `id-resolver-call`), before the context is forwarded to `errorHandling.observer` when one is
 given. `errorHandling.writeFailurePolicy` defaults to `'throw'`: a failed write the operation
 awaits rejects the operation; a queued or detached one is logged. A resolver failure leaves that
-row without its records and never fails the operation.
+row without its records and never fails the operation. A record build that fails after a detached
+write has committed drops that write's records: the observer hears `diff-generation` and the
+policy applies to the drop, logging it (`'throw'` logs here, since the caller has returned).
 
 The package is not published. `pnpm --filter @kuruwic/audit-adapter-memory test` runs its spec.

@@ -124,6 +124,83 @@ describe('createFailureSink', () => {
     });
   });
 
+  describe('reportDroppedBuild', () => {
+    const buildError = new Error('read after the write failed');
+    const dropped = {
+      phase: 'diff-generation',
+      modelName: 'Post',
+      operation: 'update',
+      params: { where: { id: 'p1' } },
+      error: buildError,
+    } as const;
+    const droppedLine = expect.stringMatching(/Post\.update.*dropped/);
+
+    it('notifies the observer with the context it is given', async () => {
+      const observer = vi.fn();
+      const sink = createFailureSink({ observer });
+
+      await sink.reportDroppedBuild(dropped);
+
+      expect(observer).toHaveBeenCalledTimes(1);
+      expect(observer).toHaveBeenCalledWith(dropped);
+    });
+
+    it("applies 'log' when no policy is configured, naming the model and operation without the params", async () => {
+      const sink = createFailureSink({});
+
+      await expect(sink.reportDroppedBuild(dropped)).resolves.toBeUndefined();
+
+      expect(consoleError).toHaveBeenCalledWith(droppedLine, 'read after the write failed');
+      expect(JSON.stringify(consoleError.mock.calls)).not.toContain('"p1"');
+    });
+
+    it("stays silent under 'ignore', after notifying the observer", async () => {
+      const observer = vi.fn();
+      const sink = createFailureSink({ observer, writeFailurePolicy: 'ignore' });
+
+      await expect(sink.reportDroppedBuild(dropped)).resolves.toBeUndefined();
+
+      expect(observer).toHaveBeenCalledWith(dropped);
+      expect(consoleError).not.toHaveBeenCalled();
+    });
+
+    it("logs instead of rejecting under 'throw', whose caller has returned", async () => {
+      const sink = createFailureSink({ writeFailurePolicy: 'throw' });
+
+      await expect(sink.reportDroppedBuild(dropped)).resolves.toBeUndefined();
+
+      expect(consoleError).toHaveBeenCalledWith(droppedLine, 'read after the write failed');
+    });
+
+    it('passes a policy function the context the observer received and applies what it returns', async () => {
+      const observer = vi.fn();
+      const writeFailurePolicy = vi.fn((_context: AuditErrorContext) => 'ignore' as const);
+      const sink = createFailureSink({ observer, writeFailurePolicy });
+
+      await sink.reportDroppedBuild(dropped);
+
+      expect(writeFailurePolicy).toHaveBeenCalledWith(dropped);
+      expect(writeFailurePolicy.mock.calls[0]?.[0]).toBe(observer.mock.calls[0]?.[0]);
+      expect(consoleError).not.toHaveBeenCalled();
+    });
+
+    it("falls back to 'log' when the policy function throws", async () => {
+      const sink = createFailureSink({
+        writeFailurePolicy: () => {
+          throw new Error('policy exploded');
+        },
+      });
+
+      await expect(sink.reportDroppedBuild(dropped)).resolves.toBeUndefined();
+
+      expect(consoleError).toHaveBeenCalledWith(
+        "[db-audit-core] Error in writeFailurePolicy function; falling back to 'log':",
+        'policy exploded',
+      );
+      expect(consoleError).toHaveBeenCalledWith(droppedLine, 'read after the write failed');
+    });
+  });
+
   describe('notify', () => {
     it('notifies the observer without consulting the policy', async () => {
       const observer = vi.fn();

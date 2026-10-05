@@ -109,6 +109,7 @@ const createDeps = (overrides: Partial<AuditPipelineDependencies> = {}) => {
   const failureSink: FailureSink = {
     notify: vi.fn(async () => {}),
     reportResolverFailures: vi.fn(async () => {}),
+    reportDroppedBuild: vi.fn(async () => {}),
     reportWriteFailure: vi.fn(async () => {}),
   };
   const deps: AuditPipelineDependencies = {
@@ -479,8 +480,9 @@ describe('runAuditedOperation', () => {
           ),
         ).resolves.toBe(outcome.result);
 
-        expect(deps.failureSink.notify).toHaveBeenCalledTimes(1);
-        expect(deps.failureSink.notify).toHaveBeenCalledWith(buildFailure);
+        expect(deps.failureSink.reportDroppedBuild).toHaveBeenCalledTimes(1);
+        expect(deps.failureSink.reportDroppedBuild).toHaveBeenCalledWith(buildFailure);
+        expect(deps.failureSink.notify).not.toHaveBeenCalled();
         expect(getPendingWriteCount()).toBe(0);
         expect(auditWriteOf(deps)).not.toHaveBeenCalled();
       });

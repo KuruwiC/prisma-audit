@@ -6,6 +6,9 @@
  * fails with the original error and keeps no audit rows. A batch `$transaction([...])` with an
  * awaited audit runs as one interactive transaction, so every operation of the batch rolls back.
  *
+ * Without an observer the dropped rows of a committed write are reported by the write-failure
+ * policy: a console line under the default `'log'`, nothing under `'ignore'`.
+ *
  * Faults are injected on the client passed to `createAuditClient`, which every audit read runs
  * on: its `findMany` on a model fails the first time it returns the state the caller's write
  * produced, which only a read after the write can see; or the actor enricher, which runs once the
@@ -14,7 +17,7 @@
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
-import type { AuditErrorContext } from '@kuruwic/prisma-audit';
+import type { AuditErrorContext, ErrorHandlingConfig } from '@kuruwic/prisma-audit';
 import { createAuditClient, flushAllPendingWrites } from '@kuruwic/prisma-audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -38,6 +41,8 @@ interface ScenarioOptions {
   readonly databaseUrl: string;
   readonly awaitWrite: boolean;
   readonly fault: FailingRead | 'actor-enricher';
+  /** Replaces the observer and policy spies, to exercise the default error handling */
+  readonly errorHandling?: ErrorHandlingConfig;
 }
 
 const createScenario = (options: ScenarioOptions) => {
@@ -79,7 +84,7 @@ const createScenario = (options: ScenarioOptions) => {
     aggregateMapping: testAggregateMapping,
     performance: { awaitWrite: options.awaitWrite },
     fetchBefore: { update: true },
-    errorHandling: { writeFailurePolicy: policy, observer },
+    errorHandling: options.errorHandling ?? { writeFailurePolicy: policy, observer },
     ...(fault === 'actor-enricher'
       ? {
           contextEnricher: {
@@ -137,12 +142,17 @@ describe('A failed audit build after the write', () => {
     scenario: ReturnType<typeof createScenario>,
     modelName: string,
     operation: string,
+    policyApplied: boolean,
   ): void => {
+    const failure = expect.objectContaining({ phase: 'diff-generation', modelName, operation, error: scenario.error });
     expect(scenario.observer).toHaveBeenCalledTimes(1);
-    expect(scenario.observer).toHaveBeenCalledWith(
-      expect.objectContaining({ phase: 'diff-generation', modelName, operation, error: scenario.error }),
-    );
-    expect(scenario.policy).not.toHaveBeenCalled();
+    expect(scenario.observer).toHaveBeenCalledWith(failure);
+    if (policyApplied) {
+      expect(scenario.policy).toHaveBeenCalledTimes(1);
+      expect(scenario.policy).toHaveBeenCalledWith(failure);
+    } else {
+      expect(scenario.policy).not.toHaveBeenCalled();
+    }
   };
 
   const renamed = (rows: readonly Row[]) => rows.some((row) => row.name === 'Renamed');
@@ -167,7 +177,7 @@ describe('A failed audit build after the write', () => {
 
         expect((await context.basePrisma.user.findUnique({ where: { id: user.id } }))?.name).toBe('Renamed');
         expect(await auditRowCount()).toBe(auditRowsBefore);
-        expectOneDiffGenerationFailure(scenario, 'User', 'updateMany');
+        expectOneDiffGenerationFailure(scenario, 'User', 'updateMany', true);
       } finally {
         await scenario.dispose();
       }
@@ -196,7 +206,7 @@ describe('A failed audit build after the write', () => {
 
         expect((await context.basePrisma.post.findUnique({ where: { id: post.id } }))?.title).toBe('Updated');
         expect(await auditRowCount()).toBe(auditRowsBefore);
-        expectOneDiffGenerationFailure(scenario, 'User', 'update');
+        expectOneDiffGenerationFailure(scenario, 'User', 'update', true);
       } finally {
         await scenario.dispose();
       }
@@ -225,7 +235,7 @@ describe('A failed audit build after the write', () => {
 
         expect((await context.basePrisma.post.findUnique({ where: { id: post.id } }))?.authorId).toBe(newOwner.id);
         expect(await auditRowCount()).toBe(auditRowsBefore);
-        expectOneDiffGenerationFailure(scenario, 'User', 'update');
+        expectOneDiffGenerationFailure(scenario, 'User', 'update', true);
       } finally {
         await scenario.dispose();
       }
@@ -260,7 +270,7 @@ describe('A failed audit build after the write', () => {
           }),
         ).toEqual([{ title: 'Existing' }, { title: 'Hidden' }]);
         expect(await auditRowCount()).toBe(auditRowsBefore);
-        expectOneDiffGenerationFailure(scenario, 'User', 'update');
+        expectOneDiffGenerationFailure(scenario, 'User', 'update', true);
       } finally {
         await scenario.dispose();
       }
@@ -284,7 +294,7 @@ describe('A failed audit build after the write', () => {
 
         expect((await context.basePrisma.user.findUnique({ where: { id: user.id } }))?.name).toBe('Renamed');
         expect(await auditRowCount()).toBe(auditRowsBefore);
-        expectOneDiffGenerationFailure(scenario, 'User', 'update');
+        expectOneDiffGenerationFailure(scenario, 'User', 'update', true);
       } finally {
         await scenario.dispose();
       }
@@ -310,9 +320,65 @@ describe('A failed audit build after the write', () => {
 
         expect((await context.basePrisma.user.findUnique({ where: { id: user.id } }))?.name).toBe('Renamed');
         expect(await auditRowCount()).toBe(auditRowsBefore);
-        expectOneDiffGenerationFailure(scenario, 'User', 'updateMany');
+        expectOneDiffGenerationFailure(scenario, 'User', 'updateMany', true);
       } finally {
         await scenario.dispose();
+      }
+    });
+  });
+
+  describe('without an observer, reports the dropped audit rows of a committed write by the write-failure policy', () => {
+    const renameUser = async (errorHandling: ErrorHandlingConfig) => {
+      const scenario = createScenario({
+        databaseUrl: context.databaseUrl,
+        awaitWrite: false,
+        fault: 'actor-enricher',
+        errorHandling,
+      });
+      try {
+        const user = await seedUser('no-observer@example.com');
+        const auditRowsBefore = await auditRowCount();
+
+        await expect(
+          scenario.provider.runAsync(actor, () =>
+            scenario.prisma.user.update({ where: { id: user.id }, data: { name: 'Renamed' } }),
+          ),
+        ).resolves.toMatchObject({ id: user.id, name: 'Renamed' });
+
+        expect(await auditRowCount()).toBe(auditRowsBefore);
+      } finally {
+        await scenario.dispose();
+      }
+    };
+
+    it("logs one console line naming the model and the operation under the default 'log' policy", async () => {
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        await renameUser({});
+
+        const lines = consoleError.mock.calls.map(([line]) => String(line));
+        expect(lines.filter((line) => /User\.update.*dropped/.test(line))).toHaveLength(1);
+        expect(consoleError).toHaveBeenCalledWith(
+          expect.stringMatching(/dropped/),
+          'simulated failure after the write',
+        );
+        expect(JSON.stringify(consoleError.mock.calls)).not.toContain('no-observer@example.com');
+      } finally {
+        consoleError.mockRestore();
+      }
+    });
+
+    it("stays silent under the 'ignore' policy", async () => {
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        await renameUser({ writeFailurePolicy: 'ignore' });
+
+        expect(consoleError).not.toHaveBeenCalled();
+        expect(consoleWarn).not.toHaveBeenCalled();
+      } finally {
+        consoleError.mockRestore();
+        consoleWarn.mockRestore();
       }
     });
   });
@@ -343,7 +409,7 @@ describe('A failed audit build after the write', () => {
 
         expect((await context.basePrisma.post.findUnique({ where: { id: post.id } }))?.title).toBe('Original');
         expect(await auditRowCount()).toBe(auditRowsBefore);
-        expectOneDiffGenerationFailure(scenario, 'User', 'update');
+        expectOneDiffGenerationFailure(scenario, 'User', 'update', false);
       } finally {
         await scenario.dispose();
       }
@@ -367,7 +433,7 @@ describe('A failed audit build after the write', () => {
 
         expect((await context.basePrisma.user.findUnique({ where: { id: user.id } }))?.name).toBe('Owner');
         expect(await auditRowCount()).toBe(auditRowsBefore);
-        expectOneDiffGenerationFailure(scenario, 'User', 'updateMany');
+        expectOneDiffGenerationFailure(scenario, 'User', 'updateMany', false);
       } finally {
         await scenario.dispose();
       }
@@ -403,7 +469,7 @@ describe('A failed audit build after the write', () => {
         [second.id]: 'Owner',
       });
       expect(await auditRowCount()).toBe(auditRowsBefore);
-      expectOneDiffGenerationFailure(scenario, 'User', 'updateMany');
+      expectOneDiffGenerationFailure(scenario, 'User', 'updateMany', false);
     } finally {
       await scenario.dispose();
     }

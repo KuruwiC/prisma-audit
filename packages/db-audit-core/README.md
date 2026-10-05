@@ -73,8 +73,9 @@ dispatch({ buildRecords, modelName, operation, params, atomic, auditContext }, c
   build runs before `dispatch` resolves whatever the write plan, right after the write. A failed
   build notifies the observer as `diff-generation` with the operation's `modelName`, `operation` and
   `params`, and rejects with its error, except under a `detached` plan: the operation's write has
-  committed and its caller does not wait for its audit, so its records are dropped and `dispatch`
-  resolves. A failed write goes to the failure sink with its plan.
+  committed and its caller does not wait for its audit, so its records are dropped, the sink's
+  `reportDroppedBuild` applies the write-failure policy to the drop and `dispatch` resolves. A
+  failed write goes to the failure sink with its plan.
 - **`TransactionRuntime<TDbHandle>`** is what the adapter knows about where the operation's write
   can run: `baseHandle` (a handle outside any transaction), `transaction` when the operation runs in
   one (its `handle` and `afterCommit(work)`, which starts the work once the transaction has
@@ -178,13 +179,18 @@ What the adapter must provide:
 - **Failure routing.** The adapter builds one `FailureSink` with
   `createFailureSink(errorHandlingConfig)` and reports every failure through it. The sink owns
   the user-facing contract: the observer hears every failure and never affects the operation (an
-  observer that throws is logged), and only a failed write consults `writeFailurePolicy`
-  (default `'log'`; a policy function that throws falls back to `'log'`).
+  observer that throws is logged), and only a failed write, or the records of a committed write
+  that `dispatch` dropped, consult `writeFailurePolicy` (default `'log'`; a policy function that
+  throws falls back to `'log'`).
   - `notify(context)` for a failure the adapter detects itself: `pre-fetch` (a read before the
     write failed), `diff-generation` (other work that builds the records failed before the write)
     and `row-identification` (the adapter could not identify a row the operation wrote). What each
     does to the operation is the adapter's choice, documented by it. A failure of `buildRecords`
-    is notified by `dispatch` as `diff-generation`, and the adapter does not report it again.
+    is reported by `dispatch` as `diff-generation`, and the adapter does not report it again.
+  - `reportDroppedBuild(context)` for the records of a committed write whose build failed and
+    that no write is left to await: notifies the observer under `diff-generation`, then applies
+    `writeFailurePolicy`. `'throw'` logs, because the caller has returned. `dispatch` calls it; an
+    adapter does not.
   - `reportResolverFailures(failures)` with the `ResolverFailure`s `resolve` returned instead of
     throwing (an id resolver threw or returned no usable id), one `id-resolver-call` notification
     each.
