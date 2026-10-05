@@ -792,7 +792,7 @@ Constraints:
 - The operations are not PrismaPromises. A batch accepts only operations of the client `$transaction` is called on that have not run, and rejects anything else before running any of them; Prisma's own `$transaction` of another client, such as the one passed to `createAuditClient`, rejects them.
 - An interactive transaction holds a connection for its whole duration and is bound by the client's interactive transaction limits (`transactionOptions.maxWait` / `timeout`). Every batch under an audit context runs as one, its operations one after another, read-only batches included.
 - The transaction is opened before sampling decides whether the write is audited, so a write sampling leaves out runs in one too.
-- Interactive transactions are required: Cloudflare D1 has none.
+- Interactive transactions are required: a driver adapter without them, such as the one for Cloudflare's database, cannot use the option.
 - The audit's own reads and writes run in that transaction, as separate queries, through the extensions of the client.
 
 ### Write Strategies
