@@ -7,9 +7,17 @@
  */
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
-import type { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
+import { defineEntity, lookup, to } from '@kuruwic/db-audit-core';
+import { createAuditClient } from '@kuruwic/prisma-audit';
+import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { cleanDatabase, createTestContext, disposeTestContext, type TestContext } from './helpers/setup.js';
+import {
+  cleanDatabase,
+  createTestContext,
+  disposeTestContext,
+  type TestContext,
+  testAggregateMapping,
+} from './helpers/setup.js';
 
 describe('Transaction Consistency Integration', () => {
   let context: TestContext;
@@ -27,7 +35,7 @@ describe('Transaction Consistency Integration', () => {
   });
 
   describe('IdResolver transaction consistency', () => {
-    it('should resolve ID using uncommitted data within transaction', async () => {
+    it('should resolve the aggregate root through the transactional client from a row written earlier in the transaction', async () => {
       const auditContext: AuditContext = {
         actor: {
           category: 'model',
@@ -36,9 +44,30 @@ describe('Transaction Consistency Integration', () => {
         },
       };
 
-      await context.provider.runAsync(auditContext, async () => {
-        await context.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-          const user = await tx.user.create({
+      const lookupClient = createAuditClient(context.basePrisma, {
+        Prisma,
+        provider: context.provider,
+        aggregateMapping: {
+          ...testAggregateMapping,
+          Post: defineEntity({
+            type: 'Post',
+            aggregates: [
+              to(
+                'User',
+                lookup<{ authorId: string }, Prisma.TransactionClient>(async (post, db) => {
+                  const author = await db.user.findUnique({ where: { id: post.authorId } });
+                  return author?.id ?? null;
+                }),
+              ),
+            ],
+          }),
+        },
+        performance: { awaitWrite: true },
+      });
+
+      const { user, post } = await context.provider.runAsync(auditContext, async () =>
+        lookupClient.$transaction(async (tx: Prisma.TransactionClient) => {
+          const createdUser = await tx.user.create({
             data: {
               email: 'user@example.com',
               name: 'User',
@@ -46,29 +75,33 @@ describe('Transaction Consistency Integration', () => {
             },
           });
 
-          await tx.user.update({
-            where: { id: user.id },
-            data: { email: 'updated@example.com' },
-          });
-
-          await tx.post.create({
+          const createdPost = await tx.post.create({
             data: {
               title: 'Test Post',
               content: 'Content',
-              authorId: user.id,
+              authorId: createdUser.id,
             },
           });
-        });
-      });
+
+          return { user: createdUser, post: createdPost };
+        }),
+      );
 
       const postLogs = await context.prisma.auditLog.findMany({
         where: { entityType: 'Post' },
+        orderBy: { aggregateType: 'asc' },
       });
 
-      expect(postLogs).toHaveLength(2);
-
-      const aggregateTypes = postLogs.map((log: { aggregateType: string }) => log.aggregateType).sort();
-      expect(aggregateTypes).toEqual(['Post', 'User']);
+      expect(
+        postLogs.map((log: { entityId: string; aggregateType: string; aggregateId: string }) => [
+          log.entityId,
+          log.aggregateType,
+          log.aggregateId,
+        ]),
+      ).toEqual([
+        [post.id, 'Post', post.id],
+        [post.id, 'User', user.id],
+      ]);
     });
   });
 

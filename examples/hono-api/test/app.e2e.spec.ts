@@ -146,11 +146,12 @@ describe('Hono + Prisma Audit E2E Tests', () => {
         },
       });
 
-      expect(auditLogs.length).toBeGreaterThanOrEqual(1);
+      expect(auditLogs).toHaveLength(1);
       const log = auditLogs[0];
       expect(log.actorId).toBe('admin-456');
-      expect(log.before).toBeDefined();
-      expect(log.after).toBeDefined();
+      expect(log.changes).toStrictEqual({ name: { old: 'Original Name', new: 'Updated Name' } });
+      expect(log.before).toMatchObject({ name: 'Original Name' });
+      expect(log.after).toMatchObject({ name: 'Updated Name' });
     });
 
     it('should delete user and generate audit log', async () => {
@@ -447,7 +448,7 @@ describe('Hono + Prisma Audit E2E Tests', () => {
 
       expect(res.status).toBe(200);
       const logs = (await res.json()) as AuditLog[];
-      expect(logs.every((log: AuditLog) => log.aggregateType === 'User')).toBe(true);
+      expect(logs.map((log) => [log.aggregateType, log.aggregateId])).toEqual([['User', testUser.id]]);
     });
 
     it('should filter audit logs by aggregateId', async () => {
@@ -459,7 +460,7 @@ describe('Hono + Prisma Audit E2E Tests', () => {
 
       expect(res.status).toBe(200);
       const logs = (await res.json()) as AuditLog[];
-      expect(logs.every((log: AuditLog) => log.aggregateId === testUser.id)).toBe(true);
+      expect(logs.map((log) => [log.aggregateType, log.aggregateId])).toEqual([['User', testUser.id]]);
     });
 
     it('should filter audit logs by actorId', async () => {
@@ -471,7 +472,14 @@ describe('Hono + Prisma Audit E2E Tests', () => {
 
       expect(res.status).toBe(200);
       const logs = (await res.json()) as AuditLog[];
-      expect(logs.every((log: AuditLog) => log.actorId === testUser.id)).toBe(true);
+      expect(
+        logs
+          .map((log) => [log.aggregateType, log.aggregateId, log.actorId])
+          .sort(([a], [b]) => String(a).localeCompare(String(b))),
+      ).toEqual([
+        ['Post', testPost.id, testUser.id],
+        ['User', testUser.id, testUser.id],
+      ]);
     });
 
     it('should get audit log by id', async () => {

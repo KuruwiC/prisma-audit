@@ -174,6 +174,8 @@ describe('Nested Delete Operations', () => {
         });
       });
 
+      const initialLogCount = await context.prisma.auditLog.count();
+
       const transactionPromise = context.provider.runAsync(testActor, async () => {
         return context.prisma.$transaction(async (tx: typeof context.prisma) => {
           await tx.user.update({
@@ -189,6 +191,8 @@ describe('Nested Delete Operations', () => {
       });
 
       await expect(transactionPromise).rejects.toThrow('Rollback test');
+
+      expect(await context.prisma.auditLog.count()).toBe(initialLogCount);
 
       const finalPost = await context.prisma.post.findUnique({ where: { id: post.id } });
       expect(finalPost).not.toBeNull();

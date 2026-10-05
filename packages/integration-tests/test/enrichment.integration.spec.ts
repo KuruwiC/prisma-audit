@@ -333,18 +333,16 @@ describe('Context Enrichment Integration', () => {
         where: { entityType: 'Comment', entityId: comment.id, action: 'delete' },
       });
 
-      expect(deleteLogs.length).toBeGreaterThanOrEqual(1);
-      const commentLog = deleteLogs[0];
-      if (!commentLog) throw new Error('Comment log not found');
-
-      // to() projection contexts enrich the aggregate logs (Post, User); the entity log carries entityContext
-      expect(commentLog.entityContext).toBeDefined();
-      expect((commentLog.entityContext as Record<string, unknown>).commentContent).toBe('Test Comment');
-
-      if (commentLog.aggregateContext) {
-        expect(commentLog.aggregateContext).toBeDefined();
-        expect(commentLog.aggregateContext).toHaveProperty('aggregateInfo');
-      }
+      // The Comment aggregate log carries no aggregateContext; each to() projection log carries aggregateInfo
+      expect(
+        deleteLogs
+          .map((log) => [log.aggregateType, log.entityContext, log.aggregateContext])
+          .sort(([a], [b]) => String(a).localeCompare(String(b))),
+      ).toEqual([
+        ['Comment', { commentContent: 'Test Comment' }, null],
+        ['Post', { commentContent: 'Test Comment' }, { aggregateInfo: `Comment ${comment.id}` }],
+        ['User', { commentContent: 'Test Comment' }, { aggregateInfo: `Comment ${comment.id}` }],
+      ]);
 
       await customBasePrisma.$disconnect();
     });
@@ -369,7 +367,7 @@ describe('Context Enrichment Integration', () => {
         actor: { category: 'model', type: 'User', id: 'delete-profile-actor' },
       };
 
-      const { profile } = await provider.runAsync(actor, async () => {
+      const { user, profile } = await provider.runAsync(actor, async () => {
         const user = await customPrisma.user.create({
           data: { email: 'profile-user@example.com', name: 'Profile User', password: 'pass' },
         });
@@ -378,7 +376,7 @@ describe('Context Enrichment Integration', () => {
           data: { bio: 'Test Bio', userId: user.id },
         });
 
-        return { profile };
+        return { user, profile };
       });
 
       await customBasePrisma.auditLog.deleteMany({ where: { action: 'create' } });
@@ -397,18 +395,15 @@ describe('Context Enrichment Integration', () => {
         where: { entityType: 'Profile', entityId: profile.id, action: 'delete' },
       });
 
-      expect(deleteLogs.length).toBeGreaterThanOrEqual(1);
-      const profileLog = deleteLogs[0];
-      if (!profileLog) throw new Error('Profile log not found');
-
-      // to() projection context enriches the aggregate log (User); the entity log carries entityContext
-      expect(profileLog.entityContext).toBeDefined();
-      expect((profileLog.entityContext as Record<string, unknown>).profileBio).toBe('Test Bio');
-
-      if (profileLog.aggregateContext) {
-        expect(profileLog.aggregateContext).toBeDefined();
-        expect(profileLog.aggregateContext).toHaveProperty('profileInfo');
-      }
+      // The Profile aggregate log carries no aggregateContext; the to() projection log carries profileInfo
+      expect(
+        deleteLogs
+          .map((log) => [log.aggregateType, log.entityContext, log.aggregateContext])
+          .sort(([a], [b]) => String(a).localeCompare(String(b))),
+      ).toEqual([
+        ['Profile', { profileBio: 'Test Bio' }, null],
+        ['User', { profileBio: 'Test Bio' }, { profileInfo: `Profile for user ${user.id}` }],
+      ]);
 
       await customBasePrisma.$disconnect();
     });
@@ -818,46 +813,51 @@ describe('Context Enrichment Integration', () => {
   });
 
   describe('[N+1 Resolution] Entity/Aggregate Batch Enrichment', () => {
-    it('should handle batch enrichment for updateMany operations', async () => {
-      const createActor: AuditContext = {
-        actor: { category: 'model', type: 'User', id: 'create-for-update-batch' },
-      };
+    it('should call the entity enricher once for an updateMany and enrich every updated row', async () => {
+      const entityEnricher = createUserEntityEnricher();
+      const customBasePrisma = new (await import('@kuruwic/prisma-audit-database/generated/client')).PrismaClient({
+        datasources: { db: { url: context.databaseUrl } },
+      });
+      const { customPrisma, provider } = createEnrichmentTestContext({
+        basePrisma: customBasePrisma,
+        aggregateMapping: createUserEntityAggregateMapping(
+          entityEnricher as Mock<(entities: unknown[], prisma: PrismaClient) => Promise<unknown[]>>,
+        ),
+      });
 
-      const updateActor: AuditContext = {
+      const actor: AuditContext = {
         actor: { category: 'model', type: 'User', id: 'update-batch-actor' },
       };
+      const emails = ['update1@example.com', 'update2@example.com', 'update3@example.com'];
 
-      await context.provider.runAsync(createActor, async () => {
-        return await Promise.all([
-          context.prisma.user.create({
-            data: { email: 'update1@example.com', name: 'Update User 1', password: 'pass1' },
-          }),
-          context.prisma.user.create({
-            data: { email: 'update2@example.com', name: 'Update User 2', password: 'pass2' },
-          }),
-          context.prisma.user.create({
-            data: { email: 'update3@example.com', name: 'Update User 3', password: 'pass3' },
-          }),
-        ]);
-      });
-      await context.provider.runAsync(updateActor, async () => {
-        await context.prisma.user.updateMany({
-          where: {
-            email: { in: ['update1@example.com', 'update2@example.com', 'update3@example.com'] },
-          },
-          data: { name: 'Updated Name' },
+      try {
+        await provider.runAsync(actor, async () => {
+          await customPrisma.user.createMany({
+            data: emails.map((email, i) => ({ email, name: `Update User ${i + 1}`, password: `pass${i + 1}` })),
+          });
         });
-      });
-      const updateLogs = await context.prisma.auditLog.findMany({
-        where: { actorId: 'update-batch-actor', action: 'update' },
-      });
+        await customBasePrisma.auditLog.deleteMany();
+        entityEnricher.mockClear();
 
-      expect(updateLogs.length).toBeGreaterThanOrEqual(3);
+        await provider.runAsync(actor, async () => {
+          await customPrisma.user.updateMany({
+            where: { email: { in: emails } },
+            data: { name: 'Updated Name' },
+          });
+        });
 
-      for (const log of updateLogs) {
-        expect(log.actorContext).toBeDefined();
-        expect('entityContext' in log).toBe(true);
-        expect('aggregateContext' in log).toBe(true);
+        expect(entityEnricher).toHaveBeenCalledTimes(1);
+
+        const updateLogs = await customBasePrisma.auditLog.findMany({
+          where: { action: 'update' },
+        });
+
+        expect(updateLogs).toHaveLength(3);
+        expect(
+          updateLogs.map((log) => log.entityContext).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
+        ).toEqual(emails.map((email) => ({ enrichedEmail: email.toUpperCase() })));
+      } finally {
+        await customBasePrisma.$disconnect();
       }
     });
   });

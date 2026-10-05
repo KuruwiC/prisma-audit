@@ -13,6 +13,22 @@ const testActor: AuditContext = {
   },
 };
 
+const maskedPasswordChange = {
+  old: { redacted: true, hadValue: true },
+  new: { redacted: true, hadValue: true, isDifferent: true },
+};
+
+function expectMaskedPassword(state: unknown): void {
+  expect(state).toMatchObject({ password: { redacted: true, hadValue: true } });
+}
+
+function expectPlaintextAbsent(log: unknown, plaintexts: string[]): void {
+  const serialized = JSON.stringify(log);
+  for (const plaintext of plaintexts) {
+    expect(serialized).not.toContain(plaintext);
+  }
+}
+
 describe('Password Changes Detection', () => {
   beforeAll(async () => {
     await testPrisma.auditLog.deleteMany();
@@ -53,18 +69,13 @@ describe('Password Changes Detection', () => {
       },
     });
 
-    expect(auditLogs.length).toBeGreaterThanOrEqual(1);
-
+    expect(auditLogs).toHaveLength(1);
     const log = auditLogs[0];
-    expect(log?.changes).toBeDefined();
-    expect(log?.changes).not.toBeNull();
 
-    const changes = log?.changes as Record<string, unknown> | null;
-    expect(changes?.password).toBeDefined();
-    const passwordChange = changes?.password as { old: unknown; new: unknown } | undefined;
-    expect(passwordChange).toBeDefined();
-    expect(passwordChange?.old).toBeDefined();
-    expect(passwordChange?.new).toBeDefined();
+    expect(log?.changes).toStrictEqual({ password: maskedPasswordChange });
+    expectMaskedPassword(log?.before);
+    expectMaskedPassword(log?.after);
+    expectPlaintextAbsent(log, ['oldPassword123', 'newPassword456']);
   });
 
   it('should track password changes alongside other field changes', async () => {
@@ -98,20 +109,15 @@ describe('Password Changes Detection', () => {
       },
     });
 
-    expect(auditLogs.length).toBeGreaterThanOrEqual(1);
-
+    expect(auditLogs).toHaveLength(1);
     const log = auditLogs[0];
-    expect(log?.changes).toBeDefined();
-    expect(log?.changes).not.toBeNull();
 
-    const changes = log?.changes as Record<string, unknown> | null;
-    expect(changes).not.toBeNull();
-    expect(changes?.name).toBeDefined();
-    expect(changes?.password).toBeDefined();
-    const nameChange = changes?.name as { old: unknown; new: unknown } | undefined;
-    expect(nameChange?.old).toBe('Combined Test User');
-    expect(nameChange?.new).toBe('Updated Name');
-    const passwordChange = changes?.password as { old: unknown; new: unknown } | undefined;
-    expect(passwordChange).toBeDefined();
+    expect(log?.changes).toStrictEqual({
+      name: { old: 'Combined Test User', new: 'Updated Name' },
+      password: maskedPasswordChange,
+    });
+    expectMaskedPassword(log?.before);
+    expectMaskedPassword(log?.after);
+    expectPlaintextAbsent(log, ['oldPassword123', 'newPassword456']);
   });
 });

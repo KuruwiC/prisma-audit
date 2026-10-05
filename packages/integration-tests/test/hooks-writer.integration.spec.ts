@@ -173,30 +173,6 @@ describe('hooks.writer Coverage', () => {
       expect(context.writerSpy.calls[0]?.logCount).toBeGreaterThan(0);
     });
 
-    it('should call hooks.writer for nested create', async () => {
-      await context.provider.runAsync(testActor, async () => {
-        await context.prisma.user.create({
-          data: {
-            email: 'user@example.com',
-            name: 'User',
-            password: 'secret123',
-            posts: {
-              create: [
-                { title: 'Post 1', content: 'Content 1' },
-                { title: 'Post 2', content: 'Content 2' },
-              ],
-            },
-          },
-          include: { posts: true },
-        });
-      });
-
-      // Batching decides whether the logs arrive in one writer call or several.
-      expect(context.writerSpy.callCount).toBeGreaterThan(0);
-      const totalLogs = context.writerSpy.calls.reduce((sum, call) => sum + call.logCount, 0);
-      expect(totalLogs).toBeGreaterThan(0); // At least user + posts
-    });
-
     it('should call hooks.writer for nested update', async () => {
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
@@ -231,7 +207,9 @@ describe('hooks.writer Coverage', () => {
         });
       });
 
-      expect(context.writerSpy.callCount).toBeGreaterThan(0);
+      // The user's update row plus the post's own row and its row under the User aggregate
+      expect(context.writerSpy.callCount).toBe(1);
+      expect(context.writerSpy.calls).toEqual([{ logCount: 3, contextId: 'test-user-1' }]);
     });
   });
 
@@ -283,9 +261,9 @@ describe('hooks.writer Coverage', () => {
         });
       });
 
-      expect(context.writerSpy.callCount).toBeGreaterThan(0);
-      const totalLogs = context.writerSpy.calls.reduce((sum, call) => sum + call.logCount, 0);
-      expect(totalLogs).toBeGreaterThan(0); // User + posts
+      // The user's row plus each post's own row and its row under the User aggregate
+      expect(context.writerSpy.callCount).toBe(1);
+      expect(context.writerSpy.calls).toEqual([{ logCount: 5, contextId: 'test-user-1' }]);
     });
 
     it('should persist no audit logs when the transaction rolls back', async () => {
@@ -376,7 +354,7 @@ describe('hooks.writer Coverage', () => {
   });
 
   describe('Edge Cases', () => {
-    it('should batch multiple operations in single hooks.writer call when appropriate', async () => {
+    it("should pass a nested create's rows to hooks.writer in a single call", async () => {
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.user.create({
           data: {
@@ -395,9 +373,9 @@ describe('hooks.writer Coverage', () => {
         });
       });
 
-      expect(context.writerSpy.callCount).toBeGreaterThan(0);
-      const totalLogs = context.writerSpy.calls.reduce((sum, call) => sum + call.logCount, 0);
-      expect(totalLogs).toBeGreaterThan(3); // At least user + 3 posts (+ aggregate logs)
+      // The user's row plus each post's own row and its row under the User aggregate
+      expect(context.writerSpy.callCount).toBe(1);
+      expect(context.writerSpy.calls).toEqual([{ logCount: 7, contextId: 'test-user-1' }]);
     });
   });
 

@@ -209,7 +209,7 @@ describe('Normalized Writer Helpers', () => {
       expect(events[0]?.action).toBe('create');
     });
 
-    it('should deduplicate actors/entities/aggregates across multiple operations', async () => {
+    it('should deduplicate the actor, entity and aggregate rows of two writes to the same entity', async () => {
       const prisma = createAuditClient(context.basePrisma, {
         Prisma,
         provider: context.provider,
@@ -228,24 +228,26 @@ describe('Normalized Writer Helpers', () => {
       });
 
       await context.provider.runAsync(testActor, async () => {
-        await prisma.user.create({
+        const user = await prisma.user.create({
           data: { email: 'user1@example.com', name: 'User 1' },
         });
-        await prisma.user.create({
-          data: { email: 'user2@example.com', name: 'User 2' },
-        });
-        await prisma.user.create({
-          data: { email: 'user3@example.com', name: 'User 3' },
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { name: 'User 1 renamed' },
         });
       });
 
       const actors = await context.basePrisma.actor.findMany();
       const entities = await context.basePrisma.entity.findMany();
+      const aggregates = await context.basePrisma.aggregate.findMany();
       const events = await context.basePrisma.auditEvent.findMany();
 
       expect(actors).toHaveLength(1);
-      expect(entities).toHaveLength(3);
-      expect(events).toHaveLength(3);
+      expect(entities).toHaveLength(1);
+      expect(aggregates).toHaveLength(1);
+      expect(events.map((event) => event.action).sort()).toEqual(['create', 'update']);
+      expect(new Set(events.map((event) => event.entityId))).toEqual(new Set([entities[0]?.id]));
+      expect(new Set(events.map((event) => event.aggregateId))).toEqual(new Set([aggregates[0]?.id]));
     });
 
     it('should support both lowerCamelCase and UpperCamelCase model names', async () => {

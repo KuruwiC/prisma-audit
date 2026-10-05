@@ -52,6 +52,14 @@ describe('updateMany / deleteMany (Behavioral)', () => {
       );
 
       const updateLogs = await h.readAuditLogs({ entityType: 'User', action: 'update' });
+      expect(updateLogs).toHaveLength(2);
+
+      // Each entity's original name, keyed by id, to correlate the before-state per log.
+      const originalNameById: Record<string, string> = {
+        [user1.id as string]: 'Before1',
+        [user2.id as string]: 'Before2',
+      };
+      expect(new Set(updateLogs.map((log) => log.entityId))).toEqual(new Set([user1.id, user2.id]));
 
       for (const log of updateLogs) {
         expect(log.before).not.toBeNull();
@@ -61,11 +69,7 @@ describe('updateMany / deleteMany (Behavioral)', () => {
         expect(after.name).toBe('After');
 
         const changes = log.changes as Record<string, { old: unknown; new: unknown }>;
-        expect(changes).toHaveProperty('name');
-        const nameChange = changes.name;
-        expect(nameChange).toBeDefined();
-        if (!nameChange) throw new Error('Expected name change to exist');
-        expect(nameChange.new).toBe('After');
+        expect(changes.name).toEqual({ old: originalNameById[log.entityId], new: 'After' });
       }
     });
   });
@@ -100,6 +104,7 @@ describe('updateMany / deleteMany (Behavioral)', () => {
       await h.runWithContext(actor, () => h.deleteMany('User', { id: { in: [user1.id, user2.id] } }));
 
       const deleteLogs = await h.readAuditLogs({ entityType: 'User', action: 'delete' });
+      expect(deleteLogs).toHaveLength(2);
       for (const log of deleteLogs) {
         expect(log.before).not.toBeNull();
         expect(log.after).toBeNull();

@@ -69,6 +69,13 @@ describe('Actor Override Inside Transactions (Integration)', () => {
       const posts = await context.basePrisma.post.findMany({ where: { title: 'Child Post' } });
       expect(users).toHaveLength(1);
       expect(posts).toHaveLength(1);
+
+      const logs = await context.basePrisma.auditLog.findMany({ where: { action: 'create' } });
+      expect(logs.map((log) => [log.entityType, log.aggregateType, log.actorId]).sort()).toEqual([
+        ['Post', 'Post', 'actor-2'],
+        ['Post', 'User', 'actor-2'],
+        ['User', 'User', 'actor-1'],
+      ]);
     });
 
     it('parent audit log actor = actor1, child audit log actor = actor2', async () => {
@@ -147,6 +154,13 @@ describe('Actor Override Inside Transactions (Integration)', () => {
 
       const posts = await context.basePrisma.post.findMany({ where: { title: 'Child Post RA' } });
       expect(posts).toHaveLength(1);
+
+      const logs = await context.basePrisma.auditLog.findMany({ where: { action: 'create' } });
+      expect(logs.map((log) => [log.entityType, log.aggregateType, log.actorId]).sort()).toEqual([
+        ['Post', 'Post', 'actor-2'],
+        ['Post', 'User', 'actor-2'],
+        ['User', 'User', 'actor-1'],
+      ]);
     });
 
     it('child audit log actor = actor2 when using full runAsync replacement', async () => {

@@ -226,6 +226,20 @@ describe('Nested Upsert Operations', () => {
       const profile = await context.prisma.profile.findUnique({ where: { userId: user.id } });
       expect(profile?.bio).toBe('Updated bio');
       expect(profile?.website).toBe('https://original.com');
+
+      const profileLogs = await context.prisma.auditLog.findMany({
+        where: { entityType: 'Profile', entityId: profile?.id },
+      });
+
+      // Profile has 2 logs: Profile aggregate + User aggregate
+      expect(profileLogs).toHaveLength(2);
+      for (const log of profileLogs) {
+        expect(log.action).toBe('update');
+        // The untouched website is not a change; updatedAt moves with every write
+        const changes = log.changes as Record<string, unknown>;
+        expect(Object.keys(changes).sort()).toEqual(['bio', 'updatedAt']);
+        expect(changes.bio).toEqual({ old: 'Original bio', new: 'Updated bio' });
+      }
     });
   });
 
@@ -457,6 +471,9 @@ describe('Nested Upsert Operations', () => {
               email: 'user1@example.com',
               name: 'User 1',
               password: 'secret123',
+              profile: {
+                create: { bio: 'Original Bio for User 1' },
+              },
             },
           }),
           context.prisma.user.create({
@@ -474,6 +491,9 @@ describe('Nested Upsert Operations', () => {
               email: 'user3@example.com',
               name: 'User 3',
               password: 'secret123',
+              profile: {
+                create: { bio: 'Original Bio for User 3' },
+              },
             },
           }),
         ]);
@@ -501,6 +521,10 @@ describe('Nested Upsert Operations', () => {
       expect(user2Profile).not.toBeNull();
       expect(user2Profile?.bio).toBe('Updated Bio for User 2');
 
+      // Only user2's profile was written: the other profiles have no logs
+      const allProfileLogs = await context.prisma.auditLog.findMany({ where: { entityType: 'Profile' } });
+      expect(allProfileLogs).toHaveLength(2);
+
       const profileLogs = await context.prisma.auditLog.findMany({
         where: { entityType: 'Profile', entityId: user2Profile?.id, action: 'update' },
       });
@@ -516,10 +540,10 @@ describe('Nested Upsert Operations', () => {
       }
 
       const user1Profile = await context.prisma.profile.findUnique({ where: { userId: user1.id } });
-      expect(user1Profile).toBeNull();
+      expect(user1Profile?.bio).toBe('Original Bio for User 1');
 
       const user3Profile = await context.prisma.profile.findUnique({ where: { userId: user3.id } });
-      expect(user3Profile).toBeNull();
+      expect(user3Profile?.bio).toBe('Original Bio for User 3');
     });
   });
 

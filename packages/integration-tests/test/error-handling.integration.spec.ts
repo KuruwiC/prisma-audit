@@ -879,21 +879,44 @@ describe('Error Handling Integration', () => {
   });
 
   describe('Database constraint violations', () => {
-    it('should handle foreign key constraint violations correctly', async () => {
-      await expect(
-        context.provider.runAsync(testActor, async () => {
-          return await context.prisma.post.create({
+    it('a foreign key violation on a single-record create propagates raw as P2003, leaving no row and no audit log and without reaching the audit observer or policy', async () => {
+      const basePrisma = new PrismaClient({ datasources: { db: { url: context.databaseUrl } } });
+      const provider = createAsyncLocalStorageProvider();
+      const observer = vi.fn();
+      const policy = vi.fn((_context: AuditErrorContext) => 'ignore' as const);
+      const prisma = createAuditClient(basePrisma, {
+        Prisma,
+        provider,
+        aggregateMapping: testAggregateMapping,
+        performance: { awaitWrite: true },
+        errorHandling: { writeFailurePolicy: policy, observer },
+      });
+
+      try {
+        const invalidCreate = provider.runAsync(testActor, async () =>
+          prisma.post.create({
             data: {
               title: 'Invalid Post',
               content: 'Content',
               authorId: 'non-existent-user-id',
             },
-          });
-        }),
-      ).rejects.toThrow();
+          }),
+        );
 
-      const posts = await context.prisma.post.findMany();
-      expect(posts).toHaveLength(0);
+        await expect(invalidCreate).rejects.toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
+        await expect(invalidCreate).rejects.toMatchObject({
+          code: 'P2003',
+          message: expect.not.stringContaining('[@prisma-audit]'),
+        });
+
+        expect(await context.basePrisma.post.count()).toBe(0);
+        expect(await context.basePrisma.auditLog.count({ where: { entityType: 'Post' } })).toBe(0);
+        expect(observer).not.toHaveBeenCalled();
+        expect(policy).not.toHaveBeenCalled();
+      } finally {
+        await prisma.$disconnect();
+        await basePrisma.$disconnect();
+      }
     });
 
     it('a batch (updateMany) unique constraint violation propagates raw, without reaching the audit observer or policy', async () => {

@@ -41,6 +41,7 @@ describe('Batch Operations (Behavioral)', () => {
       );
 
       const logs = await h.readAuditLogs({ entityType: 'User', action: 'create' });
+      expect(logs).toHaveLength(2);
       for (const log of logs) {
         expect(log.actorId).toBe('test-actor-1');
         expect(log.actorType).toBe('User');
@@ -111,6 +112,7 @@ describe('Batch Operations (Behavioral)', () => {
       );
 
       const logs = await h.readAuditLogs({ entityType: 'User', action: 'create' });
+      expect(logs).toHaveLength(2);
       for (const log of logs) {
         expect(log.actorId).toBe('test-actor-1');
         expect(log.actorType).toBe('User');
@@ -251,6 +253,7 @@ describe('Batch Operations (Behavioral)', () => {
       );
 
       const updateLogs = await h.readAuditLogs({ entityType: 'User', action: 'update' });
+      expect(updateLogs).toHaveLength(2);
       for (const log of updateLogs) {
         expect(log.actorId).toBe('test-actor-1');
         expect(log.actorType).toBe('User');

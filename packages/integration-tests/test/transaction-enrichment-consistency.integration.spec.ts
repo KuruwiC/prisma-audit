@@ -68,22 +68,22 @@ describe('Transaction Enrichment Consistency', () => {
       };
 
       await provider.runAsync(auditContext, async () => {
-        await prisma.user.update({
-          where: { id: user.id },
-          data: { email: 'new@example.com' },
+        await prisma.$transaction(async (tx) => {
+          await tx.user.update({
+            where: { id: user.id },
+            data: { email: 'new@example.com' },
+          });
         });
       });
 
       expect(enrichedEmail).toBe('new@example.com');
 
-      const auditLog = await context.basePrisma.auditLog.findFirst({
+      const auditLogs = await context.basePrisma.auditLog.findMany({
         where: { entityType: 'User', entityId: user.id, action: 'update' },
       });
 
-      expect(auditLog).toBeDefined();
-      expect(auditLog?.entityContext).toBeDefined();
-      const entityContext = auditLog?.entityContext as Record<string, unknown>;
-      expect(entityContext.enrichedEmail).toBe('new@example.com');
+      expect(auditLogs).toHaveLength(1);
+      expect(auditLogs[0]?.entityContext).toEqual({ enrichedEmail: 'new@example.com' });
     });
 
     it('should allow entity enricher to read uncommitted CREATE within $transaction', async () => {
@@ -124,17 +124,29 @@ describe('Transaction Enrichment Consistency', () => {
       };
 
       await provider.runAsync(auditContext, async () => {
-        await prisma.post.create({
-          data: {
-            title: 'New Post Title',
-            content: 'Content',
-            published: true,
-            authorId: user.id,
-          },
+        await prisma.$transaction(async (tx) => {
+          await tx.post.create({
+            data: {
+              title: 'New Post Title',
+              content: 'Content',
+              published: true,
+              authorId: user.id,
+            },
+          });
         });
       });
 
       expect(enrichedName).toBe('New Post Title');
+
+      const auditLogs = await context.basePrisma.auditLog.findMany({
+        where: { entityType: 'Post', action: 'create' },
+        orderBy: { aggregateType: 'asc' },
+      });
+
+      expect(auditLogs.map((log) => [log.aggregateType, log.entityContext])).toEqual([
+        ['Post', { enrichedTitle: 'New Post Title' }],
+        ['User', { enrichedTitle: 'New Post Title' }],
+      ]);
     });
   });
 

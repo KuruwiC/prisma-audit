@@ -158,7 +158,7 @@ describe('Custom Audit Log Table', () => {
       expect(activities).toHaveLength(1);
       expect(activities[0].entityType).toBe('User');
       expect(activities[0].action).toBe('update');
-      expect(activities[0].changes).toBeDefined();
+      expect(activities[0].changes).toEqual({ name: { old: 'User', new: 'Updated User' } });
     });
 
     it('should handle delete operations with custom table', async () => {
@@ -206,13 +206,14 @@ describe('Custom Audit Log Table', () => {
       });
 
       const activities = await customContext.customPrisma.activity.findMany();
-      expect(activities.length).toBeGreaterThan(2); // User + Posts + aggregates
+      // The User log, plus each of the 2 Posts under both its own aggregate and the User aggregate
+      expect(activities).toHaveLength(5);
 
       const userLogs = activities.filter((log: { entityType: string }) => log.entityType === 'User');
       const postLogs = activities.filter((log: { entityType: string }) => log.entityType === 'Post');
 
-      expect(userLogs.length).toBeGreaterThan(0);
-      expect(postLogs.length).toBeGreaterThan(0);
+      expect(userLogs).toHaveLength(1);
+      expect(postLogs).toHaveLength(4);
     });
 
     it('should handle batch operations with custom table', async () => {
@@ -237,7 +238,7 @@ describe('Custom Audit Log Table', () => {
       });
 
       const activities = await customContext.customPrisma.activity.findMany();
-      expect(activities.length).toBeGreaterThanOrEqual(3); // 3 users updated
+      expect(activities).toHaveLength(3); // 3 users updated
 
       for (const activity of activities) {
         expect(activity.action).toBe('update');

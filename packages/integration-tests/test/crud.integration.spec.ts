@@ -57,7 +57,7 @@ describe('CRUD Operations Integration', () => {
       expect(log.entityType).toBe('User');
       expect(log.entityId).toBe(user.id);
       expect(log.before).toBeNull();
-      expect(log.after).toBeDefined();
+      expect(log.after).toMatchObject({ id: user.id, email: 'test@example.com', name: 'John Doe' });
     });
 
     it('should create audit log for Post creation with User aggregate', async () => {
@@ -179,11 +179,9 @@ describe('CRUD Operations Integration', () => {
       expect(auditLogs).toHaveLength(1);
       const updateLog = auditLogs[0];
 
-      expect(updateLog.changes).toBeDefined();
       const changes = updateLog.changes as Record<string, { old: unknown; new: unknown }>;
 
-      expect(changes).toHaveProperty('name');
-      expect(changes).toHaveProperty('email');
+      expect(Object.keys(changes).sort()).toEqual(['email', 'name']);
 
       expect(changes.name).toEqual({
         old: 'Original Name',
@@ -379,8 +377,7 @@ describe('CRUD Operations Integration', () => {
       expect(auditLogs).toHaveLength(2);
 
       const deleteLog = auditLogs.find((log: { action: string }) => log.action === 'delete');
-      expect(deleteLog).toBeDefined();
-      expect(deleteLog?.before).toBeDefined();
+      expect(deleteLog?.before).toMatchObject({ id: userId, email: 'delete@example.com', name: 'To Delete' });
       expect(deleteLog?.after).toBeNull();
 
       expect(deleteLog?.changes).toBeNull();
@@ -410,12 +407,12 @@ describe('CRUD Operations Integration', () => {
       // Should have exactly 3 audit logs (one for each user)
       expect(auditLogs).toHaveLength(3);
 
-      // Verify all audit logs have valid entity IDs (cuid format)
-      for (const log of auditLogs) {
-        expect(log.entityId).toBeTruthy();
-        expect(typeof log.entityId).toBe('string');
-        expect(log.entityId.length).toBeGreaterThan(0);
-      }
+      // The generated ids the audit logs carry are the ids the rows were persisted with
+      const persistedIds = (await context.prisma.user.findMany({ select: { id: true } }))
+        .map((u: { id: string }) => u.id)
+        .sort();
+      expect(persistedIds).toHaveLength(3);
+      expect(auditLogs.map((log: { entityId: string }) => log.entityId).sort()).toEqual(persistedIds);
     });
 
     it('should create audit log for createMany with single object data', async () => {

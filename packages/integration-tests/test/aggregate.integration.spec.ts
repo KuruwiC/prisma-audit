@@ -49,16 +49,13 @@ describe('Aggregate Root Resolution Integration', () => {
           aggregateId: user.id,
           entityType: 'Post',
         },
-        orderBy: { createdAt: 'asc' },
+        orderBy: { action: 'asc' },
       });
 
-      expect(userAggregateLogs.length).toBeGreaterThanOrEqual(2); // create + update
-
-      const createLog = userAggregateLogs.find((log: { action: string }) => log.action === 'create');
-      expect(createLog).toBeDefined();
-
-      const updateLog = userAggregateLogs.find((log: { action: string }) => log.action === 'update');
-      expect(updateLog).toBeDefined();
+      expect(userAggregateLogs.map((log: { action: string; entityId: string }) => [log.action, log.entityId])).toEqual([
+        ['create', post.id],
+        ['update', post.id],
+      ]);
     });
   });
 
@@ -99,20 +96,18 @@ describe('Aggregate Root Resolution Integration', () => {
         orderBy: { aggregateType: 'asc' },
       });
 
-      // Should have logs for Comment, Post, and User aggregates
-      expect(commentLogs.length).toBeGreaterThanOrEqual(3);
-
-      const commentAggregateLog = commentLogs.find((log: { aggregateType: string }) => log.aggregateType === 'Comment');
-      expect(commentAggregateLog).toBeDefined();
-      expect(commentAggregateLog?.aggregateId).toBe(comment.id);
-
-      const postAggregateLog = commentLogs.find((log: { aggregateType: string }) => log.aggregateType === 'Post');
-      expect(postAggregateLog).toBeDefined();
-      expect(postAggregateLog?.aggregateId).toBe(post.id);
-
-      const userAggregateLog = commentLogs.find((log: { aggregateType: string }) => log.aggregateType === 'User');
-      expect(userAggregateLog).toBeDefined();
-      expect(userAggregateLog?.aggregateId).toBe(user.id);
+      // One log for each of the Comment, Post and User aggregates
+      expect(
+        commentLogs.map((log: { aggregateType: string; aggregateId: string; action: string }) => [
+          log.aggregateType,
+          log.aggregateId,
+          log.action,
+        ]),
+      ).toEqual([
+        ['Comment', comment.id, 'create'],
+        ['Post', post.id, 'create'],
+        ['User', user.id, 'create'],
+      ]);
     });
 
     it('should track Comment changes under both Post and User aggregates', async () => {
@@ -159,9 +154,13 @@ describe('Aggregate Root Resolution Integration', () => {
           aggregateId: post.id,
           entityType: 'Comment',
         },
+        orderBy: { action: 'asc' },
       });
 
-      expect(postAggregateLogs.length).toBeGreaterThanOrEqual(2); // create + update
+      expect(postAggregateLogs.map((log: { action: string; entityId: string }) => [log.action, log.entityId])).toEqual([
+        ['create', comment.id],
+        ['update', comment.id],
+      ]);
 
       const userAggregateLogs = await getContext().prisma.auditLog.findMany({
         where: {
@@ -169,9 +168,13 @@ describe('Aggregate Root Resolution Integration', () => {
           aggregateId: user.id,
           entityType: 'Comment',
         },
+        orderBy: { action: 'asc' },
       });
 
-      expect(userAggregateLogs.length).toBeGreaterThanOrEqual(2); // create + update
+      expect(userAggregateLogs.map((log: { action: string; entityId: string }) => [log.action, log.entityId])).toEqual([
+        ['create', comment.id],
+        ['update', comment.id],
+      ]);
     });
   });
 
@@ -215,7 +218,7 @@ describe('Aggregate Root Resolution Integration', () => {
         },
       });
 
-      expect(userAggregateLogs.length).toBeGreaterThanOrEqual(1);
+      expect(userAggregateLogs).toHaveLength(1);
     });
   });
 });
