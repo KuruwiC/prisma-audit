@@ -85,7 +85,8 @@ export interface PreFetchOneToOneRelationInput extends Omit<ResolveParentRowsInp
   select?: Record<string, true>;
   /**
    * The unique WHERE of the row a `connect` or `connectOrCreate` links to a parent row ahead of the
-   * write read under it, keyed by that parent row; read instead of the row linked to it before the write
+   * write read under it, keyed by that parent row; read instead of the row linked to it before the
+   * write
    */
   connectedRowWheres?: ReadonlyMap<ParentRowIdentity, PreFetchRecord>;
 }

@@ -67,7 +67,6 @@ export interface PrismaNamespace {
   };
   /** Sentinel value for SQL NULL (distinguishes DB NULL from JSON null) */
   DbNull: unknown;
-  /** Version of the generated client */
   prismaVersion?: { client: string };
 }
 
