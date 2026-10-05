@@ -47,7 +47,6 @@ const createPipelineDependencies = (
     batchExecutor: createBatchExecutor({ Prisma, schemaMetadata, clientOmittedFields, failureSink }),
     produceRecords: createRecordProducer({
       ...audit,
-      // The fields the client omits are read, and recorded with their values masked.
       composeConfig: { ...audit.composeConfig, maskedFieldNames: clientOmittedFields.masked },
       failureSink,
     }),
@@ -88,7 +87,8 @@ const recipeConfigOf = (audit: AuditOptions): RecipeTransactionConfig => {
   };
 };
 
-interface ClientAudit {
+/** The pipeline dependencies and selection reading built for the client the extension is applied to */
+interface BaseClientPipeline {
   readonly baseClient: PrismaClientWithDynamicAccess;
   readonly deps: AuditPipelineDependencies;
   readonly reading: ClientShape;
@@ -108,7 +108,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
 
   const recipes = audit.openImplicitTransaction ? recipeConfigOf(audit) : undefined;
 
-  const auditOperation = async (params: ExtensionParams, { baseClient, deps, reading }: ClientAudit) => {
+  const auditOperation = async (params: ExtensionParams, { baseClient, deps, reading }: BaseClientPipeline) => {
     const { operation, model, args, query } = params;
     const auditContext = audit.provider.getContext();
 
@@ -152,7 +152,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
       audit.schemaMetadata,
       audit.Prisma.prismaVersion?.client,
     );
-    const clientAudit: ClientAudit = {
+    const pipeline: BaseClientPipeline = {
       baseClient,
       deps: createPipelineDependencies(audit, clientOmittedFields),
       reading: {
@@ -164,7 +164,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     const extendedClient = baseClient.$extends({
       name: 'prisma-audit',
       query: {
-        $allOperations: (params: ExtensionParams) => auditOperation(params, clientAudit),
+        $allOperations: (params: ExtensionParams) => auditOperation(params, pipeline),
       },
     });
 
