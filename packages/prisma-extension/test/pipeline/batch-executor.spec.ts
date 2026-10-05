@@ -441,18 +441,75 @@ describe('createBatchExecutor', () => {
       );
     });
 
-    it('propagates limit to the before read as take', async () => {
-      const findMany = vi.fn(async () => [a1]);
-      const client = clientWith({ user: { findMany, deleteMany: vi.fn(async () => ({ count: 1 })) } });
+    describe('with a limit', () => {
+      const where = { email: { contains: '@' } };
+      const narrowedTo = (ids: string[]) => ({ AND: [where, { id: { in: ids } }] });
+      const deleteEvent = (before: Row) =>
+        eventOf({
+          identity: before.id,
+          action: 'delete',
+          before: { kind: 'captured', row: before },
+          origin: { path: '', op: 'deleteMany' },
+        });
 
-      await runWithRecords(
-        executor,
-        operationOn(client, 'deleteMany', { where: {}, limit: 1 }),
-        scopeOn(client),
-        produce(),
-      );
+      it('reads the primary keys the limit selects, continues the delete without the limit narrowed to them, and audits those rows as read', async () => {
+        const findMany = findManyReturning([a1, b1]);
+        const deleteMany = vi.fn(async () => ({ count: 2 }));
+        const client = clientWith({ user: { findMany, deleteMany } });
+        const produceRecords = produce();
+        const operation = operationOn(client, 'deleteMany', { where, limit: 2 });
 
-      expect(findMany).toHaveBeenCalledWith({ where: {}, take: 1 });
+        const outcome = await runWithRecords(executor, operation, scopeOn(client), produceRecords);
+
+        expect(findMany.mock.calls).toEqual([[{ where, take: 2 }]]);
+        expect(operation.execute).toHaveBeenCalledWith({ where: narrowedTo(['a', 'b']) });
+        expect(outcome.result).toEqual({ count: 2 });
+        expect(produceRecords).toHaveBeenCalledWith([deleteEvent(a1), deleteEvent(b1)], expect.anything());
+      });
+
+      it('tops up a round that deleted fewer rows than it read, auditing the read rows that are gone when as many are gone as it deleted', async () => {
+        const c1: Row = { id: 'c', email: 'c@1' };
+        const findMany = findManyReturning([a1, b1], [b1], [c1]);
+        const deleteMany = vi.fn<() => Promise<{ count: number }>>();
+        deleteMany.mockResolvedValueOnce({ count: 1 }).mockResolvedValueOnce({ count: 1 });
+        const client = clientWith({ user: { findMany, deleteMany } });
+        const produceRecords = produce();
+        const operation = operationOn(client, 'deleteMany', { where, limit: 2 });
+
+        const outcome = await runWithRecords(executor, operation, scopeOn(client), produceRecords);
+
+        expect(findMany.mock.calls).toEqual([
+          [{ where, take: 2 }],
+          [{ where: { id: { in: ['a', 'b'] } } }],
+          [{ where: { AND: [where, { NOT: { id: { in: ['a', 'b'] } } }] }, take: 1 }],
+        ]);
+        expect(vi.mocked(operation.execute).mock.calls).toEqual([
+          [{ where: narrowedTo(['a', 'b']) }],
+          [{ where: narrowedTo(['c']) }],
+        ]);
+        expect(outcome.result).toEqual({ count: 2 });
+        expect(produceRecords).toHaveBeenCalledWith([deleteEvent(a1), deleteEvent(c1)], expect.anything());
+      });
+
+      it('reports the rows of a short round it cannot tell apart as row-identification, and audits none of them', async () => {
+        const findMany = findManyReturning([a1, b1], [], []);
+        const deleteMany = vi.fn(async () => ({ count: 1 }));
+        const client = clientWith({ user: { findMany, deleteMany } });
+        const produceRecords = produce();
+
+        const outcome = await runWithRecords(
+          executor,
+          operationOn(client, 'deleteMany', { where, limit: 2 }),
+          scopeOn(client),
+          produceRecords,
+        );
+
+        expect(outcome.result).toEqual({ count: 1 });
+        expect(failureSink.notify).toHaveBeenCalledWith(
+          expect.objectContaining({ phase: 'row-identification', modelName: 'User', operation: 'deleteMany' }),
+        );
+        expect(produceRecords).toHaveBeenCalledWith([], expect.anything());
+      });
     });
   });
 

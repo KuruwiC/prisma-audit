@@ -1,11 +1,11 @@
 /**
- * Integration Tests: updateMany with a limit
+ * Integration Tests: updateMany and deleteMany with a limit
  *
  * The audit reads the primary keys of the rows the limit selects first, then continues the
- * caller's own `updateMany` narrowed to those keys, so the rows it audits are the rows the update
- * wrote. A round that updates fewer rows than it read, because another writer changed some of them
- * in between, is topped up with rows read the same way, a bounded number of times, so the count
- * matches a plain `updateMany` with the same limit.
+ * caller's own `updateMany` or `deleteMany` narrowed to those keys, so the rows it audits are the
+ * rows the operation wrote. A round that writes fewer rows than it read, because another writer
+ * changed some of them in between, is topped up with rows read the same way, a bounded number of
+ * times, so the count matches a plain operation with the same limit.
  */
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
@@ -19,7 +19,7 @@ const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'update-many-limit-actor' },
 };
 
-interface SeenUpdate {
+interface SeenWrite {
   readonly operation: string;
   readonly args: Record<string, unknown>;
 }
@@ -30,14 +30,14 @@ const narrowedIds = (args: Record<string, unknown>): string[] => {
   return branches[1]?.id?.in ?? [];
 };
 
-describe('updateMany with a limit', () => {
+describe('updateMany and deleteMany with a limit', () => {
   const databaseUrl = () => inject('databaseUrl');
   let raw: PrismaClient;
   let plain: PrismaClient;
   const provider = createAsyncLocalStorageProvider();
-  const seen: SeenUpdate[] = [];
-  /** Runs before the narrowed update reaches the database; set by a test to simulate another writer */
-  let beforeUpdate: ((args: Record<string, unknown>) => Promise<void>) | undefined;
+  const seen: SeenWrite[] = [];
+  /** Runs before the narrowed write reaches the database; set by a test to simulate another writer */
+  let beforeWrite: ((args: Record<string, unknown>) => Promise<void>) | undefined;
 
   const createAudited = () =>
     createAuditClient(raw, {
@@ -50,9 +50,9 @@ describe('updateMany with a limit', () => {
       query: {
         user: {
           async $allOperations({ operation, args, query }) {
-            if (operation.startsWith('updateMany')) {
+            if (operation === 'updateMany' || operation === 'deleteMany') {
               seen.push({ operation, args: args as Record<string, unknown> });
-              await beforeUpdate?.(args as Record<string, unknown>);
+              await beforeWrite?.(args as Record<string, unknown>);
             }
             return query(args);
           },
@@ -76,7 +76,7 @@ describe('updateMany with a limit', () => {
   beforeEach(async () => {
     await cleanDatabase(raw);
     seen.length = 0;
-    beforeUpdate = undefined;
+    beforeWrite = undefined;
   });
 
   const seedQueued = async (count: number): Promise<string[]> => {
@@ -138,7 +138,7 @@ describe('updateMany with a limit', () => {
   it('tops up a round another writer left short, and audits only the rows it updated', async () => {
     await seedQueued(4);
     let taken: string | undefined;
-    beforeUpdate = async (args) => {
+    beforeWrite = async (args) => {
       if (taken !== undefined) {
         return;
       }
@@ -154,5 +154,49 @@ describe('updateMany with a limit', () => {
     expect(updated).toHaveLength(3);
     expect(updated).not.toContain(taken);
     expect(await auditedIds()).toEqual(updated);
+  });
+
+  const deleteAudited = (limit: number) =>
+    provider.runAsync(testActor, () => audited.user.deleteMany({ where: queued, limit }));
+
+  const remainingIds = async () => (await raw.user.findMany({ select: { id: true } })).map((row) => row.id).sort();
+
+  const deletedAuditIds = async () => {
+    await flushAllPendingWrites();
+    return (await raw.auditLog.findMany({ where: { entityType: 'User', action: 'delete' } }))
+      .map((row) => row.entityId)
+      .sort();
+  };
+
+  it("continues the caller's deleteMany narrowed to the rows it read, and audits exactly the rows it deleted", async () => {
+    const ids = await seedQueued(4);
+
+    const result = await deleteAudited(2);
+
+    expect(result).toEqual({ count: 2 });
+    expect(seen.map((call) => call.operation)).toEqual(['deleteMany']);
+    expect(seen[0]?.args.limit).toBeUndefined();
+    const remaining = await remainingIds();
+    expect(remaining).toHaveLength(2);
+    expect(await deletedAuditIds()).toEqual(ids.filter((id) => !remaining.includes(id)).sort());
+  });
+
+  it('tops up a delete round another writer left short, and audits only the rows it deleted', async () => {
+    const ids = await seedQueued(4);
+    let taken: string | undefined;
+    beforeWrite = async (args) => {
+      if (taken !== undefined) {
+        return;
+      }
+      taken = narrowedIds(args)[0];
+      await raw.user.update({ where: { id: taken }, data: { name: 'Taken by another writer' } });
+    };
+
+    const result = await deleteAudited(3);
+
+    expect(result).toEqual({ count: 3 });
+    expect(seen.map((call) => call.operation)).toEqual(['deleteMany', 'deleteMany']);
+    expect(await remainingIds()).toEqual([taken]);
+    expect(await deletedAuditIds()).toEqual(ids.filter((id) => id !== taken).sort());
   });
 });
