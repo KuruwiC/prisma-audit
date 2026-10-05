@@ -38,7 +38,7 @@ export type BatchPrepared =
   | { readonly kind: 'create-returning' }
   /** createMany: the rows to insert, with client-generated ids */
   | { readonly kind: 'create'; readonly rows: Row[] }
-  /** A `limit`ed update on a connector with updateManyAndReturn: its returned rows are exactly the updated ones */
+  /** updateManyAndReturn, or a `limit`ed update on a connector with it: its returned rows are exactly the updated ones */
   | { readonly kind: 'update-returning'; readonly beforeRows: Row[]; readonly pkFields: string[] }
   | { readonly kind: 'update'; readonly beforeRows: Row[]; readonly pkFields: string[] }
   | { readonly kind: 'delete'; readonly beforeRows: Row[] };
@@ -100,10 +100,11 @@ const prepareCreate = (operation: AuditedOperation, schemaMetadata: SchemaMetada
 };
 
 /**
- * `updateMany({ limit })` and a separate `findMany({ take })` are not guaranteed to select the
- * same rows, so pre-limiting the before fetch desyncs before/after counts. A connector with
- * `updateManyAndReturn` audits the exact updated rows through it; without it (MySQL), `take`
- * propagates to the before fetch as a best effort.
+ * An `updateManyAndReturn` is audited from the rows it returns, paired with the rows read before
+ * it, so they are not read again. `updateMany({ limit })` and a separate `findMany({ take })` are
+ * not guaranteed to select the same rows, so pre-limiting the before fetch desyncs before/after
+ * counts: a connector with `updateManyAndReturn` audits the exact updated rows by running the
+ * update through it; without it (MySQL), `take` propagates to the before fetch as a best effort.
  */
 const prepareUpdateOrDelete = async (
   operation: AuditedOperation,
@@ -116,7 +117,10 @@ const prepareUpdateOrDelete = async (
   const where = args.where ?? {};
   const limit = typeof args.limit === 'number' ? args.limit : undefined;
 
-  if (action !== AUDIT_ACTION.DELETE_MANY && limit !== undefined && hasOperation(delegate, 'updateManyAndReturn')) {
+  const returnsUpdatedRows =
+    action === AUDIT_ACTION.UPDATE_MANY_AND_RETURN ||
+    (action !== AUDIT_ACTION.DELETE_MANY && limit !== undefined && hasOperation(delegate, 'updateManyAndReturn'));
+  if (returnsUpdatedRows) {
     const beforeRows = await delegate.findMany({ where });
     return { kind: 'update-returning', beforeRows, pkFields: getPrimaryKeyFields(Prisma, model) };
   }

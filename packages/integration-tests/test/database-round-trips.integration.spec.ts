@@ -343,4 +343,36 @@ describe('Database Round-Trip Guard', () => {
     // 5. COMMIT
     expect(statements).toHaveLength(5);
   });
+
+  it('updateManyAndReturn (2 rows) issues 5 statements', async () => {
+    const user = await provider.runAsync(testActor, async () => {
+      return prisma.user.create({
+        data: {
+          email: 'update-many-and-return@example.com',
+          name: 'UpdManyRet',
+          posts: {
+            create: [
+              { title: 'Post 1', content: 'Body 1' },
+              { title: 'Post 2', content: 'Body 2' },
+            ],
+          },
+        },
+      });
+    });
+    statements.length = 0;
+
+    await provider.runAsync(testActor, async () => {
+      await prisma.post.updateManyAndReturn({ where: { authorId: user.id }, data: { published: true } });
+    });
+
+    console.log(`updateManyAndReturn: ${statements.length} SQL statements`);
+    // 1. BEGIN                  — awaitWrite: true (default) wraps the operation in a transaction
+    // 2. SELECT FROM posts      — the batch executor's findMany, capturing before-state for
+    //                             the 2 rows about to be updated
+    // 3. UPDATE posts RETURNING — the caller's own updateManyAndReturn; its returned rows are the
+    //                             after-state, so they are not read again
+    // 4. INSERT INTO audit_logs — one batched write covering both updated rows (2 rows, 1 statement)
+    // 5. COMMIT
+    expect(statements).toHaveLength(5);
+  });
 });
