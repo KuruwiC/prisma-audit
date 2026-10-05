@@ -652,7 +652,7 @@ Use shared change normalization if:
 
 Control how changes are tracked and recorded.
 
-An update's `changes` compares the columns of the row. The audited row is read with every column of the client's default shape whatever the query's `select` or `omit` (the value returned keeps the shape the query requested), so a column the query does not read is still compared and a change to it is recorded; a column the client omits for every query is read and compared too, and its value is masked (see [`redact.fields`](#redactfields)); the relation fields and relation counts (`_count`) read with the row are neither compared nor stored. An update whose columns did not change, such as one that writes only nested relations, gets no audit log.
+An update's `changes` compares the columns of the row. The audited row is read with every column of the client's default shape whatever the query's `select` or `omit` (the value returned keeps the shape the query requested), so a column the query does not read is still compared and a change to it is recorded; a column the client omits for every query is left out, unless the entity lists it in [`auditOmittedFields`](#auditomittedfields); the relation fields and relation counts (`_count`) read with the row are neither compared nor stored. An update whose columns did not change, such as one that writes only nested relations, gets no audit log.
 
 #### `excludeFields`
 **Type:** `string[]`
@@ -678,6 +678,19 @@ const aggregateMapping = defineAggregateMapping<PrismaClient>()({
 });
 ```
 
+#### `auditOmittedFields`
+**Type:** `string[]` (per model, on `defineEntity`)
+**Default:** none
+
+The fields a client-level `omit` hides (`new PrismaClient({ omit })`) that the audit reads and records anyway, their values masked whether or not `security.redact` is set. The audit reads them in its own queries only, the read before the write and one read by primary key per listed model after it; the query you run and the value it returns are never widened with them. A field the entity's `excludeFields` (or, without one, `diffing.excludeFields`) names is not read. Requires Prisma 6.2 or later; creating the audited client throws on an older version, and for a name that is not a scalar or enum field of the model.
+
+```typescript
+User: defineEntity({
+  type: 'User',
+  auditOmittedFields: ['password'],
+}),
+```
+
 ### Security Options (`security`)
 
 Configure sensitive data protection.
@@ -688,7 +701,7 @@ Configure sensitive data protection.
 
 Additional fields to redact in audit logs, on top of the 17 defaults, which apply once `security.redact` is set (`redact: {}` turns on the defaults alone). A field is redacted when its name matches an entry exactly (case-sensitive), at any depth of the before / after / changes data. Without `security.redact`, nothing is redacted.
 
-The columns a client-level `omit` hides (`new PrismaClient({ omit })`) are masked per model, in the format below, whether or not `security.redact` is set, and there is no option to record them unmasked: they are read before and after the write, so a change to one is recorded without its values, and the value returned to a query still holds only the fields it asked for. Prisma exposes the client's `omit` setting through no public API, so the audit reads it from the client's internal `_globalOmit` field. When that field cannot be read, a warning is printed when the audit client is created. On Prisma 6.2 and later, those columns are then left out of the audit logs: they are neither read nor recorded. Before 6.2, or when the Prisma version cannot be determined, a query's `select` is read by listing every column, the hidden ones among them, so every column value of every model is masked in the audit logs, and the changes are still recorded without their values.
+The columns a client-level `omit` hides (`new PrismaClient({ omit })`) are left out of the audit logs, unless the entity lists them in [`auditOmittedFields`](#auditomittedfields): those are masked, in the format below, whether or not `security.redact` is set, and there is no option to record them unmasked. A change to one is recorded without its values.
 
 ```typescript
 {
@@ -1070,7 +1083,7 @@ Either way, the audit covers the rows the filter matched when they were read bef
 
 #### Batch Creates (createMany / createManyAndReturn)
 
-`createManyAndReturn` delegates ID generation entirely to Prisma: audit logs are built from the rows Prisma actually created, read with every column of the client's default shape and the columns a client-level `omit` hides, whatever the query's `select` or `omit`. Any `@default` works — including database-generated ones like `autoincrement()` — and logs stay accurate under `skipDuplicates` (skipped rows produce no logs).
+`createManyAndReturn` delegates ID generation entirely to Prisma: audit logs are built from the rows Prisma actually created, read with every column of the client's default shape whatever the query's `select` or `omit`, and the fields the entity lists in `auditOmittedFields` read by primary key after the write. Any `@default` works — including database-generated ones like `autoincrement()` — and logs stay accurate under `skipDuplicates` (skipped rows produce no logs).
 
 `createMany` only returns `{ count }`, so the extension pre-generates IDs client-side and injects them into `data`, matching the format the schema declares:
 
@@ -1268,7 +1281,7 @@ await prisma.post.update({
 
 #### Important Notes
 
-1. **No `include` needed**: The relations a nested write touches are added to the query's `include` so their rows can be audited; a `select` on the audited record or on a written relation is read as the client's default shape with the relations it selects included, and the fields an `omit` there leaves out are read, so the records are audited with every column the client reads by default, and the columns a client-level `omit` hides, and the rows written below a returned record are found by its keys when the result leaves them out. The value returned to the caller keeps the shape the query requested.
+1. **No `include` needed**: The relations a nested write touches are added to the query's `include` so their rows can be audited; a `select` on the audited record or on a written relation is read as the client's default shape with the relations it selects included, and the fields an `omit` there leaves out are read, so the records are audited with every column the client reads by default (and the fields the entity lists in `auditOmittedFields`, read by primary key after the write), and the rows written below a returned record are found by its keys when the result leaves them out. The value returned to the caller keeps the shape the query requested.
 2. **`connect`, `set` and `disconnect` behavior**:
    - A foreign key on the related record is that record's column: each record whose foreign key the write changed gets an `update` audit log, `changes` holding the old and new value. The records the writes at one relation path name, and the records linked to their parent rows when a write unlinks those (a `set`, or a to-one `connect`, `create`, `connectOrCreate` or `disconnect` on an optional foreign key), are read once before the write (whole rows, when `fetchBefore.update` is on for the related model) and once after it by primary key; a record whose foreign key did not change (already linked, kept by a `set`, linked to another parent) gets no audit log. Prisma also sets an `@updatedAt` column on every connected record, so with the foreign key in `excludeFields` such a record is still logged, with `updatedAt` as its only change
    - Creates join table records (e.g., PostTag) for many-to-many relations

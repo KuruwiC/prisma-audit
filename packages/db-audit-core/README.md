@@ -172,9 +172,9 @@ write the adapter runs, in order:
    `buildRecords` returns. `composeConfig` carries the entity lookup, `excludeFields`, `redact`,
    `serialization`, `relationFieldNames(model)`, the keys of a row that are not its columns (the
    relation fields, and any aggregate of related records the ORM returns with the row, such as
-   Prisma's `_count`), and the optional `maskedFieldNames(model)`, the columns whose values are
-   masked in the stored states and changes whether or not `redact` is set (such as the columns
-   the adapter's client hides from reads). An update's `changes` compares the row's columns only: those fields are
+   Prisma's `_count`). An entity's `auditOmittedFields`, the fields its client leaves out of its
+   default reads that the adapter reads anyway, are masked in the stored states and changes
+   whether or not `redact` is set. An update's `changes` compares the row's columns only: those fields are
    left out of the comparison, so an update whose columns are unchanged yields no record.
 
 What the adapter must provide:

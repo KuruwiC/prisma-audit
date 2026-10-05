@@ -72,7 +72,7 @@ Branded types (`ActorId`, `EntityId`, `AggregateId`) prevent ID mix-ups at compi
 | **Operations**    | Batch operations (createMany, updateMany, deleteMany, createManyAndReturn, updateManyAndReturn), nested operations at all depths (including nested createMany), smart upsert/connectOrCreate detection |
 | **Architecture**  | DDD aggregate root mapping, AsyncLocalStorage context propagation, one audit pipeline for single and batch writes              |
 | **Performance**   | 3 write strategies (sync/deferred/fire-and-forget), probabilistic sampling, batch context enrichment (N+1 free)                |
-| **Security**      | PII redaction once `security.redact` is set (passwords, tokens, SSN, etc.), masking of the fields a client-level `omit` hides  |
+| **Security**      | PII redaction once `security.redact` is set (passwords, tokens, SSN, etc.); the fields a client-level `omit` hides stay out of the logs unless an entity lists them in `auditOmittedFields`, then masked |
 | **Extensibility** | Custom writer hooks, custom serializers, pluggable error handling, framework-agnostic core                                     |
 
 ## Installation
@@ -510,9 +510,23 @@ Add custom fields via `security.redact.fields`.
 
 ### Fields a client-level `omit` hides
 
-A field the Prisma client omits for every query (`new PrismaClient({ omit: { user: { password: true } } })`) is still audited: it is read before and after the write, a change to it is recorded, and its value is masked in before, after and `changes`, always, whether or not `security.redact` is set. A changed field shows as `{ old: { redacted: true, hadValue: true }, new: { redacted: true, hadValue: true, isDifferent: true } }` (a side is `null` when the value was or became null); an unchanged one has no entry in `changes`. The value returned to your query keeps the fields it asked for, so such a field reaches it only when the query names it (`select: { password: true }` or `omit: { password: false }`). There is no option to record it unmasked; list it in `excludeFields` to keep it out of `changes`.
+The audit records a row in the client's default shape. A field the Prisma client omits for every query (`new PrismaClient({ omit: { user: { password: true } } })`) is therefore neither read nor recorded, and a change to it alone yields no log.
 
-Prisma has no public API for the client's `omit` setting: the audit reads it from the client's internal `_globalOmit` field, and this repository's tests check that it is found. If a Prisma version does not expose it there, a warning is printed when the audit client is created. On Prisma 6.2 and later, the fields a client-level `omit` hides are then not audited: they are neither read nor recorded. Before 6.2, or when the Prisma version cannot be determined, every column value is masked in the audit logs instead, and the changes are recorded without their values.
+To audit such a field, list it on its entity:
+
+```typescript
+User: defineEntity({ type: 'User', auditOmittedFields: ['password'] }),
+```
+
+A listed field is read in the audit's own queries only: added to the read of the row before the write, and read for the written rows by primary key after it, in one query per listed model (one extra statement for a single write; `updateMany`, `deleteMany` and `createMany` add none). Your query and the value it returns are never widened with it. Its value is masked in before, after and `changes`, whether or not `security.redact` is set: a changed field shows as `{ old: { redacted: true, hadValue: true }, new: { redacted: true, hadValue: true, isDifferent: true } }` (a side is `null` when the value was or became null), and an unchanged one has no entry in `changes`. There is no option to record it unmasked.
+
+- `excludeFields` wins: a field the entity excludes is not read, even when listed.
+- A field `security.redact` also names is masked once, in the same shape.
+- A field the client does not hide is masked all the same when listed.
+- A foreign key the client hides and a `foreignKey(...)` root names must be listed: otherwise the row lacks the column, every write of it reports `id-resolver-call`, and the row is not recorded under that aggregate. A listed foreign key that holds `null` reports nothing.
+- `auditOmittedFields` needs Prisma 6.2 or later, whose queries take an `omit`; creating the audited client throws on an older version, or one that cannot be determined.
+
+A field your query names itself (`select: { password: true }` or `omit: { password: false }`) reaches your result as usual. The record of a row read before the write (an update or delete with `fetchBefore` on, an upsert) keeps only the columns that read holds, so such a field is not recorded there; the record of a created row, or of an update with `fetchBefore.update` off, holds it as your query read it, in clear unless listed in `auditOmittedFields` or `security.redact.fields`. With `fetchBefore.delete` off, a deleted row's listed fields are not recorded.
 
 ## Nested Operations
 
@@ -539,8 +553,8 @@ Nested rows are audited from the operation's own result: the relations a nested 
 - **Edge runtimes**: No AsyncLocalStorage support (Vercel Edge, Cloudflare Workers)
 - **Raw queries**: `$executeRaw` / `$queryRaw` are not intercepted
 - **Many-to-many with multiple aggregates**: Not currently supported
-- **Client-level `omit`**: The audit learns which fields a client-level `omit` hides from an internal Prisma field (see [Fields a client-level `omit` hides](#fields-a-client-level-omit-hides)); on a Prisma version that does not expose it, it prints a warning, and those fields are not audited (Prisma 6.2 and later) or every column value is masked (earlier, or an unknown version)
-- **Nested re-read consistency**: A row a nested write updated or inserted that your own `include` / `select` leaves out, and a row a nested `connect`, `set` or `disconnect` re-linked, is read again after the operation on the same client. Outside a transaction (an interactive `$transaction`, or the one `openImplicitTransaction` opens for an awaited audit), that re-read is a separate query and may observe concurrent changes
+- **Client-level `omit`**: The audit cannot tell which fields a client-level `omit` hides. A hidden field your query names in a `select` or `omit` is recorded as read for a row not read before the write (a create, or an update with `fetchBefore.update` off); list it in `auditOmittedFields` or `security.redact.fields` to mask it (see [Fields a client-level `omit` hides](#fields-a-client-level-omit-hides)). Before Prisma 6.2, or when the version cannot be determined, a query's `select` is read by listing every column; a column the audit added that way is recorded only when the row's before state holds it, so a row created under a `select` is recorded with the selected columns only. `auditOmittedFields` needs Prisma 6.2 or later
+- **Nested re-read consistency**: A row a nested write updated or inserted that your own `include` / `select` leaves out, and a row a nested `connect`, `set` or `disconnect` re-linked, is read again after the operation on the same client. Outside a transaction (an interactive `$transaction`, or the one `openImplicitTransaction` opens for an awaited audit), that re-read is a separate query and may observe concurrent changes; so may the read, after the write, of the fields an entity lists in `auditOmittedFields`
 
 ## Development
 
