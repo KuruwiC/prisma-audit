@@ -107,13 +107,15 @@ export interface HooksConfig<TClient = unknown> {
    * and a context with the audit context, the client the write runs on (`handle`) and
    * `defaultWrite`, the default persistence on that client.
    *
-   * With `awaitWrite: true` (the default), `handle` is the client of the operation's transaction
-   * (the caller's `$transaction` or the one the extension opens around the operation), and the
-   * writer runs before commit, so a later rollback undoes rows it wrote through `handle` or
-   * `defaultWrite`. With `awaitWrite: false`, `handle` is the base client: the write starts
-   * after the operation, and inside `$transaction` only once `$transaction` has resolved; a
-   * transaction that throws discards the queued write unrun, so the writer never runs for it.
-   * For an awaited write the handle is typed as the client although it is a transaction's client.
+   * With `awaitWrite: true` (the default), inside a transaction (the caller's `$transaction`, or
+   * the one the client opens with `openImplicitTransaction`) `handle` is the client of that
+   * transaction and the writer runs before commit, so a later rollback undoes rows it wrote
+   * through `handle` or `defaultWrite`; outside any transaction `handle` is the base client and
+   * the writer runs, awaited, once the operation has committed. With `awaitWrite: false`, `handle`
+   * is the base client: the write starts after the operation, and inside `$transaction` only once
+   * `$transaction` has resolved; a transaction that throws discards the queued write unrun, so the
+   * writer never runs for it. For an awaited write inside a transaction the handle is typed as the
+   * client although it is a transaction's client.
    *
    * Either way, side effects the writer performs outside the database transaction (an HTTP
    * call, a queue publish) are never rolled back — they have already happened by the time a
@@ -239,16 +241,19 @@ export interface PrismaAuditExtensionOptions<TModelName extends string = string,
    *   `beforeUnavailable: true` (a `disconnect` only when it left the row unlinked); a row unlinked
    *   without being named is not recorded.
    * - `log-write`: persisting the audit log entry itself failed. The only phase whose outcome
-   *   `writeFailurePolicy` decides; with `awaitWrite: false` the write is queued or detached and
-   *   `'throw'` logs instead.
+   *   `writeFailurePolicy` decides; `'throw'` fails the caller only for an awaited write inside a
+   *   transaction, and logs once the operation has committed (an awaited write outside any
+   *   transaction, or a queued or detached one).
    * - `diff-generation`: other audit-support work around the caller's operation failed —
    *   building the entry (enrichment, redaction), reading the primary keys a to-many relation
    *   holds before a nested create under an existing row or the rows a nested `updateMany` /
    *   `deleteMany` filter matches (the caller's write is then never attempted), reading again,
    *   after the write, a nested row the operation updated or inserted that its result did not
    *   return, or a row a nested `connect`, `set` or `disconnect` re-linked, or, for batch
-   *   operations, fetching the affected rows before or after the mutation. It always propagates
-   *   to the caller as a thrown error, regardless of `writeFailurePolicy`.
+   *   operations, fetching the affected rows before or after the mutation. It propagates to the
+   *   caller as a thrown error, regardless of `writeFailurePolicy`, when the caller's write has not
+   *   run or runs inside a transaction; outside any transaction a failure after the write drops
+   *   the entry and `writeFailurePolicy` applies to the drop.
    * - `row-identification`: a nested delete's primary key could not be resolved, from the
    *   pre-fetched row, its WHERE or the operation data; or an `updateMany` with a `limit` wrote
    *   rows it cannot tell apart from rows another writer changed (`params` is `{ unidentified }`,

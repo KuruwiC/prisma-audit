@@ -200,14 +200,14 @@ Every intercepted write operation, single or batch, passes through one pipeline:
 ```
 Operation arrives
   │
-  ├─ 1. Write Policy ───────── Decide whether the audit rows join the operation's transaction
-  │                            (awaitWrite / awaitWriteIf); open one when they do and none is active
+  ├─ 1. Write Policy ───────── Decide whether the audit rows are awaited (awaitWrite / awaitWriteIf);
+  │                            with openImplicitTransaction the client opens a transaction for them
   ├─ 2. Read Before State ──── Capture the target row (UPDATE/DELETE/UPSERT) and the nested rows the write touches
   ├─ 3. Execute Operation ──── Run the original Prisma operation
   ├─ 4. Collect Events ─────── One mutation event per row written, top-level, nested or batch
   ├─ 5. Resolve & Compose ──── Resolve entity ids and aggregates, enrich contexts (batch, N+1 free), diff, redact
   ├─ 6. Dispatch ───────────── Choose the write plan from the policy and the transaction context
-  └─ 7. Write Logs ─────────── Immediately, after commit, or detached
+  └─ 7. Write Logs ─────────── In the transaction, after commit (awaited or queued), or detached
 ```
 
 ### Write Strategies
@@ -216,16 +216,20 @@ The library automatically selects the optimal write strategy based on your confi
 
 ```
                   awaitWrite: true?
-                  ┌─── Yes ──→  Synchronous     (same transaction, blocks until written)
+                  ┌─── Yes ──→  In transaction?
+                  │             ┌─── Yes ──→  Synchronous     (same transaction, blocks until written)
+                  │             └─── No ───→  Synchronous     (after commit, blocks until written)
                   │
                   └─── No ───→  In transaction?
                                 ┌─── Yes ──→  Deferred        (queued, executes after TX commit)
                                 └─── No ───→  Fire & Forget   (background, zero latency impact)
 ```
 
+"In transaction" means your interactive `$transaction`, or, with `performance.openImplicitTransaction`, the interactive transaction the audited client opens around a write whose audit is awaited and around a batch `$transaction([...])` of its operations.
+
 | Strategy          | Atomicity      | Latency Impact | Use Case                                          |
 | ----------------- | -------------- | -------------- | ------------------------------------------------- |
-| **Synchronous**   | Full (same TX) | Blocks         | Compliance-critical data                          |
+| **Synchronous**   | Full inside a transaction (same TX); none after commit | Blocks         | Compliance-critical data                          |
 | **Deferred**      | None (post-TX) | Minimal        | Operations inside an interactive `$transaction()` |
 | **Fire & Forget** | None           | Zero           | High-throughput, non-critical                     |
 
