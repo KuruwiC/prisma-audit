@@ -106,12 +106,14 @@ export interface AuditRecord {
 /**
  * How and when `dispatch` writes a set of records
  *
- * - `immediate`: write immediately on the transaction's handle (the base handle outside any
- *   transaction); the caller awaits it
+ * - `immediate`: written on the transaction's handle before the transaction commits; the caller awaits it
+ * - `awaited-after-commit`: written on the base handle once the operation, which runs outside any
+ *   transaction, has committed; the caller awaits it
  * - `after-commit`: registered with the enclosing transaction; run on the base handle after commit
  * - `detached`: started on the base handle, never awaited by the caller
  */
 export type WritePlan =
   | { readonly kind: 'immediate'; readonly records: readonly AuditRecord[] }
+  | { readonly kind: 'awaited-after-commit'; readonly records: readonly AuditRecord[] }
   | { readonly kind: 'after-commit'; readonly records: readonly AuditRecord[] }
   | { readonly kind: 'detached'; readonly records: readonly AuditRecord[] };

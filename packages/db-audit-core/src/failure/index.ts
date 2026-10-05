@@ -120,8 +120,9 @@ export interface FailureSink {
   readonly reportDroppedBuild: (context: AuditErrorContext & { readonly phase: 'diff-generation' }) => Promise<void>;
   /**
    * Reports a failed write of `plan`: notifies the observer under `log-write`, then applies the
-   * write-failure policy. Rejects with `error` only for an `immediate` plan under `'throw'`; the
-   * caller of an `after-commit` or `detached` plan has returned, so there `'throw'` logs.
+   * write-failure policy. Rejects with `error` only for an `immediate` plan under `'throw'`, whose
+   * transaction has not committed; under any other plan the operation's write has committed, so
+   * there `'throw'` logs.
    * `dispatch` calls it for every write it executes; an adapter does not.
    */
   readonly reportWriteFailure: (plan: WritePlan, error: Error) => Promise<void>;
@@ -129,6 +130,7 @@ export interface FailureSink {
 
 const WRITE_LOG_LABELS: Readonly<Record<WritePlan['kind'], string>> = {
   immediate: 'audit log write',
+  'awaited-after-commit': 'audit log write after commit',
   'after-commit': 'deferred audit log write',
   detached: 'async audit log write',
 };
@@ -182,12 +184,12 @@ export const createFailureSink = (config: ErrorHandlingConfig): FailureSink => {
 
   const applyWriteFailurePolicy = async (
     context: AuditErrorContext,
-    awaited: boolean,
+    failsCaller: boolean,
     label: string,
   ): Promise<void> => {
     await observe(context);
     const strategy = await resolveStrategy(context);
-    const applied = strategy === 'throw' && !awaited ? 'log' : strategy;
+    const applied = strategy === 'throw' && !failsCaller ? 'log' : strategy;
     createErrorHandler(applied)(context.error, label);
   };
 

@@ -66,9 +66,9 @@ export interface WriteContext<TDbHandle = unknown> {
   readonly handle: TDbHandle;
   /**
    * Whether `handle` belongs to the audited operation's transaction, so that what the writer
-   * writes through it commits and rolls back with the operation: true for an immediate write
-   * inside a transaction; false for a write after commit, a detached one, and an immediate one
-   * outside any transaction. `dispatch` derives it from the adapter's {@link TransactionRuntime}.
+   * writes through it commits and rolls back with the operation: true for an immediate write,
+   * which runs inside a transaction; false for a write after commit, awaited or queued, and a
+   * detached one. `dispatch` derives it from the adapter's {@link TransactionRuntime}.
    * A writer that needs several statements to be atomic opens a transaction of its own exactly
    * when this is false.
    */

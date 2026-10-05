@@ -77,13 +77,17 @@ describe('createFailureSink', () => {
     it.each([
       ['after-commit', 'deferred audit log write'],
       ['detached', 'async audit log write'],
-    ] as const)("logs instead under 'throw' for an %s plan, whose caller has returned", async (kind, label) => {
-      const sink = createFailureSink({ writeFailurePolicy: 'throw' });
+      ['awaited-after-commit', 'audit log write after commit'],
+    ] as const)(
+      "logs instead under 'throw' for an %s plan, whose operation's write has committed",
+      async (kind, label) => {
+        const sink = createFailureSink({ writeFailurePolicy: 'throw' });
 
-      await expect(sink.reportWriteFailure(planOf(kind), writeError)).resolves.toBeUndefined();
+        await expect(sink.reportWriteFailure(planOf(kind), writeError)).resolves.toBeUndefined();
 
-      expect(consoleError).toHaveBeenCalledWith(`[db-audit-core] Error in ${label}:`, 'insert failed');
-    });
+        expect(consoleError).toHaveBeenCalledWith(`[db-audit-core] Error in ${label}:`, 'insert failed');
+      },
+    );
 
     it("stays silent under 'ignore'", async () => {
       const sink = createFailureSink({ writeFailurePolicy: 'ignore' });

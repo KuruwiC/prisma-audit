@@ -67,15 +67,18 @@ dispatch({ buildRecords, modelName, operation, params, atomic, auditContext }, c
   required for it.
 - **`dispatch`** chooses a `WritePlan` from `atomic` and the adapter's `TransactionRuntime`, runs
   the adapter's `buildRecords`, and writes the records by that write plan: `immediate` when atomic
-  (on the transaction's handle, or the base handle outside any transaction, awaited), `after-commit`
-  when not atomic inside a transaction (registered with the transaction, run on the base handle once
-  it commits), `detached` otherwise (handed to the runtime's `detach`, run on the base handle). The
-  build runs before `dispatch` resolves whatever the write plan, right after the write. A failed
-  build notifies the observer as `diff-generation` with the operation's `modelName`, `operation` and
-  `params`, and rejects with its error, except under a `detached` plan: the operation's write has
-  committed and its caller does not wait for its audit, so its records are dropped, the sink's
-  `reportDroppedBuild` applies the write-failure policy to the drop and `dispatch` resolves. A
-  failed write goes to the failure sink with its plan.
+  inside a transaction (on the transaction's handle, awaited), `awaited-after-commit` when atomic
+  outside any transaction (on the base handle once the operation has committed, awaited),
+  `after-commit` when not atomic inside a transaction (registered with the transaction, run on the
+  base handle once it commits), `detached` otherwise (handed to the runtime's `detach`, run on the
+  base handle). The build runs before `dispatch` resolves whatever the write plan, right after the
+  write. `dispatch` rejects only while the operation's write is inside a transaction that has not
+  committed: a failed build then notifies the observer as `diff-generation` with the operation's
+  `modelName`, `operation` and `params` and rejects with its error. Outside any transaction the
+  operation's write has committed, and reporting it as failed would invite a retry that writes it
+  twice: a failed build drops the records, the sink's `reportDroppedBuild` applies the
+  write-failure policy to the drop, and `dispatch` resolves. A failed write goes to the failure sink
+  with its plan.
 - **`TransactionRuntime<TDbHandle>`** is what the adapter knows about where the operation's write
   can run: `baseHandle` (a handle outside any transaction), `transaction` when the operation runs in
   one (its `handle` and `afterCommit(work)`, which starts the work once the transaction has
@@ -85,9 +88,9 @@ dispatch({ buildRecords, modelName, operation, params, atomic, auditContext }, c
 - **`WriteExecutor<TDbHandle>`** is the adapter's `write(handle, records)`, which persists records
   with the database's API to the audit log the adapter constructed it for. **`WriteFn`** is the user hook that runs in place of the default write:
   it receives the records and a `WriteContext` with the audit context, the database `handle` the
-  write runs on (the transaction's for an immediate write inside one, the base handle otherwise),
+  write runs on (the transaction's for an immediate write, the base handle otherwise),
   `inTransaction` (whether the write is part of the operation's transaction: true for an immediate
-  write inside it, false otherwise; `dispatch` derives it from the runtime) and `defaultWrite`, the
+  write, false otherwise; `dispatch` derives it from the runtime) and `defaultWrite`, the
   executor's write on that handle.
 
 ## Configuration API
@@ -139,14 +142,16 @@ write the adapter runs, in order:
    handle.
 3. **`dispatch({ buildRecords, modelName, operation, params, atomic, auditContext }, dispatchConfig,
    runtime)`**, which runs `buildRecords` (steps 4 to 6) and writes the records: `immediate` on the
-   transaction's handle before it resolves, `after-commit` registered with
+   transaction's handle before it resolves, `awaited-after-commit` on `runtime.baseHandle` before it
+   resolves when the operation ran outside any transaction, `after-commit` registered with
    `runtime.transaction.afterCommit` and run on `runtime.baseHandle` once the transaction commits,
    `detached` handed to `runtime.detach` and run on `runtime.baseHandle`. `modelName`, `operation`
    and `params` name the operation in a failure report. `dispatchConfig` is the adapter's
    `writeExecutor`, the user's optional `writer` (a `WriteFn` run in place of the executor's write,
-   on the same handle) and the `failureSink`. It rejects when the build failed, unless the write
-   plan is `detached` (the records are dropped), and when an immediate write failed and the
-   write-failure policy rethrows.
+   on the same handle) and the `failureSink`. It rejects only inside a transaction: when the build
+   failed, and when an immediate write failed and the write-failure policy rethrows. Outside any
+   transaction a failed build drops the records and a failed write follows the policy, with
+   `'throw'` logging.
 4. **The mutation events**, inside `buildRecords`: one `MutationEvent` per written row, with what
    the adapter reads after the write when the write itself does not return it. Each row an event
    carries holds every column of the table, `null` where the row has no value: a `foreignKey`
@@ -208,8 +213,8 @@ What the adapter must provide:
     each.
   - `reportWriteFailure(plan, error)`, which `dispatch` calls when a write it executes failed (the
     adapter does not): a `log-write` notification, then the policy. `'throw'` rejects with the
-    error only for an `immediate` plan, whose caller is still waiting; for `after-commit` and
-    `detached` plans it logs, and the call never rejects.
+    error only for an `immediate` plan, whose transaction has not committed; for the other plans
+    the operation's write has committed, so it logs, and the call never rejects.
 
 `@kuruwic/audit-adapter-memory` (`packages/adapter-memory`) is the smallest complete adapter. Its
 `runAudited` in `src/adapter.ts` is the whole sequence:

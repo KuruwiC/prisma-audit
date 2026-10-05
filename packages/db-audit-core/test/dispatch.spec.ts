@@ -166,16 +166,6 @@ describe('dispatch', () => {
       expect(detach).not.toHaveBeenCalled();
     });
 
-    it('writes on the base handle outside any transaction', async () => {
-      const { config, writeExecutor } = createConfig();
-      const { runtime, detach } = createRuntime(false);
-
-      await dispatch(audited(true), config, runtime);
-
-      expect(writeExecutor.write).toHaveBeenCalledWith(baseHandle, [record]);
-      expect(detach).not.toHaveBeenCalled();
-    });
-
     it('reports a failed write with its immediate plan, which carries the records by reference', async () => {
       const { config, failureSink } = createConfig({ write: failingWrite });
 
@@ -357,11 +347,61 @@ describe('dispatch', () => {
     expect(afterCommit).not.toHaveBeenCalled();
     expect(detach).not.toHaveBeenCalled();
   });
+  describe('after the write has committed and awaited, for an atomic policy outside any transaction', () => {
+    it('writes on the base handle, outside any transaction, and resolves only once the write has finished', async () => {
+      let finishWrite: () => void = () => {};
+      const contexts: Array<{ readonly handle: Handle; readonly inTransaction: boolean }> = [];
+      const { config } = createConfig({
+        writer: async (written, { handle, inTransaction, defaultWrite }) => {
+          contexts.push({ handle, inTransaction });
+          await new Promise<void>((resolve) => {
+            finishWrite = resolve;
+          });
+          await defaultWrite(written);
+        },
+      });
+      const { runtime, detach } = createRuntime(false);
+
+      let settled = false;
+      const dispatched = dispatch(audited(true), config, runtime).then(() => {
+        settled = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(contexts).toEqual([{ handle: baseHandle, inTransaction: false }]);
+      expect(settled).toBe(false);
+      finishWrite();
+      await dispatched;
+      expect(settled).toBe(true);
+      expect(detach).not.toHaveBeenCalled();
+    });
+
+    it('reports a failed write with its awaited-after-commit plan', async () => {
+      const { config, failureSink } = createConfig({ write: failingWrite });
+
+      await dispatch(audited(true), config, createRuntime(false).runtime);
+
+      expect(failureSink.reportWriteFailure).toHaveBeenCalledWith(
+        { kind: 'awaited-after-commit', records },
+        writeError,
+      );
+    });
+
+    it("resolves under a 'throw' policy, after notifying the observer, since the operation's write has committed", async () => {
+      const { failureSink, observed } = throwingPolicySink();
+      const { config } = createConfig({ write: failingWrite, failureSink });
+
+      await expect(dispatch(audited(true), config, createRuntime(false).runtime)).resolves.toBeUndefined();
+      expect(observed).toEqual([logWriteContext]);
+      expect(consoleError).toHaveBeenCalledWith(
+        '[db-audit-core] Error in audit log write after commit:',
+        writeError.message,
+      );
+    });
+  });
+
   describe('a record build that fails', () => {
-    it.each([
-      { plan: 'immediate inside a transaction', inTransaction: true },
-      { plan: 'immediate outside any transaction', inTransaction: false },
-    ])(
+    it.each([{ plan: 'immediate inside a transaction', inTransaction: true }])(
       'notifies diff-generation once, rejects with its error and writes nothing ($plan)',
       async ({ inTransaction }) => {
         const { config, writeExecutor, failureSink } = createConfig();
@@ -390,19 +430,25 @@ describe('dispatch', () => {
       expect(writeExecutor.write).not.toHaveBeenCalled();
     });
 
-    it('reports the dropped build once and resolves without detaching anything for a detached write, whose operation has committed', async () => {
-      const { config, writeExecutor, failureSink } = createConfig();
-      const { runtime, detach } = createRuntime(false);
+    it.each([
+      { plan: 'detached', atomic: false },
+      { plan: 'awaited after commit', atomic: true },
+    ])(
+      'reports the dropped build once and resolves, writing and detaching nothing, outside any transaction, whose operation has committed ($plan)',
+      async ({ atomic }) => {
+        const { config, writeExecutor, failureSink } = createConfig();
+        const { runtime, detach } = createRuntime(false);
 
-      await expect(dispatch(audited(false, failingBuild), config, runtime)).resolves.toBeUndefined();
+        await expect(dispatch(audited(atomic, failingBuild), config, runtime)).resolves.toBeUndefined();
 
-      expect(failureSink.reportDroppedBuild).toHaveBeenCalledTimes(1);
-      expect(failureSink.reportDroppedBuild).toHaveBeenCalledWith(buildFailureContext);
-      expect(failureSink.notify).not.toHaveBeenCalled();
-      expect(detach).not.toHaveBeenCalled();
-      expect(writeExecutor.write).not.toHaveBeenCalled();
-      expect(failureSink.reportWriteFailure).not.toHaveBeenCalled();
-    });
+        expect(failureSink.reportDroppedBuild).toHaveBeenCalledTimes(1);
+        expect(failureSink.reportDroppedBuild).toHaveBeenCalledWith(buildFailureContext);
+        expect(failureSink.notify).not.toHaveBeenCalled();
+        expect(detach).not.toHaveBeenCalled();
+        expect(writeExecutor.write).not.toHaveBeenCalled();
+        expect(failureSink.reportWriteFailure).not.toHaveBeenCalled();
+      },
+    );
 
     it('wraps a non-Error rejection in an Error', async () => {
       const { config, failureSink } = createConfig();
@@ -418,10 +464,10 @@ describe('dispatch', () => {
     });
 
     it.each([
-      { plan: 'immediate', atomic: true, inTransaction: false },
+      { plan: 'immediate', atomic: true, inTransaction: true },
       { plan: 'after commit', atomic: false, inTransaction: true },
     ])(
-      'does not report a dropped build for a write that is not detached ($plan)',
+      'does not report a dropped build for a write inside a transaction ($plan)',
       async ({ atomic, inTransaction }) => {
         const { config, failureSink } = createConfig();
 

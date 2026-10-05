@@ -23,11 +23,12 @@ const planOf = <TDbHandle>(
   atomic: boolean,
   runtime: TransactionRuntime<TDbHandle>,
 ):
-  | { readonly kind: 'immediate' }
+  | { readonly kind: 'immediate'; readonly handle: TDbHandle }
+  | { readonly kind: 'awaited-after-commit' }
   | { readonly kind: 'after-commit' | 'detached'; readonly handOver: (work: Work) => void } => {
   const { transaction } = runtime;
   if (atomic) {
-    return { kind: 'immediate' };
+    return transaction ? { kind: 'immediate', handle: transaction.handle } : { kind: 'awaited-after-commit' };
   }
   if (transaction) {
     return { kind: 'after-commit', handOver: (work) => transaction.afterCommit(work) };
@@ -37,20 +38,22 @@ const planOf = <TDbHandle>(
 
 /**
  * Builds the records of an operation whose write has run, then writes them:
- * - atomic: immediately, on the transaction's handle (the base handle outside any transaction), awaited;
+ * - atomic inside a transaction: immediately, on the transaction's handle, awaited;
+ * - atomic outside any transaction: on the base handle, awaited, the operation having committed;
  * - not atomic inside a transaction: after the transaction commits, on the base handle;
  * - otherwise: detached, on the base handle.
  *
- * The build runs before `dispatch` resolves, whatever the write plan. A failed build notifies the
- * observer under `diff-generation` with the operation's `modelName`, `operation` and `params`, and
- * rejects with its error, except when the records would be written detached: the operation's
- * write has committed and its caller does not wait for its audit, so the records are dropped
- * (reported through {@link FailureSink.reportDroppedBuild}) and `dispatch` resolves.
+ * The build runs before `dispatch` resolves, whatever the write plan. `dispatch` rejects only
+ * while the operation's write is inside a transaction that has not committed: with the error of a
+ * failed build, after notifying the observer under `diff-generation` with the operation's
+ * `modelName`, `operation` and `params`, and with the error of a failed immediate write that the
+ * write-failure policy rethrows. Outside any transaction the operation's write has committed, and
+ * reporting it as failed would invite a retry that writes it twice: a failed build drops the
+ * records (reported through {@link FailureSink.reportDroppedBuild}) and a failed write follows the
+ * write-failure policy, with `'throw'` logging.
  *
- * Resolves once an immediate write has finished, or once the write is handed to the runtime.
- * Rejects with the error of a failed build, as above, and with the error of a failed immediate
- * write that the write-failure policy rethrows; the work handed to `afterCommit` or `detach`
- * reports its own failure and never rejects.
+ * Resolves once an awaited write has finished, or once the write is handed to the runtime; the
+ * work handed to `afterCommit` or `detach` reports its own failure and never rejects.
  */
 export const dispatch = async <TDbHandle>(
   audited: {
@@ -76,7 +79,7 @@ export const dispatch = async <TDbHandle>(
   } catch (caught) {
     const error = toError(caught);
     const failure = { phase: 'diff-generation', modelName, operation, params, error } as const;
-    if (plan.kind === 'detached') {
+    if (!transaction) {
       await config.failureSink.reportDroppedBuild(failure);
       return;
     }
@@ -107,7 +110,9 @@ export const dispatch = async <TDbHandle>(
     };
 
   if (plan.kind === 'immediate') {
-    await attempt(transaction?.handle ?? baseHandle, transaction !== undefined)();
+    await attempt(plan.handle, true)();
+  } else if (plan.kind === 'awaited-after-commit') {
+    await attempt(baseHandle, false)();
   } else {
     plan.handOver(attempt(baseHandle, false));
   }
