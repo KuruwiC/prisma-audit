@@ -90,6 +90,7 @@ const scopeOn = (client: PrismaClientWithDynamicAccess): ExecutionScope => ({
   auditContext,
   handle: client,
   baseClient: client,
+  inPrismaBatch: false,
   atomic: true,
 });
 

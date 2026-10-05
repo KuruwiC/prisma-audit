@@ -23,6 +23,11 @@ export interface ActiveTransaction {
 
 export interface RuntimeScope {
   readonly transaction?: ActiveTransaction;
+  /**
+   * Raised while Prisma runs a batch `$transaction([...])` itself: its operations reach the hook as
+   * parts of one request that no audit query can join
+   */
+  readonly isInPrismaBatch?: boolean;
   /** Raised while an audited operation is being processed, so that the audit's own queries are not audited */
   readonly isProcessingAuditLog?: boolean;
 }

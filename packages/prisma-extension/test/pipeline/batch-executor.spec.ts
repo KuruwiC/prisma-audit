@@ -60,7 +60,14 @@ const scopeOn = (client: PrismaClientWithDynamicAccess): ExecutionScope => ({
   auditContext,
   handle: client,
   baseClient: client,
+  inPrismaBatch: false,
   atomic: true,
+});
+
+/** The scope of an operation inside an interactive transaction whose client is `client` */
+const transactionScopeOn = (client: PrismaClientWithDynamicAccess): ExecutionScope => ({
+  ...scopeOn(client),
+  transaction: { deferredWrites: [] },
 });
 
 /** The continuation the pipeline would build for `client`: the action of its `user` delegate */
@@ -322,22 +329,22 @@ describe('createBatchExecutor', () => {
         expect(produceRecords).toHaveBeenCalledWith([updateEvent(a1, a2), updateEvent(b1, b2)], expect.anything());
       });
 
-      it('tops up a round that updated fewer rows than it read with rows read the same way, leaving out the rows already read', async () => {
+      it('tops up, inside an interactive transaction, a round that updated fewer rows than it read with rows read the same way, leaving out the rows already read', async () => {
         const c1: Row = { id: 'c', email: 'c@1' };
         const c2: Row = { id: 'c', email: 'c@2' };
-        const findMany = findManyReturning([a1, b1], [a1], [c1], [a2, c2]);
+        const findMany = findManyReturning([a1, b1], [c1], [a1], [a2, c2]);
         const updateMany = vi.fn<() => Promise<{ count: number }>>();
         updateMany.mockResolvedValueOnce({ count: 1 }).mockResolvedValueOnce({ count: 1 });
         const client = clientWith({ user: { findMany, updateMany } });
         const produceRecords = produce();
         const operation = operationOn(client, 'updateMany', { where, data, limit: 2 });
 
-        const outcome = await runWithRecords(executor, operation, scopeOn(client), produceRecords);
+        const outcome = await runWithRecords(executor, operation, transactionScopeOn(client), produceRecords);
 
         expect(findMany.mock.calls).toEqual([
           [{ where, take: 2 }],
-          [{ where: narrowedTo(['a', 'b']) }],
           [{ where: { AND: [where, { NOT: { id: { in: ['a', 'b'] } } }] }, take: 1 }],
+          [{ where: narrowedTo(['a', 'b']) }],
           [{ where: { id: { in: ['a', 'c'] } } }],
         ]);
         expect(vi.mocked(operation.execute).mock.calls).toEqual([
@@ -348,8 +355,8 @@ describe('createBatchExecutor', () => {
         expect(produceRecords).toHaveBeenCalledWith([updateEvent(a1, a2), updateEvent(c1, c2)], expect.anything());
       });
 
-      it('reports the rows of a short round it cannot tell apart as row-identification, and audits none of them', async () => {
-        const findMany = findManyReturning([a1, b1], [], []);
+      it('writes one round outside any transaction, and reports the rows of a short round it cannot tell apart as row-identification', async () => {
+        const findMany = findManyReturning([a1, b1], []);
         const updateMany = vi.fn(async () => ({ count: 1 }));
         const client = clientWith({ user: { findMany, updateMany } });
         const produceRecords = produce();
@@ -362,14 +369,15 @@ describe('createBatchExecutor', () => {
         );
 
         expect(outcome.result).toEqual({ count: 1 });
-        expect(findMany).toHaveBeenCalledTimes(3);
+        expect(updateMany).toHaveBeenCalledTimes(1);
+        expect(findMany.mock.calls).toEqual([[{ where, take: 2 }], [{ where: narrowedTo(['a', 'b']) }]]);
         expect(failureSink.notify).toHaveBeenCalledWith(
           expect.objectContaining({ phase: 'row-identification', modelName: 'User', operation: 'updateMany' }),
         );
         expect(produceRecords).toHaveBeenCalledWith([], expect.anything());
       });
 
-      it('stops after three rounds', async () => {
+      it('stops after three rounds inside an interactive transaction', async () => {
         const findMany = findManyReturning([a1], [b1], [{ id: 'c', email: 'c@1' }]);
         const updateMany = vi.fn(async () => ({ count: 0 }));
         const client = clientWith({ user: { findMany, updateMany } });
@@ -377,13 +385,45 @@ describe('createBatchExecutor', () => {
         const outcome = await runWithRecords(
           executor,
           operationOn(client, 'updateMany', { where, data, limit: 1 }),
-          scopeOn(client),
+          transactionScopeOn(client),
           produce(),
         );
 
         expect(outcome.result).toEqual({ count: 0 });
         expect(updateMany).toHaveBeenCalledTimes(3);
         expect(findMany).toHaveBeenCalledTimes(3);
+      });
+
+      it.each([
+        { scope: 'inside a batch Prisma runs', limit: 2, inPrismaBatch: true, reported: { unidentified: 2 } },
+        { scope: 'with a limit that is not a positive integer', limit: 0, inPrismaBatch: false, reported: undefined },
+      ])('runs the update as given $scope and audits none of its rows', async ({ limit, inPrismaBatch, reported }) => {
+        const findMany = vi.fn(async () => []);
+        const updateMany = vi.fn(async () => ({ count: 2 }));
+        const client = clientWith({ user: { findMany, updateMany } });
+        const produceRecords = produce();
+        const notify = vi.mocked(failureSink.notify);
+        notify.mockClear();
+        const args = { where, data, limit };
+
+        const outcome = await runWithRecords(
+          executor,
+          operationOn(client, 'updateMany', args),
+          { ...scopeOn(client), inPrismaBatch },
+          produceRecords,
+        );
+
+        expect(updateMany).toHaveBeenCalledWith(args);
+        expect(findMany).not.toHaveBeenCalled();
+        expect(outcome.result).toEqual({ count: 2 });
+        expect(produceRecords).toHaveBeenCalledWith([], expect.anything());
+        if (reported) {
+          expect(notify).toHaveBeenCalledWith(
+            expect.objectContaining({ phase: 'row-identification', operation: 'updateMany', params: reported }),
+          );
+        } else {
+          expect(notify).not.toHaveBeenCalled();
+        }
       });
     });
 
@@ -467,21 +507,21 @@ describe('createBatchExecutor', () => {
         expect(produceRecords).toHaveBeenCalledWith([deleteEvent(a1), deleteEvent(b1)], expect.anything());
       });
 
-      it('tops up a round that deleted fewer rows than it read, auditing the read rows that are gone when as many are gone as it deleted', async () => {
+      it('tops up, inside an interactive transaction, a round that deleted fewer rows than it read, auditing the read rows that are gone when as many are gone as it deleted', async () => {
         const c1: Row = { id: 'c', email: 'c@1' };
-        const findMany = findManyReturning([a1, b1], [b1], [c1]);
+        const findMany = findManyReturning([a1, b1], [c1], [b1]);
         const deleteMany = vi.fn<() => Promise<{ count: number }>>();
         deleteMany.mockResolvedValueOnce({ count: 1 }).mockResolvedValueOnce({ count: 1 });
         const client = clientWith({ user: { findMany, deleteMany } });
         const produceRecords = produce();
         const operation = operationOn(client, 'deleteMany', { where, limit: 2 });
 
-        const outcome = await runWithRecords(executor, operation, scopeOn(client), produceRecords);
+        const outcome = await runWithRecords(executor, operation, transactionScopeOn(client), produceRecords);
 
         expect(findMany.mock.calls).toEqual([
           [{ where, take: 2 }],
-          [{ where: { id: { in: ['a', 'b'] } } }],
           [{ where: { AND: [where, { NOT: { id: { in: ['a', 'b'] } } }] }, take: 1 }],
+          [{ where: { id: { in: ['a', 'b'] } } }],
         ]);
         expect(vi.mocked(operation.execute).mock.calls).toEqual([
           [{ where: narrowedTo(['a', 'b']) }],

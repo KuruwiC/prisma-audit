@@ -42,16 +42,22 @@ export type BatchPrepared =
   /** updateManyAndReturn: its returned rows are exactly the updated ones */
   | { readonly kind: 'update-returning'; readonly beforeRows: Row[]; readonly pkFields: string[] }
   | { readonly kind: 'update'; readonly beforeRows: Row[]; readonly pkFields: string[] }
-  /** updateMany or deleteMany with a `limit`: the rows are read round by round as the write runs */
-  | { readonly kind: 'limited'; readonly limit: number; readonly pkFields: string[] }
+  /** updateMany or deleteMany with a positive integer `limit`: the rows are read round by round as the write runs */
+  | { readonly kind: 'limited'; readonly limit: number; readonly pkFields: string[]; readonly rounds: number }
+  /**
+   * updateMany or deleteMany with a `limit`, run as given: inside a batch `$transaction([...])`
+   * Prisma runs, whose rows no read can name (`reportsRows`), or with a limit that is not a
+   * positive integer, which Prisma rejects
+   */
+  | { readonly kind: 'limited-as-given'; readonly reportsRows: boolean }
   | { readonly kind: 'delete'; readonly beforeRows: Row[] };
 
 export interface BatchExecuted {
   readonly result: unknown;
   /** The rows the mutation itself returned (createManyAndReturn, updateManyAndReturn) */
   readonly returnedRows: Row[] | undefined;
-  /** The before state of each row a limited updateMany or deleteMany is known to have written */
-  readonly knownWrittenRows?: Row[];
+  /** The rounds a limited updateMany or deleteMany ran */
+  readonly limitedRounds?: readonly LimitedRound[];
 }
 
 interface WrittenRows {
@@ -137,7 +143,9 @@ const prepareCreate = (operation: AuditedOperation, schemaMetadata: SchemaMetada
 /**
  * An `updateManyAndReturn` is audited from the rows it returns, so the after rows are not read
  * again. An `updateMany` or `deleteMany` with a `limit` reads its rows as it runs (see
- * `runLimitedWrite`).
+ * `runLimitedWrite`): in rounds inside an interactive transaction, in one narrowed statement
+ * outside any. Inside a batch `$transaction([...])` Prisma runs, a read before the write cannot see
+ * what the batch's earlier operations wrote, so the operation runs as given.
  */
 const prepareUpdateOrDelete = async (
   operation: AuditedOperation,
@@ -148,10 +156,17 @@ const prepareUpdateOrDelete = async (
   const { model, action, args } = operation;
   const delegate = batchDelegate(scope, model, deps.clientOmittedFields);
   const where = args.where ?? {};
-  const limit = typeof args.limit === 'number' ? args.limit : undefined;
+  const { limit } = args;
 
   if ((action === AUDIT_ACTION.UPDATE_MANY || action === AUDIT_ACTION.DELETE_MANY) && limit !== undefined) {
-    return { kind: 'limited', limit, pkFields: getPrimaryKeyFields(Prisma, model) };
+    if (typeof limit !== 'number' || !Number.isInteger(limit) || limit <= 0) {
+      return { kind: 'limited-as-given', reportsRows: false };
+    }
+    if (scope.inPrismaBatch) {
+      return { kind: 'limited-as-given', reportsRows: true };
+    }
+    const rounds = scope.transaction ? LIMITED_WRITE_ROUNDS : 1;
+    return { kind: 'limited', limit, pkFields: getPrimaryKeyFields(Prisma, model), rounds };
   }
   if (action === AUDIT_ACTION.UPDATE_MANY_AND_RETURN) {
     const beforeRows = await delegate.findMany({ where });
@@ -231,27 +246,26 @@ const reportUnidentified = async (
 /**
  * Runs an `updateMany` or `deleteMany` with a `limit` as the caller's own operation, without the
  * limit and narrowed to the primary keys of the rows a read with the caller's `where` and the limit
- * as `take` selected, so the rows it audits are the rows it wrote. A round that writes fewer rows
- * than it read (another writer changed some of them in between) is topped up with rows read the
- * same way, leaving out every row already read, at most `LIMITED_WRITE_ROUNDS` rounds in all: the
- * count is a plain operation's, except under contention past the last round. In a short round,
- * `writtenRowsOfShortRound` names the rows known to be written; the number of written rows it
- * cannot name is reported as `row-identification`, and they are not audited.
+ * as `take` selected, so the rows it audits are the rows it wrote. Inside an interactive
+ * transaction a round that writes fewer rows than it read (another writer changed some of them in
+ * between) is topped up with rows read the same way, leaving out every row already read, at most
+ * `LIMITED_WRITE_ROUNDS` rounds in all: the count is a plain operation's, except under contention
+ * past the last round. Outside any transaction the operation is one round, one statement, whose
+ * count may be lower than a plain operation's under contention. Which rows a short round wrote is
+ * read when the records are built (`limitedWrittenRows`).
  */
 const runLimitedWrite = async (
   operation: AuditedOperation,
   delegate: BatchDelegate,
-  prepared: { readonly limit: number; readonly pkFields: string[] },
-  writtenRowsOfShortRound: WrittenRowsOfShortRound,
-  failureSink: FailureSink,
+  prepared: { readonly limit: number; readonly pkFields: string[]; readonly rounds: number },
 ): Promise<BatchExecuted> => {
   const { limit, pkFields } = prepared;
   const where = operation.args.where ?? {};
   const unlimited = Object.fromEntries(Object.entries(operation.args).filter(([key]) => key !== 'limit'));
   const read: Row[] = [];
-  const knownWrittenRows: Row[] = [];
+  const limitedRounds: LimitedRound[] = [];
   let count = 0;
-  for (let round = 0; round < LIMITED_WRITE_ROUNDS && count < limit; round++) {
+  for (let round = 0; round < prepared.rounds && count < limit; round++) {
     const unread = read.length === 0 ? where : { AND: [where, { NOT: buildPKWhereClause(pkFields, read) }] };
     const rows = await delegate.findMany({ where: unread, take: limit - count });
     if (rows.length === 0) {
@@ -261,15 +275,39 @@ const runLimitedWrite = async (
     const narrowed = { AND: [where, buildPKWhereClause(pkFields, rows)] };
     const written = countOf(await operation.execute({ ...unlimited, where: narrowed }));
     count += written;
+    limitedRounds.push({ rows, narrowed, written, pkFields });
     if (written === rows.length) {
-      knownWrittenRows.push(...rows);
       break;
     }
-    const known = written === 0 ? [] : await writtenRowsOfShortRound(delegate, { rows, narrowed, written, pkFields });
-    knownWrittenRows.push(...known);
-    await reportUnidentified(operation, written - known.length, failureSink);
   }
-  return { result: { count }, returnedRows: undefined, knownWrittenRows };
+  return { result: { count }, returnedRows: undefined, limitedRounds };
+};
+
+/**
+ * The before state of each row the rounds are known to have written: every row of a round that
+ * wrote as many rows as it read, and in a short round the rows `writtenRowsOfShortRound` names;
+ * the number of written rows it cannot name is reported as `row-identification`, and they are not
+ * audited.
+ */
+const limitedWrittenRows = async (
+  operation: AuditedOperation,
+  delegate: BatchDelegate,
+  rounds: readonly LimitedRound[],
+  failureSink: FailureSink,
+): Promise<Row[]> => {
+  const writtenRowsOfShortRound =
+    operation.action === AUDIT_ACTION.DELETE_MANY ? deletedRowsOfShortRound : updatedRowsOfShortRound;
+  const known: Row[] = [];
+  for (const round of rounds) {
+    if (round.written === round.rows.length) {
+      known.push(...round.rows);
+    } else if (round.written > 0) {
+      const named = await writtenRowsOfShortRound(delegate, round);
+      known.push(...named);
+      await reportUnidentified(operation, round.written - named.length, failureSink);
+    }
+  }
+  return known;
 };
 
 export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationExecutor => {
@@ -298,13 +336,8 @@ export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationE
         return { result, returnedRows: rowsOf(result) };
       }
       case 'limited':
-        return runLimitedWrite(
-          operation,
-          batchDelegate(scope, operation.model, clientOmittedFields),
-          prepared,
-          operation.action === AUDIT_ACTION.DELETE_MANY ? deletedRowsOfShortRound : updatedRowsOfShortRound,
-          failureSink,
-        );
+        return runLimitedWrite(operation, batchDelegate(scope, operation.model, clientOmittedFields), prepared);
+      case 'limited-as-given':
       case 'update':
       case 'delete':
         return { result: await operation.execute(args), returnedRows: undefined };
@@ -328,13 +361,18 @@ export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationE
         return { rows: storedCreateRows(schemaMetadata, operation.model, prepared.rows) };
       case 'update-returning':
         return pairByPrimaryKey(executed.returnedRows ?? [], prepared.beforeRows, prepared.pkFields);
+      case 'limited-as-given':
+        if (prepared.reportsRows) {
+          await reportUnidentified(operation, countOf(executed.result), failureSink);
+        }
+        return { rows: [] };
       case 'limited': {
-        const written = executed.knownWrittenRows ?? [];
+        const delegate = batchDelegate(scope, operation.model, clientOmittedFields);
+        const written = await limitedWrittenRows(operation, delegate, executed.limitedRounds ?? [], failureSink);
         if (operation.action === AUDIT_ACTION.DELETE_MANY) {
           // A deleted row cannot be read again: its state is the one read before the delete.
           return { rows: written, beforeStates: written };
         }
-        const delegate = batchDelegate(scope, operation.model, clientOmittedFields);
         const afterRows = await findManyByPKs(delegate, prepared.pkFields, written);
         return pairByPrimaryKey(afterRows, written, prepared.pkFields);
       }

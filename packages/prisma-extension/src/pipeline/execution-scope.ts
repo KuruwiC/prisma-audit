@@ -25,6 +25,8 @@ export interface ExecutionScope {
   readonly handle: PrismaClientWithDynamicAccess | TransactionalPrismaClient;
   readonly baseClient: PrismaClientWithDynamicAccess;
   readonly transaction?: TransactionScope;
+  /** The operation is part of a batch `$transaction([...])` Prisma runs, which no audit query can join */
+  readonly inPrismaBatch: boolean;
   /** The audit rows are written in the same transaction as the operation */
   readonly atomic: boolean;
 }
@@ -38,12 +40,14 @@ export interface ExecutionScopeInput {
 /** The scope of an operation that runs now: inside the interactive transaction the runtime scope holds, if any */
 export const executionScopeOf = (input: ExecutionScopeInput): ExecutionScope => {
   const { auditContext, baseClient, atomic } = input;
-  const transaction = currentScope()?.transaction;
+  const runtime = currentScope();
+  const transaction = runtime?.transaction;
   return {
     auditContext,
     handle: transaction?.client ?? baseClient,
     baseClient,
     transaction: transaction ? { deferredWrites: transaction.deferredWrites } : undefined,
+    inPrismaBatch: runtime?.isInPrismaBatch === true,
     atomic,
   };
 };

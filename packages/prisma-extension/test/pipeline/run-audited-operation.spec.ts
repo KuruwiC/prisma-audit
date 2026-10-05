@@ -485,6 +485,7 @@ describe('createExecutor', () => {
     auditContext,
     handle: transactionClient,
     baseClient: createBaseClient(),
+    inPrismaBatch: false,
     atomic: true,
   };
 

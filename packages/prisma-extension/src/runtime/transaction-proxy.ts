@@ -21,7 +21,7 @@
 import type { AuditContext, AuditContextProvider } from '@kuruwic/db-audit-core';
 import type { TransactionalPrismaClient } from '../internal-types.js';
 import { createRecipeClient, type RecipeConfig, takeBatchRecipes } from './operation-recipe.js';
-import { drainAfterCommit, enterTransaction } from './scope.js';
+import { drainAfterCommit, enterTransaction, withScope } from './scope.js';
 
 type TransactionMethod = (...args: unknown[]) => Promise<unknown>;
 
@@ -95,6 +95,10 @@ export const createTransactionProxyHandler = (
     return result;
   };
 
+  /** Prisma's own batch, its operations marked as parts of it while Prisma triggers them */
+  const runPrismaBatch = (batchArgs: unknown[]): Promise<unknown> =>
+    withScope({ isInPrismaBatch: true }, () => originalTransaction.apply(target, batchArgs));
+
   /** In the interactive transaction, the recipes run one after another in list order, as Prisma runs a batch */
   const runRecipeBatch = async (
     items: readonly unknown[],
@@ -103,10 +107,7 @@ export const createTransactionProxyHandler = (
   ): Promise<unknown> => {
     const { awaitsAudit, operationsOn } = takeBatchRecipes(items, receiver, config);
     if (!awaitsAudit) {
-      return originalTransaction.apply(
-        target,
-        options === undefined ? [operationsOn(target)] : [operationsOn(target), options],
-      );
+      return runPrismaBatch(options === undefined ? [operationsOn(target)] : [operationsOn(target), options]);
     }
     return runInteractive(async (tx) => {
       const results: unknown[] = [];
@@ -122,7 +123,7 @@ export const createTransactionProxyHandler = (
     if (typeof first !== 'function') {
       return recipeConfig && Array.isArray(first) && first.length > 0
         ? runRecipeBatch(first, options, recipeConfig)
-        : originalTransaction.apply(target, args);
+        : runPrismaBatch(args);
     }
     const callback = first as (tx: TransactionalPrismaClient) => Promise<unknown>;
     return runInteractive(callback, options ? [options] : []);
