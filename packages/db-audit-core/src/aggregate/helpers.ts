@@ -184,7 +184,8 @@ export const self = (idKey: string | IdTransformer = 'id'): IdResolver => {
  * Create an ID resolver that extracts a foreign key field
  *
  * A field that holds `null` is a row without a parent: no id, nothing reported. A row that lacks
- * the field fails the resolver, reported like any resolver failure, except the row of a delete
+ * the field fails the resolver, reported like any resolver failure (a field the client leaves out
+ * of its default reads is in the row only when the entity lists it in `auditOmittedFields`), except the row of a delete
  * whose before state was not read: it holds only what the adapter knows without reading it, so
  * the resolver is not called and the row is left out of that root silently.
  *
@@ -224,7 +225,10 @@ export const foreignKey = (foreignKeyField: string | IdTransformer): IdResolver 
   const resolver: IdResolver = async (entity) => {
     const fieldValue = (entity as Record<string, unknown>)[foreignKeyField];
     if (fieldValue === undefined) {
-      throw new Error(`The row has no "${foreignKeyField}" column`);
+      throw new Error(
+        `The row has no "${foreignKeyField}" column; if the client leaves it out of its default reads, ` +
+          "list it in the entity's auditOmittedFields",
+      );
     }
     return fieldValue === null ? null : normalizeId(fieldValue);
   };

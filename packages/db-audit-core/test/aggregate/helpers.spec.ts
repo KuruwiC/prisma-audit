@@ -76,9 +76,11 @@ describe('Resolver helper functions', () => {
       expect(result).toBe('user-456');
     });
 
-    it('rejects a row that lacks the foreign key field', async () => {
+    it('rejects a row that lacks the foreign key field, naming the option that reads a hidden column', async () => {
       const resolver = foreignKey('authorId');
-      await expect(resolver({ id: 'post-123' }, null)).rejects.toThrow('The row has no "authorId" column');
+      await expect(resolver({ id: 'post-123' }, null)).rejects.toThrow(
+        'The row has no "authorId" column; if the client leaves it out of its default reads, list it in the entity\'s auditOmittedFields',
+      );
     });
 
     it('returns null for a foreign key that holds null', async () => {

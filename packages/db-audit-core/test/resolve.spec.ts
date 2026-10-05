@@ -14,6 +14,10 @@ import type { ProjectionEnrichmentMeta } from '../src/enrichment/types.js';
 import { type ResolveConfig, resolve } from '../src/resolve/index.js';
 import type { AuditContext } from '../src/types.js';
 
+const MISSING_AUTHOR_ID =
+  'The row has no "authorId" column; if the client leaves it out of its default reads, list it in the ' +
+  "entity's auditOmittedFields";
+
 type Row = Record<string, unknown>;
 
 const auditContext: AuditContext = { actor: { category: 'model', type: 'User', id: 'user-1' } };
@@ -302,9 +306,7 @@ describe('resolve', () => {
           ['Comment', 'c1'],
           ['Post', 'p1'],
         ]);
-        expect(failures).toEqual([
-          { event: events[0], resolver: userRoot, error: new Error('The row has no "authorId" column') },
-        ]);
+        expect(failures).toEqual([{ event: events[0], resolver: userRoot, error: new Error(MISSING_AUTHOR_ID) }]);
       });
 
       it('reports a row read before a delete that lacks the column', async () => {
@@ -322,7 +324,7 @@ describe('resolve', () => {
         const { failures } = await resolve(events, auditContext, commentConfig(), read);
 
         expect(failures.map((failure) => [failure.resolver, failure.error.message])).toEqual([
-          [userRoot, 'The row has no "authorId" column'],
+          [userRoot, MISSING_AUTHOR_ID],
         ]);
       });
 
