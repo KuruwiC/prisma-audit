@@ -389,6 +389,30 @@ describe('nested to-many batch pre-read', () => {
     );
   });
 
+  it('reads the rows related to the parent when a deleteMany runs, after the keywords listed before it', async () => {
+    const { client, delegates } = createClient({ member: draftOrFinal });
+
+    await preFetch(client, 'Account', {
+      where: { id: 'a1' },
+      data: { members: { connect: { id: 'm9' }, disconnect: { id: 'm2' }, deleteMany: { name: 'draft' } } },
+    });
+
+    const linkedThenDetached = {
+      AND: [{ OR: [{ account: { is: { id: 'a1' } } }, { id: 'm9' }] }, { NOT: { OR: [{ id: 'm2' }] } }],
+    };
+    expect(delegates.member?.findMany.mock.calls).toContainEqual([
+      { where: { name: 'draft', AND: [linkedThenDetached] } },
+    ]);
+  });
+
+  it('reads no row for a deleteMany listed after a set that names none', async () => {
+    const { client, delegates } = createClient({ member: draftOrFinal });
+
+    await preFetch(client, 'Account', { where: { id: 'a1' }, data: { members: { set: [], deleteMany: {} } } });
+
+    expect(delegates.member?.findMany.mock.calls).toContainEqual([{ where: { AND: [{ id: { in: [] } }] } }]);
+  });
+
   it('keeps a row another operation at the path read whole when the batch read carries identities only', async () => {
     const { client } = createClient({ member: draftOrFinal });
 
@@ -593,6 +617,7 @@ describe('parentKeysFromOperationWheres', () => {
       [
         {
           fieldName: 'members',
+          writesBefore: [],
           relatedModel: 'Member',
           operation: 'update',
           isList: true,
@@ -604,6 +629,7 @@ describe('parentKeysFromOperationWheres', () => {
         },
         {
           fieldName: 'members',
+          writesBefore: [],
           relatedModel: 'Member',
           operation: 'delete',
           isList: true,
@@ -612,6 +638,7 @@ describe('parentKeysFromOperationWheres', () => {
         },
         {
           fieldName: 'members',
+          writesBefore: [],
           relatedModel: 'Member',
           operation: 'create',
           isList: true,
@@ -630,6 +657,7 @@ describe('parentKeysFromOperationWheres', () => {
       [
         {
           fieldName: 'items',
+          writesBefore: [],
           relatedModel: 'Item',
           operation: 'update',
           isList: true,

@@ -159,6 +159,27 @@ describe('detectNestedOperations', () => {
         { title: 'Post 2', content: 'Content 2' },
       ],
       path: 'posts',
+      writesBefore: [],
+    });
+  });
+
+  it('gives each operation the keywords its relation field lists before it, in the order listed', () => {
+    const args = {
+      where: { id: 'u1' },
+      data: { posts: { delete: { id: 'p2' }, connect: { id: 'p1' }, deleteMany: { title: 'Old' } } },
+    };
+
+    const operations = detectNestedOperations(createSchemaMetadataFromDMMF(Prisma), 'User', args, {
+      kind: 'discovery',
+    });
+
+    expect(Object.fromEntries(operations.map((op) => [op.operation, op.writesBefore]))).toEqual({
+      delete: [],
+      connect: [{ operation: 'delete', data: { id: 'p2' } }],
+      deleteMany: [
+        { operation: 'delete', data: { id: 'p2' } },
+        { operation: 'connect', data: { id: 'p1' } },
+      ],
     });
   });
 

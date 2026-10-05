@@ -750,6 +750,8 @@ const handleToManyBatch = async (
     operation: keyword,
     relatedModelClient,
     fetchBefore,
+    writesBefore: nestedOp.writesBefore,
+    fieldNames: new Set(context.schemaMetadata.getAllFields(nestedOp.relatedModel).map((field) => field.name)),
   });
   recordBatchTargets(context.batchTargets, nestedOp.path, keyword, matched);
 };

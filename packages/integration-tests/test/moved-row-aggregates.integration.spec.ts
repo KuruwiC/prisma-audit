@@ -5,8 +5,10 @@
  * the aggregate it left as well as the one it joined, from the row as read before the write. An
  * update that keeps the foreign key records it under that one aggregate. Without the row before
  * the write (`fetchBefore.update` off) only the aggregate it joined is known. A row a nested write
- * links to its parent and a nested delete then removes in the same write is recorded under the
- * aggregate it left and the one it was deleted from.
+ * links to its parent and a nested delete or deleteMany then removes in the same write is recorded
+ * under the aggregate it left and the one it was deleted from. Prisma runs the keywords of one
+ * relation field in the order the data lists them, so a deleteMany removes the rows linked to the
+ * parent by the keywords before it and not those detached or deleted by them.
  */
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
@@ -195,5 +197,101 @@ describe('aggregates of a row moved to another parent', () => {
     ]);
     const before = [expect.objectContaining({ id: 'p1', authorId: 'u-a' }), false];
     expect(await beforeStatesOf('Post', 'p1')).toEqual([before, before]);
+  });
+
+  it.each([
+    ['connect', { connect: { id: 'p1' } }],
+    ['set', { set: [{ id: 'p1' }] }],
+    ['connectOrCreate', { connectOrCreate: { where: { id: 'p1' }, create: { title: 'Created' } } }],
+  ])(
+    'records a post a nested %s moves to user B and a nested deleteMany then removes under both users',
+    async (_keyword, link) => {
+      const { basePrisma, prisma, run, recordsOf, beforeStatesOf } = await setup();
+
+      await run(() =>
+        prisma.user.update({ where: { id: 'u-b' }, data: { posts: { ...link, deleteMany: { title: 'Moved' } } } }),
+      );
+
+      expect(await basePrisma.post.findUnique({ where: { id: 'p1' } })).toBeNull();
+      expect(await recordsOf('Post', 'p1')).toEqual([
+        ['Post', 'p1', 'delete', null],
+        ['User', 'u-a', 'delete', null],
+        ['User', 'u-b', 'delete', null],
+      ]);
+      const before = [expect.objectContaining({ id: 'p1', title: 'Moved', authorId: 'u-a' }), false];
+      expect(await beforeStatesOf('Post', 'p1')).toEqual([before, before, before]);
+    },
+  );
+
+  it('records a post a nested deleteMany listed before a connect leaves in place as moved only', async () => {
+    const { basePrisma, prisma, run, recordsOf } = await setup();
+
+    await run(() =>
+      prisma.user.update({
+        where: { id: 'u-b' },
+        data: { posts: { deleteMany: { title: 'Moved' }, connect: { id: 'p1' } } },
+      }),
+    );
+
+    expect(await basePrisma.post.findUnique({ where: { id: 'p1' } })).toMatchObject({ authorId: 'u-b' });
+    expect(await recordsOf('Post', 'p1')).toEqual([
+      ['Post', 'p1', 'update', moveFromAToB],
+      ['User', 'u-a', 'update', moveFromAToB],
+      ['User', 'u-b', 'update', moveFromAToB],
+    ]);
+  });
+
+  it.each([
+    ['disconnect', { disconnect: { id: 'l1' } }],
+    ['set', { set: [] }],
+  ])('records no delete of a label a nested %s detaches before a nested deleteMany', async (_keyword, detach) => {
+    const { basePrisma, prisma, run, recordsOf } = await setup();
+    await basePrisma.label.create({ data: { id: 'l1', name: 'l1', postId: 'p1' } });
+
+    await run(() => prisma.post.update({ where: { id: 'p1' }, data: { labels: { ...detach, deleteMany: {} } } }));
+
+    expect(await basePrisma.label.findUnique({ where: { id: 'l1' } })).toMatchObject({ postId: null });
+    const detached = { postId: { old: 'p1', new: null } };
+    expect(await recordsOf('Label', 'l1')).toEqual([
+      ['Label', 'l1', 'update', detached],
+      ['Post', 'p1', 'update', detached],
+    ]);
+  });
+
+  it('records a label a nested delete removes before a nested deleteMany once', async () => {
+    const { basePrisma, prisma, run, recordsOf } = await setup();
+    await basePrisma.label.create({ data: { id: 'l1', name: 'l1', postId: 'p1' } });
+
+    await run(() =>
+      prisma.post.update({ where: { id: 'p1' }, data: { labels: { delete: { id: 'l1' }, deleteMany: {} } } }),
+    );
+
+    expect(await recordsOf('Label', 'l1')).toEqual([
+      ['Label', 'l1', 'delete', null],
+      ['Post', 'p1', 'delete', null],
+    ]);
+  });
+
+  it('records no update of a label a nested deleteMany removes before a nested updateMany', async () => {
+    const { basePrisma, prisma, run, recordsOf } = await setup();
+    await basePrisma.label.create({ data: { id: 'l1', name: 'l1', postId: 'p1' } });
+    await basePrisma.label.create({ data: { id: 'l2', name: 'l2', postId: 'p1' } });
+
+    await run(() =>
+      prisma.post.update({
+        where: { id: 'p1' },
+        data: { labels: { deleteMany: { name: 'l1' }, updateMany: { where: {}, data: { name: 'renamed' } } } },
+      }),
+    );
+
+    expect(await recordsOf('Label', 'l1')).toEqual([
+      ['Label', 'l1', 'delete', null],
+      ['Post', 'p1', 'delete', null],
+    ]);
+    const renamed = { name: { old: 'l2', new: 'renamed' } };
+    expect(await recordsOf('Label', 'l2')).toEqual([
+      ['Label', 'l2', 'update', renamed],
+      ['Post', 'p1', 'update', renamed],
+    ]);
   });
 });

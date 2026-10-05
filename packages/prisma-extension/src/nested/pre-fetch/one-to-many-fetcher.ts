@@ -13,11 +13,14 @@ import {
   batchFilterClauses,
   type NestedBatchKeyword,
   type NestedOperationKeyword,
+  type NestedWriteBefore,
+  namedTargets,
   targetWhereClauses,
 } from '../../grammar/nested-operations.js';
 import type { DMMFField, DMMFModel } from '../../internal-types.js';
 import type { UniqueConstraint } from '../../schema/types.js';
 import { NO_BEFORE_STATE } from '../../utils/before-state.js';
+import { uniqueWhereAsFilter } from '../../utils/compound-where.js';
 import { preFetchLog } from '../../utils/debug.js';
 import { extractEntityIdentity, primaryKeyOf } from '../../utils/id-generation.js';
 import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID } from '../../utils/identity-key.js';
@@ -162,6 +165,10 @@ export interface PreFetchToManyBatchInput extends ToManyScopeInput {
   relatedModelClient: PreFetchListClient;
   /** Whether the matched rows are read whole, as their before-state, or by primary key only */
   fetchBefore: boolean;
+  /** The writes to the relation that run before the operation (see `NestedOperationInfo.writesBefore`) */
+  writesBefore: readonly NestedWriteBefore[];
+  /** The related model's field names, to turn a unique WHERE into a filter */
+  fieldNames: ReadonlySet<string>;
 }
 
 /** An identity-only read never replaces what another operation at the path already read */
@@ -186,19 +193,57 @@ const storeMatchedRow = (
   }
 };
 
+/**
+ * The filter of the rows related to the parent row `parentKey` when a batch keyword runs: the rows
+ * related to it before the write, then, keyword by keyword in the order the writes before it run,
+ * with the rows a `connect` or `connectOrCreate` names added, the rows a `disconnect` or `delete`
+ * names removed, and only the rows a `set` names kept. Rows a write inserts are unknown before the
+ * write and are not included, and filters match the rows as they were before the write.
+ */
+const relatedWhenRun = (input: PreFetchToManyBatchInput, parentKey: PreFetchRecord): PreFetchRecord => {
+  const { scope, writesBefore, fieldNames, pkConstraint } = input;
+  // Prisma reads an empty `OR` nested under `AND` as no condition, so a `set` naming no row keeps
+  // no row through a primary-key `in` with no values
+  const noRow = { [pkConstraint.fields[0] ?? '']: { in: [] } };
+  return writesBefore.reduce<PreFetchRecord>(
+    (related, { operation, data }) => {
+      const named = namedTargets(operation, data).map(({ where }) => uniqueWhereAsFilter(where, fieldNames));
+      switch (operation) {
+        case 'connect':
+        case 'connectOrCreate':
+          return named.length === 0 ? related : { OR: [related, ...named] };
+        case 'set':
+          return named.length === 0 ? noRow : { OR: named };
+        case 'disconnect':
+        case 'delete':
+          return named.length === 0 ? related : { AND: [related, { NOT: { OR: named } }] };
+        default:
+          return related;
+      }
+    },
+    { [scope.backField]: { [scope.filter]: parentKey } },
+  );
+};
+
 const scopeFilterToParents = (
   filter: PreFetchRecord,
-  scope: ToManyRelationScope,
+  input: PreFetchToManyBatchInput,
   parentRows: readonly PreFetchRecord[],
 ): PreFetchRecord[] =>
   parentRows.flatMap((parentRow) => {
-    const parentKey = parentKeyOf(parentRow, scope.parentFields);
-    return parentKey ? [scopeWhereToParent(filter, scope, parentKey)] : [];
+    const parentKey = parentKeyOf(parentRow, input.scope.parentFields);
+    if (!parentKey) {
+      return [];
+    }
+    const existingAnd = filter.AND;
+    const and = existingAnd === undefined ? [] : Array.isArray(existingAnd) ? existingAnd : [existingAnd];
+    return [{ ...filter, AND: [...and, relatedWhenRun(input, parentKey)] }];
   });
 
 /**
  * Pre-reads the rows a nested `updateMany` / `deleteMany` filter matches, scoped through the
- * back-relation the way Prisma scopes the write. Each matched row is stored whole when
+ * back-relation the way Prisma scopes the write, to the rows related to the parent row when the
+ * operation runs (see {@link relatedWhenRun}). Each matched row is stored whole when
  * `fetchBefore` asks for its before-state, else by its primary key with none.
  *
  * @returns The primary key of every matched row, keyed by its identity
@@ -208,7 +253,7 @@ const scopeFilterToParents = (
 export const preFetchToManyBatch = async (
   input: PreFetchToManyBatchInput,
 ): Promise<Map<EntityIdentityKey, PreFetchRecord>> => {
-  const { path, operation, data, scope, relatedModelClient, pkConstraint, fetchBefore, preFetchResults } = input;
+  const { path, operation, data, relatedModelClient, pkConstraint, fetchBefore, preFetchResults } = input;
 
   const { rows: parentRows, allKnown } = await resolveScopedParentRows(input);
   if (!allKnown) {
@@ -218,7 +263,7 @@ export const preFetchToManyBatch = async (
     );
   }
   const wheres = batchFilterClauses(operation, data).flatMap((filter) =>
-    scopeFilterToParents(filter, scope, parentRows),
+    scopeFilterToParents(filter, input, parentRows),
   );
   preFetchLog('1:N batch parent rows: path=%s operation=%s queries=%d', path, operation, wheres.length);
 

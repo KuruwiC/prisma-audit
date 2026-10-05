@@ -59,7 +59,34 @@ export interface NestedOperationInfo {
   path: string;
   /** Absent for an operation detected directly in the top-level args */
   parent?: NestedOperationParent;
+  /**
+   * The keywords the same relation field's data lists before this one, in that order, with their
+   * data. Prisma runs the keywords of one relation field in the order its data lists them, so
+   * these are the writes to the relation that run before this one.
+   */
+  writesBefore: readonly NestedWriteBefore[];
 }
+
+/** A keyword of a relation field's data and its data, listed before another keyword of that field */
+export interface NestedWriteBefore {
+  readonly operation: NestedOperationKeyword;
+  readonly data: unknown;
+}
+
+const isNestedOperationKeyword = (key: string): key is NestedOperationKeyword =>
+  (NESTED_OPERATION_KEYWORDS as readonly string[]).includes(key);
+
+/** The keywords `fieldValue` lists before `keyword`, with their data */
+const writesListedBefore = (
+  fieldValue: Record<string, unknown>,
+  keyword: NestedOperationKeyword,
+): NestedWriteBefore[] => {
+  const keys = Object.keys(fieldValue);
+  return keys
+    .slice(0, keys.indexOf(keyword))
+    .filter(isNestedOperationKeyword)
+    .map((operation) => ({ operation, data: fieldValue[operation] }));
+};
 
 /** The element of a nested operation's data that another nested operation was detected in */
 export interface NestedOperationParent {
@@ -215,7 +242,7 @@ const detectOperationAndNested = (
   schemaMetadata: SchemaMetadata,
   relationField: RelationField,
   keyword: NestedOperationKeyword,
-  nestedData: unknown,
+  fieldValue: Record<string, unknown>,
   parent: NestedOperationParent | undefined,
   pass: NestedDetectionPass,
 ): NestedOperationInfo[] => {
@@ -224,9 +251,10 @@ const detectOperationAndNested = (
     relatedModel: relationField.relatedModel,
     operation: keyword,
     isList: relationField.isList,
-    data: nestedData,
+    data: fieldValue[keyword],
     path: parent ? `${parent.operation.path}.${relationField.name}` : relationField.name,
     parent,
+    writesBefore: writesListedBefore(fieldValue, keyword),
   };
 
   const nested = scannedElementsOf(operation, pass).flatMap(({ element, data }) =>
@@ -253,7 +281,7 @@ const detectOperationsIn = (
       if (nestedData === undefined || !isNew(relationField, keyword, nestedData)) {
         return [];
       }
-      return detectOperationAndNested(schemaMetadata, relationField, keyword, nestedData, parent, pass);
+      return detectOperationAndNested(schemaMetadata, relationField, keyword, fieldValue, parent, pass);
     });
   });
 
