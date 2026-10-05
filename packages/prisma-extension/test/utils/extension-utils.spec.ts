@@ -10,9 +10,10 @@
  * pre-fetched before-state is available.
  */
 
+import { createEntityConfigLookup, defineEntity } from '@kuruwic/db-audit-core';
 import { describe, expect, it } from 'vitest';
 import type { UniqueConstraint } from '../../src/schema/types.js';
-import { extractDeleteOperationEntityId } from '../../src/utils/extension-utils.js';
+import { extractDeleteOperationEntityId, shouldAuditModel } from '../../src/utils/extension-utils.js';
 
 describe('extractDeleteOperationEntityId', () => {
   describe('single-field primary key (unaffected by the compound-unique unwrap)', () => {
@@ -72,5 +73,26 @@ describe('extractDeleteOperationEntityId', () => {
 
       expect(extractDeleteOperationEntityId(data, namedPkConstraint)).toBe(JSON.stringify(['post-4', 'user-4']));
     });
+  });
+});
+
+describe('shouldAuditModel', () => {
+  const { isLoggable } = createEntityConfigLookup({
+    User: defineEntity({ type: 'User' }),
+    AuditLog: defineEntity({ type: 'AuditLog' }),
+  });
+
+  it('audits a model the aggregate mapping declares', () => {
+    expect(shouldAuditModel({ modelName: 'User', auditLogModel: 'AuditLog', isLoggable })).toBe(true);
+  });
+
+  it('skips a model the aggregate mapping does not declare', () => {
+    expect(shouldAuditModel({ modelName: 'Session', auditLogModel: 'AuditLog', isLoggable })).toBe(false);
+  });
+
+  it('skips the audit-log model whatever the case it is configured in, even when the mapping declares it', () => {
+    expect(shouldAuditModel({ modelName: 'AuditLog', auditLogModel: 'AuditLog', isLoggable })).toBe(false);
+    expect(shouldAuditModel({ modelName: 'AuditLog', auditLogModel: 'auditLog', isLoggable })).toBe(false);
+    expect(shouldAuditModel({ modelName: 'AuditLog', auditLogModel: 'AUDITLOG', isLoggable })).toBe(false);
   });
 });

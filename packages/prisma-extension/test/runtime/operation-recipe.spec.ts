@@ -111,6 +111,50 @@ describe('operation recipes', () => {
     expect(clients.ran).toEqual([{ client: 'client', transactionClient: undefined, decided: undefined }]);
   });
 
+  it('runs once when awaited twice, both awaits receiving the one result', async () => {
+    const clients = createClients();
+    const created = createUserOn(configAwaiting(false), clients, { email: 'a' });
+
+    const first = await created;
+    const second = await created;
+
+    expect(clients.ran).toHaveLength(1);
+    expect(second).toBe(first);
+  });
+
+  it('replays a fluent relation call on the operation it follows, under the decision made for that operation', async () => {
+    const calls: unknown[] = [];
+    const target = {
+      user: {
+        update: (args: unknown) => {
+          calls.push(['update', args]);
+          return {
+            ...lazyOperation(() => ({ id: 'u1' })),
+            posts: (postArgs: unknown) => {
+              calls.push(['posts', postArgs]);
+              return lazyOperation(() => ({ posts: postArgs, decided: decidedWritePolicyFor('User', 'update') }));
+            },
+          };
+        },
+      },
+    };
+    const config: RecipeConfig = {
+      ...configAwaiting(false),
+      relatedModel: (model, field) => (model === 'User' && field === 'posts' ? 'Post' : undefined),
+    };
+    const delegate = createRecipeClient(config).propertyOf({ $transaction: vi.fn() }, target, 'user')?.value as {
+      update: (args: unknown) => { posts: (args: unknown) => PromiseLike<unknown> };
+    };
+
+    const posts = await delegate.update({ where: { id: 'u1' }, data: {} }).posts({ take: 1 });
+
+    expect(calls).toEqual([
+      ['update', { where: { id: 'u1' }, data: {} }],
+      ['posts', { take: 1 }],
+    ]);
+    expect(posts).toEqual({ posts: { take: 1 }, decided: { sampled: true, atomic: false } });
+  });
+
   it('rejects when awaited after a batch has taken it, without running it', async () => {
     const clients = createClients();
     const created = createUserOn(configAwaiting(true), clients, { email: 'a' });
@@ -119,6 +163,42 @@ describe('operation recipes', () => {
 
     await expect(Promise.resolve(created)).rejects.toThrow('given to a batch $transaction');
     expect(clients.ran).toEqual([]);
+  });
+
+  describe('a batch that cannot take every operation', () => {
+    it.each([
+      [
+        'an item that is not an operation of an audited client',
+        () => ({ then: () => undefined }),
+        'was not created by an audited client',
+      ],
+      [
+        'an operation of another client',
+        () => createUserOn(configAwaiting(false), createClients(), { email: 'b' }),
+        'was created by another client than the one $transaction is called on',
+      ],
+    ])('rejects %s, taking none of the operations', async (_label, makeItem, problem) => {
+      const clients = createClients();
+      const config = configAwaiting(false);
+      const own = createUserOn(config, clients, { email: 'a' });
+
+      expect(() => takeBatchRecipes([own, makeItem()], clients.receiver, config)).toThrow(
+        `The operation at index 1 of the batch $transaction ${problem}`,
+      );
+      await own;
+      expect(clients.ran).toHaveLength(1);
+    });
+
+    it('rejects an operation that has already run', async () => {
+      const clients = createClients();
+      const config = configAwaiting(false);
+      const created = createUserOn(config, clients, { email: 'a' });
+      await created;
+
+      expect(() => takeBatchRecipes([created], clients.receiver, config)).toThrow(
+        'The operation at index 0 of the batch $transaction has already run',
+      );
+    });
   });
 
   it('answers in and Symbol.toStringTag as a promise of its own kind, with its fluent relations', () => {

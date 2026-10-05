@@ -78,6 +78,60 @@ describe('createPrismaWriteExecutor', () => {
   });
 });
 
+describe('the inserts a write issues', () => {
+  const recordOf = (id: string): AuditRecord => ({
+    ...record,
+    entityId: createEntityId(id),
+    aggregateId: createAggregateId(id),
+  });
+  const auditLogDelegate = (withCreateMany: boolean) => {
+    const create = vi.fn(async (_args: { data: Record<string, unknown> }) => ({}));
+    const createMany = vi.fn(async (_args: { data: Record<string, unknown>[] }) => ({ count: 0 }));
+    return { client: { auditLog: withCreateMany ? { create, createMany } : { create } }, create, createMany };
+  };
+  const write = (client: Record<string, unknown>, records: AuditRecord[]) =>
+    createPrismaWriteExecutor(DbNull, { auditLogModel: 'auditLog', storesBeforeUnavailable: false }).write(
+      client,
+      records,
+    );
+
+  it('issues no insert for no record', async () => {
+    const { client, create, createMany } = auditLogDelegate(true);
+
+    await write(client, []);
+
+    expect(create).not.toHaveBeenCalled();
+    expect(createMany).not.toHaveBeenCalled();
+  });
+
+  it('inserts a single record with create even when the model has createMany', async () => {
+    const { client, create, createMany } = auditLogDelegate(true);
+
+    await write(client, [recordOf('p1')]);
+
+    expect(create.mock.calls.map(([args]) => args.data.entityId)).toEqual(['p1']);
+    expect(createMany).not.toHaveBeenCalled();
+  });
+
+  it('inserts several records with one createMany when the model has it', async () => {
+    const { client, create, createMany } = auditLogDelegate(true);
+
+    await write(client, [recordOf('p1'), recordOf('p2')]);
+
+    expect(createMany).toHaveBeenCalledTimes(1);
+    expect(createMany.mock.calls[0]?.[0].data.map((row) => row.entityId)).toEqual(['p1', 'p2']);
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('inserts several records with one create each, in order, when the model has no createMany', async () => {
+    const { client, create } = auditLogDelegate(false);
+
+    await write(client, [recordOf('p1'), recordOf('p2'), recordOf('p3')]);
+
+    expect(create.mock.calls.map(([args]) => args.data.entityId)).toEqual(['p1', 'p2', 'p3']);
+  });
+});
+
 describe('declaresBeforeUnavailableColumn', () => {
   it('is true for a Boolean beforeUnavailable field of the audit-log model', () => {
     const dmmf = dmmfWith([{ name: 'beforeUnavailable', kind: 'scalar', type: 'Boolean' }]);

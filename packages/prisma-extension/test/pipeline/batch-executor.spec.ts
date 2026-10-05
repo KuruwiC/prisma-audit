@@ -439,6 +439,45 @@ describe('createBatchExecutor', () => {
       });
     });
 
+    it('audits an updateManyAndReturn from the rows it returns, paired by primary key with the rows read before, without reading them again', async () => {
+      const findMany = findManyReturning([a1, b1]);
+      const updateManyAndReturn = vi.fn(async () => [b2, a2]);
+      const client = clientWith({ user: { findMany, updateManyAndReturn } });
+      const produceRecords = produce();
+      const args = { where: { email: { contains: '@' } }, data: { email: 'x' } };
+
+      const outcome = await runWithRecords(
+        executor,
+        operationOn(client, 'updateManyAndReturn', args),
+        scopeOn(client),
+        produceRecords,
+      );
+
+      expect(findMany.mock.calls).toEqual([[{ where: args.where }]]);
+      expect(updateManyAndReturn).toHaveBeenCalledWith(args);
+      expect(outcome.result).toEqual([b2, a2]);
+      expect(produceRecords).toHaveBeenCalledWith(
+        [
+          eventOf({
+            identity: 'b',
+            action: 'update',
+            before: { kind: 'captured', row: b1 },
+            after: b2,
+            origin: { path: '', op: 'updateManyAndReturn' },
+          }),
+          eventOf({
+            identity: 'a',
+            action: 'update',
+            before: { kind: 'captured', row: a1 },
+            after: a2,
+            origin: { path: '', op: 'updateManyAndReturn' },
+          }),
+        ],
+        expect.anything(),
+        new Map(),
+      );
+    });
+
     it('returns the rows for a limited updateManyAndReturn', async () => {
       const updateManyAndReturn = vi.fn(async () => [b2]);
       const client = clientWith({ user: { findMany: vi.fn(async () => [b1]), updateManyAndReturn } });

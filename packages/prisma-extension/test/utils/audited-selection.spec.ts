@@ -3,10 +3,12 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { detectNestedOperations } from '../../src/grammar/nested-operations.js';
 import {
   type ClientShape,
   injectAuditedSelection,
   projectToRequestedShape,
+  writtenRelationsInclude,
 } from '../../src/utils/audited-selection.js';
 import { createSchemaMetadataFromDMMF } from '../../src/utils/schema-metadata.js';
 
@@ -499,5 +501,50 @@ describe('projectToRequestedShape', () => {
       { id: 'user-1', posts: [{ id: 'post-1', authorId: 'user-1' }] },
       { id: 'user-1', posts: [{ id: 'post-1', authorId: 'user-1' }] },
     ]);
+  });
+});
+
+describe('writtenRelationsInclude', () => {
+  const includeBelow = (data: Record<string, unknown>, path: string) =>
+    writtenRelationsInclude(
+      { schemaMetadata },
+      'User',
+      detectNestedOperations(schemaMetadata, 'User', { where: { id: 'user-1' }, data }, { kind: 'discovery' }),
+      path,
+    );
+
+  it('includes the relations written below the path, as the audited selection reads them', () => {
+    expect(includeBelow(commentCreatedInPostUpdate, 'posts')).toEqual({ comments: true });
+  });
+
+  it('bounds a to-many relation below the path to the rows its updates name', () => {
+    expect(
+      includeBelow(
+        {
+          posts: {
+            update: {
+              where: { id: 'post-1' },
+              data: { comments: { update: { where: { id: 'comment-1' }, data: { content: 'C' } } } },
+            },
+          },
+        },
+        'posts',
+      ),
+    ).toEqual({ comments: { where: { OR: [{ id: 'comment-1' }] } } });
+  });
+
+  it('is undefined when nothing below the path is written, or only by keywords not audited from the result', () => {
+    expect(
+      includeBelow({ ...commentCreatedInPostUpdate, profile: { create: { bio: 'B' } } }, 'profile'),
+    ).toBeUndefined();
+    expect(
+      includeBelow({ posts: { update: { where: { id: 'post-1' }, data: { title: 'T' } } } }, 'posts'),
+    ).toBeUndefined();
+    expect(
+      includeBelow(
+        { posts: { update: { where: { id: 'post-1' }, data: { comments: { delete: { id: 'comment-1' } } } } } },
+        'posts',
+      ),
+    ).toBeUndefined();
   });
 });

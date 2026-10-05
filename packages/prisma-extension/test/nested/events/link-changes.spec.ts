@@ -127,4 +127,86 @@ describe('collectLinkChanges', () => {
       { entity: after, action: 'update', beforeState: { kind: 'captured', row: readBefore }, relatedModel: 'Label' },
     ]);
   });
+
+  describe('the rows a write detaches', () => {
+    const linkWrite = (
+      operation: NestedOperationInfo['operation'],
+      isList: boolean,
+      named: Row[],
+      detaches: boolean,
+    ): LinkWrite => ({
+      operation: { ...connect, operation, isList, data: named.length === 1 ? named[0] : named },
+      named,
+      detaches,
+    });
+    const readFor = (linkWriteValue: LinkWrite, rows: Row[], failed = false) =>
+      readOf({
+        writes: [linkWriteValue],
+        rows,
+        parentKeys: failed ? new Map() : new Map([[linkWriteValue.operation, { id: 'p1' }]]),
+        failed,
+      });
+    const update = (entity: Row, before: Row) => ({
+      entity,
+      action: 'update',
+      beforeState: { kind: 'captured', row: before },
+      relatedModel: 'Label',
+    });
+
+    it('records the row a named to-many disconnect detached, and nothing for a named row attached elsewhere', async () => {
+      const disconnect = linkWrite('disconnect', true, [{ id: 'l1' }, { id: 'l2' }], false);
+      const l1 = { id: 'l1', name: 'one', postId: 'p1' };
+      const l2 = { id: 'l2', name: 'two', postId: 'p2' };
+
+      const { records } = await collect(readFor(disconnect, [l1, l2]), [{ ...l1, postId: null }, l2]);
+
+      expect(records.get(disconnect.operation)).toEqual([update({ ...l1, postId: null }, l1)]);
+    });
+
+    it('records the rows a set attaches by name and the rows it detaches without naming them, reading neither a kept row', async () => {
+      const set = linkWrite('set', true, [{ id: 'l1' }, { id: 'l3' }], true);
+      const l1 = { id: 'l1', name: 'attached', postId: 'p2' };
+      const l2 = { id: 'l2', name: 'detached', postId: 'p1' };
+      const l3 = { id: 'l3', name: 'kept', postId: 'p1' };
+
+      const { records, findMany } = await collect(readFor(set, [l1, l2, l3]), [
+        { ...l1, postId: 'p1' },
+        { ...l2, postId: null },
+      ]);
+
+      expect(findMany).toHaveBeenCalledWith({ where: { OR: [{ id: 'l1' }, { id: 'l2' }] } });
+      expect(records.get(set.operation)).toEqual([
+        update({ ...l1, postId: 'p1' }, l1),
+        update({ ...l2, postId: null }, l2),
+      ]);
+    });
+
+    it('records the row a to-one connect replaces along with the row it connects', async () => {
+      const replace = linkWrite('connect', false, [{ id: 'l9' }], true);
+      const replaced = { id: 'l1', name: 'old', postId: 'p1' };
+      const connected = { id: 'l9', name: 'new', postId: null };
+
+      const { records } = await collect(readFor(replace, [replaced, connected]), [
+        { ...replaced, postId: null },
+        { ...connected, postId: 'p1' },
+      ]);
+
+      expect(records.get(replace.operation)).toEqual([
+        update({ ...connected, postId: 'p1' }, connected),
+        update({ ...replaced, postId: null }, replaced),
+      ]);
+    });
+
+    it('when the read before the write failed, records a named disconnected row only when it holds no parent after the write', async () => {
+      const disconnect = linkWrite('disconnect', true, [{ id: 'l1' }, { id: 'l2' }], false);
+      const detached = { id: 'l1', name: 'one', postId: null };
+      const attachedElsewhere = { id: 'l2', name: 'two', postId: 'p2' };
+
+      const { records } = await collect(readFor(disconnect, [], true), [detached, attachedElsewhere]);
+
+      expect(records.get(disconnect.operation)).toEqual([
+        { entity: detached, action: 'update', beforeState: { kind: 'unavailable' }, relatedModel: 'Label' },
+      ]);
+    });
+  });
 });

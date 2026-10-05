@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { matchesUniqueWhere, uniqueWhereAsFilter } from '../../src/utils/compound-where.js';
+import { matchesUniqueWhere, namesKey, sameUniqueWhere, uniqueWhereAsFilter } from '../../src/utils/compound-where.js';
 
 describe('matchesUniqueWhere', () => {
   const row = { id: 'p1', slug: 'hello', authorId: 'u1', postId: 'p1', userId: 'u1', publishedAt: new Date(0) };
@@ -34,6 +34,50 @@ describe('matchesUniqueWhere', () => {
     expect(matchesUniqueWhere({ id: 42n }, { id: 42n })).toBe(true);
     expect(matchesUniqueWhere({ id: 42n }, { id: 42 })).toBe(true);
     expect(matchesUniqueWhere({ id: 42n }, { id: 43 })).toBe(false);
+  });
+});
+
+describe('namesKey', () => {
+  it('names the key when the WHERE compares every key field to its value, directly or inside a compound wrapper', () => {
+    expect(namesKey({ id: 'p1' }, { id: 'p1' })).toBe(true);
+    expect(namesKey({ id: 'p1' }, { id: 'p1', authorId: 'u1' })).toBe(true);
+    expect(namesKey({ postId: 'p1', userId: 'u1' }, { postId_userId: { postId: 'p1', userId: 'u1' } })).toBe(true);
+    expect(namesKey({ id: 10n }, { id: 10 })).toBe(true);
+  });
+
+  it('does not name the key when a key field is missing, differs or is compared through a filter', () => {
+    expect(namesKey({ id: 'p1' }, { id: 'p2' })).toBe(false);
+    expect(namesKey({ id: 'p1' }, { slug: 'hello' })).toBe(false);
+    expect(namesKey({ postId: 'p1', userId: 'u1' }, { postId_userId: { postId: 'p1', userId: 'u2' } })).toBe(false);
+    expect(namesKey({ postId: 'p1', userId: 'u1' }, { postId: 'p1' })).toBe(false);
+    expect(namesKey({ id: 'p1' }, { id: { in: ['p1'] } })).toBe(false);
+  });
+});
+
+describe('sameUniqueWhere', () => {
+  it('is the same WHERE when the same fields compare to the same values', () => {
+    expect(sameUniqueWhere({ id: 'p1' }, { id: 'p1' })).toBe(true);
+    expect(sameUniqueWhere({ id: 'p1', slug: 'a' }, { slug: 'a', id: 'p1' })).toBe(true);
+    expect(
+      sameUniqueWhere(
+        { postId_userId: { postId: 'p1', userId: 'u1' } },
+        { postId_userId: { userId: 'u1', postId: 'p1' } },
+      ),
+    ).toBe(true);
+    expect(sameUniqueWhere({ publishedAt: new Date(0) }, { publishedAt: new Date(0) })).toBe(true);
+  });
+
+  it('is not the same WHERE when the fields or values differ, even when both name the same row', () => {
+    expect(sameUniqueWhere({ id: 'p1' }, { id: 'p2' })).toBe(false);
+    expect(sameUniqueWhere({ id: 'p1' }, { slug: 'hello' })).toBe(false);
+    expect(sameUniqueWhere({ id: 'p1' }, { id: 'p1', slug: 'hello' })).toBe(false);
+    expect(sameUniqueWhere({ id: 'p1' }, { id: { equals: 'p1' } })).toBe(false);
+    expect(
+      sameUniqueWhere(
+        { postId_userId: { postId: 'p1', userId: 'u1' } },
+        { postId_userId: { postId: 'p1', userId: 'u2' } },
+      ),
+    ).toBe(false);
   });
 });
 

@@ -59,6 +59,18 @@ describe('withOmittedFieldsInFinds', () => {
     });
   });
 
+  it("merges the omitted fields into the find's own omit, the find's entry winning for a field both name", async () => {
+    const original = delegate();
+    const reader = withOmittedFieldsInFinds(original, new Set(['password', 'token']));
+
+    await reader.findMany({ where: { id: 'u1' }, omit: { password: true, bio: true } });
+
+    expect(original.findMany).toHaveBeenCalledWith({
+      where: { id: 'u1' },
+      omit: { password: true, token: false, bio: true },
+    });
+  });
+
   it('leaves a find that names its columns with select as it is', async () => {
     const original = delegate();
     const reader = withOmittedFieldsInFinds(original, new Set(['password']));

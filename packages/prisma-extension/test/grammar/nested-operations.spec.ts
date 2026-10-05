@@ -8,6 +8,7 @@ import {
   detectNestedOperations,
   type NestedDetectionPass,
   namedTargets,
+  targetWhereClauses,
   type UpsertBranch,
 } from '../../src/grammar/nested-operations.js';
 import { createSchemaMetadataFromDMMF } from '../../src/utils/schema-metadata.js';
@@ -438,6 +439,64 @@ const executedPass = (existingPaths: readonly string[], topLevelUpsertBranch?: U
   kind: 'executed',
   topLevelUpsertBranch,
   branchAt: ({ path }) => (existingPaths.includes(path) ? 'update' : 'create'),
+});
+
+describe('namedTargets', () => {
+  it.each(['update', 'upsert', 'connectOrCreate'] as const)(
+    'names the where of each %s element, by its index in the data',
+    (keyword) => {
+      const data = [
+        { where: { id: 'post-1' }, data: {}, create: {}, update: {} },
+        { where: { title_authorId: { title: 'T', authorId: 'user-1' } }, data: {}, create: {}, update: {} },
+      ];
+
+      expect(namedTargets(keyword, data)).toEqual([
+        { element: 0, where: { id: 'post-1' } },
+        { element: 1, where: { title_authorId: { title: 'T', authorId: 'user-1' } } },
+      ]);
+    },
+  );
+
+  it.each(['delete', 'connect', 'set', 'disconnect'] as const)('names each %s element itself', (keyword) => {
+    expect(namedTargets(keyword, [{ id: 'post-1' }, { id: 'post-2' }])).toEqual([
+      { element: 0, where: { id: 'post-1' } },
+      { element: 1, where: { id: 'post-2' } },
+    ]);
+  });
+
+  it('names a single element that is not a list as element 0', () => {
+    expect(namedTargets('update', { where: { id: 'post-1' }, data: {} })).toEqual([
+      { element: 0, where: { id: 'post-1' } },
+    ]);
+    expect(namedTargets('delete', { id: 'post-1' })).toEqual([{ element: 0, where: { id: 'post-1' } }]);
+  });
+
+  it('keeps the index of the data for an element without a where', () => {
+    expect(namedTargets('update', [{ data: {} }, { where: { id: 'post-2' }, data: {} }])).toEqual([
+      { element: 1, where: { id: 'post-2' } },
+    ]);
+  });
+
+  it.each([
+    ['create', { title: 'T' }],
+    ['createMany', { data: [{ title: 'T' }] }],
+    ['updateMany', { where: { title: 'T' }, data: {} }],
+    ['deleteMany', { title: 'T' }],
+  ] as const)('names no row for %s', (keyword, data) => {
+    expect(namedTargets(keyword, data)).toEqual([]);
+  });
+});
+
+describe('targetWhereClauses', () => {
+  it('is the where of every named target, in data order', () => {
+    expect(
+      targetWhereClauses('upsert', [
+        { where: { id: 'post-1' }, create: {}, update: {} },
+        { where: { id: 'post-2' }, create: {}, update: {} },
+      ]),
+    ).toEqual([{ id: 'post-1' }, { id: 'post-2' }]);
+    expect(targetWhereClauses('deleteMany', { title: 'T' })).toEqual([]);
+  });
 });
 
 describe('detectNestedOperations with upsert branch filtering', () => {

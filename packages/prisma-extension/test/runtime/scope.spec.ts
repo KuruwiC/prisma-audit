@@ -7,7 +7,7 @@ import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { describe, expect, it } from 'vitest';
 import type { TransactionalPrismaClient } from '../../src/internal-types.js';
-import { currentScope, withScope } from '../../src/runtime/scope.js';
+import { currentScope, decidedWritePolicyFor, withScope } from '../../src/runtime/scope.js';
 
 const client = (id: string): TransactionalPrismaClient => ({ id });
 
@@ -28,6 +28,27 @@ describe('runtime scope', () => {
     });
 
     expect(currentScope()).toBeUndefined();
+  });
+
+  describe('decidedWritePolicyFor', () => {
+    const policy = { sampled: true, atomic: false } as const;
+
+    it("returns the decided policy for the operation's own model and action", () => {
+      withScope({ writePolicyDecision: { model: 'User', action: 'update', policy } }, () => {
+        expect(decidedWritePolicyFor('User', 'update')).toBe(policy);
+      });
+    });
+
+    it('returns undefined for another model or action, or without a decision', () => {
+      withScope({ writePolicyDecision: { model: 'User', action: 'update', policy } }, () => {
+        expect(decidedWritePolicyFor('Post', 'update')).toBeUndefined();
+        expect(decidedWritePolicyFor('User', 'delete')).toBeUndefined();
+      });
+      withScope({ isProcessingAuditLog: false }, () => {
+        expect(decidedWritePolicyFor('User', 'update')).toBeUndefined();
+      });
+      expect(decidedWritePolicyFor('User', 'update')).toBeUndefined();
+    });
   });
 
   describe('merge semantics', () => {
