@@ -72,7 +72,7 @@ Branded types (`ActorId`, `EntityId`, `AggregateId`) prevent ID mix-ups at compi
 | **Operations**    | Batch operations (createMany, updateMany, deleteMany, createManyAndReturn, updateManyAndReturn), nested operations at all depths (including nested createMany), smart upsert/connectOrCreate detection |
 | **Architecture**  | DDD aggregate root mapping, AsyncLocalStorage context propagation, one audit pipeline for single and batch writes              |
 | **Performance**   | 3 write strategies (sync/deferred/fire-and-forget), probabilistic sampling, batch context enrichment (N+1 free)                |
-| **Security**      | PII redaction once `security.redact` is set (passwords, tokens, SSN, etc.); the fields a client-level `omit` hides stay out of the logs unless an entity lists them in `auditOmittedFields`, then masked, or your own query names or `createMany` writes them |
+| **Security**      | PII redaction once `security.redact` is set (passwords, tokens, SSN, etc.), masking of the fields a client-level `omit` hides that an entity lists in `auditOmittedFields` |
 | **Extensibility** | Custom writer hooks, custom serializers, pluggable error handling, framework-agnostic core                                     |
 
 ## Installation
@@ -510,23 +510,13 @@ Add custom fields via `security.redact.fields`.
 
 ### Fields a client-level `omit` hides
 
-The audit records a row in the client's default shape. A field the Prisma client omits for every query (`new PrismaClient({ omit: { user: { password: true } } })`) is therefore not read by the audit, a change to it alone yields no log, and it is recorded only where your own query names it or your `createMany` data writes it (below).
-
-To audit such a field, list it on its entity:
+The audit records a row in the client's default shape, so a field the Prisma client omits for every query (`new PrismaClient({ omit: { user: { password: true } } })`) is left out of the audit logs, except where your own query names it or your `createMany` data writes it. To audit such a field with its value masked, list it on its entity (Prisma 6.2 or later):
 
 ```typescript
 User: defineEntity({ type: 'User', auditOmittedFields: ['password'] }),
 ```
 
-A listed field is read in the audit's own queries only: added to the read of the row before the write, and read for the written rows by primary key after it, in one query per listed model (one extra statement for a single write; `updateMany` and `deleteMany` add none; `createMany` adds one only when its `data` leaves out a listed field the database fills with a `@default` or `@updatedAt`, and none when its `data` holds the listed fields or leaves out only nullable ones without a default, which the rows hold as `null`). Your query and the value it returns are never widened with it. Its value is masked in before, after and `changes`, whether or not `security.redact` is set: a changed field shows as `{ old: { redacted: true, hadValue: true }, new: { redacted: true, hadValue: true, isDifferent: true } }` (a side is `null` when the value was or became null), and an unchanged one has no entry in `changes`. There is no option to record it unmasked.
-
-- `excludeFields` wins: a field the entity excludes is not read, even when listed.
-- A field `security.redact` also names is masked once, in the same shape.
-- A field the client does not hide is masked all the same when listed.
-- A foreign key the client hides and a `foreignKey(...)` root names must be listed: otherwise the row lacks the column, every write of it reports `id-resolver-call`, and the row is not recorded under that aggregate. A listed foreign key that holds `null` reports nothing.
-- `auditOmittedFields` needs Prisma 6.2 or later, whose queries take an `omit`; creating the audited client throws on an older version, or one that cannot be determined.
-
-A field your query names itself (`select: { password: true }` or `omit: { password: false }`) reaches your result as usual. The record of a row whose before state the audit read (an update or delete with `fetchBefore` on, an upsert that updated) keeps only the columns that read holds, so such a field is not recorded there. A row without a captured before state (a create, an upsert that created, an update whose before read is off or failed) is recorded as your query read it, holding the field in clear unless it is listed in `auditOmittedFields` or `security.redact.fields`. `createMany` records each row as its `data` supplies it, so a hidden field you write in `createMany` data is stored as written: in clear, unless the entity lists it in `auditOmittedFields` (masked) or `security.redact.fields` names it. With `fetchBefore.delete` off, a deleted row's listed fields are not recorded.
+The reads a listed field adds, and how it combines with `excludeFields`, `security.redact` and `foreignKey(...)` roots, are described under [`auditOmittedFields`](packages/prisma-extension/README.md#auditomittedfields); when a hidden field is recorded in clear, under [`redact.fields`](packages/prisma-extension/README.md#redactfields).
 
 ## Nested Operations
 
@@ -553,12 +543,12 @@ Nested rows are audited from the operation's own result: the relations a nested 
 - **Edge runtimes**: No AsyncLocalStorage support (Vercel Edge, Cloudflare Workers)
 - **Raw queries**: `$executeRaw` / `$queryRaw` are not intercepted
 - **Many-to-many with multiple aggregates**: Not currently supported
-- **Client-level `omit`**: The audit cannot tell which fields a client-level `omit` hides. A hidden field your query names in a `select` or `omit` is recorded as read for a row without a captured before state (a create, an upsert that created, an update whose before read is off or failed), and a hidden field your `createMany` data writes is recorded as written; list it in `auditOmittedFields` or `security.redact.fields` to mask it (see [Fields a client-level `omit` hides](#fields-a-client-level-omit-hides)). Before Prisma 6.2, or when the version cannot be determined, a query's `select` is read by listing every column; a column the audit added that way is recorded only when the row's before state holds it, so a row created under a `select` is recorded with the selected columns only, on any client, whether or not it hides fields. `auditOmittedFields` needs Prisma 6.2 or later
+- **Client-level `omit`**: The fields a client-level `omit` hides are not recorded unless an entity lists them in `auditOmittedFields` (Prisma 6.2 or later), which masks them; one your query names or your `createMany` data writes can be recorded in clear. Before Prisma 6.2, or when the version cannot be determined, a row created under a `select` is recorded with the selected columns only (see [Fields a client-level `omit` hides](#fields-a-client-level-omit-hides))
 - **Nested re-read consistency**: A row a nested write updated or inserted that your own `include` / `select` leaves out, and a row a nested `connect`, `set` or `disconnect` re-linked, is read again after the operation on the same client. Outside a transaction (an interactive `$transaction`, or the one `openImplicitTransaction` opens for an awaited audit), that re-read is a separate query and may observe concurrent changes; so may the read, after the write, of the fields an entity lists in `auditOmittedFields`
 - **Composite keys in `updateMany` / `deleteMany` with `limit`**: The audit narrows the write to the rows it read, with an `OR` of one condition per row over the primary key fields (Prisma has no tuple `IN`), so that `where` clause grows with `limit`. When a transaction tops up a short round, the exclusion of rows already read grows the same way. The number of queries does not change with `limit`
-- **Order of the nested keywords of one relation field**: Prisma runs them in the order your data lists them. A nested `updateMany` / `deleteMany` is audited for the rows related to its parent when it runs: those related before the write, with the rows a `connect`, `connectOrCreate` or `set` listed before it links added and those a `disconnect`, `delete` or `set` listed before it unlinks removed. Its filter is matched against the rows as they were before the write, so a row a `create` listed before it inserts, or a row whose filtered columns an `update` or `updateMany` listed before it changes, is not identified as one it writes. A row a nested `updateMany` listed before a `deleteMany` brings into the `deleteMany`'s filter (it sets a column the filter names) is updated and deleted with no record at all, neither of the update nor of the delete.
+- **Order of the nested keywords of one relation field**: A nested `updateMany` / `deleteMany` matches its filter against the rows as they were before the write, so a row an earlier `create` inserts, or whose filtered columns an earlier `update` / `updateMany` changes, is not identified as one it writes, and a row a nested `updateMany` brings into a later `deleteMany`'s filter is updated and deleted with no record (see [Nested Operations limitations](packages/prisma-extension/README.md#limitations))
 - **`updateMany` / `deleteMany` without `limit`**: The audit reads every matching row before the write to record the before states, so the cost grows with the number of rows the `where` matches
-- **A row `connectOrCreate` finds and `delete` removes in one write**: A row a nested `connectOrCreate` finds and a nested `delete` of the same write then removes is recorded only under the parent it is deleted from, without its before state
+- **A row `connectOrCreate` finds and `delete` removes in one write**: Recorded only under the parent it is deleted from, without its before state (see [Nested Operations limitations](packages/prisma-extension/README.md#limitations))
 
 ## Development
 
