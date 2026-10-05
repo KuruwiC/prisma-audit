@@ -5,7 +5,7 @@
  */
 
 import type { AuditContext, FailureSink } from '@kuruwic/db-audit-core';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DMMFField, PrismaClientWithDynamicAccess, PrismaNamespace } from '../../src/internal-types.js';
 import { createBatchExecutor } from '../../src/pipeline/batch-executor.js';
 import type { ExecutionScope } from '../../src/pipeline/execution-scope.js';
@@ -93,19 +93,20 @@ const operationOn = (
   ),
 });
 
-const failureSink: FailureSink = {
+const createFailureSink = (): FailureSink => ({
   notify: vi.fn(async () => {}),
   reportResolverFailures: vi.fn(async () => {}),
   reportDroppedBuild: vi.fn(async () => {}),
   reportWriteFailure: vi.fn(async () => {}),
-};
-
-const executor = createBatchExecutor({
-  Prisma,
-  schemaMetadata,
-  auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS,
-  failureSink,
 });
+
+const createExecutor = (failureSink: FailureSink) =>
+  createBatchExecutor({
+    Prisma,
+    schemaMetadata,
+    auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS,
+    failureSink,
+  });
 const produce = () => vi.fn<RecordProducer>(async () => []);
 const eventOf = (fields: Row) => expect.objectContaining({ model: 'User', ...fields });
 const findManyReturning = (...results: Row[][]) => {
@@ -116,12 +117,23 @@ const findManyReturning = (...results: Row[][]) => {
   return findMany;
 };
 
+const unidentifiedMessage = (action: string, count: number) =>
+  `${count} of the rows a limited ${action} wrote cannot be told apart from rows another writer changed`;
+
 const a1: Row = { id: 'a', email: 'a@1' };
 const a2: Row = { id: 'a', email: 'a@2' };
 const b1: Row = { id: 'b', email: 'b@1' };
 const b2: Row = { id: 'b', email: 'b@2' };
 
 describe('createBatchExecutor', () => {
+  let failureSink: FailureSink;
+  let executor: ReturnType<typeof createExecutor>;
+
+  beforeEach(() => {
+    failureSink = createFailureSink();
+    executor = createExecutor(failureSink);
+  });
+
   describe('createMany', () => {
     it('inserts the rows with client-generated ids, audits them and returns the count', async () => {
       const createMany = vi.fn<(args: { data: Row[] }) => Promise<{ count: number }>>(async () => ({ count: 2 }));
@@ -363,9 +375,14 @@ describe('createBatchExecutor', () => {
         expect(outcome.result).toEqual({ count: 1 });
         expect(updateMany).toHaveBeenCalledTimes(1);
         expect(findMany.mock.calls).toEqual([[{ where, take: 2 }], [{ where: narrowedTo(['a', 'b']) }]]);
-        expect(failureSink.notify).toHaveBeenCalledWith(
-          expect.objectContaining({ phase: 'row-identification', modelName: 'User', operation: 'updateMany' }),
-        );
+        expect(failureSink.notify).toHaveBeenCalledTimes(1);
+        expect(failureSink.notify).toHaveBeenCalledWith({
+          phase: 'row-identification',
+          modelName: 'User',
+          operation: 'updateMany',
+          params: { unidentified: 1 },
+          error: new Error(unidentifiedMessage('updateMany', 1)),
+        });
         expect(produceRecords).toHaveBeenCalledWith([], expect.anything(), new Map());
       });
 
@@ -394,8 +411,6 @@ describe('createBatchExecutor', () => {
         const updateMany = vi.fn(async () => ({ count: 2 }));
         const client = clientWith({ user: { findMany, updateMany } });
         const produceRecords = produce();
-        const notify = vi.mocked(failureSink.notify);
-        notify.mockClear();
         const args = { where, data, limit };
 
         const outcome = await runWithRecords(
@@ -410,11 +425,16 @@ describe('createBatchExecutor', () => {
         expect(outcome.result).toEqual({ count: 2 });
         expect(produceRecords).toHaveBeenCalledWith([], expect.anything(), new Map());
         if (reported) {
-          expect(notify).toHaveBeenCalledWith(
-            expect.objectContaining({ phase: 'row-identification', operation: 'updateMany', params: reported }),
-          );
+          expect(failureSink.notify).toHaveBeenCalledTimes(1);
+          expect(failureSink.notify).toHaveBeenCalledWith({
+            phase: 'row-identification',
+            modelName: 'User',
+            operation: 'updateMany',
+            params: reported,
+            error: new Error(unidentifiedMessage('updateMany', reported.unidentified)),
+          });
         } else {
-          expect(notify).not.toHaveBeenCalled();
+          expect(failureSink.notify).not.toHaveBeenCalled();
         }
       });
     });
@@ -538,9 +558,14 @@ describe('createBatchExecutor', () => {
         );
 
         expect(outcome.result).toEqual({ count: 1 });
-        expect(failureSink.notify).toHaveBeenCalledWith(
-          expect.objectContaining({ phase: 'row-identification', modelName: 'User', operation: 'deleteMany' }),
-        );
+        expect(failureSink.notify).toHaveBeenCalledTimes(1);
+        expect(failureSink.notify).toHaveBeenCalledWith({
+          phase: 'row-identification',
+          modelName: 'User',
+          operation: 'deleteMany',
+          params: { unidentified: 1 },
+          error: new Error(unidentifiedMessage('deleteMany', 1)),
+        });
         expect(produceRecords).toHaveBeenCalledWith([], expect.anything(), new Map());
       });
     });

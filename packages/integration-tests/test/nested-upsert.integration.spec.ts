@@ -407,7 +407,7 @@ describe('Nested Upsert Operations', () => {
   });
 
   describe('Edge Cases', () => {
-    it('should handle concurrent upserts on same record', async () => {
+    it('should leave one profile and audit logs that match the upserts that committed, however they interleave', async () => {
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -420,45 +420,45 @@ describe('Nested Upsert Operations', () => {
 
       await context.prisma.auditLog.deleteMany();
 
-      // One may fail due to unique constraint (race condition)
-      const results = await Promise.allSettled([
+      // Both upserts see no profile; the unique constraint on userId lets only one create it,
+      // and the other either fails or sees the committed profile and updates it.
+      const upsertProfile = (bio: string) =>
         context.provider.runAsync(testActor, async () => {
           return context.prisma.user.update({
             where: { id: user.id },
             data: {
               profile: {
                 upsert: {
-                  create: { bio: 'Bio 1' },
-                  update: { bio: 'Bio 1 Updated' },
+                  create: { bio },
+                  update: { bio: `${bio} Updated` },
                 },
               },
             },
             include: { profile: true },
           });
-        }),
-        context.provider.runAsync(testActor, async () => {
-          return context.prisma.user.update({
-            where: { id: user.id },
-            data: {
-              profile: {
-                upsert: {
-                  create: { bio: 'Bio 2' },
-                  update: { bio: 'Bio 2 Updated' },
-                },
-              },
-            },
-            include: { profile: true },
-          });
-        }),
-      ]);
+        });
+
+      const results = await Promise.allSettled([upsertProfile('Bio 1'), upsertProfile('Bio 2')]);
 
       const successCount = results.filter((r) => r.status === 'fulfilled').length;
       expect(successCount).toBeGreaterThanOrEqual(1);
 
-      const profile = await context.prisma.profile.findUnique({ where: { userId: user.id } });
-      expect(profile).not.toBeNull();
+      const profiles = await context.prisma.profile.findMany({ where: { userId: user.id } });
+      expect(profiles).toHaveLength(1);
+      const profile = profiles[0];
 
-      // Note: Final bio depends on race condition
+      const profileLogs = await context.prisma.auditLog.findMany({
+        where: { entityType: 'Profile' },
+      });
+
+      // Every committed upsert wrote its Profile and User aggregate logs; a failed one wrote none.
+      // The profile is created exactly once and every other committed upsert updated it.
+      expect(profileLogs.every((log: { entityId: string }) => log.entityId === profile?.id)).toBe(true);
+      expect(profileLogs.filter((log: { action: string }) => log.action === 'create')).toHaveLength(2);
+      expect(profileLogs.filter((log: { action: string }) => log.action === 'update')).toHaveLength(
+        2 * (successCount - 1),
+      );
+      expect(profileLogs).toHaveLength(2 * successCount);
     });
   });
 

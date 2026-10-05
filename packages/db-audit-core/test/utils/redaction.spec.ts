@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createRedactor, type RedactedFieldInfo, redactSensitiveData } from '../../src/utils/redaction.js';
 
 describe('createRedactor', () => {
@@ -481,19 +481,25 @@ describe('structuredClone support in redactSensitiveData', () => {
     expect(redacted.password).toEqual({ redacted: true, hadValue: true });
   });
 
-  it('should fallback to JSON when structuredClone fails with symbols', () => {
-    const sym = Symbol('test');
-    const data = {
-      id: 1,
-      [sym]: 'symbol-value',
-      password: 'secret',
-    };
+  it('should fallback to JSON when structuredClone fails with a symbol value, dropping symbol values and keys', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const symbolKey = Symbol('key');
+      const data = {
+        id: 1,
+        tag: Symbol('value'),
+        [symbolKey]: 'symbol-keyed-value',
+        password: 'secret',
+      };
 
-    const redacted = redactSensitiveData(data) as Record<string, unknown>;
+      const redacted = redactSensitiveData(data);
 
-    expect((redacted as Record<string | symbol, unknown>)[sym]).toBeUndefined();
-
-    expect(redacted.password).toEqual({ redacted: true, hadValue: true });
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0]?.[0]).toContain('Using JSON fallback.');
+      expect(redacted).toStrictEqual({ id: 1, password: { redacted: true, hadValue: true } });
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('should handle nested objects with Date and BigInt', () => {

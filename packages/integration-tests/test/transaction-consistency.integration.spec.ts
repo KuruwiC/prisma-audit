@@ -161,17 +161,15 @@ describe('Transaction Consistency Integration', () => {
       });
 
       const postLogs = await context.prisma.auditLog.findMany({
-        where: { entityType: 'Post', action: 'update' },
-        orderBy: { createdAt: 'asc' },
+        where: { entityType: 'Post', action: 'update', aggregateType: 'Post' },
       });
 
-      expect(postLogs.length).toBeGreaterThanOrEqual(1);
+      expect(postLogs).toHaveLength(2);
 
-      const nestedUpdateLog = postLogs[postLogs.length - 1];
-      expect(nestedUpdateLog.before).toBeDefined();
-      const before = nestedUpdateLog.before as Record<string, unknown>;
-
-      expect(before.title).toBe('New Title');
+      const nestedUpdateLog = postLogs.find(
+        (log: { after: unknown }) => (log.after as Record<string, unknown>).content === 'Updated content',
+      );
+      expect(nestedUpdateLog?.before).toMatchObject({ title: 'New Title', content: 'Content' });
     });
   });
 });

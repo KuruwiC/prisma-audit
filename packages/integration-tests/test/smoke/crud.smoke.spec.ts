@@ -92,7 +92,7 @@ describe('CRUD Smoke Tests (SQLite)', () => {
           entityType: 'Post',
           entityId: post.id,
         },
-        orderBy: { createdAt: 'asc' },
+        orderBy: { aggregateType: 'asc' },
       });
 
       expect(auditLogs).toHaveLength(2);

@@ -20,6 +20,7 @@ const testAggregateMapping: AggregateMapping = {
 describe('Custom Audit Log Table', () => {
   let context: TestContext;
   let customContext: TestContext & { customPrisma: ReturnType<typeof createAuditClient> };
+  let customBasePrisma: PrismaClient;
 
   beforeAll(async () => {
     const databaseUrl = inject('databaseUrl');
@@ -39,7 +40,7 @@ describe('Custom Audit Log Table', () => {
       },
     });
 
-    const customBasePrisma = new PrismaClient({
+    customBasePrisma = new PrismaClient({
       datasources: { db: { url: databaseUrl } },
     });
     const customPrisma = createAuditClient(customBasePrisma, {
@@ -72,6 +73,7 @@ describe('Custom Audit Log Table', () => {
   });
 
   afterAll(async () => {
+    await disposeTestContext({ ...context, prisma: customContext.customPrisma, basePrisma: customBasePrisma });
     await disposeTestContext(context);
   });
 

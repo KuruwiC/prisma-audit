@@ -185,7 +185,7 @@ describe('createAsyncLocalStorageProvider', () => {
   describe('withActor', () => {
     const otherActor: AuditActor = { category: 'system', type: 'Admin', id: 'admin-456' };
 
-    it('should override only the actor and preserve request metadata', () => {
+    it('should override only the actor and preserve request metadata', async () => {
       const provider = createAsyncLocalStorageProvider();
 
       const context: AuditContext = {
@@ -193,8 +193,8 @@ describe('createAsyncLocalStorageProvider', () => {
         request: { ipAddress: '192.168.1.1', traceId: 'trace-1' },
       };
 
-      provider.run(context, () => {
-        provider.withActor(otherActor, () => {
+      await provider.runAsync(context, async () => {
+        await provider.withActor(otherActor, () => {
           const ctx = provider.getContext();
           expect(ctx?.actor).toEqual(otherActor);
           expect(ctx?.request).toEqual(context.request);
@@ -202,7 +202,7 @@ describe('createAsyncLocalStorageProvider', () => {
       });
     });
 
-    it('should restore the outer context after withActor returns', () => {
+    it('should restore the outer context after withActor returns', async () => {
       const provider = createAsyncLocalStorageProvider();
 
       const context: AuditContext = {
@@ -210,8 +210,8 @@ describe('createAsyncLocalStorageProvider', () => {
         request: { traceId: 'trace-1' },
       };
 
-      provider.run(context, () => {
-        provider.withActor(otherActor, () => {
+      await provider.runAsync(context, async () => {
+        await provider.withActor(otherActor, () => {
           expect(provider.getContext()?.actor).toEqual(otherActor);
         });
 
@@ -219,10 +219,10 @@ describe('createAsyncLocalStorageProvider', () => {
       });
     });
 
-    it('should work with no outer context', () => {
+    it('should work with no outer context', async () => {
       const provider = createAsyncLocalStorageProvider();
 
-      provider.withActor(otherActor, () => {
+      await provider.withActor(otherActor, () => {
         const ctx = provider.getContext();
         expect(ctx?.actor).toEqual(otherActor);
         expect(ctx?.request).toBeUndefined();
@@ -231,7 +231,7 @@ describe('createAsyncLocalStorageProvider', () => {
       expect(provider.getContext()).toBeUndefined();
     });
 
-    it('should support nested withActor calls', () => {
+    it('should support nested withActor calls', async () => {
       const provider = createAsyncLocalStorageProvider();
 
       const context: AuditContext = {
@@ -241,11 +241,11 @@ describe('createAsyncLocalStorageProvider', () => {
 
       const innerActor: AuditActor = { category: 'external', type: 'Webhook', id: 'hook-1' };
 
-      provider.run(context, () => {
-        provider.withActor(otherActor, () => {
+      await provider.runAsync(context, async () => {
+        await provider.withActor(otherActor, async () => {
           expect(provider.getContext()?.actor).toEqual(otherActor);
 
-          provider.withActor(innerActor, () => {
+          await provider.withActor(innerActor, () => {
             const ctx = provider.getContext();
             expect(ctx?.actor).toEqual(innerActor);
             // Request metadata is carried through every nesting level.

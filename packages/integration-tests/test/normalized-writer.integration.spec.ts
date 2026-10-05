@@ -505,7 +505,7 @@ describe('Normalized Writer Helpers', () => {
 
       const changes = await context.basePrisma.auditChange.findMany({
         where: { entityType: 'Post' },
-        orderBy: { createdAt: 'asc' },
+        orderBy: { action: 'asc' },
       });
       expect(changes.map((change) => [change.action, change.beforeUnavailable])).toEqual([
         ['create', false],

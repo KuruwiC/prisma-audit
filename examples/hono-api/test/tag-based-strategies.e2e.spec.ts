@@ -7,6 +7,7 @@ import {
   createAuditClient,
   defineAggregateMapping,
   defineEntity,
+  flushAllPendingWrites,
   foreignKey,
   type PrismaModelNames,
   to,
@@ -27,6 +28,7 @@ describe('Tag-based Strategies E2E', () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     await basePrisma.$disconnect();
   });
 
@@ -290,6 +292,9 @@ describe('Tag-based Strategies E2E', () => {
         Prisma,
       });
 
+      // Below the 0.5 rate of the moderate-volume Post: its write is sampled in
+      vi.spyOn(Math, 'random').mockReturnValue(0.25);
+
       await auditProvider.runAsync(
         {
           actor: { category: 'system', type: 'System', id: 'test-system' },
@@ -317,17 +322,24 @@ describe('Tag-based Strategies E2E', () => {
         },
       );
 
-      const userAuditLogs = await waitFor(
-        async () =>
-          basePrisma.auditLog.findMany({
-            where: { entityType: 'User' },
-          }),
-        { timeout: 2000, interval: 50, checkFn: (logs) => logs.length === 1 },
-      );
-
+      // The critical User write is awaited inside the transaction
+      const userAuditLogs = await basePrisma.auditLog.findMany({
+        where: { entityType: 'User' },
+      });
       expect(userAuditLogs).toHaveLength(1);
-      expect(awaitWriteIfSpy).toHaveBeenCalled();
-      expect(samplingIfSpy).toHaveBeenCalled();
+
+      // The Post write is deferred until the transaction commits
+      await flushAllPendingWrites();
+      const postAuditLogs = await basePrisma.auditLog.findMany({
+        where: { entityType: 'Post' },
+        orderBy: { aggregateType: 'asc' },
+      });
+      expect(postAuditLogs.map((log) => log.aggregateType)).toEqual(['Post', 'User']);
+
+      expect(awaitWriteIfSpy).toHaveBeenCalledWith('User', ['critical', 'pii']);
+      expect(awaitWriteIfSpy).toHaveBeenCalledWith('Post', ['user-content', 'moderate-volume']);
+      expect(samplingIfSpy).toHaveBeenCalledWith('User', ['critical', 'pii']);
+      expect(samplingIfSpy).toHaveBeenCalledWith('Post', ['user-content', 'moderate-volume']);
     });
   });
 });
