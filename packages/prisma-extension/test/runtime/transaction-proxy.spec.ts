@@ -376,7 +376,6 @@ describe('createTransactionProxy', () => {
       modelOfAccessor: new Map([['user', 'User']]),
       relatedModel: () => undefined,
       awaitsAudit: () => awaitsAudit,
-      auditMayBeAwaited: true,
     });
 
     it('returns the same delegate and the same action for a property read twice', () => {
@@ -437,12 +436,12 @@ describe('createTransactionProxy', () => {
       expect($transaction.mock.calls[0]?.[1]).toEqual({ isolationLevel: 'Serializable' });
     });
 
-    it("runs a batch of the client's calls as Prisma's own batch without an audit context", async () => {
+    it("runs a batch of the client's calls none of which awaits an audit as Prisma's own batch", async () => {
       const provider = createAsyncLocalStorageProvider();
       const { target, ran, $transaction } = createRecipeTarget();
-      const proxy = createTransactionProxy(target, { provider, recipes: recipesAwaiting(true) });
+      const proxy = createTransactionProxy(target, { provider, recipes: recipesAwaiting(false) });
 
-      await proxy.$transaction([proxy.user.create({ email: 'a' })]);
+      await provider.runAsync(baseContext, () => proxy.$transaction([proxy.user.create({ email: 'a' })]));
 
       expect(Array.isArray($transaction.mock.calls[0]?.[0])).toBe(true);
       expect(ran).toEqual([{ action: 'create', client: 'client', inScope: undefined }]);

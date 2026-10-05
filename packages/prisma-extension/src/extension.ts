@@ -21,8 +21,9 @@ import { createBatchExecutor } from './pipeline/batch-executor.js';
 import { createRecordProducer } from './pipeline/produce-records.js';
 import { type AuditPipelineDependencies, runAuditedOperation } from './pipeline/run-audited-operation.js';
 import { createSingleExecutor } from './pipeline/single-executor.js';
+import type { RecipeConfig } from './runtime/operation-recipe.js';
 import { isProcessingAuditLog, withScope } from './runtime/scope.js';
-import { createTransactionProxy, type RecipeTransactionConfig } from './runtime/transaction-proxy.js';
+import { createTransactionProxy } from './runtime/transaction-proxy.js';
 import type { PrismaAuditExtensionOptions } from './types.js';
 import { type ClientShape, injectAuditedSelection, projectToRequestedShape } from './utils/audited-selection.js';
 import { type ClientOmittedFields, readClientOmittedFields } from './utils/client-omit.js';
@@ -63,7 +64,7 @@ const createPipelineDependencies = (
 };
 
 /** What the client proxy needs to open the interactive transaction of an operation whose audit is awaited */
-const recipeConfigOf = (audit: AuditOptions): RecipeTransactionConfig => {
+const recipeConfigOf = (audit: AuditOptions): RecipeConfig => {
   const { policyConfig, schemaMetadata } = audit;
   const modelNames = audit.Prisma.dmmf.datamodel.models.map((model) => model.name);
   const relatedModels = new Map(
@@ -82,8 +83,6 @@ const recipeConfigOf = (audit: AuditOptions): RecipeTransactionConfig => {
       (policyConfig.awaitWriteIf
         ? policyConfig.awaitWriteIf(modelName, audit.modelTags(modelName))
         : policyConfig.awaitWrite),
-    // `awaitWriteIf` may return true for any model, so its presence counts as making an audit awaitable.
-    auditMayBeAwaited: policyConfig.awaitWrite || policyConfig.awaitWriteIf !== undefined,
   };
 };
 

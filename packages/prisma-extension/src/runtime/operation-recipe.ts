@@ -114,16 +114,17 @@ const replay = (recipe: Recipe, client: object): unknown => {
 const runInTransaction = (receiver: object, run: (tx: object) => Promise<unknown>): Promise<unknown> =>
   Promise.resolve(invoke(receiver, { method: '$transaction', args: [run] }));
 
-const createRecipeFactory = (config: RecipeConfig) => {
-  const awaitsAuditNow = (recipe: Recipe): boolean =>
-    recipe.model !== undefined &&
-    currentScope()?.transaction === undefined &&
-    !isProcessingAuditLog() &&
-    config.awaitsAudit(recipe.model, recipe.call.method);
+/** Whether the recipe, run now, is an audited write whose audit is awaited outside any transaction */
+const awaitsAuditNow = (recipe: Recipe, config: RecipeConfig): boolean =>
+  recipe.model !== undefined &&
+  currentScope()?.transaction === undefined &&
+  !isProcessingAuditLog() &&
+  config.awaitsAudit(recipe.model, recipe.call.method);
 
+const createRecipeFactory = (config: RecipeConfig) => {
   const start = (recipe: Recipe): Promise<unknown> => {
     if (recipe.started === undefined) {
-      recipe.started = awaitsAuditNow(recipe)
+      recipe.started = awaitsAuditNow(recipe, config)
         ? runInTransaction(recipe.receiver, async (tx) => await replay(recipe, tx))
         : Promise.resolve(replay(recipe, recipe.target));
     }
@@ -265,12 +266,19 @@ export const createRecipeClient = (config: RecipeConfig) => {
   return { propertyOf };
 };
 
+export interface BatchRecipes {
+  /** Whether some operation of the batch is an audited write whose audit is awaited */
+  readonly awaitsAudit: boolean;
+  /** The batch's operations made on `client`, not yet started */
+  readonly operationsOn: (client: object) => unknown[];
+}
+
 /**
- * The operations of a batch `$transaction([...])` called on `receiver`, made on `client`: every
- * item must be a recipe of `receiver` that has not run, or the batch is rejected before anything
- * runs. The recipes are taken by the batch, so awaiting one of them afterwards fails.
+ * The operations of a batch `$transaction([...])` called on `receiver`: every item must be a
+ * recipe of `receiver` that has not run, or the batch is rejected before anything runs. The
+ * recipes are taken by the batch, so awaiting one of them afterwards fails.
  */
-export const takeBatchRecipes = (items: readonly unknown[], receiver: object): ((client: object) => unknown[]) => {
+export const takeBatchRecipes = (items: readonly unknown[], receiver: object, config: RecipeConfig): BatchRecipes => {
   const taken = items.map((item, index) => {
     const recipe = isObject(item) ? recipes.get(item) : undefined;
     const problem =
@@ -291,5 +299,8 @@ export const takeBatchRecipes = (items: readonly unknown[], receiver: object): (
   for (const recipe of taken) {
     recipe.started = 'taken-by-batch';
   }
-  return (client) => taken.map((recipe) => replay(recipe, client));
+  return {
+    awaitsAudit: taken.some((recipe) => awaitsAuditNow(recipe, config)),
+    operationsOn: (client) => taken.map((recipe) => replay(recipe, client)),
+  };
 };

@@ -225,7 +225,7 @@ The library automatically selects the optimal write strategy based on your confi
                                 └─── No ───→  Fire & Forget   (background, zero latency impact)
 ```
 
-"In transaction" means your interactive `$transaction`, or, with `performance.openImplicitTransaction`, the interactive transaction the audited client opens around a write whose audit is awaited and around a batch `$transaction([...])` of its operations.
+"In transaction" means your interactive `$transaction`, or, with `performance.openImplicitTransaction`, the interactive transaction the audited client opens around a write whose audit is awaited and around a batch `$transaction([...])` of its operations that holds such a write.
 
 | Strategy          | Atomicity      | Latency Impact | Use Case                                          |
 | ----------------- | -------------- | -------------- | ------------------------------------------------- |

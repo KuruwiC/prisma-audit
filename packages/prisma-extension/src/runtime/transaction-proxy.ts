@@ -11,8 +11,8 @@
  * With `openImplicitTransaction`, the proxy also wraps the client's model delegates and raw-query
  * methods (`operation-recipe.ts`): a write whose audit is awaited runs in an interactive
  * transaction of the client it was called on, and a batch `$transaction([...])` of the client's
- * operations runs as one interactive transaction when an audit context is set and an audit may be
- * awaited, as Prisma's own batch otherwise. Without it, the sequential form passes through
+ * operations runs as one interactive transaction when one of them is an audited write whose audit
+ * is awaited, as Prisma's own batch otherwise. Without it, the sequential form passes through
  * untouched.
  *
  * @module runtime/transaction-proxy
@@ -25,15 +25,10 @@ import { drainAfterCommit, enterTransaction } from './scope.js';
 
 export type TransactionMethod = (...args: unknown[]) => Promise<unknown>;
 
-export interface RecipeTransactionConfig extends RecipeConfig {
-  /** Whether an audit can be awaited for some operation, which makes a batch run as an interactive transaction */
-  readonly auditMayBeAwaited: boolean;
-}
-
 export interface TransactionProxyConfig {
   readonly provider: AuditContextProvider;
   /** Present with `openImplicitTransaction`: how the client's operations open their transaction */
-  readonly recipes?: RecipeTransactionConfig;
+  readonly recipes?: RecipeConfig;
 }
 
 type TransactionProxyDependencies = TransactionProxyConfig & {
@@ -102,12 +97,16 @@ export const createTransactionProxyHandler = (
 
   /**
    * The batch's recipes run one after another, in the order of the list, in one interactive
-   * transaction of the client when an audit context is set and an audit may be awaited, and as
+   * transaction of the client when one of them is an audited write whose audit is awaited, and as
    * Prisma's own batch of the same operations otherwise.
    */
-  const runRecipeBatch = async (items: readonly unknown[], options: unknown): Promise<unknown> => {
-    const operationsOn = takeBatchRecipes(items, receiver);
-    if (!recipes?.auditMayBeAwaited || !provider.getContext()) {
+  const runRecipeBatch = async (
+    items: readonly unknown[],
+    options: unknown,
+    recipeConfig: RecipeConfig,
+  ): Promise<unknown> => {
+    const { awaitsAudit, operationsOn } = takeBatchRecipes(items, receiver, recipeConfig);
+    if (!awaitsAudit) {
       return originalTransaction.apply(
         target,
         options === undefined ? [operationsOn(target)] : [operationsOn(target), options],
@@ -126,7 +125,7 @@ export const createTransactionProxyHandler = (
     const [first, options] = args;
     if (typeof first !== 'function') {
       return recipes && Array.isArray(first) && first.length > 0
-        ? runRecipeBatch(first, options)
+        ? runRecipeBatch(first, options, recipes)
         : originalTransaction.apply(target, args);
     }
     const callback = first as (tx: TransactionalPrismaClient) => Promise<unknown>;

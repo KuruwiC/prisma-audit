@@ -67,7 +67,7 @@ export interface PerformanceConfig {
   /**
    * Whether the audited client opens an interactive transaction for an operation whose audit is
    * awaited and that runs outside your own interactive `$transaction`: around a single write, and
-   * around a batch `$transaction([...])` of the client's operations called under an audit context.
+   * around a batch `$transaction([...])` of the client's operations that holds such a write.
    * The operation and its audit rows then commit or roll back together. Default: `false`: the
    * audit of such an operation is written once the operation has committed, and its failure is
    * reported without failing the operation.
@@ -75,8 +75,9 @@ export interface PerformanceConfig {
    * With `true`, a call on a model delegate or a raw-query method returns a lazy operation of the
    * library's own, which runs when it is awaited or given to a batch `$transaction` of the same
    * client, and Prisma's `$transaction` of another client rejects it. A batch accepts only
-   * operations of the client it is called on that have not run, and runs as one interactive
-   * transaction, bound by the client's interactive transaction limits. See the README.
+   * operations of the client it is called on that have not run; one holding a write whose audit
+   * is awaited runs as one interactive transaction, bound by the client's interactive transaction
+   * limits. See the README.
    */
   openImplicitTransaction?: boolean;
   /**

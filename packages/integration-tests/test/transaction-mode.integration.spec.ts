@@ -135,8 +135,22 @@ describe('openImplicitTransaction', () => {
     throw new Error('audit write failed');
   };
 
-  /** A read-only batch on an audited client whose interactive transactions time out after 200 ms */
-  const runSlowReadOnlyBatch = (openImplicitTransaction: boolean) => {
+  interface SlowBatchOptions {
+    readonly openImplicitTransaction: boolean;
+    readonly awaitWrite?: boolean;
+    /** The one model whose audit is awaited, through `awaitWriteIf` */
+    readonly awaitedModel?: string;
+    /** The model the audit records; the batch writes a User */
+    readonly audited?: 'User' | 'Post';
+    /** Whether the batch writes a User before its slow read */
+    readonly writes?: boolean;
+  }
+
+  /**
+   * A batch whose read takes 500 ms, on an audited client whose interactive transactions time out
+   * after 200 ms: it fails with P2028 exactly when it runs as an interactive transaction
+   */
+  const runSlowBatch = (options: SlowBatchOptions) => {
     const limited = new PrismaClient({
       datasources: { db: { url: databaseUrl() } },
       transactionOptions: { timeout: 200 },
@@ -148,12 +162,21 @@ describe('openImplicitTransaction', () => {
     const audited = createAuditClient(limited, {
       Prisma,
       provider,
-      aggregateMapping: { User: defineEntity({ type: 'User' }) },
-      performance: { openImplicitTransaction },
+      aggregateMapping:
+        options.audited === 'Post'
+          ? { Post: defineEntity({ type: 'Post' }) }
+          : { User: defineEntity({ type: 'User' }) },
+      performance: {
+        awaitWrite: options.awaitWrite ?? true,
+        ...(options.awaitedModel ? { awaitWriteIf: (modelName: string) => modelName === options.awaitedModel } : {}),
+        openImplicitTransaction: options.openImplicitTransaction,
+      },
     });
-    return provider.runAsync(testActor, () =>
-      audited.$transaction([audited.$queryRaw`SELECT 1 AS slept FROM pg_sleep(0.5)`]),
-    );
+    const operations: Prisma.PrismaPromise<unknown>[] = [audited.$queryRaw`SELECT 1 AS slept FROM pg_sleep(0.5)`];
+    if (options.writes) {
+      operations.unshift(audited.user.create({ data: { email: 'slow@example.com', name: 'Slow' } }));
+    }
+    return provider.runAsync(testActor, () => audited.$transaction(operations));
   };
 
   describe.each([
@@ -289,13 +312,32 @@ describe('openImplicitTransaction', () => {
     });
 
     it("runs a read-only batch as Prisma's own batch, outside the client's interactive transaction limits", async () => {
-      await expect(runSlowReadOnlyBatch(false)).resolves.toHaveLength(1);
+      await expect(runSlowBatch({ openImplicitTransaction: false })).resolves.toHaveLength(1);
     });
   });
 
   describe('with openImplicitTransaction', () => {
-    it("runs a read-only batch as an interactive transaction too, bound by the client's limits", async () => {
-      await expect(runSlowReadOnlyBatch(true)).rejects.toMatchObject({ code: 'P2028' });
+    it("runs a read-only batch as Prisma's own batch, outside the client's interactive transaction limits", async () => {
+      await expect(runSlowBatch({ openImplicitTransaction: true })).resolves.toHaveLength(1);
+    });
+
+    it("runs a batch that writes only a model the audit does not record as Prisma's own batch", async () => {
+      await expect(
+        runSlowBatch({ openImplicitTransaction: true, audited: 'Post', writes: true }),
+      ).resolves.toHaveLength(2);
+    });
+
+    it("runs a batch whose write does not await its audit as Prisma's own batch", async () => {
+      await expect(
+        runSlowBatch({ openImplicitTransaction: true, awaitWrite: false, awaitedModel: 'Post', writes: true }),
+      ).resolves.toHaveLength(2);
+    });
+
+    it("runs a batch holding a write whose audit is awaited as an interactive transaction, bound by the client's limits", async () => {
+      await expect(runSlowBatch({ openImplicitTransaction: true, writes: true })).rejects.toMatchObject({
+        code: 'P2028',
+      });
+      expect(await raw.user.count()).toBe(0);
     });
 
     it('rolls a write back when its awaited audit write fails', async () => {
