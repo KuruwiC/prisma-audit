@@ -1054,9 +1054,9 @@ Every record carries `beforeUnavailable`. The default write stores it when the a
 
 #### Upsert Action Accuracy
 
-When `awaitWrite: true` (default), the before-state fetch and the upsert operation run inside the same transaction, so the audited action (`create` vs `update`) accurately reflects what happened.
+Inside a transaction (yours, or the one `openImplicitTransaction` opens when the audit is awaited), the before-state fetch and the upsert operation run in it, so the audited action (`create` vs `update`) accurately reflects what happened.
 
-When `awaitWrite: false`, there is a time gap between the before-state fetch and the upsert execution. Concurrent operations during this gap may cause the audited action to diverge from the actual database operation. This is an inherent limitation because Prisma does not expose which branch of an upsert was executed.
+Outside any transaction, awaited or not, there is a time gap between the before-state fetch and the upsert execution. Concurrent operations during this gap may cause the audited action to diverge from the actual database operation. This is an inherent limitation because Prisma does not expose which branch of an upsert was executed.
 
 #### Batch Operations (updateMany / deleteMany)
 
