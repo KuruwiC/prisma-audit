@@ -784,7 +784,7 @@ Makes the audited client open the interactive transaction an awaited audit needs
 
 With it, a call on a model delegate (`prisma.user.update(...)`) or a raw-query method (`prisma.$queryRaw`, `$executeRaw` and their `Unsafe` variants) of the audited client, or of a client derived from it by `$extends`, returns a lazy operation of the library's own, which runs when it is awaited (`await`, `.then`, `Promise.all`):
 
-- A write whose audit is awaited (an audited model, an audit context set, `awaitWrite: true` or `awaitWriteIf` returning `true`) outside any transaction runs in an interactive transaction of the client it was called on, opened before the call enters the extension chain: every query extension sees the call once, and a fluent call returns the relation. Any other call runs as it would without the option.
+- A write whose audit is awaited (an audited model, an audit context set, kept by sampling, `awaitWrite: true` or `awaitWriteIf` returning `true`) runs in an interactive transaction of the client it was called on, opened before the call enters the extension chain, also inside a callback of your interactive `$transaction`, which a call on the audited client rather than `tx` is not part of: every query extension sees the call once, and a fluent call returns the relation. Any other call runs as it would without the option.
 - A batch `$transaction([...])` of the client's operations that holds such a write runs as one interactive transaction of that client (see "Batch transactions" under [Transaction Behavior and Recursion Safety](#transaction-behavior-and-recursion-safety)).
 
 Constraints:
@@ -792,7 +792,7 @@ Constraints:
 - The operations are not PrismaPromises. A batch accepts only operations of the client `$transaction` is called on that have not run, and rejects anything else before running any of them; Prisma's own `$transaction` of another client, such as the one passed to `createAuditClient`, rejects them.
 - An operation offers `then`, `catch`, `finally` and the fluent relation calls of its model, and `Object.prototype.toString` names it `PrismaAuditOperation`. A method a client extension adds to the promise Prisma returns is not available on it.
 - An interactive transaction holds a connection for its whole duration and is bound by the client's interactive transaction limits (`transactionOptions.maxWait` / `timeout`). A batch that runs as one runs its operations one after another.
-- The transaction is opened before sampling decides whether the write is audited, so a write sampling leaves out runs in one too.
+- Sampling decides whether the write is audited before the transaction is opened, so a write sampling leaves out runs without one.
 - Interactive transactions are required: a driver adapter without them, such as the one for Cloudflare's database, cannot use the option.
 - The audit's own reads and writes run in that transaction, as separate queries, through the extensions of the client.
 
