@@ -185,9 +185,10 @@ export const self = (idKey: string | IdTransformer = 'id'): IdResolver => {
  *
  * A field that holds `null` is a row without a parent: no id, nothing reported. A row that lacks
  * the field fails the resolver, reported like any resolver failure (a field the client leaves out
- * of its default reads is in the row only when the entity lists it in `auditOmittedFields`), except the row of a delete
- * whose before state was not read: it holds only what the adapter knows without reading it, so
- * the resolver is not called and the row is left out of that root silently.
+ * of its default reads is in the row only when the entity lists it in `auditOmittedFields`),
+ * except the row of a delete whose before state was not read: it holds only what the adapter
+ * knows without reading it, so the resolver is not called and the row is left out of that root
+ * silently.
  *
  * @param foreignKeyField - Field name (string) or transformation function to extract the foreign key
  *

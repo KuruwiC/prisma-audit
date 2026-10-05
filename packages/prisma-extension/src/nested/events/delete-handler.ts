@@ -197,7 +197,7 @@ const deletedEntityOf = (
  * an unresolved to-one delete.
  *
  * @param linkedRowNamedBy - The rows the link read at the path found; undefined when the
- *   before-state of the delete is not requested
+ *   before-state of the delete is not requested or the link read failed
  */
 export const collectToManyDeleteRecords = async (
   nestedOp: NestedOperationInfo,

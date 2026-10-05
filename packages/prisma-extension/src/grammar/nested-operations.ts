@@ -67,7 +67,6 @@ export interface NestedOperationInfo {
   precedingWrites: readonly PrecedingNestedWrite[];
 }
 
-/** A keyword of a relation field's data and its data, listed before another keyword of that field */
 export interface PrecedingNestedWrite {
   readonly operation: NestedOperationKeyword;
   readonly data: unknown;
@@ -76,7 +75,6 @@ export interface PrecedingNestedWrite {
 const isNestedOperationKeyword = (key: string): key is NestedOperationKeyword =>
   (NESTED_OPERATION_KEYWORDS as readonly string[]).includes(key);
 
-/** The keywords `fieldValue` lists before `keyword`, with their data */
 const precedingWritesOf = (
   fieldValue: Record<string, unknown>,
   keyword: NestedOperationKeyword,

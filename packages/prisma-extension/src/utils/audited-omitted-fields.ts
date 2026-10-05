@@ -18,7 +18,6 @@ export interface AuditedOmittedFields {
   of(modelName: string): ReadonlySet<string>;
 }
 
-/** What decides a model's omitted fields: its entity's list and its own `excludeFields` */
 interface OmittedFieldsEntity {
   readonly auditOmittedFields?: readonly string[];
   readonly excludeFields?: readonly string[];
@@ -29,7 +28,6 @@ const NONE: ReadonlySet<string> = new Set();
 export const NO_AUDITED_OMITTED_FIELDS: AuditedOmittedFields = { of: () => NONE };
 
 /**
- * @param entityOf - The entity config of a model, undefined for a model without one
  * @param excludeFields - The global `excludeFields`, which applies to an entity without its own list
  */
 export const createAuditedOmittedFields = (

@@ -8,7 +8,10 @@
 import type { BeforeState, MutationAction } from '@kuruwic/db-audit-core';
 
 export interface CollectedNestedRecord {
-  /** The entity data (after state for create/update; for delete, the row before the write, or what is known of it without a read) */
+  /**
+   * The entity data: the after state for create and update; for delete, the row before the write,
+   * or what is known of it without a read
+   */
   entity: Record<string, unknown>;
   /** Resolved action (create, update, delete); rows that are not audited are already filtered out */
   action: MutationAction;

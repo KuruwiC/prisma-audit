@@ -30,13 +30,11 @@ interface SelectingFindMany {
   readonly findMany: (args: { where: unknown; select: Record<string, true> }) => Promise<Row[]>;
 }
 
-/** Whether the after state of `event` is stored and lacks one of `fields` */
 const lacksAny = (event: MutationEvent, fields: ReadonlySet<string>): boolean =>
   event.action !== 'delete' &&
   event.after !== undefined &&
   [...fields].some((field) => !(field in (event.after ?? {})));
 
-/** The rows of `modelName` by identity, holding its primary key and `fields`, read by the keys of `rows` */
 const readFields = async (
   handle: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
   modelName: string,

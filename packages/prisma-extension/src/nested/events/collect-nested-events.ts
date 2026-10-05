@@ -635,10 +635,6 @@ const collectDeleteRecordsWithLinkColumns = async (
   return records.map((record) => withRowAsWritten(record, linkColumns));
 };
 
-/**
- * The rows the link read at the path of `nestedOp` found, by unique WHERE; undefined when the
- * delete's before state is not requested or that read failed
- */
 const linkedRowNamedByAt = (
   nestedOp: NestedOperationInfo,
   input: NestedEventCollectionInput,

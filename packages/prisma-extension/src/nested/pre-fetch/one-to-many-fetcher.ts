@@ -78,12 +78,10 @@ export const resolveToManyRelationScope = (
   };
 };
 
-/** The filter of the rows related to the parent row `parentKey` through the back-relation */
 const relatedToParent = (scope: ToManyRelationScope, parentKey: PreFetchRecord): PreFetchRecord => ({
   [scope.backField]: { [scope.filter]: parentKey },
 });
 
-/** `where` with `condition` added to its `AND` */
 const andWhere = (where: PreFetchRecord, condition: PreFetchRecord): PreFetchRecord => {
   const existingAnd = where.AND;
   const and = existingAnd === undefined ? [] : Array.isArray(existingAnd) ? existingAnd : [existingAnd];
