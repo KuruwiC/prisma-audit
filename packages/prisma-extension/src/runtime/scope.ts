@@ -69,14 +69,12 @@ export const enterTransaction = <T>(
 
 const operationKey = (model: string, action: string): string => `${model}.${action}`;
 
-/** The write policy decided at the client boundary for a call of `action` on `model` */
 export interface WritePolicyDecision {
   readonly model: string;
   readonly action: string;
   readonly policy: WritePolicy;
 }
 
-/** The write policies decided for `decisions`, to run operations under with `withScope` */
 export const decidedWritePoliciesOf = (
   decisions: readonly WritePolicyDecision[],
 ): ReadonlyMap<string, WritePolicy[]> => {

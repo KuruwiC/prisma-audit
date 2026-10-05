@@ -46,8 +46,7 @@ export type BatchPrepared =
   | { readonly kind: 'limited'; readonly limit: number; readonly pkFields: string[]; readonly rounds: number }
   /**
    * updateMany or deleteMany with a `limit`, run as given: inside a batch `$transaction([...])`
-   * Prisma runs, whose rows no read can name (`reportsUnidentified`), or with a limit that is not a
-   * positive integer, which Prisma rejects
+   * Prisma runs (`reportsUnidentified`), or with a limit Prisma rejects
    */
   | { readonly kind: 'limited-as-given'; readonly reportsUnidentified: boolean }
   | { readonly kind: 'delete'; readonly beforeRows: Row[] };

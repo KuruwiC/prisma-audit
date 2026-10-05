@@ -5,10 +5,12 @@
  * client, or of a client derived from it, does not reach Prisma when it is made. It returns a
  * recipe: a lazy thenable holding the client the call was made on, the call, and the fluent
  * relation calls chained on it. Awaiting the recipe replays the calls on that client, inside an
- * interactive transaction of the client when the call is a write whose audit is awaited and no
- * transaction is active, so the call enters the client's extension chain once, already inside the
- * transaction. A batch `$transaction([...])` replays the client's recipes in one transaction. A
- * recipe is not a PrismaPromise: Prisma's own `$transaction` rejects it.
+ * interactive transaction of the client when the call is a write whose audit is awaited, so the
+ * call enters the client's extension chain once, already inside the transaction. Inside a callback
+ * of your interactive `$transaction` too: the call is not made on the transaction's client, so it
+ * runs in a transaction of its own, together with its audit. A batch `$transaction([...])`
+ * replays the client's recipes in one transaction. A recipe is not a PrismaPromise: Prisma's own
+ * `$transaction` rejects it.
  */
 
 import type { WritePolicy } from '@kuruwic/db-audit-core';
@@ -126,7 +128,6 @@ const replay = (recipe: Recipe, client: object): unknown => {
 const runInTransaction = (receiver: object, run: (tx: object) => Promise<unknown>): Promise<unknown> =>
   Promise.resolve(invoke(receiver, { method: '$transaction', args: [run] }));
 
-/** The write policy of the recipe's call, decided now; undefined when the call is not audited */
 const decisionOf = (recipe: Recipe, config: RecipeConfig): WritePolicyDecision | undefined => {
   if (recipe.model === undefined || isProcessingAuditLog()) {
     return undefined;
@@ -135,11 +136,6 @@ const decisionOf = (recipe: Recipe, config: RecipeConfig): WritePolicyDecision |
   return policy && { model: recipe.model, action: recipe.call.method, policy };
 };
 
-/**
- * Whether the decision is for an audited write whose audit is awaited. A call of the audited
- * client inside a callback of your interactive `$transaction` is one too: the call is not made on
- * the transaction's client, so it runs in a transaction of its own, together with its audit.
- */
 const awaitsAudit = (decision: WritePolicyDecision | undefined): boolean =>
   decision?.policy.sampled === true && decision.policy.atomic;
 
@@ -186,7 +182,6 @@ const createRecipeFactory = (config: RecipeConfig) => {
     }
   };
 
-  /** The model the fluent relation call `prop` leads to, when one can follow the recipe */
   const relatedModelOf = (recipe: Recipe, prop: string | symbol): string | undefined =>
     typeof prop === 'string' && recipe.fluentModel !== undefined
       ? config.relatedModel(recipe.fluentModel, prop)
