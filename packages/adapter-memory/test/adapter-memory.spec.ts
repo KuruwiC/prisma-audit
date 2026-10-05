@@ -429,12 +429,15 @@ describe('transaction membership', () => {
       const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
       const { adapter, observer } = adapterWithFailingEnricher(false);
 
-      await expect(withContext(() => adapter.create('User', { id: 'u1', name: 'Alice' }))).resolves.toBeUndefined();
-      await adapter.flush();
+      try {
+        await expect(withContext(() => adapter.create('User', { id: 'u1', name: 'Alice' }))).resolves.toBeUndefined();
+        await adapter.flush();
 
-      expect(observer.mock.calls).toEqual([[diffGeneration]]);
-      expect(consoleError).toHaveBeenCalledWith(expect.stringMatching(/User\.create.*dropped/), failure.message);
-      consoleError.mockRestore();
+        expect(observer.mock.calls).toEqual([[diffGeneration]]);
+        expect(consoleError).toHaveBeenCalledWith(expect.stringMatching(/User\.create.*dropped/), failure.message);
+      } finally {
+        consoleError.mockRestore();
+      }
       expect(adapter.store.find('User', 'u1')).toEqual({ id: 'u1', name: 'Alice' });
       expect(adapter.store.auditLogs()).toEqual([]);
     });
