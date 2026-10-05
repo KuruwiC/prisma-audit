@@ -47,11 +47,13 @@ dispatch({ buildRecords, modelName, operation, params, atomic, auditContext }, c
   The entity's id resolver runs once per row, on the row after the write, and the self root is its
   id. Each `to()` root is resolved from the row after the write and, for an update whose before
   state is `captured`, from the row before it too: a row moved to another parent gets a record under
-  the aggregate it left as well as the one it joined. The roots of the row before the update come
-  after the others, and roots equal in category, type and id are kept once. A resolver that reads
-  the database (`lookup()`, `batchLookup()`) runs for the row before the update too and reads the
-  database as it is after the write; a projection's `context` enricher receives, for each root, the
-  row that resolved it. Without a captured before state (a read not asked for, or one that failed)
+  the aggregate it left as well as the one it joined. The same holds for a delete whose before state
+  is `captured` and that carries `after`, the row as the write left it before deleting it: a row the
+  write moved to another parent and then deleted gets a record under both. The roots of the row
+  before the write come after the others, and roots equal in category, type and id are kept once. A
+  resolver that reads the database (`lookup()`, `batchLookup()`) runs for the row before the write
+  too and reads the database as it is after the write; a projection's `context` enricher receives,
+  for each root, the row that resolved it. Without a captured before state (a read not asked for, or one that failed)
   only the aggregates the row names after the write are known. A resolver that throws, or returns
   an id `normalizeId` rejects, is returned in `failures` (the row, which resolver, the error),
   once per row and resolver, instead of failing the call: the entity's id resolver leaves the row

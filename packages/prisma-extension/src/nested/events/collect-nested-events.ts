@@ -34,6 +34,7 @@ import {
   targetWhereClauses,
 } from '../../grammar/nested-operations.js';
 import { TOP_LEVEL_ROW } from '../../grammar/nested-state.js';
+import { AUDIT_ACTION } from '../../grammar/operations.js';
 import type { ShouldFetchBefore } from '../../grammar/pre-fetch-selection.js';
 import type {
   PrismaClientWithDynamicAccess,
@@ -63,6 +64,7 @@ import type { CollectedNestedRecord } from './collected-record.js';
 import {
   collectToManyDeleteRecords,
   collectToOneDeleteRecords,
+  type LinkedRowNamedBy,
   type UnresolvedDeleteEntityIdReporter,
 } from './delete-handler.js';
 import { identityOf } from './event-fields.js';
@@ -157,7 +159,7 @@ const toEvent = (
   identity: identityOf(record.entity, pkConstraint.fields, { model: record.relatedModel, path: nestedOp.path }),
   action: record.action,
   before: record.beforeState,
-  after: record.entity,
+  after: record.action === AUDIT_ACTION.DELETE ? record.rowLeft : record.entity,
   origin: { path: nestedOp.path, op: nestedOp.operation },
 });
 
@@ -597,11 +599,28 @@ const linkColumnsOf = (
   return parentKey ? attachedFilter(link, parentKey) : {};
 };
 
+const linksDiffer = (row: Row, linkColumns: Row): boolean =>
+  Object.entries(linkColumns).some(([field, value]) => String(row[field] ?? null) !== String(value ?? null));
+
 /**
- * The rows a nested delete removed. A row whose before state was not read holds only the key the
- * operation names; it is completed with the relation's link columns, so its parent is known
- * without a read.
+ * A deleted row with the row the write left it as: a nested delete removes a row linked to its
+ * parent, so that row holds the relation's link columns. A row read before the write that held
+ * other link columns was linked to the parent by the write first; its after state is the read row
+ * linked to the parent, so it is recorded under the parent it left and the one it was deleted
+ * from. A row whose before state was not read holds only the key the operation names, completed
+ * with the link columns, so its parent is known without a read.
  */
+const withRowLeft = (record: CollectedNestedRecord, linkColumns: Row): CollectedNestedRecord => {
+  if (record.beforeState.kind !== 'captured') {
+    const entity = { ...linkColumns, ...record.entity };
+    return { ...record, entity, rowLeft: entity };
+  }
+  return linksDiffer(record.beforeState.row, linkColumns)
+    ? { ...record, rowLeft: { ...record.beforeState.row, ...linkColumns } }
+    : record;
+};
+
+/** The rows a nested delete removed, each with the row the write left it as (see {@link withRowLeft}) */
 const collectDeleteRecordsWithLinkColumns = async (
   nestedOp: NestedOperationInfo,
   input: NestedEventCollectionInput,
@@ -609,13 +628,27 @@ const collectDeleteRecordsWithLinkColumns = async (
   deps: NestedEventCollectorDependencies,
 ): Promise<CollectedNestedRecord[]> => {
   const records = await collectDeleteRecords(nestedOp, input, pkConstraint, deps);
-  if (records.every((record) => record.beforeState.kind === 'captured')) {
+  if (records.length === 0) {
     return records;
   }
   const linkColumns = linkColumnsOf(nestedOp, input, deps);
-  return records.map((record) =>
-    record.beforeState.kind === 'captured' ? record : { ...record, entity: { ...linkColumns, ...record.entity } },
-  );
+  return records.map((record) => withRowLeft(record, linkColumns));
+};
+
+/**
+ * The rows the link read at the path of `nestedOp` found, by unique WHERE; undefined when the
+ * delete's before state is not requested or that read failed
+ */
+const linkedRowsAt = (
+  nestedOp: NestedOperationInfo,
+  input: NestedEventCollectionInput,
+  deps: NestedEventCollectorDependencies,
+): LinkedRowNamedBy | undefined => {
+  const read = input.linkReads.get(nestedOp.path);
+  if (!read || read.failed || !deps.shouldFetchBefore(nestedOp.relatedModel, 'delete')) {
+    return undefined;
+  }
+  return (where) => read.rows.find((row) => matchesUniqueWhere(row, where));
 };
 
 const collectDeleteRecords = (
@@ -629,6 +662,7 @@ const collectDeleteRecords = (
         nestedOp,
         input.writeSets.get(nestedOp.path)?.targets ?? [],
         pkConstraint,
+        linkedRowsAt(nestedOp, input, deps),
         deps.onUnresolvedDeleteEntityId,
       )
     : collectToOneDeleteRecords(

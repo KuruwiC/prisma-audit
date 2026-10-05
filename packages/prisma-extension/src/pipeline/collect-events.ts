@@ -7,9 +7,12 @@
  * operation, or one per row of a batch operation.
  *
  * The row handed to an entity's resolvers and enrichers is `after` when present, else `before`.
- * A delete stores no after state, so a delete event may carry in `after` the row Prisma returned
- * for the deleted record (top level) or the primary-key record rebuilt from the operation (a
- * nested delete without a before-state) without either reaching the audit row.
+ * A delete stores no after state, and its `to()` roots are resolved from `after` and, when its
+ * before state is captured, from the row before the write too, so a delete event carries in
+ * `after` only what its before state does not show: the row Prisma returned for the deleted record
+ * when it was not read before (top level), the primary-key record rebuilt from the operation (a
+ * nested delete without a before-state), or the row a nested write linked to the parent it was
+ * then deleted from.
  */
 
 import type { BeforeState, MutationAction, MutationEvent } from '@kuruwic/db-audit-core';
@@ -84,7 +87,7 @@ export const collectSingleOperationEvents = async (
     }),
     action: toMutationAction(action, beforeState),
     before: beforeState,
-    after: row,
+    after: action === AUDIT_ACTION.DELETE && beforeState.kind === 'captured' ? undefined : row,
     origin: { path: '', op: action },
   };
 

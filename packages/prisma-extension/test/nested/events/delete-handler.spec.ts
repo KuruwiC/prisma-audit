@@ -243,6 +243,7 @@ describe('collectToManyDeleteRecords', () => {
           },
         ],
         idPrimaryKey,
+        undefined,
       ),
     ).toEqual([
       { entity: before, action: 'delete', beforeState: { kind: 'captured', row: before }, relatedModel: 'Post' },
@@ -262,8 +263,32 @@ describe('collectToManyDeleteRecords', () => {
           },
         ],
         idPrimaryKey,
+        undefined,
       ),
     ).toEqual([{ entity: { id: 'post-1' }, action: 'delete', beforeState: { kind: 'none' }, relatedModel: 'Post' }]);
+  });
+
+  it('takes the before state of a row its own read did not find under the parent from the link read', async () => {
+    const linked = { id: 'post-9', authorId: 'user-old' };
+    const linkedRowNamedBy = (where: Record<string, unknown>) => (where.id === linked.id ? linked : undefined);
+
+    expect(
+      await collectToManyDeleteRecords(
+        deleteOp,
+        [
+          {
+            locator: { by: 'uniqueWhere', where: { id: 'post-9' } },
+            operation: deleteOp,
+            element: 0,
+            before: { kind: 'none' },
+          },
+        ],
+        idPrimaryKey,
+        linkedRowNamedBy,
+      ),
+    ).toEqual([
+      { entity: linked, action: 'delete', beforeState: { kind: 'captured', row: linked }, relatedModel: 'Post' },
+    ]);
   });
 
   it('leaves the rows of the other operations at the path to them', async () => {
@@ -279,6 +304,7 @@ describe('collectToManyDeleteRecords', () => {
           },
         ],
         idPrimaryKey,
+        undefined,
       ),
     ).toEqual([]);
   });
@@ -298,6 +324,7 @@ describe('collectToManyDeleteRecords', () => {
           },
         ],
         pkConstraint,
+        undefined,
       ),
     ).toEqual([
       {
@@ -324,6 +351,7 @@ describe('collectToManyDeleteRecords', () => {
         },
       ],
       idPrimaryKey,
+      undefined,
       onUnresolvedDeleteEntityId,
     );
 

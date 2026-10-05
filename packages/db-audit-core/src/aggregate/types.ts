@@ -84,14 +84,15 @@ export interface AggregateRoot<TDbHandle = unknown, TEntity extends Record<strin
   type: string;
   /**
    * Callback function to resolve the aggregate ID from the entity. Called with the row after the
-   * write and, for an update whose row was read before the write, with that row too, so that a
-   * row moved to another parent is recorded under both; `db` reads the database after the write.
+   * write and, for an update or a delete whose row was read before the write and that carries a
+   * row after it, with the row before the write too, so that a row moved to another parent is
+   * recorded under both; `db` reads the database after the write.
    */
   resolve(entity: TEntity, db: TDbHandle): Promise<string | null | undefined>;
   /**
    * Batch resolver for N+1 prevention; takes precedence over `resolve` when processing multiple
    * entities. Called once per operation and model with the rows after the write followed by the
-   * rows before the updates.
+   * rows before the writes.
    */
   batchResolve?(entities: TEntity[], db: TDbHandle): Promise<(string | null | undefined)[]>;
   /** Whether `resolve` performs DB queries. Set automatically by lookup(). Used for N+1 warnings. */

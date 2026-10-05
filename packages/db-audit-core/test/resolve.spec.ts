@@ -480,7 +480,7 @@ describe('resolve', () => {
     });
   });
 
-  describe('roots of the row before an update', () => {
+  describe('roots of the row before an update or a delete', () => {
     const updated = (model: string, before: Row, after: Row): MutationEvent =>
       event(model, after, {
         action: 'update',
@@ -557,7 +557,7 @@ describe('resolve', () => {
       expect(resolved[0]?.roots).toEqual([root('Post', 'p1'), root('User', 'u1')]);
     });
 
-    it('resolves a to() root from the one row of a create, a delete and an update without a captured before row', async () => {
+    it('resolves a to() root from the one row of a create, a delete without an after row and an update without a captured before row', async () => {
       const resolver = vi.fn(async (row: Row) => row.authorId as string);
       const after = { id: 'p1', authorId: 'u-new' };
       const before = { id: 'p1', authorId: 'u-old' };
@@ -565,7 +565,7 @@ describe('resolve', () => {
         event('Post', after),
         event('Post', after, { action: 'update', before: { kind: 'none' } }),
         event('Post', after, { action: 'update', before: { kind: 'unavailable' } }),
-        event('Post', before, { action: 'delete', before: { kind: 'captured', row: before } }),
+        event('Post', before, { action: 'delete', before: { kind: 'captured', row: before }, after: undefined }),
       ];
 
       const { resolved } = await resolve(events, auditContext, postOfAuthor(lookup(resolver)), read);
@@ -577,6 +577,22 @@ describe('resolve', () => {
         ['p1', 'u-new'],
         ['p1', 'u-old'],
       ]);
+    });
+
+    it('adds the roots of the row before a delete that carries the row the write left it in', async () => {
+      const resolver = vi.fn(async (row: Row) => row.authorId as string);
+      const before = { id: 'p1', authorId: 'u-old' };
+      const left = { id: 'p1', authorId: 'u-new' };
+      const deleted = event('Post', left, {
+        action: 'delete',
+        before: { kind: 'captured', row: before },
+        origin: { path: 'posts', op: 'delete' },
+      });
+
+      const { resolved } = await resolve([deleted], auditContext, postOfAuthor(lookup(resolver)), read);
+
+      expect(resolver.mock.calls.map(([row]) => row)).toEqual([left, before]);
+      expect(resolved[0]?.roots).toEqual([root('Post', 'p1'), root('User', 'u-new'), root('User', 'u-old')]);
     });
 
     it('identifies the row by the row after the update only', async () => {

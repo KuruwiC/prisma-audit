@@ -2,13 +2,15 @@
  * Nested Delete Operation Handler
  *
  * Collects the rows a nested `delete` or `deleteMany` deleted. On a to-many relation these are the
- * operation's own write-set targets: the rows a `delete` names by unique WHERE, or the rows a
+ * operation's own write-set targets: the rows a `delete` names by unique WHERE (a row the same
+ * write linked to the parent first carries the before state the link read found), or the rows a
  * `deleteMany` filter matched when read ahead of the write. On a to-one relation, where the
  * target is the related row of the parent row, it is the row pre-fetched under the delete's own
  * parent row, falling back to the entity ID in the operation data when nothing was pre-fetched.
  * The collected records become mutation events in collect-nested-events.ts.
  */
 
+import type { BeforeState } from '@kuruwic/db-audit-core';
 import {
   deserializeEntityId,
   type NestedOperationInfo,
@@ -148,13 +150,34 @@ export const collectToOneDeleteRecords = async (
   ];
 };
 
+/** The row a link write at a to-many path read before the write under a unique WHERE, if any */
+export type LinkedRowNamedBy = (where: Record<string, unknown>) => Record<string, unknown> | undefined;
+
 /**
- * The deleted row of a to-many delete target: its pre-fetched row, else its primary key, from the
- * locator or from the unique WHERE; null when neither holds the full primary key.
+ * The before state of a to-many delete target: what its own read under the parent found, or, when
+ * that found no row, the row the link read at the path found under its WHERE. A nested delete
+ * removes a row linked to its parent, so a row its own read did not find there is one the write
+ * linked to the parent before deleting it.
  */
-const deletedEntityOf = (target: NestedWriteTarget, pkConstraint: UniqueConstraint): Record<string, unknown> | null => {
-  if (target.before.kind === 'captured') {
-    return target.before.row;
+const beforeStateOf = (target: NestedWriteTarget, linkedRowNamedBy: LinkedRowNamedBy | undefined): BeforeState => {
+  if (target.before.kind !== 'none') {
+    return target.before;
+  }
+  const linked = linkedRowNamedBy?.(target.locator.where);
+  return linked ? { kind: 'captured', row: linked } : target.before;
+};
+
+/**
+ * The deleted row of a to-many delete target: its row read before the write, else its primary
+ * key, from the locator or from the unique WHERE; null when neither holds the full primary key.
+ */
+const deletedEntityOf = (
+  target: NestedWriteTarget,
+  before: BeforeState,
+  pkConstraint: UniqueConstraint,
+): Record<string, unknown> | null => {
+  if (before.kind === 'captured') {
+    return before.row;
   }
   if (target.locator.by === 'primaryKey') {
     return target.locator.where;
@@ -164,15 +187,20 @@ const deletedEntityOf = (target: NestedWriteTarget, pkConstraint: UniqueConstrai
 
 /**
  * The rows a to-many nested `delete` or `deleteMany` deleted: the operation's own targets, each
- * with the before-state read ahead of the write (unavailable when that read failed), or its
- * primary key alone when the before-state was not requested. A `delete` target whose WHERE names
- * no primary key and whose row was not read is skipped and reported through
- * `onUnresolvedDeleteEntityId`, like an unresolved to-one delete.
+ * with the before-state read ahead of the write (unavailable when that read failed; see
+ * {@link beforeStateOf} for a row the write linked to the parent first), or its primary key alone
+ * when the before-state was not requested. A `delete` target whose WHERE names no primary key and
+ * whose row was not read is skipped and reported through `onUnresolvedDeleteEntityId`, like an
+ * unresolved to-one delete.
+ *
+ * @param linkedRowNamedBy - The rows the link read at the path found; undefined when the
+ *   before-state of the delete is not requested
  */
 export const collectToManyDeleteRecords = async (
   nestedOp: NestedOperationInfo,
   targets: readonly NestedWriteTarget[],
   pkConstraint: UniqueConstraint,
+  linkedRowNamedBy: LinkedRowNamedBy | undefined,
   onUnresolvedDeleteEntityId?: UnresolvedDeleteEntityIdReporter,
 ): Promise<CollectedNestedRecord[]> => {
   const collected: CollectedNestedRecord[] = [];
@@ -180,7 +208,8 @@ export const collectToManyDeleteRecords = async (
     if (target.operation !== nestedOp) {
       continue;
     }
-    const entity = deletedEntityOf(target, pkConstraint);
+    const before = beforeStateOf(target, linkedRowNamedBy);
+    const entity = deletedEntityOf(target, before, pkConstraint);
     if (entity === null) {
       nestedLog('cannot resolve primary key of a delete target (path=%s); skipping delete audit entry', nestedOp.path);
       await reportUnresolvedEntityId(
@@ -191,12 +220,7 @@ export const collectToManyDeleteRecords = async (
       );
       continue;
     }
-    collected.push({
-      entity,
-      action: AUDIT_ACTION.DELETE,
-      beforeState: target.before,
-      relatedModel: nestedOp.relatedModel,
-    });
+    collected.push({ entity, action: AUDIT_ACTION.DELETE, beforeState: before, relatedModel: nestedOp.relatedModel });
   }
   return collected;
 };

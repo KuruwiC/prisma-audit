@@ -4,7 +4,9 @@
  * An update that changes the foreign key a `to()` root is resolved from records the row under
  * the aggregate it left as well as the one it joined, from the row as read before the write. An
  * update that keeps the foreign key records it under that one aggregate. Without the row before
- * the write (`fetchBefore.update` off) only the aggregate it joined is known.
+ * the write (`fetchBefore.update` off) only the aggregate it joined is known. A row a nested write
+ * links to its parent and a nested delete then removes in the same write is recorded under the
+ * aggregate it left and the one it was deleted from.
  */
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
@@ -22,6 +24,7 @@ const testActor: AuditContext = {
 const aggregateMapping: AggregateMapping = {
   ...testAggregateMapping,
   Label: defineEntity({ type: 'Label', aggregates: [to('Post', foreignKey('postId'))] }),
+  Badge: defineEntity({ type: 'Badge', aggregates: [to('User', foreignKey('userId'))] }),
 };
 
 describe('aggregates of a row moved to another parent', () => {
@@ -65,12 +68,20 @@ describe('aggregates of a row moved to another parent', () => {
           orderBy: [{ aggregateType: 'asc' }, { aggregateId: 'asc' }],
         })
       ).map((log) => [log.aggregateType, log.aggregateId, log.action, log.changes]);
+    /** The stored before states of one entity row's records, one per record */
+    const beforeStatesOf = async (entityType: string, entityId: string) =>
+      (
+        await basePrisma.auditLog.findMany({
+          where: { entityType, entityId },
+          select: { before: true, beforeUnavailable: true },
+        })
+      ).map((log) => [log.before, log.beforeUnavailable]);
 
     await basePrisma.user.create({ data: { id: 'u-a', email: 'a@example.com', name: 'A' } });
     await basePrisma.user.create({ data: { id: 'u-b', email: 'b@example.com', name: 'B' } });
     await basePrisma.post.create({ data: { id: 'p1', title: 'Moved', authorId: 'u-a' } });
 
-    return { basePrisma, prisma, run, recordsOf };
+    return { basePrisma, prisma, run, recordsOf, beforeStatesOf };
   };
 
   const moveFromAToB = { authorId: { old: 'u-a', new: 'u-b' } };
@@ -133,5 +144,56 @@ describe('aggregates of a row moved to another parent', () => {
       ['Post', 'p1', 'update', null],
       ['User', 'u-b', 'update', null],
     ]);
+  });
+
+  it.each([
+    ['connect', { connect: { id: 'p1' } }],
+    ['set', { set: [{ id: 'p1' }] }],
+  ])(
+    'records a post a nested %s moves to user B and a nested delete then removes under both users',
+    async (_keyword, link) => {
+      const { prisma, run, recordsOf, beforeStatesOf } = await setup();
+
+      await run(() => prisma.user.update({ where: { id: 'u-b' }, data: { posts: { ...link, delete: { id: 'p1' } } } }));
+
+      expect(await recordsOf('Post', 'p1')).toEqual([
+        ['Post', 'p1', 'delete', null],
+        ['User', 'u-a', 'delete', null],
+        ['User', 'u-b', 'delete', null],
+      ]);
+      const before = [expect.objectContaining({ id: 'p1', title: 'Moved', authorId: 'u-a' }), false];
+      expect(await beforeStatesOf('Post', 'p1')).toEqual([before, before, before]);
+    },
+  );
+
+  it('records a badge a nested to-one connect moves to user B and a nested delete then removes under both users', async () => {
+    const { basePrisma, prisma, run, recordsOf, beforeStatesOf } = await setup();
+    await basePrisma.badge.create({ data: { id: 'b1', name: 'b1', userId: 'u-a' } });
+
+    await run(() =>
+      prisma.user.update({ where: { id: 'u-b' }, data: { badge: { connect: { id: 'b1' }, delete: true } } }),
+    );
+
+    expect(await basePrisma.badge.findUnique({ where: { id: 'b1' } })).toBeNull();
+    expect(await recordsOf('Badge', 'b1')).toEqual([
+      ['Badge', 'b1', 'delete', null],
+      ['User', 'u-a', 'delete', null],
+      ['User', 'u-b', 'delete', null],
+    ]);
+    const before = [expect.objectContaining({ id: 'b1', userId: 'u-a' }), false];
+    expect(await beforeStatesOf('Badge', 'b1')).toEqual([before, before, before]);
+  });
+
+  it('records a post a nested delete removes without moving it under its author only', async () => {
+    const { prisma, run, recordsOf, beforeStatesOf } = await setup();
+
+    await run(() => prisma.user.update({ where: { id: 'u-a' }, data: { posts: { delete: { id: 'p1' } } } }));
+
+    expect(await recordsOf('Post', 'p1')).toEqual([
+      ['Post', 'p1', 'delete', null],
+      ['User', 'u-a', 'delete', null],
+    ]);
+    const before = [expect.objectContaining({ id: 'p1', authorId: 'u-a' }), false];
+    expect(await beforeStatesOf('Post', 'p1')).toEqual([before, before]);
   });
 });

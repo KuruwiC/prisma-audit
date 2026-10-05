@@ -8,12 +8,13 @@
  * each call, so a callback running inside a transaction reads that transaction's writes.
  *
  * The entity id is resolved first, once per row; the self root is that id. Each `to()` root is
- * resolved from the row after the write and, for an update whose row was read before the write,
- * from that row too: a row moved to another parent belongs to the aggregate it left as well as
- * the one it joined. A resolver that throws, or returns an id `normalizeId` rejects, is returned
- * as a failure of its row instead of failing the resolution: the entity's id resolver leaves the
- * row without records, a `to()` resolver leaves it without the record under the root it failed
- * to resolve.
+ * resolved from the row after the write and, for an update or a delete whose row was read before
+ * the write and that carries a row after it, from the row before the write too: a row moved to
+ * another parent belongs to the aggregate it left as well as the one it joined, and so does a row
+ * the write moved before deleting it. A resolver that throws, or returns an id `normalizeId`
+ * rejects, is returned as a failure of its row instead of failing the resolution: the entity's id
+ * resolver leaves the row without records, a `to()` resolver leaves it without the record under
+ * the root it failed to resolve.
  *
  * Aggregate contexts are composed from two layers: the root entity's `aggregateContext`
  * enricher, called once per (category, type) with the unique aggregate ids of the call, and
@@ -100,13 +101,14 @@ interface ResolvedRoot extends ResolvedId {
 
 /**
  * An event with a row for its callbacks, its position in the input of `resolve`, and, for an
- * update whose row was read before the write, that row
+ * update or a delete whose row was read before the write and that carries a row after it, the
+ * row before the write
  */
 interface Entry<TModelName extends string> {
   readonly position: number;
   readonly event: MutationEvent<TModelName>;
   readonly row: Row;
-  readonly rowBeforeUpdate?: Row;
+  readonly rowBeforeWrite?: Row;
 }
 
 interface IdentifiedEntry<TModelName extends string> extends Entry<TModelName> {
@@ -120,13 +122,13 @@ interface Survivor {
   readonly roots: readonly ResolvedRoot[];
 }
 
-/** A row a `to()` resolver runs on: the row of an identified entry, or the row before its update */
+/** A row a `to()` resolver runs on: the row of an identified entry, or the row before its write */
 interface Subject<TModelName extends string> {
   readonly entry: Entry<TModelName>;
   /** Position of the entry among the identified entries of its model group */
   readonly entryIndex: number;
   readonly row: Row;
-  readonly isRowBeforeUpdate: boolean;
+  readonly isRowBeforeWrite: boolean;
 }
 
 /** The events of one written model, in event order. */
@@ -139,8 +141,8 @@ interface ModelGroup<TModelName extends string> {
 const rowOf = (event: MutationEvent): Row | undefined =>
   event.after ?? (event.before.kind === 'captured' ? event.before.row : undefined);
 
-const rowBeforeUpdateOf = (event: MutationEvent): Row | undefined =>
-  event.action === 'update' && event.after !== undefined && event.before.kind === 'captured'
+const rowBeforeWriteOf = (event: MutationEvent): Row | undefined =>
+  event.action !== 'create' && event.after !== undefined && event.before.kind === 'captured'
     ? event.before.row
     : undefined;
 
@@ -161,7 +163,7 @@ const groupByModel = <TModelName extends string>(
       entries = [];
       groups.set(event.model, entries);
     }
-    entries.push({ position, event, row, rowBeforeUpdate: rowBeforeUpdateOf(event) });
+    entries.push({ position, event, row, rowBeforeWrite: rowBeforeWriteOf(event) });
   });
 
   return Array.from(groups, ([model, entries]) => ({ model, entries }));
@@ -331,15 +333,15 @@ const resolveRootsRowByRow = async <TModelName extends string, TDbHandle>(
   return roots;
 };
 
-/** The rows the `to()` resolvers run on: every entry's row, then the rows before the updates */
+/** The rows the `to()` resolvers run on: every entry's row, then the rows before the writes */
 const subjectsOf = <TModelName extends string>(
   entries: readonly IdentifiedEntry<TModelName>[],
 ): Subject<TModelName>[] => [
-  ...entries.map((entry, index) => ({ entry, entryIndex: index, row: entry.row, isRowBeforeUpdate: false })),
+  ...entries.map((entry, index) => ({ entry, entryIndex: index, row: entry.row, isRowBeforeWrite: false })),
   ...entries.flatMap((entry, index) =>
-    entry.rowBeforeUpdate === undefined
+    entry.rowBeforeWrite === undefined
       ? []
-      : [{ entry, entryIndex: index, row: entry.rowBeforeUpdate, isRowBeforeUpdate: true }],
+      : [{ entry, entryIndex: index, row: entry.rowBeforeWrite, isRowBeforeWrite: true }],
   ),
 ];
 
@@ -348,10 +350,10 @@ const isSameRoot = (a: ResolvedRoot, b: ResolvedRoot): boolean => aggregateRootK
 /**
  * Resolve the aggregate roots of every identified row and keep the rows that have at least one:
  * the self projection unless `self` is `false`, whose id is the entity id, then each `to()` root
- * of the row in declaration order, then each `to()` root of the row before an update in
+ * of the row in declaration order, then each `to()` root of the row before the write in
  * declaration order. A resolver that fails or returns no id contributes no root, and a root equal
  * in category, type and id to one the row already has is kept once, from the first it was
- * resolved by: a root the row names both before and after an update is the current row's.
+ * resolved by: a root the row names both before and after the write is the current row's.
  */
 const resolveSurvivors = async <TModelName extends string, TDbHandle>(
   entries: readonly IdentifiedEntry<TModelName>[],
@@ -389,10 +391,10 @@ const resolveSurvivors = async <TModelName extends string, TDbHandle>(
       rowRoots.push(root);
     }
   };
-  for (const isRowBeforeUpdate of [false, true]) {
+  for (const isRowBeforeWrite of [false, true]) {
     for (const roots of perDeclaration) {
       subjects.forEach((subject, index) => {
-        if (subject.isRowBeforeUpdate === isRowBeforeUpdate) {
+        if (subject.isRowBeforeWrite === isRowBeforeWrite) {
           keep(subject, roots[index]);
         }
       });

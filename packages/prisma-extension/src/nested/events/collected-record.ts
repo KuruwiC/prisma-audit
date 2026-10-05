@@ -8,7 +8,7 @@
 import type { BeforeState, MutationAction } from '@kuruwic/db-audit-core';
 
 export interface CollectedNestedRecord {
-  /** The entity data (after state for create/update, minimal record for delete) */
+  /** The entity data (after state for create/update; for delete, the row before the write, or what is known of it without a read) */
   entity: Record<string, unknown>;
   /** Resolved action (create, update, delete); rows that are not audited are already filtered out */
   action: MutationAction;
@@ -16,4 +16,11 @@ export interface CollectedNestedRecord {
   beforeState: BeforeState;
   /** Related model name (e.g., 'Post', 'Comment') */
   relatedModel: string;
+  /**
+   * For a delete, the event's after state: the row as the write left it before deleting it, where
+   * the before state does not show it. That is the row linked to the parent it was deleted from
+   * when the write linked it there first, or what is known of a row whose before state was not
+   * read. Undefined for a row deleted as it was read.
+   */
+  rowLeft?: Record<string, unknown>;
 }

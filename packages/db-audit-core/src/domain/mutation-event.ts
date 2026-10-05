@@ -44,10 +44,12 @@ export interface MutationEvent<TModelName extends string = string> {
   readonly action: MutationAction;
   readonly before: BeforeState;
   /**
-   * Row after the write. Resolvers and enrichers receive `after ?? before`, so a delete event may
-   * carry the deleted row here as the adapter last saw it; `compose` stores no after state for a
-   * delete. A delete whose before state is not `captured` may carry only what the adapter knows of
-   * the row without reading it, such as its key; see `foreignKey` for how that affects resolution.
+   * Row after the write. Resolvers and enrichers receive `after ?? before`; `compose` stores no
+   * after state for a delete. A delete carries here only what its before state does not show: the
+   * row as the write left it before deleting it (one the write linked to another parent first),
+   * whose `to()` roots are resolved along with those of the captured row before the write, or,
+   * when its before state is not `captured`, what the adapter knows of the row without reading
+   * it, such as its key; see `foreignKey` for how that affects resolution.
    */
   readonly after?: Record<string, unknown>;
   readonly origin: MutationOrigin;
@@ -58,7 +60,8 @@ export interface ResolvedEvent<TModelName extends string = string> extends Mutat
   readonly entityId: string;
   /**
    * Self projection (unless `self: false`) plus every `to()` root that resolved from the row after
-   * the write and, for an update whose before state was captured, from the row before it.
+   * the write and, for an update or a delete whose before state was captured and that carries
+   * `after`, from the row before the write.
    * Empty means no record.
    */
   readonly roots: readonly ResolvedId[];

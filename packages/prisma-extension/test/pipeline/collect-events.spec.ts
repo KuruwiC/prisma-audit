@@ -148,7 +148,7 @@ describe('collectSingleOperationEvents', () => {
     ]);
   });
 
-  it('carries the row Prisma returned for a delete in after, next to the before state', async () => {
+  it('carries the before state alone for a delete whose row was read before it', async () => {
     const before = { id: 'u1', name: 'Ann' };
     const outcome = single({
       action: 'delete',
@@ -159,7 +159,17 @@ describe('collectSingleOperationEvents', () => {
     const events = await collectSingleOperationEvents(outcome, deps);
 
     expect(events).toEqual([
-      expect.objectContaining({ action: 'delete', before: { kind: 'captured', row: before }, after: outcome.result }),
+      expect.objectContaining({ action: 'delete', before: { kind: 'captured', row: before }, after: undefined }),
+    ]);
+  });
+
+  it('carries the row Prisma returned for a delete whose row was not read before it in after', async () => {
+    const outcome = single({ action: 'delete', args: { where: { id: 'u1' } }, beforeState: { kind: 'none' } });
+
+    const events = await collectSingleOperationEvents(outcome, deps);
+
+    expect(events).toEqual([
+      expect.objectContaining({ action: 'delete', before: { kind: 'none' }, after: outcome.result }),
     ]);
   });
 
@@ -460,7 +470,7 @@ describe('collectSingleOperationEvents', () => {
           identity: 'p2',
           action: 'delete',
           before: { kind: 'captured', row: p2Before },
-          after: p2Before,
+          after: undefined,
           origin: { path: 'posts', op: 'deleteMany' },
         },
         {
