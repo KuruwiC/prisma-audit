@@ -96,12 +96,19 @@ describe('nested delete of a row whose primary key is "__default__"', () => {
     const regular = await deleteThroughParent(config, regularId);
     const colliding = await deleteThroughParent(config, COLLIDING_ID);
 
-    // Without the before-state only the id from the WHERE is known, so the foreign keys that
-    // resolve the Post and Tag aggregates are absent and only the PostTag's own log is written.
+    // Without the before-state the row is known by the id its WHERE names and the post it was
+    // deleted through, so the Post aggregate resolves; the Tag key is not known and that root is
+    // left out.
     expect(regular.remaining).toBeNull();
-    expect(regular.logs).toEqual([['PostTag', regularId]]);
+    expect(regular.logs).toEqual([
+      ['Post', regular.seed.post.id],
+      ['PostTag', regularId],
+    ]);
     expect(colliding.remaining).toBeNull();
-    expect(colliding.logs).toEqual([['PostTag', COLLIDING_ID]]);
+    expect(colliding.logs).toEqual([
+      ['Post', colliding.seed.post.id],
+      ['PostTag', COLLIDING_ID],
+    ]);
     expect(observer).not.toHaveBeenCalled();
   });
 

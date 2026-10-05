@@ -242,10 +242,10 @@ describe('Performance Benchmarks', () => {
 
       console.log(`Nested delete (no pre-fetch): ${context.auditLogRowCount.value} audit logs`);
       expect(context.auditLogRowCount.value).toBeGreaterThan(0);
-      // The User update, plus one row per deleted post: each is recorded from the primary key its
-      // WHERE names, which resolves the post's own root but not its User, whose key is on the
-      // unread row.
-      expect(context.auditLogRowCount.value).toBe(4);
+      // The User update, plus two rows per deleted post: each is recorded from the primary key its
+      // WHERE names and the author key of the user it was deleted through, which resolve the
+      // post's own root and its User.
+      expect(context.auditLogRowCount.value).toBe(7);
     });
   });
 

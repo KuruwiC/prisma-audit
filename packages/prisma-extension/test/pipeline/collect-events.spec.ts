@@ -263,7 +263,7 @@ describe('collectSingleOperationEvents', () => {
     ]);
   });
 
-  it('collects a nested delete without a before state from the primary key in the operation', async () => {
+  it('collects a nested delete without a before state from the primary key in the operation and the foreign key the parent row gives', async () => {
     const outcome = single({
       action: 'update',
       args: { where: { id: 'u1' }, data: { posts: { delete: { id: 'p9' } } } },
@@ -280,7 +280,7 @@ describe('collectSingleOperationEvents', () => {
         identity: 'p9',
         action: 'delete',
         before: { kind: 'none' },
-        after: { id: 'p9' },
+        after: { id: 'p9', authorId: 'u1' },
         origin: { path: 'posts', op: 'delete' },
       },
     ]);
@@ -468,7 +468,7 @@ describe('collectSingleOperationEvents', () => {
           identity: 'p3',
           action: 'delete',
           before: { kind: 'none' },
-          after: { id: 'p3' },
+          after: { id: 'p3', authorId: 'u1' },
           origin: { path: 'posts', op: 'deleteMany' },
         },
       ]);

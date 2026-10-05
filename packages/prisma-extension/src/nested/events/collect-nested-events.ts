@@ -25,6 +25,7 @@
 
 import type { BeforeState, MutationEvent } from '@kuruwic/db-audit-core';
 import {
+  deserializeEntityId,
   getPrimaryKeyConstraint,
   linksNamedRows,
   type NestedOperationInfo,
@@ -32,6 +33,7 @@ import {
   relationRowsOf,
   targetWhereClauses,
 } from '../../grammar/nested-operations.js';
+import { TOP_LEVEL_ROW } from '../../grammar/nested-state.js';
 import type { ShouldFetchBefore } from '../../grammar/pre-fetch-selection.js';
 import type {
   PrismaClientWithDynamicAccess,
@@ -50,11 +52,12 @@ import type { ClientOmittedFields } from '../../utils/client-omit.js';
 import { matchesUniqueWhere } from '../../utils/compound-where.js';
 import { nestedLog } from '../../utils/debug.js';
 import { extractEntityIdentity } from '../../utils/id-generation.js';
-import type { LinkReads } from '../pre-fetch/link-rows.js';
+import { attachedFilter, type LinkReads } from '../pre-fetch/link-rows.js';
 import { getPreFetchListClient } from '../pre-fetch/model-client.js';
-import { parentRowIdentityOf, writesLinkedRow } from '../pre-fetch/parent-rows.js';
+import { parentKeyOf, parentRowIdentityOf, writesLinkedRow } from '../pre-fetch/parent-rows.js';
 import type { PreExistingRows } from '../pre-fetch/pre-existing-rows.js';
 import { preFetchedStateNamedBy, preFetchedStateUnder } from '../pre-fetch/pre-fetch-result-store.js';
+import { relationLinkOf } from '../pre-fetch/relation-link.js';
 import { resolveToManyPath } from '../pre-fetch/to-many-path.js';
 import type { CollectedNestedRecord } from './collected-record.js';
 import {
@@ -530,7 +533,72 @@ const walkLevels = async (walk: CollectionWalk, roots: readonly WalkedRow[]): Pr
   }
 };
 
-const collectDeleteRecords = (
+const isRow = (value: unknown): value is Row => typeof value === 'object' && value !== null;
+
+/**
+ * The key, before the operation, of the parent row of `nestedOp` in the fields `fields`: from the
+ * top-level row the operation returned, or from the primary key that identifies a nested parent
+ * row when `fields` are that primary key's fields. Undefined when neither tells.
+ */
+const parentKeyIn = (
+  nestedOp: NestedOperationInfo,
+  input: NestedEventCollectionInput,
+  deps: NestedEventCollectorDependencies,
+  parentModel: string,
+  fields: readonly string[],
+): Row | undefined => {
+  const identity = parentRowIdentityOf(nestedOp.parent, input.nestedPreFetchResults, deps.schemaMetadata);
+  if (identity === TOP_LEVEL_ROW) {
+    return isRow(input.result) ? parentKeyOf(input.result, fields) : undefined;
+  }
+  const pkFields = getPrimaryKeyConstraint(deps.schemaMetadata, parentModel)?.fields;
+  if (identity === undefined || !pkFields || !fields.every((field) => pkFields.includes(field))) {
+    return undefined;
+  }
+  const primaryKey = deserializeEntityId(identity, pkFields);
+  return primaryKey ? parentKeyOf(primaryKey, fields) : undefined;
+};
+
+/**
+ * The foreign-key columns of a row `nestedOp` deletes through a relation whose foreign key the
+ * deleted row holds, from its parent row: they equal the parent's referenced columns. Empty when
+ * the parent holds the foreign key, or its referenced columns are unknown.
+ */
+const linkColumnsOf = (
+  nestedOp: NestedOperationInfo,
+  input: NestedEventCollectionInput,
+  deps: NestedEventCollectorDependencies,
+): Row => {
+  const link = relationLinkOf(deps.Prisma, input.modelName, nestedOp);
+  if (link?.side !== 'related') {
+    return {};
+  }
+  const parentKey = parentKeyIn(nestedOp, input, deps, link.parentModel, link.references);
+  return parentKey ? attachedFilter(link, parentKey) : {};
+};
+
+/**
+ * The rows a nested delete removed. A row whose before state was not read holds what the
+ * operation names, its key; it is completed with the columns the relation it was deleted through
+ * links by, so the parent it belonged to is known without a read.
+ */
+const collectDeleteRecords = async (
+  nestedOp: NestedOperationInfo,
+  input: NestedEventCollectionInput,
+  pkConstraint: UniqueConstraint,
+  deps: NestedEventCollectorDependencies,
+): Promise<CollectedNestedRecord[]> => {
+  const records = await collectDeletedRows(nestedOp, input, pkConstraint, deps);
+  if (records.every((record) => record.beforeState.kind === 'captured')) {
+    return records;
+  }
+  const linkColumns = linkColumnsOf(nestedOp, input, deps);
+  return records.map((record) =>
+    record.beforeState.kind === 'captured' ? record : { ...record, entity: { ...linkColumns, ...record.entity } },
+  );
+};
+
+const collectDeletedRows = (
   nestedOp: NestedOperationInfo,
   input: NestedEventCollectionInput,
   pkConstraint: UniqueConstraint,
@@ -550,8 +618,6 @@ const collectDeleteRecords = (
         pkConstraint,
         deps.onUnresolvedDeleteEntityId,
       );
-
-const isRow = (value: unknown): value is Row => typeof value === 'object' && value !== null;
 
 const auditedIdentitiesAt = (walk: CollectionWalk, path: string): Set<string> => {
   const pkFields = walk.pkConstraints.get(path)?.fields;
