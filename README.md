@@ -72,7 +72,7 @@ Branded types (`ActorId`, `EntityId`, `AggregateId`) prevent ID mix-ups at compi
 | **Operations**    | Batch operations (createMany, updateMany, deleteMany, createManyAndReturn, updateManyAndReturn), nested operations at all depths (including nested createMany), smart upsert/connectOrCreate detection |
 | **Architecture**  | DDD aggregate root mapping, AsyncLocalStorage context propagation, one audit pipeline for single and batch writes              |
 | **Performance**   | 3 write strategies (sync/deferred/fire-and-forget), probabilistic sampling, batch context enrichment (N+1 free)                |
-| **Security**      | Automatic PII redaction (passwords, tokens, SSN, etc.), configurable sensitive field detection                                 |
+| **Security**      | PII redaction once `security.redact` is set (passwords, tokens, SSN, etc.), masking of the fields a client-level `omit` hides  |
 | **Extensibility** | Custom writer hooks, custom serializers, pluggable error handling, framework-agnostic core                                     |
 
 ## Installation
@@ -242,7 +242,7 @@ createAuditClient(basePrisma, {
     excludeFields: ["updatedAt", "createdAt"],
   },
 
-  // Automatic PII redaction
+  // PII redaction: the defaults plus these fields, applied only when `redact` is set
   security: {
     redact: {
       fields: ["password", "token", "ssn"],
@@ -492,7 +492,7 @@ When an update moves a row to another parent (an OrderItem whose `orderId` chang
 
 ## PII Redaction
 
-Sensitive fields are automatically masked in audit logs. Default detection covers: `password`, `passwordHash`, `hashedPassword`, `salt`, `token`, `accessToken`, `refreshToken`, `apiKey`, `secret`, `secretKey`, `privateKey`, `ssn`, `socialSecurityNumber`, `creditCard`, `cardNumber`, `cvv`, `pin`.
+Redaction applies only when `security.redact` is set (`redact: {}` turns on the defaults alone); without it, before, after and `changes` are stored as read. The defaults cover: `password`, `passwordHash`, `hashedPassword`, `salt`, `token`, `accessToken`, `refreshToken`, `apiKey`, `secret`, `secretKey`, `privateKey`, `ssn`, `socialSecurityNumber`, `creditCard`, `cardNumber`, `cvv`, `pin`.
 
 ```typescript
 // Before redaction
@@ -503,6 +503,12 @@ Sensitive fields are automatically masked in audit logs. Default detection cover
 ```
 
 Add custom fields via `security.redact.fields`.
+
+### Fields a client-level `omit` hides
+
+A field the Prisma client omits for every query (`new PrismaClient({ omit: { user: { password: true } } })`) is still audited: it is read before and after the write, a change to it is recorded, and its value is masked in before, after and `changes`, always, whether or not `security.redact` is set. A changed field shows as `{ old: { redacted: true, hadValue: true }, new: { redacted: true, hadValue: true, isDifferent: true } }` (a side is `null` when the value was or became null); an unchanged one has no entry in `changes`. The value returned to your query keeps the fields it asked for, so such a field reaches it only when the query names it (`select: { password: true }` or `omit: { password: false }`). There is no option to record it unmasked; list it in `excludeFields` to keep it out of `changes`.
+
+Prisma has no public API for the client's `omit` setting: the audit reads it from the client's internal `_globalOmit` field, and this repository's tests check that it is found. If a Prisma version does not expose it there, a warning is printed when the audit client is created, and the fields a client-level `omit` hides are not audited: they are neither read nor recorded.
 
 ## Nested Operations
 
@@ -529,7 +535,7 @@ Nested rows are audited from the operation's own result: the relations a nested 
 - **Edge runtimes**: No AsyncLocalStorage support (Vercel Edge, Cloudflare Workers)
 - **Raw queries**: `$executeRaw` / `$queryRaw` are not intercepted
 - **Many-to-many with multiple aggregates**: Not currently supported
-- **Client-level `omit`**: The audit reads every row in the client's default shape, so a field the Prisma client omits for every query (`new PrismaClient({ omit })`) is left out of the before and after states; a foreign key it omits is not there for the aggregate resolver that names it, and that aggregate gets no log. A query that reads such a field itself (`select` naming it, or `omit: { field: false }`) reads it after the write only, so it appears in `changes` as added: list it in `excludeFields` to keep it out of `changes`, and in `security.redact` to mask its value in the stored states. Below Prisma 6.2, where `omit` is the `omitApi` preview, a `select` is read with every column, so a field the client omits is read after the write the same way
+- **Client-level `omit`**: The audit learns which fields a client-level `omit` hides from an internal Prisma field (see [Fields a client-level `omit` hides](#fields-a-client-level-omit-hides)); on a Prisma version that does not expose it, it prints a warning and those fields are not audited
 - **Nested re-read consistency**: A row a nested write updated or inserted that your own `include` / `select` leaves out, and a row a nested `connect`, `set` or `disconnect` re-linked, is read again after the operation on the same client. For a non-atomic write (`awaitWrite: false`, or `awaitWriteIf` returning `false`) outside `$transaction`, that re-read is a separate query and may observe concurrent changes
 
 ## Development
