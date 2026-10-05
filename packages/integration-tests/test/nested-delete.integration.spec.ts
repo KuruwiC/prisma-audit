@@ -306,7 +306,7 @@ describe('Nested Delete Operations', () => {
   });
 
   describe('Cascade Delete', () => {
-    it('should create audit logs for cascaded deletes', async () => {
+    it('audits the deleted post and does not audit the comments the database cascades the delete to', async () => {
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -353,9 +353,23 @@ describe('Nested Delete Operations', () => {
       const deletedPost = await context.prisma.post.findUnique({ where: { id: post.id } });
       expect(deletedPost).toBeNull();
 
-      // Comment cascades from Post (onDelete: Cascade in the schema)
+      // Comment cascades from Post (onDelete: Cascade in the schema): the database removes it
+      // without a Prisma query, so only the nested delete of the post is audited
       const deletedComment = await context.prisma.comment.findUnique({ where: { id: comment.id } });
       expect(deletedComment).toBeNull();
+
+      const logs = await context.prisma.auditLog.findMany({ orderBy: { aggregateType: 'asc' } });
+      expect(
+        logs.map((log: { entityType: string; entityId: string; action: string; aggregateType: string }) => [
+          log.entityType,
+          log.entityId,
+          log.action,
+          log.aggregateType,
+        ]),
+      ).toEqual([
+        ['Post', post.id, 'delete', 'Post'],
+        ['Post', post.id, 'delete', 'User'],
+      ]);
     });
   });
 

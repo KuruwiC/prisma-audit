@@ -549,6 +549,7 @@ Nested rows are audited from the operation's own result: the relations a nested 
 - **Order of the nested keywords of one relation field**: A nested `updateMany` / `deleteMany` matches its filter against the rows as they were before the write, so a row an earlier `create` inserts, or whose filtered columns an earlier `update` / `updateMany` changes, is not identified as one it writes, and a row a nested `updateMany` brings into a later `deleteMany`'s filter is updated and deleted with no record (see [Nested Operations limitations](packages/prisma-extension/README.md#limitations))
 - **`updateMany` / `deleteMany` without `limit`**: The audit reads every matching row before the write to record the before states, so the cost grows with the number of rows the `where` matches
 - **A row `connectOrCreate` finds and `delete` removes in one write**: Recorded only under the parent it is deleted from, without its before state (see [Nested Operations limitations](packages/prisma-extension/README.md#limitations))
+- **Database referential actions**: Rows an `onDelete` / `onUpdate` action (`Cascade`, `SetNull`) removes or changes are not audited, because the database writes them without a Prisma query (see [Nested Operations limitations](packages/prisma-extension/README.md#limitations))
 
 ## Development
 
