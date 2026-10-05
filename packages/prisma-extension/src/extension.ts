@@ -25,7 +25,7 @@ import { reissueOnBatchClient } from './runtime/batch-transaction.js';
 import { currentScope, isProcessingAuditLog, withScope } from './runtime/scope.js';
 import { createTransactionProxy } from './runtime/transaction-proxy.js';
 import type { PrismaAuditExtensionOptions } from './types.js';
-import { injectAuditedSelection, projectToRequestedShape, type SelectionReading } from './utils/audited-selection.js';
+import { type ClientShape, injectAuditedSelection, projectToRequestedShape } from './utils/audited-selection.js';
 import { type ClientOmittedFields, readClientOmittedFields } from './utils/client-omit.js';
 import { isAuditableAction } from './utils/extension-utils.js';
 
@@ -67,7 +67,7 @@ const createPipelineDependencies = (
 interface ClientAudit {
   readonly baseClient: PrismaClientWithDynamicAccess;
   readonly deps: AuditPipelineDependencies;
-  readonly reading: SelectionReading;
+  readonly reading: ClientShape;
 }
 
 /**

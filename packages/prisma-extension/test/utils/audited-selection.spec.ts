@@ -4,9 +4,9 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  type ClientShape,
   injectAuditedSelection,
   projectToRequestedShape,
-  type SelectionReading,
 } from '../../src/utils/audited-selection.js';
 import { type ClientOmittedFields, NO_CLIENT_OMITTED_FIELDS } from '../../src/utils/client-omit.js';
 import { createSchemaMetadataFromDMMF } from '../../src/utils/schema-metadata.js';
@@ -44,9 +44,9 @@ const commentCreatedInPostUpdate = {
   posts: { update: { where: { id: 'post-1' }, data: { comments: { create: { content: 'Comment' } } } } },
 };
 
-const inject = (args: Record<string, unknown>, reading: Partial<SelectionReading> = {}, action = 'update') =>
+const inject = (args: Record<string, unknown>, shape: Partial<ClientShape> = {}, action = 'update') =>
   injectAuditedSelection(
-    { schemaMetadata, queryOmitSupported: true, clientOmittedFields: NO_CLIENT_OMITTED_FIELDS, ...reading },
+    { schemaMetadata, queryOmitSupported: true, clientOmittedFields: NO_CLIENT_OMITTED_FIELDS, ...shape },
     'User',
     action,
     args,

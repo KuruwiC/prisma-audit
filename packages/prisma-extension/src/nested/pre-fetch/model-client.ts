@@ -5,7 +5,7 @@
  */
 
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../internal-types.js';
-import { type ClientOmittedFields, readingEveryColumn } from '../../utils/client-omit.js';
+import { type ClientOmittedFields, withOmittedFieldsInFinds } from '../../utils/client-omit.js';
 import { getModelDelegate, hasOperation } from '../../utils/model-accessor.js';
 
 export type PreFetchRecord = Record<string, unknown>;
@@ -36,7 +36,7 @@ export const getPreFetchModelClient = (
   const delegate = getModelDelegate(prismaClient, modelName);
   return hasOperation<PreFetchModelClient>(delegate, 'findUnique') &&
     hasOperation<PreFetchModelClient>(delegate, 'findFirst')
-    ? readingEveryColumn(delegate, clientOmittedFields.of(modelName))
+    ? withOmittedFieldsInFinds(delegate, clientOmittedFields.of(modelName))
     : undefined;
 };
 
@@ -48,6 +48,6 @@ export const getPreFetchListClient = (
 ): PreFetchListClient | undefined => {
   const delegate = getModelDelegate(prismaClient, modelName);
   return hasOperation<PreFetchListClient>(delegate, 'findMany')
-    ? readingEveryColumn(delegate, clientOmittedFields.of(modelName))
+    ? withOmittedFieldsInFinds(delegate, clientOmittedFields.of(modelName))
     : undefined;
 };

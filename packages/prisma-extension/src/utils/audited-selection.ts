@@ -33,7 +33,7 @@ import {
   targetWhereClauses,
 } from '../grammar/nested-operations.js';
 import type { SchemaMetadata } from '../schema/types.js';
-import { type ClientOmittedFields, omitEntriesReading } from './client-omit.js';
+import { type ClientOmittedFields, omitFalseEntries } from './client-omit.js';
 import { uniqueWhereAsFilter } from './compound-where.js';
 import { isRecord } from './is-record.js';
 
@@ -61,14 +61,18 @@ const RECORD_RETURNING_ACTIONS: ReadonlySet<string> = new Set([
   'updateManyAndReturn',
 ]);
 
-export interface SelectionReading {
+/**
+ * What decides the client's default shape and how a selection reads it: its models, whether it
+ * takes a query `omit`, and the fields it omits
+ */
+export interface ClientShape {
   readonly schemaMetadata: SchemaMetadata;
   /** Whether the client accepts a query `omit` (Prisma 6.2 and later) */
   readonly queryOmitSupported: boolean;
   readonly clientOmittedFields: ClientOmittedFields;
 }
 
-type RelationReading = Pick<SelectionReading, 'schemaMetadata' | 'clientOmittedFields'>;
+type RelationClientShape = Pick<ClientShape, 'schemaMetadata' | 'clientOmittedFields'>;
 
 /**
  * The rows of a written relation to read: `rows` bounds a to-many relation to the unique WHEREs
@@ -169,8 +173,8 @@ const buildWrittenRelations = (
   return root;
 };
 
-const buildIncludeTree = (reading: RelationReading, relations: WrittenRelations): Selection =>
-  Object.fromEntries(Array.from(relations, ([field, relation]) => [field, buildRelationEntry(reading, relation)]));
+const buildIncludeTree = (shape: RelationClientShape, relations: WrittenRelations): Selection =>
+  Object.fromEntries(Array.from(relations, ([field, relation]) => [field, buildRelationEntry(shape, relation)]));
 
 /**
  * Entry for one written relation, reading the fields the client omits on its model. Nested
@@ -179,16 +183,16 @@ const buildIncludeTree = (reading: RelationReading, relations: WrittenRelations)
  *
  * @internal
  */
-const buildRelationEntry = (reading: RelationReading, relation: WrittenRelation): true | Selection => {
+const buildRelationEntry = (shape: RelationClientShape, relation: WrittenRelation): true | Selection => {
   const entry: Selection = {};
   if (relation.rows.kind === 'rows' && relation.rows.wheres.length > 0) {
-    const fieldNames = new Set(reading.schemaMetadata.getAllFields(relation.relatedModel).map((field) => field.name));
+    const fieldNames = new Set(shape.schemaMetadata.getAllFields(relation.relatedModel).map((field) => field.name));
     entry.where = { OR: relation.rows.wheres.map((where) => uniqueWhereAsFilter(where, fieldNames)) };
   }
   if (relation.children.size > 0) {
-    entry.include = buildIncludeTree(reading, relation.children);
+    entry.include = buildIncludeTree(shape, relation.children);
   }
-  const omit = omitEntriesReading(reading.clientOmittedFields.of(relation.relatedModel));
+  const omit = omitFalseEntries(shape.clientOmittedFields.of(relation.relatedModel));
   if (omit) {
     entry.omit = omit;
   }
@@ -243,25 +247,25 @@ const liftOmittedFields = (omit: unknown): { omit: Selection | undefined; lifted
  * @internal
  */
 const selectionInDefaultShape = (
-  reading: SelectionReading,
+  shape: ClientShape,
   modelName: string,
   argsWithoutSelect: Selection,
   selected: Selection,
   relations: WrittenRelations,
 ): { value: Selection; injected: InjectedSelection } => {
-  const scalarFields = new Set(scalarFieldNamesOf(reading.schemaMetadata, modelName));
+  const scalarFields = new Set(scalarFieldNamesOf(shape.schemaMetadata, modelName));
   const selectedScalars = [...scalarFields].filter((field) => selected[field] === true);
   const selectedRelations = Object.fromEntries(
     Object.entries(selected).filter(([field, entry]) => !scalarFields.has(field) && entry !== false),
   );
-  const children = mergeWrittenRelations(reading, selectedRelations, relations);
+  const children = mergeWrittenRelations(shape, selectedRelations, relations);
 
   const value: Selection = { ...argsWithoutSelect };
   if (Object.keys(children.entries).length > 0) {
     value.include = children.entries;
   }
-  const kept = new Set([...selectedScalars, ...reading.clientOmittedFields.of(modelName)]);
-  const omit = omitEntriesReading(kept);
+  const kept = new Set([...selectedScalars, ...shape.clientOmittedFields.of(modelName)]);
+  const omit = omitFalseEntries(kept);
   if (omit) {
     value.omit = omit;
   }
@@ -282,18 +286,18 @@ const selectionInDefaultShape = (
  * @internal
  */
 const selectAuditedRows = (
-  reading: SelectionReading,
+  shape: ClientShape,
   modelName: string,
   callerArgs: Selection,
   relations: WrittenRelations,
 ): { value: Selection; injected: InjectedSelection } => {
   const { select, ...argsWithoutSelect } = callerArgs;
   if (isRecord(select)) {
-    if (reading.queryOmitSupported) {
-      return selectionInDefaultShape(reading, modelName, argsWithoutSelect, select, relations);
+    if (shape.queryOmitSupported) {
+      return selectionInDefaultShape(shape, modelName, argsWithoutSelect, select, relations);
     }
-    const children = mergeWrittenRelations(reading, select, relations);
-    const addedFields = selectMissingScalarFields(reading.schemaMetadata, modelName, children.entries);
+    const children = mergeWrittenRelations(shape, select, relations);
+    const addedFields = selectMissingScalarFields(shape.schemaMetadata, modelName, children.entries);
     return {
       value: { ...callerArgs, select: children.entries },
       injected: { keys: new Set([...children.injected.keys, ...addedFields]), nested: children.injected.nested },
@@ -302,10 +306,10 @@ const selectAuditedRows = (
 
   const { omit: callerOmit, ...argsWithoutOmit } = callerArgs;
   const { omit: callerKept, lifted } = liftOmittedFields(callerOmit);
-  const clientOmitted = [...reading.clientOmittedFields.of(modelName)].filter((field) => callerKept?.[field] !== false);
-  const omit = { ...omitEntriesReading(new Set(clientOmitted)), ...callerKept };
+  const clientOmitted = [...shape.clientOmittedFields.of(modelName)].filter((field) => callerKept?.[field] !== false);
+  const omit = { ...omitFalseEntries(new Set(clientOmitted)), ...callerKept };
   const callerInclude = isRecord(callerArgs.include) ? callerArgs.include : undefined;
-  const children = mergeWrittenRelations(reading, callerInclude ?? {}, relations);
+  const children = mergeWrittenRelations(shape, callerInclude ?? {}, relations);
   const value: Selection = Object.keys(omit).length > 0 ? { ...argsWithoutOmit, omit } : argsWithoutOmit;
   if (callerInclude || Object.keys(children.entries).length > 0) {
     value.include = children.entries;
@@ -326,7 +330,7 @@ const selectAuditedRows = (
  * @internal
  */
 const mergeWrittenRelations = (
-  reading: SelectionReading,
+  shape: ClientShape,
   callerEntries: Selection,
   relations: WrittenRelations,
 ): { entries: Selection; injected: InjectedSelection } => {
@@ -338,11 +342,11 @@ const mergeWrittenRelations = (
     const callerValue = entries[field];
 
     if (callerValue === undefined || callerValue === false) {
-      entries[field] = buildRelationEntry(reading, relation);
+      entries[field] = buildRelationEntry(shape, relation);
       keys.add(field);
     } else if (callerValue === true || isRecord(callerValue)) {
       const requested = selectAuditedRows(
-        reading,
+        shape,
         relation.relatedModel,
         callerValue === true ? {} : callerValue,
         relation.children,
@@ -367,7 +371,7 @@ const mergeWrittenRelations = (
  *   caller's selection, for {@link projectToRequestedShape}
  */
 export const injectAuditedSelection = (
-  reading: SelectionReading,
+  shape: ClientShape,
   modelName: string,
   action: string,
   args: unknown,
@@ -376,12 +380,12 @@ export const injectAuditedSelection = (
     return { args, injected: undefined };
   }
 
-  const { schemaMetadata } = reading;
+  const { schemaMetadata } = shape;
   const writtenOperations = detectNestedOperations(schemaMetadata, modelName, args, { kind: 'discovery' }).filter(
     (operation) => RESULT_AUDITED_KEYWORDS.has(operation.operation),
   );
   const { value, injected } = selectAuditedRows(
-    reading,
+    shape,
     modelName,
     args,
     buildWrittenRelations(schemaMetadata, modelName, writtenOperations),
@@ -446,7 +450,7 @@ export const restrictsRows = (entry: unknown): boolean =>
  * {@link injectAuditedSelection} adds them; undefined when nothing below `path` is written.
  */
 export const writtenRelationsInclude = (
-  reading: RelationReading,
+  shape: RelationClientShape,
   modelName: string,
   operations: readonly NestedOperationInfo[],
   path: string,
@@ -455,9 +459,9 @@ export const writtenRelationsInclude = (
   const below = operations.filter(
     (operation) => RESULT_AUDITED_KEYWORDS.has(operation.operation) && operation.path.startsWith(prefix),
   );
-  let relations: WrittenRelations | undefined = buildWrittenRelations(reading.schemaMetadata, modelName, below);
+  let relations: WrittenRelations | undefined = buildWrittenRelations(shape.schemaMetadata, modelName, below);
   for (const segment of path.split('.')) {
     relations = relations?.get(segment)?.children;
   }
-  return relations && relations.size > 0 ? buildIncludeTree(reading, relations) : undefined;
+  return relations && relations.size > 0 ? buildIncludeTree(shape, relations) : undefined;
 };

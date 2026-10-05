@@ -91,7 +91,7 @@ export const readClientOmittedFields = (
 };
 
 /** The query `omit` that reads `fields` although the client omits them; undefined for no field */
-export const omitEntriesReading = (fields: ReadonlySet<string>): Record<string, false> | undefined =>
+export const omitFalseEntries = (fields: ReadonlySet<string>): Record<string, false> | undefined =>
   fields.size > 0 ? Object.fromEntries(Array.from(fields, (field) => [field, false])) : undefined;
 
 const FIND_OPERATIONS: ReadonlySet<PropertyKey> = new Set(['findUnique', 'findFirst', 'findMany']);
@@ -105,11 +105,11 @@ const withOmitEntries = (args: unknown, omit: Record<string, false>): unknown =>
  * `delegate` with its finds reading `fields` too when their args name no `select`, so a whole row
  * the audit reads holds the fields the client omits; `delegate` itself when there is none.
  */
-export const readingEveryColumn = <TDelegate extends object>(
+export const withOmittedFieldsInFinds = <TDelegate extends object>(
   delegate: TDelegate,
   fields: ReadonlySet<string>,
 ): TDelegate => {
-  const omit = omitEntriesReading(fields);
+  const omit = omitFalseEntries(fields);
   if (!omit) {
     return delegate;
   }

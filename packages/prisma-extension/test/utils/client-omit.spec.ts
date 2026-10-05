@@ -3,7 +3,7 @@
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { readClientOmittedFields, readingEveryColumn } from '../../src/utils/client-omit.js';
+import { readClientOmittedFields, withOmittedFieldsInFinds } from '../../src/utils/client-omit.js';
 import { createSchemaMetadataFromDMMF } from '../../src/utils/schema-metadata.js';
 
 const scalar = (name: string) => ({ name, kind: 'scalar', type: 'String', isList: false });
@@ -94,7 +94,7 @@ describe('readClientOmittedFields', () => {
   });
 });
 
-describe('readingEveryColumn', () => {
+describe('withOmittedFieldsInFinds', () => {
   const delegate = () => ({
     findUnique: vi.fn(async (args: unknown) => args),
     findMany: vi.fn(async (args: unknown) => args),
@@ -104,12 +104,12 @@ describe('readingEveryColumn', () => {
   it('returns the delegate itself when the client omits no field of the model', () => {
     const original = delegate();
 
-    expect(readingEveryColumn(original, new Set())).toBe(original);
+    expect(withOmittedFieldsInFinds(original, new Set())).toBe(original);
   });
 
   it('reads the omitted fields in a find without select', async () => {
     const original = delegate();
-    const reader = readingEveryColumn(original, new Set(['password']));
+    const reader = withOmittedFieldsInFinds(original, new Set(['password']));
 
     await reader.findUnique({ where: { id: 'u1' } });
     await reader.findMany({ where: { id: 'u1' }, include: { posts: true } });
@@ -124,7 +124,7 @@ describe('readingEveryColumn', () => {
 
   it('leaves a find that names its columns with select as it is', async () => {
     const original = delegate();
-    const reader = readingEveryColumn(original, new Set(['password']));
+    const reader = withOmittedFieldsInFinds(original, new Set(['password']));
 
     await reader.findMany({ where: { id: 'u1' }, select: { id: true } });
 
@@ -133,7 +133,7 @@ describe('readingEveryColumn', () => {
 
   it('leaves the operations other than finds as they are', async () => {
     const original = delegate();
-    const reader = readingEveryColumn(original, new Set(['password']));
+    const reader = withOmittedFieldsInFinds(original, new Set(['password']));
 
     await reader.updateManyAndReturn({ where: { id: 'u1' } });
 

@@ -13,7 +13,7 @@ import { AUDIT_ACTION, type AuditAction } from '../grammar/operations.js';
 import type { ShouldFetchBefore } from '../grammar/pre-fetch-selection.js';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../internal-types.js';
 import { beforeStateOf, NO_BEFORE_STATE, UNAVAILABLE_BEFORE_STATE } from '../utils/before-state.js';
-import { type ClientOmittedFields, readingEveryColumn } from '../utils/client-omit.js';
+import { type ClientOmittedFields, withOmittedFieldsInFinds } from '../utils/client-omit.js';
 import { getModelDelegate, hasOperation } from '../utils/model-accessor.js';
 import { toError } from '../utils/to-error.js';
 
@@ -71,7 +71,7 @@ const findExistingRow = async (
   if (!hasOperation<FindUniqueDelegate>(delegate, 'findUnique')) {
     return NO_BEFORE_STATE;
   }
-  const row = await readingEveryColumn(delegate, clientOmittedFields.of(modelName)).findUnique({ where });
+  const row = await withOmittedFieldsInFinds(delegate, clientOmittedFields.of(modelName)).findUnique({ where });
   return beforeStateOf(isRow(row) ? row : null);
 };
 

@@ -10,7 +10,7 @@ import type { MutationEvent } from '@kuruwic/db-audit-core';
 import { AUDIT_ACTION } from '../grammar/operations.js';
 import type { PrismaNamespace } from '../internal-types.js';
 import type { SchemaMetadata } from '../schema/types.js';
-import { type ClientOmittedFields, omitEntriesReading, readingEveryColumn } from '../utils/client-omit.js';
+import { type ClientOmittedFields, omitFalseEntries, withOmittedFieldsInFinds } from '../utils/client-omit.js';
 import {
   buildEntityMap,
   ensureIds,
@@ -67,7 +67,7 @@ const batchDelegate = (
   if (!hasOperation<BatchDelegate>(delegate, 'findMany')) {
     throw new Error(`Model ${modelName} does not have findMany operation. This is required for batch operations.`);
   }
-  return readingEveryColumn(delegate, clientOmittedFields.of(modelName));
+  return withOmittedFieldsInFinds(delegate, clientOmittedFields.of(modelName));
 };
 
 const rowsOf = (value: unknown): Row[] => (Array.isArray(value) ? (value as Row[]) : []);
@@ -168,7 +168,7 @@ export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationE
 
   /** Adds the `omit` that reads the fields the client omits, so the returned rows hold them */
   const returningArgs = (operation: AuditedOperation): Record<string, unknown> => {
-    const omit = omitEntriesReading(clientOmittedFields.of(operation.model));
+    const omit = omitFalseEntries(clientOmittedFields.of(operation.model));
     return operation.action === AUDIT_ACTION.UPDATE_MANY_AND_RETURN || !omit
       ? operation.args
       : { ...operation.args, omit };
