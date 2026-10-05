@@ -48,7 +48,7 @@ No decorators, no wrapper functions, no code changes. Attach the extension once 
 
 ### Transaction Safety
 
-Audit logs and data operations share the same transaction by default. If the operation fails, the audit log rolls back too — no orphaned or inconsistent log entries.
+Inside a transaction, audit logs and data operations share it: if the operation fails, the audit log rolls back too — no orphaned or inconsistent log entries. Outside one, an awaited audit log is written once the operation has committed, and its failure never fails the committed operation; with `performance.openImplicitTransaction` the audited client opens the transaction for you instead.
 
 App context (actor, request metadata) and library transaction state (transactional client, deferred-write queue) live in separate AsyncLocalStorage stores. Establishing a fresh context via `runAsync` or `run` inside a `$transaction` callback never detaches writes from the transaction.
 
@@ -538,10 +538,9 @@ Nested rows are audited from the operation's own result: the relations a nested 
 
 - **Edge runtimes**: No AsyncLocalStorage support (Vercel Edge, Cloudflare Workers)
 - **Raw queries**: `$executeRaw` / `$queryRaw` are not intercepted
-- **Fluent API under an awaited audit**: `prisma.user.update(...).posts()` returns `{ posts: [...] }` instead of the posts when the extension runs the operation again on a transaction's client (an awaited audit outside a transaction, and every operation of a batch `$transaction([...])` that runs as one interactive transaction); select the relation and read it from the result instead (see [Fluent API calls](./packages/prisma-extension/README.md#transaction-behavior-and-recursion-safety))
 - **Many-to-many with multiple aggregates**: Not currently supported
-- **Client-level `omit`**: The audit learns which fields a client-level `omit` hides from an internal Prisma field (see [Fields a client-level `omit` hides](#fields-a-client-level-omit-hides)); on a Prisma version that does not expose it, it prints a warning and those fields are not audited
-- **Nested re-read consistency**: A row a nested write updated or inserted that your own `include` / `select` leaves out, and a row a nested `connect`, `set` or `disconnect` re-linked, is read again after the operation on the same client. For a non-atomic write (`awaitWrite: false`, or `awaitWriteIf` returning `false`) outside an interactive `$transaction`, that re-read is a separate query and may observe concurrent changes
+- **Client-level `omit`**: The audit learns which fields a client-level `omit` hides from an internal Prisma field (see [Fields a client-level `omit` hides](#fields-a-client-level-omit-hides)); on a Prisma version that does not expose it, it prints a warning, and those fields are not audited (Prisma 6.2 and later) or every column value is masked (earlier, or an unknown version)
+- **Nested re-read consistency**: A row a nested write updated or inserted that your own `include` / `select` leaves out, and a row a nested `connect`, `set` or `disconnect` re-linked, is read again after the operation on the same client. Outside a transaction (an interactive `$transaction`, or the one `openImplicitTransaction` opens for an awaited audit), that re-read is a separate query and may observe concurrent changes
 
 ## Development
 
