@@ -14,7 +14,7 @@
  */
 
 import type { WritePolicy } from '@kuruwic/db-audit-core';
-import { decidedWritePoliciesOf, isProcessingAuditLog, type WritePolicyDecision, withScope } from './scope.js';
+import { isProcessingAuditLog, type WritePolicyDecision, withScope } from './scope.js';
 
 /** The model actions Prisma's delegates expose as lazy operations */
 const MODEL_ACTIONS: ReadonlySet<string> = new Set([
@@ -136,17 +136,33 @@ const decisionOf = (recipe: Recipe, config: RecipeConfig): WritePolicyDecision |
   return policy && { model: recipe.model, action: recipe.call.method, policy };
 };
 
+/**
+ * `operation`, each of whose methods runs in a scope that holds `decision`: the `then` an await
+ * calls and the method Prisma's own batch starts it with alike, so the queries the operation runs
+ * reach the audit extension with the decision made for it, whoever starts it
+ */
+const startingIn = (decision: WritePolicyDecision | undefined, operation: unknown): unknown =>
+  isObject(operation)
+    ? new Proxy(operation, {
+        get(target, prop) {
+          const value: unknown = Reflect.get(target, prop);
+          return typeof value === 'function'
+            ? (...args: unknown[]) =>
+                withScope({ decidedWritePolicy: decision }, () => Reflect.apply(value, target, args))
+            : value;
+        },
+      })
+    : operation;
+
 const awaitsAudit = (decision: WritePolicyDecision | undefined): boolean =>
   decision?.policy.sampled === true && decision.policy.atomic;
 
 const createRecipeFactory = (config: RecipeConfig) => {
-  const run = (recipe: Recipe): Promise<unknown> => {
+  const run = async (recipe: Recipe): Promise<unknown> => {
     const decision = decisionOf(recipe, config);
-    return withScope({ decidedWritePolicies: decidedWritePoliciesOf(decision ? [decision] : []) }, async () =>
-      awaitsAudit(decision)
-        ? await runInTransaction(recipe.receiver, async (tx) => await replay(recipe, tx))
-        : await replay(recipe, recipe.target),
-    );
+    return awaitsAudit(decision)
+      ? await runInTransaction(recipe.receiver, async (tx) => await startingIn(decision, replay(recipe, tx)))
+      : await startingIn(decision, replay(recipe, recipe.target));
   };
 
   const start = (recipe: Recipe): Promise<unknown> => {
@@ -313,9 +329,7 @@ export const createRecipeClient = (config: RecipeConfig) => {
 export interface BatchRecipes {
   /** Whether some operation of the batch is an audited write whose audit is awaited */
   readonly awaitsAudit: boolean;
-  /** The write policies decided for the batch's operations, to run them under */
-  readonly decidedWritePolicies: ReadonlyMap<string, WritePolicy[]>;
-  /** The batch's operations made on `client`, not yet started */
+  /** The batch's operations made on `client`, not yet started, each to start with the write policy decided for it */
   readonly operationsOn: (client: object) => unknown[];
 }
 
@@ -345,10 +359,9 @@ export const takeBatchRecipes = (items: readonly unknown[], receiver: object, co
   for (const recipe of taken) {
     recipe.state = { kind: 'taken-by-batch' };
   }
-  const decisions = taken.flatMap((recipe) => decisionOf(recipe, config) ?? []);
+  const decisions = taken.map((recipe) => decisionOf(recipe, config));
   return {
     awaitsAudit: decisions.some(awaitsAudit),
-    decidedWritePolicies: decidedWritePoliciesOf(decisions),
-    operationsOn: (client) => taken.map((recipe) => replay(recipe, client)),
+    operationsOn: (client) => taken.map((recipe, index) => startingIn(decisions[index], replay(recipe, client))),
   };
 };

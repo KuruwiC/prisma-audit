@@ -22,7 +22,7 @@ import { createRecordProducer } from './pipeline/produce-records.js';
 import { type AuditPipelineDependencies, runAuditedOperation } from './pipeline/run-audited-operation.js';
 import { createSingleExecutor } from './pipeline/single-executor.js';
 import type { RecipeConfig } from './runtime/operation-recipe.js';
-import { isProcessingAuditLog, takeDecidedWritePolicy, withScope } from './runtime/scope.js';
+import { decidedWritePolicyFor, isProcessingAuditLog, withScope } from './runtime/scope.js';
 import { createTransactionProxy } from './runtime/transaction-proxy.js';
 import type { PrismaAuditExtensionOptions } from './types.js';
 import { type ClientShape, injectAuditedSelection, projectToRequestedShape } from './utils/audited-selection.js';
@@ -109,7 +109,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
       return query(args);
     }
     const writePolicy =
-      takeDecidedWritePolicy(model, operation) ?? policy(model, audit.modelTags(model), audit.policyConfig);
+      decidedWritePolicyFor(model, operation) ?? policy(model, audit.modelTags(model), audit.policyConfig);
     if (!writePolicy.sampled) {
       return query(args);
     }

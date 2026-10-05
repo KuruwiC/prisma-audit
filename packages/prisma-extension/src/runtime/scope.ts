@@ -29,10 +29,10 @@ export interface RuntimeScope {
    */
   readonly isInPrismaBatch?: boolean;
   /**
-   * Write policies decided at the client boundary for the operations about to run, keyed by model
-   * and action, each for the next such operation that reaches the hook
+   * The write policy decided at the client boundary for the operation this scope runs, set only
+   * around that operation, so a nested operation's scope replaces it
    */
-  readonly decidedWritePolicies?: ReadonlyMap<string, WritePolicy[]>;
+  readonly decidedWritePolicy?: WritePolicyDecision | undefined;
   /** Raised while an audited operation is being processed, so that the audit's own queries are not audited */
   readonly isProcessingAuditLog?: boolean;
 }
@@ -67,32 +67,23 @@ export const enterTransaction = <T>(
   return auditContext ? provider.runAsync(auditContext, inScope) : inScope();
 };
 
-const operationKey = (model: string, action: string): string => `${model}.${action}`;
-
 export interface WritePolicyDecision {
   readonly model: string;
   readonly action: string;
   readonly policy: WritePolicy;
 }
 
-export const decidedWritePoliciesOf = (
-  decisions: readonly WritePolicyDecision[],
-): ReadonlyMap<string, WritePolicy[]> => {
-  const byOperation = new Map<string, WritePolicy[]>();
-  for (const { model, action, policy } of decisions) {
-    const key = operationKey(model, action);
-    byOperation.set(key, [...(byOperation.get(key) ?? []), policy]);
-  }
-  return byOperation;
-};
-
 /**
- * Takes the write policy decided at the client boundary for an operation of `model` and `action`,
- * if any. Operations of one model and action take theirs in the order they reach the hook; they
- * share the policy configuration, so which of them takes which decision does not matter.
+ * The write policy decided at the client boundary for the operation the current scope runs, when
+ * `model` and `action` are that operation's. Every query the operation runs through the audit
+ * extension takes it, a query an extension applied before the audit issues through `query`
+ * included: Prisma runs those as part of the operation, and they reach the hook with its model and
+ * action.
  */
-export const takeDecidedWritePolicy = (model: string, action: string): WritePolicy | undefined =>
-  currentScope()?.decidedWritePolicies?.get(operationKey(model, action))?.shift();
+export const decidedWritePolicyFor = (model: string, action: string): WritePolicy | undefined => {
+  const decision = currentScope()?.decidedWritePolicy;
+  return decision?.model === model && decision.action === action ? decision.policy : undefined;
+};
 
 /** Starts the writes queued on a committed transaction on the base client, as pending writes no caller awaits */
 export const drainAfterCommit = (deferredWrites: ReadonlyArray<() => Promise<void>>): void => {

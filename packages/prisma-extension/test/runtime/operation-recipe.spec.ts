@@ -7,7 +7,7 @@ import type { WritePolicy } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
 import type { TransactionalPrismaClient } from '../../src/internal-types.js';
 import { createRecipeClient, type RecipeConfig, takeBatchRecipes } from '../../src/runtime/operation-recipe.js';
-import { currentScope, takeDecidedWritePolicy, withScope } from '../../src/runtime/scope.js';
+import { currentScope, decidedWritePolicyFor, withScope } from '../../src/runtime/scope.js';
 
 /** A lazy operation, as Prisma's operations are: it runs, once, when it is awaited */
 const lazyOperation = (run: () => unknown) => {
@@ -43,7 +43,7 @@ const createClients = () => {
           ran.push({
             client: name,
             transactionClient: currentScope()?.transaction?.client,
-            decided: takeDecidedWritePolicy('User', 'create'),
+            decided: decidedWritePolicyFor('User', 'create'),
           });
           return { created: args };
         }),

@@ -102,21 +102,17 @@ export const createTransactionProxyHandler = (
     options: unknown,
     config: RecipeConfig,
   ): Promise<unknown> => {
-    const { awaitsAudit, decidedWritePolicies, operationsOn } = takeBatchRecipes(items, receiver, config);
+    const { awaitsAudit, operationsOn } = takeBatchRecipes(items, receiver, config);
     if (!awaitsAudit) {
-      return withScope({ decidedWritePolicies }, () =>
-        runPrismaBatch(options === undefined ? [operationsOn(target)] : [operationsOn(target), options]),
-      );
+      return runPrismaBatch(options === undefined ? [operationsOn(target)] : [operationsOn(target), options]);
     }
-    return withScope({ decidedWritePolicies }, () =>
-      runInteractive(async (tx) => {
-        const results: unknown[] = [];
-        for (const operation of operationsOn(tx)) {
-          results.push(await operation);
-        }
-        return results;
-      }, isolationLevelOptionOf(options)),
-    );
+    return runInteractive(async (tx) => {
+      const results: unknown[] = [];
+      for (const operation of operationsOn(tx)) {
+        results.push(await operation);
+      }
+      return results;
+    }, isolationLevelOptionOf(options));
   };
 
   return async (...args: unknown[]): Promise<unknown> => {

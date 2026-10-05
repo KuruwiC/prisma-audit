@@ -82,18 +82,20 @@ export interface PerformanceConfig {
   openImplicitTransaction?: boolean;
   /**
    * Dynamic `awaitWrite` decision, called once per operation the audit records, once sampling
-   * has kept it (with `openImplicitTransaction` too, where the client decides before the call
-   * runs), with the name of its top-level model and that model's `tags` from `aggregateMapping`
+   * has kept it (with `openImplicitTransaction` once per call, which the client decides before the
+   * call runs, for every query the call runs through the audit extension), with the name of its
+   * top-level model and that model's `tags` from `aggregateMapping`
    * (`tags` is `[]` for a model whose entity config declares no tags). Its return value replaces
    * {@link PerformanceConfig.awaitWrite} for the whole operation, the audit rows of its nested
    * writes to other models included.
    */
   awaitWriteIf?: (modelName: string, tags: string[]) => boolean;
   /**
-   * Dynamic sampling rate, called once per audited operation with the name of its top-level
-   * model and that model's `tags` from `aggregateMapping` (`tags` is `[]` for a model whose
-   * entity config declares no tags). Its return value replaces
-   * {@link PerformanceConfig.sampling} for the whole operation, its nested writes included.
+   * Dynamic sampling rate, called once per audited operation (with `openImplicitTransaction` once
+   * per call, as `awaitWriteIf`) with the name of its top-level model and that model's `tags` from
+   * `aggregateMapping` (`tags` is `[]` for a model whose entity config declares no tags). Its
+   * return value replaces {@link PerformanceConfig.sampling} for the whole operation, its nested
+   * writes included.
    */
   samplingIf?: (modelName: string, tags: string[]) => number;
 }

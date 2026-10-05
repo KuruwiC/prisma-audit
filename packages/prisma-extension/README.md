@@ -763,7 +763,7 @@ Controls whether audit log writes are synchronous or asynchronous.
 #### `awaitWriteIf`
 **Type:** `(modelName: string, tags: string[]) => boolean`
 
-Conditionally control the write strategy per operation. Called once per operation the audit records, once sampling has kept it (with `openImplicitTransaction` too, where the client decides before the call runs), with its top-level model and that model's `tags` from `aggregateMapping` (`[]` for a model without tags); its return value replaces `performance.awaitWrite` for the whole operation, the audit rows of its nested writes to other models included.
+Conditionally control the write strategy per operation. Called once per operation the audit records, once sampling has kept it (with `openImplicitTransaction` once per call, which the client decides before the call runs; see [`openImplicitTransaction`](#openimplicittransaction)), with its top-level model and that model's `tags` from `aggregateMapping` (`[]` for a model without tags); its return value replaces `performance.awaitWrite` for the whole operation, the audit rows of its nested writes to other models included.
 
 ```typescript
 {
@@ -798,6 +798,7 @@ Makes the audited client open the interactive transaction an awaited audit needs
 With it, a call on a model delegate (`prisma.user.update(...)`) or a raw-query method (`prisma.$queryRaw`, `$executeRaw` and their `Unsafe` variants) of the audited client, or of a client derived from it by `$extends`, returns a lazy operation of the library's own, which runs when it is awaited (`await`, `.then`, `Promise.all`):
 
 - A write whose audit is awaited (an audited model, an audit context set, kept by sampling, `awaitWrite: true` or `awaitWriteIf` returning `true`) runs in an interactive transaction of the client it was called on, opened before the call enters the extension chain, also inside a callback of your interactive `$transaction`, which a call on the audited client rather than `tx` is not part of: every query extension sees the call once, and a fluent call returns the relation. Any other call runs as it would without the option.
+- The client decides sampling and `awaitWriteIf` for the call once, before it runs, and the decision covers every query the call runs through the audit extension: a query an extension applied before the audit issues through `query` for the call (a companion row of the same model) is audited with the call's decision and does not consult the callbacks again.
 - A batch `$transaction([...])` of the client's operations that holds such a write runs as one interactive transaction of that client (see "Batch transactions" under [Transaction Behavior and Recursion Safety](#transaction-behavior-and-recursion-safety)).
 
 Constraints:
@@ -972,7 +973,7 @@ Sample rate for audit logging (0.0 = 0%, 1.0 = 100%).
 #### `samplingIf`
 **Type:** `(modelName: string, tags: string[]) => number`
 
-Sampling rate per operation. Called once per audited operation with its top-level model and that model's `tags` from `aggregateMapping` (`[]` for a model without tags); its return value replaces `performance.sampling` for the whole operation, its nested writes included.
+Sampling rate per operation. Called once per audited operation (with `openImplicitTransaction` once per call, which the client decides before the call runs), with its top-level model and that model's `tags` from `aggregateMapping` (`[]` for a model without tags); its return value replaces `performance.sampling` for the whole operation, its nested writes included.
 
 ```typescript
 {

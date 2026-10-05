@@ -27,8 +27,11 @@ interface ClientOptions {
   readonly awaitWrite?: boolean;
   readonly awaitWriteIf?: (modelName: string) => boolean;
   readonly sampling?: number;
+  readonly samplingIf?: (modelName: string) => number;
   readonly writer?: (records: AuditRecord[]) => Promise<void>;
   readonly failingEnricher?: boolean;
+  /** Applies, before the audit extension, one that writes a companion user through `query` ahead of each user create */
+  readonly companionCreate?: boolean;
 }
 
 /** One `user.update` pass of a recording extension, and every other User operation it saw */
@@ -57,6 +60,22 @@ const recorder = (name: string, seen: Seen, suffix: string) => ({
         seen.updates++;
         const data = args.data as Record<string, unknown>;
         return query({ ...args, data: { ...data, name: `${String(data.name)}${suffix}` } });
+      },
+    },
+  },
+});
+
+/**
+ * For each `user.create`, first creates a companion user through `query`, then continues the
+ * caller's create: two queries of the same model and action reach the next extension
+ */
+const companionCreator = Prisma.defineExtension({
+  name: 'companion-creator',
+  query: {
+    user: {
+      async create({ args, query }) {
+        await query({ data: { email: `companion-${args.data.email}`, name: 'Companion' } });
+        return query(args);
       },
     },
   },
@@ -93,7 +112,8 @@ describe('openImplicitTransaction', () => {
     const after: Seen = { updates: 0, others: 0 };
     const provider = createAsyncLocalStorageProvider();
     const observer = vi.fn<(context: AuditErrorContext) => void>();
-    const audited = createAuditClient(base.$extends(recorder('before', before, '!')), {
+    const recorded = base.$extends(recorder('before', before, '!'));
+    const audited = createAuditClient(options.companionCreate ? recorded.$extends(companionCreator) : recorded, {
       Prisma,
       provider,
       aggregateMapping: { User: defineEntity({ type: 'User' }), Post: defineEntity({ type: 'Post' }) },
@@ -101,6 +121,7 @@ describe('openImplicitTransaction', () => {
         awaitWrite: options.awaitWrite ?? true,
         ...(options.awaitWriteIf ? { awaitWriteIf: options.awaitWriteIf } : {}),
         ...(options.sampling === undefined ? {} : { sampling: options.sampling }),
+        ...(options.samplingIf ? { samplingIf: options.samplingIf } : {}),
         openImplicitTransaction: options.openImplicitTransaction,
       },
       errorHandling: { observer, writeFailurePolicy: 'throw' },
@@ -412,6 +433,51 @@ describe('openImplicitTransaction', () => {
 
         expect(userCalls(awaitWriteIf)).toHaveLength(2);
         expect(await auditRows()).toEqual(['User.create', 'User.create']);
+      });
+
+      describe('and applies it to a query an extension applied before the audit issues through `query` for the same call', () => {
+        it('for a single write', async () => {
+          const awaitWriteIf = vi.fn((_modelName: string) => true);
+          const clients = createClients({ openImplicitTransaction: true, awaitWriteIf, companionCreate: true });
+
+          await clients.run(() => clients.client.user.create({ data: { email: 'a@example.com', name: 'A' } }));
+
+          expect(userCalls(awaitWriteIf)).toHaveLength(1);
+          expect(await auditRows()).toEqual(['User.create', 'User.create']);
+        });
+
+        it.each([
+          { batch: 'that runs as an interactive transaction', awaited: true },
+          { batch: 'that Prisma runs', awaited: false },
+        ])('for each write of a batch $batch', async ({ awaited }) => {
+          const awaitWriteIf = vi.fn((_modelName: string) => awaited);
+          const clients = createClients({ openImplicitTransaction: true, awaitWriteIf, companionCreate: true });
+
+          await clients.run(() =>
+            clients.client.$transaction([
+              clients.client.user.create({ data: { email: 'a@example.com', name: 'A' } }),
+              clients.client.user.create({ data: { email: 'b@example.com', name: 'B' } }),
+            ]),
+          );
+
+          expect(userCalls(awaitWriteIf)).toHaveLength(2);
+          expect(await auditRows()).toEqual(['User.create', 'User.create', 'User.create', 'User.create']);
+        });
+
+        it('and leaves both queries out when sampling leaves the call out', async () => {
+          let rate = 0;
+          const samplingIf = vi.fn((_modelName: string) => {
+            const current = rate;
+            rate = 1;
+            return current;
+          });
+          const clients = createClients({ openImplicitTransaction: true, samplingIf, companionCreate: true });
+
+          await clients.run(() => clients.client.user.create({ data: { email: 'a@example.com', name: 'A' } }));
+
+          expect(samplingIf).toHaveBeenCalledTimes(1);
+          expect(await auditRows()).toEqual([]);
+        });
       });
 
       it('and not at all for a write sampling leaves out', async () => {
