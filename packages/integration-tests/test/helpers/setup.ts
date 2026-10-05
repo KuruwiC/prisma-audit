@@ -179,6 +179,12 @@ export const disposeTestContext = async (context: TestContext): Promise<void> =>
   }
 };
 
+/** `entityId:aggregateType:aggregateId` of every audit log of `entityType`, sorted */
+export const aggregatesOf = async (prisma: PrismaClient, entityType: string): Promise<string[]> =>
+  (await prisma.auditLog.findMany({ where: { entityType } }))
+    .map((log) => `${log.entityId}:${log.aggregateType}:${log.aggregateId}`)
+    .sort();
+
 /**
  * Truncates all tables in the database, resetting sequences and handling foreign key constraints.
  * Migration tables are preserved.

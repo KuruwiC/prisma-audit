@@ -11,7 +11,7 @@ import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { type AggregateMapping, type AuditErrorObserver, createAuditClient, defineEntity } from '@kuruwic/prisma-audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { cleanDatabase, getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
+import { aggregatesOf, cleanDatabase, getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
 
 const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'client-omitted-fields-actor' },
@@ -93,11 +93,6 @@ describe('fields a client-level omit hides', () => {
       expect(records).toHaveLength(1);
       return records[0];
     };
-    /** `entityId:aggregateType:aggregateId` of every record of `entityType`, sorted */
-    const aggregatesOf = async (entityType: string) =>
-      (await basePrisma.auditLog.findMany({ where: { entityType } }))
-        .map((log) => `${log.entityId}:${log.aggregateType}:${log.aggregateId}`)
-        .sort();
 
     await basePrisma.user.create({
       data: { id: 'u1', email: 'u1@example.com', name: 'Ada', password: 'hash-old' },
@@ -105,7 +100,7 @@ describe('fields a client-level omit hides', () => {
     await basePrisma.user.create({ data: { id: 'u2', email: 'u2@example.com', name: 'Bob' } });
     await basePrisma.post.create({ data: { id: 'p1', title: 'T1', content: 'Body', authorId: 'u1' } });
 
-    return { basePrisma, prisma, run, recordsOf, recordOf, aggregatesOf };
+    return { basePrisma, prisma, run, recordsOf, recordOf };
   };
 
   it('detects the fields the client omits, without a warning', async () => {
@@ -287,7 +282,7 @@ describe('fields a client-level omit hides', () => {
     });
 
     it('records a hidden foreign key a connect changes masked, under both users', async () => {
-      const { prisma, run, recordOf, aggregatesOf } = await setup();
+      const { basePrisma, prisma, run, recordOf } = await setup();
 
       const result = await run(() =>
         prisma.user.update({ where: { id: 'u2' }, data: { posts: { connect: { id: 'p1' } } }, select: { id: true } }),
@@ -297,29 +292,29 @@ describe('fields a client-level omit hides', () => {
       const record = await recordOf('Post', 'p1');
       expect(record?.changes).toEqual({ authorId: { old: MASKED, new: MASKED_CHANGED } });
       expect(record?.before).toMatchObject({ content: MASKED });
-      expect(await aggregatesOf('Post')).toEqual(['p1:Post:p1', 'p1:User:u1', 'p1:User:u2']);
+      expect(await aggregatesOf(basePrisma, 'Post')).toEqual(['p1:Post:p1', 'p1:User:u1', 'p1:User:u2']);
     });
   });
 
   describe('a hidden foreign key', () => {
     it('resolves the aggregate of a created row through it', async () => {
-      const { prisma, run, aggregatesOf, recordOf } = await setup();
+      const { basePrisma, prisma, run, recordOf } = await setup();
 
       const result = await run(() =>
         prisma.post.create({ data: { id: 'p-new', title: 'New', authorId: 'u1' }, select: { id: true } }),
       );
 
       expect(result).toEqual({ id: 'p-new' });
-      expect(await aggregatesOf('Post')).toEqual(['p-new:Post:p-new', 'p-new:User:u1']);
+      expect(await aggregatesOf(basePrisma, 'Post')).toEqual(['p-new:Post:p-new', 'p-new:User:u1']);
       expect((await recordOf('Post', 'p-new'))?.after).toMatchObject({ authorId: MASKED });
     });
 
     it('resolves the aggregate of a nested deleted row through its before state', async () => {
-      const { prisma, run, aggregatesOf } = await setup();
+      const { basePrisma, prisma, run } = await setup();
 
       await run(() => prisma.user.update({ where: { id: 'u1' }, data: { posts: { delete: { id: 'p1' } } } }));
 
-      expect(await aggregatesOf('Post')).toEqual(['p1:Post:p1', 'p1:User:u1']);
+      expect(await aggregatesOf(basePrisma, 'Post')).toEqual(['p1:Post:p1', 'p1:User:u1']);
     });
   });
 
@@ -459,15 +454,11 @@ describe('fields a client-level omit hides', () => {
 
     it('fails a foreignKey root on a hidden column the rows lack, reports it, and records the row under its own root', async () => {
       const observer = vi.fn<AuditErrorObserver>();
-      const { prisma, run, aggregatesOf } = await setup(
-        { errorHandling: { observer } },
-        CLIENT_OMIT,
-        hidingOmitSetting,
-      );
+      const { basePrisma, prisma, run } = await setup({ errorHandling: { observer } }, CLIENT_OMIT, hidingOmitSetting);
 
       await run(() => prisma.post.update({ where: { id: 'p1' }, data: { title: 'T1b' } }));
 
-      expect(await aggregatesOf('Post')).toEqual(['p1:Post:p1']);
+      expect(await aggregatesOf(basePrisma, 'Post')).toEqual(['p1:Post:p1']);
       expect(observer).toHaveBeenCalledTimes(1);
       expect(observer).toHaveBeenCalledWith(
         expect.objectContaining({

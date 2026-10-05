@@ -14,6 +14,7 @@ import { createAuditClient } from '@kuruwic/prisma-audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  aggregatesOf,
   cleanDatabase,
   createTestContext,
   disposeTestContext,
@@ -177,6 +178,7 @@ describe('id-resolver-call failures', () => {
       await basePrisma.$disconnect();
     }
   });
+
   describe('a foreignKey root and the columns of the row', () => {
     const createClientWith = (fetchBeforeDelete: boolean, observer: AuditErrorObserver) => {
       const basePrisma = new PrismaClient({ datasources: { db: { url: context.databaseUrl } } });
@@ -195,11 +197,6 @@ describe('id-resolver-call failures', () => {
       return { basePrisma, provider, prisma };
     };
 
-    const aggregatesOf = async (entityType: string) =>
-      (await context.basePrisma.auditLog.findMany({ where: { entityType } }))
-        .map((log) => `${log.entityId}:${log.aggregateType}:${log.aggregateId}`)
-        .sort();
-
     it('records a createMany row that leaves an optional foreign key out with null, and reports nothing', async () => {
       const observer = vi.fn<AuditErrorObserver>();
       const { basePrisma, provider, prisma } = createClientWith(true, observer);
@@ -211,7 +208,7 @@ describe('id-resolver-call failures', () => {
       }
 
       expect(observer).not.toHaveBeenCalled();
-      expect(await aggregatesOf('Label')).toEqual(['l-unlinked:Label:l-unlinked']);
+      expect(await aggregatesOf(context.basePrisma, 'Label')).toEqual(['l-unlinked:Label:l-unlinked']);
       const [record] = await context.basePrisma.auditLog.findMany({ where: { entityType: 'Label' } });
       expect(record?.after).toMatchObject({ id: 'l-unlinked', postId: null });
     });
@@ -239,8 +236,14 @@ describe('id-resolver-call failures', () => {
       expect(observer).not.toHaveBeenCalled();
       // The comment's author is not a column of the relation it was deleted through, so its
       // User root is unknown without the read and is left out
-      expect(await aggregatesOf('Comment')).toEqual(['c-deleted:Comment:c-deleted', 'c-deleted:Post:p-deleted']);
-      expect(await aggregatesOf('Post')).toEqual(['p-deleted:Post:p-deleted', `p-deleted:User:${author.id}`]);
+      expect(await aggregatesOf(context.basePrisma, 'Comment')).toEqual([
+        'c-deleted:Comment:c-deleted',
+        'c-deleted:Post:p-deleted',
+      ]);
+      expect(await aggregatesOf(context.basePrisma, 'Post')).toEqual([
+        'p-deleted:Post:p-deleted',
+        `p-deleted:User:${author.id}`,
+      ]);
     });
 
     it('records a row a nested delete removes without reading it under the nested parent it was deleted from', async () => {
@@ -267,7 +270,7 @@ describe('id-resolver-call failures', () => {
 
       expect(observer).not.toHaveBeenCalled();
       // The post it was deleted through is known by the primary key its read encodes
-      expect(await aggregatesOf('Comment')).toEqual([
+      expect(await aggregatesOf(context.basePrisma, 'Comment')).toEqual([
         'c-grandchild:Comment:c-grandchild',
         'c-grandchild:Post:p-parent',
       ]);
