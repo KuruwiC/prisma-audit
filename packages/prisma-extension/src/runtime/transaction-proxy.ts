@@ -82,7 +82,8 @@ export const createTransactionProxyHandler = (
 };
 
 /**
- * Creates a Proxy over the extended client that traps `$transaction` only.
+ * Creates a Proxy over the extended client that traps `$transaction`, and `$extends` so that a
+ * client derived from it is proxied the same way and its transactions are scoped too.
  *
  * Every other property is returned as the client holds it, so method identity
  * (`client.user.findMany === client.user.findMany`), `in` checks and the prototype chain are
@@ -97,6 +98,13 @@ export const createTransactionProxy = <TClient extends object>(
       if (prop === '$transaction') {
         const originalTransaction = Reflect.get(target, prop) as OriginalTransactionMethod;
         return createTransactionProxyHandler({ provider, originalTransaction, target });
+      }
+      if (prop === '$extends') {
+        const originalExtends = Reflect.get(target, prop) as (...args: unknown[]) => unknown;
+        return (...args: unknown[]): unknown => {
+          const derived = originalExtends.apply(target, args);
+          return typeof derived === 'object' && derived !== null ? createTransactionProxy(derived, provider) : derived;
+        };
       }
       return Reflect.get(target, prop);
     },

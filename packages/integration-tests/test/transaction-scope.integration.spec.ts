@@ -1,8 +1,9 @@
 /**
- * An interactive `$transaction` started on the audited client is the transaction of every
- * audited operation inside its callback, whether or not an audit context is set when
- * `$transaction` is called. The operations and their audit rows commit and roll back with it: an
- * awaited audit is written in it, an audit that is not awaited is written once it has committed.
+ * An interactive `$transaction` started on the audited client, or on a client derived from it by
+ * `$extends`, is the transaction of every audited operation inside its callback, whether or not an
+ * audit context is set when `$transaction` is called. The operations and their audit rows commit
+ * and roll back with it: an awaited audit is written in it, an audit that is not awaited is written
+ * once it has committed.
  */
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
@@ -102,6 +103,27 @@ describe('Interactive $transaction scope', () => {
         expect(seenBeforeCommit).toEqual({ users: 0, auditRows: 0 });
         expect(await userEmails()).toEqual(['inside@example.com']);
         expect(await auditRowCount()).toBe(1);
+      } finally {
+        await audited.dispose();
+      }
+    });
+
+    it('rolls back the write and its audit inside a transaction of a client derived from the audited client', async () => {
+      const audited = createAudited(awaitWrite);
+      const derived = audited.prisma.$extends({ name: 'derived' });
+      try {
+        await expect(
+          audited.provider.runAsync(actor, () =>
+            derived.$transaction(async (tx) => {
+              await tx.user.create({ data: { email: 'derived@example.com', name: 'Derived' } });
+              throw rollback;
+            }),
+          ),
+        ).rejects.toBe(rollback);
+        await flushAllPendingWrites();
+
+        expect(await userEmails()).toEqual([]);
+        expect(await auditRowCount()).toBe(0);
       } finally {
         await audited.dispose();
       }

@@ -259,13 +259,19 @@ describe('createTransactionProxy', () => {
   /** A client with methods on its prototype, as a Prisma client has */
   class FakeClient {
     readonly user = { findMany: async (): Promise<unknown[]> => [] };
+    readonly extensions: unknown[] = [];
     async $connect(): Promise<void> {}
     async $transaction(...args: unknown[]): Promise<unknown> {
       return args;
     }
+    $extends(extension: unknown): FakeClient {
+      const derived = new FakeClient();
+      derived.extensions.push(...this.extensions, extension);
+      return derived;
+    }
   }
 
-  it('returns every property other than $transaction as the client holds it', () => {
+  it('returns every property other than $transaction and $extends as the client holds it', () => {
     const target = new FakeClient();
     const proxy = createTransactionProxy(target, createAsyncLocalStorageProvider());
 
@@ -342,5 +348,27 @@ describe('createTransactionProxy', () => {
 
     expect(clientInsideCallback).toBe(txClient);
     expect(contextInsideCallback).toBe(baseContext);
+  });
+
+  it('proxies a client derived by $extends, so that its interactive $transaction runs inside the scope', async () => {
+    const provider = createAsyncLocalStorageProvider();
+    const txClient: TransactionalPrismaClient = { _isTx: true };
+    const proxy = createTransactionProxy(new FakeClient(), provider);
+    const extension = { name: 'derived' };
+
+    const derived = proxy.$extends(extension);
+    vi.spyOn(derived, '$transaction').mockImplementation(async (...args: unknown[]) => {
+      const callback = args[0] as (tx: TransactionalPrismaClient) => Promise<unknown>;
+      return callback(txClient);
+    });
+    let clientInsideCallback: unknown;
+    await provider.runAsync(baseContext, () =>
+      derived.$transaction(async () => {
+        clientInsideCallback = resolveTxClientFromRuntime();
+      }),
+    );
+
+    expect(derived.extensions).toEqual([extension]);
+    expect(clientInsideCallback).toBe(txClient);
   });
 });
