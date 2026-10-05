@@ -320,4 +320,27 @@ describe('createTransactionProxy', () => {
     expect(result).toBe('committed');
     expect(clientInsideCallback).toBe(txClient);
   });
+
+  it('runs an interactive $transaction callback inside the scope of its transactional client without an audit context', async () => {
+    const provider = createAsyncLocalStorageProvider();
+    const txClient: TransactionalPrismaClient = { _isTx: true };
+    const target = new FakeClient();
+    vi.spyOn(target, '$transaction').mockImplementation(async (...args: unknown[]) => {
+      const callback = args[0] as (tx: TransactionalPrismaClient) => Promise<unknown>;
+      return callback(txClient);
+    });
+    const proxy = createTransactionProxy(target, provider);
+    let clientInsideCallback: unknown;
+    let contextInsideCallback: AuditContext | undefined;
+
+    await proxy.$transaction(async () =>
+      provider.runAsync(baseContext, async () => {
+        clientInsideCallback = resolveTxClientFromRuntime();
+        contextInsideCallback = provider.getContext();
+      }),
+    );
+
+    expect(clientInsideCallback).toBe(txClient);
+    expect(contextInsideCallback).toBe(baseContext);
+  });
 });

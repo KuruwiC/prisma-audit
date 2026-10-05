@@ -44,16 +44,18 @@ export const withScope = <T>(patch: RuntimeScope, fn: () => T): T =>
 export const isProcessingAuditLog = (): boolean => currentScope()?.isProcessingAuditLog === true;
 
 /**
- * Runs `fn` inside `transaction`, re-establishing the audit context alongside it: a
- * `$transaction` callback may start on a different microtask than its caller, and both stores
- * must be present when it does.
+ * Runs `fn` inside `transaction`, re-establishing the audit context alongside it when there is
+ * one: a `$transaction` callback may start on a different microtask than its caller, and both
+ * stores must be present when it does. Without an audit context the transaction is entered all
+ * the same, so that an audit context set later inside `fn` finds it.
  */
 export const enterTransaction = <T>(
   provider: ContextRunner,
-  auditContext: AuditContext,
+  auditContext: AuditContext | undefined,
   transaction: ActiveTransaction,
   fn: () => Promise<T>,
-): Promise<T> => provider.runAsync(auditContext, () => withScope({ transaction }, fn));
+): Promise<T> =>
+  auditContext ? provider.runAsync(auditContext, () => withScope({ transaction }, fn)) : withScope({ transaction }, fn);
 
 export interface ImplicitTransactionInput {
   readonly baseClient: PrismaClientWithDynamicAccess;

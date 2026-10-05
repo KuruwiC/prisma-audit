@@ -2,11 +2,12 @@
  * Transaction Proxy Module
  *
  * Wraps the client's `$transaction` so that an interactive transaction runs its callback inside
- * the runtime scope of its transactional client: the audit reads and writes of the operations
- * in the callback share the client, and the writes that must wait for the commit queue on the
- * scope. The queue is drained strictly after `$transaction` resolves; on rejection it is
- * discarded unrun. The sequential form, `$transaction([...])`, passes through untouched: a list
- * of operations carries no callback, hence no interactive scope to establish.
+ * the runtime scope of its transactional client, whether or not an audit context is set when
+ * `$transaction` is called: the audit reads and writes of the operations in the callback share
+ * the client, and the writes that must wait for the commit queue on the scope. The queue is
+ * drained strictly after `$transaction` resolves; on rejection it is discarded unrun. The
+ * sequential form, `$transaction([...])`, passes through untouched: a list of operations carries
+ * no callback, hence no interactive scope to establish.
  *
  * @module runtime/transaction-proxy
  */
@@ -38,7 +39,7 @@ type TransactionProxyDependencies = {
  */
 export const createWrappedTransactionCallback = (
   callback: (tx: TransactionalPrismaClient) => Promise<unknown>,
-  context: AuditContext,
+  context: AuditContext | undefined,
   provider: AuditContextProvider,
   deferredWrites: Array<() => Promise<void>>,
 ): ((txClient: TransactionalPrismaClient) => Promise<unknown>) => {
@@ -63,26 +64,20 @@ export const createTransactionProxyHandler = (
   const { provider, originalTransaction, target } = deps;
 
   return async (...args: unknown[]): Promise<unknown> => {
-    const context = provider.getContext();
-
-    if (!context) {
+    if (typeof args[0] !== 'function') {
       return originalTransaction.apply(target, args);
     }
 
-    if (typeof args[0] === 'function') {
-      const callback = args[0] as (tx: TransactionalPrismaClient) => Promise<unknown>;
-      const options = args[1] as Record<string, unknown> | undefined;
+    const callback = args[0] as (tx: TransactionalPrismaClient) => Promise<unknown>;
+    const options = args[1] as Record<string, unknown> | undefined;
 
-      const deferredWrites: Array<() => Promise<void>> = [];
-      const wrappedCallback = createWrappedTransactionCallback(callback, context, provider, deferredWrites);
+    const deferredWrites: Array<() => Promise<void>> = [];
+    const wrappedCallback = createWrappedTransactionCallback(callback, provider.getContext(), provider, deferredWrites);
 
-      const transactionArgs = options ? [wrappedCallback, options] : [wrappedCallback];
-      const result = await originalTransaction.apply(target, transactionArgs);
-      drainAfterCommit(deferredWrites);
-      return result;
-    }
-
-    return originalTransaction.apply(target, args);
+    const transactionArgs = options ? [wrappedCallback, options] : [wrappedCallback];
+    const result = await originalTransaction.apply(target, transactionArgs);
+    drainAfterCommit(deferredWrites);
+    return result;
   };
 };
 
