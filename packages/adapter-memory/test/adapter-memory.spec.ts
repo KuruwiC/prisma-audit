@@ -9,6 +9,7 @@ import {
 import { describe, expect, it, vi } from 'vitest';
 import {
   createMemoryAuditAdapter,
+  identityOf,
   type MemoryAuditOptions,
   type MemoryHandle,
   type MemorySchema,
@@ -548,5 +549,20 @@ describe('record composition', () => {
       balance: '10',
     });
     expect(adapter.store.find('User', 'u1')?.createdAt).toBe(createdAt);
+  });
+});
+
+describe('identityOf', () => {
+  it('a single-column key is the string of its value', () => {
+    expect(identityOf(schema, 'User', { id: 'u1', name: 'Alice' })).toBe('u1');
+    expect(identityOf({ Counter: { primaryKey: ['id'] } }, 'Counter', { id: 42n })).toBe('42');
+  });
+
+  it('a composite key is a JSON array in primary-key order, with BigInt values as strings', () => {
+    const compositeSchema: MemorySchema<'Membership'> = { Membership: { primaryKey: ['orgId', 'seq', 'userId'] } };
+
+    expect(
+      identityOf(compositeSchema, 'Membership', { userId: 'u1', seq: 9007199254740993n, orgId: 7, role: 'admin' }),
+    ).toBe('[7,"9007199254740993","u1"]');
   });
 });
