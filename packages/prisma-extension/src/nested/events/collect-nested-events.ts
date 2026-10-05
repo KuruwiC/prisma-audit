@@ -540,7 +540,7 @@ const isRow = (value: unknown): value is Row => typeof value === 'object' && val
  * top-level row the operation returned, or from the primary key that identifies a nested parent
  * row when `fields` are that primary key's fields. Undefined when neither tells.
  */
-const parentKeyIn = (
+const knownParentKey = (
   nestedOp: NestedOperationInfo,
   input: NestedEventCollectionInput,
   deps: NestedEventCollectorDependencies,
@@ -573,7 +573,7 @@ const linkColumnsOf = (
   if (link?.side !== 'related') {
     return {};
   }
-  const parentKey = parentKeyIn(nestedOp, input, deps, link.parentModel, link.references);
+  const parentKey = knownParentKey(nestedOp, input, deps, link.parentModel, link.references);
   return parentKey ? attachedFilter(link, parentKey) : {};
 };
 
@@ -582,13 +582,13 @@ const linkColumnsOf = (
  * operation names, its key; it is completed with the columns the relation it was deleted through
  * links by, so the parent it belonged to is known without a read.
  */
-const collectDeleteRecords = async (
+const collectDeleteRecordsWithLinkColumns = async (
   nestedOp: NestedOperationInfo,
   input: NestedEventCollectionInput,
   pkConstraint: UniqueConstraint,
   deps: NestedEventCollectorDependencies,
 ): Promise<CollectedNestedRecord[]> => {
-  const records = await collectDeletedRows(nestedOp, input, pkConstraint, deps);
+  const records = await collectDeleteRecords(nestedOp, input, pkConstraint, deps);
   if (records.every((record) => record.beforeState.kind === 'captured')) {
     return records;
   }
@@ -598,7 +598,7 @@ const collectDeleteRecords = async (
   );
 };
 
-const collectDeletedRows = (
+const collectDeleteRecords = (
   nestedOp: NestedOperationInfo,
   input: NestedEventCollectionInput,
   pkConstraint: UniqueConstraint,
@@ -684,7 +684,7 @@ export const collectNestedEvents = async (
       continue;
     }
     const records = isDelete(nestedOp)
-      ? await collectDeleteRecords(nestedOp, input, pkConstraint, deps)
+      ? await collectDeleteRecordsWithLinkColumns(nestedOp, input, pkConstraint, deps)
       : [...(walk.records.get(nestedOp) ?? []), ...(linkRecords.get(nestedOp) ?? [])];
     events.push(...records.map((collected) => toEvent(collected, nestedOp, pkConstraint)));
   }
