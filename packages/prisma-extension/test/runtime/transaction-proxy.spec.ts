@@ -487,6 +487,23 @@ describe('createTransactionProxy', () => {
     expect(clientInsideCallback).toBe(txClient);
   });
 
+  it('runs the lazy operation an interactive $transaction callback returns without awaiting it inside the scope of its transactional client', async () => {
+    const provider = createAsyncLocalStorageProvider();
+    const txClient: TransactionalPrismaClient = { _isTx: true };
+    const target = new FakeClient();
+    vi.spyOn(target, '$transaction').mockImplementation(async (...args: unknown[]) => {
+      const callback = args[0] as (tx: TransactionalPrismaClient) => Promise<unknown>;
+      return await callback(txClient);
+    });
+    const proxy = createTransactionProxy(target, { provider });
+
+    const clientWhenRun = await provider.runAsync(baseContext, () =>
+      proxy.$transaction(() => lazyOperation(() => resolveTxClientFromRuntime())),
+    );
+
+    expect(clientWhenRun).toBe(txClient);
+  });
+
   it('runs an interactive $transaction callback inside the scope of its transactional client without an audit context', async () => {
     const provider = createAsyncLocalStorageProvider();
     const txClient: TransactionalPrismaClient = { _isTx: true };

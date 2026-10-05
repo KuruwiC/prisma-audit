@@ -44,15 +44,18 @@ export const isProcessingAuditLog = (): boolean => currentScope()?.isProcessingA
  * Runs `fn` inside `transaction`, re-establishing the audit context alongside it when there is
  * one: a `$transaction` callback may start on a different microtask than its caller, and both
  * stores must be present when it does. Without one the transaction is entered all the same, so an
- * audit context set later inside `fn` finds it.
+ * audit context set later inside `fn` finds it. `fn`'s result is awaited inside the scope, so a
+ * lazy operation it returns without awaiting it starts there too.
  */
 export const enterTransaction = <T>(
   provider: ContextRunner,
   auditContext: AuditContext | undefined,
   transaction: ActiveTransaction,
   fn: () => Promise<T>,
-): Promise<T> =>
-  auditContext ? provider.runAsync(auditContext, () => withScope({ transaction }, fn)) : withScope({ transaction }, fn);
+): Promise<T> => {
+  const inScope = () => withScope({ transaction }, async () => await fn());
+  return auditContext ? provider.runAsync(auditContext, inScope) : inScope();
+};
 
 /** Starts the writes queued on a committed transaction on the base client, as pending writes no caller awaits */
 export const drainAfterCommit = (deferredWrites: ReadonlyArray<() => Promise<void>>): void => {
