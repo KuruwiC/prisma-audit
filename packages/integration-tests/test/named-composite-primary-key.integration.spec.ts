@@ -143,6 +143,38 @@ describe('Named Composite Primary Key (PostBookmark)', () => {
     });
   });
 
+  describe('top-level delete via the named compound key', () => {
+    it('records the real composite entityId when fetchBefore.delete is false', async () => {
+      const { basePrisma, prisma, provider, observer } = createScenario({ fetchBeforeDelete: false });
+      const { user, post } = await createUserAndPost(basePrisma);
+      await basePrisma.postBookmark.create({ data: { postId: post.id, userId: user.id, label: 'to-delete' } });
+
+      await provider.runAsync(testActor, async () => {
+        await prisma.postBookmark.delete({ where: { bookmarkKey: { postId: post.id, userId: user.id } } });
+      });
+
+      const stillExists = await basePrisma.postBookmark.findUnique({
+        where: { bookmarkKey: { postId: post.id, userId: user.id } },
+      });
+      expect(stillExists).toBeNull();
+
+      const deleteLogs = await basePrisma.auditLog.findMany({
+        where: { entityType: 'PostBookmark', action: 'delete' },
+        orderBy: { aggregateType: 'asc' },
+      });
+      expect(deleteLogs.map((log) => [log.entityId, log.aggregateType])).toEqual([
+        [compositeEntityId(post.id, user.id), 'Post'],
+        [compositeEntityId(post.id, user.id), 'PostBookmark'],
+      ]);
+      expect(deleteLogs.find((log) => log.aggregateType === 'Post')?.aggregateId).toBe(post.id);
+      for (const log of deleteLogs) {
+        expect(log.before).toBeNull();
+        expect(log.after).toBeNull();
+      }
+      expect(observer).not.toHaveBeenCalled();
+    });
+  });
+
   describe('nested connectOrCreate via the named compound key', () => {
     it('creates a new row and records the real composite entityId with action=create', async () => {
       const { basePrisma, prisma, provider, observer } = createScenario({ fetchBeforeDelete: true });

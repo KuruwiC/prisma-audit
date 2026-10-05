@@ -58,4 +58,28 @@ describe('Transaction Atomicity (Behavioral)', () => {
     const before = log.before as Record<string, unknown>;
     expect(before.name).toBe('Before Update');
   });
+
+  it('should leave no audit logs and no rows when the transaction rolls back', async () => {
+    const h = getHarness();
+    const failure = new Error('abort the transaction');
+
+    await expect(
+      h.runWithContext(actor, () =>
+        h.withTransaction(async (tx) => {
+          const user = await tx.createOne('User', {
+            email: 'rolled-back@example.com',
+            name: 'Rolled Back',
+            password: 'secret',
+          });
+          await tx.createOne('Post', { title: 'Rolled Back Post', content: 'Content', authorId: user.id as string });
+          await tx.updateOne('User', { id: user.id }, { name: 'Rolled Back Again' });
+          throw failure;
+        }),
+      ),
+    ).rejects.toBe(failure);
+
+    expect(await h.findMany('User')).toHaveLength(0);
+    expect(await h.findMany('Post')).toHaveLength(0);
+    expect(await h.countAuditLogs()).toBe(0);
+  });
 });

@@ -122,6 +122,121 @@ describe('id-resolver-call failures', () => {
     }
   });
 
+  describe('an entity idResolver throwing in a write of one record', () => {
+    const resolverError = new Error('entity id resolver is broken');
+
+    const createBrokenIdClient = (observer: AuditErrorObserver) =>
+      createClient(
+        defineEntity({
+          type: 'Post',
+          idResolver: async (post) => {
+            if (post.title === BROKEN_TITLE) throw resolverError;
+            return post.id as string;
+          },
+          aggregates: [to('User', foreignKey('authorId'))],
+        }),
+        observer,
+      );
+
+    it('a create is persisted, gets no entry, and is reported once', async () => {
+      const observer = vi.fn<AuditErrorObserver>();
+      const { basePrisma, provider, prisma } = createBrokenIdClient(observer);
+
+      try {
+        const author = await createAuthor();
+
+        const created = await provider.runAsync(testActor, async () =>
+          prisma.post.create({ data: { title: BROKEN_TITLE, authorId: author.id } }),
+        );
+
+        expect(await context.basePrisma.post.findMany({ select: { id: true } })).toEqual([{ id: created.id }]);
+        expect(await postLogs()).toEqual([]);
+        expect(observer).toHaveBeenCalledTimes(1);
+        expect(observer).toHaveBeenCalledWith({
+          phase: 'id-resolver-call',
+          modelName: 'Post',
+          operation: 'create',
+          params: { identity: created.id, resolver: { kind: 'entity' } },
+          error: resolverError,
+        });
+      } finally {
+        await prisma.$disconnect();
+        await basePrisma.$disconnect();
+      }
+    });
+
+    it('an update is persisted, gets no entry, and is reported once', async () => {
+      const observer = vi.fn<AuditErrorObserver>();
+      const { basePrisma, provider, prisma } = createBrokenIdClient(observer);
+
+      try {
+        const author = await createAuthor();
+        const post = await context.basePrisma.post.create({ data: { title: 'ok', authorId: author.id } });
+
+        const updated = await provider.runAsync(testActor, async () =>
+          prisma.post.update({ where: { id: post.id }, data: { title: BROKEN_TITLE } }),
+        );
+
+        expect(updated.title).toBe(BROKEN_TITLE);
+        expect((await context.basePrisma.post.findUnique({ where: { id: post.id } }))?.title).toBe(BROKEN_TITLE);
+        expect(await postLogs()).toEqual([]);
+        expect(observer).toHaveBeenCalledTimes(1);
+        expect(observer).toHaveBeenCalledWith({
+          phase: 'id-resolver-call',
+          modelName: 'Post',
+          operation: 'update',
+          params: { identity: post.id, resolver: { kind: 'entity' } },
+          error: resolverError,
+        });
+      } finally {
+        await prisma.$disconnect();
+        await basePrisma.$disconnect();
+      }
+    });
+
+    it('a nested create skips the failing row, keeps its sibling and the parent update, and reports once', async () => {
+      const observer = vi.fn<AuditErrorObserver>();
+      const { basePrisma, provider, prisma } = createBrokenIdClient(observer);
+
+      try {
+        const author = await createAuthor();
+
+        await provider.runAsync(testActor, async () =>
+          prisma.user.update({
+            where: { id: author.id },
+            data: {
+              name: 'Renamed',
+              posts: { create: [{ title: 'ok' }, { title: BROKEN_TITLE }] },
+            },
+          }),
+        );
+
+        const ids = await postIdsByTitle(author.id);
+        expect(Object.keys(ids).sort()).toEqual([BROKEN_TITLE, 'ok']);
+        expect(await postLogs()).toEqual([
+          { entityId: ids.ok, aggregateType: 'Post' },
+          { entityId: ids.ok, aggregateType: 'User' },
+        ]);
+        const userUpdates = await context.basePrisma.auditLog.findMany({
+          where: { entityType: 'User', entityId: author.id, action: 'update' },
+          select: { aggregateType: true, aggregateId: true },
+        });
+        expect(userUpdates).toEqual([{ aggregateType: 'User', aggregateId: author.id }]);
+        expect(observer).toHaveBeenCalledTimes(1);
+        expect(observer).toHaveBeenCalledWith({
+          phase: 'id-resolver-call',
+          modelName: 'Post',
+          operation: 'create',
+          params: { identity: ids[BROKEN_TITLE], resolver: { kind: 'entity' } },
+          error: resolverError,
+        });
+      } finally {
+        await prisma.$disconnect();
+        await basePrisma.$disconnect();
+      }
+    });
+  });
+
   it("a to() resolver throwing for one row skips only that row's entry under the aggregate, reports it, and the write succeeds", async () => {
     const resolverError = new Error('aggregate resolver is broken');
     const observer = vi.fn<AuditErrorObserver>();
