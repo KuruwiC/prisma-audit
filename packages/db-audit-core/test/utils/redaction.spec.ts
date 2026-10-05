@@ -502,6 +502,46 @@ describe('structuredClone support in redactSensitiveData', () => {
     }
   });
 
+  it('should redact the uncloned data when neither structuredClone nor JSON can copy it', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const toJSON = () => undefined;
+      const data = { id: 1, password: 'secret', toJSON };
+
+      const redacted = redactSensitiveData(data);
+
+      expect(warn).toHaveBeenCalledTimes(2);
+      expect(warn.mock.calls[1]).toEqual([
+        '[db-audit-core] Cannot stringify data for redaction fallback. Applying redaction in-place.',
+      ]);
+      expect(redacted).toStrictEqual({ id: 1, password: { redacted: true, hadValue: true }, toJSON });
+      expect(data.password).toBe('secret');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('should redact the uncloned data when the JSON fallback throws', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const toJSON = () => {
+        throw new Error('not serializable');
+      };
+      const data = { id: 1, password: 'secret', toJSON };
+
+      const redacted = redactSensitiveData(data);
+
+      expect(warn).toHaveBeenCalledTimes(2);
+      expect(warn.mock.calls[1]).toEqual([
+        '[db-audit-core] Cannot clone data for redaction. Applying redaction in-place.',
+      ]);
+      expect(redacted).toStrictEqual({ id: 1, password: { redacted: true, hadValue: true }, toJSON });
+      expect(data.password).toBe('secret');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it('should handle nested objects with Date and BigInt', () => {
     const data = {
       user: {

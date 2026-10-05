@@ -80,6 +80,18 @@ describe('runEnricher', () => {
       const result = await runEnricher(config, {}, null, 5000);
       expect(result).toBeNull();
     });
+
+    it('should return null even when a fallback is configured', async () => {
+      const config = {
+        enricher: async (): Promise<{ default: boolean }> => {
+          throw new Error('enricher failed');
+        },
+        onError: 'skip' as const,
+        fallback: { default: true },
+      };
+      const result = await runEnricher(config, {}, null, 5000);
+      expect(result).toBeNull();
+    });
   });
 
   describe('error strategy: custom function', () => {
@@ -94,6 +106,21 @@ describe('runEnricher', () => {
       const result = await runEnricher(config, {}, null, 5000);
       expect(result).toEqual({ recovered: true });
       expect(handler).toHaveBeenCalledWith(expect.objectContaining({ message: 'enricher failed' }));
+    });
+
+    it.each([
+      ['null', null],
+      ['undefined', undefined],
+    ])('should return the fallback when the custom handler returns %s', async (_label, handlerResult) => {
+      const config = {
+        enricher: async (): Promise<{ default: boolean }> => {
+          throw new Error('enricher failed');
+        },
+        onError: () => handlerResult,
+        fallback: { default: true },
+      };
+      const result = await runEnricher(config, {}, null, 5000);
+      expect(result).toEqual({ default: true });
     });
 
     it('should return fallback when custom handler throws', async () => {

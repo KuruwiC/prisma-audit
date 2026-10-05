@@ -34,6 +34,14 @@ describe('createEntityConfigLookup', () => {
 
       expect(entity).toBeUndefined();
     });
+
+    it('should find the entity config whatever the case of the model name', () => {
+      const config = createEntityConfigLookup(createTestMapping());
+
+      expect(config.byModel('post')?.type).toBe('Post');
+      expect(config.byModel('POST')?.type).toBe('Post');
+      expect(config.byModel('cOmMeNt')?.type).toBe('Comment');
+    });
   });
 
   describe('byCategoryAndType', () => {
@@ -63,6 +71,15 @@ describe('createEntityConfigLookup', () => {
       const config = createEntityConfigLookup(createTestMapping());
 
       expect(config.isLoggable('NonExistent')).toBe(false);
+    });
+
+    it('should treat the model name case-insensitively', () => {
+      const config = createEntityConfigLookup(createTestMapping());
+
+      expect(config.isLoggable('user')).toBe(true);
+      expect(config.isLoggable('USER')).toBe(true);
+      expect(config.isLoggable('comment')).toBe(true);
+      expect(config.isLoggable('users')).toBe(false);
     });
   });
 

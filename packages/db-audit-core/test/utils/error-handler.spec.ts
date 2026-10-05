@@ -67,6 +67,35 @@ describe('createErrorHandler', () => {
 
       consoleErrorSpy.mockRestore();
     });
+
+    it("should log a custom handler's synchronous throw instead of propagating it", () => {
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const handler = createErrorHandler('ignore', () => {
+        throw new Error('handler failed');
+      });
+
+      expect(() => handler(new Error('Test error'), 'test context')).not.toThrow();
+      expect(consoleErrorSpy.mock.calls).toEqual([
+        ['[db-audit-core] Error in custom error handler:', 'handler failed'],
+      ]);
+
+      consoleErrorSpy.mockRestore();
+    });
+
+    it("should log a custom handler's rejection instead of propagating it", async () => {
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const rejection = Promise.reject(new Error('handler rejected'));
+      const handler = createErrorHandler('ignore', () => rejection);
+
+      expect(() => handler(new Error('Test error'), 'test context')).not.toThrow();
+      await rejection.catch(() => {});
+
+      expect(consoleErrorSpy.mock.calls).toEqual([
+        ['[db-audit-core] Error in async custom error handler:', 'handler rejected'],
+      ]);
+
+      consoleErrorSpy.mockRestore();
+    });
   });
 
   describe('default strategy', () => {

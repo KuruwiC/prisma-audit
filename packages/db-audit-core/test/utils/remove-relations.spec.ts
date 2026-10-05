@@ -98,6 +98,23 @@ describe('removeRelations', () => {
       });
     });
 
+    it('should keep a nested key that shares a relation field name', () => {
+      const input = {
+        id: 'post-1',
+        author: { id: 'user-1' },
+        metadata: { author: 'imported', tags: ['a'] },
+        revisions: [{ author: 'editor-1' }],
+      };
+
+      const result = removeRelations(input, new Set(['author', 'tags']));
+
+      expect(result).toEqual({
+        id: 'post-1',
+        metadata: { author: 'imported', tags: ['a'] },
+        revisions: [{ author: 'editor-1' }],
+      });
+    });
+
     it('should not mutate the original object', () => {
       const input = {
         id: 'comment-1',

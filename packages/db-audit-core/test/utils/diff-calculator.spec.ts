@@ -65,6 +65,18 @@ describe('createDiffCalculator', () => {
     });
   });
 
+  describe('fields present in only one state', () => {
+    it('should report a field only in before as changed to undefined', () => {
+      const result = calculateDiff({ id: '1', nickname: 'Al' }, { id: '1' });
+      expect(result).toStrictEqual({ nickname: { old: 'Al', new: undefined } });
+    });
+
+    it('should report a field only in after as changed from undefined', () => {
+      const result = calculateDiff({ id: '1' }, { id: '1', nickname: 'Al' });
+      expect(result).toStrictEqual({ nickname: { old: undefined, new: 'Al' } });
+    });
+  });
+
   describe('null/undefined states', () => {
     it('should return null when before is null', () => {
       expect(calculateDiff(null, { id: '1', balance: 100n })).toBeNull();
