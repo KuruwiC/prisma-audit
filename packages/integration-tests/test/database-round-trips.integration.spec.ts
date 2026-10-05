@@ -476,4 +476,67 @@ describe('Database Round-Trip Guard: fields an entity lists in auditOmittedField
     // 8. COMMIT
     expect(statements).toHaveLength(8);
   });
+
+  it.each([2, 3])('createMany (%i rows) whose data leaves the listed field unset issues 6 statements', async (rows) => {
+    await provider.runAsync(testActor, async () => {
+      await prisma.user.createMany({
+        data: Array.from({ length: rows }, (_, index) => ({
+          email: `omitted-create-many-${rows}-${index}@example.com`,
+          name: `CreateMany ${index}`,
+        })),
+      });
+    });
+
+    console.log(`createMany with an omitted field (${rows} rows): ${statements.length} SQL statements`);
+    // 1. BEGIN                  — Prisma's own transaction around a write of several rows
+    // 2. INSERT INTO users      — the caller's own createMany, every row in one statement
+    // 3. COMMIT
+    // 4. BEGIN                  — Prisma's own transaction around a write of several rows
+    // 5. INSERT INTO audit_logs — one batched write covering every created row
+    // 6. COMMIT
+    // The listed field is nullable without a default, so a row its data leaves it out of holds null,
+    // and the written rows are not read back.
+    expect(statements).toHaveLength(6);
+  });
+
+  describe('a listed field the database fills with a default', () => {
+    let prismaListingPublished: ReturnType<typeof createAuditClient>;
+
+    beforeAll(() => {
+      prismaListingPublished = createAuditClient(basePrisma, {
+        Prisma,
+        provider,
+        aggregateMapping: {
+          User: defineEntity({ type: 'User', excludeFields: ['updatedAt'] }),
+          Post: defineEntity({ type: 'Post', auditOmittedFields: ['content', 'published'] }),
+        },
+      });
+    });
+
+    it.each([2, 3])(
+      'createMany (%i rows) whose data leaves it out issues 7 statements, one read of the listed fields',
+      async (rows) => {
+        const author = await basePrisma.user.create({ data: { email: `omitted-default-${rows}@example.com` } });
+        statements.length = 0;
+
+        await provider.runAsync(testActor, async () => {
+          await prismaListingPublished.post.createMany({
+            data: Array.from({ length: rows }, (_, index) => ({ title: `Post ${index}`, authorId: author.id })),
+          });
+        });
+
+        console.log(
+          `createMany leaving out a listed field with a default (${rows} rows): ${statements.length} SQL statements`,
+        );
+        // 1. BEGIN                  — Prisma's own transaction around a write of several rows
+        // 2. INSERT INTO posts      — the caller's own createMany, every row in one statement
+        // 3. COMMIT
+        // 4. SELECT FROM posts      — the listed fields of every created row, read by primary key at once
+        // 5. BEGIN                  — Prisma's own transaction around a write of several rows
+        // 6. INSERT INTO audit_logs — one batched write covering every created row
+        // 7. COMMIT
+        expect(statements).toHaveLength(7);
+      },
+    );
+  });
 });
