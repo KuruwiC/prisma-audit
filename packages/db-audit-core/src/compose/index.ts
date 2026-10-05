@@ -23,8 +23,6 @@ export interface ComposeConfig<TModelName extends string = string> {
   readonly excludeFields: readonly string[];
   readonly redact?: RedactConfig;
   readonly serialization?: SerializationConfig;
-  /** Whether relation objects stay in the stored states (default: false, they are stripped); `changes` never compares them */
-  readonly includeRelations?: boolean;
   /** Relation field names of a model, as the adapter derives them from its schema; undefined strips nothing. */
   readonly relationFieldNames: (model: TModelName) => ReadonlySet<string> | undefined;
 }
@@ -116,9 +114,7 @@ const resolveStates = <TModelName extends string>(
     return undefined;
   }
 
-  const states = config.includeRelations
-    ? { before, after, changes }
-    : { before: beforeColumns, after: afterColumns, changes };
+  const states = { before: beforeColumns, after: afterColumns, changes };
   return config.redact ? redactStates(states, config.redact) : states;
 };
 

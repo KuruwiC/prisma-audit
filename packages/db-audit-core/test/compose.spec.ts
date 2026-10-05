@@ -394,13 +394,7 @@ describe('compose', () => {
       expect(composeOne(event({ after: row })).after).toEqual(row);
     });
 
-    it('keeps relations when they are included', () => {
-      const record = composeOne(event({ after: row }), { ...authorRelation, includeRelations: true });
-
-      expect(record.after).toEqual(row);
-    });
-
-    it('strips relations by default', () => {
+    it('strips the relation fields from the after state', () => {
       expect(composeOne(event({ after: row }), authorRelation).after).toEqual(stripped);
     });
 
@@ -415,20 +409,6 @@ describe('compose', () => {
         const resolved = updateEvent(stripped, { ...row, authorId: 'user-2' });
 
         expect(composeOne(resolved, authorRelation).changes).toEqual({ authorId: { old: 'user-9', new: 'user-2' } });
-      });
-
-      it('compares the columns only when relations are included in the stored states', () => {
-        const resolved = updateEvent(stripped, { ...row, authorId: 'user-2' });
-        const record = composeOne(resolved, { ...authorRelation, includeRelations: true });
-
-        expect(record.changes).toEqual({ authorId: { old: 'user-9', new: 'user-2' } });
-        expect(record.after).toEqual({ ...row, authorId: 'user-2' });
-      });
-
-      it('skips an update whose states differ only in a relation field when relations are included', () => {
-        const resolved = updateEvent(stripped, row);
-
-        expect(compose([resolved], ambient({ ...authorRelation, includeRelations: true }), now)).toEqual([]);
       });
 
       it('records an update without a before state whose row holds a relation, without changes', () => {
