@@ -39,6 +39,29 @@ describe('Password Changes Detection', () => {
     await testPrisma.$disconnect();
   });
 
+  it('should store the password of a created user redacted in the audit log', async () => {
+    const user = await auditProvider.runAsync(testActor, async () => {
+      return await testPrisma.user.create({
+        data: {
+          email: 'create-password@example.com',
+          name: 'Create Password User',
+          password: 'createPassword789',
+        },
+      });
+    });
+
+    const auditLogs = await testPrisma.auditLog.findMany({
+      where: { entityType: 'User', entityId: user.id, action: 'create' },
+    });
+
+    expect(auditLogs).toHaveLength(1);
+    const log = auditLogs[0];
+
+    expect(log?.before).toBeNull();
+    expectMaskedPassword(log?.after);
+    expectPlaintextAbsent(log, ['createPassword789']);
+  });
+
   it('should track password-only changes in audit log changes field', async () => {
     const user = await auditProvider.runAsync(testActor, async () => {
       return await testPrisma.user.create({

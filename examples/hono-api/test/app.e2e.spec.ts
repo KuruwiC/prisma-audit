@@ -154,6 +154,47 @@ describe('Hono + Prisma Audit E2E Tests', () => {
       expect(log.after).toMatchObject({ name: 'Updated Name' });
     });
 
+    it('should store a password changed through PATCH /users/:id redacted in the audit log', async () => {
+      const user = await testPrisma.user.create({
+        data: {
+          email: 'patch-password@example.com',
+          name: 'Patch Password',
+          password: 'oldHttpPassword123',
+        },
+      });
+      await testPrisma.auditLog.deleteMany();
+
+      const res = await app.request(`/users/${user.id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Actor-Id': 'admin-789',
+          'X-Actor-Type': 'AdminUser',
+        },
+        body: JSON.stringify({ password: 'newHttpPassword456' }),
+      });
+      expect(res.status).toBe(200);
+
+      const auditLogs = await testPrisma.auditLog.findMany({
+        where: { entityType: 'User', entityId: user.id, action: 'update' },
+      });
+      expect(auditLogs).toHaveLength(1);
+      const log = auditLogs[0];
+      expect(log?.actorId).toBe('admin-789');
+      expect(log?.changes).toStrictEqual({
+        password: {
+          old: { redacted: true, hadValue: true },
+          new: { redacted: true, hadValue: true, isDifferent: true },
+        },
+      });
+      expect(log?.before).toMatchObject({ password: { redacted: true, hadValue: true } });
+      expect(log?.after).toMatchObject({ password: { redacted: true, hadValue: true } });
+
+      const serialized = JSON.stringify(log);
+      expect(serialized).not.toContain('oldHttpPassword123');
+      expect(serialized).not.toContain('newHttpPassword456');
+    });
+
     it('should delete user and generate audit log', async () => {
       const user = await testPrisma.user.create({
         data: {
