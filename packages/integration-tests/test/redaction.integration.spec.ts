@@ -149,4 +149,52 @@ describe('PII Redaction Integration', () => {
 
     expect(log.after).toBeNull();
   });
+
+  it('should store a null password as null instead of redaction metadata, before and after a change to a value', async () => {
+    const user = await context.provider.runAsync(testActor, async () => {
+      return await context.prisma.user.create({
+        data: { email: 'no-password@example.com', name: 'No Password' },
+      });
+    });
+
+    await context.provider.runAsync(testActor, async () => {
+      await context.prisma.user.update({
+        where: { id: user.id },
+        data: { password: 'first-password' },
+      });
+    });
+
+    await context.provider.runAsync(testActor, async () => {
+      await context.prisma.user.update({
+        where: { id: user.id },
+        data: { password: null },
+      });
+    });
+
+    const logs: Array<{ action: string; before: unknown; after: unknown; changes: unknown }> =
+      await context.prisma.auditLog.findMany({
+        where: { entityType: 'User', entityId: user.id, aggregateType: 'User' },
+      });
+    const passwordOf = (state: unknown) => (state as Record<string, unknown>).password;
+    const created = logs.find((log) => log.action === 'create');
+    const updates = logs.filter((log) => log.action === 'update');
+    expect(logs).toHaveLength(3);
+    expect(updates).toHaveLength(2);
+    const setPassword = updates.find((log) => passwordOf(log.before) === null);
+    const clearedPassword = updates.find((log) => passwordOf(log.after) === null);
+
+    expect(passwordOf(created?.after)).toBeNull();
+
+    expect(passwordOf(setPassword?.after)).toEqual({ redacted: true, hadValue: true });
+    expect(passwordOf(setPassword?.changes)).toEqual({
+      old: null,
+      new: { redacted: true, hadValue: true, isDifferent: true },
+    });
+
+    expect(passwordOf(clearedPassword?.before)).toEqual({ redacted: true, hadValue: true });
+    expect(passwordOf(clearedPassword?.changes)).toEqual({
+      old: { redacted: true, hadValue: true },
+      new: null,
+    });
+  });
 });
