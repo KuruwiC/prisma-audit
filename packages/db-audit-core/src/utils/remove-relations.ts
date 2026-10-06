@@ -1,77 +1,21 @@
-const isObjectValue = (value: unknown): value is Record<string, unknown> => {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) && !(value instanceof Date);
-};
-
-const processObjectEntry = <T>(
-  key: string,
-  value: unknown,
-  recurse: (obj: T) => T,
-  relationFieldNames: ReadonlySet<string> | undefined,
-): [string, unknown] | null => {
-  if (relationFieldNames?.has(key)) {
-    return null;
-  }
-
-  if (value instanceof Date) {
-    return [key, value];
-  }
-
-  if (isObjectValue(value)) {
-    return [key, recurse(value as T)];
-  }
-
-  if (Array.isArray(value)) {
-    return [key, value.map(recurse)];
-  }
-
-  return [key, value];
-};
-
 /**
  * Remove the keys of a row that hold related data rather than its own columns
  *
- * Only the top-level keys named in `relationFieldNames` are removed; nested values are copied as
- * they are. Without it, the data comes back unchanged: relations are not detected heuristically,
- * to avoid false positives.
+ * Only the top-level keys named in `relationFieldNames` are removed. Column values are kept as
+ * they are, so a `Uint8Array`, a decimal instance or a JSON value still reaches the diff and the
+ * custom serializers. Without `relationFieldNames`, every key is kept: relations are not detected
+ * heuristically, to avoid false positives.
  *
  * @param relationFieldNames - The keys of a row that are not its columns: relation fields and
  *   ORM-returned aggregates such as `_count`
  *
  * @example
  * ```typescript
- * // With field names (precise removal)
- * removeRelations(input, new Set(['post', 'author']));
- *
- * // Without field names (no removal)
- * removeRelations(input);
- * // => input (unchanged)
+ * removeRelations({ id: 'c1', postId: 'p1', post: { id: 'p1' } }, new Set(['post']));
+ * // => { id: 'c1', postId: 'p1' }
  * ```
  */
-export const removeRelations = <T>(obj: T, relationFieldNames?: ReadonlySet<string>): T => {
-  if (!obj || typeof obj !== 'object') {
-    return obj;
-  }
-
-  if (Array.isArray(obj)) {
-    return obj.map((item) => removeRelations(item)) as T;
-  }
-
-  if (obj instanceof Date) {
-    return obj;
-  }
-
-  const result = {} as Record<string, unknown>;
-  const recurse = (v: T) => removeRelations(v);
-
-  for (const key of Object.keys(obj)) {
-    const value = (obj as Record<string, unknown>)[key];
-    const entry = processObjectEntry(key, value, recurse, relationFieldNames);
-
-    if (entry !== null) {
-      const [entryKey, entryValue] = entry;
-      result[entryKey] = entryValue;
-    }
-  }
-
-  return result as T;
-};
+export const removeRelations = (
+  row: Readonly<Record<string, unknown>>,
+  relationFieldNames?: ReadonlySet<string>,
+): Record<string, unknown> => Object.fromEntries(Object.entries(row).filter(([key]) => !relationFieldNames?.has(key)));

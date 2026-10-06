@@ -527,5 +527,20 @@ describe('compose', () => {
 
       expect(record.actorContext).toEqual({ data: 'bytes:3' });
     });
+
+    it('applies the custom serializers to the column values of the states and changes', () => {
+      const record = composeOne(
+        updateEvent({ id: 'post-1', data: new Uint8Array([1]) }, { id: 'post-1', data: new Uint8Array([1, 2, 3]) }),
+        {
+          serialization: {
+            customSerializers: [(value) => (value instanceof Uint8Array ? `bytes:${value.length}` : UNHANDLED)],
+          },
+        },
+      );
+
+      expect(record.before).toEqual({ id: 'post-1', data: 'bytes:1' });
+      expect(record.after).toEqual({ id: 'post-1', data: 'bytes:3' });
+      expect(record.changes).toEqual({ data: { old: 'bytes:1', new: 'bytes:3' } });
+    });
   });
 });

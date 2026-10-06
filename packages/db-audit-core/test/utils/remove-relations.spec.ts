@@ -115,17 +115,21 @@ describe('removeRelations', () => {
       });
     });
 
-    it('should copy the elements of a top-level array without removing their relation fields', () => {
-      const input = [
-        { id: 'comment-1', author: { id: 'user-1' } },
-        { id: 'comment-2', author: { id: 'user-2' } },
-      ];
+    it('should pass the column values through as they are, class instances included', () => {
+      const input = {
+        id: 'file-1',
+        data: Buffer.from('hi'),
+        bytes: new Uint8Array([1, 2]),
+        metadata: { tags: ['a'] },
+        owner: { id: 'user-1' },
+      };
 
-      const result = removeRelations(input, new Set(['author']));
+      const result = removeRelations(input, new Set(['owner']));
 
-      expect(result).toEqual(input);
-      expect(result).not.toBe(input);
-      expect(result[0]).not.toBe(input[0]);
+      expect(Object.keys(result)).toEqual(['id', 'data', 'bytes', 'metadata']);
+      expect(result.data).toBe(input.data);
+      expect(result.bytes).toBe(input.bytes);
+      expect(result.metadata).toBe(input.metadata);
     });
 
     it('should not mutate the original object', () => {
@@ -202,14 +206,6 @@ describe('removeRelations', () => {
       const result = removeRelations(input);
 
       expect(result).toEqual(input);
-    });
-
-    it('should handle primitive values', () => {
-      expect(removeRelations('string')).toBe('string');
-      expect(removeRelations(123)).toBe(123);
-      expect(removeRelations(true)).toBe(true);
-      expect(removeRelations(null)).toBe(null);
-      expect(removeRelations(undefined)).toBe(undefined);
     });
 
     it('should handle arrays of primitive values', () => {
