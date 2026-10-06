@@ -90,7 +90,7 @@ describe('Write Strategy Tests', () => {
             },
           });
 
-          expect(user).toBeDefined();
+          expect(user.email).toBe('test@example.com');
 
           const users = await db.user.findMany();
           expect(users.length).toBe(1);
@@ -101,7 +101,7 @@ describe('Write Strategy Tests', () => {
               action: 'create',
             },
           });
-          expect(auditLogs.length).toBeGreaterThan(0);
+          expect(auditLogs).toHaveLength(1);
         },
       );
 
@@ -138,7 +138,8 @@ describe('Write Strategy Tests', () => {
             },
           });
 
-          expect(user).toBeDefined();
+          // The audit write is still pending when the create resolves
+          expect(getPendingWriteCount()).toBe(1);
 
           const users = await db.user.findMany();
           expect(users.length).toBe(1);
@@ -154,7 +155,7 @@ describe('Write Strategy Tests', () => {
               action: 'create',
             },
           });
-          expect(auditLogs.length).toBeGreaterThan(0);
+          expect(auditLogs).toHaveLength(1);
         },
       );
 
@@ -209,7 +210,11 @@ describe('Write Strategy Tests', () => {
           expect(getPendingWriteCount()).toBe(0);
 
           const auditLogs = await db.auditLog.findMany();
-          expect(auditLogs.length).toBeGreaterThan(0);
+          expect(auditLogs.map((log) => `${log.entityType}/${log.aggregateType}`).sort()).toEqual([
+            'Post/Post',
+            'Post/User',
+            'User/User',
+          ]);
         },
       );
 
@@ -246,7 +251,7 @@ describe('Write Strategy Tests', () => {
             },
           });
 
-          expect(user).toBeDefined();
+          expect(user.email).toBe('test@example.com');
 
           const updated = await prisma.user.update({
             where: { id: user.id },
@@ -271,8 +276,9 @@ describe('Write Strategy Tests', () => {
             },
           });
 
-          expect(createLogs.length).toBeGreaterThan(0);
-          expect(updateLogs.length).toBeGreaterThan(0);
+          expect(createLogs).toHaveLength(1);
+          expect(updateLogs).toHaveLength(1);
+          expect(updateLogs[0]?.changes).toMatchObject({ name: { old: 'Test User', new: 'Updated Name' } });
         },
       );
 
@@ -320,8 +326,8 @@ describe('Write Strategy Tests', () => {
             return { user, post };
           });
 
-          expect(result.user).toBeDefined();
-          expect(result.post).toBeDefined();
+          expect(result.user.email).toBe('test@example.com');
+          expect(result.post.authorId).toBe(result.user.id);
 
           const userLogs = await db.auditLog.findMany({
             where: {
@@ -337,8 +343,8 @@ describe('Write Strategy Tests', () => {
             },
           });
 
-          expect(userLogs.length).toBeGreaterThan(0);
-          expect(postLogs.length).toBeGreaterThan(0);
+          expect(userLogs).toHaveLength(1);
+          expect(postLogs).toHaveLength(2);
         },
       );
 
