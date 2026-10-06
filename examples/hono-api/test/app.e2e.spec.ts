@@ -12,8 +12,6 @@ import { testPrisma } from './setup.js';
 describe('Hono + Prisma Audit E2E Tests', () => {
   const app = createApp();
 
-  beforeEach(async () => {});
-
   describe('GET /health', () => {
     it('should return health status', async () => {
       const res = await app.request('/health');
@@ -55,7 +53,7 @@ describe('Hono + Prisma Audit E2E Tests', () => {
         },
       });
 
-      expect(auditLogs.length).toBeGreaterThanOrEqual(1);
+      expect(auditLogs).toHaveLength(1);
       const log = auditLogs[0];
       expect(log?.actorId).toBe('admin-123');
       expect(log?.actorType).toBe('AdminUser');
@@ -79,7 +77,7 @@ describe('Hono + Prisma Audit E2E Tests', () => {
 
       expect(res.status).toBe(200);
       const users = (await res.json()) as User[];
-      expect(users.length).toBeGreaterThanOrEqual(2);
+      expect(users).toHaveLength(2);
     });
 
     it('should get user by id', async () => {
@@ -228,7 +226,7 @@ describe('Hono + Prisma Audit E2E Tests', () => {
         },
       });
 
-      expect(auditLogs.length).toBeGreaterThanOrEqual(1);
+      expect(auditLogs).toHaveLength(1);
       const log = auditLogs[0];
       expect(log.actorId).toBe('admin-789');
     });
@@ -280,7 +278,7 @@ describe('Hono + Prisma Audit E2E Tests', () => {
         },
       });
 
-      expect(auditLogs.length).toBeGreaterThanOrEqual(2);
+      expect(auditLogs).toHaveLength(2);
 
       const postLog = auditLogs.find((log: AuditLog) => log.aggregateType === 'Post');
       expect(postLog).toBeDefined();
@@ -315,7 +313,7 @@ describe('Hono + Prisma Audit E2E Tests', () => {
 
       expect(res.status).toBe(200);
       const posts = (await res.json()) as Post[];
-      expect(posts.length).toBeGreaterThanOrEqual(2);
+      expect(posts).toHaveLength(2);
     });
 
     it('should get post by id', async () => {
@@ -375,7 +373,14 @@ describe('Hono + Prisma Audit E2E Tests', () => {
         },
       });
 
-      expect(auditLogs.length).toBeGreaterThanOrEqual(2);
+      expect(auditLogs.map((log: AuditLog) => log.aggregateType).sort()).toEqual(['Post', 'User']);
+      for (const log of auditLogs) {
+        expect(log.actorId).toBe(testUser.id);
+        expect(log.changes).toStrictEqual({
+          title: { old: 'Original Title', new: 'Updated Title' },
+          published: { old: false, new: true },
+        });
+      }
     });
 
     it('should delete post and generate audit logs', async () => {
@@ -410,7 +415,7 @@ describe('Hono + Prisma Audit E2E Tests', () => {
         },
       });
 
-      expect(auditLogs.length).toBeGreaterThanOrEqual(2);
+      expect(auditLogs.map((log: AuditLog) => log.aggregateType).sort()).toEqual(['Post', 'User']);
     });
   });
 
@@ -477,7 +482,7 @@ describe('Hono + Prisma Audit E2E Tests', () => {
 
       expect(res.status).toBe(200);
       const logs = (await res.json()) as AuditLog[];
-      expect(logs.length).toBeGreaterThan(0);
+      expect(logs).toHaveLength(2);
     });
 
     it('should filter audit logs by aggregateType', async () => {
@@ -621,7 +626,7 @@ describe('Hono + Prisma Audit E2E Tests', () => {
         },
       });
 
-      expect(postTagLogs.length).toBeGreaterThan(0);
+      expect(postTagLogs).toHaveLength(2);
 
       // With self: false, PostTag should NOT have itself as aggregate root
       const aggregateTypes = postTagLogs.map((log: AuditLog) => log.aggregateType);
@@ -719,7 +724,7 @@ describe('Hono + Prisma Audit E2E Tests', () => {
         },
       });
 
-      expect(initialAttachmentLogs.length).toBeGreaterThan(0);
+      expect(initialAttachmentLogs).toHaveLength(2);
       const userAggregateLog = initialAttachmentLogs.find(
         (log: AuditLog) => log.aggregateType === 'User' && log.aggregateId === owner.id,
       );
@@ -760,7 +765,7 @@ describe('Hono + Prisma Audit E2E Tests', () => {
         },
       });
 
-      expect(updateLogs.length).toBeGreaterThan(0);
+      expect(updateLogs).toHaveLength(3);
 
       const updateAggregateTypes = updateLogs.map((log: AuditLog) => log.aggregateType);
       expect(updateAggregateTypes).toContain('User');
@@ -804,7 +809,7 @@ describe('Hono + Prisma Audit E2E Tests', () => {
       });
       const user = (await userRes.json()) as User;
 
-      // Create post with tags in transaction (1 tag to avoid SQLite timeout)
+      // Create post with tags in transaction
       const res = await app.request('/posts-with-tags', {
         method: 'POST',
         headers: {
@@ -831,7 +836,7 @@ describe('Hono + Prisma Audit E2E Tests', () => {
       const post = await testPrisma.post.findUnique({
         where: { id: result.post.id },
       });
-      expect(post).toBeDefined();
+      expect(post).not.toBeNull();
 
       // Verify tags were created
       const tags = await testPrisma.tag.findMany({
@@ -853,7 +858,7 @@ describe('Hono + Prisma Audit E2E Tests', () => {
           action: 'create',
         },
       });
-      expect(postLogs.length).toBeGreaterThanOrEqual(1);
+      expect(postLogs).toHaveLength(2);
 
       // Verify Tag audit logs (upsert creates 'create' or 'update' action)
       for (const tag of tags) {
@@ -863,10 +868,8 @@ describe('Hono + Prisma Audit E2E Tests', () => {
             entityId: tag.id,
           },
         });
-        expect(tagLogs.length).toBeGreaterThanOrEqual(1);
-        // Upsert operation should have 'create' or 'update' action (not 'upsert')
-        const actions = tagLogs.map((log: AuditLog) => log.action);
-        expect(actions.some((action: string) => action === 'create' || action === 'update')).toBe(true);
+        // The upsert of a new tag is recorded as a single 'create' (not 'upsert')
+        expect(tagLogs.map((log: AuditLog) => log.action)).toEqual(['create']);
       }
 
       // Verify PostTag audit logs (with self: false, should not have PostTag aggregate)
@@ -877,7 +880,7 @@ describe('Hono + Prisma Audit E2E Tests', () => {
             entityId: postTag.id,
           },
         });
-        expect(postTagLogs.length).toBeGreaterThan(0);
+        expect(postTagLogs).toHaveLength(2);
         const aggregateTypes = postTagLogs.map((log: AuditLog) => log.aggregateType);
         expect(aggregateTypes).not.toContain('PostTag'); // self: false
         expect(aggregateTypes).toContain('Post');
@@ -910,8 +913,8 @@ describe('Hono + Prisma Audit E2E Tests', () => {
           },
         },
         async () => {
-          try {
-            await testPrisma.$transaction(async (tx) => {
+          await expect(
+            testPrisma.$transaction(async (tx) => {
               // Create a new tag (this should succeed)
               await tx.tag.create({
                 data: { name: 'new-tag-in-transaction' },
@@ -921,11 +924,8 @@ describe('Hono + Prisma Audit E2E Tests', () => {
               await tx.tag.create({
                 data: { name: existingTag.name }, // Duplicate!
               });
-            });
-          } catch (error) {
-            // Expected to fail
-            expect(error).toBeDefined();
-          }
+            }),
+          ).rejects.toMatchObject({ code: 'P2002' });
         },
       );
 
@@ -975,7 +975,7 @@ describe('Hono + Prisma Audit E2E Tests', () => {
           action: 'create',
         },
       });
-      expect(profileLogs.length).toBeGreaterThan(0);
+      expect(profileLogs).toHaveLength(2);
       const profileAggregateTypes = profileLogs.map((log: AuditLog) => log.aggregateType);
       expect(profileAggregateTypes).toContain('User');
       expect(profileAggregateTypes).toContain('Profile');
@@ -1010,7 +1010,7 @@ describe('Hono + Prisma Audit E2E Tests', () => {
           action: 'create',
         },
       });
-      expect(avatarLogs.length).toBeGreaterThan(0);
+      expect(avatarLogs).toHaveLength(2);
       const avatarAggregateTypes = avatarLogs.map((log: AuditLog) => log.aggregateType);
       expect(avatarAggregateTypes).toContain('User'); // Resolved via relation
       expect(avatarAggregateTypes).toContain('Avatar');
@@ -1046,7 +1046,7 @@ describe('Hono + Prisma Audit E2E Tests', () => {
         },
       });
 
-      expect(avatarImageLogs.length).toBeGreaterThan(0);
+      expect(avatarImageLogs).toHaveLength(2);
       const avatarImageAggregateTypes = avatarImageLogs.map((log: AuditLog) => log.aggregateType);
       expect(avatarImageAggregateTypes).toContain('User'); // Resolved via deep callback (3 hops)
       expect(avatarImageAggregateTypes).toContain('AvatarImage');
@@ -1084,7 +1084,7 @@ describe('Hono + Prisma Audit E2E Tests', () => {
         },
       });
 
-      expect(updateLogs.length).toBeGreaterThan(0);
+      expect(updateLogs).toHaveLength(2);
       const updateAggregateTypes = updateLogs.map((log: AuditLog) => log.aggregateType);
       expect(updateAggregateTypes).toContain('User'); // Deep nesting still works on update
       expect(updateAggregateTypes).toContain('AvatarImage');
@@ -1127,7 +1127,7 @@ describe('Hono + Prisma Audit E2E Tests', () => {
         },
       });
 
-      expect(auditLogs.length).toBeGreaterThan(0);
+      expect(auditLogs).toHaveLength(1);
       const log = auditLogs[0];
       expect(log.actorId).toBe(actor.id);
       expect(log.actorType).toBe('User');
@@ -1169,7 +1169,7 @@ describe('Hono + Prisma Audit E2E Tests', () => {
         },
       });
 
-      expect(auditLogs.length).toBeGreaterThan(0);
+      expect(auditLogs).toHaveLength(1);
       const log = auditLogs[0];
       expect(log.actorCategory).toBe('anonymous');
       expect(log.actorType).toBe('Anonymous');
@@ -1187,7 +1187,7 @@ describe('Hono + Prisma Audit E2E Tests', () => {
       });
 
       // Create post WITHOUT preloading author relation
-      await auditProvider.runAsync(
+      const post = await auditProvider.runAsync(
         {
           actor: {
             category: 'model',
@@ -1197,7 +1197,7 @@ describe('Hono + Prisma Audit E2E Tests', () => {
           },
         },
         async () => {
-          await testPrisma.post.create({
+          return await testPrisma.post.create({
             data: {
               title: 'Test Post 2',
               content: 'Content 2',
@@ -1214,19 +1214,17 @@ describe('Hono + Prisma Audit E2E Tests', () => {
           entityType: 'Post',
           action: 'create',
         },
-        orderBy: {
-          createdAt: 'desc',
-        },
       });
 
-      const latestLogs = logs.slice(0, 2); // Get the two logs from this test
-      const aggregateTypes = latestLogs.map((log: AuditLog) => log.aggregateType);
-      expect(aggregateTypes).toContain('User'); // Should resolve from foreignKey (authorId)
-      expect(aggregateTypes).toContain('Post'); // Self
-
-      // Verify the User aggregate ID is correct
-      const userLog = latestLogs.find((log: AuditLog) => log.aggregateType === 'User');
-      expect(userLog?.aggregateId).toBe(user.id);
+      // The User aggregate resolves from the foreign key (authorId); the Post is its own aggregate
+      expect(
+        logs
+          .map((log: AuditLog) => [log.aggregateType, log.aggregateId])
+          .sort(([a], [b]) => String(a).localeCompare(String(b))),
+      ).toEqual([
+        ['Post', post.id],
+        ['User', user.id],
+      ]);
     });
   });
 });
