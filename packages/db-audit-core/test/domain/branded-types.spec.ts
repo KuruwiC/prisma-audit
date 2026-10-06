@@ -26,16 +26,10 @@ describe('Branded Types', () => {
     });
 
     it('should preserve the error type and fields', () => {
-      try {
-        createActorId('');
-      } catch (error) {
-        expect(error).toBeInstanceOf(IdValidationError);
-        if (error instanceof IdValidationError) {
-          expect(error.idType).toBe('ActorId');
-          expect(error.value).toBe('');
-          expect(error.name).toBe('IdValidationError');
-        }
-      }
+      expect(() => createActorId('')).toThrow(
+        expect.objectContaining({ name: 'IdValidationError', idType: 'ActorId', value: '' }),
+      );
+      expect(() => createActorId('')).toThrow(IdValidationError);
     });
   });
 

@@ -101,6 +101,20 @@ describe('Smart Constructors', () => {
       }
     });
 
+    it('should fail when createdAt is not a Date', () => {
+      const result = createAuditLogData({
+        ...validInput,
+        createdAt: '2024-01-01T00:00:00Z' as unknown as Date,
+      });
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.errors).toHaveLength(1);
+        expect(result.errors[0]?.field).toBe('createdAt');
+        expect(result.errors[0]?.message).toMatch(/must be.*valid Date/);
+      }
+    });
+
     it('should collect multiple validation errors', () => {
       const result = createAuditLogData({
         ...validInput,
@@ -113,13 +127,13 @@ describe('Smart Constructors', () => {
 
       expect(result.success).toBe(false);
       if (!result.success) {
-        expect(result.errors.length).toBeGreaterThanOrEqual(5);
-        const errorFields = result.errors.map((e) => e.field);
-        expect(errorFields).toContain('actorId');
-        expect(errorFields).toContain('entityId');
-        expect(errorFields).toContain('aggregateId');
-        expect(errorFields).toContain('actorCategory');
-        expect(errorFields).toContain('entityType');
+        expect(result.errors.map((e) => e.field)).toEqual([
+          'actorId',
+          'entityId',
+          'aggregateId',
+          'actorCategory',
+          'entityType',
+        ]);
       }
     });
 
@@ -132,10 +146,7 @@ describe('Smart Constructors', () => {
 
       expect(result.success).toBe(false);
       if (!result.success) {
-        expect(result.errors.length).toBeGreaterThanOrEqual(2);
-        const errorFields = result.errors.map((e) => e.field);
-        expect(errorFields).toContain('actorId');
-        expect(errorFields).toContain('actorCategory');
+        expect(result.errors.map((e) => e.field)).toEqual(['actorId', 'actorCategory']);
       }
     });
   });
