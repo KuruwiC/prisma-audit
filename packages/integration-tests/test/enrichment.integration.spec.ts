@@ -4,7 +4,7 @@ import type { AggregateMapping } from '@kuruwic/prisma-audit';
 import { createAuditClient, defineEntity, foreignKey, to } from '@kuruwic/prisma-audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import type { Mock } from 'vitest';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createCommentAggregateEnricher,
   createCommentAggregateMapping,
@@ -569,6 +569,68 @@ describe('Context Enrichment Integration', () => {
         expect(log.aggregateContext).toEqual({ aggregateType: 'User', aggregateId: log.aggregateId });
       }
     });
+
+    it('should run the entity enricher after the delete, when the rows that depended on the deleted row are already gone', async () => {
+      const commentCounts: number[] = [];
+      const {
+        basePrisma,
+        prisma: customPrisma,
+        provider,
+      } = openClient({
+        aggregateMapping: {
+          ...testAggregateMapping,
+          Post: defineEntity({
+            type: 'Post',
+            aggregates: [to('User', foreignKey('authorId'))],
+            context: {
+              enricher: async (posts, prisma) =>
+                Promise.all(
+                  posts.map(async (post) => {
+                    const commentCount = await prisma.comment.count({ where: { postId: post.id as string } });
+                    commentCounts.push(commentCount);
+                    return { commentCount };
+                  }),
+                ),
+            },
+          }),
+        },
+      });
+
+      const author = await basePrisma.user.create({
+        data: { email: 'cascade-author@example.com', name: 'Cascade Author', password: 'pass' },
+      });
+      const post = await basePrisma.post.create({
+        data: { title: 'Cascade Post', content: 'Content', authorId: author.id },
+      });
+      await basePrisma.comment.createMany({
+        data: [
+          { content: 'Comment 1', postId: post.id, authorId: author.id },
+          { content: 'Comment 2', postId: post.id, authorId: author.id },
+        ],
+      });
+      expect(await basePrisma.comment.count({ where: { postId: post.id } })).toBe(2);
+
+      const actor: AuditContext = {
+        actor: { category: 'model', type: 'User', id: 'cascade-delete-actor' },
+      };
+      await provider.runAsync(actor, async () => {
+        await customPrisma.post.delete({ where: { id: post.id } });
+      });
+
+      // The comments are removed with the post, so the enricher finds none of them
+      expect(commentCounts).toEqual([0]);
+      const deleteLogs = await basePrisma.auditLog.findMany({
+        where: { entityType: 'Post', entityId: post.id, action: 'delete' },
+      });
+      expect(
+        deleteLogs
+          .map((log) => [log.aggregateType, log.entityContext])
+          .sort(([a], [b]) => String(a).localeCompare(String(b))),
+      ).toEqual([
+        ['Post', { commentCount: 0 }],
+        ['User', { commentCount: 0 }],
+      ]);
+    });
   });
 
   describe('Enricher Error Handling', () => {
@@ -771,6 +833,84 @@ describe('Context Enrichment Integration', () => {
 
       expect(auditLogs).toHaveLength(1);
       expect(auditLogs[0]?.actorContext).toEqual(actorFallback);
+    });
+
+    describe("an entity enricher that throws under the default onError ('fail')", () => {
+      const enricherError = new Error('entity enricher failed');
+      const failingEntityMapping: AggregateMapping = {
+        ...testAggregateMapping,
+        User: defineEntity({
+          type: 'User',
+          excludeFields: ['updatedAt'],
+          context: {
+            enricher: async () => {
+              throw enricherError;
+            },
+          },
+        }),
+      };
+      const actor: AuditContext = {
+        actor: { category: 'model', type: 'User', id: 'entity-fail-actor' },
+      };
+
+      it('keeps the committed row and drops its audit rows outside a transaction, reporting diff-generation once', async () => {
+        const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const observer = vi.fn();
+        const {
+          basePrisma,
+          prisma: customPrisma,
+          provider,
+        } = openClient({
+          aggregateMapping: failingEntityMapping,
+          errorHandling: { observer },
+        });
+
+        try {
+          const user = await provider.runAsync(actor, async () =>
+            customPrisma.user.create({
+              data: { email: 'entity-fail@example.com', name: 'Entity Fail', password: 'pass' },
+            }),
+          );
+
+          expect(await basePrisma.user.findUnique({ where: { id: user.id } })).not.toBeNull();
+          expect(await basePrisma.auditLog.count()).toBe(0);
+          expect(observer).toHaveBeenCalledTimes(1);
+          expect(observer).toHaveBeenCalledWith(
+            expect.objectContaining({ phase: 'diff-generation', modelName: 'User', error: enricherError }),
+          );
+        } finally {
+          consoleError.mockRestore();
+        }
+      });
+
+      it('rolls the write back with its audit rows inside an interactive transaction', async () => {
+        const observer = vi.fn();
+        const {
+          basePrisma,
+          prisma: customPrisma,
+          provider,
+        } = openClient({
+          aggregateMapping: failingEntityMapping,
+          errorHandling: { observer },
+        });
+
+        await expect(
+          provider.runAsync(actor, async () =>
+            customPrisma.$transaction(async (tx) =>
+              tx.user.create({
+                data: { email: 'entity-fail-tx@example.com', name: 'Entity Fail Tx', password: 'pass' },
+              }),
+            ),
+          ),
+        ).rejects.toThrow('entity enricher failed');
+
+        expect(await basePrisma.user.count()).toBe(0);
+        expect(await basePrisma.auditLog.count()).toBe(0);
+        expect(observer).toHaveBeenCalledTimes(1);
+        expect(observer).toHaveBeenCalledWith(
+          expect.objectContaining({ phase: 'diff-generation', modelName: 'User', error: enricherError }),
+        );
+      });
     });
   });
 
@@ -1464,6 +1604,64 @@ describe('Context Enrichment Integration', () => {
       for (const log of postUserLogs) {
         const aggregateContext = log.aggregateContext as Record<string, unknown>;
         expect(aggregateContext.authorIdFromMeta).toBe(log.aggregateId);
+      }
+    });
+
+    it('should call the root-side aggregateContext enricher once per aggregate type with the unique aggregate ids', async () => {
+      const receivedIds: string[][] = [];
+      const {
+        basePrisma,
+        prisma: customPrisma,
+        provider,
+      } = openClient({
+        aggregateMapping: {
+          User: defineEntity({
+            type: 'User',
+            excludeFields: ['updatedAt'],
+            aggregateContext: {
+              enricher: async (userIds, _prisma) => {
+                receivedIds.push([...userIds]);
+                return userIds.map((id) => ({ rootUserId: id }));
+              },
+            },
+          }),
+          Post: defineEntity({
+            type: 'Post',
+            aggregates: [to('User', foreignKey('authorId'))],
+          }),
+        },
+      });
+
+      const userA = await basePrisma.user.create({
+        data: { email: 'root-ids-a@example.com', name: 'Root Ids A', password: 'pass' },
+      });
+      const userB = await basePrisma.user.create({
+        data: { email: 'root-ids-b@example.com', name: 'Root Ids B', password: 'pass' },
+      });
+
+      const actor: AuditContext = {
+        actor: { category: 'model', type: 'User', id: 'root-ids-actor' },
+      };
+      await provider.runAsync(actor, async () => {
+        await customPrisma.post.createMany({
+          data: [
+            { title: 'Root Ids 1', content: 'Content', authorId: userA.id },
+            { title: 'Root Ids 2', content: 'Content', authorId: userB.id },
+            { title: 'Root Ids 3', content: 'Content', authorId: userA.id },
+          ],
+        });
+      });
+
+      // Three posts project onto two users: one call, each user id once
+      expect(receivedIds).toHaveLength(1);
+      expect([...(receivedIds[0] ?? [])].sort()).toEqual([userA.id, userB.id].sort());
+
+      const userLogs = await basePrisma.auditLog.findMany({
+        where: { entityType: 'Post', aggregateType: 'User', action: 'create' },
+      });
+      expect(userLogs).toHaveLength(3);
+      for (const log of userLogs) {
+        expect(log.aggregateContext).toEqual({ rootUserId: log.aggregateId });
       }
     });
   });
