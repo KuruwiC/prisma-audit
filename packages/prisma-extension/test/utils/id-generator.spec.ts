@@ -13,12 +13,16 @@ import { describe, expect, it } from 'vitest';
 import type { DMMFModel } from '../../src/internal-types.js';
 import type { SchemaMetadata } from '../../src/schema/types.js';
 import {
+  buildEntityMap,
+  buildPKWhereClause,
   ensureIds,
   getIdFieldInfo,
   getIdGenerator,
   getPrimaryKeyConstraintOrThrow,
   ID_GENERATOR_FACTORIES,
+  primaryKeyOf,
 } from '../../src/utils/id-generation.js';
+import { UNRESOLVED_ENTITY_ID } from '../../src/utils/identity-key.js';
 import { createSchemaMetadataFromDMMF } from '../../src/utils/schema-metadata.js';
 
 const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -107,6 +111,13 @@ describe('getIdGenerator (string expression route)', () => {
     expect(getIdGenerator('cuid(2)')?.()).toMatch(CUID2_RE);
   });
 
+  it('matches the function name whatever its case, and ignores spaces around the arguments', () => {
+    expect(getIdGenerator('UUID(7)')?.()).toMatch(UUID_V7_RE);
+    expect(getIdGenerator('Cuid()')?.()).toMatch(CUID_V1_RE);
+    expect(getIdGenerator('CUID2()')?.()).toMatch(CUID2_RE);
+    expect(getIdGenerator('uuid( 7 )')?.()).toMatch(UUID_V7_RE);
+  });
+
   it('returns undefined for unknown versions instead of falling back', () => {
     expect(getIdGenerator('uuid(8)')).toBeUndefined();
     expect(getIdGenerator('cuid(3)')).toBeUndefined();
@@ -126,6 +137,17 @@ describe('getIdFieldInfo', () => {
     const Prisma = {};
     const info = getIdFieldInfo(createSchemaMetadataFromDMMF(Prisma), 'User', 'id');
     expect(info).toBeUndefined();
+  });
+
+  it('should return undefined if reading the field metadata throws', () => {
+    const schemaMetadata: SchemaMetadata = {
+      ...metadataWithIdDefault(undefined),
+      getFieldMetadata: () => {
+        throw new Error('metadata unavailable');
+      },
+    };
+
+    expect(getIdFieldInfo(schemaMetadata, 'User', 'id')).toBeUndefined();
   });
 
   it('should return undefined if model is not found', () => {
@@ -236,9 +258,7 @@ describe('getIdFieldInfo', () => {
     expect(info?.defaultExpr).toBe('autoincrement()');
     expect(info?.generator).toBeUndefined();
   });
-});
 
-describe('getIdFieldInfo default parsing', () => {
   it('parses args from string defaults (uuid(7))', () => {
     const info = getIdFieldInfo(metadataWithIdDefault('uuid(7)'), 'Item');
     expect(info?.defaultExpr).toBe('uuid(7)');
@@ -299,8 +319,8 @@ describe('ensureIds', () => {
     const secondEntity = result[1];
     expect(firstEntity).toBeDefined();
     expect(secondEntity).toBeDefined();
-    expect(typeof firstEntity?.id).toBe('string');
-    expect(typeof secondEntity?.id).toBe('string');
+    expect(firstEntity?.id).toMatch(CUID_V1_RE);
+    expect(secondEntity?.id).toMatch(CUID_V1_RE);
     expect(firstEntity?.id).not.toBe(secondEntity?.id);
   });
 
@@ -318,8 +338,7 @@ describe('ensureIds', () => {
     expect(firstEntity).toBeDefined();
     expect(secondEntity).toBeDefined();
     expect(firstEntity?.id).toBe('existing');
-    expect(secondEntity?.id).toBeDefined();
-    expect(secondEntity?.id).not.toBe('existing');
+    expect(secondEntity?.id).toMatch(CUID_V1_RE);
   });
 
   it('should throw error if no default is defined', () => {
@@ -338,6 +357,19 @@ describe('ensureIds', () => {
     const entities = [{ email: 'user@example.com' }];
     expect(() => ensureIds(createSchemaMetadataFromDMMF(Prisma), 'User', entities)).toThrow(
       '[@prisma-audit] createMany requires pre-generated IDs',
+    );
+  });
+
+  it('should throw the no-default error when the field metadata cannot be read', () => {
+    const schemaMetadata: SchemaMetadata = {
+      ...metadataWithIdDefault('cuid()'),
+      getFieldMetadata: () => {
+        throw new Error('metadata unavailable');
+      },
+    };
+
+    expect(() => ensureIds(schemaMetadata, 'User', [{ email: 'user@example.com' }])).toThrow(
+      'Field "id" has no default directive',
     );
   });
 
@@ -402,11 +434,10 @@ describe('ensureIds', () => {
     expect(result).toHaveLength(1);
     const firstEntity = result[0];
     expect(firstEntity).toBeDefined();
-    expect(typeof firstEntity?.userId).toBe('string');
+    expect(firstEntity?.userId).toMatch(CUID_V1_RE);
+    expect(firstEntity).not.toHaveProperty('id');
   });
-});
 
-describe('ensureIds format fidelity', () => {
   it('injects UUID v7 for @default(uuid(7)) models', () => {
     const result = ensureIds(metadataWithIdDefault({ name: 'uuid', args: [7] }), 'Item', [
       { label: 'a' },
@@ -474,9 +505,97 @@ describe('getPrimaryKeyConstraintOrThrow', () => {
     expect(() => getPrimaryKeyConstraintOrThrow(Prisma, 'Setting')).toThrow('Model "Setting" has no primary key');
   });
 
+  it.each([
+    ['no dmmf', {}],
+    ['no datamodel', { dmmf: {} }],
+  ])('throws that DMMF is not available when the client has %s', (_label, Prisma) => {
+    expect(() => getPrimaryKeyConstraintOrThrow(Prisma, 'User')).toThrow(
+      '[@prisma-audit] DMMF not available, cannot determine primary key for User',
+    );
+  });
+
   it('throws for a model missing from DMMF', () => {
     const Prisma = prismaWith([{ name: 'User', fields: [scalar('id', true)] }]);
 
     expect(() => getPrimaryKeyConstraintOrThrow(Prisma, 'Unknown')).toThrow('Model "Unknown" not found in DMMF');
+  });
+});
+
+describe('primaryKeyOf', () => {
+  it('picks the key fields of the row, in the order of the key', () => {
+    const key = primaryKeyOf({ title: 'T', userId: 'u1', postId: 'p1' }, ['postId', 'userId']);
+
+    expect(key).toEqual({ postId: 'p1', userId: 'u1' });
+    expect(Object.keys(key)).toEqual(['postId', 'userId']);
+  });
+
+  it('reads a field the row lacks as undefined, keeping its entry', () => {
+    const key = primaryKeyOf({ postId: 'p1' }, ['postId', 'userId']);
+
+    expect(Object.keys(key)).toEqual(['postId', 'userId']);
+    expect(key.userId).toBeUndefined();
+  });
+});
+
+describe('buildEntityMap', () => {
+  it('maps each row by its entity identity', () => {
+    const rows = [
+      { id: 'a', n: 1 },
+      { id: 'b', n: 2 },
+    ];
+
+    const map = buildEntityMap(rows, ['id']);
+
+    expect([...map.keys()]).toEqual(['a', 'b']);
+    expect(map.get('a')).toBe(rows[0]);
+    expect(map.get('b')).toBe(rows[1]);
+  });
+
+  it('maps each row of a composite key by the JSON array of its values', () => {
+    const row = { postId: 'p1', userId: 'u1' };
+
+    expect(buildEntityMap([row], ['postId', 'userId']).get('["p1","u1"]')).toBe(row);
+  });
+
+  it('keeps the last of the rows that share an identity, and files a row without a key under the unresolved identity', () => {
+    const keyless = { n: 3 };
+
+    const map = buildEntityMap([{ id: 'a', n: 1 }, { id: 'a', n: 2 }, keyless], ['id']);
+
+    expect(map.size).toBe(2);
+    expect(map.get('a')).toEqual({ id: 'a', n: 2 });
+    expect(map.get(UNRESOLVED_ENTITY_ID)).toBe(keyless);
+  });
+
+  it('is empty for no rows', () => {
+    expect(buildEntityMap([], ['id']).size).toBe(0);
+  });
+});
+
+describe('buildPKWhereClause', () => {
+  it('is null for no entities, so a caller can skip the query', () => {
+    expect(buildPKWhereClause(['id'], [])).toBeNull();
+    expect(buildPKWhereClause(['postId', 'userId'], [])).toBeNull();
+  });
+
+  it('names a single key with one in-list of the values, in the order of the entities', () => {
+    expect(buildPKWhereClause(['id'], [{ id: 'b', n: 1 }, { id: 'a' }])).toEqual({ id: { in: ['b', 'a'] } });
+  });
+
+  it('names a composite key with one OR branch per entity holding only the key fields', () => {
+    expect(
+      buildPKWhereClause(
+        ['postId', 'userId'],
+        [
+          { postId: 'p1', userId: 'u1', title: 'T' },
+          { postId: 'p2', userId: 'u2' },
+        ],
+      ),
+    ).toEqual({
+      OR: [
+        { postId: 'p1', userId: 'u1' },
+        { postId: 'p2', userId: 'u2' },
+      ],
+    });
   });
 });
