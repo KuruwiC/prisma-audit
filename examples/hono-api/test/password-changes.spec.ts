@@ -2,7 +2,7 @@
  * Password field changes detection in audit logs
  */
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { type AuditContext, auditProvider, prisma as testPrisma } from '../src/prisma.js';
 
 const testActor: AuditContext = {
@@ -30,15 +30,6 @@ function expectPlaintextAbsent(log: unknown, plaintexts: string[]): void {
 }
 
 describe('Password Changes Detection', () => {
-  beforeAll(async () => {
-    await testPrisma.auditLog.deleteMany();
-    await testPrisma.user.deleteMany();
-  });
-
-  afterAll(async () => {
-    await testPrisma.$disconnect();
-  });
-
   it('should store the password of a created user redacted in the audit log', async () => {
     const user = await auditProvider.runAsync(testActor, async () => {
       return await testPrisma.user.create({
@@ -73,7 +64,6 @@ describe('Password Changes Detection', () => {
       });
     });
 
-    await testPrisma.auditLog.deleteMany();
     await auditProvider.runAsync(testActor, async () => {
       await testPrisma.user.update({
         where: { id: user.id },
@@ -112,7 +102,6 @@ describe('Password Changes Detection', () => {
       });
     });
 
-    await testPrisma.auditLog.deleteMany();
     await auditProvider.runAsync(testActor, async () => {
       await testPrisma.user.update({
         where: { id: user.id },
