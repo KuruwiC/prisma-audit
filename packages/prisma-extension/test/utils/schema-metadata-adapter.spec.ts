@@ -40,6 +40,25 @@ describe('createSchemaMetadataFromDMMF', () => {
       expect(constraints).toContainEqual({ type: 'uniqueField', fields: ['email'] });
     });
 
+    it('should return unique indexes after unique fields', () => {
+      const Prisma = createPrismaWithModel({
+        name: 'Article',
+        fields: [
+          { name: 'id', kind: 'scalar', type: 'String', isId: true },
+          { name: 'tenantId', kind: 'scalar', type: 'String' },
+          { name: 'slug', kind: 'scalar', type: 'String', isUnique: true },
+        ],
+        uniqueIndexes: [{ name: 'tenant_slug', fields: ['tenantId', 'slug'] }],
+      });
+
+      const metadata = createSchemaMetadataFromDMMF(Prisma);
+
+      expect(metadata.getUniqueConstraints('Article')).toEqual([
+        { type: 'uniqueField', fields: ['slug'] },
+        { type: 'uniqueIndex', fields: ['tenantId', 'slug'], name: 'tenant_slug' },
+      ]);
+    });
+
     it('should return empty for unknown model', () => {
       const Prisma = createPrismaWithModel({ name: 'User', fields: [] });
       const metadata = createSchemaMetadataFromDMMF(Prisma);
@@ -68,6 +87,28 @@ describe('createSchemaMetadataFromDMMF', () => {
       expect(fields[0]).toMatchObject({ name: 'id', isId: true });
       expect(fields[1]).toMatchObject({ name: 'email', isUnique: true });
     });
+
+    it('should report hasDefaultValue for a field with a default and no hasDefaultValue flag', () => {
+      const Prisma = createPrismaWithModel({
+        name: 'User',
+        fields: [
+          { name: 'role', kind: 'scalar', type: 'String', default: 'member' },
+          { name: 'name', kind: 'scalar', type: 'String' },
+        ],
+      });
+
+      const fields = createSchemaMetadataFromDMMF(Prisma).getAllFields('User');
+
+      expect(fields.map(({ name, hasDefaultValue }) => ({ name, hasDefaultValue }))).toEqual([
+        { name: 'role', hasDefaultValue: true },
+        { name: 'name', hasDefaultValue: false },
+      ]);
+    });
+
+    it('should return empty for unknown model', () => {
+      const Prisma = createPrismaWithModel({ name: 'User', fields: [{ name: 'id', kind: 'scalar', type: 'String' }] });
+      expect(createSchemaMetadataFromDMMF(Prisma).getAllFields('Unknown')).toEqual([]);
+    });
   });
 
   describe('getRelationFields', () => {
@@ -85,6 +126,14 @@ describe('createSchemaMetadataFromDMMF', () => {
 
       expect(relations).toHaveLength(1);
       expect(relations[0]).toMatchObject({ name: 'posts', relatedModel: 'Post', isList: true });
+    });
+
+    it('should return empty for unknown model', () => {
+      const Prisma = createPrismaWithModel({
+        name: 'User',
+        fields: [{ name: 'posts', kind: 'object', type: 'Post', isList: true }],
+      });
+      expect(createSchemaMetadataFromDMMF(Prisma).getRelationFields('Unknown')).toEqual([]);
     });
   });
 });
