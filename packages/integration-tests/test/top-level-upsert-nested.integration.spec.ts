@@ -185,6 +185,8 @@ describe('top-level upsert nested audit entries', () => {
     );
 
     expect(upserted.id).toBe(existingPost.id);
+    expect(upserted.title).toBe('Updated Through Upsert');
+    expect(await basePrisma.post.count({ where: { authorId: author.id } })).toBe(1);
     expect(upserted.postTags).toHaveLength(1);
     expect(observer).toHaveBeenCalledWith(
       expect.objectContaining({

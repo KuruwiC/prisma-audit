@@ -7,7 +7,7 @@
  * an update whose before state was never requested.
  *
  * The read failure is injected with a Prisma Client Extension applied before the audit extension,
- * as in `upsert-before-state-failure.integration.spec.ts`; Prisma's own execution of the update
+ * as in `top-level-upsert-nested.integration.spec.ts`; Prisma's own execution of the update
  * does not call the JS-level `findUnique`, so only the audit read fails.
  */
 
