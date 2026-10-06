@@ -1,26 +1,17 @@
 /**
- * Integration Test: nested pre-fetch failures are reported to the observer
+ * Integration Test: a failed nested pre-fetch read
  *
- * `preFetchNestedRecordsBeforeOperation` (`nested/pre-fetch/coordinator.ts`) wraps
- * each nested operation's pre-fetch in a per-operation try/catch that records the rows
- * the failed read left unknown as unavailable. It reports the failure through
- * `errorHandling.observer` with `phase: 'pre-fetch'`, matching the top-level
- * equivalent (`fetchBeforeState` in `pipeline/before-state.ts`): a nested `update`/`delete` whose
- * pre-fetch query fails keeps that notification even though it loses its before-state.
+ * Before a nested `update` or `delete` writes, the audit reads the row it targets. When that read
+ * fails, the caller's operation still runs, the observer hears about the failure under
+ * `phase: 'pre-fetch'`, and the row is recorded with `before: null`, `changes: null` and
+ * `beforeUnavailable: true`. The rows of a nested delete array are read one by one, so a failed
+ * read leaves only its own item without a before state: the items around it keep theirs, and the
+ * observer hears once per failed read.
  *
- * The second scenario below drives the same underlying failure through a nested
- * *delete array*: when the pre-fetch for one item in the array throws, the items
- * after it are never individually pre-fetched. Each item is still recorded from the
- * primary key its own WHERE names: the item read before the failure with its before
- * state, the others as deletes whose before state is unavailable.
- *
- * Both failures are injected the same way as
- * `upsert-before-state-failure.integration.spec.ts`: a plain Prisma Client
- * Extension applied to the related model's `findUnique` *before* the audit
- * extension. Prisma's own nested-write execution does not call back into the
- * JS-level `findUnique` method, so the caller's actual database change is
- * unaffected by the fault injection — only the audit extension's own pre-fetch
- * call(s) fail.
+ * The failures are injected the way `top-level-upsert-nested.integration.spec.ts` injects its own:
+ * a plain Prisma Client Extension on `comment.findUnique` of the base client the audit extension
+ * wraps. Prisma's own nested-write execution does not call back into the JS-level `findUnique`
+ * method, so the caller's database change is unaffected; only the audit's own reads fail.
  */
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
@@ -90,7 +81,7 @@ describe('nested pre-fetch failures — observer notification', () => {
     return { rawBasePrisma, basePrisma, provider, prisma, armFault };
   };
 
-  it("a nested update's pre-fetch failure notifies the observer with phase: 'pre-fetch', and the caller's operation still succeeds", async () => {
+  it('a nested update whose pre-fetch fails still runs, notifies the observer once under pre-fetch, and is recorded with beforeUnavailable, a null before and no changes', async () => {
     const FAILURE_MESSAGE = 'simulated nested pre-fetch failure (update)';
     const observer = vi.fn<AuditErrorObserver>();
     const { rawBasePrisma, basePrisma, provider, prisma, armFault } = createClient(sharedDatabaseUrl, observer);
@@ -108,7 +99,7 @@ describe('nested pre-fetch failures — observer notification', () => {
         prisma.comment.create({ data: { content: 'Original Comment', postId: post.id, authorId: user.id } }),
       );
 
-      // Arm the fault only now: the nested update's own pre-fetch is the very next
+      // Arm the fault only now: the audit's read of the updated comment is the very next
       // `comment.findUnique` call.
       armFault(new Set([1]), FAILURE_MESSAGE);
       observer.mockClear();
@@ -131,43 +122,13 @@ describe('nested pre-fetch failures — observer notification', () => {
       const persistedComment = await basePrisma.comment.findUnique({ where: { id: comment.id } });
       expect(persistedComment?.content).toBe('Updated Comment');
 
+      expect(observer).toHaveBeenCalledTimes(1);
       expect(observer).toHaveBeenCalledWith(
         expect.objectContaining({
           phase: 'pre-fetch',
           modelName: 'Comment',
           operation: 'update',
           error: expect.objectContaining({ message: FAILURE_MESSAGE }),
-        }),
-      );
-    } finally {
-      await prisma.$disconnect();
-      await rawBasePrisma.$disconnect();
-    }
-  });
-
-  it('records a nested update whose pre-fetch failed with beforeUnavailable, a null before and no changes', async () => {
-    const observer = vi.fn<AuditErrorObserver>();
-    const { rawBasePrisma, basePrisma, provider, prisma, armFault } = createClient(sharedDatabaseUrl, observer);
-
-    try {
-      await cleanDatabase(rawBasePrisma);
-
-      const user = await provider.runAsync(testActor, async () =>
-        prisma.user.create({ data: { email: 'nested-pf-marker@example.com', name: 'Owner', password: 'secret123' } }),
-      );
-      const post = await provider.runAsync(testActor, async () =>
-        prisma.post.create({ data: { title: 'Original', content: 'original', authorId: user.id } }),
-      );
-      const comment = await provider.runAsync(testActor, async () =>
-        prisma.comment.create({ data: { content: 'Original Comment', postId: post.id, authorId: user.id } }),
-      );
-
-      armFault(new Set([1]), 'simulated nested pre-fetch failure (update marker)');
-
-      await provider.runAsync(testActor, async () =>
-        prisma.post.update({
-          where: { id: post.id },
-          data: { comments: { update: { where: { id: comment.id }, data: { content: 'Updated Comment' } } } },
         }),
       );
 
