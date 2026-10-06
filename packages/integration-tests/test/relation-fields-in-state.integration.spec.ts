@@ -8,7 +8,7 @@ import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
 
 const testActor: AuditContext = {
@@ -46,8 +46,8 @@ describe('relation fields in audited entity state', () => {
     await scenario.basePrisma.user.deleteMany();
   });
 
-  afterAll(async () => {
-    await scenario?.basePrisma.$disconnect();
+  afterEach(async () => {
+    await scenario.basePrisma.$disconnect();
   });
 
   it('keeps an included to-many relation out of a single update log', async () => {
