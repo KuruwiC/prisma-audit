@@ -12,6 +12,23 @@ import { testPrisma } from './setup.js';
 describe('Hono + Prisma Audit E2E Tests', () => {
   const app = createApp();
 
+  const jsonRequestAs = (actorId: string, actorType = 'User') => ({
+    'Content-Type': 'application/json',
+    'X-Actor-Id': actorId,
+    'X-Actor-Type': actorType,
+  });
+
+  const entityAggregatePairs = (logs: AuditLog[]) => logs.map((log) => `${log.entityType}/${log.aggregateType}`).sort();
+
+  const profileTreeCreatePairs = [
+    'Avatar/Avatar',
+    'Avatar/User',
+    'AvatarImage/AvatarImage',
+    'AvatarImage/User',
+    'Profile/Profile',
+    'Profile/User',
+  ];
+
   describe('GET /health', () => {
     it('should return health status', async () => {
       const res = await app.request('/health');
@@ -1225,6 +1242,217 @@ describe('Hono + Prisma Audit E2E Tests', () => {
         ['Post', post.id],
         ['User', user.id],
       ]);
+    });
+  });
+
+  describe('POST /auth/login', () => {
+    it('should create the user of an unknown email and record the create under the request actor', async () => {
+      const res = await app.request('/auth/login', {
+        method: 'POST',
+        headers: jsonRequestAs('system-1', 'System'),
+        body: JSON.stringify({ email: 'new-login@example.com' }),
+      });
+
+      expect(res.status).toBe(200);
+      const user = (await res.json()) as User;
+      expect(user.name).toBe('new-login');
+
+      const auditLogs = await testPrisma.auditLog.findMany();
+      expect(auditLogs).toHaveLength(1);
+      expect(auditLogs[0]).toMatchObject({
+        entityType: 'User',
+        entityId: user.id,
+        action: 'create',
+        aggregateType: 'User',
+        aggregateId: user.id,
+        actorType: 'System',
+        actorId: 'system-1',
+      });
+    });
+  });
+
+  describe('Profile Operations', () => {
+    it('should record a profile with its avatar created through PUT /profiles/:userId on the Profile, Avatar, AvatarImage and User aggregates', async () => {
+      const user = await testPrisma.user.create({
+        data: { email: 'put-profile@example.com', name: 'Put Profile' },
+      });
+
+      const res = await app.request(`/profiles/${user.id}`, {
+        method: 'PUT',
+        headers: jsonRequestAs(user.id),
+        body: JSON.stringify({ bio: 'Hello', avatar: { name: 'Main', imageUrl: 'https://example.com/main.png' } }),
+      });
+
+      expect(res.status).toBe(200);
+      const auditLogs = await testPrisma.auditLog.findMany();
+      expect(entityAggregatePairs(auditLogs)).toEqual(profileTreeCreatePairs);
+      for (const log of auditLogs) {
+        expect(log.action).toBe('create');
+        expect(log.actorId).toBe(user.id);
+      }
+      expect(
+        auditLogs
+          .filter((log: AuditLog) => log.aggregateType === 'User')
+          .every((log: AuditLog) => log.aggregateId === user.id),
+      ).toBe(true);
+    });
+
+    it('should record the profile, avatar and avatar image created through POST /profiles/:userId/avatar for a user without a profile', async () => {
+      const user = await testPrisma.user.create({
+        data: { email: 'post-avatar@example.com', name: 'Post Avatar' },
+      });
+
+      const res = await app.request(`/profiles/${user.id}/avatar`, {
+        method: 'POST',
+        headers: jsonRequestAs(user.id),
+        body: JSON.stringify({ name: 'Portrait', imageUrl: 'https://example.com/portrait.png' }),
+      });
+
+      expect(res.status).toBe(200);
+      const auditLogs = await testPrisma.auditLog.findMany();
+      expect(entityAggregatePairs(auditLogs)).toEqual(profileTreeCreatePairs);
+      for (const log of auditLogs) {
+        expect(log.action).toBe('create');
+        expect(log.actorId).toBe(user.id);
+      }
+      const avatarImageLog = auditLogs.find(
+        (log: AuditLog) => log.entityType === 'AvatarImage' && log.aggregateType === 'User',
+      );
+      expect(avatarImageLog?.aggregateId).toBe(user.id);
+      expect(avatarImageLog?.after).toMatchObject({ imageUrl: 'https://example.com/portrait.png' });
+    });
+  });
+
+  describe('Comment Operations', () => {
+    let author: User;
+    let post: Post;
+
+    beforeEach(async () => {
+      author = await testPrisma.user.create({
+        data: { email: 'commenter@example.com', name: 'Commenter' },
+      });
+      post = await testPrisma.post.create({
+        data: { title: 'Commented Post', authorId: author.id },
+      });
+    });
+
+    it('should record a comment created through POST /posts/:postId/comments on the Comment, Post and User aggregates', async () => {
+      const res = await app.request(`/posts/${post.id}/comments`, {
+        method: 'POST',
+        headers: jsonRequestAs(author.id),
+        body: JSON.stringify({ content: 'Well written', authorId: author.id }),
+      });
+
+      expect(res.status).toBe(201);
+      const comment = (await res.json()) as { id: string };
+
+      const auditLogs = await testPrisma.auditLog.findMany();
+      expect(entityAggregatePairs(auditLogs)).toEqual(['Comment/Comment', 'Comment/Post', 'Comment/User']);
+      const aggregateIdByType = Object.fromEntries(
+        auditLogs.map((log: AuditLog) => [log.aggregateType, log.aggregateId]),
+      );
+      expect(aggregateIdByType).toEqual({ Comment: comment.id, Post: post.id, User: author.id });
+      for (const log of auditLogs) {
+        expect(log.action).toBe('create');
+        expect(log.actorId).toBe(author.id);
+        expect(log.entityId).toBe(comment.id);
+        expect(log.entityContext).toStrictEqual({ name: 'Commenter', title: 'Commented Post' });
+      }
+    });
+
+    it('should record a comment deleted through DELETE /comments/:id on the Comment, Post and User aggregates', async () => {
+      const comment = await testPrisma.comment.create({
+        data: { content: 'To be removed', postId: post.id, authorId: author.id },
+      });
+
+      const res = await app.request(`/comments/${comment.id}`, {
+        method: 'DELETE',
+        headers: jsonRequestAs(author.id),
+      });
+
+      expect(res.status).toBe(200);
+      expect(await testPrisma.comment.findUnique({ where: { id: comment.id } })).toBeNull();
+
+      const auditLogs = await testPrisma.auditLog.findMany();
+      expect(entityAggregatePairs(auditLogs)).toEqual(['Comment/Comment', 'Comment/Post', 'Comment/User']);
+      for (const log of auditLogs) {
+        expect(log.action).toBe('delete');
+        expect(log.actorId).toBe(author.id);
+        expect(log.entityId).toBe(comment.id);
+      }
+    });
+  });
+
+  describe('POST /posts/:postId/tags', () => {
+    it('should record each new tag and its PostTag association on the Tag and Post aggregates', async () => {
+      const author = await testPrisma.user.create({
+        data: { email: 'tagger@example.com', name: 'Tagger' },
+      });
+      const post = await testPrisma.post.create({
+        data: { title: 'Tagged Post', authorId: author.id },
+      });
+
+      const res = await app.request(`/posts/${post.id}/tags`, {
+        method: 'POST',
+        headers: jsonRequestAs(author.id),
+        body: JSON.stringify({ tagNames: ['alpha', 'beta'] }),
+      });
+
+      expect(res.status).toBe(200);
+
+      const auditLogs = await testPrisma.auditLog.findMany();
+      expect(auditLogs.map((log: AuditLog) => `${log.entityType}/${log.aggregateType}/${log.action}`).sort()).toEqual([
+        'PostTag/Post/create',
+        'PostTag/Post/create',
+        'PostTag/Tag/create',
+        'PostTag/Tag/create',
+        'Tag/Tag/create',
+        'Tag/Tag/create',
+      ]);
+      for (const log of auditLogs) {
+        expect(log.actorId).toBe(author.id);
+      }
+
+      const postTagLogs = auditLogs.filter((log: AuditLog) => log.entityType === 'PostTag');
+      const tagNamesOnTagAggregates = postTagLogs
+        .filter((log: AuditLog) => log.aggregateType === 'Tag')
+        .map((log: AuditLog) => (log.aggregateContext as { name: string }).name)
+        .sort();
+      expect(tagNamesOnTagAggregates).toEqual(['alpha', 'beta']);
+      for (const log of postTagLogs.filter((entry: AuditLog) => entry.aggregateType === 'Post')) {
+        expect(log.aggregateId).toBe(post.id);
+        expect(log.aggregateContext).toStrictEqual({ name: 'Tagged Post' });
+      }
+    });
+  });
+
+  describe('POST /attachments', () => {
+    it('should record the attachment created through the endpoint on the Attachment and owner User aggregates', async () => {
+      const owner = await testPrisma.user.create({
+        data: { email: 'attachment-owner@example.com', name: 'Attachment Owner' },
+      });
+
+      const res = await app.request('/attachments', {
+        method: 'POST',
+        headers: jsonRequestAs(owner.id),
+        body: JSON.stringify({ fileUrl: 'https://example.com/report.pdf', fileName: 'report.pdf', ownerId: owner.id }),
+      });
+
+      expect(res.status).toBe(201);
+      const attachment = (await res.json()) as { id: string };
+
+      const auditLogs = await testPrisma.auditLog.findMany();
+      expect(entityAggregatePairs(auditLogs)).toEqual(['Attachment/Attachment', 'Attachment/User']);
+      const aggregateIdByType = Object.fromEntries(
+        auditLogs.map((log: AuditLog) => [log.aggregateType, log.aggregateId]),
+      );
+      expect(aggregateIdByType).toEqual({ Attachment: attachment.id, User: owner.id });
+      for (const log of auditLogs) {
+        expect(log.action).toBe('create');
+        expect(log.actorId).toBe(owner.id);
+        expect(log.entityId).toBe(attachment.id);
+        expect(log.entityContext).toStrictEqual({ fileUrl: 'https://example.com/report.pdf', fileName: 'report.pdf' });
+      }
     });
   });
 });
