@@ -11,6 +11,7 @@ import type { AuditContext, DispatchConfig, FailureSink } from '@kuruwic/db-audi
 import { dispatch } from '@kuruwic/db-audit-core';
 import type { AuditAction } from '../grammar/operations.js';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../internal-types.js';
+import { withScope } from '../runtime/scope.js';
 import type { WidenedColumns } from '../utils/audited-selection.js';
 import { isCallerMutationError, runCallerMutation } from '../utils/caller-mutation-error.js';
 import { isBatchOperation } from '../utils/operation-classifier.js';
@@ -55,12 +56,16 @@ export interface AuditPipelineDependencies {
  * the extension chain on the client the caller invoked it on. The audit reads and writes run on
  * the scope's handle, the client of the transaction the runtime scope holds, which is that client
  * when the caller writes through the transaction's client inside `$transaction`. It runs through
- * `runCallerMutation`, so a failure of the caller's own write reaches the caller raw.
+ * `runCallerMutation`, so a failure of the caller's own write reaches the caller raw. It runs
+ * with the re-entrancy guard lowered: a query an extension applied after this one issues of its
+ * own while continuing the operation is application work and is audited; only the audit's own
+ * queries run with the guard raised. The query is awaited inside that scope, so Prisma's lazy
+ * operation starts there.
  */
 const operationContinuation =
   (operation: InterceptedOperation): AuditedOperation['execute'] =>
   (args) =>
-    runCallerMutation(() => operation.query(args));
+    runCallerMutation(() => withScope({ isProcessingAuditLog: false }, async () => await operation.query(args)));
 
 /**
  * The reads before the write and the write. The caller's own mutation error (see

@@ -7,8 +7,11 @@
  * it through `query`. The audit extension always continues the caller's operation that way, and
  * with `openImplicitTransaction` the transaction is opened before the operation enters the chain,
  * so each extension sees one audited `user.update` once in every execution scope. The audit's own
- * reads and writes are separate queries; this spec counts only the caller's update. A change that
- * moves a count must update the number and its comment, never loosen the assertion instead.
+ * reads and writes are separate queries; the counts are of the caller's update only. A change that
+ * moves a count must update the number and its comment, never loosen the assertion instead. A write
+ * an extension applied after the audit extension issues of its own is audited when it issues it
+ * while continuing the caller's operation, and not when it issues it while handling the audit's
+ * own read.
  */
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
@@ -173,7 +176,70 @@ describe('Extension Chain Guard', () => {
       expect(laterUpdatesSeen()).toHaveLength(1);
       expect(await auditRowsForUpdate(clients)).toHaveLength(1);
     });
+
+    it("audits a write an extension applied after the audit extension issues while it continues the caller's operation", async () => {
+      const clients = clientsOf();
+      const user = await createUser(clients, 'continued-caller@example.com');
+      const companion = await createUser(clients, 'continued-companion@example.com');
+      const later = clients.prisma.$extends({
+        name: 'later-companion-writer',
+        query: {
+          user: {
+            async update({ args, query }) {
+              await clients.prisma.user.update({ where: { id: companion.id }, data: { name: 'Companion' } });
+              return query(args);
+            },
+          },
+        },
+      });
+
+      await clients.provider.runAsync(testActor, () =>
+        later.user.update({ where: { id: user.id }, data: { name: 'After' } }),
+      );
+
+      const rows = await auditRowsForUpdate(clients);
+      expect(rows.map((row) => row.entityId).sort()).toEqual([user.id, companion.id].sort());
+    });
   });
+
+  it.each([
+    { scope: 'with openImplicitTransaction', clients: () => opening, explicitTransaction: false },
+    { scope: 'inside an explicit $transaction', clients: () => awaited, explicitTransaction: true },
+  ])(
+    "does not audit a write an extension applied after the audit extension issues while it handles the audit's own read, $scope",
+    async ({ clients: clientsOf, explicitTransaction }) => {
+      const clients = clientsOf();
+      const user = await createUser(clients, 'read-caller@example.com');
+      const companion = await createUser(clients, 'read-companion@example.com');
+      const readsHandled: string[] = [];
+      const later = clients.prisma.$extends({
+        name: 'later-read-companion-writer',
+        query: {
+          user: {
+            async $allOperations({ operation, args, query }) {
+              if (operation.startsWith('find') && readsHandled.length === 0) {
+                readsHandled.push(operation);
+                await clients.prisma.user.update({ where: { id: companion.id }, data: { name: 'Companion' } });
+              }
+              return query(args);
+            },
+          },
+        },
+      });
+
+      const update = { where: { id: user.id }, data: { name: 'After' } };
+      await clients.provider.runAsync(testActor, () =>
+        explicitTransaction ? later.$transaction((tx) => tx.user.update(update)) : later.user.update(update),
+      );
+
+      expect(readsHandled).toHaveLength(1);
+      expect(await clients.rawBasePrisma.user.findUniqueOrThrow({ where: { id: companion.id } })).toMatchObject({
+        name: 'Companion',
+      });
+      const rows = await auditRowsForUpdate(clients);
+      expect(rows.map((row) => row.entityId)).toEqual([user.id]);
+    },
+  );
 
   it('an update outside any transaction with awaitWrite: false reaches the extension once', async () => {
     const user = await createUser(detached, 'detached-write@example.com');

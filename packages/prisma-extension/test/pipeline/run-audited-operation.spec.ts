@@ -17,7 +17,7 @@ import {
   runAuditedOperation,
 } from '../../src/pipeline/run-audited-operation.js';
 import { flushAllPendingWrites, getPendingWriteCount } from '../../src/runtime/pending-writes.js';
-import { withScope } from '../../src/runtime/scope.js';
+import { isProcessingAuditLog, withScope } from '../../src/runtime/scope.js';
 import type { AuditLogData } from '../../src/types.js';
 import { isCallerMutationError } from '../../src/utils/caller-mutation-error.js';
 
@@ -262,6 +262,33 @@ describe('runAuditedOperation', () => {
 
       expect(operation.query).toHaveBeenCalledWith(args);
       expect(update).not.toHaveBeenCalled();
+    });
+
+    it("runs the caller's operation with the processing flag lowered and the audit's own work with it raised", async () => {
+      const flagSeen: Array<[string, boolean]> = [];
+      const operation = interceptedOf(
+        'update',
+        vi.fn(async () => {
+          flagSeen.push(['query', isProcessingAuditLog()]);
+        }),
+      );
+      const executor = stubExecutor(async (executed) => {
+        flagSeen.push(['read before', isProcessingAuditLog()]);
+        await executed.execute(executed.args);
+        flagSeen.push(['read after', isProcessingAuditLog()]);
+        return outcome;
+      });
+      const deps = createDeps({ singleExecutor: executor });
+
+      await withScope({ isProcessingAuditLog: true }, () =>
+        runAuditedOperation({ operation, auditContext, baseClient: createBaseClient(), atomic: true }, deps),
+      );
+
+      expect(flagSeen).toEqual([
+        ['read before', true],
+        ['query', false],
+        ['read after', true],
+      ]);
     });
 
     it.each([
