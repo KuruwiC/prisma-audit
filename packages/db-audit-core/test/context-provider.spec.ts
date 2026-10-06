@@ -266,6 +266,28 @@ describe('createAsyncLocalStorageProvider', () => {
       expect(result).toBe('value');
     });
 
+    it('rejects with the error of a callback that rejects, and leaves no actor override behind', async () => {
+      const provider = createAsyncLocalStorageProvider();
+      const failure = new Error('write failed');
+
+      await provider.runAsync({ actor: { category: 'model', type: 'User', id: 'outer-user' } }, async () => {
+        await expect(provider.withActor(otherActor, () => Promise.reject(failure))).rejects.toBe(failure);
+
+        expect(provider.getContext()?.actor.id).toBe('outer-user');
+      });
+    });
+
+    it('rejects with the error of a callback that throws synchronously', async () => {
+      const provider = createAsyncLocalStorageProvider();
+      const failure = new Error('callback threw');
+
+      await expect(
+        provider.withActor(otherActor, () => {
+          throw failure;
+        }),
+      ).rejects.toBe(failure);
+    });
+
     // Lazy thenables (e.g. PrismaPromise) only invoke their pipeline when .then is
     // called. The async wrapper in withActor ensures .then is called INSIDE the
     // overridden scope, so the actor read at that point is actor2, not the outer actor.
