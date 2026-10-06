@@ -658,7 +658,7 @@ An update's `changes` compares the columns of the row. The audited row is read w
 **Type:** `string[]`
 **Default:** `[]`
 
-Fields to exclude from change tracking (globally or per-model). An update whose only changes are in excluded fields gets no audit log. Prisma sets an `@updatedAt` column on every update, so an `update` (or an `upsert` that takes its update branch) that stores the values the row already holds is logged with `updatedAt` as its only change; list that column to skip those updates.
+Fields to exclude from change tracking (globally or per-model). An update whose only changes are in excluded fields gets no audit log. Prisma sets an `@updatedAt` column on every update, so an update or upsert that stores the values the row already holds is logged with `updatedAt` as its only change unless that column is excluded.
 
 ```typescript
 {
