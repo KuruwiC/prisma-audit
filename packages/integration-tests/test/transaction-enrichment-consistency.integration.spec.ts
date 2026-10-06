@@ -370,10 +370,10 @@ describe('Transaction Enrichment Consistency', () => {
                 const users = await (prismaClient as typeof context.basePrisma).user.findMany({
                   where: { id: { in: ids } },
                   select: { id: true, email: true },
-                  orderBy: { email: 'asc' },
                 });
+                const emailById = new Map(users.map((u: { id: string; email: string }) => [u.id, u.email]));
                 enrichedEmails.push(...users.map((u: { email: string }) => u.email));
-                return users.map((u: { email: string }) => ({ enrichedEmail: u.email }));
+                return ids.map((id) => ({ enrichedEmail: emailById.get(id) }));
               },
             },
           }),
@@ -397,10 +397,14 @@ describe('Transaction Enrichment Consistency', () => {
         });
       });
 
-      expect(enrichedEmails).toHaveLength(3);
-      expect(enrichedEmails).toContain('user1@example.com');
-      expect(enrichedEmails).toContain('user2@example.com');
-      expect(enrichedEmails).toContain('user3@example.com');
+      expect([...enrichedEmails].sort()).toEqual(['user1@example.com', 'user2@example.com', 'user3@example.com']);
+
+      const users = await context.basePrisma.user.findMany({ select: { id: true, email: true } });
+      const auditLogs = await context.basePrisma.auditLog.findMany({ where: { entityType: 'User', action: 'create' } });
+      expect(auditLogs).toHaveLength(3);
+      expect(auditLogs.map((log) => [log.entityId, log.entityContext]).sort()).toEqual(
+        users.map((user) => [user.id, { enrichedEmail: user.email }]).sort(),
+      );
     });
   });
 });
