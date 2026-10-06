@@ -168,40 +168,11 @@ export const createRedactor = (config: RedactConfig = {}): Redactor => {
 };
 
 /**
- * Deep clone and redact data
+ * Redact the sensitive fields of a state or a change set
  *
  * @remarks
- * Uses structuredClone (Node.js 17+) with JSON fallback if clone fails
+ * Plain objects and arrays come back as new containers and the input is never changed; every other
+ * value (Date, Buffer, a decimal instance) comes back by reference, so a custom serializer that
+ * matches it by class sees it.
  */
-export const redactSensitiveData = (data: unknown, config: RedactConfig = {}): unknown => {
-  if (data === null || data === undefined) {
-    return data;
-  }
-
-  let cloned: unknown;
-  try {
-    cloned = structuredClone(data);
-  } catch (error) {
-    console.warn(
-      '[db-audit-core] Failed to clone data for redaction using structuredClone. Using JSON fallback.',
-      error instanceof Error ? error.message : String(error),
-    );
-
-    try {
-      const stringified = safeStringify(data);
-      if (stringified === undefined) {
-        console.warn('[db-audit-core] Cannot stringify data for redaction fallback. Applying redaction in-place.');
-        const redactor = createRedactor(config);
-        return redactor(data);
-      }
-      cloned = JSON.parse(stringified);
-    } catch {
-      console.warn('[db-audit-core] Cannot clone data for redaction. Applying redaction in-place.');
-      const redactor = createRedactor(config);
-      return redactor(data);
-    }
-  }
-
-  const redactor = createRedactor(config);
-  return redactor(cloned);
-};
+export const redactSensitiveData = (data: unknown, config: RedactConfig = {}): unknown => createRedactor(config)(data);

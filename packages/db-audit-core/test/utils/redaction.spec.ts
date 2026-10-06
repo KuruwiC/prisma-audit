@@ -1,5 +1,15 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { createRedactor, type RedactedFieldInfo, redactSensitiveData } from '../../src/utils/redaction.js';
+
+const deepFreeze = <T>(value: T): T => {
+  if (value !== null && typeof value === 'object') {
+    for (const nested of Object.values(value)) {
+      deepFreeze(nested);
+    }
+    Object.freeze(value);
+  }
+  return value;
+};
 
 describe('createRedactor', () => {
   it('should redact sensitive fields', () => {
@@ -140,6 +150,24 @@ describe('createRedactor', () => {
       TOKEN: 'secret3',
     });
   });
+
+  it('should leave its input unchanged, returning new objects and arrays', () => {
+    const input = deepFreeze({
+      id: 1,
+      password: 'secret',
+      profile: { token: 'abc', tags: ['a', { apiKey: 'key' }] },
+      changes: { secret: { old: 'x', new: 'y' }, name: { old: 'A', new: 'B' } },
+    });
+    const snapshot = structuredClone(input);
+
+    const redacted = createRedactor()(input) as typeof input;
+
+    expect(input).toStrictEqual(snapshot);
+    expect(redacted).not.toBe(input);
+    expect(redacted.profile).not.toBe(input.profile);
+    expect(redacted.profile.tags).not.toBe(input.profile.tags);
+    expect(redacted.changes.name).not.toBe(input.changes.name);
+  });
 });
 
 describe('non-plain objects', () => {
@@ -208,7 +236,7 @@ describe('redactSensitiveData', () => {
     });
   });
 
-  it('should deep clone data', () => {
+  it('should leave the input unchanged', () => {
     const original = { name: 'John', password: 'secret' };
     const redacted = redactSensitiveData(original) as Record<string, unknown>;
 
@@ -457,8 +485,8 @@ describe('redaction metadata', () => {
   });
 });
 
-describe('structuredClone support in redactSensitiveData', () => {
-  it('should handle Date objects correctly with structuredClone', () => {
+describe('redactSensitiveData with values JSON cannot hold', () => {
+  it('should keep Date values and redact beside them', () => {
     const now = new Date('2025-01-10T12:00:00Z');
     const data = {
       id: 1,
@@ -474,7 +502,7 @@ describe('structuredClone support in redactSensitiveData', () => {
     expect(redacted.password).toEqual({ redacted: true, hadValue: true });
   });
 
-  it('should handle BigInt correctly with structuredClone', () => {
+  it('should keep BigInt values and redact beside them', () => {
     const data = {
       id: 123n,
       largeNumber: 9007199254740991n,
@@ -489,7 +517,7 @@ describe('structuredClone support in redactSensitiveData', () => {
     expect(redacted.password).toEqual({ redacted: true, hadValue: true });
   });
 
-  it('should handle circular references with structuredClone', () => {
+  it('should throw a RangeError for circular references', () => {
     const data: Record<string, unknown> = {
       id: 1,
       password: 'secret',
@@ -499,81 +527,6 @@ describe('structuredClone support in redactSensitiveData', () => {
     expect(() => {
       redactSensitiveData(data);
     }).toThrow(RangeError);
-  });
-
-  it('should fallback to JSON when structuredClone fails with functions', () => {
-    const data = {
-      id: 1,
-      callback: () => console.log('test'),
-      password: 'secret',
-    };
-
-    const redacted = redactSensitiveData(data) as Record<string, unknown>;
-
-    expect(redacted.callback).toBeUndefined();
-
-    expect(redacted.password).toEqual({ redacted: true, hadValue: true });
-  });
-
-  it('should fallback to JSON when structuredClone fails with a symbol value, dropping symbol values and keys', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    try {
-      const symbolKey = Symbol('key');
-      const data = {
-        id: 1,
-        tag: Symbol('value'),
-        [symbolKey]: 'symbol-keyed-value',
-        password: 'secret',
-      };
-
-      const redacted = redactSensitiveData(data);
-
-      expect(warn).toHaveBeenCalledTimes(1);
-      expect(warn.mock.calls[0]?.[0]).toContain('Using JSON fallback.');
-      expect(redacted).toStrictEqual({ id: 1, password: { redacted: true, hadValue: true } });
-    } finally {
-      warn.mockRestore();
-    }
-  });
-
-  it('should redact the uncloned data when neither structuredClone nor JSON can copy it', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    try {
-      const toJSON = () => undefined;
-      const data = { id: 1, password: 'secret', toJSON };
-
-      const redacted = redactSensitiveData(data);
-
-      expect(warn).toHaveBeenCalledTimes(2);
-      expect(warn.mock.calls[1]).toEqual([
-        '[db-audit-core] Cannot stringify data for redaction fallback. Applying redaction in-place.',
-      ]);
-      expect(redacted).toStrictEqual({ id: 1, password: { redacted: true, hadValue: true }, toJSON });
-      expect(data.password).toBe('secret');
-    } finally {
-      warn.mockRestore();
-    }
-  });
-
-  it('should redact the uncloned data when the JSON fallback throws', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    try {
-      const toJSON = () => {
-        throw new Error('not serializable');
-      };
-      const data = { id: 1, password: 'secret', toJSON };
-
-      const redacted = redactSensitiveData(data);
-
-      expect(warn).toHaveBeenCalledTimes(2);
-      expect(warn.mock.calls[1]).toEqual([
-        '[db-audit-core] Cannot clone data for redaction. Applying redaction in-place.',
-      ]);
-      expect(redacted).toStrictEqual({ id: 1, password: { redacted: true, hadValue: true }, toJSON });
-      expect(data.password).toBe('secret');
-    } finally {
-      warn.mockRestore();
-    }
   });
 
   it('should handle nested objects with Date and BigInt', () => {
@@ -643,25 +596,6 @@ describe('BigInt safety in redaction', () => {
       const password = result.password as Record<string, unknown>;
       expect(password.old).toEqual({ redacted: true, hadValue: true });
       expect(password.new).toEqual({ redacted: true, hadValue: true, isDifferent: false });
-    });
-  });
-
-  describe('redactSensitiveData JSON fallback with BigInt', () => {
-    it('should store a BigInt as a string and drop a function when structuredClone fails', () => {
-      const data = {
-        id: 123n,
-        callback: () => 'test',
-        password: 'secret',
-      };
-      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-      try {
-        const result = redactSensitiveData(data);
-
-        expect(warn).toHaveBeenCalledTimes(1);
-        expect(result).toStrictEqual({ id: '123', password: { redacted: true, hadValue: true } });
-      } finally {
-        warn.mockRestore();
-      }
     });
   });
 });

@@ -542,5 +542,38 @@ describe('compose', () => {
       expect(record.after).toEqual({ id: 'post-1', data: 'bytes:3' });
       expect(record.changes).toEqual({ data: { old: 'bytes:1', new: 'bytes:3' } });
     });
+
+    it('applies the custom serializers to the class instances among the column values once redact is configured', () => {
+      class Decimal {
+        constructor(readonly digits: string) {}
+      }
+      const record = composeOne(
+        updateEvent(
+          { id: 'post-1', data: Buffer.from([1]), price: new Decimal('5'), password: 'old' },
+          { id: 'post-1', data: Buffer.from([1, 2]), price: new Decimal('7'), password: 'new' },
+        ),
+        {
+          redact: {},
+          serialization: {
+            customSerializers: [
+              (value) => {
+                if (Buffer.isBuffer(value)) return `buffer:${value.toString('hex')}`;
+                if (value instanceof Decimal) return `decimal:${value.digits}`;
+                return UNHANDLED;
+              },
+            ],
+          },
+        },
+      );
+
+      const redacted = { redacted: true, hadValue: true };
+      expect(record.before).toEqual({ id: 'post-1', data: 'buffer:01', price: 'decimal:5', password: redacted });
+      expect(record.after).toEqual({ id: 'post-1', data: 'buffer:0102', price: 'decimal:7', password: redacted });
+      expect(record.changes).toEqual({
+        data: { old: 'buffer:01', new: 'buffer:0102' },
+        price: { old: 'decimal:5', new: 'decimal:7' },
+        password: { old: redacted, new: { ...redacted, isDifferent: true } },
+      });
+    });
   });
 });
