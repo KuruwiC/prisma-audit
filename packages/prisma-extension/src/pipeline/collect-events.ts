@@ -16,11 +16,7 @@
  */
 
 import type { BeforeState, MutationAction, MutationEvent } from '@kuruwic/db-audit-core';
-import {
-  getPrimaryKeyConstraint,
-  type NestedOperationInfo,
-  type NestedPreFetchResults,
-} from '../grammar/nested-operations.js';
+import type { NestedOperationInfo, NestedPreFetchResults } from '../grammar/nested-operations.js';
 import { AUDIT_ACTION, type AuditAction, BATCH_TO_SINGULAR_ACTION } from '../grammar/operations.js';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../internal-types.js';
 import { collectNestedEvents, type NestedEventCollectorDependencies } from '../nested/events/collect-nested-events.js';
@@ -30,6 +26,7 @@ import type { LinkReads } from '../nested/pre-fetch/link-rows.js';
 import type { PreExistingRows } from '../nested/pre-fetch/pre-existing-rows.js';
 import type { SchemaMetadata } from '../schema/types.js';
 import { beforeStateOf } from '../utils/before-state.js';
+import { rowKeyFieldsOf } from '../utils/id-generation.js';
 import { executedUpsertBranch } from './before-state.js';
 
 type Row = Record<string, unknown>;
@@ -81,7 +78,7 @@ export const collectSingleOperationEvents = async (
   const row = toRow(result);
   const topLevel: MutationEvent = {
     model: modelName,
-    identity: identityOf(row, getPrimaryKeyConstraint(deps.schemaMetadata, modelName)?.fields, {
+    identity: identityOf(row, rowKeyFieldsOf(deps.schemaMetadata, modelName), {
       model: modelName,
       path: '',
     }),
@@ -132,12 +129,12 @@ export const collectBatchOperationEvents = (
 ): MutationEvent[] => {
   const { modelName, action, rows, beforeStates } = outcome;
   const singularAction = toSingularAction(action);
-  const pkFields = getPrimaryKeyConstraint(schemaMetadata, modelName)?.fields;
+  const keyFields = rowKeyFieldsOf(schemaMetadata, modelName);
 
   // A batch operation reads every row it updates or deletes, so a row without a before row had none
   return rows.map((row, index) => ({
     model: modelName,
-    identity: identityOf(row, pkFields, { model: modelName, path: '' }),
+    identity: identityOf(row, keyFields, { model: modelName, path: '' }),
     action: singularAction,
     before: beforeStateOf(beforeStates?.[index]),
     after: singularAction === 'delete' ? undefined : row,

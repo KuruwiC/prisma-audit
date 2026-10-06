@@ -18,6 +18,8 @@ const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'unique-only-model-actor' },
 };
 
+type IdResolver = ReturnType<typeof self>;
+
 describe('a model identified by a unique field instead of a primary key', () => {
   let databaseUrl: string;
   const disconnects: Array<() => Promise<void>> = [];
@@ -32,13 +34,13 @@ describe('a model identified by a unique field instead of a primary key', () => 
     }
   });
 
-  const setup = async (observer?: AuditErrorObserver) => {
+  const setup = async (observer?: AuditErrorObserver, idResolver: IdResolver = self('code')) => {
     const basePrisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
     const provider = createAsyncLocalStorageProvider();
     const prisma = createAuditClient(basePrisma, {
       Prisma,
       provider,
-      aggregateMapping: { Device: defineEntity({ type: 'Device', idResolver: self('code') }) },
+      aggregateMapping: { Device: defineEntity({ type: 'Device', idResolver }) },
       performance: { awaitWrite: true },
       ...(observer ? { errorHandling: { observer } } : {}),
     });
@@ -254,6 +256,73 @@ describe('a model identified by a unique field instead of a primary key', () => 
 
       expect(observer).not.toHaveBeenCalled();
       expect(await logsOf()).toEqual([matching('d-1', relabelled('d-1')), matching('d-2', relabelled('d-2'))]);
+    });
+  });
+
+  describe('an entity idResolver that throws for a row', () => {
+    const resolverError = new Error('device id resolver is broken');
+    const BROKEN_CODE = 'broken';
+    const brokenIdResolver: IdResolver = async (device) => {
+      const { code } = device as { code: string };
+      if (code === BROKEN_CODE) throw resolverError;
+      return code;
+    };
+    const failureOf = (operation: string, identity: string) => ({
+      phase: 'id-resolver-call',
+      modelName: 'Device',
+      operation,
+      params: { identity, resolver: { kind: 'entity' } },
+      error: resolverError,
+    });
+
+    it('reports a create under the code of the row', async () => {
+      const observer = vi.fn<AuditErrorObserver>();
+      const { prisma, run, logsOf, labels } = await setup(observer, brokenIdResolver);
+
+      await run(() => prisma.device.create({ data: { code: BROKEN_CODE, label: 'one' } }));
+
+      expect(await labels()).toEqual({ [BROKEN_CODE]: 'one' });
+      expect(await logsOf()).toEqual([]);
+      expect(observer).toHaveBeenCalledExactlyOnceWith(failureOf('create', BROKEN_CODE));
+    });
+
+    it('reports an update under the code of the row', async () => {
+      const observer = vi.fn<AuditErrorObserver>();
+      const { prisma, run, seed, logsOf } = await setup(observer, brokenIdResolver);
+      await seed(BROKEN_CODE, 'd-1');
+
+      await run(() => prisma.device.update({ where: { code: BROKEN_CODE }, data: { label: 'relabelled' } }));
+
+      expect(await logsOf()).toEqual([]);
+      expect(observer).toHaveBeenCalledExactlyOnceWith(failureOf('update', BROKEN_CODE));
+    });
+
+    it('reports the row of a createMany that fails, under its code, and records the others', async () => {
+      const observer = vi.fn<AuditErrorObserver>();
+      const { prisma, run, logsOf } = await setup(observer, brokenIdResolver);
+
+      await run(() =>
+        prisma.device.createMany({
+          data: [
+            { code: 'd-1', label: 'one' },
+            { code: BROKEN_CODE, label: 'two' },
+          ],
+        }),
+      );
+
+      expect((await logsOf()).map((log) => log.entityId)).toEqual(['d-1']);
+      expect(observer).toHaveBeenCalledExactlyOnceWith(failureOf('createMany', BROKEN_CODE));
+    });
+
+    it('reports the row of an updateMany that fails, under its code, and records the others', async () => {
+      const observer = vi.fn<AuditErrorObserver>();
+      const { prisma, run, seed, logsOf } = await setup(observer, brokenIdResolver);
+      await seed('d-1', BROKEN_CODE);
+
+      await run(() => prisma.device.updateMany({ data: { label: 'relabelled' } }));
+
+      expect(await logsOf()).toEqual([matching('d-1', relabelled('d-1'))]);
+      expect(observer).toHaveBeenCalledExactlyOnceWith(failureOf('updateMany', BROKEN_CODE));
     });
   });
 });

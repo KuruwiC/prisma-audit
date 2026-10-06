@@ -150,8 +150,8 @@ describe('readOmittedFieldsAfterWrite', () => {
 
     const { completed } = await read(
       [
-        { ...eventOf('Device', 'create', { code: 'd1', label: 'One' }), identity: '' },
-        { ...eventOf('Device', 'update', { code: 'd2', label: 'Two' }), identity: '' },
+        { ...eventOf('Device', 'create', { code: 'd1', label: 'One' }), identity: 'd1' },
+        { ...eventOf('Device', 'update', { code: 'd2', label: 'Two' }), identity: 'd2' },
       ],
       { device: { findMany } },
     );

@@ -10,7 +10,7 @@ import { UNRESOLVED_ENTITY_ID } from '../../utils/identity-key.js';
 
 type Row = Record<string, unknown>;
 
-/** Identity of a row that does not carry every primary-key field (a `select` that omits one) or whose model has no primary key */
+/** Identity of a row that does not carry every key field (a `select` that omits one) or whose model has no key */
 const UNKNOWN_IDENTITY = '';
 
 /** Where a row came from, named in the debug log when its identity cannot be resolved */
@@ -20,15 +20,16 @@ export interface RowOrigin {
   readonly path: string;
 }
 
-export const identityOf = (row: Row, pkFields: readonly string[] | undefined, origin: RowOrigin): string => {
-  if (pkFields === undefined) {
-    nestedLog('model=%s has no primary key; the identity of the row at path=%s is unknown', origin.model, origin.path);
+/** Identity of `row` from its key fields: the primary key of a nested row, the row key of a top-level or batch row */
+export const identityOf = (row: Row, keyFields: readonly string[] | undefined, origin: RowOrigin): string => {
+  if (keyFields === undefined) {
+    nestedLog('model=%s has no key; the identity of the row at path=%s is unknown', origin.model, origin.path);
     return UNKNOWN_IDENTITY;
   }
-  const identity = extractEntityIdentity(row, pkFields);
+  const identity = extractEntityIdentity(row, keyFields);
   if (identity === UNRESOLVED_ENTITY_ID) {
     nestedLog(
-      'model=%s row at path=%s lacks a primary-key field (a select that omits one?); its identity is unknown',
+      'model=%s row at path=%s lacks a key field (a select that omits one?); its identity is unknown',
       origin.model,
       origin.path,
     );

@@ -243,8 +243,9 @@ export const getRowKeyFields = (schemaMetadata: SchemaMetadata, modelName: strin
 };
 
 /**
- * Extract the entity identity of `record` from its primary-key fields: the single key's value as
- * a string, or the JSON array of a composite key's values (BigInt values as strings), which keeps
+ * Extract the entity identity of `record` from `pkFields`, the fields to read (the row key for a
+ * top-level or batch row, the primary key for a nested one): the single field's value as a string,
+ * or the JSON array of a composite key's values (BigInt values as strings), which keeps
  * `["a:b", "c"]` and `["a", "b:c"]` apart. `UNRESOLVED_ENTITY_ID` when any field is absent or null.
  */
 export const extractEntityIdentity = (

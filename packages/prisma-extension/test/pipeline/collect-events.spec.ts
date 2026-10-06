@@ -66,6 +66,29 @@ const models: DMMFModel[] = [
     name: 'Legacy',
     fields: [{ name: 'code', kind: 'scalar', type: 'String' }],
   },
+  {
+    name: 'Device',
+    fields: [
+      { name: 'code', kind: 'scalar', type: 'String', isUnique: true, isRequired: true },
+      { name: 'label', kind: 'scalar', type: 'String', isRequired: true },
+    ],
+  },
+  {
+    name: 'Slot',
+    fields: [
+      { name: 'zone', kind: 'scalar', type: 'String', isRequired: true },
+      { name: 'seat', kind: 'scalar', type: 'Int', isRequired: true },
+      { name: 'note', kind: 'scalar', type: 'String' },
+    ],
+    uniqueIndexes: [{ name: null, fields: ['seat', 'zone'] }],
+  },
+  {
+    name: 'Tag',
+    fields: [
+      { name: 'alias', kind: 'scalar', type: 'String', isUnique: true },
+      { name: 'code', kind: 'scalar', type: 'String', isUnique: true, isRequired: true },
+    ],
+  },
 ];
 
 const Prisma: PrismaNamespace = { defineExtension: () => undefined, DbNull: null, dmmf: { datamodel: { models } } };
@@ -241,9 +264,49 @@ describe('collectSingleOperationEvents', () => {
     expect(events[0]?.identity).toBe('');
   });
 
-  it('gives a row of a model without primary key an empty identity', async () => {
+  it('gives a row of a model with no row key at all an empty identity', async () => {
     const events = await collectSingleOperationEvents(
       single({ modelName: 'Legacy', args: { data: { code: 'x' } }, result: { code: 'x' } }),
+      deps,
+    );
+
+    expect(events[0]?.identity).toBe('');
+  });
+
+  it('names the row of a model without primary key by its unique field on a required column', async () => {
+    const events = await collectSingleOperationEvents(
+      single({ modelName: 'Device', args: { data: { code: 'd-1' } }, result: { code: 'd-1', label: 'one' } }),
+      deps,
+    );
+
+    expect(events[0]?.identity).toBe('d-1');
+  });
+
+  it('names the row of a model without primary key by the JSON array of its composite unique key, in the constraint order', async () => {
+    const events = await collectSingleOperationEvents(
+      single({
+        modelName: 'Slot',
+        args: { data: { zone: 'a:b', seat: 7 } },
+        result: { zone: 'a:b', seat: 7, note: null },
+      }),
+      deps,
+    );
+
+    expect(events[0]?.identity).toBe('[7,"a:b"]');
+  });
+
+  it('names the row of a model without primary key by its required unique field when a nullable one is declared first', async () => {
+    const events = await collectSingleOperationEvents(
+      single({ modelName: 'Tag', args: { data: { code: 't-1' } }, result: { alias: null, code: 't-1' } }),
+      deps,
+    );
+
+    expect(events[0]?.identity).toBe('t-1');
+  });
+
+  it('gives a row of a model without primary key that lacks its unique field an empty identity', async () => {
+    const events = await collectSingleOperationEvents(
+      single({ modelName: 'Device', args: { data: { code: 'd-1' } }, result: { label: 'one' } }),
       deps,
     );
 
@@ -886,6 +949,20 @@ describe('collectBatchOperationEvents', () => {
         origin: { path: '', op: 'deleteMany' },
       },
     ]);
+  });
+
+  it('names the rows of a model without primary key by their unique field on a required column', () => {
+    const devices = [
+      { code: 'd-1', label: 'one' },
+      { code: 'd-2', label: 'two' },
+    ];
+
+    const events = collectBatchOperationEvents(
+      batch({ modelName: 'Device', action: 'deleteMany', rows: devices, beforeStates: devices }),
+      schemaMetadata,
+    );
+
+    expect(events.map((event) => event.identity)).toEqual(['d-1', 'd-2']);
   });
 
   it('collects the returned rows of a createManyAndReturn as create events carrying their own keyword', () => {

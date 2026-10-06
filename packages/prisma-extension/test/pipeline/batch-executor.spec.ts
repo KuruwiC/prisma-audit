@@ -415,7 +415,7 @@ describe('createBatchExecutor', () => {
         [
           expect.objectContaining({
             model: 'Device',
-            identity: '',
+            identity: serial,
             action: 'create',
             after: { label: null, serial, name: 'd1' },
           }),
