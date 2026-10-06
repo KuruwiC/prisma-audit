@@ -199,3 +199,76 @@ describe('the beforeUnavailable marker of the normalized writers', () => {
     expect(Object.keys(data)).not.toContain('beforeUnavailable');
   });
 });
+
+describe('a write the normalized writers cannot make', () => {
+  const entitySchema = {
+    actorModel: 'actor',
+    entityModel: 'entity',
+    aggregateModel: 'aggregate',
+    eventModel: 'auditEvent',
+  };
+  const sharedChangeSchema = { changeModel: 'auditChange', aggregateModel: 'auditAggregate' };
+  const entityModels = () => ({
+    actor: modelDelegate('actor-1'),
+    entity: modelDelegate('entity-1'),
+    aggregate: modelDelegate('aggregate-1'),
+    auditEvent: modelDelegate('event-1'),
+  });
+  const sharedChangeModels = () => ({
+    auditChange: modelDelegate('change-1'),
+    auditAggregate: modelDelegate('link-1'),
+  });
+  const without = <T extends Record<string, unknown>>(models: T, name: keyof T) => {
+    const { [name]: _removed, ...rest } = models;
+    return rest;
+  };
+
+  describe('with no audit log', () => {
+    it.each([
+      ['createEntityNormalizedWriter', createEntityNormalizedWriter(entitySchema), entityModels, 'auditEvent'],
+      ['createSharedChangeWriter', createSharedChangeWriter(sharedChangeSchema), sharedChangeModels, 'auditChange'],
+    ] as const)('%s opens no transaction and writes nothing', async (_name, writer, makeModels, created) => {
+      const models: Record<string, ReturnType<typeof modelDelegate>> = makeModels();
+      const $transaction = vi.fn(async (run: (tx: unknown) => Promise<void>) => run(models));
+
+      await writer([], contextOn({ ...models, $transaction }, false));
+
+      expect($transaction).not.toHaveBeenCalled();
+      expect(models[created]?.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('with a model the client does not have, or one without the operation the writer needs', () => {
+    it.each([
+      ['the actor model', 'actor', 'upsert'],
+      ['the entity model', 'entity', 'upsert'],
+      ['the aggregate model', 'aggregate', 'upsert'],
+      ['the event model', 'auditEvent', 'create'],
+    ] as const)('the entity-normalized writer rejects without %s', async (_label, missing, operation) => {
+      const models = without(entityModels(), missing);
+
+      await expect(createEntityNormalizedWriter(entitySchema)([record], contextOn(models))).rejects.toThrow(
+        `Model "${missing}" not found or does not support ${operation} operation`,
+      );
+    });
+
+    it.each([
+      ['the change model', 'auditChange'],
+      ['the aggregate model', 'auditAggregate'],
+    ] as const)('the shared-change writer rejects without %s', async (_label, missing) => {
+      const models = without(sharedChangeModels(), missing);
+
+      await expect(createSharedChangeWriter(sharedChangeSchema)([record], contextOn(models))).rejects.toThrow(
+        `Model "${missing}" not found or does not support create operation`,
+      );
+    });
+
+    it('rejects a model whose operation is not a function, naming the operation', async () => {
+      const models = { ...entityModels(), actor: { upsert: 'not a function' } };
+
+      await expect(createEntityNormalizedWriter(entitySchema)([record], contextOn(models))).rejects.toThrow(
+        'Model "actor" not found or does not support upsert operation',
+      );
+    });
+  });
+});
