@@ -7,9 +7,16 @@
  */
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
+import { createAuditClient } from '@kuruwic/prisma-audit';
 import { Prisma } from '@kuruwic/prisma-audit-database';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { cleanDatabase, createTestContext, disposeTestContext, type TestContext } from './helpers/setup.js';
+import {
+  cleanDatabase,
+  createTestContext,
+  disposeTestContext,
+  type TestContext,
+  testAggregateMapping,
+} from './helpers/setup.js';
 
 describe('NULL Handling Verification', () => {
   let context: TestContext;
@@ -201,6 +208,44 @@ describe('NULL Handling Verification', () => {
       expect(raw.after_is_null).toBe(false);
       expect(raw.before_type).toBe('jsonb');
       expect(raw.after_type).toBe('jsonb');
+    });
+
+    it('should store SQL NULL (not JSON null) for before field when the before state is not read', async () => {
+      const unreadBefore = createAuditClient(context.basePrisma, {
+        Prisma,
+        provider: context.provider,
+        aggregateMapping: testAggregateMapping,
+        performance: { awaitWrite: true },
+        fetchBefore: { update: false },
+      });
+      const user = await context.basePrisma.user.create({ data: { email: 'test@example.com', name: 'John Doe' } });
+
+      await context.provider.runAsync(testActor, async () => {
+        await unreadBefore.user.update({ where: { id: user.id }, data: { name: 'Jane Doe' } });
+      });
+
+      const auditLog = await context.prisma.auditLog.findFirst({
+        where: { entityType: 'User', entityId: user.id, action: 'update' },
+      });
+      expect(auditLog).not.toBeNull();
+
+      type RawQueryResult = {
+        before_is_null: boolean;
+        after_is_null: boolean;
+        after_type: string | null;
+      };
+      const rawResult = (await context.prisma.$queryRaw(
+        Prisma.sql`
+          SELECT
+            (before IS NULL) AS before_is_null,
+            (after IS NULL) AS after_is_null,
+            pg_typeof(after)::text AS after_type
+          FROM audit_logs
+          WHERE id = ${auditLog?.id}
+        `,
+      )) as RawQueryResult[];
+
+      expect(rawResult).toEqual([{ before_is_null: true, after_is_null: false, after_type: 'jsonb' }]);
     });
   });
 });
