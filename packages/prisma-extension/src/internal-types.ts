@@ -68,6 +68,12 @@ export interface PrismaNamespace {
   };
   /** Sentinel value for SQL NULL (distinguishes DB NULL from JSON null) */
   DbNull: unknown;
+  /** `Prisma.skip` (Prisma 5.20 and later): a field given it is left out of the query */
+  skip?: unknown;
+  /** `Prisma.Decimal`: the type Prisma reads a `Decimal` column back in */
+  Decimal?: new (
+    value: string | number,
+  ) => unknown;
   prismaVersion?: { client: string };
 }
 

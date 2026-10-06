@@ -42,7 +42,7 @@ const createPipelineDependencies = (audit: AuditOptions): AuditPipelineDependenc
       auditedOmittedFieldsWithRowKey,
       failureSink,
     }),
-    batchExecutor: createBatchExecutor({ schemaMetadata, auditedOmittedFieldsWithRowKey, failureSink }),
+    batchExecutor: createBatchExecutor({ Prisma, schemaMetadata, auditedOmittedFieldsWithRowKey, failureSink }),
     produceRecords: createRecordProducer({
       ...audit,
       omittedFieldReads: { schemaMetadata, auditedOmittedFields },

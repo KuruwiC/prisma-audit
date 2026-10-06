@@ -180,16 +180,17 @@ describe('a model identified by a unique field instead of a primary key', () => 
       );
     });
   });
-  describe('a write that changes the code of its rows', () => {
-    const unidentified = (operation: string, count: number) =>
-      expect.objectContaining({
-        phase: 'row-identification',
-        modelName: 'Device',
-        operation,
-        params: { unidentified: count },
+  describe('a write that gives its rows another code', () => {
+    const recoded = (from: string, to: string) =>
+      matching(to, {
+        action: 'update',
+        changes: { code: { old: from, new: to } },
+        before: expect.objectContaining({ code: from, label: `label of ${from}` }),
+        after: expect.objectContaining({ code: to, label: `label of ${from}` }),
+        beforeUnavailable: false,
       });
 
-    it('reports the row an updateMany gave another code, which its read after the write cannot find, and records no log for it', async () => {
+    it('records the row an updateMany gave another code under that code, with the change from the code it had', async () => {
       const observer = vi.fn<AuditErrorObserver>();
       const { prisma, run, seed, logsOf, labels } = await setup(observer);
       await seed('d-1', 'd-2');
@@ -198,36 +199,28 @@ describe('a model identified by a unique field instead of a primary key', () => 
 
       expect(result).toEqual({ count: 1 });
       expect(Object.keys(await labels()).sort()).toEqual(['d-2', 'd-9']);
-      expect(observer).toHaveBeenCalledExactlyOnceWith(unidentified('updateMany', 1));
-      expect(await logsOf()).toEqual([]);
+      expect(observer).not.toHaveBeenCalled();
+      expect(await logsOf()).toEqual([recoded('d-1', 'd-9')]);
     });
 
-    it('records the row an updateManyAndReturn gave another code without a before state, returns it, and reports it', async () => {
+    it('records the row an updateManyAndReturn gave another code with its before state, and returns it', async () => {
       const observer = vi.fn<AuditErrorObserver>();
       const { prisma, run, seed, logsOf } = await setup(observer);
       await seed('d-1', 'd-2');
 
       const rows = await run(() =>
-        prisma.device.updateManyAndReturn({ where: { code: 'd-1' }, data: { code: 'd-9' } }),
+        prisma.device.updateManyAndReturn({ where: { code: 'd-1' }, data: { code: { set: 'd-9' } } }),
       );
 
       expect(rows.map((row) => row.code)).toEqual(['d-9']);
-      expect(observer).toHaveBeenCalledExactlyOnceWith(unidentified('updateManyAndReturn', 1));
-      expect(await logsOf()).toEqual([
-        matching('d-9', {
-          action: 'update',
-          before: null,
-          changes: null,
-          beforeUnavailable: true,
-          after: expect.objectContaining({ code: 'd-9', label: 'label of d-1' }),
-        }),
-      ]);
+      expect(observer).not.toHaveBeenCalled();
+      expect(await logsOf()).toEqual([recoded('d-1', 'd-9')]);
     });
 
     it.each([
       ['outside a transaction', false],
       ['inside an interactive transaction', true],
-    ])('reports the row an updateMany with a limit gave another code, %s', async (_label, interactive) => {
+    ])('records the row an updateMany with a limit gave another code, %s', async (_label, interactive) => {
       const observer = vi.fn<AuditErrorObserver>();
       const { prisma, run, seed, logsOf, labels } = await setup(observer);
       await seed('d-1', 'd-2');
@@ -240,8 +233,8 @@ describe('a model identified by a unique field instead of a primary key', () => 
 
       expect(result).toEqual({ count: 1 });
       expect(Object.keys(await labels()).sort()).toEqual(['d-2', 'd-9']);
-      expect(observer).toHaveBeenCalledExactlyOnceWith(unidentified('updateMany', 1));
-      expect(await logsOf()).toEqual([]);
+      expect(observer).not.toHaveBeenCalled();
+      expect(await logsOf()).toEqual([recoded('d-1', 'd-9')]);
     });
 
     it('audits an updateMany and an updateManyAndReturn that leave the code as it is, and reports nothing', async () => {

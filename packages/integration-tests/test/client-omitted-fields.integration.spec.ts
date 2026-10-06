@@ -1052,15 +1052,22 @@ describe('fields a client-level omit hides', () => {
       expect(keysOf(record?.after)).toEqual(['code', 'createdAt', 'label']);
     });
 
-    it('records no update that changes the id under the id its before state holds', async () => {
+    it('records an update that gives the row another id under that id, with the change from the id its before state holds', async () => {
       const observer = vi.fn<AuditErrorObserver>();
       const { prisma, run, recordsOf } = await setup({ errorHandling: { observer } }, HIDDEN_ID);
 
       const result = await run(() => prisma.user.update({ where: { id: 'u1' }, data: { id: 'u9', name: 'Bea' } }));
 
       expect(keysOf(result)).toEqual(WITHOUT_ID);
-      expect(await recordsOf('User')).toEqual([]);
-      expect(observer.mock.calls.map(([failure]) => [failure.phase, failure.modelName, failure.operation])).toEqual([]);
+      const records = await recordsOf('User');
+      expect(records.map(({ entityId, action, changes }) => ({ entityId, action, changes }))).toEqual([
+        {
+          entityId: 'u9',
+          action: 'update',
+          changes: { id: { old: 'u1', new: 'u9' }, name: { old: 'Ada', new: 'Bea' } },
+        },
+      ]);
+      expect(observer).not.toHaveBeenCalled();
     });
   });
 

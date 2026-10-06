@@ -4,16 +4,21 @@
  * createMany, createManyAndReturn, updateMany, updateManyAndReturn and deleteMany: reads the
  * rows an update or a delete will touch with `findMany`, runs the operation, reads back the rows a
  * createMany wrote by the keys of its data and the rows an updateMany wrote by row key, and
- * collects one event per written row, paired with its before row by row key. A row whose update
- * changed its key does not pair: it is reported as `row-identification`, and recorded without a
- * before state when the update returned it. A row's key is the
+ * collects one event per written row, paired with its before row by row key. A row's key is the
  * model's primary key, or its first unique constraint on required fields when it has no primary key
- * (`rowKeyFieldsOf`). Every read of the executor reads the row key whatever a client-level omit
- * hides, and the omitted fields the entity audits (`withRowKeyFields`).
+ * (`rowKeyFieldsOf`). An update's rows are read again and paired by the key the write gives them
+ * (`rowKeyWriteOf`): the key they had, with the key fields the data gives literal values replaced.
+ * When the data changes the key in a way its arguments do not tell (an operator such as
+ * `increment`), the update runs as given and reads no row: the rows of an updateMany are reported
+ * as `row-identification` and not audited, and the rows an updateManyAndReturn returns are recorded
+ * without a before state and reported. A row another writer re-keys or deletes between the reads
+ * does not pair, and is reported the same way. Every read of the executor reads the row key
+ * whatever a client-level omit hides, and the omitted fields the entity audits (`withRowKeyFields`).
  */
 
 import type { FailureSink, MutationEvent } from '@kuruwic/db-audit-core';
 import { AUDIT_ACTION } from '../grammar/operations.js';
+import type { PrismaNamespace } from '../internal-types.js';
 import type { SchemaMetadata } from '../schema/types.js';
 import { type AuditedOmittedFields, withOmittedFieldsInFinds } from '../utils/audited-omitted-fields.js';
 import { UNAVAILABLE_BEFORE_STATE } from '../utils/before-state.js';
@@ -28,6 +33,7 @@ import {
 import type { EntityIdentityKey } from '../utils/identity-key.js';
 import { getModelDelegate, hasOperation } from '../utils/model-accessor.js';
 import { requiresBeforeState } from '../utils/operation-classifier.js';
+import { type DerivableRowKeyWrite, NO_ROW_KEY_WRITE, rowKeyWriteOf, withWrittenKey } from '../utils/row-key-write.js';
 import { collectBatchOperationEvents } from './collect-events.js';
 import type { ExecutionScope } from './execution-scope.js';
 import { type AuditedOperation, createExecutor, type OperationExecutor } from './executor.js';
@@ -35,6 +41,11 @@ import { type AuditedOperation, createExecutor, type OperationExecutor } from '.
 type Row = Record<string, unknown>;
 
 export interface BatchExecutorDependencies {
+  /**
+   * Prisma namespace given as the extension's `Prisma` option; its `skip` leaves a data field
+   * unwritten, and its `Decimal` is the type a `Decimal` key is read back in
+   */
+  readonly Prisma: PrismaNamespace;
   readonly schemaMetadata: SchemaMetadata;
   readonly auditedOmittedFieldsWithRowKey: AuditedOmittedFields;
   readonly failureSink: FailureSink;
@@ -46,10 +57,31 @@ export type BatchPrepared =
   /** createMany: the rows to insert, with client-generated key values, and the fields of that key */
   | { readonly kind: 'create'; readonly rows: Row[]; readonly keyFields: string[] }
   /** updateManyAndReturn: its returned rows are exactly the updated ones */
-  | { readonly kind: 'update-returning'; readonly beforeRows: Row[]; readonly keyFields: string[] }
-  | { readonly kind: 'update'; readonly beforeRows: Row[]; readonly keyFields: string[] }
+  | {
+      readonly kind: 'update-returning';
+      readonly beforeRows: Row[];
+      readonly keyFields: string[];
+      readonly keyWrite: DerivableRowKeyWrite;
+    }
+  | {
+      readonly kind: 'update';
+      readonly beforeRows: Row[];
+      readonly keyFields: string[];
+      readonly keyWrite: DerivableRowKeyWrite;
+    }
+  /**
+   * updateMany (with or without a `limit`) or updateManyAndReturn whose data changes the key in a
+   * way its arguments do not tell: run as given, no row read
+   */
+  | { readonly kind: 'key-not-followed' }
   /** updateMany or deleteMany with a positive integer `limit`: the rows are read round by round as the write runs */
-  | { readonly kind: 'limited'; readonly limit: number; readonly keyFields: string[]; readonly rounds: number }
+  | {
+      readonly kind: 'limited';
+      readonly limit: number;
+      readonly keyFields: string[];
+      readonly rounds: number;
+      readonly keyWrite: DerivableRowKeyWrite;
+    }
   /**
    * updateMany or deleteMany with a `limit`, run as given: inside a batch `$transaction([...])`
    * Prisma runs (`reportsUnidentified`), or with a limit Prisma rejects
@@ -91,8 +123,22 @@ const batchDelegate = (scope: ExecutionScope, modelName: string, readFields: Aud
 
 const rowsOf = (value: unknown): Row[] => (Array.isArray(value) ? (value as Row[]) : []);
 
-const pairByRowKey = (afterRows: Row[], beforeRows: Row[], keyFields: string[]): WrittenRows => {
-  const beforeByKey = buildEntityMap(beforeRows, keyFields);
+/** `rows` by the key the write gives each of them */
+const byWrittenKey = (rows: readonly Row[], keyFields: string[], keyWrite: DerivableRowKeyWrite) =>
+  new Map(rows.map((row) => [extractEntityIdentity(withWrittenKey(row, keyWrite), keyFields), row]));
+
+/** `rows` as the write leaves them: each with the key the write gives it */
+const underWrittenKeys = (rows: readonly Row[], keyWrite: DerivableRowKeyWrite): Row[] =>
+  rows.map((row) => withWrittenKey(row, keyWrite));
+
+/** Pairs each of `afterRows` with the row of `beforeRows` the write gave its key */
+const pairByRowKey = (
+  afterRows: Row[],
+  beforeRows: Row[],
+  keyFields: string[],
+  keyWrite: DerivableRowKeyWrite,
+): WrittenRows => {
+  const beforeByKey = byWrittenKey(beforeRows, keyFields, keyWrite);
   return {
     rows: afterRows,
     beforeStates: afterRows.map((row) => beforeByKey.get(extractEntityIdentity(row, keyFields)) ?? null),
@@ -141,12 +187,31 @@ const createdRows = async (delegate: BatchDelegate, rows: readonly Row[], keyFie
   return ranked.sort((a, b) => a.rank - b.rank).map(({ row }) => row);
 };
 
+/** An `updateMany` or `deleteMany` with a `limit`: run as given, or in rounds narrowed to the keys each reads */
+const prepareLimited = (
+  limit: unknown,
+  scope: ExecutionScope,
+  keyWrite: DerivableRowKeyWrite,
+  rowKeyFields: () => string[],
+): BatchPrepared => {
+  if (typeof limit !== 'number' || !Number.isInteger(limit) || limit <= 0) {
+    return { kind: 'limited-as-given', reportsUnidentified: false };
+  }
+  if (scope.inPrismaBatch) {
+    return { kind: 'limited-as-given', reportsUnidentified: true };
+  }
+  const rounds = scope.transaction ? LIMITED_WRITE_ROUNDS : 1;
+  return { kind: 'limited', limit, keyFields: rowKeyFields(), rounds, keyWrite };
+};
+
 /**
  * An `updateManyAndReturn` is audited from the rows it returns, so the after rows are not read
  * again. An `updateMany` or `deleteMany` with a `limit` reads its rows as it runs (see
  * `runLimitedWrite`): in rounds inside an interactive transaction, in one narrowed statement
  * outside any. Inside a batch `$transaction([...])` Prisma runs, a read before the write cannot see
- * what the batch's earlier operations wrote, so the operation runs as given.
+ * what the batch's earlier operations wrote, so the operation runs as given. An update whose data
+ * changes the key in a way its arguments do not tell runs as given too: no row it writes could be
+ * found or paired by key, so none is read.
  */
 const prepareUpdateOrDelete = async (
   operation: AuditedOperation,
@@ -158,26 +223,26 @@ const prepareUpdateOrDelete = async (
   const delegate = batchDelegate(scope, model, deps.auditedOmittedFieldsWithRowKey);
   const where = args.where ?? {};
   const { limit } = args;
+  const keyWrite =
+    action === AUDIT_ACTION.DELETE_MANY
+      ? NO_ROW_KEY_WRITE
+      : rowKeyWriteOf(deps.schemaMetadata, model, args.data, deps.Prisma);
 
+  if (keyWrite.kind === 'not-derivable') {
+    return { kind: 'key-not-followed' };
+  }
   if ((action === AUDIT_ACTION.UPDATE_MANY || action === AUDIT_ACTION.DELETE_MANY) && limit !== undefined) {
-    if (typeof limit !== 'number' || !Number.isInteger(limit) || limit <= 0) {
-      return { kind: 'limited-as-given', reportsUnidentified: false };
-    }
-    if (scope.inPrismaBatch) {
-      return { kind: 'limited-as-given', reportsUnidentified: true };
-    }
-    const rounds = scope.transaction ? LIMITED_WRITE_ROUNDS : 1;
-    return { kind: 'limited', limit, keyFields: rowKeyFields(), rounds };
+    return prepareLimited(limit, scope, keyWrite, rowKeyFields);
   }
   if (action === AUDIT_ACTION.UPDATE_MANY_AND_RETURN) {
     const keyFields = rowKeyFields();
-    return { kind: 'update-returning', beforeRows: await delegate.findMany({ where }), keyFields };
+    return { kind: 'update-returning', beforeRows: await delegate.findMany({ where }), keyFields, keyWrite };
   }
   if (action === AUDIT_ACTION.DELETE_MANY) {
     return { kind: 'delete', beforeRows: await delegate.findMany({ where }) };
   }
   const keyFields = rowKeyFields();
-  return { kind: 'update', beforeRows: await delegate.findMany({ where }), keyFields };
+  return { kind: 'update', beforeRows: await delegate.findMany({ where }), keyFields, keyWrite };
 };
 
 const countOf = (result: unknown): number => {
@@ -185,12 +250,18 @@ const countOf = (result: unknown): number => {
   return typeof count === 'number' ? count : 0;
 };
 
-/** One round of a limited write: the rows it read, the `where` it wrote them with, and how many it wrote */
+/**
+ * One round of a limited write: the rows it read, the `where` it wrote them with, how many it
+ * wrote, and the `where` that finds, after the write, the rows it wrote that still match the
+ * caller's `where` (by the key the write gave them)
+ */
 interface LimitedRound {
   readonly rows: Row[];
   readonly narrowed: unknown;
   readonly written: number;
   readonly keyFields: string[];
+  readonly keyWrite: DerivableRowKeyWrite;
+  readonly matchingAfter: unknown;
 }
 
 /** Names the rows a round that wrote fewer rows than it read is known to have written */
@@ -202,8 +273,8 @@ type WrittenRowsOfShortRound = (delegate: BatchDelegate, round: LimitedRound) =>
  * told apart from a read row another writer changed before the update.
  */
 const updatedRowsOfShortRound: WrittenRowsOfShortRound = async (delegate, round) => {
-  const readByKey = buildEntityMap(round.rows, round.keyFields);
-  const stillMatching = await delegate.findMany({ where: round.narrowed });
+  const readByKey = byWrittenKey(round.rows, round.keyFields, round.keyWrite);
+  const stillMatching = await delegate.findMany({ where: round.matchingAfter });
   return stillMatching.flatMap((row): Row[] => {
     const readRow = readByKey.get(extractEntityIdentity(row, round.keyFields));
     return readRow ? [readRow] : [];
@@ -234,10 +305,16 @@ const createdRowsNotReadBack: UnidentifiedReason = (operation, unidentified) =>
   `${unidentified} of the rows a ${operation.action} created ${unidentified === 1 ? 'was' : 'were'} not found when read back by key`;
 
 const rowsNotFoundAfterWrite: UnidentifiedReason = (operation, unidentified) =>
-  `${unidentified} of the rows read before an ${operation.action} are not found by key after it, so they are not audited: the write changed their key, or another writer changed or deleted them`;
+  `${unidentified} of the rows read before an ${operation.action} are not found by key after it, so they are not audited: another writer changed their key or deleted them`;
 
 const returnedRowsWithoutBefore: UnidentifiedReason = (operation, unidentified) =>
   `${unidentified} of the rows an ${operation.action} returned pair with no row read before the write by key, so they have no before state`;
+
+const writtenRowsKeyNotFollowed: UnidentifiedReason = (operation, unidentified) =>
+  `${unidentified} of the rows an ${operation.action} wrote are not audited: its data changes their key in a way the audit cannot follow`;
+
+const returnedRowsKeyNotFollowed: UnidentifiedReason = (operation, unidentified) =>
+  `${unidentified} of the rows an ${operation.action} returned are recorded without a before state: its data changes their key in a way the audit cannot follow`;
 
 const reportUnidentified = async (
   operation: AuditedOperation,
@@ -258,34 +335,40 @@ const reportUnidentified = async (
 };
 
 /**
- * Pairs the rows an update re-read after the write with the `readRows` it read before, by row key.
- * The re-read is by the keys of `readRows`, so a row whose key the update changed is missing from
- * it: such a row is not audited, and the number of them is reported as `row-identification`.
+ * Pairs the rows an update re-read after the write with the `readRows` it read before, by the key
+ * the write gave each of them. The re-read is by those keys, so a row another writer re-keyed or
+ * deleted in between
+ * is missing from it: such a row is not audited, and the number of them is reported as
+ * `row-identification`.
  */
 const pairReReadRows = async (
   operation: AuditedOperation,
   afterRows: Row[],
   readRows: Row[],
   keyFields: string[],
+  keyWrite: DerivableRowKeyWrite,
   failureSink: FailureSink,
 ): Promise<WrittenRows> => {
   await reportUnidentified(operation, readRows.length - afterRows.length, failureSink, rowsNotFoundAfterWrite);
-  return pairByRowKey(afterRows, readRows, keyFields);
+  return pairByRowKey(afterRows, readRows, keyFields, keyWrite);
 };
 
 /**
- * Pairs the rows an `updateManyAndReturn` returned with the rows read before it, by row key. The
- * update wrote every returned row, so one with no before row (the update changed its key) is still
- * recorded, with an unavailable before state, and its number is reported as `row-identification`.
+ * Pairs the rows an `updateManyAndReturn` returned with the rows read before it, by the key the
+ * write gave each of them. The
+ * update wrote every returned row, so one with no before row (another writer inserted it or changed
+ * its key between the read and the write) is still recorded, with an unavailable before state, and
+ * its number is reported as `row-identification`.
  */
 const pairReturnedRows = async (
   operation: AuditedOperation,
   returnedRows: Row[],
   beforeRows: Row[],
   keyFields: string[],
+  keyWrite: DerivableRowKeyWrite,
   failureSink: FailureSink,
 ): Promise<WrittenRows> => {
-  const paired = pairByRowKey(returnedRows, beforeRows, keyFields);
+  const paired = pairByRowKey(returnedRows, beforeRows, keyFields, keyWrite);
   const unavailableBefore = new Set<number>();
   paired.beforeStates?.forEach((before, index) => {
     if (before === null) {
@@ -297,22 +380,60 @@ const pairReturnedRows = async (
 };
 
 /**
+ * The rows of an update whose data changes the key in a way its arguments do not tell, which ran
+ * as given: the rows an `updateManyAndReturn` returned are recorded with an unavailable before
+ * state; an `updateMany`'s rows are not audited. Their number is reported as `row-identification`.
+ */
+const keyNotFollowedRows = async (
+  operation: AuditedOperation,
+  executed: BatchExecuted,
+  failureSink: FailureSink,
+): Promise<WrittenRows> => {
+  const returnedRows = executed.returnedRows;
+  if (!returnedRows) {
+    await reportUnidentified(operation, countOf(executed.result), failureSink, writtenRowsKeyNotFollowed);
+    return { rows: [] };
+  }
+  await reportUnidentified(operation, returnedRows.length, failureSink, returnedRowsKeyNotFollowed);
+  return {
+    rows: returnedRows,
+    beforeStates: returnedRows.map(() => null),
+    unavailableBefore: new Set(returnedRows.keys()),
+  };
+};
+
+/** The rows of `rows` whose key the write changes, each under the key the write gives it */
+const rowsUnderNewKeys = (rows: readonly Row[], keyFields: string[], keyWrite: DerivableRowKeyWrite): Row[] =>
+  rows
+    .map((row) => withWrittenKey(row, keyWrite))
+    .filter((rekeyed, index) => {
+      const row = rows[index];
+      return row !== undefined && extractEntityIdentity(rekeyed, keyFields) !== extractEntityIdentity(row, keyFields);
+    });
+
+/**
  * Runs an `updateMany` or `deleteMany` with a `limit` as the caller's own operation, without the
  * limit and narrowed to the row keys of the rows a read with the caller's `where` and the limit
  * as `take` selected, so the rows it audits are the rows it wrote. Inside an interactive
  * transaction a round that writes fewer rows than it read (another writer changed some of them in
- * between) is topped up with rows read the same way, leaving out every row already read, at most
- * `LIMITED_WRITE_ROUNDS` rounds in all: the count is a plain operation's, except under contention
- * past the last round. Outside any transaction the operation is one round, one statement, whose
- * count may be lower than a plain operation's under contention. Which rows a short round wrote is
- * read when the records are built (`limitedWrittenRows`).
+ * between) is topped up with rows read the same way, leaving out every row already read, under
+ * the key it was read with and the key the write gives it, at most `LIMITED_WRITE_ROUNDS` rounds in
+ * all: the count is a plain operation's, except under contention past the last round. Outside any
+ * transaction the operation is one round, one statement, whose count may be lower than a plain
+ * operation's under contention. Which rows a short round wrote is read when the records are built
+ * (`limitedWrittenRows`).
  */
 const runLimitedWrite = async (
   operation: AuditedOperation,
   delegate: BatchDelegate,
-  prepared: { readonly limit: number; readonly keyFields: string[]; readonly rounds: number },
+  prepared: {
+    readonly limit: number;
+    readonly keyFields: string[];
+    readonly rounds: number;
+    readonly keyWrite: DerivableRowKeyWrite;
+  },
 ): Promise<BatchExecuted> => {
-  const { limit, keyFields } = prepared;
+  const { limit, keyFields, keyWrite } = prepared;
   const where = operation.args.where ?? {};
   const unlimited = Object.fromEntries(Object.entries(operation.args).filter(([key]) => key !== 'limit'));
   const read: Row[] = [];
@@ -324,11 +445,16 @@ const runLimitedWrite = async (
     if (rows.length === 0) {
       break;
     }
-    read.push(...rows);
+    const rekeyed = rowsUnderNewKeys(rows, keyFields, keyWrite);
+    read.push(...rows, ...rekeyed);
     const narrowed = { AND: [where, buildPKWhereClause(keyFields, rows)] };
     const written = countOf(await operation.execute({ ...unlimited, where: narrowed }));
     count += written;
-    limitedRounds.push({ rows, narrowed, written, keyFields });
+    const matchingAfter =
+      rekeyed.length === 0
+        ? narrowed
+        : { AND: [where, buildPKWhereClause(keyFields, underWrittenKeys(rows, keyWrite))] };
+    limitedRounds.push({ rows, narrowed, written, keyFields, keyWrite, matchingAfter });
     if (written === rows.length) {
       break;
     }
@@ -363,6 +489,27 @@ const limitedWrittenRows = async (
   return known;
 };
 
+/**
+ * The rows of a limited write with their before states. A delete's rows keep the state read before
+ * it; an update's rows are read again by the key the write gave them and paired with it.
+ */
+const limitedWriteRows = async (
+  operation: AuditedOperation,
+  delegate: BatchDelegate,
+  prepared: { readonly keyFields: string[]; readonly keyWrite: DerivableRowKeyWrite },
+  executed: BatchExecuted,
+  failureSink: FailureSink,
+): Promise<WrittenRows> => {
+  const written = await limitedWrittenRows(operation, delegate, executed.limitedRounds ?? [], failureSink);
+  if (operation.action === AUDIT_ACTION.DELETE_MANY) {
+    // A deleted row cannot be read again: its state is the one read before the delete.
+    return { rows: written, beforeStates: written };
+  }
+  const { keyFields, keyWrite } = prepared;
+  const afterRows = await findManyByPKs(delegate, keyFields, underWrittenKeys(written, keyWrite));
+  return pairReReadRows(operation, afterRows, written, keyFields, keyWrite, failureSink);
+};
+
 export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationExecutor => {
   const { schemaMetadata, auditedOmittedFieldsWithRowKey, failureSink } = deps;
 
@@ -390,6 +537,11 @@ export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationE
       case 'update-returning': {
         const result = await operation.execute(args);
         return { result, returnedRows: rowsOf(result) };
+      }
+      case 'key-not-followed': {
+        const result = await operation.execute(args);
+        const returns = operation.action === AUDIT_ACTION.UPDATE_MANY_AND_RETURN;
+        return { result, returnedRows: returns ? rowsOf(result) : undefined };
       }
       case 'limited':
         return runLimitedWrite(operation, delegateOf(scope, operation.model), prepared);
@@ -430,6 +582,7 @@ export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationE
           executed.returnedRows ?? [],
           prepared.beforeRows,
           prepared.keyFields,
+          prepared.keyWrite,
           failureSink,
         );
       case 'limited-as-given':
@@ -437,25 +590,20 @@ export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationE
           await reportUnidentified(operation, countOf(executed.result), failureSink, limitedRowsOfOtherWriters);
         }
         return { rows: [] };
-      case 'limited': {
-        const delegate = delegateOf(scope, operation.model);
-        const written = await limitedWrittenRows(operation, delegate, executed.limitedRounds ?? [], failureSink);
-        if (operation.action === AUDIT_ACTION.DELETE_MANY) {
-          // A deleted row cannot be read again: its state is the one read before the delete.
-          return { rows: written, beforeStates: written };
-        }
-        const afterRows = await findManyByPKs(delegate, prepared.keyFields, written);
-        return pairReReadRows(operation, afterRows, written, prepared.keyFields, failureSink);
-      }
+      case 'key-not-followed':
+        return keyNotFollowedRows(operation, executed, failureSink);
+      case 'limited':
+        return limitedWriteRows(operation, delegateOf(scope, operation.model), prepared, executed, failureSink);
       case 'update': {
         if (prepared.beforeRows.length === 0) {
           return { rows: [] };
         }
-        // Re-fetched by row key, not by the original where, so a row whose where-field
-        // the update changed still pairs with its before row.
+        // Re-fetched by the key the write gave each row, not by the original where, so a row whose
+        // where-field the update changed still pairs with its before row.
+        const { beforeRows, keyFields, keyWrite } = prepared;
         const delegate = delegateOf(scope, operation.model);
-        const afterRows = await findManyByPKs(delegate, prepared.keyFields, prepared.beforeRows);
-        return pairReReadRows(operation, afterRows, prepared.beforeRows, prepared.keyFields, failureSink);
+        const afterRows = await findManyByPKs(delegate, keyFields, underWrittenKeys(beforeRows, keyWrite));
+        return pairReReadRows(operation, afterRows, beforeRows, keyFields, keyWrite, failureSink);
       }
       case 'delete':
         return { rows: prepared.beforeRows, beforeStates: prepared.beforeRows };

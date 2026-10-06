@@ -6,6 +6,7 @@
  */
 
 import type { AuditContext, FailureSink } from '@kuruwic/db-audit-core';
+import { Decimal } from '@prisma/client/runtime/library';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DMMFField, PrismaClientWithDynamicAccess, PrismaNamespace } from '../../src/internal-types.js';
 import { createBatchExecutor } from '../../src/pipeline/batch-executor.js';
@@ -29,6 +30,7 @@ const scalar = (name: string, extra: Partial<DMMFField> = {}): DMMFField => ({
 const Prisma: PrismaNamespace = {
   defineExtension: () => undefined,
   DbNull: null,
+  Decimal,
   dmmf: {
     datamodel: {
       models: [
@@ -60,6 +62,17 @@ const Prisma: PrismaNamespace = {
         },
         { name: 'Note', fields: [scalar('label', { isUnique: true }), scalar('text', { isRequired: true })] },
         { name: 'Reading', fields: [scalar('at', { type: 'DateTime', isId: true }), scalar('value')] },
+        { name: 'Counter', fields: [scalar('id', { type: 'Int', isId: true }), scalar('value')] },
+        {
+          name: 'Slot',
+          fields: [
+            scalar('room', { isRequired: true }),
+            scalar('at', { type: 'DateTime', isRequired: true }),
+            scalar('note'),
+          ],
+          primaryKey: { name: null, fields: ['room', 'at'] },
+        },
+        { name: 'Rate', fields: [scalar('amount', { type: 'Decimal', isId: true }), scalar('label')] },
       ],
     },
   },
@@ -123,6 +136,7 @@ const createFailureSink = (): FailureSink => ({
 /** An executor on a client that takes a query omit (Prisma 6.2 and later) when `queryOmitSupported` */
 const createExecutor = (failureSink: FailureSink, queryOmitSupported = false) =>
   createBatchExecutor({
+    Prisma,
     schemaMetadata,
     auditedOmittedFieldsWithRowKey: withRowKeyFields(NO_AUDITED_OMITTED_FIELDS, schemaMetadata, queryOmitSupported),
     failureSink,
@@ -1048,11 +1062,10 @@ describe('createBatchExecutor', () => {
     });
   });
 
-  describe('a write that changes the key of the rows it writes', () => {
+  describe('rows the read after the write does not find by the key they were read under', () => {
     const c1: Row = { id: 'c', email: 'c@1' };
     const c2: Row = { id: 'c', email: 'c@2' };
-    const rekeyed = (row: Row, id: string): Row => ({ ...row, id });
-    const data = { id: 'z' };
+    const data = { email: 'x' };
     const report = (action: string, count: number, message: string) => ({
       phase: 'row-identification',
       modelName: 'User',
@@ -1064,7 +1077,7 @@ describe('createBatchExecutor', () => {
       report(
         action,
         count,
-        `${count} of the rows read before an ${action} are not found by key after it, so they are not audited: the write changed their key, or another writer changed or deleted them`,
+        `${count} of the rows read before an ${action} are not found by key after it, so they are not audited: another writer changed their key or deleted them`,
       );
     const withoutBeforeReport = (action: string, count: number) =>
       report(
@@ -1121,8 +1134,9 @@ describe('createBatchExecutor', () => {
     });
 
     it('records the rows an updateManyAndReturn returns under a key that no row read before has without a before state, and reports them', async () => {
-      const findMany = findManyReturning([a1, b1]);
-      const updateManyAndReturn = vi.fn(async () => [rekeyed(a2, 'z'), b2]);
+      const inserted: Row = { id: 'z', email: 'x' };
+      const findMany = findManyReturning([b1]);
+      const updateManyAndReturn = vi.fn(async () => [inserted, b2]);
       const client = clientWith({ user: { findMany, updateManyAndReturn } });
       const produceRecords = produce();
 
@@ -1133,7 +1147,7 @@ describe('createBatchExecutor', () => {
         produceRecords,
       );
 
-      expect(outcome.result).toEqual([rekeyed(a2, 'z'), b2]);
+      expect(outcome.result).toEqual([inserted, b2]);
       expect(failureSink.notify).toHaveBeenCalledExactlyOnceWith(withoutBeforeReport('updateManyAndReturn', 1));
       expect(produceRecords).toHaveBeenCalledWith(
         [
@@ -1141,7 +1155,7 @@ describe('createBatchExecutor', () => {
             identity: 'z',
             action: 'update',
             before: { kind: 'unavailable' },
-            after: rekeyed(a2, 'z'),
+            after: inserted,
             origin: { path: '', op: 'updateManyAndReturn' },
           }),
           updateEvent(b1, b2, 'updateManyAndReturn'),
@@ -1175,12 +1189,307 @@ describe('createBatchExecutor', () => {
 
       await runWithRecords(
         executor,
-        operationOn(client, 'updateMany', { where: {}, data: { email: 'x' } }),
+        operationOn(client, 'updateMany', { where: {}, data }),
         scopeOn(client),
         produce(),
       );
 
       expect(failureSink.notify).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('a write whose data changes the key of the rows it writes in a way the audit cannot follow', () => {
+    const one: Row = { id: 1, value: 'one' };
+    const two: Row = { id: 2, value: 'two' };
+    const shifted = (row: Row): Row => ({ ...row, id: (row.id as number) + 1 });
+    const data = { id: { increment: 1 } };
+    const report = (action: string, count: number, message: string) => ({
+      phase: 'row-identification',
+      modelName: 'Counter',
+      operation: action,
+      params: { unidentified: count },
+      error: new Error(message),
+    });
+    const notFollowedReport = (action: string, count: number) =>
+      report(
+        action,
+        count,
+        `${count} of the rows an ${action} wrote are not audited: its data changes their key in a way the audit cannot follow`,
+      );
+
+    it('runs an updateMany that moves one row onto the old key of another as given, reads no row, audits none and reports the rows it wrote', async () => {
+      // A read by the keys of the rows read before would find the row that moved onto key 2 and pair it with row 2
+      const findMany = findManyReturning([one, two], [shifted(one)]);
+      const updateMany = vi.fn(async () => ({ count: 2 }));
+      const { client, operation } = operationOnModel('Counter', { findMany, updateMany }, 'updateMany', {
+        where: {},
+        data,
+      });
+      const produceRecords = produce();
+
+      const outcome = await runWithRecords(executor, operation, scopeOn(client), produceRecords);
+
+      expect(outcome.result).toEqual({ count: 2 });
+      expect(updateMany).toHaveBeenCalledExactlyOnceWith({ where: {}, data });
+      expect(findMany).not.toHaveBeenCalled();
+      expect(failureSink.notify).toHaveBeenCalledExactlyOnceWith(notFollowedReport('updateMany', 2));
+      expect(produceRecords).toHaveBeenCalledWith([], expect.anything(), new Map());
+    });
+
+    it('records each row an updateManyAndReturn returns as an update without a before state, reports them, and reads no row', async () => {
+      const findMany = findManyReturning([one, two]);
+      const updateManyAndReturn = vi.fn(async () => [shifted(two), shifted(one)]);
+      const { client, operation } = operationOnModel(
+        'Counter',
+        { findMany, updateManyAndReturn },
+        'updateManyAndReturn',
+        { where: {}, data },
+      );
+      const produceRecords = produce();
+
+      const outcome = await runWithRecords(executor, operation, scopeOn(client), produceRecords);
+
+      expect(outcome.result).toEqual([shifted(two), shifted(one)]);
+      expect(findMany).not.toHaveBeenCalled();
+      expect(failureSink.notify).toHaveBeenCalledExactlyOnceWith(
+        report(
+          'updateManyAndReturn',
+          2,
+          '2 of the rows an updateManyAndReturn returned are recorded without a before state: its data changes their key in a way the audit cannot follow',
+        ),
+      );
+      const unavailableUpdate = (after: Row) =>
+        expect.objectContaining({
+          model: 'Counter',
+          identity: String(after.id),
+          action: 'update',
+          before: { kind: 'unavailable' },
+          after,
+          origin: { path: '', op: 'updateManyAndReturn' },
+        });
+      expect(produceRecords).toHaveBeenCalledWith(
+        [unavailableUpdate(shifted(two)), unavailableUpdate(shifted(one))],
+        expect.anything(),
+        new Map(),
+      );
+    });
+
+    it.each([
+      ['outside any transaction', false],
+      ['inside an interactive transaction', true],
+    ])(
+      'runs an updateMany with a limit %s as given, its count the one Prisma returns, reads no row and reports the rows it wrote',
+      async (_label, interactive) => {
+        const findMany = findManyReturning([one, two]);
+        const updateMany = vi.fn(async () => ({ count: 2 }));
+        const args = { where: {}, data, limit: 2 };
+        const { client, operation } = operationOnModel('Counter', { findMany, updateMany }, 'updateMany', args);
+        const produceRecords = produce();
+
+        const outcome = await runWithRecords(
+          executor,
+          operation,
+          interactive ? transactionScopeOn(client) : scopeOn(client),
+          produceRecords,
+        );
+
+        expect(outcome.result).toEqual({ count: 2 });
+        expect(updateMany).toHaveBeenCalledExactlyOnceWith(args);
+        expect(findMany).not.toHaveBeenCalled();
+        expect(failureSink.notify).toHaveBeenCalledExactlyOnceWith(notFollowedReport('updateMany', 2));
+        expect(produceRecords).toHaveBeenCalledWith([], expect.anything(), new Map());
+      },
+    );
+  });
+
+  describe('a write whose data gives the key literal values', () => {
+    const d1: Row = { label: null, serial: 's1', name: 'one' };
+    const d9: Row = { ...d1, serial: 's9' };
+    const deviceUpdate = (before: Row, after: Row, op: string) =>
+      expect.objectContaining({
+        model: 'Device',
+        identity: after.serial,
+        action: 'update',
+        before: { kind: 'captured', row: before },
+        after,
+        origin: { path: '', op },
+      });
+
+    it('reads the rows of an updateMany again by the key the write gave them, and pairs each with the row it was', async () => {
+      const findMany = findManyReturning([d1], [d9]);
+      const updateMany = vi.fn(async () => ({ count: 1 }));
+      const { client, operation } = operationOnModel('Device', { findMany, updateMany }, 'updateMany', {
+        where: { serial: 's1' },
+        data: { serial: 's9' },
+      });
+      const produceRecords = produce();
+
+      await runWithRecords(executor, operation, scopeOn(client), produceRecords);
+
+      expect(findMany.mock.calls).toEqual([[{ where: { serial: 's1' } }], [{ where: { serial: { in: ['s9'] } } }]]);
+      expect(failureSink.notify).not.toHaveBeenCalled();
+      expect(produceRecords).toHaveBeenCalledWith([deviceUpdate(d1, d9, 'updateMany')], expect.anything(), new Map());
+    });
+
+    it('pairs each row an updateManyAndReturn returns with the row it was, by the key the write gave it', async () => {
+      const findMany = findManyReturning([d1]);
+      const updateManyAndReturn = vi.fn(async () => [d9]);
+      const { client, operation } = operationOnModel(
+        'Device',
+        { findMany, updateManyAndReturn },
+        'updateManyAndReturn',
+        { where: { serial: 's1' }, data: { serial: { set: 's9' } } },
+      );
+      const produceRecords = produce();
+
+      await runWithRecords(executor, operation, scopeOn(client), produceRecords);
+
+      expect(findMany.mock.calls).toEqual([[{ where: { serial: 's1' } }]]);
+      expect(failureSink.notify).not.toHaveBeenCalled();
+      expect(produceRecords).toHaveBeenCalledWith(
+        [deviceUpdate(d1, d9, 'updateManyAndReturn')],
+        expect.anything(),
+        new Map(),
+      );
+    });
+
+    it('audits an updateMany whose data gives the key the value each row already has, as a write that leaves the key alone', async () => {
+      const findMany = findManyReturning([a1], [a2]);
+      const updateMany = vi.fn(async () => ({ count: 1 }));
+      const client = clientWith({ user: { findMany, updateMany } });
+      const produceRecords = produce();
+
+      await runWithRecords(
+        executor,
+        operationOn(client, 'updateMany', { where: { id: 'a' }, data: { id: 'a', email: 'a@2' } }),
+        scopeOn(client),
+        produceRecords,
+      );
+
+      expect(findMany.mock.calls).toEqual([[{ where: { id: 'a' } }], [{ where: { id: { in: ['a'] } } }]]);
+      expect(failureSink.notify).not.toHaveBeenCalled();
+      expect(produceRecords).toHaveBeenCalledWith(
+        [eventOf({ identity: 'a', before: { kind: 'captured', row: a1 }, after: a2 })],
+        expect.anything(),
+        new Map(),
+      );
+    });
+
+    it('leaves out of a top-up round inside an interactive transaction the rows already read, under their old and their new keys, and pairs the written rows by their new keys', async () => {
+      const m11: Row = { orgId: 1n, userId: 1n, role: 'member' };
+      const m12: Row = { orgId: 1n, userId: 2n, role: 'member' };
+      const m91: Row = { ...m11, orgId: 9n };
+      const findMany = findManyReturning([m11, m12], [], [m91], [m91]);
+      const updateMany = vi.fn(async () => ({ count: 1 }));
+      const where = { role: 'member' };
+      const data = { orgId: 9n };
+      const { client, operation } = operationOnModel('Membership', { findMany, updateMany }, 'updateMany', {
+        where,
+        data,
+        limit: 2,
+      });
+      const produceRecords = produce();
+      const keys = (...pairs: Array<[bigint, bigint]>) => ({
+        OR: pairs.map(([orgId, userId]) => ({ orgId, userId })),
+      });
+
+      const outcome = await runWithRecords(executor, operation, transactionScopeOn(client), produceRecords);
+
+      expect(outcome.result).toEqual({ count: 1 });
+      expect(findMany.mock.calls).toEqual([
+        [{ where, take: 2 }],
+        [
+          {
+            where: {
+              AND: [
+                where,
+                {
+                  NOT: keys([1n, 1n], [1n, 2n], [9n, 1n], [9n, 2n]),
+                },
+              ],
+            },
+            take: 1,
+          },
+        ],
+        [{ where: { AND: [where, keys([9n, 1n], [9n, 2n])] } }],
+        [{ where: keys([9n, 1n]) }],
+      ]);
+      expect(vi.mocked(operation.execute).mock.calls).toEqual([
+        [{ where: { AND: [where, keys([1n, 1n], [1n, 2n])] }, data }],
+      ]);
+      expect(failureSink.notify).not.toHaveBeenCalled();
+      expect(produceRecords).toHaveBeenCalledWith(
+        [
+          expect.objectContaining({
+            model: 'Membership',
+            action: 'update',
+            before: { kind: 'captured', row: m11 },
+            after: m91,
+          }),
+        ],
+        expect.anything(),
+        new Map(),
+      );
+    });
+  });
+
+  describe('a write whose data gives a key field a literal in another form than the type Prisma reads it back in', () => {
+    const updateOf = (model: string, before: Row, after: Row) =>
+      expect.objectContaining({ model, action: 'update', before: { kind: 'captured', row: before }, after });
+
+    it('pairs the rows of an updateMany that gives a DateTime of a composite key as an ISO string', async () => {
+      const s0: Row = { room: 'r1', at: new Date('2026-01-01T00:00:00.000Z'), note: 'n' };
+      const s1: Row = { ...s0, at: new Date('2026-01-02T03:04:05.000Z') };
+      const findMany = findManyReturning([s0], [s1]);
+      const updateMany = vi.fn(async () => ({ count: 1 }));
+      const { client, operation } = operationOnModel('Slot', { findMany, updateMany }, 'updateMany', {
+        where: { room: 'r1' },
+        data: { at: '2026-01-02T03:04:05Z' },
+      });
+      const produceRecords = produce();
+
+      await runWithRecords(executor, operation, scopeOn(client), produceRecords);
+
+      expect(findMany.mock.calls[1]).toEqual([{ where: { OR: [{ room: 'r1', at: s1.at }] } }]);
+      expect(failureSink.notify).not.toHaveBeenCalled();
+      expect(produceRecords).toHaveBeenCalledWith([updateOf('Slot', s0, s1)], expect.anything(), new Map());
+    });
+
+    it('pairs the rows of a limited updateMany inside an interactive transaction that gives a BigInt of a composite key as a number', async () => {
+      const m11: Row = { orgId: 1n, userId: 1n, role: 'member' };
+      const m91: Row = { ...m11, orgId: 9n };
+      const findMany = findManyReturning([m11], [m91]);
+      const updateMany = vi.fn(async () => ({ count: 1 }));
+      const { client, operation } = operationOnModel('Membership', { findMany, updateMany }, 'updateMany', {
+        where: { role: 'member' },
+        data: { orgId: 9 },
+        limit: 1,
+      });
+      const produceRecords = produce();
+
+      const outcome = await runWithRecords(executor, operation, transactionScopeOn(client), produceRecords);
+
+      expect(outcome.result).toEqual({ count: 1 });
+      expect(findMany.mock.calls[1]).toEqual([{ where: { OR: [{ orgId: 9n, userId: 1n }] } }]);
+      expect(failureSink.notify).not.toHaveBeenCalled();
+      expect(produceRecords).toHaveBeenCalledWith([updateOf('Membership', m11, m91)], expect.anything(), new Map());
+    });
+
+    it('pairs each row an updateManyAndReturn returns when its data gives a Decimal key as a string with a trailing zero', async () => {
+      const r0: Row = { amount: new Decimal('1.25'), label: 'base' };
+      const r1: Row = { amount: new Decimal('1.5'), label: 'base' };
+      const findMany = findManyReturning([r0]);
+      const updateManyAndReturn = vi.fn(async () => [r1]);
+      const { client, operation } = operationOnModel('Rate', { findMany, updateManyAndReturn }, 'updateManyAndReturn', {
+        where: { label: 'base' },
+        data: { amount: '1.50' },
+      });
+      const produceRecords = produce();
+
+      await runWithRecords(executor, operation, scopeOn(client), produceRecords);
+
+      expect(failureSink.notify).not.toHaveBeenCalled();
+      expect(produceRecords).toHaveBeenCalledWith([updateOf('Rate', r0, r1)], expect.anything(), new Map());
     });
   });
 

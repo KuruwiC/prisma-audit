@@ -74,6 +74,13 @@ const models: DMMFModel[] = [
     ],
   },
   {
+    name: 'Reading',
+    fields: [
+      { name: 'at', kind: 'scalar', type: 'DateTime', isId: true, isRequired: true },
+      { name: 'value', kind: 'scalar', type: 'String' },
+    ],
+  },
+  {
     name: 'Slot',
     fields: [
       { name: 'zone', kind: 'scalar', type: 'String', isRequired: true },
@@ -107,7 +114,14 @@ const models: DMMFModel[] = [
   },
 ];
 
-const Prisma: PrismaNamespace = { defineExtension: () => undefined, DbNull: null, dmmf: { datamodel: { models } } };
+/** Stands for `Prisma.skip`: a field given it is left out of the query */
+const skip = new (class Skip {})();
+const Prisma: PrismaNamespace = {
+  defineExtension: () => undefined,
+  DbNull: null,
+  skip,
+  dmmf: { datamodel: { models } },
+};
 const schemaMetadata = createSchemaMetadataFromDMMF(Prisma);
 
 const deps = { Prisma, schemaMetadata, shouldFetchBefore: () => true, auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS };
@@ -379,12 +393,60 @@ describe('collectSingleOperationEvents', () => {
         'upsert' as const,
         { where: { id: 'u1' }, create: { id: 'u1', name: 'Anne' }, update: { id: 'u9' } },
       ],
-    ])('takes no key from the before state when %s', async (_label, action, args) => {
-      const outcome = single({ action, args, result: { name: 'Anne' }, beforeState: captured });
+    ])('takes the key the write gives the row when %s', async (_label, action, args) => {
+      const result = { name: 'Anne' };
+      const outcome = single({ action, args, result, beforeState: captured });
 
       const events = await collectSingleOperationEvents(outcome, deps);
 
-      expect(events).toEqual([expect.objectContaining({ identity: '', after: { name: 'Anne' } })]);
+      expect(events).toEqual([expect.objectContaining({ identity: 'u9', after: { name: 'Anne', id: 'u9' } })]);
+      expect(result).toEqual({ name: 'Anne' });
+    });
+
+    it('takes a DateTime key the update gives as an ISO string as the Date Prisma reads back', async () => {
+      const before = { at: new Date('2026-01-01T00:00:00.000Z'), value: 'v' };
+      const outcome = single({
+        modelName: 'Reading',
+        action: 'update',
+        args: { where: { at: before.at }, data: { at: '2026-01-02T03:04:05Z' } },
+        result: { value: 'v' },
+        beforeState: { kind: 'captured', row: before },
+      });
+
+      const events = await collectSingleOperationEvents(outcome, deps);
+
+      expect(events).toEqual([
+        expect.objectContaining({
+          identity: '2026-01-02T03:04:05.000Z',
+          after: { value: 'v', at: new Date('2026-01-02T03:04:05.000Z') },
+        }),
+      ]);
+    });
+
+    it('takes the key of its before state when the update gives the key Prisma.skip', async () => {
+      const outcome = single({
+        action: 'update',
+        args: { where: { id: 'u1' }, data: { id: skip, name: 'Anne' } },
+        result: { name: 'Anne' },
+        beforeState: captured,
+      });
+
+      const events = await collectSingleOperationEvents(outcome, deps);
+
+      expect(events).toEqual([expect.objectContaining({ identity: 'u1', after: { name: 'Anne', id: 'u1' } })]);
+    });
+
+    it('takes no key when the update changes the key by an operator', async () => {
+      const outcome = single({
+        action: 'update',
+        args: { where: { id: 'u1' }, data: { id: { increment: 1 } } },
+        result: { name: 'Ann' },
+        beforeState: captured,
+      });
+
+      const events = await collectSingleOperationEvents(outcome, deps);
+
+      expect(events).toEqual([expect.objectContaining({ identity: '', after: { name: 'Ann' } })]);
     });
 
     it('takes no key from the before state when the update connects a relation whose foreign key is the key', async () => {

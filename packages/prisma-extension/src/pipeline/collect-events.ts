@@ -14,9 +14,11 @@
  * nested delete without a before-state), or the row a nested write linked to the parent it was
  * then deleted from.
  *
- * A top-level row a client-level `omit` returns without its row key takes the key from its before
- * state, which the read before the write reads whatever the omit hides, unless the write changes
- * the key. The caller's result itself is left as it is.
+ * A top-level row a client-level `omit` returns without its row key takes the key the write gave it:
+ * the key of its before state, which the read before the write reads whatever the omit hides, with
+ * the key fields the write gives literal values replaced (`withWrittenKey`). A write that changes
+ * the key in a way its arguments do not tell leaves the row without it. The caller's result itself
+ * is left as it is.
  */
 
 import type { BeforeState, MutationAction, MutationEvent } from '@kuruwic/db-audit-core';
@@ -31,6 +33,7 @@ import type { PreExistingRows } from '../nested/pre-fetch/pre-existing-rows.js';
 import type { SchemaMetadata } from '../schema/types.js';
 import { beforeStateOf } from '../utils/before-state.js';
 import { rowKeyFieldsOf } from '../utils/id-generation.js';
+import { type PrismaValues, rowKeyWriteOf, withWrittenKey } from '../utils/row-key-write.js';
 import { executedUpsertBranch } from './before-state.js';
 
 type Row = Record<string, unknown>;
@@ -66,33 +69,20 @@ export type EventCollectorDependencies = NestedEventCollectorDependencies;
 const writtenDataOf = (action: AuditAction, args: Record<string, unknown>): unknown =>
   action === AUDIT_ACTION.UPSERT ? args.update : args.data;
 
-/**
- * Whether `data` can change one of `keyFields`: it writes one, or a relation whose foreign key holds one
- * (`relationKeys`: each relation of the model to the foreign key fields it writes)
- */
-const writesKey = (
-  data: unknown,
-  keyFields: ReadonlySet<string>,
-  relationKeys: ReadonlyMap<string, readonly string[]>,
-): boolean =>
-  isRow(data) &&
-  Object.entries(data).some(
-    ([field, value]) =>
-      value !== undefined &&
-      (keyFields.has(field) || (relationKeys.get(field) ?? []).some((foreignKey) => keyFields.has(foreignKey))),
-  );
-
 interface TopLevelWrite {
   readonly schemaMetadata: SchemaMetadata;
   readonly modelName: string;
   readonly action: AuditAction;
   readonly args: Record<string, unknown>;
   readonly beforeState: BeforeState;
+  /** The client's Prisma namespace: its `skip` and `Decimal` */
+  readonly prisma: PrismaValues;
 }
 
 /**
- * `row` with the key fields it lacks taken from the before state, when that state was read and
- * the write leaves the key as it was; `row` itself otherwise. A copy: the caller's result is not changed.
+ * `row` with the key fields it lacks taken from the key the write gave it, when the before state
+ * was read and the write leaves the key as it was or gives it literal values; `row` itself
+ * otherwise. A copy: the caller's result is not changed.
  */
 const withKeyFromBefore = (row: Row, keyFields: readonly string[], write: TopLevelWrite): Row => {
   const { beforeState } = write;
@@ -100,17 +90,19 @@ const withKeyFromBefore = (row: Row, keyFields: readonly string[], write: TopLev
   if (missing.length === 0 || beforeState.kind !== 'captured') {
     return row;
   }
-  const relationKeys = new Map(
-    write.schemaMetadata
-      .getRelationFields(write.modelName)
-      .map((relation) => [relation.name, relation.foreignKeyFields]),
+  const keyWrite = rowKeyWriteOf(
+    write.schemaMetadata,
+    write.modelName,
+    writtenDataOf(write.action, write.args),
+    write.prisma,
   );
-  if (writesKey(writtenDataOf(write.action, write.args), new Set(keyFields), relationKeys)) {
+  if (keyWrite.kind === 'not-derivable') {
     return row;
   }
-  const fromBefore = missing.filter((field) => field in beforeState.row);
-  return fromBefore.length > 0
-    ? { ...row, ...Object.fromEntries(fromBefore.map((field) => [field, beforeState.row[field]])) }
+  const written = withWrittenKey(beforeState.row, keyWrite);
+  const fromWrite = missing.filter((field) => field in written);
+  return fromWrite.length > 0
+    ? { ...row, ...Object.fromEntries(fromWrite.map((field) => [field, written[field]])) }
     : row;
 };
 
@@ -138,6 +130,7 @@ export const collectSingleOperationEvents = async (
     action,
     args,
     beforeState,
+    prisma: deps.Prisma,
   });
   const topLevel: MutationEvent = {
     model: modelName,
