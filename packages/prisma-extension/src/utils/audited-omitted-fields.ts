@@ -7,11 +7,14 @@
  * `excludeFields` names, are read in the audit's own queries: its whole-row reads, before and
  * after the write, through {@link withOmittedFieldsInFinds}, and a read by row key after the
  * write of the written rows it did not read itself (`pipeline/omitted-fields-after-write.ts`). The
- * caller's query is never widened with them.
+ * caller's query is never widened with them. The audit's batch reads, which tell rows apart by their
+ * row key, also read the key fields a client omit hides ({@link withRowKeyFields}).
  *
  * @module utils/audited-omitted-fields
  */
 
+import type { SchemaMetadata } from '../schema/types.js';
+import { rowKeyFieldsOf } from './id-generation.js';
 import { isRecord } from './is-record.js';
 
 /** The omitted fields of each model the audit reads */
@@ -44,6 +47,35 @@ export const createAuditedOmittedFields = (
         const excluded = new Set(entity?.excludeFields ?? excludeFields);
         const listed = (entity?.auditOmittedFields ?? []).filter((field) => !excluded.has(field));
         fields = listed.length > 0 ? new Set(listed) : NONE;
+        byModel.set(modelName, fields);
+      }
+      return fields;
+    },
+  };
+};
+
+/**
+ * `auditedOmittedFields` with each model's row key (`rowKeyFieldsOf`) added, so a read that names
+ * rows by their key reads it whatever a client-level omit hides. A client that takes no query omit
+ * (before Prisma 6.2) hides no field, and a model with no row key has none to add: both get
+ * `auditedOmittedFields` as it is.
+ */
+export const withRowKeyFields = (
+  auditedOmittedFields: AuditedOmittedFields,
+  schemaMetadata: SchemaMetadata,
+  queryOmitSupported: boolean,
+): AuditedOmittedFields => {
+  if (!queryOmitSupported) {
+    return auditedOmittedFields;
+  }
+  const byModel = new Map<string, ReadonlySet<string>>();
+  return {
+    of: (modelName) => {
+      let fields = byModel.get(modelName);
+      if (fields === undefined) {
+        const audited = auditedOmittedFields.of(modelName);
+        const rowKey = rowKeyFieldsOf(schemaMetadata, modelName) ?? [];
+        fields = rowKey.length > 0 ? new Set([...audited, ...rowKey]) : audited;
         byModel.set(modelName, fields);
       }
       return fields;

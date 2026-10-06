@@ -680,6 +680,125 @@ describe('fields a client-level omit hides', () => {
     });
   });
 
+  describe.each([
+    ['outside a transaction', false],
+    ['inside an interactive transaction', true],
+  ])('batch writes of a client whose omit hides the primary key, %s', (_label, interactive) => {
+    const MEMBERS = ['m1', 'm2', 'm3', 'm4'];
+    const OF_MEMBERS = { email: { startsWith: 'm' } };
+
+    const withHiddenKey = async (options: Options = {}) => {
+      const context = await setup(options, { user: { id: true } });
+      const plainPrisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
+      disconnects.push(() => plainPrisma.$disconnect());
+      await plainPrisma.user.createMany({
+        data: MEMBERS.map((id) => ({ id, email: `${id}@example.com`, name: `name of ${id}` })),
+      });
+      const inScope = <T>(operation: (client: Pick<typeof context.prisma, 'user'>) => Promise<T>): Promise<T> =>
+        context.run(() =>
+          interactive ? context.prisma.$transaction((tx) => operation(tx)) : operation(context.prisma),
+        );
+      /** The members as a client without omit reads them: id to name */
+      const members = async () =>
+        Object.fromEntries(
+          (await plainPrisma.user.findMany({ where: OF_MEMBERS, orderBy: { id: 'asc' } })).map((user) => [
+            user.id,
+            user.name,
+          ]),
+        );
+      return { ...context, inScope, members };
+    };
+
+    const renamed = (id: string) => ({
+      entityId: id,
+      action: 'update',
+      before: USER_COLUMNS,
+      after: USER_COLUMNS,
+      changes: { name: { old: `name of ${id}`, new: 'renamed' } },
+    });
+    const deleted = (id: string) => ({ entityId: id, action: 'delete', before: USER_COLUMNS });
+    const logsOf = async (recordsOf: (entityType: string) => Promise<Prisma.AuditLogGetPayload<object>[]>) =>
+      (await recordsOf('User')).map((record) => ({
+        entityId: record.entityId,
+        action: record.action,
+        before: keysOf(record.before),
+        ...(record.action === 'update' ? { after: keysOf(record.after), changes: record.changes } : {}),
+      }));
+
+    it('updates every matching row with an updateMany and records each under its id, the id in both states', async () => {
+      const { inScope, members, recordsOf } = await withHiddenKey();
+
+      const result = await inScope((client) =>
+        client.user.updateMany({ where: OF_MEMBERS, data: { name: 'renamed' } }),
+      );
+
+      expect(result).toEqual({ count: 4 });
+      expect(Object.values(await members())).toEqual(['renamed', 'renamed', 'renamed', 'renamed']);
+      expect(await logsOf(recordsOf)).toEqual(MEMBERS.map(renamed));
+    });
+
+    it('deletes every matching row with a deleteMany and records each under its id', async () => {
+      const { inScope, members, recordsOf } = await withHiddenKey();
+
+      const result = await inScope((client) => client.user.deleteMany({ where: OF_MEMBERS }));
+
+      expect(result).toEqual({ count: 4 });
+      expect(await members()).toEqual({});
+      expect(await logsOf(recordsOf)).toEqual(MEMBERS.map(deleted));
+    });
+
+    it('updates exactly as many rows as the limit allows, as a client without omit does, and records each under its id', async () => {
+      const { inScope, members, recordsOf } = await withHiddenKey();
+
+      const result = await inScope((client) =>
+        client.user.updateMany({ where: OF_MEMBERS, data: { name: 'renamed' }, limit: 2 }),
+      );
+
+      expect(result).toEqual({ count: 2 });
+      const changed = Object.entries(await members())
+        .filter(([, name]) => name === 'renamed')
+        .map(([id]) => id);
+      expect(changed).toHaveLength(2);
+      expect(await logsOf(recordsOf)).toEqual(changed.map(renamed));
+    });
+
+    it('deletes exactly as many rows as the limit allows, as a client without omit does, and records each under its id', async () => {
+      const { inScope, members, recordsOf } = await withHiddenKey();
+
+      const result = await inScope((client) => client.user.deleteMany({ where: OF_MEMBERS, limit: 3 }));
+
+      expect(result).toEqual({ count: 3 });
+      const remaining = Object.keys(await members());
+      expect(remaining).toHaveLength(1);
+      const gone = MEMBERS.filter((id) => !remaining.includes(id));
+      expect(await logsOf(recordsOf)).toEqual(gone.map(deleted));
+    });
+
+    it('records none of the rows an updateManyAndReturn without a select returns in the shape that hides the key, and reports them all', async () => {
+      const observer = vi.fn<AuditErrorObserver>();
+      const { inScope, members, recordsOf } = await withHiddenKey({ errorHandling: { observer } });
+
+      const result = await inScope((client) =>
+        client.user.updateManyAndReturn({ where: OF_MEMBERS, data: { name: 'renamed' } }),
+      );
+
+      expect(result.map((row) => [keysOf(row), row.name])).toEqual(
+        MEMBERS.map(() => [USER_COLUMNS.filter((column) => column !== 'id'), 'renamed']),
+      );
+      expect(Object.values(await members())).toEqual(['renamed', 'renamed', 'renamed', 'renamed']);
+      expect(await logsOf(recordsOf)).toEqual([]);
+      expect(observer).toHaveBeenCalledTimes(1);
+      expect(observer).toHaveBeenCalledWith(
+        expect.objectContaining({
+          phase: 'row-identification',
+          modelName: 'User',
+          operation: 'updateManyAndReturn',
+          params: { unidentified: 4 },
+        }),
+      );
+    });
+  });
+
   describe('a client that takes no query omit, which reads a select by listing every column', () => {
     it.each([
       ['before 6.2', '6.1.0'],

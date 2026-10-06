@@ -12,7 +12,7 @@ import { createBatchExecutor } from '../../src/pipeline/batch-executor.js';
 import type { ExecutionScope } from '../../src/pipeline/execution-scope.js';
 import type { AuditedOperation } from '../../src/pipeline/executor.js';
 import type { RecordProducer } from '../../src/pipeline/produce-records.js';
-import { NO_AUDITED_OMITTED_FIELDS } from '../../src/utils/audited-omitted-fields.js';
+import { NO_AUDITED_OMITTED_FIELDS, withRowKeyFields } from '../../src/utils/audited-omitted-fields.js';
 import { createSchemaMetadataFromDMMF } from '../../src/utils/schema-metadata.js';
 import { runWithRecords } from './run-with-records.js';
 
@@ -119,11 +119,11 @@ const createFailureSink = (): FailureSink => ({
   reportWriteFailure: vi.fn(async () => {}),
 });
 
-const createExecutor = (failureSink: FailureSink, prismaNamespace: PrismaNamespace = Prisma) =>
+/** An executor on a client that takes a query omit (Prisma 6.2 and later) when `queryOmitSupported` */
+const createExecutor = (failureSink: FailureSink, queryOmitSupported = false) =>
   createBatchExecutor({
-    Prisma: prismaNamespace,
     schemaMetadata,
-    auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS,
+    auditedOmittedFieldsWithRowKey: withRowKeyFields(NO_AUDITED_OMITTED_FIELDS, schemaMetadata, queryOmitSupported),
     failureSink,
   });
 const produce = () => vi.fn<RecordProducer>(async () => []);
@@ -333,7 +333,7 @@ describe('createBatchExecutor', () => {
       const produceRecords = produce();
 
       await runWithRecords(
-        createExecutor(failureSink, { ...Prisma, prismaVersion: { client: '6.2.0' } }),
+        createExecutor(failureSink, true),
         operationOn(client, 'createMany', { data: [{ id: 'a', email: 'a@1' }] }),
         scopeOn(client),
         produceRecords,
@@ -1180,6 +1180,118 @@ describe('createBatchExecutor', () => {
       );
 
       expect(failureSink.notify).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('on a client that takes a query omit, whatever a client-level omit hides', () => {
+    const where = { email: { contains: '@' } };
+    const data = { email: 'x' };
+    const READS_ID = { omit: { id: false } };
+    const c1: Row = { id: 'c', email: 'c@1' };
+    const c2: Row = { id: 'c', email: 'c@2' };
+
+    beforeEach(() => {
+      executor = createExecutor(failureSink, true);
+    });
+
+    it('reads the primary key in the read before an updateMany and in the read after it', async () => {
+      const findMany = findManyReturning([a1, b1], [a2, b2]);
+      const client = clientWith({ user: { findMany, updateMany: vi.fn(async () => ({ count: 2 })) } });
+
+      await runWithRecords(executor, operationOn(client, 'updateMany', { where, data }), scopeOn(client), produce());
+
+      expect(findMany.mock.calls).toEqual([
+        [{ where, ...READS_ID }],
+        [{ where: { id: { in: ['a', 'b'] } }, ...READS_ID }],
+      ]);
+    });
+
+    it('reads the primary key in the read before an updateManyAndReturn', async () => {
+      const findMany = findManyReturning([a1]);
+      const updateManyAndReturn = vi.fn(async () => [a2]);
+      const client = clientWith({ user: { findMany, updateManyAndReturn } });
+
+      await runWithRecords(
+        executor,
+        operationOn(client, 'updateManyAndReturn', { where, data }),
+        scopeOn(client),
+        produce(),
+      );
+
+      expect(findMany.mock.calls).toEqual([[{ where, ...READS_ID }]]);
+    });
+
+    it('reads the primary key in the read before a deleteMany', async () => {
+      const findMany = findManyReturning([a1]);
+      const client = clientWith({ user: { findMany, deleteMany: vi.fn(async () => ({ count: 1 })) } });
+
+      await runWithRecords(executor, operationOn(client, 'deleteMany', { where }), scopeOn(client), produce());
+
+      expect(findMany.mock.calls).toEqual([[{ where, ...READS_ID }]]);
+    });
+
+    it('reads the primary key in every read of a limited updateMany, a short round and the read after the write included', async () => {
+      const findMany = findManyReturning([a1, b1], [c1], [a1], [a2, c2]);
+      const updateMany = vi.fn<() => Promise<{ count: number }>>();
+      updateMany.mockResolvedValueOnce({ count: 1 }).mockResolvedValueOnce({ count: 1 });
+      const client = clientWith({ user: { findMany, updateMany } });
+
+      await runWithRecords(
+        executor,
+        operationOn(client, 'updateMany', { where, data, limit: 2 }),
+        transactionScopeOn(client),
+        produce(),
+      );
+
+      expect(findMany.mock.calls).toEqual([
+        [{ where, take: 2, ...READS_ID }],
+        [{ where: { AND: [where, { NOT: { id: { in: ['a', 'b'] } } }] }, take: 1, ...READS_ID }],
+        [{ where: { AND: [where, { id: { in: ['a', 'b'] } }] }, ...READS_ID }],
+        [{ where: { id: { in: ['a', 'c'] } }, ...READS_ID }],
+      ]);
+    });
+
+    it('reads the primary key in every read of a limited deleteMany, a short round included', async () => {
+      const findMany = findManyReturning([a1, b1], [c1], [b1]);
+      const deleteMany = vi.fn<() => Promise<{ count: number }>>();
+      deleteMany.mockResolvedValueOnce({ count: 1 }).mockResolvedValueOnce({ count: 1 });
+      const client = clientWith({ user: { findMany, deleteMany } });
+
+      await runWithRecords(
+        executor,
+        operationOn(client, 'deleteMany', { where, limit: 2 }),
+        transactionScopeOn(client),
+        produce(),
+      );
+
+      expect(findMany.mock.calls).toEqual([
+        [{ where, take: 2, ...READS_ID }],
+        [{ where: { AND: [where, { NOT: { id: { in: ['a', 'b'] } } }] }, take: 1, ...READS_ID }],
+        [{ where: { id: { in: ['a', 'b'] } }, ...READS_ID }],
+      ]);
+    });
+
+    it('reads the unique field of a model without a primary key, and no extra field of a model with no row key', async () => {
+      const deviceFindMany = findManyReturning([{ label: null, serial: 's1', name: 'one' }]);
+      const device = operationOnModel(
+        'Device',
+        { findMany: deviceFindMany, deleteMany: vi.fn(async () => ({ count: 1 })) },
+        'deleteMany',
+        { where },
+      );
+      const noteFindMany = findManyReturning([{ label: null, text: 't' }]);
+      const note = operationOnModel(
+        'Note',
+        { findMany: noteFindMany, deleteMany: vi.fn(async () => ({ count: 1 })) },
+        'deleteMany',
+        { where },
+      );
+
+      await runWithRecords(executor, device.operation, scopeOn(device.client), produce());
+      await runWithRecords(executor, note.operation, scopeOn(note.client), produce());
+
+      expect(deviceFindMany.mock.calls).toEqual([[{ where, omit: { serial: false } }]]);
+      expect(noteFindMany.mock.calls).toEqual([[{ where }]]);
     });
   });
 

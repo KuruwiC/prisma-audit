@@ -4,7 +4,13 @@
 
 import { defineEntity } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
-import { createAuditedOmittedFields, withOmittedFieldsInFinds } from '../../src/utils/audited-omitted-fields.js';
+import type { DMMFField, PrismaNamespace } from '../../src/internal-types.js';
+import {
+  createAuditedOmittedFields,
+  withOmittedFieldsInFinds,
+  withRowKeyFields,
+} from '../../src/utils/audited-omitted-fields.js';
+import { createSchemaMetadataFromDMMF } from '../../src/utils/schema-metadata.js';
 
 describe('createAuditedOmittedFields', () => {
   const entities = {
@@ -28,6 +34,60 @@ describe('createAuditedOmittedFields', () => {
   it('lists none for an entity without the option, or a model without an entity', () => {
     expect(fields.of('Comment')).toEqual(new Set());
     expect(fields.of('Tag')).toEqual(new Set());
+  });
+});
+
+describe('withRowKeyFields', () => {
+  const scalar = (name: string, extra: Partial<DMMFField> = {}): DMMFField => ({
+    name,
+    kind: 'scalar',
+    type: 'String',
+    isList: false,
+    ...extra,
+  });
+  const Prisma: PrismaNamespace = {
+    defineExtension: () => undefined,
+    DbNull: null,
+    dmmf: {
+      datamodel: {
+        models: [
+          { name: 'User', fields: [scalar('id', { isId: true }), scalar('password')] },
+          {
+            name: 'Membership',
+            fields: [scalar('orgId', { isRequired: true }), scalar('userId', { isRequired: true })],
+            primaryKey: { name: null, fields: ['orgId', 'userId'] },
+          },
+          { name: 'Device', fields: [scalar('serial', { isUnique: true, isRequired: true }), scalar('name')] },
+          { name: 'Note', fields: [scalar('label', { isUnique: true }), scalar('text', { isRequired: true })] },
+        ],
+      },
+    },
+  };
+  const schemaMetadata = createSchemaMetadataFromDMMF(Prisma);
+  const audited = createAuditedOmittedFields(
+    (model) => (model === 'User' ? defineEntity({ type: 'User', auditOmittedFields: ['password'] }) : undefined),
+    [],
+  );
+
+  it('adds the row key of each model to the fields it audits, on a client that takes a query omit', () => {
+    const fields = withRowKeyFields(audited, schemaMetadata, true);
+
+    expect(fields.of('User')).toEqual(new Set(['password', 'id']));
+    expect(fields.of('Membership')).toEqual(new Set(['orgId', 'userId']));
+    expect(fields.of('Device')).toEqual(new Set(['serial']));
+  });
+
+  it('adds no field on a client that takes no query omit', () => {
+    const fields = withRowKeyFields(audited, schemaMetadata, false);
+
+    expect(fields.of('User')).toEqual(new Set(['password']));
+    expect(fields.of('Device')).toEqual(new Set());
+  });
+
+  it('adds no field for a model with no row key, and does not fail for it', () => {
+    const fields = withRowKeyFields(audited, schemaMetadata, true);
+
+    expect(fields.of('Note')).toEqual(new Set());
   });
 });
 

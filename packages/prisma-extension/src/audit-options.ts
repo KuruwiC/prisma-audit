@@ -20,7 +20,11 @@ import type { ShouldFetchBefore } from './grammar/pre-fetch-selection.js';
 import type { PrismaNamespace } from './internal-types.js';
 import type { SchemaMetadata } from './schema/types.js';
 import type { PrismaAuditExtensionOptions } from './types.js';
-import { type AuditedOmittedFields, createAuditedOmittedFields } from './utils/audited-omitted-fields.js';
+import {
+  type AuditedOmittedFields,
+  createAuditedOmittedFields,
+  withRowKeyFields,
+} from './utils/audited-omitted-fields.js';
 import { shouldAuditModel } from './utils/extension-utils.js';
 import { getModelAccessor } from './utils/model-accessor.js';
 import { supportsQueryOmit } from './utils/prisma-version.js';
@@ -34,6 +38,11 @@ export interface AuditOptions {
   readonly queryOmitSupported: boolean;
   /** The fields a client-level `omit` hides that the audit reads, from the entities' `auditOmittedFields` */
   readonly auditedOmittedFields: AuditedOmittedFields;
+  /**
+   * `auditedOmittedFields` with each model's row key on a client that takes a query omit: the fields
+   * the audit's batch reads name, so the rows they read carry their key whatever a client omit hides
+   */
+  readonly auditedOmittedFieldsWithRowKey: AuditedOmittedFields;
   /** Accessor of the audit-log model on the client (camelCase) */
   readonly auditLogModel: string;
   readonly policyConfig: PolicyConfig;
@@ -93,13 +102,15 @@ export const normalizeAuditOptions = (options: PrismaAuditExtensionOptions): Aud
     return names;
   };
   const auditLogModel = options.auditLogModel ? getModelAccessor(options.auditLogModel) : 'auditLog';
+  const auditedOmittedFields = createAuditedOmittedFields(entityConfigs.byModel, excludeFields);
 
   return {
     provider,
     Prisma,
     schemaMetadata,
     queryOmitSupported,
-    auditedOmittedFields: createAuditedOmittedFields(entityConfigs.byModel, excludeFields),
+    auditedOmittedFields,
+    auditedOmittedFieldsWithRowKey: withRowKeyFields(auditedOmittedFields, schemaMetadata, queryOmitSupported),
     auditLogModel,
     openImplicitTransaction: performance?.openImplicitTransaction ?? false,
     policyConfig: {

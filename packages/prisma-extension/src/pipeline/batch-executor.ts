@@ -8,12 +8,12 @@
  * changed its key does not pair: it is reported as `row-identification`, and recorded without a
  * before state when the update returned it. A row's key is the
  * model's primary key, or its first unique constraint on required fields when it has no primary key
- * (`rowKeyFieldsOf`).
+ * (`rowKeyFieldsOf`). Every read of the executor reads the row key whatever a client-level omit
+ * hides, and the omitted fields the entity audits (`withRowKeyFields`).
  */
 
 import type { FailureSink, MutationEvent } from '@kuruwic/db-audit-core';
 import { AUDIT_ACTION } from '../grammar/operations.js';
-import type { PrismaNamespace } from '../internal-types.js';
 import type { SchemaMetadata } from '../schema/types.js';
 import { type AuditedOmittedFields, withOmittedFieldsInFinds } from '../utils/audited-omitted-fields.js';
 import { UNAVAILABLE_BEFORE_STATE } from '../utils/before-state.js';
@@ -28,7 +28,6 @@ import {
 import type { EntityIdentityKey } from '../utils/identity-key.js';
 import { getModelDelegate, hasOperation } from '../utils/model-accessor.js';
 import { requiresBeforeState } from '../utils/operation-classifier.js';
-import { supportsQueryOmit } from '../utils/prisma-version.js';
 import { collectBatchOperationEvents } from './collect-events.js';
 import type { ExecutionScope } from './execution-scope.js';
 import { type AuditedOperation, createExecutor, type OperationExecutor } from './executor.js';
@@ -36,9 +35,8 @@ import { type AuditedOperation, createExecutor, type OperationExecutor } from '.
 type Row = Record<string, unknown>;
 
 export interface BatchExecutorDependencies {
-  readonly Prisma: PrismaNamespace;
   readonly schemaMetadata: SchemaMetadata;
-  readonly auditedOmittedFields: AuditedOmittedFields;
+  readonly auditedOmittedFieldsWithRowKey: AuditedOmittedFields;
   readonly failureSink: FailureSink;
 }
 
@@ -82,13 +80,13 @@ interface BatchDelegate {
 /** How many times a limited updateMany or deleteMany reads and writes rows before it settles for its count */
 const LIMITED_WRITE_ROUNDS = 3;
 
-/** The model's delegate on the scope's handle, its finds reading `omittedFields` although the client omits them */
-const batchDelegate = (scope: ExecutionScope, modelName: string, omittedFields: ReadonlySet<string>): BatchDelegate => {
+/** The model's delegate on the scope's handle, its finds reading the fields of `readFields` although the client omits them */
+const batchDelegate = (scope: ExecutionScope, modelName: string, readFields: AuditedOmittedFields): BatchDelegate => {
   const delegate = getModelDelegate(scope.handle, modelName);
   if (!hasOperation<BatchDelegate>(delegate, 'findMany')) {
     throw new Error(`Model ${modelName} does not have findMany operation. This is required for batch operations.`);
   }
-  return withOmittedFieldsInFinds(delegate, omittedFields);
+  return withOmittedFieldsInFinds(delegate, readFields.of(modelName));
 };
 
 const rowsOf = (value: unknown): Row[] => (Array.isArray(value) ? (value as Row[]) : []);
@@ -157,7 +155,7 @@ const prepareUpdateOrDelete = async (
 ): Promise<BatchPrepared> => {
   const { model, action, args } = operation;
   const rowKeyFields = () => getRowKeyFields(deps.schemaMetadata, model);
-  const delegate = batchDelegate(scope, model, deps.auditedOmittedFields.of(model));
+  const delegate = batchDelegate(scope, model, deps.auditedOmittedFieldsWithRowKey);
   const where = args.where ?? {};
   const { limit } = args;
 
@@ -366,20 +364,10 @@ const limitedWrittenRows = async (
 };
 
 export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationExecutor => {
-  const { schemaMetadata, auditedOmittedFields, failureSink } = deps;
-  const queryOmitSupported = supportsQueryOmit(deps.Prisma.prismaVersion?.client);
+  const { schemaMetadata, auditedOmittedFieldsWithRowKey, failureSink } = deps;
 
   const delegateOf = (scope: ExecutionScope, modelName: string): BatchDelegate =>
-    batchDelegate(scope, modelName, auditedOmittedFields.of(modelName));
-
-  /**
-   * The read of the rows a createMany created also reads the key fields a client-level omit hides,
-   * so each row read can be told by its key. A client that takes no query omit hides no field.
-   */
-  const createdRowsDelegateOf = (scope: ExecutionScope, modelName: string, keyFields: string[]): BatchDelegate =>
-    queryOmitSupported
-      ? batchDelegate(scope, modelName, new Set([...auditedOmittedFields.of(modelName), ...keyFields]))
-      : delegateOf(scope, modelName);
+    batchDelegate(scope, modelName, auditedOmittedFieldsWithRowKey);
 
   const prepare = (operation: AuditedOperation, scope: ExecutionScope): Promise<BatchPrepared> =>
     requiresBeforeState(operation.action)
@@ -426,7 +414,7 @@ export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationE
       case 'create-returning':
         return { rows: executed.returnedRows ?? [] };
       case 'create': {
-        const delegate = createdRowsDelegateOf(scope, operation.model, prepared.keyFields);
+        const delegate = delegateOf(scope, operation.model);
         const rows = await createdRows(delegate, prepared.rows, prepared.keyFields);
         await reportUnidentified(
           operation,

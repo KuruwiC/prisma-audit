@@ -30,7 +30,7 @@ import { isAuditableAction } from './utils/extension-utils.js';
 import { getModelAccessor } from './utils/model-accessor.js';
 
 const createPipelineDependencies = (audit: AuditOptions): AuditPipelineDependencies => {
-  const { Prisma, schemaMetadata, shouldFetchBefore, auditedOmittedFields } = audit;
+  const { Prisma, schemaMetadata, shouldFetchBefore, auditedOmittedFields, auditedOmittedFieldsWithRowKey } = audit;
   const failureSink = createFailureSink(audit.errorHandling);
 
   return {
@@ -41,7 +41,7 @@ const createPipelineDependencies = (audit: AuditOptions): AuditPipelineDependenc
       auditedOmittedFields,
       failureSink,
     }),
-    batchExecutor: createBatchExecutor({ Prisma, schemaMetadata, auditedOmittedFields, failureSink }),
+    batchExecutor: createBatchExecutor({ schemaMetadata, auditedOmittedFieldsWithRowKey, failureSink }),
     produceRecords: createRecordProducer({
       ...audit,
       omittedFieldReads: { schemaMetadata, auditedOmittedFields },
