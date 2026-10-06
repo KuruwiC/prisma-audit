@@ -5,11 +5,20 @@
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { TransactionalPrismaClient } from '../../src/internal-types.js';
-import { currentScope, decidedWritePolicyFor, withScope } from '../../src/runtime/scope.js';
+import { currentScope, decidedWritePolicyFor, enterTransaction, withScope } from '../../src/runtime/scope.js';
 
 const client = (id: string): TransactionalPrismaClient => ({ id });
+
+/** A promise the test settles itself, so the order in which flows resume is the test's, not the clock's */
+const gate = () => {
+  let open!: () => void;
+  const opened = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  return { opened, open };
+};
 
 describe('runtime scope', () => {
   it('exposes the patched frame inside withScope', () => {
@@ -91,23 +100,100 @@ describe('runtime scope', () => {
       });
     });
 
-    it('isolates frames between parallel async flows', async () => {
+    it('isolates frames between parallel async flows that resume in the reverse order', async () => {
       const clientA = client('a');
       const clientB = client('b');
+      const gateA = gate();
+      const gateB = gate();
 
-      const [a, b] = await Promise.all([
-        withScope({ transaction: { client: clientA, deferredWrites: [] } }, async () => {
-          await new Promise((resolve) => setTimeout(resolve, 20));
-          return currentScope()?.transaction?.client;
-        }),
-        withScope({ transaction: { client: clientB, deferredWrites: [] } }, async () => {
-          await new Promise((resolve) => setTimeout(resolve, 10));
-          return currentScope()?.transaction?.client;
-        }),
-      ]);
+      const flowA = withScope({ transaction: { client: clientA, deferredWrites: [] } }, async () => {
+        await gateA.opened;
+        return currentScope()?.transaction?.client;
+      });
+      const flowB = withScope({ transaction: { client: clientB, deferredWrites: [] } }, async () => {
+        await gateB.opened;
+        return currentScope()?.transaction?.client;
+      });
+      gateB.open();
+      const b = await flowB;
+      gateA.open();
+      const a = await flowA;
 
       expect(a).toBe(clientA);
       expect(b).toBe(clientB);
+      expect(currentScope()).toBeUndefined();
+    });
+  });
+
+  describe('enterTransaction', () => {
+    const context: AuditContext = { actor: { category: 'model', type: 'User', id: 'user-123' } };
+
+    it('runs the callback in the transaction scope, under the audit context it re-establishes', async () => {
+      const provider = createAsyncLocalStorageProvider();
+      const transaction = { client: client('tx'), deferredWrites: [] };
+
+      const seen = await enterTransaction(provider, context, transaction, async () => ({
+        transaction: currentScope()?.transaction,
+        context: provider.getContext(),
+      }));
+
+      expect(seen.transaction).toBe(transaction);
+      expect(seen.context).toEqual(context);
+      expect(currentScope()).toBeUndefined();
+    });
+
+    it('enters the transaction without touching the audit context when there is none', async () => {
+      const provider = { runAsync: vi.fn() };
+      const transaction = { client: client('tx'), deferredWrites: [] };
+
+      const seen = await enterTransaction(provider, undefined, transaction, async () => currentScope()?.transaction);
+
+      expect(seen).toBe(transaction);
+      expect(provider.runAsync).not.toHaveBeenCalled();
+    });
+
+    it('resolves with the result of the callback and rejects with its error', async () => {
+      const provider = createAsyncLocalStorageProvider();
+      const transaction = { client: client('tx'), deferredWrites: [] };
+      const failure = new Error('callback failed');
+
+      await expect(enterTransaction(provider, context, transaction, async () => 'result')).resolves.toBe('result');
+      await expect(
+        enterTransaction(provider, undefined, transaction, async () => {
+          throw failure;
+        }),
+      ).rejects.toBe(failure);
+    });
+
+    it('starts a lazy operation the callback returns without awaiting it inside the transaction scope', async () => {
+      const transaction = { client: client('tx'), deferredWrites: [] };
+      const lazy = {
+        then: (onFulfilled: (value: unknown) => unknown) =>
+          Promise.resolve(currentScope()?.transaction).then(onFulfilled),
+      };
+
+      const startedIn = await enterTransaction(
+        createAsyncLocalStorageProvider(),
+        undefined,
+        transaction,
+        () => lazy as unknown as Promise<unknown>,
+      );
+
+      expect(startedIn).toBe(transaction);
+    });
+
+    it('keeps the fields of the enclosing scope that the entered transaction does not set', async () => {
+      const outer = { client: client('outer'), deferredWrites: [] };
+      const inner = { client: client('inner'), deferredWrites: [] };
+
+      const seen = await withScope({ isProcessingAuditLog: true }, () =>
+        enterTransaction(createAsyncLocalStorageProvider(), undefined, outer, () =>
+          enterTransaction(createAsyncLocalStorageProvider(), undefined, inner, async () => currentScope()),
+        ),
+      );
+
+      expect(seen?.transaction).toBe(inner);
+      expect(seen?.isProcessingAuditLog).toBe(true);
     });
   });
 

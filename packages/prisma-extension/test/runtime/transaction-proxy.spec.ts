@@ -120,7 +120,7 @@ describe('createWrappedTransactionCallback (context/runtime separation)', () => 
     // overridden scope, while the storage.run scope is still active.
     const provider = createAsyncLocalStorageProvider();
     const txClient = { _isTx: true } as unknown as TransactionalPrismaClient;
-    const seen: string[] = [];
+    const seen: Array<{ actor: string; transactionClient: unknown }> = [];
 
     const callback = async (_tx: TransactionalPrismaClient) => {
       // Plain arrow returning a lazy thenable — no async keyword on the callback.
@@ -129,7 +129,10 @@ describe('createWrappedTransactionCallback (context/runtime separation)', () => 
         () =>
           ({
             then(onFulfilled: (v: unknown) => unknown) {
-              seen.push(provider.getContext()?.actor.id ?? 'none');
+              seen.push({
+                actor: provider.getContext()?.actor.id ?? 'none',
+                transactionClient: resolveTxClientFromRuntime(),
+              });
               return Promise.resolve().then(() => onFulfilled(undefined));
             },
           }) as unknown as Promise<unknown>,
@@ -141,8 +144,8 @@ describe('createWrappedTransactionCallback (context/runtime separation)', () => 
     const wrapped = createWrappedTransactionCallback(callback, baseContext, provider, deferredWrites);
     await provider.runAsync(baseContext, () => wrapped(txClient));
 
-    // .then was invoked inside the overridden scope → actor2, not actor1.
-    expect(seen).toEqual(['user-2']);
+    // .then was invoked inside the overridden scope → actor2, not actor1, and still inside the transaction.
+    expect(seen).toEqual([{ actor: 'user-2', transactionClient: txClient }]);
   });
 
   it('clears the caller-owned queue at the start of each invocation', async () => {
@@ -225,7 +228,7 @@ describe('createTransactionProxyHandler (deferred-write drain timing)', () => {
     const rollbackError = new Error('rolled back');
 
     const callback = async (_tx: TransactionalPrismaClient) => {
-      provider.runAsync({ actor: actor2 }, async () => {
+      await provider.runAsync({ actor: actor2 }, async () => {
         enqueueDeferredWrite(deferredWrite);
       });
       throw rollbackError;
@@ -345,6 +348,23 @@ describe('createTransactionProxy', () => {
     await passesThrough([Promise.resolve('a')], baseContext);
   });
 
+  it('marks the array form of $transaction as a Prisma batch while Prisma runs it, and nothing else', async () => {
+    const provider = createAsyncLocalStorageProvider();
+    const target = new FakeClient();
+    const seen: Array<boolean | undefined> = [];
+    vi.spyOn(target, '$transaction').mockImplementation(async () => {
+      seen.push(currentScope()?.isInPrismaBatch);
+      return [];
+    });
+    const proxy = createTransactionProxy(target, { provider });
+
+    await provider.runAsync(baseContext, () => proxy.$transaction([lazyOperation(() => 'a')]));
+    await provider.runAsync(baseContext, () => proxy.$transaction(async () => 'interactive'));
+
+    expect(seen).toEqual([true, undefined]);
+    expect(currentScope()).toBeUndefined();
+  });
+
   describe('with operation recipes', () => {
     /** A client whose `user` operations are lazy and record the client they ran on */
     const createRecipeTarget = () => {
@@ -364,12 +384,14 @@ describe('createTransactionProxy', () => {
         },
       });
       const tx = clientNamed('transaction');
+      const inPrismaBatch: Array<boolean | undefined> = [];
       const $transaction = vi.fn(async (...args: unknown[]): Promise<unknown> => {
         const [first] = args;
+        inPrismaBatch.push(currentScope()?.isInPrismaBatch);
         return typeof first === 'function' ? first(tx) : Promise.all(first as unknown[]);
       });
       const target = { ...clientNamed('client'), $transaction, $extends: () => undefined };
-      return { target, tx, ran, $transaction };
+      return { target, tx, ran, $transaction, inPrismaBatch };
     };
 
     const recipeConfigAwaiting = (awaitsAudit: boolean) => ({
@@ -417,7 +439,7 @@ describe('createTransactionProxy', () => {
 
     it("runs a batch of the client's calls in one interactive transaction, in order, at the caller's isolation level", async () => {
       const provider = createAsyncLocalStorageProvider();
-      const { target, tx, ran, $transaction } = createRecipeTarget();
+      const { target, tx, ran, $transaction, inPrismaBatch } = createRecipeTarget();
       const proxy = createTransactionProxy(target, { provider, recipeConfig: recipeConfigAwaiting(true) });
 
       const results = await provider.runAsync(baseContext, () =>
@@ -434,17 +456,47 @@ describe('createTransactionProxy', () => {
       expect($transaction).toHaveBeenCalledTimes(1);
       expect(typeof $transaction.mock.calls[0]?.[0]).toBe('function');
       expect($transaction.mock.calls[0]?.[1]).toEqual({ isolationLevel: 'Serializable' });
+      expect(inPrismaBatch).toEqual([undefined]);
     });
 
     it("runs a batch of the client's calls none of which awaits an audit as Prisma's own batch", async () => {
       const provider = createAsyncLocalStorageProvider();
-      const { target, ran, $transaction } = createRecipeTarget();
+      const { target, ran, $transaction, inPrismaBatch } = createRecipeTarget();
       const proxy = createTransactionProxy(target, { provider, recipeConfig: recipeConfigAwaiting(false) });
 
       await provider.runAsync(baseContext, () => proxy.$transaction([proxy.user.create({ email: 'a' })]));
 
       expect(Array.isArray($transaction.mock.calls[0]?.[0])).toBe(true);
+      expect($transaction.mock.calls[0]).toHaveLength(1);
+      expect(inPrismaBatch).toEqual([true]);
       expect(ran).toEqual([{ action: 'create', client: 'client', inScope: undefined }]);
+    });
+
+    it("forwards the options of a batch none of whose calls awaits an audit to Prisma's own batch", async () => {
+      const provider = createAsyncLocalStorageProvider();
+      const { target, $transaction } = createRecipeTarget();
+      const proxy = createTransactionProxy(target, { provider, recipeConfig: recipeConfigAwaiting(false) });
+      const options = { isolationLevel: 'Serializable', maxWait: 1 };
+
+      await provider.runAsync(baseContext, () => proxy.$transaction([proxy.user.create({ email: 'a' })], options));
+
+      expect($transaction.mock.calls[0]).toHaveLength(2);
+      expect($transaction.mock.calls[0]?.[1]).toBe(options);
+    });
+
+    it('passes an empty batch through untouched to Prisma, which has no recipe to run', async () => {
+      const provider = createAsyncLocalStorageProvider();
+      const { target, ran, $transaction, inPrismaBatch } = createRecipeTarget();
+      const proxy = createTransactionProxy(target, { provider, recipeConfig: recipeConfigAwaiting(true) });
+      const empty: unknown[] = [];
+
+      await expect(provider.runAsync(baseContext, () => proxy.$transaction(empty))).resolves.toEqual([]);
+
+      expect($transaction).toHaveBeenCalledTimes(1);
+      expect($transaction.mock.calls[0]).toHaveLength(1);
+      expect($transaction.mock.calls[0]?.[0]).toBe(empty);
+      expect(inPrismaBatch).toEqual([true]);
+      expect(ran).toEqual([]);
     });
 
     it('rejects a batch holding an operation that is not a call of the client before running anything', async () => {
@@ -485,6 +537,24 @@ describe('createTransactionProxy', () => {
 
     expect(result).toBe('committed');
     expect(clientInsideCallback).toBe(txClient);
+  });
+
+  it('forwards the options of an interactive $transaction to Prisma, and passes none when it got none', async () => {
+    const provider = createAsyncLocalStorageProvider();
+    const target = new FakeClient();
+    const original = vi.spyOn(target, '$transaction').mockImplementation(async (...args: unknown[]) => {
+      const callback = args[0] as (tx: TransactionalPrismaClient) => Promise<unknown>;
+      return callback({ _isTx: true });
+    });
+    const proxy = createTransactionProxy(target, { provider });
+    const options = { isolationLevel: 'Serializable', maxWait: 5000, timeout: 10000 };
+
+    await provider.runAsync(baseContext, () => proxy.$transaction(async () => 'with options', options));
+    await provider.runAsync(baseContext, () => proxy.$transaction(async () => 'without options'));
+
+    expect(original.mock.calls[0]).toHaveLength(2);
+    expect(original.mock.calls[0]?.[1]).toBe(options);
+    expect(original.mock.calls[1]).toHaveLength(1);
   });
 
   it('runs the lazy operation an interactive $transaction callback returns without awaiting it inside the scope of its transactional client', async () => {

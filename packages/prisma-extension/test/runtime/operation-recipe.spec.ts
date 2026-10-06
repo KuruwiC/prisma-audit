@@ -201,6 +201,129 @@ describe('operation recipes', () => {
     });
   });
 
+  describe('a raw-query method of the client', () => {
+    const rawClient = () => {
+      const queryRaw = vi.fn((...args: unknown[]) => lazyOperation(() => ({ rows: args })));
+      const runCommandRaw = vi.fn((...args: unknown[]) => lazyOperation(() => ({ command: args })));
+      return { receiver: { $transaction: vi.fn() }, target: { $queryRaw: queryRaw, $runCommandRaw: runCommandRaw } };
+    };
+    const rawMethodOf = (clients: ReturnType<typeof rawClient>, name: string) =>
+      createRecipeClient(configAwaiting(true)).propertyOf(clients.receiver, clients.target, name)?.value as
+        | ((...args: unknown[]) => PromiseLike<unknown> & object)
+        | undefined;
+
+    it('returns a recipe that calls the method on the client behind it, with the arguments, when awaited', async () => {
+      const clients = rawClient();
+
+      const recipe = rawMethodOf(clients, '$queryRaw')?.(['SELECT 1'], 7);
+
+      expect(clients.target.$queryRaw).not.toHaveBeenCalled();
+      await expect(recipe).resolves.toEqual({ rows: [['SELECT 1'], 7] });
+      expect(clients.target.$queryRaw).toHaveBeenCalledTimes(1);
+      expect(clients.receiver.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('is a recipe no fluent relation follows and no write policy is decided for', async () => {
+      const clients = rawClient();
+      const config = configAwaiting(true);
+      const recipe = createRecipeClient(config).propertyOf(clients.receiver, clients.target, '$runCommandRaw')
+        ?.value as (...args: unknown[]) => PromiseLike<unknown> & object;
+
+      const command = recipe({ ping: 1 });
+
+      expect('posts' in command).toBe(false);
+      await expect(command).resolves.toEqual({ command: [{ ping: 1 }] });
+      expect(config.decideWritePolicy).not.toHaveBeenCalled();
+    });
+
+    it('can be taken by a batch like the operation of a model, and runs on the client the batch gives', async () => {
+      const clients = rawClient();
+      const config = configAwaiting(true);
+      const recipe = rawMethodOf(clients, '$queryRaw')?.('SELECT 2');
+      const other = { $queryRaw: vi.fn((...args: unknown[]) => lazyOperation(() => ({ other: args }))) };
+
+      const batch = takeBatchRecipes([recipe], clients.receiver, config);
+
+      expect(batch.awaitsAudit).toBe(false);
+      await expect(Promise.all(batch.operationsOn(other))).resolves.toEqual([{ other: ['SELECT 2'] }]);
+      expect(clients.target.$queryRaw).not.toHaveBeenCalled();
+    });
+
+    it('is not wrapped when the client behind it has no such method, nor are other client methods', () => {
+      const clients = rawClient();
+      const recipeClient = createRecipeClient(configAwaiting(true));
+
+      expect(recipeClient.propertyOf(clients.receiver, clients.target, '$executeRaw')).toBeUndefined();
+      expect(recipeClient.propertyOf(clients.receiver, clients.target, '$connect')).toBeUndefined();
+      expect(recipeClient.propertyOf(clients.receiver, clients.target, Symbol.iterator)).toBeUndefined();
+    });
+  });
+
+  describe('the operations a batch takes', () => {
+    /** Deciding by action: creates await their audit, updates do not, deletes are not audited */
+    const decidingConfig = (): RecipeConfig => ({
+      modelOfAccessor: new Map([['user', 'User']]),
+      relatedModel: () => undefined,
+      decideWritePolicy: (_model, action) => {
+        if (action === 'create') {
+          return { sampled: true, atomic: true };
+        }
+        return action === 'update' ? { sampled: true, atomic: false } : undefined;
+      },
+    });
+    const userClient = (seen: Array<{ action: string; decided: WritePolicy | undefined }>) => {
+      const action = (name: string) => () =>
+        lazyOperation(() => {
+          seen.push({ action: name, decided: decidedWritePolicyFor('User', name) });
+          return name;
+        });
+      return { user: { create: action('create'), update: action('update'), delete: action('delete') } };
+    };
+    const recipesOn = (receiver: object, target: object, config: RecipeConfig, actions: string[]) => {
+      const user = createRecipeClient(config).propertyOf(receiver, target, 'user')?.value as Record<
+        string,
+        () => PromiseLike<unknown>
+      >;
+      return actions.map((name) => user[name]?.() as PromiseLike<unknown>);
+    };
+
+    it('await an audit when one of them is an audited write whose audit is awaited', () => {
+      const receiver = {};
+      const config = decidingConfig();
+      const items = recipesOn(receiver, userClient([]), config, ['update', 'delete', 'create']);
+
+      expect(takeBatchRecipes(items, receiver, config).awaitsAudit).toBe(true);
+    });
+
+    it('do not await an audit when each is unaudited or its audit is not awaited', () => {
+      const receiver = {};
+      const config = decidingConfig();
+      const items = recipesOn(receiver, userClient([]), config, ['update', 'delete']);
+
+      expect(takeBatchRecipes(items, receiver, config).awaitsAudit).toBe(false);
+    });
+
+    it('do not await an audit for an empty batch', () => {
+      expect(takeBatchRecipes([], {}, decidingConfig()).awaitsAudit).toBe(false);
+    });
+
+    it('start on the client given, each in the scope of the decision made for its own call', async () => {
+      const receiver = {};
+      const config = decidingConfig();
+      const items = recipesOn(receiver, userClient([]), config, ['create', 'update', 'delete']);
+      const seen: Array<{ action: string; decided: WritePolicy | undefined }> = [];
+
+      const operations = takeBatchRecipes(items, receiver, config).operationsOn(userClient(seen));
+      await expect(Promise.all(operations as PromiseLike<unknown>[])).resolves.toEqual(['create', 'update', 'delete']);
+
+      expect(seen).toEqual([
+        { action: 'create', decided: { sampled: true, atomic: true } },
+        { action: 'update', decided: { sampled: true, atomic: false } },
+        { action: 'delete', decided: undefined },
+      ]);
+    });
+  });
+
   it('answers in and Symbol.toStringTag as a promise of its own kind, with its fluent relations', () => {
     const clients = createClients();
     const config: RecipeConfig = {
