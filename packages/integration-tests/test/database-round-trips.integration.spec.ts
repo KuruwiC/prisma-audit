@@ -92,7 +92,6 @@ describe('Database Round-Trip Guard', () => {
       });
     });
 
-    console.log(`Plain create: ${statements.length} SQL statements`);
     // 1. INSERT INTO users     — the caller's own create
     // 2. INSERT INTO audit_logs — the audit log write, awaited once the create has committed
     expect(statements).toHaveLength(2);
@@ -110,7 +109,6 @@ describe('Database Round-Trip Guard', () => {
       await prisma.user.update({ where: { id: user.id }, data: { name: 'Updated' } });
     });
 
-    console.log(`Single-record update: ${statements.length} SQL statements`);
     // 1. SELECT FROM users      — the before-state fetch (fetchBefore, default: true)
     // 2. UPDATE users           — the caller's own update
     // 3. INSERT INTO audit_logs — the audit log write, awaited once the update has committed
@@ -130,7 +128,6 @@ describe('Database Round-Trip Guard', () => {
       });
     });
 
-    console.log(`Nested create: ${statements.length} SQL statements`);
     // 1. BEGIN                  — Prisma's own transaction around a nested write
     // 2. INSERT INTO users      — the caller's own create (parent)
     // 3. INSERT INTO posts      — the caller's own create (nested child)
@@ -165,7 +162,6 @@ describe('Database Round-Trip Guard', () => {
       });
     });
 
-    console.log(`Update with nested create: ${statements.length} SQL statements`);
     // 1. SELECT FROM users      — the before-state fetch (fetchBefore, default: true)
     // 2. SELECT id FROM posts   — the snapshot of the posts the user already holds, primary key
     //                             only, so the created post is told apart from its sibling in the
@@ -207,7 +203,6 @@ describe('Database Round-Trip Guard', () => {
       });
     });
 
-    console.log(`Update with a filtered nested create: ${statements.length} SQL statements`);
     // 1. SELECT FROM users      — the before-state fetch (fetchBefore, default: true)
     // 2. SELECT id FROM posts   — the snapshot of the posts the user already holds, primary key only
     // 3. BEGIN                  — Prisma's own transaction around a nested write
@@ -253,7 +248,6 @@ describe('Database Round-Trip Guard', () => {
       });
     });
 
-    console.log(`Update with nested updateMany: ${statements.length} SQL statements`);
     // 1. SELECT FROM users      — the before-state fetch (fetchBefore, default: true)
     // 2. SELECT FROM posts      — the pre-read of the rows the nested updateMany filter matches
     //                             under this user (the filter plus the back-relation to the
@@ -301,7 +295,6 @@ describe('Database Round-Trip Guard', () => {
       await prisma.user.update({ where: { id: user.id }, data: { posts: { connect: { id: moved?.id } } } });
     });
 
-    console.log(`Update with a nested connect: ${statements.length} SQL statements`);
     // 1. SELECT FROM users      — the before-state fetch (fetchBefore, default: true)
     // 2. SELECT FROM posts      — the connected post read whole before the write: its old authorId
     // 3. BEGIN                  — Prisma's own transaction around a nested write
@@ -341,7 +334,6 @@ describe('Database Round-Trip Guard', () => {
       await prisma.post.deleteMany({ where: { authorId: user.id } });
     });
 
-    console.log(`deleteMany: ${statements.length} SQL statements`);
     // 1. SELECT FROM posts      — the batch executor's findMany, capturing before-state for
     //                             the 2 rows about to be deleted
     // 2. DELETE FROM posts      — the caller's own deleteMany
@@ -372,7 +364,6 @@ describe('Database Round-Trip Guard', () => {
       await prisma.post.updateManyAndReturn({ where: { authorId: user.id }, data: { published: true } });
     });
 
-    console.log(`updateManyAndReturn: ${statements.length} SQL statements`);
     // 1. SELECT FROM posts      — the batch executor's findMany, capturing before-state for
     //                             the 2 rows about to be updated
     // 2. BEGIN                  — Prisma's own transaction around the update
@@ -439,7 +430,6 @@ describe('Database Round-Trip Guard: fields an entity lists in auditOmittedField
       await prisma.user.update({ where: { id: user.id }, data: { password: 'secret456' } });
     });
 
-    console.log(`Update with an omitted field: ${statements.length} SQL statements`);
     // 1. SELECT FROM users      — the before-state fetch, with the listed field
     // 2. UPDATE users           — the caller's own update, in the client's default shape
     // 3. SELECT FROM users      — the listed field of the updated row, read by primary key
@@ -465,7 +455,6 @@ describe('Database Round-Trip Guard: fields an entity lists in auditOmittedField
       await prisma.post.updateManyAndReturn({ where: { authorId: user.id }, data: { content: 'Changed' } });
     });
 
-    console.log(`updateManyAndReturn with an omitted field (${rows} rows): ${statements.length} SQL statements`);
     // 1. SELECT FROM posts      — the batch executor's findMany, with the listed field
     // 2. BEGIN                  — Prisma's own transaction around the update
     // 3. UPDATE posts RETURNING — the caller's own updateManyAndReturn, in the client's default shape
@@ -487,7 +476,6 @@ describe('Database Round-Trip Guard: fields an entity lists in auditOmittedField
       });
     });
 
-    console.log(`createMany with an omitted field (${rows} rows): ${statements.length} SQL statements`);
     // 1. BEGIN                  — Prisma's own transaction around a write of several rows
     // 2. INSERT INTO users      — the caller's own createMany, every row in one statement
     // 3. COMMIT
@@ -525,9 +513,6 @@ describe('Database Round-Trip Guard: fields an entity lists in auditOmittedField
           });
         });
 
-        console.log(
-          `createMany leaving out a listed field with a default (${rows} rows): ${statements.length} SQL statements`,
-        );
         // 1. BEGIN                  — Prisma's own transaction around a write of several rows
         // 2. INSERT INTO posts      — the caller's own createMany, every row in one statement
         // 3. COMMIT
