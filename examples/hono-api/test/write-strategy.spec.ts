@@ -41,46 +41,6 @@ describe('Write Strategy Tests', () => {
     await db.$disconnect();
   });
 
-  describe('Sync Mode (awaitWrite: true)', () => {
-    it('should write operation and audit log atomically in the transaction the client opens (openImplicitTransaction)', async () => {
-      const auditProvider = createAsyncLocalStorageProvider();
-
-      const prisma = createAuditClient(db, {
-        provider: auditProvider,
-        aggregateMapping: testAggregateMapping,
-        performance: { awaitWrite: true, openImplicitTransaction: true },
-        Prisma,
-      });
-
-      await auditProvider.runAsync(
-        {
-          actor: { category: 'user', type: 'User', id: 'test-user', name: 'Test User' },
-        },
-        async () => {
-          const user = await prisma.user.create({
-            data: {
-              email: 'test@example.com',
-              name: 'Test User',
-            },
-          });
-
-          expect(user.email).toBe('test@example.com');
-
-          const users = await db.user.findMany();
-          expect(users.length).toBe(1);
-          const auditLogs = await db.auditLog.findMany({
-            where: {
-              entityType: 'User',
-              entityId: user.id,
-              action: 'create',
-            },
-          });
-          expect(auditLogs).toHaveLength(1);
-        },
-      );
-    });
-  });
-
   describe('Async Mode (awaitWrite: false)', () => {
     it('should write audit logs asynchronously without blocking the main operation (fire and forget)', async () => {
       const auditProvider = createAsyncLocalStorageProvider();

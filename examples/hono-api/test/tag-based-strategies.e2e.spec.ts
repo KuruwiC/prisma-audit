@@ -9,12 +9,12 @@ import {
   defineEntity,
   flushAllPendingWrites,
   foreignKey,
+  getPendingWriteCount,
   type PrismaModelNames,
   to,
 } from '@kuruwic/prisma-audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { waitFor } from './test-helpers.js';
 
 describe('Tag-based Strategies E2E', () => {
   let basePrisma: PrismaClient;
@@ -63,6 +63,7 @@ describe('Tag-based Strategies E2E', () => {
               name: 'Critical User',
             },
           });
+          expect(getPendingWriteCount()).toBe(0);
         },
       );
 
@@ -120,16 +121,14 @@ describe('Tag-based Strategies E2E', () => {
               authorId: user.id,
             },
           });
+          expect(getPendingWriteCount()).toBe(1);
         },
       );
 
-      const auditLogs = await waitFor(
-        async () =>
-          basePrisma.auditLog.findMany({
-            where: { entityType: 'Post' },
-          }),
-        { timeout: 2000, interval: 50, checkFn: (logs) => logs.length > 0 },
-      );
+      await flushAllPendingWrites();
+      const auditLogs = await basePrisma.auditLog.findMany({
+        where: { entityType: 'Post' },
+      });
 
       expect(auditLogs.map((log) => log.aggregateType).sort()).toEqual(['Post', 'User']);
       expect(awaitWriteIfSpy).toHaveBeenCalledWith('Post', ['analytics', 'non-critical']);
