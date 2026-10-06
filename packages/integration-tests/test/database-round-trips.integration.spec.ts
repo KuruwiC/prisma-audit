@@ -8,13 +8,13 @@
  * Prisma's query event API (`log: [{ emit: 'event', level: 'query' }]` +
  * `$on('query', ...)`), so such a regression shows up here.
  *
- * Each count below is the exact statement sequence the implementation issues for
- * that scenario with the default settings, under which the audit extension opens no transaction
- * around the operation; the per-scenario comments enumerate those statements. A change
- * that moves a count must update the number and its comments to describe the new
- * sequence — never loosen the assertion instead.
+ * Each test pins the exact statement sequence the implementation issues for that scenario
+ * with the default settings, under which the audit extension opens no transaction around the
+ * operation, as the verb and table of every statement; the numbered comments say why each
+ * statement is there. A change that moves the sequence must update the list and its comments
+ * to describe the new sequence — never loosen the assertion instead.
  *
- * Every statement Prisma sends is counted (BEGIN and COMMIT included) except the bare
+ * Every statement Prisma sends is listed (BEGIN and COMMIT included) except the bare
  * `SELECT 1` it issues to check a connection it re-opens, which depends on pool state and
  * load rather than on the implementation.
  */
@@ -42,6 +42,20 @@ const collectStatement = (statements: string[], query: string): void => {
   if (query !== CONNECTION_HEALTH_CHECK) {
     statements.push(query);
   }
+};
+
+/**
+ * Reduces a statement to its leading verb and the table it targets (`SELECT users`,
+ * `INSERT audit_logs`, `UPDATE posts`, `DELETE posts`); `BEGIN` and `COMMIT` stay as they are.
+ */
+const statementShape = (query: string): string => {
+  const verb = query.match(/^\s*(\w+)/)?.[1]?.toUpperCase() ?? query;
+  if (verb === 'BEGIN' || verb === 'COMMIT') {
+    return verb;
+  }
+  const targetPattern = { INSERT: /\bINTO\s+(\S+)/, UPDATE: /^\s*UPDATE\s+(\S+)/ }[verb] ?? /\bFROM\s+(\S+)/;
+  const qualifiedTable = query.match(targetPattern)?.[1] ?? '';
+  return `${verb} ${qualifiedTable.replaceAll('"', '').split('.').pop()}`;
 };
 
 /**
@@ -106,7 +120,7 @@ describe('Database Round-Trip Guard', () => {
 
     // 1. INSERT INTO users     — the caller's own create
     // 2. INSERT INTO audit_logs — the audit log write, awaited once the create has committed
-    expect(statements).toHaveLength(2);
+    expect(statements.map(statementShape)).toEqual(['INSERT users', 'INSERT audit_logs']);
   });
 
   it('single-record update issues 3 statements (includes the before-state fetch)', async () => {
@@ -124,7 +138,7 @@ describe('Database Round-Trip Guard', () => {
     // 1. SELECT FROM users      — the before-state fetch (fetchBefore, default: true)
     // 2. UPDATE users           — the caller's own update
     // 3. INSERT INTO audit_logs — the audit log write, awaited once the update has committed
-    expect(statements).toHaveLength(3);
+    expect(statements.map(statementShape)).toEqual(['SELECT users', 'UPDATE users', 'INSERT audit_logs']);
   });
 
   it('nested create (1 nested post, with include) issues 9 statements', async () => {
@@ -151,7 +165,17 @@ describe('Database Round-Trip Guard', () => {
     // 8. INSERT INTO audit_logs — one batched write: user + post + the post's aggregate-owner
     //                             (User) propagation log — 3 rows, 1 statement
     // 9. COMMIT
-    expect(statements).toHaveLength(9);
+    expect(statements.map(statementShape)).toEqual([
+      'BEGIN',
+      'INSERT users',
+      'INSERT posts',
+      'SELECT users',
+      'SELECT posts',
+      'COMMIT',
+      'BEGIN',
+      'INSERT audit_logs',
+      'COMMIT',
+    ]);
   });
 
   it('update with a nested create under an existing parent (1 existing post) issues 11 statements', async () => {
@@ -191,7 +215,19 @@ describe('Database Round-Trip Guard', () => {
     //                             (User) propagation log — 2 rows, 1 statement; the user's
     //                             columns did not change and the existing post gets no row
     // 11. COMMIT
-    expect(statements).toHaveLength(11);
+    expect(statements.map(statementShape)).toEqual([
+      'SELECT users',
+      'SELECT posts',
+      'BEGIN',
+      'SELECT users',
+      'INSERT posts',
+      'SELECT users',
+      'SELECT posts',
+      'COMMIT',
+      'BEGIN',
+      'INSERT audit_logs',
+      'COMMIT',
+    ]);
   });
 
   it("update with a nested create the caller's include filters out (1 existing post) issues 13 statements", async () => {
@@ -232,7 +268,21 @@ describe('Database Round-Trip Guard', () => {
     // 12. INSERT INTO audit_logs — one batched write: the created post + its aggregate-owner
     //                             (User) propagation log — 2 rows; the user's columns did not change
     // 13. COMMIT
-    expect(statements).toHaveLength(13);
+    expect(statements.map(statementShape)).toEqual([
+      'SELECT users',
+      'SELECT posts',
+      'BEGIN',
+      'SELECT users',
+      'INSERT posts',
+      'SELECT users',
+      'SELECT posts',
+      'COMMIT',
+      'SELECT posts',
+      'SELECT posts',
+      'BEGIN',
+      'INSERT audit_logs',
+      'COMMIT',
+    ]);
   });
 
   it('update with a nested updateMany under an existing parent (1 matching post, 1 other) issues 12 statements', async () => {
@@ -280,7 +330,20 @@ describe('Database Round-Trip Guard', () => {
     //                             columns did not change and the post the filter did not match
     //                             gets no row
     // 12. COMMIT
-    expect(statements).toHaveLength(12);
+    expect(statements.map(statementShape)).toEqual([
+      'SELECT users',
+      'SELECT posts',
+      'BEGIN',
+      'SELECT users',
+      'SELECT posts',
+      'UPDATE posts',
+      'SELECT users',
+      'SELECT posts',
+      'COMMIT',
+      'BEGIN',
+      'INSERT audit_logs',
+      'COMMIT',
+    ]);
   });
 
   it('update with a nested connect that moves 1 post from another user issues 11 statements', async () => {
@@ -320,7 +383,19 @@ describe('Database Round-Trip Guard', () => {
     //                             aggregate-owner (User) propagation logs, under the user it
     //                             joined and the user it left — 3 rows, 1 statement
     // 11. COMMIT
-    expect(statements).toHaveLength(11);
+    expect(statements.map(statementShape)).toEqual([
+      'SELECT users',
+      'SELECT posts',
+      'BEGIN',
+      'SELECT users',
+      'UPDATE posts',
+      'SELECT users',
+      'COMMIT',
+      'SELECT posts',
+      'BEGIN',
+      'INSERT audit_logs',
+      'COMMIT',
+    ]);
   });
 
   it('deleteMany (2 rows) issues 5 statements', async () => {
@@ -352,7 +427,13 @@ describe('Database Round-Trip Guard', () => {
     // 3. BEGIN                  — Prisma's own transaction around a write of several rows
     // 4. INSERT INTO audit_logs — one batched write covering both deleted rows (2 rows, 1 statement)
     // 5. COMMIT
-    expect(statements).toHaveLength(5);
+    expect(statements.map(statementShape)).toEqual([
+      'SELECT posts',
+      'DELETE posts',
+      'BEGIN',
+      'INSERT audit_logs',
+      'COMMIT',
+    ]);
   });
 
   it('updateManyAndReturn (2 rows) issues 7 statements', async () => {
@@ -385,7 +466,15 @@ describe('Database Round-Trip Guard', () => {
     // 5. BEGIN                  — Prisma's own transaction around a write of several rows
     // 6. INSERT INTO audit_logs — one batched write covering both updated rows (2 rows, 1 statement)
     // 7. COMMIT
-    expect(statements).toHaveLength(7);
+    expect(statements.map(statementShape)).toEqual([
+      'SELECT posts',
+      'BEGIN',
+      'UPDATE posts',
+      'COMMIT',
+      'BEGIN',
+      'INSERT audit_logs',
+      'COMMIT',
+    ]);
   });
 
   it('single-record delete issues 3 statements (includes the before-state fetch)', async () => {
@@ -403,7 +492,7 @@ describe('Database Round-Trip Guard', () => {
     // 1. SELECT FROM users      — the before-state fetch (fetchBefore, default: true)
     // 2. DELETE FROM users      — the caller's own delete
     // 3. INSERT INTO audit_logs — the audit log write, awaited once the delete has committed
-    expect(statements).toHaveLength(3);
+    expect(statements.map(statementShape)).toEqual(['SELECT users', 'DELETE users', 'INSERT audit_logs']);
   });
 
   it.each([2, 3])('plain updateMany (%i rows) issues 8 statements, one read of the updated rows', async (rows) => {
@@ -433,7 +522,16 @@ describe('Database Round-Trip Guard', () => {
     // 6. BEGIN                  — Prisma's own transaction around a write of several rows
     // 7. INSERT INTO audit_logs — one batched write covering every updated row
     // 8. COMMIT
-    expect(statements).toHaveLength(8);
+    expect(statements.map(statementShape)).toEqual([
+      'SELECT posts',
+      'BEGIN',
+      'UPDATE posts',
+      'COMMIT',
+      'SELECT posts',
+      'BEGIN',
+      'INSERT audit_logs',
+      'COMMIT',
+    ]);
   });
 
   it.each([2, 3])('plain createMany (%i rows) issues 6 statements', async (rows) => {
@@ -452,7 +550,14 @@ describe('Database Round-Trip Guard', () => {
     // 4. BEGIN                  — Prisma's own transaction around a write of several rows
     // 5. INSERT INTO audit_logs — one batched write covering every created row
     // 6. COMMIT
-    expect(statements).toHaveLength(6);
+    expect(statements.map(statementShape)).toEqual([
+      'BEGIN',
+      'INSERT users',
+      'COMMIT',
+      'BEGIN',
+      'INSERT audit_logs',
+      'COMMIT',
+    ]);
   });
 
   it('top-level upsert that updates an existing row issues 7 statements', async () => {
@@ -478,7 +583,15 @@ describe('Database Round-Trip Guard', () => {
     // 5. SELECT FROM users      — Prisma's read of the upsert() result
     // 6. COMMIT
     // 7. INSERT INTO audit_logs — the audit log write, awaited once the upsert has committed
-    expect(statements).toHaveLength(7);
+    expect(statements.map(statementShape)).toEqual([
+      'SELECT users',
+      'BEGIN',
+      'SELECT users',
+      'UPDATE users',
+      'SELECT users',
+      'COMMIT',
+      'INSERT audit_logs',
+    ]);
   });
 
   it('top-level upsert that creates a row issues 3 statements', async () => {
@@ -493,7 +606,7 @@ describe('Database Round-Trip Guard', () => {
     // 1. SELECT FROM users      — the before-state fetch, which finds no row
     // 2. INSERT INTO users      — the caller's own upsert, taking the create branch
     // 3. INSERT INTO audit_logs — the audit log write, awaited once the upsert has committed
-    expect(statements).toHaveLength(3);
+    expect(statements.map(statementShape)).toEqual(['SELECT users', 'INSERT users', 'INSERT audit_logs']);
   });
 });
 
@@ -554,7 +667,12 @@ describe('Database Round-Trip Guard: fields an entity lists in auditOmittedField
     // 2. UPDATE users           — the caller's own update, in the client's default shape
     // 3. SELECT FROM users      — the listed field of the updated row, read by primary key
     // 4. INSERT INTO audit_logs — the audit log write, awaited once the update has committed
-    expect(statements).toHaveLength(4);
+    expect(statements.map(statementShape)).toEqual([
+      'SELECT users',
+      'UPDATE users',
+      'SELECT users',
+      'INSERT audit_logs',
+    ]);
   });
 
   it.each([2, 3])('updateManyAndReturn (%i rows) issues 8 statements, one read of the listed field', async (rows) => {
@@ -583,7 +701,16 @@ describe('Database Round-Trip Guard: fields an entity lists in auditOmittedField
     // 6. BEGIN                  — Prisma's own transaction around a write of several rows
     // 7. INSERT INTO audit_logs — one batched write covering every updated row
     // 8. COMMIT
-    expect(statements).toHaveLength(8);
+    expect(statements.map(statementShape)).toEqual([
+      'SELECT posts',
+      'BEGIN',
+      'UPDATE posts',
+      'COMMIT',
+      'SELECT posts',
+      'BEGIN',
+      'INSERT audit_logs',
+      'COMMIT',
+    ]);
   });
 
   it.each([2, 3])('createMany (%i rows) whose data leaves the listed field unset issues 6 statements', async (rows) => {
@@ -604,7 +731,14 @@ describe('Database Round-Trip Guard: fields an entity lists in auditOmittedField
     // 6. COMMIT
     // The listed field is nullable without a default, so a row its data leaves it out of holds null,
     // and the written rows are not read back.
-    expect(statements).toHaveLength(6);
+    expect(statements.map(statementShape)).toEqual([
+      'BEGIN',
+      'INSERT users',
+      'COMMIT',
+      'BEGIN',
+      'INSERT audit_logs',
+      'COMMIT',
+    ]);
   });
 
   describe('a listed field the database fills with a default', () => {
@@ -640,7 +774,15 @@ describe('Database Round-Trip Guard: fields an entity lists in auditOmittedField
         // 5. BEGIN                  — Prisma's own transaction around a write of several rows
         // 6. INSERT INTO audit_logs — one batched write covering every created row
         // 7. COMMIT
-        expect(statements).toHaveLength(7);
+        expect(statements.map(statementShape)).toEqual([
+          'BEGIN',
+          'INSERT posts',
+          'COMMIT',
+          'SELECT posts',
+          'BEGIN',
+          'INSERT audit_logs',
+          'COMMIT',
+        ]);
       },
     );
   });
