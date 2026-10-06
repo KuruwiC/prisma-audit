@@ -63,6 +63,7 @@ interface Options {
   readonly errorHandling?: { readonly observer?: AuditErrorObserver };
   readonly aggregateMapping?: AggregateMapping;
   readonly security?: { readonly redact?: { readonly fields?: string[] } };
+  readonly fetchBefore?: { readonly delete?: boolean };
 }
 
 /** The Prisma namespace with its client version reported as `version` */
@@ -797,6 +798,151 @@ describe('fields a client-level omit hides', () => {
         }),
       );
     });
+  });
+
+  describe('a select that leaves out the primary key a client omit hides', () => {
+    const HIDDEN_ID: Prisma.GlobalOmitConfig = { user: { id: true } };
+    const WITHOUT_ID = USER_COLUMNS.filter((column) => column !== 'id');
+
+    const recordedOf = async (recordsOf: (entityType: string) => Promise<Prisma.AuditLogGetPayload<object>[]>) =>
+      (await recordsOf('User')).map((record) => ({
+        entityId: record.entityId,
+        action: record.action,
+        changes: record.changes,
+      }));
+
+    it('returns exactly the selection of a create and records the row under its id', async () => {
+      const { prisma, run, recordOf } = await setup({}, HIDDEN_ID);
+
+      const result = await run(() =>
+        prisma.user.create({ data: { id: 'u3', email: 'u3@example.com', name: 'Cy' }, select: { email: true } }),
+      );
+
+      expect(result).toEqual({ email: 'u3@example.com' });
+      const record = await recordOf('User', 'u3');
+      expect(record?.action).toBe('create');
+      expect(record?.after).toMatchObject({ id: 'u3', email: 'u3@example.com', name: 'Cy' });
+    });
+
+    it('returns exactly the selection of an update and records its change under the id, the id in neither state', async () => {
+      const { prisma, run, recordsOf, recordOf } = await setup({}, HIDDEN_ID);
+
+      const result = await run(() =>
+        prisma.user.update({ where: { id: 'u1' }, data: { name: 'Bea' }, select: { email: true } }),
+      );
+
+      expect(result).toEqual({ email: 'u1@example.com' });
+      expect(await recordedOf(recordsOf)).toEqual([
+        { entityId: 'u1', action: 'update', changes: { name: { old: 'Ada', new: 'Bea' } } },
+      ]);
+      const record = await recordOf('User', 'u1');
+      expect(keysOf(record?.before)).toEqual(WITHOUT_ID);
+      expect(keysOf(record?.after)).toEqual(WITHOUT_ID);
+    });
+
+    it('returns exactly the selection of an upsert of either branch and records each row under its id', async () => {
+      const { prisma, run, recordsOf } = await setup({}, HIDDEN_ID);
+
+      const updated = await run(() =>
+        prisma.user.upsert({
+          where: { id: 'u1' },
+          update: { name: 'Bea' },
+          create: { id: 'u1', email: 'u1@example.com' },
+          select: { email: true },
+        }),
+      );
+      const created = await run(() =>
+        prisma.user.upsert({
+          where: { id: 'u3' },
+          update: { name: 'never' },
+          create: { id: 'u3', email: 'u3@example.com', name: 'Cy' },
+          select: { email: true },
+        }),
+      );
+
+      expect(updated).toEqual({ email: 'u1@example.com' });
+      expect(created).toEqual({ email: 'u3@example.com' });
+      expect((await recordedOf(recordsOf)).map(({ entityId, action }) => [entityId, action])).toEqual([
+        ['u1', 'update'],
+        ['u3', 'create'],
+      ]);
+    });
+
+    it('returns exactly the selection of a delete whose before state is not read and records the row under its id', async () => {
+      const { prisma, run, recordOf } = await setup({ fetchBefore: { delete: false } }, HIDDEN_ID);
+
+      const result = await run(() => prisma.user.delete({ where: { id: 'u2' }, select: { email: true } }));
+
+      expect(result).toEqual({ email: 'u2@example.com' });
+      expect((await recordOf('User', 'u2'))?.action).toBe('delete');
+    });
+
+    it('returns exactly the selection of each row createManyAndReturn creates and records each under its id', async () => {
+      const { prisma, run, recordsOf } = await setup({}, HIDDEN_ID);
+
+      const result = await run(() =>
+        prisma.user.createManyAndReturn({
+          data: [
+            { id: 'u3', email: 'u3@example.com' },
+            { id: 'u4', email: 'u4@example.com' },
+          ],
+          select: { email: true },
+        }),
+      );
+
+      expect(result).toEqual([{ email: 'u3@example.com' }, { email: 'u4@example.com' }]);
+      expect((await recordsOf('User')).map((record) => [record.entityId, record.action])).toEqual([
+        ['u3', 'create'],
+        ['u4', 'create'],
+      ]);
+    });
+
+    it('returns exactly the selection of each row updateManyAndReturn updates and records each with its before state and change', async () => {
+      const observer = vi.fn<AuditErrorObserver>();
+      const { prisma, run, recordsOf } = await setup({ errorHandling: { observer } }, HIDDEN_ID);
+
+      const result = await run(() =>
+        prisma.user.updateManyAndReturn({
+          where: { email: { endsWith: '@example.com' } },
+          data: { name: 'renamed' },
+          select: { email: true },
+        }),
+      );
+
+      expect(result.map((row) => row.email).sort()).toEqual(['u1@example.com', 'u2@example.com']);
+      expect(result.every((row) => keysOf(row).join() === 'email')).toBe(true);
+      expect(await recordedOf(recordsOf)).toEqual([
+        { entityId: 'u1', action: 'update', changes: { name: { old: 'Ada', new: 'renamed' } } },
+        { entityId: 'u2', action: 'update', changes: { name: { old: 'Bob', new: 'renamed' } } },
+      ]);
+      const records = await recordsOf('User');
+      expect(records.map((record) => keysOf(record.before))).toEqual([USER_COLUMNS, USER_COLUMNS]);
+      expect(observer).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['before 6.2', '6.1.0'],
+      ['of an unknown version', undefined],
+    ])(
+      'records the rows of a client %s under their id too, returning exactly the selection',
+      async (_label, version) => {
+        const { prisma, run, recordsOf } = await setup({ Prisma: prismaReportingVersion(version) }, HIDDEN_ID);
+
+        const created = await run(() =>
+          prisma.user.create({ data: { id: 'u3', email: 'u3@example.com' }, select: { email: true } }),
+        );
+        const updated = await run(() =>
+          prisma.user.update({ where: { id: 'u1' }, data: { name: 'Bea' }, select: { email: true } }),
+        );
+
+        expect(created).toEqual({ email: 'u3@example.com' });
+        expect(updated).toEqual({ email: 'u1@example.com' });
+        expect(await recordedOf(recordsOf)).toEqual([
+          { entityId: 'u1', action: 'update', changes: { name: { old: 'Ada', new: 'Bea' } } },
+          { entityId: 'u3', action: 'create', changes: null },
+        ]);
+      },
+    );
   });
 
   describe('a client that takes no query omit, which reads a select by listing every column', () => {

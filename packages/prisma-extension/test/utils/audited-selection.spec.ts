@@ -250,7 +250,7 @@ describe('injectAuditedSelection', () => {
         args,
       );
 
-      expect(injectedArgs).toEqual({ where: args.where, data: args.data, omit: { role: false } });
+      expect(injectedArgs).toEqual({ where: args.where, data: args.data, omit: { role: false, id: false } });
       expect(injected?.keys).toEqual(new Set(['id', 'status']));
     });
 
@@ -268,6 +268,184 @@ describe('injectAuditedSelection', () => {
         include: { posts: { orderBy: { title: 'asc' }, include: { comments: true }, omit: { title: false } } },
       });
       expect(injected?.nested.get('posts')?.keys).toEqual(new Set(['comments', 'id', 'authorId']));
+    });
+  });
+
+  describe('a caller select, reading the row key whatever a client-level omit hides', () => {
+    const field = (name: string, extra: Record<string, unknown> = {}) => ({ ...scalar(name), ...extra });
+    const keyedMetadata = createSchemaMetadataFromDMMF({
+      dmmf: {
+        datamodel: {
+          models: [
+            {
+              name: 'Member',
+              fields: [field('id', { isId: true }), field('name'), field('email'), relation('notes', 'Memo', true)],
+            },
+            { name: 'Memo', fields: [field('id', { isId: true }), field('title'), field('memberId')] },
+            {
+              name: 'Membership',
+              fields: [field('orgId', { isRequired: true }), field('userId', { isRequired: true }), field('role')],
+              primaryKey: { name: null, fields: ['orgId', 'userId'] },
+            },
+            {
+              name: 'Device',
+              fields: [field('code', { isUnique: true, isRequired: true }), field('label'), field('createdAt')],
+            },
+            { name: 'Note', fields: [field('slug', { isUnique: true }), field('text', { isRequired: true })] },
+            {
+              name: 'Account',
+              fields: [
+                field('userId', { isId: true, isRequired: true }),
+                field('bio'),
+                field('plan'),
+                { ...relation('owner', 'Member', false), relationFromFields: ['userId'] },
+              ],
+            },
+          ],
+        },
+      },
+    } as Parameters<typeof createSchemaMetadataFromDMMF>[0]);
+    const injectInto = (
+      modelName: string,
+      args: Record<string, unknown>,
+      action = 'update',
+      queryOmitSupported = true,
+    ) => injectAuditedSelection({ schemaMetadata: keyedMetadata, queryOmitSupported }, modelName, action, args);
+
+    it.each(['create', 'update', 'upsert', 'delete', 'createManyAndReturn', 'updateManyAndReturn'])(
+      'keeps the primary key by an omit entry set to false in a %s, and leaves it out of the value handed back',
+      (action) => {
+        const args = { where: { id: 'm1' }, data: { name: 'N' }, select: { name: true } };
+
+        const { args: injectedArgs, injected } = injectInto('Member', args, action);
+
+        expect(injectedArgs).toEqual({ where: args.where, data: args.data, omit: { name: false, id: false } });
+        expect(injected?.keys).toEqual(new Set(['id', 'email']));
+        expect(projectToRequestedShape({ id: 'm1', name: 'N', email: 'e' }, injected)).toEqual({ name: 'N' });
+      },
+    );
+
+    it('keeps every field of a composite primary key', () => {
+      const args = { where: {}, data: { role: 'admin' }, select: { role: true } };
+
+      const { args: injectedArgs, injected } = injectInto('Membership', args);
+
+      expect(injectedArgs).toEqual({ where: {}, data: args.data, omit: { role: false, orgId: false, userId: false } });
+      expect(injected?.keys).toEqual(new Set(['orgId', 'userId']));
+    });
+
+    it('keeps the unique field of a model without a primary key', () => {
+      const args = { where: { code: 'd1' }, data: { label: 'L' }, select: { label: true } };
+
+      const { args: injectedArgs, injected } = injectInto('Device', args);
+
+      expect(injectedArgs).toEqual({ where: args.where, data: args.data, omit: { label: false, code: false } });
+      expect(injected?.keys).toEqual(new Set(['code', 'createdAt']));
+    });
+
+    it('keeps only the selected fields of a model with no row key', () => {
+      const args = { where: { slug: 's1' }, data: { text: 'T' }, select: { text: true } };
+
+      const { args: injectedArgs } = injectInto('Note', args);
+
+      expect(injectedArgs).toEqual({ where: args.where, data: args.data, omit: { text: false } });
+    });
+
+    it('keeps a selected primary key once', () => {
+      const args = { where: { id: 'm1' }, data: {}, select: { id: true, name: true } };
+
+      const { args: injectedArgs, injected } = injectInto('Member', args);
+
+      expect(injectedArgs).toEqual({ where: args.where, data: args.data, omit: { id: false, name: false } });
+      expect(injected?.keys).toEqual(new Set(['email']));
+    });
+
+    it('reads every field of a composite key when the caller selects only one, and returns only the selected one', () => {
+      const args = { where: {}, data: { role: 'admin' }, select: { orgId: true } };
+
+      const { args: injectedArgs, injected } = injectInto('Membership', args);
+
+      expect(injectedArgs).toEqual({ where: {}, data: args.data, omit: { orgId: false, userId: false } });
+      expect(injected).toEqual({ keys: new Set(['userId', 'role']), nested: new Map() });
+      expect(projectToRequestedShape({ orgId: 'o1', userId: 'u1', role: 'admin' }, injected)).toEqual({ orgId: 'o1' });
+    });
+
+    it('puts a selected relation and _count into the include next to the forced key, and returns exactly the select', () => {
+      const args = {
+        where: { id: 'm1' },
+        data: { name: 'N' },
+        select: { name: true, notes: { select: { title: true } }, _count: { select: { notes: true } } },
+      };
+
+      const { args: injectedArgs, injected } = injectInto('Member', args);
+
+      expect(injectedArgs).toEqual({
+        where: args.where,
+        data: args.data,
+        include: { notes: { select: { title: true } }, _count: { select: { notes: true } } },
+        omit: { name: false, id: false },
+      });
+      expect(injected).toEqual({ keys: new Set(['id', 'email']), nested: new Map() });
+      expect(
+        projectToRequestedShape(
+          { id: 'm1', name: 'N', email: 'e', notes: [{ title: 'T' }], _count: { notes: 1 } },
+          injected,
+        ),
+      ).toEqual({ name: 'N', notes: [{ title: 'T' }], _count: { notes: 1 } });
+    });
+
+    it('reads a key that is also a relation foreign key, and returns it only when selected', () => {
+      const args = { where: { userId: 'u1' }, data: { bio: 'B' }, select: { bio: true, owner: true } };
+
+      const { args: injectedArgs, injected } = injectInto('Account', args);
+
+      expect(injectedArgs).toEqual({
+        where: args.where,
+        data: args.data,
+        include: { owner: true },
+        omit: { bio: false, userId: false },
+      });
+      expect(injected).toEqual({ keys: new Set(['userId', 'plan']), nested: new Map() });
+      expect(
+        projectToRequestedShape({ userId: 'u1', bio: 'B', plan: 'p', owner: { id: 'u1', name: 'N' } }, injected),
+      ).toEqual({ bio: 'B', owner: { id: 'u1', name: 'N' } });
+
+      const selected = injectInto('Account', { ...args, select: { userId: true, owner: true } });
+
+      expect(selected.args).toEqual({
+        where: args.where,
+        data: args.data,
+        include: { owner: true },
+        omit: { userId: false },
+      });
+      expect(selected.injected?.keys).toEqual(new Set(['bio', 'plan']));
+    });
+
+    it('adds no row key to the selection of a written relation the caller selects', () => {
+      const args = {
+        where: { id: 'm1' },
+        data: { notes: { create: { title: 'T' } } },
+        select: { name: true, notes: { select: { title: true } } },
+      };
+
+      const { args: injectedArgs } = injectInto('Member', args);
+
+      expect(injectedArgs).toEqual({
+        where: args.where,
+        data: args.data,
+        include: { notes: { omit: { title: false } } },
+        omit: { name: false, id: false },
+      });
+    });
+
+    it('selects the row key with every other scalar on a client that cannot omit a field', () => {
+      const args = { where: { code: 'd1' }, data: { label: 'L' }, select: { label: true } };
+
+      const { args: injectedArgs, injected, widened } = injectInto('Device', args, 'update', false);
+
+      expect(injectedArgs).toEqual({ ...args, select: { label: true, code: true, createdAt: true } });
+      expect(injected?.keys).toEqual(new Set(['code', 'createdAt']));
+      expect(widened).toEqual(new Map([['Device', new Set(['code', 'createdAt'])]]));
     });
   });
 

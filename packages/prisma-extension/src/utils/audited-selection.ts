@@ -7,9 +7,10 @@
  * audited is therefore read as the default shape with the relations it selects included, and the
  * fields a caller `omit` leaves out are read. On a client that takes a query `omit`, that shape is
  * read without naming its columns, so a field a client-level `omit` hides is not read unless the
- * caller names it. A client that takes no query `omit` is read in that shape only by selecting
- * every scalar field, which reads such a field too: the columns that adds are named per model
- * (`widened`), and a record keeps one only when the row's before state holds it
+ * caller names it, except the row key (`rowKeyFieldsOf`) of a top-level row, which is read so the
+ * audit identifies the row. A client that takes no query `omit` is read in that shape only by
+ * selecting every scalar field, which reads such a field too: the columns that adds are named per
+ * model (`widened`), and a record keeps one only when the row's before state holds it
  * (`pipeline/audited-columns.ts`). The omitted fields an entity audits are never added here: the
  * audit reads them in its own queries (`utils/audited-omitted-fields.ts`).
  *
@@ -38,6 +39,7 @@ import {
 import type { SchemaMetadata } from '../schema/types.js';
 import { omitFalseEntries } from './audited-omitted-fields.js';
 import { uniqueWhereAsFilter } from './compound-where.js';
+import { rowKeyFieldsOf } from './id-generation.js';
 import { isRecord } from './is-record.js';
 
 /**
@@ -255,9 +257,12 @@ const liftOmittedFields = (omit: unknown): { omit: Selection | undefined; lifted
 /**
  * The args reading the rows a caller `select` reads, in the client's default shape: the relations and
  * `_count` it selects are included with their own args, the written relations merged in; each
- * scalar it selects is kept by an `omit` entry set to `false`, which reads it even when the client
- * omits it for every query; every other scalar is left out of the value handed back.
+ * scalar it selects, and each of `keyFields`, is kept by an `omit` entry set to `false`, which reads
+ * it even when the client omits it for every query; every scalar it does not select is left out of
+ * the value handed back.
  *
+ * @param keyFields - The row key of a top-level row, so the audit identifies the row whatever a
+ *   client-level `omit` hides; empty at a nested level, whose rows are matched by primary key
  * @internal
  */
 const selectionInDefaultShape = (
@@ -267,6 +272,7 @@ const selectionInDefaultShape = (
   selected: Selection,
   relations: WrittenRelations,
   widened: WidenedColumnsBuilder,
+  keyFields: readonly string[],
 ): { value: Selection; injected: InjectedSelection } => {
   const scalarFields = new Set(scalarFieldNamesOf(shape.schemaMetadata, modelName));
   const selectedScalars = [...scalarFields].filter((field) => selected[field] === true);
@@ -279,7 +285,7 @@ const selectionInDefaultShape = (
   if (Object.keys(children.entries).length > 0) {
     value.include = children.entries;
   }
-  const omit = omitFalseEntries(new Set(selectedScalars));
+  const omit = omitFalseEntries(new Set([...selectedScalars, ...keyFields]));
   if (omit) {
     value.omit = omit;
   }
@@ -292,9 +298,10 @@ const selectionInDefaultShape = (
 
 /**
  * The args the rows of `modelName` at one level are read with in the client's default shape, and
- * what that adds to the caller's: a caller `select` is read as the default shape (on a client that
- * cannot `omit` a field, by selecting every scalar field, recorded in `widened`); the fields a
- * caller `omit` leaves out are read; the written relations are merged into the caller's selection.
+ * what that adds to the caller's: a caller `select` is read as the default shape with `keyFields`
+ * (on a client that cannot `omit` a field, by selecting every scalar field, recorded in `widened`);
+ * the fields a caller `omit` leaves out are read; the written relations are merged into the
+ * caller's selection.
  *
  * @internal
  */
@@ -304,11 +311,12 @@ const selectAuditedRows = (
   callerArgs: Selection,
   relations: WrittenRelations,
   widened: WidenedColumnsBuilder,
+  keyFields: readonly string[],
 ): { value: Selection; injected: InjectedSelection } => {
   const { select, ...argsWithoutSelect } = callerArgs;
   if (isRecord(select)) {
     if (shape.queryOmitSupported) {
-      return selectionInDefaultShape(shape, modelName, argsWithoutSelect, select, relations, widened);
+      return selectionInDefaultShape(shape, modelName, argsWithoutSelect, select, relations, widened, keyFields);
     }
     const children = mergeWrittenRelations(shape, select, relations, widened);
     const addedFields = selectMissingScalarFields(shape.schemaMetadata, modelName, children.entries);
@@ -365,6 +373,7 @@ const mergeWrittenRelations = (
         callerValue === true ? {} : callerValue,
         relation.children,
         widened,
+        [],
       );
       if (!isEmptyInjection(requested.injected)) {
         entries[field] = requested.value;
@@ -405,6 +414,7 @@ export const injectAuditedSelection = (
     args,
     buildWrittenRelations(schemaMetadata, modelName, writtenOperations),
     widened,
+    rowKeyFieldsOf(schemaMetadata, modelName) ?? [],
   );
 
   return isEmptyInjection(injected) ? { args, injected: undefined, widened } : { args: value, injected, widened };
