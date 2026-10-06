@@ -76,6 +76,55 @@ describe('createPrismaWriteExecutor', () => {
 
     expect(create).toHaveBeenCalledWith({ data: expect.objectContaining({ beforeUnavailable: true }) });
   });
+
+  const nullableColumns = [
+    'before',
+    'after',
+    'changes',
+    'actorContext',
+    'entityContext',
+    'aggregateContext',
+    'requestContext',
+  ] as const;
+
+  it.each(nullableColumns)('writes %s as DbNull when the record has null there', async (column) => {
+    const { client, create } = clientWithAuditLog();
+
+    await createPrismaWriteExecutor(DbNull, { auditLogModel: 'auditLog', storesBeforeUnavailable: false }).write(
+      client,
+      [{ ...record, [column]: null }],
+    );
+
+    expect(create.mock.calls[0]?.[0].data[column]).toBe(DbNull);
+  });
+
+  it.each(nullableColumns)('writes the value of %s as it is when the record has one', async (column) => {
+    const { client, create } = clientWithAuditLog();
+    const value = { marker: column };
+
+    await createPrismaWriteExecutor(DbNull, { auditLogModel: 'auditLog', storesBeforeUnavailable: false }).write(
+      client,
+      [{ ...record, [column]: value }],
+    );
+
+    expect(create.mock.calls[0]?.[0].data[column]).toBe(value);
+  });
+
+  it('rejects a write when the client has no audit-log model, even for no record', async () => {
+    const executor = createPrismaWriteExecutor(DbNull, { auditLogModel: 'auditLog', storesBeforeUnavailable: false });
+
+    await expect(executor.write({}, [])).rejects.toThrow(
+      'Audit log model "auditLog" not found in Prisma client. Ensure the model name matches your Prisma schema.',
+    );
+  });
+
+  it('rejects a write when the audit-log model has no create method', async () => {
+    const executor = createPrismaWriteExecutor(DbNull, { auditLogModel: 'auditLog', storesBeforeUnavailable: false });
+
+    await expect(executor.write({ auditLog: { createMany: vi.fn() } }, [record])).rejects.toThrow(
+      'Audit log model "auditLog" has no create method. Verify that the model is correctly defined in your Prisma schema.',
+    );
+  });
 });
 
 describe('the inserts a write issues', () => {
@@ -152,6 +201,24 @@ describe('declaresBeforeUnavailableColumn', () => {
   it('throws for a beforeUnavailable field that is not a single Boolean', () => {
     const dmmf = dmmfWith([{ name: 'beforeUnavailable', kind: 'scalar', type: 'String' }]);
 
-    expect(() => declaresBeforeUnavailableColumn(dmmf, 'auditLog')).toThrow(/beforeUnavailable.*Boolean/);
+    expect(() => declaresBeforeUnavailableColumn(dmmf, 'auditLog')).toThrow(
+      'The audit-log model "AuditLog" declares "beforeUnavailable" as String; it must be Boolean.',
+    );
+  });
+
+  it('throws for a Boolean list, naming it as a list', () => {
+    const dmmf = dmmfWith([{ name: 'beforeUnavailable', kind: 'scalar', type: 'Boolean', isList: true }]);
+
+    expect(() => declaresBeforeUnavailableColumn(dmmf, 'auditLog')).toThrow(
+      'The audit-log model "AuditLog" declares "beforeUnavailable" as Boolean[]; it must be Boolean.',
+    );
+  });
+
+  it('throws for a beforeUnavailable field that is a relation', () => {
+    const dmmf = dmmfWith([{ name: 'beforeUnavailable', kind: 'object', type: 'Flag' }]);
+
+    expect(() => declaresBeforeUnavailableColumn(dmmf, 'auditLog')).toThrow(
+      'The audit-log model "AuditLog" declares "beforeUnavailable" as Flag; it must be Boolean.',
+    );
   });
 });
