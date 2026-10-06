@@ -294,6 +294,50 @@ describe('collectToManyDeleteRecords', () => {
     ]);
   });
 
+  it.each([
+    ['captured', { kind: 'captured', row: { id: 'post-9', authorId: 'user-own' } }],
+    ['unavailable', { kind: 'unavailable' }],
+  ] as const)('keeps the %s before state of its own read without consulting the link read', async (_name, before) => {
+    const linkedRowNamedBy = vi.fn(() => ({ id: 'post-9', authorId: 'user-linked' }));
+
+    const collected = await collectToManyDeleteRecords(
+      deleteOp,
+      [{ locator: { by: 'uniqueWhere', where: { id: 'post-9' } }, operation: deleteOp, element: 0, before }],
+      idPrimaryKey,
+      linkedRowNamedBy,
+    );
+
+    expect(linkedRowNamedBy).not.toHaveBeenCalled();
+    expect(collected).toEqual([
+      {
+        entity: before.kind === 'captured' ? before.row : { id: 'post-9' },
+        action: 'delete',
+        beforeState: before,
+        relatedModel: 'Post',
+      },
+    ]);
+  });
+
+  it('takes the primary key of a row located by it from the locator when its before state is unavailable', async () => {
+    expect(
+      await collectToManyDeleteRecords(
+        deleteManyOp,
+        [
+          {
+            locator: { by: 'primaryKey', where: { id: 'post-1' } },
+            operation: deleteManyOp,
+            element: undefined,
+            before: { kind: 'unavailable' },
+          },
+        ],
+        idPrimaryKey,
+        undefined,
+      ),
+    ).toEqual([
+      { entity: { id: 'post-1' }, action: 'delete', beforeState: { kind: 'unavailable' }, relatedModel: 'Post' },
+    ]);
+  });
+
   it('leaves the rows of the other operations at the path to them', async () => {
     expect(
       await collectToManyDeleteRecords(

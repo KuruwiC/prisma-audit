@@ -44,6 +44,21 @@ const readOf = (overrides: Partial<LinkPathRead> = {}): LinkPathRead => ({
   ...overrides,
 });
 
+/** The input of a link write at `labels` on `client` */
+const inputOf = (
+  read: LinkPathRead,
+  client: LinkChangesInput['client'],
+  audited: readonly string[] = [],
+  nestedPreFetchResults: NestedPreFetchResults = new Map(),
+): LinkChangesInput => ({
+  client,
+  linkReads: new Map([['labels', read]]),
+  nestedPreFetchResults,
+  auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS,
+  auditedAt: () => new Set(audited.map((id) => extractEntityIdentity({ id }, ['id']))),
+  fieldNamesOf: () => new Set(['id', 'name', 'postId']),
+});
+
 /** The records of a link write at `labels`, with `after` the rows the read after the write returns */
 const collect = async (
   read: LinkPathRead,
@@ -52,14 +67,7 @@ const collect = async (
   nestedPreFetchResults: NestedPreFetchResults = new Map(),
 ) => {
   const findMany = vi.fn(async () => after);
-  const input: LinkChangesInput = {
-    client: { label: { findMany } },
-    linkReads: new Map([['labels', read]]),
-    nestedPreFetchResults,
-    auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS,
-    auditedAt: () => new Set(audited.map((id) => extractEntityIdentity({ id }, ['id']))),
-    fieldNamesOf: () => new Set(['id', 'name', 'postId']),
-  };
+  const input = inputOf(read, { label: { findMany } }, audited, nestedPreFetchResults);
   return { records: await collectLinkChanges(input), findMany };
 };
 
@@ -82,6 +90,21 @@ describe('collectLinkChanges', () => {
     const { records } = await collect(readOf(), [{ id: 'l1', name: 'after', postId: 'p2' }]);
 
     expect(records.size).toBe(0);
+  });
+
+  it('reads and records nothing for a connect of a row already attached to the parent row', async () => {
+    const attached = readOf({ rows: [{ id: 'l1', name: 'before', postId: 'p1' }] });
+
+    const { records, findMany } = await collect(attached, [{ id: 'l1', name: 'before', postId: 'p1' }]);
+
+    expect(records.size).toBe(0);
+    expect(findMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects when the related model has no client to read the re-linked rows with', async () => {
+    await expect(collectLinkChanges(inputOf(readOf(), {}))).rejects.toThrow(
+      '[@prisma-audit] Cannot read the re-linked rows at path "labels": no model client',
+    );
   });
 
   it('does not read again a row another nested write audits', async () => {

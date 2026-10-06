@@ -186,4 +186,89 @@ describe('readRowsNotInResult', () => {
       expect(rows).toEqual([[inserted]]);
     });
   });
+
+  describe('when nothing is missing from the result', () => {
+    const fkPath: ToManyPath = {
+      parentModelName: 'User',
+      parentPk: pk,
+      pk,
+      scope: {
+        backField: 'author',
+        filter: 'is',
+        parentFields: ['id'],
+        foreignKey: { fields: ['authorId'], references: ['id'] },
+      },
+    };
+
+    it('reads nothing for parents that neither hide inserted rows nor have absent targets', async () => {
+      const { client, findMany } = clientReading([], []);
+      const parent: ParentAtPath = { row: { id: 'u1' }, rows: [], absentTargets: [], insertsHidden: false };
+
+      const rows = await readRowsNotInResult(inputOf(client, 'Post', fkPath, [parent, parent]));
+
+      expect(rows).toEqual([[], []]);
+      expect(findMany).not.toHaveBeenCalled();
+    });
+
+    it('reads the keys under the parent rows only, and no second time, when no key is missing from the result', async () => {
+      const { client, findMany } = clientReading([{ id: 'held' }], []);
+      const parent: ParentAtPath = { ...hiddenParent('u1'), rows: [{ id: 'held', authorId: 'u1' }] };
+
+      const rows = await readRowsNotInResult(inputOf(client, 'Post', fkPath, [parent]));
+
+      expect(rows).toEqual([[]]);
+      expect(findMany).toHaveBeenCalledTimes(1);
+      expect(findMany).toHaveBeenCalledWith({
+        where: { OR: [{ author: { is: { id: 'u1' } } }] },
+        select: { id: true },
+      });
+    });
+
+    it('reads nothing for a parent row that lacks the key its rows hang under', async () => {
+      const { client, findMany } = clientReading([{ id: 'new' }], [{ id: 'new', authorId: 'u1' }]);
+      const keyless: ParentAtPath = { ...hiddenParent('u1'), row: { name: 'no id' } };
+
+      const rows = await readRowsNotInResult(inputOf(client, 'Post', fkPath, [keyless]));
+
+      expect(rows).toEqual([[]]);
+      expect(findMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('the include of the read', () => {
+    const include = { comments: { include: { author: true } } };
+    const absent = targetBy('primaryKey', { id: 'pa' });
+    const absentParent: ParentAtPath = { row: { id: 'u1' }, rows: [], absentTargets: [absent], insertsHidden: false };
+
+    it('passes the relations the operation writes below the path to the read of absent targets', async () => {
+      const postA = { id: 'pa', authorId: 'u1' };
+      const findMany = vi.fn(async (_args: unknown) => [postA]);
+
+      const rows = await readRowsNotInResult({
+        ...inputOf({ findMany }, 'Post', undefined, [absentParent]),
+        targets: [absent],
+        include,
+      });
+
+      expect(findMany.mock.calls).toEqual([[{ where: { OR: [{ id: 'pa' }] }, include }]]);
+      expect(rows).toEqual([[postA]]);
+    });
+
+    it('keeps them beside the link keys it reads for the inserted rows of an implicit many-to-many relation', async () => {
+      const path: ToManyPath = {
+        parentModelName: 'Post',
+        parentPk: pk,
+        pk,
+        scope: { backField: 'posts', filter: 'some', parentFields: ['id'] },
+      };
+      const { client, findMany } = clientReading([{ id: 'ca' }], [{ id: 'ca', posts: [{ id: 'p1' }] }]);
+
+      await readRowsNotInResult({ ...inputOf(client, 'Category', path, [hiddenParent('p1')]), include });
+
+      expect(findMany).toHaveBeenLastCalledWith({
+        where: { OR: [{ id: 'ca' }] },
+        include: { ...include, posts: { where: { OR: [{ id: 'p1' }] }, select: { id: true } } },
+      });
+    });
+  });
 });

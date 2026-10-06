@@ -3,10 +3,13 @@
  * path, the rows they name and whether they insert rows.
  */
 
+import type { BeforeState } from '@kuruwic/db-audit-core';
 import { describe, expect, it } from 'vitest';
 import type { NestedBatchTargets, NestedPreFetchResults } from '../../../src/grammar/nested-operations.js';
+import { TOP_LEVEL_ROW } from '../../../src/grammar/nested-state.js';
 import { buildNestedWriteSets, detectExecutedNestedOperations } from '../../../src/nested/events/write-set.js';
-import { storePreFetchResult } from '../../../src/nested/pre-fetch/pre-fetch-result-store.js';
+import { markPathUnread, storePreFetchResult } from '../../../src/nested/pre-fetch/pre-fetch-result-store.js';
+import { UNRESOLVED_ENTITY_ID } from '../../../src/utils/identity-key.js';
 import { createSchemaMetadataFromDMMF } from '../../../src/utils/schema-metadata.js';
 
 const scalar = (name: string) => ({ name, kind: 'scalar', type: 'String', isList: false });
@@ -25,7 +28,8 @@ const schemaMetadata = createSchemaMetadataFromDMMF({
           fields: [{ ...scalar('id'), isId: true }, scalar('title'), relation('comments', 'Comment', true)],
         },
         { name: 'Comment', fields: [scalar('id'), scalar('content')] },
-        { name: 'Profile', fields: [scalar('id'), scalar('bio')] },
+        { name: 'Profile', fields: [scalar('id'), scalar('bio'), relation('badges', 'Badge', true)] },
+        { name: 'Badge', fields: [scalar('id'), scalar('label')] },
       ],
     },
   },
@@ -74,6 +78,53 @@ describe('detectExecutedNestedOperations', () => {
   });
 });
 
+describe('detectExecutedNestedOperations of a to-one upsert', () => {
+  const args = {
+    data: {
+      profile: {
+        upsert: {
+          create: { bio: 'new', badges: { create: { label: 'from create' } } },
+          update: { bio: 'updated', badges: { deleteMany: {} } },
+        },
+      },
+    },
+  };
+  const operationsGiven = (results: NestedPreFetchResults) =>
+    detectExecutedNestedOperations(schemaMetadata, 'User', args, undefined, results).map(
+      (op) => `${op.path}:${op.operation}`,
+    );
+  const readUnderTopLevelRow = (before: BeforeState): NestedPreFetchResults => {
+    const results: NestedPreFetchResults = new Map();
+    storePreFetchResult(results, 'profile', {
+      before,
+      identity: 'pr1',
+      name: { by: 'parentRow', parent: TOP_LEVEL_ROW },
+    });
+    return results;
+  };
+
+  it('takes the update branch when the related row of the top-level row was read', () => {
+    expect(operationsGiven(readUnderTopLevelRow({ kind: 'captured', row: { id: 'pr1' } }))).toEqual([
+      'profile:upsert',
+      'profile.badges:deleteMany',
+    ]);
+  });
+
+  it('takes the create branch when the top-level row has no related row', () => {
+    expect(operationsGiven(readUnderTopLevelRow({ kind: 'none' }))).toEqual([
+      'profile:upsert',
+      'profile.badges:create',
+    ]);
+  });
+
+  it('scans neither branch when the read of the related rows failed', () => {
+    const results: NestedPreFetchResults = new Map();
+    markPathUnread(results, 'profile');
+
+    expect(operationsGiven(results)).toEqual(['profile:upsert']);
+  });
+});
+
 describe('buildNestedWriteSets', () => {
   it('builds no write set for a to-one path', () => {
     const { writeSets } = writeSetsOf({ profile: { update: { bio: 'B' } } });
@@ -112,6 +163,48 @@ describe('buildNestedWriteSets', () => {
       ],
       createsPending: false,
     });
+  });
+
+  it('locates a row by its WHERE when the before state read holds no complete primary key', () => {
+    const results: NestedPreFetchResults = new Map();
+    storePreFetchResult(results, 'posts', {
+      before: { kind: 'captured', row: { title: 'First' } },
+      identity: UNRESOLVED_ENTITY_ID,
+      name: { by: 'uniqueWhere', where: { title: 'First' } },
+    });
+
+    const { operations, writeSets } = writeSetsOf(
+      { posts: { update: { where: { title: 'First' }, data: { title: 'A' } } } },
+      results,
+    );
+
+    expect(writeSets.get('posts')?.targets).toEqual([
+      {
+        locator: { by: 'uniqueWhere', where: { title: 'First' } },
+        operation: operations[0],
+        element: 0,
+        before: { kind: 'captured', row: { title: 'First' } },
+      },
+    ]);
+  });
+
+  it('locates a row by its WHERE when the model declares no primary key', () => {
+    const results = preFetched([['posts.comments', 'c1', { id: 'c1', content: 'text' }]]);
+
+    const { operations, writeSets } = writeSetsOf(
+      { posts: { update: { where: { id: 'p1' }, data: { comments: { update: { where: { id: 'c1' }, data: {} } } } } } },
+      results,
+    );
+    const commentUpdate = operations.find((op) => op.path === 'posts.comments');
+
+    expect(writeSets.get('posts.comments')?.targets).toEqual([
+      {
+        locator: { by: 'uniqueWhere', where: { id: 'c1' } },
+        operation: commentUpdate,
+        element: 0,
+        before: { kind: 'captured', row: { id: 'c1', content: 'text' } },
+      },
+    ]);
   });
 
   it.each([
