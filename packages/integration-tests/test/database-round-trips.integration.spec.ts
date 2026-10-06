@@ -375,6 +375,114 @@ describe('Database Round-Trip Guard', () => {
     // 7. COMMIT
     expect(statements).toHaveLength(7);
   });
+
+  it('single-record delete issues 3 statements (includes the before-state fetch)', async () => {
+    const user = await provider.runAsync(testActor, async () => {
+      return prisma.user.create({
+        data: { email: 'delete-target@example.com', name: 'Doomed', password: 'secret123' },
+      });
+    });
+    statements.length = 0;
+
+    await provider.runAsync(testActor, async () => {
+      await prisma.user.delete({ where: { id: user.id } });
+    });
+
+    // 1. SELECT FROM users      — the before-state fetch (fetchBefore, default: true)
+    // 2. DELETE FROM users      — the caller's own delete
+    // 3. INSERT INTO audit_logs — the audit log write, awaited once the delete has committed
+    expect(statements).toHaveLength(3);
+  });
+
+  it.each([2, 3])('plain updateMany (%i rows) issues 8 statements, one read of the updated rows', async (rows) => {
+    const user = await provider.runAsync(testActor, async () => {
+      return prisma.user.create({
+        data: {
+          email: `plain-update-many-${rows}@example.com`,
+          name: 'UpdMany',
+          posts: {
+            create: Array.from({ length: rows }, (_, index) => ({ title: `Post ${index}`, content: `Body ${index}` })),
+          },
+        },
+      });
+    });
+    statements.length = 0;
+
+    await provider.runAsync(testActor, async () => {
+      await prisma.post.updateMany({ where: { authorId: user.id }, data: { published: true } });
+    });
+
+    // 1. SELECT FROM posts      — the batch executor's findMany, capturing before-state for
+    //                             the rows about to be updated
+    // 2. BEGIN                  — Prisma's own transaction around the update
+    // 3. UPDATE posts           — the caller's own updateMany, which returns only a count
+    // 4. COMMIT
+    // 5. SELECT FROM posts      — the updated rows read by primary key at once: after-state
+    // 6. BEGIN                  — Prisma's own transaction around a write of several rows
+    // 7. INSERT INTO audit_logs — one batched write covering every updated row
+    // 8. COMMIT
+    expect(statements).toHaveLength(8);
+  });
+
+  it.each([2, 3])('plain createMany (%i rows) issues 6 statements', async (rows) => {
+    await provider.runAsync(testActor, async () => {
+      await prisma.user.createMany({
+        data: Array.from({ length: rows }, (_, index) => ({
+          email: `plain-create-many-${rows}-${index}@example.com`,
+          name: `CreateMany ${index}`,
+        })),
+      });
+    });
+
+    // 1. BEGIN                  — Prisma's own transaction around a write of several rows
+    // 2. INSERT INTO users      — the caller's own createMany, every row in one statement
+    // 3. COMMIT
+    // 4. BEGIN                  — Prisma's own transaction around a write of several rows
+    // 5. INSERT INTO audit_logs — one batched write covering every created row
+    // 6. COMMIT
+    expect(statements).toHaveLength(6);
+  });
+
+  it('top-level upsert that updates an existing row issues 7 statements', async () => {
+    const user = await provider.runAsync(testActor, async () => {
+      return prisma.user.create({
+        data: { email: 'upsert-existing@example.com', name: 'Original', password: 'secret123' },
+      });
+    });
+    statements.length = 0;
+
+    await provider.runAsync(testActor, async () => {
+      await prisma.user.upsert({
+        where: { id: user.id },
+        create: { email: 'upsert-existing@example.com', name: 'Created' },
+        update: { name: 'Updated' },
+      });
+    });
+
+    // 1. SELECT FROM users      — the before-state fetch (fetchBefore, default: true)
+    // 2. BEGIN                  — Prisma's own transaction around the upsert
+    // 3. SELECT id FROM users   — Prisma's own existence check on the `where`
+    // 4. UPDATE users           — the caller's own upsert, taking the update branch
+    // 5. SELECT FROM users      — Prisma's read of the upsert() result
+    // 6. COMMIT
+    // 7. INSERT INTO audit_logs — the audit log write, awaited once the upsert has committed
+    expect(statements).toHaveLength(7);
+  });
+
+  it('top-level upsert that creates a row issues 3 statements', async () => {
+    await provider.runAsync(testActor, async () => {
+      await prisma.user.upsert({
+        where: { id: 'upsert-missing-id' },
+        create: { id: 'upsert-missing-id', email: 'upsert-missing@example.com', name: 'Created' },
+        update: { name: 'Updated' },
+      });
+    });
+
+    // 1. SELECT FROM users      — the before-state fetch, which finds no row
+    // 2. INSERT INTO users      — the caller's own upsert, taking the create branch
+    // 3. INSERT INTO audit_logs — the audit log write, awaited once the upsert has committed
+    expect(statements).toHaveLength(3);
+  });
 });
 
 describe('Database Round-Trip Guard: fields an entity lists in auditOmittedFields', () => {
