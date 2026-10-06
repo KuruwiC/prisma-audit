@@ -6,6 +6,8 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+const neverSettles = () => new Promise<never>(() => {});
+
 describe('runEnricher', () => {
   it('should return enriched context on success', async () => {
     const config = {
@@ -144,8 +146,6 @@ describe('runEnricher', () => {
   });
 
   describe('timeout', () => {
-    const neverSettles = () => new Promise<never>(() => {});
-
     it('should reject when enricher exceeds timeout, leaving no timer pending', async () => {
       vi.useFakeTimers();
       const outcome = expect(runEnricher({ enricher: neverSettles }, {}, null, 10)).rejects.toThrow('Enricher timeout');
@@ -316,8 +316,6 @@ describe('runBatchEnricher', () => {
   });
 
   describe('timeout', () => {
-    const neverSettles = () => new Promise<never>(() => {});
-
     it('should reject when batch enricher exceeds timeout, leaving no timer pending', async () => {
       vi.useFakeTimers();
       const outcome = expect(runBatchEnricher({ enricher: neverSettles }, [{ id: 'a' }], null, 10)).rejects.toThrow(

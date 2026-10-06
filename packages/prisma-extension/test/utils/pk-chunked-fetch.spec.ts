@@ -34,8 +34,8 @@ describe('findManyByPKs', () => {
     await findManyByPKs(delegate, ['id'], entities);
 
     expect(delegate.findMany).toHaveBeenCalledTimes(1);
-    const where = (delegate.findMany.mock.calls[0] as unknown[])[0] as { where: { id: { in: string[] } } };
-    expect(where.where.id.in).toHaveLength(1000);
+    const args = (delegate.findMany.mock.calls[0] as unknown[])[0] as { where: { id: { in: string[] } } };
+    expect(args.where.id.in).toHaveLength(1000);
   });
 
   it('should start a second findMany call with the first key past the chunk size', async () => {

@@ -207,8 +207,8 @@ describe('operation recipes', () => {
       const runCommandRaw = vi.fn((...args: unknown[]) => lazyOperation(() => ({ command: args })));
       return { receiver: { $transaction: vi.fn() }, target: { $queryRaw: queryRaw, $runCommandRaw: runCommandRaw } };
     };
-    const rawMethodOf = (clients: ReturnType<typeof rawClient>, name: string) =>
-      createRecipeClient(configAwaiting(true)).propertyOf(clients.receiver, clients.target, name)?.value as
+    const rawMethodOf = (clients: ReturnType<typeof rawClient>, name: string, config = configAwaiting(true)) =>
+      createRecipeClient(config).propertyOf(clients.receiver, clients.target, name)?.value as
         | ((...args: unknown[]) => PromiseLike<unknown> & object)
         | undefined;
 
@@ -226,10 +226,7 @@ describe('operation recipes', () => {
     it('is a recipe no fluent relation follows and no write policy is decided for', async () => {
       const clients = rawClient();
       const config = configAwaiting(true);
-      const recipe = createRecipeClient(config).propertyOf(clients.receiver, clients.target, '$runCommandRaw')
-        ?.value as (...args: unknown[]) => PromiseLike<unknown> & object;
-
-      const command = recipe({ ping: 1 });
+      const command = rawMethodOf(clients, '$runCommandRaw', config)?.({ ping: 1 }) as PromiseLike<unknown> & object;
 
       expect('posts' in command).toBe(false);
       await expect(command).resolves.toEqual({ command: [{ ping: 1 }] });
@@ -239,7 +236,7 @@ describe('operation recipes', () => {
     it('can be taken by a batch like the operation of a model, and runs on the client the batch gives', async () => {
       const clients = rawClient();
       const config = configAwaiting(true);
-      const recipe = rawMethodOf(clients, '$queryRaw')?.('SELECT 2');
+      const recipe = rawMethodOf(clients, '$queryRaw', config)?.('SELECT 2');
       const other = { $queryRaw: vi.fn((...args: unknown[]) => lazyOperation(() => ({ other: args }))) };
 
       const batch = takeBatchRecipes([recipe], clients.receiver, config);

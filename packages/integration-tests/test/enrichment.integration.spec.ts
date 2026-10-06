@@ -35,6 +35,9 @@ type TestAuditContext = Omit<AuditContext, 'actor'> & {
 
 type ClientOptions = Omit<Parameters<typeof createAuditClient<PrismaClient>>[1], 'Prisma' | 'provider'>;
 
+/** Orders values by their JSON text, for comparing rows read in no fixed order */
+const byJson = (a: unknown, b: unknown) => JSON.stringify(a).localeCompare(JSON.stringify(b));
+
 describe('Context Enrichment Integration', () => {
   let context: TestContext;
   const openedBaseClients: PrismaClient[] = [];
@@ -473,7 +476,7 @@ describe('Context Enrichment Integration', () => {
           deleteLogs
             .filter((log) => log.aggregateType === aggregateType)
             .map((log) => log.entityContext)
-            .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
+            .sort(byJson),
         ).toEqual([{ commentContent: 'Comment 1' }, { commentContent: 'Comment 2' }, { commentContent: 'Comment 3' }]);
       }
     });
@@ -516,9 +519,7 @@ describe('Context Enrichment Integration', () => {
       });
 
       expect(auditLogs).toHaveLength(3);
-      expect(
-        auditLogs.map((log) => log.entityContext).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
-      ).toEqual(
+      expect(auditLogs.map((log) => log.entityContext).sort(byJson)).toEqual(
         ['del-batch1@example.com', 'del-batch2@example.com', 'del-batch3@example.com'].map((email) => ({
           enrichedEmail: email.toUpperCase(),
         })),
@@ -954,9 +955,9 @@ describe('Context Enrichment Integration', () => {
       });
 
       expect(updateLogs).toHaveLength(3);
-      expect(
-        updateLogs.map((log) => log.entityContext).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
-      ).toEqual(emails.map((email) => ({ enrichedEmail: email.toUpperCase() })));
+      expect(updateLogs.map((log) => log.entityContext).sort(byJson)).toEqual(
+        emails.map((email) => ({ enrichedEmail: email.toUpperCase() })),
+      );
     });
   });
 
@@ -1185,9 +1186,7 @@ describe('Context Enrichment Integration', () => {
       });
 
       expect(auditLogs).toHaveLength(3);
-      expect(
-        auditLogs.map((log) => log.entityContext).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
-      ).toEqual(
+      expect(auditLogs.map((log) => log.entityContext).sort(byJson)).toEqual(
         ['entity1@example.com', 'entity2@example.com', 'entity3@example.com'].map((email) => ({
           enrichedEmail: email.toUpperCase(),
         })),

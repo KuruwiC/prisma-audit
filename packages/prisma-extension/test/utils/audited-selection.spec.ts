@@ -558,14 +558,14 @@ describe('relationSelectionOf', () => {
     expect(relationSelectionOf({ select: { posts: true } }, 'posts')).toBe(true);
   });
 
-  it('reads the select of a node that has both a select and an include', () => {
+  it('reads the select of a node that has both a select and an include, and the include when the select is undefined', () => {
     expect(relationSelectionOf({ select: { posts: true }, include: { posts: { take: 1 } } }, 'posts')).toBe(true);
+    expect(relationSelectionOf({ select: undefined, include: { posts: true } }, 'posts')).toBe(true);
   });
 
   it('is undefined for a relation the node does not read, or a node with no select or include', () => {
     expect(relationSelectionOf({ include: { profile: true } }, 'posts')).toBeUndefined();
     expect(relationSelectionOf({ where: { id: 'u1' } }, 'posts')).toBeUndefined();
-    expect(relationSelectionOf({ select: undefined, include: { posts: true } }, 'posts')).toBe(true);
   });
 });
 

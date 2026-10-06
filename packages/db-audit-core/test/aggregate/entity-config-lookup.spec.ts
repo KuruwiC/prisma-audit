@@ -45,7 +45,7 @@ describe('createEntityConfigLookup', () => {
   });
 
   describe('a mapping entry that is undefined', () => {
-    it('is skipped: not loggable, not found by model or by identity, and the mapping stays valid', () => {
+    it('is skipped: not loggable and not found by model, while the other entries are still found', () => {
       const lookup = createEntityConfigLookup({ ...createTestMapping(), Ghost: undefined });
 
       expect(lookup.byModel('Ghost')).toBeUndefined();

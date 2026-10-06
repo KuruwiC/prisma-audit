@@ -422,7 +422,7 @@ describe('createSingleExecutor', () => {
   });
 
   describe('a nested delete whose row cannot be identified', () => {
-    it('is skipped and reported as row-identification with the raw identity it never had', async () => {
+    it('is skipped and reported as row-identification, with no entity id in the reported params', async () => {
       const args = { where: { id: 'u1' }, data: { profile: { delete: true } } };
       const client = clientWith({
         user: { findUnique: vi.fn(async () => user), update: vi.fn(async () => ({ ...user, profile: null })) },
