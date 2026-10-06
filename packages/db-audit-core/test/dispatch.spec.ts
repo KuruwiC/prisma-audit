@@ -401,34 +401,26 @@ describe('dispatch', () => {
   });
 
   describe('a record build that fails', () => {
-    it.each([{ plan: 'immediate inside a transaction', inTransaction: true }])(
-      'notifies diff-generation once, rejects with its error and writes nothing ($plan)',
-      async ({ inTransaction }) => {
+    it.each([
+      { plan: 'immediate inside a transaction', atomic: true },
+      { plan: 'after commit inside a transaction', atomic: false },
+    ])(
+      'notifies diff-generation once, rejects with its error, reports no dropped build and writes and registers nothing ($plan)',
+      async ({ atomic }) => {
         const { config, writeExecutor, failureSink } = createConfig();
-        const { runtime, afterCommit, detach } = createRuntime(inTransaction);
+        const { runtime, afterCommit, detach } = createRuntime(true);
 
-        await expect(dispatch(audited(true, failingBuild), config, runtime)).rejects.toBe(buildError);
+        await expect(dispatch(audited(atomic, failingBuild), config, runtime)).rejects.toBe(buildError);
 
         expect(failureSink.notify).toHaveBeenCalledTimes(1);
         expect(failureSink.notify).toHaveBeenCalledWith(buildFailureContext);
+        expect(failureSink.reportDroppedBuild).not.toHaveBeenCalled();
         expect(writeExecutor.write).not.toHaveBeenCalled();
         expect(failureSink.reportWriteFailure).not.toHaveBeenCalled();
         expect(afterCommit).not.toHaveBeenCalled();
         expect(detach).not.toHaveBeenCalled();
       },
     );
-
-    it('notifies diff-generation once, rejects with its error and registers nothing after commit', async () => {
-      const { config, writeExecutor, failureSink } = createConfig();
-      const { runtime, afterCommit } = createRuntime(true);
-
-      await expect(dispatch(audited(false, failingBuild), config, runtime)).rejects.toBe(buildError);
-
-      expect(failureSink.notify).toHaveBeenCalledTimes(1);
-      expect(failureSink.notify).toHaveBeenCalledWith(buildFailureContext);
-      expect(afterCommit).not.toHaveBeenCalled();
-      expect(writeExecutor.write).not.toHaveBeenCalled();
-    });
 
     it.each([
       { plan: 'detached', atomic: false },
@@ -462,22 +454,6 @@ describe('dispatch', () => {
       expect(failureSink.reportDroppedBuild).toHaveBeenCalledWith({ ...buildFailureContext, error: expect.any(Error) });
       expect(vi.mocked(failureSink.reportDroppedBuild).mock.calls[0]?.[0].error.message).toBe('read failed');
     });
-
-    it.each([
-      { plan: 'immediate', atomic: true, inTransaction: true },
-      { plan: 'after commit', atomic: false, inTransaction: true },
-    ])(
-      'does not report a dropped build for a write inside a transaction ($plan)',
-      async ({ atomic, inTransaction }) => {
-        const { config, failureSink } = createConfig();
-
-        await expect(
-          dispatch(audited(atomic, failingBuild), config, createRuntime(inTransaction).runtime),
-        ).rejects.toBe(buildError);
-
-        expect(failureSink.reportDroppedBuild).not.toHaveBeenCalled();
-      },
-    );
   });
 
   it.each([
