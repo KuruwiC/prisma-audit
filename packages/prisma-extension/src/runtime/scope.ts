@@ -3,7 +3,7 @@
  *
  * The library-owned state of the async flow an audited operation runs in: the transaction it is
  * inside, with the client of that transaction and the writes queued until it commits, and the
- * re-entrancy guard raised while audit logs are being processed. The state lives on its own
+ * re-entrancy guard raised while the audit's own queries run. The state lives on its own
  * async-local store, apart from the app-owned audit context, so re-attributing the actor mid-flow
  * cannot drop it. This module is the only reader and writer of that store.
  */
@@ -33,7 +33,11 @@ export interface RuntimeScope {
    * around that operation, so a nested operation's scope replaces it
    */
   readonly writePolicyDecision?: WritePolicyDecision | undefined;
-  /** Raised while an audited operation is being processed, so that the audit's own queries are not audited */
+  /**
+   * Raised while the audit's own queries run (the reads before and after the write, the audit-log
+   * insert), so that they are not audited; lowered while the caller's operation continues through
+   * `query`, so that a query an extension issues of its own then is audited
+   */
   readonly isProcessingAuditLog?: boolean;
 }
 

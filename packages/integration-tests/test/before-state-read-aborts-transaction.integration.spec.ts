@@ -1,11 +1,10 @@
 /**
  * Integration Test: a before-state read that fails in the database inside a PostgreSQL transaction
  *
- * PostgreSQL aborts a transaction once one of its statements fails, so when the audit's read before
- * an update fails in the database inside an interactive transaction, the caller's update that
- * follows fails too and the transaction rolls back. The read is made to fail with a value
- * PostgreSQL rejects (a NUL byte in a text comparison), through a query extension applied before
- * the audit extension that touches only the audit's `findUnique`.
+ * PostgreSQL aborts a transaction once one of its statements fails, so the caller's update that
+ * follows a failed before-state read fails too and the transaction rolls back. The read fails on a
+ * value PostgreSQL rejects (a NUL byte in a text comparison), set by a query extension applied
+ * before the audit extension that touches only the audit's `findUnique`.
  */
 
 import type { AuditContext } from '@kuruwic/db-audit-core';

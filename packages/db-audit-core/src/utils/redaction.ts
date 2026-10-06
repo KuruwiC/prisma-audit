@@ -171,8 +171,7 @@ export const createRedactor = (config: RedactConfig = {}): Redactor => {
  * Redact the sensitive fields of a state or a change set
  *
  * @remarks
- * Walks plain objects and arrays, the shape of serialized (JSON-safe) data, which is what compose
- * passes; they come back as new containers and the input is never changed. Any other object is
- * neither traversed nor copied.
+ * Plain objects and arrays, the shape of serialized (JSON-safe) data, are walked and come back as
+ * new containers; the input is never changed. Any other object is neither traversed nor copied.
  */
 export const redactSensitiveData = (data: unknown, config: RedactConfig = {}): unknown => createRedactor(config)(data);

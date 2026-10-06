@@ -57,10 +57,9 @@ export interface AuditPipelineDependencies {
  * the scope's handle, the client of the transaction the runtime scope holds, which is that client
  * when the caller writes through the transaction's client inside `$transaction`. It runs through
  * `runCallerMutation`, so a failure of the caller's own write reaches the caller raw. It runs
- * with the re-entrancy guard lowered: a query an extension applied after this one issues of its
- * own while continuing the operation is application work and is audited; only the audit's own
- * queries run with the guard raised. The query is awaited inside that scope, so Prisma's lazy
- * operation starts there.
+ * with the re-entrancy guard lowered, so a query an extension applied after this one issues of its
+ * own while continuing the operation is audited; only the audit's own queries run with it raised.
+ * The query is awaited inside that scope so Prisma's lazy operation starts there.
  */
 const operationContinuation =
   (operation: InterceptedOperation): AuditedOperation['execute'] =>
