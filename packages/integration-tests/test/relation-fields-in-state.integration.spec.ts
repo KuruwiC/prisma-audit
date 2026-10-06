@@ -99,45 +99,6 @@ describe('relation fields in audited entity state', () => {
     expect(log?.changes).toEqual({ name: { old: 'Before Rename', new: 'After Rename' } });
   });
 
-  it('records no update of a row whose update writes only below it', async () => {
-    const { prisma, basePrisma, provider } = scenario;
-    const user = await basePrisma.user.create({ data: { email: 'relation-fields-nested@example.com', name: 'Ada' } });
-
-    await provider.runAsync(testActor, async () =>
-      prisma.user.update({ where: { id: user.id }, data: { posts: { create: { id: 'p1', title: 'T' } } } }),
-    );
-
-    const logs = await basePrisma.auditLog.findMany({ where: { aggregateType: { in: ['User', 'Post'] } } });
-    expect(logs.map((log) => [log.entityType, log.entityId, log.action, log.aggregateType]).sort()).toEqual([
-      ['Post', 'p1', 'create', 'Post'],
-      ['Post', 'p1', 'create', 'User'],
-    ]);
-  });
-
-  it('records no update of a nested row whose update writes only below it', async () => {
-    const { prisma, basePrisma, provider } = scenario;
-    const user = await basePrisma.user.create({ data: { email: 'relation-fields-deep@example.com', name: 'Ada' } });
-    await basePrisma.post.create({ data: { id: 'p1', title: 'T', authorId: user.id } });
-
-    await provider.runAsync(testActor, async () =>
-      prisma.user.update({
-        where: { id: user.id },
-        data: {
-          posts: {
-            update: {
-              where: { id: 'p1' },
-              data: { comments: { create: { id: 'k1', content: 'C', authorId: user.id } } },
-            },
-          },
-        },
-      }),
-    );
-
-    const logs = await basePrisma.auditLog.findMany();
-    const ownRecords = logs.filter((log) => log.aggregateType === log.entityType);
-    expect(ownRecords.map((log) => `${log.entityType}:${log.entityId}:${log.action}`)).toEqual(['Comment:k1:create']);
-  });
-
   it('keeps an included to-one relation out of batch create logs', async () => {
     const { prisma, basePrisma, provider } = scenario;
     const user = await basePrisma.user.create({ data: { email: 'relation-fields-batch@example.com', name: 'Author' } });

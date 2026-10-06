@@ -204,6 +204,29 @@ describe('nested rows attributed through their parent row', () => {
     expect(await recordsOf('Post')).toEqual(['p3:create']);
   });
 
+  it('records no update of a row, top-level or nested, whose update writes only below it', async () => {
+    const { basePrisma, prisma, run, recordsOf, author } = await setup();
+    await basePrisma.post.create({ data: { id: 'p1', title: 'p1', authorId: author.id } });
+
+    await run(() =>
+      prisma.user.update({
+        where: { id: author.id },
+        data: {
+          posts: {
+            update: {
+              where: { id: 'p1' },
+              data: { comments: { create: { id: 'k1', content: 'k1', authorId: author.id } } },
+            },
+          },
+        },
+      }),
+    );
+
+    expect(await recordsOf('User')).toEqual([]);
+    expect(await recordsOf('Post')).toEqual([]);
+    expect(await recordsOf('Comment')).toEqual(['k1:create']);
+  });
+
   it('audits the rows written below every element of a list create, each once', async () => {
     const { basePrisma, prisma, run, recordsOf, author } = await setup();
     await basePrisma.attachment.create({ data: { id: 'att', fileUrl: 'f', fileName: 'f', ownerId: author.id } });
