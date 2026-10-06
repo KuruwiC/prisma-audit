@@ -1,5 +1,10 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { runBatchEnricher, runEnricher } from '../../src/enrichment/run-enricher.js';
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+});
 
 describe('runEnricher', () => {
   it('should return enriched context on success', async () => {
@@ -52,7 +57,6 @@ describe('runEnricher', () => {
       const result = await runEnricher(config, {}, null, 5000);
       expect(result).toEqual({ default: true });
       expect(warnSpy).toHaveBeenCalledWith('[db-audit-core] Enricher failed:', expect.any(Error));
-      warnSpy.mockRestore();
     });
 
     it('should return null when no fallback provided', async () => {
@@ -65,7 +69,6 @@ describe('runEnricher', () => {
       };
       const result = await runEnricher(config, {}, null, 5000);
       expect(result).toBeNull();
-      vi.restoreAllMocks();
     });
   });
 
@@ -137,30 +140,46 @@ describe('runEnricher', () => {
       };
       const result = await runEnricher(config, {}, null, 5000);
       expect(result).toEqual({ fallbackUsed: true });
-      vi.restoreAllMocks();
     });
   });
 
   describe('timeout', () => {
-    it('should reject when enricher exceeds timeout', async () => {
-      const config = {
-        enricher: async () => {
-          await new Promise((resolve) => setTimeout(resolve, 500));
-          return { done: true };
-        },
-      };
-      await expect(runEnricher(config, {}, null, 10)).rejects.toThrow('Enricher timeout');
+    const neverSettles = () => new Promise<never>(() => {});
+
+    it('should reject when enricher exceeds timeout, leaving no timer pending', async () => {
+      vi.useFakeTimers();
+      const outcome = expect(runEnricher({ enricher: neverSettles }, {}, null, 10)).rejects.toThrow('Enricher timeout');
+
+      expect(vi.getTimerCount()).toBe(1);
+      await vi.advanceTimersByTimeAsync(10);
+      await outcome;
+
+      expect(vi.getTimerCount()).toBe(0);
     });
 
     it('should clean up timeout when enricher completes first', async () => {
-      const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout');
+      vi.useFakeTimers();
       const config = {
         enricher: async () => ({ fast: true }),
       };
       const result = await runEnricher(config, {}, null, 5000);
       expect(result).toEqual({ fast: true });
-      expect(clearTimeoutSpy).toHaveBeenCalled();
-      clearTimeoutSpy.mockRestore();
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it("should log the timeout and return the fallback under the 'log' strategy", async () => {
+      vi.useFakeTimers();
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const config = { enricher: neverSettles, onError: 'log' as const, fallback: { timedOut: true } };
+      const outcome = runEnricher(config, {}, null, 10);
+
+      await vi.advanceTimersByTimeAsync(10);
+
+      await expect(outcome).resolves.toEqual({ timedOut: true });
+      expect(warnSpy).toHaveBeenCalledWith(
+        '[db-audit-core] Enricher failed:',
+        expect.objectContaining({ message: 'Enricher timeout' }),
+      );
     });
   });
 });
@@ -226,7 +245,6 @@ describe('runBatchEnricher', () => {
       const result = await runBatchEnricher(config, [{ id: 'a' }, { id: 'b' }], null, 5000);
       expect(result).toEqual([{ ctx: 'a' }, { ctx: 'b' }]);
       expect(warnSpy).toHaveBeenCalledWith('[db-audit-core] Batch enricher failed:', expect.any(Error));
-      warnSpy.mockRestore();
     });
 
     it('should return null array when no fallback provided', async () => {
@@ -239,7 +257,6 @@ describe('runBatchEnricher', () => {
       };
       const result = await runBatchEnricher(config, [{ id: 'a' }, { id: 'b' }], null, 5000);
       expect(result).toEqual([null, null]);
-      vi.restoreAllMocks();
     });
   });
 
@@ -256,6 +273,32 @@ describe('runBatchEnricher', () => {
       expect(result).toEqual([{ recovered: 'a' }, { recovered: 'b' }]);
     });
 
+    it.each([
+      ['null', null],
+      ['an object', { recovered: true }],
+    ])('should use the fallback array when the custom handler returns %s', async (_label, handlerResult) => {
+      const config = {
+        enricher: async (): Promise<({ ctx: string } | null)[]> => {
+          throw new Error('batch failed');
+        },
+        onError: () => handlerResult,
+        fallback: [{ ctx: 'a' }, { ctx: 'b' }],
+      };
+      const result = await runBatchEnricher(config, [{ id: 'a' }, { id: 'b' }], null, 5000);
+      expect(result).toEqual([{ ctx: 'a' }, { ctx: 'b' }]);
+    });
+
+    it('should return null array when the custom handler returns a non-array and no fallback is configured', async () => {
+      const config = {
+        enricher: async (): Promise<null[]> => {
+          throw new Error('batch failed');
+        },
+        onError: () => 'recovered',
+      };
+      const result = await runBatchEnricher(config, [{ id: 'a' }, { id: 'b' }], null, 5000);
+      expect(result).toEqual([null, null]);
+    });
+
     it('should return null array when custom handler throws', async () => {
       vi.spyOn(console, 'warn').mockImplementation(() => {});
       const handler = vi.fn().mockImplementation(() => {
@@ -269,30 +312,33 @@ describe('runBatchEnricher', () => {
       };
       const result = await runBatchEnricher(config, [{ id: 'a' }, { id: 'b' }], null, 5000);
       expect(result).toEqual([null, null]);
-      vi.restoreAllMocks();
     });
   });
 
   describe('timeout', () => {
-    it('should reject when batch enricher exceeds timeout', async () => {
-      const config = {
-        enricher: async (inputs: { id: string }[]) => {
-          await new Promise((resolve) => setTimeout(resolve, 500));
-          return inputs.map(() => ({ done: true }));
-        },
-      };
-      await expect(runBatchEnricher(config, [{ id: 'a' }], null, 10)).rejects.toThrow('Enricher timeout');
+    const neverSettles = () => new Promise<never>(() => {});
+
+    it('should reject when batch enricher exceeds timeout, leaving no timer pending', async () => {
+      vi.useFakeTimers();
+      const outcome = expect(runBatchEnricher({ enricher: neverSettles }, [{ id: 'a' }], null, 10)).rejects.toThrow(
+        'Enricher timeout',
+      );
+
+      expect(vi.getTimerCount()).toBe(1);
+      await vi.advanceTimersByTimeAsync(10);
+      await outcome;
+
+      expect(vi.getTimerCount()).toBe(0);
     });
 
     it('should clean up timeout when batch enricher completes first', async () => {
-      const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout');
+      vi.useFakeTimers();
       const config = {
         enricher: async (inputs: { id: string }[]) => inputs.map((i) => ({ enriched: i.id })),
       };
       const result = await runBatchEnricher(config, [{ id: 'a' }], null, 5000);
       expect(result).toEqual([{ enriched: 'a' }]);
-      expect(clearTimeoutSpy).toHaveBeenCalled();
-      clearTimeoutSpy.mockRestore();
+      expect(vi.getTimerCount()).toBe(0);
     });
   });
 });
