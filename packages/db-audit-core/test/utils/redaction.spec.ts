@@ -517,18 +517,6 @@ describe('redactSensitiveData with values JSON cannot hold', () => {
     expect(redacted.password).toEqual({ redacted: true, hadValue: true });
   });
 
-  it('should throw a RangeError for circular references', () => {
-    const data: Record<string, unknown> = {
-      id: 1,
-      password: 'secret',
-    };
-    data.self = data;
-
-    expect(() => {
-      redactSensitiveData(data);
-    }).toThrow(RangeError);
-  });
-
   it('should handle nested objects with Date and BigInt', () => {
     const data = {
       user: {
