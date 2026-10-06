@@ -6,6 +6,7 @@
  */
 
 import type { UniqueConstraint } from '../schema/types.js';
+import { sameKeyValue } from './id-generation.js';
 import { isRecord } from './is-record.js';
 
 /**
@@ -28,19 +29,20 @@ export const unwrapCompoundWhere = (
   return (whereClause[compoundKey] as Record<string, unknown> | undefined) ?? whereClause;
 };
 
+/** A key value that is neither a string, a number nor a boolean: a BigInt, a Date, Bytes, a Decimal */
+const isStructuredKeyValue = (value: unknown): boolean =>
+  typeof value === 'bigint' ||
+  value instanceof Uint8Array ||
+  (typeof value === 'object' && value !== null && 'toJSON' in value);
+
 /** A value a unique WHERE compares a field to; a filter object (`{ contains }`) is not one */
 const isComparableValue = (value: unknown): boolean =>
-  value === null || typeof value !== 'object' || value instanceof Date;
+  value === null || typeof value !== 'object' || isStructuredKeyValue(value);
 
-const valuesEqual = (rowValue: unknown, whereValue: unknown): boolean => {
-  if (rowValue instanceof Date && whereValue instanceof Date) {
-    return rowValue.getTime() === whereValue.getTime();
-  }
-  if (typeof rowValue === 'bigint' || typeof whereValue === 'bigint') {
-    return String(rowValue) === String(whereValue);
-  }
-  return rowValue === whereValue;
-};
+const valuesEqual = (rowValue: unknown, whereValue: unknown): boolean =>
+  isStructuredKeyValue(rowValue) || isStructuredKeyValue(whereValue)
+    ? sameKeyValue(rowValue, whereValue)
+    : rowValue === whereValue;
 
 /**
  * Whether `row` is the row `whereClause`, a `<Model>WhereUniqueInput`, names: every field the WHERE

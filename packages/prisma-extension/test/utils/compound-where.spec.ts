@@ -84,6 +84,12 @@ describe('matchesUniqueWhere', () => {
     expect(matchesUniqueWhere({ id: 42n }, { id: 42 })).toBe(true);
     expect(matchesUniqueWhere({ id: 42n }, { id: 43 })).toBe(false);
   });
+
+  it('compares Bytes by content and Dates to the millisecond', () => {
+    expect(matchesUniqueWhere({ digest: Buffer.from([1, 2]) }, { digest: new Uint8Array([1, 2]) })).toBe(true);
+    expect(matchesUniqueWhere({ digest: Buffer.from([1, 2]) }, { digest: new Uint8Array([1, 3]) })).toBe(false);
+    expect(matchesUniqueWhere({ at: new Date(1000) }, { at: new Date(1001) })).toBe(false);
+  });
 });
 
 describe('namesKey', () => {

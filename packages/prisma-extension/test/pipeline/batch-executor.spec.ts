@@ -59,6 +59,7 @@ const Prisma: PrismaNamespace = {
           ],
         },
         { name: 'Note', fields: [scalar('label', { isUnique: true }), scalar('text', { isRequired: true })] },
+        { name: 'Reading', fields: [scalar('at', { type: 'DateTime', isId: true }), scalar('value')] },
       ],
     },
   },
@@ -1292,6 +1293,82 @@ describe('createBatchExecutor', () => {
 
       expect(deviceFindMany.mock.calls).toEqual([[{ where, omit: { serial: false } }]]);
       expect(noteFindMany.mock.calls).toEqual([[{ where }]]);
+    });
+  });
+
+  describe('a model whose primary key is a DateTime', () => {
+    const t0 = new Date('2026-01-02T03:04:05.000Z');
+    const t1 = new Date('2026-01-02T03:04:05.001Z');
+    const readingEvent = (fields: Row) => expect.objectContaining({ model: 'Reading', ...fields });
+
+    it('pairs the rows of an updateMany by their key when two keys differ by one millisecond', async () => {
+      const findMany = findManyReturning(
+        [
+          { at: t0, value: 'zero' },
+          { at: t1, value: 'one' },
+        ],
+        [
+          { at: t1, value: 'one!' },
+          { at: t0, value: 'zero!' },
+        ],
+      );
+      const delegate = { findMany, updateMany: vi.fn(async () => ({ count: 2 })) };
+      const { client, operation } = operationOnModel('Reading', delegate, 'updateMany', {
+        where: {},
+        data: { value: 'x' },
+      });
+      const produceRecords = produce();
+
+      await runWithRecords(executor, operation, scopeOn(client), produceRecords);
+
+      expect(produceRecords).toHaveBeenCalledWith(
+        [
+          readingEvent({
+            identity: t1.toISOString(),
+            before: { kind: 'captured', row: { at: t1, value: 'one' } },
+            after: { at: t1, value: 'one!' },
+          }),
+          readingEvent({
+            identity: t0.toISOString(),
+            before: { kind: 'captured', row: { at: t0, value: 'zero' } },
+            after: { at: t0, value: 'zero!' },
+          }),
+        ],
+        expect.anything(),
+        new Map(),
+      );
+      expect(failureSink.notify).not.toHaveBeenCalled();
+    });
+
+    it('audits both rows a createMany inserted under keys that differ by one millisecond', async () => {
+      const createMany = vi.fn(async () => ({ count: 2 }));
+      const findMany = findManyReturning([
+        { at: t1, value: 'one' },
+        { at: t0, value: 'zero' },
+      ]);
+      const { client, operation } = createManyOn(
+        'Reading',
+        { createMany, findMany },
+        {
+          data: [
+            { at: t0, value: 'zero' },
+            { at: t1, value: 'one' },
+          ],
+        },
+      );
+      const produceRecords = produce();
+
+      await runWithRecords(executor, operation, scopeOn(client), produceRecords);
+
+      expect(produceRecords).toHaveBeenCalledWith(
+        [
+          readingEvent({ identity: t0.toISOString(), after: { at: t0, value: 'zero' } }),
+          readingEvent({ identity: t1.toISOString(), after: { at: t1, value: 'one' } }),
+        ],
+        expect.anything(),
+        new Map(),
+      );
+      expect(failureSink.notify).not.toHaveBeenCalled();
     });
   });
 

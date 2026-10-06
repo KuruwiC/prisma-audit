@@ -20,7 +20,7 @@ import type { AuditedOmittedFields } from '../../utils/audited-omitted-fields.js
 import { UNAVAILABLE_BEFORE_STATE } from '../../utils/before-state.js';
 import { matchesUniqueWhere, uniqueWhereAsFilter } from '../../utils/compound-where.js';
 import { nestedLog } from '../../utils/debug.js';
-import { extractEntityIdentity, primaryKeyOf } from '../../utils/id-generation.js';
+import { extractEntityIdentity, primaryKeyOf, sameKeyValue } from '../../utils/id-generation.js';
 import type { EntityIdentityKey } from '../../utils/identity-key.js';
 import { attachedFilter, type LinkPathRead, type LinkReads, type LinkWrite } from '../pre-fetch/link-rows.js';
 import { getPreFetchListClient } from '../pre-fetch/model-client.js';
@@ -143,7 +143,7 @@ const capturedFirst = (candidates: readonly LinkCandidate[]): LinkCandidate[] =>
 ];
 
 const foreignKeyChanged = (before: Row, after: Row, fields: readonly string[]): boolean =>
-  fields.some((field) => String(before[field] ?? null) !== String(after[field] ?? null));
+  fields.some((field) => !sameKeyValue(before[field] ?? null, after[field] ?? null));
 
 const holdsNoParent = (row: Row, fields: readonly string[]): boolean =>
   fields.every((field) => row[field] === null || row[field] === undefined);

@@ -54,7 +54,7 @@ import {
 import { NO_BEFORE_STATE } from '../../utils/before-state.js';
 import { matchesUniqueWhere } from '../../utils/compound-where.js';
 import { nestedLog } from '../../utils/debug.js';
-import { extractEntityIdentity } from '../../utils/id-generation.js';
+import { extractEntityIdentity, sameKeyValue } from '../../utils/id-generation.js';
 import { attachedFilter, type LinkReads } from '../pre-fetch/link-rows.js';
 import { getPreFetchListClient } from '../pre-fetch/model-client.js';
 import {
@@ -645,7 +645,7 @@ const linkColumnsAsStoredOf = (
 };
 
 const linksDiffer = (row: Row, linkColumns: Row): boolean =>
-  Object.entries(linkColumns).some(([field, value]) => String(row[field] ?? null) !== String(value ?? null));
+  Object.entries(linkColumns).some(([field, value]) => !sameKeyValue(row[field] ?? null, value ?? null));
 
 /**
  * A row read before the write that a keyword listed before the delete linked to the parent, with

@@ -243,10 +243,57 @@ export const getRowKeyFields = (schemaMetadata: SchemaMetadata, modelName: strin
 };
 
 /**
+ * A row-key value in the form its identity is written in: a Date as its ISO string (to the
+ * millisecond), a BigInt as its decimal string, Bytes as base64, a Decimal as its decimal string.
+ * Any other value is kept as it is, so that a string, a number and a boolean read the same in the
+ * JSON of a composite key.
+ */
+const canonicalKeyValue = (value: unknown): unknown => {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? 'Invalid Date' : value.toISOString();
+  }
+  if (typeof value === 'bigint') {
+    return value.toString();
+  }
+  if (value instanceof Uint8Array) {
+    return btoa(Array.from(value, (byte) => String.fromCharCode(byte)).join(''));
+  }
+  if (typeof value === 'object' && value !== null && 'toJSON' in value && typeof value.toJSON === 'function') {
+    return value.toJSON();
+  }
+  return value;
+};
+
+/**
+ * The text of a row-key value: what every identity, and every map that pairs, looks up or
+ * de-duplicates rows by key, writes a key value as. Two values of one key field that differ,
+ * to the millisecond for a DateTime or byte for Bytes, never write alike.
+ */
+export const serializeKeyValue = (value: unknown): string => String(canonicalKeyValue(value));
+
+const isInvalidDate = (value: unknown): boolean => value instanceof Date && Number.isNaN(value.getTime());
+
+/**
+ * Whether two row-key values write alike; a number and a BigInt of one value do. Null and undefined
+ * equal each other and nothing else, and an invalid Date equals only an invalid Date, so neither
+ * collides with the string its text reads as.
+ */
+export const sameKeyValue = (left: unknown, right: unknown): boolean => {
+  if (left == null || right == null) {
+    return (left ?? null) === (right ?? null);
+  }
+  if (isInvalidDate(left) || isInvalidDate(right)) {
+    return isInvalidDate(left) && isInvalidDate(right);
+  }
+  return serializeKeyValue(left) === serializeKeyValue(right);
+};
+
+/**
  * Extract the entity identity of `record` from `pkFields`, the fields to read (the row key for a
- * top-level or batch row, the primary key for a nested one): the single field's value as a string,
- * or the JSON array of a composite key's values (BigInt values as strings), which keeps
- * `["a:b", "c"]` and `["a", "b:c"]` apart. `UNRESOLVED_ENTITY_ID` when any field is absent or null.
+ * top-level or batch row, the primary key for a nested one): the single field's value written by
+ * {@link serializeKeyValue}, or the JSON array of a composite key's values written the same way,
+ * which keeps `["a:b", "c"]` and `["a", "b:c"]` apart. `UNRESOLVED_ENTITY_ID` when any field is
+ * absent or null.
  */
 export const extractEntityIdentity = (
   record: Record<string, unknown>,
@@ -255,14 +302,9 @@ export const extractEntityIdentity = (
   const allPresent = pkFields.every((f) => f in record && record[f] != null);
   if (!allPresent) return UNRESOLVED_ENTITY_ID;
 
-  if (pkFields.length === 1) return String(record[pkFields[0] as string]);
+  if (pkFields.length === 1) return serializeKeyValue(record[pkFields[0] as string]);
 
-  return JSON.stringify(
-    pkFields.map((f) => {
-      const v = record[f];
-      return typeof v === 'bigint' ? v.toString() : v;
-    }),
-  );
+  return JSON.stringify(pkFields.map((f) => canonicalKeyValue(record[f])));
 };
 
 /** The fields `pkFields` of `row`, as a key or a filter; a field the row lacks reads `undefined` */
