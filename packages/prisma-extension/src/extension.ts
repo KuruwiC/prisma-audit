@@ -39,6 +39,7 @@ const createPipelineDependencies = (audit: AuditOptions): AuditPipelineDependenc
       schemaMetadata,
       shouldFetchBefore,
       auditedOmittedFields,
+      auditedOmittedFieldsWithRowKey,
       failureSink,
     }),
     batchExecutor: createBatchExecutor({ schemaMetadata, auditedOmittedFieldsWithRowKey, failureSink }),

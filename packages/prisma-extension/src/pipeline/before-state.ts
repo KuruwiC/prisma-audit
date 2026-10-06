@@ -3,7 +3,9 @@
  *
  * Read with `findUnique` on the operation's `where` before the write: always for an upsert,
  * whose executed branch is what the before state tells; for an update or a delete only when
- * its `fetchBefore` setting is on; never for a create.
+ * its `fetchBefore` setting is on; never for a create. The read holds the omitted fields the
+ * entity audits and, on a client that takes a query omit, the row key whatever a client-level
+ * omit hides, so the row is identified by it even when the row the write returns lacks it.
  */
 
 import type { BeforeState, FailureSink } from '@kuruwic/db-audit-core';
@@ -41,7 +43,7 @@ export interface BeforeStateInput {
 
 export interface BeforeStateDependencies {
   readonly shouldFetchBefore: ShouldFetchBefore;
-  readonly auditedOmittedFields: AuditedOmittedFields;
+  readonly auditedOmittedFieldsWithRowKey: AuditedOmittedFields;
   /** Receives a failed fetch under the `pre-fetch` phase; the caller's operation continues */
   readonly onFetchFailure: FailureSink['notify'];
 }
@@ -65,13 +67,13 @@ const findExistingRow = async (
   handle: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
   modelName: string,
   where: unknown,
-  auditedOmittedFields: AuditedOmittedFields,
+  readFields: AuditedOmittedFields,
 ): Promise<BeforeState> => {
   const delegate = getModelDelegate(handle, modelName);
   if (!hasOperation<FindUniqueDelegate>(delegate, 'findUnique')) {
     return NO_BEFORE_STATE;
   }
-  const row = await withOmittedFieldsInFinds(delegate, auditedOmittedFields.of(modelName)).findUnique({ where });
+  const row = await withOmittedFieldsInFinds(delegate, readFields.of(modelName)).findUnique({ where });
   return beforeStateOf(isRow(row) ? row : null);
 };
 
@@ -95,7 +97,7 @@ export const fetchBeforeState = async (
   }
 
   try {
-    return await findExistingRow(handle, modelName, args.where, deps.auditedOmittedFields);
+    return await findExistingRow(handle, modelName, args.where, deps.auditedOmittedFieldsWithRowKey);
   } catch (caughtError) {
     const error = toError(caughtError);
     await deps.onFetchFailure({ phase: 'pre-fetch', modelName, operation: action, params: args, error });

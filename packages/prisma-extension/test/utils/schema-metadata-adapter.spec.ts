@@ -112,6 +112,34 @@ describe('createSchemaMetadataFromDMMF', () => {
   });
 
   describe('getRelationFields', () => {
+    it('should return the fields of the model that hold the foreign key of a relation it owns, and none for the other side', () => {
+      const Prisma = createPrismaWithModel({
+        name: 'Membership',
+        fields: [
+          { name: 'orgId', kind: 'scalar', type: 'String', isList: false },
+          {
+            name: 'org',
+            kind: 'object',
+            type: 'Org',
+            isList: false,
+            relationName: 'OrgMemberships',
+            relationFromFields: ['orgId'],
+            relationToFields: ['id'],
+          },
+          { name: 'notes', kind: 'object', type: 'Note', isList: true, relationName: 'MembershipNotes' },
+        ],
+      });
+
+      expect(
+        createSchemaMetadataFromDMMF(Prisma)
+          .getRelationFields('Membership')
+          .map(({ name, foreignKeyFields }) => [name, foreignKeyFields]),
+      ).toEqual([
+        ['org', ['orgId']],
+        ['notes', []],
+      ]);
+    });
+
     it('should return only relation fields (kind === "object") with their relation metadata', () => {
       const Prisma = createPrismaWithModel({
         name: 'User',
@@ -125,8 +153,22 @@ describe('createSchemaMetadataFromDMMF', () => {
       });
 
       expect(createSchemaMetadataFromDMMF(Prisma).getRelationFields('User')).toEqual([
-        { name: 'posts', relatedModel: 'Post', isList: true, isRequired: false, relationName: 'UserPosts' },
-        { name: 'profile', relatedModel: 'Profile', isList: false, isRequired: false, relationName: 'UserProfile' },
+        {
+          name: 'posts',
+          relatedModel: 'Post',
+          isList: true,
+          isRequired: false,
+          relationName: 'UserPosts',
+          foreignKeyFields: [],
+        },
+        {
+          name: 'profile',
+          relatedModel: 'Profile',
+          isList: false,
+          isRequired: false,
+          relationName: 'UserProfile',
+          foreignKeyFields: [],
+        },
       ]);
     });
 

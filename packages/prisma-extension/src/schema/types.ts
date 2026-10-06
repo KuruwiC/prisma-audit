@@ -37,6 +37,8 @@ export interface RelationField {
   isList: boolean;
   isRequired: boolean;
   relationName?: string;
+  /** The fields of this model that hold the relation's foreign key; empty when the related model holds it */
+  foreignKeyFields: string[];
 }
 
 export interface FieldMetadata {

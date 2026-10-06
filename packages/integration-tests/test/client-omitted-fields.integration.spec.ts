@@ -9,7 +9,7 @@
  */
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
-import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
+import { createAsyncLocalStorageProvider, self } from '@kuruwic/db-audit-core';
 import {
   type AggregateMapping,
   type AuditErrorObserver,
@@ -63,7 +63,7 @@ interface Options {
   readonly errorHandling?: { readonly observer?: AuditErrorObserver };
   readonly aggregateMapping?: AggregateMapping;
   readonly security?: { readonly redact?: { readonly fields?: string[] } };
-  readonly fetchBefore?: { readonly delete?: boolean };
+  readonly fetchBefore?: { readonly update?: boolean; readonly delete?: boolean };
 }
 
 /** The Prisma namespace with its client version reported as `version` */
@@ -802,7 +802,6 @@ describe('fields a client-level omit hides', () => {
 
   describe('a select that leaves out the primary key a client omit hides', () => {
     const HIDDEN_ID: Prisma.GlobalOmitConfig = { user: { id: true } };
-    const WITHOUT_ID = USER_COLUMNS.filter((column) => column !== 'id');
 
     const recordedOf = async (recordsOf: (entityType: string) => Promise<Prisma.AuditLogGetPayload<object>[]>) =>
       (await recordsOf('User')).map((record) => ({
@@ -824,7 +823,7 @@ describe('fields a client-level omit hides', () => {
       expect(record?.after).toMatchObject({ id: 'u3', email: 'u3@example.com', name: 'Cy' });
     });
 
-    it('returns exactly the selection of an update and records its change under the id, the id in neither state', async () => {
+    it('returns exactly the selection of an update and records its change under the id, the id in both states', async () => {
       const { prisma, run, recordsOf, recordOf } = await setup({}, HIDDEN_ID);
 
       const result = await run(() =>
@@ -836,8 +835,8 @@ describe('fields a client-level omit hides', () => {
         { entityId: 'u1', action: 'update', changes: { name: { old: 'Ada', new: 'Bea' } } },
       ]);
       const record = await recordOf('User', 'u1');
-      expect(keysOf(record?.before)).toEqual(WITHOUT_ID);
-      expect(keysOf(record?.after)).toEqual(WITHOUT_ID);
+      expect(keysOf(record?.before)).toEqual(USER_COLUMNS);
+      expect(keysOf(record?.after)).toEqual(USER_COLUMNS);
     });
 
     it('returns exactly the selection of an upsert of either branch and records each row under its id', async () => {
@@ -875,6 +874,17 @@ describe('fields a client-level omit hides', () => {
 
       expect(result).toEqual({ email: 'u2@example.com' });
       expect((await recordOf('User', 'u2'))?.action).toBe('delete');
+    });
+
+    it('returns exactly the selection of a delete whose before state is read and records the row under its id', async () => {
+      const { prisma, run, recordOf } = await setup({}, HIDDEN_ID);
+
+      const result = await run(() => prisma.user.delete({ where: { id: 'u2' }, select: { email: true } }));
+
+      expect(result).toEqual({ email: 'u2@example.com' });
+      const record = await recordOf('User', 'u2');
+      expect(record?.action).toBe('delete');
+      expect(keysOf(record?.before)).toEqual(USER_COLUMNS);
     });
 
     it('returns exactly the selection of each row createManyAndReturn creates and records each under its id', async () => {
@@ -943,6 +953,115 @@ describe('fields a client-level omit hides', () => {
         ]);
       },
     );
+  });
+
+  describe('a row returned without a select, whose primary key a client omit hides', () => {
+    const HIDDEN_ID: Prisma.GlobalOmitConfig = { user: { id: true } };
+    const WITHOUT_ID = USER_COLUMNS.filter((column) => column !== 'id');
+
+    it('records an update under the id its before state holds, the id in both states and not in the changes', async () => {
+      const { prisma, run, recordsOf } = await setup({}, HIDDEN_ID);
+
+      const result = await run(() => prisma.user.update({ where: { id: 'u1' }, data: { name: 'Bea' } }));
+
+      expect(keysOf(result)).toEqual(WITHOUT_ID);
+      const records = await recordsOf('User');
+      expect(records.map(({ entityId, action, changes }) => ({ entityId, action, changes }))).toEqual([
+        { entityId: 'u1', action: 'update', changes: { name: { old: 'Ada', new: 'Bea' } } },
+      ]);
+      expect(keysOf(records[0]?.before)).toEqual(USER_COLUMNS);
+      expect(keysOf(records[0]?.after)).toEqual(USER_COLUMNS);
+    });
+
+    it('records the update branch of an upsert under the id its before state holds, the id in both states', async () => {
+      const { prisma, run, recordsOf } = await setup({}, HIDDEN_ID);
+
+      const result = await run(() =>
+        prisma.user.upsert({
+          where: { id: 'u1' },
+          update: { name: 'Bea' },
+          create: { id: 'u1', email: 'u1@example.com' },
+        }),
+      );
+
+      expect(keysOf(result)).toEqual(WITHOUT_ID);
+      const records = await recordsOf('User');
+      expect(records.map(({ entityId, action, changes }) => ({ entityId, action, changes }))).toEqual([
+        { entityId: 'u1', action: 'update', changes: { name: { old: 'Ada', new: 'Bea' } } },
+      ]);
+      expect(keysOf(records[0]?.before)).toEqual(USER_COLUMNS);
+      expect(keysOf(records[0]?.after)).toEqual(USER_COLUMNS);
+    });
+
+    it('records a delete under the id its before state holds', async () => {
+      const { prisma, run, recordOf } = await setup({}, HIDDEN_ID);
+
+      const result = await run(() => prisma.user.delete({ where: { id: 'u2' } }));
+
+      expect(keysOf(result)).toEqual(WITHOUT_ID);
+      const record = await recordOf('User', 'u2');
+      expect(record?.action).toBe('delete');
+      expect(keysOf(record?.before)).toEqual(USER_COLUMNS);
+    });
+
+    it('records no update whose before read is off, reporting nothing', async () => {
+      const observer = vi.fn<AuditErrorObserver>();
+      const { prisma, run, recordsOf } = await setup(
+        { errorHandling: { observer }, fetchBefore: { update: false } },
+        HIDDEN_ID,
+      );
+
+      const result = await run(() => prisma.user.update({ where: { id: 'u1' }, data: { name: 'Bea' } }));
+
+      expect(keysOf(result)).toEqual(WITHOUT_ID);
+      expect(await recordsOf('User')).toEqual([]);
+      expect(observer).not.toHaveBeenCalled();
+    });
+
+    it('records no upsert that created its row, reporting nothing', async () => {
+      const observer = vi.fn<AuditErrorObserver>();
+      const { prisma, run, recordsOf } = await setup({ errorHandling: { observer } }, HIDDEN_ID);
+
+      const result = await run(() =>
+        prisma.user.upsert({ where: { id: 'u3' }, update: {}, create: { id: 'u3', email: 'u3@example.com' } }),
+      );
+
+      expect(keysOf(result)).toEqual(WITHOUT_ID);
+      expect(await recordsOf('User')).toEqual([]);
+      expect(observer).not.toHaveBeenCalled();
+    });
+
+    it('records an update of a model without a primary key under the unique field its before state holds', async () => {
+      const { basePrisma, prisma, run, recordOf } = await setup(
+        {
+          aggregateMapping: {
+            ...testAggregateMapping,
+            Device: defineEntity({ type: 'Device', idResolver: self('code') }),
+          },
+        },
+        { device: { code: true } },
+      );
+      await basePrisma.device.create({ data: { code: 'd1', label: 'one' } });
+
+      const result = await run(() => prisma.device.update({ where: { code: 'd1' }, data: { label: 'two' } }));
+
+      expect(keysOf(result)).toEqual(['createdAt', 'label']);
+      const record = await recordOf('Device', 'd1');
+      expect(record?.changes).toEqual({ label: { old: 'one', new: 'two' } });
+      expect(keysOf(record?.before)).toEqual(['code', 'createdAt', 'label']);
+      expect(keysOf(record?.after)).toEqual(['code', 'createdAt', 'label']);
+    });
+
+    it('records no update that changes the id under the id its before state holds', async () => {
+      const observer = vi.fn<AuditErrorObserver>();
+      const { prisma, run, recordsOf } = await setup({ errorHandling: { observer } }, HIDDEN_ID);
+
+      const result = await run(() => prisma.user.update({ where: { id: 'u1' }, data: { id: 'u9', name: 'Bea' } }));
+
+      expect(keysOf(result)).toEqual(WITHOUT_ID);
+      expect(await recordsOf('User')).toEqual([]);
+      expect(observer.mock.calls.map(([failure]) => [failure.phase, failure.modelName, failure.operation])).toEqual([]);
+    });
   });
 
   describe('a client that takes no query omit, which reads a select by listing every column', () => {

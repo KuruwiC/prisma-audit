@@ -8,7 +8,8 @@
  * after the write, through {@link withOmittedFieldsInFinds}, and a read by row key after the
  * write of the written rows it did not read itself (`pipeline/omitted-fields-after-write.ts`). The
  * caller's query is never widened with them. The audit's batch reads, which tell rows apart by their
- * row key, also read the key fields a client omit hides ({@link withRowKeyFields}).
+ * row key, and the top-level read before the write, which identifies a row the write returns without
+ * its key, also read the key fields a client omit hides ({@link withRowKeyFields}).
  *
  * @module utils/audited-omitted-fields
  */

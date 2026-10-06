@@ -11,7 +11,7 @@ import type { ExecutionScope } from '../../src/pipeline/execution-scope.js';
 import type { AuditedOperation } from '../../src/pipeline/executor.js';
 import type { RecordProducer } from '../../src/pipeline/produce-records.js';
 import { createSingleExecutor } from '../../src/pipeline/single-executor.js';
-import { NO_AUDITED_OMITTED_FIELDS } from '../../src/utils/audited-omitted-fields.js';
+import { NO_AUDITED_OMITTED_FIELDS, withRowKeyFields } from '../../src/utils/audited-omitted-fields.js';
 import { createSchemaMetadataFromDMMF } from '../../src/utils/schema-metadata.js';
 import { runWithRecords } from './run-with-records.js';
 
@@ -129,6 +129,8 @@ const updateArgs = { where: { id: 'u1' }, data: { name: 'Anne' } };
 interface ExecutorOptions {
   fetchBefore?: boolean;
   failureSink?: FailureSink;
+  /** Whether the client takes a query `omit` (Prisma 6.2 and later); false by default */
+  queryOmitSupported?: boolean;
 }
 
 const executorWith = (options: ExecutorOptions = {}) => {
@@ -139,6 +141,11 @@ const executorWith = (options: ExecutorOptions = {}) => {
     schemaMetadata,
     shouldFetchBefore,
     auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS,
+    auditedOmittedFieldsWithRowKey: withRowKeyFields(
+      NO_AUDITED_OMITTED_FIELDS,
+      schemaMetadata,
+      options.queryOmitSupported ?? false,
+    ),
     failureSink,
   });
   const produceRecords = vi.fn<RecordProducer>(async () => []);
@@ -296,6 +303,62 @@ describe('createSingleExecutor', () => {
 
       expect(failureSink.notify).toHaveBeenCalledWith(expect.objectContaining({ phase: 'pre-fetch' }));
       expect(produceRecords).toHaveBeenCalledWith([], expect.anything(), new Map());
+    });
+  });
+
+  describe('the row key in the read before the write, whatever a client-level omit hides', () => {
+    it.each([
+      { action: 'update' as const, args: updateArgs },
+      { action: 'delete' as const, args: { where: { id: 'u1' } } },
+      { action: 'upsert' as const, args: { where: { id: 'u1' }, create: { name: 'Ann' }, update: { name: 'Anne' } } },
+    ])(
+      'reads it by an omit entry set to false in the read before $action on a client that takes a query omit',
+      async ({ action, args }) => {
+        const findUnique = vi.fn(async () => user);
+        const client = clientWith({ user: { findUnique, [action]: vi.fn(async () => user) } });
+        const { executor, produceRecords } = executorWith({ queryOmitSupported: true });
+
+        await runWithRecords(executor, operationOn(client, action, args), scopeOn(client), produceRecords);
+
+        expect(findUnique).toHaveBeenCalledWith({ where: { id: 'u1' }, omit: { id: false } });
+      },
+    );
+
+    it('adds no omit entry to the read before the write on a client that takes no query omit', async () => {
+      const findUnique = vi.fn(async () => user);
+      const client = clientWith({ user: { findUnique, update: vi.fn(async () => user) } });
+      const { executor, produceRecords } = executorWith({ queryOmitSupported: false });
+
+      await runWithRecords(executor, operationOn(client, 'update', updateArgs), scopeOn(client), produceRecords);
+
+      expect(findUnique).toHaveBeenCalledWith({ where: { id: 'u1' } });
+    });
+
+    it('adds no omit entry to the reads of the nested rows', async () => {
+      const profileRow: Row = { id: 'pr1', userId: 'u1', bio: 'old' };
+      const profileFindUnique = vi.fn(async (_args: unknown) => profileRow);
+      const profileFindFirst = vi.fn(async (_args: unknown) => profileRow);
+      const client = clientWith({
+        user: {
+          findUnique: vi.fn(async () => user),
+          update: vi.fn(async () => ({ ...user, profile: { ...profileRow, bio: 'new' } })),
+        },
+        profile: { findUnique: profileFindUnique, findFirst: profileFindFirst },
+      });
+      const { executor, produceRecords } = executorWith({ queryOmitSupported: true });
+
+      await runWithRecords(
+        executor,
+        operationOn(client, 'update', { where: { id: 'u1' }, data: { profile: { update: { bio: 'new' } } } }),
+        scopeOn(client),
+        produceRecords,
+      );
+
+      const nestedReads = [...profileFindUnique.mock.calls, ...profileFindFirst.mock.calls];
+      expect(nestedReads.length).toBeGreaterThan(0);
+      for (const [args] of nestedReads) {
+        expect(args).not.toHaveProperty('omit');
+      }
     });
   });
 

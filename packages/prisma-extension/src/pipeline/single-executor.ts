@@ -31,6 +31,7 @@ export interface SingleExecutorDependencies {
   readonly schemaMetadata: SchemaMetadata;
   readonly shouldFetchBefore: ShouldFetchBefore;
   readonly auditedOmittedFields: AuditedOmittedFields;
+  readonly auditedOmittedFieldsWithRowKey: AuditedOmittedFields;
   readonly failureSink: FailureSink;
 }
 
@@ -44,13 +45,20 @@ export interface SinglePrepared {
 }
 
 export const createSingleExecutor = (deps: SingleExecutorDependencies): OperationExecutor => {
-  const { Prisma, schemaMetadata, shouldFetchBefore, auditedOmittedFields, failureSink } = deps;
+  const {
+    Prisma,
+    schemaMetadata,
+    shouldFetchBefore,
+    auditedOmittedFields,
+    auditedOmittedFieldsWithRowKey,
+    failureSink,
+  } = deps;
 
   const prepare = async (operation: AuditedOperation, scope: ExecutionScope): Promise<SinglePrepared> => {
     const { model: modelName, action, args } = operation;
     const beforeState = await fetchBeforeState(
       { handle: scope.handle, modelName, action, args },
-      { shouldFetchBefore, auditedOmittedFields, onFetchFailure: failureSink.notify },
+      { shouldFetchBefore, auditedOmittedFieldsWithRowKey, onFetchFailure: failureSink.notify },
     );
     const topLevelUpsertBranch = executedUpsertBranch(action, beforeState);
     const { results: nestedPreFetchResults, batchTargets } = await preFetchNestedRecordsBeforeOperation(

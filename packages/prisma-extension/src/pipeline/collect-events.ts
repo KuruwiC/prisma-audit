@@ -13,6 +13,10 @@
  * when it was not read before (top level), the primary-key record rebuilt from the operation (a
  * nested delete without a before-state), or the row a nested write linked to the parent it was
  * then deleted from.
+ *
+ * A top-level row a client-level `omit` returns without its row key takes the key from its before
+ * state, which the read before the write reads whatever the omit hides, unless the write changes
+ * the key. The caller's result itself is left as it is.
  */
 
 import type { BeforeState, MutationAction, MutationEvent } from '@kuruwic/db-audit-core';
@@ -58,6 +62,58 @@ export interface SingleOperationOutcome {
 
 export type EventCollectorDependencies = NestedEventCollectorDependencies;
 
+/** The data a top-level write applies to its existing row: an upsert's update branch, else `data` */
+const writtenDataOf = (action: AuditAction, args: Record<string, unknown>): unknown =>
+  action === AUDIT_ACTION.UPSERT ? args.update : args.data;
+
+/**
+ * Whether `data` can change one of `keyFields`: it writes one, or a relation whose foreign key holds one
+ * (`relationKeys`: each relation of the model to the foreign key fields it writes)
+ */
+const writesKey = (
+  data: unknown,
+  keyFields: ReadonlySet<string>,
+  relationKeys: ReadonlyMap<string, readonly string[]>,
+): boolean =>
+  isRow(data) &&
+  Object.entries(data).some(
+    ([field, value]) =>
+      value !== undefined &&
+      (keyFields.has(field) || (relationKeys.get(field) ?? []).some((foreignKey) => keyFields.has(foreignKey))),
+  );
+
+interface TopLevelWrite {
+  readonly schemaMetadata: SchemaMetadata;
+  readonly modelName: string;
+  readonly action: AuditAction;
+  readonly args: Record<string, unknown>;
+  readonly beforeState: BeforeState;
+}
+
+/**
+ * `row` with the key fields it lacks taken from the before state, when that state was read and
+ * the write leaves the key as it was; `row` itself otherwise. A copy: the caller's result is not changed.
+ */
+const withKeyFromBefore = (row: Row, keyFields: readonly string[], write: TopLevelWrite): Row => {
+  const { beforeState } = write;
+  const missing = keyFields.filter((field) => !(field in row));
+  if (missing.length === 0 || beforeState.kind !== 'captured') {
+    return row;
+  }
+  const relationKeys = new Map(
+    write.schemaMetadata
+      .getRelationFields(write.modelName)
+      .map((relation) => [relation.name, relation.foreignKeyFields]),
+  );
+  if (writesKey(writtenDataOf(write.action, write.args), new Set(keyFields), relationKeys)) {
+    return row;
+  }
+  const fromBefore = missing.filter((field) => field in beforeState.row);
+  return fromBefore.length > 0
+    ? { ...row, ...Object.fromEntries(fromBefore.map((field) => [field, beforeState.row[field]])) }
+    : row;
+};
+
 /**
  * The top-level row carries the before state as read: captured, none, or unavailable when the
  * read failed. An upsert whose read failed yields no event at all: a failed read cannot tell an
@@ -75,13 +131,17 @@ export const collectSingleOperationEvents = async (
     return [];
   }
 
-  const row = toRow(result);
+  const keyFields = rowKeyFieldsOf(deps.schemaMetadata, modelName);
+  const row = withKeyFromBefore(toRow(result), keyFields ?? [], {
+    schemaMetadata: deps.schemaMetadata,
+    modelName,
+    action,
+    args,
+    beforeState,
+  });
   const topLevel: MutationEvent = {
     model: modelName,
-    identity: identityOf(row, rowKeyFieldsOf(deps.schemaMetadata, modelName), {
-      model: modelName,
-      path: '',
-    }),
+    identity: identityOf(row, keyFields, { model: modelName, path: '' }),
     action: toMutationAction(action, beforeState),
     before: beforeState,
     after: action === AUDIT_ACTION.DELETE && beforeState.kind === 'captured' ? undefined : row,

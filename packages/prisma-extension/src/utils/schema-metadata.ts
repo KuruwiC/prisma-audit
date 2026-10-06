@@ -71,6 +71,7 @@ export const createSchemaMetadataFromDMMF = (Prisma: PrismaWithDMMF): SchemaMeta
           isList: field.isList ?? false,
           isRequired: field.isRequired ?? false,
           relationName: field.relationName,
+          foreignKeyFields: field.relationFromFields ?? [],
         }));
     },
 

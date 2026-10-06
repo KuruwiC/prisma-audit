@@ -40,7 +40,8 @@ export interface AuditOptions {
   readonly auditedOmittedFields: AuditedOmittedFields;
   /**
    * `auditedOmittedFields` with each model's row key on a client that takes a query omit: the fields
-   * the audit's batch reads name, so the rows they read carry their key whatever a client omit hides
+   * the audit's batch reads and the top-level read before the write name, so the rows they read carry
+   * their key whatever a client omit hides
    */
   readonly auditedOmittedFieldsWithRowKey: AuditedOmittedFields;
   /** Accessor of the audit-log model on the client (camelCase) */

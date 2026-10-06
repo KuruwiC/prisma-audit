@@ -83,6 +83,22 @@ const models: DMMFModel[] = [
     uniqueIndexes: [{ name: null, fields: ['seat', 'zone'] }],
   },
   {
+    name: 'Badge',
+    fields: [
+      { name: 'ownerId', kind: 'scalar', type: 'String', isId: true, isRequired: true },
+      { name: 'label', kind: 'scalar', type: 'String', isRequired: true },
+      {
+        name: 'owner',
+        kind: 'object',
+        type: 'User',
+        isList: false,
+        relationName: 'UserBadge',
+        relationFromFields: ['ownerId'],
+        relationToFields: ['id'],
+      },
+    ],
+  },
+  {
     name: 'Tag',
     fields: [
       { name: 'alias', kind: 'scalar', type: 'String', isUnique: true },
@@ -311,6 +327,108 @@ describe('collectSingleOperationEvents', () => {
     );
 
     expect(events[0]?.identity).toBe('');
+  });
+
+  describe('a top-level row returned without its key, which a client-level omit hides', () => {
+    const before = { id: 'u1', name: 'Ann' };
+    const captured: BeforeState = { kind: 'captured', row: before };
+
+    it.each([
+      { action: 'update' as const, args: { where: { id: 'u1' }, data: { name: 'Anne' } } },
+      {
+        action: 'upsert' as const,
+        args: { where: { id: 'u1' }, create: { id: 'u1', name: 'Anne' }, update: { name: 'Anne' } },
+      },
+    ])(
+      'takes the key of an $action from its before state into the row it records, leaving the result as it is',
+      async ({ action, args }) => {
+        const result = { name: 'Anne' };
+        const outcome = single({ action, args, result, beforeState: captured });
+
+        const events = await collectSingleOperationEvents(outcome, deps);
+
+        expect(events).toEqual([
+          expect.objectContaining({
+            identity: 'u1',
+            action: 'update',
+            before: captured,
+            after: { name: 'Anne', id: 'u1' },
+          }),
+        ]);
+        expect(result).toEqual({ name: 'Anne' });
+      },
+    );
+
+    it('names a delete by the key of its before state', async () => {
+      const result = { name: 'Ann' };
+      const outcome = single({ action: 'delete', args: { where: { id: 'u1' } }, result, beforeState: captured });
+
+      const events = await collectSingleOperationEvents(outcome, deps);
+
+      expect(events).toEqual([
+        expect.objectContaining({ identity: 'u1', action: 'delete', before: captured, after: undefined }),
+      ]);
+      expect(result).toEqual({ name: 'Ann' });
+    });
+
+    it.each([
+      ['an update writes the key', 'update' as const, { where: { id: 'u1' }, data: { id: 'u9', name: 'Anne' } }],
+      ['an update sets the key', 'update' as const, { where: { id: 'u1' }, data: { id: { set: 'u9' } } }],
+      [
+        'the update branch of an upsert writes the key',
+        'upsert' as const,
+        { where: { id: 'u1' }, create: { id: 'u1', name: 'Anne' }, update: { id: 'u9' } },
+      ],
+    ])('takes no key from the before state when %s', async (_label, action, args) => {
+      const outcome = single({ action, args, result: { name: 'Anne' }, beforeState: captured });
+
+      const events = await collectSingleOperationEvents(outcome, deps);
+
+      expect(events).toEqual([expect.objectContaining({ identity: '', after: { name: 'Anne' } })]);
+    });
+
+    it('takes no key from the before state when the update connects a relation whose foreign key is the key', async () => {
+      const outcome = single({
+        modelName: 'Badge',
+        action: 'update',
+        args: { where: { ownerId: 'u1' }, data: { owner: { connect: { id: 'u2' } } } },
+        result: { label: 'gold' },
+        beforeState: { kind: 'captured', row: { ownerId: 'u1', label: 'gold' } },
+      });
+
+      const events = await collectSingleOperationEvents(outcome, deps);
+
+      expect(events[0]).toEqual(expect.objectContaining({ identity: '', after: { label: 'gold' } }));
+    });
+
+    it.each([
+      ['none', { kind: 'none' }],
+      ['unavailable', { kind: 'unavailable' }],
+    ] as const)('takes no key when the before state is %s', async (_label, beforeState) => {
+      const outcome = single({
+        action: 'update',
+        args: { where: { id: 'u1' }, data: { name: 'Anne' } },
+        result: { name: 'Anne' },
+        beforeState,
+      });
+
+      const events = await collectSingleOperationEvents(outcome, deps);
+
+      expect(events).toEqual([expect.objectContaining({ identity: '', after: { name: 'Anne' } })]);
+    });
+
+    it('keeps the key the returned row holds', async () => {
+      const outcome = single({
+        action: 'update',
+        args: { where: { id: 'u1' }, data: { name: 'Anne' } },
+        result: { id: 'u1', name: 'Anne' },
+        beforeState: { kind: 'captured', row: { id: 'u0', name: 'Ann' } },
+      });
+
+      const events = await collectSingleOperationEvents(outcome, deps);
+
+      expect(events).toEqual([expect.objectContaining({ identity: 'u1', after: outcome.result })]);
+    });
   });
 
   it('collects the nested records after the top-level row, with their path and keyword', async () => {
