@@ -48,18 +48,6 @@ export const safeStringify = (value: unknown): string | undefined => {
   return JSON.stringify(value, (_key, v) => (typeof v === 'bigint' ? v.toString() : v));
 };
 
-const isPlainObject = (value: unknown): value is Record<string, unknown> => {
-  if (typeof value !== 'object' || value === null) {
-    return false;
-  }
-
-  if (Array.isArray(value) || value instanceof Date) {
-    return false;
-  }
-
-  return true;
-};
-
 const applyCustomSerializers = (
   value: unknown,
   serializers: ValueSerializer[] | undefined,
@@ -73,14 +61,12 @@ const applyCustomSerializers = (
 };
 
 const serializeObjectEntries = (
-  obj: Record<string, unknown>,
+  obj: object,
   customSerializers: ValueSerializer[] | undefined,
 ): Record<string, unknown> => {
   const result: Record<string, unknown> = {};
-  for (const key in obj) {
-    if (Object.hasOwn(obj, key)) {
-      result[key] = serializeForAuditJson(obj[key], customSerializers);
-    }
+  for (const [key, value] of Object.entries(obj)) {
+    result[key] = serializeForAuditJson(value, customSerializers);
   }
   return result;
 };
@@ -91,6 +77,9 @@ const serializeObjectEntries = (
  * Built-in conversions:
  * - `BigInt` → `string` (e.g. `123n` → `"123"`)
  * - `Date` → ISO string (e.g. `new Date(...)` → `"2025-01-01T00:00:00.000Z"`)
+ * - arrays → each element serialized
+ * - any other object → a plain object of its own enumerable properties, each serialized (a `Map`
+ *   or `Set` without a custom serializer becomes `{}`)
  *
  * Custom serializers run before built-ins and can override any conversion.
  * Return `UNHANDLED` from a custom serializer to fall through to the next.
@@ -115,7 +104,5 @@ export const serializeForAuditJson = (obj: unknown, customSerializers?: ValueSer
   if (obj === null || typeof obj !== 'object') return obj;
   if (obj instanceof Date) return obj.toISOString();
   if (Array.isArray(obj)) return obj.map((item) => serializeForAuditJson(item, customSerializers));
-  if (isPlainObject(obj)) return serializeObjectEntries(obj, customSerializers);
-
-  return obj;
+  return serializeObjectEntries(obj, customSerializers);
 };
