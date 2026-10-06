@@ -586,6 +586,65 @@ describe('Error Handling Integration', () => {
       }
     });
 
+    it.each([
+      { policy: "writeFailurePolicy: 'log'", errorHandling: { writeFailurePolicy: 'log' as const } },
+      { policy: 'the default writeFailurePolicy', errorHandling: {} },
+    ])(
+      "$policy on a batch operation (updateMany) lets the caller's operation succeed and reports the failed write to the console",
+      async ({ errorHandling }) => {
+        const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const observer = vi.fn();
+        const scenario = createFailingWriterClient(context.databaseUrl, {
+          errorHandling: { ...errorHandling, observer },
+        });
+
+        try {
+          // Seeded through the raw base client: the audited client's writer always fails.
+          const [userA, userB] = await Promise.all([
+            scenario.basePrisma.user.create({
+              data: { email: 'batch-log-a@example.com', name: 'Batch Log A', password: 'secret123' },
+            }),
+            scenario.basePrisma.user.create({
+              data: { email: 'batch-log-b@example.com', name: 'Batch Log B', password: 'secret123' },
+            }),
+          ]);
+
+          const updateResult = await scenario.provider.runAsync(testActor, async () =>
+            scenario.prisma.user.updateMany({
+              where: { id: { in: [userA.id, userB.id] } },
+              data: { name: 'Batch Log Updated' },
+            }),
+          );
+
+          expect(updateResult.count).toBe(2);
+
+          const updated = await context.basePrisma.user.findMany({
+            where: { id: { in: [userA.id, userB.id] } },
+            select: { name: true },
+          });
+          expect(updated.map((u) => u.name)).toEqual(['Batch Log Updated', 'Batch Log Updated']);
+
+          // The message line, then the error's stack
+          expect(consoleErrorSpy.mock.calls.map(([line]) => String(line).split('\n')[0])).toEqual([
+            '[db-audit-core] Error in audit log write:',
+            `Error: ${AUDIT_WRITE_FAILURE_MESSAGE}`,
+          ]);
+
+          expect(observer).toHaveBeenCalledTimes(1);
+          expect(observer).toHaveBeenCalledWith(
+            expect.objectContaining({
+              phase: 'log-write',
+              modelName: 'User',
+              error: expect.objectContaining({ message: AUDIT_WRITE_FAILURE_MESSAGE }),
+            }),
+          );
+        } finally {
+          consoleErrorSpy.mockRestore();
+          await disconnectScenario(scenario);
+        }
+      },
+    );
+
     it('a diff-generation failure on the batch path inside the transaction the client opens propagates to the caller, regardless of writeFailurePolicy', async () => {
       // `diff-generation` is never policy-gated, unlike `log-write` (see
       // `AuditErrorPhase` / `WriteFailurePolicy` in the audit extension's types.ts): it
@@ -1006,6 +1065,7 @@ describe('Error Handling Integration', () => {
         // The setup create above must not itself trip the observer/policy.
         observer.mockClear();
         policy.mockClear();
+        const auditLogCount = await context.basePrisma.auditLog.count();
 
         const duplicateCreate = provider.runAsync(testActor, async () =>
           prisma.user.create({
@@ -1022,6 +1082,7 @@ describe('Error Handling Integration', () => {
         const users = await context.basePrisma.user.findMany({ where: { email } });
         expect(users).toHaveLength(1);
         expect(users[0]?.name).toBe('First User');
+        expect(await context.basePrisma.auditLog.count()).toBe(auditLogCount);
 
         expect(observer).not.toHaveBeenCalled();
         expect(policy).not.toHaveBeenCalled();
