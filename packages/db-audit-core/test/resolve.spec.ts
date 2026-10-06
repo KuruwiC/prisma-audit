@@ -287,6 +287,32 @@ describe('resolve', () => {
       ]);
     });
 
+    it('reports a to() root whose resolver returns an id that cannot be normalized and keeps the other roots of the row', async () => {
+      const config = configOf({
+        Post: defineEntity({
+          type: 'Post',
+          aggregates: [
+            to(
+              'User',
+              lookup(async () => Object.create(null) as string),
+            ),
+          ],
+        }),
+      });
+      const events = [event('Post', { id: 'post-456' })];
+
+      const { resolved, failures } = await resolve(events, auditContext, config, read);
+
+      expect(resolved[0]?.roots.map((r) => r.aggregateType)).toEqual(['Post']);
+      expect(failures).toEqual([
+        {
+          event: events[0],
+          resolver: { kind: 'aggregate', aggregateCategory: 'model', aggregateType: 'User' },
+          error: new Error('Cannot normalize ID of type: object'),
+        },
+      ]);
+    });
+
     describe('a foreignKey root and its column', () => {
       const commentConfig = () =>
         configOf({
@@ -453,6 +479,32 @@ describe('resolve', () => {
         expect(failures).toEqual([
           { event: events[0], resolver, error },
           { event: events[1], resolver, error },
+        ]);
+      });
+
+      it('reports only the rows whose id cannot be normalized and keeps the roots of the other rows', async () => {
+        const config = configOf({
+          Post: defineEntity({
+            type: 'Post',
+            aggregates: [
+              to(
+                'User',
+                batchLookup(async () => ['u0', Object.create(null) as string]),
+              ),
+            ],
+          }),
+        });
+        const events = rowsOf('Post', 2);
+
+        const { resolved, failures } = await resolve(events, auditContext, config, read);
+
+        expect(resolved.map((e) => e.roots.map((r) => r.aggregateType))).toEqual([['Post', 'User'], ['Post']]);
+        expect(failures).toEqual([
+          {
+            event: events[1],
+            resolver: { kind: 'aggregate', aggregateCategory: 'model', aggregateType: 'User' },
+            error: new Error('Cannot normalize ID of type: object'),
+          },
         ]);
       });
 
@@ -864,6 +916,30 @@ describe('resolve', () => {
       });
     });
 
+    it.each([
+      ['a root context that is an array', ['root'], { projection: true }, { projection: true }],
+      ['a root context that is a string', 'root', { projection: true }, { projection: true }],
+      ['a projection context that is an array', { root: true }, ['projection'], ['projection']],
+      ['a projection context that is a string', { root: true }, 'projection', 'projection'],
+    ])('keeps the projection context unmerged when %s', async (_label, rootContext, projectionContext, expected) => {
+      const config = configOf({
+        User: defineEntity({ type: 'User', aggregateContext: { enricher: async (ids) => ids.map(() => rootContext) } }),
+        Post: defineEntity({
+          type: 'Post',
+          self: false,
+          aggregates: [
+            to('User', foreignKey('authorId'), {
+              context: { enricher: async (rows) => rows.map(() => projectionContext) },
+            }),
+          ],
+        }),
+      });
+
+      const { resolved } = await resolve([event('Post', { id: 'p1', authorId: 'u1' })], auditContext, config, read);
+
+      expect(resolved[0]?.aggregateContexts.get('model:User:u1')).toEqual(expected);
+    });
+
     it('calls the root-side enricher once per (category, type) with the unique aggregate ids', async () => {
       const rootEnricher = vi.fn(async (ids: string[]) => ids.map((id) => ({ userName: `name-${id}` })));
       const config = configOf({
@@ -1192,7 +1268,7 @@ describe('resolve', () => {
       await resolve([event('Post', { id: 'p1' })], auditContext, config, perCallRead);
 
       const handles = perCallRead.mock.results.map((result) => result.value);
-      expect(received.length).toBeGreaterThanOrEqual(7);
+      expect(received).toHaveLength(7);
       expect(new Set(received).size).toBe(received.length);
       for (const db of received) {
         expect(handles).toContain(db);
