@@ -613,7 +613,7 @@ describe('openImplicitTransaction', () => {
 
       await expect(
         clients.run(() => raw.$transaction([clients.client.user.create({ data: { email: 'a@example.com' } })])),
-      ).rejects.toThrow();
+      ).rejects.toThrow('All elements of the array need to be Prisma Client promises');
 
       expect(await raw.user.count()).toBe(0);
     });
