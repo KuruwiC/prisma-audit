@@ -4,6 +4,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import type { NestedPreFetchResults } from '../../../src/grammar/nested-operations.js';
+import type { ShouldFetchBefore } from '../../../src/grammar/pre-fetch-selection.js';
 import type { DMMFField, PrismaClientWithDynamicAccess, PrismaNamespace } from '../../../src/internal-types.js';
 import { buildNestedWriteSets, detectExecutedNestedOperations } from '../../../src/nested/events/write-set.js';
 import { snapshotPreExistingRows } from '../../../src/nested/pre-fetch/pre-existing-rows.js';
@@ -77,6 +78,7 @@ const snapshot = (
   args: Record<string, unknown>,
   delegates: Record<string, Record<string, unknown>>,
   nestedPreFetchResults: NestedPreFetchResults = new Map(),
+  fetchesBefore: ShouldFetchBefore = shouldFetchBefore,
 ) => {
   const nestedOperations = detectExecutedNestedOperations(
     schemaMetadata,
@@ -94,7 +96,7 @@ const snapshot = (
       writeSets: buildNestedWriteSets(schemaMetadata, nestedOperations, nestedPreFetchResults, new Map()),
       nestedPreFetchResults,
     },
-    { Prisma, schemaMetadata, shouldFetchBefore, auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS },
+    { Prisma, schemaMetadata, shouldFetchBefore: fetchesBefore, auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS },
   );
 };
 
@@ -178,6 +180,29 @@ describe('snapshotPreExistingRows', () => {
       ),
     ).rejects.toThrow('Cannot snapshot the rows at nested path "posts.comments"');
     expect(findMany).not.toHaveBeenCalled();
+  });
+
+  it('snapshots a deeper path under the key the WHERE of a parent operation names when that parent was not pre-fetched', async () => {
+    const findMany = vi.fn(async () => [{ id: 'c1' }]);
+
+    const preExisting = await snapshot(
+      updateWithCommentCreate,
+      { user: { findUnique: vi.fn(), findFirst: vi.fn() }, comment: { findMany } },
+      new Map(),
+      () => false,
+    );
+
+    expect(findMany).toHaveBeenCalledWith({ where: { post: { is: { id: 'p1' } } }, select: { id: true } });
+    expect(preExisting).toEqual(new Map([['posts.comments', new Set(['c1'])]]));
+  });
+
+  it('gives a path whose model has no client to read with no entry', async () => {
+    const preExisting = await snapshot(
+      { where: { id: 'u1' }, data: { posts: { create: { title: 'A' } } } },
+      { user: { findUnique: vi.fn(), findFirst: vi.fn() }, post: {} },
+    );
+
+    expect(preExisting.size).toBe(0);
   });
 
   it('records an empty snapshot without a query for a deeper path whose parent the operation creates', async () => {

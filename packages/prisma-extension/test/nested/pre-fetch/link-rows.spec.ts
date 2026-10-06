@@ -7,9 +7,13 @@ import { describe, expect, it, vi } from 'vitest';
 import type { NestedPreFetchResults } from '../../../src/grammar/nested-operations.js';
 import type { DMMFField, DMMFModel, PrismaNamespace } from '../../../src/internal-types.js';
 import { detectExecutedNestedOperations } from '../../../src/nested/events/write-set.js';
-import { linkWriteOf, readLinkRows } from '../../../src/nested/pre-fetch/link-rows.js';
+import { linkWriteOf, type ReadLinkRowsDependencies, readLinkRows } from '../../../src/nested/pre-fetch/link-rows.js';
 import { storeReadResult } from '../../../src/nested/pre-fetch/pre-fetch-result-store.js';
-import { relationLinkOf, resolveRelationLink } from '../../../src/nested/pre-fetch/relation-link.js';
+import {
+  findBackRelationField,
+  relationLinkOf,
+  resolveRelationLink,
+} from '../../../src/nested/pre-fetch/relation-link.js';
 import { NO_AUDITED_OMITTED_FIELDS } from '../../../src/utils/audited-omitted-fields.js';
 import { createSchemaMetadataFromDMMF } from '../../../src/utils/schema-metadata.js';
 
@@ -98,6 +102,28 @@ describe('relationLinkOf', () => {
   });
 });
 
+describe('findBackRelationField', () => {
+  const children = relation('children', 'Node', 'Tree', { isList: true });
+  const parent = relation('parent', 'Node', 'Tree', { relationFromFields: ['parentId'], relationToFields: ['id'] });
+  const node = [scalar('id', { isId: true }), scalar('parentId'), children, parent];
+
+  it('finds the other side of a self-relation, not the field itself', () => {
+    expect(findBackRelationField(children, 'Node', 'Node', node)).toBe(parent);
+    expect(findBackRelationField(parent, 'Node', 'Node', node)).toBe(children);
+  });
+
+  it('finds the field of the related model that carries the same relation name', () => {
+    const labelPost = models[2]?.fields.find((field) => field.name === 'post');
+    const postLabels = models[1]?.fields.find((field) => field.name === 'labels');
+
+    expect(findBackRelationField(postLabels as DMMFField, 'Post', 'Label', models[2]?.fields ?? [])).toBe(labelPost);
+  });
+
+  it('finds nothing when no field of the related model carries the relation name', () => {
+    expect(findBackRelationField(children, 'Node', 'Node', [scalar('id'), children])).toBeUndefined();
+  });
+});
+
 describe('linkWriteOf', () => {
   const optional = {
     side: 'related',
@@ -107,7 +133,11 @@ describe('linkWriteOf', () => {
     optional: true,
   } as const;
   const required = { ...optional, optional: false } as const;
-  const operation = (keyword: 'connect' | 'set' | 'disconnect' | 'create', data: unknown, isList = true) => ({
+  const operation = (
+    keyword: 'connect' | 'set' | 'disconnect' | 'create' | 'connectOrCreate',
+    data: unknown,
+    isList = true,
+  ) => ({
     fieldName: 'labels',
     precedingWrites: [],
     relatedModel: 'Label',
@@ -152,6 +182,20 @@ describe('linkWriteOf', () => {
     expect(linkWriteOf(operation('disconnect', true, false), required)).toBeUndefined();
   });
 
+  it('names no row for a connectOrCreate, which a read of its own already covers, and detaches the row a to-one one replaces on an optional foreign key only', () => {
+    const data = { where: { id: 'l1' }, create: { id: 'l1' } };
+
+    expect(linkWriteOf(operation('connectOrCreate', data), optional)).toMatchObject({ named: [], detaches: false });
+    expect(linkWriteOf(operation('connectOrCreate', data, false), optional)).toMatchObject({
+      named: [],
+      detaches: true,
+    });
+    expect(linkWriteOf(operation('connectOrCreate', data, false), required)).toMatchObject({
+      named: [],
+      detaches: false,
+    });
+  });
+
   it('is no link write for a to-many create', () => {
     expect(linkWriteOf(operation('create', { name: 'n' }), optional)).toBeUndefined();
   });
@@ -177,9 +221,12 @@ describe('readLinkRows', () => {
     },
   };
 
-  it('reads the rows of every link write at a path in one query, named rows and rows attached under the parents', async () => {
+  /** Reads the link rows of `args` through `findMany`, with every dependency but the ones given at their defaults */
+  const readWith = (
+    findMany: (query: unknown) => Promise<Record<string, unknown>[]>,
+    deps: Partial<ReadLinkRowsDependencies> = {},
+  ) => {
     const nestedPreFetchResults = twoParents();
-    const findMany = vi.fn(async () => [{ id: 'la', postId: 'p9' }]);
     const nestedOperations = detectExecutedNestedOperations(
       schemaMetadata,
       'User',
@@ -187,34 +234,7 @@ describe('readLinkRows', () => {
       undefined,
       nestedPreFetchResults,
     );
-
-    const reads = await readLinkRows(
-      {
-        prismaClient: { label: { findMany } },
-        modelName: 'User',
-        topLevelWhere: args.where,
-        nestedOperations,
-        nestedPreFetchResults,
-      },
-      { Prisma, schemaMetadata, auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS, shouldFetchBefore: () => true },
-    );
-
-    expect(findMany.mock.calls).toEqual([[{ where: { OR: [{ id: 'la' }, { postId: 'p1' }, { id: 'lb' }] } }]]);
-    expect(reads.get('posts.labels')).toMatchObject({ rows: [{ id: 'la', postId: 'p9' }], failed: false });
-  });
-
-  it('reads nothing when the before state of updates of the related model is not read', async () => {
-    const nestedPreFetchResults = twoParents();
-    const findMany = vi.fn();
-    const nestedOperations = detectExecutedNestedOperations(
-      schemaMetadata,
-      'User',
-      args,
-      undefined,
-      nestedPreFetchResults,
-    );
-
-    const reads = await readLinkRows(
+    return readLinkRows(
       {
         prismaClient: { label: { findMany } },
         modelName: 'User',
@@ -226,9 +246,25 @@ describe('readLinkRows', () => {
         Prisma,
         schemaMetadata,
         auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS,
-        shouldFetchBefore: (model) => model !== 'Label',
+        shouldFetchBefore: () => true,
+        ...deps,
       },
     );
+  };
+
+  it('reads the rows of every link write at a path in one query, named rows and rows attached under the parents', async () => {
+    const findMany = vi.fn(async () => [{ id: 'la', postId: 'p9' }]);
+
+    const reads = await readWith(findMany);
+
+    expect(findMany.mock.calls).toEqual([[{ where: { OR: [{ id: 'la' }, { postId: 'p1' }, { id: 'lb' }] } }]]);
+    expect(reads.get('posts.labels')).toMatchObject({ rows: [{ id: 'la', postId: 'p9' }], failed: false });
+  });
+
+  it('reads nothing when the before state of updates of the related model is not read', async () => {
+    const findMany = vi.fn();
+
+    const reads = await readWith(findMany, { shouldFetchBefore: (model) => model !== 'Label' });
 
     expect(findMany).not.toHaveBeenCalled();
     expect(reads.size).toBe(0);
@@ -248,33 +284,10 @@ describe('readLinkRows', () => {
       DbNull: null,
       dmmf: { datamodel: { models: withoutReferences } },
     };
-    const nestedPreFetchResults = twoParents();
     const findMany = vi.fn(async () => []);
     const onPreFetchFailure = vi.fn(async () => undefined);
-    const nestedOperations = detectExecutedNestedOperations(
-      schemaMetadata,
-      'User',
-      args,
-      undefined,
-      nestedPreFetchResults,
-    );
 
-    const reads = await readLinkRows(
-      {
-        prismaClient: { label: { findMany } },
-        modelName: 'User',
-        topLevelWhere: args.where,
-        nestedOperations,
-        nestedPreFetchResults,
-      },
-      {
-        Prisma: unresolved,
-        schemaMetadata,
-        auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS,
-        shouldFetchBefore: () => true,
-        onPreFetchFailure,
-      },
-    );
+    const reads = await readWith(findMany, { Prisma: unresolved, onPreFetchFailure });
 
     expect(findMany).not.toHaveBeenCalled();
     expect(reads.get('posts.labels')).toMatchObject({ rows: [], failed: true });
@@ -288,39 +301,13 @@ describe('readLinkRows', () => {
   });
 
   it('reports a failed read and marks the path', async () => {
-    const nestedPreFetchResults = twoParents();
     const error = new Error('findMany failed');
     const onPreFetchFailure = vi.fn(async () => undefined);
-    const nestedOperations = detectExecutedNestedOperations(
-      schemaMetadata,
-      'User',
-      args,
-      undefined,
-      nestedPreFetchResults,
-    );
+    const findMany = vi.fn(async () => {
+      throw error;
+    });
 
-    const reads = await readLinkRows(
-      {
-        prismaClient: {
-          label: {
-            findMany: vi.fn(async () => {
-              throw error;
-            }),
-          },
-        },
-        modelName: 'User',
-        topLevelWhere: args.where,
-        nestedOperations,
-        nestedPreFetchResults,
-      },
-      {
-        Prisma,
-        schemaMetadata,
-        auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS,
-        shouldFetchBefore: () => true,
-        onPreFetchFailure,
-      },
-    );
+    const reads = await readWith(findMany, { onPreFetchFailure });
 
     expect(reads.get('posts.labels')).toMatchObject({ rows: [], failed: true });
     expect(onPreFetchFailure).toHaveBeenCalledWith(

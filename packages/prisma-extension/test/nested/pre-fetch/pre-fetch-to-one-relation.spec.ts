@@ -126,8 +126,13 @@ const matches = (row: Row, where: Row): boolean =>
   });
 
 const createDelegate = (rows: Row[]) => {
-  const find = async ({ where }: { where: Row }): Promise<Row | null> =>
-    rows.find((row) => matches(row, where)) ?? null;
+  const find = async ({ where, select }: { where: Row; select?: Record<string, true> }): Promise<Row | null> => {
+    const row = rows.find((candidate) => matches(candidate, where));
+    if (!row) {
+      return null;
+    }
+    return select ? Object.fromEntries(Object.keys(select).map((key) => [key, row[key]])) : row;
+  };
   return { findUnique: find, findFirst: find };
 };
 
@@ -367,7 +372,7 @@ describe('nested to-one pre-fetch relation link and parent rows', () => {
           before: { kind: 'none' },
           identity: 'c-primary',
           name: { by: 'parentRow', parent: TOP_LEVEL_ROW },
-          key: { id: 'c-primary', primaryForId: 'a1', backupForId: 'a2', label: 'primary' },
+          key: { id: 'c-primary', backupForId: 'a2' },
         },
       ]);
       expect(preFetchedStateUnder(results, 'primaryContact.backupFor', 'c-primary')).toMatchObject({
@@ -541,13 +546,13 @@ describe('nested to-one pre-fetch relation link and parent rows', () => {
           before: { kind: 'none' },
           identity: 'm1',
           name: { by: 'uniqueWhere', where: { id: 'm1' } },
-          key: expect.objectContaining({ id: 'm1', deskId: 'd1' }),
+          key: { id: 'm1', deskId: 'd1' },
         },
         {
           before: { kind: 'none' },
           identity: 'm2',
           name: { by: 'uniqueWhere', where: { id: 'm2' } },
-          key: expect.objectContaining({ id: 'm2', deskId: 'd2' }),
+          key: { id: 'm2', deskId: 'd2' },
         },
       ]);
       expect(preFetchedStateUnder(results, 'members.desk', 'm1')).toMatchObject({
@@ -592,7 +597,7 @@ describe('nested to-one pre-fetch relation link and parent rows', () => {
           before: { kind: 'none' },
           identity: 'm1',
           name: { by: 'uniqueWhere', where: { code: 'first' } },
-          key: expect.objectContaining({ id: 'm1' }),
+          key: { id: 'm1' },
         },
       ]);
       expect(preFetchedStateUnder(results, 'members.badge', 'm1')).toMatchObject({

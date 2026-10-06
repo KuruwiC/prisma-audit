@@ -6,10 +6,13 @@ import { describe, expect, it } from 'vitest';
 import type { NestedPreFetchResults } from '../../../src/grammar/nested-operations.js';
 import { TOP_LEVEL_ROW } from '../../../src/grammar/nested-state.js';
 import {
+  extractEntityId,
+  extractEntityIdOrUnresolved,
   preFetchedResultFor,
   preFetchedResultNamedBy,
   preFetchedStateNamedBy,
   preFetchedStateUnder,
+  primaryKeyNamedBy,
   storeIdentifiedRow,
   storePreFetchResult,
   storeReadResult,
@@ -189,5 +192,80 @@ describe('storeIdentifiedRow', () => {
       kind: 'captured',
       row: { id: 'pt-1', postId: 'p1', tagId: 't1' },
     });
+  });
+});
+
+describe('extractEntityIdOrUnresolved', () => {
+  it('gives the value of a single-field key as a string', () => {
+    expect(extractEntityIdOrUnresolved({ id: 123, name: 'n' }, ['id'])).toBe('123');
+  });
+
+  it('gives the JSON array of the values of a composite key', () => {
+    expect(extractEntityIdOrUnresolved({ postId: 'a', tagId: '1' }, ['postId', 'tagId'])).toBe('["a","1"]');
+  });
+
+  it.each([
+    ['null', null],
+    ['undefined', undefined],
+    ['a string', 'p1'],
+    ['a number', 1],
+  ])('is unresolved when the record is %s', (_name, record) => {
+    expect(extractEntityIdOrUnresolved(record, ['id'])).toBe(UNRESOLVED_ENTITY_ID);
+  });
+
+  it('is unresolved when a key field is missing or null', () => {
+    expect(extractEntityIdOrUnresolved({ name: 'n' }, ['id'])).toBe(UNRESOLVED_ENTITY_ID);
+    expect(extractEntityIdOrUnresolved({ postId: 'a', tagId: null }, ['postId', 'tagId'])).toBe(UNRESOLVED_ENTITY_ID);
+  });
+});
+
+describe('extractEntityId', () => {
+  it('takes the identity from the record read before the write', () => {
+    expect(extractEntityId({ id: 'p1' }, { id: 'other' }, pk)).toBe('p1');
+  });
+
+  it('falls back to the WHERE when the record is absent or holds no complete key', () => {
+    expect(extractEntityId(null, { id: 'p2' }, pk)).toBe('p2');
+    expect(extractEntityId({ title: 'no key' }, { id: 'p2' }, pk)).toBe('p2');
+  });
+
+  it('unwraps the compound-unique shape of a composite key in the WHERE', () => {
+    expect(extractEntityId(null, { postId_tagId: { postId: 'a', tagId: '1' } }, compositePk)).toBe('["a","1"]');
+    expect(extractEntityId(null, { postId: 'a', tagId: '1' }, compositePk)).toBe('["a","1"]');
+  });
+
+  it('unwraps a composite key under its declared name', () => {
+    const named: UniqueConstraint = { ...compositePk, name: 'postTag' };
+
+    expect(extractEntityId(null, { postTag: { postId: 'a', tagId: '1' } }, named)).toBe('["a","1"]');
+  });
+
+  it('is unresolved when neither the record nor the WHERE names the full key', () => {
+    expect(extractEntityId(null, { slug: 'first' }, pk)).toBe(UNRESOLVED_ENTITY_ID);
+    expect(extractEntityId({ postId: 'a' }, { postId: 'a' }, compositePk)).toBe(UNRESOLVED_ENTITY_ID);
+    expect(extractEntityId(null, null, pk)).toBe(UNRESOLVED_ENTITY_ID);
+  });
+});
+
+describe('primaryKeyNamedBy', () => {
+  it('gives the key fields of a WHERE that names them', () => {
+    expect(primaryKeyNamedBy({ id: 'p1' }, pk)).toEqual({ id: 'p1' });
+  });
+
+  it('leaves out the fields of the WHERE that are not part of the key', () => {
+    expect(primaryKeyNamedBy({ id: 'p1', slug: 'first' }, pk)).toEqual({ id: 'p1' });
+  });
+
+  it('unwraps the compound-unique shape of a composite key', () => {
+    expect(primaryKeyNamedBy({ postId_tagId: { postId: 'a', tagId: '1' } }, compositePk)).toEqual({
+      postId: 'a',
+      tagId: '1',
+    });
+  });
+
+  it('is undefined when the WHERE does not name every key field with a value', () => {
+    expect(primaryKeyNamedBy({ slug: 'first' }, pk)).toBeUndefined();
+    expect(primaryKeyNamedBy({ postId: 'a' }, compositePk)).toBeUndefined();
+    expect(primaryKeyNamedBy({ id: null }, pk)).toBeUndefined();
   });
 });
