@@ -76,7 +76,7 @@ describe('Tag-based Strategies E2E', () => {
       expect(auditLogs).toHaveLength(1);
       expect(auditLogs[0]?.action).toBe('create');
       expect(auditLogs[0]?.entityCategory).toBe('model');
-      expect(awaitWriteIfSpy).toHaveBeenCalled();
+      expect(awaitWriteIfSpy).toHaveBeenCalledWith('User', ['critical', 'pii']);
     });
 
     it('should write audit log asynchronously for non-critical tagged models', async () => {
@@ -134,8 +134,8 @@ describe('Tag-based Strategies E2E', () => {
         { timeout: 2000, interval: 50, checkFn: (logs) => logs.length > 0 },
       );
 
-      expect(auditLogs.length).toBeGreaterThan(0);
-      expect(awaitWriteIfSpy).toHaveBeenCalled();
+      expect(auditLogs.map((log) => log.aggregateType).sort()).toEqual(['Post', 'User']);
+      expect(awaitWriteIfSpy).toHaveBeenCalledWith('Post', ['analytics', 'non-critical']);
     });
   });
 
@@ -189,7 +189,7 @@ describe('Tag-based Strategies E2E', () => {
       });
 
       expect(auditLogs).toHaveLength(10);
-      expect(samplingIfSpy).toHaveBeenCalled();
+      expect(samplingIfSpy).toHaveBeenCalledWith('User', ['financial', 'critical']);
     });
 
     it('should apply reduced sampling rate for analytics tagged models', async () => {
@@ -250,8 +250,13 @@ describe('Tag-based Strategies E2E', () => {
         where: { entityType: 'Post' },
       });
 
-      expect(auditLogs).toHaveLength(6);
+      // Every third Post create is sampled in, and each one writes a Post row and a User aggregate row
+      const sampledInCreates = operationCount / 3;
+      expect(auditLogs.filter((log) => log.aggregateType === 'Post')).toHaveLength(sampledInCreates);
+      expect(auditLogs.filter((log) => log.aggregateType === 'User')).toHaveLength(sampledInCreates);
+      expect(auditLogs).toHaveLength(sampledInCreates * 2);
       expect(samplingIfSpy).toHaveBeenCalledTimes(operationCount);
+      expect(samplingIfSpy).toHaveBeenCalledWith('Post', ['analytics', 'high-volume']);
     });
   });
 
