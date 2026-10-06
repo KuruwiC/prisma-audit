@@ -101,6 +101,51 @@ describe('nested rows a relation filter leaves out of the result', () => {
     expect(await recordsOf('Post')).toEqual(['p-new:create']);
   });
 
+  it("audits a created row the caller's skip on the relation leaves out, and returns the remaining rows", async () => {
+    const { prisma, run, recordsOf } = await setup();
+
+    const result = await run(() =>
+      prisma.user.update({
+        where: { id: 'u1' },
+        data: { posts: { create: { id: 'p-new', title: 'New' } } },
+        include: { posts: { skip: 1, orderBy: { id: 'desc' } } },
+      }),
+    );
+
+    expect(result.posts.map((post) => post.id)).toEqual(['p-live', 'p-draft']);
+    expect(await recordsOf('Post')).toEqual(['p-new:create']);
+  });
+
+  it("audits a created row the caller's cursor on the relation leaves out, and returns the rows from the cursor", async () => {
+    const { prisma, run, recordsOf } = await setup();
+
+    const result = await run(() =>
+      prisma.user.update({
+        where: { id: 'u1' },
+        data: { posts: { create: { id: 'p-new', title: 'New' } } },
+        include: { posts: { cursor: { id: 'p-live' }, orderBy: { id: 'desc' } } },
+      }),
+    );
+
+    expect(result.posts.map((post) => post.id)).toEqual(['p-live', 'p-draft']);
+    expect(await recordsOf('Post')).toEqual(['p-new:create']);
+  });
+
+  it("audits a created row the caller's distinct on the relation leaves out, and returns the distinct rows", async () => {
+    const { prisma, run, recordsOf } = await setup();
+
+    const result = await run(() =>
+      prisma.user.update({
+        where: { id: 'u1' },
+        data: { posts: { create: { id: 'p-new', title: 'New', published: false } } },
+        include: { posts: { distinct: ['published'], orderBy: { id: 'asc' } } },
+      }),
+    );
+
+    expect(result.posts.map((post) => post.id)).toEqual(['p-draft', 'p-live']);
+    expect(await recordsOf('Post')).toEqual(['p-new:create']);
+  });
+
   it("audits a created row the caller's filtered select leaves out, with the whole row", async () => {
     const { prisma, run, recordsOf, afterOf } = await setup();
 
