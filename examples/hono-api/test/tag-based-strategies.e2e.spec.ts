@@ -22,9 +22,6 @@ describe('Tag-based Strategies E2E', () => {
 
   beforeEach(async () => {
     basePrisma = new PrismaClient();
-    await basePrisma.auditLog.deleteMany();
-    await basePrisma.user.deleteMany();
-    await basePrisma.post.deleteMany();
   });
 
   afterEach(async () => {
