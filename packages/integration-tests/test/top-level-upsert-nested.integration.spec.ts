@@ -119,14 +119,21 @@ describe('top-level upsert nested audit entries', () => {
       }),
     );
 
-    const postTag = post.postTags[0];
-    expect(postTag).toBeDefined();
+    expect(post.postTags).toHaveLength(1);
+    const postTagId = post.postTags[0]?.id;
+    const tagId = post.postTags[0]?.tag.id;
 
-    const postTagLogs = await basePrisma.auditLog.findMany({ where: { entityType: 'PostTag', entityId: postTag?.id } });
-    expect(postTagLogs.map((log) => log.action)).toContain('create');
-
-    const tagLogs = await basePrisma.auditLog.findMany({ where: { entityType: 'Tag', entityId: postTag?.tag.id } });
-    expect(tagLogs.map((log) => log.action)).toContain('create');
+    const logs = await basePrisma.auditLog.findMany();
+    expect(logs.map((log) => `${log.entityType}:${log.entityId}:${log.action}:${log.aggregateType}`).sort()).toEqual(
+      [
+        `Post:${post.id}:create:Post`,
+        `Post:${post.id}:create:User`,
+        `PostTag:${postTagId}:create:Post`,
+        `PostTag:${postTagId}:create:PostTag`,
+        `PostTag:${postTagId}:create:Tag`,
+        `Tag:${tagId}:create:Tag`,
+      ].sort(),
+    );
   });
 
   it('records the nested write of the update branch as update when the upsert updates the row', async () => {
