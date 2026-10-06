@@ -2,18 +2,27 @@
  * Integration Tests: Before-state capture for batch write operations
  *
  * `updateMany`, `deleteMany`, and `updateManyAndReturn` run through the batch executor,
- * which captures before-state itself via `findMany` + primary-key pairing, independent
- * of the single-record `fetchBeforeState` gate. These tests assert that behavior
- * black-box, through the public client, so it is pinned regardless of how the
- * single-record gate is implemented internally.
+ * which reads the rows it writes in order to identify them, so it records their before
+ * state whatever `fetchBefore` says. These tests run on a client with `fetchBefore`
+ * turned off for update and delete and assert that behavior black-box, through the
+ * public client.
  */
 
-import type { AuditContext } from '@kuruwic/db-audit-core';
+import { type AuditContext, createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
+import { createAuditClient } from '@kuruwic/prisma-audit';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { cleanDatabase, createTestContext, disposeTestContext, type TestContext } from './helpers/setup.js';
+import {
+  cleanDatabase,
+  createTestContext,
+  disposeTestContext,
+  type TestContext,
+  testAuditOptions,
+} from './helpers/setup.js';
 
-describe('Batch operations — before-state capture', () => {
+describe('Batch operations record the before state whatever fetchBefore says', () => {
   let context: TestContext;
+  let provider: ReturnType<typeof createAsyncLocalStorageProvider>;
+  let prisma: TestContext['prisma'];
 
   const testActor: AuditContext = {
     actor: {
@@ -25,6 +34,11 @@ describe('Batch operations — before-state capture', () => {
 
   beforeAll(async () => {
     context = await createTestContext();
+    provider = createAsyncLocalStorageProvider();
+    prisma = createAuditClient(context.basePrisma, {
+      ...testAuditOptions(provider),
+      fetchBefore: { update: false, delete: false },
+    });
   });
 
   afterAll(async () => {
@@ -32,20 +46,20 @@ describe('Batch operations — before-state capture', () => {
   });
 
   beforeEach(async () => {
-    await cleanDatabase(context.prisma);
+    await cleanDatabase(context.basePrisma);
   });
 
   const createUserWithPosts = async (emailPrefix: string, postTitles: string[]) => {
-    const user = await context.provider.runAsync(testActor, async () => {
-      return await context.prisma.user.create({
+    const user = await provider.runAsync(testActor, async () => {
+      return await prisma.user.create({
         data: { email: `${emailPrefix}@example.com`, name: 'Batch Owner', password: 'secret123' },
       });
     });
 
-    const posts = await context.provider.runAsync(testActor, async () => {
+    const posts = await provider.runAsync(testActor, async () => {
       return await Promise.all(
         postTitles.map((title) =>
-          context.prisma.post.create({
+          prisma.post.create({
             data: { title, content: 'original content', authorId: user.id },
           }),
         ),
@@ -57,10 +71,10 @@ describe('Batch operations — before-state capture', () => {
 
   it('updateMany records the pre-update row as `before` and computes `changes` against it', async () => {
     const { user, posts } = await createUserWithPosts('updatemany-before', ['Post A', 'Post B']);
-    await context.prisma.auditLog.deleteMany({ where: { entityType: 'Post' } });
+    await prisma.auditLog.deleteMany({ where: { entityType: 'Post' } });
 
-    await context.provider.runAsync(testActor, async () => {
-      await context.prisma.post.updateMany({
+    await provider.runAsync(testActor, async () => {
+      await prisma.post.updateMany({
         where: { authorId: user.id },
         data: { title: 'Updated Title', published: true },
       });
@@ -70,7 +84,7 @@ describe('Batch operations — before-state capture', () => {
     // fans out a second row with aggregateType: 'User' (its parent aggregate, see
     // testAggregateMapping), which carries the same before/changes and would
     // otherwise double-count entries per post.
-    const updateLogs = await context.prisma.auditLog.findMany({
+    const updateLogs = await prisma.auditLog.findMany({
       where: { entityType: 'Post', action: 'update', aggregateType: 'Post' },
     });
 
@@ -95,13 +109,13 @@ describe('Batch operations — before-state capture', () => {
 
   it('deleteMany records the pre-delete row as `before`', async () => {
     const { user, posts } = await createUserWithPosts('deletemany-before', ['Post C', 'Post D']);
-    await context.prisma.auditLog.deleteMany({ where: { entityType: 'Post' } });
+    await prisma.auditLog.deleteMany({ where: { entityType: 'Post' } });
 
-    await context.provider.runAsync(testActor, async () => {
-      await context.prisma.post.deleteMany({ where: { authorId: user.id } });
+    await provider.runAsync(testActor, async () => {
+      await prisma.post.deleteMany({ where: { authorId: user.id } });
     });
 
-    const deleteLogs = await context.prisma.auditLog.findMany({
+    const deleteLogs = await prisma.auditLog.findMany({
       where: { entityType: 'Post', action: 'delete', aggregateType: 'Post' },
     });
 
@@ -117,16 +131,16 @@ describe('Batch operations — before-state capture', () => {
       expect(log?.after).toBeNull();
     }
 
-    const remaining = await context.prisma.post.findMany({ where: { authorId: user.id } });
+    const remaining = await prisma.post.findMany({ where: { authorId: user.id } });
     expect(remaining).toHaveLength(0);
   });
 
   it('updateManyAndReturn records the pre-update row as `before` and computes `changes` against it', async () => {
     const { user, posts } = await createUserWithPosts('updatemanyandreturn-before', ['Post E', 'Post F']);
-    await context.prisma.auditLog.deleteMany({ where: { entityType: 'Post' } });
+    await prisma.auditLog.deleteMany({ where: { entityType: 'Post' } });
 
-    const returned = await context.provider.runAsync(testActor, async () => {
-      return await context.prisma.post.updateManyAndReturn({
+    const returned = await provider.runAsync(testActor, async () => {
+      return await prisma.post.updateManyAndReturn({
         where: { authorId: user.id },
         data: { title: 'Returned Update' },
       });
@@ -134,7 +148,7 @@ describe('Batch operations — before-state capture', () => {
 
     expect(returned).toHaveLength(posts.length);
 
-    const updateLogs = await context.prisma.auditLog.findMany({
+    const updateLogs = await prisma.auditLog.findMany({
       where: { entityType: 'Post', action: 'update', aggregateType: 'Post' },
     });
 

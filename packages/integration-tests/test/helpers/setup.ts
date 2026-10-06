@@ -125,6 +125,38 @@ export const getSharedDatabaseUrl = async (): Promise<string> => {
   return inject('databaseUrl');
 };
 
+/** The audit options every test client is built with. */
+export const testAuditOptions = (provider: AuditContextProvider) => ({
+  provider,
+  Prisma,
+  aggregateMapping: testAggregateMapping,
+  diffing: {
+    excludeFields: ['createdAt'],
+  },
+  security: {
+    redact: {
+      fields: [],
+    },
+  },
+  performance: {
+    awaitWrite: true,
+  },
+  fetchBefore: {
+    update: true,
+    delete: true,
+  },
+  contextEnricher: {
+    actor: {
+      enricher: async (actor: unknown) => ({
+        name: (actor as { name?: string }).name,
+        role: (actor as { role?: string }).role,
+      }),
+      onError: 'log' as const,
+      fallback: null,
+    },
+  },
+});
+
 export const createTestClients = (databaseUrl: string): TestContext => {
   const basePrisma = new PrismaClient({
     datasources: { db: { url: databaseUrl } },
@@ -132,36 +164,7 @@ export const createTestClients = (databaseUrl: string): TestContext => {
 
   const provider = createAsyncLocalStorageProvider();
 
-  const prisma = createAuditClient(basePrisma, {
-    provider,
-    Prisma,
-    aggregateMapping: testAggregateMapping,
-    diffing: {
-      excludeFields: ['createdAt'],
-    },
-    security: {
-      redact: {
-        fields: [],
-      },
-    },
-    performance: {
-      awaitWrite: true,
-    },
-    fetchBefore: {
-      update: true,
-      delete: true,
-    },
-    contextEnricher: {
-      actor: {
-        enricher: async (actor: unknown) => ({
-          name: (actor as { name?: string }).name,
-          role: (actor as { role?: string }).role,
-        }),
-        onError: 'log',
-        fallback: null,
-      },
-    },
-  });
+  const prisma = createAuditClient(basePrisma, testAuditOptions(provider));
 
   return { prisma, basePrisma, provider, databaseUrl };
 };
