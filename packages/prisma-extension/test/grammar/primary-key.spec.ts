@@ -73,6 +73,17 @@ describe('getPrimaryKeyConstraint', () => {
     });
   });
 
+  it('falls back to the @id field when the @@id constraint lists no fields', () => {
+    const metadata = metadataFor({
+      User: {
+        constraints: [{ type: 'primaryKey', fields: [], name: null }],
+        fields: [scalarField('id', true)],
+      },
+    });
+
+    expect(getPrimaryKeyConstraint(metadata, 'User')).toEqual({ type: 'primaryKey', fields: ['id'] });
+  });
+
   it('returns undefined for a model without a primary key', () => {
     const metadata = metadataFor({
       Setting: {
@@ -104,6 +115,13 @@ describe('deserializeEntityId', () => {
   it('returns null for a composite identity that is not valid JSON', () => {
     expect(deserializeEntityId('not-json', ['tenantId', 'itemId'])).toBeNull();
   });
+
+  it.each(['{"tenantId":"tenant-1","itemId":"item-1"}', '"tenant-1"', '42', 'null'])(
+    'returns null when the composite identity %s parses to something other than an array',
+    (entityId) => {
+      expect(deserializeEntityId(entityId, ['tenantId', 'itemId'])).toBeNull();
+    },
+  );
 
   it('returns null when the parsed composite identity has a different length than the key', () => {
     expect(deserializeEntityId(JSON.stringify(['tenant-1']), ['tenantId', 'itemId'])).toBeNull();

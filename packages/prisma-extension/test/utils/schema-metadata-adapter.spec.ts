@@ -112,20 +112,26 @@ describe('createSchemaMetadataFromDMMF', () => {
   });
 
   describe('getRelationFields', () => {
-    it('should return relation fields', () => {
+    it('should return only relation fields (kind === "object") with their relation metadata', () => {
       const Prisma = createPrismaWithModel({
         name: 'User',
         fields: [
-          { name: 'id', kind: 'scalar', type: 'String' },
-          { name: 'posts', kind: 'object', type: 'Post', isList: true },
+          { name: 'id', kind: 'scalar', type: 'String', isList: false },
+          { name: 'email', kind: 'scalar', type: 'String', isList: false },
+          { name: 'metadata', kind: 'scalar', type: 'Json', isList: false },
+          { name: 'posts', kind: 'object', type: 'Post', isList: true, relationName: 'UserPosts' },
+          { name: 'profile', kind: 'object', type: 'Profile', isList: false, relationName: 'UserProfile' },
         ],
       });
 
-      const metadata = createSchemaMetadataFromDMMF(Prisma);
-      const relations = metadata.getRelationFields('User');
+      expect(createSchemaMetadataFromDMMF(Prisma).getRelationFields('User')).toEqual([
+        { name: 'posts', relatedModel: 'Post', isList: true, isRequired: false, relationName: 'UserPosts' },
+        { name: 'profile', relatedModel: 'Profile', isList: false, isRequired: false, relationName: 'UserProfile' },
+      ]);
+    });
 
-      expect(relations).toHaveLength(1);
-      expect(relations[0]).toMatchObject({ name: 'posts', relatedModel: 'Post', isList: true });
+    it('should return empty when Prisma carries no DMMF', () => {
+      expect(createSchemaMetadataFromDMMF({}).getRelationFields('User')).toEqual([]);
     });
 
     it('should return empty for unknown model', () => {

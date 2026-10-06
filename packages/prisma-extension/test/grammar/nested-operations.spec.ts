@@ -6,85 +6,16 @@ import { describe, expect, it } from 'vitest';
 import {
   batchFilterClauses,
   detectNestedOperations,
+  isNestedBatchKeyword,
+  linksNamedRows,
+  NESTED_OPERATION_KEYWORDS,
   type NestedDetectionPass,
   namedTargets,
+  relationRowsOf,
   targetWhereClauses,
   type UpsertBranch,
 } from '../../src/grammar/nested-operations.js';
 import { createSchemaMetadataFromDMMF } from '../../src/utils/schema-metadata.js';
-
-describe('getRelationFields', () => {
-  it('should return empty array if Prisma.dmmf is not available', () => {
-    const Prisma = {};
-    const fields = createSchemaMetadataFromDMMF(Prisma).getRelationFields('User');
-    expect(fields).toEqual([]);
-  });
-
-  it('should return empty array if model is not found', () => {
-    const Prisma = {
-      dmmf: {
-        datamodel: {
-          models: [{ name: 'User', fields: [] }],
-        },
-      },
-    };
-    const fields = createSchemaMetadataFromDMMF(Prisma).getRelationFields('Post');
-    expect(fields).toEqual([]);
-  });
-
-  it('should return only relation fields (kind === "object")', () => {
-    const Prisma = {
-      dmmf: {
-        datamodel: {
-          models: [
-            {
-              name: 'User',
-              fields: [
-                { name: 'id', kind: 'scalar', type: 'String', isList: false },
-                { name: 'email', kind: 'scalar', type: 'String', isList: false },
-                { name: 'metadata', kind: 'scalar', type: 'Json', isList: false },
-                {
-                  name: 'posts',
-                  kind: 'object',
-                  type: 'Post',
-                  isList: true,
-                  relationName: 'UserPosts',
-                },
-                {
-                  name: 'profile',
-                  kind: 'object',
-                  type: 'Profile',
-                  isList: false,
-                  relationName: 'UserProfile',
-                },
-              ],
-            },
-          ],
-        },
-      },
-    };
-
-    const fields = createSchemaMetadataFromDMMF(Prisma).getRelationFields('User');
-
-    expect(fields).toHaveLength(2);
-    expect(fields).toEqual([
-      {
-        name: 'posts',
-        relatedModel: 'Post',
-        isList: true,
-        isRequired: false,
-        relationName: 'UserPosts',
-      },
-      {
-        name: 'profile',
-        relatedModel: 'Profile',
-        isList: false,
-        isRequired: false,
-        relationName: 'UserProfile',
-      },
-    ]);
-  });
-});
 
 describe('detectNestedOperations', () => {
   const Prisma = {
@@ -158,29 +89,6 @@ describe('detectNestedOperations', () => {
     });
   });
 
-  it('should detect nested createMany operations', () => {
-    const args = {
-      data: {
-        email: 'user@example.com',
-        posts: {
-          createMany: {
-            data: [
-              { title: 'Post 1', content: 'Content 1' },
-              { title: 'Post 2', content: 'Content 2' },
-            ],
-          },
-        },
-      },
-    };
-
-    const operations = detectNestedOperations(createSchemaMetadataFromDMMF(Prisma), 'User', args, {
-      kind: 'discovery',
-    });
-
-    expect(operations).toHaveLength(1);
-    expect(operations[0]?.operation).toBe('createMany');
-  });
-
   it('should detect multiple nested operations', () => {
     const args = {
       data: {
@@ -246,24 +154,6 @@ describe('detectNestedOperations', () => {
     expect(operations).toEqual([]);
   });
 
-  it('should handle connect operations', () => {
-    const args = {
-      data: {
-        email: 'user@example.com',
-        posts: {
-          connect: [{ id: 'post-1' }, { id: 'post-2' }],
-        },
-      },
-    };
-
-    const operations = detectNestedOperations(createSchemaMetadataFromDMMF(Prisma), 'User', args, {
-      kind: 'discovery',
-    });
-
-    expect(operations).toHaveLength(1);
-    expect(operations[0]?.operation).toBe('connect');
-  });
-
   it('detects a disconnect, which names its rows like connect', () => {
     const args = { data: { posts: { disconnect: [{ id: 'post-1' }, { id: 'post-2' }] } } };
 
@@ -279,128 +169,28 @@ describe('detectNestedOperations', () => {
     expect(namedTargets('disconnect', true)).toEqual([]);
   });
 
-  it('should handle connectOrCreate operations', () => {
-    const args = {
-      data: {
-        email: 'user@example.com',
-        posts: {
-          connectOrCreate: {
-            where: { id: 'post-1' },
-            create: { title: 'New Post', content: 'Content' },
-          },
-        },
-      },
-    };
+  it.each([
+    ['createMany', 'posts', 'Post', { data: [{ title: 'Post 1', content: 'Content 1' }] }],
+    ['connect', 'posts', 'Post', [{ id: 'post-1' }, { id: 'post-2' }]],
+    ['connectOrCreate', 'posts', 'Post', { where: { id: 'post-1' }, create: { title: 'New Post' } }],
+    ['update', 'posts', 'Post', { where: { id: 'post-1' }, data: { title: 'Updated Title' } }],
+    ['updateMany', 'posts', 'Post', { where: { published: false }, data: { published: true } }],
+    ['delete', 'posts', 'Post', { id: 'post-1' }],
+    ['deleteMany', 'posts', 'Post', { published: false }],
+    ['upsert', 'profile', 'Profile', { create: { bio: 'New bio' }, update: { bio: 'Updated bio' } }],
+  ] as const)(
+    'detects a lone nested %s once, on the relation field it sits in',
+    (keyword, fieldName, relatedModel, data) => {
+      const args = { data: { email: 'user@example.com', [fieldName]: { [keyword]: data } } };
 
-    const operations = detectNestedOperations(createSchemaMetadataFromDMMF(Prisma), 'User', args, {
-      kind: 'discovery',
-    });
+      const operations = detectNestedOperations(createSchemaMetadataFromDMMF(Prisma), 'User', args, {
+        kind: 'discovery',
+      });
 
-    expect(operations).toHaveLength(1);
-    expect(operations[0]?.operation).toBe('connectOrCreate');
-  });
-
-  it('should detect nested update operations', () => {
-    const args = {
-      data: {
-        email: 'user@example.com',
-        posts: {
-          update: {
-            where: { id: 'post-1' },
-            data: { title: 'Updated Title' },
-          },
-        },
-      },
-    };
-
-    const operations = detectNestedOperations(createSchemaMetadataFromDMMF(Prisma), 'User', args, {
-      kind: 'discovery',
-    });
-
-    expect(operations).toHaveLength(1);
-    expect(operations[0]?.operation).toBe('update');
-    expect(operations[0]?.fieldName).toBe('posts');
-    expect(operations[0]?.relatedModel).toBe('Post');
-  });
-
-  it('should detect nested updateMany operations', () => {
-    const args = {
-      data: {
-        email: 'user@example.com',
-        posts: {
-          updateMany: {
-            where: { published: false },
-            data: { published: true },
-          },
-        },
-      },
-    };
-
-    const operations = detectNestedOperations(createSchemaMetadataFromDMMF(Prisma), 'User', args, {
-      kind: 'discovery',
-    });
-
-    expect(operations).toHaveLength(1);
-    expect(operations[0]?.operation).toBe('updateMany');
-  });
-
-  it('should detect nested delete operations', () => {
-    const args = {
-      data: {
-        email: 'user@example.com',
-        posts: {
-          delete: { id: 'post-1' },
-        },
-      },
-    };
-
-    const operations = detectNestedOperations(createSchemaMetadataFromDMMF(Prisma), 'User', args, {
-      kind: 'discovery',
-    });
-
-    expect(operations).toHaveLength(1);
-    expect(operations[0]?.operation).toBe('delete');
-  });
-
-  it('should detect nested deleteMany operations', () => {
-    const args = {
-      data: {
-        email: 'user@example.com',
-        posts: {
-          deleteMany: { published: false },
-        },
-      },
-    };
-
-    const operations = detectNestedOperations(createSchemaMetadataFromDMMF(Prisma), 'User', args, {
-      kind: 'discovery',
-    });
-
-    expect(operations).toHaveLength(1);
-    expect(operations[0]?.operation).toBe('deleteMany');
-  });
-
-  it('should detect nested upsert operations', () => {
-    const args = {
-      data: {
-        email: 'user@example.com',
-        profile: {
-          upsert: {
-            create: { bio: 'New bio' },
-            update: { bio: 'Updated bio' },
-          },
-        },
-      },
-    };
-
-    const operations = detectNestedOperations(createSchemaMetadataFromDMMF(Prisma), 'User', args, {
-      kind: 'discovery',
-    });
-
-    expect(operations).toHaveLength(1);
-    expect(operations[0]?.operation).toBe('upsert');
-    expect(operations[0]?.fieldName).toBe('profile');
-  });
+      expect(operations).toHaveLength(1);
+      expect(operations[0]).toMatchObject({ operation: keyword, fieldName, relatedModel, path: fieldName, data });
+    },
+  );
 
   it('should detect multiple mixed nested operations', () => {
     const args = {
@@ -580,7 +370,7 @@ describe('detectNestedOperations with upsert branch filtering', () => {
     expect(operationKeys(operations)).toEqual(['profile:upsert', 'profile.avatar:create']);
   });
 
-  it('should detect nested upsert with different pre-fetch results', () => {
+  it('reports a nested upsert once when only the executed branch of its parent upsert is scanned', () => {
     const args = {
       data: {
         email: 'user@example.com',
@@ -1195,5 +985,47 @@ describe('batchFilterClauses', () => {
   it('drops elements that carry no filter', () => {
     expect(batchFilterClauses('updateMany', [{ data: {} }, null])).toEqual([]);
     expect(batchFilterClauses('deleteMany', [null, 'x'])).toEqual([]);
+  });
+});
+
+describe('isNestedBatchKeyword', () => {
+  it('holds for exactly updateMany and deleteMany', () => {
+    expect(NESTED_OPERATION_KEYWORDS.filter(isNestedBatchKeyword)).toEqual(['updateMany', 'deleteMany']);
+  });
+});
+
+describe('linksNamedRows', () => {
+  it('holds for exactly connect and set', () => {
+    expect(NESTED_OPERATION_KEYWORDS.filter(linksNamedRows)).toEqual(['connect', 'set']);
+  });
+});
+
+describe('relationRowsOf', () => {
+  const posts = { name: 'posts', isList: true };
+  const profile = { name: 'profile', isList: false };
+
+  it('returns the records of a to-many relation in order', () => {
+    expect(relationRowsOf({ posts: [{ id: 'p1' }, { id: 'p2' }] }, posts)).toEqual([{ id: 'p1' }, { id: 'p2' }]);
+  });
+
+  it('returns the one record of a to-one relation', () => {
+    expect(relationRowsOf({ profile: { id: 'pr1' } }, profile)).toEqual([{ id: 'pr1' }]);
+  });
+
+  it('returns nothing for a relation the row does not carry', () => {
+    expect(relationRowsOf({ id: 'u1' }, posts)).toEqual([]);
+    expect(relationRowsOf({ id: 'u1' }, profile)).toEqual([]);
+  });
+
+  it('returns nothing for a null to-one relation', () => {
+    expect(relationRowsOf({ profile: null }, profile)).toEqual([]);
+  });
+
+  it('returns nothing for a to-many relation that is not a list', () => {
+    expect(relationRowsOf({ posts: { id: 'p1' } }, posts)).toEqual([]);
+  });
+
+  it('drops list entries that are not records', () => {
+    expect(relationRowsOf({ posts: [{ id: 'p1' }, null, 'p2', 3] }, posts)).toEqual([{ id: 'p1' }]);
   });
 });
