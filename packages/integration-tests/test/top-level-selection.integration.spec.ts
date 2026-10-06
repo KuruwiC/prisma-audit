@@ -121,6 +121,26 @@ describe("an audited row read in the client's default shape whatever the caller 
       expect(record?.changes).toEqual({ name: { old: 'Ada', new: 'Cid' } });
     });
 
+    it('records the row an upsert creates whole, and returns the selected fields', async () => {
+      const { prisma, run, recordOf } = await setup();
+
+      const result = await run(() =>
+        prisma.user.upsert({
+          where: { id: 'u2' },
+          create: { id: 'u2', email: 'u2@example.com', name: 'Dee' },
+          update: { name: 'Eve' },
+          select: { id: true },
+        }),
+      );
+
+      expect(result).toEqual({ id: 'u2' });
+      const record = await recordOf('User', 'u2');
+      expect(record?.action).toBe('create');
+      expect(record?.before).toBeNull();
+      expect(keysOf(record?.after)).toEqual(USER_COLUMNS);
+      expect(record?.after).toMatchObject({ id: 'u2', email: 'u2@example.com', name: 'Dee' });
+    });
+
     it('resolves the aggregate a created row names by a foreign key the caller does not select', async () => {
       const { prisma, run, aggregatesOf, recordOf } = await setup();
 
