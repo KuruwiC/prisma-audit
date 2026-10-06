@@ -2,7 +2,8 @@
  * Serialization Utilities for Audit Logging
  *
  * Converts JavaScript objects to JSON-compatible format for JSON column storage.
- * Handles non-JSON-serializable types: BigInt → string, Date → ISO string.
+ * Handles non-JSON-serializable types: BigInt → string, and a value with a `toJSON` method (a
+ * Date, a decimal.js `Decimal`, a Buffer) → what its `toJSON` returns.
  *
  * @example
  * ```typescript
@@ -60,6 +61,9 @@ const applyCustomSerializers = (
   return UNHANDLED;
 };
 
+const hasToJSON = (value: object): value is { toJSON: () => unknown } =>
+  typeof (value as { toJSON?: unknown }).toJSON === 'function';
+
 const serializeObjectEntries = (
   obj: object,
   customSerializers: ValueSerializer[] | undefined,
@@ -76,12 +80,15 @@ const serializeObjectEntries = (
  *
  * Built-in conversions:
  * - `BigInt` → `string` (e.g. `123n` → `"123"`)
- * - `Date` → ISO string (e.g. `new Date(...)` → `"2025-01-01T00:00:00.000Z"`)
+ * - an object with a `toJSON` method → what `toJSON` returns, serialized, as `JSON.stringify`
+ *   does: a `Date` → its ISO string (`"2025-01-01T00:00:00.000Z"`, `null` for an invalid date),
+ *   a decimal.js `Decimal` → its string (`"1.5"`), a `Buffer` → `{ type: 'Buffer', data: [...] }`.
+ *   `toJSON` is called once per value: its result is not passed to its own `toJSON`
  * - arrays → each element serialized
  * - any other object → a plain object of its own enumerable properties, each serialized (a `Map`
  *   or `Set` without a custom serializer becomes `{}`)
  *
- * Custom serializers run before built-ins and can override any conversion.
+ * Custom serializers run before built-ins and can override any conversion, `toJSON` included.
  * Return `UNHANDLED` from a custom serializer to fall through to the next.
  *
  * @example
@@ -96,13 +103,20 @@ const serializeObjectEntries = (
  * // => { data: 'aGVsbG8=' }
  * ```
  */
-export const serializeForAuditJson = (obj: unknown, customSerializers?: ValueSerializer[]): unknown => {
-  const customResult = applyCustomSerializers(obj, customSerializers);
+export const serializeForAuditJson = (obj: unknown, customSerializers?: ValueSerializer[]): unknown =>
+  serializeValue(obj, customSerializers, true);
+
+const serializeValue = (
+  value: unknown,
+  customSerializers: ValueSerializer[] | undefined,
+  callToJSON: boolean,
+): unknown => {
+  const customResult = applyCustomSerializers(value, customSerializers);
   if (customResult !== UNHANDLED) return customResult;
 
-  if (typeof obj === 'bigint') return obj.toString();
-  if (obj === null || typeof obj !== 'object') return obj;
-  if (obj instanceof Date) return obj.toISOString();
-  if (Array.isArray(obj)) return obj.map((item) => serializeForAuditJson(item, customSerializers));
-  return serializeObjectEntries(obj, customSerializers);
+  if (typeof value === 'bigint') return value.toString();
+  if (value === null || typeof value !== 'object') return value;
+  if (callToJSON && hasToJSON(value)) return serializeValue(value.toJSON(), customSerializers, false);
+  if (Array.isArray(value)) return value.map((item) => serializeForAuditJson(item, customSerializers));
+  return serializeObjectEntries(value, customSerializers);
 };

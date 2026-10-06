@@ -277,7 +277,8 @@ createAuditClient(basePrisma, {
     },
   },
 
-  // Custom serialization (BigInt and Date handled by default)
+  // Custom serialization. BigInt and values with a toJSON method (Date, Decimal, Buffer) are
+  // handled by default; this serializer stores a Buffer as base64 instead of { type, data }
   serialization: {
     customSerializers: [
       (value) => {

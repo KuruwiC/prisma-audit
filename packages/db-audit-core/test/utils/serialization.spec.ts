@@ -81,6 +81,10 @@ describe('serializeForAuditJson', () => {
       expect(serializeForAuditJson(date)).toBe('2025-01-01T00:00:00.000Z');
     });
 
+    it('should convert an invalid Date to null, as JSON.stringify does', () => {
+      expect(serializeForAuditJson({ at: new Date(Number.NaN) })).toStrictEqual({ at: null });
+    });
+
     it('should convert Date in nested objects', () => {
       const obj = { createdAt: new Date('2025-06-15T12:00:00.000Z') };
       const result = serializeForAuditJson(obj) as Record<string, unknown>;
@@ -174,6 +178,73 @@ describe('serializeForAuditJson', () => {
 
       expect(serializeForAuditJson({ collection: new Map([['a', 1]]) }, [mapSerializer])).toStrictEqual({
         collection: { a: 1 },
+      });
+    });
+  });
+
+  describe('values with a toJSON method', () => {
+    /** Mirrors decimal.js: an instance carries its digits and an own `constructor` property, and serializes through `toJSON` */
+    class DecimalLike {
+      readonly #text: string;
+      declare readonly s: number;
+      declare readonly e: number;
+      declare readonly d: readonly number[];
+
+      constructor(text: string) {
+        this.#text = text;
+        Object.assign(this, { constructor: DecimalLike, s: 1, e: 0, d: [1, 5000000] });
+      }
+
+      toJSON(): string {
+        return this.#text;
+      }
+    }
+
+    it('should serialize a decimal.js-like value to the string its toJSON returns', () => {
+      const amount = new DecimalLike('1.5');
+
+      expect(Object.keys(amount)).toEqual(['constructor', 's', 'e', 'd']);
+      expect(serializeForAuditJson(amount)).toBe('1.5');
+      expect(serializeForAuditJson({ amount, amounts: [amount] })).toStrictEqual({ amount: '1.5', amounts: ['1.5'] });
+    });
+
+    it('should serialize a Buffer to what JSON.stringify produces for it', () => {
+      const data = Buffer.from('hi');
+
+      expect(serializeForAuditJson({ data })).toStrictEqual({ data: { type: 'Buffer', data: [104, 105] } });
+      expect(serializeForAuditJson({ data })).toStrictEqual(JSON.parse(JSON.stringify({ data })));
+    });
+
+    it('should serialize the value toJSON returns', () => {
+      const value = { toJSON: () => ({ id: 1n, at: new Date('2025-01-01T00:00:00.000Z') }) };
+
+      expect(serializeForAuditJson(value)).toStrictEqual({ id: '1', at: '2025-01-01T00:00:00.000Z' });
+    });
+
+    it('should call toJSON once per value, like JSON.stringify, so a toJSON that returns its own object yields its properties', () => {
+      class ReturnsItself {
+        readonly id = 1n;
+
+        toJSON(): this {
+          return this;
+        }
+      }
+
+      expect(serializeForAuditJson(new ReturnsItself())).toStrictEqual({ id: '1' });
+    });
+
+    it('should keep a toJSON property that is not a function as an ordinary property', () => {
+      expect(serializeForAuditJson({ toJSON: 'not a function', id: 1n })).toStrictEqual({
+        toJSON: 'not a function',
+        id: '1',
+      });
+    });
+
+    it('should apply a custom serializer before toJSON', () => {
+      const decimalSerializer = (value: unknown) => (value instanceof DecimalLike ? Number(value.toJSON()) : UNHANDLED);
+
+      expect(serializeForAuditJson({ amount: new DecimalLike('1.5') }, [decimalSerializer])).toStrictEqual({
+        amount: 1.5,
       });
     });
   });
