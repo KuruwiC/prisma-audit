@@ -34,6 +34,11 @@ describe('normalizeId', () => {
     expect(() => normalizeId(null)).toThrow('Cannot normalize ID of type');
     expect(() => normalizeId(undefined)).toThrow('Cannot normalize ID of type');
   });
+
+  it('throws for a symbol and for a function, naming the type', () => {
+    expect(() => normalizeId(Symbol('id'))).toThrow('Cannot normalize ID of type: symbol');
+    expect(() => normalizeId(() => 'id')).toThrow('Cannot normalize ID of type: function');
+  });
 });
 
 describe('Resolver helper functions', () => {
@@ -57,6 +62,11 @@ describe('Resolver helper functions', () => {
       const entity = { name: 'John' };
       const result = await resolver(entity, null);
       expect(result).toBeNull();
+    });
+
+    it('returns null when the field holds null', async () => {
+      const resolver = self('id');
+      await expect(resolver({ id: null, name: 'John' }, null)).resolves.toBeNull();
     });
 
     it('should apply transformation function to entity data', async () => {
@@ -228,11 +238,24 @@ describe('validateAggregateMapping', () => {
       User: {
         category: 'model',
         idResolver: self(),
-        aggregateRoots: [],
+        aggregates: [],
       },
     } as unknown as AggregateMapping;
 
     expect(() => validateAggregateMapping(mapping)).toThrow('type is required');
+  });
+
+  it('reports every invalid entity in one error, one line per problem', () => {
+    const mapping = {
+      User: { category: 'model', idResolver: self() },
+      Post: { category: 'model', type: 'Post' },
+    } as unknown as AggregateMapping;
+
+    expect(() => validateAggregateMapping(mapping)).toThrow(
+      '[db-audit-core] Invalid aggregate mapping configuration:\n' +
+        'Entity "User": type is required\n' +
+        'Entity "Post": idResolver is required',
+    );
   });
 
   it('should throw on missing idResolver field', () => {
@@ -240,7 +263,7 @@ describe('validateAggregateMapping', () => {
       User: {
         category: 'model',
         type: 'User',
-        aggregateRoots: [],
+        aggregates: [],
       },
     } as unknown as AggregateMapping;
 

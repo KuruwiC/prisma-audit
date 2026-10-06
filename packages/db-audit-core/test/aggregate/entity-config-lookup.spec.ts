@@ -19,13 +19,13 @@ describe('createEntityConfigLookup', () => {
   });
 
   describe('byModel', () => {
-    it('should return entity config for valid model', () => {
+    it('should return entity config for valid model', async () => {
       const config = createEntityConfigLookup(createTestMapping());
       const entity = config.byModel('User');
 
       expect(entity).toBeDefined();
       expect(entity?.type).toBe('User');
-      expect(entity?.idResolver).toBeDefined();
+      await expect(entity?.idResolver({ id: 'u1' }, null)).resolves.toBe('u1');
     });
 
     it('should return undefined for non-existent model', () => {
@@ -41,6 +41,16 @@ describe('createEntityConfigLookup', () => {
       expect(config.byModel('post')?.type).toBe('Post');
       expect(config.byModel('POST')?.type).toBe('Post');
       expect(config.byModel('cOmMeNt')?.type).toBe('Comment');
+    });
+  });
+
+  describe('a mapping entry that is undefined', () => {
+    it('is skipped: not loggable, not found by model or by identity, and the mapping stays valid', () => {
+      const lookup = createEntityConfigLookup({ ...createTestMapping(), Ghost: undefined });
+
+      expect(lookup.byModel('Ghost')).toBeUndefined();
+      expect(lookup.isLoggable('Ghost')).toBe(false);
+      expect(lookup.byModel('User')?.type).toBe('User');
     });
   });
 

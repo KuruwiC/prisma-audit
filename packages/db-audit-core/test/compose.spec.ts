@@ -136,6 +136,12 @@ describe('compose', () => {
       expect(() => compose([event()], ambientWithoutActorId, now)).toThrow(IdValidationError);
     });
 
+    it('throws when a resolved aggregate id is empty', () => {
+      const roots: ResolvedId[] = [postRoot('post-1'), postRoot('')];
+
+      expect(() => compose([event({ roots })], ambient(), now)).toThrow(IdValidationError);
+    });
+
     it('looks up each root aggregate context by category, type and id, null when absent', () => {
       const roots: ResolvedId[] = [
         postRoot('post-1'),
