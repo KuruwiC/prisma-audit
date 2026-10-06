@@ -14,7 +14,7 @@ import type { DMMFModel } from '../../src/internal-types.js';
 import type { SchemaMetadata } from '../../src/schema/types.js';
 import {
   buildEntityMap,
-  buildPKWhereClause,
+  buildKeyWhereClause,
   ensureIds,
   getIdFieldInfo,
   getIdGenerator,
@@ -671,19 +671,19 @@ describe('buildEntityMap', () => {
   });
 });
 
-describe('buildPKWhereClause', () => {
+describe('buildKeyWhereClause', () => {
   it('is null for no entities, so a caller can skip the query', () => {
-    expect(buildPKWhereClause(['id'], [])).toBeNull();
-    expect(buildPKWhereClause(['postId', 'userId'], [])).toBeNull();
+    expect(buildKeyWhereClause(['id'], [])).toBeNull();
+    expect(buildKeyWhereClause(['postId', 'userId'], [])).toBeNull();
   });
 
   it('names a single key with one in-list of the values, in the order of the entities', () => {
-    expect(buildPKWhereClause(['id'], [{ id: 'b', n: 1 }, { id: 'a' }])).toEqual({ id: { in: ['b', 'a'] } });
+    expect(buildKeyWhereClause(['id'], [{ id: 'b', n: 1 }, { id: 'a' }])).toEqual({ id: { in: ['b', 'a'] } });
   });
 
   it('names a composite key with one OR branch per entity holding only the key fields', () => {
     expect(
-      buildPKWhereClause(
+      buildKeyWhereClause(
         ['postId', 'userId'],
         [
           { postId: 'p1', userId: 'u1', title: 'T' },

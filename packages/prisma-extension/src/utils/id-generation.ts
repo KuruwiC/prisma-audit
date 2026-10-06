@@ -202,7 +202,7 @@ export const ensureIds = <T extends Record<string, unknown>>(
     return rows.map((row) => (row[field] !== undefined ? row : { ...row, [field]: generate() }));
   }, entities);
 
-const PK_CHUNK_SIZE = 1000;
+const KEY_CHUNK_SIZE = 1000;
 
 /**
  * The fields that name one row of `modelName`: its primary key, else the first of its unique
@@ -278,7 +278,7 @@ export const sameKeyValue = (left: unknown, right: unknown): boolean => {
 };
 
 /**
- * Extract the entity identity of `record` from `pkFields`, the fields to read (the row key for a
+ * Extract the entity identity of `record` from `keyFields`, the fields to read (the row key for a
  * top-level or batch row, the primary key for a nested one): the single field's value written by
  * {@link serializeKeyValue}, or the JSON array of a composite key's values written the same way,
  * which keeps `["a:b", "c"]` and `["a", "b:c"]` apart. `UNRESOLVED_ENTITY_ID` when any field is
@@ -286,14 +286,14 @@ export const sameKeyValue = (left: unknown, right: unknown): boolean => {
  */
 export const extractEntityIdentity = (
   record: Record<string, unknown>,
-  pkFields: readonly string[],
+  keyFields: readonly string[],
 ): EntityIdentityKey => {
-  const allPresent = pkFields.every((f) => f in record && record[f] != null);
+  const allPresent = keyFields.every((f) => f in record && record[f] != null);
   if (!allPresent) return UNRESOLVED_ENTITY_ID;
 
-  if (pkFields.length === 1) return serializeKeyValue(record[pkFields[0] as string]);
+  if (keyFields.length === 1) return serializeKeyValue(record[keyFields[0] as string]);
 
-  return JSON.stringify(pkFields.map((f) => canonicalKeyValue(record[f])));
+  return JSON.stringify(keyFields.map((f) => canonicalKeyValue(record[f])));
 };
 
 /** The fields `pkFields` of `row`, as a key or a filter; a field the row lacks reads `undefined` */
@@ -302,40 +302,40 @@ export const primaryKeyOf = (row: Record<string, unknown>, pkFields: readonly st
 
 export const buildEntityMap = (
   entities: ReadonlyArray<Record<string, unknown>>,
-  pkFields: string[],
+  keyFields: string[],
 ): Map<EntityIdentityKey, Record<string, unknown>> => {
   const map = new Map<EntityIdentityKey, Record<string, unknown>>();
   for (const entity of entities) {
-    map.set(extractEntityIdentity(entity, pkFields), entity);
+    map.set(extractEntityIdentity(entity, keyFields), entity);
   }
   return map;
 };
 
 /**
- * Build a Prisma WHERE clause naming entities by the values of their key fields `pkFields`.
+ * Build a Prisma WHERE clause naming entities by the values of their key fields `keyFields`.
  *
- * - Single PK: `{ id: { in: [...] } }`
- * - Composite PK: `{ OR: [{ pk1: v1, pk2: v2 }, ...] }`
+ * - A single-field key: `{ id: { in: [...] } }`
+ * - A composite key: `{ OR: [{ k1: v1, k2: v2 }, ...] }`
  *
  * Returns null for empty entity lists to signal callers to skip the query.
  */
-export const buildPKWhereClause = (
-  pkFields: string[],
+export const buildKeyWhereClause = (
+  keyFields: string[],
   entities: ReadonlyArray<Record<string, unknown>>,
 ): Record<string, unknown> | null => {
   if (entities.length === 0) {
     return null;
   }
 
-  if (pkFields.length === 1) {
-    const field = pkFields[0] as string;
+  if (keyFields.length === 1) {
+    const field = keyFields[0] as string;
     return { [field]: { in: entities.map((e) => e[field]) } };
   }
 
-  // Composite PK: one OR branch per entity; `findManyByPKs` chunks the list so the query stays bounded
+  // A composite key: one OR branch per entity; `findManyByKeys` chunks the list so the query stays bounded
   const conditions = entities.map((entity) => {
     const condition: Record<string, unknown> = {};
-    for (const field of pkFields) {
+    for (const field of keyFields) {
       condition[field] = entity[field];
     }
     return condition;
@@ -349,24 +349,24 @@ type FindManyDelegate = {
 };
 
 /**
- * Fetch entities by the values of their key fields `pkFields` in parallel batches of PK_CHUNK_SIZE,
+ * Fetch entities by the values of their key fields `keyFields` in parallel batches of KEY_CHUNK_SIZE,
  * so that a single query never exceeds database parameter limits.
  */
-export const findManyByPKs = async (
+export const findManyByKeys = async (
   delegate: FindManyDelegate,
-  pkFields: string[],
+  keyFields: string[],
   entities: ReadonlyArray<Record<string, unknown>>,
 ): Promise<Record<string, unknown>[]> => {
   if (entities.length === 0) return [];
 
   const chunks: ReadonlyArray<Record<string, unknown>>[] = [];
-  for (let i = 0; i < entities.length; i += PK_CHUNK_SIZE) {
-    chunks.push(entities.slice(i, i + PK_CHUNK_SIZE));
+  for (let i = 0; i < entities.length; i += KEY_CHUNK_SIZE) {
+    chunks.push(entities.slice(i, i + KEY_CHUNK_SIZE));
   }
 
   const results = await Promise.all(
     chunks.map((chunk) => {
-      const where = buildPKWhereClause(pkFields, chunk);
+      const where = buildKeyWhereClause(keyFields, chunk);
       if (!where) return Promise.resolve([]);
       return delegate.findMany({ where });
     }),

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { findManyByPKs } from '../../src/utils/id-generation.js';
+import { findManyByKeys } from '../../src/utils/id-generation.js';
 
 const createMockDelegate = (findManyImpl?: (args: unknown) => Promise<Record<string, unknown>[]>) => ({
   findMany: vi.fn(findManyImpl ?? (async () => [])),
@@ -8,13 +8,13 @@ const createMockDelegate = (findManyImpl?: (args: unknown) => Promise<Record<str
 
 type InArgs = { where: { id: { in: string[] } } };
 
-const makeEntities = (count: number, pkField = 'id'): Record<string, unknown>[] =>
-  Array.from({ length: count }, (_, i) => ({ [pkField]: `id-${i}`, name: `entity-${i}` }));
+const makeEntities = (count: number, keyField = 'id'): Record<string, unknown>[] =>
+  Array.from({ length: count }, (_, i) => ({ [keyField]: `id-${i}`, name: `entity-${i}` }));
 
-describe('findManyByPKs', () => {
+describe('findManyByKeys', () => {
   it('should return empty array for empty entities without calling findMany', async () => {
     const delegate = createMockDelegate();
-    const result = await findManyByPKs(delegate, ['id'], []);
+    const result = await findManyByKeys(delegate, ['id'], []);
     expect(result).toEqual([]);
     expect(delegate.findMany).not.toHaveBeenCalled();
   });
@@ -31,7 +31,7 @@ describe('findManyByPKs', () => {
       const entities = makeEntities(count);
       const delegate = createMockDelegate(async (args: unknown) => (args as InArgs).where.id.in.map((id) => ({ id })));
 
-      const result = await findManyByPKs(delegate, ['id'], entities);
+      const result = await findManyByKeys(delegate, ['id'], entities);
 
       expect(delegate.findMany.mock.calls.map((call) => ((call as unknown[])[0] as InArgs).where.id.in.length)).toEqual(
         sizes,
@@ -40,14 +40,14 @@ describe('findManyByPKs', () => {
     },
   );
 
-  it('should work with composite primary keys', async () => {
+  it('should work with composite keys', async () => {
     const entities = [
       { tenantId: 'a', userId: '1', name: 'Alice' },
       { tenantId: 'a', userId: '2', name: 'Bob' },
     ];
     const delegate = createMockDelegate(async () => entities);
 
-    const result = await findManyByPKs(delegate, ['tenantId', 'userId'], entities);
+    const result = await findManyByKeys(delegate, ['tenantId', 'userId'], entities);
 
     expect(delegate.findMany).toHaveBeenCalledTimes(1);
     const call = delegate.findMany.mock.calls[0];

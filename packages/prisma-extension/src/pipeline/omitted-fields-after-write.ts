@@ -15,7 +15,7 @@ import type { MutationEvent } from '@kuruwic/db-audit-core';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../internal-types.js';
 import type { SchemaMetadata } from '../schema/types.js';
 import type { AuditedOmittedFields } from '../utils/audited-omitted-fields.js';
-import { extractEntityIdentity, findManyByPKs, rowKeyFieldsOf } from '../utils/id-generation.js';
+import { extractEntityIdentity, findManyByKeys, rowKeyFieldsOf } from '../utils/id-generation.js';
 import type { EntityIdentityKey } from '../utils/identity-key.js';
 import { getModelDelegate, hasOperation } from '../utils/model-accessor.js';
 
@@ -47,7 +47,7 @@ const readFields = async (
     throw new Error(`[@prisma-audit] Cannot read the omitted fields of ${modelName}: no findMany`);
   }
   const select: Record<string, true> = Object.fromEntries([...keyFields, ...fields].map((field) => [field, true]));
-  const read = await findManyByPKs({ findMany: ({ where }) => delegate.findMany({ where, select }) }, keyFields, rows);
+  const read = await findManyByKeys({ findMany: ({ where }) => delegate.findMany({ where, select }) }, keyFields, rows);
   return new Map(read.map((row) => [extractEntityIdentity(row, keyFields), row]));
 };
 

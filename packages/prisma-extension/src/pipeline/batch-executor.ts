@@ -1,8 +1,8 @@
 /**
  * Batch-operation executor
  *
- * createMany, createManyAndReturn, updateMany, updateManyAndReturn and deleteMany: reads the
- * rows an update or a delete will touch with `findMany`, runs the operation, reads back the rows a
+ * createMany, createManyAndReturn, updateMany, updateManyAndReturn and deleteMany: reads the rows
+ * an update or a delete will touch with `findMany`, runs the operation, reads back the rows a
  * createMany wrote by the keys of its data and the rows an updateMany wrote by row key, and
  * collects one event per written row, paired with its before row by row key. A row's key is the
  * model's primary key, or its first unique constraint on required fields when it has no primary key
@@ -13,7 +13,8 @@
  * as `row-identification` and not audited, and the rows an updateManyAndReturn returns are recorded
  * without a before state and reported. A row another writer re-keys or deletes between the reads
  * does not pair, and is reported the same way. Every read of the executor reads the row key
- * whatever a client-level omit hides, and the omitted fields the entity audits (`withRowKeyFields`).
+ * whatever a client-level omit hides, and the omitted fields the entity audits
+ * (`withRowKeyFields`).
  */
 
 import type { FailureSink, MutationEvent } from '@kuruwic/db-audit-core';
@@ -24,10 +25,10 @@ import { type AuditedOmittedFields, withOmittedFieldsInFinds } from '../utils/au
 import { UNAVAILABLE_BEFORE_STATE } from '../utils/before-state.js';
 import {
   buildEntityMap,
-  buildPKWhereClause,
+  buildKeyWhereClause,
   ensureIds,
   extractEntityIdentity,
-  findManyByPKs,
+  findManyByKeys,
   getRowKeyFields,
 } from '../utils/id-generation.js';
 import type { EntityIdentityKey } from '../utils/identity-key.js';
@@ -175,7 +176,7 @@ const prepareCreate = (operation: AuditedOperation, deps: BatchExecutorDependenc
  * read. A row skipped because a row with its key already exists reads as that row.
  */
 const createdRows = async (delegate: BatchDelegate, rows: readonly Row[], keyFields: string[]): Promise<Row[]> => {
-  const read = buildEntityMap(await findManyByPKs(delegate, keyFields, rows), keyFields);
+  const read = buildEntityMap(await findManyByKeys(delegate, keyFields, rows), keyFields);
   const position = new Map<EntityIdentityKey, number>();
   rows.forEach((row, index) => {
     const identity = extractEntityIdentity(row, keyFields);
@@ -288,7 +289,7 @@ const updatedRowsOfShortRound: WrittenRowsOfShortRound = async (delegate, round)
  */
 const deletedRowsOfShortRound: WrittenRowsOfShortRound = async (delegate, round) => {
   const remaining = buildEntityMap(
-    await delegate.findMany({ where: buildPKWhereClause(round.keyFields, round.rows) }),
+    await delegate.findMany({ where: buildKeyWhereClause(round.keyFields, round.rows) }),
     round.keyFields,
   );
   const gone = round.rows.filter((row) => !remaining.has(extractEntityIdentity(row, round.keyFields)));
@@ -440,20 +441,20 @@ const runLimitedWrite = async (
   const limitedRounds: LimitedRound[] = [];
   let count = 0;
   for (let round = 0; round < prepared.rounds && count < limit; round++) {
-    const unread = read.length === 0 ? where : { AND: [where, { NOT: buildPKWhereClause(keyFields, read) }] };
+    const unread = read.length === 0 ? where : { AND: [where, { NOT: buildKeyWhereClause(keyFields, read) }] };
     const rows = await delegate.findMany({ where: unread, take: limit - count });
     if (rows.length === 0) {
       break;
     }
     const rekeyed = rowsUnderNewKeys(rows, keyFields, keyWrite);
     read.push(...rows, ...rekeyed);
-    const narrowed = { AND: [where, buildPKWhereClause(keyFields, rows)] };
+    const narrowed = { AND: [where, buildKeyWhereClause(keyFields, rows)] };
     const written = countOf(await operation.execute({ ...unlimited, where: narrowed }));
     count += written;
     const matchingAfter =
       rekeyed.length === 0
         ? narrowed
-        : { AND: [where, buildPKWhereClause(keyFields, underWrittenKeys(rows, keyWrite))] };
+        : { AND: [where, buildKeyWhereClause(keyFields, underWrittenKeys(rows, keyWrite))] };
     limitedRounds.push({ rows, narrowed, written, keyFields, keyWrite, matchingAfter });
     if (written === rows.length) {
       break;
@@ -506,7 +507,7 @@ const limitedWriteRows = async (
     return { rows: written, beforeStates: written };
   }
   const { keyFields, keyWrite } = prepared;
-  const afterRows = await findManyByPKs(delegate, keyFields, underWrittenKeys(written, keyWrite));
+  const afterRows = await findManyByKeys(delegate, keyFields, underWrittenKeys(written, keyWrite));
   return pairReReadRows(operation, afterRows, written, keyFields, keyWrite, failureSink);
 };
 
@@ -602,7 +603,7 @@ export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationE
         // where-field the update changed still pairs with its before row.
         const { beforeRows, keyFields, keyWrite } = prepared;
         const delegate = delegateOf(scope, operation.model);
-        const afterRows = await findManyByPKs(delegate, keyFields, underWrittenKeys(beforeRows, keyWrite));
+        const afterRows = await findManyByKeys(delegate, keyFields, underWrittenKeys(beforeRows, keyWrite));
         return pairReReadRows(operation, afterRows, beforeRows, keyFields, keyWrite, failureSink);
       }
       case 'delete':
