@@ -418,7 +418,7 @@ describe('Context Enrichment Integration', () => {
       ]);
     });
 
-    it('should enrich context for deleteMany operation', async () => {
+    it('should call the entity enricher once with the three deleted comments for a deleteMany and enrich every row of each', async () => {
       const entityEnricher = createCommentEntityEnricher();
       const aggregateEnricher = createCommentAggregateEnricher();
       const aggregateMapping = createCommentAggregateMapping(
@@ -464,6 +464,7 @@ describe('Context Enrichment Integration', () => {
       });
 
       expect(entityEnricher).toHaveBeenCalledTimes(1);
+      expect(entityEnricher.mock.calls[0]?.[0]).toHaveLength(3);
 
       const deleteLogs = await customBasePrisma.auditLog.findMany({
         where: { entityType: 'Comment', action: 'delete', entityId: { in: commentIds } },
@@ -479,51 +480,6 @@ describe('Context Enrichment Integration', () => {
             .sort(byJson),
         ).toEqual([{ commentContent: 'Comment 1' }, { commentContent: 'Comment 2' }, { commentContent: 'Comment 3' }]);
       }
-    });
-
-    it('should call entity enricher exactly once (batch) for deleteMany operation', async () => {
-      const entityEnricher = createUserEntityEnricher();
-      const aggregateMapping = createUserEntityAggregateMapping(
-        entityEnricher as Mock<(entities: unknown[], prisma: PrismaClient) => Promise<unknown[]>>,
-      );
-
-      const { basePrisma: customBasePrisma, prisma: customPrisma, provider } = openClient({ aggregateMapping });
-
-      const actor: AuditContext = {
-        actor: { category: 'model', type: 'User', id: 'delete-batch-enricher-actor' },
-      };
-
-      const userIds = await provider.runAsync(actor, async () => {
-        const user1 = await customPrisma.user.create({
-          data: { email: 'del-batch1@example.com', name: 'Del Batch 1', password: 'pass1' },
-        });
-        const user2 = await customPrisma.user.create({
-          data: { email: 'del-batch2@example.com', name: 'Del Batch 2', password: 'pass2' },
-        });
-        const user3 = await customPrisma.user.create({
-          data: { email: 'del-batch3@example.com', name: 'Del Batch 3', password: 'pass3' },
-        });
-
-        return [user1.id, user2.id, user3.id];
-      });
-
-      await customBasePrisma.auditLog.deleteMany({ where: { action: 'create' } });
-      entityEnricher.mockClear();
-      await provider.runAsync(actor, async () => {
-        await customPrisma.user.deleteMany({ where: { id: { in: userIds } } });
-      });
-
-      expect(entityEnricher).toHaveBeenCalledTimes(1);
-      const auditLogs = await customBasePrisma.auditLog.findMany({
-        where: { actorId: 'delete-batch-enricher-actor', action: 'delete' },
-      });
-
-      expect(auditLogs).toHaveLength(3);
-      expect(auditLogs.map((log) => log.entityContext).sort(byJson)).toEqual(
-        ['del-batch1@example.com', 'del-batch2@example.com', 'del-batch3@example.com'].map((email) => ({
-          enrichedEmail: email.toUpperCase(),
-        })),
-      );
     });
 
     it('should call aggregate enricher exactly once (batch) for deleteMany operation', async () => {
