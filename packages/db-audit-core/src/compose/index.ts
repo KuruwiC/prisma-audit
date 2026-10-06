@@ -94,6 +94,9 @@ const redactStates = (states: StoredStates, redactConfig: RedactConfig): StoredS
   return { before: before ?? null, after: after ?? null, changes };
 };
 
+/** A copy of the stored states that shares no object with them, for one more record of the same event */
+const copyStates = (states: StoredStates): StoredStates => structuredClone(states);
+
 const maskStates = (states: RecordStates, fields: ReadonlySet<string>): RecordStates => ({
   before: states.before && maskColumns(states.before, fields),
   after: states.after && maskColumns(states.after, fields),
@@ -170,8 +173,10 @@ const composeEvent = <TModelName extends string>(
   const stored = config.redact ? redactStates(serialized, config.redact) : serialized;
   const requestContext = auditContext.request || null;
 
-  return event.roots.map((root) =>
-    serializeContexts(
+  // Each root's record holds its own states, so a writer that changes one record leaves the others as composed
+  return event.roots.map((root, index) => {
+    const recordStates = index === 0 ? stored : copyStates(stored);
+    return serializeContexts(
       {
         actorCategory: auditContext.actor.category,
         actorType: auditContext.actor.type,
@@ -189,17 +194,17 @@ const composeEvent = <TModelName extends string>(
         aggregateContext: event.aggregateContexts.get(aggregateRootKey(root)) ?? null,
 
         action: event.action,
-        before: stored.before,
-        after: stored.after,
-        changes: stored.changes,
+        before: recordStates.before,
+        after: recordStates.after,
+        changes: recordStates.changes,
         beforeUnavailable: event.action !== 'create' && event.before.kind === 'unavailable',
 
         requestContext,
         createdAt: now,
       },
       customSerializers,
-    ),
-  );
+    );
+  });
 };
 
 /**

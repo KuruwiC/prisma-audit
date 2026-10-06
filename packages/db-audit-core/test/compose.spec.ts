@@ -90,6 +90,24 @@ describe('compose', () => {
       ]);
     });
 
+    it("gives each root's record its own states, so changing one record's states leaves the others as composed", () => {
+      const roots: ResolvedId[] = [
+        postRoot('post-1'),
+        { aggregateCategory: 'model', aggregateType: 'User', aggregateId: 'user-9' },
+      ];
+      const resolved = { ...updateEvent({ id: 'post-1', title: 'Old' }, { id: 'post-1', title: 'New' }), roots };
+
+      const [first, second] = compose([resolved], ambient(), now);
+      const mutated = first as NonNullable<typeof first>;
+      (mutated.before as Record<string, unknown>).title = 'changed';
+      (mutated.after as Record<string, unknown>).title = 'changed';
+      (mutated.changes as Record<string, unknown>).title = 'changed';
+
+      expect(second?.before).toEqual({ id: 'post-1', title: 'Old' });
+      expect(second?.after).toEqual({ id: 'post-1', title: 'New' });
+      expect(second?.changes).toEqual({ title: { old: 'Old', new: 'New' } });
+    });
+
     it('concatenates the records of several events in event order', () => {
       const records = compose([event({ entityId: 'post-1' }), event({ entityId: 'post-2' })], ambient(), now);
 
