@@ -353,6 +353,81 @@ describe('compose', () => {
       expect(record.after).toEqual({ id: 'post-1', password: 'plain' });
     });
 
+    it('redacts a sensitive key inside a class instance among the column values', () => {
+      class Credentials {
+        constructor(
+          readonly user: string,
+          readonly token: string,
+        ) {}
+      }
+      const resolved = updateEvent(
+        { id: 'post-1', credentials: new Credentials('a', 'old') },
+        { id: 'post-1', credentials: new Credentials('a', 'new') },
+      );
+
+      const record = composeOne(resolved, { redact: {} });
+
+      const redacted = { redacted: true, hadValue: true };
+      expect(record.before).toEqual({ id: 'post-1', credentials: { user: 'a', token: redacted } });
+      expect(record.after).toEqual({ id: 'post-1', credentials: { user: 'a', token: redacted } });
+      expect(record.changes).toEqual({
+        credentials: { old: { user: 'a', token: redacted }, new: { user: 'a', token: redacted } },
+      });
+    });
+
+    it('redacts sensitive Date and BigInt values and compares their stored forms for isDifferent', () => {
+      const resolved = updateEvent(
+        { id: 'post-1', secret: new Date('2025-01-01T00:00:00.000Z'), pin: 1234n },
+        { id: 'post-1', secret: new Date('2025-02-01T00:00:00.000Z'), pin: 1234n },
+      );
+
+      const record = composeOne(resolved, { redact: {} });
+
+      const redacted = { redacted: true, hadValue: true };
+      expect(record.before).toEqual({ id: 'post-1', secret: redacted, pin: redacted });
+      expect(record.after).toEqual({ id: 'post-1', secret: redacted, pin: redacted });
+      expect(record.changes).toEqual({ secret: { old: redacted, new: { ...redacted, isDifferent: true } } });
+    });
+
+    it('redacts a sensitive field whose value a custom serializer turns into a string, by its key', () => {
+      class Pin {
+        constructor(
+          readonly digits: string,
+          readonly issuedAt: number,
+        ) {}
+      }
+      const resolved = updateEvent(
+        { id: 'post-1', pin: new Pin('1234', 1), token: new Pin('1111', 1) },
+        { id: 'post-1', pin: new Pin('1234', 2), token: new Pin('2222', 1) },
+      );
+
+      const record = composeOne(resolved, {
+        redact: {},
+        serialization: { customSerializers: [(value) => (value instanceof Pin ? `pin:${value.digits}` : UNHANDLED)] },
+      });
+
+      // The diff compares the column values; isDifferent compares what is stored.
+      const redacted = { redacted: true, hadValue: true };
+      expect(record.before).toEqual({ id: 'post-1', pin: redacted, token: redacted });
+      expect(record.after).toEqual({ id: 'post-1', pin: redacted, token: redacted });
+      expect(record.changes).toEqual({
+        pin: { old: redacted, new: { ...redacted, isDifferent: false } },
+        token: { old: redacted, new: { ...redacted, isDifferent: true } },
+      });
+    });
+
+    it('throws when a custom serializer turns a whole state into a value that is not a record', () => {
+      const isState = (value: unknown) => typeof value === 'object' && value !== null && 'password' in value;
+      const config: Partial<ComposeConfig> = {
+        redact: {},
+        serialization: { customSerializers: [(value) => (isState(value) ? JSON.stringify(value) : UNHANDLED)] },
+      };
+
+      expect(() => compose([event({ after: { id: 'post-1', password: 'plain' } })], ambient(config), now)).toThrow(
+        '[db-audit-core] Redaction produced unexpected type',
+      );
+    });
+
     it('throws when redaction does not return a record for a state', () => {
       redaction.override = () => ['not', 'a', 'record'];
 

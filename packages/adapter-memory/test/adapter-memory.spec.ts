@@ -692,6 +692,26 @@ describe('record composition', () => {
     });
     expect(adapter.store.find('User', 'u1')?.createdAt).toBe(createdAt);
   });
+
+  it('redaction: a sensitive key inside a class instance among the column values is masked, the stored row keeps the instance', async () => {
+    class Credentials {
+      constructor(
+        readonly user: string,
+        readonly token: string,
+      ) {}
+    }
+    const adapter = createAdapter({ redact: {} });
+    const credentials = new Credentials('alice', 'placeholder-token');
+
+    await withContext(() => adapter.create('User', { id: 'u1', name: 'Alice', credentials }));
+
+    expect(adapter.store.auditLogs()[0]?.after).toEqual({
+      id: 'u1',
+      name: 'Alice',
+      credentials: { user: 'alice', token: { redacted: true, hadValue: true } },
+    });
+    expect(adapter.store.find('User', 'u1')?.credentials).toBe(credentials);
+  });
 });
 
 describe('identityOf', () => {
