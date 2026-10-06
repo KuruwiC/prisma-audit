@@ -410,10 +410,7 @@ const recordFailedRead = async (
   await reportNestedPreFetchFailure(context.onPreFetchFailure, nestedOp, params, error);
 };
 
-/**
- * Records a failed read of the row one element of `nestedOp` names, leaving its other rows as read,
- * and reports it with that element
- */
+/** Records a failed read of the row one element of `nestedOp` names, leaving the other rows of the path as read */
 const targetReadFailureHandler =
   (context: NestedPreFetchContext, nestedOp: NestedOperationInfo): TargetReadFailureHandler =>
   (target, error) =>
@@ -492,8 +489,7 @@ const preFetchNestedOperation = async (
  *
  * Not scoped to the parent rows: `connect` re-parents an existing row, so the row the WHERE names
  * is the target whichever parent it belongs to. The WHERE is a `<Model>WhereUniqueInput`, which
- * `findUnique` accepts natively, including a composite-key compound-unique shape. Each row is read
- * on its own, so a failed read leaves unknown only the row its WHERE names.
+ * `findUnique` accepts natively, including a composite-key compound-unique shape.
  */
 const handleConnectOrCreate = async (
   context: NestedPreFetchContext,
@@ -624,10 +620,10 @@ const keyColumnsOf = (
  * Reads the key columns of the row each element of a to-many `update` whose before state is not
  * read names, when its WHERE names the row by a unique field other than the primary key, or a
  * to-one relation below it links by another column of that row (a foreign key on the row): one
- * read per element, so bounded by the caller's args, and a failed read leaves unknown only the row
- * its element names. The key columns read are stored under the element's WHERE, so the element's
- * row is identified by it and the operations below it are read and snapshotted under its key. A
- * WHERE that names the primary key is enough for every other relation below it.
+ * read per element, so bounded by the caller's args. The key columns read are stored under the
+ * element's WHERE, so the element's row is identified by it and the operations below it are read
+ * and snapshotted under its key. A WHERE that names the primary key is enough for every other
+ * relation below it.
  */
 const identifyRowsNamedByElements = async (
   context: NestedPreFetchContext,

@@ -114,7 +114,6 @@ const resolveScopedParentRows = async (input: ToManyScopeInput): Promise<ScopedP
 export interface PreFetchOneToManyRelationInput extends ToManyScopeInput {
   operation: NestedOperationKeyword;
   relatedModelClient: PreFetchModelClient;
-  /** Takes the failed read of the row one target WHERE names; the other targets are still read */
   onTargetReadFailure: TargetReadFailureHandler;
 }
 
