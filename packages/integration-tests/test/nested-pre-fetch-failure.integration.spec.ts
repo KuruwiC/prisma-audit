@@ -145,7 +145,7 @@ describe('nested pre-fetch failures — observer notification', () => {
     }
   });
 
-  it('a nested delete array whose read of one item fails records that item as unavailable and the items around it with their before state', async () => {
+  it('a nested delete array whose read of one item fails records that item as unavailable and the items around it with their before state, and reports that item', async () => {
     const FAILURE_MESSAGE = 'simulated nested pre-fetch failure (delete #2)';
     const observer = vi.fn<AuditErrorObserver>();
     const { rawBasePrisma, basePrisma, provider, prisma, armFault } = createClient(sharedDatabaseUrl, observer);
@@ -192,16 +192,18 @@ describe('nested pre-fetch failures — observer notification', () => {
       const remaining = await basePrisma.comment.count({ where: { postId: post.id } });
       expect(remaining).toBe(0);
 
-      // Only c2's read failed, so the observer hears about that one read.
-      expect(observer).toHaveBeenCalledTimes(1);
-      expect(observer).toHaveBeenCalledWith(
-        expect.objectContaining({
-          phase: 'pre-fetch',
-          modelName: 'Comment',
-          operation: 'delete',
-          error: expect.objectContaining({ message: FAILURE_MESSAGE }),
-        }),
-      );
+      // Only c2's read failed, so the observer hears about that one read, with c2's item as params.
+      expect(observer.mock.calls).toEqual([
+        [
+          {
+            phase: 'pre-fetch',
+            modelName: 'Comment',
+            operation: 'delete',
+            params: { id: c2.id },
+            error: expect.objectContaining({ message: FAILURE_MESSAGE }),
+          },
+        ],
+      ]);
 
       const rows = await basePrisma.auditLog.findMany({
         where: { entityType: 'Comment', aggregateType: 'Comment', action: 'delete' },

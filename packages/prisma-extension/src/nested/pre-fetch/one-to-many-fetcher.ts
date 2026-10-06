@@ -15,7 +15,6 @@ import {
   type NestedOperationKeyword,
   namedTargets,
   type PrecedingNestedWrite,
-  targetWhereClauses,
 } from '../../grammar/nested-operations.js';
 import type { DMMFField, DMMFModel } from '../../internal-types.js';
 import type { UniqueConstraint } from '../../schema/types.js';
@@ -161,8 +160,8 @@ const readTargetUnderParents = async (
 export const preFetchOneToManyRelation = async (input: PreFetchOneToManyRelationInput): Promise<void> => {
   const { path, operation, data, pkConstraint, preFetchResults, onTargetReadFailure } = input;
 
-  const whereClauses = targetWhereClauses(operation, data);
-  if (whereClauses.length === 0) {
+  const targets = namedTargets(operation, data);
+  if (targets.length === 0) {
     preFetchLog('1:N no target where clause: path=%s operation=%s', path, operation);
     return;
   }
@@ -175,7 +174,7 @@ export const preFetchOneToManyRelation = async (input: PreFetchOneToManyRelation
   }
 
   await readEachTarget(
-    whereClauses,
+    targets,
     async (where) => {
       const beforeRecord = await readTargetUnderParents(input, where, parentRows);
       storeReadResult(preFetchResults, path, where, beforeRecord, pkConstraint, allKnown);

@@ -656,7 +656,7 @@ describe('a failed read of one element of a nested list', () => {
     { keyword: 'delete', data: ids.map((id) => ({ id })) },
     { keyword: 'connectOrCreate', data: ids.map((id) => ({ where: { id }, create: { name: 'new' } })) },
   ])(
-    'a $keyword list records only the elements whose read failed as unavailable, and reports each failed read',
+    'a $keyword list records only the elements whose read failed as unavailable, and reports each failed read with its element',
     async ({ keyword, data }) => {
       const { client, delegates } = createClient({ member: members });
       const findUnique = delegates.member?.findUnique;
@@ -675,38 +675,39 @@ describe('a failed read of one element of a nested list', () => {
       expect(preFetchedResultFor(results, 'members', 'm3')).toEqual(unavailable('m3'));
       expect(onPreFetchFailure.mock.calls).toEqual([
         [
-          expect.objectContaining({
+          {
             phase: 'pre-fetch',
             modelName: 'Member',
             operation: keyword,
+            params: data[0],
             error: new Error('read 1 failed'),
-          }),
+          },
         ],
         [
-          expect.objectContaining({
+          {
             phase: 'pre-fetch',
             modelName: 'Member',
             operation: keyword,
+            params: data[2],
             error: new Error('read 3 failed'),
-          }),
+          },
         ],
       ]);
     },
   );
 
-  it('identifies the elements of an update list without a before state around the one whose key-column read failed', async () => {
+  it('identifies the elements of an update list without a before state around the one whose key-column read failed, and reports that element', async () => {
     const { client, delegates } = createClient({ member: members });
     const findUnique = delegates.member?.findUnique;
     if (!findUnique) throw new Error('member delegate missing');
     failReadsOn(findUnique, [1]);
     const mentorUpsert = { upsert: { create: { name: 'mentor' }, update: { name: 'mentor' } } };
 
+    const update = ids.slice(0, 2).map((id) => ({ where: { id }, data: { mentor: mentorUpsert } }));
+
     const { preFetched, onPreFetchFailure } = preFetchReporting(
       client,
-      {
-        where: { id: 'a1' },
-        data: { members: { update: ids.slice(0, 2).map((id) => ({ where: { id }, data: { mentor: mentorUpsert } })) } },
-      },
+      { where: { id: 'a1' }, data: { members: { update } } },
       identityOnly,
     );
     const { results } = await preFetched;
@@ -725,12 +726,13 @@ describe('a failed read of one element of a nested list', () => {
     });
     expect(onPreFetchFailure.mock.calls).toEqual([
       [
-        expect.objectContaining({
+        {
           phase: 'pre-fetch',
           modelName: 'Member',
           operation: 'update',
+          params: update[0],
           error: new Error('read 1 failed'),
-        }),
+        },
       ],
     ]);
   });

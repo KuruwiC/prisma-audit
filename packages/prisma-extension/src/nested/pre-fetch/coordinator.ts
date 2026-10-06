@@ -15,6 +15,7 @@ import {
   type NestedBatchTargets,
   type NestedOperationInfo,
   type NestedPreFetchResults,
+  namedTargets,
   targetWhereClauses,
   type UpsertBranch,
 } from '../../grammar/nested-operations.js';
@@ -73,7 +74,7 @@ import {
   storeUnreadRows,
 } from './pre-fetch-result-store.js';
 import { relationLinkOf } from './relation-link.js';
-import { readEachTarget, type TargetReadFailureHandler } from './target-reads.js';
+import { elementNaming, readEachTarget, type TargetReadFailureHandler } from './target-reads.js';
 
 type PrismaDMMF = PrismaNamespace['dmmf'];
 
@@ -84,11 +85,13 @@ export interface PreFetchCoordinatorDependencies {
   readonly shouldFetchBefore: ShouldFetchBefore;
   readonly auditedOmittedFields: AuditedOmittedFields;
   /**
-   * Notified once per failed pre-fetch read of a nested operation: once per element whose row the
-   * element names by unique WHERE (each such row is read on its own), else once per operation. The
-   * rows the read left unknown are recorded as `unavailable` (see pre-fetch-result-store.ts), and
-   * the caller's own operation continues. Mirrors the top-level equivalent, `fetchBeforeState` in
-   * pipeline/before-state.ts, which reports the same failure class through the same observer.
+   * Notified once per failed pre-fetch read of a nested operation, with `params` naming what the
+   * read was for: a row an element of the operation names by unique WHERE is read on its own, so a
+   * failed read of it is reported once with that element as `params`; any other read is reported
+   * once per operation with the operation's data as `params`. The rows the read left unknown are
+   * recorded as `unavailable` (see pre-fetch-result-store.ts), and the caller's own operation
+   * continues. Mirrors the top-level equivalent, `fetchBeforeState` in pipeline/before-state.ts,
+   * which reports the same failure class through the same observer.
    * Optional: when omitted, the failure is visible only via `preFetchLog`. The filter read of an
    * `updateMany` / `deleteMany` is not reported here: it identifies the rows the keyword writes,
    * so its failure rejects the pre-fetch, like the read of a top-level batch operation.
@@ -169,6 +172,7 @@ const categorizeRelationType = (
 const reportNestedPreFetchFailure = async (
   onPreFetchFailure: FailureSink['notify'] | undefined,
   nestedOp: NestedOperationInfo,
+  params: unknown,
   error: unknown,
 ): Promise<void> => {
   if (!onPreFetchFailure) return;
@@ -177,7 +181,7 @@ const reportNestedPreFetchFailure = async (
     phase: 'pre-fetch',
     modelName: nestedOp.relatedModel,
     operation: nestedOp.operation,
-    params: nestedOp.data,
+    params,
     error: toError(error),
   });
 };
@@ -285,6 +289,7 @@ export const preFetchNestedRecordsBeforeOperation = async (
         context,
         nestedOp,
         targetsNamedByWhere(nestedOp) ? targetWhereClauses(nestedOp.operation, nestedOp.data) : undefined,
+        nestedOp.data,
         error,
       );
     }
@@ -391,24 +396,28 @@ interface NestedRelation {
 /**
  * Records the rows a failed pre-fetch read of `nestedOp` left unknown (see `storeUnreadRows`):
  * those `wheres` names, or, when undefined, the rows of the path the read did not name on its own.
- * Then reports the failure.
+ * Then reports the failure with `params`, the part of the operation's data the read was for.
  */
 const recordFailedRead = async (
   context: NestedPreFetchContext,
   nestedOp: NestedOperationInfo,
   wheres: readonly PreFetchRecord[] | undefined,
+  params: unknown,
   error: unknown,
 ): Promise<void> => {
   storeUnreadRows(context.preFetchResults, nestedOp.path, wheres, context.resolvePkConstraint(nestedOp.relatedModel));
   preFetchLog('pre-fetch failed: path=%s error=%o', nestedOp.path, error);
-  await reportNestedPreFetchFailure(context.onPreFetchFailure, nestedOp, error);
+  await reportNestedPreFetchFailure(context.onPreFetchFailure, nestedOp, params, error);
 };
 
-/** Records a failed read of the row one element of `nestedOp` names, leaving its other rows as read */
+/**
+ * Records a failed read of the row one element of `nestedOp` names, leaving its other rows as read,
+ * and reports it with that element
+ */
 const targetReadFailureHandler =
   (context: NestedPreFetchContext, nestedOp: NestedOperationInfo): TargetReadFailureHandler =>
-  (where, error) =>
-    recordFailedRead(context, nestedOp, [where], error);
+  (target, error) =>
+    recordFailedRead(context, nestedOp, [target.where], elementNaming(nestedOp.data, target), error);
 
 const resolveNestedRelation = (
   context: NestedPreFetchContext,
@@ -493,7 +502,7 @@ const handleConnectOrCreate = async (
   pkConstraint: UniqueConstraint,
 ): Promise<void> => {
   await readEachTarget(
-    targetWhereClauses(nestedOp.operation, nestedOp.data),
+    namedTargets(nestedOp.operation, nestedOp.data),
     async (where) => {
       const beforeRecord = await relatedModelClient.findUnique({ where });
       storeReadResult(context.preFetchResults, nestedOp.path, where, beforeRecord, pkConstraint);
@@ -628,11 +637,11 @@ const identifyRowsNamedByElements = async (
 ): Promise<void> => {
   const { nestedOp, pkConstraint } = relation;
   const linksByPrimaryKey = Object.keys(keyColumns).length === pkConstraint.fields.length;
-  const wheres = targetWhereClauses(nestedOp.operation, nestedOp.data).filter(
-    (where) => !(linksByPrimaryKey && primaryKeyNamedBy(where, pkConstraint)),
+  const targets = namedTargets(nestedOp.operation, nestedOp.data).filter(
+    ({ where }) => !(linksByPrimaryKey && primaryKeyNamedBy(where, pkConstraint)),
   );
   await readEachTarget(
-    wheres,
+    targets,
     async (where) => {
       const row = await relatedModelClient.findUnique({ where, select: keyColumns });
       preFetchLog('key columns of a to-many update row: path=%s found=%s', nestedOp.path, row !== null);

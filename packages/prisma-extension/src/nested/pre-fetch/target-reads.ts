@@ -5,25 +5,30 @@
  * @module nested/pre-fetch/target-reads
  */
 
+import type { NamedTarget } from '../../grammar/nested-operations.js';
 import type { PreFetchRecord } from './model-client.js';
 
-/** Records the row `where` names as unknown after its read failed with `error`, and reports it */
-export type TargetReadFailureHandler = (where: PreFetchRecord, error: unknown) => Promise<void>;
+/** Records the row `target` names as unknown after its read failed with `error`, and reports it */
+export type TargetReadFailureHandler = (target: NamedTarget, error: unknown) => Promise<void>;
+
+/** The element of a nested operation's `data` that names `target`: `data` itself when it is not a list */
+export const elementNaming = (data: unknown, target: NamedTarget): unknown =>
+  Array.isArray(data) ? data[target.element] : data;
 
 /**
- * Runs `read` for each WHERE in turn. A read that rejects is handed to `onFailure`, and the next
- * WHERE is still read.
+ * Runs `read` for the WHERE of each target in turn. A read that rejects is handed to `onFailure`
+ * with its target, and the next target is still read.
  */
 export const readEachTarget = async (
-  wheres: readonly PreFetchRecord[],
+  targets: readonly NamedTarget[],
   read: (where: PreFetchRecord) => Promise<void>,
   onFailure: TargetReadFailureHandler,
 ): Promise<void> => {
-  for (const where of wheres) {
+  for (const target of targets) {
     try {
-      await read(where);
+      await read(target.where);
     } catch (error) {
-      await onFailure(where, error);
+      await onFailure(target, error);
     }
   }
 };
