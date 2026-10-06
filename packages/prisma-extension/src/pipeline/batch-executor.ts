@@ -2,9 +2,9 @@
  * Batch-operation executor
  *
  * createMany, createManyAndReturn, updateMany, updateManyAndReturn and deleteMany: reads the
- * rows an update or a delete will touch with `findMany`, runs the operation, reads the rows a
- * createMany or an updateMany wrote back by primary key, and collects one event per written row,
- * paired with its before row by primary key.
+ * rows an update or a delete will touch with `findMany`, runs the operation, reads back the rows a
+ * createMany wrote by the keys of its data and the rows an updateMany wrote by primary key, and
+ * collects one event per written row, paired with its before row by primary key.
  */
 
 import type { FailureSink, MutationEvent } from '@kuruwic/db-audit-core';
@@ -20,8 +20,10 @@ import {
   findManyByPKs,
   getPrimaryKeyFields,
 } from '../utils/id-generation.js';
+import type { EntityIdentityKey } from '../utils/identity-key.js';
 import { getModelDelegate, hasOperation } from '../utils/model-accessor.js';
 import { requiresBeforeState } from '../utils/operation-classifier.js';
+import { supportsQueryOmit } from '../utils/prisma-version.js';
 import { collectBatchOperationEvents } from './collect-events.js';
 import type { ExecutionScope } from './execution-scope.js';
 import { type AuditedOperation, createExecutor, type OperationExecutor } from './executor.js';
@@ -38,8 +40,8 @@ export interface BatchExecutorDependencies {
 export type BatchPrepared =
   /** createManyAndReturn: Prisma generates the ids and returns the rows it created */
   | { readonly kind: 'create-returning' }
-  /** createMany: the rows to insert, with client-generated ids */
-  | { readonly kind: 'create'; readonly rows: Row[]; readonly pkFields: string[] }
+  /** createMany: the rows to insert, with client-generated primary-key values, and the fields of that key */
+  | { readonly kind: 'create'; readonly rows: Row[]; readonly keyFields: string[] }
   /** updateManyAndReturn: its returned rows are exactly the updated ones */
   | { readonly kind: 'update-returning'; readonly beforeRows: Row[]; readonly pkFields: string[] }
   | { readonly kind: 'update'; readonly beforeRows: Row[]; readonly pkFields: string[] }
@@ -73,16 +75,13 @@ interface BatchDelegate {
 /** How many times a limited updateMany or deleteMany reads and writes rows before it settles for its count */
 const LIMITED_WRITE_ROUNDS = 3;
 
-const batchDelegate = (
-  scope: ExecutionScope,
-  modelName: string,
-  auditedOmittedFields: AuditedOmittedFields,
-): BatchDelegate => {
+/** The model's delegate on the scope's handle, its finds reading `omittedFields` although the client omits them */
+const batchDelegate = (scope: ExecutionScope, modelName: string, omittedFields: ReadonlySet<string>): BatchDelegate => {
   const delegate = getModelDelegate(scope.handle, modelName);
   if (!hasOperation<BatchDelegate>(delegate, 'findMany')) {
     throw new Error(`Model ${modelName} does not have findMany operation. This is required for batch operations.`);
   }
-  return withOmittedFieldsInFinds(delegate, auditedOmittedFields.of(modelName));
+  return withOmittedFieldsInFinds(delegate, omittedFields);
 };
 
 const rowsOf = (value: unknown): Row[] => (Array.isArray(value) ? (value as Row[]) : []);
@@ -110,28 +109,30 @@ const prepareCreate = (operation: AuditedOperation, deps: BatchExecutorDependenc
   const { data } = operation.args;
   // Single-object data is normalized to an array so `data: {...}` is logged like `data: [...]`
   const rows = Array.isArray(data) ? (data as Row[]) : [data as Row];
-  const pkFields = getPrimaryKeyFields(deps.Prisma, operation.model);
-  return { kind: 'create', rows: ensureIds(deps.schemaMetadata, operation.model, rows, pkFields), pkFields };
+  const keyFields = getPrimaryKeyFields(deps.Prisma, operation.model);
+  return { kind: 'create', rows: ensureIds(deps.schemaMetadata, operation.model, rows, keyFields), keyFields };
 };
 
 /**
- * The rows a `createMany` inserted, as the client reads them, once per primary key, in `data`
- * order. A row of `data` whose primary key the read does not find was not created (skipped under
- * `skipDuplicates`). A row skipped because a row with its primary key already exists reads as
- * that row.
+ * The rows a `createMany` inserted, as the client reads them by the keys of `data`: every row the
+ * read returns, once per key as read. The database compares the keys, so a row whose key it stores
+ * or returns otherwise than `data` gave it (a case-insensitive collation, a BigInt given as a
+ * number, a truncated DateTime) is found all the same; `data` only orders the rows, those whose key
+ * reads as `data` gave it first, in `data` order, then the others in read order. A row of `data`
+ * the read does not find was not created (skipped under `skipDuplicates`) or is not visible to the
+ * read. A row skipped because a row with its key already exists reads as that row.
  */
-const createdRows = async (delegate: BatchDelegate, rows: readonly Row[], pkFields: string[]): Promise<Row[]> => {
-  const readByPk = buildEntityMap(await findManyByPKs(delegate, pkFields, rows), pkFields);
-  const created: Row[] = [];
-  for (const row of rows) {
-    const identity = extractEntityIdentity(row, pkFields);
-    const read = readByPk.get(identity);
-    if (read) {
-      created.push(read);
-      readByPk.delete(identity);
+const createdRows = async (delegate: BatchDelegate, rows: readonly Row[], keyFields: string[]): Promise<Row[]> => {
+  const read = buildEntityMap(await findManyByPKs(delegate, keyFields, rows), keyFields);
+  const position = new Map<EntityIdentityKey, number>();
+  rows.forEach((row, index) => {
+    const identity = extractEntityIdentity(row, keyFields);
+    if (!position.has(identity)) {
+      position.set(identity, index);
     }
-  }
-  return created;
+  });
+  const ranked = Array.from(read, ([identity, row]) => ({ row, rank: position.get(identity) ?? rows.length }));
+  return ranked.sort((a, b) => a.rank - b.rank).map(({ row }) => row);
 };
 
 /**
@@ -148,7 +149,7 @@ const prepareUpdateOrDelete = async (
 ): Promise<BatchPrepared> => {
   const { Prisma } = deps;
   const { model, action, args } = operation;
-  const delegate = batchDelegate(scope, model, deps.auditedOmittedFields);
+  const delegate = batchDelegate(scope, model, deps.auditedOmittedFields.of(model));
   const where = args.where ?? {};
   const { limit } = args;
 
@@ -218,10 +219,20 @@ const deletedRowsOfShortRound: WrittenRowsOfShortRound = async (delegate, round)
   return gone.length === round.written ? gone : [];
 };
 
+/** Why `unidentified` rows the operation wrote are not audited */
+type UnidentifiedReason = (operation: AuditedOperation, unidentified: number) => string;
+
+const limitedRowsOfOtherWriters: UnidentifiedReason = (operation, unidentified) =>
+  `${unidentified} of the rows a limited ${operation.action} wrote cannot be told apart from rows another writer changed`;
+
+const createdRowsNotReadBack: UnidentifiedReason = (operation, unidentified) =>
+  `${unidentified} of the rows a ${operation.action} created ${unidentified === 1 ? 'was' : 'were'} not found when read back by key`;
+
 const reportUnidentified = async (
   operation: AuditedOperation,
   unidentified: number,
   failureSink: FailureSink,
+  reason: UnidentifiedReason,
 ): Promise<void> => {
   if (unidentified <= 0) {
     return;
@@ -231,9 +242,7 @@ const reportUnidentified = async (
     modelName: operation.model,
     operation: operation.action,
     params: { unidentified },
-    error: new Error(
-      `${unidentified} of the rows a limited ${operation.action} wrote cannot be told apart from rows another writer changed`,
-    ),
+    error: new Error(reason(operation, unidentified)),
   });
 };
 
@@ -298,7 +307,7 @@ const limitedWrittenRows = async (
     } else if (round.written > 0) {
       const named = await writtenRowsOfShortRound(delegate, round);
       known.push(...named);
-      await reportUnidentified(operation, round.written - named.length, failureSink);
+      await reportUnidentified(operation, round.written - named.length, failureSink, limitedRowsOfOtherWriters);
     }
   }
   return known;
@@ -306,6 +315,19 @@ const limitedWrittenRows = async (
 
 export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationExecutor => {
   const { schemaMetadata, auditedOmittedFields, failureSink } = deps;
+  const queryOmitSupported = supportsQueryOmit(deps.Prisma.prismaVersion?.client);
+
+  const delegateOf = (scope: ExecutionScope, modelName: string): BatchDelegate =>
+    batchDelegate(scope, modelName, auditedOmittedFields.of(modelName));
+
+  /**
+   * The read of the rows a createMany created also reads the key fields a client-level omit hides,
+   * so each row read can be told by its key. A client that takes no query omit hides no field.
+   */
+  const createdRowsDelegateOf = (scope: ExecutionScope, modelName: string, keyFields: string[]): BatchDelegate =>
+    queryOmitSupported
+      ? batchDelegate(scope, modelName, new Set([...auditedOmittedFields.of(modelName), ...keyFields]))
+      : delegateOf(scope, modelName);
 
   const prepare = (operation: AuditedOperation, scope: ExecutionScope): Promise<BatchPrepared> =>
     requiresBeforeState(operation.action)
@@ -330,7 +352,7 @@ export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationE
         return { result, returnedRows: rowsOf(result) };
       }
       case 'limited':
-        return runLimitedWrite(operation, batchDelegate(scope, operation.model, auditedOmittedFields), prepared);
+        return runLimitedWrite(operation, delegateOf(scope, operation.model), prepared);
       case 'limited-as-given':
       case 'update':
       case 'delete':
@@ -352,18 +374,25 @@ export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationE
       case 'create-returning':
         return { rows: executed.returnedRows ?? [] };
       case 'create': {
-        const delegate = batchDelegate(scope, operation.model, auditedOmittedFields);
-        return { rows: await createdRows(delegate, prepared.rows, prepared.pkFields) };
+        const delegate = createdRowsDelegateOf(scope, operation.model, prepared.keyFields);
+        const rows = await createdRows(delegate, prepared.rows, prepared.keyFields);
+        await reportUnidentified(
+          operation,
+          countOf(executed.result) - rows.length,
+          failureSink,
+          createdRowsNotReadBack,
+        );
+        return { rows };
       }
       case 'update-returning':
         return pairByPrimaryKey(executed.returnedRows ?? [], prepared.beforeRows, prepared.pkFields);
       case 'limited-as-given':
         if (prepared.reportsUnidentified) {
-          await reportUnidentified(operation, countOf(executed.result), failureSink);
+          await reportUnidentified(operation, countOf(executed.result), failureSink, limitedRowsOfOtherWriters);
         }
         return { rows: [] };
       case 'limited': {
-        const delegate = batchDelegate(scope, operation.model, auditedOmittedFields);
+        const delegate = delegateOf(scope, operation.model);
         const written = await limitedWrittenRows(operation, delegate, executed.limitedRounds ?? [], failureSink);
         if (operation.action === AUDIT_ACTION.DELETE_MANY) {
           // A deleted row cannot be read again: its state is the one read before the delete.
@@ -378,7 +407,7 @@ export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationE
         }
         // Re-fetched by primary key, not by the original where, so a row whose where-field
         // the update changed still pairs with its before row.
-        const delegate = batchDelegate(scope, operation.model, auditedOmittedFields);
+        const delegate = delegateOf(scope, operation.model);
         const afterRows = await findManyByPKs(delegate, prepared.pkFields, prepared.beforeRows);
         return pairByPrimaryKey(afterRows, prepared.beforeRows, prepared.pkFields);
       }

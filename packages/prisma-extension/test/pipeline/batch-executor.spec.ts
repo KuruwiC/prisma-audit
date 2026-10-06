@@ -41,6 +41,15 @@ const Prisma: PrismaNamespace = {
             scalar('updatedAt', { type: 'DateTime', isUpdatedAt: true }),
           ],
         },
+        {
+          name: 'Membership',
+          fields: [
+            scalar('orgId', { type: 'BigInt', isRequired: true }),
+            scalar('userId', { type: 'BigInt', isRequired: true }),
+            scalar('role'),
+          ],
+          primaryKey: { name: null, fields: ['orgId', 'userId'] },
+        },
       ],
     },
   },
@@ -101,9 +110,9 @@ const createFailureSink = (): FailureSink => ({
   reportWriteFailure: vi.fn(async () => {}),
 });
 
-const createExecutor = (failureSink: FailureSink) =>
+const createExecutor = (failureSink: FailureSink, prismaNamespace: PrismaNamespace = Prisma) =>
   createBatchExecutor({
-    Prisma,
+    Prisma: prismaNamespace,
     schemaMetadata,
     auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS,
     failureSink,
@@ -121,6 +130,20 @@ const findManyByIds = (rowOf: (id: string) => Row) =>
   vi.fn<(args: { where: Row }) => Promise<Row[]>>(async ({ where }) =>
     (where.id as { in: string[] }).in.map((id) => rowOf(id)),
   );
+
+/** A createMany on `model`, run on a client holding that model's `createMany` and `findMany` */
+const createManyOn = (model: string, delegate: { createMany: unknown; findMany: unknown }, args: Row) => {
+  const client = clientWith({ [model.charAt(0).toLowerCase() + model.slice(1)]: delegate });
+  const createMany = delegate.createMany as (runArgs: Row) => Promise<unknown>;
+  const operation: AuditedOperation = {
+    model,
+    action: 'createMany',
+    args,
+    widened: new Map(),
+    execute: vi.fn(async (runArgs: Row) => createMany(runArgs)),
+  };
+  return { client, operation };
+};
 
 const unidentifiedMessage = (action: string, count: number) =>
   `${count} of the rows a limited ${action} wrote cannot be told apart from rows another writer changed`;
@@ -209,6 +232,137 @@ describe('createBatchExecutor', () => {
         expect.anything(),
         new Map(),
       );
+    });
+
+    it('audits every row the read returns: in data order where its key reads as data gave it, after those in read order where it does not', async () => {
+      const createMany = vi.fn(async () => ({ count: 2 }));
+      const findMany = findManyReturning([
+        { id: 'x1', email: 'x1@read' },
+        { id: 'b', email: 'b@read' },
+      ]);
+      const client = clientWith({ user: { createMany, findMany } });
+      const produceRecords = produce();
+
+      await runWithRecords(
+        executor,
+        operationOn(client, 'createMany', {
+          data: [
+            { id: 'X1', email: 'x1@1' },
+            { id: 'b', email: 'b@1' },
+          ],
+        }),
+        scopeOn(client),
+        produceRecords,
+      );
+
+      expect(produceRecords).toHaveBeenCalledWith(
+        [
+          eventOf({ identity: 'b', action: 'create', after: { id: 'b', email: 'b@read' } }),
+          eventOf({ identity: 'x1', action: 'create', after: { id: 'x1', email: 'x1@read' } }),
+        ],
+        expect.anything(),
+        new Map(),
+      );
+      expect(failureSink.notify).not.toHaveBeenCalled();
+    });
+
+    it('audits the row of a composite BigInt key that data gives as numbers, under the key as read', async () => {
+      const createMany = vi.fn(async () => ({ count: 1 }));
+      const findMany = findManyReturning([{ orgId: 1n, userId: 2n, role: 'member' }]);
+      const { client, operation } = createManyOn(
+        'Membership',
+        { createMany, findMany },
+        {
+          data: [{ orgId: 1, userId: 2, role: 'member' }],
+        },
+      );
+      const produceRecords = produce();
+
+      await runWithRecords(executor, operation, scopeOn(client), produceRecords);
+
+      expect(findMany.mock.calls).toEqual([[{ where: { OR: [{ orgId: 1, userId: 2 }] } }]]);
+      expect(produceRecords).toHaveBeenCalledWith(
+        [
+          expect.objectContaining({
+            model: 'Membership',
+            identity: '["1","2"]',
+            action: 'create',
+            after: { orgId: 1n, userId: 2n, role: 'member' },
+          }),
+        ],
+        expect.anything(),
+        new Map(),
+      );
+    });
+
+    it('reads the primary-key fields whatever a client-level omit hides, on a client that takes a query omit', async () => {
+      const createMany = vi.fn(async () => ({ count: 1 }));
+      const findMany = findManyReturning([{ id: 'a', email: 'a@read' }]);
+      const client = clientWith({ user: { createMany, findMany } });
+      const produceRecords = produce();
+
+      await runWithRecords(
+        createExecutor(failureSink, { ...Prisma, prismaVersion: { client: '6.2.0' } }),
+        operationOn(client, 'createMany', { data: [{ id: 'a', email: 'a@1' }] }),
+        scopeOn(client),
+        produceRecords,
+      );
+
+      expect(findMany.mock.calls).toEqual([[{ where: { id: { in: ['a'] } }, omit: { id: false } }]]);
+      expect(produceRecords).toHaveBeenCalledWith(
+        [eventOf({ identity: 'a', action: 'create', after: { id: 'a', email: 'a@read' } })],
+        expect.anything(),
+        new Map(),
+      );
+    });
+
+    it('reports the created rows the read does not find as row-identification, and audits the rows it finds', async () => {
+      const createMany = vi.fn(async () => ({ count: 3 }));
+      const findMany = findManyReturning([a1, b1]);
+      const client = clientWith({ user: { createMany, findMany } });
+      const produceRecords = produce();
+
+      const outcome = await runWithRecords(
+        executor,
+        operationOn(client, 'createMany', { data: [a1, b1, { id: 'c', email: 'c@1' }] }),
+        scopeOn(client),
+        produceRecords,
+      );
+
+      expect(outcome.result).toEqual({ count: 3 });
+      expect(failureSink.notify).toHaveBeenCalledExactlyOnceWith({
+        phase: 'row-identification',
+        modelName: 'User',
+        operation: 'createMany',
+        params: { unidentified: 1 },
+        error: new Error('1 of the rows a createMany created was not found when read back by key'),
+      });
+      expect(produceRecords).toHaveBeenCalledWith(
+        [eventOf({ identity: 'a', after: a1 }), eventOf({ identity: 'b', after: b1 })],
+        expect.anything(),
+        new Map(),
+      );
+    });
+
+    it('audits a row once when the reads of two chunks of keys both return it', async () => {
+      const ids = [...Array.from({ length: 1000 }, (_, index) => `r${index}`), 'R0'];
+      const createMany = vi.fn(async () => ({ count: 1000 }));
+      const findMany = vi.fn(async ({ where }: { where: Row }) =>
+        Array.from(new Set((where.id as { in: string[] }).in.map((id) => id.toLowerCase())), (id) => ({ id })),
+      );
+      const client = clientWith({ user: { createMany, findMany } });
+      const produceRecords = produce();
+
+      await runWithRecords(
+        executor,
+        operationOn(client, 'createMany', { data: ids.map((id) => ({ id })), skipDuplicates: true }),
+        scopeOn(client),
+        produceRecords,
+      );
+
+      expect(findMany).toHaveBeenCalledTimes(2);
+      expect(produceRecords.mock.calls[0]?.[0].map((event) => event.identity)).toEqual(ids.slice(0, 1000));
+      expect(failureSink.notify).not.toHaveBeenCalled();
     });
 
     it('reads the created rows on the handle of the interactive transaction it runs in', async () => {

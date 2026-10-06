@@ -221,6 +221,26 @@ describe('fields a client-level omit hides', () => {
       expect(JSON.stringify(record)).not.toContain('hash-new');
     });
 
+    it('records the rows createMany creates under their primary key when the client omit hides it, with the key in the state', async () => {
+      const { prisma, run, recordsOf } = await setup({}, { user: { id: true } });
+
+      const result = await run(() =>
+        prisma.user.createMany({
+          data: [
+            { id: 'u3', email: 'u3@example.com' },
+            { id: 'u4', email: 'u4@example.com' },
+          ],
+        }),
+      );
+
+      expect(result).toEqual({ count: 2 });
+      const records = await recordsOf('User');
+      expect(records.map((record) => [record.entityId, record.action, keysOf(record.after)])).toEqual([
+        ['u3', 'create', USER_COLUMNS],
+        ['u4', 'create', USER_COLUMNS],
+      ]);
+    });
+
     it('fails a foreignKey root on a hidden column the entity does not list, naming the option, and records the row under its own root', async () => {
       const observer = vi.fn<AuditErrorObserver>();
       const { basePrisma, prisma, run } = await setup({ errorHandling: { observer } });
