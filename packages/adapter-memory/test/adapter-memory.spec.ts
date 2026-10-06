@@ -111,6 +111,32 @@ describe('audited writes', () => {
     });
     expect(adapter.store.find('User', 'u1')).toBeUndefined();
   });
+
+  it('create of a key that exists rejects, keeps the existing row and writes no record', async () => {
+    const adapter = createAdapter();
+
+    await withContext(async () => {
+      await adapter.create('User', { id: 'u1', name: 'Alice' });
+      await expect(adapter.create('User', { id: 'u1', name: 'Bob' })).rejects.toThrow(
+        '[audit-adapter-memory] User "u1" already exists',
+      );
+    });
+
+    expect(adapter.store.find('User', 'u1')).toEqual({ id: 'u1', name: 'Alice' });
+    expect(adapter.store.auditLogs().map((log) => log.action)).toEqual(['create']);
+  });
+
+  it.each([
+    ['update', (adapter: ReturnType<typeof createAdapter>) => adapter.update('User', 'u1', { name: 'Bob' })],
+    ['delete', (adapter: ReturnType<typeof createAdapter>) => adapter.delete('User', 'u1')],
+  ])('%s of a missing row rejects, writes no row and no record', async (_action, write) => {
+    const adapter = createAdapter();
+
+    await expect(withContext(() => write(adapter))).rejects.toThrow('[audit-adapter-memory] User "u1" not found');
+
+    expect(adapter.store.find('User', 'u1')).toBeUndefined();
+    expect(adapter.store.auditLogs()).toEqual([]);
+  });
 });
 
 describe('aggregate resolution and enrichment', () => {
@@ -595,6 +621,28 @@ describe('sampling', () => {
     await withContext(() => adapter.create('User', { id: 'u1', name: 'Alice' }));
 
     expect(adapter.store.find('User', 'u1')).toEqual({ id: 'u1', name: 'Alice' });
+    expect(adapter.store.auditLogs()).toEqual([]);
+  });
+
+  it('sampling 0 inside a transaction: the row is written on the transaction handle and commits or rolls back with it', async () => {
+    const adapter = createAdapter({ sampling: 0 });
+
+    await withContext(async () => {
+      await adapter.transaction(async (db) => {
+        await adapter.create('User', { id: 'u1', name: 'Alice' });
+        expect(db.find('User', 'u1')).toEqual({ id: 'u1', name: 'Alice' });
+        expect(adapter.store.find('User', 'u1')).toBeUndefined();
+      });
+      await expect(
+        adapter.transaction(async () => {
+          await adapter.create('User', { id: 'u2', name: 'Bob' });
+          throw new Error('abort');
+        }),
+      ).rejects.toThrow('abort');
+    });
+
+    expect(adapter.store.find('User', 'u1')).toEqual({ id: 'u1', name: 'Alice' });
+    expect(adapter.store.find('User', 'u2')).toBeUndefined();
     expect(adapter.store.auditLogs()).toEqual([]);
   });
 
