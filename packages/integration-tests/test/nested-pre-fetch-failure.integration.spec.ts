@@ -174,7 +174,7 @@ describe('nested pre-fetch failures — observer notification', () => {
       const rows = await basePrisma.auditLog.findMany({
         where: { entityType: 'Comment', entityId: comment.id, action: 'update' },
       });
-      expect(rows.length).toBeGreaterThan(0);
+      expect(rows).toHaveLength(3);
       for (const row of rows) {
         expect(row).toMatchObject({ before: null, changes: null, beforeUnavailable: true });
       }

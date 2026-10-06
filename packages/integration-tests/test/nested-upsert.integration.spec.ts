@@ -314,12 +314,12 @@ describe('Nested Upsert Operations', () => {
       const profile1Logs = await context.prisma.auditLog.findMany({
         where: { entityType: 'Profile', entityId: profile1?.id },
       });
-      expect(profile1Logs.some((log: { action: string }) => log.action === 'update')).toBe(true);
+      expect(profile1Logs.map((log: { action: string }) => log.action)).toEqual(['update', 'update']);
 
       const profile2Logs = await context.prisma.auditLog.findMany({
         where: { entityType: 'Profile', entityId: profile2?.id },
       });
-      expect(profile2Logs.some((log: { action: string }) => log.action === 'create')).toBe(true);
+      expect(profile2Logs.map((log: { action: string }) => log.action)).toEqual(['create', 'create']);
     });
   });
 
@@ -381,6 +381,8 @@ describe('Nested Upsert Operations', () => {
         });
       });
 
+      const initialLogCount = await context.prisma.auditLog.count();
+
       const transactionPromise = context.provider.runAsync(testActor, async () => {
         return context.prisma.$transaction(async (tx: typeof context.prisma) => {
           await tx.user.update({
@@ -400,6 +402,8 @@ describe('Nested Upsert Operations', () => {
       });
 
       await expect(transactionPromise).rejects.toThrow('Rollback test');
+
+      expect(await context.prisma.auditLog.count()).toBe(initialLogCount);
 
       const profile = await context.prisma.profile.findUnique({ where: { userId: user.id } });
       expect(profile).toBeNull();

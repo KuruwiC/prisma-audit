@@ -79,7 +79,8 @@ describe('Nested Delete Operations', () => {
         where: { entityType: 'Post', entityId: post.id, action: 'delete' },
       });
 
-      expect(postLogs.length).toBeGreaterThanOrEqual(1);
+      // One log per aggregate the Post belongs to: its own and its author's.
+      expect(postLogs.map((log: { aggregateType: string }) => log.aggregateType).sort()).toEqual(['Post', 'User']);
       for (const log of postLogs) {
         expect(log.before).not.toBeNull(); // fetchBefore.delete=true (test setup)
         expect(log.after).toBeNull(); // Delete always has null 'after'
@@ -437,7 +438,7 @@ describe('Nested Delete Operations', () => {
         where: { entityType: 'Post', entityId: post3.id, action: 'delete' },
       });
 
-      expect(post2Logs.length).toBeGreaterThanOrEqual(1);
+      expect(post2Logs.map((log: { aggregateType: string }) => log.aggregateType).sort()).toEqual(['Post', 'User']);
 
       // All delete logs should have before state (fetchBefore.delete=true)
       for (const log of post2Logs) {

@@ -27,8 +27,8 @@ describe('Nested ConnectOrCreate Operations', () => {
   };
 
   describe('Create Path (record does not exist)', () => {
-    it('should create audit log with action=create when connectOrCreate creates new Tag (DEEP NESTED)', async () => {
-      // Deep nesting (postTags.create.tag.connectOrCreate) is detected recursively
+    it('records a create for a Tag created by a connectOrCreate nested under a PostTag create', async () => {
+      // The connectOrCreate sits two levels below the updated Post (postTags.create.tag.connectOrCreate)
 
       const post = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.post.create({
@@ -78,9 +78,9 @@ describe('Nested ConnectOrCreate Operations', () => {
         where: { entityType: 'Tag', entityId: tag?.id },
       });
 
-      expect(tagLogs.length).toBeGreaterThanOrEqual(1);
-      const createLog = tagLogs.find((log: { action: string }) => log.action === 'create');
-      expect(createLog).toBeDefined();
+      expect(tagLogs).toHaveLength(1);
+      const createLog = tagLogs[0];
+      expect(createLog?.action).toBe('create');
       expect(createLog?.before).toBeNull(); // Create always has null 'before'
       expect(createLog?.after).not.toBeNull();
       const after = createLog?.after as { name?: string };
@@ -431,7 +431,7 @@ describe('Nested ConnectOrCreate Operations', () => {
       const tagLogs = await context.prisma.auditLog.findMany({
         where: { entityType: 'Tag', entityId: tag?.id, action: 'create' },
       });
-      expect(tagLogs.length).toBeGreaterThanOrEqual(1);
+      expect(tagLogs).toHaveLength(1);
     });
   });
 

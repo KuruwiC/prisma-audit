@@ -88,7 +88,7 @@ describe('nested to-one pre-fetch', () => {
       const userLogs = await clients.basePrisma.auditLog.findMany({
         where: { entityType: 'User', entityId: author.id },
       });
-      expect(userLogs.length).toBeGreaterThan(0);
+      expect(userLogs).toHaveLength(1);
       for (const log of userLogs) {
         expect(log.action).toBe('update');
         expect((log.before as Record<string, unknown> | null)?.name).toBe('Before');
@@ -117,7 +117,7 @@ describe('nested to-one pre-fetch', () => {
       );
 
       const userLogs = await clients.basePrisma.auditLog.findMany({ where: { entityType: 'User' } });
-      expect(userLogs.length).toBeGreaterThan(0);
+      expect(userLogs).toHaveLength(1);
       for (const log of userLogs) {
         expect(log.entityId).toBe(user.id);
         expect(log.action).toBe('update');
@@ -138,7 +138,7 @@ describe('nested to-one pre-fetch', () => {
       );
 
       const bookmarkLogs = await clients.basePrisma.auditLog.findMany({ where: { entityType: 'PostBookmark' } });
-      expect(bookmarkLogs.length).toBeGreaterThan(0);
+      expect(bookmarkLogs).toHaveLength(2);
       for (const log of bookmarkLogs) {
         expect(log.entityId).toBe(JSON.stringify([bookmark.postId, bookmark.userId]));
         expect(log.action).toBe('update');
@@ -168,7 +168,7 @@ describe('nested to-one pre-fetch', () => {
       );
 
       const profileLogs = await clients.basePrisma.auditLog.findMany({ where: { entityType: 'Profile' } });
-      expect(profileLogs.length).toBeGreaterThan(0);
+      expect(profileLogs).toHaveLength(2);
       for (const log of profileLogs) {
         expect(log.action).toBe('create');
       }
@@ -186,7 +186,7 @@ describe('nested to-one pre-fetch', () => {
       );
 
       const noteLogs = await clients.basePrisma.auditLog.findMany({ where: { entityType: 'PostBookmarkNote' } });
-      expect(noteLogs.length).toBeGreaterThan(0);
+      expect(noteLogs).toHaveLength(2);
       for (const log of noteLogs) {
         expect(log.entityId).toBe(note.id);
         expect(log.action).toBe('delete');
@@ -207,7 +207,7 @@ describe('nested to-one pre-fetch', () => {
       );
 
       const noteLogs = await clients.basePrisma.auditLog.findMany({ where: { entityType: 'PostBookmarkNote' } });
-      expect(noteLogs.length).toBeGreaterThan(0);
+      expect(noteLogs).toHaveLength(2);
       for (const log of noteLogs) {
         expect(log.entityId).toBe(note.id);
         expect(log.action).toBe('update');
@@ -262,7 +262,7 @@ describe('nested to-one pre-fetch', () => {
       );
 
       const bookmarkLogs = await clients.basePrisma.auditLog.findMany({ where: { entityType: 'PostBookmark' } });
-      expect(bookmarkLogs.length).toBeGreaterThan(0);
+      expect(bookmarkLogs).toHaveLength(2);
       for (const log of bookmarkLogs) {
         expect(log.entityId).toBe(JSON.stringify([post.id, user.id]));
         expect(log.action).toBe('create');

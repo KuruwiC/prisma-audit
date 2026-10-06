@@ -85,14 +85,20 @@ describe('Nested Connect Operations', () => {
       });
       expect(postTag).not.toBeNull();
 
+      // One log per aggregate the PostTag belongs to: itself, its Post and its Tag.
       const postTagLogs = await context.prisma.auditLog.findMany({
         where: { entityType: 'PostTag', entityId: postTag?.id, action: 'create' },
       });
 
-      expect(postTagLogs.length).toBeGreaterThanOrEqual(1);
-      const createLog = postTagLogs[0];
-      expect(createLog.before).toBeNull(); // Create always has null 'before'
-      expect(createLog.after).not.toBeNull();
+      expect(postTagLogs.map((log: { aggregateType: string }) => log.aggregateType).sort()).toEqual([
+        'Post',
+        'PostTag',
+        'Tag',
+      ]);
+      for (const log of postTagLogs) {
+        expect(log.before).toBeNull(); // Create always has null 'before'
+        expect(log.after).not.toBeNull();
+      }
     });
 
     it('should NOT create audit log for Tag entity itself when connecting (only join table)', async () => {
@@ -160,7 +166,7 @@ describe('Nested Connect Operations', () => {
       const postTagLogs = await context.prisma.auditLog.findMany({
         where: { entityType: 'PostTag', action: 'create' },
       });
-      expect(postTagLogs.length).toBeGreaterThanOrEqual(3);
+      expect(postTagLogs).toHaveLength(9);
 
       const loggedIds = postTagLogs.map((log: { entityId: string }) => log.entityId);
       for (const postTag of postTags) {
@@ -335,7 +341,7 @@ describe('Nested Connect Operations', () => {
   });
 
   describe('Edge Cases', () => {
-    it('should handle connect with non-existent ID gracefully', async () => {
+    it('rejects a connect to a Tag that does not exist and records nothing', async () => {
       const post = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.post.create({
           data: {
@@ -382,7 +388,7 @@ describe('Nested Connect Operations', () => {
       expect(postTagLogs.length).toBe(0);
     });
 
-    it('should handle duplicate connect attempts (idempotency)', async () => {
+    it('rejects a second connect of an already connected Tag and records nothing', async () => {
       const tag = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.tag.create({
           data: { name: 'svelte' },

@@ -144,7 +144,7 @@ describe('nested pre-fetch failures — affected rows', () => {
     expect(phases()).toEqual([['pre-fetch', 'Post', 'update']]);
 
     const postLogs = await logsOf('Post');
-    expect(postLogs.length).toBeGreaterThan(0);
+    expect(postLogs).toHaveLength(2);
     for (const log of postLogs) {
       expect(log).toMatchObject({ entityId: post.id, action: 'update', before: null, beforeUnavailable: true });
     }
@@ -191,7 +191,7 @@ describe('nested pre-fetch failures — affected rows', () => {
     expect(phases()).toEqual([['pre-fetch', 'User', 'update']]);
 
     const commentLogs = await logsOf('Comment');
-    expect(commentLogs.length).toBeGreaterThan(0);
+    expect(commentLogs).toHaveLength(3);
     for (const log of commentLogs) {
       expect(log).toMatchObject({ entityId: c1.id, action: 'update', before: null, beforeUnavailable: true });
     }
