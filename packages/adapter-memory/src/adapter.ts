@@ -146,7 +146,6 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
     pending.add(promise);
   };
 
-  /** Nests in the active transaction when there is one, handing its after-commit writes to it; else opens on the store */
   const transaction = async <T>(fn: (db: MemoryHandle<TModelName>) => Promise<T>): Promise<T> => {
     const parent = activeScope.getStore();
     const deferredWrites: Array<() => Promise<void>> = [];
