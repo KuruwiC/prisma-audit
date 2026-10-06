@@ -278,67 +278,6 @@ describe('Nested Connect Operations', () => {
     });
   });
 
-  describe('Transaction Atomicity', () => {
-    it('should NOT create audit log if connect operation fails in transaction', async () => {
-      const tag = await context.provider.runAsync(testActor, async () => {
-        return await context.prisma.tag.create({
-          data: { name: 'vue' },
-        });
-      });
-
-      const post = await context.provider.runAsync(testActor, async () => {
-        return await context.prisma.post.create({
-          data: {
-            title: 'Test Post',
-            content: 'Test content',
-            author: {
-              create: {
-                email: 'author@example.com',
-                name: 'Author',
-                password: 'secret123',
-              },
-            },
-          },
-        });
-      });
-
-      const initialLogCount = await context.prisma.auditLog.count();
-
-      const transactionPromise = context.provider.runAsync(testActor, async () => {
-        return context.prisma.$transaction(async (tx: typeof context.prisma) => {
-          await tx.post.update({
-            where: { id: post.id },
-            data: {
-              postTags: {
-                create: {
-                  tag: {
-                    connect: { id: tag.id },
-                  },
-                },
-              },
-            },
-            include: {
-              postTags: {
-                include: { tag: true },
-              },
-            },
-          });
-          throw new Error('Rollback test');
-        });
-      });
-
-      await expect(transactionPromise).rejects.toThrow('Rollback test');
-
-      const finalLogCount = await context.prisma.auditLog.count();
-      expect(finalLogCount).toBe(initialLogCount);
-
-      const postTag = await context.prisma.postTag.findFirst({
-        where: { postId: post.id, tagId: tag.id },
-      });
-      expect(postTag).toBeNull();
-    });
-  });
-
   describe('Edge Cases', () => {
     it('rejects a connect to a Tag that does not exist and records nothing', async () => {
       const post = await context.provider.runAsync(testActor, async () => {

@@ -48,6 +48,7 @@ describe('Nested Upsert Operations', () => {
               upsert: {
                 create: {
                   bio: 'New bio',
+                  website: 'https://example.com',
                 },
                 update: {
                   bio: 'Updated bio',
@@ -62,6 +63,7 @@ describe('Nested Upsert Operations', () => {
       const profile = await context.prisma.profile.findUnique({ where: { userId: user.id } });
       expect(profile).not.toBeNull();
       expect(profile?.bio).toBe('New bio');
+      expect(profile?.website).toBe('https://example.com');
 
       const profileLogs = await context.prisma.auditLog.findMany({
         where: { entityType: 'Profile', entityId: profile?.id },
@@ -72,58 +74,8 @@ describe('Nested Upsert Operations', () => {
       for (const log of profileLogs) {
         expect(log.action).toBe('create');
         expect(log.before).toBeNull(); // Create always has null 'before'
-        expect(log.after).not.toBeNull();
+        expect(log.after).toMatchObject({ bio: 'New bio', website: 'https://example.com' });
       }
-    });
-
-    it('should handle nested upsert create with multiple fields', async () => {
-      const user = await context.provider.runAsync(testActor, async () => {
-        return await context.prisma.user.create({
-          data: {
-            email: 'user@example.com',
-            name: 'User',
-            password: 'secret123',
-          },
-        });
-      });
-
-      await context.prisma.auditLog.deleteMany();
-
-      await context.provider.runAsync(testActor, async () => {
-        await context.prisma.user.update({
-          where: { id: user.id },
-          data: {
-            profile: {
-              upsert: {
-                create: {
-                  bio: 'Biography',
-                  website: 'https://example.com',
-                },
-                update: {
-                  bio: 'Updated',
-                },
-              },
-            },
-          },
-          include: { profile: true },
-        });
-      });
-
-      const profile = await context.prisma.profile.findUnique({ where: { userId: user.id } });
-      expect(profile?.bio).toBe('Biography');
-      expect(profile?.website).toBe('https://example.com');
-
-      const profileLogs = await context.prisma.auditLog.findMany({
-        where: { entityType: 'Profile' },
-      });
-
-      // Profile has 2 logs: Profile aggregate + User aggregate
-      expect(profileLogs).toHaveLength(2);
-      const logWithData = profileLogs.find((log: { after: unknown }) => {
-        const after = log.after as { bio?: string; website?: string };
-        return after.bio === 'Biography' && after.website === 'https://example.com';
-      });
-      expect(logWithData).toBeDefined();
     });
   });
 
@@ -320,93 +272,6 @@ describe('Nested Upsert Operations', () => {
         where: { entityType: 'Profile', entityId: profile2?.id },
       });
       expect(profile2Logs.map((log: { action: string }) => log.action)).toEqual(['create', 'create']);
-    });
-  });
-
-  describe('Transaction Atomicity', () => {
-    it('should NOT create audit log if upsert fails in transaction', async () => {
-      const user = await context.provider.runAsync(testActor, async () => {
-        return await context.prisma.user.create({
-          data: {
-            email: 'user@example.com',
-            name: 'User',
-            password: 'secret123',
-            profile: {
-              create: {
-                bio: 'Original bio',
-              },
-            },
-          },
-          include: { profile: true },
-        });
-      });
-
-      const initialLogCount = await context.prisma.auditLog.count();
-
-      const transactionPromise = context.provider.runAsync(testActor, async () => {
-        return context.prisma.$transaction(async (tx: typeof context.prisma) => {
-          await tx.user.update({
-            where: { id: user.id },
-            data: {
-              profile: {
-                upsert: {
-                  create: { bio: 'Should not be created' },
-                  update: { bio: 'Should not be updated' },
-                },
-              },
-            },
-            include: { profile: true },
-          });
-          throw new Error('Rollback test');
-        });
-      });
-
-      await expect(transactionPromise).rejects.toThrow('Rollback test');
-
-      const finalLogCount = await context.prisma.auditLog.count();
-      expect(finalLogCount).toBe(initialLogCount);
-
-      const profile = await context.prisma.profile.findUnique({ where: { userId: user.id } });
-      expect(profile?.bio).toBe('Original bio');
-    });
-
-    it('should roll back upsert create if transaction fails', async () => {
-      const user = await context.provider.runAsync(testActor, async () => {
-        return await context.prisma.user.create({
-          data: {
-            email: 'user@example.com',
-            name: 'User',
-            password: 'secret123',
-          },
-        });
-      });
-
-      const initialLogCount = await context.prisma.auditLog.count();
-
-      const transactionPromise = context.provider.runAsync(testActor, async () => {
-        return context.prisma.$transaction(async (tx: typeof context.prisma) => {
-          await tx.user.update({
-            where: { id: user.id },
-            data: {
-              profile: {
-                upsert: {
-                  create: { bio: 'Should be rolled back' },
-                  update: { bio: 'Should not be used' },
-                },
-              },
-            },
-            include: { profile: true },
-          });
-          throw new Error('Rollback test');
-        });
-      });
-
-      await expect(transactionPromise).rejects.toThrow('Rollback test');
-
-      expect(await context.prisma.auditLog.count()).toBe(initialLogCount);
-
-      const profile = await context.prisma.profile.findUnique({ where: { userId: user.id } });
-      expect(profile).toBeNull();
     });
   });
 

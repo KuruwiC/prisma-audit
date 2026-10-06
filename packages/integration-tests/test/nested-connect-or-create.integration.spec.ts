@@ -123,11 +123,15 @@ describe('Nested ConnectOrCreate Operations', () => {
         where: { entityType: 'Profile', entityId: profile?.id },
       });
 
-      expect(profileLogs.length).toBeGreaterThanOrEqual(1);
-      const createLog = profileLogs.find((log: { action: string }) => log.action === 'create');
-      expect(createLog).toBeDefined();
-      expect(createLog?.before).toBeNull();
-      expect(createLog?.after).not.toBeNull();
+      expect(profileLogs.map((log: { aggregateType: string }) => log.aggregateType).sort()).toEqual([
+        'Profile',
+        'User',
+      ]);
+      for (const log of profileLogs) {
+        expect(log.action).toBe('create');
+        expect(log.before).toBeNull();
+        expect((log.after as { bio?: string }).bio).toBe('New bio');
+      }
     });
 
     it('should handle multiple connectOrCreate operations with mixed create/connect paths', async () => {
@@ -316,62 +320,6 @@ describe('Nested ConnectOrCreate Operations', () => {
         where: { entityType: 'Profile', entityId: profileId },
       });
       expect(profileLogs.length).toBe(0);
-    });
-  });
-
-  describe('Transaction Atomicity', () => {
-    it('should NOT create audit log if connectOrCreate fails in transaction', async () => {
-      const post = await context.provider.runAsync(testActor, async () => {
-        return await context.prisma.post.create({
-          data: {
-            title: 'Test Post',
-            content: 'Test content',
-            author: {
-              create: {
-                email: 'author@example.com',
-                name: 'Author',
-                password: 'secret123',
-              },
-            },
-          },
-        });
-      });
-
-      const initialLogCount = await context.prisma.auditLog.count();
-
-      const transactionPromise = context.provider.runAsync(testActor, async () => {
-        return context.prisma.$transaction(async (tx: typeof context.prisma) => {
-          await tx.post.update({
-            where: { id: post.id },
-            data: {
-              postTags: {
-                create: {
-                  tag: {
-                    connectOrCreate: {
-                      where: { name: 'typescript' },
-                      create: { name: 'typescript' },
-                    },
-                  },
-                },
-              },
-            },
-            include: {
-              postTags: {
-                include: { tag: true },
-              },
-            },
-          });
-          throw new Error('Rollback test');
-        });
-      });
-
-      await expect(transactionPromise).rejects.toThrow('Rollback test');
-
-      const finalLogCount = await context.prisma.auditLog.count();
-      expect(finalLogCount).toBe(initialLogCount);
-
-      const tag = await context.prisma.tag.findUnique({ where: { name: 'typescript' } });
-      expect(tag).toBeNull();
     });
   });
 

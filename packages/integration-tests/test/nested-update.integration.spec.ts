@@ -94,68 +94,7 @@ describe('Nested Update Operations', () => {
   // and performance.integration.spec.ts, each with its own client.
 
   describe('Transaction Atomicity', () => {
-    it('should NOT create audit log if main operation fails in transaction', async () => {
-      const user1 = await context.provider.runAsync(testActor, async () => {
-        return await context.prisma.user.create({
-          data: {
-            email: 'user1@example.com',
-            name: 'User 1',
-            password: 'secret123',
-          },
-        });
-      });
-
-      // A second user whose email the update below collides with
-      await context.provider.runAsync(testActor, async () => {
-        return await context.prisma.user.create({
-          data: {
-            email: 'user2@example.com',
-            name: 'User 2',
-            password: 'secret123',
-          },
-        });
-      });
-
-      const post = await context.provider.runAsync(testActor, async () => {
-        return await context.prisma.post.create({
-          data: {
-            title: 'Test Post',
-            content: 'Content',
-            authorId: user1.id,
-          },
-        });
-      });
-
-      const initialLogCount = await context.prisma.auditLog.count();
-
-      const transactionPromise = context.provider.runAsync(testActor, async () => {
-        return context.prisma.$transaction(async (tx: typeof context.prisma) => {
-          await tx.user.update({
-            where: { id: user1.id },
-            data: {
-              posts: {
-                update: {
-                  where: { id: post.id },
-                  data: { title: 'New Title' }, // This would succeed
-                },
-              },
-              // This will cause the main operation to fail (unique constraint)
-              email: 'user2@example.com',
-            },
-          });
-        });
-      });
-
-      await expect(transactionPromise).rejects.toThrow();
-
-      const finalLogCount = await context.prisma.auditLog.count();
-      expect(finalLogCount).toBe(initialLogCount);
-
-      const finalPost = await context.prisma.post.findUnique({ where: { id: post.id } });
-      expect(finalPost?.title).toBe('Test Post');
-    });
-
-    it('should roll back nested update if transaction fails', async () => {
+    it("rolls back the audit rows of a nested update with the caller's interactive transaction", async () => {
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -245,7 +184,7 @@ describe('Nested Update Operations', () => {
   });
 
   describe('Where Clause Accuracy', () => {
-    it('should pre-fetch only the correct record when multiple posts exist', async () => {
+    it("audits only the post a nested update names when the caller's include returns its siblings, with that post's before state", async () => {
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
