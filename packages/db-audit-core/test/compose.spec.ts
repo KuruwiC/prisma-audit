@@ -543,7 +543,7 @@ describe('compose', () => {
       expect(record.changes).toEqual({ data: { old: 'bytes:1', new: 'bytes:3' } });
     });
 
-    it('applies the custom serializers to the class instances among the column values once redact is configured', () => {
+    it('applies the custom serializers to the class instances among the column values when redact is configured', () => {
       class Decimal {
         constructor(readonly digits: string) {}
       }

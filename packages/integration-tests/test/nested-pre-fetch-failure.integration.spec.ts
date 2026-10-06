@@ -5,8 +5,7 @@
  * fails, the caller's operation still runs, the observer hears about the failure under
  * `phase: 'pre-fetch'`, and the row is recorded with `before: null`, `changes: null` and
  * `beforeUnavailable: true`. The rows of a nested delete array are read one by one, so a failed
- * read leaves only its own item without a before state: the items around it keep theirs, and the
- * observer hears once per failed read.
+ * read leaves only its own item without a before state.
  *
  * The failures are injected the way `top-level-upsert-nested.integration.spec.ts` injects its own:
  * a plain Prisma Client Extension on `comment.findUnique` of the base client the audit extension
@@ -192,7 +191,6 @@ describe('nested pre-fetch failures — observer notification', () => {
       const remaining = await basePrisma.comment.count({ where: { postId: post.id } });
       expect(remaining).toBe(0);
 
-      // Only c2's read failed, so the observer hears about that one read, with c2's item as params.
       expect(observer.mock.calls).toEqual([
         [
           {

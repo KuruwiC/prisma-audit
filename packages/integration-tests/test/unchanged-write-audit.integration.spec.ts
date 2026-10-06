@@ -40,6 +40,7 @@ describe('A write that stores the values a row already holds', () => {
       performance: { awaitWrite: true },
       fetchBefore: { update: true, delete: true },
     });
+  type AuditedClient = ReturnType<typeof createClient>;
 
   const seedUser = async () =>
     basePrisma.user.create({
@@ -66,17 +67,17 @@ describe('A write that stores the values a row already holds', () => {
 
   const unchangedWrites = {
     'a single row': {
-      upsert: (client: ReturnType<typeof createClient>, userId: string) =>
+      upsert: (client: AuditedClient, userId: string) =>
         client.profile.upsert({
           where: { userId },
           create: { userId, bio: 'Should not be used' },
           update: { bio: 'Original bio' },
         }),
-      update: (client: ReturnType<typeof createClient>, userId: string) =>
+      update: (client: AuditedClient, userId: string) =>
         client.profile.update({ where: { userId }, data: { bio: 'Original bio' } }),
     },
     'a row and the rows nested three levels deep': {
-      upsert: (client: ReturnType<typeof createClient>, userId: string) =>
+      upsert: (client: AuditedClient, userId: string) =>
         client.profile.upsert({
           where: { userId },
           create: { userId, bio: 'Should not be used' },
@@ -98,7 +99,7 @@ describe('A write that stores the values a row already holds', () => {
             },
           },
         }),
-      update: (client: ReturnType<typeof createClient>, userId: string) =>
+      update: (client: AuditedClient, userId: string) =>
         client.profile.update({
           where: { userId },
           data: {

@@ -121,7 +121,6 @@ const preFetch = (
     shouldFetchBefore,
   });
 
-/** Pre-fetches under Account with an `onPreFetchFailure` spy */
 const preFetchReporting = (
   client: TransactionalPrismaClient,
   args: Row,
