@@ -4,7 +4,9 @@
  * Tables keyed by model and then by serialized primary key, plus the audit-log rows. A
  * transaction runs its callback on a copy-on-write overlay of the store: reads see the
  * overlay's writes first, audit rows written in it stay in a private buffer, and both merge
- * into the store when the callback resolves or are discarded when it throws.
+ * into the store when the callback resolves or are discarded when it throws. An overlay is a
+ * store of its own: a transaction opened on it nests inside it, merging into the overlay rather
+ * than the store, so the outer transaction's rollback discards it too.
  */
 
 import type { AuditRecord } from '@kuruwic/db-audit-core';
@@ -21,8 +23,8 @@ export interface MemoryHandle<TModelName extends string = string> {
 }
 
 export interface MemoryStore<TModelName extends string = string> extends MemoryHandle<TModelName> {
-  /** Runs `fn` on an overlay that merges into the store when `fn` resolves and is discarded when it throws */
-  transaction<T>(fn: (tx: MemoryHandle<TModelName>) => Promise<T>): Promise<T>;
+  /** Runs `fn` on an overlay that merges into this store when `fn` resolves and is discarded when it throws */
+  transaction<T>(fn: (tx: MemoryStore<TModelName>) => Promise<T>): Promise<T>;
 }
 
 const DELETED = Symbol('deleted');
@@ -39,14 +41,24 @@ const getOrCreate = <K, V>(map: Map<K, V>, key: K, create: () => V): V => {
   return created;
 };
 
+const runTransaction = async <TModelName extends string, T>(
+  base: MemoryHandle<TModelName>,
+  fn: (tx: MemoryStore<TModelName>) => Promise<T>,
+): Promise<T> => {
+  const overlay = createOverlay(base);
+  const result = await fn(overlay);
+  overlay.commit();
+  return result;
+};
+
 const createOverlay = <TModelName extends string>(
   base: MemoryHandle<TModelName>,
-): MemoryHandle<TModelName> & { commit(): void } => {
+): MemoryStore<TModelName> & { commit(): void } => {
   const changes = new Map<TModelName, Map<string, Change>>();
   const buffer: AuditRecord[] = [];
   const changesOf = (model: TModelName): Map<string, Change> => getOrCreate(changes, model, () => new Map());
 
-  return {
+  const overlay: MemoryStore<TModelName> & { commit(): void } = {
     find: (model, identity) => {
       const change = changes.get(model)?.get(identity);
       if (change === DELETED) {
@@ -76,7 +88,9 @@ const createOverlay = <TModelName extends string>(
       }
       base.appendAuditLogs(buffer);
     },
+    transaction: (fn) => runTransaction(overlay, fn),
   };
+  return overlay;
 };
 
 export const createMemoryStore = <TModelName extends string = string>(): MemoryStore<TModelName> => {
@@ -96,12 +110,7 @@ export const createMemoryStore = <TModelName extends string = string>(): MemoryS
     appendAuditLogs: (records) => {
       auditLogs.push(...records);
     },
-    transaction: async (fn) => {
-      const overlay = createOverlay(store);
-      const result = await fn(overlay);
-      overlay.commit();
-      return result;
-    },
+    transaction: (fn) => runTransaction(store, fn),
   };
   return store;
 };

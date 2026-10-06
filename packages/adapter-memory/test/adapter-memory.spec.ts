@@ -347,6 +347,100 @@ describe('transaction membership', () => {
     expect(handles[1]).toBe(adapter.store);
   });
 
+  describe('a transaction opened inside another joins it', () => {
+    it('both resolve: the inner rows and audit rows are visible to the outer before it commits and land in the store once', async () => {
+      const adapter = createAdapter();
+
+      await withContext(() =>
+        adapter.transaction(async (outer) => {
+          await adapter.create('User', { id: 'u1', name: 'Alice' });
+          await adapter.transaction(async () => {
+            await adapter.create('User', { id: 'u2', name: 'Bob' });
+          });
+          expect(outer.find('User', 'u2')).toEqual({ id: 'u2', name: 'Bob' });
+          expect(outer.auditLogs().map((log) => log.entityId)).toEqual(['u1', 'u2']);
+          expect(adapter.store.find('User', 'u2')).toBeUndefined();
+          expect(adapter.store.auditLogs()).toEqual([]);
+        }),
+      );
+
+      expect(adapter.store.find('User', 'u1')).toEqual({ id: 'u1', name: 'Alice' });
+      expect(adapter.store.find('User', 'u2')).toEqual({ id: 'u2', name: 'Bob' });
+      expect(adapter.store.auditLogs().map((log) => log.entityId)).toEqual(['u1', 'u2']);
+    });
+
+    it('the outer throws after the inner resolved: the inner rows and audit rows are discarded with the outer ones', async () => {
+      const adapter = createAdapter();
+
+      await withContext(async () => {
+        await adapter.create('User', { id: 'u0', name: 'Existing' });
+        await expect(
+          adapter.transaction(async () => {
+            await adapter.create('User', { id: 'u1', name: 'Alice' });
+            await adapter.transaction(async () => {
+              await adapter.create('User', { id: 'u2', name: 'Bob' });
+            });
+            throw new Error('abort');
+          }),
+        ).rejects.toThrow('abort');
+      });
+
+      expect(adapter.store.find('User', 'u1')).toBeUndefined();
+      expect(adapter.store.find('User', 'u2')).toBeUndefined();
+      expect(adapter.store.auditLogs().map((log) => log.entityId)).toEqual(['u0']);
+    });
+
+    it('only the inner throws: its rows and audit rows are discarded, the outer ones commit', async () => {
+      const adapter = createAdapter();
+
+      await withContext(() =>
+        adapter.transaction(async (outer) => {
+          await adapter.create('User', { id: 'u1', name: 'Alice' });
+          await expect(
+            adapter.transaction(async () => {
+              await adapter.create('User', { id: 'u2', name: 'Bob' });
+              throw new Error('abort');
+            }),
+          ).rejects.toThrow('abort');
+          expect(outer.find('User', 'u2')).toBeUndefined();
+        }),
+      );
+
+      expect(adapter.store.find('User', 'u1')).toEqual({ id: 'u1', name: 'Alice' });
+      expect(adapter.store.find('User', 'u2')).toBeUndefined();
+      expect(adapter.store.auditLogs().map((log) => log.entityId)).toEqual(['u1']);
+    });
+
+    it('awaitWrite false: the inner after-commit records start once the outer commits and are dropped when the outer throws', async () => {
+      const adapter = createAdapter({ awaitWrite: false });
+
+      await withContext(async () => {
+        await adapter.transaction(async () => {
+          await adapter.transaction(async () => {
+            await adapter.create('User', { id: 'u1', name: 'Alice' });
+          });
+          await adapter.flush();
+          expect(adapter.store.auditLogs()).toEqual([]);
+        });
+        await adapter.flush();
+        expect(adapter.store.auditLogs().map((log) => log.entityId)).toEqual(['u1']);
+
+        await expect(
+          adapter.transaction(async () => {
+            await adapter.transaction(async () => {
+              await adapter.create('User', { id: 'u2', name: 'Bob' });
+            });
+            throw new Error('abort');
+          }),
+        ).rejects.toThrow('abort');
+      });
+      await adapter.flush();
+
+      expect(adapter.store.find('User', 'u2')).toBeUndefined();
+      expect(adapter.store.auditLogs().map((log) => log.entityId)).toEqual(['u1']);
+    });
+  });
+
   it('a detached write that fails is recorded in writeFailures and flush resolves', async () => {
     const adapter = createAdapter({ awaitWrite: false });
     const failure = new Error('audit-log store unavailable');

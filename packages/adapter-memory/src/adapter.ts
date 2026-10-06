@@ -63,7 +63,10 @@ export interface MemoryAuditAdapter<TModelName extends string> {
   create(model: TModelName, data: MemoryRow): Promise<void>;
   update(model: TModelName, identity: string, data: MemoryRow): Promise<void>;
   delete(model: TModelName, identity: string): Promise<void>;
-  /** Runs `fn` in a transaction of the store; audit writes queued for after commit start once it has committed */
+  /**
+   * Runs `fn` in a transaction of the store, or nested inside the active transaction when called within one; audit
+   * writes queued for after commit start once the outermost transaction has committed
+   */
   transaction<T>(fn: (db: MemoryHandle<TModelName>) => Promise<T>): Promise<T>;
   /** Waits for every audit write no caller awaited that is pending at the time of the call */
   flush(): Promise<void>;
@@ -75,7 +78,7 @@ export interface MemoryAuditAdapter<TModelName extends string> {
 
 /** The transaction the current async flow is inside: its handle and the writes queued until it commits */
 interface TransactionScope<TModelName extends string> {
-  readonly handle: MemoryHandle<TModelName>;
+  readonly handle: MemoryStore<TModelName>;
   readonly deferredWrites: Array<() => Promise<void>>;
 }
 
@@ -143,11 +146,19 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
     pending.add(promise);
   };
 
+  /** Nests in the active transaction when there is one, handing its after-commit writes to it; else opens on the store */
   const transaction = async <T>(fn: (db: MemoryHandle<TModelName>) => Promise<T>): Promise<T> => {
+    const parent = activeScope.getStore();
     const deferredWrites: Array<() => Promise<void>> = [];
-    const result = await store.transaction((tx) => activeScope.run({ handle: tx, deferredWrites }, () => fn(tx)));
-    for (const write of deferredWrites) {
-      startDetached(write);
+    const result = await (parent?.handle ?? store).transaction((tx) =>
+      activeScope.run({ handle: tx, deferredWrites }, () => fn(tx)),
+    );
+    if (parent === undefined) {
+      for (const write of deferredWrites) {
+        startDetached(write);
+      }
+    } else {
+      parent.deferredWrites.push(...deferredWrites);
     }
     return result;
   };
