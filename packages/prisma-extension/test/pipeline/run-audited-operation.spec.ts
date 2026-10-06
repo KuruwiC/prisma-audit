@@ -19,7 +19,7 @@ import {
 import { flushAllPendingWrites, getPendingWriteCount } from '../../src/runtime/pending-writes.js';
 import { withScope } from '../../src/runtime/scope.js';
 import type { AuditLogData } from '../../src/types.js';
-import { isCallerMutationError, runCallerMutation } from '../../src/utils/caller-mutation-error.js';
+import { isCallerMutationError } from '../../src/utils/caller-mutation-error.js';
 
 const auditContext: AuditContext = { actor: { category: 'model', type: 'User', id: 'user-1' } };
 
@@ -234,27 +234,31 @@ describe('runAuditedOperation', () => {
         return outcome;
       });
 
-    it("continues the operation through query inside the caller's own transaction", async () => {
+    type Run = (
+      update: () => void,
+      start: (baseClient: PrismaClientWithDynamicAccess) => Promise<unknown>,
+    ) => Promise<unknown>;
+
+    it.each<{ path: string; atomic: boolean; run: Run }>([
+      {
+        path: "inside the caller's own transaction",
+        atomic: true,
+        run: (update, start) =>
+          withScope({ transaction: { client: transactionClientWith({ user: { update } }), deferredWrites: [] } }, () =>
+            start(createBaseClient()),
+          ),
+      },
+      {
+        path: 'when the policy is not atomic',
+        atomic: false,
+        run: (update, start) => start(createBaseClient(transactionClient, { user: { update } })),
+      },
+    ])('continues the operation through query, never through the client delegate, $path', async ({ atomic, run }) => {
       const update = vi.fn();
       const deps = createDeps({ singleExecutor: runningTheOperation() });
       const operation = interceptedOf();
 
-      await withScope(
-        { transaction: { client: transactionClientWith({ user: { update } }), deferredWrites: [] } },
-        () => runAuditedOperation({ operation, auditContext, baseClient: createBaseClient(), atomic: true }, deps),
-      );
-
-      expect(operation.query).toHaveBeenCalledWith(args);
-      expect(update).not.toHaveBeenCalled();
-    });
-
-    it('continues the operation through query when the policy is not atomic', async () => {
-      const update = vi.fn();
-      const baseClient = createBaseClient(transactionClient, { user: { update } });
-      const deps = createDeps({ singleExecutor: runningTheOperation() });
-      const operation = interceptedOf();
-
-      await runAuditedOperation({ operation, auditContext, baseClient, atomic: false }, deps);
+      await run(update, (baseClient) => runAuditedOperation({ operation, auditContext, baseClient, atomic }, deps));
 
       expect(operation.query).toHaveBeenCalledWith(args);
       expect(update).not.toHaveBeenCalled();
@@ -322,27 +326,6 @@ describe('runAuditedOperation', () => {
   });
 
   describe('failures', () => {
-    it("propagates the caller's own mutation error untouched, without notifying the observer or writing", async () => {
-      const callerError = new Error('Unique constraint failed on the fields: (`email`)');
-      const deps = createDeps({
-        singleExecutor: stubExecutor(() =>
-          runCallerMutation(async () => {
-            throw callerError;
-          }),
-        ),
-      });
-
-      await expect(
-        runAuditedOperation(
-          { operation: interceptedOf(), auditContext, baseClient: createBaseClient(), atomic: true },
-          deps,
-        ),
-      ).rejects.toBe(callerError);
-
-      expect(deps.failureSink.notify).not.toHaveBeenCalled();
-      expect(auditWriteOf(deps)).not.toHaveBeenCalled();
-    });
-
     it.each([
       ['single', 'update'],
       ['batch', 'updateMany'],

@@ -81,20 +81,6 @@ describe('UUID v7 generation', () => {
     expect(ts).toBeGreaterThanOrEqual(before);
     expect(ts).toBeLessThanOrEqual(after);
   });
-
-  it('generates unique values', () => {
-    const generator = ID_GENERATOR_FACTORIES.uuid?.([7]);
-    const ids = new Set(Array.from({ length: 1000 }, () => generator?.()));
-    expect(ids.size).toBe(1000);
-  });
-});
-
-describe('cuid v1 generation', () => {
-  it('generates unique values', () => {
-    const generator = ID_GENERATOR_FACTORIES.cuid?.([1]);
-    const ids = new Set(Array.from({ length: 1000 }, () => generator?.()));
-    expect(ids.size).toBe(1000);
-  });
 });
 
 describe('getIdGenerator (string expression route)', () => {
@@ -116,6 +102,11 @@ describe('getIdGenerator (string expression route)', () => {
     expect(getIdGenerator('Cuid()')?.()).toMatch(CUID_V1_RE);
     expect(getIdGenerator('CUID2()')?.()).toMatch(CUID2_RE);
     expect(getIdGenerator('uuid( 7 )')?.()).toMatch(UUID_V7_RE);
+  });
+
+  it.each(['cuid()', 'cuid(2)', 'cuid2()', 'uuid()', 'uuid(7)'])('%s yields a new id on every call', (expr) => {
+    const generate = getIdGenerator(expr);
+    expect(generate?.()).not.toBe(generate?.());
   });
 
   it('returns undefined for unknown versions instead of falling back', () => {

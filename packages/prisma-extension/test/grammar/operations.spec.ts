@@ -9,10 +9,8 @@ import {
 } from '../../src/grammar/operations.js';
 
 describe('operation classification invariants', () => {
-  it('SUPPORTED_OPERATIONS contains every AUDIT_ACTION value', () => {
-    for (const action of Object.values(AUDIT_ACTION)) {
-      expect(SUPPORTED_OPERATIONS.has(action)).toBe(true);
-    }
+  it('SUPPORTED_OPERATIONS is exactly the set of AUDIT_ACTION values', () => {
+    expect(SUPPORTED_OPERATIONS).toEqual(new Set(Object.values(AUDIT_ACTION)));
   });
 
   it('SINGLE_OPERATIONS and BATCH_OPERATIONS partition all AUDIT_ACTION values', () => {

@@ -6,6 +6,8 @@ const createMockDelegate = (findManyImpl?: (args: unknown) => Promise<Record<str
   findMany: vi.fn(findManyImpl ?? (async () => [])),
 });
 
+type InArgs = { where: { id: { in: string[] } } };
+
 const makeEntities = (count: number, pkField = 'id'): Record<string, unknown>[] =>
   Array.from({ length: count }, (_, i) => ({ [pkField]: `id-${i}`, name: `entity-${i}` }));
 
@@ -17,65 +19,26 @@ describe('findManyByPKs', () => {
     expect(delegate.findMany).not.toHaveBeenCalled();
   });
 
-  it('should make one findMany call for entities under chunk size', async () => {
-    const entities = makeEntities(5);
-    const delegate = createMockDelegate(async () => entities);
+  it.each([
+    { count: 5, sizes: [5] },
+    { count: 1000, sizes: [1000] },
+    { count: 1001, sizes: [1000, 1] },
+    { count: 1500, sizes: [1000, 500] },
+    { count: 2500, sizes: [1000, 1000, 500] },
+  ])(
+    'splits $count keys into findMany calls of $sizes and returns their rows in call order',
+    async ({ count, sizes }) => {
+      const entities = makeEntities(count);
+      const delegate = createMockDelegate(async (args: unknown) => (args as InArgs).where.id.in.map((id) => ({ id })));
 
-    const result = await findManyByPKs(delegate, ['id'], entities);
+      const result = await findManyByPKs(delegate, ['id'], entities);
 
-    expect(delegate.findMany).toHaveBeenCalledTimes(1);
-    expect(result).toHaveLength(5);
-  });
-
-  it('should make one findMany call for exactly the chunk size, holding every key', async () => {
-    const entities = makeEntities(1000);
-    const delegate = createMockDelegate(async () => []);
-
-    await findManyByPKs(delegate, ['id'], entities);
-
-    expect(delegate.findMany).toHaveBeenCalledTimes(1);
-    const args = (delegate.findMany.mock.calls[0] as unknown[])[0] as { where: { id: { in: string[] } } };
-    expect(args.where.id.in).toHaveLength(1000);
-  });
-
-  it('should start a second findMany call with the first key past the chunk size', async () => {
-    const entities = makeEntities(1001);
-    const delegate = createMockDelegate(async () => []);
-
-    await findManyByPKs(delegate, ['id'], entities);
-
-    const sizes = delegate.findMany.mock.calls.map(
-      (call) => ((call as unknown[])[0] as { where: { id: { in: string[] } } }).where.id.in.length,
-    );
-    expect(sizes).toEqual([1000, 1]);
-  });
-
-  it('should chunk into multiple findMany calls when exceeding PK_CHUNK_SIZE', async () => {
-    const entities = makeEntities(1500);
-    const delegate = createMockDelegate(async (args: unknown) => {
-      const where = (args as { where: { id: { in: string[] } } }).where;
-      const ids = where.id.in;
-      return ids.map((id: string) => ({ id, name: `found-${id}` }));
-    });
-
-    const result = await findManyByPKs(delegate, ['id'], entities);
-
-    expect(delegate.findMany).toHaveBeenCalledTimes(2);
-    expect(result).toHaveLength(1500);
-  });
-
-  it('should correctly merge results from multiple chunks', async () => {
-    const entities = makeEntities(2500);
-    const delegate = createMockDelegate(async (args: unknown) => {
-      const where = (args as { where: { id: { in: string[] } } }).where;
-      return where.id.in.map((id: string) => ({ id }));
-    });
-
-    const result = await findManyByPKs(delegate, ['id'], entities);
-
-    expect(delegate.findMany).toHaveBeenCalledTimes(3);
-    expect(result).toHaveLength(2500);
-  });
+      expect(delegate.findMany.mock.calls.map((call) => ((call as unknown[])[0] as InArgs).where.id.in.length)).toEqual(
+        sizes,
+      );
+      expect(result.map((row) => row.id)).toEqual(entities.map((entity) => entity.id));
+    },
+  );
 
   it('should work with composite primary keys', async () => {
     const entities = [
