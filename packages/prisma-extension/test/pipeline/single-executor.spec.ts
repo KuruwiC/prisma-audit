@@ -372,6 +372,84 @@ describe('createSingleExecutor', () => {
     });
   });
 
+  describe('rows a nested connect re-links', () => {
+    it('reads them on the scope handle before and after the operation and audits the foreign key it changed', async () => {
+      const calls: string[] = [];
+      const postBefore: Row = { id: 'p1', title: 'T', authorId: 'u0' };
+      const postAfter: Row = { id: 'p1', title: 'T', authorId: 'u1' };
+      const findMany = vi.fn<(args: Row) => Promise<Row[]>>();
+      findMany.mockImplementationOnce(async () => {
+        calls.push('read before');
+        return [postBefore];
+      });
+      findMany.mockImplementationOnce(async () => {
+        calls.push('read after');
+        return [postAfter];
+      });
+      const args = { where: { id: 'u1' }, data: { posts: { connect: { id: 'p1' } } } };
+      const client = clientWith({
+        user: {
+          findUnique: vi.fn(async () => user),
+          findFirst: vi.fn(async () => user),
+          update: vi.fn(async () => {
+            calls.push('update');
+            return user;
+          }),
+        },
+        post: { findMany },
+      });
+      const { executor, produceRecords } = executorWith({ fetchBefore: true });
+
+      await runWithRecords(executor, operationOn(client, 'update', args), scopeOn(client), produceRecords);
+
+      expect(calls).toEqual(['read before', 'update', 'read after']);
+      expect(findMany.mock.calls).toEqual([[{ where: { OR: [{ id: 'p1' }] } }], [{ where: { OR: [{ id: 'p1' }] } }]]);
+      expect(produceRecords).toHaveBeenCalledWith(
+        [
+          expect.objectContaining({ model: 'User', identity: 'u1', action: 'update' }),
+          expect.objectContaining({
+            model: 'Post',
+            identity: 'p1',
+            action: 'update',
+            before: { kind: 'captured', row: postBefore },
+            after: postAfter,
+          }),
+        ],
+        expect.anything(),
+        new Map(),
+      );
+    });
+  });
+
+  describe('a nested delete whose row cannot be identified', () => {
+    it('is skipped and reported as row-identification with the raw identity it never had', async () => {
+      const args = { where: { id: 'u1' }, data: { profile: { delete: true } } };
+      const client = clientWith({
+        user: { findUnique: vi.fn(async () => user), update: vi.fn(async () => ({ ...user, profile: null })) },
+        profile: { findUnique: vi.fn(), findFirst: vi.fn() },
+      });
+      const { executor, produceRecords, failureSink } = executorWith({ fetchBefore: false });
+
+      await runWithRecords(executor, operationOn(client, 'update', args), scopeOn(client), produceRecords);
+
+      expect(failureSink.notify).toHaveBeenCalledTimes(1);
+      expect(failureSink.notify).toHaveBeenCalledWith({
+        phase: 'row-identification',
+        modelName: 'Profile',
+        operation: 'delete',
+        params: { entityId: undefined, pkFields: ['id'] },
+        error: expect.objectContaining({
+          message: expect.stringContaining('Cannot resolve the primary key of a deleted Profile record'),
+        }),
+      });
+      expect(produceRecords).toHaveBeenCalledWith(
+        [expect.objectContaining({ model: 'User', action: 'update' })],
+        expect.anything(),
+        new Map(),
+      );
+    });
+  });
+
   describe('rows a to-many relation holds before a nested create', () => {
     const existingPost: Row = { id: 'p1', title: 'A', authorId: 'u1' };
     const createdPost: Row = { id: 'p2', title: 'B', authorId: 'u1' };

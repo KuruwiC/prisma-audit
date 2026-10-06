@@ -18,12 +18,13 @@ const schemaMetadata = createSchemaMetadataFromDMMF({
         { name: 'User', fields: [{ ...scalar('id'), isId: true }, scalar('name'), scalar('password')] },
         { name: 'Post', fields: [{ ...scalar('id'), isId: true }, scalar('title'), scalar('content')] },
         { name: 'Tag', fields: [{ ...scalar('id'), isId: true }, scalar('label')] },
+        { name: 'Legacy', fields: [scalar('code'), scalar('secret')] },
       ],
     },
   },
 } as Parameters<typeof createSchemaMetadataFromDMMF>[0]);
 
-const listed: Record<string, string[]> = { User: ['password'], Post: ['content'] };
+const listed: Record<string, string[]> = { User: ['password'], Post: ['content'], Legacy: ['secret'] };
 const auditedOmittedFields = createAuditedOmittedFields(
   (model) => (listed[model] ? { auditOmittedFields: listed[model] } : undefined),
   [],
@@ -64,9 +65,9 @@ const eventOf = (
   origin: { path: '', op: action },
 });
 
-const read = async (events: MutationEvent[]) => {
+const read = async (events: MutationEvent[], overrides: Record<string, unknown> = {}) => {
   const client = clientOf();
-  const handle: PrismaClientWithDynamicAccess = Object.assign(Object.create(null), client);
+  const handle: PrismaClientWithDynamicAccess = Object.assign(Object.create(null), client, overrides);
   const completed = await readOmittedFieldsAfterWrite(events, handle, { schemaMetadata, auditedOmittedFields });
   return { completed, client };
 };
@@ -125,5 +126,21 @@ describe('readOmittedFieldsAfterWrite', () => {
     const { completed } = await read([gone]);
 
     expect(completed[0]?.after).toEqual({ id: 'u9', name: 'Gone' });
+  });
+
+  it('rejects when the delegate of a model that lists fields cannot findMany', async () => {
+    await expect(read([eventOf('Post', 'create', { id: 'p1', title: 'T' })], { post: {} })).rejects.toThrow(
+      '[@prisma-audit] Cannot read the omitted fields of Post: no findMany',
+    );
+  });
+
+  it('passes the rows of a model without a primary key through, reading nothing for them', async () => {
+    const legacy = eventOf('Legacy', 'create', { code: 'x' });
+    const findMany = vi.fn();
+
+    const { completed } = await read([legacy], { legacy: { findMany } });
+
+    expect(findMany).not.toHaveBeenCalled();
+    expect(completed).toEqual([legacy]);
   });
 });

@@ -386,6 +386,26 @@ describe('createBatchExecutor', () => {
         expect(produceRecords).toHaveBeenCalledWith([], expect.anything(), new Map());
       });
 
+      it('writes nothing and counts zero when the first read selects no row, even inside an interactive transaction', async () => {
+        const findMany = findManyReturning([]);
+        const updateMany = vi.fn(async () => ({ count: 1 }));
+        const client = clientWith({ user: { findMany, updateMany } });
+        const produceRecords = produce();
+
+        const outcome = await runWithRecords(
+          executor,
+          operationOn(client, 'updateMany', { where, data, limit: 2 }),
+          transactionScopeOn(client),
+          produceRecords,
+        );
+
+        expect(outcome.result).toEqual({ count: 0 });
+        expect(findMany.mock.calls).toEqual([[{ where, take: 2 }]]);
+        expect(updateMany).not.toHaveBeenCalled();
+        expect(failureSink.notify).not.toHaveBeenCalled();
+        expect(produceRecords).toHaveBeenCalledWith([], expect.anything(), new Map());
+      });
+
       it('stops after three rounds inside an interactive transaction', async () => {
         const findMany = findManyReturning([a1], [b1], [{ id: 'c', email: 'c@1' }]);
         const updateMany = vi.fn(async () => ({ count: 0 }));
@@ -478,18 +498,33 @@ describe('createBatchExecutor', () => {
       );
     });
 
-    it('returns the rows for a limited updateManyAndReturn', async () => {
+    it('runs an updateManyAndReturn with a limit as given, reading the rows once without the limit, and pairs the returned rows with them', async () => {
+      const findMany = findManyReturning([b1]);
       const updateManyAndReturn = vi.fn(async () => [b2]);
-      const client = clientWith({ user: { findMany: vi.fn(async () => [b1]), updateManyAndReturn } });
+      const client = clientWith({ user: { findMany, updateManyAndReturn } });
+      const produceRecords = produce();
+      const args = { where: {}, data: { email: 'x' }, limit: 1 };
+      const operation = operationOn(client, 'updateManyAndReturn', args);
 
-      const outcome = await runWithRecords(
-        executor,
-        operationOn(client, 'updateManyAndReturn', { where: {}, data: {}, limit: 1 }),
-        scopeOn(client),
-        produce(),
-      );
+      const outcome = await runWithRecords(executor, operation, scopeOn(client), produceRecords);
 
+      expect(findMany.mock.calls).toEqual([[{ where: {} }]]);
+      expect(operation.execute).toHaveBeenCalledTimes(1);
+      expect(operation.execute).toHaveBeenCalledWith(args);
       expect(outcome.result).toEqual([b2]);
+      expect(produceRecords).toHaveBeenCalledWith(
+        [
+          eventOf({
+            identity: 'b',
+            action: 'update',
+            before: { kind: 'captured', row: b1 },
+            after: b2,
+            origin: { path: '', op: 'updateManyAndReturn' },
+          }),
+        ],
+        expect.anything(),
+        new Map(),
+      );
     });
   });
 

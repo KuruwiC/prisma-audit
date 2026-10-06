@@ -9,8 +9,9 @@ import { createEntityConfigLookup, defineEntity } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../src/internal-types.js';
 import type { ExecutionScope } from '../../src/pipeline/execution-scope.js';
+import type { OmittedFieldReadDependencies } from '../../src/pipeline/omitted-fields-after-write.js';
 import { createRecordProducer } from '../../src/pipeline/produce-records.js';
-import { NO_AUDITED_OMITTED_FIELDS } from '../../src/utils/audited-omitted-fields.js';
+import { createAuditedOmittedFields, NO_AUDITED_OMITTED_FIELDS } from '../../src/utils/audited-omitted-fields.js';
 import { createSchemaMetadataFromDMMF } from '../../src/utils/schema-metadata.js';
 
 const baseClient: PrismaClientWithDynamicAccess = Object.assign(Object.create(null), { name: 'base' });
@@ -35,20 +36,38 @@ const event: MutationEvent = {
   origin: { path: '', op: 'update' },
 };
 
+const postSchemaMetadata = createSchemaMetadataFromDMMF({
+  dmmf: {
+    datamodel: {
+      models: [
+        {
+          name: 'Post',
+          fields: [
+            { name: 'id', kind: 'scalar', type: 'String', isList: false, isId: true },
+            { name: 'title', kind: 'scalar', type: 'String', isList: false },
+            { name: 'secret', kind: 'scalar', type: 'String', isList: false },
+          ],
+        },
+      ],
+    },
+  },
+} as Parameters<typeof createSchemaMetadataFromDMMF>[0]);
+
 const producerWith = (
   idResolver: (row: Record<string, unknown>, db: unknown) => Promise<string | null>,
   failureSink: Pick<FailureSink, 'reportResolverFailures'> = { reportResolverFailures: vi.fn(async () => {}) },
+  omittedFieldReads: OmittedFieldReadDependencies = {
+    schemaMetadata: createSchemaMetadataFromDMMF({ dmmf: { datamodel: { models: [] } } } as Parameters<
+      typeof createSchemaMetadataFromDMMF
+    >[0]),
+    auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS,
+  },
 ) => {
   const entityConfigs = createEntityConfigLookup({ Post: defineEntity({ type: 'Post', idResolver }) });
   return createRecordProducer({
     resolveConfig: { entity: entityConfigs.byModel, rootEntity: entityConfigs.byCategoryAndType },
     composeConfig: { entity: entityConfigs.byModel, excludeFields: [], relationFieldNames: () => undefined },
-    omittedFieldReads: {
-      schemaMetadata: createSchemaMetadataFromDMMF({ dmmf: { datamodel: { models: [] } } } as Parameters<
-        typeof createSchemaMetadataFromDMMF
-      >[0]),
-      auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS,
-    },
+    omittedFieldReads,
     failureSink,
   });
 };
@@ -112,5 +131,59 @@ describe('createRecordProducer', () => {
 
     expect(idResolver).toHaveBeenCalledWith(event.after, transactionClient);
     expect(idResolver).not.toHaveBeenCalledWith(event.after, baseClient);
+  });
+
+  it('leaves the widened columns of a created row out of the stored after state', async () => {
+    const created: MutationEvent = {
+      model: 'Post',
+      identity: 'p1',
+      action: 'create',
+      before: { kind: 'none' },
+      after: { id: 'p1', title: 'new', secret: 'hidden' },
+      origin: { path: '', op: 'create' },
+    };
+    const produce = producerWith(async (row) => row.id as string);
+
+    const [widenedRecord] = await produce([created], scopeOn(baseClient), new Map([['Post', new Set(['secret'])]]));
+    const [plainRecord] = await produce([created], scopeOn(baseClient), new Map());
+
+    expect(widenedRecord?.after).toEqual({ id: 'p1', title: 'new' });
+    expect(plainRecord?.after).toEqual({ id: 'p1', title: 'new', secret: 'hidden' });
+  });
+
+  it('reads the omitted fields an entity audits on the handle of the scope, completing the stored after state', async () => {
+    const baseFindMany = vi.fn(async () => [{ id: 'p1', secret: 'read-on-base' }]);
+    const transactionFindMany = vi.fn(async () => [{ id: 'p1', secret: 'read-after-write' }]);
+    const base: PrismaClientWithDynamicAccess = Object.assign(Object.create(null), {
+      post: { findMany: baseFindMany },
+    });
+    const transaction: TransactionalPrismaClient = Object.assign(Object.create(null), {
+      post: { findMany: transactionFindMany },
+    });
+    const produce = producerWith(
+      async (row) => row.id as string,
+      { reportResolverFailures: vi.fn(async () => {}) },
+      {
+        schemaMetadata: postSchemaMetadata,
+        auditedOmittedFields: createAuditedOmittedFields(
+          (model) => (model === 'Post' ? { auditOmittedFields: ['secret'] } : undefined),
+          [],
+        ),
+      },
+    );
+
+    const written: MutationEvent = {
+      ...event,
+      before: { kind: 'captured', row: { id: 'p1', title: 'old', secret: 'old-secret' } },
+    };
+
+    const [record] = await produce([written], { ...scopeOn(transaction), baseClient: base }, new Map());
+
+    expect(transactionFindMany).toHaveBeenCalledWith({
+      where: { id: { in: ['p1'] } },
+      select: { id: true, secret: true },
+    });
+    expect(baseFindMany).not.toHaveBeenCalled();
+    expect(record?.after).toEqual({ id: 'p1', title: 'new', secret: 'read-after-write' });
   });
 });

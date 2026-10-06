@@ -128,6 +128,16 @@ describe('collectSingleOperationEvents', () => {
     ]);
   });
 
+  it.each([
+    ['null', null],
+    ['undefined', undefined],
+    ['a string', 'u1'],
+  ])('rejects an operation result that is %s', async (_name, result) => {
+    await expect(collectSingleOperationEvents(single({ result }), deps)).rejects.toThrow(
+      '[@prisma-audit] Operation result must be an object',
+    );
+  });
+
   it('pairs an update with its before state', async () => {
     const before = { id: 'u1', name: 'Anne' };
     const outcome = single({
@@ -876,6 +886,41 @@ describe('collectBatchOperationEvents', () => {
         origin: { path: '', op: 'deleteMany' },
       },
     ]);
+  });
+
+  it('collects the returned rows of a createManyAndReturn as create events carrying their own keyword', () => {
+    const events = collectBatchOperationEvents(batch({ action: 'createManyAndReturn' }), schemaMetadata);
+
+    expect(events).toEqual(
+      rows.map((row) => ({
+        model: 'Post',
+        identity: row.id,
+        action: 'create',
+        before: { kind: 'none' },
+        after: row,
+        origin: { path: '', op: 'createManyAndReturn' },
+      })),
+    );
+  });
+
+  it('pairs the returned rows of an updateManyAndReturn with their before states as update events', () => {
+    const beforeStates = [
+      { id: 'p1', title: 'A0', authorId: 'u1' },
+      { id: 'p2', title: 'B0', authorId: 'u1' },
+    ];
+
+    const events = collectBatchOperationEvents(batch({ action: 'updateManyAndReturn', beforeStates }), schemaMetadata);
+
+    expect(events).toEqual(
+      rows.map((row, index) => ({
+        model: 'Post',
+        identity: row.id,
+        action: 'update',
+        before: { kind: 'captured', row: beforeStates[index] },
+        after: row,
+        origin: { path: '', op: 'updateManyAndReturn' },
+      })),
+    );
   });
 
   it('rejects an action that is not a batch keyword', () => {
