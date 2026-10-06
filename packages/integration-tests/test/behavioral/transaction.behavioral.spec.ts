@@ -31,10 +31,12 @@ describe('Transaction Atomicity (Behavioral)', () => {
     );
 
     const userLogs = await h.readAuditLogs({ entityType: 'User', action: 'create' });
-    expect(userLogs.length).toBeGreaterThanOrEqual(1);
+    expect(userLogs).toHaveLength(1);
 
+    // One log per aggregate the Post belongs to: its own and its author's.
     const postLogs = await h.readAuditLogs({ entityType: 'Post', action: 'create' });
-    expect(postLogs.length).toBeGreaterThanOrEqual(1);
+    expect(postLogs).toHaveLength(2);
+    expect(postLogs.map((l) => l.aggregateType).sort()).toEqual(['Post', 'User']);
   });
 
   it('should reflect latest state in before for tx-internal update', async () => {
@@ -51,7 +53,7 @@ describe('Transaction Atomicity (Behavioral)', () => {
     );
 
     const updateLogs = await h.readAuditLogs({ entityType: 'User', action: 'update' });
-    expect(updateLogs.length).toBeGreaterThanOrEqual(1);
+    expect(updateLogs).toHaveLength(1);
 
     const log = updateLogs[0];
     if (!log) throw new Error('Expected at least one audit log');

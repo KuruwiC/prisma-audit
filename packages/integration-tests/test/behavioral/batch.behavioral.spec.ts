@@ -63,10 +63,10 @@ describe('Batch Operations (Behavioral)', () => {
 
       const postLogs = await h.readAuditLogs({ entityType: 'Post', action: 'create' });
       // Each post should have 2 logs: Post aggregate + User aggregate
-      expect(postLogs.length).toBeGreaterThanOrEqual(4);
+      expect(postLogs).toHaveLength(4);
 
       const userAggLogs = postLogs.filter((l) => l.aggregateType === 'User');
-      expect(userAggLogs.length).toBeGreaterThanOrEqual(2);
+      expect(userAggLogs).toHaveLength(2);
       for (const log of userAggLogs) {
         expect(log.aggregateId).toBe(user.id);
       }
@@ -134,10 +134,10 @@ describe('Batch Operations (Behavioral)', () => {
 
       const postLogs = await h.readAuditLogs({ entityType: 'Post', action: 'create' });
       // Each post should have 2 logs: Post aggregate + User aggregate
-      expect(postLogs.length).toBeGreaterThanOrEqual(4);
+      expect(postLogs).toHaveLength(4);
 
       const userAggLogs = postLogs.filter((l) => l.aggregateType === 'User');
-      expect(userAggLogs.length).toBeGreaterThanOrEqual(2);
+      expect(userAggLogs).toHaveLength(2);
       for (const log of userAggLogs) {
         expect(log.aggregateId).toBe(user.id);
       }

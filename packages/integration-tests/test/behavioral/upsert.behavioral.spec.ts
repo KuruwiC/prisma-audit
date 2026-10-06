@@ -30,10 +30,10 @@ describe('Upsert Operations (Behavioral)', () => {
       expect(user.name).toBe('Upsert New');
 
       const logs = await h.readAuditLogs({ entityType: 'User', entityId: user.id as string });
-      expect(logs.length).toBeGreaterThanOrEqual(1);
+      expect(logs).toHaveLength(1);
 
-      const createLog = logs.find((l) => l.action === 'create');
-      expect(createLog).toBeDefined();
+      const createLog = logs[0];
+      expect(createLog?.action).toBe('create');
       expect(createLog?.before).toBeNull();
       expect(createLog?.after).not.toBeNull();
     });
@@ -58,7 +58,7 @@ describe('Upsert Operations (Behavioral)', () => {
       expect(user.name).toBe('Upsert Updated');
 
       const logs = await h.readAuditLogs({ entityType: 'User', entityId: user.id as string, action: 'update' });
-      expect(logs.length).toBeGreaterThanOrEqual(1);
+      expect(logs).toHaveLength(1);
 
       const updateLog = logs[0];
       if (!updateLog) throw new Error('Expected at least one audit log');

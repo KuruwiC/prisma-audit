@@ -255,7 +255,7 @@ describe('CRUD Smoke Tests (SQLite)', () => {
         },
       });
 
-      expect(auditLogs.length).toBeGreaterThanOrEqual(3);
+      expect(auditLogs).toHaveLength(6);
 
       for (const log of auditLogs) {
         expect(log.changes).toMatchObject({
