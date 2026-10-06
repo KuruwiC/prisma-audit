@@ -18,12 +18,14 @@ describe('createDiffCalculator', () => {
       expect(result).toEqual({ balance: { old: 100n, new: 200n } });
     });
 
-    it('should detect changes when BigInt changes to a different BigInt', () => {
-      const before = { id: '1', blockNumber: 9007199254740991n };
-      const after = { id: '1', blockNumber: 9007199254740992n };
+    it('should detect a change between BigInts that are the same Number', () => {
+      expect(Number(9007199254740992n)).toBe(Number(9007199254740993n));
+
+      const before = { id: '1', blockNumber: 9007199254740992n };
+      const after = { id: '1', blockNumber: 9007199254740993n };
       const result = calculateDiff(before, after);
       expect(result).toEqual({
-        blockNumber: { old: 9007199254740991n, new: 9007199254740992n },
+        blockNumber: { old: 9007199254740992n, new: 9007199254740993n },
       });
     });
 
@@ -77,6 +79,24 @@ describe('createDiffCalculator', () => {
     });
   });
 
+  describe('Date values', () => {
+    it('should detect no change between distinct Date instances of the same time', () => {
+      const before = { id: '1', publishedAt: new Date('2024-01-01T00:00:00Z') };
+      const after = { id: '1', publishedAt: new Date('2024-01-01T00:00:00Z') };
+
+      expect(calculateDiff(before, after)).toBeNull();
+    });
+
+    it('should detect a change between Dates of different times', () => {
+      const old = new Date('2024-01-01T00:00:00Z');
+      const next = new Date('2024-01-02T00:00:00Z');
+
+      expect(calculateDiff({ id: '1', publishedAt: old }, { id: '1', publishedAt: next })).toEqual({
+        publishedAt: { old, new: next },
+      });
+    });
+  });
+
   describe('null/undefined states', () => {
     it('should return null when before is null', () => {
       expect(calculateDiff(null, { id: '1', balance: 100n })).toBeNull();
@@ -84,6 +104,18 @@ describe('createDiffCalculator', () => {
 
     it('should return null when after is null', () => {
       expect(calculateDiff({ id: '1', balance: 100n }, null)).toBeNull();
+    });
+
+    it('should return null when before is undefined', () => {
+      expect(calculateDiff(undefined, { id: '1', balance: 100n })).toBeNull();
+    });
+
+    it('should return null when after is undefined', () => {
+      expect(calculateDiff({ id: '1', balance: 100n }, undefined)).toBeNull();
+    });
+
+    it('should return null when both states are undefined', () => {
+      expect(calculateDiff(undefined, undefined)).toBeNull();
     });
   });
 });

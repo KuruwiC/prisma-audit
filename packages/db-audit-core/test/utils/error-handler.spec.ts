@@ -1,5 +1,9 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createErrorHandler } from '../../src/utils/error-handler.js';
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe('createErrorHandler', () => {
   describe('throw strategy', () => {
@@ -22,6 +26,15 @@ describe('createErrorHandler', () => {
 
       expect(() => handler(error, 'test context')).toThrow(CustomError);
     });
+
+    it('should run the custom handler before rethrowing', () => {
+      const customHandler = vi.fn();
+      const handler = createErrorHandler('throw', customHandler);
+      const error = new Error('Test error');
+
+      expect(() => handler(error, 'test context')).toThrow(error);
+      expect(customHandler).toHaveBeenCalledExactlyOnceWith(error, 'test context');
+    });
   });
 
   describe('log strategy', () => {
@@ -35,8 +48,6 @@ describe('createErrorHandler', () => {
       expect(consoleErrorSpy).toHaveBeenNthCalledWith(1, '[db-audit-core] Error in test context:', 'Test error');
       expect(consoleErrorSpy).toHaveBeenCalledTimes(2);
       expect(consoleErrorSpy.mock.calls[1]?.[0]).toContain('Error: Test error');
-
-      consoleErrorSpy.mockRestore();
     });
   });
 
@@ -48,8 +59,6 @@ describe('createErrorHandler', () => {
 
       expect(() => handler(error, 'test context')).not.toThrow();
       expect(consoleErrorSpy).not.toHaveBeenCalled();
-
-      consoleErrorSpy.mockRestore();
     });
   });
 
@@ -63,9 +72,8 @@ describe('createErrorHandler', () => {
       handler(error, 'test context');
 
       expect(customHandler).toHaveBeenCalledWith(error, 'test context');
-      expect(consoleErrorSpy).toHaveBeenCalled();
-
-      consoleErrorSpy.mockRestore();
+      expect(consoleErrorSpy).toHaveBeenNthCalledWith(1, '[db-audit-core] Error in test context:', 'Test error');
+      expect(consoleErrorSpy).toHaveBeenCalledTimes(2);
     });
 
     it("should log a custom handler's synchronous throw instead of propagating it", () => {
@@ -78,8 +86,6 @@ describe('createErrorHandler', () => {
       expect(consoleErrorSpy.mock.calls).toEqual([
         ['[db-audit-core] Error in custom error handler:', 'handler failed'],
       ]);
-
-      consoleErrorSpy.mockRestore();
     });
 
     it("should log a custom handler's rejection instead of propagating it", async () => {
@@ -93,8 +99,6 @@ describe('createErrorHandler', () => {
       expect(consoleErrorSpy.mock.calls).toEqual([
         ['[db-audit-core] Error in async custom error handler:', 'handler rejected'],
       ]);
-
-      consoleErrorSpy.mockRestore();
     });
   });
 
@@ -106,9 +110,8 @@ describe('createErrorHandler', () => {
 
       handler(error, 'test context');
 
-      expect(consoleErrorSpy).toHaveBeenCalled();
-
-      consoleErrorSpy.mockRestore();
+      expect(consoleErrorSpy).toHaveBeenNthCalledWith(1, '[db-audit-core] Error in test context:', 'Test error');
+      expect(consoleErrorSpy).toHaveBeenCalledTimes(2);
     });
   });
 });
