@@ -5,7 +5,7 @@
  * that does not name them, and the audit records the rows in that default shape. An entity lists
  * the hidden fields to audit anyway in `auditOmittedFields`; those, less the fields the entity's
  * `excludeFields` names, are read in the audit's own queries: its whole-row reads, before and
- * after the write, through {@link withOmittedFieldsInFinds}, and a read by primary key after the
+ * after the write, through {@link withOmittedFieldsInFinds}, and a read by row key after the
  * write of the written rows it did not read itself (`pipeline/omitted-fields-after-write.ts`). The
  * caller's query is never widened with them.
  *

@@ -157,6 +157,28 @@ const createManyOn = (model: string, delegate: { createMany: unknown; findMany: 
 const unidentifiedMessage = (action: string, count: number) =>
   `${count} of the rows a limited ${action} wrote cannot be told apart from rows another writer changed`;
 
+const NO_ROW_KEY_MESSAGE =
+  '[@prisma-audit] Model "Note" has no primary key and no unique constraint on required fields: its rows cannot be identified for a batch audit.';
+
+/** An operation on `model` (a model without a primary key), run on a client holding `delegate` for it */
+const operationOnModel = (
+  model: string,
+  delegate: Record<string, unknown>,
+  action: AuditedOperation['action'],
+  args: Row,
+) => {
+  const client = clientWith({ [model.charAt(0).toLowerCase() + model.slice(1)]: delegate });
+  const mutation = delegate[action] as (runArgs: Row) => Promise<unknown>;
+  const operation: AuditedOperation = {
+    model,
+    action,
+    args,
+    widened: new Map(),
+    execute: vi.fn(async (runArgs: Row) => mutation(runArgs)),
+  };
+  return { client, operation };
+};
+
 const a1: Row = { id: 'a', email: 'a@1' };
 const a2: Row = { id: 'a', email: 'a@2' };
 const b1: Row = { id: 'b', email: 'b@1' };
@@ -408,9 +430,7 @@ describe('createBatchExecutor', () => {
       const findMany = vi.fn(async () => []);
       const { client, operation } = createManyOn('Note', { createMany, findMany }, { data: [{ text: 't' }] });
 
-      await expect(runWithRecords(executor, operation, scopeOn(client), produce())).rejects.toThrow(
-        '[@prisma-audit] Model "Note" has no primary key and no unique constraint on required fields: createMany cannot read back the rows it creates.',
-      );
+      await expect(runWithRecords(executor, operation, scopeOn(client), produce())).rejects.toThrow(NO_ROW_KEY_MESSAGE);
       expect(createMany).not.toHaveBeenCalled();
     });
 
@@ -889,6 +909,141 @@ describe('createBatchExecutor', () => {
         });
         expect(produceRecords).toHaveBeenCalledWith([], expect.anything(), new Map());
       });
+    });
+  });
+
+  describe('a model without a primary key, identified by a unique field on a required column', () => {
+    const d1: Row = { label: null, serial: 's1', name: 'one' };
+    const d2: Row = { label: null, serial: 's2', name: 'two' };
+    const renamed = (row: Row): Row => ({ ...row, name: 'renamed' });
+    const where = { name: { not: 'x' } };
+    const data = { name: 'renamed' };
+    const bySerials = (...serials: string[]) => ({ serial: { in: serials } });
+    const updateEvent = (before: Row, after: Row, op: string) =>
+      expect.objectContaining({
+        model: 'Device',
+        action: 'update',
+        before: { kind: 'captured', row: before },
+        after,
+        origin: { path: '', op },
+      });
+    const deleteEvent = (before: Row) =>
+      expect.objectContaining({
+        model: 'Device',
+        action: 'delete',
+        before: { kind: 'captured', row: before },
+        origin: { path: '', op: 'deleteMany' },
+      });
+
+    it('reads the matching rows before, re-reads them by the unique field after and pairs each after row with its before row on an updateMany', async () => {
+      const findMany = findManyReturning([d1, d2], [renamed(d2), renamed(d1)]);
+      const updateMany = vi.fn(async () => ({ count: 2 }));
+      const { client, operation } = operationOnModel('Device', { findMany, updateMany }, 'updateMany', { where, data });
+      const produceRecords = produce();
+
+      await runWithRecords(executor, operation, scopeOn(client), produceRecords);
+
+      expect(findMany.mock.calls).toEqual([[{ where }], [{ where: bySerials('s1', 's2') }]]);
+      expect(produceRecords).toHaveBeenCalledWith(
+        [updateEvent(d2, renamed(d2), 'updateMany'), updateEvent(d1, renamed(d1), 'updateMany')],
+        expect.anything(),
+        new Map(),
+      );
+    });
+
+    it('pairs the rows an updateManyAndReturn returns with the rows read before, by the unique field', async () => {
+      const findMany = findManyReturning([d1, d2]);
+      const updateManyAndReturn = vi.fn(async () => [renamed(d2), renamed(d1)]);
+      const { client, operation } = operationOnModel(
+        'Device',
+        { findMany, updateManyAndReturn },
+        'updateManyAndReturn',
+        {
+          where,
+          data,
+        },
+      );
+      const produceRecords = produce();
+
+      await runWithRecords(executor, operation, scopeOn(client), produceRecords);
+
+      expect(findMany.mock.calls).toEqual([[{ where }]]);
+      expect(produceRecords).toHaveBeenCalledWith(
+        [updateEvent(d2, renamed(d2), 'updateManyAndReturn'), updateEvent(d1, renamed(d1), 'updateManyAndReturn')],
+        expect.anything(),
+        new Map(),
+      );
+    });
+
+    it('narrows an updateMany with a limit to the unique values of the rows its limit selected, and audits those rows', async () => {
+      const findMany = findManyReturning([d1, d2], [renamed(d1), renamed(d2)]);
+      const updateMany = vi.fn(async () => ({ count: 2 }));
+      const { client, operation } = operationOnModel('Device', { findMany, updateMany }, 'updateMany', {
+        where,
+        data,
+        limit: 2,
+      });
+      const produceRecords = produce();
+
+      await runWithRecords(executor, operation, scopeOn(client), produceRecords);
+
+      expect(findMany.mock.calls).toEqual([[{ where, take: 2 }], [{ where: bySerials('s1', 's2') }]]);
+      expect(operation.execute).toHaveBeenCalledWith({ where: { AND: [where, bySerials('s1', 's2')] }, data });
+      expect(produceRecords).toHaveBeenCalledWith(
+        [updateEvent(d1, renamed(d1), 'updateMany'), updateEvent(d2, renamed(d2), 'updateMany')],
+        expect.anything(),
+        new Map(),
+      );
+    });
+
+    it('narrows a deleteMany with a limit to the unique values of the rows its limit selected, and audits those rows as read', async () => {
+      const findMany = findManyReturning([d1, d2]);
+      const deleteMany = vi.fn(async () => ({ count: 2 }));
+      const { client, operation } = operationOnModel('Device', { findMany, deleteMany }, 'deleteMany', {
+        where,
+        limit: 2,
+      });
+      const produceRecords = produce();
+
+      await runWithRecords(executor, operation, scopeOn(client), produceRecords);
+
+      expect(operation.execute).toHaveBeenCalledWith({ where: { AND: [where, bySerials('s1', 's2')] } });
+      expect(produceRecords).toHaveBeenCalledWith([deleteEvent(d1), deleteEvent(d2)], expect.anything(), new Map());
+    });
+
+    it.each([
+      ['updateMany', { where, data }],
+      ['updateManyAndReturn', { where, data }],
+      ['updateMany', { where, data, limit: 2 }],
+    ] as const)(
+      'fails an %s %j of a model with no row key before the write, naming the model',
+      async (action, args) => {
+        const findMany = vi.fn(async () => []);
+        const mutation = vi.fn(async () => ({ count: 0 }));
+        const { client, operation } = operationOnModel('Note', { findMany, [action]: mutation }, action, args);
+
+        await expect(runWithRecords(executor, operation, scopeOn(client), produce())).rejects.toThrow(
+          NO_ROW_KEY_MESSAGE,
+        );
+        expect(mutation).not.toHaveBeenCalled();
+      },
+    );
+
+    it('audits a deleteMany of a model with no row key from the rows read before it', async () => {
+      const note: Row = { label: null, text: 't' };
+      const findMany = findManyReturning([note]);
+      const deleteMany = vi.fn(async () => ({ count: 1 }));
+      const { client, operation } = operationOnModel('Note', { findMany, deleteMany }, 'deleteMany', { where });
+      const produceRecords = produce();
+
+      await runWithRecords(executor, operation, scopeOn(client), produceRecords);
+
+      expect(deleteMany).toHaveBeenCalledWith({ where });
+      expect(produceRecords).toHaveBeenCalledWith(
+        [expect.objectContaining({ model: 'Note', action: 'delete', before: { kind: 'captured', row: note } })],
+        expect.anything(),
+        new Map(),
+      );
     });
   });
 

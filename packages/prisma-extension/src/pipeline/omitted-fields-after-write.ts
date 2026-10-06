@@ -3,19 +3,19 @@
  *
  * An after state taken from the caller's operation result is in the client's default shape, which
  * lacks the fields a client-level `omit` hides. The fields an entity lists in `auditOmittedFields`
- * are read for those rows in one query per model, by primary key, selecting the key and those
- * fields only, so the caller's query is never widened with them. Rows the audit read itself, through
- * `withOmittedFieldsInFinds`, already hold them, and a deleted row has no after state to store.
+ * are read for those rows in one query per model, by row key (`rowKeyFieldsOf`), selecting the key
+ * and those fields only, so the caller's query is never widened with them. Rows the audit read
+ * itself, through `withOmittedFieldsInFinds`, already hold them, and a deleted row has no after
+ * state to store.
  *
  * @module pipeline/omitted-fields-after-write
  */
 
 import type { MutationEvent } from '@kuruwic/db-audit-core';
-import { getPrimaryKeyConstraint } from '../grammar/nested-operations.js';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../internal-types.js';
 import type { SchemaMetadata } from '../schema/types.js';
 import type { AuditedOmittedFields } from '../utils/audited-omitted-fields.js';
-import { extractEntityIdentity, findManyByPKs } from '../utils/id-generation.js';
+import { extractEntityIdentity, findManyByPKs, rowKeyFieldsOf } from '../utils/id-generation.js';
 import type { EntityIdentityKey } from '../utils/identity-key.js';
 import { getModelDelegate, hasOperation } from '../utils/model-accessor.js';
 
@@ -38,7 +38,7 @@ const lacksAny = (event: MutationEvent, fields: ReadonlySet<string>): boolean =>
 const readFields = async (
   handle: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
   modelName: string,
-  pkFields: string[],
+  keyFields: string[],
   fields: ReadonlySet<string>,
   rows: Row[],
 ): Promise<Map<EntityIdentityKey, Row>> => {
@@ -46,9 +46,9 @@ const readFields = async (
   if (!hasOperation<SelectingFindMany>(delegate, 'findMany')) {
     throw new Error(`[@prisma-audit] Cannot read the omitted fields of ${modelName}: no findMany`);
   }
-  const select: Record<string, true> = Object.fromEntries([...pkFields, ...fields].map((field) => [field, true]));
-  const read = await findManyByPKs({ findMany: ({ where }) => delegate.findMany({ where, select }) }, pkFields, rows);
-  return new Map(read.map((row) => [extractEntityIdentity(row, pkFields), row]));
+  const select: Record<string, true> = Object.fromEntries([...keyFields, ...fields].map((field) => [field, true]));
+  const read = await findManyByPKs({ findMany: ({ where }) => delegate.findMany({ where, select }) }, keyFields, rows);
+  return new Map(read.map((row) => [extractEntityIdentity(row, keyFields), row]));
 };
 
 const withReadFields = (after: Row, read: Row | undefined, fields: ReadonlySet<string>): Row => {
@@ -79,12 +79,12 @@ export const readOmittedFieldsAfterWrite = async (
     return [...events];
   }
 
-  const readByModel = new Map<string, { pkFields: string[]; rows: Map<EntityIdentityKey, Row> }>();
+  const readByModel = new Map<string, { keyFields: string[]; rows: Map<EntityIdentityKey, Row> }>();
   for (const [modelName, rows] of lacking) {
-    const pkFields = getPrimaryKeyConstraint(deps.schemaMetadata, modelName)?.fields;
-    if (pkFields) {
+    const keyFields = rowKeyFieldsOf(deps.schemaMetadata, modelName);
+    if (keyFields) {
       const fields = deps.auditedOmittedFields.of(modelName);
-      readByModel.set(modelName, { pkFields, rows: await readFields(handle, modelName, pkFields, fields, rows) });
+      readByModel.set(modelName, { keyFields, rows: await readFields(handle, modelName, keyFields, fields, rows) });
     }
   }
 
@@ -96,7 +96,7 @@ export const readOmittedFieldsAfterWrite = async (
     }
     return {
       ...event,
-      after: withReadFields(event.after, read.rows.get(extractEntityIdentity(event.after, read.pkFields)), fields),
+      after: withReadFields(event.after, read.rows.get(extractEntityIdentity(event.after, read.keyFields)), fields),
     };
   });
 };

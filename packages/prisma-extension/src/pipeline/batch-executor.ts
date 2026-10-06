@@ -3,8 +3,10 @@
  *
  * createMany, createManyAndReturn, updateMany, updateManyAndReturn and deleteMany: reads the
  * rows an update or a delete will touch with `findMany`, runs the operation, reads back the rows a
- * createMany wrote by the keys of its data and the rows an updateMany wrote by primary key, and
- * collects one event per written row, paired with its before row by primary key.
+ * createMany wrote by the keys of its data and the rows an updateMany wrote by row key, and
+ * collects one event per written row, paired with its before row by row key. A row's key is the
+ * model's primary key, or its first unique constraint on required fields when it has no primary key
+ * (`rowKeyFieldsOf`).
  */
 
 import type { FailureSink, MutationEvent } from '@kuruwic/db-audit-core';
@@ -18,7 +20,6 @@ import {
   ensureIds,
   extractEntityIdentity,
   findManyByPKs,
-  getPrimaryKeyFields,
   getRowKeyFields,
 } from '../utils/id-generation.js';
 import type { EntityIdentityKey } from '../utils/identity-key.js';
@@ -44,10 +45,10 @@ export type BatchPrepared =
   /** createMany: the rows to insert, with client-generated key values, and the fields of that key */
   | { readonly kind: 'create'; readonly rows: Row[]; readonly keyFields: string[] }
   /** updateManyAndReturn: its returned rows are exactly the updated ones */
-  | { readonly kind: 'update-returning'; readonly beforeRows: Row[]; readonly pkFields: string[] }
-  | { readonly kind: 'update'; readonly beforeRows: Row[]; readonly pkFields: string[] }
+  | { readonly kind: 'update-returning'; readonly beforeRows: Row[]; readonly keyFields: string[] }
+  | { readonly kind: 'update'; readonly beforeRows: Row[]; readonly keyFields: string[] }
   /** updateMany or deleteMany with a positive integer `limit`: the rows are read round by round as the write runs */
-  | { readonly kind: 'limited'; readonly limit: number; readonly pkFields: string[]; readonly rounds: number }
+  | { readonly kind: 'limited'; readonly limit: number; readonly keyFields: string[]; readonly rounds: number }
   /**
    * updateMany or deleteMany with a `limit`, run as given: inside a batch `$transaction([...])`
    * Prisma runs (`reportsUnidentified`), or with a limit Prisma rejects
@@ -65,7 +66,7 @@ export interface BatchExecuted {
 
 interface WrittenRows {
   readonly rows: Row[];
-  /** Before state of each row, paired by primary key; absent for a create */
+  /** Before state of each row, paired by row key; absent for a create */
   readonly beforeStates?: Array<Row | null>;
 }
 
@@ -87,19 +88,19 @@ const batchDelegate = (scope: ExecutionScope, modelName: string, omittedFields: 
 
 const rowsOf = (value: unknown): Row[] => (Array.isArray(value) ? (value as Row[]) : []);
 
-const pairByPrimaryKey = (afterRows: Row[], beforeRows: Row[], pkFields: string[]): WrittenRows => {
-  const beforeByPk = buildEntityMap(beforeRows, pkFields);
+const pairByRowKey = (afterRows: Row[], beforeRows: Row[], keyFields: string[]): WrittenRows => {
+  const beforeByKey = buildEntityMap(beforeRows, keyFields);
   return {
     rows: afterRows,
-    beforeStates: afterRows.map((row) => beforeByPk.get(extractEntityIdentity(row, pkFields)) ?? null),
+    beforeStates: afterRows.map((row) => beforeByKey.get(extractEntityIdentity(row, keyFields)) ?? null),
   };
 };
 
 /**
  * `createMany` returns only `{ count }`, which leaves `data` as the only way to know the keys of the
- * rows it inserts: the model's primary key, or a unique constraint on required fields for a model
- * without one (`getRowKeyFields`). `ensureIds` fills in client-side the key fields `data` leaves
- * out, and the rows it audits are the ones read back by those keys after the write (`createdRows`).
+ * rows it inserts: the model's row key (`getRowKeyFields`). `ensureIds` fills in client-side the key
+ * fields `data` leaves out, and the rows it audits are the ones read back by those keys after the
+ * write (`createdRows`).
  * `createManyAndReturn` relies on Prisma's own id generation and audits the rows it actually
  * created, read whole whatever the caller selects (see `injectAuditedSelection`), which supports
  * database-generated defaults (autoincrement, dbgenerated) and stays correct under skipDuplicates.
@@ -149,8 +150,8 @@ const prepareUpdateOrDelete = async (
   scope: ExecutionScope,
   deps: BatchExecutorDependencies,
 ): Promise<BatchPrepared> => {
-  const { Prisma } = deps;
   const { model, action, args } = operation;
+  const rowKeyFields = () => getRowKeyFields(deps.schemaMetadata, model);
   const delegate = batchDelegate(scope, model, deps.auditedOmittedFields.of(model));
   const where = args.where ?? {};
   const { limit } = args;
@@ -163,18 +164,17 @@ const prepareUpdateOrDelete = async (
       return { kind: 'limited-as-given', reportsUnidentified: true };
     }
     const rounds = scope.transaction ? LIMITED_WRITE_ROUNDS : 1;
-    return { kind: 'limited', limit, pkFields: getPrimaryKeyFields(Prisma, model), rounds };
+    return { kind: 'limited', limit, keyFields: rowKeyFields(), rounds };
   }
   if (action === AUDIT_ACTION.UPDATE_MANY_AND_RETURN) {
-    const beforeRows = await delegate.findMany({ where });
-    return { kind: 'update-returning', beforeRows, pkFields: getPrimaryKeyFields(Prisma, model) };
+    const keyFields = rowKeyFields();
+    return { kind: 'update-returning', beforeRows: await delegate.findMany({ where }), keyFields };
   }
-
-  const beforeRows = await delegate.findMany({ where });
   if (action === AUDIT_ACTION.DELETE_MANY) {
-    return { kind: 'delete', beforeRows };
+    return { kind: 'delete', beforeRows: await delegate.findMany({ where }) };
   }
-  return { kind: 'update', beforeRows, pkFields: getPrimaryKeyFields(Prisma, model) };
+  const keyFields = rowKeyFields();
+  return { kind: 'update', beforeRows: await delegate.findMany({ where }), keyFields };
 };
 
 const countOf = (result: unknown): number => {
@@ -187,7 +187,7 @@ interface LimitedRound {
   readonly rows: Row[];
   readonly narrowed: unknown;
   readonly written: number;
-  readonly pkFields: string[];
+  readonly keyFields: string[];
 }
 
 /** Names the rows a round that wrote fewer rows than it read is known to have written */
@@ -199,10 +199,10 @@ type WrittenRowsOfShortRound = (delegate: BatchDelegate, round: LimitedRound) =>
  * told apart from a read row another writer changed before the update.
  */
 const updatedRowsOfShortRound: WrittenRowsOfShortRound = async (delegate, round) => {
-  const readByPk = buildEntityMap(round.rows, round.pkFields);
+  const readByKey = buildEntityMap(round.rows, round.keyFields);
   const stillMatching = await delegate.findMany({ where: round.narrowed });
   return stillMatching.flatMap((row): Row[] => {
-    const readRow = readByPk.get(extractEntityIdentity(row, round.pkFields));
+    const readRow = readByKey.get(extractEntityIdentity(row, round.keyFields));
     return readRow ? [readRow] : [];
   });
 };
@@ -214,10 +214,10 @@ const updatedRowsOfShortRound: WrittenRowsOfShortRound = async (delegate, round)
  */
 const deletedRowsOfShortRound: WrittenRowsOfShortRound = async (delegate, round) => {
   const remaining = buildEntityMap(
-    await delegate.findMany({ where: buildPKWhereClause(round.pkFields, round.rows) }),
-    round.pkFields,
+    await delegate.findMany({ where: buildPKWhereClause(round.keyFields, round.rows) }),
+    round.keyFields,
   );
-  const gone = round.rows.filter((row) => !remaining.has(extractEntityIdentity(row, round.pkFields)));
+  const gone = round.rows.filter((row) => !remaining.has(extractEntityIdentity(row, round.keyFields)));
   return gone.length === round.written ? gone : [];
 };
 
@@ -250,7 +250,7 @@ const reportUnidentified = async (
 
 /**
  * Runs an `updateMany` or `deleteMany` with a `limit` as the caller's own operation, without the
- * limit and narrowed to the primary keys of the rows a read with the caller's `where` and the limit
+ * limit and narrowed to the row keys of the rows a read with the caller's `where` and the limit
  * as `take` selected, so the rows it audits are the rows it wrote. Inside an interactive
  * transaction a round that writes fewer rows than it read (another writer changed some of them in
  * between) is topped up with rows read the same way, leaving out every row already read, at most
@@ -262,25 +262,25 @@ const reportUnidentified = async (
 const runLimitedWrite = async (
   operation: AuditedOperation,
   delegate: BatchDelegate,
-  prepared: { readonly limit: number; readonly pkFields: string[]; readonly rounds: number },
+  prepared: { readonly limit: number; readonly keyFields: string[]; readonly rounds: number },
 ): Promise<BatchExecuted> => {
-  const { limit, pkFields } = prepared;
+  const { limit, keyFields } = prepared;
   const where = operation.args.where ?? {};
   const unlimited = Object.fromEntries(Object.entries(operation.args).filter(([key]) => key !== 'limit'));
   const read: Row[] = [];
   const limitedRounds: LimitedRound[] = [];
   let count = 0;
   for (let round = 0; round < prepared.rounds && count < limit; round++) {
-    const unread = read.length === 0 ? where : { AND: [where, { NOT: buildPKWhereClause(pkFields, read) }] };
+    const unread = read.length === 0 ? where : { AND: [where, { NOT: buildPKWhereClause(keyFields, read) }] };
     const rows = await delegate.findMany({ where: unread, take: limit - count });
     if (rows.length === 0) {
       break;
     }
     read.push(...rows);
-    const narrowed = { AND: [where, buildPKWhereClause(pkFields, rows)] };
+    const narrowed = { AND: [where, buildPKWhereClause(keyFields, rows)] };
     const written = countOf(await operation.execute({ ...unlimited, where: narrowed }));
     count += written;
-    limitedRounds.push({ rows, narrowed, written, pkFields });
+    limitedRounds.push({ rows, narrowed, written, keyFields });
     if (written === rows.length) {
       break;
     }
@@ -387,7 +387,7 @@ export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationE
         return { rows };
       }
       case 'update-returning':
-        return pairByPrimaryKey(executed.returnedRows ?? [], prepared.beforeRows, prepared.pkFields);
+        return pairByRowKey(executed.returnedRows ?? [], prepared.beforeRows, prepared.keyFields);
       case 'limited-as-given':
         if (prepared.reportsUnidentified) {
           await reportUnidentified(operation, countOf(executed.result), failureSink, limitedRowsOfOtherWriters);
@@ -400,18 +400,18 @@ export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationE
           // A deleted row cannot be read again: its state is the one read before the delete.
           return { rows: written, beforeStates: written };
         }
-        const afterRows = await findManyByPKs(delegate, prepared.pkFields, written);
-        return pairByPrimaryKey(afterRows, written, prepared.pkFields);
+        const afterRows = await findManyByPKs(delegate, prepared.keyFields, written);
+        return pairByRowKey(afterRows, written, prepared.keyFields);
       }
       case 'update': {
         if (prepared.beforeRows.length === 0) {
           return { rows: [] };
         }
-        // Re-fetched by primary key, not by the original where, so a row whose where-field
+        // Re-fetched by row key, not by the original where, so a row whose where-field
         // the update changed still pairs with its before row.
         const delegate = delegateOf(scope, operation.model);
-        const afterRows = await findManyByPKs(delegate, prepared.pkFields, prepared.beforeRows);
-        return pairByPrimaryKey(afterRows, prepared.beforeRows, prepared.pkFields);
+        const afterRows = await findManyByPKs(delegate, prepared.keyFields, prepared.beforeRows);
+        return pairByRowKey(afterRows, prepared.beforeRows, prepared.keyFields);
       }
       case 'delete':
         return { rows: prepared.beforeRows, beforeStates: prepared.beforeRows };

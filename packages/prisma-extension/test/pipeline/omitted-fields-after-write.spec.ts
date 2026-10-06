@@ -19,12 +19,21 @@ const schemaMetadata = createSchemaMetadataFromDMMF({
         { name: 'Post', fields: [{ ...scalar('id'), isId: true }, scalar('title'), scalar('content')] },
         { name: 'Tag', fields: [{ ...scalar('id'), isId: true }, scalar('label')] },
         { name: 'Legacy', fields: [scalar('code'), scalar('secret')] },
+        {
+          name: 'Device',
+          fields: [{ ...scalar('code'), isUnique: true, isRequired: true }, scalar('label'), scalar('secret')],
+        },
       ],
     },
   },
 } as Parameters<typeof createSchemaMetadataFromDMMF>[0]);
 
-const listed: Record<string, string[]> = { User: ['password'], Post: ['content'], Legacy: ['secret'] };
+const listed: Record<string, string[]> = {
+  User: ['password'],
+  Post: ['content'],
+  Legacy: ['secret'],
+  Device: ['secret'],
+};
 const auditedOmittedFields = createAuditedOmittedFields(
   (model) => (listed[model] ? { auditOmittedFields: listed[model] } : undefined),
   [],
@@ -134,7 +143,31 @@ describe('readOmittedFieldsAfterWrite', () => {
     );
   });
 
-  it('passes the rows of a model without a primary key through, reading nothing for them', async () => {
+  it('reads the rows of a model without a primary key by its unique field on a required column', async () => {
+    const findMany = vi.fn(async (args: { where: { code: { in: string[] } }; select: Record<string, true> }) =>
+      args.where.code.in.map((code) => ({ code, secret: `secret of ${code}` })),
+    );
+
+    const { completed } = await read(
+      [
+        { ...eventOf('Device', 'create', { code: 'd1', label: 'One' }), identity: '' },
+        { ...eventOf('Device', 'update', { code: 'd2', label: 'Two' }), identity: '' },
+      ],
+      { device: { findMany } },
+    );
+
+    expect(findMany).toHaveBeenCalledTimes(1);
+    expect(findMany).toHaveBeenCalledWith({
+      where: { code: { in: ['d1', 'd2'] } },
+      select: { code: true, secret: true },
+    });
+    expect(completed.map((event) => event.after)).toEqual([
+      { code: 'd1', label: 'One', secret: 'secret of d1' },
+      { code: 'd2', label: 'Two', secret: 'secret of d2' },
+    ]);
+  });
+
+  it('passes the rows of a model without a row key through, reading nothing for them', async () => {
     const legacy = eventOf('Legacy', 'create', { code: 'x' });
     const findMany = vi.fn();
 

@@ -18,10 +18,10 @@ import {
   ensureIds,
   getIdFieldInfo,
   getIdGenerator,
-  getPrimaryKeyConstraintOrThrow,
   getRowKeyFields,
   ID_GENERATOR_FACTORIES,
   primaryKeyOf,
+  rowKeyFieldsOf,
 } from '../../src/utils/id-generation.js';
 import { UNRESOLVED_ENTITY_ID } from '../../src/utils/identity-key.js';
 import { createSchemaMetadataFromDMMF } from '../../src/utils/schema-metadata.js';
@@ -517,54 +517,6 @@ describe('ensureIds', () => {
   });
 });
 
-describe('getPrimaryKeyConstraintOrThrow', () => {
-  const prismaWith = (models: DMMFModel[]) => ({ dmmf: { datamodel: { models } } });
-  const scalar = (name: string, isId = false) => ({ name, kind: 'scalar', type: 'String', isId });
-
-  it('returns the @id field', () => {
-    const Prisma = prismaWith([{ name: 'User', fields: [scalar('id', true), scalar('email')] }]);
-
-    expect(getPrimaryKeyConstraintOrThrow(Prisma, 'User')).toEqual({ type: 'primaryKey', fields: ['id'] });
-  });
-
-  it('returns a named @@id with its declared name', () => {
-    const Prisma = prismaWith([
-      {
-        name: 'PostBookmark',
-        fields: [scalar('postId'), scalar('userId')],
-        primaryKey: { name: 'bookmarkKey', fields: ['postId', 'userId'] },
-      },
-    ]);
-
-    expect(getPrimaryKeyConstraintOrThrow(Prisma, 'PostBookmark')).toEqual({
-      type: 'primaryKey',
-      fields: ['postId', 'userId'],
-      name: 'bookmarkKey',
-    });
-  });
-
-  it('throws for a model without a primary key', () => {
-    const Prisma = prismaWith([{ name: 'Setting', fields: [{ ...scalar('key'), isUnique: true }] }]);
-
-    expect(() => getPrimaryKeyConstraintOrThrow(Prisma, 'Setting')).toThrow('Model "Setting" has no primary key');
-  });
-
-  it.each([
-    ['no dmmf', {}],
-    ['no datamodel', { dmmf: {} }],
-  ])('throws that DMMF is not available when the client has %s', (_label, Prisma) => {
-    expect(() => getPrimaryKeyConstraintOrThrow(Prisma, 'User')).toThrow(
-      '[@prisma-audit] DMMF not available, cannot determine primary key for User',
-    );
-  });
-
-  it('throws for a model missing from DMMF', () => {
-    const Prisma = prismaWith([{ name: 'User', fields: [scalar('id', true)] }]);
-
-    expect(() => getPrimaryKeyConstraintOrThrow(Prisma, 'Unknown')).toThrow('Model "Unknown" not found in DMMF');
-  });
-});
-
 describe('getRowKeyFields', () => {
   const metadataOf = (model: DMMFModel) => createSchemaMetadataFromDMMF({ dmmf: { datamodel: { models: [model] } } });
   const field = (name: string, extra: Partial<DMMFModel['fields'][number]> = {}) => ({
@@ -623,8 +575,48 @@ describe('getRowKeyFields', () => {
     const metadata = metadataOf({ name: 'Note', fields: [field('label', { isUnique: true }), field('text')] });
 
     expect(() => getRowKeyFields(metadata, 'Note')).toThrow(
-      '[@prisma-audit] Model "Note" has no primary key and no unique constraint on required fields: createMany cannot read back the rows it creates.',
+      '[@prisma-audit] Model "Note" has no primary key and no unique constraint on required fields: its rows cannot be identified for a batch audit.',
     );
+  });
+
+  it('throws the same error for a model the metadata does not know', () => {
+    const metadata = metadataOf({ name: 'User', fields: [field('id', { isId: true, isRequired: true })] });
+
+    expect(() => getRowKeyFields(metadata, 'Unknown')).toThrow('Model "Unknown" has no primary key');
+  });
+});
+
+describe('rowKeyFieldsOf', () => {
+  const metadataOf = (model: DMMFModel) => createSchemaMetadataFromDMMF({ dmmf: { datamodel: { models: [model] } } });
+  const field = (name: string, extra: Partial<DMMFModel['fields'][number]> = {}) => ({
+    name,
+    kind: 'scalar',
+    type: 'String',
+    ...extra,
+  });
+
+  it('returns the primary key ahead of a unique field', () => {
+    const metadata = metadataOf({
+      name: 'User',
+      fields: [field('email', { isUnique: true, isRequired: true }), field('id', { isId: true, isRequired: true })],
+    });
+
+    expect(rowKeyFieldsOf(metadata, 'User')).toEqual(['id']);
+  });
+
+  it('returns the first unique field on a required column of a model without a primary key', () => {
+    const metadata = metadataOf({
+      name: 'Device',
+      fields: [field('label', { isUnique: true }), field('code', { isUnique: true, isRequired: true })],
+    });
+
+    expect(rowKeyFieldsOf(metadata, 'Device')).toEqual(['code']);
+  });
+
+  it('returns undefined for a model with no primary key and no unique constraint on required fields', () => {
+    const metadata = metadataOf({ name: 'Note', fields: [field('label', { isUnique: true }), field('text')] });
+
+    expect(rowKeyFieldsOf(metadata, 'Note')).toBeUndefined();
   });
 });
 

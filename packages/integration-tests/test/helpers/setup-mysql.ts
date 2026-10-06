@@ -119,5 +119,6 @@ export const cleanMySQLDatabase = async (prisma: ReturnType<typeof createAuditCl
   await prisma.comment.deleteMany();
   await prisma.post.deleteMany();
   await prisma.user.deleteMany();
+  await prisma.device.deleteMany();
   await prisma.auditLog.deleteMany();
 };

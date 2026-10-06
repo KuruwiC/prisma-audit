@@ -1,9 +1,10 @@
 /**
- * ID Generation and Primary-Key Utilities
+ * ID Generation and Key Utilities
  *
  * Provides client-side ID generation for `createMany` data, so audit logs can record
- * the IDs of rows the operation does not return, and the primary-key helpers that pair
- * before and after states, serialize a row's entity identity, and read rows by primary key.
+ * the IDs of rows the operation does not return, and the key helpers that pair before and
+ * after states, serialize a row's entity identity, and read rows by key: the row key
+ * (`rowKeyFieldsOf`) of a top-level or batch row, the primary key of a nested one.
  *
  * Generated IDs must match the format the schema declares — Prisma itself
  * generates cuid v1 for `cuid()` and UUID v7 for `uuid(7)`, so injecting a
@@ -30,9 +31,8 @@ import cuidV1 from '@bugsnag/cuid';
 import { createId } from '@paralleldrive/cuid2';
 import { v4 as uuidV4, v7 as uuidV7 } from 'uuid';
 import { getPrimaryKeyConstraint } from '../grammar/nested-operations.js';
-import type { SchemaMetadata, UniqueConstraint } from '../schema/types.js';
+import type { SchemaMetadata } from '../schema/types.js';
 import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID } from './identity-key.js';
-import { createSchemaMetadataFromDMMF, type PrismaWithDMMF } from './schema-metadata.js';
 
 export type IdGenerator = () => string;
 
@@ -204,44 +204,12 @@ export const ensureIds = <T extends Record<string, unknown>>(
 const PK_CHUNK_SIZE = 1000;
 
 /**
- * Get a model's primary key from DMMF, as derived by `getPrimaryKeyConstraint`
- * (`@@id` with its declared name → `@id` field).
- *
- * @throws Error if DMMF is unavailable, the model is unknown, or the model has no primary key
+ * The fields that name one row of `modelName`: its primary key, else the first of its unique
+ * constraints (`@unique` fields in declaration order, then `@@unique` indexes) whose fields are all
+ * required, since a nullable unique column holds null in any number of rows. `undefined` for a
+ * model with neither.
  */
-export const getPrimaryKeyConstraintOrThrow = (Prisma: PrismaWithDMMF, modelName: string): UniqueConstraint => {
-  const models = Prisma.dmmf?.datamodel?.models;
-  if (!models) {
-    throw new Error(`[@prisma-audit] DMMF not available, cannot determine primary key for ${modelName}`);
-  }
-
-  if (!models.some((m) => m.name === modelName)) {
-    throw new Error(`[@prisma-audit] Model "${modelName}" not found in DMMF`);
-  }
-
-  const primaryKey = getPrimaryKeyConstraint(createSchemaMetadataFromDMMF(Prisma), modelName);
-  if (primaryKey) {
-    return primaryKey;
-  }
-
-  throw new Error(
-    `[@prisma-audit] Model "${modelName}" has no primary key. ` +
-      'Batch audit operations require a primary key for before/after state matching.',
-  );
-};
-
-/** Fields of `getPrimaryKeyConstraintOrThrow`; throws if the model has no primary key. */
-export const getPrimaryKeyFields = (Prisma: PrismaWithDMMF, modelName: string): string[] =>
-  getPrimaryKeyConstraintOrThrow(Prisma, modelName).fields;
-
-/**
- * The fields that name one row of `modelName` before it is read: its primary key, else the first of
- * its unique constraints (`@unique` fields in declaration order, then `@@unique` indexes) whose
- * fields are all required, since a nullable unique column holds null in any number of rows.
- *
- * @throws Error if the model has neither
- */
-export const getRowKeyFields = (schemaMetadata: SchemaMetadata, modelName: string): string[] => {
+export const rowKeyFieldsOf = (schemaMetadata: SchemaMetadata, modelName: string): string[] | undefined => {
   const primaryKey = getPrimaryKeyConstraint(schemaMetadata, modelName);
   if (primaryKey) {
     return primaryKey.fields;
@@ -252,15 +220,25 @@ export const getRowKeyFields = (schemaMetadata: SchemaMetadata, modelName: strin
       .filter((field) => field.isRequired)
       .map((field) => field.name),
   );
-  const unique = schemaMetadata
+  return schemaMetadata
     .getUniqueConstraints(modelName)
-    .find((constraint) => constraint.fields.length > 0 && constraint.fields.every((field) => required.has(field)));
-  if (unique) {
-    return unique.fields;
+    .find((constraint) => constraint.fields.length > 0 && constraint.fields.every((field) => required.has(field)))
+    ?.fields;
+};
+
+/**
+ * {@link rowKeyFieldsOf} for a caller that cannot go on without a key.
+ *
+ * @throws Error if the model has no primary key and no unique constraint on required fields
+ */
+export const getRowKeyFields = (schemaMetadata: SchemaMetadata, modelName: string): string[] => {
+  const keyFields = rowKeyFieldsOf(schemaMetadata, modelName);
+  if (keyFields) {
+    return keyFields;
   }
   throw new Error(
     `[@prisma-audit] Model "${modelName}" has no primary key and no unique constraint on required fields: ` +
-      'createMany cannot read back the rows it creates.',
+      'its rows cannot be identified for a batch audit.',
   );
 };
 
@@ -302,7 +280,7 @@ export const buildEntityMap = (
 };
 
 /**
- * Build a Prisma WHERE clause naming entities by their primary keys.
+ * Build a Prisma WHERE clause naming entities by the values of their key fields `pkFields`.
  *
  * - Single PK: `{ id: { in: [...] } }`
  * - Composite PK: `{ OR: [{ pk1: v1, pk2: v2 }, ...] }`
@@ -339,8 +317,8 @@ type FindManyDelegate = {
 };
 
 /**
- * Fetch entities by primary keys in parallel batches of PK_CHUNK_SIZE, so that a single query
- * never exceeds database parameter limits.
+ * Fetch entities by the values of their key fields `pkFields` in parallel batches of PK_CHUNK_SIZE,
+ * so that a single query never exceeds database parameter limits.
  */
 export const findManyByPKs = async (
   delegate: FindManyDelegate,

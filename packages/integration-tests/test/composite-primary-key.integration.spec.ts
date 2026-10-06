@@ -11,7 +11,7 @@
  * Because a composite-key entity has no `entity.id` field, the default
  * `idResolver` (`self('id')`) cannot resolve it — `testAggregateMapping` gives
  * `PostLike` an explicit `idResolver` that serializes `[postId, userId]` as JSON,
- * matching the format `getPrimaryKeyFields`/`extractEntityIdentity`
+ * matching the format `getPrimaryKeyConstraint`/`extractEntityIdentity`
  * (`packages/prisma-extension/src/utils/id-generation.ts`) derive from the
  * schema's declared `@@id` field order.
  *

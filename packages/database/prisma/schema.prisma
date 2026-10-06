@@ -336,6 +336,18 @@ model Subscription {
 }
 
 // ============================================
+// Device Model (no primary key; identified by a unique field on a required column)
+// ============================================
+
+model Device {
+  code      String   @unique @default(cuid())
+  label     String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("devices")
+}
+
+// ============================================
 // Audit Log Model (Default)
 // ============================================
 
