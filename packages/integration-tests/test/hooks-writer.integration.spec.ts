@@ -89,8 +89,6 @@ describe('hooks.writer Coverage', () => {
   });
 
   beforeEach(async () => {
-    context.writerSpy.callCount = 0;
-    context.writerSpy.calls = [];
     await cleanDatabase(context.prisma);
     context.writerSpy.callCount = 0;
     context.writerSpy.calls = [];
@@ -118,8 +116,7 @@ describe('hooks.writer Coverage', () => {
       });
 
       expect(context.writerSpy.callCount).toBe(1);
-      expect(context.writerSpy.calls[0]?.logCount).toBeGreaterThan(0);
-      expect(context.writerSpy.calls[0]?.contextId).toBe('test-user-1');
+      expect(context.writerSpy.calls).toEqual([{ logCount: 1, contextId: 'test-user-1' }]);
     });
 
     it('should call hooks.writer for top-level update', async () => {
@@ -145,7 +142,7 @@ describe('hooks.writer Coverage', () => {
       });
 
       expect(context.writerSpy.callCount).toBe(1);
-      expect(context.writerSpy.calls[0]?.logCount).toBeGreaterThan(0);
+      expect(context.writerSpy.calls).toEqual([{ logCount: 1, contextId: 'test-user-1' }]);
     });
 
     it('should call hooks.writer for top-level delete', async () => {
@@ -170,7 +167,7 @@ describe('hooks.writer Coverage', () => {
       });
 
       expect(context.writerSpy.callCount).toBe(1);
-      expect(context.writerSpy.calls[0]?.logCount).toBeGreaterThan(0);
+      expect(context.writerSpy.calls).toEqual([{ logCount: 1, contextId: 'test-user-1' }]);
     });
 
     it('should call hooks.writer for nested update', async () => {
@@ -214,7 +211,7 @@ describe('hooks.writer Coverage', () => {
   });
 
   describe('Explicit Transaction Path ($transaction)', () => {
-    it('should call hooks.writer inside explicit transaction', async () => {
+    it('should call hooks.writer once per operation for the creates of an explicit transaction', async () => {
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.$transaction(async (tx: typeof context.prisma) => {
           await tx.user.create({
@@ -235,10 +232,10 @@ describe('hooks.writer Coverage', () => {
         });
       });
 
-      // Batching decides whether the logs arrive in one writer call or several.
-      expect(context.writerSpy.callCount).toBeGreaterThan(0);
-      const totalLogs = context.writerSpy.calls.reduce((sum, call) => sum + call.logCount, 0);
-      expect(totalLogs).toBeGreaterThanOrEqual(2); // At least 2 users
+      expect(context.writerSpy.calls).toEqual([
+        { logCount: 1, contextId: 'test-user-1' },
+        { logCount: 1, contextId: 'test-user-1' },
+      ]);
     });
 
     it('should call hooks.writer for nested operations inside transaction', async () => {
@@ -318,9 +315,11 @@ describe('hooks.writer Coverage', () => {
       };
     });
 
+    afterAll(async () => {
+      await disposeTestContext(asyncContext);
+    });
+
     beforeEach(async () => {
-      asyncContext.writerSpy.callCount = 0;
-      asyncContext.writerSpy.calls = [];
       await cleanDatabase(asyncContext.prisma);
       asyncContext.writerSpy.callCount = 0;
       asyncContext.writerSpy.calls = [];
