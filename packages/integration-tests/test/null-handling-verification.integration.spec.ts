@@ -50,7 +50,7 @@ describe('NULL Handling Verification', () => {
         where: { entityType: 'User', entityId: user.id, action: 'create' },
       });
 
-      expect(auditLog).toBeDefined();
+      expect(auditLog).not.toBeNull();
       expect(auditLog?.before).toBeNull();
 
       type RawQueryResult = {
@@ -78,11 +78,6 @@ describe('NULL Handling Verification', () => {
       if (!raw) {
         throw new Error('Expected rawResult[0] to be defined');
       }
-
-      console.log('Raw database values for CREATE operation:');
-      console.log('  before:', raw.before);
-      console.log('  before IS NULL:', raw.before_is_null);
-      console.log('  pg_typeof(before):', raw.before_type);
 
       expect(raw.before_is_null).toBe(true);
       expect(raw.before).toBeNull();
@@ -112,7 +107,7 @@ describe('NULL Handling Verification', () => {
         where: { entityType: 'User', entityId: user.id, action: 'delete' },
       });
 
-      expect(auditLog).toBeDefined();
+      expect(auditLog).not.toBeNull();
       expect(auditLog?.after).toBeNull();
 
       type RawQueryResult = {
@@ -140,11 +135,6 @@ describe('NULL Handling Verification', () => {
       if (!raw) {
         throw new Error('Expected rawResult[0] to be defined');
       }
-
-      console.log('Raw database values for DELETE operation:');
-      console.log('  after:', raw.after);
-      console.log('  after IS NULL:', raw.after_is_null);
-      console.log('  pg_typeof(after):', raw.after_type);
 
       expect(raw.after_is_null).toBe(true);
       expect(raw.after).toBeNull();
@@ -175,7 +165,7 @@ describe('NULL Handling Verification', () => {
         where: { entityType: 'User', entityId: user.id, action: 'update' },
       });
 
-      expect(auditLog).toBeDefined();
+      expect(auditLog).not.toBeNull();
       expect(auditLog?.before).not.toBeNull();
       expect(auditLog?.after).not.toBeNull();
 
@@ -206,12 +196,6 @@ describe('NULL Handling Verification', () => {
       if (!raw) {
         throw new Error('Expected rawResult[0] to be defined');
       }
-
-      console.log('Raw database values for UPDATE operation:');
-      console.log('  before IS NULL:', raw.before_is_null);
-      console.log('  after IS NULL:', raw.after_is_null);
-      console.log('  pg_typeof(before):', raw.before_type);
-      console.log('  pg_typeof(after):', raw.after_type);
 
       expect(raw.before_is_null).toBe(false);
       expect(raw.after_is_null).toBe(false);
