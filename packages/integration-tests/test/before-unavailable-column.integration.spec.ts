@@ -12,6 +12,7 @@ import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { createPostReadFault } from './helpers/post-read-fault.js';
 import { getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
 
 const testActor: AuditContext = {
@@ -28,21 +29,8 @@ describe('beforeUnavailable column of the audit-log model', () => {
   const createClient = (auditLogModel?: 'Activity') => {
     const rawBasePrisma = new PrismaClient({ datasources: { db: { url: sharedDatabaseUrl } } });
 
-    let failNextFindUnique = false;
-    const basePrisma = rawBasePrisma.$extends({
-      name: 'fault-injection',
-      query: {
-        post: {
-          async findUnique({ args, query }) {
-            if (failNextFindUnique) {
-              failNextFindUnique = false;
-              throw new Error('simulated before-state read failure');
-            }
-            return query(args);
-          },
-        },
-      },
-    });
+    const { findUnique, armFindUniqueFailure } = createPostReadFault('simulated before-state read failure');
+    const basePrisma = rawBasePrisma.$extends({ name: 'fault-injection', query: { post: { findUnique } } });
 
     const provider = createAsyncLocalStorageProvider();
     const prisma = createAuditClient(basePrisma, {
@@ -52,9 +40,6 @@ describe('beforeUnavailable column of the audit-log model', () => {
       ...(auditLogModel ? { auditLogModel } : {}),
       errorHandling: { writeFailurePolicy: 'throw' },
     });
-    const armFindUniqueFailure = () => {
-      failNextFindUnique = true;
-    };
 
     return { rawBasePrisma, basePrisma, provider, prisma, armFindUniqueFailure };
   };
