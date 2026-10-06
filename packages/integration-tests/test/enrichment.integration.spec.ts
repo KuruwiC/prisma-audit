@@ -2,15 +2,13 @@ import type { AuditActor, AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import type { AggregateMapping } from '@kuruwic/prisma-audit';
 import { createAuditClient, defineEntity, foreignKey, to } from '@kuruwic/prisma-audit';
-import type { PrismaClient } from '@kuruwic/prisma-audit-database';
-import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
+import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import type { Mock } from 'vitest';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   createCommentAggregateEnricher,
   createCommentAggregateMapping,
   createCommentEntityEnricher,
-  createEnrichmentTestContext,
   createProfileAggregateEnricher,
   createProfileAggregateMapping,
   createProfileEntityEnricher,
@@ -35,8 +33,29 @@ type TestAuditContext = Omit<AuditContext, 'actor'> & {
   actor: TestAuditActor;
 };
 
+type ClientOptions = Omit<Parameters<typeof createAuditClient<PrismaClient>>[1], 'Prisma' | 'provider'>;
+
 describe('Context Enrichment Integration', () => {
   let context: TestContext;
+  const openedBaseClients: PrismaClient[] = [];
+
+  /**
+   * Opens an awaited audited client with its own provider on a fresh Prisma client, so the
+   * mapping and enrichers under test cannot leak into other tests. The Prisma client is
+   * disconnected after the test, whether it passed or not.
+   */
+  const openClient = (options: ClientOptions) => {
+    const basePrisma = new PrismaClient({ datasources: { db: { url: context.databaseUrl } } });
+    openedBaseClients.push(basePrisma);
+    const provider = createAsyncLocalStorageProvider();
+    const prisma = createAuditClient(basePrisma, {
+      Prisma,
+      provider,
+      performance: { awaitWrite: true },
+      ...options,
+    });
+    return { basePrisma, prisma, provider };
+  };
 
   beforeAll(async () => {
     context = await createTestContext();
@@ -48,6 +67,10 @@ describe('Context Enrichment Integration', () => {
 
   beforeEach(async () => {
     await cleanDatabase(context.prisma);
+  });
+
+  afterEach(async () => {
+    await Promise.all(openedBaseClients.splice(0).map((client) => client.$disconnect()));
   });
 
   describe('Actor context enrichment', () => {
@@ -289,13 +312,7 @@ describe('Context Enrichment Integration', () => {
         aggregateEnricher as Mock<(aggregates: unknown[], prisma: PrismaClient) => Promise<unknown[]>>,
       );
 
-      const customBasePrisma = new (await import('@kuruwic/prisma-audit-database/generated/client')).PrismaClient({
-        datasources: { db: { url: context.databaseUrl } },
-      });
-      const { customPrisma, provider } = createEnrichmentTestContext({
-        basePrisma: customBasePrisma,
-        aggregateMapping,
-      });
+      const { basePrisma: customBasePrisma, prisma: customPrisma, provider } = openClient({ aggregateMapping });
 
       const actor: AuditContext = {
         actor: { category: 'model', type: 'User', id: 'delete-comment-actor' },
@@ -343,8 +360,6 @@ describe('Context Enrichment Integration', () => {
         ['Post', { commentContent: 'Test Comment' }, { aggregateInfo: `Comment ${comment.id}` }],
         ['User', { commentContent: 'Test Comment' }, { aggregateInfo: `Comment ${comment.id}` }],
       ]);
-
-      await customBasePrisma.$disconnect();
     });
 
     it('should enrich entity and aggregate context when deleting Profile', async () => {
@@ -355,13 +370,7 @@ describe('Context Enrichment Integration', () => {
         aggregateEnricher as Mock<(aggregates: unknown[], prisma: PrismaClient) => Promise<unknown[]>>,
       );
 
-      const customBasePrisma = new (await import('@kuruwic/prisma-audit-database/generated/client')).PrismaClient({
-        datasources: { db: { url: context.databaseUrl } },
-      });
-      const { customPrisma, provider } = createEnrichmentTestContext({
-        basePrisma: customBasePrisma,
-        aggregateMapping,
-      });
+      const { basePrisma: customBasePrisma, prisma: customPrisma, provider } = openClient({ aggregateMapping });
 
       const actor: AuditContext = {
         actor: { category: 'model', type: 'User', id: 'delete-profile-actor' },
@@ -404,8 +413,6 @@ describe('Context Enrichment Integration', () => {
         ['Profile', { profileBio: 'Test Bio' }, null],
         ['User', { profileBio: 'Test Bio' }, { profileInfo: `Profile for user ${user.id}` }],
       ]);
-
-      await customBasePrisma.$disconnect();
     });
 
     it('should enrich context for deleteMany operation', async () => {
@@ -416,13 +423,7 @@ describe('Context Enrichment Integration', () => {
         aggregateEnricher as Mock<(aggregates: unknown[], prisma: PrismaClient) => Promise<unknown[]>>,
       );
 
-      const customBasePrisma = new (await import('@kuruwic/prisma-audit-database/generated/client')).PrismaClient({
-        datasources: { db: { url: context.databaseUrl } },
-      });
-      const { customPrisma, provider } = createEnrichmentTestContext({
-        basePrisma: customBasePrisma,
-        aggregateMapping,
-      });
+      const { basePrisma: customBasePrisma, prisma: customPrisma, provider } = openClient({ aggregateMapping });
 
       const actor: AuditContext = {
         actor: { category: 'model', type: 'User', id: 'delete-many-comment-actor' },
@@ -473,8 +474,6 @@ describe('Context Enrichment Integration', () => {
         expect(entityContext.commentContent).toBeDefined();
         expect(typeof entityContext.commentContent).toBe('string');
       }
-
-      await customBasePrisma.$disconnect();
     });
 
     it('should call entity enricher exactly once (batch) for deleteMany operation', async () => {
@@ -483,13 +482,7 @@ describe('Context Enrichment Integration', () => {
         entityEnricher as Mock<(entities: unknown[], prisma: PrismaClient) => Promise<unknown[]>>,
       );
 
-      const customBasePrisma = new (await import('@kuruwic/prisma-audit-database/generated/client')).PrismaClient({
-        datasources: { db: { url: context.databaseUrl } },
-      });
-      const { customPrisma, provider } = createEnrichmentTestContext({
-        basePrisma: customBasePrisma,
-        aggregateMapping,
-      });
+      const { basePrisma: customBasePrisma, prisma: customPrisma, provider } = openClient({ aggregateMapping });
 
       const actor: AuditContext = {
         actor: { category: 'model', type: 'User', id: 'delete-batch-enricher-actor' },
@@ -527,8 +520,6 @@ describe('Context Enrichment Integration', () => {
         expect(entityContext.enrichedEmail).toBeDefined();
         expect(typeof entityContext.enrichedEmail).toBe('string');
       }
-
-      await customBasePrisma.$disconnect();
     });
 
     it('should call aggregate enricher exactly once (batch) for deleteMany operation', async () => {
@@ -537,13 +528,7 @@ describe('Context Enrichment Integration', () => {
         aggregateEnricher as Mock<(aggregates: unknown[], prisma: PrismaClient) => Promise<unknown[]>>,
       );
 
-      const customBasePrisma = new (await import('@kuruwic/prisma-audit-database/generated/client')).PrismaClient({
-        datasources: { db: { url: context.databaseUrl } },
-      });
-      const { customPrisma, provider } = createEnrichmentTestContext({
-        basePrisma: customBasePrisma,
-        aggregateMapping,
-      });
+      const { basePrisma: customBasePrisma, prisma: customPrisma, provider } = openClient({ aggregateMapping });
 
       const actor: AuditContext = {
         actor: { category: 'model', type: 'User', id: 'delete-agg-batch-actor' },
@@ -582,18 +567,11 @@ describe('Context Enrichment Integration', () => {
         expect(aggregateContext.aggregateType).toBe('User');
         expect(aggregateContext.aggregateId).toBeDefined();
       }
-
-      await customBasePrisma.$disconnect();
     });
   });
 
   describe('Enricher Error Handling', () => {
     it('should handle enricher throwing error with onError: "log" strategy', async () => {
-      const customBasePrisma = new (await import('@kuruwic/prisma-audit-database/generated/client')).PrismaClient({
-        datasources: { db: { url: context.databaseUrl } },
-      });
-      const customProvider = createAsyncLocalStorageProvider();
-
       const customAggregateMapping: AggregateMapping = {
         User: defineEntity({ type: 'User', excludeFields: ['updatedAt'] }),
         Profile: defineEntity({
@@ -617,9 +595,11 @@ describe('Context Enrichment Integration', () => {
         }),
       };
 
-      const customPrisma = createAuditClient(customBasePrisma, {
-        Prisma,
+      const {
+        basePrisma: customBasePrisma,
+        prisma: customPrisma,
         provider: customProvider,
+      } = openClient({
         aggregateMapping: customAggregateMapping,
         contextEnricher: {
           actor: {
@@ -630,7 +610,6 @@ describe('Context Enrichment Integration', () => {
             fallback: null,
           },
         },
-        performance: { awaitWrite: true },
       });
 
       const actor: AuditContext = {
@@ -662,16 +641,9 @@ describe('Context Enrichment Integration', () => {
       if (!log) throw new Error('Audit log not found');
 
       expect(log.entityContext).toBeNull();
-
-      await customBasePrisma.$disconnect();
     });
 
     it('should handle enricher errors with error strategy configuration', async () => {
-      const customBasePrisma = new (await import('@kuruwic/prisma-audit-database/generated/client')).PrismaClient({
-        datasources: { db: { url: context.databaseUrl } },
-      });
-      const customProvider = createAsyncLocalStorageProvider();
-
       const customAggregateMapping: AggregateMapping = {
         User: defineEntity({ type: 'User', excludeFields: ['updatedAt'] }),
         Profile: defineEntity({
@@ -714,9 +686,11 @@ describe('Context Enrichment Integration', () => {
         }),
       };
 
-      const customPrisma = createAuditClient(customBasePrisma, {
-        Prisma,
+      const {
+        basePrisma: customBasePrisma,
+        prisma: customPrisma,
         provider: customProvider,
+      } = openClient({
         aggregateMapping: customAggregateMapping,
         contextEnricher: {
           actor: {
@@ -727,7 +701,6 @@ describe('Context Enrichment Integration', () => {
             fallback: null,
           },
         },
-        performance: { awaitWrite: true },
       });
 
       const actor: AuditContext = {
@@ -760,21 +733,16 @@ describe('Context Enrichment Integration', () => {
 
       expect(log.entityContext).toBeNull();
       expect(log.aggregateContext).toBeNull();
-
-      await customBasePrisma.$disconnect();
     });
 
     it('should handle actor enricher error with fallback', async () => {
-      const customBasePrisma = new (await import('@kuruwic/prisma-audit-database/generated/client')).PrismaClient({
-        datasources: { db: { url: context.databaseUrl } },
-      });
-      const customProvider = createAsyncLocalStorageProvider();
-
       const actorFallback = { errorOccurred: true };
 
-      const customPrisma = createAuditClient(customBasePrisma, {
-        Prisma,
+      const {
+        basePrisma: customBasePrisma,
+        prisma: customPrisma,
         provider: customProvider,
+      } = openClient({
         aggregateMapping: testAggregateMapping,
         contextEnricher: {
           actor: {
@@ -785,7 +753,6 @@ describe('Context Enrichment Integration', () => {
             fallback: actorFallback,
           },
         },
-        performance: { awaitWrite: true },
       });
 
       const actor: AuditContext = {
@@ -807,19 +774,17 @@ describe('Context Enrichment Integration', () => {
       if (!log) throw new Error('Audit log not found');
 
       expect(log.actorContext).toEqual(actorFallback);
-
-      await customBasePrisma.$disconnect();
     });
   });
 
   describe('[N+1 Resolution] Entity/Aggregate Batch Enrichment', () => {
     it('should call the entity enricher once for an updateMany and enrich every updated row', async () => {
       const entityEnricher = createUserEntityEnricher();
-      const customBasePrisma = new (await import('@kuruwic/prisma-audit-database/generated/client')).PrismaClient({
-        datasources: { db: { url: context.databaseUrl } },
-      });
-      const { customPrisma, provider } = createEnrichmentTestContext({
+      const {
         basePrisma: customBasePrisma,
+        prisma: customPrisma,
+        provider,
+      } = openClient({
         aggregateMapping: createUserEntityAggregateMapping(
           entityEnricher as Mock<(entities: unknown[], prisma: PrismaClient) => Promise<unknown[]>>,
         ),
@@ -830,49 +795,43 @@ describe('Context Enrichment Integration', () => {
       };
       const emails = ['update1@example.com', 'update2@example.com', 'update3@example.com'];
 
-      try {
-        await provider.runAsync(actor, async () => {
-          await customPrisma.user.createMany({
-            data: emails.map((email, i) => ({ email, name: `Update User ${i + 1}`, password: `pass${i + 1}` })),
-          });
+      await provider.runAsync(actor, async () => {
+        await customPrisma.user.createMany({
+          data: emails.map((email, i) => ({ email, name: `Update User ${i + 1}`, password: `pass${i + 1}` })),
         });
-        await customBasePrisma.auditLog.deleteMany();
-        entityEnricher.mockClear();
+      });
+      await customBasePrisma.auditLog.deleteMany();
+      entityEnricher.mockClear();
 
-        await provider.runAsync(actor, async () => {
-          await customPrisma.user.updateMany({
-            where: { email: { in: emails } },
-            data: { name: 'Updated Name' },
-          });
+      await provider.runAsync(actor, async () => {
+        await customPrisma.user.updateMany({
+          where: { email: { in: emails } },
+          data: { name: 'Updated Name' },
         });
+      });
 
-        expect(entityEnricher).toHaveBeenCalledTimes(1);
+      expect(entityEnricher).toHaveBeenCalledTimes(1);
 
-        const updateLogs = await customBasePrisma.auditLog.findMany({
-          where: { action: 'update' },
-        });
+      const updateLogs = await customBasePrisma.auditLog.findMany({
+        where: { action: 'update' },
+      });
 
-        expect(updateLogs).toHaveLength(3);
-        expect(
-          updateLogs.map((log) => log.entityContext).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
-        ).toEqual(emails.map((email) => ({ enrichedEmail: email.toUpperCase() })));
-      } finally {
-        await customBasePrisma.$disconnect();
-      }
+      expect(updateLogs).toHaveLength(3);
+      expect(
+        updateLogs.map((log) => log.entityContext).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
+      ).toEqual(emails.map((email) => ({ enrichedEmail: email.toUpperCase() })));
     });
   });
 
   describe('[Direct Verification] Enricher Call Count Tests', () => {
     it('should call actor enricher exactly once for createMany operation', async () => {
       let actorEnricherCallCount = 0;
-      const customBasePrisma = new (await import('@kuruwic/prisma-audit-database/generated/client')).PrismaClient({
-        datasources: { db: { url: context.databaseUrl } },
-      });
-      const customProvider = createAsyncLocalStorageProvider();
 
-      const customPrisma = createAuditClient(customBasePrisma, {
-        Prisma,
+      const {
+        basePrisma: customBasePrisma,
+        prisma: customPrisma,
         provider: customProvider,
+      } = openClient({
         aggregateMapping: testAggregateMapping,
         contextEnricher: {
           actor: {
@@ -886,9 +845,6 @@ describe('Context Enrichment Integration', () => {
             onError: 'log',
             fallback: null,
           },
-        },
-        performance: {
-          awaitWrite: true,
         },
       });
 
@@ -922,21 +878,12 @@ describe('Context Enrichment Integration', () => {
         expect(actorContext.name).toBe('Direct Verify Actor');
         expect(actorContext.role).toBe('admin');
       }
-
-      await customBasePrisma.$disconnect();
     });
 
     it('should call actor enricher exactly once for multiple individual operations', async () => {
       let actorEnricherCallCount = 0;
 
-      const customBasePrisma = new (await import('@kuruwic/prisma-audit-database/generated/client')).PrismaClient({
-        datasources: { db: { url: context.databaseUrl } },
-      });
-      const customProvider = createAsyncLocalStorageProvider();
-
-      const customPrisma = createAuditClient(customBasePrisma, {
-        Prisma,
-        provider: customProvider,
+      const { prisma: customPrisma, provider: customProvider } = openClient({
         aggregateMapping: testAggregateMapping,
         contextEnricher: {
           actor: {
@@ -950,9 +897,6 @@ describe('Context Enrichment Integration', () => {
             onError: 'log',
             fallback: null,
           },
-        },
-        performance: {
-          awaitWrite: true,
         },
       });
 
@@ -979,21 +923,12 @@ describe('Context Enrichment Integration', () => {
 
       // Actor context cache is per-operation, not per-runAsync
       expect(actorEnricherCallCount).toBe(3);
-
-      await customBasePrisma.$disconnect();
     });
 
     it('should call actor enricher separately for concurrent operations', async () => {
       let actorEnricherCallCount = 0;
 
-      const customBasePrisma = new (await import('@kuruwic/prisma-audit-database/generated/client')).PrismaClient({
-        datasources: { db: { url: context.databaseUrl } },
-      });
-      const customProvider = createAsyncLocalStorageProvider();
-
-      const customPrisma = createAuditClient(customBasePrisma, {
-        Prisma,
-        provider: customProvider,
+      const { prisma: customPrisma, provider: customProvider } = openClient({
         aggregateMapping: testAggregateMapping,
         contextEnricher: {
           actor: {
@@ -1007,9 +942,6 @@ describe('Context Enrichment Integration', () => {
             onError: 'log',
             fallback: null,
           },
-        },
-        performance: {
-          awaitWrite: true,
         },
       });
 
@@ -1047,17 +979,10 @@ describe('Context Enrichment Integration', () => {
       ]);
 
       expect(actorEnricherCallCount).toBe(2);
-
-      await customBasePrisma.$disconnect();
     });
 
     it('should call entity enricher exactly once (batch) for createMany operation', async () => {
       let entityEnricherCallCount = 0;
-
-      const customBasePrisma = new (await import('@kuruwic/prisma-audit-database/generated/client')).PrismaClient({
-        datasources: { db: { url: context.databaseUrl } },
-      });
-      const customProvider = createAsyncLocalStorageProvider();
 
       const customAggregateMapping: AggregateMapping = {
         User: defineEntity({
@@ -1086,9 +1011,11 @@ describe('Context Enrichment Integration', () => {
         }),
       };
 
-      const customPrisma = createAuditClient(customBasePrisma, {
-        Prisma,
+      const {
+        basePrisma: customBasePrisma,
+        prisma: customPrisma,
         provider: customProvider,
+      } = openClient({
         aggregateMapping: customAggregateMapping,
         contextEnricher: {
           actor: {
@@ -1099,9 +1026,6 @@ describe('Context Enrichment Integration', () => {
             onError: 'log',
             fallback: null,
           },
-        },
-        performance: {
-          awaitWrite: true,
         },
       });
 
@@ -1130,17 +1054,10 @@ describe('Context Enrichment Integration', () => {
         expect(entityContext.enrichedEmail).toBeDefined();
         expect(typeof entityContext.enrichedEmail).toBe('string');
       }
-
-      await customBasePrisma.$disconnect();
     });
 
     it('should call entity enricher exactly once (batch) for multiple individual create operations', async () => {
       let entityEnricherCallCount = 0;
-
-      const customBasePrisma = new (await import('@kuruwic/prisma-audit-database/generated/client')).PrismaClient({
-        datasources: { db: { url: context.databaseUrl } },
-      });
-      const customProvider = createAsyncLocalStorageProvider();
 
       const customAggregateMapping: AggregateMapping = {
         User: defineEntity({
@@ -1169,9 +1086,7 @@ describe('Context Enrichment Integration', () => {
         }),
       };
 
-      const customPrisma = createAuditClient(customBasePrisma, {
-        Prisma,
-        provider: customProvider,
+      const { prisma: customPrisma, provider: customProvider } = openClient({
         aggregateMapping: customAggregateMapping,
         contextEnricher: {
           actor: {
@@ -1182,9 +1097,6 @@ describe('Context Enrichment Integration', () => {
             onError: 'log',
             fallback: null,
           },
-        },
-        performance: {
-          awaitWrite: true,
         },
       });
 
@@ -1205,8 +1117,6 @@ describe('Context Enrichment Integration', () => {
 
       // Entity enrichment is per-operation, not cached across operations
       expect(entityEnricherCallCount).toBe(3);
-
-      await customBasePrisma.$disconnect();
     });
   });
 
@@ -1214,11 +1124,6 @@ describe('Context Enrichment Integration', () => {
     it('should call aggregate enricher once per aggregateType for createMany (same aggregateType)', async () => {
       let aggregateEnricherCallCount = 0;
       const receivedEntityCounts: number[] = [];
-
-      const customBasePrisma = new (await import('@kuruwic/prisma-audit-database/generated/client')).PrismaClient({
-        datasources: { db: { url: context.databaseUrl } },
-      });
-      const customProvider = createAsyncLocalStorageProvider();
 
       const customAggregateMapping: AggregateMapping = {
         User: defineEntity({
@@ -1251,9 +1156,11 @@ describe('Context Enrichment Integration', () => {
         }),
       };
 
-      const customPrisma = createAuditClient(customBasePrisma, {
-        Prisma,
+      const {
+        basePrisma: customBasePrisma,
+        prisma: customPrisma,
         provider: customProvider,
+      } = openClient({
         aggregateMapping: customAggregateMapping,
         contextEnricher: {
           actor: {
@@ -1263,9 +1170,6 @@ describe('Context Enrichment Integration', () => {
             onError: 'log',
             fallback: null,
           },
-        },
-        performance: {
-          awaitWrite: true,
         },
       });
 
@@ -1295,17 +1199,10 @@ describe('Context Enrichment Integration', () => {
         const aggregateContext = log.aggregateContext as Record<string, unknown>;
         expect(aggregateContext.aggregateType).toBe('User');
       }
-
-      await customBasePrisma.$disconnect();
     });
 
     it('should call aggregate enricher once per distinct aggregateType for createMany (multiple aggregateTypes)', async () => {
       const enricherCallsByType: Record<string, number> = {};
-
-      const customBasePrisma = new (await import('@kuruwic/prisma-audit-database/generated/client')).PrismaClient({
-        datasources: { db: { url: context.databaseUrl } },
-      });
-      const customProvider = createAsyncLocalStorageProvider();
 
       const sharedEnricher = async (
         rows: Record<string, unknown>[],
@@ -1346,13 +1243,12 @@ describe('Context Enrichment Integration', () => {
         }),
       };
 
-      const customPrisma = createAuditClient(customBasePrisma, {
-        Prisma,
+      const {
+        basePrisma: customBasePrisma,
+        prisma: customPrisma,
         provider: customProvider,
+      } = openClient({
         aggregateMapping: customAggregateMapping,
-        performance: {
-          awaitWrite: true,
-        },
       });
 
       const author = await customBasePrisma.user.create({
@@ -1380,18 +1276,11 @@ describe('Context Enrichment Integration', () => {
       expect(enricherCallsByType.Comment).toBe(1);
       expect(enricherCallsByType.Post).toBe(1);
       expect(enricherCallsByType.User).toBe(1);
-
-      await customBasePrisma.$disconnect();
     });
   });
 
   describe('[Aggregate Context] Root-side aggregateContext and projection merge semantics', () => {
     it('should apply root-side aggregateContext to self logs and child-projected logs', async () => {
-      const customBasePrisma = new (await import('@kuruwic/prisma-audit-database/generated/client')).PrismaClient({
-        datasources: { db: { url: context.databaseUrl } },
-      });
-      const customProvider = createAsyncLocalStorageProvider();
-
       const customAggregateMapping: AggregateMapping = {
         User: defineEntity({
           type: 'User',
@@ -1406,11 +1295,12 @@ describe('Context Enrichment Integration', () => {
         }),
       };
 
-      const customPrisma = createAuditClient(customBasePrisma, {
-        Prisma,
+      const {
+        basePrisma: customBasePrisma,
+        prisma: customPrisma,
         provider: customProvider,
+      } = openClient({
         aggregateMapping: customAggregateMapping,
-        performance: { awaitWrite: true },
       });
 
       const actor: AuditContext = {
@@ -1447,16 +1337,9 @@ describe('Context Enrichment Integration', () => {
       });
       expect(postSelfLogs).toHaveLength(1);
       expect(postSelfLogs[0]?.aggregateContext).toBeNull();
-
-      await customBasePrisma.$disconnect();
     });
 
     it('should merge projection context over root-side aggregateContext (projection keys win)', async () => {
-      const customBasePrisma = new (await import('@kuruwic/prisma-audit-database/generated/client')).PrismaClient({
-        datasources: { db: { url: context.databaseUrl } },
-      });
-      const customProvider = createAsyncLocalStorageProvider();
-
       const customAggregateMapping: AggregateMapping = {
         User: defineEntity({
           type: 'User',
@@ -1477,11 +1360,12 @@ describe('Context Enrichment Integration', () => {
         }),
       };
 
-      const customPrisma = createAuditClient(customBasePrisma, {
-        Prisma,
+      const {
+        basePrisma: customBasePrisma,
+        prisma: customPrisma,
         provider: customProvider,
+      } = openClient({
         aggregateMapping: customAggregateMapping,
-        performance: { awaitWrite: true },
       });
 
       const actor: AuditContext = {
@@ -1511,16 +1395,9 @@ describe('Context Enrichment Integration', () => {
       });
       expect(userSelfLogs).toHaveLength(1);
       expect(userSelfLogs[0]?.aggregateContext).toEqual({ source: 'root', rootOnly: true });
-
-      await customBasePrisma.$disconnect();
     });
 
     it('should pass aggregateIds aligned with the written rows to to() projection enrichers', async () => {
-      const customBasePrisma = new (await import('@kuruwic/prisma-audit-database/generated/client')).PrismaClient({
-        datasources: { db: { url: context.databaseUrl } },
-      });
-      const customProvider = createAsyncLocalStorageProvider();
-
       const receivedCalls: { rows: Record<string, unknown>[]; aggregateIds: string[] }[] = [];
 
       const customAggregateMapping: AggregateMapping = {
@@ -1543,11 +1420,12 @@ describe('Context Enrichment Integration', () => {
         }),
       };
 
-      const customPrisma = createAuditClient(customBasePrisma, {
-        Prisma,
+      const {
+        basePrisma: customBasePrisma,
+        prisma: customPrisma,
         provider: customProvider,
+      } = openClient({
         aggregateMapping: customAggregateMapping,
-        performance: { awaitWrite: true },
       });
 
       const userA = await customBasePrisma.user.create({
@@ -1589,8 +1467,6 @@ describe('Context Enrichment Integration', () => {
         const aggregateContext = log.aggregateContext as Record<string, unknown>;
         expect(aggregateContext.authorIdFromMeta).toBe(log.aggregateId);
       }
-
-      await customBasePrisma.$disconnect();
     });
   });
 });

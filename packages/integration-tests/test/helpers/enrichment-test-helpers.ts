@@ -1,12 +1,8 @@
-import type { AuditContextProvider } from '@kuruwic/db-audit-core';
-import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import type { AggregateMapping } from '@kuruwic/prisma-audit';
-import { createAuditClient, defineEntity, foreignKey, to } from '@kuruwic/prisma-audit';
+import { defineEntity, foreignKey, to } from '@kuruwic/prisma-audit';
 import type { PrismaClient } from '@kuruwic/prisma-audit-database';
-import { Prisma } from '@kuruwic/prisma-audit-database';
 import type { Mock } from 'vitest';
 import { expect, vi } from 'vitest';
-import { testAggregateMapping } from './setup.js';
 
 export interface EntityEnricherConfig<TEntity = unknown, TContext = unknown> {
   enrichFn: (entities: TEntity[], prisma: PrismaClient) => TContext[] | Promise<TContext[]>;
@@ -63,44 +59,6 @@ export function createActorEnricher<TActor = unknown, TContext = unknown>(
     const result = await config.enrichFn(actor);
     return result;
   });
-}
-
-export interface EnrichmentTestContextOptions {
-  basePrisma: PrismaClient;
-  aggregateMapping?: AggregateMapping;
-  actorEnricher?: {
-    enricher: (actor: unknown) => Promise<unknown>;
-    onError?: 'log' | 'fail';
-    fallback?: unknown;
-  };
-}
-
-export function createEnrichmentTestContext(options: EnrichmentTestContextOptions): {
-  customPrisma: ReturnType<typeof createAuditClient<PrismaClient>>;
-  provider: AuditContextProvider;
-  basePrisma: PrismaClient;
-} {
-  const { basePrisma, aggregateMapping, actorEnricher } = options;
-
-  const provider = createAsyncLocalStorageProvider();
-  const finalAggregateMapping = aggregateMapping ?? testAggregateMapping;
-
-  const customPrisma = createAuditClient(basePrisma, {
-    Prisma,
-    provider,
-    aggregateMapping: finalAggregateMapping,
-    ...(actorEnricher && {
-      contextEnricher: {
-        actor: actorEnricher,
-      },
-    }),
-  });
-
-  return {
-    customPrisma,
-    provider,
-    basePrisma,
-  };
 }
 
 export function createCommentEntityEnricher() {
