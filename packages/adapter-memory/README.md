@@ -6,7 +6,8 @@ in-memory list, and runs every audited `create`, `update` and `delete` through `
 `dispatch`, handing `dispatch` a build of the records (`resolve`, then `compose`), its own
 `WriteExecutor`, and its store and transactions as the transaction runtime.
 
-Transactions are copy-on-write overlays of the store. An operation whose policy is atomic runs in
+Transactions are copy-on-write overlays of the store. A transaction opened inside another nests in
+it and is discarded when the outer one rolls back. An operation whose policy is atomic runs in
 the active transaction or opens an implicit one, and its audit rows are written into that
 transaction's buffer, so they commit and roll back with the data. A non-atomic operation inside a
 transaction queues its write until commit; outside one it starts a detached write that `flush()`
