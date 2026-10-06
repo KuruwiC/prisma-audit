@@ -260,19 +260,10 @@ describe('Transaction Enrichment Consistency', () => {
 
       const auditLogs = await context.basePrisma.auditLog.findMany({
         where: { entityType: 'Post', entityId: post.id, action: 'update', aggregateType: 'User' },
-        orderBy: { createdAt: 'desc' },
       });
 
-      expect(auditLogs.length).toBeGreaterThan(0);
-      const auditLog = auditLogs[0];
-      expect(auditLog).toBeDefined();
-
-      if (auditLog?.aggregateContext) {
-        const aggregateContext = auditLog.aggregateContext as Record<string, unknown>;
-        expect(aggregateContext.parentUserEmail).toBe('new-author@example.com');
-      } else {
-        throw new Error(`aggregateContext is null. Full log: ${JSON.stringify(auditLog, null, 2)}`);
-      }
+      expect(auditLogs).toHaveLength(1);
+      expect(auditLogs[0]).toMatchObject({ aggregateContext: { parentUserEmail: 'new-author@example.com' } });
     });
   });
 
