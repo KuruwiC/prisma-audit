@@ -30,6 +30,50 @@ describe('normalizeId', () => {
     expect(normalizeId(objWithToString)).toBe('custom-id-123');
   });
 
+  it('writes a Date as its ISO string to the millisecond, whatever the time zone', () => {
+    expect(normalizeId(new Date('2026-01-02T03:04:05.678Z'))).toBe('2026-01-02T03:04:05.678Z');
+  });
+
+  it('keeps two Dates that differ by one millisecond apart', () => {
+    expect(normalizeId(new Date(1000))).not.toBe(normalizeId(new Date(1001)));
+  });
+
+  it('writes an invalid Date without throwing', () => {
+    expect(normalizeId(new Date(Number.NaN))).toBe('Invalid Date');
+  });
+
+  it('writes bytes as base64, the same for a Uint8Array and a Buffer', () => {
+    expect(normalizeId(new Uint8Array([0, 1, 2, 250, 255]))).toBe('AAEC+v8=');
+    expect(normalizeId(Buffer.from([0, 1, 2, 250, 255]))).toBe('AAEC+v8=');
+    expect(normalizeId(new Uint8Array([0, 255]))).not.toBe(normalizeId(new Uint8Array([0, 254])));
+  });
+
+  it('writes an object that has toJSON, such as a Decimal, by its toJSON', () => {
+    const decimalLike = {
+      toJSON: () => '12.5',
+      toString: () => '1.25e+1',
+    };
+    expect(normalizeId(decimalLike)).toBe('12.5');
+  });
+
+  it('writes an object whose toJSON returns a number by that number', () => {
+    expect(normalizeId({ toJSON: () => 7 })).toBe('7');
+  });
+
+  it('writes an object whose toJSON returns an object by its toString', () => {
+    class AccountId {
+      constructor(private readonly value: string) {}
+      toJSON() {
+        return { value: this.value };
+      }
+      toString() {
+        return `account-${this.value}`;
+      }
+    }
+
+    expect(normalizeId(new AccountId('42'))).toBe('account-42');
+  });
+
   it('should throw error for null and undefined values', () => {
     expect(() => normalizeId(null)).toThrow('Cannot normalize ID of type');
     expect(() => normalizeId(undefined)).toThrow('Cannot normalize ID of type');

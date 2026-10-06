@@ -103,10 +103,32 @@ export type IdTransformer = (value: unknown) => string;
 // ID Normalization Utilities
 // ============================================================================
 
+const bytesToBase64 = (bytes: Uint8Array): string =>
+  btoa(Array.from(bytes, (byte) => String.fromCharCode(byte)).join(''));
+
+/** The text of `id`'s `toJSON` when it has one that returns a string or a number */
+const jsonTextOf = (id: object): string | undefined => {
+  if (!('toJSON' in id) || typeof id.toJSON !== 'function') return undefined;
+  const json: unknown = id.toJSON();
+  return typeof json === 'string' || typeof json === 'number' ? String(json) : undefined;
+};
+
+const normalizeObjectId = (id: object): string => {
+  if (id instanceof Date) return Number.isNaN(id.getTime()) ? 'Invalid Date' : id.toISOString();
+  if (id instanceof Uint8Array) return bytesToBase64(id);
+  const json = jsonTextOf(id);
+  if (json !== undefined) return json;
+  if ('toString' in id && typeof id.toString === 'function') return id.toString();
+  throw new Error('Cannot normalize ID of type: object');
+};
+
 /**
  * Normalize an ID value to a string representation
  *
- * Handles primitive types and objects with toString methods.
+ * The text is the same in every time zone and keeps distinct values apart: a Date is written as its
+ * ISO string to the millisecond, a bigint as its decimal string, bytes (`Uint8Array`, `Buffer`) as
+ * base64, and any other object whose `toJSON` returns a string or a number (a decimal number type)
+ * by it. Any other object with a `toString` method is written by it.
  *
  * @throws Error if the ID type cannot be normalized
  *
@@ -116,7 +138,8 @@ export type IdTransformer = (value: unknown) => string;
  * normalizeId(456);              // '456'
  * normalizeId(789n);             // '789'
  * normalizeId(true);             // 'true'
- * normalizeId(new Date());       // Date#toString() output
+ * normalizeId(new Date(1000));   // '1970-01-01T00:00:01.000Z'
+ * normalizeId(new Uint8Array([0, 255])); // 'AP8='
  * normalizeId({ toString: () => 'custom-id' }); // 'custom-id'
  * ```
  */
@@ -125,10 +148,7 @@ export const normalizeId = (id: unknown): string => {
   if (typeof id === 'number') return String(id);
   if (typeof id === 'bigint') return id.toString();
   if (typeof id === 'boolean') return id ? 'true' : 'false';
-
-  if (typeof id === 'object' && id !== null && 'toString' in id && typeof id.toString === 'function') {
-    return id.toString();
-  }
+  if (typeof id === 'object' && id !== null) return normalizeObjectId(id);
 
   throw new Error(`Cannot normalize ID of type: ${typeof id}`);
 };

@@ -1,5 +1,7 @@
+import { normalizeId } from '@kuruwic/db-audit-core';
 import { Decimal } from '@prisma/client/runtime/library';
 import { describe, expect, it } from 'vitest';
+import { deserializeEntityId } from '../../src/grammar/nested-operations.js';
 import { extractEntityIdentity, sameKeyValue, serializeKeyValue } from '../../src/utils/id-generation.js';
 import { UNRESOLVED_ENTITY_ID } from '../../src/utils/identity-key.js';
 
@@ -192,5 +194,37 @@ describe('sameKeyValue', () => {
   it('compares Bytes by content', () => {
     expect(sameKeyValue(Buffer.from([1, 2]), new Uint8Array([1, 2]))).toBe(true);
     expect(sameKeyValue(Buffer.from([1, 2]), new Uint8Array([1, 3]))).toBe(false);
+  });
+});
+
+describe('the entity id the audit stores for a key value', () => {
+  const keyValues: Record<string, unknown> = {
+    string: 'abc',
+    number: 42,
+    BigInt: BigInt('9007199254740993'),
+    boolean: true,
+    'Date to the millisecond': new Date('2026-01-02T03:04:05.678Z'),
+    Bytes: Buffer.from([0, 1, 2, 250, 255]),
+    Decimal: new Decimal('1.25'),
+  };
+
+  it.each(Object.entries(keyValues))('is the identity of a %s key', (_, value) => {
+    expect(normalizeId(value)).toBe(serializeKeyValue(value));
+  });
+
+  it.each([
+    ['a Date', { at: new Date('2026-01-02T03:04:05.678Z') }, ['at']],
+    ['Bytes', { digest: Buffer.from([0, 255]) }, ['digest']],
+    ['a Decimal', { amount: new Decimal('1.25') }, ['amount']],
+    ['a composite key with a Date', { tenant: 'a', at: new Date('2026-01-02T03:04:05.678Z') }, ['tenant', 'at']],
+  ] as const)('is the same for a row keyed by %s and for the entity rebuilt from its identity', (_, row, pkFields) => {
+    const rebuilt = deserializeEntityId(extractEntityIdentity(row, pkFields), pkFields);
+
+    expect(rebuilt).not.toBeNull();
+    for (const field of pkFields) {
+      expect(normalizeId((rebuilt as Record<string, unknown>)[field])).toBe(
+        normalizeId((row as Record<string, unknown>)[field]),
+      );
+    }
   });
 });

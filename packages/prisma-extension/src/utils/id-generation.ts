@@ -28,6 +28,7 @@
  */
 
 import cuidV1 from '@bugsnag/cuid';
+import { normalizeId } from '@kuruwic/db-audit-core';
 import { createId } from '@paralleldrive/cuid2';
 import { v4 as uuidV4, v7 as uuidV7 } from 'uuid';
 import { getPrimaryKeyConstraint } from '../grammar/nested-operations.js';
@@ -243,33 +244,21 @@ export const getRowKeyFields = (schemaMetadata: SchemaMetadata, modelName: strin
 };
 
 /**
- * A row-key value in the form its identity is written in: a Date as its ISO string (to the
- * millisecond), a BigInt as its decimal string, Bytes as base64, a Decimal as its decimal string.
- * Any other value is kept as it is, so that a string, a number and a boolean read the same in the
- * JSON of a composite key.
+ * The text of a row-key value: what every identity, and every map that pairs, looks up or
+ * de-duplicates rows by key, writes a key value as. It is the text core stores as the entity id
+ * (`normalizeId`), so an id the audit stores and an identity written here agree. Two values of one
+ * key field that differ, to the millisecond for a DateTime or byte for Bytes, never write alike.
  */
-const canonicalKeyValue = (value: unknown): unknown => {
-  if (value instanceof Date) {
-    return Number.isNaN(value.getTime()) ? 'Invalid Date' : value.toISOString();
-  }
-  if (typeof value === 'bigint') {
-    return value.toString();
-  }
-  if (value instanceof Uint8Array) {
-    return btoa(Array.from(value, (byte) => String.fromCharCode(byte)).join(''));
-  }
-  if (typeof value === 'object' && value !== null && 'toJSON' in value && typeof value.toJSON === 'function') {
-    return value.toJSON();
-  }
-  return value;
-};
+export const serializeKeyValue = (value: unknown): string => (value == null ? String(value) : normalizeId(value));
 
 /**
- * The text of a row-key value: what every identity, and every map that pairs, looks up or
- * de-duplicates rows by key, writes a key value as. Two values of one key field that differ,
- * to the millisecond for a DateTime or byte for Bytes, never write alike.
+ * A row-key value inside the JSON of a composite key: a string, a number and a boolean stay as they
+ * are, any other value is written by {@link serializeKeyValue}.
  */
-export const serializeKeyValue = (value: unknown): string => String(canonicalKeyValue(value));
+const canonicalKeyValue = (value: unknown): unknown =>
+  typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'
+    ? value
+    : serializeKeyValue(value);
 
 const isInvalidDate = (value: unknown): boolean => value instanceof Date && Number.isNaN(value.getTime());
 
