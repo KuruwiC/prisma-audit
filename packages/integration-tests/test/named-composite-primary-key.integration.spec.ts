@@ -175,6 +175,37 @@ describe('Named Composite Primary Key (PostBookmark)', () => {
     });
   });
 
+  describe('createMany', () => {
+    it('records each row by the composite key its data supplies', async () => {
+      const { basePrisma, prisma, provider, observer } = createScenario({ fetchBeforeDelete: true });
+      const { user, post } = await createUserAndPost(basePrisma);
+      const secondUser = await basePrisma.user.create({
+        data: { email: 'second-bookmarker@example.com', name: 'Second Bookmarker' },
+      });
+
+      const result = await provider.runAsync(testActor, async () => {
+        return await prisma.postBookmark.createMany({
+          data: [
+            { postId: post.id, userId: user.id, label: 'first' },
+            { postId: post.id, userId: secondUser.id, label: 'second' },
+          ],
+        });
+      });
+
+      expect(result).toEqual({ count: 2 });
+      const createLogs = await basePrisma.auditLog.findMany({
+        where: { entityType: 'PostBookmark', aggregateType: 'PostBookmark', action: 'create' },
+      });
+      expect(createLogs.map((log) => [log.entityId, (log.after as Record<string, unknown>).label]).sort()).toEqual(
+        [
+          [compositeEntityId(post.id, user.id), 'first'],
+          [compositeEntityId(post.id, secondUser.id), 'second'],
+        ].sort(),
+      );
+      expect(observer).not.toHaveBeenCalled();
+    });
+  });
+
   describe('nested connectOrCreate via the named compound key', () => {
     it('creates a new row and records the real composite entityId with action=create', async () => {
       const { basePrisma, prisma, provider, observer } = createScenario({ fetchBeforeDelete: true });

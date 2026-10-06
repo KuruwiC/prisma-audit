@@ -96,12 +96,12 @@ const pairByPrimaryKey = (afterRows: Row[], beforeRows: Row[], pkFields: string[
 };
 
 /**
- * `createMany` returns only `{ count }`, which leaves client-side id injection as the only way to
- * know the primary keys of the rows it inserts: the rows it audits are the ones read back by those
- * keys after the write (`createdRows`). `createManyAndReturn` relies on Prisma's own id generation
- * and audits the rows it actually created, read whole whatever the caller selects (see
- * `injectAuditedSelection`), which supports database-generated defaults (autoincrement,
- * dbgenerated) and stays correct under skipDuplicates.
+ * `createMany` returns only `{ count }`, which leaves `data` as the only way to know the primary
+ * keys of the rows it inserts: `ensureIds` fills in client-side the key fields `data` leaves out,
+ * and the rows it audits are the ones read back by those keys after the write (`createdRows`).
+ * `createManyAndReturn` relies on Prisma's own id generation and audits the rows it actually
+ * created, read whole whatever the caller selects (see `injectAuditedSelection`), which supports
+ * database-generated defaults (autoincrement, dbgenerated) and stays correct under skipDuplicates.
  */
 const prepareCreate = (operation: AuditedOperation, deps: BatchExecutorDependencies): BatchPrepared => {
   if (operation.action === AUDIT_ACTION.CREATE_MANY_AND_RETURN) {
@@ -110,11 +110,8 @@ const prepareCreate = (operation: AuditedOperation, deps: BatchExecutorDependenc
   const { data } = operation.args;
   // Single-object data is normalized to an array so `data: {...}` is logged like `data: [...]`
   const rows = Array.isArray(data) ? (data as Row[]) : [data as Row];
-  return {
-    kind: 'create',
-    rows: ensureIds(deps.schemaMetadata, operation.model, rows),
-    pkFields: getPrimaryKeyFields(deps.Prisma, operation.model),
-  };
+  const pkFields = getPrimaryKeyFields(deps.Prisma, operation.model);
+  return { kind: 'create', rows: ensureIds(deps.schemaMetadata, operation.model, rows, pkFields), pkFields };
 };
 
 /**

@@ -149,6 +149,91 @@ describe('Composite Primary Key (PostLike)', () => {
     });
   });
 
+  describe('batch creates', () => {
+    const createLogs = () =>
+      context.basePrisma.auditLog.findMany({
+        where: { entityType: 'PostLike', aggregateType: 'PostLike', action: 'create' },
+      });
+
+    const createSecondUser = () =>
+      context.basePrisma.user.create({ data: { email: 'second-liker@example.com', name: 'Second Liker' } });
+
+    it('createMany records each row by the composite key its data supplies', async () => {
+      const { user, post } = await createUserAndPost();
+      const secondUser = await createSecondUser();
+
+      const result = await context.provider.runAsync(testActor, async () => {
+        return await context.prisma.postLike.createMany({
+          data: [
+            { postId: post.id, userId: user.id, note: 'first' },
+            { postId: post.id, userId: secondUser.id, note: 'second' },
+          ],
+        });
+      });
+
+      expect(result).toEqual({ count: 2 });
+      const logs = await createLogs();
+      expect(logs.map((log) => [log.entityId, (log.after as Record<string, unknown>).note]).sort()).toEqual(
+        [
+          [compositeEntityId(post.id, user.id), 'first'],
+          [compositeEntityId(post.id, secondUser.id), 'second'],
+        ].sort(),
+      );
+    });
+
+    it('createManyAndReturn records each row by its composite key', async () => {
+      const { user, post } = await createUserAndPost();
+      const secondUser = await createSecondUser();
+
+      const created = await context.provider.runAsync(testActor, async () => {
+        return await context.prisma.postLike.createManyAndReturn({
+          data: [
+            { postId: post.id, userId: user.id, note: 'first' },
+            { postId: post.id, userId: secondUser.id, note: 'second' },
+          ],
+        });
+      });
+
+      expect(created).toHaveLength(2);
+      const logs = await createLogs();
+      expect(logs.map((log) => [log.entityId, (log.after as Record<string, unknown>).note]).sort()).toEqual(
+        [
+          [compositeEntityId(post.id, user.id), 'first'],
+          [compositeEntityId(post.id, secondUser.id), 'second'],
+        ].sort(),
+      );
+    });
+
+    it('a nested createMany from Post records each row by its composite key', async () => {
+      const { user, post } = await createUserAndPost();
+      const secondUser = await createSecondUser();
+
+      await context.provider.runAsync(testActor, async () => {
+        return await context.prisma.post.update({
+          where: { id: post.id },
+          data: {
+            postLikes: {
+              createMany: {
+                data: [
+                  { userId: user.id, note: 'first' },
+                  { userId: secondUser.id, note: 'second' },
+                ],
+              },
+            },
+          },
+        });
+      });
+
+      const logs = await createLogs();
+      expect(logs.map((log) => [log.entityId, (log.after as Record<string, unknown>).note]).sort()).toEqual(
+        [
+          [compositeEntityId(post.id, user.id), 'first'],
+          [compositeEntityId(post.id, secondUser.id), 'second'],
+        ].sort(),
+      );
+    });
+  });
+
   describe('nested delete from Post', () => {
     it('records the real composite entityId, real before state, and delete action for an existing composite-key row', async () => {
       const { user, post } = await createUserAndPost();

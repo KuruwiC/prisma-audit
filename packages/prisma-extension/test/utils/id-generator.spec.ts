@@ -251,17 +251,17 @@ describe('getIdFieldInfo', () => {
   });
 
   it('parses args from string defaults (uuid(7))', () => {
-    const info = getIdFieldInfo(metadataWithIdDefault('uuid(7)'), 'Item');
+    const info = getIdFieldInfo(metadataWithIdDefault('uuid(7)'), 'Item', 'id');
     expect(info?.defaultExpr).toBe('uuid(7)');
     expect(info?.generator?.()).toMatch(UUID_V7_RE);
   });
 
   it('leaves generator undefined for unknown uuid versions', () => {
-    const objectRoute = getIdFieldInfo(metadataWithIdDefault({ name: 'uuid', args: [8] }), 'Item');
+    const objectRoute = getIdFieldInfo(metadataWithIdDefault({ name: 'uuid', args: [8] }), 'Item', 'id');
     expect(objectRoute?.defaultExpr).toBe('uuid(8)');
     expect(objectRoute?.generator).toBeUndefined();
 
-    const stringRoute = getIdFieldInfo(metadataWithIdDefault('uuid(8)'), 'Item');
+    const stringRoute = getIdFieldInfo(metadataWithIdDefault('uuid(8)'), 'Item', 'id');
     expect(stringRoute?.generator).toBeUndefined();
   });
 });
@@ -293,14 +293,14 @@ describe('ensureIds', () => {
       { id: 'existing-1', email: 'user1@example.com' },
       { id: 'existing-2', email: 'user2@example.com' },
     ];
-    const result = ensureIds(createSchemaMetadataFromDMMF(Prisma), 'User', entities);
+    const result = ensureIds(createSchemaMetadataFromDMMF(Prisma), 'User', entities, ['id']);
     expect(result).toEqual(entities);
   });
 
   it('should generate unique IDs for all entities without IDs', () => {
     const Prisma = createMockPrisma('cuid');
     const entities = [{ email: 'user1@example.com' }, { email: 'user2@example.com' }];
-    const result = ensureIds(createSchemaMetadataFromDMMF(Prisma), 'User', entities) as Array<{
+    const result = ensureIds(createSchemaMetadataFromDMMF(Prisma), 'User', entities, ['id']) as Array<{
       id: string;
       email: string;
     }>;
@@ -318,7 +318,7 @@ describe('ensureIds', () => {
   it('should preserve existing IDs and generate only missing ones', () => {
     const Prisma = createMockPrisma('cuid');
     const entities = [{ id: 'existing', email: 'user1@example.com' }, { email: 'user2@example.com' }];
-    const result = ensureIds(createSchemaMetadataFromDMMF(Prisma), 'User', entities) as Array<{
+    const result = ensureIds(createSchemaMetadataFromDMMF(Prisma), 'User', entities, ['id']) as Array<{
       id: string;
       email: string;
     }>;
@@ -346,7 +346,7 @@ describe('ensureIds', () => {
       },
     };
     const entities = [{ email: 'user@example.com' }];
-    expect(() => ensureIds(createSchemaMetadataFromDMMF(Prisma), 'User', entities)).toThrow(
+    expect(() => ensureIds(createSchemaMetadataFromDMMF(Prisma), 'User', entities, ['id'])).toThrow(
       '[@prisma-audit] createMany requires pre-generated IDs',
     );
   });
@@ -359,7 +359,7 @@ describe('ensureIds', () => {
       },
     };
 
-    expect(() => ensureIds(schemaMetadata, 'User', [{ email: 'user@example.com' }])).toThrow(
+    expect(() => ensureIds(schemaMetadata, 'User', [{ email: 'user@example.com' }], ['id'])).toThrow(
       'Field "id" has no default directive',
     );
   });
@@ -385,18 +385,18 @@ describe('ensureIds', () => {
       },
     };
     const entities = [{ email: 'user@example.com' }];
-    expect(() => ensureIds(createSchemaMetadataFromDMMF(Prisma), 'User', entities)).toThrow(
+    expect(() => ensureIds(createSchemaMetadataFromDMMF(Prisma), 'User', entities, ['id'])).toThrow(
       'unsupported default: autoincrement()',
     );
   });
 
   it('should return empty array for empty input', () => {
     const Prisma = createMockPrisma('cuid');
-    const result = ensureIds(createSchemaMetadataFromDMMF(Prisma), 'User', []);
+    const result = ensureIds(createSchemaMetadataFromDMMF(Prisma), 'User', [], ['id']);
     expect(result).toEqual([]);
   });
 
-  it('should support custom ID field names', () => {
+  it('generates a single primary key whatever its name, and adds no `id`', () => {
     const Prisma = {
       dmmf: {
         datamodel: {
@@ -417,7 +417,7 @@ describe('ensureIds', () => {
       },
     };
     const entities = [{ email: 'user@example.com' }];
-    const result = ensureIds(createSchemaMetadataFromDMMF(Prisma), 'User', entities, 'userId') as Array<{
+    const result = ensureIds(createSchemaMetadataFromDMMF(Prisma), 'User', entities, ['userId']) as Array<{
       userId: string;
       email: string;
     }>;
@@ -430,10 +430,12 @@ describe('ensureIds', () => {
   });
 
   it('injects UUID v7 for @default(uuid(7)) models', () => {
-    const result = ensureIds(metadataWithIdDefault({ name: 'uuid', args: [7] }), 'Item', [
-      { label: 'a' },
-      { label: 'b' },
-    ]) as Array<{ id: string; label: string }>;
+    const result = ensureIds(
+      metadataWithIdDefault({ name: 'uuid', args: [7] }),
+      'Item',
+      [{ label: 'a' }, { label: 'b' }],
+      ['id'],
+    ) as Array<{ id: string; label: string }>;
 
     for (const entity of result) {
       expect(entity.id).toMatch(UUID_V7_RE);
@@ -442,7 +444,12 @@ describe('ensureIds', () => {
   });
 
   it('injects UUID v4 for @default(uuid()) models', () => {
-    const result = ensureIds(metadataWithIdDefault({ name: 'uuid', args: [4] }), 'Item', [{ label: 'a' }]) as Array<{
+    const result = ensureIds(
+      metadataWithIdDefault({ name: 'uuid', args: [4] }),
+      'Item',
+      [{ label: 'a' }],
+      ['id'],
+    ) as Array<{
       id: string;
       label: string;
     }>;
@@ -450,7 +457,12 @@ describe('ensureIds', () => {
   });
 
   it('injects cuid v1 for @default(cuid()) models', () => {
-    const result = ensureIds(metadataWithIdDefault({ name: 'cuid', args: [1] }), 'Item', [{ label: 'a' }]) as Array<{
+    const result = ensureIds(
+      metadataWithIdDefault({ name: 'cuid', args: [1] }),
+      'Item',
+      [{ label: 'a' }],
+      ['id'],
+    ) as Array<{
       id: string;
       label: string;
     }>;
@@ -458,9 +470,48 @@ describe('ensureIds', () => {
   });
 
   it('throws an unsupported-default error for unknown uuid versions instead of silently injecting v4', () => {
-    expect(() => ensureIds(metadataWithIdDefault({ name: 'uuid', args: [8] }), 'Item', [{ label: 'a' }])).toThrow(
-      'unsupported default: uuid(8)',
-    );
+    expect(() =>
+      ensureIds(metadataWithIdDefault({ name: 'uuid', args: [8] }), 'Item', [{ label: 'a' }], ['id']),
+    ).toThrow('unsupported default: uuid(8)');
+  });
+  describe('composite primary key', () => {
+    const likeField = (name: string, defaultValue?: unknown) => ({
+      name,
+      kind: 'scalar',
+      type: 'String',
+      ...(defaultValue === undefined ? {} : { default: defaultValue }),
+    });
+    const metadataForLike = (fields: ReturnType<typeof likeField>[]) =>
+      createSchemaMetadataFromDMMF({ dmmf: { datamodel: { models: [{ name: 'Like', fields }] } } });
+    const pkFields = ['postId', 'userId'];
+
+    it('returns rows that supply every key field unchanged, adding no `id`', () => {
+      const rows = [
+        { postId: 'p1', userId: 'u1', note: 'a' },
+        { postId: 'p1', userId: 'u2', note: 'b' },
+      ];
+      const result = ensureIds(metadataForLike([likeField('postId'), likeField('userId')]), 'Like', rows, pkFields);
+      expect(result).toEqual(rows);
+    });
+
+    it('generates only the key field the rows leave out that has a supported default', () => {
+      const result = ensureIds(
+        metadataForLike([likeField('postId'), likeField('userId', { name: 'uuid', args: [7] })]),
+        'Like',
+        [{ postId: 'p1' }, { postId: 'p2', userId: 'u-supplied' }],
+        pkFields,
+      );
+      expect(result[0]?.postId).toBe('p1');
+      expect(result[0]?.userId).toMatch(UUID_V7_RE);
+      expect(result[1]).toEqual({ postId: 'p2', userId: 'u-supplied' });
+      expect(result[0]).not.toHaveProperty('id');
+    });
+
+    it('throws naming the key field a row leaves out that has no default', () => {
+      expect(() =>
+        ensureIds(metadataForLike([likeField('postId'), likeField('userId')]), 'Like', [{ postId: 'p1' }], pkFields),
+      ).toThrow('Field "userId" has no default directive');
+    });
   });
 });
 

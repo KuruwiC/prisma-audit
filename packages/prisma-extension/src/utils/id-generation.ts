@@ -107,16 +107,16 @@ export interface IdFieldInfo {
 export const getIdFieldInfo = (
   schemaMetadata: SchemaMetadata,
   modelName: string,
-  idKey = 'id',
+  fieldName: string,
 ): IdFieldInfo | undefined => {
   try {
-    const field = schemaMetadata.getFieldMetadata(modelName, idKey);
+    const field = schemaMetadata.getFieldMetadata(modelName, fieldName);
     if (!field) {
       return undefined;
     }
 
     const info: IdFieldInfo = {
-      name: idKey,
+      name: fieldName,
       hasDefault: field.hasDefaultValue,
     };
 
@@ -146,39 +146,17 @@ export const getIdFieldInfo = (
 };
 
 /**
- * Generate missing IDs for entities in createMany data
+ * The generator of a primary-key field, for the rows of a `createMany` that leave it out.
  *
- * @throws Error if ID generation is required but not possible
- *
- * @example
- * ```typescript
- * const dataWithIds = ensureIds(schemaMetadata, 'User', [
- *   { email: 'user1@example.com' },
- *   { email: 'user2@example.com' },
- * ]);
- * ```
+ * @throws Error if the field has no default, or a default the client cannot generate
  */
-export const ensureIds = <T extends Record<string, unknown>>(
-  schemaMetadata: SchemaMetadata,
-  modelName: string,
-  entities: T[],
-  idKey = 'id',
-): T[] => {
-  if (entities.length === 0) {
-    return entities;
-  }
-
-  const missingIds = entities.filter((entity) => entity[idKey] === undefined);
-  if (missingIds.length === 0) {
-    return entities;
-  }
-
-  const idFieldInfo = getIdFieldInfo(schemaMetadata, modelName, idKey);
+const keyFieldGenerator = (schemaMetadata: SchemaMetadata, modelName: string, field: string): IdGenerator => {
+  const idFieldInfo = getIdFieldInfo(schemaMetadata, modelName, field);
 
   if (!idFieldInfo?.hasDefault) {
     throw new Error(
       `[@prisma-audit] createMany requires pre-generated IDs for model "${modelName}". ` +
-        `Field "${idKey}" has no default directive. ` +
+        `Field "${field}" has no default directive. ` +
         `Please provide IDs explicitly in your data, or add a default value (e.g., @default(cuid())) to your schema.`,
     );
   }
@@ -186,24 +164,42 @@ export const ensureIds = <T extends Record<string, unknown>>(
   if (!idFieldInfo.generator) {
     throw new Error(
       `[@prisma-audit] createMany requires pre-generated IDs for model "${modelName}". ` +
-        `Field "${idKey}" has unsupported default: ${idFieldInfo.defaultExpr}. ` +
+        `Field "${field}" has unsupported default: ${idFieldInfo.defaultExpr}. ` +
         `Supported defaults: cuid(), cuid(2), uuid(), uuid(4), uuid(7). ` +
         `For database-generated IDs like autoincrement() or dbgenerated(), ` +
         `audit logging with createMany is not supported. Use createManyAndReturn or individual create() calls instead.`,
     );
   }
 
-  return entities.map((entity) => {
-    if (entity[idKey] !== undefined) {
-      return entity;
-    }
-
-    return {
-      ...entity,
-      [idKey]: idFieldInfo.generator?.(),
-    };
-  });
+  return idFieldInfo.generator;
 };
+
+/**
+ * Fill in the primary-key fields `pkFields` (the model's `@id` field, or every field of its `@@id`)
+ * that rows of `createMany` data leave out, with the generator the field's default declares. A field
+ * every row supplies is left as it is, whatever its default.
+ *
+ * @throws Error if a row leaves out a key field that has no default the client can generate
+ *
+ * @example
+ * ```typescript
+ * const dataWithIds = ensureIds(schemaMetadata, 'User', [
+ *   { email: 'user1@example.com' },
+ *   { email: 'user2@example.com' },
+ * ], ['id']);
+ * ```
+ */
+export const ensureIds = <T extends Record<string, unknown>>(
+  schemaMetadata: SchemaMetadata,
+  modelName: string,
+  entities: T[],
+  pkFields: readonly string[],
+): T[] =>
+  pkFields.reduce((rows, field) => {
+    if (rows.every((row) => row[field] !== undefined)) return rows;
+    const generate = keyFieldGenerator(schemaMetadata, modelName, field);
+    return rows.map((row) => (row[field] !== undefined ? row : { ...row, [field]: generate() }));
+  }, entities);
 
 const PK_CHUNK_SIZE = 1000;
 

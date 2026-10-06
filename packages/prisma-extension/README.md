@@ -1092,7 +1092,7 @@ Either way, the audit covers the rows the filter matched when they were read bef
 
 `createManyAndReturn` delegates ID generation entirely to Prisma: audit logs are built from the rows Prisma actually created, read with every column of the client's default shape whatever the query's `select` or `omit`, and the fields the entity lists in `auditOmittedFields` read by primary key after the write. Any `@default` works — including database-generated ones like `autoincrement()` — and logs stay accurate under `skipDuplicates` (skipped rows produce no logs).
 
-`createMany` only returns `{ count }`, so the extension pre-generates IDs client-side and injects them into `data`, matching the format the schema declares:
+`createMany` only returns `{ count }`, so the extension pre-generates client-side every primary-key field (the `@id` field, or each field of an `@@id`) that a row of `data` leaves out, and injects it into `data`, matching the format the schema declares:
 
 | Schema default | Injected format |
 | --- | --- |
@@ -1103,7 +1103,7 @@ Either way, the audit covers the rows the filter matched when they were read bef
 
 After the write, the extension reads the created rows back by those primary keys (one query per 1,000 rows) and audits the rows it reads, in the client's default shape plus the fields the entity lists in `auditOmittedFields`: columns the database fills (`@default`, `@updatedAt`) are recorded, and a column a client-level `omit` hides is not, even when `data` writes it. The read follows the rules of the read after an `updateMany` (see Batch Operations above): inside a transaction it sees the rows the operation created; outside one, a row another writer changes before the read is recorded as changed, and a row it deletes gets no audit log; inside a batch `$transaction([...])` that Prisma runs itself, it runs once the batch has committed, so a row a later operation of the batch deleted gets no audit log.
 
-Database-generated defaults (`autoincrement()`, `dbgenerated()`) cannot be pre-generated, so `createMany` on such models throws unless its `data` supplies every ID. Use `createManyAndReturn` or individual `create` calls instead.
+Database-generated defaults (`autoincrement()`, `dbgenerated()`) cannot be pre-generated, so `createMany` throws when a row of its `data` leaves out a primary-key field that has such a default, or no default at all. A key field every row supplies needs no default. Use `createManyAndReturn` or individual `create` calls instead.
 
 With `skipDuplicates`, a row the database skipped gets no audit log, except a row skipped because a row with its primary key already exists: that row is read back and recorded as a create of the existing row. To avoid this, leave the primary key out of `data`, so the extension generates it, or use `createManyAndReturn`, which audits only the rows it created.
 
