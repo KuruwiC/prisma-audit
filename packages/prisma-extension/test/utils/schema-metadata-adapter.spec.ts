@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { DMMFModel } from '../../src/internal-types.js';
-import { createSchemaMetadataFromDMMF, getUniqueConstraints } from '../../src/utils/schema-metadata.js';
+import { createSchemaMetadataFromDMMF } from '../../src/utils/schema-metadata.js';
 
 const createPrismaWithModel = (model: Partial<DMMFModel> & { name: string; fields: DMMFModel['fields'] }) => ({
   dmmf: { datamodel: { models: [model] as DMMFModel[] } },
@@ -45,6 +45,10 @@ describe('createSchemaMetadataFromDMMF', () => {
       const metadata = createSchemaMetadataFromDMMF(Prisma);
       expect(metadata.getUniqueConstraints('Unknown')).toEqual([]);
     });
+
+    it('should return empty when Prisma carries no DMMF', () => {
+      expect(createSchemaMetadataFromDMMF({}).getUniqueConstraints('User')).toEqual([]);
+    });
   });
 
   describe('getAllFields', () => {
@@ -82,21 +86,5 @@ describe('createSchemaMetadataFromDMMF', () => {
       expect(relations).toHaveLength(1);
       expect(relations[0]).toMatchObject({ name: 'posts', relatedModel: 'Post', isList: true });
     });
-  });
-});
-
-describe('getUniqueConstraints (standalone)', () => {
-  it('should delegate to createSchemaMetadataFromDMMF', () => {
-    const Prisma = createPrismaWithModel({
-      name: 'User',
-      fields: [{ name: 'email', kind: 'scalar', type: 'String', isUnique: true }],
-    });
-
-    const constraints = getUniqueConstraints(Prisma, 'User');
-    expect(constraints).toContainEqual({ type: 'uniqueField', fields: ['email'] });
-  });
-
-  it('should return empty for missing DMMF', () => {
-    expect(getUniqueConstraints({}, 'User')).toEqual([]);
   });
 });

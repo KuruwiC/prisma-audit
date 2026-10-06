@@ -116,7 +116,3 @@ export const createSchemaMetadataFromDMMF = (Prisma: PrismaWithDMMF): SchemaMeta
     },
   };
 };
-
-export const getUniqueConstraints = (Prisma: PrismaWithDMMF, modelName: string): UniqueConstraint[] => {
-  return createSchemaMetadataFromDMMF(Prisma).getUniqueConstraints(modelName);
-};
