@@ -19,6 +19,7 @@ import {
   extractEntityIdentity,
   findManyByPKs,
   getPrimaryKeyFields,
+  getRowKeyFields,
 } from '../utils/id-generation.js';
 import type { EntityIdentityKey } from '../utils/identity-key.js';
 import { getModelDelegate, hasOperation } from '../utils/model-accessor.js';
@@ -40,7 +41,7 @@ export interface BatchExecutorDependencies {
 export type BatchPrepared =
   /** createManyAndReturn: Prisma generates the ids and returns the rows it created */
   | { readonly kind: 'create-returning' }
-  /** createMany: the rows to insert, with client-generated primary-key values, and the fields of that key */
+  /** createMany: the rows to insert, with client-generated key values, and the fields of that key */
   | { readonly kind: 'create'; readonly rows: Row[]; readonly keyFields: string[] }
   /** updateManyAndReturn: its returned rows are exactly the updated ones */
   | { readonly kind: 'update-returning'; readonly beforeRows: Row[]; readonly pkFields: string[] }
@@ -95,9 +96,10 @@ const pairByPrimaryKey = (afterRows: Row[], beforeRows: Row[], pkFields: string[
 };
 
 /**
- * `createMany` returns only `{ count }`, which leaves `data` as the only way to know the primary
- * keys of the rows it inserts: `ensureIds` fills in client-side the key fields `data` leaves out,
- * and the rows it audits are the ones read back by those keys after the write (`createdRows`).
+ * `createMany` returns only `{ count }`, which leaves `data` as the only way to know the keys of the
+ * rows it inserts: the model's primary key, or a unique constraint on required fields for a model
+ * without one (`getRowKeyFields`). `ensureIds` fills in client-side the key fields `data` leaves
+ * out, and the rows it audits are the ones read back by those keys after the write (`createdRows`).
  * `createManyAndReturn` relies on Prisma's own id generation and audits the rows it actually
  * created, read whole whatever the caller selects (see `injectAuditedSelection`), which supports
  * database-generated defaults (autoincrement, dbgenerated) and stays correct under skipDuplicates.
@@ -109,7 +111,7 @@ const prepareCreate = (operation: AuditedOperation, deps: BatchExecutorDependenc
   const { data } = operation.args;
   // Single-object data is normalized to an array so `data: {...}` is logged like `data: [...]`
   const rows = Array.isArray(data) ? (data as Row[]) : [data as Row];
-  const keyFields = getPrimaryKeyFields(deps.Prisma, operation.model);
+  const keyFields = getRowKeyFields(deps.schemaMetadata, operation.model);
   return { kind: 'create', rows: ensureIds(deps.schemaMetadata, operation.model, rows, keyFields), keyFields };
 };
 

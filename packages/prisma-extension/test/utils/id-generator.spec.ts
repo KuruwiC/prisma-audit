@@ -19,6 +19,7 @@ import {
   getIdFieldInfo,
   getIdGenerator,
   getPrimaryKeyConstraintOrThrow,
+  getRowKeyFields,
   ID_GENERATOR_FACTORIES,
   primaryKeyOf,
 } from '../../src/utils/id-generation.js';
@@ -561,6 +562,69 @@ describe('getPrimaryKeyConstraintOrThrow', () => {
     const Prisma = prismaWith([{ name: 'User', fields: [scalar('id', true)] }]);
 
     expect(() => getPrimaryKeyConstraintOrThrow(Prisma, 'Unknown')).toThrow('Model "Unknown" not found in DMMF');
+  });
+});
+
+describe('getRowKeyFields', () => {
+  const metadataOf = (model: DMMFModel) => createSchemaMetadataFromDMMF({ dmmf: { datamodel: { models: [model] } } });
+  const field = (name: string, extra: Partial<DMMFModel['fields'][number]> = {}) => ({
+    name,
+    kind: 'scalar',
+    type: 'String',
+    ...extra,
+  });
+
+  it('returns the primary key of a model that has one, ahead of its unique fields', () => {
+    const metadata = metadataOf({
+      name: 'User',
+      fields: [field('email', { isUnique: true, isRequired: true }), field('id', { isId: true, isRequired: true })],
+    });
+
+    expect(getRowKeyFields(metadata, 'User')).toEqual(['id']);
+  });
+
+  it('returns every field of a composite primary key', () => {
+    const metadata = metadataOf({
+      name: 'PostLike',
+      fields: [field('postId', { isRequired: true }), field('userId', { isRequired: true })],
+      primaryKey: { name: null, fields: ['postId', 'userId'] },
+    });
+
+    expect(getRowKeyFields(metadata, 'PostLike')).toEqual(['postId', 'userId']);
+  });
+
+  it('returns the first unique field on a required column of a model without a primary key, passing over a nullable one', () => {
+    const metadata = metadataOf({
+      name: 'Device',
+      fields: [
+        field('label', { isUnique: true }),
+        field('serial', { isUnique: true, isRequired: true }),
+        field('code', { isUnique: true, isRequired: true }),
+      ],
+    });
+
+    expect(getRowKeyFields(metadata, 'Device')).toEqual(['serial']);
+  });
+
+  it('returns a unique index whose fields are all required when the model has no primary key or such unique field', () => {
+    const metadata = metadataOf({
+      name: 'Setting',
+      fields: [field('scope', { isRequired: true }), field('key', { isRequired: true }), field('note')],
+      uniqueIndexes: [
+        { name: null, fields: ['scope', 'note'] },
+        { name: 'scope_key', fields: ['scope', 'key'] },
+      ],
+    });
+
+    expect(getRowKeyFields(metadata, 'Setting')).toEqual(['scope', 'key']);
+  });
+
+  it('throws naming the model when it has no primary key and no unique constraint on required fields', () => {
+    const metadata = metadataOf({ name: 'Note', fields: [field('label', { isUnique: true }), field('text')] });
+
+    expect(() => getRowKeyFields(metadata, 'Note')).toThrow(
+      '[@prisma-audit] Model "Note" has no primary key and no unique constraint on required fields: createMany cannot read back the rows it creates.',
+    );
   });
 });
 

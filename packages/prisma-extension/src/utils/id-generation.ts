@@ -146,7 +146,7 @@ export const getIdFieldInfo = (
 };
 
 /**
- * The generator of a primary-key field, for the rows of a `createMany` that leave it out.
+ * The generator of a key field, for the rows of a `createMany` that leave it out.
  *
  * @throws Error if the field has no default, or a default the client cannot generate
  */
@@ -175,9 +175,9 @@ const keyFieldGenerator = (schemaMetadata: SchemaMetadata, modelName: string, fi
 };
 
 /**
- * Fill in the primary-key fields `pkFields` (the model's `@id` field, or every field of its `@@id`)
- * that rows of `createMany` data leave out, with the generator the field's default declares. A field
- * every row supplies is left as it is, whatever its default.
+ * Fill in the key fields `keyFields` (from {@link getRowKeyFields}) that rows of `createMany` data
+ * leave out, with the generator the field's default declares. A field every row supplies is left as
+ * it is, whatever its default.
  *
  * @throws Error if a row leaves out a key field that has no default the client can generate
  *
@@ -193,9 +193,9 @@ export const ensureIds = <T extends Record<string, unknown>>(
   schemaMetadata: SchemaMetadata,
   modelName: string,
   entities: T[],
-  pkFields: readonly string[],
+  keyFields: readonly string[],
 ): T[] =>
-  pkFields.reduce((rows, field) => {
+  keyFields.reduce((rows, field) => {
     if (rows.every((row) => row[field] !== undefined)) return rows;
     const generate = keyFieldGenerator(schemaMetadata, modelName, field);
     return rows.map((row) => (row[field] !== undefined ? row : { ...row, [field]: generate() }));
@@ -233,6 +233,36 @@ export const getPrimaryKeyConstraintOrThrow = (Prisma: PrismaWithDMMF, modelName
 /** Fields of `getPrimaryKeyConstraintOrThrow`; throws if the model has no primary key. */
 export const getPrimaryKeyFields = (Prisma: PrismaWithDMMF, modelName: string): string[] =>
   getPrimaryKeyConstraintOrThrow(Prisma, modelName).fields;
+
+/**
+ * The fields that name one row of `modelName` before it is read: its primary key, else the first of
+ * its unique constraints (`@unique` fields in declaration order, then `@@unique` indexes) whose
+ * fields are all required, since a nullable unique column holds null in any number of rows.
+ *
+ * @throws Error if the model has neither
+ */
+export const getRowKeyFields = (schemaMetadata: SchemaMetadata, modelName: string): string[] => {
+  const primaryKey = getPrimaryKeyConstraint(schemaMetadata, modelName);
+  if (primaryKey) {
+    return primaryKey.fields;
+  }
+  const required = new Set(
+    schemaMetadata
+      .getAllFields(modelName)
+      .filter((field) => field.isRequired)
+      .map((field) => field.name),
+  );
+  const unique = schemaMetadata
+    .getUniqueConstraints(modelName)
+    .find((constraint) => constraint.fields.length > 0 && constraint.fields.every((field) => required.has(field)));
+  if (unique) {
+    return unique.fields;
+  }
+  throw new Error(
+    `[@prisma-audit] Model "${modelName}" has no primary key and no unique constraint on required fields: ` +
+      'createMany cannot read back the rows it creates.',
+  );
+};
 
 /**
  * Extract the entity identity of `record` from its primary-key fields: the single key's value as

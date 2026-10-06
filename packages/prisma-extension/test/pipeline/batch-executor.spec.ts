@@ -50,6 +50,15 @@ const Prisma: PrismaNamespace = {
           ],
           primaryKey: { name: null, fields: ['orgId', 'userId'] },
         },
+        {
+          name: 'Device',
+          fields: [
+            scalar('label', { isUnique: true }),
+            scalar('serial', { isUnique: true, isRequired: true, default: { name: 'cuid', args: [] } }),
+            scalar('name'),
+          ],
+        },
+        { name: 'Note', fields: [scalar('label', { isUnique: true }), scalar('text', { isRequired: true })] },
       ],
     },
   },
@@ -363,6 +372,46 @@ describe('createBatchExecutor', () => {
       expect(findMany).toHaveBeenCalledTimes(2);
       expect(produceRecords.mock.calls[0]?.[0].map((event) => event.identity)).toEqual(ids.slice(0, 1000));
       expect(failureSink.notify).not.toHaveBeenCalled();
+    });
+
+    it('reads back the rows of a model without a primary key by its first unique field on required columns, generating it when data leaves it out', async () => {
+      const createMany = vi.fn<(args: { data: Row[] }) => Promise<{ count: number }>>(async () => ({ count: 1 }));
+      const findMany = vi.fn(async ({ where }: { where: Row }) =>
+        (where.serial as { in: string[] }).in.map((serial) => ({ label: null, serial, name: 'd1' })),
+      );
+      const { client, operation } = createManyOn('Device', { createMany, findMany }, { data: [{ name: 'd1' }] });
+      const produceRecords = produce();
+
+      await runWithRecords(executor, operation, scopeOn(client), produceRecords);
+
+      const serial = createMany.mock.calls[0]?.[0].data[0]?.serial;
+      expect(createMany).toHaveBeenCalledWith({
+        data: [{ name: 'd1', serial: expect.stringMatching(/^c[a-z0-9]{24}$/) }],
+      });
+      expect(findMany.mock.calls).toEqual([[{ where: { serial: { in: [serial] } } }]]);
+      expect(produceRecords).toHaveBeenCalledWith(
+        [
+          expect.objectContaining({
+            model: 'Device',
+            identity: '',
+            action: 'create',
+            after: { label: null, serial, name: 'd1' },
+          }),
+        ],
+        expect.anything(),
+        new Map(),
+      );
+    });
+
+    it('fails before the write for a model with no primary key and no unique constraint on required columns, naming the model', async () => {
+      const createMany = vi.fn(async () => ({ count: 1 }));
+      const findMany = vi.fn(async () => []);
+      const { client, operation } = createManyOn('Note', { createMany, findMany }, { data: [{ text: 't' }] });
+
+      await expect(runWithRecords(executor, operation, scopeOn(client), produce())).rejects.toThrow(
+        '[@prisma-audit] Model "Note" has no primary key and no unique constraint on required fields: createMany cannot read back the rows it creates.',
+      );
+      expect(createMany).not.toHaveBeenCalled();
     });
 
     it('reads the created rows on the handle of the interactive transaction it runs in', async () => {
