@@ -261,8 +261,10 @@ export interface PrismaAuditExtensionOptions<TModelName extends string = string,
    * - `row-identification`: a nested delete's primary key could not be resolved, from the
    *   pre-fetched row, its WHERE or the operation data; or an `updateMany` or `deleteMany` with a
    *   `limit` wrote rows it cannot tell apart from rows another writer changed, or ran inside a
-   *   batch `$transaction([...])` Prisma runs (`params` is `{ unidentified }`, their number). The
-   *   caller's operation continues; those audit log entries are skipped.
+   *   batch `$transaction([...])` Prisma runs; or an `updateMany` or `updateManyAndReturn` wrote
+   *   rows it cannot pair by row key with the rows read before it, because the write changed
+   *   their key (`params` is `{ unidentified }`, their number). The caller's operation
+   *   continues; those audit log entries are skipped.
    * - `id-resolver-call`: an id resolver (the entity's `idResolver` or a `to()` resolver) threw,
    *   returned an id that cannot be normalized to a string, or, for a `batchLookup` resolver,
    *   returned a different number of ids than rows. A `foreignKey` resolver throws for a row that

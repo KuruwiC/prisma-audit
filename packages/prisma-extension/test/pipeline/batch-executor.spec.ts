@@ -1047,6 +1047,142 @@ describe('createBatchExecutor', () => {
     });
   });
 
+  describe('a write that changes the key of the rows it writes', () => {
+    const c1: Row = { id: 'c', email: 'c@1' };
+    const c2: Row = { id: 'c', email: 'c@2' };
+    const rekeyed = (row: Row, id: string): Row => ({ ...row, id });
+    const data = { id: 'z' };
+    const report = (action: string, count: number, message: string) => ({
+      phase: 'row-identification',
+      modelName: 'User',
+      operation: action,
+      params: { unidentified: count },
+      error: new Error(message),
+    });
+    const notFoundReport = (action: string, count: number) =>
+      report(
+        action,
+        count,
+        `${count} of the rows read before an ${action} are not found by key after it, so they are not audited: the write changed their key, or another writer changed or deleted them`,
+      );
+    const withoutBeforeReport = (action: string, count: number) =>
+      report(
+        action,
+        count,
+        `${count} of the rows an ${action} returned pair with no row read before the write by key, so they have no before state`,
+      );
+    const updateEvent = (before: Row, after: Row, op: string) =>
+      eventOf({
+        identity: before.id,
+        action: 'update',
+        before: { kind: 'captured', row: before },
+        after,
+        origin: { path: '', op },
+      });
+
+    it('reports the rows an updateMany re-read does not find by their key, and audits the rows it finds', async () => {
+      const findMany = findManyReturning([a1, b1, c1], [b2, c2]);
+      const updateMany = vi.fn(async () => ({ count: 3 }));
+      const client = clientWith({ user: { findMany, updateMany } });
+      const produceRecords = produce();
+
+      const outcome = await runWithRecords(
+        executor,
+        operationOn(client, 'updateMany', { where: {}, data }),
+        scopeOn(client),
+        produceRecords,
+      );
+
+      expect(outcome.result).toEqual({ count: 3 });
+      expect(failureSink.notify).toHaveBeenCalledExactlyOnceWith(notFoundReport('updateMany', 1));
+      expect(produceRecords).toHaveBeenCalledWith(
+        [updateEvent(b1, b2, 'updateMany'), updateEvent(c1, c2, 'updateMany')],
+        expect.anything(),
+        new Map(),
+      );
+    });
+
+    it('reports every row an updateMany re-read misses, and audits none when it finds none', async () => {
+      const findMany = findManyReturning([a1, b1], []);
+      const updateMany = vi.fn(async () => ({ count: 2 }));
+      const client = clientWith({ user: { findMany, updateMany } });
+      const produceRecords = produce();
+
+      await runWithRecords(
+        executor,
+        operationOn(client, 'updateMany', { where: {}, data }),
+        scopeOn(client),
+        produceRecords,
+      );
+
+      expect(failureSink.notify).toHaveBeenCalledExactlyOnceWith(notFoundReport('updateMany', 2));
+      expect(produceRecords).toHaveBeenCalledWith([], expect.anything(), new Map());
+    });
+
+    it('records the rows an updateManyAndReturn returns under a key that no row read before has without a before state, and reports them', async () => {
+      const findMany = findManyReturning([a1, b1]);
+      const updateManyAndReturn = vi.fn(async () => [rekeyed(a2, 'z'), b2]);
+      const client = clientWith({ user: { findMany, updateManyAndReturn } });
+      const produceRecords = produce();
+
+      const outcome = await runWithRecords(
+        executor,
+        operationOn(client, 'updateManyAndReturn', { where: {}, data }),
+        scopeOn(client),
+        produceRecords,
+      );
+
+      expect(outcome.result).toEqual([rekeyed(a2, 'z'), b2]);
+      expect(failureSink.notify).toHaveBeenCalledExactlyOnceWith(withoutBeforeReport('updateManyAndReturn', 1));
+      expect(produceRecords).toHaveBeenCalledWith(
+        [
+          eventOf({
+            identity: 'z',
+            action: 'update',
+            before: { kind: 'unavailable' },
+            after: rekeyed(a2, 'z'),
+            origin: { path: '', op: 'updateManyAndReturn' },
+          }),
+          updateEvent(b1, b2, 'updateManyAndReturn'),
+        ],
+        expect.anything(),
+        new Map(),
+      );
+    });
+
+    it('reports the rows an updateMany with a limit wrote that its re-read does not find by their key, and audits the rows it finds', async () => {
+      const findMany = findManyReturning([a1, b1], [b2]);
+      const updateMany = vi.fn(async () => ({ count: 2 }));
+      const client = clientWith({ user: { findMany, updateMany } });
+      const produceRecords = produce();
+
+      await runWithRecords(
+        executor,
+        operationOn(client, 'updateMany', { where: {}, data, limit: 2 }),
+        scopeOn(client),
+        produceRecords,
+      );
+
+      expect(failureSink.notify).toHaveBeenCalledExactlyOnceWith(notFoundReport('updateMany', 1));
+      expect(produceRecords).toHaveBeenCalledWith([updateEvent(b1, b2, 'updateMany')], expect.anything(), new Map());
+    });
+
+    it('reports nothing when every written row pairs by its key', async () => {
+      const findMany = findManyReturning([a1, b1], [a2, b2]);
+      const updateMany = vi.fn(async () => ({ count: 2 }));
+      const client = clientWith({ user: { findMany, updateMany } });
+
+      await runWithRecords(
+        executor,
+        operationOn(client, 'updateMany', { where: {}, data: { email: 'x' } }),
+        scopeOn(client),
+        produce(),
+      );
+
+      expect(failureSink.notify).not.toHaveBeenCalled();
+    });
+  });
+
   describe('failures', () => {
     it('fails an update or delete when the model delegate has no findMany', async () => {
       const client = clientWith({ user: { updateMany: vi.fn() } });

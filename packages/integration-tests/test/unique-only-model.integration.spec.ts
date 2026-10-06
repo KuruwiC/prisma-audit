@@ -7,11 +7,11 @@
  * affected row, under the row's `code`, with the changes the operation made.
  */
 
-import type { AuditContext } from '@kuruwic/db-audit-core';
+import type { AuditContext, AuditErrorObserver } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider, self } from '@kuruwic/db-audit-core';
 import { createAuditClient, defineEntity } from '@kuruwic/prisma-audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { cleanDatabase, getSharedDatabaseUrl } from './helpers/setup.js';
 
 const testActor: AuditContext = {
@@ -32,7 +32,7 @@ describe('a model identified by a unique field instead of a primary key', () => 
     }
   });
 
-  const setup = async () => {
+  const setup = async (observer?: AuditErrorObserver) => {
     const basePrisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
     const provider = createAsyncLocalStorageProvider();
     const prisma = createAuditClient(basePrisma, {
@@ -40,6 +40,7 @@ describe('a model identified by a unique field instead of a primary key', () => 
       provider,
       aggregateMapping: { Device: defineEntity({ type: 'Device', idResolver: self('code') }) },
       performance: { awaitWrite: true },
+      ...(observer ? { errorHandling: { observer } } : {}),
     });
     disconnects.push(async () => {
       await prisma.$disconnect();
@@ -54,7 +55,14 @@ describe('a model identified by a unique field instead of a primary key', () => 
     /** `action:entityId` of every log of a Device, with its changes, sorted */
     const logsOf = async () =>
       (await basePrisma.auditLog.findMany({ where: { entityType: 'Device' }, orderBy: { entityId: 'asc' } })).map(
-        (log) => ({ action: log.action, entityId: log.entityId, changes: log.changes, before: log.before }),
+        (log) => ({
+          action: log.action,
+          entityId: log.entityId,
+          changes: log.changes,
+          before: log.before,
+          after: log.after,
+          beforeUnavailable: log.beforeUnavailable,
+        }),
       );
     const labels = async () =>
       Object.fromEntries((await basePrisma.device.findMany()).map((device) => [device.code, device.label]));
@@ -168,6 +176,84 @@ describe('a model identified by a unique field instead of a primary key', () => 
       expect((await logsOf()).map((log) => [log.action, log.entityId])).toEqual(
         deleted.map((code) => ['delete', code]),
       );
+    });
+  });
+  describe('a write that changes the code of its rows', () => {
+    const unidentified = (operation: string, count: number) =>
+      expect.objectContaining({
+        phase: 'row-identification',
+        modelName: 'Device',
+        operation,
+        params: { unidentified: count },
+      });
+
+    it('reports the row an updateMany gave another code, which its read after the write cannot find, and records no log for it', async () => {
+      const observer = vi.fn<AuditErrorObserver>();
+      const { prisma, run, seed, logsOf, labels } = await setup(observer);
+      await seed('d-1', 'd-2');
+
+      const result = await run(() => prisma.device.updateMany({ where: { code: 'd-1' }, data: { code: 'd-9' } }));
+
+      expect(result).toEqual({ count: 1 });
+      expect(Object.keys(await labels()).sort()).toEqual(['d-2', 'd-9']);
+      expect(observer).toHaveBeenCalledExactlyOnceWith(unidentified('updateMany', 1));
+      expect(await logsOf()).toEqual([]);
+    });
+
+    it('records the row an updateManyAndReturn gave another code without a before state, returns it, and reports it', async () => {
+      const observer = vi.fn<AuditErrorObserver>();
+      const { prisma, run, seed, logsOf } = await setup(observer);
+      await seed('d-1', 'd-2');
+
+      const rows = await run(() =>
+        prisma.device.updateManyAndReturn({ where: { code: 'd-1' }, data: { code: 'd-9' } }),
+      );
+
+      expect(rows.map((row) => row.code)).toEqual(['d-9']);
+      expect(observer).toHaveBeenCalledExactlyOnceWith(unidentified('updateManyAndReturn', 1));
+      expect(await logsOf()).toEqual([
+        matching('d-9', {
+          action: 'update',
+          before: null,
+          changes: null,
+          beforeUnavailable: true,
+          after: expect.objectContaining({ code: 'd-9', label: 'label of d-1' }),
+        }),
+      ]);
+    });
+
+    it.each([
+      ['outside a transaction', false],
+      ['inside an interactive transaction', true],
+    ])('reports the row an updateMany with a limit gave another code, %s', async (_label, interactive) => {
+      const observer = vi.fn<AuditErrorObserver>();
+      const { prisma, run, seed, logsOf, labels } = await setup(observer);
+      await seed('d-1', 'd-2');
+
+      const result = await run(() => {
+        const rewrite = (client: Pick<typeof prisma, 'device'>) =>
+          client.device.updateMany({ where: { code: 'd-1' }, data: { code: 'd-9' }, limit: 1 });
+        return interactive ? prisma.$transaction((tx) => rewrite(tx)) : rewrite(prisma);
+      });
+
+      expect(result).toEqual({ count: 1 });
+      expect(Object.keys(await labels()).sort()).toEqual(['d-2', 'd-9']);
+      expect(observer).toHaveBeenCalledExactlyOnceWith(unidentified('updateMany', 1));
+      expect(await logsOf()).toEqual([]);
+    });
+
+    it('audits an updateMany and an updateManyAndReturn that leave the code as it is, and reports nothing', async () => {
+      const observer = vi.fn<AuditErrorObserver>();
+      const { prisma, run, seed, logsOf } = await setup(observer);
+      await seed('d-1', 'd-2', 'd-3');
+
+      await run(async () => {
+        await prisma.device.updateMany({ where: { code: 'd-1' }, data: { label: 'relabelled' } });
+        await prisma.device.updateManyAndReturn({ where: { code: 'd-2' }, data: { label: 'relabelled' } });
+      });
+
+      expect(observer).not.toHaveBeenCalled();
+      expect(await logsOf()).toEqual([matching('d-1', relabelled('d-1')), matching('d-2', relabelled('d-2'))]);
     });
   });
 });

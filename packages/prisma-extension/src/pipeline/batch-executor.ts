@@ -4,7 +4,9 @@
  * createMany, createManyAndReturn, updateMany, updateManyAndReturn and deleteMany: reads the
  * rows an update or a delete will touch with `findMany`, runs the operation, reads back the rows a
  * createMany wrote by the keys of its data and the rows an updateMany wrote by row key, and
- * collects one event per written row, paired with its before row by row key. A row's key is the
+ * collects one event per written row, paired with its before row by row key. A row whose update
+ * changed its key does not pair: it is reported as `row-identification`, and recorded without a
+ * before state when the update returned it. A row's key is the
  * model's primary key, or its first unique constraint on required fields when it has no primary key
  * (`rowKeyFieldsOf`).
  */
@@ -14,6 +16,7 @@ import { AUDIT_ACTION } from '../grammar/operations.js';
 import type { PrismaNamespace } from '../internal-types.js';
 import type { SchemaMetadata } from '../schema/types.js';
 import { type AuditedOmittedFields, withOmittedFieldsInFinds } from '../utils/audited-omitted-fields.js';
+import { UNAVAILABLE_BEFORE_STATE } from '../utils/before-state.js';
 import {
   buildEntityMap,
   buildPKWhereClause,
@@ -68,6 +71,8 @@ interface WrittenRows {
   readonly rows: Row[];
   /** Before state of each row, paired by row key; absent for a create */
   readonly beforeStates?: Array<Row | null>;
+  /** Indexes of the rows to record with an unavailable before state, a row's own pairing having failed */
+  readonly unavailableBefore?: ReadonlySet<number>;
 }
 
 interface BatchDelegate {
@@ -230,6 +235,12 @@ const limitedRowsOfOtherWriters: UnidentifiedReason = (operation, unidentified) 
 const createdRowsNotReadBack: UnidentifiedReason = (operation, unidentified) =>
   `${unidentified} of the rows a ${operation.action} created ${unidentified === 1 ? 'was' : 'were'} not found when read back by key`;
 
+const rowsNotFoundAfterWrite: UnidentifiedReason = (operation, unidentified) =>
+  `${unidentified} of the rows read before an ${operation.action} are not found by key after it, so they are not audited: the write changed their key, or another writer changed or deleted them`;
+
+const returnedRowsWithoutBefore: UnidentifiedReason = (operation, unidentified) =>
+  `${unidentified} of the rows an ${operation.action} returned pair with no row read before the write by key, so they have no before state`;
+
 const reportUnidentified = async (
   operation: AuditedOperation,
   unidentified: number,
@@ -246,6 +257,45 @@ const reportUnidentified = async (
     params: { unidentified },
     error: new Error(reason(operation, unidentified)),
   });
+};
+
+/**
+ * Pairs the rows an update re-read after the write with the `readRows` it read before, by row key.
+ * The re-read is by the keys of `readRows`, so a row whose key the update changed is missing from
+ * it: such a row is not audited, and the number of them is reported as `row-identification`.
+ */
+const pairReReadRows = async (
+  operation: AuditedOperation,
+  afterRows: Row[],
+  readRows: Row[],
+  keyFields: string[],
+  failureSink: FailureSink,
+): Promise<WrittenRows> => {
+  await reportUnidentified(operation, readRows.length - afterRows.length, failureSink, rowsNotFoundAfterWrite);
+  return pairByRowKey(afterRows, readRows, keyFields);
+};
+
+/**
+ * Pairs the rows an `updateManyAndReturn` returned with the rows read before it, by row key. The
+ * update wrote every returned row, so one with no before row (the update changed its key) is still
+ * recorded, with an unavailable before state, and its number is reported as `row-identification`.
+ */
+const pairReturnedRows = async (
+  operation: AuditedOperation,
+  returnedRows: Row[],
+  beforeRows: Row[],
+  keyFields: string[],
+  failureSink: FailureSink,
+): Promise<WrittenRows> => {
+  const paired = pairByRowKey(returnedRows, beforeRows, keyFields);
+  const unavailableBefore = new Set<number>();
+  paired.beforeStates?.forEach((before, index) => {
+    if (before === null) {
+      unavailableBefore.add(index);
+    }
+  });
+  await reportUnidentified(operation, unavailableBefore.size, failureSink, returnedRowsWithoutBefore);
+  return { ...paired, unavailableBefore };
 };
 
 /**
@@ -387,7 +437,13 @@ export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationE
         return { rows };
       }
       case 'update-returning':
-        return pairByRowKey(executed.returnedRows ?? [], prepared.beforeRows, prepared.keyFields);
+        return pairReturnedRows(
+          operation,
+          executed.returnedRows ?? [],
+          prepared.beforeRows,
+          prepared.keyFields,
+          failureSink,
+        );
       case 'limited-as-given':
         if (prepared.reportsUnidentified) {
           await reportUnidentified(operation, countOf(executed.result), failureSink, limitedRowsOfOtherWriters);
@@ -401,7 +457,7 @@ export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationE
           return { rows: written, beforeStates: written };
         }
         const afterRows = await findManyByPKs(delegate, prepared.keyFields, written);
-        return pairByRowKey(afterRows, written, prepared.keyFields);
+        return pairReReadRows(operation, afterRows, written, prepared.keyFields, failureSink);
       }
       case 'update': {
         if (prepared.beforeRows.length === 0) {
@@ -411,7 +467,7 @@ export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationE
         // the update changed still pairs with its before row.
         const delegate = delegateOf(scope, operation.model);
         const afterRows = await findManyByPKs(delegate, prepared.keyFields, prepared.beforeRows);
-        return pairByRowKey(afterRows, prepared.beforeRows, prepared.keyFields);
+        return pairReReadRows(operation, afterRows, prepared.beforeRows, prepared.keyFields, failureSink);
       }
       case 'delete':
         return { rows: prepared.beforeRows, beforeStates: prepared.beforeRows };
@@ -428,11 +484,16 @@ export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationE
     prepared: BatchPrepared,
     executed: BatchExecuted,
   ): Promise<MutationEvent[]> => {
-    const { rows, beforeStates } = await writtenRows(operation, scope, prepared, executed);
-    return collectBatchOperationEvents(
+    const { rows, beforeStates, unavailableBefore } = await writtenRows(operation, scope, prepared, executed);
+    const events = collectBatchOperationEvents(
       { modelName: operation.model, action: operation.action, rows, beforeStates },
       schemaMetadata,
     );
+    return unavailableBefore
+      ? events.map((event, index) =>
+          unavailableBefore.has(index) ? { ...event, before: UNAVAILABLE_BEFORE_STATE } : event,
+        )
+      : events;
   };
 
   const result = async (executed: BatchExecuted): Promise<unknown> => executed.result;
