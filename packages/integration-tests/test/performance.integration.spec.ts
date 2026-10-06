@@ -1,5 +1,7 @@
 /**
- * Integration Tests: Performance Benchmarks
+ * Integration Tests: Audit log rows written by nested and bulk writes
+ *
+ * Counts the audit log rows handed to `hooks.writer` for each scenario. Nothing here is timed.
  */
 
 import type { AuditContext, AuditContextProvider } from '@kuruwic/db-audit-core';
@@ -92,7 +94,7 @@ const createAuditedClientFetchingBeforeState = (
   });
 };
 
-describe('Performance Benchmarks', () => {
+describe('Audit log rows by write shape', () => {
   let context: TestContext & { auditLogRowCount: { value: number } };
 
   beforeAll(async () => {
@@ -117,11 +119,8 @@ describe('Performance Benchmarks', () => {
   });
 
   afterAll(async () => {
-    try {
-      await context.prisma.$disconnect();
-    } catch (error) {
-      console.error('Error disconnecting Prisma:', error);
-    }
+    await context.prisma.$disconnect();
+    await context.basePrisma.$disconnect();
   });
 
   beforeEach(async () => {
@@ -140,7 +139,7 @@ describe('Performance Benchmarks', () => {
   };
 
   describe('fetchBefore: false', () => {
-    it('should minimize audit log rows for nested update without pre-fetch', async () => {
+    it('should write the User update and two rows per updated post for a nested update of three posts without pre-fetch', async () => {
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -176,12 +175,10 @@ describe('Performance Benchmarks', () => {
         });
       });
 
-      console.log(`Nested update (no pre-fetch): ${context.auditLogRowCount.value} audit logs`);
-      expect(context.auditLogRowCount.value).toBeGreaterThan(0);
       expect(context.auditLogRowCount.value).toBe(7);
     });
 
-    it('should minimize audit log rows for nested delete without pre-fetch', async () => {
+    it('should write the User update and two rows per deleted post for a nested delete of three posts without pre-fetch', async () => {
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -214,8 +211,6 @@ describe('Performance Benchmarks', () => {
         });
       });
 
-      console.log(`Nested delete (no pre-fetch): ${context.auditLogRowCount.value} audit logs`);
-      expect(context.auditLogRowCount.value).toBeGreaterThan(0);
       // The User update, plus two rows per deleted post: each is recorded from the primary key its
       // WHERE names and the author key of the user it was deleted through, which resolve the
       // post's own root and its User.
@@ -224,9 +219,8 @@ describe('Performance Benchmarks', () => {
   });
 
   describe('Bulk Operations', () => {
-    it('should demonstrate scalability of nested creates', async () => {
+    it('should write 2n + 1 audit log rows for a nested create of n posts, for n of 1, 5, 10 and 20', async () => {
       const counts = [1, 5, 10, 20];
-      const results: { count: number; auditLogs: number }[] = [];
 
       for (const count of counts) {
         context.auditLogRowCount.value = 0;
@@ -248,22 +242,11 @@ describe('Performance Benchmarks', () => {
           });
         });
 
-        results.push({ count, auditLogs: context.auditLogRowCount.value });
-        console.log(
-          `${count} nested creates: ${context.auditLogRowCount.value} audit logs (1 user + ${count} posts + ${count} aggregate logs)`,
-        );
-      }
-
-      for (let i = 0; i < results.length; i++) {
-        expect(results[i]?.auditLogs).toBe(2 * (results[i]?.count ?? 0) + 1);
-      }
-
-      for (let i = 1; i < results.length; i++) {
-        expect(results[i]?.auditLogs ?? 0).toBeGreaterThan(results[i - 1]?.auditLogs ?? 0);
+        expect(context.auditLogRowCount.value).toBe(2 * count + 1);
       }
     });
 
-    it('should measure updateMany performance', async () => {
+    it('should write the User update and two rows per post for a nested updateMany over 20 posts', async () => {
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -299,14 +282,12 @@ describe('Performance Benchmarks', () => {
         });
       });
 
-      console.log(`updateMany (20 posts): ${context.auditLogRowCount.value} audit logs`);
-      expect(context.auditLogRowCount.value).toBeGreaterThan(0);
       expect(context.auditLogRowCount.value).toBe(41);
     });
   });
 
-  describe('Transaction Overhead', () => {
-    it('should measure audit log count difference with/without transaction', async () => {
+  describe('Interactive transaction', () => {
+    it('should write the same audit log rows for a nested update inside and outside an interactive transaction', async () => {
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -336,7 +317,6 @@ describe('Performance Benchmarks', () => {
       });
 
       const auditLogsNoTx = context.auditLogRowCount.value;
-      console.log(`Without transaction: ${auditLogsNoTx} audit logs`);
 
       context.auditLogRowCount.value = 0;
 
@@ -355,9 +335,7 @@ describe('Performance Benchmarks', () => {
       });
 
       const auditLogsWithTx = context.auditLogRowCount.value;
-      console.log(`With transaction: ${auditLogsWithTx} audit logs`);
 
-      expect(auditLogsNoTx).toBeGreaterThan(0);
       expect(auditLogsWithTx).toBe(auditLogsNoTx);
       expect(auditLogsNoTx).toBe(3);
     });
@@ -390,7 +368,6 @@ describe('Performance Benchmarks', () => {
       });
 
       const auditLogsCreate = context.auditLogRowCount.value;
-      console.log(`Create with include: ${auditLogsCreate} audit logs`);
 
       const post = await context.prisma.post.findFirst({ where: { authorId: user.id } });
       if (!post) throw new Error('Post not found');
@@ -410,10 +387,7 @@ describe('Performance Benchmarks', () => {
       });
 
       const auditLogsUpdate = context.auditLogRowCount.value;
-      console.log(`Update without pre-fetch: ${auditLogsUpdate} audit logs`);
 
-      expect(auditLogsCreate).toBeGreaterThan(0);
-      expect(auditLogsUpdate).toBeGreaterThan(0);
       expect(auditLogsCreate).toBe(3);
       expect(auditLogsUpdate).toBe(3);
     });
@@ -447,9 +421,8 @@ describe('Nested update with and without an include of the written relation', ()
   });
 
   afterAll(async () => {
-    if (context?.prisma) {
-      await context.prisma.$disconnect();
-    }
+    await context.prisma.$disconnect();
+    await context.basePrisma.$disconnect();
   });
 
   beforeEach(async () => {
@@ -498,9 +471,7 @@ describe('Nested update with and without an include of the written relation', ()
       });
 
       const auditLogsWithoutInclude = context.auditLogRowCount.value;
-      console.log(`Update without include: ${auditLogsWithoutInclude} audit logs`);
 
-      expect(auditLogsWithoutInclude).toBeGreaterThan(0);
       // The post's update under its own aggregate and under its author; the user's columns did not change
       expect(auditLogsWithoutInclude).toBe(2);
 
@@ -551,7 +522,6 @@ describe('Nested update with and without an include of the written relation', ()
       });
 
       const auditLogsWithInclude = context.auditLogRowCount.value;
-      console.log(`Update with include: ${auditLogsWithInclude} audit logs`);
 
       // The post's update under its own aggregate and under its author; the user's columns did not change
       expect(auditLogsWithInclude).toBe(2);
