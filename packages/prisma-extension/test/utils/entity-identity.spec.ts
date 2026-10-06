@@ -40,6 +40,32 @@ describe('extractEntityIdentity', () => {
     });
   });
 
+  describe('values that are falsy but present', () => {
+    it('resolves a single PK of 0 or an empty string', () => {
+      expect(extractEntityIdentity({ id: 0 }, ['id'])).toBe('0');
+      expect(extractEntityIdentity({ id: '' }, ['id'])).toBe('');
+    });
+
+    it('resolves a composite PK holding 0 or an empty string', () => {
+      expect(extractEntityIdentity({ a: 0, b: '' }, ['a', 'b'])).toBe(JSON.stringify([0, '']));
+    });
+  });
+
+  describe('composite PK values containing separators', () => {
+    it('keeps composite keys whose values only differ in where the separator falls apart', () => {
+      const first = extractEntityIdentity({ a: 'a:b', b: 'c' }, ['a', 'b']);
+      const second = extractEntityIdentity({ a: 'a', b: 'b:c' }, ['a', 'b']);
+
+      expect(first).toBe('["a:b","c"]');
+      expect(second).toBe('["a","b:c"]');
+      expect(first).not.toBe(second);
+    });
+
+    it('keeps the order of the key fields, not the order of the record', () => {
+      expect(extractEntityIdentity({ b: 'y', a: 'x' }, ['a', 'b'])).toBe('["x","y"]');
+    });
+  });
+
   describe('BigInt safety', () => {
     it('should handle BigInt PK values', () => {
       const result = extractEntityIdentity({ id: BigInt(123) }, ['id']);

@@ -1,5 +1,48 @@
 import { describe, expect, it } from 'vitest';
-import { matchesUniqueWhere, namesKey, sameUniqueWhere, uniqueWhereAsFilter } from '../../src/utils/compound-where.js';
+import type { UniqueConstraint } from '../../src/schema/types.js';
+import {
+  matchesUniqueWhere,
+  namesKey,
+  sameUniqueWhere,
+  uniqueWhereAsFilter,
+  unwrapCompoundWhere,
+} from '../../src/utils/compound-where.js';
+
+describe('unwrapCompoundWhere', () => {
+  const compoundKey: UniqueConstraint = { type: 'primaryKey', fields: ['postId', 'userId'] };
+
+  it('lifts the fields out of the wrapper named after the joined fields of a composite key', () => {
+    expect(unwrapCompoundWhere({ postId_userId: { postId: 'p1', userId: 'u1' } }, compoundKey)).toEqual({
+      postId: 'p1',
+      userId: 'u1',
+    });
+  });
+
+  it('lifts them out of the wrapper named by the key when it has an explicit name', () => {
+    const named = { ...compoundKey, name: 'membership' };
+
+    expect(unwrapCompoundWhere({ membership: { postId: 'p1', userId: 'u1' } }, named)).toEqual({
+      postId: 'p1',
+      userId: 'u1',
+    });
+  });
+
+  it('returns the WHERE itself when it holds no wrapper of the key', () => {
+    const where = { postId: 'p1', userId: 'u1' };
+
+    expect(unwrapCompoundWhere(where, compoundKey)).toBe(where);
+    expect(
+      unwrapCompoundWhere({ postId_userId: { postId: 'p1', userId: 'u1' } }, { ...compoundKey, name: 'other' }),
+    ).toEqual({ postId_userId: { postId: 'p1', userId: 'u1' } });
+  });
+
+  it('returns the WHERE itself for a single-field key or without a key', () => {
+    const where = { id_: { id: 'p1' }, id: 'p1' };
+
+    expect(unwrapCompoundWhere(where, { type: 'primaryKey', fields: ['id'] })).toBe(where);
+    expect(unwrapCompoundWhere(where)).toBe(where);
+  });
+});
 
 describe('matchesUniqueWhere', () => {
   const row = { id: 'p1', slug: 'hello', authorId: 'u1', postId: 'p1', userId: 'u1', publishedAt: new Date(0) };
@@ -28,6 +71,12 @@ describe('matchesUniqueWhere', () => {
     expect(matchesUniqueWhere(row, { id: 'p1', slug: { contains: 'x' } })).toBe(true);
   });
 
+  it('compares a null WHERE value to the null of the row, and to no other value', () => {
+    expect(matchesUniqueWhere({ id: 'p1', deletedAt: null }, { id: 'p1', deletedAt: null })).toBe(true);
+    expect(matchesUniqueWhere({ id: 'p1', deletedAt: new Date(0) }, { id: 'p1', deletedAt: null })).toBe(false);
+    expect(matchesUniqueWhere({ id: 'p1', deletedAt: null }, { id: 'p1', deletedAt: new Date(0) })).toBe(false);
+  });
+
   it('compares dates by instant and bigints by value', () => {
     expect(matchesUniqueWhere(row, { publishedAt: new Date(0) })).toBe(true);
     expect(matchesUniqueWhere(row, { publishedAt: new Date(1) })).toBe(false);
@@ -51,6 +100,13 @@ describe('namesKey', () => {
     expect(namesKey({ postId: 'p1', userId: 'u1' }, { postId_userId: { postId: 'p1', userId: 'u2' } })).toBe(false);
     expect(namesKey({ postId: 'p1', userId: 'u1' }, { postId: 'p1' })).toBe(false);
     expect(namesKey({ id: 'p1' }, { id: { in: ['p1'] } })).toBe(false);
+  });
+});
+
+describe('namesKey with a null WHERE value', () => {
+  it('does not name a key field the WHERE compares to null, unless the key value is null as well', () => {
+    expect(namesKey({ id: 'p1' }, { id: null })).toBe(false);
+    expect(namesKey({ id: null }, { id: null })).toBe(true);
   });
 });
 

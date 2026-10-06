@@ -13,7 +13,11 @@
 import { createEntityConfigLookup, defineEntity } from '@kuruwic/db-audit-core';
 import { describe, expect, it } from 'vitest';
 import type { UniqueConstraint } from '../../src/schema/types.js';
-import { extractDeleteOperationEntityId, shouldAuditModel } from '../../src/utils/extension-utils.js';
+import {
+  extractDeleteOperationEntityId,
+  isAuditableAction,
+  shouldAuditModel,
+} from '../../src/utils/extension-utils.js';
 
 describe('extractDeleteOperationEntityId', () => {
   describe('single-field primary key (unaffected by the compound-unique unwrap)', () => {
@@ -29,6 +33,19 @@ describe('extractDeleteOperationEntityId', () => {
 
     it('returns undefined when no recognizable PK field is present', () => {
       expect(extractDeleteOperationEntityId({ where: { email: 'user@example.com' } }, idPrimaryKey)).toBeUndefined();
+    });
+
+    it.each([
+      ['undefined', undefined],
+      ['null', null],
+      ['a string', 'abc'],
+      ['a number', 42],
+    ])('returns undefined when the data is %s', (_label, data) => {
+      expect(extractDeleteOperationEntityId(data, idPrimaryKey)).toBeUndefined();
+    });
+
+    it('returns undefined when where is null', () => {
+      expect(extractDeleteOperationEntityId({ where: null }, idPrimaryKey)).toBeUndefined();
     });
   });
 
@@ -74,6 +91,29 @@ describe('extractDeleteOperationEntityId', () => {
       expect(extractDeleteOperationEntityId(data, namedPkConstraint)).toBe(JSON.stringify(['post-4', 'user-4']));
     });
   });
+});
+
+describe('isAuditableAction', () => {
+  it.each([
+    'create',
+    'update',
+    'upsert',
+    'delete',
+    'createMany',
+    'updateMany',
+    'deleteMany',
+    'createManyAndReturn',
+    'updateManyAndReturn',
+  ])('is true for the write operation %s', (operation) => {
+    expect(isAuditableAction(operation)).toBe(true);
+  });
+
+  it.each(['findUnique', 'findFirst', 'findMany', 'count', 'aggregate', 'groupBy', '$queryRaw', '', 'Create'])(
+    'is false for %j, which is not an audited write',
+    (operation) => {
+      expect(isAuditableAction(operation)).toBe(false);
+    },
+  );
 });
 
 describe('shouldAuditModel', () => {

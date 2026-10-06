@@ -27,6 +27,29 @@ describe('findManyByPKs', () => {
     expect(result).toHaveLength(5);
   });
 
+  it('should make one findMany call for exactly the chunk size, holding every key', async () => {
+    const entities = makeEntities(1000);
+    const delegate = createMockDelegate(async () => []);
+
+    await findManyByPKs(delegate, ['id'], entities);
+
+    expect(delegate.findMany).toHaveBeenCalledTimes(1);
+    const where = (delegate.findMany.mock.calls[0] as unknown[])[0] as { where: { id: { in: string[] } } };
+    expect(where.where.id.in).toHaveLength(1000);
+  });
+
+  it('should start a second findMany call with the first key past the chunk size', async () => {
+    const entities = makeEntities(1001);
+    const delegate = createMockDelegate(async () => []);
+
+    await findManyByPKs(delegate, ['id'], entities);
+
+    const sizes = delegate.findMany.mock.calls.map(
+      (call) => ((call as unknown[])[0] as { where: { id: { in: string[] } } }).where.id.in.length,
+    );
+    expect(sizes).toEqual([1000, 1]);
+  });
+
   it('should chunk into multiple findMany calls when exceeding PK_CHUNK_SIZE', async () => {
     const entities = makeEntities(1500);
     const delegate = createMockDelegate(async (args: unknown) => {
