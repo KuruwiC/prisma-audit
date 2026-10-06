@@ -115,6 +115,19 @@ describe('removeRelations', () => {
       });
     });
 
+    it('should copy the elements of a top-level array without removing their relation fields', () => {
+      const input = [
+        { id: 'comment-1', author: { id: 'user-1' } },
+        { id: 'comment-2', author: { id: 'user-2' } },
+      ];
+
+      const result = removeRelations(input, new Set(['author']));
+
+      expect(result).toEqual(input);
+      expect(result).not.toBe(input);
+      expect(result[0]).not.toBe(input[0]);
+    });
+
     it('should not mutate the original object', () => {
       const input = {
         id: 'comment-1',

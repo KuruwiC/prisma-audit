@@ -142,6 +142,32 @@ describe('createRedactor', () => {
   });
 });
 
+describe('non-plain objects', () => {
+  class Account {
+    password = 'secret123';
+  }
+
+  it('should return a Date and a class instance as they are, without traversing them', () => {
+    const redactor = createRedactor();
+    const createdAt = new Date('2025-01-10');
+    const account = new Account();
+
+    const redacted = redactor({ createdAt, account, password: 'secret123' }) as Record<string, unknown>;
+
+    expect(redacted.createdAt).toBe(createdAt);
+    expect(redacted.account).toBe(account);
+    expect(account.password).toBe('secret123');
+    expect(redacted.password).toEqual({ redacted: true, hadValue: true });
+  });
+
+  it('should traverse an object without a prototype like a plain object', () => {
+    const redactor = createRedactor();
+    const row = Object.assign(Object.create(null) as Record<string, unknown>, { id: 1, password: 'secret123' });
+
+    expect(redactor({ row })).toStrictEqual({ row: { id: 1, password: { redacted: true, hadValue: true } } });
+  });
+});
+
 describe('redactSensitiveData', () => {
   it('should redact with default config', () => {
     const data = {
@@ -310,6 +336,14 @@ describe('redaction metadata', () => {
 
     expect(redacted.id).toBe('user-123');
     expect(redacted.password).toBe(null);
+  });
+
+  it('should redact a sensitive field that is undefined to null', () => {
+    const redactor = createRedactor();
+
+    const redacted = redactor({ id: 'user-123', password: undefined }) as Record<string, unknown>;
+
+    expect(redacted).toStrictEqual({ id: 'user-123', password: null });
   });
 
   it('should detect changes for change objects', () => {
@@ -613,15 +647,21 @@ describe('BigInt safety in redaction', () => {
   });
 
   describe('redactSensitiveData JSON fallback with BigInt', () => {
-    it('should not throw when structuredClone fails and data contains BigInt', () => {
+    it('should store a BigInt as a string and drop a function when structuredClone fails', () => {
       const data = {
         id: 123n,
         callback: () => 'test',
         password: 'secret',
       };
-      expect(() => redactSensitiveData(data)).not.toThrow();
-      const result = redactSensitiveData(data) as Record<string, unknown>;
-      expect(result.password).toEqual({ redacted: true, hadValue: true });
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const result = redactSensitiveData(data);
+
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(result).toStrictEqual({ id: '123', password: { redacted: true, hadValue: true } });
+      } finally {
+        warn.mockRestore();
+      }
     });
   });
 });

@@ -160,6 +160,24 @@ describe('serializeForAuditJson', () => {
     });
   });
 
+  describe('objects that are neither plain nor a Date', () => {
+    it.each([
+      ['Map', new Map([['a', 1n]])],
+      ['Set', new Set([1n])],
+    ])('should serialize a %s without a custom serializer to an empty object', (_label, value) => {
+      expect(serializeForAuditJson(value)).toStrictEqual({});
+      expect(serializeForAuditJson({ id: 1n, collection: value })).toStrictEqual({ id: '1', collection: {} });
+    });
+
+    it('should serialize a Map as the custom serializer returns it', () => {
+      const mapSerializer = (value: unknown) => (value instanceof Map ? Object.fromEntries(value) : UNHANDLED);
+
+      expect(serializeForAuditJson({ collection: new Map([['a', 1]]) }, [mapSerializer])).toStrictEqual({
+        collection: { a: 1 },
+      });
+    });
+  });
+
   describe('idempotency', () => {
     it('should produce the same result when applied twice', () => {
       const obj = { id: 1n, createdAt: new Date('2025-01-01T00:00:00.000Z') };
