@@ -2,7 +2,7 @@ import type { AggregateMapping } from '@kuruwic/prisma-audit';
 import { defineEntity, foreignKey, to } from '@kuruwic/prisma-audit';
 import type { PrismaClient } from '@kuruwic/prisma-audit-database';
 import type { Mock } from 'vitest';
-import { expect, vi } from 'vitest';
+import { vi } from 'vitest';
 
 export interface EntityEnricherConfig<TEntity = unknown, TContext = unknown> {
   enrichFn: (entities: TEntity[], prisma: PrismaClient) => TContext[] | Promise<TContext[]>;
@@ -44,21 +44,6 @@ export function createAggregateEnricher<TEntity = unknown, TContext = unknown>(
       return result;
     },
   );
-}
-
-export interface ActorEnricherConfig<TActor = unknown, TContext = unknown> {
-  enrichFn: (actor: TActor) => TContext | Promise<TContext>;
-  onError?: 'log' | 'fail';
-  fallback?: TContext | null;
-}
-
-export function createActorEnricher<TActor = unknown, TContext = unknown>(
-  config: ActorEnricherConfig<TActor, TContext>,
-): Mock<(actor: TActor) => Promise<TContext>> {
-  return vi.fn(async (actor: TActor): Promise<TContext> => {
-    const result = await config.enrichFn(actor);
-    return result;
-  });
 }
 
 export function createCommentEntityEnricher() {
@@ -164,49 +149,6 @@ export function createProfileAggregateMapping(
       },
     }),
   };
-}
-
-export function expectEnrichedAuditLog(
-  log: Record<string, unknown>,
-  expected: {
-    entityId: string;
-    entityType: string;
-    action: string;
-    entityContext?: Record<string, unknown>;
-    aggregateContext?: Record<string, unknown>;
-    actorContext?: Record<string, unknown>;
-  },
-) {
-  expect(log.entityId).toBe(expected.entityId);
-  expect(log.entityType).toBe(expected.entityType);
-  expect(log.action).toBe(expected.action);
-
-  if (expected.entityContext) {
-    expect(log.entityContext).toBeDefined();
-    const actualEntityContext = log.entityContext as Record<string, unknown>;
-    for (const [key, value] of Object.entries(expected.entityContext)) {
-      expect(actualEntityContext[key]).toEqual(value);
-    }
-  }
-
-  if (expected.aggregateContext) {
-    expect(log.aggregateContext).toBeDefined();
-    const actualAggregateContext = log.aggregateContext as Record<string, unknown>;
-    for (const [key, value] of Object.entries(expected.aggregateContext)) {
-      expect(actualAggregateContext[key]).toEqual(value);
-    }
-  }
-
-  if (expected.actorContext) {
-    expect(log.actorContext).toBeDefined();
-    expect(log.actorContext).toEqual(expected.actorContext);
-  }
-}
-
-export function createErrorThrowingEnricher(errorMessage = 'Simulated enricher error') {
-  return vi.fn(async () => {
-    throw new Error(errorMessage);
-  });
 }
 
 export function createUserEntityEnricher() {
