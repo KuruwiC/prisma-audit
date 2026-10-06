@@ -474,6 +474,7 @@ describe('ensureIds', () => {
       ensureIds(metadataWithIdDefault({ name: 'uuid', args: [8] }), 'Item', [{ label: 'a' }], ['id']),
     ).toThrow('unsupported default: uuid(8)');
   });
+
   describe('composite primary key', () => {
     const likeField = (name: string, defaultValue?: unknown) => ({
       name,

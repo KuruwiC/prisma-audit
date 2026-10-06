@@ -158,6 +158,17 @@ describe('Composite Primary Key (PostLike)', () => {
     const createSecondUser = () =>
       context.basePrisma.user.create({ data: { email: 'second-liker@example.com', name: 'Second Liker' } });
 
+    /** Expects one create log per user, keyed by the composite id, with the notes 'first' and 'second' in user order */
+    const expectCreateLogsByNote = async (postId: string, [firstUserId, secondUserId]: [string, string]) => {
+      const logs = await createLogs();
+      expect(logs.map((log) => [log.entityId, (log.after as Record<string, unknown>).note]).sort()).toEqual(
+        [
+          [compositeEntityId(postId, firstUserId), 'first'],
+          [compositeEntityId(postId, secondUserId), 'second'],
+        ].sort(),
+      );
+    };
+
     it('createMany records each row by the composite key its data supplies', async () => {
       const { user, post } = await createUserAndPost();
       const secondUser = await createSecondUser();
@@ -172,13 +183,7 @@ describe('Composite Primary Key (PostLike)', () => {
       });
 
       expect(result).toEqual({ count: 2 });
-      const logs = await createLogs();
-      expect(logs.map((log) => [log.entityId, (log.after as Record<string, unknown>).note]).sort()).toEqual(
-        [
-          [compositeEntityId(post.id, user.id), 'first'],
-          [compositeEntityId(post.id, secondUser.id), 'second'],
-        ].sort(),
-      );
+      await expectCreateLogsByNote(post.id, [user.id, secondUser.id]);
     });
 
     it('createManyAndReturn records each row by its composite key', async () => {
@@ -195,13 +200,7 @@ describe('Composite Primary Key (PostLike)', () => {
       });
 
       expect(created).toHaveLength(2);
-      const logs = await createLogs();
-      expect(logs.map((log) => [log.entityId, (log.after as Record<string, unknown>).note]).sort()).toEqual(
-        [
-          [compositeEntityId(post.id, user.id), 'first'],
-          [compositeEntityId(post.id, secondUser.id), 'second'],
-        ].sort(),
-      );
+      await expectCreateLogsByNote(post.id, [user.id, secondUser.id]);
     });
 
     it('a nested createMany from Post records each row by its composite key', async () => {
@@ -224,13 +223,7 @@ describe('Composite Primary Key (PostLike)', () => {
         });
       });
 
-      const logs = await createLogs();
-      expect(logs.map((log) => [log.entityId, (log.after as Record<string, unknown>).note]).sort()).toEqual(
-        [
-          [compositeEntityId(post.id, user.id), 'first'],
-          [compositeEntityId(post.id, secondUser.id), 'second'],
-        ].sort(),
-      );
+      await expectCreateLogsByNote(post.id, [user.id, secondUser.id]);
     });
   });
 

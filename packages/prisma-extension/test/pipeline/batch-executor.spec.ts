@@ -117,6 +117,10 @@ const findManyReturning = (...results: Row[][]) => {
   }
   return findMany;
 };
+const findManyByIds = (rowOf: (id: string) => Row) =>
+  vi.fn<(args: { where: Row }) => Promise<Row[]>>(async ({ where }) =>
+    (where.id as { in: string[] }).in.map((id) => rowOf(id)),
+  );
 
 const unidentifiedMessage = (action: string, count: number) =>
   `${count} of the rows a limited ${action} wrote cannot be told apart from rows another writer changed`;
@@ -138,10 +142,7 @@ describe('createBatchExecutor', () => {
   describe('createMany', () => {
     it('inserts the rows with client-generated ids, reads them back by primary key, audits the rows read and returns the count', async () => {
       const createMany = vi.fn<(args: { data: Row[] }) => Promise<{ count: number }>>(async () => ({ count: 2 }));
-      const findMany = vi.fn<(args: { where: Row }) => Promise<Row[]>>(async ({ where }) => {
-        const ids = (where.id as { in: string[] }).in;
-        return ids.map((id) => ({ id, email: `${id}@read`, nickname: 'anonymous' }));
-      });
+      const findMany = findManyByIds((id) => ({ id, email: `${id}@read`, nickname: 'anonymous' }));
       const client = clientWith({ user: { createMany, findMany } });
       const produceRecords = produce();
       const args = { data: [{ email: 'a@1' }, { email: 'b@1' }] };
@@ -233,9 +234,7 @@ describe('createBatchExecutor', () => {
 
     it('normalizes a single data object to one row', async () => {
       const createMany = vi.fn(async () => ({ count: 1 }));
-      const findMany = vi.fn(async ({ where }: { where: Row }) =>
-        (where.id as { in: string[] }).in.map((id) => ({ id, email: 'a@1' })),
-      );
+      const findMany = findManyByIds((id) => ({ id, email: 'a@1' }));
       const client = clientWith({ user: { createMany, findMany } });
       const produceRecords = produce();
 
