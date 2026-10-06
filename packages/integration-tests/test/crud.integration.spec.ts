@@ -99,6 +99,25 @@ describe('CRUD Operations Integration', () => {
       expect(userLog).toBeDefined();
       expect(userLog?.aggregateId).toBe(user.id);
     });
+
+    it('should have null changes for create operations', async () => {
+      const user = await context.provider.runAsync(testActor, async () => {
+        return await context.prisma.user.create({
+          data: {
+            email: 'create@example.com',
+            name: 'New User',
+            password: 'secret123',
+          },
+        });
+      });
+
+      const auditLogs = await context.prisma.auditLog.findMany({
+        where: { entityType: 'User', entityId: user.id, action: 'create' },
+      });
+
+      expect(auditLogs).toHaveLength(1);
+      expect(auditLogs[0].changes).toBeNull();
+    });
   });
 
   describe('UPDATE operations', () => {
@@ -191,25 +210,6 @@ describe('CRUD Operations Integration', () => {
         old: 'multi@example.com',
         new: 'updated@example.com',
       });
-    });
-
-    it('should have null changes for create operations', async () => {
-      const user = await context.provider.runAsync(testActor, async () => {
-        return await context.prisma.user.create({
-          data: {
-            email: 'create@example.com',
-            name: 'New User',
-            password: 'secret123',
-          },
-        });
-      });
-
-      const auditLogs = await context.prisma.auditLog.findMany({
-        where: { entityType: 'User', entityId: user.id, action: 'create' },
-      });
-
-      expect(auditLogs).toHaveLength(1);
-      expect(auditLogs[0].changes).toBeNull();
     });
 
     it('should respect per-model excludeFields for User (excludes password and updatedAt)', async () => {

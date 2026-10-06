@@ -11,7 +11,7 @@
  *
  * Covered scenarios:
  *   a. withActor inside $transaction — FK succeeds, child audit actor = actor2,
- *      parent audit actor = actor1, request metadata preserved on child log
+ *      parent audit actor = actor1, request metadata preserved on child logs
  *   b. runAsync({ actor: actor2 }) inside $transaction — same FK success
  *   c. Rollback path — no rows and no audit logs after a thrown transaction
  *   d. Audit-log atomicity — audit logs written within the same transaction
@@ -45,7 +45,7 @@ describe('Actor Override Inside Transactions (Integration)', () => {
   const actor2 = { category: 'model' as const, type: 'User' as const, id: 'actor-2', name: 'Override Actor' };
 
   describe('withActor inside $transaction', () => {
-    it('should succeed with FK to an uncommitted parent row', async () => {
+    it('should succeed with FK to an uncommitted parent row, attribute each log to its own actor and keep the outer request metadata', async () => {
       await context.provider.runAsync(actor1, async () => {
         await context.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
           // Parent created under actor1 — not yet committed
@@ -76,64 +76,19 @@ describe('Actor Override Inside Transactions (Integration)', () => {
         ['Post', 'User', 'actor-2'],
         ['User', 'User', 'actor-1'],
       ]);
-    });
-
-    it('parent audit log actor = actor1, child audit log actor = actor2', async () => {
-      await context.provider.runAsync(actor1, async () => {
-        await context.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-          const user = await tx.user.create({
-            data: { email: 'actor-check-wa@example.com', name: 'Parent', password: 'secret' },
-          });
-
-          await context.provider.withActor(actor2, async () =>
-            tx.post.create({
-              data: { title: 'Actor Check Post', content: 'Content', authorId: user.id },
-            }),
-          );
-        });
-      });
-
-      const userLogs = await context.basePrisma.auditLog.findMany({ where: { entityType: 'User', action: 'create' } });
-      const postLogs = await context.basePrisma.auditLog.findMany({ where: { entityType: 'Post', action: 'create' } });
-
-      expect(userLogs).toHaveLength(1);
-      expect(userLogs[0]?.actorId).toBe('actor-1');
-
-      // Post belongs to aggregate User AND aggregate Post; find the one for the Post entity
-      const postEntityLog = postLogs.find((l) => l.aggregateType === 'Post');
-      expect(postEntityLog).toBeDefined();
-      expect(postEntityLog?.actorId).toBe('actor-2');
-    });
-
-    it('request metadata from the outer context is preserved on the child audit log', async () => {
-      await context.provider.runAsync(actor1, async () => {
-        await context.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-          const user = await tx.user.create({
-            data: { email: 'req-ctx-wa@example.com', name: 'Parent', password: 'secret' },
-          });
-
-          await context.provider.withActor(actor2, async () =>
-            tx.post.create({
-              data: { title: 'Req Ctx Post', content: 'Content', authorId: user.id },
-            }),
-          );
-        });
-      });
-
-      const postLogs = await context.basePrisma.auditLog.findMany({ where: { entityType: 'Post', action: 'create' } });
-      const postEntityLog = postLogs.find((l) => l.aggregateType === 'Post');
-      expect(postEntityLog).toBeDefined();
 
       // withActor preserves the outer request context (only actor is replaced)
-      const reqCtx = postEntityLog?.requestContext as Record<string, unknown> | null;
-      expect(reqCtx).not.toBeNull();
-      expect(reqCtx?.path).toBe('/api/tx');
-      expect(reqCtx?.traceId).toBe('trace-abc');
+      for (const log of logs.filter((l) => l.entityType === 'Post')) {
+        const reqCtx = log.requestContext as Record<string, unknown> | null;
+        expect(reqCtx).not.toBeNull();
+        expect(reqCtx?.path).toBe('/api/tx');
+        expect(reqCtx?.traceId).toBe('trace-abc');
+      }
     });
   });
 
   describe('runAsync({ actor: actor2 }) inside $transaction', () => {
-    it('should succeed with FK to an uncommitted parent row', async () => {
+    it('should succeed with FK to an uncommitted parent row and attribute each log to its own actor', async () => {
       await context.provider.runAsync(actor1, async () => {
         await context.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
           const user = await tx.user.create({
@@ -161,29 +116,6 @@ describe('Actor Override Inside Transactions (Integration)', () => {
         ['Post', 'User', 'actor-2'],
         ['User', 'User', 'actor-1'],
       ]);
-    });
-
-    it('child audit log actor = actor2 when using full runAsync replacement', async () => {
-      await context.provider.runAsync(actor1, async () => {
-        await context.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-          const user = await tx.user.create({
-            data: { email: 'actor-check-ra@example.com', name: 'Parent', password: 'secret' },
-          });
-
-          await context.provider.runAsync({ actor: actor2 }, async () => {
-            await tx.post.create({
-              data: { title: 'Actor Check Post RA', content: 'Content', authorId: user.id },
-            });
-          });
-        });
-      });
-
-      const postLogs = await context.basePrisma.auditLog.findMany({
-        where: { entityType: 'Post', action: 'create' },
-      });
-      const postEntityLog = postLogs.find((l) => l.aggregateType === 'Post');
-      expect(postEntityLog).toBeDefined();
-      expect(postEntityLog?.actorId).toBe('actor-2');
     });
   });
 
