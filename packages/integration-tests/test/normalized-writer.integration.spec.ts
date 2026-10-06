@@ -16,7 +16,7 @@ import {
 } from '@kuruwic/prisma-audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, inject, it } from 'vitest';
-import { cleanDatabase, disposeTestContext, type TestContext } from './helpers/setup.js';
+import { cleanDatabase } from './helpers/setup.js';
 
 const testAggregateMapping: AggregateMapping = {
   User: defineEntity({
@@ -34,39 +34,29 @@ const testAggregateMapping: AggregateMapping = {
 };
 
 describe('Normalized Writer Helpers', () => {
-  let context: TestContext;
+  let basePrisma: PrismaClient;
+  const provider = createAsyncLocalStorageProvider();
 
-  beforeAll(async () => {
-    const databaseUrl = inject('databaseUrl');
-
-    const basePrisma = new PrismaClient({
-      datasources: { db: { url: databaseUrl } },
+  beforeAll(() => {
+    basePrisma = new PrismaClient({
+      datasources: { db: { url: inject('databaseUrl') } },
     });
-
-    const provider = createAsyncLocalStorageProvider();
-
-    context = {
-      prisma: basePrisma as never,
-      basePrisma,
-      provider,
-      databaseUrl,
-    };
   });
 
   afterAll(async () => {
-    await disposeTestContext(context);
+    await basePrisma.$disconnect();
   });
 
   beforeEach(async () => {
-    await context.basePrisma.auditEvent.deleteMany();
-    await context.basePrisma.actor.deleteMany();
-    await context.basePrisma.entity.deleteMany();
-    await context.basePrisma.aggregate.deleteMany();
+    await basePrisma.auditEvent.deleteMany();
+    await basePrisma.actor.deleteMany();
+    await basePrisma.entity.deleteMany();
+    await basePrisma.aggregate.deleteMany();
 
-    await context.basePrisma.auditAggregate.deleteMany();
-    await context.basePrisma.auditChange.deleteMany();
+    await basePrisma.auditAggregate.deleteMany();
+    await basePrisma.auditChange.deleteMany();
 
-    await cleanDatabase(context.basePrisma);
+    await cleanDatabase(basePrisma);
   });
 
   const testActor: AuditContext = {
@@ -88,53 +78,53 @@ describe('Normalized Writer Helpers', () => {
     const sharedChangeSchema = { changeModel: 'AuditChange', aggregateModel: 'AuditAggregate' };
 
     it('writes a detached write in a transaction of its own on the base client', async () => {
-      const prisma = createAuditClient(context.basePrisma, {
+      const prisma = createAuditClient(basePrisma, {
         Prisma,
-        provider: context.provider,
+        provider,
         aggregateMapping: testAggregateMapping,
         performance: { awaitWrite: false },
         hooks: { writer: createEntityNormalizedWriter(entitySchema) },
       });
 
-      await context.provider.runAsync(testActor, () =>
+      await provider.runAsync(testActor, () =>
         prisma.user.create({ data: { email: 'detached@example.com', name: 'Detached' } }),
       );
       await flushAllPendingWrites();
 
-      expect(await context.basePrisma.auditEvent.count()).toBe(1);
-      expect(await context.basePrisma.actor.count()).toBe(1);
+      expect(await basePrisma.auditEvent.count()).toBe(1);
+      expect(await basePrisma.actor.count()).toBe(1);
     });
 
     it('writes a write queued until the transaction commits, once it has committed', async () => {
-      const prisma = createAuditClient(context.basePrisma, {
+      const prisma = createAuditClient(basePrisma, {
         Prisma,
-        provider: context.provider,
+        provider,
         aggregateMapping: testAggregateMapping,
         performance: { awaitWrite: false },
         hooks: { writer: createSharedChangeWriter(sharedChangeSchema) },
       });
 
-      await context.provider.runAsync(testActor, () =>
+      await provider.runAsync(testActor, () =>
         prisma.$transaction(async (tx) => {
           await tx.user.create({ data: { email: 'after-commit@example.com', name: 'After Commit' } });
         }),
       );
       await flushAllPendingWrites();
 
-      expect(await context.basePrisma.auditChange.count()).toBe(1);
-      expect(await context.basePrisma.auditAggregate.count()).toBe(1);
+      expect(await basePrisma.auditChange.count()).toBe(1);
+      expect(await basePrisma.auditAggregate.count()).toBe(1);
     });
 
     it("writes an awaited write in the operation's transaction, so a rollback undoes it", async () => {
-      const prisma = createAuditClient(context.basePrisma, {
+      const prisma = createAuditClient(basePrisma, {
         Prisma,
-        provider: context.provider,
+        provider,
         aggregateMapping: testAggregateMapping,
         performance: { awaitWrite: true },
         hooks: { writer: createEntityNormalizedWriter(entitySchema) },
       });
 
-      const rolledBack = context.provider.runAsync(testActor, () =>
+      const rolledBack = provider.runAsync(testActor, () =>
         prisma.$transaction(async (tx) => {
           await tx.user.create({ data: { email: 'undone@example.com', name: 'Undone' } });
           throw new Error('Rollback test');
@@ -142,16 +132,16 @@ describe('Normalized Writer Helpers', () => {
       );
 
       await expect(rolledBack).rejects.toThrow('Rollback test');
-      expect(await context.basePrisma.auditEvent.count()).toBe(0);
-      expect(await context.basePrisma.actor.count()).toBe(0);
+      expect(await basePrisma.auditEvent.count()).toBe(0);
+      expect(await basePrisma.actor.count()).toBe(0);
     });
   });
 
   describe('Pattern 1: Entity Normalization (createEntityNormalizedWriter)', () => {
     it('should write audit logs to normalized schema (Actor, Entity, Aggregate, AuditEvent)', async () => {
-      const prisma = createAuditClient(context.basePrisma, {
+      const prisma = createAuditClient(basePrisma, {
         Prisma,
-        provider: context.provider,
+        provider,
         aggregateMapping: testAggregateMapping,
         performance: {
           awaitWrite: true,
@@ -166,7 +156,7 @@ describe('Normalized Writer Helpers', () => {
         },
       });
 
-      await context.provider.runAsync(testActor, async () => {
+      await provider.runAsync(testActor, async () => {
         await prisma.user.create({
           data: {
             email: 'alice@example.com',
@@ -175,10 +165,10 @@ describe('Normalized Writer Helpers', () => {
         });
       });
 
-      const actors = await context.basePrisma.actor.findMany();
-      const entities = await context.basePrisma.entity.findMany();
-      const aggregates = await context.basePrisma.aggregate.findMany();
-      const events = await context.basePrisma.auditEvent.findMany({
+      const actors = await basePrisma.actor.findMany();
+      const entities = await basePrisma.entity.findMany();
+      const aggregates = await basePrisma.aggregate.findMany();
+      const events = await basePrisma.auditEvent.findMany({
         include: { actor: true, entity: true, aggregate: true },
       });
 
@@ -210,9 +200,9 @@ describe('Normalized Writer Helpers', () => {
     });
 
     it('should deduplicate the actor, entity and aggregate rows of two writes to the same entity', async () => {
-      const prisma = createAuditClient(context.basePrisma, {
+      const prisma = createAuditClient(basePrisma, {
         Prisma,
-        provider: context.provider,
+        provider,
         aggregateMapping: testAggregateMapping,
         performance: {
           awaitWrite: true,
@@ -227,7 +217,7 @@ describe('Normalized Writer Helpers', () => {
         },
       });
 
-      await context.provider.runAsync(testActor, async () => {
+      await provider.runAsync(testActor, async () => {
         const user = await prisma.user.create({
           data: { email: 'user1@example.com', name: 'User 1' },
         });
@@ -237,10 +227,10 @@ describe('Normalized Writer Helpers', () => {
         });
       });
 
-      const actors = await context.basePrisma.actor.findMany();
-      const entities = await context.basePrisma.entity.findMany();
-      const aggregates = await context.basePrisma.aggregate.findMany();
-      const events = await context.basePrisma.auditEvent.findMany();
+      const actors = await basePrisma.actor.findMany();
+      const entities = await basePrisma.entity.findMany();
+      const aggregates = await basePrisma.aggregate.findMany();
+      const events = await basePrisma.auditEvent.findMany();
 
       expect(actors).toHaveLength(1);
       expect(entities).toHaveLength(1);
@@ -250,10 +240,10 @@ describe('Normalized Writer Helpers', () => {
       expect(new Set(events.map((event) => event.aggregateId))).toEqual(new Set([aggregates[0]?.id]));
     });
 
-    it('should support both lowerCamelCase and UpperCamelCase model names', async () => {
-      const prisma = createAuditClient(context.basePrisma, {
+    it('should accept lowerCamelCase model names', async () => {
+      const prisma = createAuditClient(basePrisma, {
         Prisma,
-        provider: context.provider,
+        provider,
         aggregateMapping: testAggregateMapping,
         performance: {
           awaitWrite: true,
@@ -268,22 +258,22 @@ describe('Normalized Writer Helpers', () => {
         },
       });
 
-      await context.provider.runAsync(testActor, async () => {
+      await provider.runAsync(testActor, async () => {
         await prisma.user.create({
           data: { email: 'test@example.com', name: 'Test' },
         });
       });
 
-      const events = await context.basePrisma.auditEvent.findMany();
+      const events = await basePrisma.auditEvent.findMany();
       expect(events).toHaveLength(1);
     });
   });
 
   describe('Pattern 2: Shared Change Normalization (createSharedChangeWriter)', () => {
     it('should write audit logs to shared change schema (AuditChange, AuditAggregate)', async () => {
-      const prisma = createAuditClient(context.basePrisma, {
+      const prisma = createAuditClient(basePrisma, {
         Prisma,
-        provider: context.provider,
+        provider,
         aggregateMapping: testAggregateMapping,
         performance: {
           awaitWrite: true,
@@ -296,7 +286,7 @@ describe('Normalized Writer Helpers', () => {
         },
       });
 
-      await context.provider.runAsync(testActor, async () => {
+      await provider.runAsync(testActor, async () => {
         await prisma.user.create({
           data: {
             email: 'alice@example.com',
@@ -305,8 +295,8 @@ describe('Normalized Writer Helpers', () => {
         });
       });
 
-      const changes = await context.basePrisma.auditChange.findMany();
-      const aggregates = await context.basePrisma.auditAggregate.findMany({
+      const changes = await basePrisma.auditChange.findMany();
+      const aggregates = await basePrisma.auditAggregate.findMany({
         include: { change: true },
       });
 
@@ -330,9 +320,9 @@ describe('Normalized Writer Helpers', () => {
     });
 
     it('should deduplicate change data when entity belongs to multiple aggregates', async () => {
-      const prisma = createAuditClient(context.basePrisma, {
+      const prisma = createAuditClient(basePrisma, {
         Prisma,
-        provider: context.provider,
+        provider,
         aggregateMapping: testAggregateMapping,
         performance: {
           awaitWrite: true,
@@ -345,13 +335,13 @@ describe('Normalized Writer Helpers', () => {
         },
       });
 
-      const user = await context.provider.runAsync(testActor, async () => {
+      const user = await provider.runAsync(testActor, async () => {
         return await prisma.user.create({
           data: { email: 'alice@example.com', name: 'Alice' },
         });
       });
 
-      const post = await context.provider.runAsync(testActor, async () => {
+      const post = await provider.runAsync(testActor, async () => {
         return await prisma.post.create({
           data: {
             title: 'Test Post',
@@ -361,10 +351,10 @@ describe('Normalized Writer Helpers', () => {
         });
       });
 
-      await context.basePrisma.auditAggregate.deleteMany();
-      await context.basePrisma.auditChange.deleteMany();
+      await basePrisma.auditAggregate.deleteMany();
+      await basePrisma.auditChange.deleteMany();
 
-      await context.provider.runAsync(testActor, async () => {
+      await provider.runAsync(testActor, async () => {
         await prisma.comment.create({
           data: {
             content: 'Hello!',
@@ -374,8 +364,8 @@ describe('Normalized Writer Helpers', () => {
         });
       });
 
-      const changes = await context.basePrisma.auditChange.findMany();
-      const aggregates = await context.basePrisma.auditAggregate.findMany();
+      const changes = await basePrisma.auditChange.findMany();
+      const aggregates = await basePrisma.auditAggregate.findMany();
 
       expect(changes).toHaveLength(1);
       expect(aggregates).toHaveLength(3);
@@ -388,10 +378,10 @@ describe('Normalized Writer Helpers', () => {
       expect(aggregateTypes).toEqual(['Comment', 'Post', 'User']);
     });
 
-    it('should support both lowerCamelCase and UpperCamelCase model names', async () => {
-      const prisma = createAuditClient(context.basePrisma, {
+    it('should accept lowerCamelCase model names', async () => {
+      const prisma = createAuditClient(basePrisma, {
         Prisma,
-        provider: context.provider,
+        provider,
         aggregateMapping: testAggregateMapping,
         performance: {
           awaitWrite: true,
@@ -404,13 +394,13 @@ describe('Normalized Writer Helpers', () => {
         },
       });
 
-      await context.provider.runAsync(testActor, async () => {
+      await provider.runAsync(testActor, async () => {
         await prisma.user.create({
           data: { email: 'test@example.com', name: 'Test' },
         });
       });
 
-      const changes = await context.basePrisma.auditChange.findMany();
+      const changes = await basePrisma.auditChange.findMany();
       expect(changes).toHaveLength(1);
     });
   });
@@ -427,7 +417,7 @@ describe('Normalized Writer Helpers', () => {
     /** An audited client whose before-state read of a Post update is failed once it is armed */
     const createClientFailingBeforeRead = (writer: AuditLogWriter) => {
       let failNextFindUnique = false;
-      const basePrisma = context.basePrisma.$extends({
+      const faulty = basePrisma.$extends({
         name: 'fault-injection',
         query: {
           post: {
@@ -441,9 +431,9 @@ describe('Normalized Writer Helpers', () => {
           },
         },
       });
-      const prisma = createAuditClient(basePrisma, {
+      const prisma = createAuditClient(faulty, {
         Prisma,
-        provider: context.provider,
+        provider,
         aggregateMapping: testAggregateMapping,
         performance: { awaitWrite: true },
         hooks: { writer },
@@ -458,19 +448,19 @@ describe('Normalized Writer Helpers', () => {
 
     const updatePostAfterFailedBeforeRead = async (writer: AuditLogWriter) => {
       const { prisma, armFindUniqueFailure } = createClientFailingBeforeRead(writer);
-      const user = await context.basePrisma.user.create({ data: { email: 'author@example.com', name: 'Author' } });
-      const post = await context.provider.runAsync(testActor, () =>
+      const user = await basePrisma.user.create({ data: { email: 'author@example.com', name: 'Author' } });
+      const post = await provider.runAsync(testActor, () =>
         prisma.post.create({ data: { title: 'Original', content: 'original', authorId: user.id } }),
       );
       armFindUniqueFailure();
-      await context.provider.runAsync(testActor, () =>
+      await provider.runAsync(testActor, () =>
         prisma.post.update({ where: { id: post.id }, data: { title: 'Updated' } }),
       );
     };
 
     /** One row per aggregate the post belongs to (the post and its author), as `[action, beforeUnavailable, aggregate type]` */
     const eventsOfPost = async () =>
-      (await context.basePrisma.auditEvent.findMany({ include: { aggregate: true } }))
+      (await basePrisma.auditEvent.findMany({ include: { aggregate: true } }))
         .map((event) => [event.action, event.beforeUnavailable, event.aggregate.type] as const)
         .sort();
 
@@ -503,7 +493,7 @@ describe('Normalized Writer Helpers', () => {
         createSharedChangeWriter({ ...sharedChangeSchema, beforeUnavailableField: 'beforeUnavailable' }),
       );
 
-      const changes = await context.basePrisma.auditChange.findMany({
+      const changes = await basePrisma.auditChange.findMany({
         where: { entityType: 'Post' },
         orderBy: { action: 'asc' },
       });
@@ -516,7 +506,7 @@ describe('Normalized Writer Helpers', () => {
     it('is not stored by the shared-change writer when the schema names no field for it', async () => {
       await updatePostAfterFailedBeforeRead(createSharedChangeWriter(sharedChangeSchema));
 
-      const changes = await context.basePrisma.auditChange.findMany({ where: { action: 'update' } });
+      const changes = await basePrisma.auditChange.findMany({ where: { action: 'update' } });
       expect(changes.map((change) => [change.action, change.beforeUnavailable])).toEqual([['update', false]]);
     });
   });
