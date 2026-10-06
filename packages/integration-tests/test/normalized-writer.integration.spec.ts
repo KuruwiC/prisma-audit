@@ -135,6 +135,27 @@ describe('Normalized Writer Helpers', () => {
       expect(await basePrisma.auditEvent.count()).toBe(0);
       expect(await basePrisma.actor.count()).toBe(0);
     });
+
+    it("writes an awaited shared-change write in the operation's transaction, so a rollback undoes it", async () => {
+      const prisma = createAuditClient(basePrisma, {
+        Prisma,
+        provider,
+        aggregateMapping: testAggregateMapping,
+        performance: { awaitWrite: true },
+        hooks: { writer: createSharedChangeWriter(sharedChangeSchema) },
+      });
+
+      const rolledBack = provider.runAsync(testActor, () =>
+        prisma.$transaction(async (tx) => {
+          await tx.user.create({ data: { email: 'undone@example.com', name: 'Undone' } });
+          throw new Error('Rollback test');
+        }),
+      );
+
+      await expect(rolledBack).rejects.toThrow('Rollback test');
+      expect(await basePrisma.auditChange.count()).toBe(0);
+      expect(await basePrisma.auditAggregate.count()).toBe(0);
+    });
   });
 
   describe('Pattern 1: Entity Normalization (createEntityNormalizedWriter)', () => {
