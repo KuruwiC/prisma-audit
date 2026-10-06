@@ -121,6 +121,23 @@ const preFetch = (
     shouldFetchBefore,
   });
 
+/** Pre-fetches under Account with an `onPreFetchFailure` spy */
+const preFetchReporting = (
+  client: TransactionalPrismaClient,
+  args: Row,
+  shouldFetchBefore: ShouldFetchBefore = fetchBefore,
+) => {
+  const onPreFetchFailure = vi.fn();
+  const preFetched = preFetchNestedRecordsBeforeOperation(client, 'Account', args, {
+    Prisma,
+    schemaMetadata: createSchemaMetadataFromDMMF(Prisma),
+    auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS,
+    shouldFetchBefore,
+    onPreFetchFailure,
+  });
+  return { preFetched, onPreFetchFailure };
+};
+
 describe('nested to-many pre-fetch parent scope', () => {
   it('scopes a direct child by the parent key the top-level WHERE names, without reading the parent', async () => {
     const { client, delegates } = createClient({
@@ -287,6 +304,7 @@ describe('nested to-many pre-fetch parent scope', () => {
       return scope.member.is.id === 'm2' ? { id: 'n1', memberId: 'm2', body: 'note' } : null;
     });
     const preFetchResults: NestedPreFetchResults = new Map();
+    const onTargetReadFailure = vi.fn();
 
     await preFetchOneToManyRelation({
       path: 'members.notes',
@@ -300,6 +318,7 @@ describe('nested to-many pre-fetch parent scope', () => {
       preFetchResults,
       pkConstraint: { type: 'primaryKey', fields: ['id'] },
       parentKeysFromWhere: [{ id: 'm1' }, { id: 'm2' }, { id: 'm3' }],
+      onTargetReadFailure,
     });
 
     expect(note.findUnique.mock.calls).toEqual([
@@ -311,6 +330,7 @@ describe('nested to-many pre-fetch parent scope', () => {
       row: { memberId: 'm2' },
     });
     expect(preFetchResults.get('members.notes')?.unread).toBe(false);
+    expect(onTargetReadFailure).not.toHaveBeenCalled();
   });
 });
 
@@ -523,18 +543,6 @@ describe('nested to-many batch pre-read', () => {
 
 describe('a failed pre-fetch at the parent path', () => {
   const notesUpsert = { upsert: { where: { id: 'n1' }, create: { body: 'new' }, update: { body: 'changed' } } };
-  const preFetchReporting = (client: TransactionalPrismaClient, args: Row) => {
-    const onPreFetchFailure = vi.fn();
-    const preFetched = preFetchNestedRecordsBeforeOperation(client, 'Account', args, {
-      Prisma,
-      schemaMetadata: createSchemaMetadataFromDMMF(Prisma),
-      auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS,
-      shouldFetchBefore: fetchBefore,
-      onPreFetchFailure,
-    });
-    return { preFetched, onPreFetchFailure };
-  };
-
   it('reads the rows nested below a row whose read failed under the primary key its WHERE names', async () => {
     const { client, delegates } = createClient({
       member: [{ id: 'm1', accountId: 'a1', name: 'first' }],
@@ -608,6 +616,123 @@ describe('a failed pre-fetch at the parent path', () => {
       'Cannot identify the rows the deleteMany at nested path "members.mentor.notes"',
     );
     expect(delegates.note?.findMany).not.toHaveBeenCalled();
+  });
+});
+
+describe('a failed read of one element of a nested list', () => {
+  const members = [
+    { id: 'm1', accountId: 'a1', mentorId: 'm0', name: 'first' },
+    { id: 'm2', accountId: 'a1', mentorId: 'm0', name: 'second' },
+    { id: 'm3', accountId: 'a1', mentorId: 'm0', name: 'third' },
+  ];
+  const ids = ['m1', 'm2', 'm3'];
+
+  /** Makes the reads with the given 1-based call numbers reject, each with its own error */
+  const failReadsOn = (findUnique: ReturnType<typeof createDelegate>['findUnique'], calls: readonly number[]) => {
+    const read = findUnique.getMockImplementation();
+    let call = 0;
+    findUnique.mockImplementation(async (args) => {
+      call += 1;
+      if (calls.includes(call)) {
+        throw new Error(`read ${call} failed`);
+      }
+      return read ? read(args) : null;
+    });
+  };
+
+  const unavailable = (id: string) => ({
+    before: { kind: 'unavailable' },
+    identity: id,
+    name: { by: 'uniqueWhere', where: { id } },
+    key: { id },
+  });
+
+  it.each([
+    { keyword: 'update', data: ids.map((id) => ({ where: { id }, data: { name: 'changed' } })) },
+    {
+      keyword: 'upsert',
+      data: ids.map((id) => ({ where: { id }, create: { name: 'new' }, update: { name: 'changed' } })),
+    },
+    { keyword: 'delete', data: ids.map((id) => ({ id })) },
+    { keyword: 'connectOrCreate', data: ids.map((id) => ({ where: { id }, create: { name: 'new' } })) },
+  ])(
+    'a $keyword list records only the elements whose read failed as unavailable, and reports each failed read',
+    async ({ keyword, data }) => {
+      const { client, delegates } = createClient({ member: members });
+      const findUnique = delegates.member?.findUnique;
+      if (!findUnique) throw new Error('member delegate missing');
+      failReadsOn(findUnique, [1, 3]);
+
+      const { preFetched, onPreFetchFailure } = preFetchReporting(client, {
+        where: { id: 'a1' },
+        data: { members: { [keyword]: data } },
+      });
+      const { results } = await preFetched;
+
+      expect(findUnique).toHaveBeenCalledTimes(3);
+      expect(preFetchedResultFor(results, 'members', 'm1')).toEqual(unavailable('m1'));
+      expect(preFetchedResultFor(results, 'members', 'm2')?.before).toEqual({ kind: 'captured', row: members[1] });
+      expect(preFetchedResultFor(results, 'members', 'm3')).toEqual(unavailable('m3'));
+      expect(onPreFetchFailure.mock.calls).toEqual([
+        [
+          expect.objectContaining({
+            phase: 'pre-fetch',
+            modelName: 'Member',
+            operation: keyword,
+            error: new Error('read 1 failed'),
+          }),
+        ],
+        [
+          expect.objectContaining({
+            phase: 'pre-fetch',
+            modelName: 'Member',
+            operation: keyword,
+            error: new Error('read 3 failed'),
+          }),
+        ],
+      ]);
+    },
+  );
+
+  it('identifies the elements of an update list without a before state around the one whose key-column read failed', async () => {
+    const { client, delegates } = createClient({ member: members });
+    const findUnique = delegates.member?.findUnique;
+    if (!findUnique) throw new Error('member delegate missing');
+    failReadsOn(findUnique, [1]);
+    const mentorUpsert = { upsert: { create: { name: 'mentor' }, update: { name: 'mentor' } } };
+
+    const { preFetched, onPreFetchFailure } = preFetchReporting(
+      client,
+      {
+        where: { id: 'a1' },
+        data: { members: { update: ids.slice(0, 2).map((id) => ({ where: { id }, data: { mentor: mentorUpsert } })) } },
+      },
+      identityOnly,
+    );
+    const { results } = await preFetched;
+
+    expect(findUnique.mock.calls.slice(0, 2)).toEqual([
+      [{ where: { id: 'm1' }, select: { id: true, mentorId: true } }],
+      [{ where: { id: 'm2' }, select: { id: true, mentorId: true } }],
+    ]);
+    expect(preFetchedResultFor(results, 'members', 'm1')).toEqual(unavailable('m1'));
+    // The stub returns the whole row whatever `select` asks for, so only the key columns are pinned
+    expect(preFetchedResultFor(results, 'members', 'm2')).toMatchObject({
+      before: { kind: 'none' },
+      identity: 'm2',
+      name: { by: 'uniqueWhere', where: { id: 'm2' } },
+      key: { id: 'm2', mentorId: 'm0' },
+    });
+    expect(onPreFetchFailure.mock.calls).toEqual([
+      [
+        expect.objectContaining({
+          phase: 'pre-fetch',
+          modelName: 'Member',
+          operation: 'update',
+          error: new Error('read 1 failed'),
+        }),
+      ],
+    ]);
   });
 });
 

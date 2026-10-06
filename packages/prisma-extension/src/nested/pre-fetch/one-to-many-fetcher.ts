@@ -28,6 +28,7 @@ import type { PreFetchListClient, PreFetchModelClient, PreFetchRecord } from './
 import { parentKeyOf, type ResolveParentRowsInput, resolveParentRows } from './parent-rows.js';
 import { preFetchedResultFor, storePreFetchResult, storeReadResult } from './pre-fetch-result-store.js';
 import { findBackRelationField } from './relation-link.js';
+import { readEachTarget, type TargetReadFailureHandler } from './target-reads.js';
 
 /** A related row belongs to the parent row when `backField` matches the parent's `parentFields`. */
 export interface ToManyRelationScope {
@@ -114,7 +115,33 @@ const resolveScopedParentRows = async (input: ToManyScopeInput): Promise<ScopedP
 export interface PreFetchOneToManyRelationInput extends ToManyScopeInput {
   operation: NestedOperationKeyword;
   relatedModelClient: PreFetchModelClient;
+  /** Takes the failed read of the row one target WHERE names; the other targets are still read */
+  onTargetReadFailure: TargetReadFailureHandler;
 }
+
+/** Reads the row `where` names under each parent row in turn until one holds it */
+const readTargetUnderParents = async (
+  input: PreFetchOneToManyRelationInput,
+  where: PreFetchRecord,
+  parentRows: readonly PreFetchRecord[],
+): Promise<PreFetchRecord | null> => {
+  const { path, scope, relatedModelClient } = input;
+  for (const parentRow of parentRows) {
+    const parentKey = parentKeyOf(parentRow, scope.parentFields);
+    if (!parentKey) {
+      continue;
+    }
+
+    const scopedWhere = scopeWhereToParent(where, scope, parentKey);
+    preFetchLog('1:N scoped where: path=%s where=%O', path, scopedWhere);
+
+    const beforeRecord = await relatedModelClient.findUnique({ where: scopedWhere });
+    if (beforeRecord) {
+      return beforeRecord;
+    }
+  }
+  return null;
+};
 
 /**
  * Pre-fetches the row each target WHERE of a nested to-many `update` / `upsert` / `delete` names
@@ -126,9 +153,13 @@ export interface PreFetchOneToManyRelationInput extends ToManyScopeInput {
  * derivation and `matchesUniqueWhere` unwrap that shape. Parent rows are tried in turn until one
  * holds the row; when no parent row exists, nothing is queried or stored. When a parent row could
  * not be read and is not known by its key, a row no known parent holds is stored as unavailable.
+ * Each target is read on its own: a failed read goes to `onTargetReadFailure` and the next target
+ * is still read.
+ *
+ * @throws The error of a failed read of the parent rows, before any target is read
  */
 export const preFetchOneToManyRelation = async (input: PreFetchOneToManyRelationInput): Promise<void> => {
-  const { path, operation, data, scope, relatedModelClient, pkConstraint, preFetchResults } = input;
+  const { path, operation, data, pkConstraint, preFetchResults, onTargetReadFailure } = input;
 
   const whereClauses = targetWhereClauses(operation, data);
   if (whereClauses.length === 0) {
@@ -143,27 +174,15 @@ export const preFetchOneToManyRelation = async (input: PreFetchOneToManyRelation
     return;
   }
 
-  for (const where of whereClauses) {
-    let beforeRecord: PreFetchRecord | null = null;
-
-    for (const parentRow of parentRows) {
-      const parentKey = parentKeyOf(parentRow, scope.parentFields);
-      if (!parentKey) {
-        continue;
-      }
-
-      const scopedWhere = scopeWhereToParent(where, scope, parentKey);
-      preFetchLog('1:N scoped where: path=%s where=%O', path, scopedWhere);
-
-      beforeRecord = await relatedModelClient.findUnique({ where: scopedWhere });
-      if (beforeRecord) {
-        break;
-      }
-    }
-
-    storeReadResult(preFetchResults, path, where, beforeRecord, pkConstraint, allKnown);
-    preFetchLog('1:N stored: path=%s found=%s', path, beforeRecord !== null);
-  }
+  await readEachTarget(
+    whereClauses,
+    async (where) => {
+      const beforeRecord = await readTargetUnderParents(input, where, parentRows);
+      storeReadResult(preFetchResults, path, where, beforeRecord, pkConstraint, allKnown);
+      preFetchLog('1:N stored: path=%s found=%s', path, beforeRecord !== null);
+    },
+    onTargetReadFailure,
+  );
 };
 
 export interface PreFetchToManyBatchInput extends ToManyScopeInput {

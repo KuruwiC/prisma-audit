@@ -184,7 +184,7 @@ describe('nested pre-fetch failures — observer notification', () => {
     }
   });
 
-  it('a nested delete array whose pre-fetch fails partway records every deleted row, those without a read before state as unavailable', async () => {
+  it('a nested delete array whose read of one item fails records that item as unavailable and the items around it with their before state', async () => {
     const FAILURE_MESSAGE = 'simulated nested pre-fetch failure (delete #2)';
     const observer = vi.fn<AuditErrorObserver>();
     const { rawBasePrisma, basePrisma, provider, prisma, armFault } = createClient(sharedDatabaseUrl, observer);
@@ -208,14 +208,11 @@ describe('nested pre-fetch failures — observer notification', () => {
         prisma.comment.create({ data: { content: 'Comment 3', postId: post.id, authorId: user.id } }),
       );
 
-      // Arm the fault only now: the delete array's pre-fetch loop is the next set of
-      // `comment.findUnique` calls, one per item in order.
+      // Arm the fault only now: the audit reads the deleted comments one `findUnique` per
+      // item, in array order, so the second read is c2's.
       armFault(new Set([2]), FAILURE_MESSAGE);
       observer.mockClear();
 
-      // Pre-fetch processes the array in order: c1's `findUnique` (call #1) succeeds,
-      // c2's (call #2) is the injected failure, and c3's is never attempted — the
-      // exception aborts the rest of `preFetchOneToManyRelation`'s loop.
       const updatedPost = await provider.runAsync(testActor, async () =>
         prisma.post.update({
           where: { id: post.id },
@@ -234,7 +231,8 @@ describe('nested pre-fetch failures — observer notification', () => {
       const remaining = await basePrisma.comment.count({ where: { postId: post.id } });
       expect(remaining).toBe(0);
 
-      // The pre-fetch failure itself, from coordinator.ts's per-operation catch.
+      // Only c2's read failed, so the observer hears about that one read.
+      expect(observer).toHaveBeenCalledTimes(1);
       expect(observer).toHaveBeenCalledWith(
         expect.objectContaining({
           phase: 'pre-fetch',
@@ -244,9 +242,6 @@ describe('nested pre-fetch failures — observer notification', () => {
         }),
       );
 
-      // Every item names its primary key, so none is left unresolved.
-      expect(observer).not.toHaveBeenCalledWith(expect.objectContaining({ phase: 'row-identification' }));
-
       const rows = await basePrisma.auditLog.findMany({
         where: { entityType: 'Comment', aggregateType: 'Comment', action: 'delete' },
       });
@@ -254,9 +249,8 @@ describe('nested pre-fetch failures — observer notification', () => {
       expect([...byEntity.keys()].sort()).toEqual([c1.id, c2.id, c3.id].sort());
       expect(rows).toHaveLength(3);
       expect(byEntity.get(c1.id)).toMatchObject({ before: { content: 'Comment 1' }, beforeUnavailable: false });
-      for (const id of [c2.id, c3.id]) {
-        expect(byEntity.get(id)).toMatchObject({ before: null, changes: null, beforeUnavailable: true });
-      }
+      expect(byEntity.get(c2.id)).toMatchObject({ before: null, changes: null, beforeUnavailable: true });
+      expect(byEntity.get(c3.id)).toMatchObject({ before: { content: 'Comment 3' }, beforeUnavailable: false });
     } finally {
       await prisma.$disconnect();
       await rawBasePrisma.$disconnect();
