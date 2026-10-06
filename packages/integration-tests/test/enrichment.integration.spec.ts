@@ -249,7 +249,7 @@ describe('Context Enrichment Integration', () => {
         where: { entityType: 'User', entityId: user.id, action: 'update' },
       });
 
-      expect(updateLogs.length).toBeGreaterThanOrEqual(1);
+      expect(updateLogs).toHaveLength(1);
       const log = updateLogs[0];
 
       expect(log.actorId).toBe('editor-1');
@@ -293,7 +293,7 @@ describe('Context Enrichment Integration', () => {
         where: { entityType: 'User', entityId: userId, action: 'delete' },
       });
 
-      expect(deleteLogs.length).toBeGreaterThanOrEqual(1);
+      expect(deleteLogs).toHaveLength(1);
       const log = deleteLogs[0];
 
       expect(log.actorId).toBe('deleter-1');
@@ -466,13 +466,15 @@ describe('Context Enrichment Integration', () => {
         where: { entityType: 'Comment', action: 'delete', entityId: { in: commentIds } },
       });
 
-      expect(deleteLogs.length).toBeGreaterThanOrEqual(3);
-
-      for (const log of deleteLogs) {
-        expect(log.entityContext).toBeDefined();
-        const entityContext = log.entityContext as Record<string, unknown>;
-        expect(entityContext.commentContent).toBeDefined();
-        expect(typeof entityContext.commentContent).toBe('string');
+      // Each of the 3 comments is logged under its own aggregate, the Post and the User
+      expect(deleteLogs).toHaveLength(9);
+      for (const aggregateType of ['Comment', 'Post', 'User']) {
+        expect(
+          deleteLogs
+            .filter((log) => log.aggregateType === aggregateType)
+            .map((log) => log.entityContext)
+            .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
+        ).toEqual([{ commentContent: 'Comment 1' }, { commentContent: 'Comment 2' }, { commentContent: 'Comment 3' }]);
       }
     });
 
@@ -513,13 +515,14 @@ describe('Context Enrichment Integration', () => {
         where: { actorId: 'delete-batch-enricher-actor', action: 'delete' },
       });
 
-      expect(auditLogs.length).toBeGreaterThanOrEqual(3);
-      for (const log of auditLogs) {
-        expect(log.entityContext).toBeDefined();
-        const entityContext = log.entityContext as Record<string, unknown>;
-        expect(entityContext.enrichedEmail).toBeDefined();
-        expect(typeof entityContext.enrichedEmail).toBe('string');
-      }
+      expect(auditLogs).toHaveLength(3);
+      expect(
+        auditLogs.map((log) => log.entityContext).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
+      ).toEqual(
+        ['del-batch1@example.com', 'del-batch2@example.com', 'del-batch3@example.com'].map((email) => ({
+          enrichedEmail: email.toUpperCase(),
+        })),
+      );
     });
 
     it('should call aggregate enricher exactly once (batch) for deleteMany operation', async () => {
@@ -560,18 +563,16 @@ describe('Context Enrichment Integration', () => {
         where: { actorId: 'delete-agg-batch-actor', action: 'delete' },
       });
 
-      expect(auditLogs.length).toBeGreaterThanOrEqual(3);
+      expect(auditLogs).toHaveLength(3);
+      expect(auditLogs.map((log) => log.aggregateId).sort()).toEqual([...userIds].sort());
       for (const log of auditLogs) {
-        expect(log.aggregateContext).toBeDefined();
-        const aggregateContext = log.aggregateContext as Record<string, unknown>;
-        expect(aggregateContext.aggregateType).toBe('User');
-        expect(aggregateContext.aggregateId).toBeDefined();
+        expect(log.aggregateContext).toEqual({ aggregateType: 'User', aggregateId: log.aggregateId });
       }
     });
   });
 
   describe('Enricher Error Handling', () => {
-    it('should handle enricher throwing error with onError: "log" strategy', async () => {
+    it("should write a Comment create without entity context when its entity enricher throws under onError: 'log'", async () => {
       const customAggregateMapping: AggregateMapping = {
         User: defineEntity({ type: 'User', excludeFields: ['updatedAt'] }),
         Profile: defineEntity({
@@ -636,14 +637,14 @@ describe('Context Enrichment Integration', () => {
         where: { entityType: 'Comment', entityId: comment.id, action: 'create' },
       });
 
-      expect(auditLogs.length).toBeGreaterThanOrEqual(1);
-      const log = auditLogs[0];
-      if (!log) throw new Error('Audit log not found');
-
-      expect(log.entityContext).toBeNull();
+      // The Comment create is logged under its own, the Post and the User aggregate
+      expect(auditLogs).toHaveLength(3);
+      for (const log of auditLogs) {
+        expect(log.entityContext).toBeNull();
+      }
     });
 
-    it('should handle enricher errors with error strategy configuration', async () => {
+    it("should write a Comment create without entity or aggregate context when its enrichers throw under onError: 'log'", async () => {
       const customAggregateMapping: AggregateMapping = {
         User: defineEntity({ type: 'User', excludeFields: ['updatedAt'] }),
         Profile: defineEntity({
@@ -727,12 +728,11 @@ describe('Context Enrichment Integration', () => {
         where: { entityType: 'Comment', entityId: comment.id, action: 'create' },
       });
 
-      expect(auditLogs.length).toBeGreaterThanOrEqual(1);
-      const log = auditLogs[0];
-      if (!log) throw new Error('Audit log not found');
-
-      expect(log.entityContext).toBeNull();
-      expect(log.aggregateContext).toBeNull();
+      expect(auditLogs).toHaveLength(3);
+      for (const log of auditLogs) {
+        expect(log.entityContext).toBeNull();
+        expect(log.aggregateContext).toBeNull();
+      }
     });
 
     it('should handle actor enricher error with fallback', async () => {
@@ -769,11 +769,8 @@ describe('Context Enrichment Integration', () => {
         where: { entityType: 'User', entityId: user.id, action: 'create' },
       });
 
-      expect(auditLogs.length).toBeGreaterThanOrEqual(1);
-      const log = auditLogs[0];
-      if (!log) throw new Error('Audit log not found');
-
-      expect(log.actorContext).toEqual(actorFallback);
+      expect(auditLogs).toHaveLength(1);
+      expect(auditLogs[0]?.actorContext).toEqual(actorFallback);
     });
   });
 
@@ -872,7 +869,7 @@ describe('Context Enrichment Integration', () => {
         where: { actorId: 'direct-verify-actor' },
       });
 
-      expect(auditLogs.length).toBeGreaterThanOrEqual(3);
+      expect(auditLogs).toHaveLength(3);
       for (const log of auditLogs) {
         const actorContext = log.actorContext as Record<string, unknown>;
         expect(actorContext.name).toBe('Direct Verify Actor');
@@ -880,7 +877,7 @@ describe('Context Enrichment Integration', () => {
       }
     });
 
-    it('should call actor enricher exactly once for multiple individual operations', async () => {
+    it('should call the actor enricher once per operation for multiple individual operations', async () => {
       let actorEnricherCallCount = 0;
 
       const { prisma: customPrisma, provider: customProvider } = openClient({
@@ -1047,16 +1044,17 @@ describe('Context Enrichment Integration', () => {
         where: { actorId: 'entity-batch-actor' },
       });
 
-      expect(auditLogs.length).toBeGreaterThanOrEqual(3);
-      for (const log of auditLogs) {
-        expect(log.entityContext).toBeDefined();
-        const entityContext = log.entityContext as Record<string, unknown>;
-        expect(entityContext.enrichedEmail).toBeDefined();
-        expect(typeof entityContext.enrichedEmail).toBe('string');
-      }
+      expect(auditLogs).toHaveLength(3);
+      expect(
+        auditLogs.map((log) => log.entityContext).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
+      ).toEqual(
+        ['entity1@example.com', 'entity2@example.com', 'entity3@example.com'].map((email) => ({
+          enrichedEmail: email.toUpperCase(),
+        })),
+      );
     });
 
-    it('should call entity enricher exactly once (batch) for multiple individual create operations', async () => {
+    it('should call the entity enricher once per operation for multiple individual create operations', async () => {
       let entityEnricherCallCount = 0;
 
       const customAggregateMapping: AggregateMapping = {
