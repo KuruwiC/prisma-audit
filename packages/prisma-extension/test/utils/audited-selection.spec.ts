@@ -8,6 +8,9 @@ import {
   type ClientShape,
   injectAuditedSelection,
   projectToRequestedShape,
+  relationNodeOf,
+  relationSelectionOf,
+  restrictsRows,
   writtenRelationsInclude,
 } from '../../src/utils/audited-selection.js';
 import { createSchemaMetadataFromDMMF } from '../../src/utils/schema-metadata.js';
@@ -221,6 +224,36 @@ describe('injectAuditedSelection', () => {
       expect(injected?.keys).toEqual(new Set(['email']));
     });
 
+    it('treats an enum column as a scalar: keeps it when selected, and records it when left out', () => {
+      const enumMetadata = createSchemaMetadataFromDMMF({
+        dmmf: {
+          datamodel: {
+            models: [
+              {
+                name: 'Account',
+                fields: [
+                  { ...scalar('id'), isId: true },
+                  { name: 'role', kind: 'enum', type: 'Role', isList: false },
+                  { name: 'status', kind: 'enum', type: 'Status', isList: false },
+                ],
+              },
+            ],
+          },
+        },
+      } as Parameters<typeof createSchemaMetadataFromDMMF>[0]);
+      const args = { where: { id: 'a1' }, data: {}, select: { role: true } };
+
+      const { args: injectedArgs, injected } = injectAuditedSelection(
+        { schemaMetadata: enumMetadata, queryOmitSupported: true },
+        'Account',
+        'update',
+        args,
+      );
+
+      expect(injectedArgs).toEqual({ where: args.where, data: args.data, omit: { role: false } });
+      expect(injected?.keys).toEqual(new Set(['id', 'status']));
+    });
+
     it('reads a written relation it selects in the default shape too', () => {
       const args = {
         where: { id: 'user-1' },
@@ -352,6 +385,19 @@ describe('injectAuditedSelection', () => {
         include: { posts: { where: { OR: [{ id: 'post-1' }] }, include: { comments: true } } },
       });
       expect(injected).toEqual({ keys: new Set(['posts']), nested: new Map() });
+    });
+
+    it('reads a written relation the caller includes as false, and leaves it out of the value handed back', () => {
+      const args = { where: { id: 'user-1' }, data: commentCreatedInPostUpdate, include: { posts: false } };
+
+      const { args: injectedArgs, injected } = inject(args);
+
+      expect(injectedArgs).toEqual({
+        ...args,
+        include: { posts: { where: { OR: [{ id: 'post-1' }] }, include: { comments: true } } },
+      });
+      expect(injected).toEqual({ keys: new Set(['posts']), nested: new Map() });
+      expect(projectToRequestedShape({ id: 'user-1', posts: [{ id: 'post-1' }] }, injected)).toEqual({ id: 'user-1' });
     });
 
     it.each(['createMany', 'updateMany', 'deleteMany'])('leaves the args of %s untouched', (action) => {
@@ -501,6 +547,52 @@ describe('projectToRequestedShape', () => {
       { id: 'user-1', posts: [{ id: 'post-1', authorId: 'user-1' }] },
       { id: 'user-1', posts: [{ id: 'post-1', authorId: 'user-1' }] },
     ]);
+  });
+});
+
+describe('relationSelectionOf', () => {
+  it('returns the entry of the relation from the include or the select of the node', () => {
+    const entry = { where: { published: true } };
+
+    expect(relationSelectionOf({ include: { posts: entry } }, 'posts')).toBe(entry);
+    expect(relationSelectionOf({ select: { posts: true } }, 'posts')).toBe(true);
+  });
+
+  it('reads the select of a node that has both a select and an include', () => {
+    expect(relationSelectionOf({ select: { posts: true }, include: { posts: { take: 1 } } }, 'posts')).toBe(true);
+  });
+
+  it('is undefined for a relation the node does not read, or a node with no select or include', () => {
+    expect(relationSelectionOf({ include: { profile: true } }, 'posts')).toBeUndefined();
+    expect(relationSelectionOf({ where: { id: 'u1' } }, 'posts')).toBeUndefined();
+    expect(relationSelectionOf({ select: undefined, include: { posts: true } }, 'posts')).toBe(true);
+  });
+});
+
+describe('relationNodeOf', () => {
+  it('is the args of an entry that has some', () => {
+    const entry = { where: { published: true } };
+
+    expect(relationNodeOf(entry)).toBe(entry);
+  });
+
+  it.each([true, false, undefined, null, 'posts'])('is an empty node for the entry %j', (entry) => {
+    expect(relationNodeOf(entry)).toEqual({});
+  });
+});
+
+describe('restrictsRows', () => {
+  it.each(['where', 'take', 'skip', 'cursor', 'distinct'])('is true for an entry with %s', (key) => {
+    expect(restrictsRows({ [key]: key === 'take' || key === 'skip' ? 0 : { id: 'x' } })).toBe(true);
+  });
+
+  it('is false for an entry that only shapes the rows it reads', () => {
+    expect(restrictsRows({ orderBy: { title: 'asc' }, include: { comments: true }, select: { id: true } })).toBe(false);
+    expect(restrictsRows({ where: undefined, take: undefined })).toBe(false);
+  });
+
+  it.each([true, false, undefined, null])('is false for the entry %j, which reads every row or none', (entry) => {
+    expect(restrictsRows(entry)).toBe(false);
   });
 });
 

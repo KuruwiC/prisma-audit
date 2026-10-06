@@ -34,7 +34,8 @@ describe('createAuditedOmittedFields', () => {
 describe('withOmittedFieldsInFinds', () => {
   const delegate = () => ({
     findUnique: vi.fn(async (args: unknown) => args),
-    findMany: vi.fn(async (args: unknown) => args),
+    findFirst: vi.fn(async (args: unknown) => args),
+    findMany: vi.fn(async (args?: unknown) => args),
     updateManyAndReturn: vi.fn(async (args: unknown) => args),
   });
 
@@ -57,6 +58,25 @@ describe('withOmittedFieldsInFinds', () => {
       include: { posts: true },
       omit: { password: false },
     });
+  });
+
+  it('reads the omitted fields in a findFirst without select', async () => {
+    const original = delegate();
+    const reader = withOmittedFieldsInFinds(original, new Set(['password']));
+
+    await reader.findFirst({ where: { id: 'u1' } });
+
+    expect(original.findFirst).toHaveBeenCalledWith({ where: { id: 'u1' }, omit: { password: false } });
+  });
+
+  it('passes a find called without arguments through as it is, so it reads no omitted field', async () => {
+    const original = delegate();
+    const reader = withOmittedFieldsInFinds(original, new Set(['password']));
+
+    await reader.findMany();
+
+    expect(original.findMany).toHaveBeenCalledTimes(1);
+    expect(original.findMany.mock.calls[0]).toEqual([undefined]);
   });
 
   it("merges the omitted fields into the find's own omit, the find's entry winning for a field both name", async () => {
