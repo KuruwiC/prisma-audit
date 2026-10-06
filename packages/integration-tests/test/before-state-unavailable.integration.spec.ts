@@ -97,6 +97,7 @@ describe('before state requested but unreadable', () => {
     );
 
     expect((await basePrisma.post.findUnique({ where: { id: post.id } }))?.title).toBe('Updated');
+    expect(observer).toHaveBeenCalledTimes(1);
     expect(observer).toHaveBeenCalledWith(
       expect.objectContaining({
         phase: 'pre-fetch',
@@ -106,7 +107,7 @@ describe('before state requested but unreadable', () => {
       }),
     );
     const updates = postRecords().filter((log) => log.action === 'update');
-    expect(updates.length).toBeGreaterThan(0);
+    expect(updates).toHaveLength(2);
     for (const log of updates) {
       expect(log).toMatchObject({ before: null, changes: null, beforeUnavailable: true });
     }
@@ -120,21 +121,22 @@ describe('before state requested but unreadable', () => {
     );
 
     const updates = postRecords().filter((log) => log.action === 'update');
-    expect(updates.length).toBeGreaterThan(0);
+    expect(updates).toHaveLength(2);
     for (const log of updates) {
       expect(log).toMatchObject({ before: expect.objectContaining({ title: 'Original' }), beforeUnavailable: false });
     }
   });
 
   it('records a delete whose before-state read failed as unavailable', async () => {
-    const { basePrisma, provider, prisma, armFindUniqueFailure, postRecords, post } = await setUp();
+    const { basePrisma, provider, prisma, observer, armFindUniqueFailure, postRecords, post } = await setUp();
 
     armFindUniqueFailure();
     await provider.runAsync(testActor, () => prisma.post.delete({ where: { id: post.id } }));
 
     expect(await basePrisma.post.findUnique({ where: { id: post.id } })).toBeNull();
+    expect(observer).toHaveBeenCalledTimes(1);
     const deletes = postRecords().filter((log) => log.action === 'delete');
-    expect(deletes.length).toBeGreaterThan(0);
+    expect(deletes).toHaveLength(2);
     for (const log of deletes) {
       expect(log).toMatchObject({ before: null, beforeUnavailable: true });
     }
@@ -151,7 +153,7 @@ describe('before state requested but unreadable', () => {
 
     expect(observer).not.toHaveBeenCalled();
     const updates = postRecords().filter((log) => log.action === 'update');
-    expect(updates.length).toBeGreaterThan(0);
+    expect(updates).toHaveLength(2);
     for (const log of updates) {
       expect(log).toMatchObject({ before: null, beforeUnavailable: false });
     }

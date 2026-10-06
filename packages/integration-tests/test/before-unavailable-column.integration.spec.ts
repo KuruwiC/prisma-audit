@@ -77,7 +77,7 @@ describe('beforeUnavailable column of the audit-log model', () => {
     );
 
     const rows = await basePrisma.auditLog.findMany({ where: { entityType: 'Post', action: 'update' } });
-    expect(rows.length).toBeGreaterThan(0);
+    expect(rows).toHaveLength(2);
     for (const row of rows) {
       expect(row).toMatchObject({ before: null, beforeUnavailable: true });
     }
@@ -91,7 +91,7 @@ describe('beforeUnavailable column of the audit-log model', () => {
     );
 
     const rows = await basePrisma.auditLog.findMany({ where: { entityType: 'Post', action: 'update' } });
-    expect(rows.length).toBeGreaterThan(0);
+    expect(rows).toHaveLength(2);
     for (const row of rows) {
       expect(row).toMatchObject({ before: expect.objectContaining({ title: 'Original' }), beforeUnavailable: false });
     }
@@ -106,7 +106,7 @@ describe('beforeUnavailable column of the audit-log model', () => {
     );
 
     const rows = await basePrisma.activity.findMany({ where: { entityType: 'Post', action: 'update' } });
-    expect(rows.length).toBeGreaterThan(0);
+    expect(rows).toHaveLength(2);
     for (const row of rows) {
       expect(row.before).toBeNull();
     }

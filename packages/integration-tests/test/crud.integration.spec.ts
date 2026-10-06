@@ -212,7 +212,7 @@ describe('CRUD Operations Integration', () => {
       });
     });
 
-    it('should respect per-model excludeFields for User (excludes password and updatedAt)', async () => {
+    it('should respect per-model excludeFields for User (excludes updatedAt, keeps password as a redacted change)', async () => {
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {

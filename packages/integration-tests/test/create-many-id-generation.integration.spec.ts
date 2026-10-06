@@ -121,7 +121,8 @@ describe('createManyAndReturn relies on Prisma-generated IDs', () => {
       where: { entityType: 'User', action: 'create' },
     });
     expect(logs).toHaveLength(1);
-    expect(logs[0]?.entityId).toBeTruthy();
+    const persisted = await context.basePrisma.user.findUniqueOrThrow({ where: { email: 'selected@example.com' } });
+    expect(logs[0]?.entityId).toBe(persisted.id);
     // createdAt comes from @default(now()) — present only if logs use the returned rows
     expect((logs[0]?.after as Record<string, unknown>).createdAt).toBeTruthy();
   });
