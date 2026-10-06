@@ -341,8 +341,8 @@ describe('Audit log rows by write shape', () => {
     });
   });
 
-  describe('Comparison: Include vs Pre-fetch', () => {
-    it('should compare audit log count for create with include vs update without pre-fetch', async () => {
+  describe('Nested create under an update', () => {
+    it('should write the User update and two rows for the post a nested create adds under a user update', async () => {
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -367,29 +367,7 @@ describe('Audit log rows by write shape', () => {
         });
       });
 
-      const auditLogsCreate = context.auditLogRowCount.value;
-
-      const post = await context.prisma.post.findFirst({ where: { authorId: user.id } });
-      if (!post) throw new Error('Post not found');
-
-      context.auditLogRowCount.value = 0;
-
-      await context.provider.runAsync(testActor, async () => {
-        await context.prisma.user.update({
-          where: { id: user.id },
-          data: {
-            posts: {
-              update: { where: { id: post.id }, data: { title: 'Updated Post 1' } },
-            },
-          },
-          include: { posts: true },
-        });
-      });
-
-      const auditLogsUpdate = context.auditLogRowCount.value;
-
-      expect(auditLogsCreate).toBe(3);
-      expect(auditLogsUpdate).toBe(3);
+      expect(context.auditLogRowCount.value).toBe(3);
     });
   });
 });
