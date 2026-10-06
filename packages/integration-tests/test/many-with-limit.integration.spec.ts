@@ -150,7 +150,7 @@ describe('updateMany and deleteMany with a limit', () => {
   };
 
   it("continues the caller's updateMany narrowed to the rows it read, and audits exactly the rows it updated", async () => {
-    await seedQueued(4);
+    const seededIds = await seedQueued(4);
 
     const result = await updateAudited(2);
 
@@ -161,6 +161,13 @@ describe('updateMany and deleteMany with a limit', () => {
     const updated = await rotatedIds();
     expect(updated).toHaveLength(2);
     expect(await auditedIds()).toEqual(updated);
+
+    const updateLogs = await raw.auditLog.findMany({ where: { entityType: 'User', action: 'update' } });
+    expect(updateLogs).toHaveLength(2);
+    for (const log of updateLogs) {
+      expect((log.before as Record<string, unknown>).name).toBe(`Queued ${seededIds.indexOf(log.entityId)}`);
+      expect((log.after as Record<string, unknown>).password).toBe('rotated');
+    }
   });
 
   it('counts like a plain updateMany when fewer rows qualify than the limit', async () => {

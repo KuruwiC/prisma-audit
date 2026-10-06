@@ -446,41 +446,6 @@ describe('CRUD Operations Integration', () => {
       expect((logs[0].after as Record<string, unknown>).email).toBe('single2@example.com');
     });
 
-    it('should record audit logs matching the limit on updateMany with limit', async () => {
-      const created = await context.provider.runAsync(testActor, async () => {
-        return await context.prisma.user.createManyAndReturn({
-          data: [
-            { email: 'lim1@example.com', name: 'Original', password: 'x' },
-            { email: 'lim2@example.com', name: 'Original', password: 'x' },
-            { email: 'lim3@example.com', name: 'Original', password: 'x' },
-          ],
-        });
-      });
-      const ids = created.map((u: { id: string }) => u.id);
-
-      const result = await context.provider.runAsync(testActor, async () => {
-        return await context.prisma.user.updateMany({
-          where: { id: { in: ids } },
-          data: { name: 'Limited' },
-          limit: 2,
-        });
-      });
-
-      expect(result.count).toBe(2);
-
-      // Audit logs should match the actual number of updated rows (limit), not the full where set.
-      const updateLogs = await context.prisma.auditLog.findMany({
-        where: { entityType: 'User', action: 'update' },
-      });
-      expect(updateLogs).toHaveLength(2);
-      for (const log of updateLogs) {
-        const before = log.before as Record<string, unknown>;
-        const after = log.after as Record<string, unknown>;
-        expect(before.name).toBe('Original');
-        expect(after.name).toBe('Limited');
-      }
-    });
-
     it('should record audit logs matching the limit on updateManyAndReturn with limit', async () => {
       const created = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.createManyAndReturn({
