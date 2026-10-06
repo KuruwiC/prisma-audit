@@ -5,17 +5,12 @@
  * failure sink the way its origin requires.
  */
 
-import type { AuditContext, AuditRecord, FailureSink, MutationEvent } from '@kuruwic/db-audit-core';
+import type { AuditContext, AuditRecord, FailureSink } from '@kuruwic/db-audit-core';
 import { createActorId, createAggregateId, createEntityId, createFailureSink } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
 import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../src/internal-types.js';
 import type { ExecutionScope } from '../../src/pipeline/execution-scope.js';
-import {
-  type AuditedOperation,
-  createExecutor,
-  type ExecutedOperation,
-  type OperationExecutor,
-} from '../../src/pipeline/executor.js';
+import type { ExecutedOperation, OperationExecutor } from '../../src/pipeline/executor.js';
 import {
   type AuditPipelineDependencies,
   type InterceptedOperation,
@@ -80,14 +75,6 @@ const interceptedOf = (
   action: InterceptedOperation['action'] = 'update',
   query: InterceptedOperation['query'] = vi.fn(),
 ): InterceptedOperation => ({ model: 'User', action, args, query, widened: new Map() });
-
-const operationOf = (action: AuditedOperation['action'] = 'update'): AuditedOperation => ({
-  model: 'User',
-  action,
-  widened: new Map(),
-  args,
-  execute: vi.fn(),
-});
 
 const executedWith = (records: AuditRecord[]): ExecutedOperation => ({
   result: { id: 'u1', name: 'Anne' },
@@ -203,6 +190,20 @@ describe('runAuditedOperation', () => {
       expect(auditWriteOf(deps)).not.toHaveBeenCalled();
       await deferredWrites[0]?.();
       expect(auditWriteOf(deps)).toHaveBeenCalledWith(baseClient, [record]);
+    });
+
+    it.each([
+      ['inside a batch Prisma runs', true],
+      ['outside any batch', false],
+    ])('tells the executor whether the operation runs %s from the runtime scope', async (_name, inPrismaBatch) => {
+      const baseClient = createBaseClient();
+      const deps = createDeps();
+
+      await withScope({ isInPrismaBatch: inPrismaBatch }, () =>
+        runAuditedOperation({ operation: interceptedOf(), auditContext, baseClient, atomic: true }, deps),
+      );
+
+      expect(scopeSeenBy(deps.singleExecutor).inPrismaBatch).toBe(inPrismaBatch);
     });
 
     it('queues the writes after commit of several operations in one transaction in order', async () => {
@@ -478,70 +479,5 @@ describe('runAuditedOperation', () => {
 
       expect(deps.failureSink.notify).not.toHaveBeenCalled();
     });
-  });
-});
-
-describe('createExecutor', () => {
-  const scope: ExecutionScope = {
-    auditContext,
-    handle: transactionClient,
-    baseClient: createBaseClient(),
-    inPrismaBatch: false,
-    atomic: true,
-  };
-
-  it('runs prepare, execute and result, then collect and produce only when the records are built', async () => {
-    const calls: string[] = [];
-    const step = <T>(name: string, value: T) =>
-      vi.fn(async (): Promise<T> => {
-        calls.push(name);
-        return value;
-      });
-    const prepared = { before: null };
-    const executed = { id: 'u1' };
-    const events: MutationEvent[] = [
-      { model: 'User', identity: 'u1', action: 'update', before: { kind: 'none' }, origin: { path: '', op: 'update' } },
-    ];
-    const steps = {
-      prepare: step('prepare', prepared),
-      execute: step('execute', executed),
-      collect: step('collect', events),
-      result: step('result', 'returned'),
-    };
-    const produceRecords = vi.fn(async () => {
-      calls.push('produce');
-      return [record];
-    });
-    const operation = operationOf();
-
-    const run = await createExecutor(steps).run(operation, scope, produceRecords);
-
-    expect(calls).toEqual(['prepare', 'execute', 'result']);
-    expect(run.result).toBe('returned');
-    expect(steps.execute).toHaveBeenCalledWith(operation, scope, prepared);
-    expect(steps.result).toHaveBeenCalledWith(executed);
-
-    await expect(run.buildRecords()).resolves.toEqual([record]);
-
-    expect(calls).toEqual(['prepare', 'execute', 'result', 'collect', 'produce']);
-    expect(steps.collect).toHaveBeenCalledWith(operation, scope, prepared, executed);
-    expect(produceRecords).toHaveBeenCalledWith(events, scope, new Map());
-  });
-
-  it('stops at the first failing step', async () => {
-    const execute = vi.fn(async () => {
-      throw new Error('execute failed');
-    });
-    const collect = vi.fn(async () => []);
-    const executor = createExecutor({
-      prepare: async () => undefined,
-      execute,
-      collect,
-      result: async () => undefined,
-    });
-
-    await expect(executor.run(operationOf(), scope, vi.fn())).rejects.toThrow('execute failed');
-
-    expect(collect).not.toHaveBeenCalled();
   });
 });
