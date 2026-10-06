@@ -72,6 +72,9 @@ export const namesKey = (key: Record<string, unknown>, whereClause: Record<strin
 };
 
 const sameWhereValue = (left: unknown, right: unknown): boolean => {
+  if (isStructuredKeyValue(left) || isStructuredKeyValue(right)) {
+    return isComparableValue(left) && isComparableValue(right) && valuesEqual(left, right);
+  }
   if (isRecord(left) && isRecord(right)) {
     return sameUniqueWhere(left, right);
   }

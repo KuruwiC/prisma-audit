@@ -1,3 +1,4 @@
+import { Decimal } from '@prisma/client/runtime/library';
 import { describe, expect, it } from 'vitest';
 import type { UniqueConstraint } from '../../src/schema/types.js';
 import {
@@ -140,6 +141,36 @@ describe('sameUniqueWhere', () => {
         { postId_userId: { postId: 'p1', userId: 'u2' } },
       ),
     ).toBe(false);
+  });
+});
+
+describe('sameUniqueWhere with structured values', () => {
+  it('tells two Dates that differ by one millisecond apart', () => {
+    expect(sameUniqueWhere({ at: new Date(1000) }, { at: new Date(1000) })).toBe(true);
+    expect(sameUniqueWhere({ at: new Date(1000) }, { at: new Date(1001) })).toBe(false);
+  });
+
+  it('compares Decimals by value', () => {
+    expect(sameUniqueWhere({ amount: new Decimal('1.5') }, { amount: new Decimal('1.50') })).toBe(true);
+    expect(sameUniqueWhere({ amount: new Decimal('1.5') }, { amount: new Decimal('1.6') })).toBe(false);
+  });
+
+  it('compares Bytes by content, a Buffer and a Uint8Array alike', () => {
+    expect(sameUniqueWhere({ digest: Buffer.from([1, 2]) }, { digest: new Uint8Array([1, 2]) })).toBe(true);
+    expect(sameUniqueWhere({ digest: Buffer.from([1, 2]) }, { digest: new Uint8Array([1, 3]) })).toBe(false);
+  });
+
+  it('compares a structured value inside a compound-unique wrapper', () => {
+    expect(
+      sameUniqueWhere(
+        { tenant_at: { tenant: 'a', at: new Date(1000) } },
+        { tenant_at: { tenant: 'a', at: new Date(1001) } },
+      ),
+    ).toBe(false);
+  });
+
+  it('is not the same WHERE when one value is a filter object', () => {
+    expect(sameUniqueWhere({ at: new Date(1000) }, { at: { equals: new Date(1000) } })).toBe(false);
   });
 });
 

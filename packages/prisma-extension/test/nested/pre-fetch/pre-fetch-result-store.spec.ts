@@ -153,6 +153,28 @@ describe('storeUnreadRows', () => {
   });
 });
 
+describe('rows named by a unique WHERE on a DateTime field', () => {
+  it('keeps the failed reads of two rows apart whose WHEREs differ by one millisecond', () => {
+    const store: NestedPreFetchResults = new Map();
+    storeUnreadRows(store, 'events', [{ at: new Date(1000) }, { at: new Date(1001) }], pk);
+
+    expect(preFetchedStateNamedBy(store, 'events', { at: new Date(1000) })).toEqual({ kind: 'unavailable' });
+    expect(preFetchedStateNamedBy(store, 'events', { at: new Date(1001) })).toEqual({ kind: 'unavailable' });
+    expect(preFetchedStateNamedBy(store, 'events', { at: new Date(1002) })).toEqual({ kind: 'none' });
+    expect(store.get('events')?.results).toHaveLength(2);
+  });
+
+  it('does not pair a nested operation with the row another WHERE on the field named', () => {
+    const store: NestedPreFetchResults = new Map();
+    const row = { id: 'e1', at: new Date(1000) };
+    storeReadResult(store, 'events', { at: new Date(1000) }, row, pk);
+    storeReadResult(store, 'events', { at: new Date(1001) }, null, pk);
+
+    expect(preFetchedStateNamedBy(store, 'events', { at: new Date(1000) })).toEqual({ kind: 'captured', row });
+    expect(preFetchedStateNamedBy(store, 'events', { at: new Date(1001) })).toEqual({ kind: 'none' });
+  });
+});
+
 describe('storeReadResult', () => {
   it('stores a row not found under only some of its possible parent rows as unavailable', () => {
     const store: NestedPreFetchResults = new Map();
