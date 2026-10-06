@@ -13,7 +13,7 @@ import {
   to,
 } from '@kuruwic/prisma-audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 const testAggregateMapping: AggregateMapping = {
   User: defineEntity({
@@ -26,49 +26,23 @@ const testAggregateMapping: AggregateMapping = {
 };
 
 describe('Write Strategy Tests', () => {
-  let basePrisma: PrismaClient | null = null;
+  let db: PrismaClient;
 
-  beforeAll(async () => {});
-
-  beforeEach(async () => {
-    if (basePrisma) {
-      await basePrisma.$disconnect();
-    }
-
-    const databaseUrl = globalThis.__TEST_DATABASE_URL__ || process.env.DATABASE_URL;
-    if (!databaseUrl) {
-      throw new Error('DATABASE_URL not set by global-setup.ts');
-    }
-    basePrisma = new PrismaClient({
-      datasources: {
-        db: {
-          url: databaseUrl,
-        },
-      },
+  beforeEach(() => {
+    db = new PrismaClient({
       transactionOptions: {
         maxWait: 30000,
         timeout: 30000,
       },
     });
-    await basePrisma.auditLog.deleteMany();
-    await basePrisma.post.deleteMany();
-    await basePrisma.user.deleteMany();
   });
 
   afterEach(async () => {
-    if (basePrisma) {
-      await basePrisma.$disconnect();
-      basePrisma = null;
-    }
+    await db.$disconnect();
   });
 
   describe('Sync Mode (awaitWrite: true)', () => {
     it('should write operation and audit log atomically in the transaction the client opens (openImplicitTransaction)', async () => {
-      if (!basePrisma) {
-        throw new Error('basePrisma is not initialized');
-      }
-
-      const db = basePrisma;
       const auditProvider = createAsyncLocalStorageProvider();
 
       const prisma = createAuditClient(db, {
@@ -104,19 +78,11 @@ describe('Write Strategy Tests', () => {
           expect(auditLogs).toHaveLength(1);
         },
       );
-
-      await prisma.$disconnect();
-      await db.$disconnect();
     });
   });
 
   describe('Async Mode (awaitWrite: false)', () => {
     it('should write audit logs asynchronously without blocking the main operation (fire and forget)', async () => {
-      if (!basePrisma) {
-        throw new Error('basePrisma is not initialized');
-      }
-
-      const db = basePrisma;
       const auditProvider = createAsyncLocalStorageProvider();
 
       const prisma = createAuditClient(db, {
@@ -158,17 +124,9 @@ describe('Write Strategy Tests', () => {
           expect(auditLogs).toHaveLength(1);
         },
       );
-
-      await prisma.$disconnect();
-      await db.$disconnect();
     });
 
     it('should write audit logs asynchronously within explicit transactions', async () => {
-      if (!basePrisma) {
-        throw new Error('basePrisma is not initialized');
-      }
-
-      const db = basePrisma;
       const auditProvider = createAsyncLocalStorageProvider();
 
       const prisma = createAuditClient(db, {
@@ -217,19 +175,11 @@ describe('Write Strategy Tests', () => {
           ]);
         },
       );
-
-      await prisma.$disconnect();
-      await db.$disconnect();
     });
   });
 
   describe('Transaction Coverage', () => {
     it('should create audit logs for multiple sequential operations (sync)', async () => {
-      if (!basePrisma) {
-        throw new Error('basePrisma is not initialized');
-      }
-
-      const db = basePrisma;
       const auditProvider = createAsyncLocalStorageProvider();
 
       const prisma = createAuditClient(db, {
@@ -281,17 +231,9 @@ describe('Write Strategy Tests', () => {
           expect(updateLogs[0]?.changes).toMatchObject({ name: { old: 'Test User', new: 'Updated Name' } });
         },
       );
-
-      await prisma.$disconnect();
-      await db.$disconnect();
     });
 
     it('should create audit logs for all operations within explicit multi-statement transaction (sync)', async () => {
-      if (!basePrisma) {
-        throw new Error('basePrisma is not initialized');
-      }
-
-      const db = basePrisma;
       const auditProvider = createAsyncLocalStorageProvider();
 
       const prisma = createAuditClient(db, {
@@ -347,18 +289,6 @@ describe('Write Strategy Tests', () => {
           expect(postLogs).toHaveLength(2);
         },
       );
-
-      await prisma.$disconnect();
-      await db.$disconnect();
     });
-  });
-
-  afterAll(async () => {
-    if (basePrisma) {
-      try {
-        await basePrisma.$disconnect();
-      } catch {}
-      basePrisma = null;
-    }
   });
 });
