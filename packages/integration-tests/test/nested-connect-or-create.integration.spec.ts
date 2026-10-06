@@ -28,8 +28,6 @@ describe('Nested ConnectOrCreate Operations', () => {
 
   describe('Create Path (record does not exist)', () => {
     it('records a create for a Tag created by a connectOrCreate nested under a PostTag create', async () => {
-      // The connectOrCreate sits two levels below the updated Post (postTags.create.tag.connectOrCreate)
-
       const post = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.post.create({
           data: {

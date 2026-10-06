@@ -54,7 +54,6 @@ describe('Before/After Field Validation', () => {
       expect(auditLogs).toHaveLength(1);
       const afterData = auditLogs[0]?.after as Record<string, unknown>;
 
-      // createdAt and updatedAt are ISO strings, not empty objects or Date objects
       const createdAt = afterData.createdAt;
       const updatedAt = afterData.updatedAt;
       expect(typeof createdAt).toBe('string');

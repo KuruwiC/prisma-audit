@@ -85,7 +85,6 @@ describe('Nested Connect Operations', () => {
       });
       expect(postTag).not.toBeNull();
 
-      // One log per aggregate the PostTag belongs to: itself, its Post and its Tag.
       const postTagLogs = await context.prisma.auditLog.findMany({
         where: { entityType: 'PostTag', entityId: postTag?.id, action: 'create' },
       });

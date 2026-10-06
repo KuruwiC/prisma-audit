@@ -79,7 +79,6 @@ describe('Nested Delete Operations', () => {
         where: { entityType: 'Post', entityId: post.id, action: 'delete' },
       });
 
-      // One log per aggregate the Post belongs to: its own and its author's.
       expect(postLogs.map((log: { aggregateType: string }) => log.aggregateType).sort()).toEqual(['Post', 'User']);
       for (const log of postLogs) {
         expect(log.before).not.toBeNull(); // fetchBefore.delete=true (test setup)

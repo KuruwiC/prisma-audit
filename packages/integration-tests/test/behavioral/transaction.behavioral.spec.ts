@@ -33,7 +33,6 @@ describe('Transaction Atomicity (Behavioral)', () => {
     const userLogs = await h.readAuditLogs({ entityType: 'User', action: 'create' });
     expect(userLogs).toHaveLength(1);
 
-    // One log per aggregate the Post belongs to: its own and its author's.
     const postLogs = await h.readAuditLogs({ entityType: 'Post', action: 'create' });
     expect(postLogs).toHaveLength(2);
     expect(postLogs.map((l) => l.aggregateType).sort()).toEqual(['Post', 'User']);

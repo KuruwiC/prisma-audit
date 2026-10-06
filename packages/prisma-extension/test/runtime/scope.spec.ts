@@ -11,7 +11,7 @@ import { currentScope, decidedWritePolicyFor, enterTransaction, withScope } from
 
 const client = (id: string): TransactionalPrismaClient => ({ id });
 
-/** A promise the test settles itself, so the order in which flows resume is the test's, not the clock's */
+/** A promise the test settles itself, so the test decides the order in which the flows resume */
 const gate = () => {
   let open!: () => void;
   const opened = new Promise<void>((resolve) => {

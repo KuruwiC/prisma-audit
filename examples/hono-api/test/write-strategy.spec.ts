@@ -104,7 +104,6 @@ describe('Write Strategy Tests', () => {
             },
           });
 
-          // The audit write is still pending when the create resolves
           expect(getPendingWriteCount()).toBe(1);
 
           const users = await db.user.findMany();

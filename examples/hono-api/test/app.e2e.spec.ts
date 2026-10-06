@@ -826,7 +826,6 @@ describe('Hono + Prisma Audit E2E Tests', () => {
       });
       const user = (await userRes.json()) as User;
 
-      // Create post with tags in transaction
       const res = await app.request('/posts-with-tags', {
         method: 'POST',
         headers: {
@@ -885,7 +884,7 @@ describe('Hono + Prisma Audit E2E Tests', () => {
             entityId: tag.id,
           },
         });
-        // The upsert of a new tag is recorded as a single 'create' (not 'upsert')
+        // The upsert of a new tag is recorded as a single 'create'
         expect(tagLogs.map((log: AuditLog) => log.action)).toEqual(['create']);
       }
 
