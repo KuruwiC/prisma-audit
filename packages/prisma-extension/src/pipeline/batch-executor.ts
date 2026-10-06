@@ -2,8 +2,9 @@
  * Batch-operation executor
  *
  * createMany, createManyAndReturn, updateMany, updateManyAndReturn and deleteMany: reads the
- * rows an update or a delete will touch with `findMany`, runs the operation, and collects one
- * event per written row, paired with its before row by primary key.
+ * rows an update or a delete will touch with `findMany`, runs the operation, reads the rows a
+ * createMany or an updateMany wrote back by primary key, and collects one event per written row,
+ * paired with its before row by primary key.
  */
 
 import type { FailureSink, MutationEvent } from '@kuruwic/db-audit-core';
@@ -38,7 +39,7 @@ export type BatchPrepared =
   /** createManyAndReturn: Prisma generates the ids and returns the rows it created */
   | { readonly kind: 'create-returning' }
   /** createMany: the rows to insert, with client-generated ids */
-  | { readonly kind: 'create'; readonly rows: Row[] }
+  | { readonly kind: 'create'; readonly rows: Row[]; readonly pkFields: string[] }
   /** updateManyAndReturn: its returned rows are exactly the updated ones */
   | { readonly kind: 'update-returning'; readonly beforeRows: Row[]; readonly pkFields: string[] }
   | { readonly kind: 'update'; readonly beforeRows: Row[]; readonly pkFields: string[] }
@@ -95,48 +96,45 @@ const pairByPrimaryKey = (afterRows: Row[], beforeRows: Row[], pkFields: string[
 };
 
 /**
- * A `createMany` row as stored, as far as the schema tells without a read: an optional column the
- * data leaves out holds null unless it has a default or is `@updatedAt`, which the database fills,
- * so such a column stays left out.
- */
-const storedCreateRows = (schemaMetadata: SchemaMetadata, modelName: string, rows: readonly Row[]): Row[] => {
-  const nullWhenUnset = schemaMetadata
-    .getAllFields(modelName)
-    .filter(
-      (field) =>
-        (field.kind === 'scalar' || field.kind === 'enum') &&
-        !field.isList &&
-        !field.isRequired &&
-        !field.hasDefaultValue &&
-        !field.isUpdatedAt,
-    )
-    .map((field) => field.name);
-  return rows.map((row) => {
-    const stored = { ...row };
-    for (const fieldName of nullWhenUnset) {
-      if (stored[fieldName] === undefined) {
-        stored[fieldName] = null;
-      }
-    }
-    return stored;
-  });
-};
-
-/**
- * `createMany` returns only `{ count }`, which leaves client-side id injection as the only way for
- * the audit rows to record the created ids. `createManyAndReturn` relies on Prisma's own id
- * generation and audits the rows it actually created, read whole whatever the caller selects
- * (see `injectAuditedSelection`), which supports database-generated defaults (autoincrement,
+ * `createMany` returns only `{ count }`, which leaves client-side id injection as the only way to
+ * know the primary keys of the rows it inserts: the rows it audits are the ones read back by those
+ * keys after the write (`createdRows`). `createManyAndReturn` relies on Prisma's own id generation
+ * and audits the rows it actually created, read whole whatever the caller selects (see
+ * `injectAuditedSelection`), which supports database-generated defaults (autoincrement,
  * dbgenerated) and stays correct under skipDuplicates.
  */
-const prepareCreate = (operation: AuditedOperation, schemaMetadata: SchemaMetadata): BatchPrepared => {
+const prepareCreate = (operation: AuditedOperation, deps: BatchExecutorDependencies): BatchPrepared => {
   if (operation.action === AUDIT_ACTION.CREATE_MANY_AND_RETURN) {
     return { kind: 'create-returning' };
   }
   const { data } = operation.args;
   // Single-object data is normalized to an array so `data: {...}` is logged like `data: [...]`
   const rows = Array.isArray(data) ? (data as Row[]) : [data as Row];
-  return { kind: 'create', rows: ensureIds(schemaMetadata, operation.model, rows) };
+  return {
+    kind: 'create',
+    rows: ensureIds(deps.schemaMetadata, operation.model, rows),
+    pkFields: getPrimaryKeyFields(deps.Prisma, operation.model),
+  };
+};
+
+/**
+ * The rows a `createMany` inserted, as the client reads them, once per primary key, in `data`
+ * order. A row of `data` whose primary key the read does not find was not created (skipped under
+ * `skipDuplicates`). A row skipped because a row with its primary key already exists reads as
+ * that row.
+ */
+const createdRows = async (delegate: BatchDelegate, rows: readonly Row[], pkFields: string[]): Promise<Row[]> => {
+  const readByPk = buildEntityMap(await findManyByPKs(delegate, pkFields, rows), pkFields);
+  const created: Row[] = [];
+  for (const row of rows) {
+    const identity = extractEntityIdentity(row, pkFields);
+    const read = readByPk.get(identity);
+    if (read) {
+      created.push(read);
+      readByPk.delete(identity);
+    }
+  }
+  return created;
 };
 
 /**
@@ -315,7 +313,7 @@ export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationE
   const prepare = (operation: AuditedOperation, scope: ExecutionScope): Promise<BatchPrepared> =>
     requiresBeforeState(operation.action)
       ? prepareUpdateOrDelete(operation, scope, deps)
-      : Promise.resolve(prepareCreate(operation, schemaMetadata));
+      : Promise.resolve(prepareCreate(operation, deps));
 
   const execute = async (
     operation: AuditedOperation,
@@ -356,8 +354,10 @@ export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationE
     switch (prepared.kind) {
       case 'create-returning':
         return { rows: executed.returnedRows ?? [] };
-      case 'create':
-        return { rows: storedCreateRows(schemaMetadata, operation.model, prepared.rows) };
+      case 'create': {
+        const delegate = batchDelegate(scope, operation.model, auditedOmittedFields);
+        return { rows: await createdRows(delegate, prepared.rows, prepared.pkFields) };
+      }
       case 'update-returning':
         return pairByPrimaryKey(executed.returnedRows ?? [], prepared.beforeRows, prepared.pkFields);
       case 'limited-as-given':

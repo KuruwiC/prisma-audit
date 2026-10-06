@@ -1,4 +1,5 @@
 import type { AuditContext } from '@kuruwic/db-audit-core';
+import type { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { cleanDatabase, createTestContext, disposeTestContext, type TestContext } from './helpers/setup.js';
 
@@ -427,6 +428,48 @@ describe('CRUD Operations Integration', () => {
         where: { entityType: 'User', action: 'create' },
       });
       expect(logs).toHaveLength(1);
+    });
+
+    it('records the rows a createMany inside an interactive transaction created, read back in that transaction', async () => {
+      await context.provider.runAsync(testActor, async () =>
+        context.prisma.$transaction(async (tx: Prisma.TransactionClient) =>
+          tx.user.createMany({
+            data: [
+              { id: 'tx-many-1', email: 'tx-many-1@example.com', name: 'Tx 1' },
+              { id: 'tx-many-2', email: 'tx-many-2@example.com', name: 'Tx 2' },
+            ],
+          }),
+        ),
+      );
+
+      const persisted = await context.basePrisma.user.findMany({ orderBy: { id: 'asc' } });
+      const logs = await context.basePrisma.auditLog.findMany({
+        where: { entityType: 'User', aggregateType: 'User', action: 'create' },
+        orderBy: { entityId: 'asc' },
+      });
+      expect(logs.map((log) => log.entityId)).toEqual(['tx-many-1', 'tx-many-2']);
+      expect(logs.map((log) => (log.after as Record<string, unknown>).createdAt)).toEqual(
+        persisted.map((user) => user.createdAt.toISOString()),
+      );
+    });
+
+    it('records no create of a row a later operation of the same batch $transaction deleted', async () => {
+      await context.provider.runAsync(testActor, async () =>
+        context.prisma.$transaction([
+          context.prisma.user.createMany({
+            data: [
+              { id: 'batch-many-1', email: 'batch-many-1@example.com', name: 'Kept' },
+              { id: 'batch-many-2', email: 'batch-many-2@example.com', name: 'Deleted' },
+            ],
+          }),
+          context.prisma.user.deleteMany({ where: { id: 'batch-many-2' } }),
+        ]),
+      );
+
+      const logs = await context.basePrisma.auditLog.findMany({
+        where: { entityType: 'User', aggregateType: 'User', action: 'create' },
+      });
+      expect(logs.map((log) => log.entityId)).toEqual(['batch-many-1']);
     });
 
     it('should create audit log for createManyAndReturn with single object data', async () => {

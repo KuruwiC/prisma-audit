@@ -1,14 +1,15 @@
 /**
- * createManyAndReturn Prisma-native ID generation
+ * createMany and createManyAndReturn ID generation
  *
  * createManyAndReturn returns the rows Prisma actually created, so the
  * extension must not inject client-generated IDs on that path: audit logs
  * are built from the returned rows. This makes database-generated defaults
  * (autoincrement) auditable and keeps logs correct under skipDuplicates.
- *
- * createMany (count-only result) requires client-side ID injection.
  * createManyAndReturn audits its returned rows whatever the caller selects:
  * the rows are read whole and handed back in the shape the caller asked for.
+ *
+ * createMany (count-only result) requires client-side ID injection, and audits
+ * the rows it reads back by those primary keys after the write.
  */
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
@@ -171,5 +172,102 @@ describe('createManyAndReturn relies on Prisma-generated IDs', () => {
     });
     const emails = createLogs.map((l: { after: unknown }) => (l.after as Record<string, unknown>)?.email).sort();
     expect(emails).toEqual(['dup-selected@example.com', 'fresh-selected@example.com']);
+  });
+});
+
+describe('createMany audits the rows it reads back by primary key', () => {
+  let context: TestContext;
+
+  beforeAll(async () => {
+    context = await createTestContext();
+  });
+
+  afterAll(async () => {
+    await disposeTestContext(context);
+  });
+
+  beforeEach(async () => {
+    await cleanDatabase(context.prisma);
+  });
+
+  const testActor: AuditContext = {
+    actor: { category: 'model', type: 'User', id: 'test-user-1', name: 'Test User' },
+  };
+
+  const createLogsOf = async (entityType: string) =>
+    context.basePrisma.auditLog.findMany({ where: { entityType, aggregateType: entityType, action: 'create' } });
+
+  it('records the database defaults of each created row', async () => {
+    await context.provider.runAsync(testActor, async () => {
+      return await context.prisma.user.createMany({
+        data: [{ email: 'defaults@example.com', name: 'Defaults', password: 'secret' }],
+      });
+    });
+
+    const persisted = await context.basePrisma.user.findUniqueOrThrow({ where: { email: 'defaults@example.com' } });
+    const [log, ...others] = await createLogsOf('User');
+    expect(others).toEqual([]);
+    expect(log?.entityId).toBe(persisted.id);
+    expect(log?.after).toMatchObject({
+      id: persisted.id,
+      createdAt: persisted.createdAt.toISOString(),
+      updatedAt: persisted.updatedAt.toISOString(),
+    });
+  });
+
+  it('logs only the rows actually created under skipDuplicates, when a row conflicts on a unique column other than the primary key', async () => {
+    await context.basePrisma.user.create({ data: { email: 'dup-many@example.com', name: 'Existing' } });
+
+    const result = await context.provider.runAsync(testActor, async () => {
+      return await context.prisma.user.createMany({
+        data: [
+          { email: 'dup-many@example.com', name: 'Skipped' },
+          { email: 'fresh-many@example.com', name: 'Created' },
+        ],
+        skipDuplicates: true,
+      });
+    });
+
+    expect(result).toEqual({ count: 1 });
+    const created = await context.basePrisma.user.findUniqueOrThrow({ where: { email: 'fresh-many@example.com' } });
+    const logs = await createLogsOf('User');
+    expect(logs.map((log) => log.entityId)).toEqual([created.id]);
+    expect(logs[0]?.after).toMatchObject({ email: 'fresh-many@example.com', name: 'Created' });
+  });
+
+  it('records a row skipDuplicates skipped because its primary key already exists with the existing row', async () => {
+    await context.basePrisma.user.create({
+      data: { id: 'u-existing', email: 'existing@example.com', name: 'Existing' },
+    });
+
+    const result = await context.provider.runAsync(testActor, async () => {
+      return await context.prisma.user.createMany({
+        data: [{ id: 'u-existing', email: 'skipped@example.com', name: 'Skipped' }],
+        skipDuplicates: true,
+      });
+    });
+
+    expect(result).toEqual({ count: 0 });
+    const logs = await createLogsOf('User');
+    expect(logs.map((log) => log.entityId)).toEqual(['u-existing']);
+    expect(logs[0]?.after).toMatchObject({ email: 'existing@example.com', name: 'Existing' });
+  });
+
+  it('audits an autoincrement model whose data supplies every id', async () => {
+    const result = await context.provider.runAsync(testActor, async () => {
+      return await context.prisma.autoIncItem.createMany({
+        data: [
+          { id: 9001, label: 'supplied-1' },
+          { id: 9002, label: 'supplied-2' },
+        ],
+      });
+    });
+
+    expect(result).toEqual({ count: 2 });
+    const logs = await createLogsOf('AutoIncItem');
+    expect(logs.map((log) => [log.entityId, (log.after as Record<string, unknown>).label]).sort()).toEqual([
+      ['9001', 'supplied-1'],
+      ['9002', 'supplied-2'],
+    ]);
   });
 });

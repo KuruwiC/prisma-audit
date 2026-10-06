@@ -208,6 +208,19 @@ describe('fields a client-level omit hides', () => {
       expect(keysOf((await recordOf('User', 'u3'))?.after)).toEqual(USER_DEFAULT_COLUMNS);
     });
 
+    it('records the rows createMany creates in the default fields, without the hidden field its data writes', async () => {
+      const { prisma, run, recordOf } = await setup();
+
+      const result = await run(() =>
+        prisma.user.createMany({ data: [{ id: 'u3', email: 'u3@example.com', password: 'hash-new' }] }),
+      );
+
+      expect(result).toEqual({ count: 1 });
+      const record = await recordOf('User', 'u3');
+      expect(keysOf(record?.after)).toEqual(USER_DEFAULT_COLUMNS);
+      expect(JSON.stringify(record)).not.toContain('hash-new');
+    });
+
     it('fails a foreignKey root on a hidden column the entity does not list, naming the option, and records the row under its own root', async () => {
       const observer = vi.fn<AuditErrorObserver>();
       const { basePrisma, prisma, run } = await setup({ errorHandling: { observer } });
@@ -529,6 +542,27 @@ describe('fields a client-level omit hides', () => {
         expect(whole.map((row) => keysOf(row))).toEqual([USER_DEFAULT_COLUMNS]);
         expect((await recordOf('User', 'u3'))?.after).toMatchObject({ password: MASKED });
         expect(keysOf((await recordOf('User', 'u4'))?.after)).toEqual(USER_COLUMNS);
+      });
+
+      it('records the rows createMany creates with the listed field masked, whether its data writes the field or leaves it out', async () => {
+        const { prisma, run, recordOf } = await optedIn();
+
+        await run(() =>
+          prisma.user.createMany({
+            data: [
+              { id: 'u3', email: 'u3@example.com', password: 'hash-new' },
+              { id: 'u4', email: 'u4@example.com' },
+            ],
+          }),
+        );
+
+        const written = await recordOf('User', 'u3');
+        expect(keysOf(written?.after)).toEqual(USER_COLUMNS);
+        expect(written?.after).toMatchObject({ password: MASKED });
+        expect(JSON.stringify(written)).not.toContain('hash-new');
+        const leftOut = await recordOf('User', 'u4');
+        expect(keysOf(leftOut?.after)).toEqual(USER_COLUMNS);
+        expect(leftOut?.after).toMatchObject({ password: null });
       });
 
       it('records the masked change of each row a limited updateManyAndReturn updates, returning exactly the selected fields', async () => {

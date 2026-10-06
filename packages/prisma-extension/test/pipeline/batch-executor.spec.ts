@@ -1,7 +1,8 @@
 /**
  * Tests for the batch-operation executor: the rows it reads before an update or a delete, the
- * ids it injects into a createMany, the mutation it runs on the scope's handle, the pairing of
- * written rows with their before rows, and each action's return-value contract.
+ * ids it injects into a createMany and the rows it reads back after it, the mutation it runs on
+ * the scope's handle, the pairing of written rows with their before rows, and each action's
+ * return-value contract.
  */
 
 import type { AuditContext, FailureSink } from '@kuruwic/db-audit-core';
@@ -135,9 +136,13 @@ describe('createBatchExecutor', () => {
   });
 
   describe('createMany', () => {
-    it('inserts the rows with client-generated ids, audits them and returns the count', async () => {
+    it('inserts the rows with client-generated ids, reads them back by primary key, audits the rows read and returns the count', async () => {
       const createMany = vi.fn<(args: { data: Row[] }) => Promise<{ count: number }>>(async () => ({ count: 2 }));
-      const client = clientWith({ user: { createMany } });
+      const findMany = vi.fn<(args: { where: Row }) => Promise<Row[]>>(async ({ where }) => {
+        const ids = (where.id as { in: string[] }).in;
+        return ids.map((id) => ({ id, email: `${id}@read`, nickname: 'anonymous' }));
+      });
+      const client = clientWith({ user: { createMany, findMany } });
       const produceRecords = produce();
       const args = { data: [{ email: 'a@1' }, { email: 'b@1' }] };
 
@@ -153,6 +158,7 @@ describe('createBatchExecutor', () => {
         { email: 'a@1', id: expect.any(String) },
         { email: 'b@1', id: expect.any(String) },
       ]);
+      expect(findMany.mock.calls).toEqual([[{ where: { id: { in: inserted.map((row) => row.id) } } }]]);
       expect(outcome.result).toEqual({ count: 2 });
       expect(produceRecords).toHaveBeenCalledWith(
         inserted.map((row) =>
@@ -160,7 +166,7 @@ describe('createBatchExecutor', () => {
             identity: row.id,
             action: 'create',
             before: { kind: 'none' },
-            after: row,
+            after: { id: row.id, email: `${row.id}@read`, nickname: 'anonymous' },
             origin: { path: '', op: 'createMany' },
           }),
         ),
@@ -169,21 +175,57 @@ describe('createBatchExecutor', () => {
       );
     });
 
-    it('audits an optional column the data leaves out as null, and leaves out the columns the database fills', async () => {
-      const createMany = vi.fn(async () => ({ count: 1 }));
-      const client = clientWith({ user: { createMany } });
+    it('audits the rows read back once per primary key in data order, and none for a row the read does not find', async () => {
+      const createMany = vi.fn(async () => ({ count: 2 }));
+      const findMany = findManyReturning([
+        { id: 'c', email: 'c@read' },
+        { id: 'a', email: 'a@read' },
+      ]);
+      const client = clientWith({ user: { createMany, findMany } });
       const produceRecords = produce();
 
       await runWithRecords(
         executor,
-        operationOn(client, 'createMany', { data: [{}] }),
+        operationOn(client, 'createMany', {
+          data: [
+            { id: 'a', email: 'a@1' },
+            { id: 'b', email: 'b@1' },
+            { id: 'c', email: 'c@1' },
+            { id: 'a', email: 'a@2' },
+          ],
+          skipDuplicates: true,
+        }),
         scopeOn(client),
         produceRecords,
       );
 
-      expect(createMany).toHaveBeenCalledWith({ data: [{ id: expect.any(String) }] });
+      expect(findMany.mock.calls).toEqual([[{ where: { id: { in: ['a', 'b', 'c', 'a'] } } }]]);
       expect(produceRecords).toHaveBeenCalledWith(
-        [eventOf({ action: 'create', after: { id: expect.any(String), email: null } })],
+        [
+          eventOf({ identity: 'a', action: 'create', after: { id: 'a', email: 'a@read' } }),
+          eventOf({ identity: 'c', action: 'create', after: { id: 'c', email: 'c@read' } }),
+        ],
+        expect.anything(),
+        new Map(),
+      );
+    });
+
+    it('reads the created rows on the handle of the interactive transaction it runs in', async () => {
+      const createMany = vi.fn(async () => ({ count: 1 }));
+      const findMany = findManyReturning([{ id: 'a', email: 'a@read' }]);
+      const transactionClient = clientWith({ user: { createMany, findMany } });
+      const produceRecords = produce();
+
+      await runWithRecords(
+        executor,
+        operationOn(transactionClient, 'createMany', { data: [{ id: 'a', email: 'a@1' }] }),
+        { ...transactionScopeOn(transactionClient), baseClient: clientWith({ user: {} }) },
+        produceRecords,
+      );
+
+      expect(findMany).toHaveBeenCalledWith({ where: { id: { in: ['a'] } } });
+      expect(produceRecords).toHaveBeenCalledWith(
+        [eventOf({ identity: 'a', action: 'create', after: { id: 'a', email: 'a@read' } })],
         expect.anything(),
         new Map(),
       );
@@ -191,7 +233,10 @@ describe('createBatchExecutor', () => {
 
     it('normalizes a single data object to one row', async () => {
       const createMany = vi.fn(async () => ({ count: 1 }));
-      const client = clientWith({ user: { createMany } });
+      const findMany = vi.fn(async ({ where }: { where: Row }) =>
+        (where.id as { in: string[] }).in.map((id) => ({ id, email: 'a@1' })),
+      );
+      const client = clientWith({ user: { createMany, findMany } });
       const produceRecords = produce();
 
       await runWithRecords(
