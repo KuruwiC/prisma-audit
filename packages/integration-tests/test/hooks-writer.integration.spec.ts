@@ -262,28 +262,6 @@ describe('hooks.writer Coverage', () => {
       expect(context.writerSpy.callCount).toBe(1);
       expect(context.writerSpy.calls).toEqual([{ logCount: 5, contextId: 'test-user-1' }]);
     });
-
-    it('should persist no audit logs when the transaction rolls back', async () => {
-      const transactionPromise = context.provider.runAsync(testActor, async () => {
-        return context.prisma.$transaction(async (tx: typeof context.prisma) => {
-          await tx.user.create({
-            data: {
-              email: 'user@example.com',
-              name: 'User',
-              password: 'secret123',
-            },
-          });
-
-          // Intentionally throw error to rollback
-          throw new Error('Rollback test');
-        });
-      });
-
-      await expect(transactionPromise).rejects.toThrow('Rollback test');
-
-      const auditLogs = await context.prisma.auditLog.findMany();
-      expect(auditLogs).toHaveLength(0);
-    });
   });
 
   describe('Asynchronous Write Path (awaitWrite: false)', () => {

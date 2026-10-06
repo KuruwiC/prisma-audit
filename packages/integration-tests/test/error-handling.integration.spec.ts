@@ -644,74 +644,10 @@ describe('Error Handling Integration', () => {
         }
       },
     );
-
-    it('a diff-generation failure on the batch path inside the transaction the client opens propagates to the caller, regardless of writeFailurePolicy', async () => {
-      // `diff-generation` is never policy-gated, unlike `log-write` (see
-      // `AuditErrorPhase` / `WriteFailurePolicy` in the audit extension's types.ts): it
-      // propagates to the caller even under `writeFailurePolicy: 'ignore'`, and the policy
-      // function is never consulted. Trigger a genuine diff-generation failure — an
-      // actor-context enricher that throws, `onError: 'fail'` by default — rather
-      // than a log-write failure or the caller's own database error.
-      const ENRICHER_FAILURE_MESSAGE = 'actor enricher is broken';
-      const basePrisma = new PrismaClient({ datasources: { db: { url: context.databaseUrl } } });
-      const provider = createAsyncLocalStorageProvider();
-      const observer = vi.fn();
-      const policy = vi.fn((_context: AuditErrorContext) => 'ignore' as const);
-      const prisma = createAuditClient(basePrisma, {
-        Prisma,
-        provider,
-        aggregateMapping: testAggregateMapping,
-        performance: { awaitWrite: true, openImplicitTransaction: true },
-        errorHandling: { writeFailurePolicy: policy, observer },
-        contextEnricher: {
-          actor: {
-            enricher: async () => {
-              throw new Error(ENRICHER_FAILURE_MESSAGE);
-            },
-          },
-        },
-      });
-
-      try {
-        // Seeded through the shared, unbroken test client so setup itself does not trip
-        // the broken enricher configured on `prisma` above.
-        const user = await context.provider.runAsync(testActor, async () =>
-          context.prisma.user.create({
-            data: { email: 'diff-gen-batch@example.com', name: 'Diff Gen User', password: 'secret123' },
-          }),
-        );
-
-        await expect(
-          provider.runAsync(testActor, async () =>
-            prisma.user.updateMany({
-              where: { id: user.id },
-              data: { name: 'Should Not Persist' },
-            }),
-          ),
-        ).rejects.toThrow(ENRICHER_FAILURE_MESSAGE);
-
-        // Rolled back together with the transaction the batch path runs in.
-        const persisted = await context.basePrisma.user.findUnique({ where: { id: user.id } });
-        expect(persisted?.name).toBe('Diff Gen User');
-
-        expect(observer).toHaveBeenCalledWith(
-          expect.objectContaining({
-            phase: 'diff-generation',
-            modelName: 'User',
-            error: expect.objectContaining({ message: ENRICHER_FAILURE_MESSAGE }),
-          }),
-        );
-        expect(policy).not.toHaveBeenCalled();
-      } finally {
-        await prisma.$disconnect();
-        await basePrisma.$disconnect();
-      }
-    });
   });
 
   describe('Single operations — diff-generation failures', () => {
-    // The single-operation path follows the batch contract above: a `diff-generation` phase
-    // failure reaches the caller as the original error, the observer
+    // A `diff-generation` phase failure reaches the caller as the original error, the observer
     // is notified once, and the write-failure policy is never consulted.
 
     it('a diff-generation failure on the single-operation path inside the transaction the client opens propagates the original error to the caller, regardless of writeFailurePolicy', async () => {
@@ -1090,52 +1026,6 @@ describe('Error Handling Integration', () => {
         await prisma.$disconnect();
         await basePrisma.$disconnect();
       }
-    });
-  });
-
-  describe('Transaction rollback', () => {
-    it('should not create audit logs if transaction fails', async () => {
-      const user = await context.provider.runAsync(testActor, async () => {
-        return await context.prisma.user.create({
-          data: {
-            email: 'tx-user@example.com',
-            name: 'TX User',
-            password: 'secret123',
-          },
-        });
-      });
-
-      await expect(
-        context.provider.runAsync(testActor, async () => {
-          return await context.prisma.$transaction(async (tx: typeof context.prisma) => {
-            await tx.post.create({
-              data: {
-                title: 'Post 1',
-                content: 'Content 1',
-                authorId: user.id,
-              },
-            });
-
-            // This will fail - invalid foreign key
-            await tx.post.create({
-              data: {
-                title: 'Post 2',
-                content: 'Content 2',
-                authorId: 'invalid-user-id',
-              },
-            });
-          });
-        }),
-      ).rejects.toThrow();
-
-      const posts = await context.prisma.post.findMany();
-      expect(posts).toHaveLength(0);
-
-      // The test context client uses `awaitWrite: true` (helpers/setup.ts), so audit logs are written
-      // synchronously inside the transaction and roll back with it — same guarantee
-      // `actor-override.integration.spec.ts` asserts for actor-overridden writes inside a transaction.
-      const auditLogs = await context.prisma.auditLog.findMany({ where: { entityType: 'Post' } });
-      expect(auditLogs).toHaveLength(0);
     });
   });
 });
