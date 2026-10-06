@@ -16,6 +16,7 @@ import {
 } from '@kuruwic/prisma-audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, inject, it } from 'vitest';
+import { createPostReadFault } from './helpers/post-read-fault.js';
 import { cleanDatabase } from './helpers/setup.js';
 
 const testAggregateMapping: AggregateMapping = {
@@ -437,21 +438,8 @@ describe('Normalized Writer Helpers', () => {
 
     /** An audited client whose before-state read of a Post update is failed once it is armed */
     const createClientFailingBeforeRead = (writer: AuditLogWriter) => {
-      let failNextFindUnique = false;
-      const faulty = basePrisma.$extends({
-        name: 'fault-injection',
-        query: {
-          post: {
-            async findUnique({ args, query }) {
-              if (failNextFindUnique) {
-                failNextFindUnique = false;
-                throw new Error('simulated before-state read failure');
-              }
-              return query(args);
-            },
-          },
-        },
-      });
+      const { findUnique, armFindUniqueFailure } = createPostReadFault('simulated before-state read failure');
+      const faulty = basePrisma.$extends({ name: 'fault-injection', query: { post: { findUnique } } });
       const prisma = createAuditClient(faulty, {
         Prisma,
         provider,
@@ -459,12 +447,7 @@ describe('Normalized Writer Helpers', () => {
         performance: { awaitWrite: true },
         hooks: { writer },
       });
-      return {
-        prisma,
-        armFindUniqueFailure: () => {
-          failNextFindUnique = true;
-        },
-      };
+      return { prisma, armFindUniqueFailure };
     };
 
     const updatePostAfterFailedBeforeRead = async (writer: AuditLogWriter) => {

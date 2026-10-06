@@ -12,6 +12,7 @@ import type { AuditErrorObserver, PrismaAuditExtensionOptions } from '@kuruwic/p
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { createPostReadFault } from './helpers/post-read-fault.js';
 import { cleanDatabase, getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
 
 const testActor: AuditContext = {
@@ -25,21 +26,8 @@ type FetchBeforeConfig = NonNullable<PrismaAuditExtensionOptions['fetchBefore']>
 const createClients = (databaseUrl: string, fetchBefore: FetchBeforeConfig) => {
   const rawBasePrisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
 
-  let failNextPostFindUnique = false;
-  const basePrisma = rawBasePrisma.$extends({
-    name: 'fault-injection',
-    query: {
-      post: {
-        async findUnique({ args, query }) {
-          if (failNextPostFindUnique) {
-            failNextPostFindUnique = false;
-            throw new Error(FAILURE_MESSAGE);
-          }
-          return query(args);
-        },
-      },
-    },
-  });
+  const { findUnique, armFindUniqueFailure } = createPostReadFault(FAILURE_MESSAGE);
+  const basePrisma = rawBasePrisma.$extends({ name: 'fault-injection', query: { post: { findUnique } } });
 
   const observer = vi.fn<AuditErrorObserver>();
   const provider = createAsyncLocalStorageProvider();
@@ -60,9 +48,7 @@ const createClients = (databaseUrl: string, fetchBefore: FetchBeforeConfig) => {
     prisma,
     observer,
     asActor: <T>(fn: () => Promise<T>): Promise<T> => provider.runAsync(testActor, fn),
-    armPostFindUniqueFailure: () => {
-      failNextPostFindUnique = true;
-    },
+    armPostFindUniqueFailure: armFindUniqueFailure,
   };
 };
 
