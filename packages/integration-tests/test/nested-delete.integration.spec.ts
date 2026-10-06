@@ -90,8 +90,9 @@ describe('Nested Delete Operations', () => {
     });
   });
 
-  // NOTE: The tests in this file use the setup.ts configuration (fetchBefore.delete: true).
-  // The fetchBefore.delete: false path is covered by performance.integration.spec.ts with its own client.
+  // NOTE: Unless a test builds its own client, it uses the setup.ts configuration (fetchBefore.delete: true).
+  // The paths where the before state of a nested delete is not read are covered below by
+  // 'before-state read configured per model' and 'a nested delete next to other operations at the same path'.
 
   describe('Transaction Atomicity', () => {
     it('should NOT create audit log if main operation fails in transaction', async () => {

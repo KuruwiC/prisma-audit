@@ -29,7 +29,7 @@ import type { AuditErrorObserver } from '@kuruwic/prisma-audit';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
-import { getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
+import { cleanDatabase, getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
 
 const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'nested-pre-fetch-actor' },
@@ -96,10 +96,7 @@ describe('nested pre-fetch failures — observer notification', () => {
     const { rawBasePrisma, basePrisma, provider, prisma, armFault } = createClient(sharedDatabaseUrl, observer);
 
     try {
-      await basePrisma.auditLog.deleteMany();
-      await basePrisma.comment.deleteMany();
-      await basePrisma.post.deleteMany();
-      await basePrisma.user.deleteMany();
+      await cleanDatabase(rawBasePrisma);
 
       const user = await provider.runAsync(testActor, async () =>
         prisma.user.create({ data: { email: 'nested-pf-update@example.com', name: 'Owner', password: 'secret123' } }),
@@ -153,10 +150,7 @@ describe('nested pre-fetch failures — observer notification', () => {
     const { rawBasePrisma, basePrisma, provider, prisma, armFault } = createClient(sharedDatabaseUrl, observer);
 
     try {
-      await basePrisma.auditLog.deleteMany();
-      await basePrisma.comment.deleteMany();
-      await basePrisma.post.deleteMany();
-      await basePrisma.user.deleteMany();
+      await cleanDatabase(rawBasePrisma);
 
       const user = await provider.runAsync(testActor, async () =>
         prisma.user.create({ data: { email: 'nested-pf-marker@example.com', name: 'Owner', password: 'secret123' } }),
@@ -196,10 +190,7 @@ describe('nested pre-fetch failures — observer notification', () => {
     const { rawBasePrisma, basePrisma, provider, prisma, armFault } = createClient(sharedDatabaseUrl, observer);
 
     try {
-      await basePrisma.auditLog.deleteMany();
-      await basePrisma.comment.deleteMany();
-      await basePrisma.post.deleteMany();
-      await basePrisma.user.deleteMany();
+      await cleanDatabase(rawBasePrisma);
 
       const user = await provider.runAsync(testActor, async () =>
         prisma.user.create({ data: { email: 'nested-pf-delete@example.com', name: 'Owner', password: 'secret123' } }),

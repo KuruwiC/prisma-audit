@@ -18,7 +18,7 @@ import type { AuditErrorObserver } from '@kuruwic/prisma-audit';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
+import { cleanDatabase, getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
 
 const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'nested-upsert-pre-fetch-actor' },
@@ -79,12 +79,8 @@ describe('nested upsert and connectOrCreate whose target could not be read', () 
 
   const setUp = async () => {
     scenario = createClient();
-    const { basePrisma } = scenario;
-    await basePrisma.auditLog.deleteMany();
-    await basePrisma.comment.deleteMany();
-    await basePrisma.post.deleteMany();
-    await basePrisma.profile.deleteMany();
-    await basePrisma.user.deleteMany();
+    const { rawBasePrisma, basePrisma } = scenario;
+    await cleanDatabase(rawBasePrisma);
     const user = await basePrisma.user.create({
       data: { email: 'nested-upsert-pre-fetch@example.com', name: 'Owner', password: 'secret123' },
     });

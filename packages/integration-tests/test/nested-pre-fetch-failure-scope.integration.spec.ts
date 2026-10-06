@@ -22,7 +22,7 @@ import type { AuditErrorObserver } from '@kuruwic/prisma-audit';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
+import { cleanDatabase, getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
 
 const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'nested-pre-fetch-scope-actor' },
@@ -81,10 +81,7 @@ describe('nested pre-fetch failures — affected rows', () => {
       await rawBasePrisma.$disconnect();
     });
 
-    await rawBasePrisma.auditLog.deleteMany();
-    await rawBasePrisma.comment.deleteMany();
-    await rawBasePrisma.post.deleteMany();
-    await rawBasePrisma.user.deleteMany();
+    await cleanDatabase(rawBasePrisma);
 
     const user = await rawBasePrisma.user.create({
       data: {

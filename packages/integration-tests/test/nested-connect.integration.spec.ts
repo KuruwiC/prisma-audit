@@ -27,10 +27,12 @@ describe('Nested Connect Operations', () => {
   };
 
   describe('Many-to-Many Relations (Join Table)', () => {
-    it('should create audit log for PostTag when connecting existing Tag to Post', async () => {
+    // Creates an existing Tag and a Post, clears the audit logs, then connects the Tag to the Post
+    // through a PostTag created in the Post update.
+    const connectExistingTagToPost = async (tagName: string) => {
       const tag = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.tag.create({
-          data: { name: 'typescript' },
+          data: { name: tagName },
         });
       });
 
@@ -71,6 +73,12 @@ describe('Nested Connect Operations', () => {
           },
         });
       });
+
+      return { tag, post };
+    };
+
+    it('should create audit log for PostTag when connecting existing Tag to Post', async () => {
+      const { tag, post } = await connectExistingTagToPost('typescript');
 
       const postTag = await context.prisma.postTag.findFirst({
         where: { postId: post.id, tagId: tag.id },
@@ -88,49 +96,7 @@ describe('Nested Connect Operations', () => {
     });
 
     it('should NOT create audit log for Tag entity itself when connecting (only join table)', async () => {
-      const tag = await context.provider.runAsync(testActor, async () => {
-        return await context.prisma.tag.create({
-          data: { name: 'react' },
-        });
-      });
-
-      const post = await context.provider.runAsync(testActor, async () => {
-        return await context.prisma.post.create({
-          data: {
-            title: 'Test Post',
-            content: 'Test content',
-            author: {
-              create: {
-                email: 'author@example.com',
-                name: 'Author',
-                password: 'secret123',
-              },
-            },
-          },
-        });
-      });
-
-      await context.prisma.auditLog.deleteMany();
-
-      await context.provider.runAsync(testActor, async () => {
-        await context.prisma.post.update({
-          where: { id: post.id },
-          data: {
-            postTags: {
-              create: {
-                tag: {
-                  connect: { id: tag.id },
-                },
-              },
-            },
-          },
-          include: {
-            postTags: {
-              include: { tag: true },
-            },
-          },
-        });
-      });
+      const { tag } = await connectExistingTagToPost('react');
 
       // Verify: No audit log for Tag entity (it was not modified)
       const tagLogs = await context.prisma.auditLog.findMany({
