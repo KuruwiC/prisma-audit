@@ -27,6 +27,13 @@ interface SeenWrite {
   readonly args: Record<string, unknown>;
 }
 
+/** How an operation settles: its value, or the error code (or name) it rejects with */
+const settle = (run: () => Promise<unknown>) =>
+  run().then(
+    (value) => ({ value }),
+    (error: unknown) => ({ error: (error as { code?: string }).code ?? (error as Error).name }),
+  );
+
 /** The ids a narrowed `updateMany` names in the second branch of its `AND` */
 const narrowedIds = (args: Record<string, unknown>): string[] => {
   const branches = (args.where as { AND?: Array<{ id?: { in?: string[] } }> } | undefined)?.AND ?? [];
@@ -249,11 +256,6 @@ describe('updateMany and deleteMany with a limit', () => {
 
   it.each([0, -1])('passes a limit of %d to Prisma unchanged, settling as a plain updateMany does', async (limit) => {
     await seedQueued(2);
-    const settle = (run: () => Promise<unknown>) =>
-      run().then(
-        (value) => ({ value }),
-        (error: unknown) => ({ error: (error as { code?: string }).code ?? (error as Error).name }),
-      );
     const plainOutcome = await settle(() =>
       plain.user.updateMany({ where: queued, data: { password: 'rotated' }, limit }),
     );
@@ -316,5 +318,57 @@ describe('updateMany and deleteMany with a limit', () => {
     expect(remaining).toHaveLength(2);
     expect(remaining).toContain(taken.id);
     expect(await deletedAuditIds()).toEqual(ids.filter((id) => !remaining.includes(id)).sort());
+  });
+
+  it('counts like a plain deleteMany when fewer rows qualify than the limit', async () => {
+    const ids = await seedQueued(3);
+    const { count: plainCount } = await plain.user.deleteMany({ where: queued, limit: 5 });
+    await cleanDatabase(raw);
+    await seedQueued(3);
+
+    const result = await deleteAudited(5);
+
+    expect(result).toEqual({ count: plainCount });
+    expect(result.count).toBe(3);
+    expect(await remainingIds()).toEqual([]);
+    expect(await deletedAuditIds()).toHaveLength(ids.length);
+  });
+
+  it("continues the caller's deleteMany unchanged inside a batch Prisma runs, and reports its rows as row-identification", async () => {
+    await seedQueued(1);
+    const [, plainResult] = await plain.$transaction([
+      plain.user.create({ data: { email: 'plain-later@example.com', name: 'Queued later' } }),
+      plain.user.deleteMany({ where: queued, limit: 5 }),
+    ]);
+    await cleanDatabase(raw);
+    await seedQueued(1);
+
+    const [, result] = await provider.runAsync(testActor, () =>
+      audited.$transaction([
+        audited.user.create({ data: { email: 'later@example.com', name: 'Queued later' } }),
+        audited.user.deleteMany({ where: queued, limit: 5 }),
+      ]),
+    );
+
+    expect(result).toEqual(plainResult);
+    expect(result).toEqual({ count: 2 });
+    expect(seen[0]?.args.limit).toBe(5);
+    expect(await remainingIds()).toEqual([]);
+    expect(await deletedAuditIds()).toEqual([]);
+    expect(observer).toHaveBeenCalledWith(
+      expect.objectContaining({ phase: 'row-identification', operation: 'deleteMany', params: { unidentified: 2 } }),
+    );
+  });
+
+  it.each([0, -1])('passes a limit of %d to Prisma unchanged, settling as a plain deleteMany does', async (limit) => {
+    await seedQueued(2);
+    const plainOutcome = await settle(() => plain.user.deleteMany({ where: queued, limit }));
+    await cleanDatabase(raw);
+    await seedQueued(2);
+
+    const auditedOutcome = await settle(() => deleteAudited(limit));
+
+    expect(auditedOutcome).toEqual(plainOutcome);
+    expect(seen.map((call) => call.args.limit)).toEqual([limit]);
   });
 });
