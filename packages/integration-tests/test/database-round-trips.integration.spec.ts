@@ -13,6 +13,10 @@
  * around the operation; the per-scenario comments enumerate those statements. A change
  * that moves a count must update the number and its comments to describe the new
  * sequence — never loosen the assertion instead.
+ *
+ * Every statement Prisma sends is counted (BEGIN and COMMIT included) except the bare
+ * `SELECT 1` it issues to check a connection it re-opens, which depends on pool state and
+ * load rather than on the implementation.
  */
 
 import type { AuditContext, AuditContextProvider } from '@kuruwic/db-audit-core';
@@ -32,6 +36,14 @@ const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'test-user-1', name: 'Test User' },
 };
 
+const CONNECTION_HEALTH_CHECK = 'SELECT 1';
+
+const collectStatement = (statements: string[], query: string): void => {
+  if (query !== CONNECTION_HEALTH_CHECK) {
+    statements.push(query);
+  }
+};
+
 /**
  * Builds an audited client whose *base* Prisma client is subscribed to the `query`
  * log event, so every SQL statement issued through the audited client (the
@@ -46,7 +58,7 @@ const createAuditedClientWithQueryLog = (
     log: [{ emit: 'event', level: 'query' }],
   });
   basePrisma.$on('query', (event) => {
-    statements.push(event.query);
+    collectStatement(statements, event.query);
   });
 
   const provider = createAsyncLocalStorageProvider();
@@ -498,7 +510,7 @@ describe('Database Round-Trip Guard: fields an entity lists in auditOmittedField
       omit: { user: { password: true }, post: { content: true } },
     });
     loggingPrisma.$on('query', (event) => {
-      statements.push(event.query);
+      collectStatement(statements, event.query);
     });
     basePrisma = loggingPrisma;
     provider = createAsyncLocalStorageProvider();
