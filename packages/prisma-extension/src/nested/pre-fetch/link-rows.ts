@@ -25,7 +25,7 @@ import {
   namedTargets,
 } from '../../grammar/nested-operations.js';
 import { filterOperationsToPreFetch, type ShouldFetchBefore } from '../../grammar/pre-fetch-selection.js';
-import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../internal-types.js';
+import type { PrismaHandle } from '../../internal-types.js';
 import type { SchemaMetadata } from '../../schema/types.js';
 import type { AuditedOmittedFields } from '../../utils/audited-omitted-fields.js';
 import { uniqueWhereAsFilter } from '../../utils/compound-where.js';
@@ -104,7 +104,7 @@ export const linkWriteOf = (operation: NestedOperationInfo, link: RelatedSideLin
 };
 
 export interface ReadLinkRowsInput {
-  readonly prismaClient: PrismaClientWithDynamicAccess | TransactionalPrismaClient;
+  readonly prismaClient: PrismaHandle;
   readonly modelName: string;
   readonly topLevelWhere: unknown;
   /** The nested operations the operation executes */

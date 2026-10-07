@@ -7,15 +7,15 @@
 import type { FailureSink, MutationEvent } from '@kuruwic/db-audit-core';
 import { createEntityConfigLookup, defineEntity } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
-import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../src/internal-types.js';
+import type { PrismaBaseClient, PrismaHandle } from '../../src/internal-types.js';
 import type { ExecutionScope } from '../../src/pipeline/execution-scope.js';
 import type { OmittedFieldReadDependencies } from '../../src/pipeline/omitted-fields-after-write.js';
 import { createRecordProducer } from '../../src/pipeline/produce-records.js';
 import { createAuditedOmittedFields, NO_AUDITED_OMITTED_FIELDS } from '../../src/utils/audited-omitted-fields.js';
 import { column, model, schemaMetadataOf } from '../support/audit-schema.js';
 
-const baseClient: PrismaClientWithDynamicAccess = Object.assign(Object.create(null), { name: 'base' });
-const transactionClient: TransactionalPrismaClient = Object.assign(Object.create(null), { name: 'transaction' });
+const baseClient: PrismaBaseClient = Object.assign(Object.create(null), { name: 'base' });
+const transactionClient: PrismaHandle = Object.assign(Object.create(null), { name: 'transaction' });
 const auditContext = { actor: { category: 'model', type: 'User', id: 'user-1' } };
 
 const scopeOn = (handle: ExecutionScope['handle']): ExecutionScope => ({
@@ -139,10 +139,10 @@ describe('createRecordProducer', () => {
   it('reads the omitted fields an entity audits on the handle of the scope, completing the stored after state', async () => {
     const baseFindMany = vi.fn(async () => [{ id: 'p1', secret: 'read-on-base' }]);
     const transactionFindMany = vi.fn(async () => [{ id: 'p1', secret: 'read-after-write' }]);
-    const base: PrismaClientWithDynamicAccess = Object.assign(Object.create(null), {
+    const base: PrismaBaseClient = Object.assign(Object.create(null), {
       post: { findMany: baseFindMany },
     });
-    const transaction: TransactionalPrismaClient = Object.assign(Object.create(null), {
+    const transaction: PrismaHandle = Object.assign(Object.create(null), {
       post: { findMany: transactionFindMany },
     });
     const produce = producerWith(

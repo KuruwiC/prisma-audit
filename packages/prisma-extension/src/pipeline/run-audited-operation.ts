@@ -10,7 +10,7 @@
 import type { AuditContext, DispatchConfig, FailureSink } from '@kuruwic/db-audit-core';
 import { dispatch } from '@kuruwic/db-audit-core';
 import type { AuditAction } from '../grammar/operations.js';
-import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../internal-types.js';
+import type { PrismaBaseClient, PrismaHandle } from '../internal-types.js';
 import { withScope } from '../runtime/scope.js';
 import type { WidenedColumns } from '../utils/audited-selection.js';
 import { isCallerMutationError, runCallerMutation } from '../utils/caller-mutation-error.js';
@@ -35,7 +35,7 @@ export interface InterceptedOperation {
 export interface AuditedOperationInput {
   readonly operation: InterceptedOperation;
   readonly auditContext: AuditContext;
-  readonly baseClient: PrismaClientWithDynamicAccess;
+  readonly baseClient: PrismaBaseClient;
   /**
    * The write policy's decision for the sampled-in operation: its audit rows are written before it
    * returns, in its transaction inside one and once it has committed outside any
@@ -47,7 +47,7 @@ export interface AuditPipelineDependencies {
   readonly singleExecutor: OperationExecutor;
   readonly batchExecutor: OperationExecutor;
   readonly produceRecords: RecordProducer;
-  readonly dispatchConfig: DispatchConfig<TransactionalPrismaClient>;
+  readonly dispatchConfig: DispatchConfig<PrismaHandle>;
   readonly failureSink: FailureSink;
 }
 

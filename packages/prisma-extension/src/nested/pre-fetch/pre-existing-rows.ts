@@ -13,7 +13,7 @@
 
 import type { NestedOperationInfo, NestedPreFetchResults } from '../../grammar/nested-operations.js';
 import { filterOperationsToPreFetch, type ShouldFetchBefore } from '../../grammar/pre-fetch-selection.js';
-import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../internal-types.js';
+import type { PrismaHandle } from '../../internal-types.js';
 import type { SchemaMetadata } from '../../schema/types.js';
 import type { AuditedOmittedFields } from '../../utils/audited-omitted-fields.js';
 import { preFetchLog } from '../../utils/debug.js';
@@ -28,7 +28,7 @@ import { resolveToManyPath, type ToManyPath } from './to-many-path.js';
 export type PreExistingRows = ReadonlyMap<string, ReadonlySet<EntityIdentityKey>>;
 
 export interface SnapshotPreExistingRowsInput {
-  readonly prismaClient: PrismaClientWithDynamicAccess | TransactionalPrismaClient;
+  readonly prismaClient: PrismaHandle;
   readonly modelName: string;
   readonly topLevelWhere: unknown;
   /** The nested operations the operation executes; the paths with a pending create are snapshotted */

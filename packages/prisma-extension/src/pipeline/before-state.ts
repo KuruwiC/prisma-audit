@@ -13,7 +13,7 @@ import type { UpsertBranch } from '../grammar/nested-operations.js';
 import { upsertBranchOf } from '../grammar/nested-state.js';
 import { AUDIT_ACTION, type AuditAction } from '../grammar/operations.js';
 import type { ShouldFetchBefore } from '../grammar/pre-fetch-selection.js';
-import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../internal-types.js';
+import type { PrismaHandle } from '../internal-types.js';
 import { type AuditedOmittedFields, withOmittedFieldsInFinds } from '../utils/audited-omitted-fields.js';
 import { beforeStateOf, NO_BEFORE_STATE, UNAVAILABLE_BEFORE_STATE } from '../utils/before-state.js';
 import { getModelDelegate, hasOperation } from '../utils/model-accessor.js';
@@ -35,7 +35,7 @@ export const targetRowExistsBefore = (action: AuditAction, before: BeforeState):
   action === AUDIT_ACTION.UPDATE || action === AUDIT_ACTION.DELETE || executedUpsertBranch(action, before) === 'update';
 
 export interface BeforeStateInput {
-  readonly handle: PrismaClientWithDynamicAccess | TransactionalPrismaClient;
+  readonly handle: PrismaHandle;
   readonly modelName: string;
   readonly action: AuditAction;
   readonly args: Record<string, unknown>;
@@ -64,7 +64,7 @@ const shouldFetch = (action: AuditAction, modelName: string, shouldFetchBefore: 
 };
 
 const findExistingRow = async (
-  handle: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
+  handle: PrismaHandle,
   modelName: string,
   where: unknown,
   readFields: AuditedOmittedFields,

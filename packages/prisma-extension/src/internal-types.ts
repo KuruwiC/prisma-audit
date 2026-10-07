@@ -20,7 +20,7 @@
  * the values the adapter writes into queries.
  */
 export interface PrismaNamespace {
-  defineExtension: (fn: (client: PrismaClientWithDynamicAccess) => unknown) => unknown;
+  defineExtension: (fn: (client: PrismaBaseClient) => unknown) => unknown;
   /** Sentinel value for SQL NULL (distinguishes DB NULL from JSON null) */
   DbNull: unknown;
   /** `Prisma.skip` (Prisma 5.20 and later): a field given it is left out of the query */
@@ -37,27 +37,27 @@ export interface PrismaNamespace {
 // ============================================================================
 
 /**
- * Prisma transaction client type (interactive transaction callback parameter)
+ * What a `PrismaClient` and a `Prisma.TransactionClient` have in common: model delegates, looked
+ * up by the accessor string a model name maps to
  *
  * @remarks
- * Special Prisma client instance passed to transaction callbacks.
- * Has model delegates but lacks top-level methods like `$transaction`.
+ * The index signature is how Prisma's generated delegates are reached at runtime. A transaction
+ * client has no top-level methods such as `$transaction`; {@link PrismaBaseClient} adds them.
  */
-export interface TransactionalPrismaClient {
-  [modelName: string]: unknown;
+export interface PrismaHandle {
+  readonly [accessor: string]: unknown;
 }
 
 /**
- * Prisma client with dynamic model access
+ * A Prisma client outside any transaction: the handle plus the top-level methods the adapter calls
  *
  * @remarks
- * Full Prisma client instance with runtime model delegates and top-level methods.
- * Uses index signatures for Prisma's dynamic code generation.
+ * `$transaction` opens the interactive transaction an audited write runs in; `$extends` derives
+ * the client the audit extension is installed on.
  */
-export interface PrismaClientWithDynamicAccess {
-  [modelName: string]: unknown;
-  $transaction: <T>(fn: (tx: TransactionalPrismaClient) => Promise<T>) => Promise<T>;
-  $extends: (extension: unknown) => unknown;
+export interface PrismaBaseClient extends PrismaHandle {
+  readonly $transaction: <T>(fn: (tx: PrismaHandle) => Promise<T>) => Promise<T>;
+  readonly $extends: (extension: unknown) => object;
 }
 
 // ============================================================================

@@ -6,7 +6,7 @@
 import type { AuditRecord, MutationEvent } from '@kuruwic/db-audit-core';
 import { createActorId, createAggregateId, createEntityId } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
-import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../src/internal-types.js';
+import type { PrismaBaseClient, PrismaHandle } from '../../src/internal-types.js';
 import type { ExecutionScope } from '../../src/pipeline/execution-scope.js';
 import { type AuditedOperation, createExecutor } from '../../src/pipeline/executor.js';
 import type { AuditLogData } from '../../src/types.js';
@@ -33,12 +33,14 @@ const record: AuditLogData = {
   createdAt: new Date('2025-01-01T00:00:00Z'),
 };
 
-const transactionClient: TransactionalPrismaClient = Object.assign(Object.create(null), { name: 'transaction' });
-const baseClient: PrismaClientWithDynamicAccess = {
+const transactionClient: PrismaHandle = Object.assign(Object.create(null), { name: 'transaction' });
+const baseClient: PrismaBaseClient = {
   $transaction: async () => {
     throw new Error('not used');
   },
-  $extends: () => undefined,
+  $extends: () => {
+    throw new Error('not used');
+  },
 };
 
 const scope: ExecutionScope = {

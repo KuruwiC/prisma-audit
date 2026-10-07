@@ -38,11 +38,7 @@ import {
 import { TOP_LEVEL_ROW } from '../../grammar/nested-state.js';
 import { AUDIT_ACTION } from '../../grammar/operations.js';
 import type { ShouldFetchBefore } from '../../grammar/pre-fetch-selection.js';
-import type {
-  PrismaClientWithDynamicAccess,
-  PrismaNamespace,
-  TransactionalPrismaClient,
-} from '../../internal-types.js';
+import type { PrismaHandle, PrismaNamespace } from '../../internal-types.js';
 import type { SchemaMetadata, UniqueConstraint } from '../../schema/types.js';
 import type { AuditedOmittedFields } from '../../utils/audited-omitted-fields.js';
 import {
@@ -104,7 +100,7 @@ export interface NestedEventCollectionInput {
   result: unknown;
   topLevelBefore: BeforeState;
   /** Client the operation ran on; reads the nested rows the result does not hold */
-  client: PrismaClientWithDynamicAccess | TransactionalPrismaClient;
+  client: PrismaHandle;
   nestedPreFetchResults: NestedPreFetchResults;
   /** The nested operations the operation executed, in detection order */
   nestedOperations: readonly NestedOperationInfo[];

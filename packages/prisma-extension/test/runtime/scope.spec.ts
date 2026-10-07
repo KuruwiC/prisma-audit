@@ -6,10 +6,10 @@
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
-import type { TransactionalPrismaClient } from '../../src/internal-types.js';
+import type { PrismaHandle } from '../../src/internal-types.js';
 import { currentScope, decidedWritePolicyFor, enterTransaction, withScope } from '../../src/runtime/scope.js';
 
-const client = (id: string): TransactionalPrismaClient => ({ id });
+const client = (id: string): PrismaHandle => ({ id });
 
 /** A promise the test settles itself, so the test decides the order in which the flows resume */
 const gate = () => {

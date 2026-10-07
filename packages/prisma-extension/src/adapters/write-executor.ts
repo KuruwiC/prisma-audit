@@ -8,7 +8,7 @@
  */
 
 import type { AuditRecord, WriteExecutor } from '@kuruwic/db-audit-core';
-import type { TransactionalPrismaClient } from '../internal-types.js';
+import type { PrismaHandle } from '../internal-types.js';
 import type { SchemaMetadata } from '../schema/types.js';
 import { getModelAccessor } from '../utils/model-accessor.js';
 
@@ -195,7 +195,7 @@ const writeAuditLogs = async (
 export const createPrismaWriteExecutor = (
   DbNull: unknown,
   options: PrismaWriteExecutorOptions,
-): WriteExecutor<TransactionalPrismaClient> => {
+): WriteExecutor<PrismaHandle> => {
   const { auditLogModel } = options;
   return {
     write: async (client, logs) => {

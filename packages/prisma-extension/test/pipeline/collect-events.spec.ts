@@ -10,11 +10,7 @@ import type {
   NestedBatchTargets,
   NestedPreFetchResults,
 } from '../../src/grammar/nested-operations.js';
-import type {
-  PrismaClientWithDynamicAccess,
-  PrismaNamespace,
-  TransactionalPrismaClient,
-} from '../../src/internal-types.js';
+import type { PrismaBaseClient, PrismaHandle, PrismaNamespace } from '../../src/internal-types.js';
 import { buildNestedWriteSets, detectExecutedNestedOperations } from '../../src/nested/events/write-set.js';
 import type { PreExistingRows } from '../../src/nested/pre-fetch/pre-existing-rows.js';
 import { markPathUnread, storePreFetchResult } from '../../src/nested/pre-fetch/pre-fetch-result-store.js';
@@ -69,7 +65,7 @@ const schemaMetadata = schemaMetadataOf(
 );
 
 const deps = { Prisma, schemaMetadata, shouldFetchBefore: () => true, auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS };
-const client: PrismaClientWithDynamicAccess = Object.create(null);
+const client: PrismaBaseClient = Object.create(null);
 
 type SingleCase = Partial<
   Omit<SingleOperationOutcome, 'nestedOperations' | 'writeSets'> & {
@@ -722,7 +718,7 @@ describe('collectSingleOperationEvents', () => {
         const byIds = async ({ where }: { where: { OR: Record<string, unknown>[] } }) =>
           stored.filter((row) => where.OR.some((filter) => filter.id === row.id));
         const post = { findMany: vi.fn(byIds) };
-        const rereadClient: TransactionalPrismaClient = { post };
+        const rereadClient: PrismaHandle = { post };
         return { rereadClient, post };
       };
 
@@ -863,7 +859,7 @@ describe('collectSingleOperationEvents', () => {
 
       it('propagates a failed read', async () => {
         const readError = new Error('findMany failed');
-        const rereadClient: TransactionalPrismaClient = {
+        const rereadClient: PrismaHandle = {
           post: {
             findMany: vi.fn(async () => {
               throw readError;

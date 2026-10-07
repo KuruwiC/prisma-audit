@@ -24,7 +24,7 @@
 import type { BeforeState, MutationAction, MutationEvent } from '@kuruwic/db-audit-core';
 import type { NestedOperationInfo, NestedPreFetchResults } from '../grammar/nested-operations.js';
 import { AUDIT_ACTION, type AuditAction, BATCH_TO_SINGULAR_ACTION } from '../grammar/operations.js';
-import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../internal-types.js';
+import type { PrismaHandle } from '../internal-types.js';
 import { collectNestedEvents, type NestedEventCollectorDependencies } from '../nested/events/collect-nested-events.js';
 import { identityOf, toMutationAction } from '../nested/events/event-fields.js';
 import type { NestedWriteSets } from '../nested/events/write-set.js';
@@ -60,7 +60,7 @@ export interface SingleOperationOutcome {
   readonly preExistingRows: PreExistingRows;
   readonly linkReads: LinkReads;
   /** Client the operation ran on; reads the nested rows the result did not include */
-  readonly client: PrismaClientWithDynamicAccess | TransactionalPrismaClient;
+  readonly client: PrismaHandle;
 }
 
 export type EventCollectorDependencies = NestedEventCollectorDependencies;

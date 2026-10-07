@@ -4,7 +4,7 @@
  * @module nested/pre-fetch/model-client
  */
 
-import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../internal-types.js';
+import type { PrismaHandle } from '../../internal-types.js';
 import { type AuditedOmittedFields, withOmittedFieldsInFinds } from '../../utils/audited-omitted-fields.js';
 import { getModelDelegate, hasOperation } from '../../utils/model-accessor.js';
 
@@ -29,7 +29,7 @@ export interface PreFetchListClient {
 
 /** `modelName` is the model's name as the schema declares it. */
 export const getPreFetchModelClient = (
-  prismaClient: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
+  prismaClient: PrismaHandle,
   modelName: string,
   auditedOmittedFields: AuditedOmittedFields,
 ): PreFetchModelClient | undefined => {
@@ -42,7 +42,7 @@ export const getPreFetchModelClient = (
 
 /** `modelName` is the model's name as the schema declares it. */
 export const getPreFetchListClient = (
-  prismaClient: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
+  prismaClient: PrismaHandle,
   modelName: string,
   auditedOmittedFields: AuditedOmittedFields,
 ): PreFetchListClient | undefined => {

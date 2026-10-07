@@ -18,7 +18,7 @@ import {
   createAsyncLocalStorageProvider,
 } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
-import type { TransactionalPrismaClient } from '../../src/internal-types.js';
+import type { PrismaHandle } from '../../src/internal-types.js';
 import { flushAllPendingWrites } from '../../src/runtime/pending-writes.js';
 import { currentScope } from '../../src/runtime/scope.js';
 import {
@@ -47,12 +47,12 @@ const enqueueDeferredWrite = (write: () => Promise<void>): void => {
  */
 const runThroughHandler = (
   provider: AuditContextProvider,
-  callback: (tx: TransactionalPrismaClient) => Promise<unknown>,
-  txClient: TransactionalPrismaClient,
+  callback: (tx: PrismaHandle) => Promise<unknown>,
+  txClient: PrismaHandle,
 ): Promise<unknown> => {
   const target = {};
   const originalTransaction = (...args: unknown[]): Promise<unknown> => {
-    const wrapped = args[0] as (tx: TransactionalPrismaClient) => Promise<unknown>;
+    const wrapped = args[0] as (tx: PrismaHandle) => Promise<unknown>;
     return wrapped(txClient);
   };
   const handler = createTransactionProxyHandler({
@@ -67,10 +67,10 @@ const runThroughHandler = (
 describe('createWrappedTransactionCallback (context/runtime separation)', () => {
   it('keeps the transactional client after a full runAsync actor replacement', async () => {
     const provider = createAsyncLocalStorageProvider();
-    const txClient = { _isTx: true } as unknown as TransactionalPrismaClient;
+    const txClient: PrismaHandle = { _isTx: true };
     let resolvedInsideOverride: unknown;
 
-    const callback = async (_tx: TransactionalPrismaClient) => {
+    const callback = async (_tx: PrismaHandle) => {
       // Full context replacement: the actor (and request) are swapped on the app store.
       return provider.runAsync({ actor: actor2 }, async () => {
         resolvedInsideOverride = resolveTxClientFromRuntime();
@@ -90,11 +90,11 @@ describe('createWrappedTransactionCallback (context/runtime separation)', () => 
 
   it('keeps the transactional client and preserves request metadata under withActor', async () => {
     const provider = createAsyncLocalStorageProvider();
-    const txClient = { _isTx: true } as unknown as TransactionalPrismaClient;
+    const txClient: PrismaHandle = { _isTx: true };
     let resolvedInsideOverride: unknown;
     let contextInsideOverride: AuditContext | undefined;
 
-    const callback = async (_tx: TransactionalPrismaClient) => {
+    const callback = async (_tx: PrismaHandle) => {
       return provider.withActor(actor2, () => {
         resolvedInsideOverride = resolveTxClientFromRuntime();
         contextInsideOverride = provider.getContext();
@@ -119,10 +119,10 @@ describe('createWrappedTransactionCallback (context/runtime separation)', () => 
     // overridden actor: the async wrapper in withActor ensures .then is called INSIDE the
     // overridden scope, while the storage.run scope is still active.
     const provider = createAsyncLocalStorageProvider();
-    const txClient = { _isTx: true } as unknown as TransactionalPrismaClient;
+    const txClient: PrismaHandle = { _isTx: true };
     const seen: Array<{ actor: string; transactionClient: unknown }> = [];
 
-    const callback = async (_tx: TransactionalPrismaClient) => {
+    const callback = async (_tx: PrismaHandle) => {
       // Plain arrow returning a lazy thenable — no async keyword on the callback.
       await provider.withActor(
         actor2,
@@ -151,10 +151,10 @@ describe('createWrappedTransactionCallback (context/runtime separation)', () => 
   it('clears the caller-owned queue at the start of each invocation', async () => {
     // Defensive against callback re-invocation: stale entries must not survive into a re-run.
     const provider = createAsyncLocalStorageProvider();
-    const txClient = { _isTx: true } as unknown as TransactionalPrismaClient;
+    const txClient: PrismaHandle = { _isTx: true };
     const deferredWrites: Array<() => Promise<void>> = [async () => {}];
 
-    const callback = async (_tx: TransactionalPrismaClient) => 'ok';
+    const callback = async (_tx: PrismaHandle) => 'ok';
     const wrapped = createWrappedTransactionCallback(callback, baseContext, provider, deferredWrites);
 
     await provider.runAsync(baseContext, () => wrapped(txClient));
@@ -167,10 +167,10 @@ describe('createWrappedTransactionCallback (context/runtime separation)', () => 
 describe('createTransactionProxyHandler (deferred-write drain timing)', () => {
   it('drains deferred writes enqueued under an actor-overridden scope after commit', async () => {
     const provider = createAsyncLocalStorageProvider();
-    const txClient = { _isTx: true } as unknown as TransactionalPrismaClient;
+    const txClient: PrismaHandle = { _isTx: true };
     const deferredWrite = vi.fn(async () => {});
 
-    const callback = async (_tx: TransactionalPrismaClient) => {
+    const callback = async (_tx: PrismaHandle) => {
       // Enqueue from within an actor override to prove the queue survives the swap.
       provider.withActor(actor2, () => {
         enqueueDeferredWrite(deferredWrite);
@@ -189,18 +189,18 @@ describe('createTransactionProxyHandler (deferred-write drain timing)', () => {
   it('does not drain deferred writes until originalTransaction resolves', async () => {
     // Proves the drain happens strictly AFTER commit, not inside the user callback.
     const provider = createAsyncLocalStorageProvider();
-    const txClient = { _isTx: true } as unknown as TransactionalPrismaClient;
+    const txClient: PrismaHandle = { _isTx: true };
     const deferredWrite = vi.fn(async () => {});
     let calledAtCommitTime = false;
 
-    const callback = async (_tx: TransactionalPrismaClient) => {
+    const callback = async (_tx: PrismaHandle) => {
       enqueueDeferredWrite(deferredWrite);
       return 'ok';
     };
 
     const target = {};
     const originalTransaction = async (...args: unknown[]): Promise<unknown> => {
-      const wrapped = args[0] as (tx: TransactionalPrismaClient) => Promise<unknown>;
+      const wrapped = args[0] as (tx: PrismaHandle) => Promise<unknown>;
       const result = await wrapped(txClient);
       // Observe at "commit time": the callback has resolved but the handler has not drained yet.
       calledAtCommitTime = deferredWrite.mock.calls.length > 0;
@@ -223,11 +223,11 @@ describe('createTransactionProxyHandler (deferred-write drain timing)', () => {
 
   it('discards deferred writes when the transaction callback throws (rollback)', async () => {
     const provider = createAsyncLocalStorageProvider();
-    const txClient = { _isTx: true } as unknown as TransactionalPrismaClient;
+    const txClient: PrismaHandle = { _isTx: true };
     const deferredWrite = vi.fn(async () => {});
     const rollbackError = new Error('rolled back');
 
-    const callback = async (_tx: TransactionalPrismaClient) => {
+    const callback = async (_tx: PrismaHandle) => {
       await provider.runAsync({ actor: actor2 }, async () => {
         enqueueDeferredWrite(deferredWrite);
       });
@@ -244,18 +244,18 @@ describe('createTransactionProxyHandler (deferred-write drain timing)', () => {
     // The user callback runs to completion and enqueues a deferred write, but the commit
     // itself fails. The handler must NOT drain — no audit log for a rolled-back transaction.
     const provider = createAsyncLocalStorageProvider();
-    const txClient = { _isTx: true } as unknown as TransactionalPrismaClient;
+    const txClient: PrismaHandle = { _isTx: true };
     const deferredWrite = vi.fn(async () => {});
     const commitError = new Error('commit failed');
 
-    const callback = async (_tx: TransactionalPrismaClient) => {
+    const callback = async (_tx: PrismaHandle) => {
       enqueueDeferredWrite(deferredWrite);
       return 'callback-ok';
     };
 
     const target = {};
     const originalTransaction = async (...args: unknown[]): Promise<unknown> => {
-      const wrapped = args[0] as (tx: TransactionalPrismaClient) => Promise<unknown>;
+      const wrapped = args[0] as (tx: PrismaHandle) => Promise<unknown>;
       // Run the callback successfully, then simulate the commit itself failing.
       await wrapped(txClient);
       throw commitError;
@@ -519,10 +519,10 @@ describe('createTransactionProxy', () => {
 
   it('runs an interactive $transaction callback inside the scope of its transactional client', async () => {
     const provider = createAsyncLocalStorageProvider();
-    const txClient = { _isTx: true } as unknown as TransactionalPrismaClient;
+    const txClient: PrismaHandle = { _isTx: true };
     const target = new FakeClient();
     vi.spyOn(target, '$transaction').mockImplementation(async (...args: unknown[]) => {
-      const callback = args[0] as (tx: TransactionalPrismaClient) => Promise<unknown>;
+      const callback = args[0] as (tx: PrismaHandle) => Promise<unknown>;
       return callback(txClient);
     });
     const proxy = createTransactionProxy(target, { provider });
@@ -543,7 +543,7 @@ describe('createTransactionProxy', () => {
     const provider = createAsyncLocalStorageProvider();
     const target = new FakeClient();
     const original = vi.spyOn(target, '$transaction').mockImplementation(async (...args: unknown[]) => {
-      const callback = args[0] as (tx: TransactionalPrismaClient) => Promise<unknown>;
+      const callback = args[0] as (tx: PrismaHandle) => Promise<unknown>;
       return callback({ _isTx: true });
     });
     const proxy = createTransactionProxy(target, { provider });
@@ -559,10 +559,10 @@ describe('createTransactionProxy', () => {
 
   it('runs the lazy operation an interactive $transaction callback returns without awaiting it inside the scope of its transactional client', async () => {
     const provider = createAsyncLocalStorageProvider();
-    const txClient: TransactionalPrismaClient = { _isTx: true };
+    const txClient: PrismaHandle = { _isTx: true };
     const target = new FakeClient();
     vi.spyOn(target, '$transaction').mockImplementation(async (...args: unknown[]) => {
-      const callback = args[0] as (tx: TransactionalPrismaClient) => Promise<unknown>;
+      const callback = args[0] as (tx: PrismaHandle) => Promise<unknown>;
       return await callback(txClient);
     });
     const proxy = createTransactionProxy(target, { provider });
@@ -576,10 +576,10 @@ describe('createTransactionProxy', () => {
 
   it('runs an interactive $transaction callback inside the scope of its transactional client without an audit context', async () => {
     const provider = createAsyncLocalStorageProvider();
-    const txClient: TransactionalPrismaClient = { _isTx: true };
+    const txClient: PrismaHandle = { _isTx: true };
     const target = new FakeClient();
     vi.spyOn(target, '$transaction').mockImplementation(async (...args: unknown[]) => {
-      const callback = args[0] as (tx: TransactionalPrismaClient) => Promise<unknown>;
+      const callback = args[0] as (tx: PrismaHandle) => Promise<unknown>;
       return callback(txClient);
     });
     const proxy = createTransactionProxy(target, { provider });
@@ -599,13 +599,13 @@ describe('createTransactionProxy', () => {
 
   it('proxies a client derived by $extends, so that its interactive $transaction runs inside the scope', async () => {
     const provider = createAsyncLocalStorageProvider();
-    const txClient: TransactionalPrismaClient = { _isTx: true };
+    const txClient: PrismaHandle = { _isTx: true };
     const proxy = createTransactionProxy(new FakeClient(), { provider });
     const extension = { name: 'derived' };
 
     const derived = proxy.$extends(extension);
     vi.spyOn(derived, '$transaction').mockImplementation(async (...args: unknown[]) => {
-      const callback = args[0] as (tx: TransactionalPrismaClient) => Promise<unknown>;
+      const callback = args[0] as (tx: PrismaHandle) => Promise<unknown>;
       return callback(txClient);
     });
     let clientInsideCallback: unknown;

@@ -5,7 +5,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import { TOP_LEVEL_ROW } from '../../../src/grammar/nested-state.js';
-import type { TransactionalPrismaClient } from '../../../src/internal-types.js';
+import type { PrismaHandle } from '../../../src/internal-types.js';
 import { preFetchNestedRecordsBeforeOperation } from '../../../src/nested/pre-fetch/coordinator.js';
 import { preFetchedStateUnder } from '../../../src/nested/pre-fetch/pre-fetch-result-store.js';
 import { NO_AUDITED_OMITTED_FIELDS } from '../../../src/utils/audited-omitted-fields.js';
@@ -82,11 +82,11 @@ const createDelegate = (rows: Row[]) => {
   return { findUnique: find, findFirst: find };
 };
 
-const createClient = (tables: Record<string, Row[]>): TransactionalPrismaClient =>
+const createClient = (tables: Record<string, Row[]>): PrismaHandle =>
   Object.fromEntries(Object.entries(tables).map(([model, rows]) => [model, createDelegate(rows)]));
 
 const preFetch = async (
-  client: TransactionalPrismaClient,
+  client: PrismaHandle,
   modelName: string,
   args: Row,
   shouldFetchBefore: (modelName: string, operation: string) => boolean = () => true,

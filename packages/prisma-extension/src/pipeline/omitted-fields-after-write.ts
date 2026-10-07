@@ -12,7 +12,7 @@
  */
 
 import type { MutationEvent } from '@kuruwic/db-audit-core';
-import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../internal-types.js';
+import type { PrismaHandle } from '../internal-types.js';
 import type { SchemaMetadata } from '../schema/types.js';
 import type { AuditedOmittedFields } from '../utils/audited-omitted-fields.js';
 import { extractEntityIdentity, findManyByKeys, rowKeyFieldsOf } from '../utils/id-generation.js';
@@ -36,7 +36,7 @@ const lacksAny = (event: MutationEvent, fields: ReadonlySet<string>): boolean =>
   [...fields].some((field) => !(field in (event.after ?? {})));
 
 const readFields = async (
-  handle: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
+  handle: PrismaHandle,
   modelName: string,
   keyFields: string[],
   fields: ReadonlySet<string>,
@@ -65,7 +65,7 @@ const withReadFields = (after: Row, read: Row | undefined, fields: ReadonlySet<s
  */
 export const readOmittedFieldsAfterWrite = async (
   events: readonly MutationEvent[],
-  handle: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
+  handle: PrismaHandle,
   deps: OmittedFieldReadDependencies,
 ): Promise<MutationEvent[]> => {
   const lacking = new Map<string, Row[]>();

@@ -5,7 +5,7 @@
 
 import type { WritePolicy } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
-import type { TransactionalPrismaClient } from '../../src/internal-types.js';
+import type { PrismaHandle } from '../../src/internal-types.js';
 import { createRecipeClient, type RecipeConfig, takeBatchRecipes } from '../../src/runtime/operation-recipe.js';
 import { currentScope, decidedWritePolicyFor, withScope } from '../../src/runtime/scope.js';
 
@@ -51,7 +51,7 @@ const createClients = () => {
   });
   const tx = clientNamed('transaction');
   const $transaction = vi.fn(async (callback: (client: object) => Promise<unknown>) =>
-    withScope({ transaction: { client: tx as TransactionalPrismaClient, deferredWrites: [] } }, () => callback(tx)),
+    withScope({ transaction: { client: tx, deferredWrites: [] } }, () => callback(tx)),
   );
   const receiver = { $transaction };
   const target = clientNamed('client');
@@ -75,7 +75,7 @@ const createUserOn = (config: RecipeConfig, clients: ReturnType<typeof createCli
 describe('operation recipes', () => {
   it('runs a write whose audit is awaited in a transaction of its own, even inside a transaction of the caller', async () => {
     const clients = createClients();
-    const callerTransaction = { _caller: true } as TransactionalPrismaClient;
+    const callerTransaction: PrismaHandle = { _caller: true };
 
     await withScope({ transaction: { client: callerTransaction, deferredWrites: [] } }, async () => {
       await createUserOn(configAwaiting(true), clients, { email: 'a' });

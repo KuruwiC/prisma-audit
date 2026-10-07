@@ -6,7 +6,7 @@
 
 import type { AuditContext, FailureSink } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
-import type { PrismaClientWithDynamicAccess, PrismaNamespace } from '../../src/internal-types.js';
+import type { PrismaBaseClient, PrismaNamespace } from '../../src/internal-types.js';
 import type { ExecutionScope } from '../../src/pipeline/execution-scope.js';
 import type { AuditedOperation } from '../../src/pipeline/executor.js';
 import type { RecordProducer } from '../../src/pipeline/produce-records.js';
@@ -42,15 +42,17 @@ const schemaMetadata = schemaMetadataOf(
 const auditContext: AuditContext = { actor: { category: 'model', type: 'User', id: 'user-1' } };
 const user: Row = { id: 'u1', name: 'Ann' };
 
-const clientWith = (delegates: Record<string, Record<string, unknown>>): PrismaClientWithDynamicAccess => ({
+const clientWith = (delegates: Record<string, Record<string, unknown>>): PrismaBaseClient => ({
   $transaction: async () => {
     throw new Error('no transaction is opened by the executor');
   },
-  $extends: () => undefined,
+  $extends: () => {
+    throw new Error('not used');
+  },
   ...delegates,
 });
 
-const scopeOn = (client: PrismaClientWithDynamicAccess): ExecutionScope => ({
+const scopeOn = (client: PrismaBaseClient): ExecutionScope => ({
   auditContext,
   handle: client,
   baseClient: client,
@@ -66,7 +68,7 @@ const createFailureSink = (): FailureSink => ({
 });
 
 /** The continuation the pipeline would build for `client`: the action of its `user` delegate */
-const mutationOn = (client: PrismaClientWithDynamicAccess, action: string): ((args: Row) => Promise<unknown>) => {
+const mutationOn = (client: PrismaBaseClient, action: string): ((args: Row) => Promise<unknown>) => {
   const mutation = (client.user as Record<string, unknown> | undefined)?.[action];
   if (typeof mutation !== 'function') {
     throw new Error(`Model "User" or action "${action}" not found`);
@@ -74,11 +76,7 @@ const mutationOn = (client: PrismaClientWithDynamicAccess, action: string): ((ar
   return mutation as (args: Row) => Promise<unknown>;
 };
 
-const operationOn = (
-  client: PrismaClientWithDynamicAccess,
-  action: AuditedOperation['action'],
-  args: Row,
-): AuditedOperation => ({
+const operationOn = (client: PrismaBaseClient, action: AuditedOperation['action'], args: Row): AuditedOperation => ({
   model: 'User',
   action,
   args,

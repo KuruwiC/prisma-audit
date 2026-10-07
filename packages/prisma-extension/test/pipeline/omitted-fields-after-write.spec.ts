@@ -4,7 +4,7 @@
 
 import type { MutationEvent } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
-import type { PrismaClientWithDynamicAccess } from '../../src/internal-types.js';
+import type { PrismaBaseClient } from '../../src/internal-types.js';
 import { readOmittedFieldsAfterWrite } from '../../src/pipeline/omitted-fields-after-write.js';
 import { createAuditedOmittedFields } from '../../src/utils/audited-omitted-fields.js';
 import { column, model, schemaMetadataOf } from '../support/audit-schema.js';
@@ -65,7 +65,7 @@ const eventOf = (
 
 const read = async (events: MutationEvent[], overrides: Record<string, unknown> = {}) => {
   const client = clientOf();
-  const handle: PrismaClientWithDynamicAccess = Object.assign(Object.create(null), client, overrides);
+  const handle: PrismaBaseClient = Object.assign(Object.create(null), client, overrides);
   const completed = await readOmittedFieldsAfterWrite(events, handle, { schemaMetadata, auditedOmittedFields });
   return { completed, client };
 };

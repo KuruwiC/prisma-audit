@@ -16,7 +16,7 @@
 import { createFailureSink, policy } from '@kuruwic/db-audit-core';
 import { createPrismaWriteExecutor, declaresBeforeUnavailableColumn } from './adapters/write-executor.js';
 import { type AuditOptions, normalizeAuditOptions } from './audit-options.js';
-import type { ExtensionParams, PrismaClientWithDynamicAccess } from './internal-types.js';
+import type { ExtensionParams, PrismaBaseClient } from './internal-types.js';
 import { createBatchExecutor } from './pipeline/batch-executor.js';
 import { createRecordProducer } from './pipeline/produce-records.js';
 import { type AuditPipelineDependencies, runAuditedOperation } from './pipeline/run-audited-operation.js';
@@ -96,7 +96,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
   const deps = createPipelineDependencies(audit);
   const shape: ClientShape = { schemaMetadata: audit.schemaMetadata, queryOmitSupported: audit.queryOmitSupported };
 
-  const auditOperation = async (params: ExtensionParams, baseClient: PrismaClientWithDynamicAccess) => {
+  const auditOperation = async (params: ExtensionParams, baseClient: PrismaBaseClient) => {
     const { operation, model, args, query } = params;
     const auditContext = audit.provider.getContext();
 
@@ -141,7 +141,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     return projectToRequestedShape(result, injection.injected);
   };
 
-  const extensionDefinition = (baseClient: PrismaClientWithDynamicAccess) => {
+  const extensionDefinition = (baseClient: PrismaBaseClient) => {
     const extendedClient = baseClient.$extends({
       name: 'prisma-audit',
       query: {
@@ -149,7 +149,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
       },
     });
 
-    return createTransactionProxy(extendedClient as object, { provider: audit.provider, recipeConfig });
+    return createTransactionProxy(extendedClient, { provider: audit.provider, recipeConfig });
   };
 
   return audit.Prisma.defineExtension(extensionDefinition);

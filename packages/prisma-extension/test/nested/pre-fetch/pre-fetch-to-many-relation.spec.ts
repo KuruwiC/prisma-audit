@@ -6,7 +6,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { NestedPreFetchResults } from '../../../src/grammar/nested-operations.js';
 import type { ShouldFetchBefore } from '../../../src/grammar/pre-fetch-selection.js';
-import type { TransactionalPrismaClient } from '../../../src/internal-types.js';
+import type { PrismaHandle } from '../../../src/internal-types.js';
 import { preFetchNestedRecordsBeforeOperation } from '../../../src/nested/pre-fetch/coordinator.js';
 import { preFetchOneToManyRelation } from '../../../src/nested/pre-fetch/one-to-many-fetcher.js';
 import { parentKeysFromOperationWheres } from '../../../src/nested/pre-fetch/parent-rows.js';
@@ -60,14 +60,14 @@ const createDelegate = (rows: Row[]) => {
 
 const createClient = (tables: Record<string, Row[]>) => {
   const delegates = Object.fromEntries(Object.entries(tables).map(([model, rows]) => [model, createDelegate(rows)]));
-  return { client: delegates as TransactionalPrismaClient, delegates };
+  return { client: delegates, delegates };
 };
 
 const fetchBefore: ShouldFetchBefore = () => true;
 const identityOnly: ShouldFetchBefore = () => false;
 
 const preFetch = (
-  client: TransactionalPrismaClient,
+  client: PrismaHandle,
   modelName: string,
   args: Row,
   shouldFetchBefore: ShouldFetchBefore = fetchBefore,
@@ -78,11 +78,7 @@ const preFetch = (
     shouldFetchBefore,
   });
 
-const preFetchReporting = (
-  client: TransactionalPrismaClient,
-  args: Row,
-  shouldFetchBefore: ShouldFetchBefore = fetchBefore,
-) => {
+const preFetchReporting = (client: PrismaHandle, args: Row, shouldFetchBefore: ShouldFetchBefore = fetchBefore) => {
   const onPreFetchFailure = vi.fn();
   const preFetched = preFetchNestedRecordsBeforeOperation(client, 'Account', args, {
     schemaMetadata,

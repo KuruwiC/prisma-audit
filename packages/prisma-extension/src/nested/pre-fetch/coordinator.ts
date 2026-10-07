@@ -25,7 +25,7 @@ import {
   type ShouldFetchBefore,
   sortByPathDepth,
 } from '../../grammar/pre-fetch-selection.js';
-import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../internal-types.js';
+import type { PrismaHandle } from '../../internal-types.js';
 import type { RelationField, SchemaMetadata, UniqueConstraint } from '../../schema/types.js';
 import type { AuditedOmittedFields } from '../../utils/audited-omitted-fields.js';
 import { beforeStateOf, NO_BEFORE_STATE } from '../../utils/before-state.js';
@@ -183,7 +183,7 @@ const reportNestedPreFetchFailure = async (
  * @throws The error of a failed batch keyword filter read
  */
 export const preFetchNestedRecordsBeforeOperation = async (
-  prismaClient: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
+  prismaClient: PrismaHandle,
   modelName: string,
   args: Record<string, unknown>,
   dependencies: PreFetchCoordinatorDependencies,
@@ -342,7 +342,7 @@ const updatedRowsToIdentify = (
 };
 
 interface NestedPreFetchContext {
-  prismaClient: PrismaClientWithDynamicAccess | TransactionalPrismaClient;
+  prismaClient: PrismaHandle;
   modelName: string;
   schemaMetadata: SchemaMetadata;
   /** Every nested operation the discovery pass detected */

@@ -15,7 +15,7 @@ import type { BeforeState } from '@kuruwic/db-audit-core';
 import type { NestedOperationInfo, NestedPreFetchResults } from '../../grammar/nested-operations.js';
 import { namedTargets } from '../../grammar/nested-operations.js';
 import { AUDIT_ACTION } from '../../grammar/operations.js';
-import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../internal-types.js';
+import type { PrismaHandle } from '../../internal-types.js';
 import type { AuditedOmittedFields } from '../../utils/audited-omitted-fields.js';
 import { UNAVAILABLE_BEFORE_STATE } from '../../utils/before-state.js';
 import { matchesUniqueWhere, uniqueWhereAsFilter } from '../../utils/compound-where.js';
@@ -170,7 +170,7 @@ const recordOf = (
 
 export interface LinkChangesInput {
   /** Client the operation ran on */
-  readonly client: PrismaClientWithDynamicAccess | TransactionalPrismaClient;
+  readonly client: PrismaHandle;
   readonly linkReads: LinkReads;
   readonly nestedPreFetchResults: NestedPreFetchResults;
   readonly auditedOmittedFields: AuditedOmittedFields;

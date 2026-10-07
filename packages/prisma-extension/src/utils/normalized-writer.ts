@@ -13,7 +13,7 @@
  */
 
 import type { AuditRecord, WriteContext } from '@kuruwic/db-audit-core';
-import type { TransactionalPrismaClient } from '../internal-types.js';
+import type { PrismaBaseClient, PrismaHandle } from '../internal-types.js';
 import type { AuditLogWriter } from '../types.js';
 import { getModelDelegate, hasOperation } from './model-accessor.js';
 
@@ -139,7 +139,7 @@ interface CreateDelegate {
 }
 
 const requireDelegate = <TDelegate extends object>(
-  tx: TransactionalPrismaClient,
+  tx: PrismaHandle,
   modelName: string,
   operation: keyof TDelegate & string,
 ): TDelegate => {
@@ -159,7 +159,7 @@ const beforeUnavailableColumn = (field: string | undefined, log: AuditRecord): R
  * @internal
  */
 const batchUpsertActors = async (
-  tx: TransactionalPrismaClient,
+  tx: PrismaHandle,
   modelName: string,
   actors: Map<string, ActorData>,
 ): Promise<Map<string, string>> => {
@@ -190,7 +190,7 @@ const batchUpsertActors = async (
  * @internal
  */
 const batchUpsertEntities = async (
-  tx: TransactionalPrismaClient,
+  tx: PrismaHandle,
   modelName: string,
   entities: Map<string, EntityData>,
 ): Promise<Map<string, string>> => {
@@ -221,7 +221,7 @@ const batchUpsertEntities = async (
  * @internal
  */
 const batchUpsertAggregates = async (
-  tx: TransactionalPrismaClient,
+  tx: PrismaHandle,
   modelName: string,
   aggregates: Map<string, AggregateData>,
 ): Promise<Map<string, string>> => {
@@ -252,7 +252,7 @@ const batchUpsertAggregates = async (
  * @internal
  */
 const createAuditEvents = async (
-  tx: TransactionalPrismaClient,
+  tx: PrismaHandle,
   schema: Pick<NormalizedSchema, 'eventModel' | 'beforeUnavailableField'>,
   logs: AuditRecord[],
   actorMap: Map<string, string>,
@@ -293,9 +293,11 @@ const createAuditEvents = async (
   }
 };
 
-type PrismaClientWithTransaction = {
-  $transaction: <T>(fn: (tx: TransactionalPrismaClient) => Promise<T>) => Promise<T>;
-};
+const isPrismaHandle = (handle: unknown): handle is PrismaHandle =>
+  (typeof handle === 'object' && handle !== null) || typeof handle === 'function';
+
+const canOpenTransaction = (handle: PrismaHandle): handle is PrismaHandle & Pick<PrismaBaseClient, '$transaction'> =>
+  typeof handle.$transaction === 'function';
 
 /**
  * Runs `write` on the writer's handle when the write is already inside a transaction, else in a
@@ -303,11 +305,21 @@ type PrismaClientWithTransaction = {
  */
 const writeInTransaction = (
   { handle, inTransaction }: Pick<WriteContext, 'handle' | 'inTransaction'>,
-  write: (tx: TransactionalPrismaClient) => Promise<void>,
-): Promise<void> =>
-  inTransaction
-    ? write(handle as TransactionalPrismaClient)
-    : (handle as PrismaClientWithTransaction).$transaction(write);
+  write: (tx: PrismaHandle) => Promise<void>,
+): Promise<void> => {
+  if (!isPrismaHandle(handle)) {
+    throw new Error('[@prisma-audit] The normalized writer needs a Prisma client or transaction client as its handle');
+  }
+  if (inTransaction) {
+    return write(handle);
+  }
+  if (!canOpenTransaction(handle)) {
+    throw new Error(
+      '[@prisma-audit] The normalized writer cannot open a transaction on the handle it was given: it has no $transaction',
+    );
+  }
+  return handle.$transaction(write);
+};
 
 /**
  * Creates a writer that stores audit logs in a normalized schema with separate tables for actors,
@@ -340,7 +352,7 @@ export const createEntityNormalizedWriter = (schema: NormalizedSchema): AuditLog
 
     const { actors, entities, aggregates } = deduplicateData(logs);
 
-    const writeWithinTransaction = async (tx: TransactionalPrismaClient) => {
+    const writeWithinTransaction = async (tx: PrismaHandle) => {
       const actorMap = await batchUpsertActors(tx, schema.actorModel, actors);
       const entityMap = await batchUpsertEntities(tx, schema.entityModel, entities);
       const aggregateMap = await batchUpsertAggregates(tx, schema.aggregateModel, aggregates);
@@ -460,7 +472,7 @@ export const createSharedChangeWriter = (schema: SharedChangeSchema): AuditLogWr
       }
     };
 
-    const writeWithinTransaction = async (tx: TransactionalPrismaClient) => {
+    const writeWithinTransaction = async (tx: PrismaHandle) => {
       const changeModel = requireDelegate<CreateDelegate>(tx, schema.changeModel, 'create');
       const aggregateModel = requireDelegate<CreateDelegate>(tx, schema.aggregateModel, 'create');
 

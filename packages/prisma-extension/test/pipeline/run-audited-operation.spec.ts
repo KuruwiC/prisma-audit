@@ -8,7 +8,7 @@
 import type { AuditContext, AuditRecord, FailureSink } from '@kuruwic/db-audit-core';
 import { createActorId, createAggregateId, createEntityId, createFailureSink } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
-import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../src/internal-types.js';
+import type { PrismaBaseClient, PrismaHandle } from '../../src/internal-types.js';
 import type { ExecutionScope } from '../../src/pipeline/execution-scope.js';
 import type { ExecutedOperation, OperationExecutor } from '../../src/pipeline/executor.js';
 import {
@@ -23,25 +23,27 @@ import { isCallerMutationError } from '../../src/utils/caller-mutation-error.js'
 
 const auditContext: AuditContext = { actor: { category: 'model', type: 'User', id: 'user-1' } };
 
-const transactionClientWith = (delegates: Record<string, unknown> = {}): TransactionalPrismaClient =>
+const transactionClientWith = (delegates: Record<string, unknown> = {}): PrismaHandle =>
   Object.assign(Object.create(null), { name: 'transaction', ...delegates });
 const transactionClient = transactionClientWith();
 
-interface BaseClientStub extends PrismaClientWithDynamicAccess {
+interface BaseClientStub extends PrismaBaseClient {
   readonly transactionsOpened: { count: number };
 }
 
 const createBaseClient = (
-  transaction: TransactionalPrismaClient = transactionClient,
+  transaction: PrismaHandle = transactionClient,
   delegates: Record<string, unknown> = {},
 ): BaseClientStub => {
   const transactionsOpened = { count: 0 };
   return {
-    $transaction: async <T>(fn: (tx: TransactionalPrismaClient) => Promise<T>): Promise<T> => {
+    $transaction: async <T>(fn: (tx: PrismaHandle) => Promise<T>): Promise<T> => {
       transactionsOpened.count += 1;
       return fn(transaction);
     },
-    $extends: () => undefined,
+    $extends: () => {
+      throw new Error('not used');
+    },
     transactionsOpened,
     ...delegates,
   };
@@ -234,10 +236,7 @@ describe('runAuditedOperation', () => {
         return outcome;
       });
 
-    type Run = (
-      update: () => void,
-      start: (baseClient: PrismaClientWithDynamicAccess) => Promise<unknown>,
-    ) => Promise<unknown>;
+    type Run = (update: () => void, start: (baseClient: PrismaBaseClient) => Promise<unknown>) => Promise<unknown>;
 
     it.each<{ path: string; atomic: boolean; run: Run }>([
       {

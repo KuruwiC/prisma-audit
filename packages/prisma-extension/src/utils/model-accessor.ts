@@ -1,4 +1,4 @@
-import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../internal-types.js';
+import type { PrismaHandle } from '../internal-types.js';
 import { uncapitalizeFirst } from './extension-utils.js';
 
 /**
@@ -14,10 +14,8 @@ import { uncapitalizeFirst } from './extension-utils.js';
  */
 export const getModelAccessor = (modelName: string): string => uncapitalizeFirst(modelName);
 
-export const getModelDelegate = (
-  client: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
-  modelName: string,
-): unknown => client[getModelAccessor(modelName)];
+export const getModelDelegate = (client: PrismaHandle, modelName: string): unknown =>
+  client[getModelAccessor(modelName)];
 
 const getModelOperation = (delegate: unknown, operation: string): ((args: unknown) => Promise<unknown>) | undefined => {
   if (typeof delegate !== 'object' || delegate === null) {

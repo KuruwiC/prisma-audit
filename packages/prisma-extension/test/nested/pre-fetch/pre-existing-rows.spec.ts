@@ -5,7 +5,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { NestedPreFetchResults } from '../../../src/grammar/nested-operations.js';
 import type { ShouldFetchBefore } from '../../../src/grammar/pre-fetch-selection.js';
-import type { PrismaClientWithDynamicAccess } from '../../../src/internal-types.js';
+import type { PrismaBaseClient } from '../../../src/internal-types.js';
 import { buildNestedWriteSets, detectExecutedNestedOperations } from '../../../src/nested/events/write-set.js';
 import { snapshotPreExistingRows } from '../../../src/nested/pre-fetch/pre-existing-rows.js';
 import { storePreFetchResult, storeUnreadRows } from '../../../src/nested/pre-fetch/pre-fetch-result-store.js';
@@ -28,11 +28,13 @@ const schemaMetadata = schemaMetadataOf(
 );
 const shouldFetchBefore = () => true;
 
-const clientWith = (delegates: Record<string, Record<string, unknown>>): PrismaClientWithDynamicAccess => ({
+const clientWith = (delegates: Record<string, Record<string, unknown>>): PrismaBaseClient => ({
   $transaction: async () => {
     throw new Error('not used');
   },
-  $extends: () => undefined,
+  $extends: () => {
+    throw new Error('not used');
+  },
   ...delegates,
 });
 

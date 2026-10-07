@@ -19,7 +19,7 @@
  */
 
 import type { AuditContext, AuditContextProvider } from '@kuruwic/db-audit-core';
-import type { TransactionalPrismaClient } from '../internal-types.js';
+import type { PrismaHandle } from '../internal-types.js';
 import { createRecipeClient, type RecipeConfig, takeBatchRecipes } from './operation-recipe.js';
 import { drainAfterCommit, enterTransaction, withScope } from './scope.js';
 
@@ -58,12 +58,12 @@ const isolationLevelOptionOf = (options: unknown): Array<{ readonly isolationLev
  * time it runs.
  */
 export const createWrappedTransactionCallback = (
-  callback: (tx: TransactionalPrismaClient) => Promise<unknown>,
+  callback: (tx: PrismaHandle) => Promise<unknown>,
   context: AuditContext | undefined,
   provider: AuditContextProvider,
   deferredWrites: Array<() => Promise<void>>,
-): ((txClient: TransactionalPrismaClient) => Promise<unknown>) => {
-  return async (txClient: TransactionalPrismaClient): Promise<unknown> => {
+): ((txClient: PrismaHandle) => Promise<unknown>) => {
+  return async (txClient: PrismaHandle): Promise<unknown> => {
     deferredWrites.length = 0;
 
     return enterTransaction(provider, context, { client: txClient, deferredWrites }, () => callback(txClient));
@@ -82,7 +82,7 @@ export const createTransactionProxyHandler = (
   const { provider, recipeConfig, originalTransaction, target, receiver } = deps;
 
   const runInteractive = async (
-    callback: (tx: TransactionalPrismaClient) => Promise<unknown>,
+    callback: (tx: PrismaHandle) => Promise<unknown>,
     options: unknown[],
   ): Promise<unknown> => {
     const deferredWrites: Array<() => Promise<void>> = [];
@@ -122,7 +122,7 @@ export const createTransactionProxyHandler = (
         ? runRecipeBatch(first, options, recipeConfig)
         : runPrismaBatch(args);
     }
-    const callback = first as (tx: TransactionalPrismaClient) => Promise<unknown>;
+    const callback = first as (tx: PrismaHandle) => Promise<unknown>;
     return runInteractive(callback, options ? [options] : []);
   };
 };

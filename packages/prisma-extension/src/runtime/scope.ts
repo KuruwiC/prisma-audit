@@ -11,12 +11,12 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { AuditContext, AuditContextProvider, WritePolicy } from '@kuruwic/db-audit-core';
 import { getGlobalSingleton } from '@kuruwic/db-audit-core';
-import type { TransactionalPrismaClient } from '../internal-types.js';
+import type { PrismaHandle } from '../internal-types.js';
 import { trackPendingWrite } from './pending-writes.js';
 
 export interface ActiveTransaction {
   /** The client of the interactive transaction the operation runs in */
-  readonly client: TransactionalPrismaClient;
+  readonly client: PrismaHandle;
   /** Writes the owner of the transaction starts on the base client once it has committed */
   readonly deferredWrites: Array<() => Promise<void>>;
 }

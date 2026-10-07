@@ -141,6 +141,65 @@ describe('the transaction the normalized writers write in', () => {
       expect(clientModels[created]?.create).toHaveBeenCalledTimes(1);
     },
   );
+
+  it.each([
+    ['createEntityNormalizedWriter', () => createEntityNormalizedWriter(entitySchema), entityModels, 'auditEvent'],
+    ['createSharedChangeWriter', () => createSharedChangeWriter(sharedChangeSchema), sharedChangeModels, 'auditChange'],
+  ] as const)(
+    '%s rejects naming the handle when the write is outside a transaction and the handle has no $transaction',
+    async (_name, makeWriter, models, created) => {
+      const handleModels: Models = models();
+
+      await expect(makeWriter()([record], contextOn(handleModels, false))).rejects.toThrow(
+        '[@prisma-audit] The normalized writer cannot open a transaction on the handle it was given: it has no $transaction',
+      );
+      expect(handleModels[created]?.create).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ['createEntityNormalizedWriter', () => createEntityNormalizedWriter(entitySchema)],
+    ['createSharedChangeWriter', () => createSharedChangeWriter(sharedChangeSchema)],
+  ] as const)(
+    '%s rejects a handle that is neither an object nor a function, inside a transaction or not',
+    async (_name, makeWriter) => {
+      for (const handle of [undefined, null, 'client', 42]) {
+        for (const inTransaction of [true, false]) {
+          await expect(makeWriter()([record], contextOn(handle, inTransaction))).rejects.toThrow(
+            '[@prisma-audit] The normalized writer needs a Prisma client or transaction client as its handle',
+          );
+        }
+      }
+    },
+  );
+
+  it.each([
+    ['createEntityNormalizedWriter', () => createEntityNormalizedWriter(entitySchema), entityModels, 'auditEvent'],
+    ['createSharedChangeWriter', () => createSharedChangeWriter(sharedChangeSchema), sharedChangeModels, 'auditChange'],
+  ] as const)(
+    '%s writes on a handle whose typeof is function, which carries the models and $transaction',
+    async (_name, makeWriter, models, created) => {
+      const { client, clientModels, transactionModels, $transaction } = clientOutsideTransaction(models);
+      const functionHandle = Object.assign(() => undefined, client);
+
+      await makeWriter()([record], contextOn(functionHandle, false));
+
+      expect(typeof functionHandle).toBe('function');
+      expect($transaction).toHaveBeenCalledTimes(1);
+      expect(transactionModels[created]?.create).toHaveBeenCalledTimes(1);
+      expect(clientModels[created]?.create).not.toHaveBeenCalled();
+
+      await makeWriter()(
+        [record],
+        contextOn(
+          Object.assign(() => undefined, clientModels),
+          true,
+        ),
+      );
+
+      expect(clientModels[created]?.create).toHaveBeenCalledTimes(1);
+    },
+  );
 });
 
 describe('the beforeUnavailable marker of the normalized writers', () => {

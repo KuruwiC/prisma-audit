@@ -7,7 +7,7 @@
  */
 
 import type { AuditContext, TransactionRuntime } from '@kuruwic/db-audit-core';
-import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../internal-types.js';
+import type { PrismaBaseClient, PrismaHandle } from '../internal-types.js';
 import { trackPendingWrite } from '../runtime/pending-writes.js';
 import { currentScope } from '../runtime/scope.js';
 
@@ -22,8 +22,8 @@ export interface ExecutionScope {
    * Client the operation and every audit read and write run on: the transaction's client
    * inside a transaction, else the base client.
    */
-  readonly handle: PrismaClientWithDynamicAccess | TransactionalPrismaClient;
-  readonly baseClient: PrismaClientWithDynamicAccess;
+  readonly handle: PrismaHandle;
+  readonly baseClient: PrismaBaseClient;
   readonly transaction?: TransactionScope;
   /** The operation is part of a batch `$transaction([...])` Prisma runs, which no audit query can join */
   readonly inPrismaBatch: boolean;
@@ -33,7 +33,7 @@ export interface ExecutionScope {
 
 export interface ExecutionScopeInput {
   readonly auditContext: AuditContext;
-  readonly baseClient: PrismaClientWithDynamicAccess;
+  readonly baseClient: PrismaBaseClient;
   readonly atomic: boolean;
 }
 
@@ -57,7 +57,7 @@ export const executionScopeOf = (input: ExecutionScopeInput): ExecutionScope => 
  * a transaction of the scope: each of its operations' writes has committed by the time its audit
  * is built.
  */
-export const transactionRuntimeOf = (scope: ExecutionScope): TransactionRuntime<TransactionalPrismaClient> => {
+export const transactionRuntimeOf = (scope: ExecutionScope): TransactionRuntime<PrismaHandle> => {
   const { transaction } = scope;
   return {
     baseHandle: scope.baseClient,
