@@ -1,0 +1,125 @@
+// Schema the generator tests load in-process. It is never pushed to a database.
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  MEMBER
+}
+
+// uuid(7), @unique, enum and list fields, literal default, now(), @updatedAt, @@map/@map,
+// the inverse side of a 1:1 and of two named one-to-many relations
+model Author {
+  id        String   @id @default(uuid(7))
+  email     String   @unique
+  name      String?
+  role      Role     @default(MEMBER)
+  nicknames String[]
+  score     Int      @default(0)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  profile       Profile?
+  authoredPosts Post[]         @relation("PostAuthor")
+  editedPosts   Post[]         @relation("PostEditor")
+  likes         PostLike[]
+  bookmarks     PostBookmark[]
+
+  @@map("authors")
+}
+
+// uuid(), the owning side of a 1:1
+model Profile {
+  id       String  @id @default(uuid())
+  bio      String?
+  authorId String  @unique @map("author_id")
+
+  author Author @relation(fields: [authorId], references: [id])
+
+  @@map("profiles")
+}
+
+// cuid(), composite @@unique, optional FK, BigInt/Decimal/DateTime fields, implicit m2m
+model Post {
+  id          String    @id @default(cuid())
+  title       String
+  views       BigInt    @default(0)
+  price       Decimal   @db.Decimal(10, 2)
+  publishedAt DateTime?
+  authorId    String    @map("author_id")
+  editorId    String?   @map("editor_id")
+
+  author     Author         @relation("PostAuthor", fields: [authorId], references: [id])
+  editor     Author?        @relation("PostEditor", fields: [editorId], references: [id])
+  categories Category[]
+  likes      PostLike[]
+  bookmarks  PostBookmark[]
+
+  @@unique([authorId, title])
+  @@map("posts")
+}
+
+// autoincrement(), @unique, a self relation
+model Category {
+  id       Int        @id @default(autoincrement())
+  name     String     @unique
+  parentId Int?       @map("parent_id")
+
+  parent   Category?  @relation("CategoryTree", fields: [parentId], references: [id])
+  children Category[] @relation("CategoryTree")
+  posts    Post[]
+}
+
+// composite @@id
+model PostLike {
+  postId String @map("post_id")
+  userId String @map("user_id")
+
+  post Post   @relation(fields: [postId], references: [id])
+  user Author @relation(fields: [userId], references: [id])
+
+  @@id([postId, userId])
+  @@map("post_likes")
+}
+
+// named composite @@id
+model PostBookmark {
+  postId String  @map("post_id")
+  userId String  @map("user_id")
+  label  String?
+
+  post Post   @relation(fields: [postId], references: [id])
+  user Author @relation(fields: [userId], references: [id])
+
+  @@id([postId, userId], name: "bookmarkKey")
+  @@map("post_bookmarks")
+}
+
+// no primary key: a @unique field, then two @@unique constraints (one named)
+model Device {
+  serial String @unique
+  vendor String
+  model  String
+  imei   String
+
+  @@unique([vendor, model])
+  @@unique([vendor, imei], name: "vendorImei")
+}
+
+// cuid(2)
+model ApiToken {
+  id String @id @default(cuid(2))
+
+  @@map("api_tokens")
+}
+
+// dbgenerated()
+model LegacyEvent {
+  id      String @id @default(dbgenerated("gen_random_uuid()"))
+  payload String @default("{}")
+
+  @@map("legacy_events")
+}
