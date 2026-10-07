@@ -168,6 +168,12 @@ importers:
         specifier: ^6.19.0
         version: 6.19.0(prisma@6.19.0(typescript@5.9.3))(typescript@5.9.3)
     devDependencies:
+      '@kuruwic/prisma-audit':
+        specifier: workspace:*
+        version: link:../prisma-extension
+      '@kuruwic/prisma-audit-generator':
+        specifier: workspace:*
+        version: link:../generator
       '@kuruwic/prisma-audit-typescript-config':
         specifier: workspace:*
         version: link:../typescript-config
@@ -251,6 +257,9 @@ importers:
       '@kuruwic/prisma-audit-database':
         specifier: workspace:*
         version: link:../database
+      '@kuruwic/prisma-audit-generator':
+        specifier: workspace:*
+        version: link:../generator
       '@kuruwic/prisma-audit-typescript-config':
         specifier: workspace:*
         version: link:../typescript-config
@@ -300,9 +309,6 @@ importers:
       '@biomejs/biome':
         specifier: ^2.3.5
         version: 2.3.5
-      '@kuruwic/prisma-audit-database':
-        specifier: workspace:*
-        version: link:../database
       '@kuruwic/prisma-audit-typescript-config':
         specifier: workspace:*
         version: link:../typescript-config

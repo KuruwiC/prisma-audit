@@ -20,6 +20,7 @@
     "@kuruwic/prisma-audit": "workspace:*",
     "@kuruwic/db-audit-core": "workspace:*",
     "@kuruwic/prisma-audit-database": "workspace:*",
+    "@kuruwic/prisma-audit-generator": "workspace:*",
     "@kuruwic/prisma-audit-typescript-config": "workspace:*",
     "@prisma/client": "^6.19.0",
     "@testcontainers/mysql": "^11.8.1",

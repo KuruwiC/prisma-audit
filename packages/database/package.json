@@ -23,6 +23,10 @@
       "types": "./generated/client/index.d.ts",
       "import": "./generated/client/index.js",
       "require": "./generated/client/index.js"
+    },
+    "./generated/audit": {
+      "types": "./generated/audit/index.d.ts",
+      "import": "./generated/audit/index.js"
     }
   },
   "files": [
@@ -46,6 +50,8 @@
     "@prisma/client": "^6.19.0"
   },
   "devDependencies": {
+    "@kuruwic/prisma-audit": "workspace:*",
+    "@kuruwic/prisma-audit-generator": "workspace:*",
     "@kuruwic/prisma-audit-typescript-config": "workspace:*",
     "prisma": "^6.19.0",
     "tsup": "^8.5.0",

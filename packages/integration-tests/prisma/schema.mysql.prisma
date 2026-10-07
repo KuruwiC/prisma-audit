@@ -12,6 +12,11 @@ generator client {
   binaryTargets = ["native"]
 }
 
+generator audit {
+  provider = "prisma-audit-generator"
+  output   = "../generated/mysql-audit"
+}
+
 // ============================================
 // Core Models
 // ============================================

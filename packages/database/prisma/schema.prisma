@@ -12,6 +12,11 @@ generator client {
   binaryTargets = ["native", "debian-openssl-1.1.x"]
 }
 
+generator audit {
+  provider = "prisma-audit-generator"
+  output   = "../generated/audit"
+}
+
 // ============================================
 // Core Models
 // ============================================
