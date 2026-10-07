@@ -16,22 +16,14 @@ import type { PreFetchListClient } from '../../../src/nested/pre-fetch/model-cli
 import type { ToManyPath } from '../../../src/nested/pre-fetch/to-many-path.js';
 import type { UniqueConstraint } from '../../../src/schema/types.js';
 import { extractEntityIdentity } from '../../../src/utils/id-generation.js';
-import { createSchemaMetadataFromDMMF } from '../../../src/utils/schema-metadata.js';
+import { column, model, schemaMetadataOf } from '../../support/audit-schema.js';
 
 type Row = Record<string, unknown>;
 
-const scalar = (name: string) => ({ name, kind: 'scalar', type: 'String', isList: false });
-
-const schemaMetadata = createSchemaMetadataFromDMMF({
-  dmmf: {
-    datamodel: {
-      models: [
-        { name: 'Post', fields: [{ ...scalar('id'), isId: true }, scalar('authorId'), scalar('slug')] },
-        { name: 'Category', fields: [{ ...scalar('id'), isId: true }, scalar('name')] },
-      ],
-    },
-  },
-});
+const schemaMetadata = schemaMetadataOf(
+  model('Post', [column('id', { isId: true }), column('authorId'), column('slug')]),
+  model('Category', [column('id', { isId: true }), column('name')]),
+);
 
 const pk: UniqueConstraint = { type: 'primaryKey', fields: ['id'] };
 

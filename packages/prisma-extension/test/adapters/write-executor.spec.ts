@@ -6,7 +6,7 @@ import type { AuditRecord } from '@kuruwic/db-audit-core';
 import { createActorId, createAggregateId, createEntityId } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
 import { createPrismaWriteExecutor, declaresBeforeUnavailableColumn } from '../../src/adapters/write-executor.js';
-import { createSchemaMetadataFromDMMF } from '../../src/utils/schema-metadata.js';
+import { column, model, relation, schemaMetadataOf } from '../support/audit-schema.js';
 
 const DbNull = Symbol('DbNull');
 
@@ -37,8 +37,7 @@ const clientWithAuditLog = () => {
   return { client: { auditLog: { create } }, create };
 };
 
-const dmmfWith = (fields: Array<{ name: string; kind: string; type: string; isList?: boolean }>) =>
-  createSchemaMetadataFromDMMF({ dmmf: { datamodel: { models: [{ name: 'AuditLog', fields }] } } });
+const auditLogWith = (...fields: Parameters<typeof model>[1]) => schemaMetadataOf(model('AuditLog', fields));
 
 describe('createPrismaWriteExecutor', () => {
   it('writes to the audit-log model it was constructed for', async () => {
@@ -183,41 +182,41 @@ describe('the inserts a write issues', () => {
 
 describe('declaresBeforeUnavailableColumn', () => {
   it('is true for a Boolean beforeUnavailable field of the audit-log model', () => {
-    const dmmf = dmmfWith([{ name: 'beforeUnavailable', kind: 'scalar', type: 'Boolean' }]);
+    const metadata = auditLogWith(column('beforeUnavailable', { type: 'Boolean' }));
 
-    expect(declaresBeforeUnavailableColumn(dmmf, 'auditLog')).toBe(true);
+    expect(declaresBeforeUnavailableColumn(metadata, 'auditLog')).toBe(true);
   });
 
   it('is false when the audit-log model has no such field', () => {
-    const dmmf = dmmfWith([{ name: 'before', kind: 'scalar', type: 'Json' }]);
+    const metadata = auditLogWith(column('before', { type: 'Json' }));
 
-    expect(declaresBeforeUnavailableColumn(dmmf, 'auditLog')).toBe(false);
+    expect(declaresBeforeUnavailableColumn(metadata, 'auditLog')).toBe(false);
   });
 
   it('is false when the audit-log model is not in the schema', () => {
-    expect(declaresBeforeUnavailableColumn(dmmfWith([]), 'activity')).toBe(false);
+    expect(declaresBeforeUnavailableColumn(auditLogWith(), 'activity')).toBe(false);
   });
 
   it('throws for a beforeUnavailable field that is not a single Boolean', () => {
-    const dmmf = dmmfWith([{ name: 'beforeUnavailable', kind: 'scalar', type: 'String' }]);
+    const metadata = auditLogWith(column('beforeUnavailable'));
 
-    expect(() => declaresBeforeUnavailableColumn(dmmf, 'auditLog')).toThrow(
+    expect(() => declaresBeforeUnavailableColumn(metadata, 'auditLog')).toThrow(
       'The audit-log model "AuditLog" declares "beforeUnavailable" as String; it must be Boolean.',
     );
   });
 
   it('throws for a Boolean list, naming it as a list', () => {
-    const dmmf = dmmfWith([{ name: 'beforeUnavailable', kind: 'scalar', type: 'Boolean', isList: true }]);
+    const metadata = auditLogWith(column('beforeUnavailable', { type: 'Boolean', isList: true }));
 
-    expect(() => declaresBeforeUnavailableColumn(dmmf, 'auditLog')).toThrow(
+    expect(() => declaresBeforeUnavailableColumn(metadata, 'auditLog')).toThrow(
       'The audit-log model "AuditLog" declares "beforeUnavailable" as Boolean[]; it must be Boolean.',
     );
   });
 
   it('throws for a beforeUnavailable field that is a relation', () => {
-    const dmmf = dmmfWith([{ name: 'beforeUnavailable', kind: 'object', type: 'Flag' }]);
+    const metadata = auditLogWith(relation('beforeUnavailable', 'Flag', 'AuditLogFlag'));
 
-    expect(() => declaresBeforeUnavailableColumn(dmmf, 'auditLog')).toThrow(
+    expect(() => declaresBeforeUnavailableColumn(metadata, 'auditLog')).toThrow(
       'The audit-log model "AuditLog" declares "beforeUnavailable" as Flag; it must be Boolean.',
     );
   });

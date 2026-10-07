@@ -23,6 +23,7 @@ import type { AuditContext, AuditContextProvider } from '@kuruwic/db-audit-core'
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import type { AggregateMapping } from '@kuruwic/prisma-audit';
 import { createAuditClient, defineEntity, foreignKey, to } from '@kuruwic/prisma-audit';
+import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, inject, it } from 'vitest';
 import { cleanDatabase } from './helpers/setup.js';
@@ -78,6 +79,7 @@ const createAuditedClientWithQueryLog = (
   const provider = createAsyncLocalStorageProvider();
   const prisma = createAuditClient(basePrisma, {
     Prisma,
+    schema: auditSchema,
     provider,
     aggregateMapping: testAggregateMapping,
   });
@@ -631,6 +633,7 @@ describe('Database Round-Trip Guard: fields an entity lists in auditOmittedField
     provider = createAsyncLocalStorageProvider();
     prisma = createAuditClient(basePrisma, {
       Prisma,
+      schema: auditSchema,
       provider,
       aggregateMapping: {
         User: defineEntity({ type: 'User', excludeFields: ['updatedAt'], auditOmittedFields: ['password'] }),

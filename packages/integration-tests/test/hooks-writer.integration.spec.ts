@@ -2,6 +2,7 @@ import type { AuditContext, AuditContextProvider } from '@kuruwic/db-audit-core'
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import type { AggregateMapping, AuditLogData } from '@kuruwic/prisma-audit';
 import { createAuditClient, defineEntity, flushAllPendingWrites, foreignKey, to } from '@kuruwic/prisma-audit';
+import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, inject, it } from 'vitest';
 import { cleanDatabase, disposeTestContext, type TestContext } from './helpers/setup.js';
@@ -28,6 +29,7 @@ const createAuditedClientWithWriterSpy = (
 ) => {
   return createAuditClient(basePrisma, {
     Prisma,
+    schema: auditSchema,
     provider,
     aggregateMapping: testAggregateMapping,
     diffing: {
@@ -409,6 +411,7 @@ describe('hooks.writer Coverage', () => {
       const handles: unknown[] = [];
       const prisma = createAuditClient(basePrisma, {
         Prisma,
+        schema: auditSchema,
         provider: context.provider,
         aggregateMapping: testAggregateMapping,
         performance: { awaitWrite },
@@ -497,6 +500,7 @@ describe('hooks.writer Coverage', () => {
       const flags: boolean[] = [];
       const prisma = createAuditClient(basePrisma, {
         Prisma,
+        schema: auditSchema,
         provider: context.provider,
         aggregateMapping: testAggregateMapping,
         performance: { awaitWrite, openImplicitTransaction },

@@ -14,6 +14,7 @@ import {
   foreignKey,
   to,
 } from '@kuruwic/prisma-audit';
+import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, inject, it } from 'vitest';
 import { createPostReadFault } from './helpers/post-read-fault.js';
@@ -81,6 +82,7 @@ describe('Normalized Writer Helpers', () => {
     it('writes a detached write in a transaction of its own on the base client', async () => {
       const prisma = createAuditClient(basePrisma, {
         Prisma,
+        schema: auditSchema,
         provider,
         aggregateMapping: testAggregateMapping,
         performance: { awaitWrite: false },
@@ -99,6 +101,7 @@ describe('Normalized Writer Helpers', () => {
     it('writes a write queued until the transaction commits, once it has committed', async () => {
       const prisma = createAuditClient(basePrisma, {
         Prisma,
+        schema: auditSchema,
         provider,
         aggregateMapping: testAggregateMapping,
         performance: { awaitWrite: false },
@@ -119,6 +122,7 @@ describe('Normalized Writer Helpers', () => {
     it("writes an awaited write in the operation's transaction, so a rollback undoes it", async () => {
       const prisma = createAuditClient(basePrisma, {
         Prisma,
+        schema: auditSchema,
         provider,
         aggregateMapping: testAggregateMapping,
         performance: { awaitWrite: true },
@@ -140,6 +144,7 @@ describe('Normalized Writer Helpers', () => {
     it("writes an awaited shared-change write in the operation's transaction, so a rollback undoes it", async () => {
       const prisma = createAuditClient(basePrisma, {
         Prisma,
+        schema: auditSchema,
         provider,
         aggregateMapping: testAggregateMapping,
         performance: { awaitWrite: true },
@@ -163,6 +168,7 @@ describe('Normalized Writer Helpers', () => {
     it('should write audit logs to normalized schema (Actor, Entity, Aggregate, AuditEvent)', async () => {
       const prisma = createAuditClient(basePrisma, {
         Prisma,
+        schema: auditSchema,
         provider,
         aggregateMapping: testAggregateMapping,
         performance: {
@@ -224,6 +230,7 @@ describe('Normalized Writer Helpers', () => {
     it('should deduplicate the actor, entity and aggregate rows of two writes to the same entity', async () => {
       const prisma = createAuditClient(basePrisma, {
         Prisma,
+        schema: auditSchema,
         provider,
         aggregateMapping: testAggregateMapping,
         performance: {
@@ -265,6 +272,7 @@ describe('Normalized Writer Helpers', () => {
     it('should accept lowerCamelCase model names', async () => {
       const prisma = createAuditClient(basePrisma, {
         Prisma,
+        schema: auditSchema,
         provider,
         aggregateMapping: testAggregateMapping,
         performance: {
@@ -295,6 +303,7 @@ describe('Normalized Writer Helpers', () => {
     it('should write audit logs to shared change schema (AuditChange, AuditAggregate)', async () => {
       const prisma = createAuditClient(basePrisma, {
         Prisma,
+        schema: auditSchema,
         provider,
         aggregateMapping: testAggregateMapping,
         performance: {
@@ -344,6 +353,7 @@ describe('Normalized Writer Helpers', () => {
     it('should deduplicate change data when entity belongs to multiple aggregates', async () => {
       const prisma = createAuditClient(basePrisma, {
         Prisma,
+        schema: auditSchema,
         provider,
         aggregateMapping: testAggregateMapping,
         performance: {
@@ -403,6 +413,7 @@ describe('Normalized Writer Helpers', () => {
     it('should accept lowerCamelCase model names', async () => {
       const prisma = createAuditClient(basePrisma, {
         Prisma,
+        schema: auditSchema,
         provider,
         aggregateMapping: testAggregateMapping,
         performance: {
@@ -442,6 +453,7 @@ describe('Normalized Writer Helpers', () => {
       const faulty = basePrisma.$extends({ name: 'fault-injection', query: { post: { findUnique } } });
       const prisma = createAuditClient(faulty, {
         Prisma,
+        schema: auditSchema,
         provider,
         aggregateMapping: testAggregateMapping,
         performance: { awaitWrite: true },

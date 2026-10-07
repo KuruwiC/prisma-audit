@@ -9,6 +9,7 @@
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { defineEntity, lookup, to } from '@kuruwic/db-audit-core';
 import { createAuditClient } from '@kuruwic/prisma-audit';
+import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -46,6 +47,7 @@ describe('Transaction Consistency Integration', () => {
 
       const lookupClient = createAuditClient(context.basePrisma, {
         Prisma,
+        schema: auditSchema,
         provider: context.provider,
         aggregateMapping: {
           ...testAggregateMapping,

@@ -15,6 +15,7 @@
 import type { AuditContext, AuditRecord, WriteContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { createAuditClient, flushAllPendingWrites } from '@kuruwic/prisma-audit';
+import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -101,6 +102,7 @@ describe('Batch $transaction under the audit extension', () => {
     const observer = vi.fn();
     const prisma = createAuditClient(raw, {
       Prisma,
+      schema: auditSchema,
       provider,
       aggregateMapping: testAggregateMapping,
       performance: {

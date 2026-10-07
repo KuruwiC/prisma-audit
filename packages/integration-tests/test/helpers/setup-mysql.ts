@@ -5,6 +5,7 @@ import type { AuditContextProvider } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { MySqlContainer, type StartedMySqlContainer } from '@testcontainers/mysql';
+import { auditSchema } from '../../generated/mysql-audit/index.js';
 import { Prisma, PrismaClient } from '../../generated/mysql-client/index.js';
 import { testAggregateMapping } from './setup.js';
 
@@ -52,6 +53,7 @@ export const setupMySQLDatabase = async (): Promise<MySQLTestContext> => {
 
   const prisma = createAuditClient(basePrisma, {
     Prisma,
+    schema: auditSchema,
     provider,
     aggregateMapping: testAggregateMapping,
     diffing: {

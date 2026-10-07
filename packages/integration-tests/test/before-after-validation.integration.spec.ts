@@ -1,5 +1,6 @@
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAuditClient, flushAllPendingWrites } from '@kuruwic/prisma-audit';
+import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -100,6 +101,7 @@ describe('Before/After Field Validation', () => {
     it('returns Date instances from a create with awaitWrite: false', async () => {
       const prisma = createAuditClient(context.basePrisma, {
         Prisma,
+        schema: auditSchema,
         provider: context.provider,
         aggregateMapping: testAggregateMapping,
         performance: { awaitWrite: false },

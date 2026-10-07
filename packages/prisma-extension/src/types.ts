@@ -16,6 +16,7 @@ import type {
   WriteContext,
   WriteFn,
 } from '@kuruwic/db-audit-core';
+import type { AuditSchema } from './schema/audit-schema.js';
 
 /**
  * Audit log data structure with type-safe branded identifiers
@@ -195,9 +196,11 @@ export interface PrismaAuditExtensionOptions<TModelName extends string = string,
    * @example
    * ```typescript
    * import { Prisma, PrismaClient } from './generated/prisma';
+   * import { auditSchema } from './generated/audit/index.js';
    *
    * const prisma = createAuditClient(new PrismaClient(), {
    *   Prisma,
+   *   schema: auditSchema,
    *   provider,
    *   aggregateMapping,
    * });
@@ -205,9 +208,22 @@ export interface PrismaAuditExtensionOptions<TModelName extends string = string,
    */
   Prisma: {
     defineExtension: unknown;
-    dmmf: unknown;
     DbNull: unknown;
   };
+
+  /**
+   * The `auditSchema` that `prisma-audit-generator` emits from the same `schema.prisma` as the
+   * client: the models, keys and relations the audit reads. Add the generator to the schema and
+   * run `prisma generate`:
+   *
+   * ```prisma
+   * generator audit {
+   *   provider = "prisma-audit-generator"
+   *   output   = "../generated/audit"
+   * }
+   * ```
+   */
+  schema: AuditSchema;
 
   /**
    * Prisma model name for storing audit logs (PascalCase).

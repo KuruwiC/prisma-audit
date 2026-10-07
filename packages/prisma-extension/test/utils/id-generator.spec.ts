@@ -10,21 +10,19 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import type { DMMFModel } from '../../src/internal-types.js';
-import type { SchemaMetadata } from '../../src/schema/types.js';
+import type { FieldDefault, SchemaMetadata } from '../../src/schema/types.js';
 import {
   buildEntityMap,
   buildKeyWhereClause,
   ensureIds,
   getIdFieldInfo,
-  getIdGenerator,
   getRowKeyFields,
   ID_GENERATOR_FACTORIES,
   primaryKeyOf,
   rowKeyFieldsOf,
 } from '../../src/utils/id-generation.js';
 import { UNRESOLVED_ENTITY_ID } from '../../src/utils/identity-key.js';
-import { createSchemaMetadataFromDMMF } from '../../src/utils/schema-metadata.js';
+import { column, model, schemaMetadataOf } from '../support/audit-schema.js';
 
 const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const UUID_V7_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -34,27 +32,23 @@ const CUID2_RE = /^[a-z][a-z0-9]{23}$/;
 /** Extract the 48-bit unix-ms timestamp prefix from a UUID v7 */
 const uuidV7TimestampMs = (id: string): number => Number.parseInt(id.slice(0, 8) + id.slice(9, 13), 16);
 
-/** Minimal SchemaMetadata whose `id` field carries the given DMMF-style default */
-const metadataWithIdDefault = (defaultValue: unknown): SchemaMetadata => ({
-  getModelNames: () => [],
-  getUniqueConstraints: () => [],
-  getRelationFields: () => [],
-  getAllFields: () => [],
-  getFieldMetadata: (_modelName, fieldName) =>
-    fieldName === 'id'
-      ? {
-          name: 'id',
-          type: 'String',
-          kind: 'scalar',
-          isRequired: true,
-          isUnique: false,
-          isId: true,
-          isList: false,
-          hasDefaultValue: defaultValue !== undefined,
-          isUpdatedAt: false,
-          default: defaultValue,
-        }
-      : undefined,
+const metadataWithIdDefault = (defaultFunction: FieldDefault): SchemaMetadata =>
+  schemaMetadataOf(
+    model('Item', [column('id', { isId: true, isRequired: true, hasDefaultValue: true, default: defaultFunction })]),
+  );
+
+/** Schema metadata of a model `Item` whose `id` has a literal default, such as `@default("uuid(7)")` */
+const metadataWithLiteralIdDefault = (): SchemaMetadata =>
+  schemaMetadataOf(model('Item', [column('id', { isId: true, isRequired: true, hasDefaultValue: true })]));
+
+const metadataWithoutIdDefault = (): SchemaMetadata =>
+  schemaMetadataOf(model('User', [column('id', { isId: true, isRequired: true })]));
+
+const metadataFailingWith = (error: Error): SchemaMetadata => ({
+  ...metadataWithoutIdDefault(),
+  getFieldMetadata: () => {
+    throw error;
+  },
 });
 
 describe('ID_GENERATOR_FACTORIES', () => {
@@ -85,224 +79,96 @@ describe('UUID v7 generation', () => {
   });
 });
 
-describe('getIdGenerator (string expression route)', () => {
-  it('parses argument-less expressions', () => {
-    expect(getIdGenerator('cuid()')?.()).toMatch(CUID_V1_RE);
-    expect(getIdGenerator('cuid2()')?.()).toMatch(CUID2_RE);
-    expect(getIdGenerator('uuid()')?.()).toMatch(UUID_V4_RE);
-  });
-
-  it('parses versioned expressions', () => {
-    expect(getIdGenerator('uuid(4)')?.()).toMatch(UUID_V4_RE);
-    expect(getIdGenerator('uuid(7)')?.()).toMatch(UUID_V7_RE);
-    expect(getIdGenerator('cuid(1)')?.()).toMatch(CUID_V1_RE);
-    expect(getIdGenerator('cuid(2)')?.()).toMatch(CUID2_RE);
-  });
-
-  it('matches the function name whatever its case, and ignores spaces around the arguments', () => {
-    expect(getIdGenerator('UUID(7)')?.()).toMatch(UUID_V7_RE);
-    expect(getIdGenerator('Cuid()')?.()).toMatch(CUID_V1_RE);
-    expect(getIdGenerator('CUID2()')?.()).toMatch(CUID2_RE);
-    expect(getIdGenerator('uuid( 7 )')?.()).toMatch(UUID_V7_RE);
-  });
-
-  it.each(['cuid()', 'cuid(2)', 'cuid2()', 'uuid()', 'uuid(7)'])('%s yields a new id on every call', (expr) => {
-    const generate = getIdGenerator(expr);
-    expect(generate?.()).not.toBe(generate?.());
-  });
-
-  it('returns undefined for unknown versions instead of falling back', () => {
-    expect(getIdGenerator('uuid(8)')).toBeUndefined();
-    expect(getIdGenerator('cuid(3)')).toBeUndefined();
-  });
-
-  it('returns undefined for unsupported or malformed expressions', () => {
-    expect(getIdGenerator('autoincrement()')).toBeUndefined();
-    expect(getIdGenerator('dbgenerated("uuid_generate_v4()")')).toBeUndefined();
-    expect(getIdGenerator('invalid')).toBeUndefined();
-    expect(getIdGenerator('cuid')).toBeUndefined();
-    expect(getIdGenerator('')).toBeUndefined();
-  });
-});
-
 describe('getIdFieldInfo', () => {
-  it('should return undefined if Prisma.dmmf is not available', () => {
-    const Prisma = {};
-    const info = getIdFieldInfo(createSchemaMetadataFromDMMF(Prisma), 'User', 'id');
-    expect(info).toBeUndefined();
-  });
-
-  it('should return undefined if reading the field metadata throws', () => {
-    const schemaMetadata: SchemaMetadata = {
-      ...metadataWithIdDefault(undefined),
-      getFieldMetadata: () => {
-        throw new Error('metadata unavailable');
-      },
-    };
-
-    expect(getIdFieldInfo(schemaMetadata, 'User', 'id')).toBeUndefined();
-  });
-
-  it('should return undefined if model is not found', () => {
-    const Prisma = {
-      dmmf: {
-        datamodel: {
-          models: [{ name: 'User', fields: [] }],
-        },
-      },
-    };
-    const info = getIdFieldInfo(createSchemaMetadataFromDMMF(Prisma), 'NonExistent', 'id');
-    expect(info).toBeUndefined();
-  });
-
   it('should return undefined if field is not found', () => {
-    const Prisma = {
-      dmmf: {
-        datamodel: {
-          models: [
-            {
-              name: 'User',
-              fields: [{ name: 'email', kind: 'scalar', type: 'String' }],
-            },
-          ],
-        },
-      },
-    };
-    const info = getIdFieldInfo(createSchemaMetadataFromDMMF(Prisma), 'User', 'id');
-    expect(info).toBeUndefined();
+    const metadata = schemaMetadataOf(model('User', [column('email')]));
+
+    expect(getIdFieldInfo(metadata, 'User', 'id')).toBeUndefined();
+  });
+
+  it('throws naming a model the schema does not hold', () => {
+    const metadata = schemaMetadataOf(model('User', []));
+
+    expect(() => getIdFieldInfo(metadata, 'NonExistent', 'id')).toThrow(
+      'Model "NonExistent" is not in the audit schema',
+    );
+  });
+
+  it('lets an error reading the field metadata propagate', () => {
+    const error = new Error('metadata unavailable');
+
+    expect(() => getIdFieldInfo(metadataFailingWith(error), 'User', 'id')).toThrow(error);
   });
 
   it('should return field info with generator for cuid()', () => {
-    const Prisma = {
-      dmmf: {
-        datamodel: {
-          models: [
-            {
-              name: 'User',
-              fields: [
-                {
-                  name: 'id',
-                  kind: 'scalar',
-                  type: 'String',
-                  default: { name: 'cuid', args: [] },
-                },
-              ],
-            },
-          ],
-        },
-      },
-    };
-    const info = getIdFieldInfo(createSchemaMetadataFromDMMF(Prisma), 'User', 'id');
+    const info = getIdFieldInfo(metadataWithIdDefault({ name: 'cuid', args: [] }), 'Item', 'id');
     expect(info).toBeDefined();
     expect(info?.name).toBe('id');
     expect(info?.hasDefault).toBe(true);
-    expect(info?.defaultExpr).toBe('cuid()');
+    expect(info?.defaultFunction).toBe('cuid()');
     expect(info?.generator).toBeDefined();
   });
 
-  it('should preserve uuid version args from DMMF defaults (Prisma 6.x shape)', () => {
-    // Prisma 6.x DMMF: @default(uuid(7)) -> { name: 'uuid', args: [7] }, @default(uuid()) -> args: [4]
-    const createPrisma = (args: number[]) => ({
-      dmmf: {
-        datamodel: {
-          models: [
-            {
-              name: 'User',
-              fields: [{ name: 'id', kind: 'scalar', type: 'String', default: { name: 'uuid', args } }],
-            },
-          ],
-        },
-      },
-    });
-
-    const v7 = getIdFieldInfo(createSchemaMetadataFromDMMF(createPrisma([7])), 'User', 'id');
-    expect(v7?.defaultExpr).toBe('uuid(7)');
+  it('should preserve uuid version args from function defaults', () => {
+    // @default(uuid(7)) -> { name: 'uuid', args: [7] }, @default(uuid()) -> args: [4]
+    const v7 = getIdFieldInfo(metadataWithIdDefault({ name: 'uuid', args: [7] }), 'Item', 'id');
+    expect(v7?.defaultFunction).toBe('uuid(7)');
     expect(v7?.generator?.()).toMatch(UUID_V7_RE);
 
-    const v4 = getIdFieldInfo(createSchemaMetadataFromDMMF(createPrisma([4])), 'User', 'id');
-    expect(v4?.defaultExpr).toBe('uuid(4)');
+    const v4 = getIdFieldInfo(metadataWithIdDefault({ name: 'uuid', args: [4] }), 'Item', 'id');
+    expect(v4?.defaultFunction).toBe('uuid(4)');
     expect(v4?.generator?.()).toMatch(UUID_V4_RE);
   });
 
+  it.each<[string, FieldDefault]>([
+    ['cuid()', { name: 'cuid', args: [] }],
+    ['cuid(2)', { name: 'cuid', args: [2] }],
+    ['uuid()', { name: 'uuid', args: [4] }],
+    ['uuid(7)', { name: 'uuid', args: [7] }],
+  ])('%s yields a new id on every call', (_label, defaultFunction) => {
+    const generate = getIdFieldInfo(metadataWithIdDefault(defaultFunction), 'Item', 'id')?.generator;
+
+    expect(generate?.()).not.toBe(generate?.());
+  });
+
   it('should return field info without generator for autoincrement()', () => {
-    const Prisma = {
-      dmmf: {
-        datamodel: {
-          models: [
-            {
-              name: 'User',
-              fields: [
-                {
-                  name: 'id',
-                  kind: 'scalar',
-                  type: 'Int',
-                  default: { name: 'autoincrement', args: [] },
-                },
-              ],
-            },
-          ],
-        },
-      },
-    };
-    const info = getIdFieldInfo(createSchemaMetadataFromDMMF(Prisma), 'User', 'id');
+    const info = getIdFieldInfo(metadataWithIdDefault({ name: 'autoincrement', args: [] }), 'Item', 'id');
     expect(info).toBeDefined();
     expect(info?.name).toBe('id');
     expect(info?.hasDefault).toBe(true);
-    expect(info?.defaultExpr).toBe('autoincrement()');
+    expect(info?.defaultFunction).toBe('autoincrement()');
     expect(info?.generator).toBeUndefined();
   });
 
-  it('parses args from string defaults (uuid(7))', () => {
-    const info = getIdFieldInfo(metadataWithIdDefault('uuid(7)'), 'Item', 'id');
-    expect(info?.defaultExpr).toBe('uuid(7)');
-    expect(info?.generator?.()).toMatch(UUID_V7_RE);
+  it('gives a literal default no generator, even one that reads like a generator call', () => {
+    const info = getIdFieldInfo(metadataWithLiteralIdDefault(), 'Item', 'id');
+
+    expect(info).toEqual({ name: 'id', hasDefault: true });
   });
 
   it('leaves generator undefined for unknown uuid versions', () => {
-    const objectRoute = getIdFieldInfo(metadataWithIdDefault({ name: 'uuid', args: [8] }), 'Item', 'id');
-    expect(objectRoute?.defaultExpr).toBe('uuid(8)');
-    expect(objectRoute?.generator).toBeUndefined();
-
-    const stringRoute = getIdFieldInfo(metadataWithIdDefault('uuid(8)'), 'Item', 'id');
-    expect(stringRoute?.generator).toBeUndefined();
+    const info = getIdFieldInfo(metadataWithIdDefault({ name: 'uuid', args: [8] }), 'Item', 'id');
+    expect(info?.defaultFunction).toBe('uuid(8)');
+    expect(info?.generator).toBeUndefined();
   });
 });
 
 describe('ensureIds', () => {
-  const createMockPrisma = (defaultName: string) => ({
-    dmmf: {
-      datamodel: {
-        models: [
-          {
-            name: 'User',
-            fields: [
-              {
-                name: 'id',
-                kind: 'scalar',
-                type: 'String',
-                default: { name: defaultName, args: [] },
-              },
-            ],
-          },
-        ],
-      },
-    },
-  });
+  const userWithIdDefault = (name: string) =>
+    schemaMetadataOf(model('User', [column('id', { isId: true, hasDefaultValue: true, default: { name, args: [] } })]));
 
   it('should return entities unchanged when all have IDs', () => {
-    const Prisma = createMockPrisma('cuid');
     const entities = [
       { id: 'existing-1', email: 'user1@example.com' },
       { id: 'existing-2', email: 'user2@example.com' },
     ];
-    const result = ensureIds(createSchemaMetadataFromDMMF(Prisma), 'User', entities, ['id']);
+    const result = ensureIds(userWithIdDefault('cuid'), 'User', entities, ['id']);
     expect(result).toEqual(entities);
   });
 
   it('should generate unique IDs for all entities without IDs', () => {
-    const Prisma = createMockPrisma('cuid');
     const entities = [{ email: 'user1@example.com' }, { email: 'user2@example.com' }];
-    const result = ensureIds(createSchemaMetadataFromDMMF(Prisma), 'User', entities, ['id']) as Array<{
+    const result = ensureIds(userWithIdDefault('cuid'), 'User', entities, ['id']) as Array<{
       id: string;
       email: string;
     }>;
@@ -318,9 +184,8 @@ describe('ensureIds', () => {
   });
 
   it('should preserve existing IDs and generate only missing ones', () => {
-    const Prisma = createMockPrisma('cuid');
     const entities = [{ id: 'existing', email: 'user1@example.com' }, { email: 'user2@example.com' }];
-    const result = ensureIds(createSchemaMetadataFromDMMF(Prisma), 'User', entities, ['id']) as Array<{
+    const result = ensureIds(userWithIdDefault('cuid'), 'User', entities, ['id']) as Array<{
       id: string;
       email: string;
     }>;
@@ -335,91 +200,44 @@ describe('ensureIds', () => {
   });
 
   it('should throw error if no default is defined', () => {
-    const Prisma = {
-      dmmf: {
-        datamodel: {
-          models: [
-            {
-              name: 'User',
-              fields: [{ name: 'id', kind: 'scalar', type: 'String' }],
-            },
-          ],
-        },
-      },
-    };
     const entities = [{ email: 'user@example.com' }];
-    expect(() => ensureIds(createSchemaMetadataFromDMMF(Prisma), 'User', entities, ['id'])).toThrow(
+    expect(() => ensureIds(metadataWithoutIdDefault(), 'User', entities, ['id'])).toThrow(
       '[@prisma-audit] createMany requires pre-generated IDs',
     );
   });
 
-  it('should throw the no-default error when the field metadata cannot be read', () => {
-    const schemaMetadata: SchemaMetadata = {
-      ...metadataWithIdDefault('cuid()'),
-      getFieldMetadata: () => {
-        throw new Error('metadata unavailable');
-      },
-    };
+  it('lets an error reading the field metadata propagate', () => {
+    const error = new Error('metadata unavailable');
 
-    expect(() => ensureIds(schemaMetadata, 'User', [{ email: 'user@example.com' }], ['id'])).toThrow(
-      'Field "id" has no default directive',
-    );
+    expect(() => ensureIds(metadataFailingWith(error), 'User', [{ email: 'user@example.com' }], ['id'])).toThrow(error);
   });
 
   it('should throw error for unsupported default (autoincrement)', () => {
-    const Prisma = {
-      dmmf: {
-        datamodel: {
-          models: [
-            {
-              name: 'User',
-              fields: [
-                {
-                  name: 'id',
-                  kind: 'scalar',
-                  type: 'Int',
-                  default: { name: 'autoincrement', args: [] },
-                },
-              ],
-            },
-          ],
-        },
-      },
-    };
     const entities = [{ email: 'user@example.com' }];
-    expect(() => ensureIds(createSchemaMetadataFromDMMF(Prisma), 'User', entities, ['id'])).toThrow(
+    expect(() => ensureIds(userWithIdDefault('autoincrement'), 'User', entities, ['id'])).toThrow(
       'unsupported default: autoincrement()',
     );
   });
 
+  it('throws for a literal default, naming it as one', () => {
+    expect(() => ensureIds(metadataWithLiteralIdDefault(), 'Item', [{ label: 'a' }], ['id'])).toThrow(
+      '[@prisma-audit] createMany requires pre-generated IDs for model "Item". ' +
+        'Field "id" has a literal default value, not a generator function. ' +
+        'Supported defaults: cuid(), cuid(2), uuid(), uuid(4), uuid(7).',
+    );
+  });
+
   it('should return empty array for empty input', () => {
-    const Prisma = createMockPrisma('cuid');
-    const result = ensureIds(createSchemaMetadataFromDMMF(Prisma), 'User', [], ['id']);
+    const result = ensureIds(userWithIdDefault('cuid'), 'User', [], ['id']);
     expect(result).toEqual([]);
   });
 
   it('generates a single primary key whatever its name, and adds no `id`', () => {
-    const Prisma = {
-      dmmf: {
-        datamodel: {
-          models: [
-            {
-              name: 'User',
-              fields: [
-                {
-                  name: 'userId',
-                  kind: 'scalar',
-                  type: 'String',
-                  default: { name: 'cuid', args: [] },
-                },
-              ],
-            },
-          ],
-        },
-      },
-    };
+    const metadata = schemaMetadataOf(
+      model('User', [column('userId', { hasDefaultValue: true, default: { name: 'cuid', args: [] } })]),
+    );
     const entities = [{ email: 'user@example.com' }];
-    const result = ensureIds(createSchemaMetadataFromDMMF(Prisma), 'User', entities, ['userId']) as Array<{
+    const result = ensureIds(metadata, 'User', entities, ['userId']) as Array<{
       userId: string;
       email: string;
     }>;
@@ -478,14 +296,9 @@ describe('ensureIds', () => {
   });
 
   describe('composite primary key', () => {
-    const likeField = (name: string, defaultValue?: unknown) => ({
-      name,
-      kind: 'scalar',
-      type: 'String',
-      ...(defaultValue === undefined ? {} : { default: defaultValue }),
-    });
-    const metadataForLike = (fields: ReturnType<typeof likeField>[]) =>
-      createSchemaMetadataFromDMMF({ dmmf: { datamodel: { models: [{ name: 'Like', fields }] } } });
+    const likeField = (name: string, defaultFunction?: FieldDefault) =>
+      column(name, defaultFunction ? { hasDefaultValue: true, default: defaultFunction } : {});
+    const metadataForLike = (fields: ReturnType<typeof likeField>[]) => schemaMetadataOf(model('Like', fields));
     const pkFields = ['postId', 'userId'];
 
     it('returns rows that supply every key field unchanged, adding no `id`', () => {
@@ -519,103 +332,89 @@ describe('ensureIds', () => {
 });
 
 describe('getRowKeyFields', () => {
-  const metadataOf = (model: DMMFModel) => createSchemaMetadataFromDMMF({ dmmf: { datamodel: { models: [model] } } });
-  const field = (name: string, extra: Partial<DMMFModel['fields'][number]> = {}) => ({
-    name,
-    kind: 'scalar',
-    type: 'String',
-    ...extra,
-  });
-
   it('returns the primary key of a model that has one, ahead of its unique fields', () => {
-    const metadata = metadataOf({
-      name: 'User',
-      fields: [field('email', { isUnique: true, isRequired: true }), field('id', { isId: true, isRequired: true })],
-    });
+    const metadata = schemaMetadataOf(
+      model('User', [
+        column('email', { isUnique: true, isRequired: true }),
+        column('id', { isId: true, isRequired: true }),
+      ]),
+    );
 
     expect(getRowKeyFields(metadata, 'User')).toEqual(['id']);
   });
 
   it('returns every field of a composite primary key', () => {
-    const metadata = metadataOf({
-      name: 'PostLike',
-      fields: [field('postId', { isRequired: true }), field('userId', { isRequired: true })],
-      primaryKey: { name: null, fields: ['postId', 'userId'] },
-    });
+    const metadata = schemaMetadataOf(
+      model('PostLike', [column('postId', { isRequired: true }), column('userId', { isRequired: true })], {
+        primaryKey: { name: null, fields: ['postId', 'userId'] },
+      }),
+    );
 
     expect(getRowKeyFields(metadata, 'PostLike')).toEqual(['postId', 'userId']);
   });
 
   it('returns the first unique field on a required column of a model without a primary key, passing over a nullable one', () => {
-    const metadata = metadataOf({
-      name: 'Device',
-      fields: [
-        field('label', { isUnique: true }),
-        field('serial', { isUnique: true, isRequired: true }),
-        field('code', { isUnique: true, isRequired: true }),
-      ],
-    });
+    const metadata = schemaMetadataOf(
+      model('Device', [
+        column('label', { isUnique: true }),
+        column('serial', { isUnique: true, isRequired: true }),
+        column('code', { isUnique: true, isRequired: true }),
+      ]),
+    );
 
     expect(getRowKeyFields(metadata, 'Device')).toEqual(['serial']);
   });
 
   it('returns a unique index whose fields are all required when the model has no primary key or such unique field', () => {
-    const metadata = metadataOf({
-      name: 'Setting',
-      fields: [field('scope', { isRequired: true }), field('key', { isRequired: true }), field('note')],
-      uniqueIndexes: [
-        { name: null, fields: ['scope', 'note'] },
-        { name: 'scope_key', fields: ['scope', 'key'] },
-      ],
-    });
+    const metadata = schemaMetadataOf(
+      model('Setting', [column('scope', { isRequired: true }), column('key', { isRequired: true }), column('note')], {
+        uniqueIndexes: [
+          { name: null, fields: ['scope', 'note'] },
+          { name: 'scope_key', fields: ['scope', 'key'] },
+        ],
+      }),
+    );
 
     expect(getRowKeyFields(metadata, 'Setting')).toEqual(['scope', 'key']);
   });
 
   it('throws naming the model when it has no primary key and no unique constraint on required fields', () => {
-    const metadata = metadataOf({ name: 'Note', fields: [field('label', { isUnique: true }), field('text')] });
+    const metadata = schemaMetadataOf(model('Note', [column('label', { isUnique: true }), column('text')]));
 
     expect(() => getRowKeyFields(metadata, 'Note')).toThrow(
       '[@prisma-audit] Model "Note" has no primary key and no unique constraint on required fields: its rows cannot be identified for a batch audit.',
     );
   });
 
-  it('throws the same error for a model the metadata does not know', () => {
-    const metadata = metadataOf({ name: 'User', fields: [field('id', { isId: true, isRequired: true })] });
+  it('throws naming a model the schema does not hold', () => {
+    const metadata = schemaMetadataOf(model('User', [column('id', { isId: true, isRequired: true })]));
 
-    expect(() => getRowKeyFields(metadata, 'Unknown')).toThrow('Model "Unknown" has no primary key');
+    expect(() => getRowKeyFields(metadata, 'Unknown')).toThrow('Model "Unknown" is not in the audit schema');
   });
 });
 
 describe('rowKeyFieldsOf', () => {
-  const metadataOf = (model: DMMFModel) => createSchemaMetadataFromDMMF({ dmmf: { datamodel: { models: [model] } } });
-  const field = (name: string, extra: Partial<DMMFModel['fields'][number]> = {}) => ({
-    name,
-    kind: 'scalar',
-    type: 'String',
-    ...extra,
-  });
-
   it('returns the primary key ahead of a unique field', () => {
-    const metadata = metadataOf({
-      name: 'User',
-      fields: [field('email', { isUnique: true, isRequired: true }), field('id', { isId: true, isRequired: true })],
-    });
+    const metadata = schemaMetadataOf(
+      model('User', [
+        column('email', { isUnique: true, isRequired: true }),
+        column('id', { isId: true, isRequired: true }),
+      ]),
+    );
 
     expect(rowKeyFieldsOf(metadata, 'User')).toEqual(['id']);
   });
 
   it('returns the first unique field on a required column of a model without a primary key', () => {
-    const metadata = metadataOf({
-      name: 'Device',
-      fields: [field('label', { isUnique: true }), field('code', { isUnique: true, isRequired: true })],
-    });
+    const metadata = schemaMetadataOf(
+      model('Device', [column('label', { isUnique: true }), column('code', { isUnique: true, isRequired: true })]),
+    );
 
     expect(rowKeyFieldsOf(metadata, 'Device')).toEqual(['code']);
   });
 
   it('returns undefined for a model with no primary key and no unique constraint on required fields', () => {
-    const metadata = metadataOf({ name: 'Note', fields: [field('label', { isUnique: true }), field('text')] });
+    const metadata = schemaMetadataOf(model('Note', [column('label', { isUnique: true }), column('text')]));
 
     expect(rowKeyFieldsOf(metadata, 'Note')).toBeUndefined();
   });

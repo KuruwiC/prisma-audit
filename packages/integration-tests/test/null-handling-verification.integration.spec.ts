@@ -9,6 +9,7 @@
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { Prisma } from '@kuruwic/prisma-audit-database';
+import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   cleanDatabase,
@@ -213,6 +214,7 @@ describe('NULL Handling Verification', () => {
     it('should store SQL NULL (not JSON null) for before field when the before state is not read', async () => {
       const unreadBefore = createAuditClient(context.basePrisma, {
         Prisma,
+        schema: auditSchema,
         provider: context.provider,
         aggregateMapping: testAggregateMapping,
         performance: { awaitWrite: true },

@@ -13,36 +13,26 @@ import {
   restrictsRows,
   writtenRelationsInclude,
 } from '../../src/utils/audited-selection.js';
-import { createSchemaMetadataFromDMMF } from '../../src/utils/schema-metadata.js';
+import { column, model, relation, schemaMetadataOf } from '../support/audit-schema.js';
 
 type Selection = Record<string, unknown>;
 
-const scalar = (name: string) => ({ name, kind: 'scalar', type: 'String', isList: false });
-const relation = (name: string, type: string, isList: boolean) => ({ name, kind: 'object', type, isList });
-
-const schemaMetadata = createSchemaMetadataFromDMMF({
-  dmmf: {
-    datamodel: {
-      models: [
-        {
-          name: 'User',
-          fields: [
-            { ...scalar('id'), isId: true },
-            scalar('email'),
-            relation('posts', 'Post', true),
-            relation('profile', 'Profile', false),
-          ],
-        },
-        {
-          name: 'Post',
-          fields: [scalar('id'), scalar('title'), scalar('authorId'), relation('comments', 'Comment', true)],
-        },
-        { name: 'Comment', fields: [scalar('id'), scalar('content'), scalar('postId')] },
-        { name: 'Profile', fields: [scalar('id'), scalar('bio'), scalar('userId')] },
-      ],
-    },
-  },
-} as Parameters<typeof createSchemaMetadataFromDMMF>[0]);
+const schemaMetadata = schemaMetadataOf(
+  model('User', [
+    column('id', { isId: true }),
+    column('email'),
+    relation('posts', 'Post', 'UserPosts', { isList: true }),
+    relation('profile', 'Profile', 'UserProfile'),
+  ]),
+  model('Post', [
+    column('id'),
+    column('title'),
+    column('authorId'),
+    relation('comments', 'Comment', 'PostComments', { isList: true }),
+  ]),
+  model('Comment', [column('id'), column('content'), column('postId')]),
+  model('Profile', [column('id'), column('bio'), column('userId')]),
+);
 
 const commentCreatedInPostUpdate = {
   posts: { update: { where: { id: 'post-1' }, data: { comments: { create: { content: 'Comment' } } } } },
@@ -225,22 +215,13 @@ describe('injectAuditedSelection', () => {
     });
 
     it('treats an enum column as a scalar: keeps it when selected, and records it when left out', () => {
-      const enumMetadata = createSchemaMetadataFromDMMF({
-        dmmf: {
-          datamodel: {
-            models: [
-              {
-                name: 'Account',
-                fields: [
-                  { ...scalar('id'), isId: true },
-                  { name: 'role', kind: 'enum', type: 'Role', isList: false },
-                  { name: 'status', kind: 'enum', type: 'Status', isList: false },
-                ],
-              },
-            ],
-          },
-        },
-      } as Parameters<typeof createSchemaMetadataFromDMMF>[0]);
+      const enumMetadata = schemaMetadataOf(
+        model('Account', [
+          column('id', { isId: true }),
+          column('role', { kind: 'enum', type: 'Role' }),
+          column('status', { kind: 'enum', type: 'Status' }),
+        ]),
+      );
       const args = { where: { id: 'a1' }, data: {}, select: { role: true } };
 
       const { args: injectedArgs, injected } = injectAuditedSelection(
@@ -272,39 +253,30 @@ describe('injectAuditedSelection', () => {
   });
 
   describe('a caller select, reading the row key whatever a client-level omit hides', () => {
-    const field = (name: string, extra: Record<string, unknown> = {}) => ({ ...scalar(name), ...extra });
-    const keyedMetadata = createSchemaMetadataFromDMMF({
-      dmmf: {
-        datamodel: {
-          models: [
-            {
-              name: 'Member',
-              fields: [field('id', { isId: true }), field('name'), field('email'), relation('notes', 'Memo', true)],
-            },
-            { name: 'Memo', fields: [field('id', { isId: true }), field('title'), field('memberId')] },
-            {
-              name: 'Membership',
-              fields: [field('orgId', { isRequired: true }), field('userId', { isRequired: true }), field('role')],
-              primaryKey: { name: null, fields: ['orgId', 'userId'] },
-            },
-            {
-              name: 'Device',
-              fields: [field('code', { isUnique: true, isRequired: true }), field('label'), field('createdAt')],
-            },
-            { name: 'Note', fields: [field('slug', { isUnique: true }), field('text', { isRequired: true })] },
-            {
-              name: 'Account',
-              fields: [
-                field('userId', { isId: true, isRequired: true }),
-                field('bio'),
-                field('plan'),
-                { ...relation('owner', 'Member', false), relationFromFields: ['userId'] },
-              ],
-            },
-          ],
+    const keyedMetadata = schemaMetadataOf(
+      model('Member', [
+        column('id', { isId: true }),
+        column('name'),
+        column('email'),
+        relation('notes', 'Memo', 'MemberNotes', { isList: true }),
+      ]),
+      model('Memo', [column('id', { isId: true }), column('title'), column('memberId')]),
+      model(
+        'Membership',
+        [column('orgId', { isRequired: true }), column('userId', { isRequired: true }), column('role')],
+        {
+          primaryKey: { name: null, fields: ['orgId', 'userId'] },
         },
-      },
-    } as Parameters<typeof createSchemaMetadataFromDMMF>[0]);
+      ),
+      model('Device', [column('code', { isUnique: true, isRequired: true }), column('label'), column('createdAt')]),
+      model('Note', [column('slug', { isUnique: true }), column('text', { isRequired: true })]),
+      model('Account', [
+        column('userId', { isId: true, isRequired: true }),
+        column('bio'),
+        column('plan'),
+        relation('owner', 'Member', 'AccountOwner', { foreignKeyFields: ['userId'] }),
+      ]),
+    );
     const injectInto = (
       modelName: string,
       args: Record<string, unknown>,

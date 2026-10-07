@@ -20,6 +20,7 @@ import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import type { AuditErrorContext, ErrorHandlingConfig } from '@kuruwic/prisma-audit';
 import { createAuditClient, flushAllPendingWrites } from '@kuruwic/prisma-audit';
+import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -82,6 +83,7 @@ const createScenario = (options: ScenarioOptions) => {
   const policy = vi.fn((_context: AuditErrorContext) => 'ignore' as const);
   const prisma = createAuditClient(basePrisma, {
     Prisma,
+    schema: auditSchema,
     provider,
     aggregateMapping: testAggregateMapping,
     performance: { awaitWrite: options.awaitWrite, openImplicitTransaction: options.openImplicitTransaction },

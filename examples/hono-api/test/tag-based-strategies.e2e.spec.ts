@@ -13,6 +13,7 @@ import {
   type PrismaModelNames,
   to,
 } from '@kuruwic/prisma-audit';
+import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -51,6 +52,7 @@ describe('Tag-based Strategies E2E', () => {
           awaitWriteIf: awaitWriteIfSpy,
         },
         Prisma,
+        schema: auditSchema,
       });
       await auditProvider.runAsync(
         {
@@ -98,6 +100,7 @@ describe('Tag-based Strategies E2E', () => {
           awaitWriteIf: awaitWriteIfSpy,
         },
         Prisma,
+        schema: auditSchema,
       });
 
       // Create a user first
@@ -158,6 +161,7 @@ describe('Tag-based Strategies E2E', () => {
           awaitWrite: true, // Ensure synchronous for testing
         },
         Prisma,
+        schema: auditSchema,
       });
 
       // Create multiple users
@@ -214,6 +218,7 @@ describe('Tag-based Strategies E2E', () => {
           awaitWrite: true,
         },
         Prisma,
+        schema: auditSchema,
       });
 
       const user = await basePrisma.user.create({
@@ -291,6 +296,7 @@ describe('Tag-based Strategies E2E', () => {
           samplingIf: samplingIfSpy,
         },
         Prisma,
+        schema: auditSchema,
       });
 
       // Below the 0.5 rate of the moderate-volume Post: its write is sampled in

@@ -6,75 +6,39 @@
 
 import type { AuditContext, FailureSink } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
-import type { DMMFField, PrismaClientWithDynamicAccess, PrismaNamespace } from '../../src/internal-types.js';
+import type { PrismaClientWithDynamicAccess, PrismaNamespace } from '../../src/internal-types.js';
 import type { ExecutionScope } from '../../src/pipeline/execution-scope.js';
 import type { AuditedOperation } from '../../src/pipeline/executor.js';
 import type { RecordProducer } from '../../src/pipeline/produce-records.js';
 import { createSingleExecutor } from '../../src/pipeline/single-executor.js';
 import { NO_AUDITED_OMITTED_FIELDS, withRowKeyFields } from '../../src/utils/audited-omitted-fields.js';
-import { createSchemaMetadataFromDMMF } from '../../src/utils/schema-metadata.js';
+import { column, model, relation, schemaMetadataOf } from '../support/audit-schema.js';
 import { runWithRecords } from './run-with-records.js';
 
 type Row = Record<string, unknown>;
 
-const scalar = (name: string, extra: Partial<DMMFField> = {}): DMMFField => ({
-  name,
-  kind: 'scalar',
-  type: 'String',
-  isList: false,
-  ...extra,
-});
+const Prisma: PrismaNamespace = { defineExtension: () => undefined, DbNull: null };
 
-const relation = (name: string, type: string, relationName: string, extra: Partial<DMMFField> = {}): DMMFField => ({
-  name,
-  kind: 'object',
-  type,
-  isList: false,
-  relationName,
-  relationFromFields: [],
-  relationToFields: [],
-  ...extra,
-});
-
-const Prisma: PrismaNamespace = {
-  defineExtension: () => undefined,
-  DbNull: null,
-  dmmf: {
-    datamodel: {
-      models: [
-        {
-          name: 'User',
-          fields: [
-            scalar('id', { isId: true }),
-            scalar('name'),
-            relation('profile', 'Profile', 'UserProfile'),
-            relation('posts', 'Post', 'UserPosts', { isList: true }),
-          ],
-        },
-        {
-          name: 'Post',
-          fields: [
-            scalar('id', { isId: true }),
-            scalar('title'),
-            scalar('authorId'),
-            relation('author', 'User', 'UserPosts', { relationFromFields: ['authorId'], relationToFields: ['id'] }),
-          ],
-        },
-        {
-          name: 'Profile',
-          fields: [
-            scalar('id', { isId: true }),
-            scalar('userId', { isUnique: true }),
-            scalar('bio'),
-            relation('user', 'User', 'UserProfile', { relationFromFields: ['userId'], relationToFields: ['id'] }),
-          ],
-        },
-      ],
-    },
-  },
-};
-
-const schemaMetadata = createSchemaMetadataFromDMMF(Prisma);
+const schemaMetadata = schemaMetadataOf(
+  model('User', [
+    column('id', { isId: true }),
+    column('name'),
+    relation('profile', 'Profile', 'UserProfile'),
+    relation('posts', 'Post', 'UserPosts', { isList: true }),
+  ]),
+  model('Post', [
+    column('id', { isId: true }),
+    column('title'),
+    column('authorId'),
+    relation('author', 'User', 'UserPosts', { foreignKeyFields: ['authorId'], referencedFields: ['id'] }),
+  ]),
+  model('Profile', [
+    column('id', { isId: true }),
+    column('userId', { isUnique: true }),
+    column('bio'),
+    relation('user', 'User', 'UserProfile', { foreignKeyFields: ['userId'], referencedFields: ['id'] }),
+  ]),
+);
 const auditContext: AuditContext = { actor: { category: 'model', type: 'User', id: 'user-1' } };
 const user: Row = { id: 'u1', name: 'Ann' };
 

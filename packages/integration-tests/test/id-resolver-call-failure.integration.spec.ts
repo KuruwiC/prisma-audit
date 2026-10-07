@@ -11,6 +11,7 @@ import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider, defineEntity, foreignKey, lookup, to } from '@kuruwic/db-audit-core';
 import type { AuditErrorObserver } from '@kuruwic/prisma-audit';
 import { createAuditClient } from '@kuruwic/prisma-audit';
+import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -48,6 +49,7 @@ describe('id-resolver-call failures', () => {
     const provider = createAsyncLocalStorageProvider();
     const prisma = createAuditClient(basePrisma, {
       Prisma,
+      schema: auditSchema,
       provider,
       aggregateMapping: { ...testAggregateMapping, Post: post },
       performance: { awaitWrite: true },
@@ -300,6 +302,7 @@ describe('id-resolver-call failures', () => {
       const provider = createAsyncLocalStorageProvider();
       const prisma = createAuditClient(basePrisma, {
         Prisma,
+        schema: auditSchema,
         provider,
         aggregateMapping: {
           ...testAggregateMapping,

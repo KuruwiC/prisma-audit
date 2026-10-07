@@ -14,6 +14,7 @@
 import type { AuditContext, AuditErrorContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { createAuditClient, defineEntity, flushAllPendingWrites } from '@kuruwic/prisma-audit';
+import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, inject, it, vi } from 'vitest';
 import { cleanDatabase } from './helpers/setup.js';
@@ -69,6 +70,7 @@ describe('updateMany and deleteMany with a limit', () => {
       }),
       {
         Prisma,
+        schema: auditSchema,
         provider,
         aggregateMapping: { User: defineEntity({ type: 'User' }) },
         performance: { awaitWrite: false },

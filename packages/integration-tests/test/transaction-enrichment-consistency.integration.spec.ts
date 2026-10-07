@@ -8,6 +8,7 @@
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { createAuditClient, defineEntity, foreignKey, to } from '@kuruwic/prisma-audit';
+import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { cleanDatabase, createTestContext, disposeTestContext, type TestContext } from './helpers/setup.js';
@@ -34,6 +35,7 @@ describe('Transaction Enrichment Consistency', () => {
 
       const prisma = createAuditClient(context.basePrisma, {
         Prisma,
+        schema: auditSchema,
         provider,
         aggregateMapping: {
           User: defineEntity({
@@ -92,6 +94,7 @@ describe('Transaction Enrichment Consistency', () => {
 
       const prisma = createAuditClient(context.basePrisma, {
         Prisma,
+        schema: auditSchema,
         provider,
         aggregateMapping: {
           Post: defineEntity({
@@ -192,6 +195,7 @@ describe('Transaction Enrichment Consistency', () => {
 
       const prisma = createAuditClient(context.basePrisma, {
         Prisma,
+        schema: auditSchema,
         provider,
         aggregateMapping: {
           Post: defineEntity({
@@ -274,6 +278,7 @@ describe('Transaction Enrichment Consistency', () => {
 
       const prisma = createAuditClient(context.basePrisma, {
         Prisma,
+        schema: auditSchema,
         provider,
         aggregateMapping: {
           Post: defineEntity({
@@ -360,6 +365,7 @@ describe('Transaction Enrichment Consistency', () => {
 
       const prisma = createAuditClient(context.basePrisma, {
         Prisma,
+        schema: auditSchema,
         provider,
         aggregateMapping: {
           User: defineEntity({

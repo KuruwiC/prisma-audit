@@ -12,7 +12,20 @@ Each release attaches one tarball per package; `@kuruwic/prisma-audit` depends o
 pnpm add \
   https://github.com/KuruwiC/prisma-audit/releases/download/v0.1.6/kuruwic-db-audit-core-0.1.6.tgz \
   https://github.com/KuruwiC/prisma-audit/releases/download/v0.1.6/kuruwic-prisma-audit-0.1.6.tgz
+pnpm add -D \
+  https://github.com/KuruwiC/prisma-audit/releases/download/v0.1.6/kuruwic-prisma-audit-generator-0.1.6.tgz
 ```
+
+The extension reads your models' keys and relations from a file that `prisma generate` writes. Add the generator, `@kuruwic/prisma-audit-generator`, to `schema.prisma`:
+
+```prisma
+generator audit {
+  provider = "prisma-audit-generator"
+  output   = "../generated/audit"
+}
+```
+
+Run `prisma generate`, then pass the `auditSchema` it writes to `createAuditClient` or `defineConfig` as `schema: auditSchema`.
 
 ## Quick Start
 
@@ -31,11 +44,13 @@ import {
 } from '@kuruwic/prisma-audit';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { Prisma, PrismaClient } from '@prisma/client';
+import { auditSchema } from '../generated/audit/index.js'; // the generator's output
 
 export const auditProvider = createAsyncLocalStorageProvider();
 
 export default defineConfig({
   Prisma,
+  schema: auditSchema,
   provider: auditProvider,
   aggregateMapping: defineAggregateMapping<PrismaClient>()({
     User: defineEntity({ type: 'User' }),
@@ -198,12 +213,13 @@ This allows you to:
 #### `Prisma`
 **Type:** Prisma namespace
 
-The `Prisma` namespace exported by the generated client your `PrismaClient` comes from. The extension reads schema metadata (`Prisma.dmmf`), `Prisma.DbNull` and `Prisma.defineExtension` from it. A client instance does not expose its namespace, so it is passed explicitly.
+The `Prisma` namespace exported by the generated client your `PrismaClient` comes from. The extension reads `Prisma.DbNull` and `Prisma.defineExtension` from it; a client instance does not expose its namespace, so it is passed explicitly. The models' keys and relations come from the `schema` option (see [Installation](#installation)).
 
 ```typescript
 import { Prisma, PrismaClient } from '@prisma/client';
+import { auditSchema } from '../generated/audit/index.js';
 
-const prisma = createAuditClient(new PrismaClient(), { Prisma, provider, aggregateMapping });
+const prisma = createAuditClient(new PrismaClient(), { Prisma, schema: auditSchema, provider, aggregateMapping });
 ```
 
 The Prisma client itself is the first argument of `createAuditClient`. Audited operations run on it, and audit logs are written with it, bypassing the audit extension.
@@ -260,6 +276,7 @@ createAuditClient(basePrisma, {
   provider,
   aggregateMapping,
   Prisma,
+  schema: auditSchema,
   auditLogModel: 'Activity',  // Use 'Activity' instead of 'AuditLog'
 });
 ```
@@ -291,6 +308,7 @@ createAuditClient(basePrisma, {
   provider,
   aggregateMapping,
   Prisma,
+  schema: auditSchema,
   auditLogModel: 'CustomAuditLog',
   hooks: {
     writer: async (records, { handle }) => {
@@ -441,11 +459,13 @@ import {
 } from '@kuruwic/prisma-audit';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { Prisma, type PrismaClient } from '@prisma/client';
+import { auditSchema } from '../generated/audit/index.js';
 
 export const auditProvider = createAsyncLocalStorageProvider();
 
 export default defineConfig({
   Prisma,
+  schema: auditSchema,
   provider: auditProvider,
   aggregateMapping: defineAggregateMapping<PrismaClient>()({
     User: defineEntity({ type: 'User' }),
@@ -582,11 +602,13 @@ import {
 } from '@kuruwic/prisma-audit';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { Prisma, type PrismaClient } from '@prisma/client';
+import { auditSchema } from '../generated/audit/index.js';
 
 export const auditProvider = createAsyncLocalStorageProvider();
 
 export default defineConfig({
   Prisma,
+  schema: auditSchema,
   provider: auditProvider,
   aggregateMapping: defineAggregateMapping<PrismaClient>()({
     User: defineEntity({ type: 'User' }),
@@ -1333,11 +1355,13 @@ import {
 } from '@kuruwic/prisma-audit';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { Prisma, type PrismaClient } from '@prisma/client';
+import { auditSchema } from '../generated/audit/index.js';
 
 export const auditProvider = createAsyncLocalStorageProvider();
 
 export default defineConfig({
   Prisma,
+  schema: auditSchema,
   provider: auditProvider,
   aggregateMapping: defineAggregateMapping<PrismaClient>()({
     User: defineEntity({

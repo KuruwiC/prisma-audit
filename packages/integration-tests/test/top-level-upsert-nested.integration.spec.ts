@@ -10,6 +10,7 @@ import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import type { AuditErrorObserver, PrismaAuditExtensionOptions } from '@kuruwic/prisma-audit';
 import { createAuditClient } from '@kuruwic/prisma-audit';
+import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createPostReadFault } from './helpers/post-read-fault.js';
@@ -33,6 +34,7 @@ const createClients = (databaseUrl: string, fetchBefore: FetchBeforeConfig) => {
   const provider = createAsyncLocalStorageProvider();
   const prisma = createAuditClient(basePrisma, {
     Prisma,
+    schema: auditSchema,
     provider,
     aggregateMapping: testAggregateMapping,
     diffing: { excludeFields: ['createdAt'] },

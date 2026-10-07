@@ -46,7 +46,7 @@ export interface ToManyRelationScope {
  * related model's field with the same `relationName` points back to the parent, which is
  * identified by its primary key.
  *
- * @throws Error when the DMMF gives no relation name or no back-relation field
+ * @throws Error when the relation has no back-relation field
  */
 export const resolveToManyRelationScope = (
   schemaMetadata: SchemaMetadata,
@@ -55,10 +55,6 @@ export const resolveToManyRelationScope = (
   parentPkFields: readonly string[],
 ): ToManyRelationScope => {
   const { relationName } = field;
-  if (!relationName) {
-    throw new Error(`[@prisma-audit] Relation field "${field.name}" has no relation name in the DMMF`);
-  }
-
   const backField = findBackRelationField(
     field,
     parentModelName,
@@ -102,7 +98,7 @@ const scopeWhereToParent = (
 export interface ToManyScopeInput extends Omit<ResolveParentRowsInput, 'parentFields'> {
   data: unknown;
   scope: ToManyRelationScope;
-  /** The related model's primary key (fields + DMMF name) */
+  /** The related model's primary key (fields + the name the schema gives it) */
   pkConstraint: UniqueConstraint;
 }
 

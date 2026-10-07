@@ -14,6 +14,7 @@
 import type { AuditContext, AuditErrorContext, AuditRecord } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { createAuditClient, defineEntity, flushAllPendingWrites } from '@kuruwic/prisma-audit';
+import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, inject, it, vi } from 'vitest';
 import { cleanDatabase } from './helpers/setup.js';
@@ -115,6 +116,7 @@ describe('openImplicitTransaction', () => {
     const recorded = base.$extends(recorder('before', before, '!'));
     const audited = createAuditClient(options.companionCreate ? recorded.$extends(companionCreator) : recorded, {
       Prisma,
+      schema: auditSchema,
       provider,
       aggregateMapping: { User: defineEntity({ type: 'User' }), Post: defineEntity({ type: 'Post' }) },
       performance: {
@@ -186,6 +188,7 @@ describe('openImplicitTransaction', () => {
     const provider = createAsyncLocalStorageProvider();
     const audited = createAuditClient(limited, {
       Prisma,
+      schema: auditSchema,
       provider,
       aggregateMapping:
         options.audited === 'Post'

@@ -27,6 +27,7 @@ import {
   type Tag,
   type User,
 } from '@kuruwic/prisma-audit-database';
+import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 
 export const auditProvider = createAsyncLocalStorageProvider();
 
@@ -540,6 +541,7 @@ const aggregateMapping = defineAggregateMapping<PrismaModelNames<PrismaClient>, 
 export default defineConfig<PrismaClient>({
   provider: auditProvider,
   Prisma,
+  schema: auditSchema,
   aggregateMapping,
 
   diffing: {

@@ -10,30 +10,23 @@ import { TOP_LEVEL_ROW } from '../../../src/grammar/nested-state.js';
 import { buildNestedWriteSets, detectExecutedNestedOperations } from '../../../src/nested/events/write-set.js';
 import { markPathUnread, storePreFetchResult } from '../../../src/nested/pre-fetch/pre-fetch-result-store.js';
 import { UNRESOLVED_ENTITY_ID } from '../../../src/utils/identity-key.js';
-import { createSchemaMetadataFromDMMF } from '../../../src/utils/schema-metadata.js';
+import { column, model, relation, schemaMetadataOf } from '../../support/audit-schema.js';
 
-const scalar = (name: string) => ({ name, kind: 'scalar', type: 'String', isList: false });
-const relation = (name: string, type: string, isList: boolean) => ({ name, kind: 'object', type, isList });
-
-const schemaMetadata = createSchemaMetadataFromDMMF({
-  dmmf: {
-    datamodel: {
-      models: [
-        {
-          name: 'User',
-          fields: [scalar('id'), relation('posts', 'Post', true), relation('profile', 'Profile', false)],
-        },
-        {
-          name: 'Post',
-          fields: [{ ...scalar('id'), isId: true }, scalar('title'), relation('comments', 'Comment', true)],
-        },
-        { name: 'Comment', fields: [scalar('id'), scalar('content')] },
-        { name: 'Profile', fields: [scalar('id'), scalar('bio'), relation('badges', 'Badge', true)] },
-        { name: 'Badge', fields: [scalar('id'), scalar('label')] },
-      ],
-    },
-  },
-} as Parameters<typeof createSchemaMetadataFromDMMF>[0]);
+const schemaMetadata = schemaMetadataOf(
+  model('User', [
+    column('id'),
+    relation('posts', 'Post', 'UserPosts', { isList: true }),
+    relation('profile', 'Profile', 'UserProfile'),
+  ]),
+  model('Post', [
+    column('id', { isId: true }),
+    column('title'),
+    relation('comments', 'Comment', 'PostComments', { isList: true }),
+  ]),
+  model('Comment', [column('id'), column('content')]),
+  model('Profile', [column('id'), column('bio'), relation('badges', 'Badge', 'ProfileBadges', { isList: true })]),
+  model('Badge', [column('id'), column('label')]),
+);
 
 const p1 = { id: 'p1', title: 'First' };
 

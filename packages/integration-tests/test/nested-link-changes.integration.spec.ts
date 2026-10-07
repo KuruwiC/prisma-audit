@@ -13,6 +13,7 @@ import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import type { AggregateMapping, AuditErrorObserver } from '@kuruwic/prisma-audit';
 import { createAuditClient, defineEntity } from '@kuruwic/prisma-audit';
+import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { cleanDatabase, getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
@@ -63,6 +64,7 @@ describe('foreign-key changes of related rows', () => {
     const provider = createAsyncLocalStorageProvider();
     const prisma = createAuditClient(faultyPrisma, {
       Prisma,
+      schema: auditSchema,
       provider,
       aggregateMapping: options.aggregateMapping ?? testAggregateMapping,
       diffing: { excludeFields: ['createdAt', 'updatedAt'] },

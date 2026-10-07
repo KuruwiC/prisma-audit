@@ -5,86 +5,46 @@
 
 import { Decimal } from '@prisma/client/runtime/library';
 import { describe, expect, it } from 'vitest';
-import type { DMMFModel } from '../../src/internal-types.js';
 import { rowKeyWriteOf, withWrittenKey } from '../../src/utils/row-key-write.js';
-import { createSchemaMetadataFromDMMF } from '../../src/utils/schema-metadata.js';
-
-const field = (name: string, extra: Partial<DMMFModel['fields'][number]> = {}) => ({
-  name,
-  kind: 'scalar',
-  type: 'String',
-  ...extra,
-});
+import { column, model, relation, schemaMetadataOf } from '../support/audit-schema.js';
 
 /** Stands for `Prisma.skip` */
 const skip = new (class Skip {})();
 
-const metadata = createSchemaMetadataFromDMMF({
-  dmmf: {
-    datamodel: {
-      models: [
-        {
-          name: 'User',
-          fields: [
-            field('id', { isId: true, isRequired: true }),
-            field('email', { isUnique: true, isRequired: true }),
-            field('name'),
-          ],
-        },
-        {
-          name: 'Badge',
-          fields: [
-            field('ownerId', { isId: true, isRequired: true }),
-            field('label'),
-            field('owner', {
-              kind: 'object',
-              type: 'User',
-              relationName: 'UserBadge',
-              relationFromFields: ['ownerId'],
-              relationToFields: ['id'],
-            }),
-          ],
-        },
-        {
-          name: 'Post',
-          fields: [
-            field('id', { isId: true, isRequired: true }),
-            field('authorId'),
-            field('author', {
-              kind: 'object',
-              type: 'User',
-              relationName: 'UserPost',
-              relationFromFields: ['authorId'],
-              relationToFields: ['id'],
-            }),
-          ],
-        },
-        {
-          name: 'Membership',
-          fields: [field('orgId', { isRequired: true }), field('userId', { isRequired: true }), field('role')],
-          primaryKey: { name: null, fields: ['orgId', 'userId'] },
-        },
-        { name: 'Device', fields: [field('code', { isUnique: true, isRequired: true }), field('label')] },
-        { name: 'Note', fields: [field('label', { isUnique: true }), field('text')] },
-        {
-          name: 'Slot',
-          fields: [field('room', { isRequired: true }), field('at', { type: 'DateTime', isRequired: true })],
-          primaryKey: { name: null, fields: ['room', 'at'] },
-        },
-        {
-          name: 'Ledger',
-          fields: [
-            field('orgId', { type: 'BigInt', isRequired: true }),
-            field('seq', { type: 'BigInt', isRequired: true }),
-          ],
-          primaryKey: { name: null, fields: ['orgId', 'seq'] },
-        },
-        { name: 'Rate', fields: [field('amount', { type: 'Decimal', isId: true, isRequired: true })] },
-        { name: 'Blob', fields: [field('hash', { type: 'Bytes', isId: true, isRequired: true })] },
-      ],
+const metadata = schemaMetadataOf(
+  model('User', [
+    column('id', { isId: true, isRequired: true }),
+    column('email', { isUnique: true, isRequired: true }),
+    column('name'),
+  ]),
+  model('Badge', [
+    column('ownerId', { isId: true, isRequired: true }),
+    column('label'),
+    relation('owner', 'User', 'UserBadge', { foreignKeyFields: ['ownerId'], referencedFields: ['id'] }),
+  ]),
+  model('Post', [
+    column('id', { isId: true, isRequired: true }),
+    column('authorId'),
+    relation('author', 'User', 'UserPost', { foreignKeyFields: ['authorId'], referencedFields: ['id'] }),
+  ]),
+  model('Membership', [column('orgId', { isRequired: true }), column('userId', { isRequired: true }), column('role')], {
+    primaryKey: { name: null, fields: ['orgId', 'userId'] },
+  }),
+  model('Device', [column('code', { isUnique: true, isRequired: true }), column('label')]),
+  model('Note', [column('label', { isUnique: true }), column('text')]),
+  model('Slot', [column('room', { isRequired: true }), column('at', { type: 'DateTime', isRequired: true })], {
+    primaryKey: { name: null, fields: ['room', 'at'] },
+  }),
+  model(
+    'Ledger',
+    [column('orgId', { type: 'BigInt', isRequired: true }), column('seq', { type: 'BigInt', isRequired: true })],
+    {
+      primaryKey: { name: null, fields: ['orgId', 'seq'] },
     },
-  },
-});
+  ),
+  model('Rate', [column('amount', { type: 'Decimal', isId: true, isRequired: true })]),
+  model('Blob', [column('hash', { type: 'Bytes', isId: true, isRequired: true })]),
+);
 
 const keyWriteOf = (model: string, data: unknown) => rowKeyWriteOf(metadata, model, data, { skip });
 

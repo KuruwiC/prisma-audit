@@ -18,6 +18,7 @@ import { resolveFetchBefore } from './config/helpers.js';
 import { validateAuditOmittedFields, validateFieldConflicts } from './config/validation.js';
 import type { ShouldFetchBefore } from './grammar/pre-fetch-selection.js';
 import type { PrismaNamespace } from './internal-types.js';
+import { loadSchemaMetadata } from './schema/schema-metadata.js';
 import type { SchemaMetadata } from './schema/types.js';
 import type { PrismaAuditExtensionOptions } from './types.js';
 import {
@@ -28,7 +29,6 @@ import {
 import { shouldAuditModel } from './utils/extension-utils.js';
 import { getModelAccessor } from './utils/model-accessor.js';
 import { supportsQueryOmit } from './utils/prisma-version.js';
-import { createSchemaMetadataFromDMMF } from './utils/schema-metadata.js';
 
 export interface AuditOptions {
   readonly provider: AuditContextProvider;
@@ -66,14 +66,15 @@ export interface AuditOptions {
 const RELATION_COUNT_FIELD = '_count';
 
 /**
- * @throws {Error} If the aggregate mapping is invalid, the diffing and redaction settings conflict, or
- *   an entity's `auditOmittedFields` names a field the audit cannot read
+ * @throws {Error} If the `schema` option is missing or of another format version, the aggregate
+ *   mapping is invalid, the diffing and redaction settings conflict, or an entity's
+ *   `auditOmittedFields` names a field the audit cannot read
  */
 export const normalizeAuditOptions = (options: PrismaAuditExtensionOptions): AuditOptions => {
   const { provider, aggregateMapping, diffing, security, performance, hooks, contextEnricher, errorHandling } = options;
 
+  const schemaMetadata = loadSchemaMetadata(options.schema);
   const Prisma = options.Prisma as PrismaNamespace;
-  const schemaMetadata = createSchemaMetadataFromDMMF(Prisma);
   const excludeFields = diffing?.excludeFields ?? [];
   const redact = security?.redact;
   const awaitWriteIf = performance?.awaitWriteIf;

@@ -8,77 +8,52 @@
 import type { AuditContext, FailureSink } from '@kuruwic/db-audit-core';
 import { Decimal } from '@prisma/client/runtime/library';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { DMMFField, PrismaClientWithDynamicAccess, PrismaNamespace } from '../../src/internal-types.js';
+import type { PrismaClientWithDynamicAccess, PrismaNamespace } from '../../src/internal-types.js';
 import { createBatchExecutor } from '../../src/pipeline/batch-executor.js';
 import type { ExecutionScope } from '../../src/pipeline/execution-scope.js';
 import type { AuditedOperation } from '../../src/pipeline/executor.js';
 import type { RecordProducer } from '../../src/pipeline/produce-records.js';
 import { NO_AUDITED_OMITTED_FIELDS, withRowKeyFields } from '../../src/utils/audited-omitted-fields.js';
-import { createSchemaMetadataFromDMMF } from '../../src/utils/schema-metadata.js';
+import { column, model, schemaMetadataOf } from '../support/audit-schema.js';
 import { runWithRecords } from './run-with-records.js';
 
 type Row = Record<string, unknown>;
 
-const scalar = (name: string, extra: Partial<DMMFField> = {}): DMMFField => ({
-  name,
-  kind: 'scalar',
-  type: 'String',
-  isList: false,
-  ...extra,
-});
+const Prisma: PrismaNamespace = { defineExtension: () => undefined, DbNull: null, Decimal };
 
-const Prisma: PrismaNamespace = {
-  defineExtension: () => undefined,
-  DbNull: null,
-  Decimal,
-  dmmf: {
-    datamodel: {
-      models: [
-        {
-          name: 'User',
-          fields: [
-            scalar('id', { isId: true, hasDefaultValue: true, default: { name: 'cuid', args: [] } }),
-            scalar('email'),
-            scalar('nickname', { hasDefaultValue: true, default: 'anonymous' }),
-            scalar('updatedAt', { type: 'DateTime', isUpdatedAt: true }),
-          ],
-        },
-        {
-          name: 'Membership',
-          fields: [
-            scalar('orgId', { type: 'BigInt', isRequired: true }),
-            scalar('userId', { type: 'BigInt', isRequired: true }),
-            scalar('role'),
-          ],
-          primaryKey: { name: null, fields: ['orgId', 'userId'] },
-        },
-        {
-          name: 'Device',
-          fields: [
-            scalar('label', { isUnique: true }),
-            scalar('serial', { isUnique: true, isRequired: true, default: { name: 'cuid', args: [] } }),
-            scalar('name'),
-          ],
-        },
-        { name: 'Note', fields: [scalar('label', { isUnique: true }), scalar('text', { isRequired: true })] },
-        { name: 'Reading', fields: [scalar('at', { type: 'DateTime', isId: true }), scalar('value')] },
-        { name: 'Counter', fields: [scalar('id', { type: 'Int', isId: true }), scalar('value')] },
-        {
-          name: 'Slot',
-          fields: [
-            scalar('room', { isRequired: true }),
-            scalar('at', { type: 'DateTime', isRequired: true }),
-            scalar('note'),
-          ],
-          primaryKey: { name: null, fields: ['room', 'at'] },
-        },
-        { name: 'Rate', fields: [scalar('amount', { type: 'Decimal', isId: true }), scalar('label')] },
-      ],
+const schemaMetadata = schemaMetadataOf(
+  model('User', [
+    column('id', { isId: true, hasDefaultValue: true, default: { name: 'cuid', args: [] } }),
+    column('email'),
+    column('nickname', { hasDefaultValue: true }),
+    column('updatedAt', { type: 'DateTime', isUpdatedAt: true }),
+  ]),
+  model(
+    'Membership',
+    [
+      column('orgId', { type: 'BigInt', isRequired: true }),
+      column('userId', { type: 'BigInt', isRequired: true }),
+      column('role'),
+    ],
+    { primaryKey: { name: null, fields: ['orgId', 'userId'] } },
+  ),
+  model('Device', [
+    column('label', { isUnique: true }),
+    column('serial', { isUnique: true, isRequired: true, hasDefaultValue: true, default: { name: 'cuid', args: [] } }),
+    column('name'),
+  ]),
+  model('Note', [column('label', { isUnique: true }), column('text', { isRequired: true })]),
+  model('Reading', [column('at', { type: 'DateTime', isId: true }), column('value')]),
+  model('Counter', [column('id', { type: 'Int', isId: true }), column('value')]),
+  model(
+    'Slot',
+    [column('room', { isRequired: true }), column('at', { type: 'DateTime', isRequired: true }), column('note')],
+    {
+      primaryKey: { name: null, fields: ['room', 'at'] },
     },
-  },
-};
-
-const schemaMetadata = createSchemaMetadataFromDMMF(Prisma);
+  ),
+  model('Rate', [column('amount', { type: 'Decimal', isId: true }), column('label')]),
+);
 const auditContext: AuditContext = { actor: { category: 'model', type: 'User', id: 'user-1' } };
 
 const clientWith = (delegates: Record<string, Record<string, unknown>>): PrismaClientWithDynamicAccess => ({

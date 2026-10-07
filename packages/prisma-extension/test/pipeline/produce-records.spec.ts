@@ -12,7 +12,7 @@ import type { ExecutionScope } from '../../src/pipeline/execution-scope.js';
 import type { OmittedFieldReadDependencies } from '../../src/pipeline/omitted-fields-after-write.js';
 import { createRecordProducer } from '../../src/pipeline/produce-records.js';
 import { createAuditedOmittedFields, NO_AUDITED_OMITTED_FIELDS } from '../../src/utils/audited-omitted-fields.js';
-import { createSchemaMetadataFromDMMF } from '../../src/utils/schema-metadata.js';
+import { column, model, schemaMetadataOf } from '../support/audit-schema.js';
 
 const baseClient: PrismaClientWithDynamicAccess = Object.assign(Object.create(null), { name: 'base' });
 const transactionClient: TransactionalPrismaClient = Object.assign(Object.create(null), { name: 'transaction' });
@@ -36,30 +36,15 @@ const event: MutationEvent = {
   origin: { path: '', op: 'update' },
 };
 
-const postSchemaMetadata = createSchemaMetadataFromDMMF({
-  dmmf: {
-    datamodel: {
-      models: [
-        {
-          name: 'Post',
-          fields: [
-            { name: 'id', kind: 'scalar', type: 'String', isList: false, isId: true },
-            { name: 'title', kind: 'scalar', type: 'String', isList: false },
-            { name: 'secret', kind: 'scalar', type: 'String', isList: false },
-          ],
-        },
-      ],
-    },
-  },
-} as Parameters<typeof createSchemaMetadataFromDMMF>[0]);
+const postSchemaMetadata = schemaMetadataOf(
+  model('Post', [column('id', { isId: true }), column('title'), column('secret')]),
+);
 
 const producerWith = (
   idResolver: (row: Record<string, unknown>, db: unknown) => Promise<string | null>,
   failureSink: Pick<FailureSink, 'reportResolverFailures'> = { reportResolverFailures: vi.fn(async () => {}) },
   omittedFieldReads: OmittedFieldReadDependencies = {
-    schemaMetadata: createSchemaMetadataFromDMMF({ dmmf: { datamodel: { models: [] } } } as Parameters<
-      typeof createSchemaMetadataFromDMMF
-    >[0]),
+    schemaMetadata: schemaMetadataOf(),
     auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS,
   },
 ) => {

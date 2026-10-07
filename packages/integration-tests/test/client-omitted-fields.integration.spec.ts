@@ -18,6 +18,7 @@ import {
   foreignKey,
   to,
 } from '@kuruwic/prisma-audit';
+import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { aggregatesOf, cleanDatabase, getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
@@ -93,6 +94,7 @@ describe('fields a client-level omit hides', () => {
     const provider = createAsyncLocalStorageProvider();
     const prisma = createAuditClient(basePrisma, {
       Prisma,
+      schema: auditSchema,
       provider,
       aggregateMapping: testAggregateMapping,
       diffing: { excludeFields: ['createdAt', 'updatedAt'] },

@@ -12,6 +12,7 @@ import {
   getPendingWriteCount,
   to,
 } from '@kuruwic/prisma-audit';
+import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -50,6 +51,7 @@ describe('Write Strategy Tests', () => {
         aggregateMapping: testAggregateMapping,
         performance: { awaitWrite: false },
         Prisma,
+        schema: auditSchema,
       });
 
       await auditProvider.runAsync(
@@ -93,6 +95,7 @@ describe('Write Strategy Tests', () => {
         aggregateMapping: testAggregateMapping,
         performance: { awaitWrite: false },
         Prisma,
+        schema: auditSchema,
       });
 
       await auditProvider.runAsync(
@@ -146,6 +149,7 @@ describe('Write Strategy Tests', () => {
         aggregateMapping: testAggregateMapping,
         performance: { awaitWrite: true },
         Prisma,
+        schema: auditSchema,
       });
 
       await auditProvider.runAsync(
@@ -200,6 +204,7 @@ describe('Write Strategy Tests', () => {
         aggregateMapping: testAggregateMapping,
         performance: { awaitWrite: true },
         Prisma,
+        schema: auditSchema,
       });
 
       await auditProvider.runAsync(

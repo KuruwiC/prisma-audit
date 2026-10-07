@@ -4,13 +4,12 @@
 
 import { defineEntity } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
-import type { DMMFField, PrismaNamespace } from '../../src/internal-types.js';
 import {
   createAuditedOmittedFields,
   withOmittedFieldsInFinds,
   withRowKeyFields,
 } from '../../src/utils/audited-omitted-fields.js';
-import { createSchemaMetadataFromDMMF } from '../../src/utils/schema-metadata.js';
+import { column, model, schemaMetadataOf } from '../support/audit-schema.js';
 
 describe('createAuditedOmittedFields', () => {
   const entities = {
@@ -38,32 +37,14 @@ describe('createAuditedOmittedFields', () => {
 });
 
 describe('withRowKeyFields', () => {
-  const scalar = (name: string, extra: Partial<DMMFField> = {}): DMMFField => ({
-    name,
-    kind: 'scalar',
-    type: 'String',
-    isList: false,
-    ...extra,
-  });
-  const Prisma: PrismaNamespace = {
-    defineExtension: () => undefined,
-    DbNull: null,
-    dmmf: {
-      datamodel: {
-        models: [
-          { name: 'User', fields: [scalar('id', { isId: true }), scalar('password')] },
-          {
-            name: 'Membership',
-            fields: [scalar('orgId', { isRequired: true }), scalar('userId', { isRequired: true })],
-            primaryKey: { name: null, fields: ['orgId', 'userId'] },
-          },
-          { name: 'Device', fields: [scalar('serial', { isUnique: true, isRequired: true }), scalar('name')] },
-          { name: 'Note', fields: [scalar('label', { isUnique: true }), scalar('text', { isRequired: true })] },
-        ],
-      },
-    },
-  };
-  const schemaMetadata = createSchemaMetadataFromDMMF(Prisma);
+  const schemaMetadata = schemaMetadataOf(
+    model('User', [column('id', { isId: true }), column('password')]),
+    model('Membership', [column('orgId', { isRequired: true }), column('userId', { isRequired: true })], {
+      primaryKey: { name: null, fields: ['orgId', 'userId'] },
+    }),
+    model('Device', [column('serial', { isUnique: true, isRequired: true }), column('name')]),
+    model('Note', [column('label', { isUnique: true }), column('text', { isRequired: true })]),
+  );
   const audited = createAuditedOmittedFields(
     (model) => (model === 'User' ? defineEntity({ type: 'User', auditOmittedFields: ['password'] }) : undefined),
     [],

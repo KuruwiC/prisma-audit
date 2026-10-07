@@ -7,26 +7,15 @@ import { describe, expect, it, vi } from 'vitest';
 import type { PrismaClientWithDynamicAccess } from '../../src/internal-types.js';
 import { readOmittedFieldsAfterWrite } from '../../src/pipeline/omitted-fields-after-write.js';
 import { createAuditedOmittedFields } from '../../src/utils/audited-omitted-fields.js';
-import { createSchemaMetadataFromDMMF } from '../../src/utils/schema-metadata.js';
+import { column, model, schemaMetadataOf } from '../support/audit-schema.js';
 
-const scalar = (name: string) => ({ name, kind: 'scalar', type: 'String', isList: false });
-
-const schemaMetadata = createSchemaMetadataFromDMMF({
-  dmmf: {
-    datamodel: {
-      models: [
-        { name: 'User', fields: [{ ...scalar('id'), isId: true }, scalar('name'), scalar('password')] },
-        { name: 'Post', fields: [{ ...scalar('id'), isId: true }, scalar('title'), scalar('content')] },
-        { name: 'Tag', fields: [{ ...scalar('id'), isId: true }, scalar('label')] },
-        { name: 'Legacy', fields: [scalar('code'), scalar('secret')] },
-        {
-          name: 'Device',
-          fields: [{ ...scalar('code'), isUnique: true, isRequired: true }, scalar('label'), scalar('secret')],
-        },
-      ],
-    },
-  },
-} as Parameters<typeof createSchemaMetadataFromDMMF>[0]);
+const schemaMetadata = schemaMetadataOf(
+  model('User', [column('id', { isId: true }), column('name'), column('password')]),
+  model('Post', [column('id', { isId: true }), column('title'), column('content')]),
+  model('Tag', [column('id', { isId: true }), column('label')]),
+  model('Legacy', [column('code'), column('secret')]),
+  model('Device', [column('code', { isUnique: true, isRequired: true }), column('label'), column('secret')]),
+);
 
 const listed: Record<string, string[]> = {
   User: ['password'],

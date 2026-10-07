@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import type { AuditContextProvider } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { createAuditClient } from '@kuruwic/prisma-audit';
+import { auditSchema } from '../../generated/sqlite-audit/index.js';
 import { Prisma, PrismaClient } from '../../generated/sqlite-client/index.js';
 import { testAggregateMapping } from './setup.js';
 
@@ -54,6 +55,7 @@ export const setupSQLiteDatabase = async (): Promise<SQLiteTestContext> => {
 
   const prisma = createAuditClient(basePrisma, {
     Prisma,
+    schema: auditSchema,
     provider,
     aggregateMapping: testAggregateMapping,
     diffing: {

@@ -414,7 +414,7 @@ export const relationRowsOf = (
 };
 
 /**
- * A model's primary key: its `@@id` constraint, else its `@id` field.
+ * A model's primary key: its `@@id` constraint, else its `@id` field (with a null name).
  *
  * The `@@id` constraint keeps its declared `name` (`@@id([a, b], name: "custom")`), which Prisma
  * uses, or `fields.join('_')` when absent, as the compound-unique WHERE key.
@@ -424,15 +424,8 @@ export const relationRowsOf = (
 export const getPrimaryKeyConstraint = (
   schemaMetadata: SchemaMetadata,
   modelName: string,
-): UniqueConstraint | undefined => {
-  const primaryKey = schemaMetadata.getUniqueConstraints(modelName).find((c) => c.type === 'primaryKey');
-  if (primaryKey && primaryKey.fields.length > 0) return primaryKey;
-
-  const idField = schemaMetadata.getAllFields(modelName).find((f) => f.isId);
-  if (idField) return { type: 'primaryKey', fields: [idField.name] };
-
-  return undefined;
-};
+): UniqueConstraint | undefined =>
+  schemaMetadata.getUniqueConstraints(modelName).find((constraint) => constraint.type === 'primaryKey');
 
 /**
  * Rebuild the primary-key fields of a record from its serialized entity identity: the value

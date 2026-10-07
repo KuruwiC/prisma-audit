@@ -12,6 +12,7 @@ import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import type { AggregateMapping } from '@kuruwic/prisma-audit';
 import { createAuditClient, defineEntity, foreignKey, to } from '@kuruwic/prisma-audit';
+import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, inject, it } from 'vitest';
 import { cleanDatabase } from './helpers/setup.js';
@@ -34,6 +35,7 @@ describe('A write that stores the values a row already holds', () => {
   const createClient = (excludeFields: string[] | undefined) =>
     createAuditClient(basePrisma, {
       Prisma,
+      schema: auditSchema,
       provider,
       aggregateMapping: createMapping(excludeFields),
       diffing: { excludeFields: ['createdAt'] },

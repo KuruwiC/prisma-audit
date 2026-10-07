@@ -27,7 +27,7 @@ export interface PreFetchListClient {
   }): Promise<PreFetchRecord[]>;
 }
 
-/** `modelName` is PascalCase, as in the DMMF. */
+/** `modelName` is the model's name as the schema declares it. */
 export const getPreFetchModelClient = (
   prismaClient: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
   modelName: string,
@@ -40,7 +40,7 @@ export const getPreFetchModelClient = (
     : undefined;
 };
 
-/** `modelName` is PascalCase, as in the DMMF. */
+/** `modelName` is the model's name as the schema declares it. */
 export const getPreFetchListClient = (
   prismaClient: PrismaClientWithDynamicAccess | TransactionalPrismaClient,
   modelName: string,

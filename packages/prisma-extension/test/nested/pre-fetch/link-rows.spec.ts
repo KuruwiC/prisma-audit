@@ -5,7 +5,6 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import type { NestedPreFetchResults } from '../../../src/grammar/nested-operations.js';
-import type { DMMFField, DMMFModel, PrismaNamespace } from '../../../src/internal-types.js';
 import { detectExecutedNestedOperations } from '../../../src/nested/events/write-set.js';
 import { linkWriteOf, type ReadLinkRowsDependencies, readLinkRows } from '../../../src/nested/pre-fetch/link-rows.js';
 import { storeReadResult } from '../../../src/nested/pre-fetch/pre-fetch-result-store.js';
@@ -16,61 +15,34 @@ import {
 } from '../../../src/nested/pre-fetch/relation-link.js';
 import type { RelationField } from '../../../src/schema/types.js';
 import { NO_AUDITED_OMITTED_FIELDS } from '../../../src/utils/audited-omitted-fields.js';
-import { createSchemaMetadataFromDMMF } from '../../../src/utils/schema-metadata.js';
+import { column, model, relation, schemaMetadataOf } from '../../support/audit-schema.js';
 
-const scalar = (name: string, extra: Partial<DMMFField> = {}): DMMFField => ({
-  name,
-  kind: 'scalar',
-  type: 'String',
-  ...extra,
-});
-const relation = (name: string, type: string, relationName: string, extra: Partial<DMMFField> = {}): DMMFField => ({
-  name,
-  kind: 'object',
-  type,
-  relationName,
-  ...extra,
-});
-
-const models: DMMFModel[] = [
-  {
-    name: 'User',
-    fields: [scalar('id', { isId: true }), relation('posts', 'Post', 'PostToUser', { isList: true })],
-  },
-  {
-    name: 'Post',
-    fields: [
-      scalar('id', { isId: true }),
-      scalar('authorId'),
-      relation('author', 'User', 'PostToUser', {
-        isRequired: true,
-        relationFromFields: ['authorId'],
-        relationToFields: ['id'],
-      }),
-      relation('labels', 'Label', 'LabelToPost', { isList: true }),
-      relation('categories', 'Category', 'CategoryToPost', { isList: true }),
-    ],
-  },
-  {
-    name: 'Label',
-    fields: [
-      scalar('id', { isId: true }),
-      scalar('postId'),
-      relation('post', 'Post', 'LabelToPost', {
-        isRequired: false,
-        relationFromFields: ['postId'],
-        relationToFields: ['id'],
-      }),
-    ],
-  },
-  {
-    name: 'Category',
-    fields: [scalar('id', { isId: true }), relation('posts', 'Post', 'CategoryToPost', { isList: true })],
-  },
+const models = [
+  model('User', [column('id', { isId: true }), relation('posts', 'Post', 'PostToUser', { isList: true })]),
+  model('Post', [
+    column('id', { isId: true }),
+    column('authorId'),
+    relation('author', 'User', 'PostToUser', {
+      isRequired: true,
+      foreignKeyFields: ['authorId'],
+      referencedFields: ['id'],
+    }),
+    relation('labels', 'Label', 'LabelToPost', { isList: true }),
+    relation('categories', 'Category', 'CategoryToPost', { isList: true }),
+  ]),
+  model('Label', [
+    column('id', { isId: true }),
+    column('postId'),
+    relation('post', 'Post', 'LabelToPost', {
+      isRequired: false,
+      foreignKeyFields: ['postId'],
+      referencedFields: ['id'],
+    }),
+  ]),
+  model('Category', [column('id', { isId: true }), relation('posts', 'Post', 'CategoryToPost', { isList: true })]),
 ];
 
-const Prisma: PrismaNamespace = { defineExtension: () => undefined, DbNull: null, dmmf: { datamodel: { models } } };
-const schemaMetadata = createSchemaMetadataFromDMMF(Prisma);
+const schemaMetadata = schemaMetadataOf(...models);
 const at = (path: string, fieldName: string, relatedModel: string) => ({ path, fieldName, relatedModel });
 
 describe('relationLinkOf', () => {
@@ -114,23 +86,14 @@ describe('relationLinkOf', () => {
 });
 
 describe('findBackRelationField', () => {
-  const nodeFields = createSchemaMetadataFromDMMF({
-    dmmf: {
-      datamodel: {
-        models: [
-          {
-            name: 'Node',
-            fields: [
-              scalar('id', { isId: true }),
-              scalar('parentId'),
-              relation('children', 'Node', 'Tree', { isList: true }),
-              relation('parent', 'Node', 'Tree', { relationFromFields: ['parentId'], relationToFields: ['id'] }),
-            ],
-          },
-        ],
-      },
-    },
-  }).getRelationFields('Node');
+  const nodeFields = schemaMetadataOf(
+    model('Node', [
+      column('id', { isId: true }),
+      column('parentId'),
+      relation('children', 'Node', 'Tree', { isList: true }),
+      relation('parent', 'Node', 'Tree', { foreignKeyFields: ['parentId'], referencedFields: ['id'] }),
+    ]),
+  ).getRelationFields('Node');
   const children = nodeFields.find((field) => field.name === 'children') as RelationField;
   const parent = nodeFields.find((field) => field.name === 'parent') as RelationField;
 
@@ -298,24 +261,21 @@ describe('readLinkRows', () => {
   });
 
   it('reports a link whose foreign key references no field of the parent model instead of reading every row', async () => {
-    const withoutReferences: DMMFModel[] = models.map((model) =>
-      model.name === 'Label'
+    const withoutReferences = models.map((candidate) =>
+      candidate.name === 'Label'
         ? {
-            ...model,
-            fields: model.fields.map((field) => (field.name === 'post' ? { ...field, relationToFields: [] } : field)),
+            ...candidate,
+            fields: candidate.fields.map((field) =>
+              field.kind === 'object' && field.name === 'post' ? { ...field, referencedFields: [] } : field,
+            ),
           }
-        : model,
+        : candidate,
     );
-    const unresolved: PrismaNamespace = {
-      defineExtension: () => undefined,
-      DbNull: null,
-      dmmf: { datamodel: { models: withoutReferences } },
-    };
     const findMany = vi.fn(async () => []);
     const onPreFetchFailure = vi.fn(async () => undefined);
 
     const reads = await readWith(findMany, {
-      schemaMetadata: createSchemaMetadataFromDMMF(unresolved),
+      schemaMetadata: schemaMetadataOf(...withoutReferences),
       onPreFetchFailure,
     });
 

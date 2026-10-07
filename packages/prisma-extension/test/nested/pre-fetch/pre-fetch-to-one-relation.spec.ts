@@ -5,108 +5,54 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import { TOP_LEVEL_ROW } from '../../../src/grammar/nested-state.js';
-import type { DMMFField, PrismaNamespace, TransactionalPrismaClient } from '../../../src/internal-types.js';
+import type { TransactionalPrismaClient } from '../../../src/internal-types.js';
 import { preFetchNestedRecordsBeforeOperation } from '../../../src/nested/pre-fetch/coordinator.js';
 import { preFetchedStateUnder } from '../../../src/nested/pre-fetch/pre-fetch-result-store.js';
 import { NO_AUDITED_OMITTED_FIELDS } from '../../../src/utils/audited-omitted-fields.js';
-import { createSchemaMetadataFromDMMF } from '../../../src/utils/schema-metadata.js';
+import { column, model, relation, schemaMetadataOf } from '../../support/audit-schema.js';
 
 type Row = Record<string, unknown>;
 
-const scalar = (name: string, extra: Partial<DMMFField> = {}): DMMFField => ({
-  name,
-  kind: 'scalar',
-  type: 'String',
-  isList: false,
-  ...extra,
-});
-
-const relation = (name: string, type: string, relationName: string, extra: Partial<DMMFField> = {}): DMMFField => ({
-  name,
-  kind: 'object',
-  type,
-  isList: false,
-  relationName,
-  relationFromFields: [],
-  relationToFields: [],
-  ...extra,
-});
-
-const Prisma: PrismaNamespace = {
-  defineExtension: () => undefined,
-  DbNull: null,
-  dmmf: {
-    datamodel: {
-      models: [
-        {
-          name: 'Account',
-          fields: [
-            scalar('id', { isId: true }),
-            relation('members', 'Member', 'AccountMembers', { isList: true }),
-            relation('primaryContact', 'Contact', 'PrimaryContact'),
-            relation('backupContact', 'Contact', 'BackupContact'),
-          ],
-        },
-        {
-          name: 'Contact',
-          fields: [
-            scalar('id', { isId: true }),
-            scalar('primaryForId', { isUnique: true }),
-            scalar('backupForId', { isUnique: true }),
-            scalar('label'),
-            relation('primaryFor', 'Account', 'PrimaryContact', {
-              relationFromFields: ['primaryForId'],
-              relationToFields: ['id'],
-            }),
-            relation('backupFor', 'Account', 'BackupContact', {
-              relationFromFields: ['backupForId'],
-              relationToFields: ['id'],
-            }),
-          ],
-        },
-        {
-          name: 'Member',
-          fields: [
-            scalar('id', { isId: true }),
-            scalar('accountId'),
-            scalar('code', { isUnique: true }),
-            scalar('deskId'),
-            scalar('name'),
-            relation('account', 'Account', 'AccountMembers', {
-              relationFromFields: ['accountId'],
-              relationToFields: ['id'],
-            }),
-            relation('badge', 'Badge', 'MemberBadge'),
-            relation('desk', 'Desk', 'MemberDesk', {
-              relationFromFields: ['deskId'],
-              relationToFields: ['id'],
-            }),
-          ],
-        },
-        {
-          name: 'Desk',
-          fields: [
-            scalar('id', { isId: true }),
-            scalar('label'),
-            relation('members', 'Member', 'MemberDesk', { isList: true }),
-          ],
-        },
-        {
-          name: 'Badge',
-          fields: [
-            scalar('id', { isId: true }),
-            scalar('memberId', { isUnique: true }),
-            scalar('label'),
-            relation('member', 'Member', 'MemberBadge', {
-              relationFromFields: ['memberId'],
-              relationToFields: ['id'],
-            }),
-          ],
-        },
-      ],
-    },
-  },
-};
+const schemaMetadata = schemaMetadataOf(
+  model('Account', [
+    column('id', { isId: true }),
+    relation('members', 'Member', 'AccountMembers', { isList: true }),
+    relation('primaryContact', 'Contact', 'PrimaryContact'),
+    relation('backupContact', 'Contact', 'BackupContact'),
+  ]),
+  model('Contact', [
+    column('id', { isId: true }),
+    column('primaryForId', { isUnique: true }),
+    column('backupForId', { isUnique: true }),
+    column('label'),
+    relation('primaryFor', 'Account', 'PrimaryContact', {
+      foreignKeyFields: ['primaryForId'],
+      referencedFields: ['id'],
+    }),
+    relation('backupFor', 'Account', 'BackupContact', { foreignKeyFields: ['backupForId'], referencedFields: ['id'] }),
+  ]),
+  model('Member', [
+    column('id', { isId: true }),
+    column('accountId'),
+    column('code', { isUnique: true }),
+    column('deskId'),
+    column('name'),
+    relation('account', 'Account', 'AccountMembers', { foreignKeyFields: ['accountId'], referencedFields: ['id'] }),
+    relation('badge', 'Badge', 'MemberBadge'),
+    relation('desk', 'Desk', 'MemberDesk', { foreignKeyFields: ['deskId'], referencedFields: ['id'] }),
+  ]),
+  model('Desk', [
+    column('id', { isId: true }),
+    column('label'),
+    relation('members', 'Member', 'MemberDesk', { isList: true }),
+  ]),
+  model('Badge', [
+    column('id', { isId: true }),
+    column('memberId', { isUnique: true }),
+    column('label'),
+    relation('member', 'Member', 'MemberBadge', { foreignKeyFields: ['memberId'], referencedFields: ['id'] }),
+  ]),
+);
 
 /**
  * Flat field equality, plus the back-relation filter a nested to-many pre-fetch adds under `AND`
@@ -147,7 +93,7 @@ const preFetch = async (
 ) =>
   (
     await preFetchNestedRecordsBeforeOperation(client, modelName, args, {
-      schemaMetadata: createSchemaMetadataFromDMMF(Prisma),
+      schemaMetadata,
       auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS,
       shouldFetchBefore,
     })

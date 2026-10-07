@@ -6,83 +6,41 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { NestedPreFetchResults } from '../../../src/grammar/nested-operations.js';
 import type { ShouldFetchBefore } from '../../../src/grammar/pre-fetch-selection.js';
-import type { DMMFField, PrismaNamespace, TransactionalPrismaClient } from '../../../src/internal-types.js';
+import type { TransactionalPrismaClient } from '../../../src/internal-types.js';
 import { preFetchNestedRecordsBeforeOperation } from '../../../src/nested/pre-fetch/coordinator.js';
 import { preFetchOneToManyRelation } from '../../../src/nested/pre-fetch/one-to-many-fetcher.js';
 import { parentKeysFromOperationWheres } from '../../../src/nested/pre-fetch/parent-rows.js';
 import { preFetchedResultFor } from '../../../src/nested/pre-fetch/pre-fetch-result-store.js';
 import { NO_AUDITED_OMITTED_FIELDS } from '../../../src/utils/audited-omitted-fields.js';
-import { createSchemaMetadataFromDMMF } from '../../../src/utils/schema-metadata.js';
+import { column, model, relation, schemaMetadataOf } from '../../support/audit-schema.js';
 
 type Row = Record<string, unknown>;
 
-const scalar = (name: string, extra: Partial<DMMFField> = {}): DMMFField => ({
-  name,
-  kind: 'scalar',
-  type: 'String',
-  isList: false,
-  ...extra,
-});
-
-const relation = (name: string, type: string, relationName: string, extra: Partial<DMMFField> = {}): DMMFField => ({
-  name,
-  kind: 'object',
-  type,
-  isList: false,
-  relationName,
-  relationFromFields: [],
-  relationToFields: [],
-  ...extra,
-});
-
-const Prisma: PrismaNamespace = {
-  defineExtension: () => undefined,
-  DbNull: null,
-  dmmf: {
-    datamodel: {
-      models: [
-        {
-          name: 'Account',
-          fields: [
-            scalar('id', { isId: true }),
-            scalar('email', { isUnique: true }),
-            relation('members', 'Member', 'AccountMembers', { isList: true }),
-          ],
-        },
-        {
-          name: 'Member',
-          fields: [
-            scalar('id', { isId: true }),
-            scalar('accountId'),
-            scalar('mentorId'),
-            scalar('name'),
-            relation('account', 'Account', 'AccountMembers', {
-              relationFromFields: ['accountId'],
-              relationToFields: ['id'],
-            }),
-            relation('mentor', 'Member', 'Mentorship', { relationFromFields: ['mentorId'], relationToFields: ['id'] }),
-            relation('mentees', 'Member', 'Mentorship', { isList: true }),
-            relation('notes', 'Note', 'MemberNotes', { isList: true }),
-            relation('tags', 'Tag', 'MemberTags', { isList: true }),
-          ],
-        },
-        {
-          name: 'Note',
-          fields: [
-            scalar('id', { isId: true }),
-            scalar('memberId'),
-            scalar('body'),
-            relation('member', 'Member', 'MemberNotes', { relationFromFields: ['memberId'], relationToFields: ['id'] }),
-          ],
-        },
-        {
-          name: 'Tag',
-          fields: [scalar('id', { isId: true }), relation('members', 'Member', 'MemberTags', { isList: true })],
-        },
-      ],
-    },
-  },
-};
+const schemaMetadata = schemaMetadataOf(
+  model('Account', [
+    column('id', { isId: true }),
+    column('email', { isUnique: true }),
+    relation('members', 'Member', 'AccountMembers', { isList: true }),
+  ]),
+  model('Member', [
+    column('id', { isId: true }),
+    column('accountId'),
+    column('mentorId'),
+    column('name'),
+    relation('account', 'Account', 'AccountMembers', { foreignKeyFields: ['accountId'], referencedFields: ['id'] }),
+    relation('mentor', 'Member', 'Mentorship', { foreignKeyFields: ['mentorId'], referencedFields: ['id'] }),
+    relation('mentees', 'Member', 'Mentorship', { isList: true }),
+    relation('notes', 'Note', 'MemberNotes', { isList: true }),
+    relation('tags', 'Tag', 'MemberTags', { isList: true }),
+  ]),
+  model('Note', [
+    column('id', { isId: true }),
+    column('memberId'),
+    column('body'),
+    relation('member', 'Member', 'MemberNotes', { foreignKeyFields: ['memberId'], referencedFields: ['id'] }),
+  ]),
+  model('Tag', [column('id', { isId: true }), relation('members', 'Member', 'MemberTags', { isList: true })]),
+);
 
 /** Looks rows up by their flat WHERE fields; the back-relation filter is asserted on the recorded call instead. */
 const createDelegate = (rows: Row[]) => {
@@ -115,7 +73,7 @@ const preFetch = (
   shouldFetchBefore: ShouldFetchBefore = fetchBefore,
 ) =>
   preFetchNestedRecordsBeforeOperation(client, modelName, args, {
-    schemaMetadata: createSchemaMetadataFromDMMF(Prisma),
+    schemaMetadata,
     auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS,
     shouldFetchBefore,
   });
@@ -127,7 +85,7 @@ const preFetchReporting = (
 ) => {
   const onPreFetchFailure = vi.fn();
   const preFetched = preFetchNestedRecordsBeforeOperation(client, 'Account', args, {
-    schemaMetadata: createSchemaMetadataFromDMMF(Prisma),
+    schemaMetadata,
     auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS,
     shouldFetchBefore,
     onPreFetchFailure,
@@ -513,7 +471,7 @@ describe('nested to-many batch pre-read', () => {
         'Account',
         { where: { id: 'a1' }, data: { members: { deleteMany: { name: 'draft' } } } },
         {
-          schemaMetadata: createSchemaMetadataFromDMMF(Prisma),
+          schemaMetadata,
           auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS,
           shouldFetchBefore: fetchBefore,
           onPreFetchFailure,

@@ -85,9 +85,22 @@ Each release attaches one tarball per package; `@kuruwic/prisma-audit` depends o
 pnpm add \
   https://github.com/KuruwiC/prisma-audit/releases/download/v0.1.6/kuruwic-db-audit-core-0.1.6.tgz \
   https://github.com/KuruwiC/prisma-audit/releases/download/v0.1.6/kuruwic-prisma-audit-0.1.6.tgz
+pnpm add -D \
+  https://github.com/KuruwiC/prisma-audit/releases/download/v0.1.6/kuruwic-prisma-audit-generator-0.1.6.tgz
 ```
 
 **Requirements:** Node.js >=20.19.0 (AsyncLocalStorage), Prisma 5.10+
+
+The extension reads your models' keys and relations from a file that `prisma generate` writes. Add the generator, `@kuruwic/prisma-audit-generator`, to `schema.prisma`:
+
+```prisma
+generator audit {
+  provider = "prisma-audit-generator"
+  output   = "../generated/audit"
+}
+```
+
+Run `prisma generate`, then pass the `auditSchema` it writes to `createAuditClient` as `schema: auditSchema`.
 
 ## Quick Start
 
@@ -146,6 +159,7 @@ import {
   foreignKey,
 } from "@kuruwic/prisma-audit";
 import { Prisma, PrismaClient } from "@prisma/client";
+import { auditSchema } from "../generated/audit/index.js"; // the generator's output
 
 const auditProvider = createAsyncLocalStorageProvider();
 const basePrisma = new PrismaClient();
@@ -160,6 +174,7 @@ const aggregateMapping = defineAggregateMapping<PrismaClient>()({
 
 const prisma = createAuditClient(basePrisma, {
   Prisma,
+  schema: auditSchema,
   provider: auditProvider,
   aggregateMapping,
 });
@@ -238,6 +253,7 @@ The library automatically selects the optimal write strategy based on your confi
 ```typescript
 createAuditClient(basePrisma, {
   Prisma,
+  schema: auditSchema,
   provider: auditProvider,
   aggregateMapping,
 

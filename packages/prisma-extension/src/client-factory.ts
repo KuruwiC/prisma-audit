@@ -42,12 +42,14 @@ export type PrismaClientLike = {
  * import { createAuditClient, defineEntity, foreignKey, to } from '@kuruwic/prisma-audit';
  * import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
  * import { Prisma, PrismaClient } from '@prisma/client';
+ * import { auditSchema } from '../generated/audit/index.js';
  *
  * const auditProvider = createAsyncLocalStorageProvider();
  * const basePrisma = new PrismaClient();
  *
  * const prisma = createAuditClient(basePrisma, {
  *   Prisma,
+ *   schema: auditSchema,
  *   provider: auditProvider,
  *   aggregateMapping: {
  *     User: defineEntity({ type: 'User' }),
@@ -63,6 +65,7 @@ export type PrismaClientLike = {
  * ```typescript
  * const prisma = createAuditClient(basePrisma, {
  *   Prisma,
+ *   schema: auditSchema,
  *   provider: auditProvider,
  *   aggregateMapping,
  *   diffing: {
@@ -140,9 +143,11 @@ export type PrismaClientWithAudit<T extends PrismaClientLike = PrismaClientLike>
  * } from '@kuruwic/prisma-audit';
  * import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
  * import { type Post, Prisma, type PrismaClient } from '@prisma/client';
+ * import { auditSchema } from '../generated/audit/index.js';
  *
  * export default defineConfig<PrismaClient>({
  *   Prisma,
+ *   schema: auditSchema,
  *   provider: createAsyncLocalStorageProvider(),
  *   aggregateMapping: defineAggregateMapping<PrismaModelNames<PrismaClient>, PrismaClient>()({
  *     User: defineEntity({ type: 'User' }),

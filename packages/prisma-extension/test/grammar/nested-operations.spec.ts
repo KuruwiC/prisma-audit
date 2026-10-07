@@ -15,27 +15,21 @@ import {
   targetWhereClauses,
   type UpsertBranch,
 } from '../../src/grammar/nested-operations.js';
-import { createSchemaMetadataFromDMMF } from '../../src/utils/schema-metadata.js';
+import { column, model, relation, schemaMetadataOf } from '../support/audit-schema.js';
 
 describe('detectNestedOperations', () => {
-  const Prisma = {
-    dmmf: {
-      datamodel: {
-        models: [
-          {
-            name: 'User',
-            fields: [
-              { name: 'id', kind: 'scalar', type: 'String', isList: false },
-              { name: 'email', kind: 'scalar', type: 'String', isList: false },
-              { name: 'metadata', kind: 'scalar', type: 'Json', isList: false },
-              { name: 'posts', kind: 'object', type: 'Post', isList: true },
-              { name: 'profile', kind: 'object', type: 'Profile', isList: false },
-            ],
-          },
-        ],
-      },
-    },
-  };
+  // Post and Profile hold no relation of their own, so detection stops at them
+  const schemaMetadata = schemaMetadataOf(
+    model('User', [
+      column('id'),
+      column('email'),
+      column('metadata', { type: 'Json' }),
+      relation('posts', 'Post', 'UserPosts', { isList: true }),
+      relation('profile', 'Profile', 'UserProfile'),
+    ]),
+    model('Post', [column('id')]),
+    model('Profile', [column('id')]),
+  );
 
   it('should detect nested create operations', () => {
     const args = {
@@ -50,7 +44,7 @@ describe('detectNestedOperations', () => {
       },
     };
 
-    const operations = detectNestedOperations(createSchemaMetadataFromDMMF(Prisma), 'User', args, {
+    const operations = detectNestedOperations(schemaMetadata, 'User', args, {
       kind: 'discovery',
     });
 
@@ -75,7 +69,7 @@ describe('detectNestedOperations', () => {
       data: { posts: { delete: { id: 'p2' }, connect: { id: 'p1' }, deleteMany: { title: 'Old' } } },
     };
 
-    const operations = detectNestedOperations(createSchemaMetadataFromDMMF(Prisma), 'User', args, {
+    const operations = detectNestedOperations(schemaMetadata, 'User', args, {
       kind: 'discovery',
     });
 
@@ -102,7 +96,7 @@ describe('detectNestedOperations', () => {
       },
     };
 
-    const operations = detectNestedOperations(createSchemaMetadataFromDMMF(Prisma), 'User', args, {
+    const operations = detectNestedOperations(schemaMetadata, 'User', args, {
       kind: 'discovery',
     });
 
@@ -124,7 +118,7 @@ describe('detectNestedOperations', () => {
       },
     };
 
-    const operations = detectNestedOperations(createSchemaMetadataFromDMMF(Prisma), 'User', args, {
+    const operations = detectNestedOperations(schemaMetadata, 'User', args, {
       kind: 'discovery',
     });
     expect(operations).toHaveLength(0);
@@ -137,7 +131,7 @@ describe('detectNestedOperations', () => {
       },
     };
 
-    const operations = detectNestedOperations(createSchemaMetadataFromDMMF(Prisma), 'User', args, {
+    const operations = detectNestedOperations(schemaMetadata, 'User', args, {
       kind: 'discovery',
     });
     expect(operations).toEqual([]);
@@ -148,7 +142,7 @@ describe('detectNestedOperations', () => {
       where: { id: 'user-id' },
     };
 
-    const operations = detectNestedOperations(createSchemaMetadataFromDMMF(Prisma), 'User', args, {
+    const operations = detectNestedOperations(schemaMetadata, 'User', args, {
       kind: 'discovery',
     });
     expect(operations).toEqual([]);
@@ -157,7 +151,7 @@ describe('detectNestedOperations', () => {
   it('detects a disconnect, which names its rows like connect', () => {
     const args = { data: { posts: { disconnect: [{ id: 'post-1' }, { id: 'post-2' }] } } };
 
-    const operations = detectNestedOperations(createSchemaMetadataFromDMMF(Prisma), 'User', args, {
+    const operations = detectNestedOperations(schemaMetadata, 'User', args, {
       kind: 'discovery',
     });
 
@@ -183,7 +177,7 @@ describe('detectNestedOperations', () => {
     (keyword, fieldName, relatedModel, data) => {
       const args = { data: { email: 'user@example.com', [fieldName]: { [keyword]: data } } };
 
-      const operations = detectNestedOperations(createSchemaMetadataFromDMMF(Prisma), 'User', args, {
+      const operations = detectNestedOperations(schemaMetadata, 'User', args, {
         kind: 'discovery',
       });
 
@@ -213,7 +207,7 @@ describe('detectNestedOperations', () => {
       },
     };
 
-    const operations = detectNestedOperations(createSchemaMetadataFromDMMF(Prisma), 'User', args, {
+    const operations = detectNestedOperations(schemaMetadata, 'User', args, {
       kind: 'discovery',
     });
 
@@ -290,48 +284,17 @@ describe('targetWhereClauses', () => {
 });
 
 describe('detectNestedOperations with upsert branch filtering', () => {
-  const Prisma = {
-    dmmf: {
-      datamodel: {
-        models: [
-          {
-            name: 'User',
-            fields: [
-              { name: 'id', kind: 'scalar', type: 'String', isList: false },
-              { name: 'email', kind: 'scalar', type: 'String', isList: false },
-              { name: 'profile', kind: 'object', type: 'Profile', isList: false },
-            ],
-          },
-          {
-            name: 'Profile',
-            fields: [
-              { name: 'id', kind: 'scalar', type: 'String', isList: false },
-              { name: 'bio', kind: 'scalar', type: 'String', isList: false },
-              { name: 'userId', kind: 'scalar', type: 'String', isList: false },
-              { name: 'avatar', kind: 'object', type: 'Avatar', isList: false },
-            ],
-          },
-          {
-            name: 'Avatar',
-            fields: [
-              { name: 'id', kind: 'scalar', type: 'String', isList: false },
-              { name: 'name', kind: 'scalar', type: 'String', isList: false },
-              { name: 'profileId', kind: 'scalar', type: 'String', isList: false },
-              { name: 'avatarImage', kind: 'object', type: 'AvatarImage', isList: false },
-            ],
-          },
-          {
-            name: 'AvatarImage',
-            fields: [
-              { name: 'id', kind: 'scalar', type: 'String', isList: false },
-              { name: 'imageUrl', kind: 'scalar', type: 'String', isList: false },
-              { name: 'avatarId', kind: 'scalar', type: 'String', isList: false },
-            ],
-          },
-        ],
-      },
-    },
-  };
+  const schemaMetadata = schemaMetadataOf(
+    model('User', [column('id'), column('email'), relation('profile', 'Profile', 'UserProfile')]),
+    model('Profile', [column('id'), column('bio'), column('userId'), relation('avatar', 'Avatar', 'ProfileAvatar')]),
+    model('Avatar', [
+      column('id'),
+      column('name'),
+      column('profileId'),
+      relation('avatarImage', 'AvatarImage', 'AvatarAvatarImage'),
+    ]),
+    model('AvatarImage', [column('id'), column('imageUrl'), column('avatarId')]),
+  );
 
   const profileUpsertArgs = {
     data: {
@@ -349,23 +312,13 @@ describe('detectNestedOperations with upsert branch filtering', () => {
     operations.map((op) => `${op.path}:${op.operation}`);
 
   it('should detect only the update branch when the upserted record existed', () => {
-    const operations = detectNestedOperations(
-      createSchemaMetadataFromDMMF(Prisma),
-      'User',
-      profileUpsertArgs,
-      executedPass(['profile']),
-    );
+    const operations = detectNestedOperations(schemaMetadata, 'User', profileUpsertArgs, executedPass(['profile']));
 
     expect(operationKeys(operations)).toEqual(['profile:upsert', 'profile.avatar:update']);
   });
 
   it('should detect only the create branch when the upserted record did not exist', () => {
-    const operations = detectNestedOperations(
-      createSchemaMetadataFromDMMF(Prisma),
-      'User',
-      profileUpsertArgs,
-      executedPass([]),
-    );
+    const operations = detectNestedOperations(schemaMetadata, 'User', profileUpsertArgs, executedPass([]));
 
     expect(operationKeys(operations)).toEqual(['profile:upsert', 'profile.avatar:create']);
   });
@@ -400,12 +353,7 @@ describe('detectNestedOperations with upsert branch filtering', () => {
     };
 
     // Profile exists but avatar does not
-    const operations = detectNestedOperations(
-      createSchemaMetadataFromDMMF(Prisma),
-      'User',
-      args,
-      executedPass(['profile']),
-    );
+    const operations = detectNestedOperations(schemaMetadata, 'User', args, executedPass(['profile']));
 
     // Profile takes the update branch (it exists) and recurses into it, reporting the nested avatar
     // upsert once regardless of which of its own branches it will take.
@@ -413,7 +361,7 @@ describe('detectNestedOperations with upsert branch filtering', () => {
   });
 
   it('should detect both branches in the discovery pass', () => {
-    const operations = detectNestedOperations(createSchemaMetadataFromDMMF(Prisma), 'User', profileUpsertArgs, {
+    const operations = detectNestedOperations(schemaMetadata, 'User', profileUpsertArgs, {
       kind: 'discovery',
     });
 
@@ -486,7 +434,7 @@ describe('detectNestedOperations with upsert branch filtering', () => {
 
     // All records exist (update path for all upserts)
     const operations = detectNestedOperations(
-      createSchemaMetadataFromDMMF(Prisma),
+      schemaMetadata,
       'User',
       args,
       executedPass(['profile', 'profile.avatar', 'profile.avatar.avatarImage']),
@@ -503,29 +451,10 @@ describe('detectNestedOperations with upsert branch filtering', () => {
 });
 
 describe('detectNestedOperations top-level upsert branches', () => {
-  const Prisma = {
-    dmmf: {
-      datamodel: {
-        models: [
-          {
-            name: 'User',
-            fields: [
-              { name: 'id', kind: 'scalar', type: 'String', isList: false },
-              { name: 'email', kind: 'scalar', type: 'String', isList: false },
-              { name: 'profile', kind: 'object', type: 'Profile', isList: false },
-            ],
-          },
-          {
-            name: 'Profile',
-            fields: [
-              { name: 'id', kind: 'scalar', type: 'String', isList: false },
-              { name: 'bio', kind: 'scalar', type: 'String', isList: false },
-            ],
-          },
-        ],
-      },
-    },
-  };
+  const schemaMetadata = schemaMetadataOf(
+    model('User', [column('id'), column('email'), relation('profile', 'Profile', 'UserProfile')]),
+    model('Profile', [column('id'), column('bio')]),
+  );
 
   const args = {
     where: { id: 'user-1' },
@@ -534,9 +463,7 @@ describe('detectNestedOperations top-level upsert branches', () => {
   };
 
   const detectedOperations = (pass: NestedDetectionPass) =>
-    detectNestedOperations(createSchemaMetadataFromDMMF(Prisma), 'User', args, pass).map(
-      (op) => `${op.path}:${op.operation}`,
-    );
+    detectNestedOperations(schemaMetadata, 'User', args, pass).map((op) => `${op.path}:${op.operation}`);
 
   it('scans both branches in the discovery pass', () => {
     expect(detectedOperations({ kind: 'discovery' })).toEqual(['profile:create', 'profile:update']);
@@ -564,7 +491,7 @@ describe('detectNestedOperations top-level upsert branches', () => {
       update: { profile: { create: { bio: 'Replacing bio' } } },
     };
 
-    const operations = detectNestedOperations(createSchemaMetadataFromDMMF(Prisma), 'User', sameKeyword, {
+    const operations = detectNestedOperations(schemaMetadata, 'User', sameKeyword, {
       kind: 'discovery',
     });
 
@@ -579,7 +506,7 @@ describe('detectNestedOperations top-level upsert branches', () => {
     const shared = { where: { id: 'user-1' }, create: { email: 'user@example.com', profile }, update: { profile } };
 
     expect(
-      detectNestedOperations(createSchemaMetadataFromDMMF(Prisma), 'User', shared, { kind: 'discovery' }).map(
+      detectNestedOperations(schemaMetadata, 'User', shared, { kind: 'discovery' }).map(
         (op) => `${op.path}:${op.operation}`,
       ),
     ).toEqual(['profile:create']);
@@ -587,54 +514,18 @@ describe('detectNestedOperations top-level upsert branches', () => {
 });
 
 describe('detectNestedOperations inside nested updates', () => {
-  const Prisma = {
-    dmmf: {
-      datamodel: {
-        models: [
-          {
-            name: 'User',
-            fields: [
-              { name: 'id', kind: 'scalar', type: 'String', isList: false },
-              { name: 'posts', kind: 'object', type: 'Post', isList: true },
-              { name: 'profile', kind: 'object', type: 'Profile', isList: false },
-            ],
-          },
-          {
-            name: 'Profile',
-            fields: [
-              { name: 'id', kind: 'scalar', type: 'String', isList: false },
-              { name: 'avatar', kind: 'object', type: 'Avatar', isList: false },
-            ],
-          },
-          {
-            name: 'Avatar',
-            fields: [
-              { name: 'id', kind: 'scalar', type: 'String', isList: false },
-              { name: 'name', kind: 'scalar', type: 'String', isList: false },
-            ],
-          },
-          {
-            name: 'Post',
-            fields: [
-              { name: 'id', kind: 'scalar', type: 'String', isList: false },
-              { name: 'comments', kind: 'object', type: 'Comment', isList: true },
-            ],
-          },
-          {
-            name: 'Comment',
-            fields: [
-              { name: 'id', kind: 'scalar', type: 'String', isList: false },
-              { name: 'attachments', kind: 'object', type: 'Attachment', isList: true },
-            ],
-          },
-          {
-            name: 'Attachment',
-            fields: [{ name: 'id', kind: 'scalar', type: 'String', isList: false }],
-          },
-        ],
-      },
-    },
-  };
+  const schemaMetadata = schemaMetadataOf(
+    model('User', [
+      column('id'),
+      relation('posts', 'Post', 'UserPosts', { isList: true }),
+      relation('profile', 'Profile', 'UserProfile'),
+    ]),
+    model('Profile', [column('id'), relation('avatar', 'Avatar', 'ProfileAvatar')]),
+    model('Avatar', [column('id'), column('name')]),
+    model('Post', [column('id'), relation('comments', 'Comment', 'PostComments', { isList: true })]),
+    model('Comment', [column('id'), relation('attachments', 'Attachment', 'CommentAttachments', { isList: true })]),
+    model('Attachment', [column('id')]),
+  );
 
   const passes: [string, NestedDetectionPass][] = [
     ['discovery', { kind: 'discovery' }],
@@ -642,9 +533,7 @@ describe('detectNestedOperations inside nested updates', () => {
   ];
 
   const detectedOperations = (args: Record<string, unknown>, pass: NestedDetectionPass) =>
-    detectNestedOperations(createSchemaMetadataFromDMMF(Prisma), 'User', args, pass).map(
-      (op) => `${op.path}:${op.operation}`,
-    );
+    detectNestedOperations(schemaMetadata, 'User', args, pass).map((op) => `${op.path}:${op.operation}`);
 
   describe.each(passes)('%s pass', (_name, pass) => {
     it('detects a write inside a to-one update given as the update data', () => {
@@ -892,7 +781,7 @@ describe('detectNestedOperations inside nested updates', () => {
 
   describe('the element each operation was detected in', () => {
     const parentOf = (args: Record<string, unknown>, pass: NestedDetectionPass) =>
-      detectNestedOperations(createSchemaMetadataFromDMMF(Prisma), 'User', args, pass).map((op) =>
+      detectNestedOperations(schemaMetadata, 'User', args, pass).map((op) =>
         op.parent
           ? `${op.path}:${op.operation} in ${op.parent.operation.path}:${op.parent.operation.operation}[${op.parent.element}]`
           : `${op.path}:${op.operation}`,
@@ -951,7 +840,7 @@ describe('detectNestedOperations inside nested updates', () => {
         },
       };
 
-      detectNestedOperations(createSchemaMetadataFromDMMF(Prisma), 'User', args, {
+      detectNestedOperations(schemaMetadata, 'User', args, {
         kind: 'executed',
         branchAt: (operation) => {
           asked.push(`${operation.path} in ${operation.parent?.operation.path}[${operation.parent?.element}]`);

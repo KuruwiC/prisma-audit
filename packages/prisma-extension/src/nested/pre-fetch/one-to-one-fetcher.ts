@@ -55,15 +55,10 @@ const pairLinkFields = (
  *   the parent row holds that field's `referencedFields`, which the related row references with
  *   its `foreignKeyFields`.
  *
- * @throws Error when the DMMF gives no relation name, no owning side, or key-field lists that
- *   do not pair up
+ * @throws Error when the relation has no owning side, or key-field lists that do not pair up
  */
 export const resolveToOneRelationLink = (schemaMetadata: SchemaMetadata, field: RelationField): ToOneRelationLink => {
   const { relationName } = field;
-  if (!relationName) {
-    throw new Error(`[@prisma-audit] Relation field "${field.name}" has no relation name in the DMMF`);
-  }
-
   if (field.foreignKeyFields.length > 0) {
     return pairLinkFields(relationName, field.foreignKeyFields, field.referencedFields);
   }

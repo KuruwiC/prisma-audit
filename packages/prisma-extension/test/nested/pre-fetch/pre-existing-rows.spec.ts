@@ -5,65 +5,27 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { NestedPreFetchResults } from '../../../src/grammar/nested-operations.js';
 import type { ShouldFetchBefore } from '../../../src/grammar/pre-fetch-selection.js';
-import type { DMMFField, PrismaClientWithDynamicAccess, PrismaNamespace } from '../../../src/internal-types.js';
+import type { PrismaClientWithDynamicAccess } from '../../../src/internal-types.js';
 import { buildNestedWriteSets, detectExecutedNestedOperations } from '../../../src/nested/events/write-set.js';
 import { snapshotPreExistingRows } from '../../../src/nested/pre-fetch/pre-existing-rows.js';
 import { storePreFetchResult, storeUnreadRows } from '../../../src/nested/pre-fetch/pre-fetch-result-store.js';
 import { NO_AUDITED_OMITTED_FIELDS } from '../../../src/utils/audited-omitted-fields.js';
-import { createSchemaMetadataFromDMMF } from '../../../src/utils/schema-metadata.js';
+import { column, model, relation, schemaMetadataOf } from '../../support/audit-schema.js';
 
-const scalar = (name: string, extra: Partial<DMMFField> = {}): DMMFField => ({
-  name,
-  kind: 'scalar',
-  type: 'String',
-  isList: false,
-  ...extra,
-});
-
-const relation = (name: string, type: string, relationName: string, extra: Partial<DMMFField> = {}): DMMFField => ({
-  name,
-  kind: 'object',
-  type,
-  isList: false,
-  relationName,
-  relationFromFields: [],
-  relationToFields: [],
-  ...extra,
-});
-
-const Prisma: PrismaNamespace = {
-  defineExtension: () => undefined,
-  DbNull: null,
-  dmmf: {
-    datamodel: {
-      models: [
-        {
-          name: 'User',
-          fields: [scalar('id', { isId: true }), relation('posts', 'Post', 'UserPosts', { isList: true })],
-        },
-        {
-          name: 'Post',
-          fields: [
-            scalar('id', { isId: true }),
-            scalar('authorId'),
-            relation('author', 'User', 'UserPosts', { relationFromFields: ['authorId'], relationToFields: ['id'] }),
-            relation('comments', 'Comment', 'PostComments', { isList: true }),
-          ],
-        },
-        {
-          name: 'Comment',
-          fields: [
-            scalar('id', { isId: true }),
-            scalar('postId'),
-            relation('post', 'Post', 'PostComments', { relationFromFields: ['postId'], relationToFields: ['id'] }),
-          ],
-        },
-      ],
-    },
-  },
-};
-
-const schemaMetadata = createSchemaMetadataFromDMMF(Prisma);
+const schemaMetadata = schemaMetadataOf(
+  model('User', [column('id', { isId: true }), relation('posts', 'Post', 'UserPosts', { isList: true })]),
+  model('Post', [
+    column('id', { isId: true }),
+    column('authorId'),
+    relation('author', 'User', 'UserPosts', { foreignKeyFields: ['authorId'], referencedFields: ['id'] }),
+    relation('comments', 'Comment', 'PostComments', { isList: true }),
+  ]),
+  model('Comment', [
+    column('id', { isId: true }),
+    column('postId'),
+    relation('post', 'Post', 'PostComments', { foreignKeyFields: ['postId'], referencedFields: ['id'] }),
+  ]),
+);
 const shouldFetchBefore = () => true;
 
 const clientWith = (delegates: Record<string, Record<string, unknown>>): PrismaClientWithDynamicAccess => ({

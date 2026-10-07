@@ -9,46 +9,6 @@
  */
 
 // ============================================================================
-// DMMF Types - Prisma Data Model Meta Format
-// ============================================================================
-
-/**
- * Field definition from Prisma DMMF (Data Model Meta Format)
- */
-export interface DMMFField {
-  name: string;
-  kind: string;
-  type: string;
-  isList?: boolean;
-  isRequired?: boolean;
-  isUnique?: boolean;
-  isId?: boolean;
-  hasDefaultValue?: boolean;
-  default?: unknown;
-  isUpdatedAt?: boolean;
-  relationName?: string;
-  relationFromFields?: string[];
-  relationToFields?: string[];
-}
-
-/**
- * Model definition from Prisma DMMF
- */
-export interface DMMFModel {
-  name: string;
-  fields: DMMFField[];
-  primaryKey?: {
-    name: string | null;
-    fields: string[];
-  };
-  uniqueFields?: string[][];
-  uniqueIndexes?: Array<{
-    name: string | null;
-    fields: string[];
-  }>;
-}
-
-// ============================================================================
 // Prisma Namespace Types
 // ============================================================================
 
@@ -56,16 +16,11 @@ export interface DMMFModel {
  * Type definition for the Prisma namespace object
  *
  * @remarks
- * Represents the global `Prisma` object from `@prisma/client` with
- * defineExtension API and DMMF (Data Model Meta Format).
+ * Represents the `Prisma` object exported by the generated client: its defineExtension API and
+ * the values the adapter writes into queries.
  */
 export interface PrismaNamespace {
   defineExtension: (fn: (client: PrismaClientWithDynamicAccess) => unknown) => unknown;
-  dmmf: {
-    datamodel: {
-      models: DMMFModel[];
-    };
-  };
   /** Sentinel value for SQL NULL (distinguishes DB NULL from JSON null) */
   DbNull: unknown;
   /** `Prisma.skip` (Prisma 5.20 and later): a field given it is left out of the query */

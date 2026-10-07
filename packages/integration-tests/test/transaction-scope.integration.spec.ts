@@ -9,6 +9,7 @@
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { createAuditClient, flushAllPendingWrites } from '@kuruwic/prisma-audit';
+import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -43,6 +44,7 @@ describe('Interactive $transaction scope', () => {
     const provider = createAsyncLocalStorageProvider();
     const prisma = createAuditClient(raw, {
       Prisma,
+      schema: auditSchema,
       provider,
       aggregateMapping: testAggregateMapping,
       performance: { awaitWrite },

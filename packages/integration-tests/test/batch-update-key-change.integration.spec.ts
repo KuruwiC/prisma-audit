@@ -13,6 +13,7 @@
 import type { AuditContext, AuditErrorObserver } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { createAuditClient, defineEntity } from '@kuruwic/prisma-audit';
+import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { cleanDatabase, getSharedDatabaseUrl } from './helpers/setup.js';
@@ -41,6 +42,7 @@ describe('a batch update whose data changes the key of its rows by an operator',
     const provider = createAsyncLocalStorageProvider();
     const prisma = createAuditClient(basePrisma, {
       Prisma,
+      schema: auditSchema,
       provider,
       aggregateMapping: { AutoIncItem: defineEntity({ type: 'AutoIncItem' }) },
       performance: { awaitWrite: true },

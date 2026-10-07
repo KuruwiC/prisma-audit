@@ -11,7 +11,6 @@ import type {
   NestedPreFetchResults,
 } from '../../src/grammar/nested-operations.js';
 import type {
-  DMMFModel,
   PrismaClientWithDynamicAccess,
   PrismaNamespace,
   TransactionalPrismaClient,
@@ -27,7 +26,7 @@ import {
   type SingleOperationOutcome,
 } from '../../src/pipeline/collect-events.js';
 import { NO_AUDITED_OMITTED_FIELDS } from '../../src/utils/audited-omitted-fields.js';
-import { createSchemaMetadataFromDMMF } from '../../src/utils/schema-metadata.js';
+import { column, model, relation, schemaMetadataOf } from '../support/audit-schema.js';
 
 /** Pre-fetch results in which `path` is unread: a read for rows it could not name failed */
 const unreadAt = (path: string): NestedPreFetchResults => {
@@ -36,93 +35,38 @@ const unreadAt = (path: string): NestedPreFetchResults => {
   return results;
 };
 
-const models: DMMFModel[] = [
-  {
-    name: 'User',
-    fields: [
-      { name: 'id', kind: 'scalar', type: 'String', isId: true },
-      { name: 'name', kind: 'scalar', type: 'String' },
-      { name: 'posts', kind: 'object', type: 'Post', isList: true, relationName: 'UserPosts' },
-    ],
-  },
-  {
-    name: 'Post',
-    fields: [
-      { name: 'id', kind: 'scalar', type: 'String', isId: true },
-      { name: 'title', kind: 'scalar', type: 'String' },
-      { name: 'authorId', kind: 'scalar', type: 'String' },
-      {
-        name: 'author',
-        kind: 'object',
-        type: 'User',
-        isList: false,
-        relationName: 'UserPosts',
-        relationFromFields: ['authorId'],
-        relationToFields: ['id'],
-      },
-    ],
-  },
-  {
-    name: 'Legacy',
-    fields: [{ name: 'code', kind: 'scalar', type: 'String' }],
-  },
-  {
-    name: 'Device',
-    fields: [
-      { name: 'code', kind: 'scalar', type: 'String', isUnique: true, isRequired: true },
-      { name: 'label', kind: 'scalar', type: 'String', isRequired: true },
-    ],
-  },
-  {
-    name: 'Reading',
-    fields: [
-      { name: 'at', kind: 'scalar', type: 'DateTime', isId: true, isRequired: true },
-      { name: 'value', kind: 'scalar', type: 'String' },
-    ],
-  },
-  {
-    name: 'Slot',
-    fields: [
-      { name: 'zone', kind: 'scalar', type: 'String', isRequired: true },
-      { name: 'seat', kind: 'scalar', type: 'Int', isRequired: true },
-      { name: 'note', kind: 'scalar', type: 'String' },
-    ],
-    uniqueIndexes: [{ name: null, fields: ['seat', 'zone'] }],
-  },
-  {
-    name: 'Badge',
-    fields: [
-      { name: 'ownerId', kind: 'scalar', type: 'String', isId: true, isRequired: true },
-      { name: 'label', kind: 'scalar', type: 'String', isRequired: true },
-      {
-        name: 'owner',
-        kind: 'object',
-        type: 'User',
-        isList: false,
-        relationName: 'UserBadge',
-        relationFromFields: ['ownerId'],
-        relationToFields: ['id'],
-      },
-    ],
-  },
-  {
-    name: 'Tag',
-    fields: [
-      { name: 'alias', kind: 'scalar', type: 'String', isUnique: true },
-      { name: 'code', kind: 'scalar', type: 'String', isUnique: true, isRequired: true },
-    ],
-  },
-];
-
 /** Stands for `Prisma.skip`: a field given it is left out of the query */
 const skip = new (class Skip {})();
-const Prisma: PrismaNamespace = {
-  defineExtension: () => undefined,
-  DbNull: null,
-  skip,
-  dmmf: { datamodel: { models } },
-};
-const schemaMetadata = createSchemaMetadataFromDMMF(Prisma);
+const Prisma: PrismaNamespace = { defineExtension: () => undefined, DbNull: null, skip };
+const schemaMetadata = schemaMetadataOf(
+  model('User', [
+    column('id', { isId: true }),
+    column('name'),
+    relation('posts', 'Post', 'UserPosts', { isList: true }),
+  ]),
+  model('Post', [
+    column('id', { isId: true }),
+    column('title'),
+    column('authorId'),
+    relation('author', 'User', 'UserPosts', { foreignKeyFields: ['authorId'], referencedFields: ['id'] }),
+  ]),
+  model('Legacy', [column('code')]),
+  model('Device', [column('code', { isUnique: true, isRequired: true }), column('label', { isRequired: true })]),
+  model('Reading', [column('at', { type: 'DateTime', isId: true, isRequired: true }), column('value')]),
+  model(
+    'Slot',
+    [column('zone', { isRequired: true }), column('seat', { type: 'Int', isRequired: true }), column('note')],
+    {
+      uniqueIndexes: [{ name: null, fields: ['seat', 'zone'] }],
+    },
+  ),
+  model('Badge', [
+    column('ownerId', { isId: true, isRequired: true }),
+    column('label', { isRequired: true }),
+    relation('owner', 'User', 'UserBadge', { foreignKeyFields: ['ownerId'], referencedFields: ['id'] }),
+  ]),
+  model('Tag', [column('alias', { isUnique: true }), column('code', { isUnique: true, isRequired: true })]),
+);
 
 const deps = { Prisma, schemaMetadata, shouldFetchBefore: () => true, auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS };
 const client: PrismaClientWithDynamicAccess = Object.create(null);

@@ -2,6 +2,7 @@ import type { AuditContextProvider } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import type { AggregateMapping } from '@kuruwic/prisma-audit';
 import { createAuditClient, defineEntity, foreignKey, to } from '@kuruwic/prisma-audit';
+import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, beforeAll, beforeEach, inject } from 'vitest';
 
@@ -129,6 +130,7 @@ export const getSharedDatabaseUrl = async (): Promise<string> => {
 export const testAuditOptions = (provider: AuditContextProvider) => ({
   provider,
   Prisma,
+  schema: auditSchema,
   aggregateMapping: testAggregateMapping,
   diffing: {
     excludeFields: ['createdAt'],

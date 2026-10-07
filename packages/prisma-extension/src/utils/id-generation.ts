@@ -69,87 +69,46 @@ export const ID_GENERATOR_FACTORIES: Record<string, IdGeneratorFactory> = {
 const resolveIdGenerator = (name: string, args: readonly unknown[]): IdGenerator | undefined =>
   ID_GENERATOR_FACTORIES[name.toLowerCase()]?.(args);
 
-/**
- * Get ID generator for a given default expression
- *
- * @example
- * ```typescript
- * const generator = getIdGenerator('uuid(7)');
- * if (generator) {
- *   const id = generator();
- * }
- * ```
- */
-export const getIdGenerator = (defaultExpr: string): IdGenerator | undefined => {
-  // Inner parens (e.g. dbgenerated("uuid_generate_v4()")) intentionally don't match
-  const match = defaultExpr.match(/^(\w+)\(([^()]*)\)$/);
-  if (!match || !match[1]) {
-    return undefined;
-  }
-
-  const args =
-    match[2]?.trim() === ''
-      ? []
-      : (match[2] as string).split(',').map((token) => {
-          const trimmed = token.trim();
-          return /^\d+$/.test(trimmed) ? Number(trimmed) : trimmed;
-        });
-
-  return resolveIdGenerator(match[1], args);
-};
-
 export interface IdFieldInfo {
   name: string;
   hasDefault: boolean;
+  /** The call of a function default, e.g. `uuid(7)`; absent for a literal default or none */
+  defaultFunction?: string;
   generator?: IdGenerator;
-  defaultExpr?: string;
 }
 
+/**
+ * The default of `fieldName` of `modelName`, and its generator when the client can generate it.
+ * `undefined` for a field the model lacks.
+ *
+ * @throws Error if the schema holds no model `modelName`
+ */
 export const getIdFieldInfo = (
   schemaMetadata: SchemaMetadata,
   modelName: string,
   fieldName: string,
 ): IdFieldInfo | undefined => {
-  try {
-    const field = schemaMetadata.getFieldMetadata(modelName, fieldName);
-    if (!field) {
-      return undefined;
-    }
-
-    const info: IdFieldInfo = {
-      name: fieldName,
-      hasDefault: field.hasDefaultValue,
-    };
-
-    if (field.default) {
-      const defaultValue = field.default;
-
-      if (
-        typeof defaultValue === 'object' &&
-        defaultValue !== null &&
-        'name' in defaultValue &&
-        typeof defaultValue.name === 'string'
-      ) {
-        // DMMF object route: preserve args (e.g. { name: 'uuid', args: [7] })
-        const args = 'args' in defaultValue && Array.isArray(defaultValue.args) ? defaultValue.args : [];
-        info.defaultExpr = `${defaultValue.name}(${args.join(', ')})`;
-        info.generator = resolveIdGenerator(defaultValue.name, args);
-      } else if (typeof defaultValue === 'string') {
-        info.defaultExpr = defaultValue;
-        info.generator = getIdGenerator(defaultValue);
-      }
-    }
-
-    return info;
-  } catch {
+  const field = schemaMetadata.getFieldMetadata(modelName, fieldName);
+  if (!field) {
     return undefined;
   }
+  const defaultFunction = field.default;
+  if (!defaultFunction) {
+    return { name: fieldName, hasDefault: field.hasDefaultValue };
+  }
+  return {
+    name: fieldName,
+    hasDefault: field.hasDefaultValue,
+    defaultFunction: `${defaultFunction.name}(${defaultFunction.args.join(', ')})`,
+    generator: resolveIdGenerator(defaultFunction.name, defaultFunction.args),
+  };
 };
 
 /**
  * The generator of a key field, for the rows of a `createMany` that leave it out.
  *
- * @throws Error if the field has no default, or a default the client cannot generate
+ * @throws Error if the field has no default, or a default the client cannot generate, or the schema
+ *   holds no model `modelName`
  */
 const keyFieldGenerator = (schemaMetadata: SchemaMetadata, modelName: string, field: string): IdGenerator => {
   const idFieldInfo = getIdFieldInfo(schemaMetadata, modelName, field);
@@ -163,9 +122,12 @@ const keyFieldGenerator = (schemaMetadata: SchemaMetadata, modelName: string, fi
   }
 
   if (!idFieldInfo.generator) {
+    const defaultDescription = idFieldInfo.defaultFunction
+      ? `unsupported default: ${idFieldInfo.defaultFunction}`
+      : 'a literal default value, not a generator function';
     throw new Error(
       `[@prisma-audit] createMany requires pre-generated IDs for model "${modelName}". ` +
-        `Field "${field}" has unsupported default: ${idFieldInfo.defaultExpr}. ` +
+        `Field "${field}" has ${defaultDescription}. ` +
         `Supported defaults: cuid(), cuid(2), uuid(), uuid(4), uuid(7). ` +
         `For database-generated IDs like autoincrement() or dbgenerated(), ` +
         `audit logging with createMany is not supported. Use createManyAndReturn or individual create() calls instead.`,
@@ -180,7 +142,8 @@ const keyFieldGenerator = (schemaMetadata: SchemaMetadata, modelName: string, fi
  * leave out, with the generator the field's default declares. A field every row supplies is left as
  * it is, whatever its default.
  *
- * @throws Error if a row leaves out a key field that has no default the client can generate
+ * @throws Error if a row leaves out a key field that has no default the client can generate, or the
+ *   schema holds no model `modelName`
  *
  * @example
  * ```typescript

@@ -4,53 +4,24 @@
 
 import { describe, expect, it } from 'vitest';
 import { deserializeEntityId, getPrimaryKeyConstraint } from '../../src/grammar/nested-operations.js';
-import type { FieldMetadata, SchemaMetadata, UniqueConstraint } from '../../src/schema/types.js';
 import { UNRESOLVED_ENTITY_ID } from '../../src/utils/identity-key.js';
-
-const scalarField = (name: string, isId = false): FieldMetadata => ({
-  name,
-  type: 'String',
-  kind: 'scalar',
-  isRequired: true,
-  isUnique: false,
-  isId,
-  isList: false,
-  hasDefaultValue: false,
-  isUpdatedAt: false,
-});
-
-interface ModelShape {
-  constraints?: UniqueConstraint[];
-  fields?: FieldMetadata[];
-}
-
-const metadataFor = (models: Record<string, ModelShape>): SchemaMetadata => ({
-  getModelNames: () => Object.keys(models),
-  getUniqueConstraints: (modelName) => models[modelName]?.constraints ?? [],
-  getRelationFields: () => [],
-  getAllFields: (modelName) => models[modelName]?.fields ?? [],
-  getFieldMetadata: (modelName, fieldName) => models[modelName]?.fields?.find((field) => field.name === fieldName),
-});
+import { column, model, schemaMetadataOf } from '../support/audit-schema.js';
 
 describe('getPrimaryKeyConstraint', () => {
-  it('returns the @id field when the model declares no @@id', () => {
-    const metadata = metadataFor({
-      User: {
-        constraints: [{ type: 'uniqueField', fields: ['email'] }],
-        fields: [scalarField('id', true), scalarField('email')],
-      },
-    });
+  it('returns the @id field, with a null name, when the model declares no @@id', () => {
+    const metadata = schemaMetadataOf(
+      model('User', [column('id', { isId: true }), column('email', { isUnique: true })]),
+    );
 
-    expect(getPrimaryKeyConstraint(metadata, 'User')).toEqual({ type: 'primaryKey', fields: ['id'] });
+    expect(getPrimaryKeyConstraint(metadata, 'User')).toEqual({ type: 'primaryKey', fields: ['id'], name: null });
   });
 
   it('keeps the declared name of a named @@id', () => {
-    const metadata = metadataFor({
-      PostBookmark: {
-        constraints: [{ type: 'primaryKey', fields: ['postId', 'userId'], name: 'bookmarkKey' }],
-        fields: [scalarField('postId'), scalarField('userId')],
-      },
-    });
+    const metadata = schemaMetadataOf(
+      model('PostBookmark', [column('postId'), column('userId')], {
+        primaryKey: { fields: ['postId', 'userId'], name: 'bookmarkKey' },
+      }),
+    );
 
     expect(getPrimaryKeyConstraint(metadata, 'PostBookmark')).toEqual({
       type: 'primaryKey',
@@ -60,12 +31,11 @@ describe('getPrimaryKeyConstraint', () => {
   });
 
   it('returns an unnamed @@id with a null name', () => {
-    const metadata = metadataFor({
-      PostLike: {
-        constraints: [{ type: 'primaryKey', fields: ['postId', 'userId'], name: null }],
-        fields: [scalarField('postId'), scalarField('userId')],
-      },
-    });
+    const metadata = schemaMetadataOf(
+      model('PostLike', [column('postId'), column('userId')], {
+        primaryKey: { fields: ['postId', 'userId'], name: null },
+      }),
+    );
 
     expect(getPrimaryKeyConstraint(metadata, 'PostLike')).toEqual({
       type: 'primaryKey',
@@ -74,24 +44,8 @@ describe('getPrimaryKeyConstraint', () => {
     });
   });
 
-  it('falls back to the @id field when the @@id constraint lists no fields', () => {
-    const metadata = metadataFor({
-      User: {
-        constraints: [{ type: 'primaryKey', fields: [], name: null }],
-        fields: [scalarField('id', true)],
-      },
-    });
-
-    expect(getPrimaryKeyConstraint(metadata, 'User')).toEqual({ type: 'primaryKey', fields: ['id'] });
-  });
-
   it('returns undefined for a model without a primary key', () => {
-    const metadata = metadataFor({
-      Setting: {
-        constraints: [{ type: 'uniqueField', fields: ['key'] }],
-        fields: [scalarField('key')],
-      },
-    });
+    const metadata = schemaMetadataOf(model('Setting', [column('key', { isUnique: true })]));
 
     expect(getPrimaryKeyConstraint(metadata, 'Setting')).toBeUndefined();
   });
