@@ -9,7 +9,6 @@ import {
   defineEntity,
   foreignKey,
   lookup,
-  type PrismaModelNames,
   to,
 } from '@kuruwic/prisma-audit';
 import {
@@ -27,7 +26,7 @@ import {
   type Tag,
   type User,
 } from '@kuruwic/prisma-audit-database';
-import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
+import { type AuditModelName, auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 
 export const auditProvider = createAsyncLocalStorageProvider();
 
@@ -268,7 +267,7 @@ const enrichAvatarImageContext = async (avatarImages: AvatarImageRow[], db: Pris
   });
 };
 
-const aggregateMapping = defineAggregateMapping<PrismaModelNames<PrismaClient>, PrismaClient>()({
+const aggregateMapping = defineAggregateMapping<AuditModelName, PrismaClient>()({
   User: defineEntity({
     type: 'User',
     excludeFields: ['updatedAt'],
@@ -538,7 +537,7 @@ const aggregateMapping = defineAggregateMapping<PrismaModelNames<PrismaClient>, 
   }),
 });
 
-export default defineConfig<PrismaClient>({
+export default defineConfig<PrismaClient>()({
   provider: auditProvider,
   Prisma,
   schema: auditSchema,

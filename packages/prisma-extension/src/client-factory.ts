@@ -8,7 +8,6 @@
  */
 
 import { createAuditLogExtension } from './extension.js';
-import type { PrismaModelNames } from './prisma-types.js';
 import type { PrismaAuditExtensionOptions } from './types.js';
 
 /**
@@ -30,8 +29,9 @@ export type PrismaClientLike = {
 /**
  * Creates a Prisma client instance with the audit logging extension applied
  *
- * @template TClient - The client type. Its model names key `options.aggregateMapping`, and it is
- *   the `db` type every resolver and enricher in `options` receives
+ * @template TClient - The client type: the `db` type every resolver and enricher in `options` receives
+ * @template TModelName - Model names of `options.schema`, which key `options.aggregateMapping` and
+ *   `options.fetchBefore.models`
  * @param prisma - Client to audit. Audited operations run on it, and audit logs are written
  *   with it, bypassing the audit extension.
  * @param options - Audit configuration, including the `Prisma` namespace of the generated
@@ -104,10 +104,11 @@ export type PrismaClientLike = {
  */
 // TClient is inferred from `prisma` alone: the callbacks in `options` take the client as a
 // parameter, and inferring from them as well would widen it with the `unknown` an erased
-// mapping declares.
-export const createAuditClient = <TClient extends PrismaClientLike>(
+// mapping declares. TModelName is inferred from `options.schema` alone (see
+// PrismaAuditExtensionOptions): the mapping keys are typed by it and never widen it.
+export const createAuditClient = <TClient extends PrismaClientLike, TModelName extends string>(
   prisma: TClient,
-  options: PrismaAuditExtensionOptions<PrismaModelNames<NoInfer<TClient>>, NoInfer<TClient>>,
+  options: PrismaAuditExtensionOptions<TModelName, NoInfer<TClient>>,
 ): TClient & { $audit: ReturnType<typeof createAuditLogExtension> } => {
   const extension = createAuditLogExtension(options);
   return prisma.$extends(extension) as TClient & { $audit: typeof extension };
@@ -117,18 +118,19 @@ export const createAuditClient = <TClient extends PrismaClientLike>(
  * Type representing a Prisma client instance extended with audit logging capabilities
  */
 export type PrismaClientWithAudit<T extends PrismaClientLike = PrismaClientLike> = ReturnType<
-  typeof createAuditClient<T>
+  typeof createAuditClient<T, string>
 >;
 
 /**
  * Defines audit configuration with full type safety and IDE autocomplete
  *
- * @template TClient - The client the configuration is for. Its model names key
- *   `aggregateMapping`, and it is the `db` type every resolver and enricher receives
+ * @template TClient - The client the configuration is for: the `db` type every resolver and
+ *   enricher receives
  *
  * @remarks
- * Identity function that enforces type constraints on configuration,
- * enabling compile-time validation and IntelliSense without runtime overhead.
+ * Curried so that `TClient` is given explicitly while the model names are inferred from
+ * `schema`: they key `aggregateMapping` and `fetchBefore.models`, spelled as `schema.prisma`
+ * declares them. The returned function is the identity; it only types the configuration.
  *
  * @example Defining configuration in a separate file
  * ```typescript
@@ -138,18 +140,17 @@ export type PrismaClientWithAudit<T extends PrismaClientLike = PrismaClientLike>
  *   defineConfig,
  *   defineEntity,
  *   foreignKey,
- *   type PrismaModelNames,
  *   to,
  * } from '@kuruwic/prisma-audit';
  * import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
  * import { type Post, Prisma, type PrismaClient } from '@prisma/client';
- * import { auditSchema } from '../generated/audit/index.js';
+ * import { type AuditModelName, auditSchema } from '../generated/audit/index.js';
  *
- * export default defineConfig<PrismaClient>({
+ * export default defineConfig<PrismaClient>()({
  *   Prisma,
  *   schema: auditSchema,
  *   provider: createAsyncLocalStorageProvider(),
- *   aggregateMapping: defineAggregateMapping<PrismaModelNames<PrismaClient>, PrismaClient>()({
+ *   aggregateMapping: defineAggregateMapping<AuditModelName, PrismaClient>()({
  *     User: defineEntity({ type: 'User' }),
  *     Post: defineEntity<Post, PrismaClient>({
  *       type: 'Post',
@@ -172,8 +173,9 @@ export type PrismaClientWithAudit<T extends PrismaClientLike = PrismaClientLike>
  * export const prisma = createAuditClient(getBasePrisma(), auditConfig);
  * ```
  */
-export const defineConfig = <TClient>(
-  config: PrismaAuditExtensionOptions<PrismaModelNames<TClient>, TClient>,
-): PrismaAuditExtensionOptions<PrismaModelNames<TClient>, TClient> => {
-  return config;
-};
+export const defineConfig =
+  <TClient>() =>
+  <TModelName extends string>(
+    config: PrismaAuditExtensionOptions<TModelName, TClient>,
+  ): PrismaAuditExtensionOptions<TModelName, TClient> =>
+    config;

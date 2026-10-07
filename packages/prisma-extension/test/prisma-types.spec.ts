@@ -1,10 +1,9 @@
 /**
- * Type-level tests for the model-name and row-type inference over a Prisma client
+ * Type-level tests for the row-type inference over a Prisma client
  */
 
-import { defineAggregateMapping, defineEntity } from '@kuruwic/db-audit-core';
 import { describe, expectTypeOf, it } from 'vitest';
-import type { PrismaModelNames, PrismaModelType } from '../src/prisma-types.js';
+import type { PrismaModelType } from '../src/prisma-types.js';
 
 // Mirrors the shape of a generated client: model delegates expose findUnique, other members do not
 interface MockPrismaClient {
@@ -18,23 +17,8 @@ interface MockPrismaClient {
   $transaction: <T>(fn: (tx: unknown) => Promise<T>) => Promise<T>;
 }
 
-describe('PrismaModelNames', () => {
-  it('names every model delegate with its schema spelling', () => {
-    expectTypeOf<PrismaModelNames<MockPrismaClient>>().toEqualTypeOf<'User' | 'AvatarImage'>();
-  });
-});
-
 describe('PrismaModelType', () => {
   it('is the row type the delegate returns, without null', () => {
     expectTypeOf<PrismaModelType<MockPrismaClient, 'AvatarImage'>>().toEqualTypeOf<{ id: string; avatarId: string }>();
-  });
-});
-
-describe('defineAggregateMapping over a client', () => {
-  it('accepts the key of a model the client has and rejects the key of one it lacks', () => {
-    const define = defineAggregateMapping<PrismaModelNames<MockPrismaClient>, MockPrismaClient>();
-
-    expectTypeOf(define).toBeCallableWith({ User: defineEntity({ type: 'User' }) });
-    expectTypeOf(define).parameter(0).not.toHaveProperty('Comment');
   });
 });

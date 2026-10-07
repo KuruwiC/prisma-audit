@@ -44,15 +44,15 @@ import {
 } from '@kuruwic/prisma-audit';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { Prisma, PrismaClient } from '@prisma/client';
-import { auditSchema } from '../generated/audit/index.js'; // the generator's output
+import { type AuditModelName, auditSchema } from '../generated/audit/index.js'; // the generator's output
 
 export const auditProvider = createAsyncLocalStorageProvider();
 
-export default defineConfig({
+export default defineConfig<PrismaClient>()({
   Prisma,
   schema: auditSchema,
   provider: auditProvider,
-  aggregateMapping: defineAggregateMapping<PrismaClient>()({
+  aggregateMapping: defineAggregateMapping<AuditModelName, PrismaClient>()({
     User: defineEntity({ type: 'User' }),
     Post: defineEntity({
       type: 'Post',
@@ -154,12 +154,12 @@ await prisma.$transaction(async (tx) => {
 Common use cases: pre-auth login flows, impersonation, system→user handoff.
 
 #### `aggregateMapping`
-**Type:** `AggregateMapping<PrismaClient>`
+**Type:** `AggregateMapping<AuditModelName, PrismaClient>`
 
-Defines how entities relate to aggregate roots for audit log organization.
+Defines how entities relate to aggregate roots for audit log organization. Its keys, like those of `fetchBefore.models`, are typed by the model names of `schema`, spelled as `schema.prisma` declares them (`AuditModelName` from the generator's output).
 
 ```typescript
-const aggregateMapping = defineAggregateMapping<PrismaClient>()({
+const aggregateMapping = defineAggregateMapping<AuditModelName, PrismaClient>()({
   User: defineEntity({ type: 'User' }),
   Post: defineEntity({
     type: 'Post',
@@ -180,7 +180,7 @@ const aggregateMapping = defineAggregateMapping<PrismaClient>()({
 ```typescript
 import { defineEntity, to, foreignKey } from '@kuruwic/prisma-audit';
 
-const aggregateMapping = defineAggregateMapping<PrismaClient>()({
+const aggregateMapping = defineAggregateMapping<AuditModelName, PrismaClient>()({
   User: defineEntity({
     type: 'UserAccount',     // Custom entityType (stored in AuditLog.entityType)
     category: 'identity',    // Custom entityCategory (stored in AuditLog.entityCategory)
@@ -459,15 +459,15 @@ import {
 } from '@kuruwic/prisma-audit';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { Prisma, type PrismaClient } from '@prisma/client';
-import { auditSchema } from '../generated/audit/index.js';
+import { type AuditModelName, auditSchema } from '../generated/audit/index.js';
 
 export const auditProvider = createAsyncLocalStorageProvider();
 
-export default defineConfig({
+export default defineConfig<PrismaClient>()({
   Prisma,
   schema: auditSchema,
   provider: auditProvider,
-  aggregateMapping: defineAggregateMapping<PrismaClient>()({
+  aggregateMapping: defineAggregateMapping<AuditModelName, PrismaClient>()({
     User: defineEntity({ type: 'User' }),
     Post: defineEntity({
       type: 'Post',
@@ -602,15 +602,15 @@ import {
 } from '@kuruwic/prisma-audit';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { Prisma, type PrismaClient } from '@prisma/client';
-import { auditSchema } from '../generated/audit/index.js';
+import { type AuditModelName, auditSchema } from '../generated/audit/index.js';
 
 export const auditProvider = createAsyncLocalStorageProvider();
 
-export default defineConfig({
+export default defineConfig<PrismaClient>()({
   Prisma,
   schema: auditSchema,
   provider: auditProvider,
-  aggregateMapping: defineAggregateMapping<PrismaClient>()({
+  aggregateMapping: defineAggregateMapping<AuditModelName, PrismaClient>()({
     User: defineEntity({ type: 'User' }),
     Post: defineEntity({
       type: 'Post',
@@ -692,7 +692,7 @@ Fields to exclude from change tracking (globally or per-model). An update whose 
 
 Per-model exclusion:
 ```typescript
-const aggregateMapping = defineAggregateMapping<PrismaClient>()({
+const aggregateMapping = defineAggregateMapping<AuditModelName, PrismaClient>()({
   User: defineEntity({
     type: 'User',
     excludeFields: ['lastLoginAt', 'sessionToken'],
@@ -952,7 +952,7 @@ createAuditClient(prisma, {
       return true;
     },
   },
-  aggregateMapping: defineAggregateMapping<PrismaClient>()({
+  aggregateMapping: defineAggregateMapping<AuditModelName, PrismaClient>()({
     Payment: defineEntity({
       type: 'Payment',
       tags: ['critical', 'payment'], // Will use synchronous strategy (default)
@@ -1186,7 +1186,7 @@ Enrich actor information with database data.
 Entity and aggregate contexts are configured per entity in the aggregate mapping (not in `contextEnricher`), using three orthogonal batch-first hooks:
 
 ```typescript
-const aggregateMapping = defineAggregateMapping<PrismaClient>()({
+const aggregateMapping = defineAggregateMapping<AuditModelName, PrismaClient>()({
   User: defineEntity({
     type: 'User',
     // Root-side: applied whenever ANY log projects onto a User aggregate.
@@ -1252,7 +1252,7 @@ With `update` off, a nested `update` still has the key columns of its row read w
 #### `models`
 **Type:** `{ [Model]?: { update?: boolean; delete?: boolean } }`
 
-Per-model settings, keyed by model name like `aggregateMapping`: the key type offers the client's model names, and a key is matched to a model case-insensitively, so `AuditEvent` also configures a model declared as `model auditEvent`. For each operation, the written model's setting wins, then the global setting, then the default.
+Per-model settings, keyed by the model names of `schema` like [`aggregateMapping`](#aggregatemapping). For each operation, the written model's setting wins, then the global setting, then the default.
 
 ```typescript
 {
@@ -1355,15 +1355,15 @@ import {
 } from '@kuruwic/prisma-audit';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { Prisma, type PrismaClient } from '@prisma/client';
-import { auditSchema } from '../generated/audit/index.js';
+import { type AuditModelName, auditSchema } from '../generated/audit/index.js';
 
 export const auditProvider = createAsyncLocalStorageProvider();
 
-export default defineConfig({
+export default defineConfig<PrismaClient>()({
   Prisma,
   schema: auditSchema,
   provider: auditProvider,
-  aggregateMapping: defineAggregateMapping<PrismaClient>()({
+  aggregateMapping: defineAggregateMapping<AuditModelName, PrismaClient>()({
     User: defineEntity({
       type: 'User',
       excludeFields: ['lastLoginAt'],

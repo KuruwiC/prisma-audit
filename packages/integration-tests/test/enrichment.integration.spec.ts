@@ -2,7 +2,7 @@ import type { AuditActor, AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import type { AggregateMapping } from '@kuruwic/prisma-audit';
 import { createAuditClient, defineEntity, foreignKey, to } from '@kuruwic/prisma-audit';
-import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
+import { type AuditModelName, auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import type { Mock } from 'vitest';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -34,7 +34,10 @@ type TestAuditContext = Omit<AuditContext, 'actor'> & {
   actor: TestAuditActor;
 };
 
-type ClientOptions = Omit<Parameters<typeof createAuditClient<PrismaClient>>[1], 'Prisma' | 'schema' | 'provider'>;
+type ClientOptions = Omit<
+  Parameters<typeof createAuditClient<PrismaClient, AuditModelName>>[1],
+  'Prisma' | 'schema' | 'provider'
+>;
 
 /** Orders values by their JSON text, for comparing rows read in no fixed order */
 const byJson = (a: unknown, b: unknown) => JSON.stringify(a).localeCompare(JSON.stringify(b));

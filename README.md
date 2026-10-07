@@ -159,12 +159,12 @@ import {
   foreignKey,
 } from "@kuruwic/prisma-audit";
 import { Prisma, PrismaClient } from "@prisma/client";
-import { auditSchema } from "../generated/audit/index.js"; // the generator's output
+import { type AuditModelName, auditSchema } from "../generated/audit/index.js"; // the generator's output
 
 const auditProvider = createAsyncLocalStorageProvider();
 const basePrisma = new PrismaClient();
 
-const aggregateMapping = defineAggregateMapping<PrismaClient>()({
+const aggregateMapping = defineAggregateMapping<AuditModelName, PrismaClient>()({
   User: defineEntity({ type: "User" }),
   Post: defineEntity({
     type: "Post",
@@ -483,7 +483,7 @@ The self aggregate log (enabled by default) can be enriched the same way via `se
 Define domain relationships so child entity changes reference their parent aggregate:
 
 ```typescript
-const aggregateMapping = defineAggregateMapping<PrismaClient>()({
+const aggregateMapping = defineAggregateMapping<AuditModelName, PrismaClient>()({
   // Aggregate root
   Order: defineEntity({
     type: "Order",

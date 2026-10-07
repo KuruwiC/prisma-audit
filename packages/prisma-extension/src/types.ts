@@ -152,7 +152,7 @@ export interface FetchBeforeByOperation {
  * For each operation, the setting of the written model under `models` wins, then the global
  * setting, then the default (`true`).
  *
- * @template TModelName - Model names `models` may be keyed with, as the aggregate mapping spells them
+ * @template TModelName - Model names `models` may be keyed with, as the schema declares them
  *
  * @example
  * ```typescript
@@ -182,13 +182,13 @@ export type {
 /**
  * Prisma Extension configuration options
  *
- * @template TModelName - Model names the aggregate mapping may declare. `createAuditClient` and
- *   `defineConfig` derive it from the client type with `PrismaModelNames`; defaults to any string
+ * @template TModelName - Model names of `schema`, as `schema.prisma` declares them. They are inferred
+ *   from `schema` alone and key `aggregateMapping` and `fetchBefore.models`; defaults to any string
  * @template TClient - The audited client type, passed to every resolver and enricher as `db`
  */
 export interface PrismaAuditExtensionOptions<TModelName extends string = string, TClient = unknown> {
   provider: AuditContextProvider;
-  aggregateMapping: AggregateMapping<TModelName, TClient>;
+  aggregateMapping: AggregateMapping<NoInfer<TModelName>, TClient>;
   /**
    * Prisma namespace exported by the generated client that the audited `PrismaClient` comes from.
    * Required because a client instance does not expose its namespace.
@@ -223,7 +223,7 @@ export interface PrismaAuditExtensionOptions<TModelName extends string = string,
    * }
    * ```
    */
-  schema: AuditSchema;
+  schema: AuditSchema<TModelName>;
 
   /**
    * Prisma model name for storing audit logs (PascalCase).
@@ -238,7 +238,7 @@ export interface PrismaAuditExtensionOptions<TModelName extends string = string,
   hooks?: HooksConfig<TClient>;
   /** Actor enrichment; the enricher receives the operation's `AuditActor` and the client. */
   contextEnricher?: GlobalContextEnricherConfig<AuditActor, unknown, TClient>;
-  fetchBefore?: FetchBeforeConfig<TModelName>;
+  fetchBefore?: FetchBeforeConfig<NoInfer<TModelName>>;
   /**
    * Audit-failure observation and policy. See {@link ErrorHandlingConfig}. What each phase
    * means for a Prisma operation:
