@@ -9,7 +9,7 @@
  */
 
 import type { ParentRowIdentity } from '../../grammar/nested-state.js';
-import type { DMMFField, DMMFModel } from '../../internal-types.js';
+import type { RelationField, SchemaMetadata } from '../../schema/types.js';
 import { preFetchLog } from '../../utils/debug.js';
 import type { PreFetchModelClient, PreFetchRecord } from './model-client.js';
 import { type ResolveParentRowsInput, resolveParentRows } from './parent-rows.js';
@@ -34,13 +34,13 @@ export interface PreFetchOneToOneResults {
 
 const pairLinkFields = (
   relationName: string,
-  parentFields: readonly string[] | undefined,
-  relatedFields: readonly string[] | undefined,
+  parentFields: readonly string[],
+  relatedFields: readonly string[],
 ): ToOneRelationLink => {
-  if (!parentFields || !relatedFields || parentFields.length === 0 || parentFields.length !== relatedFields.length) {
+  if (parentFields.length === 0 || parentFields.length !== relatedFields.length) {
     throw new Error(
-      `[@prisma-audit] Relation "${relationName}" pairs key fields [${parentFields?.join(', ') ?? ''}] ` +
-        `with [${relatedFields?.join(', ') ?? ''}]; expected two non-empty lists of the same length`,
+      `[@prisma-audit] Relation "${relationName}" pairs key fields [${parentFields.join(', ')}] ` +
+        `with [${relatedFields.join(', ')}]; expected two non-empty lists of the same length`,
     );
   }
   return { parentFields, relatedFields };
@@ -50,32 +50,32 @@ const pairLinkFields = (
  * Resolves the link of `field`, a to-one relation field declared on the parent model.
  *
  * - Owning side (`field` declares `fields` / `references`): the parent row holds
- *   `relationFromFields`, which the related row matches with `relationToFields`.
+ *   `foreignKeyFields`, which the related row matches with `referencedFields`.
  * - Inverse side: the related model's field with the same `relationName` is the owning side;
- *   the parent row holds that field's `relationToFields`, which the related row references with
- *   its `relationFromFields`.
+ *   the parent row holds that field's `referencedFields`, which the related row references with
+ *   its `foreignKeyFields`.
  *
- * @throws Error when the DMMF gives no relation name, no owning side, or key-field lists that do
- *   not pair up
+ * @throws Error when the DMMF gives no relation name, no owning side, or key-field lists that
+ *   do not pair up
  */
-export const resolveToOneRelationLink = (field: DMMFField, relatedModel: DMMFModel | undefined): ToOneRelationLink => {
+export const resolveToOneRelationLink = (schemaMetadata: SchemaMetadata, field: RelationField): ToOneRelationLink => {
   const { relationName } = field;
   if (!relationName) {
     throw new Error(`[@prisma-audit] Relation field "${field.name}" has no relation name in the DMMF`);
   }
 
-  if (field.relationFromFields && field.relationFromFields.length > 0) {
-    return pairLinkFields(relationName, field.relationFromFields, field.relationToFields);
+  if (field.foreignKeyFields.length > 0) {
+    return pairLinkFields(relationName, field.foreignKeyFields, field.referencedFields);
   }
 
-  const owningField = relatedModel?.fields.find(
-    (candidate) => candidate.relationName === relationName && (candidate.relationFromFields?.length ?? 0) > 0,
-  );
+  const owningField = schemaMetadata
+    .getRelationFields(field.relatedModel)
+    .find((candidate) => candidate.relationName === relationName && candidate.foreignKeyFields.length > 0);
   if (!owningField) {
-    throw new Error(`[@prisma-audit] Relation "${relationName}" has no owning side on model "${field.type}"`);
+    throw new Error(`[@prisma-audit] Relation "${relationName}" has no owning side on model "${field.relatedModel}"`);
   }
 
-  return pairLinkFields(relationName, owningField.relationToFields, owningField.relationFromFields);
+  return pairLinkFields(relationName, owningField.referencedFields, owningField.foreignKeyFields);
 };
 
 export interface PreFetchOneToOneRelationInput extends Omit<ResolveParentRowsInput, 'parentFields'> {

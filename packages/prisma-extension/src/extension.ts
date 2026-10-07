@@ -51,7 +51,7 @@ const createPipelineDependencies = (audit: AuditOptions): AuditPipelineDependenc
     dispatchConfig: {
       writeExecutor: createPrismaWriteExecutor(Prisma.DbNull, {
         auditLogModel: audit.auditLogModel,
-        storesBeforeUnavailable: declaresBeforeUnavailableColumn(Prisma.dmmf, audit.auditLogModel),
+        storesBeforeUnavailable: declaresBeforeUnavailableColumn(schemaMetadata, audit.auditLogModel),
       }),
       writer: audit.writer,
       failureSink,
@@ -63,7 +63,7 @@ const createPipelineDependencies = (audit: AuditOptions): AuditPipelineDependenc
 /** What the client proxy needs to open the interactive transaction of an operation whose audit is awaited */
 const recipeConfigOf = (audit: AuditOptions): RecipeConfig => {
   const { policyConfig, schemaMetadata } = audit;
-  const modelNames = audit.Prisma.dmmf.datamodel.models.map((model) => model.name);
+  const modelNames = schemaMetadata.getModelNames();
   const relatedModels = new Map(
     modelNames.map((modelName) => [
       modelName,

@@ -25,11 +25,7 @@ import {
   namedTargets,
 } from '../../grammar/nested-operations.js';
 import { filterOperationsToPreFetch, type ShouldFetchBefore } from '../../grammar/pre-fetch-selection.js';
-import type {
-  PrismaClientWithDynamicAccess,
-  PrismaNamespace,
-  TransactionalPrismaClient,
-} from '../../internal-types.js';
+import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../internal-types.js';
 import type { SchemaMetadata } from '../../schema/types.js';
 import type { AuditedOmittedFields } from '../../utils/audited-omitted-fields.js';
 import { uniqueWhereAsFilter } from '../../utils/compound-where.js';
@@ -117,7 +113,6 @@ export interface ReadLinkRowsInput {
 }
 
 export interface ReadLinkRowsDependencies {
-  readonly Prisma: PrismaNamespace;
   readonly schemaMetadata: SchemaMetadata;
   readonly shouldFetchBefore: ShouldFetchBefore;
   readonly auditedOmittedFields: AuditedOmittedFields;
@@ -132,7 +127,7 @@ interface PathWrites {
 const linkWritesByPath = (input: ReadLinkRowsInput, deps: ReadLinkRowsDependencies): Map<string, PathWrites> => {
   const byPath = new Map<string, PathWrites>();
   for (const operation of input.nestedOperations) {
-    const link = relationLinkOf(deps.Prisma, input.modelName, operation);
+    const link = relationLinkOf(deps.schemaMetadata, input.modelName, operation);
     if (link?.side !== 'related' || !deps.shouldFetchBefore(operation.relatedModel, 'update')) {
       continue;
     }

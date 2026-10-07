@@ -1,5 +1,5 @@
 /**
- * Where the foreign key of a relation lives, from the DMMF
+ * Where the foreign key of a relation lives
  *
  * A nested `connect`, `set` or `disconnect` changes the link between a parent row and its
  * related rows. Which row that link is a column of decides what the write changes: the related
@@ -9,8 +9,8 @@
  */
 
 import type { NestedOperationInfo } from '../../grammar/nested-operations.js';
-import type { DMMFField, PrismaNamespace } from '../../internal-types.js';
-import { findDMMFField, resolveParentModelFromPath } from './coordinator.js';
+import type { RelationField, SchemaMetadata } from '../../schema/types.js';
+import { findRelationField, resolveParentModelFromPath } from './coordinator.js';
 
 /**
  * - `related`: the related model holds the foreign key `fields`, which reference the fields
@@ -35,38 +35,37 @@ export type RelationLink =
  * `relatedFields` include `field` itself, which is not its own back-relation field.
  */
 export const findBackRelationField = (
-  field: DMMFField,
+  field: RelationField,
   parentModelName: string,
   relatedModelName: string,
-  relatedFields: readonly DMMFField[],
-): DMMFField | undefined =>
+  relatedFields: readonly RelationField[],
+): RelationField | undefined =>
   relatedFields.find(
     (candidate) =>
-      candidate.kind === 'object' &&
       candidate.relationName === field.relationName &&
       !(relatedModelName === parentModelName && candidate.name === field.name),
   );
 
 export const resolveRelationLink = (
-  field: DMMFField,
+  field: RelationField,
   parentModelName: string,
   relatedModelName: string,
-  relatedFields: readonly DMMFField[],
+  relatedFields: readonly RelationField[],
 ): RelationLink | undefined => {
-  if (field.relationFromFields && field.relationFromFields.length > 0) {
+  if (field.foreignKeyFields.length > 0) {
     return { side: 'parent' };
   }
   const backField = findBackRelationField(field, parentModelName, relatedModelName, relatedFields);
   if (!backField) {
     return undefined;
   }
-  if (backField.relationFromFields && backField.relationFromFields.length > 0) {
+  if (backField.foreignKeyFields.length > 0) {
     return {
       side: 'related',
       parentModel: parentModelName,
-      fields: backField.relationFromFields,
-      references: backField.relationToFields ?? [],
-      optional: backField.isRequired !== true,
+      fields: backField.foreignKeyFields,
+      references: backField.referencedFields,
+      optional: !backField.isRequired,
     };
   }
   return backField.isList ? { side: 'joinTable' } : undefined;
@@ -74,17 +73,19 @@ export const resolveRelationLink = (
 
 /** The link of the relation the nested operation `operation` writes, below the top-level model `modelName` */
 export const relationLinkOf = (
-  Prisma: PrismaNamespace,
+  schemaMetadata: SchemaMetadata,
   modelName: string,
   operation: Pick<NestedOperationInfo, 'path' | 'fieldName' | 'relatedModel'>,
 ): RelationLink | undefined => {
-  const { dmmf } = Prisma;
-  const topLevelModel = dmmf.datamodel.models.find((model) => model.name === modelName);
-  const parentModel = resolveParentModelFromPath(operation.path, topLevelModel, dmmf);
-  const field = findDMMFField(parentModel, operation.fieldName);
-  const relatedModel = dmmf.datamodel.models.find((model) => model.name === operation.relatedModel);
-  if (!parentModel || !field || !relatedModel) {
+  const parentModel = resolveParentModelFromPath(operation.path, modelName, schemaMetadata);
+  const field = findRelationField(schemaMetadata, parentModel, operation.fieldName);
+  if (!field) {
     return undefined;
   }
-  return resolveRelationLink(field, parentModel.name, relatedModel.name, relatedModel.fields);
+  return resolveRelationLink(
+    field,
+    parentModel,
+    operation.relatedModel,
+    schemaMetadata.getRelationFields(operation.relatedModel),
+  );
 };

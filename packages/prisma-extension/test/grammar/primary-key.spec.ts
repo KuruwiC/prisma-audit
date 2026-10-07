@@ -25,6 +25,7 @@ interface ModelShape {
 }
 
 const metadataFor = (models: Record<string, ModelShape>): SchemaMetadata => ({
+  getModelNames: () => Object.keys(models),
   getUniqueConstraints: (modelName) => models[modelName]?.constraints ?? [],
   getRelationFields: () => [],
   getAllFields: (modelName) => models[modelName]?.fields ?? [],

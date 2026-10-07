@@ -147,7 +147,6 @@ const preFetch = async (
 ) =>
   (
     await preFetchNestedRecordsBeforeOperation(client, modelName, args, {
-      Prisma,
       schemaMetadata: createSchemaMetadataFromDMMF(Prisma),
       auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS,
       shouldFetchBefore,

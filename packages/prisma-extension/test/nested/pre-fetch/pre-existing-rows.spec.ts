@@ -96,7 +96,7 @@ const snapshot = (
       writeSets: buildNestedWriteSets(schemaMetadata, nestedOperations, nestedPreFetchResults, new Map()),
       nestedPreFetchResults,
     },
-    { Prisma, schemaMetadata, shouldFetchBefore: fetchesBefore, auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS },
+    { schemaMetadata, shouldFetchBefore: fetchesBefore, auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS },
   );
 };
 

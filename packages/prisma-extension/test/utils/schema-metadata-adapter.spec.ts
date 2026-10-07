@@ -8,6 +8,28 @@ const createPrismaWithModel = (model: Partial<DMMFModel> & { name: string; field
 });
 
 describe('createSchemaMetadataFromDMMF', () => {
+  describe('getModelNames', () => {
+    it('should return the model names in datamodel order', () => {
+      const Prisma = {
+        dmmf: {
+          datamodel: {
+            models: [
+              { name: 'User', fields: [] },
+              { name: 'Post', fields: [] },
+              { name: 'AuditLog', fields: [] },
+            ] as DMMFModel[],
+          },
+        },
+      };
+
+      expect(createSchemaMetadataFromDMMF(Prisma).getModelNames()).toEqual(['User', 'Post', 'AuditLog']);
+    });
+
+    it('should return no names when Prisma carries no DMMF', () => {
+      expect(createSchemaMetadataFromDMMF({}).getModelNames()).toEqual([]);
+    });
+  });
+
   describe('getUniqueConstraints', () => {
     it('should return composite primary key', () => {
       const Prisma = createPrismaWithModel({
@@ -140,6 +162,35 @@ describe('createSchemaMetadataFromDMMF', () => {
       ]);
     });
 
+    it('should return the fields of the other model that the foreign key references, and none for the other side', () => {
+      const Prisma = createPrismaWithModel({
+        name: 'Membership',
+        fields: [
+          { name: 'orgId', kind: 'scalar', type: 'String', isList: false },
+          { name: 'orgSlug', kind: 'scalar', type: 'String', isList: false },
+          {
+            name: 'org',
+            kind: 'object',
+            type: 'Org',
+            isList: false,
+            relationName: 'OrgMemberships',
+            relationFromFields: ['orgId', 'orgSlug'],
+            relationToFields: ['id', 'slug'],
+          },
+          { name: 'notes', kind: 'object', type: 'Note', isList: true, relationName: 'MembershipNotes' },
+        ],
+      });
+
+      expect(
+        createSchemaMetadataFromDMMF(Prisma)
+          .getRelationFields('Membership')
+          .map(({ name, referencedFields }) => [name, referencedFields]),
+      ).toEqual([
+        ['org', ['id', 'slug']],
+        ['notes', []],
+      ]);
+    });
+
     it('should return only relation fields (kind === "object") with their relation metadata', () => {
       const Prisma = createPrismaWithModel({
         name: 'User',
@@ -160,6 +211,7 @@ describe('createSchemaMetadataFromDMMF', () => {
           isRequired: false,
           relationName: 'UserPosts',
           foreignKeyFields: [],
+          referencedFields: [],
         },
         {
           name: 'profile',
@@ -168,6 +220,7 @@ describe('createSchemaMetadataFromDMMF', () => {
           isRequired: false,
           relationName: 'UserProfile',
           foreignKeyFields: [],
+          referencedFields: [],
         },
       ]);
     });

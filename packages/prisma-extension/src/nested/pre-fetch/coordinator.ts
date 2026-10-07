@@ -25,14 +25,8 @@ import {
   type ShouldFetchBefore,
   sortByPathDepth,
 } from '../../grammar/pre-fetch-selection.js';
-import type {
-  DMMFField,
-  DMMFModel,
-  PrismaClientWithDynamicAccess,
-  PrismaNamespace,
-  TransactionalPrismaClient,
-} from '../../internal-types.js';
-import type { SchemaMetadata, UniqueConstraint } from '../../schema/types.js';
+import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../internal-types.js';
+import type { RelationField, SchemaMetadata, UniqueConstraint } from '../../schema/types.js';
 import type { AuditedOmittedFields } from '../../utils/audited-omitted-fields.js';
 import { beforeStateOf, NO_BEFORE_STATE } from '../../utils/before-state.js';
 import { preFetchLog } from '../../utils/debug.js';
@@ -76,11 +70,7 @@ import {
 import { relationLinkOf } from './relation-link.js';
 import { elementNaming, readEachTarget, type TargetReadFailureHandler } from './target-reads.js';
 
-type PrismaDMMF = PrismaNamespace['dmmf'];
-
 export interface PreFetchCoordinatorDependencies {
-  /** Prisma namespace given as the extension's `Prisma` option; read for the DMMF relation details */
-  readonly Prisma: PrismaNamespace;
   readonly schemaMetadata: SchemaMetadata;
   readonly shouldFetchBefore: ShouldFetchBefore;
   readonly auditedOmittedFields: AuditedOmittedFields;
@@ -110,14 +100,14 @@ export interface NestedPreFetch {
 }
 
 /**
- * Resolves the model that declares the last segment of `path` by walking the DMMF from
+ * Resolves the model that declares the last segment of `path` by walking the relation fields from
  * `topLevelModel` (e.g. `'postTags.tag'` under Post resolves to PostTag).
  */
 export const resolveParentModelFromPath = (
   path: string,
-  topLevelModel: DMMFModel | undefined,
-  dmmf: PrismaDMMF,
-): DMMFModel | undefined => {
+  topLevelModel: string,
+  schemaMetadata: SchemaMetadata,
+): string => {
   if (!path.includes('.')) {
     return topLevelModel;
   }
@@ -128,38 +118,33 @@ export const resolveParentModelFromPath = (
   let currentModel = topLevelModel;
 
   for (const segment of parentPathSegments) {
-    if (!currentModel) {
+    const segmentField = findRelationField(schemaMetadata, currentModel, segment);
+
+    if (!segmentField) {
       break;
     }
 
-    const segmentField = currentModel.fields.find((f) => f.name === segment);
-
-    if (!segmentField || segmentField.kind !== 'object') {
-      break;
-    }
-
-    currentModel = dmmf.datamodel.models.find((m) => m.name === segmentField.type);
+    currentModel = segmentField.relatedModel;
   }
 
   return currentModel;
 };
 
-export const findDMMFField = (model: DMMFModel | undefined, fieldName: string): DMMFField | undefined => {
-  if (!model) {
-    return undefined;
-  }
-
-  return model.fields.find((f) => f.name === fieldName);
-};
+/** The relation field `fieldName` of `modelName`; nested operations are always written through a relation field */
+export const findRelationField = (
+  schemaMetadata: SchemaMetadata,
+  modelName: string,
+  fieldName: string,
+): RelationField | undefined => schemaMetadata.getRelationFields(modelName).find((f) => f.name === fieldName);
 
 const categorizeRelationType = (
-  field: DMMFField,
+  field: RelationField,
 ): {
   readonly isOneToOne: boolean;
   readonly isOwningSide: boolean;
 } => {
   const isOneToOne = !field.isList;
-  const isOwningSide = !!(field.relationFromFields && field.relationFromFields.length > 0);
+  const isOwningSide = field.foreignKeyFields.length > 0;
 
   return { isOneToOne, isOwningSide };
 };
@@ -204,7 +189,7 @@ export const preFetchNestedRecordsBeforeOperation = async (
   dependencies: PreFetchCoordinatorDependencies,
   topLevelUpsertBranch?: UpsertBranch,
 ): Promise<NestedPreFetch> => {
-  const { Prisma, schemaMetadata, shouldFetchBefore, auditedOmittedFields, onPreFetchFailure } = dependencies;
+  const { schemaMetadata, shouldFetchBefore, auditedOmittedFields, onPreFetchFailure } = dependencies;
 
   const preFetchResults: NestedPreFetchResults = new Map();
   const batchTargets: NestedBatchTargets = new Map();
@@ -225,7 +210,7 @@ export const preFetchNestedRecordsBeforeOperation = async (
 
   const preFetchedOperations = new Set(operationsToPreFetch);
   const rowsToIdentify = updatedRowsToIdentify(nestedOperations, preFetchedOperations, (operation) =>
-    detachesUnderParent(Prisma, modelName, shouldFetchBefore, operation),
+    detachesUnderParent(schemaMetadata, modelName, shouldFetchBefore, operation),
   );
 
   if (operationsToPreFetch.length === 0 && rowsToIdentify.size === 0) {
@@ -239,13 +224,6 @@ export const preFetchNestedRecordsBeforeOperation = async (
     sortedOperations.map((op) => ({ path: op.path, depth: op.path.split('.').length })),
   );
 
-  const dmmf: PrismaDMMF | undefined = Prisma.dmmf;
-
-  if (!dmmf?.datamodel?.models) {
-    preFetchLog('DMMF metadata not available, skipping pre-fetch');
-    return preFetch;
-  }
-
   const pkConstraintCache = new Map<string, UniqueConstraint | undefined>();
 
   const context: NestedPreFetchContext = {
@@ -253,8 +231,6 @@ export const preFetchNestedRecordsBeforeOperation = async (
     modelName,
     schemaMetadata,
     nestedOperations,
-    dmmf,
-    topLevelModel: dmmf.datamodel.models.find((m) => m.name === modelName),
     topLevelModelClient: getPreFetchModelClient(prismaClient, modelName, auditedOmittedFields),
     topLevelWhere: args.where,
     preFetchResults,
@@ -309,12 +285,12 @@ const SNAPSHOTTED_INSERTS: ReadonlySet<string> = new Set(['create', 'createMany'
  * whose rows are read (see `link-rows.ts`), so its parent row must be known before the write
  */
 const detachesUnderParent = (
-  Prisma: PrismaNamespace,
+  schemaMetadata: SchemaMetadata,
   modelName: string,
   shouldFetchBefore: ShouldFetchBefore,
   operation: NestedOperationInfo,
 ): boolean => {
-  const link = relationLinkOf(Prisma, modelName, operation);
+  const link = relationLinkOf(schemaMetadata, modelName, operation);
   return (
     link?.side === 'related' &&
     shouldFetchBefore(operation.relatedModel, 'update') &&
@@ -371,8 +347,6 @@ interface NestedPreFetchContext {
   schemaMetadata: SchemaMetadata;
   /** Every nested operation the discovery pass detected */
   nestedOperations: readonly NestedOperationInfo[];
-  dmmf: PrismaDMMF;
-  topLevelModel: DMMFModel | undefined;
   topLevelModelClient: PreFetchModelClient | undefined;
   topLevelWhere: unknown;
   preFetchResults: NestedPreFetchResults;
@@ -387,9 +361,8 @@ interface NestedPreFetchContext {
 
 interface NestedRelation {
   readonly nestedOp: NestedOperationInfo;
-  readonly field: DMMFField;
-  readonly parentModel: DMMFModel;
-  readonly relatedModel: DMMFModel | undefined;
+  readonly field: RelationField;
+  readonly parentModel: string;
   readonly pkConstraint: UniqueConstraint;
 }
 
@@ -420,12 +393,12 @@ const resolveNestedRelation = (
   context: NestedPreFetchContext,
   nestedOp: NestedOperationInfo,
 ): NestedRelation | undefined => {
-  const { modelName, dmmf, topLevelModel, resolvePkConstraint } = context;
+  const { modelName, schemaMetadata, resolvePkConstraint } = context;
 
-  const parentModel = resolveParentModelFromPath(nestedOp.path, topLevelModel, dmmf);
-  const field = findDMMFField(parentModel, nestedOp.fieldName);
-  if (!parentModel || !field) {
-    preFetchLog('field not found in model: model=%s field=%s', parentModel?.name || modelName, nestedOp.fieldName);
+  const parentModel = resolveParentModelFromPath(nestedOp.path, modelName, schemaMetadata);
+  const field = findRelationField(schemaMetadata, parentModel, nestedOp.fieldName);
+  if (!field) {
+    preFetchLog('field not found in model: model=%s field=%s', parentModel, nestedOp.fieldName);
     return undefined;
   }
 
@@ -435,8 +408,7 @@ const resolveNestedRelation = (
     return undefined;
   }
 
-  const relatedModel = dmmf.datamodel.models.find((m) => m.name === nestedOp.relatedModel);
-  return { nestedOp, field, parentModel, relatedModel, pkConstraint };
+  return { nestedOp, field, parentModel, pkConstraint };
 };
 
 const preFetchNestedOperation = async (
@@ -544,11 +516,11 @@ const handleOneToOneRelation = async (
   keyColumns?: Record<string, true>,
 ): Promise<void> => {
   const { topLevelWhere, topLevelModelClient, preFetchResults, resolvePkConstraint } = context;
-  const { nestedOp, field, parentModel, relatedModel, pkConstraint } = relation;
-  const parentPkConstraint = resolvePkConstraint(parentModel.name);
+  const { nestedOp, field, parentModel, pkConstraint } = relation;
+  const parentPkConstraint = resolvePkConstraint(parentModel);
   const { results, parentsKnown } = await preFetchOneToOneRelation({
     path: nestedOp.path,
-    link: resolveToOneRelationLink(field, relatedModel),
+    link: resolveToOneRelationLink(context.schemaMetadata, field),
     parentPkFields: parentPkConstraint?.fields ?? [],
     parentKeysFromWhere: parentPkConstraint
       ? parentKeysFromOperationWheres(context.parentOperationsNotPreFetched(nestedOp.path), parentPkConstraint)
@@ -601,15 +573,14 @@ const keyColumnsOf = (
   relation: NestedRelation,
   childRelations: ReadonlySet<string>,
 ): Record<string, true> => {
-  const { relatedModel, pkConstraint } = relation;
+  const { nestedOp, pkConstraint } = relation;
   const fields = new Set(pkConstraint.fields);
   for (const fieldName of childRelations) {
-    const childField = findDMMFField(relatedModel, fieldName);
+    const childField = findRelationField(context.schemaMetadata, nestedOp.relatedModel, fieldName);
     if (!childField || childField.isList) {
       continue;
     }
-    const childModel = context.dmmf.datamodel.models.find((model) => model.name === childField.type);
-    for (const linkField of resolveToOneRelationLink(childField, childModel).parentFields) {
+    for (const linkField of resolveToOneRelationLink(context.schemaMetadata, childField).parentFields) {
       fields.add(linkField);
     }
   }
@@ -680,22 +651,18 @@ const resolveToManyScopeInput = (
   relation: NestedRelation,
 ): ToManyScopeInput | undefined => {
   const { topLevelWhere, topLevelModelClient, preFetchResults, resolvePkConstraint } = context;
-  const { nestedOp, field, parentModel, relatedModel, pkConstraint } = relation;
+  const { nestedOp, field, parentModel, pkConstraint } = relation;
 
-  const parentPkConstraint = resolvePkConstraint(parentModel.name);
+  const parentPkConstraint = resolvePkConstraint(parentModel);
   if (!parentPkConstraint) {
-    preFetchLog(
-      'parent model has no primary key, skipping pre-fetch: model=%s path=%s',
-      parentModel.name,
-      nestedOp.path,
-    );
+    preFetchLog('parent model has no primary key, skipping pre-fetch: model=%s path=%s', parentModel, nestedOp.path);
     return undefined;
   }
 
   return {
     path: nestedOp.path,
     data: nestedOp.data,
-    scope: resolveToManyRelationScope(field, parentModel.name, relatedModel, parentPkConstraint.fields),
+    scope: resolveToManyRelationScope(context.schemaMetadata, field, parentModel, parentPkConstraint.fields),
     parentPkFields: parentPkConstraint.fields,
     topLevelWhere,
     topLevelModelClient,

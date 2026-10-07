@@ -115,7 +115,6 @@ const preFetch = (
   shouldFetchBefore: ShouldFetchBefore = fetchBefore,
 ) =>
   preFetchNestedRecordsBeforeOperation(client, modelName, args, {
-    Prisma,
     schemaMetadata: createSchemaMetadataFromDMMF(Prisma),
     auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS,
     shouldFetchBefore,
@@ -128,7 +127,6 @@ const preFetchReporting = (
 ) => {
   const onPreFetchFailure = vi.fn();
   const preFetched = preFetchNestedRecordsBeforeOperation(client, 'Account', args, {
-    Prisma,
     schemaMetadata: createSchemaMetadataFromDMMF(Prisma),
     auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS,
     shouldFetchBefore,
@@ -515,7 +513,6 @@ describe('nested to-many batch pre-read', () => {
         'Account',
         { where: { id: 'a1' }, data: { members: { deleteMany: { name: 'draft' } } } },
         {
-          Prisma,
           schemaMetadata: createSchemaMetadataFromDMMF(Prisma),
           auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS,
           shouldFetchBefore: fetchBefore,

@@ -31,6 +31,8 @@ export const createSchemaMetadataFromDMMF = (Prisma: PrismaWithDMMF): SchemaMeta
   };
 
   return {
+    getModelNames: () => Prisma.dmmf?.datamodel?.models?.map((model) => model.name) ?? [],
+
     getUniqueConstraints: (modelName: string): UniqueConstraint[] => {
       const constraints: UniqueConstraint[] = [];
       const model = findModel(modelName);
@@ -72,6 +74,7 @@ export const createSchemaMetadataFromDMMF = (Prisma: PrismaWithDMMF): SchemaMeta
           isRequired: field.isRequired ?? false,
           relationName: field.relationName,
           foreignKeyFields: field.relationFromFields ?? [],
+          referencedFields: field.relationToFields ?? [],
         }));
     },
 

@@ -84,7 +84,7 @@ import { insertsRows, type NestedWriteSet, type NestedWriteSets, type NestedWrit
 type Row = Record<string, unknown>;
 
 export interface NestedEventCollectorDependencies {
-  /** Prisma namespace given as the extension's `Prisma` option; read for the DMMF relation details */
+  /** Prisma namespace given as the extension's `Prisma` option; the top-level collector reads its `skip` and `Decimal` */
   Prisma: PrismaNamespace;
   schemaMetadata: SchemaMetadata;
   shouldFetchBefore: ShouldFetchBefore;
@@ -511,8 +511,7 @@ const rowsNotInResult = async (
     targets: writeSetAt(walk, path).targets,
     preExisting: input.preExistingRows.get(path),
     parents,
-    resolvePath: () =>
-      operation ? resolveToManyPath(deps.Prisma, deps.schemaMetadata, input.modelName, operation) : undefined,
+    resolvePath: () => (operation ? resolveToManyPath(deps.schemaMetadata, input.modelName, operation) : undefined),
     include,
   });
   const selection = include ? { include } : {};
@@ -606,7 +605,7 @@ const linkColumnsOf = (
   input: NestedEventCollectionInput,
   deps: NestedEventCollectorDependencies,
 ): Row => {
-  const link = relationLinkOf(deps.Prisma, input.modelName, nestedOp);
+  const link = relationLinkOf(deps.schemaMetadata, input.modelName, nestedOp);
   if (link?.side !== 'related') {
     return {};
   }
@@ -633,7 +632,7 @@ const linkColumnsAsStoredOf = (
   input: NestedEventCollectionInput,
   deps: NestedEventCollectorDependencies,
 ): Row => {
-  const link = relationLinkOf(deps.Prisma, input.modelName, nestedOp);
+  const link = relationLinkOf(deps.schemaMetadata, input.modelName, nestedOp);
   if (link?.side !== 'related') {
     return {};
   }

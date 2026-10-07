@@ -16,8 +16,7 @@ import {
   namedTargets,
   type PrecedingNestedWrite,
 } from '../../grammar/nested-operations.js';
-import type { DMMFField, DMMFModel } from '../../internal-types.js';
-import type { UniqueConstraint } from '../../schema/types.js';
+import type { RelationField, SchemaMetadata, UniqueConstraint } from '../../schema/types.js';
 import { NO_BEFORE_STATE } from '../../utils/before-state.js';
 import { uniqueWhereAsFilter } from '../../utils/compound-where.js';
 import { preFetchLog } from '../../utils/debug.js';
@@ -50,9 +49,9 @@ export interface ToManyRelationScope {
  * @throws Error when the DMMF gives no relation name or no back-relation field
  */
 export const resolveToManyRelationScope = (
-  field: DMMFField,
+  schemaMetadata: SchemaMetadata,
+  field: RelationField,
   parentModelName: string,
-  relatedModel: DMMFModel | undefined,
   parentPkFields: readonly string[],
 ): ToManyRelationScope => {
   const { relationName } = field;
@@ -60,15 +59,21 @@ export const resolveToManyRelationScope = (
     throw new Error(`[@prisma-audit] Relation field "${field.name}" has no relation name in the DMMF`);
   }
 
-  const backField =
-    relatedModel && findBackRelationField(field, parentModelName, relatedModel.name, relatedModel.fields);
+  const backField = findBackRelationField(
+    field,
+    parentModelName,
+    field.relatedModel,
+    schemaMetadata.getRelationFields(field.relatedModel),
+  );
   if (!backField) {
-    throw new Error(`[@prisma-audit] Relation "${relationName}" has no back-relation field on model "${field.type}"`);
+    throw new Error(
+      `[@prisma-audit] Relation "${relationName}" has no back-relation field on model "${field.relatedModel}"`,
+    );
   }
 
   const foreignKey =
-    backField.relationFromFields && backField.relationFromFields.length > 0
-      ? { fields: backField.relationFromFields, references: backField.relationToFields ?? [] }
+    backField.foreignKeyFields.length > 0
+      ? { fields: backField.foreignKeyFields, references: backField.referencedFields }
       : undefined;
   return {
     backField: backField.name,

@@ -82,12 +82,7 @@ export const normalizeAuditOptions = (options: PrismaAuditExtensionOptions): Aud
   const entityConfigs = createEntityConfigLookup(aggregateMapping);
   validateFieldConflicts(excludeFields, redact, aggregateMapping);
   const queryOmitSupported = supportsQueryOmit(Prisma.prismaVersion?.client);
-  validateAuditOmittedFields(
-    aggregateMapping,
-    schemaMetadata,
-    Prisma.dmmf.datamodel.models.map((model) => model.name),
-    queryOmitSupported,
-  );
+  validateAuditOmittedFields(aggregateMapping, schemaMetadata, schemaMetadata.getModelNames(), queryOmitSupported);
 
   const modelTags = (modelName: string): string[] => entityConfigs.byModel(modelName)?.tags ?? [];
   const relationFieldNamesByModel = new Map<string, ReadonlySet<string>>();

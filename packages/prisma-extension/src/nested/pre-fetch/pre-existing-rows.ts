@@ -13,11 +13,7 @@
 
 import type { NestedOperationInfo, NestedPreFetchResults } from '../../grammar/nested-operations.js';
 import { filterOperationsToPreFetch, type ShouldFetchBefore } from '../../grammar/pre-fetch-selection.js';
-import type {
-  PrismaClientWithDynamicAccess,
-  PrismaNamespace,
-  TransactionalPrismaClient,
-} from '../../internal-types.js';
+import type { PrismaClientWithDynamicAccess, TransactionalPrismaClient } from '../../internal-types.js';
 import type { SchemaMetadata } from '../../schema/types.js';
 import type { AuditedOmittedFields } from '../../utils/audited-omitted-fields.js';
 import { preFetchLog } from '../../utils/debug.js';
@@ -42,7 +38,6 @@ export interface SnapshotPreExistingRowsInput {
 }
 
 export interface SnapshotPreExistingRowsDependencies {
-  readonly Prisma: PrismaNamespace;
   readonly schemaMetadata: SchemaMetadata;
   readonly shouldFetchBefore: ShouldFetchBefore;
   readonly auditedOmittedFields: AuditedOmittedFields;
@@ -58,7 +53,7 @@ const resolvePathRelation = (
   deps: SnapshotPreExistingRowsDependencies,
   operation: NestedOperationInfo,
 ): PathRelation | undefined => {
-  const path = resolveToManyPath(deps.Prisma, deps.schemaMetadata, input.modelName, operation);
+  const path = resolveToManyPath(deps.schemaMetadata, input.modelName, operation);
   const client = getPreFetchListClient(input.prismaClient, operation.relatedModel, deps.auditedOmittedFields);
   if (!path || !client) {
     preFetchLog(

@@ -9,6 +9,8 @@
  */
 
 export interface SchemaMetadata {
+  /** The names of every model, in the order the schema declares them */
+  getModelNames(): readonly string[];
   getUniqueConstraints(modelName: string): UniqueConstraint[];
   getRelationFields(modelName: string): RelationField[];
   getAllFields(modelName: string): FieldMetadata[];
@@ -39,6 +41,8 @@ export interface RelationField {
   relationName?: string;
   /** The fields of this model that hold the relation's foreign key; empty when the related model holds it */
   foreignKeyFields: string[];
+  /** The fields of the related model that `foreignKeyFields` reference, in the same order; empty when the related model holds the foreign key */
+  referencedFields: string[];
 }
 
 export interface FieldMetadata {

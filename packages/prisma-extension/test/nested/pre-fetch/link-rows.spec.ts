@@ -14,6 +14,7 @@ import {
   relationLinkOf,
   resolveRelationLink,
 } from '../../../src/nested/pre-fetch/relation-link.js';
+import type { RelationField } from '../../../src/schema/types.js';
 import { NO_AUDITED_OMITTED_FIELDS } from '../../../src/utils/audited-omitted-fields.js';
 import { createSchemaMetadataFromDMMF } from '../../../src/utils/schema-metadata.js';
 
@@ -74,7 +75,7 @@ const at = (path: string, fieldName: string, relatedModel: string) => ({ path, f
 
 describe('relationLinkOf', () => {
   it('finds an optional foreign key on the related model', () => {
-    expect(relationLinkOf(Prisma, 'Post', at('labels', 'labels', 'Label'))).toEqual({
+    expect(relationLinkOf(schemaMetadata, 'Post', at('labels', 'labels', 'Label'))).toEqual({
       side: 'related',
       parentModel: 'Post',
       fields: ['postId'],
@@ -84,43 +85,70 @@ describe('relationLinkOf', () => {
   });
 
   it('finds a required foreign key on the related model', () => {
-    expect(relationLinkOf(Prisma, 'User', at('posts', 'posts', 'Post'))).toMatchObject({
+    expect(relationLinkOf(schemaMetadata, 'User', at('posts', 'posts', 'Post'))).toMatchObject({
       side: 'related',
       optional: false,
     });
   });
 
   it("tells a foreign key on the parent row and an implicit many-to-many relation's join table", () => {
-    expect(relationLinkOf(Prisma, 'Post', at('author', 'author', 'User'))).toEqual({ side: 'parent' });
-    expect(relationLinkOf(Prisma, 'Post', at('categories', 'categories', 'Category'))).toEqual({ side: 'joinTable' });
+    expect(relationLinkOf(schemaMetadata, 'Post', at('author', 'author', 'User'))).toEqual({ side: 'parent' });
+    expect(relationLinkOf(schemaMetadata, 'Post', at('categories', 'categories', 'Category'))).toEqual({
+      side: 'joinTable',
+    });
   });
 
   it('finds nothing for a field without a back-relation', () => {
-    expect(resolveRelationLink(relation('orphans', 'Label', 'Orphan', { isList: true }), 'Post', 'Label', [])).toBe(
-      undefined,
-    );
+    const orphans: RelationField = {
+      name: 'orphans',
+      relatedModel: 'Label',
+      isList: true,
+      isRequired: false,
+      relationName: 'Orphan',
+      foreignKeyFields: [],
+      referencedFields: [],
+    };
+
+    expect(resolveRelationLink(orphans, 'Post', 'Label', [])).toBe(undefined);
   });
 });
 
 describe('findBackRelationField', () => {
-  const children = relation('children', 'Node', 'Tree', { isList: true });
-  const parent = relation('parent', 'Node', 'Tree', { relationFromFields: ['parentId'], relationToFields: ['id'] });
-  const node = [scalar('id', { isId: true }), scalar('parentId'), children, parent];
+  const nodeFields = createSchemaMetadataFromDMMF({
+    dmmf: {
+      datamodel: {
+        models: [
+          {
+            name: 'Node',
+            fields: [
+              scalar('id', { isId: true }),
+              scalar('parentId'),
+              relation('children', 'Node', 'Tree', { isList: true }),
+              relation('parent', 'Node', 'Tree', { relationFromFields: ['parentId'], relationToFields: ['id'] }),
+            ],
+          },
+        ],
+      },
+    },
+  }).getRelationFields('Node');
+  const children = nodeFields.find((field) => field.name === 'children') as RelationField;
+  const parent = nodeFields.find((field) => field.name === 'parent') as RelationField;
 
   it('finds the other side of a self-relation, not the field itself', () => {
-    expect(findBackRelationField(children, 'Node', 'Node', node)).toBe(parent);
-    expect(findBackRelationField(parent, 'Node', 'Node', node)).toBe(children);
+    expect(findBackRelationField(children, 'Node', 'Node', nodeFields)).toBe(parent);
+    expect(findBackRelationField(parent, 'Node', 'Node', nodeFields)).toBe(children);
   });
 
   it('finds the field of the related model that carries the same relation name', () => {
-    const labelPost = models[2]?.fields.find((field) => field.name === 'post');
-    const postLabels = models[1]?.fields.find((field) => field.name === 'labels');
+    const labelFields = schemaMetadata.getRelationFields('Label');
+    const labelPost = labelFields.find((field) => field.name === 'post');
+    const postLabels = schemaMetadata.getRelationFields('Post').find((field) => field.name === 'labels');
 
-    expect(findBackRelationField(postLabels as DMMFField, 'Post', 'Label', models[2]?.fields ?? [])).toBe(labelPost);
+    expect(findBackRelationField(postLabels as RelationField, 'Post', 'Label', labelFields)).toBe(labelPost);
   });
 
   it('finds nothing when no field of the related model carries the relation name', () => {
-    expect(findBackRelationField(children, 'Node', 'Node', [scalar('id'), children])).toBeUndefined();
+    expect(findBackRelationField(children, 'Node', 'Node', [children])).toBeUndefined();
   });
 });
 
@@ -243,7 +271,6 @@ describe('readLinkRows', () => {
         nestedPreFetchResults,
       },
       {
-        Prisma,
         schemaMetadata,
         auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS,
         shouldFetchBefore: () => true,
@@ -287,7 +314,10 @@ describe('readLinkRows', () => {
     const findMany = vi.fn(async () => []);
     const onPreFetchFailure = vi.fn(async () => undefined);
 
-    const reads = await readWith(findMany, { Prisma: unresolved, onPreFetchFailure });
+    const reads = await readWith(findMany, {
+      schemaMetadata: createSchemaMetadataFromDMMF(unresolved),
+      onPreFetchFailure,
+    });
 
     expect(findMany).not.toHaveBeenCalled();
     expect(reads.get('posts.labels')).toMatchObject({ rows: [], failed: true });

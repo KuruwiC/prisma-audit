@@ -6,6 +6,7 @@ import type { AuditRecord } from '@kuruwic/db-audit-core';
 import { createActorId, createAggregateId, createEntityId } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
 import { createPrismaWriteExecutor, declaresBeforeUnavailableColumn } from '../../src/adapters/write-executor.js';
+import { createSchemaMetadataFromDMMF } from '../../src/utils/schema-metadata.js';
 
 const DbNull = Symbol('DbNull');
 
@@ -36,9 +37,8 @@ const clientWithAuditLog = () => {
   return { client: { auditLog: { create } }, create };
 };
 
-const dmmfWith = (fields: Array<{ name: string; kind: string; type: string; isList?: boolean }>) => ({
-  datamodel: { models: [{ name: 'AuditLog', fields }] },
-});
+const dmmfWith = (fields: Array<{ name: string; kind: string; type: string; isList?: boolean }>) =>
+  createSchemaMetadataFromDMMF({ dmmf: { datamodel: { models: [{ name: 'AuditLog', fields }] } } });
 
 describe('createPrismaWriteExecutor', () => {
   it('writes to the audit-log model it was constructed for', async () => {

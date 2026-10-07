@@ -8,7 +8,8 @@
  */
 
 import type { AuditRecord, WriteExecutor } from '@kuruwic/db-audit-core';
-import type { DMMFModel, TransactionalPrismaClient } from '../internal-types.js';
+import type { TransactionalPrismaClient } from '../internal-types.js';
+import type { SchemaMetadata } from '../schema/types.js';
 import { getModelAccessor } from '../utils/model-accessor.js';
 
 const BEFORE_UNAVAILABLE_FIELD = 'beforeUnavailable';
@@ -27,19 +28,16 @@ export interface PrismaWriteExecutorOptions {
  * @param auditLogModel - The client property of the audit-log model (`auditLog`, `activity`)
  * @throws {Error} When the model declares a `beforeUnavailable` field that is not a single Boolean
  */
-export const declaresBeforeUnavailableColumn = (
-  dmmf: { readonly datamodel: { readonly models: readonly Pick<DMMFModel, 'name' | 'fields'>[] } },
-  auditLogModel: string,
-): boolean => {
-  const model = dmmf.datamodel.models.find((candidate) => getModelAccessor(candidate.name) === auditLogModel);
-  const field = model?.fields.find((candidate) => candidate.name === BEFORE_UNAVAILABLE_FIELD);
+export const declaresBeforeUnavailableColumn = (schemaMetadata: SchemaMetadata, auditLogModel: string): boolean => {
+  const model = schemaMetadata.getModelNames().find((candidate) => getModelAccessor(candidate) === auditLogModel);
+  const field = model === undefined ? undefined : schemaMetadata.getFieldMetadata(model, BEFORE_UNAVAILABLE_FIELD);
   if (model === undefined || field === undefined) {
     return false;
   }
-  if (field.kind !== 'scalar' || field.type !== 'Boolean' || field.isList === true) {
+  if (field.kind !== 'scalar' || field.type !== 'Boolean' || field.isList) {
     throw new Error(
-      `[@prisma-audit] The audit-log model "${model.name}" declares "${BEFORE_UNAVAILABLE_FIELD}" as ` +
-        `${field.type}${field.isList === true ? '[]' : ''}; it must be Boolean.`,
+      `[@prisma-audit] The audit-log model "${model}" declares "${BEFORE_UNAVAILABLE_FIELD}" as ` +
+        `${field.type}${field.isList ? '[]' : ''}; it must be Boolean.`,
     );
   }
   return true;
@@ -189,7 +187,7 @@ const writeAuditLogs = async (
  * ```typescript
  * const writeExecutor = createPrismaWriteExecutor(Prisma.DbNull, {
  *   auditLogModel: 'auditLog',
- *   storesBeforeUnavailable: declaresBeforeUnavailableColumn(Prisma.dmmf, 'auditLog'),
+ *   storesBeforeUnavailable: declaresBeforeUnavailableColumn(schemaMetadata, 'auditLog'),
  * });
  * await writeExecutor.write(prisma, logs);
  * ```

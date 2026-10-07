@@ -65,7 +65,7 @@ export const createSingleExecutor = (deps: SingleExecutorDependencies): Operatio
       scope.handle,
       modelName,
       args,
-      { Prisma, schemaMetadata, shouldFetchBefore, auditedOmittedFields, onPreFetchFailure: failureSink.notify },
+      { schemaMetadata, shouldFetchBefore, auditedOmittedFields, onPreFetchFailure: failureSink.notify },
       topLevelUpsertBranch,
     );
     const nestedOperations = detectExecutedNestedOperations(
@@ -87,7 +87,7 @@ export const createSingleExecutor = (deps: SingleExecutorDependencies): Operatio
             writeSets,
             nestedPreFetchResults,
           },
-          { Prisma, schemaMetadata, shouldFetchBefore, auditedOmittedFields },
+          { schemaMetadata, shouldFetchBefore, auditedOmittedFields },
         )
       : new Map();
     const linkReads = await readLinkRows(
@@ -98,7 +98,7 @@ export const createSingleExecutor = (deps: SingleExecutorDependencies): Operatio
         nestedOperations,
         nestedPreFetchResults,
       },
-      { Prisma, schemaMetadata, shouldFetchBefore, auditedOmittedFields, onPreFetchFailure: failureSink.notify },
+      { schemaMetadata, shouldFetchBefore, auditedOmittedFields, onPreFetchFailure: failureSink.notify },
     );
     return { beforeState, nestedPreFetchResults, nestedOperations, writeSets, preExistingRows, linkReads };
   };

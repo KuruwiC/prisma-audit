@@ -36,6 +36,7 @@ const uuidV7TimestampMs = (id: string): number => Number.parseInt(id.slice(0, 8)
 
 /** Minimal SchemaMetadata whose `id` field carries the given DMMF-style default */
 const metadataWithIdDefault = (defaultValue: unknown): SchemaMetadata => ({
+  getModelNames: () => [],
   getUniqueConstraints: () => [],
   getRelationFields: () => [],
   getAllFields: () => [],
