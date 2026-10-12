@@ -10,7 +10,7 @@
  * write or from the primary key its locator or WHERE holds.
  */
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { NestedOperationInfo, NestedPreFetchResults } from '../../../src/grammar/nested-operations.js';
 import { TOP_LEVEL_ROW } from '../../../src/grammar/nested-state.js';
 import { collectToManyDeleteRecords, collectToOneDeleteRecords } from '../../../src/nested/events/delete-handler.js';
@@ -99,6 +99,10 @@ describe('collectToOneDeleteRecords — the row read under its parent row', () =
 });
 
 describe('collectToOneDeleteRecords — unresolved identity', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   const commentsOp: NestedOperationInfo = { ...nestedOp, relatedModel: 'Comment', path: 'comments' };
   const unread = (): NestedPreFetchResults => {
     const results: NestedPreFetchResults = new Map();
@@ -130,17 +134,27 @@ describe('collectToOneDeleteRecords — unresolved identity', () => {
   });
 
   it('awaits the reporter callback before returning, rather than firing it and forgetting it', async () => {
-    let reporterResolved = false;
-    const onUnresolvedDeleteEntityId = vi.fn().mockImplementation(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      reporterResolved = true;
+    vi.useFakeTimers();
+    const events: string[] = [];
+    // A report that settles only once the clock has passed its delay, after every pending microtask has run
+    const onUnresolvedDeleteEntityId = vi.fn(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      events.push('reporter settled');
     });
 
-    await collectToOneDeleteRecords(commentsOp, TOP_LEVEL_ROW, unread(), idPrimaryKey, onUnresolvedDeleteEntityId);
+    const collecting = collectToOneDeleteRecords(
+      commentsOp,
+      TOP_LEVEL_ROW,
+      unread(),
+      idPrimaryKey,
+      onUnresolvedDeleteEntityId,
+    ).then(() => {
+      events.push('collection returned');
+    });
+    await vi.runAllTimersAsync();
+    await collecting;
 
-    // If `collectToOneDeleteRecords` only fired the callback without awaiting it, this
-    // assertion would run before the callback's own microtask/timer resolved.
-    expect(reporterResolved).toBe(true);
+    expect(events).toEqual(['reporter settled', 'collection returned']);
   });
 });
 

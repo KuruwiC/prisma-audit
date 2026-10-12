@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createAsyncLocalStorageProvider } from '../src/context-provider.js';
 import type { AuditActor, AuditContext } from '../src/types.js';
+import { deferred } from './support/deferred.js';
 
 describe('createAsyncLocalStorageProvider', () => {
   it('should return undefined when no context is set', () => {
@@ -31,14 +32,18 @@ describe('createAsyncLocalStorageProvider', () => {
     const context: AuditContext = {
       actor: { category: 'model', type: 'User', id: 'user-123' },
     };
+    const resumed = deferred();
 
-    const result = await provider.runAsync(context, async () => {
-      await new Promise((resolve) => setTimeout(resolve, 10));
+    const running = provider.runAsync(context, async () => {
+      await resumed.promise;
 
       const ctx = provider.getContext();
       expect(ctx).toEqual(context);
       return 'async-success';
     });
+    // Resumed from outside the context, after the callback has suspended
+    resumed.resolve();
+    const result = await running;
 
     expect(result).toBe('async-success');
     expect(provider.getContext()).toBeUndefined();
@@ -52,12 +57,13 @@ describe('createAsyncLocalStorageProvider', () => {
       request: { tenantId: 'tenant-789' },
     };
 
+    const resumed = deferred();
     const nestedAsyncFunction = async () => {
-      await new Promise((resolve) => setTimeout(resolve, 5));
+      await resumed.promise;
       return provider.getContext();
     };
 
-    await provider.runAsync(context, async () => {
+    const running = provider.runAsync(context, async () => {
       const ctx1 = provider.getContext();
       expect(ctx1).toEqual(context);
 
@@ -67,35 +73,39 @@ describe('createAsyncLocalStorageProvider', () => {
       const ctx3 = provider.getContext();
       expect(ctx3).toEqual(context);
     });
+    resumed.resolve();
+    await running;
   });
 
-  it('should isolate contexts in parallel async operations', async () => {
+  // Resuming in either order fails a provider that answers with one shared context: the one started
+  // last (a stack) fails the first order, the one started first (a queue) the second.
+  it.each([
+    { order: 'the one started first resumes first', resumeOrder: [0, 1] },
+    { order: 'the one started last resumes first', resumeOrder: [1, 0] },
+  ])('should isolate contexts in parallel async operations when $order', async ({ resumeOrder }) => {
     const provider = createAsyncLocalStorageProvider();
 
-    const context1: AuditContext = {
-      actor: { category: 'model', type: 'User', id: 'user-1' },
-    };
+    const contexts: AuditContext[] = [
+      { actor: { category: 'model', type: 'User', id: 'user-1' } },
+      { actor: { category: 'model', type: 'User', id: 'user-2' } },
+    ];
+    const resumes = contexts.map(() => deferred());
 
-    const context2: AuditContext = {
-      actor: { category: 'model', type: 'User', id: 'user-2' },
-    };
-
-    const results = await Promise.all([
-      provider.runAsync(context1, async () => {
-        await new Promise((resolve) => setTimeout(resolve, 20));
-        const ctx = provider.getContext();
-        expect(ctx).toEqual(context1);
-        return 'result-1';
+    const runs = contexts.map((context, index) =>
+      provider.runAsync(context, async () => {
+        await resumes[index]?.promise;
+        return provider.getContext();
       }),
-      provider.runAsync(context2, async () => {
-        await new Promise((resolve) => setTimeout(resolve, 10));
-        const ctx = provider.getContext();
-        expect(ctx).toEqual(context2);
-        return 'result-2';
-      }),
-    ]);
+    );
 
-    expect(results).toEqual(['result-1', 'result-2']);
+    const seen: Array<AuditContext | undefined> = [];
+    for (const index of resumeOrder) {
+      resumes[index]?.resolve();
+      seen[index] = await runs[index];
+    }
+
+    expect(seen).toEqual(contexts);
+    expect(provider.getContext()).toBeUndefined();
   });
 
   it('should handle errors in run and restore context', () => {
@@ -121,12 +131,15 @@ describe('createAsyncLocalStorageProvider', () => {
       actor: { category: 'model', type: 'User', id: 'user-123' },
     };
 
-    await expect(
-      provider.runAsync(context, async () => {
-        await new Promise((resolve) => setTimeout(resolve, 10));
-        throw new Error('Async test error');
-      }),
-    ).rejects.toThrow('Async test error');
+    const resumed = deferred();
+
+    const running = provider.runAsync(context, async () => {
+      await resumed.promise;
+      throw new Error('Async test error');
+    });
+    resumed.resolve();
+
+    await expect(running).rejects.toThrow('Async test error');
 
     expect(provider.getContext()).toBeUndefined();
   });

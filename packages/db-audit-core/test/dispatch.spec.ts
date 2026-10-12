@@ -14,6 +14,7 @@ import type { AuditRecord } from '../src/domain/mutation-event.js';
 import type { TransactionRuntime, WriteContext, WriteExecutor, WriteFn } from '../src/domain/write.js';
 import { type AuditErrorContext, createFailureSink, type FailureSink } from '../src/failure/index.js';
 import type { AuditContext } from '../src/types.js';
+import { deferred } from './support/deferred.js';
 
 interface Handle {
   readonly name: string;
@@ -129,6 +130,12 @@ const failingBuild = async (): Promise<readonly AuditRecord[]> => {
 };
 const buildFailureContext = { phase: 'diff-generation', ...operationFacts, error: buildError };
 
+/**
+ * Runs every continuation that can run, including the ones those queue in turn: a turn of the fake
+ * clock yields to the event loop, which takes its next task only once the microtask queue is empty
+ */
+const runPendingContinuations = () => vi.advanceTimersByTimeAsync(0);
+
 describe('dispatch', () => {
   let consoleError: ReturnType<typeof vi.spyOn>;
 
@@ -138,30 +145,32 @@ describe('dispatch', () => {
 
   afterEach(() => {
     consoleError.mockRestore();
+    vi.useRealTimers();
   });
 
   describe('immediately, for an atomic policy', () => {
     it('writes the records on the transaction handle and resolves only once the write has finished', async () => {
-      let finishWrite: () => void = () => {};
+      vi.useFakeTimers();
+      const writeReleased = deferred();
+      const events: string[] = [];
       const { config, writeExecutor } = createConfig({
-        write: () =>
-          new Promise<void>((resolve) => {
-            finishWrite = resolve;
-          }),
+        write: async () => {
+          await writeReleased.promise;
+          events.push('write finished');
+        },
       });
       const { runtime, afterCommit, detach } = createRuntime(true);
 
-      let settled = false;
       const dispatched = dispatch(audited(true), config, runtime).then(() => {
-        settled = true;
+        events.push('dispatch resolved');
       });
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await runPendingContinuations();
 
       expect(writeExecutor.write).toHaveBeenCalledWith(transactionHandle, [record]);
-      expect(settled).toBe(false);
-      finishWrite();
+      expect(events).toEqual([]);
+      writeReleased.resolve();
       await dispatched;
-      expect(settled).toBe(true);
+      expect(events).toEqual(['write finished', 'dispatch resolved']);
       expect(afterCommit).not.toHaveBeenCalled();
       expect(detach).not.toHaveBeenCalled();
     });
@@ -349,30 +358,30 @@ describe('dispatch', () => {
   });
   describe('after the write has committed and awaited, for an atomic policy outside any transaction', () => {
     it('writes on the base handle, outside any transaction, and resolves only once the write has finished', async () => {
-      let finishWrite: () => void = () => {};
+      vi.useFakeTimers();
+      const writeReleased = deferred();
+      const events: string[] = [];
       const contexts: Array<{ readonly handle: Handle; readonly inTransaction: boolean }> = [];
       const { config } = createConfig({
         writer: async (written, { handle, inTransaction, defaultWrite }) => {
           contexts.push({ handle, inTransaction });
-          await new Promise<void>((resolve) => {
-            finishWrite = resolve;
-          });
+          await writeReleased.promise;
           await defaultWrite(written);
+          events.push('write finished');
         },
       });
       const { runtime, detach } = createRuntime(false);
 
-      let settled = false;
       const dispatched = dispatch(audited(true), config, runtime).then(() => {
-        settled = true;
+        events.push('dispatch resolved');
       });
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await runPendingContinuations();
 
       expect(contexts).toEqual([{ handle: baseHandle, inTransaction: false }]);
-      expect(settled).toBe(false);
-      finishWrite();
+      expect(events).toEqual([]);
+      writeReleased.resolve();
       await dispatched;
-      expect(settled).toBe(true);
+      expect(events).toEqual(['write finished', 'dispatch resolved']);
       expect(detach).not.toHaveBeenCalled();
     });
 
