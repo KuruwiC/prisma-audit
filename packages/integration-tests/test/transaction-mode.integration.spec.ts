@@ -15,10 +15,9 @@ import type { AuditContext, AuditErrorContext, AuditRecord } from '@kuruwic/db-a
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { createAuditClient, defineEntity, flushAllPendingWrites } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
-import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
-import { PrismaPg } from '@prisma/adapter-pg';
+import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, inject, it, vi } from 'vitest';
-import { cleanDatabase } from './helpers/setup.js';
+import { cleanDatabase, createBasePrisma } from './helpers/setup.js';
 
 const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'transaction-mode-actor' },
@@ -89,7 +88,7 @@ describe('openImplicitTransaction', () => {
   let raw: PrismaClient;
 
   beforeAll(() => {
-    raw = new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl() }) });
+    raw = createBasePrisma(databaseUrl());
   });
 
   afterAll(async () => {
@@ -109,7 +108,7 @@ describe('openImplicitTransaction', () => {
    * client) appends `?`.
    */
   const createClients = (options: ClientOptions) => {
-    const base = new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl() }) });
+    const base = createBasePrisma(databaseUrl());
     const before: Seen = { updates: 0, others: 0 };
     const after: Seen = { updates: 0, others: 0 };
     const provider = createAsyncLocalStorageProvider();
@@ -198,10 +197,7 @@ describe('openImplicitTransaction', () => {
    * transaction timeout.
    */
   const runBatch = (options: BatchOptions) => {
-    const limited = new PrismaClient({
-      adapter: new PrismaPg({ connectionString: databaseUrl() }),
-      ...(options.slow ? { transactionOptions: { timeout: 200 } } : {}),
-    });
+    const limited = createBasePrisma(databaseUrl(), options.slow ? { transactionOptions: { timeout: 200 } } : {});
     disposers.push(async () => {
       await limited.$disconnect();
     });

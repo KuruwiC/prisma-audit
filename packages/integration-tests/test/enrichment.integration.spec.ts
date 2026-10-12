@@ -3,8 +3,7 @@ import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import type { AggregateMapping } from '@kuruwic/prisma-audit';
 import { createAuditClient, defineEntity, foreignKey, to } from '@kuruwic/prisma-audit';
 import { type AuditModelName, auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
-import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
-import { PrismaPg } from '@prisma/adapter-pg';
+import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import type { Mock } from 'vitest';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -21,6 +20,7 @@ import {
 } from './helpers/enrichment-test-helpers.js';
 import {
   cleanDatabase,
+  createBasePrisma,
   createTestContext,
   disposeTestContext,
   type TestContext,
@@ -53,7 +53,7 @@ describe('Context Enrichment Integration', () => {
    * disconnected after the test, whether it passed or not.
    */
   const openClient = (options: ClientOptions) => {
-    const basePrisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: context.databaseUrl }) });
+    const basePrisma = createBasePrisma(context.databaseUrl);
     openedBaseClients.push(basePrisma);
     const provider = createAsyncLocalStorageProvider();
     const prisma = createAuditClient(basePrisma, {

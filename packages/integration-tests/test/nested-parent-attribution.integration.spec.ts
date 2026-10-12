@@ -12,10 +12,9 @@ import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import type { AuditErrorObserver } from '@kuruwic/prisma-audit';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
-import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
-import { PrismaPg } from '@prisma/adapter-pg';
+import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { cleanDatabase, getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
+import { cleanDatabase, createBasePrisma, getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
 
 const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'parent-attribution-actor' },
@@ -49,7 +48,7 @@ describe('nested rows attributed through their parent row', () => {
       readonly fault?: FaultTarget;
     } = {},
   ) => {
-    const basePrisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl }) });
+    const basePrisma = createBasePrisma(databaseUrl);
     let armed = false;
     const faultyPrisma = basePrisma.$extends({
       name: 'fault-injection',

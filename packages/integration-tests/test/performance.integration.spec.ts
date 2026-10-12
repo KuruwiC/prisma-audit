@@ -9,10 +9,9 @@ import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import type { AggregateMapping } from '@kuruwic/prisma-audit';
 import { createAuditClient, defineEntity, foreignKey, to } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
-import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
-import { PrismaPg } from '@prisma/adapter-pg';
+import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, inject, it } from 'vitest';
-import { cleanDatabase, type TestContext } from './helpers/setup.js';
+import { cleanDatabase, createBasePrisma, type TestContext } from './helpers/setup.js';
 
 const testAggregateMapping: AggregateMapping = {
   User: defineEntity({
@@ -104,9 +103,7 @@ describe('Audit log rows by write shape', () => {
   beforeAll(async () => {
     const databaseUrl = inject('databaseUrl');
 
-    const basePrisma = new PrismaClient({
-      adapter: new PrismaPg({ connectionString: databaseUrl }),
-    });
+    const basePrisma = createBasePrisma(databaseUrl);
 
     const provider = createAsyncLocalStorageProvider();
     const auditLogRowCount = { value: 0 };
@@ -382,9 +379,7 @@ describe('Nested update with and without an include of the written relation', ()
   beforeAll(async () => {
     const databaseUrl = inject('databaseUrl');
 
-    const basePrisma = new PrismaClient({
-      adapter: new PrismaPg({ connectionString: databaseUrl }),
-    });
+    const basePrisma = createBasePrisma(databaseUrl);
 
     await basePrisma.$connect();
 

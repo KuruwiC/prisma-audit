@@ -16,11 +16,11 @@ import type { AuditContext, AuditRecord, WriteContext } from '@kuruwic/db-audit-
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { createAuditClient, flushAllPendingWrites } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
-import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
-import { PrismaPg } from '@prisma/adapter-pg';
+import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   cleanDatabase,
+  createBasePrisma,
   createTestContext,
   disposeTestContext,
   type TestContext,
@@ -95,10 +95,10 @@ describe('Batch $transaction under the audit extension', () => {
   });
 
   const createAudited = (options: AuditedClientOptions) => {
-    const raw = new PrismaClient({
-      adapter: new PrismaPg({ connectionString: context.databaseUrl }),
-      ...(options.transactionOptions ? { transactionOptions: options.transactionOptions } : {}),
-    });
+    const raw = createBasePrisma(
+      context.databaseUrl,
+      options.transactionOptions ? { transactionOptions: options.transactionOptions } : {},
+    );
     const provider = createAsyncLocalStorageProvider();
     const observer = vi.fn();
     const prisma = createAuditClient(raw, {

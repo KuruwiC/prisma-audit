@@ -8,10 +8,9 @@ import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
-import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
-import { PrismaPg } from '@prisma/adapter-pg';
+import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
+import { createBasePrisma, getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
 
 const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'relation-fields-actor' },
@@ -27,7 +26,7 @@ describe('relation fields in audited entity state', () => {
   });
 
   const createClient = (databaseUrl: string) => {
-    const basePrisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl }) });
+    const basePrisma = createBasePrisma(databaseUrl);
     const provider = createAsyncLocalStorageProvider();
     const prisma = createAuditClient(basePrisma, {
       Prisma,

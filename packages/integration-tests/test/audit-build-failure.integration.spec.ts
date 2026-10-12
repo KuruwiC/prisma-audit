@@ -21,11 +21,11 @@ import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import type { AuditErrorContext, ErrorHandlingConfig } from '@kuruwic/prisma-audit';
 import { createAuditClient, flushAllPendingWrites } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
-import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
-import { PrismaPg } from '@prisma/adapter-pg';
+import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   cleanDatabase,
+  createBasePrisma,
   createTestContext,
   disposeTestContext,
   type TestContext,
@@ -51,7 +51,7 @@ interface ScenarioOptions {
 
 const createScenario = (options: ScenarioOptions) => {
   const error = new Error('simulated failure after the write');
-  const rawBasePrisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: options.databaseUrl }) });
+  const rawBasePrisma = createBasePrisma(options.databaseUrl);
   let failed = false;
   const { fault } = options;
   const failOnWrittenState = (model: FailingRead['model'], rows: readonly Row[]): void => {

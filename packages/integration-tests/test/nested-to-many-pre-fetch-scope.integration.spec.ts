@@ -12,10 +12,9 @@ import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import type { AuditErrorObserver } from '@kuruwic/prisma-audit';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { type AuditModelName, auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
-import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
-import { PrismaPg } from '@prisma/adapter-pg';
+import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
+import { createBasePrisma, getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
 
 const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'nested-to-many-scope-actor' },
@@ -33,7 +32,7 @@ describe('nested to-many pre-fetch — parent row scope', () => {
   });
 
   beforeEach(() => {
-    basePrisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: sharedDatabaseUrl }) });
+    basePrisma = createBasePrisma(sharedDatabaseUrl);
     provider = createAsyncLocalStorageProvider();
     observer = vi.fn<AuditErrorObserver>();
     prisma = createAuditClient(basePrisma, {

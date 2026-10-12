@@ -13,10 +13,9 @@ import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import type { AggregateMapping } from '@kuruwic/prisma-audit';
 import { createAuditClient, defineEntity, foreignKey, to } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
-import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
-import { PrismaPg } from '@prisma/adapter-pg';
+import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, inject, it } from 'vitest';
-import { cleanDatabase } from './helpers/setup.js';
+import { cleanDatabase, createBasePrisma } from './helpers/setup.js';
 
 const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'unchanged-write-actor' },
@@ -131,7 +130,7 @@ describe('A write that stores the values a row already holds', () => {
   };
 
   beforeAll(async () => {
-    basePrisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: inject('databaseUrl') }) });
+    basePrisma = createBasePrisma(inject('databaseUrl'));
     await basePrisma.$connect();
   });
 

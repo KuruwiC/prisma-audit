@@ -15,10 +15,9 @@ import type { AuditContext, AuditErrorContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { createAuditClient, defineEntity, flushAllPendingWrites } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
-import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
-import { PrismaPg } from '@prisma/adapter-pg';
+import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, inject, it, vi } from 'vitest';
-import { cleanDatabase } from './helpers/setup.js';
+import { cleanDatabase, createBasePrisma } from './helpers/setup.js';
 
 const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'update-many-limit-actor' },
@@ -95,8 +94,8 @@ describe('updateMany and deleteMany with a limit', () => {
   let audited: ReturnType<typeof createAudited>;
 
   beforeAll(() => {
-    raw = new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl() }) });
-    plain = new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl() }) });
+    raw = createBasePrisma(databaseUrl());
+    plain = createBasePrisma(databaseUrl());
     audited = createAudited();
   });
 

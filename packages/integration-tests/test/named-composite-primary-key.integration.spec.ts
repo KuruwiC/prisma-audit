@@ -9,10 +9,9 @@ import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import type { AuditErrorObserver } from '@kuruwic/prisma-audit';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
-import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
-import { PrismaPg } from '@prisma/adapter-pg';
+import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanDatabase, getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
+import { cleanDatabase, createBasePrisma, getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
 
 const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'named-composite-pk-actor' },
@@ -34,7 +33,7 @@ describe('Named Composite Primary Key (PostBookmark)', () => {
 
   beforeAll(async () => {
     databaseUrl = await getSharedDatabaseUrl();
-    cleanupPrisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl }) });
+    cleanupPrisma = createBasePrisma(databaseUrl);
   });
 
   afterAll(async () => {
@@ -53,7 +52,7 @@ describe('Named Composite Primary Key (PostBookmark)', () => {
   });
 
   const createScenario = (options: { fetchBeforeDelete: boolean }): Scenario => {
-    const basePrisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl }) });
+    const basePrisma = createBasePrisma(databaseUrl);
     const provider = createAsyncLocalStorageProvider();
     const observer = vi.fn<AuditErrorObserver>();
     const prisma = createAuditClient(basePrisma, {

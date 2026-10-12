@@ -169,10 +169,26 @@ export const testAuditOptions = <TPrisma, TSchema>(
   },
 });
 
+type BaseClientOptions<TOptions> = TOptions & { adapter: PrismaPg };
+
+/**
+ * A client without the audit extension on the PostgreSQL database at `databaseUrl`, through the
+ * driver adapter every base client uses. `options` adds the other constructor options; the client's
+ * type follows them, as it would for `new PrismaClient(...)` (`log` events, `omit`).
+ */
+export const createBasePrisma = <const TOptions extends Prisma.PrismaClientBaseOptions = Record<never, never>>(
+  databaseUrl: string,
+  options?: TOptions,
+): InstanceType<typeof PrismaClient<BaseClientOptions<TOptions>>> => {
+  const clientOptions = { ...options, adapter: new PrismaPg({ connectionString: databaseUrl }) };
+  // The constructor's argument type is conditional on its options type, which does not resolve while TOptions is generic
+  return new PrismaClient<BaseClientOptions<TOptions>>(
+    clientOptions as Prisma.PrismaClientConstructorArgs<BaseClientOptions<TOptions>>,
+  );
+};
+
 export const createTestClients = (databaseUrl: string): TestContext => {
-  const basePrisma = new PrismaClient({
-    adapter: new PrismaPg({ connectionString: databaseUrl }),
-  });
+  const basePrisma = createBasePrisma(databaseUrl);
 
   const provider = createAsyncLocalStorageProvider();
 

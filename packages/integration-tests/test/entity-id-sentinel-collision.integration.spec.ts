@@ -16,10 +16,9 @@ import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import type { AuditErrorObserver } from '@kuruwic/prisma-audit';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
-import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
-import { PrismaPg } from '@prisma/adapter-pg';
+import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
+import { createBasePrisma, getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
 
 type FetchBeforeConfig = Parameters<typeof createAuditClient>[1]['fetchBefore'];
 
@@ -34,7 +33,7 @@ describe('nested delete of a row whose primary key is "__default__"', () => {
   let observer: ReturnType<typeof vi.fn<AuditErrorObserver>>;
 
   beforeAll(async () => {
-    basePrisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: await getSharedDatabaseUrl() }) });
+    basePrisma = createBasePrisma(await getSharedDatabaseUrl());
   });
 
   afterAll(async () => {

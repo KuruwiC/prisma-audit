@@ -3,11 +3,11 @@ import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import type { AuditErrorContext, ErrorHandlingConfig } from '@kuruwic/prisma-audit';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
-import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
-import { PrismaPg } from '@prisma/adapter-pg';
+import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   cleanDatabase,
+  createBasePrisma,
   createTestContext,
   disposeTestContext,
   type TestContext,
@@ -28,9 +28,7 @@ interface FailingWriterClientOptions {
  * cannot leak into other scenarios.
  */
 const createFailingWriterClient = (databaseUrl: string, options: FailingWriterClientOptions) => {
-  const basePrisma = new PrismaClient({
-    adapter: new PrismaPg({ connectionString: databaseUrl }),
-  });
+  const basePrisma = createBasePrisma(databaseUrl);
   const provider = createAsyncLocalStorageProvider();
 
   const prisma = createAuditClient(basePrisma, {
@@ -656,7 +654,7 @@ describe('Error Handling Integration', () => {
     it('a diff-generation failure on the single-operation path inside the transaction the client opens propagates the original error to the caller, regardless of writeFailurePolicy', async () => {
       const ENRICHER_FAILURE_MESSAGE = 'actor enricher is broken';
       const enricherError = new Error(ENRICHER_FAILURE_MESSAGE);
-      const basePrisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: context.databaseUrl }) });
+      const basePrisma = createBasePrisma(context.databaseUrl);
       const provider = createAsyncLocalStorageProvider();
       const observer = vi.fn();
       const policy = vi.fn((_context: AuditErrorContext) => 'ignore' as const);
@@ -718,7 +716,7 @@ describe('Error Handling Integration', () => {
       // row silently left out.
       const REREAD_FAILURE_MESSAGE = 'simulated nested re-read failure';
       const rereadError = new Error(REREAD_FAILURE_MESSAGE);
-      const rawBasePrisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: context.databaseUrl }) });
+      const rawBasePrisma = createBasePrisma(context.databaseUrl);
       let rereadArmed = false;
       // Applied after the audit extension, so it sees the caller's update come back from the
       // database before the audit reads the nested rows again in the same transaction.
@@ -803,7 +801,7 @@ describe('Error Handling Integration', () => {
 
       const runWithFailingSnapshot = async (awaitWrite: boolean) => {
         const snapshotError = new Error(SNAPSHOT_FAILURE_MESSAGE);
-        const rawBasePrisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: context.databaseUrl }) });
+        const rawBasePrisma = createBasePrisma(context.databaseUrl);
         let snapshotArmed = false;
         const basePrisma = rawBasePrisma.$extends({
           name: 'fault-injection',
@@ -881,7 +879,7 @@ describe('Error Handling Integration', () => {
 
   describe('Database constraint violations', () => {
     it('a foreign key violation on a single-record create propagates raw as P2003, leaving no row and no audit log and without reaching the audit observer or policy', async () => {
-      const basePrisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: context.databaseUrl }) });
+      const basePrisma = createBasePrisma(context.databaseUrl);
       const provider = createAsyncLocalStorageProvider();
       const observer = vi.fn();
       const policy = vi.fn((_context: AuditErrorContext) => 'ignore' as const);
@@ -928,7 +926,7 @@ describe('Error Handling Integration', () => {
       // never be reported to `observer` or routed through `policy`. Uses a normal
       // (non-failing) writer so the only failure in play is the caller's own — the setup
       // creates below must not themselves trip the observer.
-      const basePrisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: context.databaseUrl }) });
+      const basePrisma = createBasePrisma(context.databaseUrl);
       const provider = createAsyncLocalStorageProvider();
       const observer = vi.fn();
       const policy = vi.fn((_context: AuditErrorContext) => 'ignore' as const);
@@ -987,7 +985,7 @@ describe('Error Handling Integration', () => {
       // here) must never reach `observer` or `policy`, and must reach the caller exactly as
       // Prisma threw it. Uses a normal (non-failing) writer so the only failure in play is
       // the caller's own.
-      const basePrisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: context.databaseUrl }) });
+      const basePrisma = createBasePrisma(context.databaseUrl);
       const provider = createAsyncLocalStorageProvider();
       const observer = vi.fn();
       const policy = vi.fn((_context: AuditErrorContext) => 'ignore' as const);

@@ -15,11 +15,10 @@ import {
   to,
 } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
-import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
-import { PrismaPg } from '@prisma/adapter-pg';
+import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, inject, it } from 'vitest';
 import { createPostReadFault } from './helpers/post-read-fault.js';
-import { cleanDatabase } from './helpers/setup.js';
+import { cleanDatabase, createBasePrisma } from './helpers/setup.js';
 
 const testAggregateMapping: AggregateMapping = {
   User: defineEntity({
@@ -41,9 +40,7 @@ describe('Normalized Writer Helpers', () => {
   const provider = createAsyncLocalStorageProvider();
 
   beforeAll(() => {
-    basePrisma = new PrismaClient({
-      adapter: new PrismaPg({ connectionString: inject('databaseUrl') }),
-    });
+    basePrisma = createBasePrisma(inject('databaseUrl'));
   });
 
   afterAll(async () => {

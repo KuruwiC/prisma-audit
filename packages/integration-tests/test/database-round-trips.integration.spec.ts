@@ -26,10 +26,9 @@ import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import type { AggregateMapping } from '@kuruwic/prisma-audit';
 import { createAuditClient, defineEntity, foreignKey, to } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
-import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
-import { PrismaPg } from '@prisma/adapter-pg';
+import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, inject, it } from 'vitest';
-import { cleanDatabase } from './helpers/setup.js';
+import { cleanDatabase, createBasePrisma } from './helpers/setup.js';
 
 const testAggregateMapping: AggregateMapping = {
   User: defineEntity({ type: 'User', excludeFields: ['updatedAt'] }),
@@ -69,10 +68,7 @@ const createAuditedClientWithQueryLog = (
   databaseUrl: string,
   statements: string[],
 ): { basePrisma: PrismaClient; provider: AuditContextProvider; prisma: ReturnType<typeof createAuditClient> } => {
-  const basePrisma = new PrismaClient({
-    adapter: new PrismaPg({ connectionString: databaseUrl }),
-    log: [{ emit: 'event', level: 'query' }],
-  });
+  const basePrisma = createBasePrisma(databaseUrl, { log: [{ emit: 'event', level: 'query' }] });
   basePrisma.$on('query', (event) => {
     collectStatement(statements, event.query);
   });
@@ -540,8 +536,7 @@ describe('Database Round-Trip Guard: fields an entity lists in auditOmittedField
   const statements: string[] = [];
 
   beforeAll(async () => {
-    const loggingPrisma = new PrismaClient({
-      adapter: new PrismaPg({ connectionString: inject('databaseUrl') }),
+    const loggingPrisma = createBasePrisma(inject('databaseUrl'), {
       log: [{ emit: 'event', level: 'query' }],
       omit: ROUND_TRIP_OMIT,
     });

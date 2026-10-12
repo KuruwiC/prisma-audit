@@ -11,10 +11,9 @@ import type { AuditContext, AuditErrorObserver } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider, self } from '@kuruwic/db-audit-core';
 import { createAuditClient, defineEntity } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
-import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
-import { PrismaPg } from '@prisma/adapter-pg';
+import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { cleanDatabase, getSharedDatabaseUrl } from './helpers/setup.js';
+import { cleanDatabase, createBasePrisma, getSharedDatabaseUrl } from './helpers/setup.js';
 
 const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'unique-only-model-actor' },
@@ -37,7 +36,7 @@ describe('a model identified by a unique field instead of a primary key', () => 
   });
 
   const setup = async (observer?: AuditErrorObserver, idResolver: IdResolver = self('code')) => {
-    const basePrisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl }) });
+    const basePrisma = createBasePrisma(databaseUrl);
     const provider = createAsyncLocalStorageProvider();
     const prisma = createAuditClient(basePrisma, {
       Prisma,
