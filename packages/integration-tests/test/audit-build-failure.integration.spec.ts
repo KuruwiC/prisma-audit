@@ -22,15 +22,8 @@ import type { AuditErrorContext, ErrorHandlingConfig } from '@kuruwic/prisma-aud
 import { createAuditClient, flushAllPendingWrites } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  cleanDatabase,
-  createBasePrisma,
-  createTestContext,
-  disposeTestContext,
-  type TestContext,
-  testAggregateMapping,
-} from './helpers/setup.js';
+import { describe, expect, it, vi } from 'vitest';
+import { createBasePrisma, setupTestContext, testAggregateMapping } from './helpers/setup.js';
 
 type Row = Record<string, unknown>;
 
@@ -110,23 +103,11 @@ const createScenario = (options: ScenarioOptions) => {
 };
 
 describe('A failed audit build after the write', () => {
-  let context: TestContext;
+  const context = setupTestContext();
 
   const actor: AuditContext = {
     actor: { category: 'model', type: 'User', id: 'test-user-1', name: 'Test User' },
   };
-
-  beforeAll(async () => {
-    context = await createTestContext();
-  });
-
-  afterAll(async () => {
-    await disposeTestContext(context);
-  });
-
-  beforeEach(async () => {
-    await cleanDatabase(context.prisma);
-  });
 
   const seedUser = (email: string) =>
     context.provider.runAsync(actor, async () =>

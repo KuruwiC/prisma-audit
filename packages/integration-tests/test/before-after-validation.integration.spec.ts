@@ -2,17 +2,11 @@ import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAuditClient, flushAllPendingWrites } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import {
-  cleanDatabase,
-  createTestContext,
-  disposeTestContext,
-  type TestContext,
-  testAggregateMapping,
-} from './helpers/setup.js';
+import { describe, expect, it } from 'vitest';
+import { setupTestContext, testAggregateMapping } from './helpers/setup.js';
 
 describe('Before/After Field Validation', () => {
-  let context: TestContext;
+  const context = setupTestContext();
 
   const testActor: AuditContext = {
     actor: {
@@ -21,18 +15,6 @@ describe('Before/After Field Validation', () => {
       id: 'test-user-1',
     },
   };
-
-  beforeAll(async () => {
-    context = await createTestContext();
-  });
-
-  afterAll(async () => {
-    await disposeTestContext(context);
-  });
-
-  beforeEach(async () => {
-    await cleanDatabase(context.prisma);
-  });
 
   describe('Date serialization', () => {
     it('should serialize Date fields as ISO strings, not empty objects', async () => {

@@ -9,15 +9,8 @@ import type { PrismaAuditExtensionOptions } from '@kuruwic/prisma-audit';
 import { createAuditClient, flushAllPendingWrites } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  cleanDatabase,
-  createBasePrisma,
-  createTestContext,
-  disposeTestContext,
-  type TestContext,
-  testAggregateMapping,
-} from './helpers/setup.js';
+import { describe, expect, it, vi } from 'vitest';
+import { createBasePrisma, setupTestContext, testAggregateMapping } from './helpers/setup.js';
 
 const AUDIT_WRITE_FAILURE_MESSAGE = 'simulated audit log write failure';
 
@@ -61,19 +54,7 @@ const createScenario = (databaseUrl: string, options: ScenarioOptions) => {
 };
 
 describe('Per-model strategy callbacks for models without tags', () => {
-  let context: TestContext;
-
-  beforeAll(async () => {
-    context = await createTestContext();
-  });
-
-  afterAll(async () => {
-    await disposeTestContext(context);
-  });
-
-  beforeEach(async () => {
-    await cleanDatabase(context.prisma);
-  });
+  const context = setupTestContext();
 
   const countAuditLogs = (entityType: string): Promise<number> =>
     context.basePrisma.auditLog.count({ where: { entityType } });

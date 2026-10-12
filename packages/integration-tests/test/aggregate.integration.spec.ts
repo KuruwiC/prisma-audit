@@ -1,9 +1,9 @@
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { describe, expect, it } from 'vitest';
-import { setupTestLifecycle } from './helpers/setup.js';
+import { setupTestContext } from './helpers/setup.js';
 
 describe('Aggregate Root Resolution Integration', () => {
-  const { getContext } = setupTestLifecycle();
+  const context = setupTestContext();
 
   const testActor: AuditContext = {
     actor: {
@@ -16,8 +16,8 @@ describe('Aggregate Root Resolution Integration', () => {
 
   describe('Post aggregate resolution', () => {
     it('should track Post changes under User aggregate', async () => {
-      const user = await getContext().provider.runAsync(testActor, async () => {
-        return await getContext().prisma.user.create({
+      const user = await context.provider.runAsync(testActor, async () => {
+        return await context.prisma.user.create({
           data: {
             email: 'author@example.com',
             name: 'Author',
@@ -26,8 +26,8 @@ describe('Aggregate Root Resolution Integration', () => {
         });
       });
 
-      const post = await getContext().provider.runAsync(testActor, async () => {
-        return await getContext().prisma.post.create({
+      const post = await context.provider.runAsync(testActor, async () => {
+        return await context.prisma.post.create({
           data: {
             title: 'Original Title',
             content: 'Original content',
@@ -36,14 +36,14 @@ describe('Aggregate Root Resolution Integration', () => {
         });
       });
 
-      await getContext().provider.runAsync(testActor, async () => {
-        return await getContext().prisma.post.update({
+      await context.provider.runAsync(testActor, async () => {
+        return await context.prisma.post.update({
           where: { id: post.id },
           data: { title: 'Updated Title' },
         });
       });
 
-      const userAggregateLogs = await getContext().prisma.auditLog.findMany({
+      const userAggregateLogs = await context.prisma.auditLog.findMany({
         where: {
           aggregateType: 'User',
           aggregateId: user.id,
@@ -61,8 +61,8 @@ describe('Aggregate Root Resolution Integration', () => {
 
   describe('Comment aggregate resolution', () => {
     it('should create audit logs for Comment, Post, and User aggregates', async () => {
-      const user = await getContext().provider.runAsync(testActor, async () => {
-        return await getContext().prisma.user.create({
+      const user = await context.provider.runAsync(testActor, async () => {
+        return await context.prisma.user.create({
           data: {
             email: 'user@example.com',
             name: 'User',
@@ -71,8 +71,8 @@ describe('Aggregate Root Resolution Integration', () => {
         });
       });
 
-      const post = await getContext().provider.runAsync(testActor, async () => {
-        return await getContext().prisma.post.create({
+      const post = await context.provider.runAsync(testActor, async () => {
+        return await context.prisma.post.create({
           data: {
             title: 'Post',
             content: 'Content',
@@ -81,8 +81,8 @@ describe('Aggregate Root Resolution Integration', () => {
         });
       });
 
-      const comment = await getContext().provider.runAsync(testActor, async () => {
-        return await getContext().prisma.comment.create({
+      const comment = await context.provider.runAsync(testActor, async () => {
+        return await context.prisma.comment.create({
           data: {
             content: 'Test comment',
             postId: post.id,
@@ -91,7 +91,7 @@ describe('Aggregate Root Resolution Integration', () => {
         });
       });
 
-      const commentLogs = await getContext().prisma.auditLog.findMany({
+      const commentLogs = await context.prisma.auditLog.findMany({
         where: { entityType: 'Comment', entityId: comment.id },
         orderBy: { aggregateType: 'asc' },
       });
@@ -111,8 +111,8 @@ describe('Aggregate Root Resolution Integration', () => {
     });
 
     it('should track Comment changes under both Post and User aggregates', async () => {
-      const user = await getContext().provider.runAsync(testActor, async () => {
-        return await getContext().prisma.user.create({
+      const user = await context.provider.runAsync(testActor, async () => {
+        return await context.prisma.user.create({
           data: {
             email: 'user@example.com',
             name: 'User',
@@ -121,8 +121,8 @@ describe('Aggregate Root Resolution Integration', () => {
         });
       });
 
-      const post = await getContext().provider.runAsync(testActor, async () => {
-        return await getContext().prisma.post.create({
+      const post = await context.provider.runAsync(testActor, async () => {
+        return await context.prisma.post.create({
           data: {
             title: 'Post',
             content: 'Content',
@@ -131,8 +131,8 @@ describe('Aggregate Root Resolution Integration', () => {
         });
       });
 
-      const comment = await getContext().provider.runAsync(testActor, async () => {
-        return await getContext().prisma.comment.create({
+      const comment = await context.provider.runAsync(testActor, async () => {
+        return await context.prisma.comment.create({
           data: {
             content: 'Original comment',
             postId: post.id,
@@ -141,14 +141,14 @@ describe('Aggregate Root Resolution Integration', () => {
         });
       });
 
-      await getContext().provider.runAsync(testActor, async () => {
-        return await getContext().prisma.comment.update({
+      await context.provider.runAsync(testActor, async () => {
+        return await context.prisma.comment.update({
           where: { id: comment.id },
           data: { content: 'Updated comment' },
         });
       });
 
-      const postAggregateLogs = await getContext().prisma.auditLog.findMany({
+      const postAggregateLogs = await context.prisma.auditLog.findMany({
         where: {
           aggregateType: 'Post',
           aggregateId: post.id,
@@ -162,7 +162,7 @@ describe('Aggregate Root Resolution Integration', () => {
         ['update', comment.id],
       ]);
 
-      const userAggregateLogs = await getContext().prisma.auditLog.findMany({
+      const userAggregateLogs = await context.prisma.auditLog.findMany({
         where: {
           aggregateType: 'User',
           aggregateId: user.id,
@@ -180,8 +180,8 @@ describe('Aggregate Root Resolution Integration', () => {
 
   describe('Aggregate deletion cascade', () => {
     it('should track Post deletion in User aggregate', async () => {
-      const user = await getContext().provider.runAsync(testActor, async () => {
-        return await getContext().prisma.user.create({
+      const user = await context.provider.runAsync(testActor, async () => {
+        return await context.prisma.user.create({
           data: {
             email: 'user@example.com',
             name: 'User',
@@ -190,8 +190,8 @@ describe('Aggregate Root Resolution Integration', () => {
         });
       });
 
-      const post = await getContext().provider.runAsync(testActor, async () => {
-        return await getContext().prisma.post.create({
+      const post = await context.provider.runAsync(testActor, async () => {
+        return await context.prisma.post.create({
           data: {
             title: 'To Delete',
             content: 'Content',
@@ -202,13 +202,13 @@ describe('Aggregate Root Resolution Integration', () => {
 
       const postId = post.id;
 
-      await getContext().provider.runAsync(testActor, async () => {
-        await getContext().prisma.post.delete({
+      await context.provider.runAsync(testActor, async () => {
+        await context.prisma.post.delete({
           where: { id: postId },
         });
       });
 
-      const userAggregateLogs = await getContext().prisma.auditLog.findMany({
+      const userAggregateLogs = await context.prisma.auditLog.findMany({
         where: {
           aggregateType: 'User',
           aggregateId: user.id,

@@ -43,16 +43,8 @@ import type { AuditErrorObserver } from '@kuruwic/prisma-audit';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  cleanDatabase,
-  createBasePrisma,
-  createTestContext,
-  disposeTestContext,
-  getSharedDatabaseUrl,
-  type TestContext,
-  testAggregateMapping,
-} from './helpers/setup.js';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { createBasePrisma, getSharedDatabaseUrl, setupTestContext, testAggregateMapping } from './helpers/setup.js';
 
 const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'composite-pk-actor' },
@@ -61,19 +53,7 @@ const testActor: AuditContext = {
 const compositeEntityId = (postId: string, userId: string): string => JSON.stringify([postId, userId]);
 
 describe('Composite Primary Key (PostLike)', () => {
-  let context: TestContext;
-
-  beforeAll(async () => {
-    context = await createTestContext();
-  });
-
-  afterAll(async () => {
-    await disposeTestContext(context);
-  });
-
-  beforeEach(async () => {
-    await cleanDatabase(context.prisma);
-  });
+  const context = setupTestContext();
 
   const createUserAndPost = async () => {
     const user = await context.provider.runAsync(testActor, async () => {

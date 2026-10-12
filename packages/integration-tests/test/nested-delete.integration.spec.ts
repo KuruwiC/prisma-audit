@@ -4,30 +4,11 @@ import type { AuditErrorObserver } from '@kuruwic/prisma-audit';
 import { createAuditClient, defineEntity, foreignKey, to } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  cleanDatabase,
-  createBasePrisma,
-  createTestContext,
-  disposeTestContext,
-  type TestContext,
-  testAggregateMapping,
-} from './helpers/setup.js';
+import { describe, expect, it, vi } from 'vitest';
+import { createBasePrisma, setupTestContext, testAggregateMapping } from './helpers/setup.js';
 
 describe('Nested Delete Operations', () => {
-  let context: TestContext;
-
-  beforeAll(async () => {
-    context = await createTestContext();
-  });
-
-  afterAll(async () => {
-    await disposeTestContext(context);
-  });
-
-  beforeEach(async () => {
-    await cleanDatabase(context.prisma);
-  });
+  const context = setupTestContext();
 
   const testActor: AuditContext = {
     actor: {

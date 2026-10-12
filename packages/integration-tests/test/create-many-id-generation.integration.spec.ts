@@ -13,23 +13,11 @@
  */
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { cleanDatabase, createTestContext, disposeTestContext, type TestContext } from './helpers/setup.js';
+import { describe, expect, it } from 'vitest';
+import { setupTestContext } from './helpers/setup.js';
 
 describe('createManyAndReturn relies on Prisma-generated IDs', () => {
-  let context: TestContext;
-
-  beforeAll(async () => {
-    context = await createTestContext();
-  });
-
-  afterAll(async () => {
-    await disposeTestContext(context);
-  });
-
-  beforeEach(async () => {
-    await cleanDatabase(context.prisma);
-  });
+  const context = setupTestContext();
 
   const testActor: AuditContext = {
     actor: { category: 'model', type: 'User', id: 'test-user-1', name: 'Test User' },
@@ -176,19 +164,7 @@ describe('createManyAndReturn relies on Prisma-generated IDs', () => {
 });
 
 describe('createMany audits the rows it reads back by primary key', () => {
-  let context: TestContext;
-
-  beforeAll(async () => {
-    context = await createTestContext();
-  });
-
-  afterAll(async () => {
-    await disposeTestContext(context);
-  });
-
-  beforeEach(async () => {
-    await cleanDatabase(context.prisma);
-  });
+  const context = setupTestContext();
 
   const testActor: AuditContext = {
     actor: { category: 'model', type: 'User', id: 'test-user-1', name: 'Test User' },

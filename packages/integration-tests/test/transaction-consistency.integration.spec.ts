@@ -11,29 +11,11 @@ import { defineEntity, lookup, to } from '@kuruwic/db-audit-core';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import {
-  cleanDatabase,
-  createTestContext,
-  disposeTestContext,
-  type TestContext,
-  testAggregateMapping,
-} from './helpers/setup.js';
+import { describe, expect, it } from 'vitest';
+import { setupTestContext, testAggregateMapping } from './helpers/setup.js';
 
 describe('Transaction Consistency Integration', () => {
-  let context: TestContext;
-
-  beforeAll(async () => {
-    context = await createTestContext();
-  });
-
-  afterAll(async () => {
-    await disposeTestContext(context);
-  });
-
-  beforeEach(async () => {
-    await cleanDatabase(context.prisma);
-  });
+  const context = setupTestContext();
 
   describe('IdResolver transaction consistency', () => {
     it('should resolve the aggregate root through the transactional client from a row written earlier in the transaction', async () => {

@@ -12,17 +12,11 @@ import { type AuditContext, createAsyncLocalStorageProvider } from '@kuruwic/db-
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import {
-  cleanDatabase,
-  createTestContext,
-  disposeTestContext,
-  type TestContext,
-  testAuditOptions,
-} from './helpers/setup.js';
+import { beforeAll, describe, expect, it } from 'vitest';
+import { setupTestContext, type TestContext, testAuditOptions } from './helpers/setup.js';
 
 describe('Batch operations record the before state whatever fetchBefore says', () => {
-  let context: TestContext;
+  const context = setupTestContext();
   let provider: ReturnType<typeof createAsyncLocalStorageProvider>;
   let prisma: TestContext['prisma'];
 
@@ -34,21 +28,12 @@ describe('Batch operations record the before state whatever fetchBefore says', (
     },
   };
 
-  beforeAll(async () => {
-    context = await createTestContext();
+  beforeAll(() => {
     provider = createAsyncLocalStorageProvider();
     prisma = createAuditClient(context.basePrisma, {
       ...testAuditOptions(provider, { Prisma, schema: auditSchema }),
       fetchBefore: { update: false, delete: false },
     });
-  });
-
-  afterAll(async () => {
-    await disposeTestContext(context);
-  });
-
-  beforeEach(async () => {
-    await cleanDatabase(context.basePrisma);
   });
 
   const createUserWithPosts = async (emailPrefix: string, postTitles: string[]) => {

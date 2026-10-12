@@ -4,15 +4,8 @@ import type { AuditErrorContext, ErrorHandlingConfig } from '@kuruwic/prisma-aud
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  cleanDatabase,
-  createBasePrisma,
-  createTestContext,
-  disposeTestContext,
-  type TestContext,
-  testAggregateMapping,
-} from './helpers/setup.js';
+import { describe, expect, it, vi } from 'vitest';
+import { createBasePrisma, setupTestContext, testAggregateMapping } from './helpers/setup.js';
 
 /** Message thrown by the failing `hooks.writer` used to simulate an audit-log write failure. */
 const AUDIT_WRITE_FAILURE_MESSAGE = 'simulated audit log write failure';
@@ -70,19 +63,7 @@ const disconnectScenario = async (scenario: {
 };
 
 describe('Error Handling Integration', () => {
-  let context: TestContext;
-
-  beforeAll(async () => {
-    context = await createTestContext();
-  });
-
-  afterAll(async () => {
-    await disposeTestContext(context);
-  });
-
-  beforeEach(async () => {
-    await cleanDatabase(context.prisma);
-  });
+  const context = setupTestContext();
 
   const testActor: AuditContext = {
     actor: {

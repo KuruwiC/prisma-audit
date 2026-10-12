@@ -5,7 +5,7 @@ import { createAuditClient, defineEntity, foreignKey, to } from '@kuruwic/prisma
 import { type AuditModelName, auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import type { Mock } from 'vitest';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createCommentAggregateEnricher,
   createCommentAggregateMapping,
@@ -18,14 +18,7 @@ import {
   createUserEntityAggregateMapping,
   createUserEntityEnricher,
 } from './helpers/enrichment-test-helpers.js';
-import {
-  cleanDatabase,
-  createBasePrisma,
-  createTestContext,
-  disposeTestContext,
-  type TestContext,
-  testAggregateMapping,
-} from './helpers/setup.js';
+import { createBasePrisma, setupTestContext, testAggregateMapping } from './helpers/setup.js';
 
 type TestAuditActor = AuditActor & {
   role?: string; // Custom property for enrichment testing
@@ -44,7 +37,7 @@ type ClientOptions = Omit<
 const byJson = (a: unknown, b: unknown) => JSON.stringify(a).localeCompare(JSON.stringify(b));
 
 describe('Context Enrichment Integration', () => {
-  let context: TestContext;
+  const context = setupTestContext();
   const openedBaseClients: PrismaClient[] = [];
 
   /**
@@ -65,18 +58,6 @@ describe('Context Enrichment Integration', () => {
     });
     return { basePrisma, prisma, provider };
   };
-
-  beforeAll(async () => {
-    context = await createTestContext();
-  });
-
-  afterAll(async () => {
-    await disposeTestContext(context);
-  });
-
-  beforeEach(async () => {
-    await cleanDatabase(context.prisma);
-  });
 
   afterEach(async () => {
     await Promise.all(openedBaseClients.splice(0).map((client) => client.$disconnect()));

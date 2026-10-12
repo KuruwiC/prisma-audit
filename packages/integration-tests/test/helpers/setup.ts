@@ -5,7 +5,7 @@ import { createAuditClient, defineEntity, foreignKey, to } from '@kuruwic/prisma
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { PrismaPg } from '@prisma/adapter-pg';
-import { afterEach, beforeAll, beforeEach, inject } from 'vitest';
+import { afterAll, beforeAll, beforeEach, inject } from 'vitest';
 
 export const testAggregateMapping: AggregateMapping = {
   User: defineEntity({
@@ -109,20 +109,7 @@ export interface TestContext {
   databaseUrl: string;
 }
 
-/**
- * Builds audit + base Prisma clients against the database URL provided by the
- * shared global-setup container (see test/global-setup.ts). Does not start any
- * infrastructure — the container and schema push happen exactly once for the run.
- */
-export const createTestContext = async (): Promise<TestContext> => {
-  const databaseUrl = inject('databaseUrl');
-  return createTestClients(databaseUrl);
-};
-
-/**
- * Reads the shared database URL without creating Prisma clients.
- * Clients should be instantiated per-test in beforeEach to prevent forking issues.
- */
+/** Reads the URL of the database the shared global-setup container serves (see test/global-setup.ts) */
 export const getSharedDatabaseUrl = async (): Promise<string> => {
   return inject('databaseUrl');
 };
@@ -272,40 +259,26 @@ export const deleteAllRows = async (prisma: ReturnType<typeof createAuditClient>
 };
 
 /**
- * Configures Vitest lifecycle hooks for integration tests with isolated Prisma clients per test.
- * Prevents Prisma client forking issues by creating fresh instances in beforeEach.
- *
- * @example
- * ```typescript
- * const { getContext } = setupTestLifecycle();
- *
- * it('should create user', async () => {
- *   const { prisma } = getContext();
- *   await prisma.user.create({ data: { email: 'test@example.com' } });
- * });
- * ```
+ * Registers the lifecycle most specs share and returns the context it fills in: audit and base
+ * clients built once for the file (beforeAll) and disconnected after it (afterAll), and a database
+ * emptied before each test (beforeEach). Call it at the top of a describe; hooks registered after
+ * the call can read the context.
  */
-export const setupTestLifecycle = () => {
-  let sharedDatabaseUrl: string;
-  let testContext: TestContext;
+export const setupTestContext = (): TestContext => {
+  // Filled in by beforeAll, before any test or later-registered hook reads it
+  const context = {} as TestContext;
 
-  beforeAll(async () => {
-    sharedDatabaseUrl = await getSharedDatabaseUrl();
+  beforeAll(() => {
+    Object.assign(context, createTestClients(inject('databaseUrl')));
+  });
+
+  afterAll(async () => {
+    await disposeTestContext(context);
   });
 
   beforeEach(async () => {
-    testContext = createTestClients(sharedDatabaseUrl);
-
-    await testContext.prisma.$connect();
-    await testContext.basePrisma.$connect();
-    await cleanDatabase(testContext.prisma);
+    await cleanDatabase(context.basePrisma);
   });
 
-  afterEach(async () => {
-    await disposeTestContext(testContext);
-  });
-
-  return {
-    getContext: () => testContext,
-  };
+  return context;
 };

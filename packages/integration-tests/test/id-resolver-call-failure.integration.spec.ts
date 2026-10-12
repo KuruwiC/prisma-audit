@@ -13,16 +13,8 @@ import type { AuditErrorObserver } from '@kuruwic/prisma-audit';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  aggregatesOf,
-  cleanDatabase,
-  createBasePrisma,
-  createTestContext,
-  disposeTestContext,
-  type TestContext,
-  testAggregateMapping,
-} from './helpers/setup.js';
+import { describe, expect, it, vi } from 'vitest';
+import { aggregatesOf, createBasePrisma, setupTestContext, testAggregateMapping } from './helpers/setup.js';
 
 const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'id-resolver-call-actor' },
@@ -31,19 +23,7 @@ const testActor: AuditContext = {
 const BROKEN_TITLE = 'broken';
 
 describe('id-resolver-call failures', () => {
-  let context: TestContext;
-
-  beforeAll(async () => {
-    context = await createTestContext();
-  });
-
-  afterAll(async () => {
-    await disposeTestContext(context);
-  });
-
-  beforeEach(async () => {
-    await cleanDatabase(context.prisma);
-  });
+  const context = setupTestContext();
 
   const createClient = (post: ReturnType<typeof defineEntity>, observer: AuditErrorObserver) => {
     const basePrisma = createBasePrisma(context.databaseUrl);

@@ -17,15 +17,8 @@ import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { createAuditClient, flushAllPendingWrites } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  cleanDatabase,
-  createBasePrisma,
-  createTestContext,
-  disposeTestContext,
-  type TestContext,
-  testAggregateMapping,
-} from './helpers/setup.js';
+import { describe, expect, it, vi } from 'vitest';
+import { cleanDatabase, createBasePrisma, setupTestContext, testAggregateMapping } from './helpers/setup.js';
 
 const actor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'batch-transaction-actor', name: 'Batch Actor' },
@@ -80,19 +73,7 @@ interface AuditedClientOptions {
 type BatchOptions = { readonly isolationLevel?: Prisma.TransactionIsolationLevel };
 
 describe('Batch $transaction under the audit extension', () => {
-  let context: TestContext;
-
-  beforeAll(async () => {
-    context = await createTestContext();
-  });
-
-  afterAll(async () => {
-    await disposeTestContext(context);
-  });
-
-  beforeEach(async () => {
-    await cleanDatabase(context.basePrisma);
-  });
+  const context = setupTestContext();
 
   const createAudited = (options: AuditedClientOptions) => {
     const raw = createBasePrisma(
