@@ -8,18 +8,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { PrismaHandle } from '../../src/internal-types.js';
 import { createRecipeClient, type RecipeConfig, takeBatchRecipes } from '../../src/runtime/operation-recipe.js';
 import { currentScope, decidedWritePolicyFor, withScope } from '../../src/runtime/scope.js';
-
-/** A lazy operation, as Prisma's operations are: it runs, once, when it is awaited */
-const lazyOperation = (run: () => unknown) => {
-  let started: Promise<unknown> | undefined;
-  return {
-    [Symbol.toStringTag]: 'PrismaPromise',
-    then: (onFulfilled: (value: unknown) => unknown, onRejected?: (reason: unknown) => unknown) => {
-      started ??= Promise.resolve().then(run);
-      return started.then(onFulfilled, onRejected);
-    },
-  };
-};
+import { lazyOperation } from '../support/lazy-operation.js';
 
 interface Ran {
   readonly client: string;
