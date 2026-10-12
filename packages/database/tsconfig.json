@@ -1,12 +1,10 @@
 {
   "extends": "@kuruwic/prisma-audit-typescript-config/base.json",
   "compilerOptions": {
-    "outDir": "./dist",
-    "rootDir": ".",
-    "declaration": true,
-    "declarationMap": true,
-    "emitDeclarationOnly": true
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false
   },
-  "include": ["src/**/*", "generated/client/**/*"],
+  "include": ["src/**/*", "generated/client/**/*", "prisma.config.ts"],
   "exclude": ["node_modules", "dist"]
 }

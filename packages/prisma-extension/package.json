@@ -65,7 +65,7 @@
   "devDependencies": {
     "@biomejs/biome": "^2.3.5",
     "@kuruwic/prisma-audit-typescript-config": "workspace:*",
-    "@prisma/client": "^6.19.0",
+    "@prisma/client": "7.10.0",
     "@types/debug": "^4.1.12",
     "@types/node": "^24.10.0",
     "tsup": "^8.5.0",

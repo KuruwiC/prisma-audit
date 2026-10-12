@@ -15,7 +15,7 @@ const Dirname = dirname(Filename);
 type SqliteAdapterFactory = new (config: {
   url: string;
   timeout?: number;
-}) => NonNullable<ConstructorParameters<typeof PrismaClient>[0]>['adapter'];
+}) => NonNullable<NonNullable<ConstructorParameters<typeof PrismaClient>[0]>['adapter']>;
 
 // The adapter class is exported as PrismaBetterSQLite3 up to Prisma 6 and as PrismaBetterSqlite3 from Prisma 7.
 const sqliteExports: {

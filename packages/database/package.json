@@ -6,10 +6,10 @@
   "description": "Shared Prisma database schema and client for prisma-audit monorepo",
   "license": "MIT",
   "module": "./dist/index.js",
-  "types": "./dist/src/index.d.ts",
+  "types": "./src/index.ts",
   "exports": {
     ".": {
-      "types": "./dist/src/index.d.ts",
+      "types": "./src/index.ts",
       "import": "./dist/index.js"
     },
     "./generated/client": {
@@ -29,7 +29,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsup && tsc",
+    "build": "tsup",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
     "db:generate": "prisma generate",
@@ -39,15 +39,16 @@
     "db:studio": "prisma studio"
   },
   "dependencies": {
-    "@prisma/adapter-pg": "6.19.0",
-    "@prisma/client": "^6.19.0"
+    "@prisma/adapter-pg": "7.10.0",
+    "@prisma/client": "7.10.0"
   },
   "devDependencies": {
     "@kuruwic/prisma-audit": "workspace:*",
     "@kuruwic/prisma-audit-generator": "workspace:*",
     "@kuruwic/prisma-audit-typescript-config": "workspace:*",
     "@types/node": "^24.10.1",
-    "prisma": "^6.19.0",
+    "dotenv": "^16.6.1",
+    "prisma": "7.10.0",
     "tsup": "^8.5.0",
     "typescript": "^5.9.3"
   }
