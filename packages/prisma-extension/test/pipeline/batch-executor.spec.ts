@@ -5,7 +5,7 @@
  * return-value contract.
  */
 
-import type { AuditContext, FailureSink } from '@kuruwic/db-audit-core';
+import type { FailureSink } from '@kuruwic/db-audit-core';
 import { Decimal } from '@prisma/client/runtime/client';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PrismaBaseClient, PrismaNamespace } from '../../src/internal-types.js';
@@ -15,6 +15,8 @@ import type { AuditedOperation } from '../../src/pipeline/executor.js';
 import type { RecordProducer } from '../../src/pipeline/produce-records.js';
 import { NO_AUDITED_OMITTED_FIELDS, withRowKeyFields } from '../../src/utils/audited-omitted-fields.js';
 import { column, model, schemaMetadataOf } from '../support/audit-schema.js';
+import { stubFailureSink } from '../support/failure-sink.js';
+import { clientWith, operationOn, scopeOn } from './client-operation.js';
 import { runWithRecords } from './run-with-records.js';
 
 type Row = Record<string, unknown>;
@@ -54,55 +56,11 @@ const schemaMetadata = schemaMetadataOf(
   ),
   model('Rate', [column('amount', { type: 'Decimal', isId: true }), column('label')]),
 );
-const auditContext: AuditContext = { actor: { category: 'model', type: 'User', id: 'user-1' } };
-
-const clientWith = (delegates: Record<string, Record<string, unknown>>): PrismaBaseClient => ({
-  $transaction: async () => {
-    throw new Error('no transaction is opened by the executor');
-  },
-  $extends: () => {
-    throw new Error('not used');
-  },
-  ...delegates,
-});
-
-const scopeOn = (client: PrismaBaseClient): ExecutionScope => ({
-  auditContext,
-  handle: client,
-  baseClient: client,
-  atomic: true,
-});
 
 /** The scope of an operation inside an interactive transaction whose client is `client` */
 const transactionScopeOn = (client: PrismaBaseClient): ExecutionScope => ({
   ...scopeOn(client),
   transaction: { deferredWrites: [] },
-});
-
-/** The continuation the pipeline would build for `client`: the action of its `user` delegate */
-const mutationOn = (client: PrismaBaseClient, action: string): ((args: Row) => Promise<unknown>) => {
-  const mutation = (client.user as Record<string, unknown> | undefined)?.[action];
-  if (typeof mutation !== 'function') {
-    throw new Error(`Model "User" or action "${action}" not found`);
-  }
-  return mutation as (args: Row) => Promise<unknown>;
-};
-
-const operationOn = (client: PrismaBaseClient, action: AuditedOperation['action'], args: Row): AuditedOperation => ({
-  model: 'User',
-  action,
-  args,
-  widened: new Map(),
-  execute: vi.fn(async (runArgs: Row, runAction: AuditedOperation['action'] = action) =>
-    mutationOn(client, runAction)(runArgs),
-  ),
-});
-
-const createFailureSink = (): FailureSink => ({
-  notify: vi.fn(async () => {}),
-  reportResolverFailures: vi.fn(async () => {}),
-  reportDroppedBuild: vi.fn(async () => {}),
-  reportWriteFailure: vi.fn(async () => {}),
 });
 
 /** An executor on a client that takes a query omit (Prisma 6.2 and later) when `queryOmitSupported` */
@@ -176,7 +134,7 @@ describe('createBatchExecutor', () => {
   let executor: ReturnType<typeof createExecutor>;
 
   beforeEach(() => {
-    failureSink = createFailureSink();
+    failureSink = stubFailureSink();
     executor = createExecutor(failureSink);
   });
 

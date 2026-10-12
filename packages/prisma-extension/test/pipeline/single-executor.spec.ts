@@ -4,15 +4,15 @@
  * collects, and the error each kind of failure surfaces as.
  */
 
-import type { AuditContext, FailureSink } from '@kuruwic/db-audit-core';
+import type { FailureSink } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
-import type { PrismaBaseClient, PrismaNamespace } from '../../src/internal-types.js';
-import type { ExecutionScope } from '../../src/pipeline/execution-scope.js';
-import type { AuditedOperation } from '../../src/pipeline/executor.js';
+import type { PrismaNamespace } from '../../src/internal-types.js';
 import type { RecordProducer } from '../../src/pipeline/produce-records.js';
 import { createSingleExecutor } from '../../src/pipeline/single-executor.js';
 import { NO_AUDITED_OMITTED_FIELDS, withRowKeyFields } from '../../src/utils/audited-omitted-fields.js';
 import { column, model, relation, schemaMetadataOf } from '../support/audit-schema.js';
+import { stubFailureSink } from '../support/failure-sink.js';
+import { clientWith, operationOn, scopeOn } from './client-operation.js';
 import { runWithRecords } from './run-with-records.js';
 
 type Row = Record<string, unknown>;
@@ -39,51 +39,7 @@ const schemaMetadata = schemaMetadataOf(
     relation('user', 'User', 'UserProfile', { foreignKeyFields: ['userId'], referencedFields: ['id'] }),
   ]),
 );
-const auditContext: AuditContext = { actor: { category: 'model', type: 'User', id: 'user-1' } };
 const user: Row = { id: 'u1', name: 'Ann' };
-
-const clientWith = (delegates: Record<string, Record<string, unknown>>): PrismaBaseClient => ({
-  $transaction: async () => {
-    throw new Error('no transaction is opened by the executor');
-  },
-  $extends: () => {
-    throw new Error('not used');
-  },
-  ...delegates,
-});
-
-const scopeOn = (client: PrismaBaseClient): ExecutionScope => ({
-  auditContext,
-  handle: client,
-  baseClient: client,
-  atomic: true,
-});
-
-const createFailureSink = (): FailureSink => ({
-  notify: vi.fn(async () => {}),
-  reportResolverFailures: vi.fn(async () => {}),
-  reportDroppedBuild: vi.fn(async () => {}),
-  reportWriteFailure: vi.fn(async () => {}),
-});
-
-/** The continuation the pipeline would build for `client`: the action of its `user` delegate */
-const mutationOn = (client: PrismaBaseClient, action: string): ((args: Row) => Promise<unknown>) => {
-  const mutation = (client.user as Record<string, unknown> | undefined)?.[action];
-  if (typeof mutation !== 'function') {
-    throw new Error(`Model "User" or action "${action}" not found`);
-  }
-  return mutation as (args: Row) => Promise<unknown>;
-};
-
-const operationOn = (client: PrismaBaseClient, action: AuditedOperation['action'], args: Row): AuditedOperation => ({
-  model: 'User',
-  action,
-  args,
-  widened: new Map(),
-  execute: vi.fn(async (runArgs: Row, runAction: AuditedOperation['action'] = action) =>
-    mutationOn(client, runAction)(runArgs),
-  ),
-});
 
 const updateArgs = { where: { id: 'u1' }, data: { name: 'Anne' } };
 
@@ -96,7 +52,7 @@ interface ExecutorOptions {
 
 const executorWith = (options: ExecutorOptions = {}) => {
   const shouldFetchBefore = vi.fn(() => options.fetchBefore ?? true);
-  const failureSink = options.failureSink ?? createFailureSink();
+  const failureSink = options.failureSink ?? stubFailureSink();
   const executor = createSingleExecutor({
     Prisma,
     schemaMetadata,

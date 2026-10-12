@@ -5,7 +5,7 @@
  * failure sink the way its origin requires.
  */
 
-import type { AuditContext, AuditRecord, FailureSink } from '@kuruwic/db-audit-core';
+import type { AuditContext, AuditRecord } from '@kuruwic/db-audit-core';
 import { createActorId, createAggregateId, createEntityId, createFailureSink } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
 import type { PrismaBaseClient, PrismaHandle } from '../../src/internal-types.js';
@@ -20,6 +20,7 @@ import { flushAllPendingWrites, getPendingWriteCount } from '../../src/runtime/p
 import { type ActivePrismaBatch, isProcessingAuditLog, withScope } from '../../src/runtime/scope.js';
 import type { AuditLogData } from '../../src/types.js';
 import { isCallerMutationError } from '../../src/utils/caller-mutation-error.js';
+import { stubFailureSink } from '../support/failure-sink.js';
 
 const auditContext: AuditContext = { actor: { category: 'model', type: 'User', id: 'user-1' } };
 
@@ -90,12 +91,7 @@ const stubExecutor = (run: OperationExecutor['run']): OperationExecutor => ({ ru
 const succeedingExecutor = () => stubExecutor(async () => outcome);
 
 const createDeps = (overrides: Partial<AuditPipelineDependencies> = {}) => {
-  const failureSink: FailureSink = {
-    notify: vi.fn(async () => {}),
-    reportResolverFailures: vi.fn(async () => {}),
-    reportDroppedBuild: vi.fn(async () => {}),
-    reportWriteFailure: vi.fn(async () => {}),
-  };
+  const failureSink = stubFailureSink();
   const deps: AuditPipelineDependencies = {
     singleExecutor: succeedingExecutor(),
     batchExecutor: succeedingExecutor(),
