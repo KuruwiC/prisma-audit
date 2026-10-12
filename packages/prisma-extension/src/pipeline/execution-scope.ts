@@ -2,8 +2,9 @@
  * Execution scope
  *
  * What one audited operation runs in: its audit context, the client the operation and every
- * audit read and write share, and the interactive transaction it is part of, if any. The scope is
- * also the transaction runtime core's `dispatch` writes the audit records with.
+ * audit read and write share, and the interactive transaction or the batch `$transaction([...])`
+ * Prisma runs that it is part of, if any. The scope is also the transaction runtime core's
+ * `dispatch` writes the audit records with.
  */
 
 import type { AuditContext, TransactionRuntime } from '@kuruwic/db-audit-core';
@@ -16,6 +17,14 @@ export interface TransactionScope {
   readonly deferredWrites: Array<() => Promise<void>>;
 }
 
+export interface PrismaBatchScope {
+  /**
+   * Queues a write to run on the base client once the batch has committed, awaited by the batch's
+   * caller when the write policy awaits the operation's audit; the batch discards it if it rejects
+   */
+  readonly afterCommit: (write: () => Promise<void>) => void;
+}
+
 export interface ExecutionScope {
   readonly auditContext: AuditContext;
   /**
@@ -25,9 +34,12 @@ export interface ExecutionScope {
   readonly handle: PrismaHandle;
   readonly baseClient: PrismaBaseClient;
   readonly transaction?: TransactionScope;
-  /** The operation is part of a batch `$transaction([...])` Prisma runs, which no audit query can join */
-  readonly inPrismaBatch: boolean;
-  /** The audit rows are written in the same transaction as the operation */
+  /** The batch `$transaction([...])` Prisma runs that the operation is part of, which no audit query can join */
+  readonly prismaBatch?: PrismaBatchScope;
+  /**
+   * The audit rows are written in the same transaction as the operation: never for an operation of
+   * a batch Prisma runs outside an interactive transaction, whose rows are written after the batch
+   */
   readonly atomic: boolean;
 }
 
@@ -37,28 +49,38 @@ export interface ExecutionScopeInput {
   readonly atomic: boolean;
 }
 
-/** The scope of an operation that runs now: inside the interactive transaction the runtime scope holds, if any */
+/**
+ * The scope of an operation that runs now: inside the interactive transaction and the Prisma batch
+ * the runtime scope holds, if any. An operation of a Prisma batch run inside an interactive
+ * transaction's callback writes its audit by that transaction.
+ */
 export const executionScopeOf = (input: ExecutionScopeInput): ExecutionScope => {
   const { auditContext, baseClient, atomic } = input;
   const runtime = currentScope();
   const transaction = runtime?.transaction;
+  const batch = runtime?.prismaBatch;
   return {
     auditContext,
     handle: transaction?.client ?? baseClient,
     baseClient,
     transaction: transaction ? { deferredWrites: transaction.deferredWrites } : undefined,
-    inPrismaBatch: runtime?.isInPrismaBatch === true,
-    atomic,
+    prismaBatch: batch && {
+      afterCommit: (write) => {
+        (atomic ? batch.awaitedWrites : batch.deferredWrites).push(write);
+      },
+    },
+    atomic: atomic && (transaction !== undefined || batch === undefined),
   };
 };
 
 /**
  * The scope as core's `dispatch` reads it. A batch `$transaction([...])` Prisma runs itself is not
- * a transaction of the scope: each of its operations' writes has committed by the time its audit
- * is built.
+ * a transaction of the scope: Prisma hands an operation its result once the batch has settled, so
+ * its audit is built after the batch has run, with no transaction to write in. The write `dispatch`
+ * detaches then goes to the batch's `afterCommit`.
  */
 export const transactionRuntimeOf = (scope: ExecutionScope): TransactionRuntime<PrismaHandle> => {
-  const { transaction } = scope;
+  const { transaction, prismaBatch } = scope;
   return {
     baseHandle: scope.baseClient,
     transaction: transaction && {
@@ -67,6 +89,6 @@ export const transactionRuntimeOf = (scope: ExecutionScope): TransactionRuntime<
         transaction.deferredWrites.push(work);
       },
     },
-    detach: trackPendingWrite,
+    detach: prismaBatch ? prismaBatch.afterCommit : trackPendingWrite,
   };
 };

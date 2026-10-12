@@ -15,10 +15,18 @@ import {
   type AuditActor,
   type AuditContext,
   type AuditContextProvider,
+  type AuditRecord,
+  createActorId,
+  createAggregateId,
   createAsyncLocalStorageProvider,
+  createEntityId,
+  createFailureSink,
+  type FailureSink,
 } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
-import type { PrismaHandle } from '../../src/internal-types.js';
+import type { PrismaBaseClient, PrismaHandle } from '../../src/internal-types.js';
+import type { OperationExecutor } from '../../src/pipeline/executor.js';
+import { type AuditPipelineDependencies, runAuditedOperation } from '../../src/pipeline/run-audited-operation.js';
 import { flushAllPendingWrites } from '../../src/runtime/pending-writes.js';
 import { currentScope } from '../../src/runtime/scope.js';
 import {
@@ -26,6 +34,7 @@ import {
   createTransactionProxyHandler,
   createWrappedTransactionCallback,
 } from '../../src/runtime/transaction-proxy.js';
+import type { AuditLogData } from '../../src/types.js';
 
 const actor1: AuditActor = { category: 'model', type: 'User', id: 'user-1' };
 const actor2: AuditActor = { category: 'model', type: 'User', id: 'user-2' };
@@ -351,9 +360,9 @@ describe('createTransactionProxy', () => {
   it('marks the array form of $transaction as a Prisma batch while Prisma runs it, and nothing else', async () => {
     const provider = createAsyncLocalStorageProvider();
     const target = new FakeClient();
-    const seen: Array<boolean | undefined> = [];
+    const seen: boolean[] = [];
     vi.spyOn(target, '$transaction').mockImplementation(async () => {
-      seen.push(currentScope()?.isInPrismaBatch);
+      seen.push(currentScope()?.prismaBatch !== undefined);
       return [];
     });
     const proxy = createTransactionProxy(target, { provider });
@@ -361,7 +370,7 @@ describe('createTransactionProxy', () => {
     await provider.runAsync(baseContext, () => proxy.$transaction([lazyOperation(() => 'a')]));
     await provider.runAsync(baseContext, () => proxy.$transaction(async () => 'interactive'));
 
-    expect(seen).toEqual([true, undefined]);
+    expect(seen).toEqual([true, false]);
     expect(currentScope()).toBeUndefined();
   });
 
@@ -384,10 +393,10 @@ describe('createTransactionProxy', () => {
         },
       });
       const tx = clientNamed('transaction');
-      const inPrismaBatch: Array<boolean | undefined> = [];
+      const inPrismaBatch: boolean[] = [];
       const $transaction = vi.fn(async (...args: unknown[]): Promise<unknown> => {
         const [first] = args;
-        inPrismaBatch.push(currentScope()?.isInPrismaBatch);
+        inPrismaBatch.push(currentScope()?.prismaBatch !== undefined);
         return typeof first === 'function' ? first(tx) : Promise.all(first as unknown[]);
       });
       const target = { ...clientNamed('client'), $transaction, $extends: () => undefined };
@@ -456,7 +465,7 @@ describe('createTransactionProxy', () => {
       expect($transaction).toHaveBeenCalledTimes(1);
       expect(typeof $transaction.mock.calls[0]?.[0]).toBe('function');
       expect($transaction.mock.calls[0]?.[1]).toEqual({ isolationLevel: 'Serializable' });
-      expect(inPrismaBatch).toEqual([undefined]);
+      expect(inPrismaBatch).toEqual([false]);
     });
 
     it("runs a batch of the client's calls none of which awaits an audit as Prisma's own batch", async () => {
@@ -617,5 +626,286 @@ describe('createTransactionProxy', () => {
 
     expect(derived.extensions).toEqual([extension]);
     expect(clientInsideCallback).toBe(txClient);
+  });
+});
+
+describe("createTransactionProxy (audit of Prisma's own batch)", () => {
+  const recordOf = (id: string): AuditLogData => ({
+    actorCategory: 'model',
+    actorType: 'User',
+    actorId: createActorId('user-1'),
+    actorContext: null,
+    entityCategory: 'model',
+    entityType: 'User',
+    entityId: createEntityId(id),
+    entityContext: null,
+    aggregateCategory: 'model',
+    aggregateType: 'User',
+    aggregateId: createAggregateId(id),
+    aggregateContext: null,
+    action: 'create',
+    before: null,
+    after: { id },
+    changes: null,
+    beforeUnavailable: false,
+    requestContext: null,
+    createdAt: new Date('2025-01-01T00:00:00Z'),
+  });
+
+  const creatingExecutor: OperationExecutor = {
+    run: async (operation) => {
+      const result = await operation.execute(operation.args);
+      return { result, buildRecords: async () => [recordOf(String(operation.args.id))] };
+    },
+  };
+
+  const baseClient: PrismaBaseClient = {
+    $transaction: async () => {
+      throw new Error('the audit of a batch operation opens no transaction');
+    },
+    $extends: () => {
+      throw new Error('not used');
+    },
+  };
+
+  const macrotask = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
+  /**
+   * Pipeline dependencies whose audit write logs `started <id>`, then `written <id>` a macrotask
+   * later, or fails with `writeError`
+   */
+  const createDeps = (
+    events: string[],
+    failureSink: FailureSink = {
+      notify: vi.fn(async () => {}),
+      reportResolverFailures: vi.fn(async () => {}),
+      reportDroppedBuild: vi.fn(async () => {}),
+      reportWriteFailure: vi.fn(async () => {}),
+    },
+    writeError?: Error,
+  ): AuditPipelineDependencies => ({
+    singleExecutor: creatingExecutor,
+    batchExecutor: creatingExecutor,
+    produceRecords: vi.fn(async () => []),
+    dispatchConfig: {
+      writeExecutor: {
+        write: vi.fn(async (_handle: PrismaHandle, records: AuditRecord[]) => {
+          events.push(...records.map((started) => `started ${started.entityId}`));
+          await macrotask();
+          if (writeError) throw writeError;
+          events.push(...records.map((written) => `written ${written.entityId}`));
+        }),
+      },
+      failureSink,
+    },
+    failureSink,
+  });
+
+  /**
+   * An operation of a batch as the audit extension's hook receives it: Prisma settles its query
+   * with `outcome`, and the hook runs the audited operation, awaiting its audit when `atomic`.
+   * With `issues`, an extension applied after the audit issues an audited create of that id of its
+   * own while the operation continues through `query`: a request of its own, outside the batch.
+   */
+  interface BatchOperation {
+    readonly id: string;
+    readonly outcome: 'resolved' | 'rejected';
+    readonly issues?: string;
+  }
+
+  const hookOf =
+    (deps: AuditPipelineDependencies, atomic: boolean) =>
+    (operation: BatchOperation): Promise<unknown> =>
+      runAuditedOperation(
+        {
+          operation: {
+            model: 'User',
+            action: 'create',
+            args: { id: operation.id },
+            query: async (args) => {
+              if (operation.issues) {
+                await hookOf(deps, atomic)({ id: operation.issues, outcome: 'resolved' });
+              }
+              if (operation.outcome === 'rejected') throw new Error(`Unique constraint failed: ${operation.id}`);
+              return args;
+            },
+            widened: new Map(),
+          },
+          auditContext: baseContext,
+          baseClient,
+          atomic,
+        },
+        deps,
+      );
+
+  /** When the batch rejects: as Prisma 7 does, once the hook of the failed operation has rejected; or once every hook has settled */
+  type Rejection = 'once a hook has rejected' | 'once every hook has settled';
+
+  /**
+   * A client whose batch `$transaction([...])` runs as Prisma's does once the database has run the
+   * batch to its end: Prisma hands each operation's hook the outcome of its query, the batch
+   * resolving with the hooks' results once every hook has resolved, logging `committed` first, or
+   * rejecting. Prisma 7 resolves an operation the database ran even when a later one fails and the
+   * batch rolls back.
+   */
+  const batchClient = (
+    events: string[],
+    hook: (operation: BatchOperation) => Promise<unknown>,
+    rejection: Rejection,
+  ) => {
+    const settledHooks: Array<Promise<unknown>> = [];
+    const $transaction = async (operations: readonly BatchOperation[]): Promise<unknown> => {
+      const hooks = operations.map(hook);
+      const settled = Promise.allSettled(hooks);
+      settledHooks.push(settled);
+      if (rejection === 'once every hook has settled') {
+        const failed = (await settled).find((each) => each.status === 'rejected');
+        if (failed) throw failed.reason;
+      }
+      const results = await Promise.all(hooks);
+      events.push('committed');
+      return results;
+    };
+    return { client: { $transaction }, everyHookSettled: () => Promise.all(settledHooks) };
+  };
+
+  const runBatch = async (
+    atomic: boolean,
+    operations: readonly BatchOperation[],
+    rejection: Rejection = 'once a hook has rejected',
+    events: string[] = [],
+    deps: AuditPipelineDependencies = createDeps(events),
+  ) => {
+    const provider = createAsyncLocalStorageProvider();
+    const { client, everyHookSettled } = batchClient(events, hookOf(deps, atomic), rejection);
+    const proxy = createTransactionProxy(client, { provider });
+    const batch = provider.runAsync(baseContext, () => proxy.$transaction(operations));
+    const outcome = await batch.then(
+      () => 'resolved' as const,
+      () => 'rejected' as const,
+    );
+    events.push(outcome);
+    await everyHookSettled();
+    await flushAllPendingWrites();
+    await macrotask();
+    return { events, outcome, write: vi.mocked(deps.dispatchConfig.writeExecutor.write) };
+  };
+
+  const writtenIds = (
+    write: ReturnType<typeof vi.mocked<AuditPipelineDependencies['dispatchConfig']['writeExecutor']['write']>>,
+  ) => write.mock.calls.flatMap(([, records]) => records.map((written) => String(written.entityId)));
+
+  describe.each([
+    { awaited: 'awaited', atomic: true },
+    { awaited: 'not awaited', atomic: false },
+  ])('with an audit $awaited', ({ atomic }) => {
+    it.each<Rejection>(['once a hook has rejected', 'once every hook has settled'])(
+      'writes no audit for an operation Prisma resolved in a batch that then rolled back, the batch rejecting %s',
+      async (rejection) => {
+        const { outcome, write } = await runBatch(
+          atomic,
+          [
+            { id: 'u1', outcome: 'resolved' },
+            { id: 'u2', outcome: 'rejected' },
+          ],
+          rejection,
+        );
+
+        expect(outcome).toBe('rejected');
+        expect(write).not.toHaveBeenCalled();
+      },
+    );
+
+    it('writes the audit of an operation an extension issues of its own while a batch operation continues, the batch then rolling back', async () => {
+      const { outcome, write } = await runBatch(atomic, [
+        { id: 'u1', outcome: 'resolved', issues: 'n1' },
+        { id: 'u2', outcome: 'rejected' },
+      ]);
+
+      expect(outcome).toBe('rejected');
+      expect(writtenIds(write)).toEqual(['n1']);
+    });
+
+    it('keeps the audit writes of two batches running at once apart', async () => {
+      const events: string[] = [];
+      const deps = createDeps(events);
+      const provider = createAsyncLocalStorageProvider();
+      const { client, everyHookSettled } = batchClient(events, hookOf(deps, atomic), 'once a hook has rejected');
+      const proxy = createTransactionProxy(client, { provider });
+
+      const [rolledBack, committed] = await provider.runAsync(baseContext, () =>
+        Promise.allSettled([
+          proxy.$transaction([
+            { id: 'u1', outcome: 'resolved' },
+            { id: 'u2', outcome: 'rejected' },
+          ]),
+          proxy.$transaction([
+            { id: 'u3', outcome: 'resolved' },
+            { id: 'u4', outcome: 'resolved' },
+          ]),
+        ]),
+      );
+      await everyHookSettled();
+      await flushAllPendingWrites();
+      await macrotask();
+
+      expect(rolledBack?.status).toBe('rejected');
+      expect(committed?.status).toBe('fulfilled');
+      expect(writtenIds(vi.mocked(deps.dispatchConfig.writeExecutor.write))).toEqual(['u3', 'u4']);
+    });
+
+    it('starts the audit writes of the operations only once the batch has committed', async () => {
+      const { events, outcome, write } = await runBatch(atomic, [
+        { id: 'u1', outcome: 'resolved' },
+        { id: 'u2', outcome: 'resolved' },
+      ]);
+
+      expect(outcome).toBe('resolved');
+      expect(write).toHaveBeenCalledTimes(2);
+      expect(events[0]).toBe('committed');
+    });
+  });
+
+  it("resolves the caller's batch once its awaited audit writes have finished", async () => {
+    const { events } = await runBatch(true, [
+      { id: 'u1', outcome: 'resolved' },
+      { id: 'u2', outcome: 'resolved' },
+    ]);
+
+    expect(events).toEqual(['committed', 'started u1', 'started u2', 'written u1', 'written u2', 'resolved']);
+  });
+
+  it("resolves the caller's committed batch when an awaited audit write fails under the 'throw' write-failure policy", async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const observer = vi.fn();
+    const writeError = new Error('audit table unavailable');
+    const events: string[] = [];
+    const deps = createDeps(events, createFailureSink({ writeFailurePolicy: 'throw', observer }), writeError);
+
+    try {
+      const { outcome, write } = await runBatch(
+        true,
+        [{ id: 'u1', outcome: 'resolved' }],
+        'once a hook has rejected',
+        events,
+        deps,
+      );
+
+      expect(outcome).toBe('resolved');
+      expect(write).toHaveBeenCalledTimes(1);
+      expect(observer).toHaveBeenCalledWith(expect.objectContaining({ phase: 'log-write', error: writeError }));
+      expect(events).toEqual(['committed', 'started u1', 'resolved']);
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it("resolves the caller's batch without waiting for audit writes it does not await, which are pending writes", async () => {
+    const { events } = await runBatch(false, [
+      { id: 'u1', outcome: 'resolved' },
+      { id: 'u2', outcome: 'resolved' },
+    ]);
+
+    expect(events).toEqual(['committed', 'started u1', 'started u2', 'resolved', 'written u1', 'written u2']);
   });
 });

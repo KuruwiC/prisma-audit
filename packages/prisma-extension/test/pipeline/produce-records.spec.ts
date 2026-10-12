@@ -23,7 +23,6 @@ const scopeOn = (handle: ExecutionScope['handle']): ExecutionScope => ({
   handle,
   baseClient,
   transaction: handle === baseClient ? undefined : { deferredWrites: [] },
-  inPrismaBatch: false,
   atomic: true,
 });
 

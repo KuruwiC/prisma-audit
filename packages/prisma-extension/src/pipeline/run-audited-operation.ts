@@ -38,7 +38,8 @@ export interface AuditedOperationInput {
   readonly baseClient: PrismaBaseClient;
   /**
    * The write policy's decision for the sampled-in operation: its audit rows are written before it
-   * returns, in its transaction inside one and once it has committed outside any
+   * returns, in its transaction inside one and once it has committed outside any; for an operation
+   * of a batch `$transaction([...])` Prisma runs, once the batch has committed, before the batch returns
    */
   readonly atomic: boolean;
 }
@@ -59,12 +60,16 @@ export interface AuditPipelineDependencies {
  * `runCallerMutation`, so a failure of the caller's own write reaches the caller raw. It runs
  * with the re-entrancy guard lowered, so a query an extension applied after this one issues of its
  * own while continuing the operation is audited; only the audit's own queries run with it raised.
- * The query is awaited inside that scope so Prisma's lazy operation starts there.
+ * Such a query is a request of its own, never part of a batch `$transaction([...])` Prisma runs, so
+ * the batch is left out of its scope and its audit does not wait for the batch. The query is
+ * awaited inside that scope so Prisma's lazy operation starts there.
  */
 const operationContinuation =
   (operation: InterceptedOperation): AuditedOperation['execute'] =>
   (args) =>
-    runCallerMutation(() => withScope({ isProcessingAuditLog: false }, async () => await operation.query(args)));
+    runCallerMutation(() =>
+      withScope({ isProcessingAuditLog: false, prismaBatch: undefined }, async () => await operation.query(args)),
+    );
 
 /**
  * The reads before the write and the write. The caller's own mutation error (see

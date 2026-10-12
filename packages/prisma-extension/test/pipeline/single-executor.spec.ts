@@ -56,7 +56,6 @@ const scopeOn = (client: PrismaBaseClient): ExecutionScope => ({
   auditContext,
   handle: client,
   baseClient: client,
-  inPrismaBatch: false,
   atomic: true,
 });
 

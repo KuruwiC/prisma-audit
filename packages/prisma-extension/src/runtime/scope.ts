@@ -2,10 +2,11 @@
  * Runtime scope
  *
  * The library-owned state of the async flow an audited operation runs in: the transaction it is
- * inside, with the client of that transaction and the writes queued until it commits, and the
- * re-entrancy guard raised while the audit's own queries run. The state lives on its own
- * async-local store, apart from the app-owned audit context, so re-attributing the actor mid-flow
- * cannot drop it. This module is the only reader and writer of that store.
+ * inside, with the client of that transaction and the writes queued until it commits, the batch
+ * `$transaction([...])` Prisma runs that it is part of, with the writes queued until that batch
+ * commits, and the re-entrancy guard raised while the audit's own queries run. The state lives on
+ * its own async-local store, apart from the app-owned audit context, so re-attributing the actor
+ * mid-flow cannot drop it. This module is the only reader and writer of that store.
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -21,13 +22,27 @@ export interface ActiveTransaction {
   readonly deferredWrites: Array<() => Promise<void>>;
 }
 
+/**
+ * A batch `$transaction([...])` Prisma runs itself. Its operations reach the hook as parts of one
+ * request that no audit query can join, and Prisma hands each its result once the database has run
+ * the whole batch, the result of an operation that ran included when the batch then rolls back
+ * (Prisma 7). Their audit writes therefore wait for the owner of the batch, which starts them on the
+ * base client once the batch has committed and discards them unrun when it rejects.
+ */
+export interface ActivePrismaBatch {
+  /** Writes the caller of the batch waits for once it has committed */
+  readonly awaitedWrites: Array<() => Promise<void>>;
+  /** Writes started once the batch has committed, as pending writes no caller awaits */
+  readonly deferredWrites: Array<() => Promise<void>>;
+}
+
 export interface RuntimeScope {
   readonly transaction?: ActiveTransaction;
   /**
-   * Raised while Prisma runs a batch `$transaction([...])` itself: its operations reach the hook as
-   * parts of one request that no audit query can join
+   * Present while Prisma runs a batch `$transaction([...])` itself, for the operations it runs as
+   * parts of the batch; absent again for a query issued while one of them continues
    */
-  readonly isInPrismaBatch?: boolean;
+  readonly prismaBatch?: ActivePrismaBatch | undefined;
   /**
    * The write policy decided at the client boundary for the operation this scope runs, set only
    * around that operation, so a nested operation's scope replaces it
@@ -94,4 +109,14 @@ export const drainAfterCommit = (deferredWrites: ReadonlyArray<() => Promise<voi
   for (const deferredWrite of deferredWrites) {
     trackPendingWrite(deferredWrite);
   }
+};
+
+/**
+ * Starts the writes queued on a committed Prisma batch on the base client, and resolves once its
+ * awaited writes have finished. A queued write reports its own failure and does not reject.
+ */
+export const drainBatchAfterCommit = async (batch: ActivePrismaBatch): Promise<void> => {
+  const awaited = batch.awaitedWrites.map((write) => write());
+  drainAfterCommit(batch.deferredWrites);
+  await Promise.all(awaited);
 };

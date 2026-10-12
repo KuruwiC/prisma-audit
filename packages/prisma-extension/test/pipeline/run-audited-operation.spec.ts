@@ -17,7 +17,7 @@ import {
   runAuditedOperation,
 } from '../../src/pipeline/run-audited-operation.js';
 import { flushAllPendingWrites, getPendingWriteCount } from '../../src/runtime/pending-writes.js';
-import { isProcessingAuditLog, withScope } from '../../src/runtime/scope.js';
+import { type ActivePrismaBatch, isProcessingAuditLog, withScope } from '../../src/runtime/scope.js';
 import type { AuditLogData } from '../../src/types.js';
 import { isCallerMutationError } from '../../src/utils/caller-mutation-error.js';
 
@@ -200,12 +200,56 @@ describe('runAuditedOperation', () => {
     ])('tells the executor whether the operation runs %s from the runtime scope', async (_name, inPrismaBatch) => {
       const baseClient = createBaseClient();
       const deps = createDeps();
+      const prismaBatch: ActivePrismaBatch = { awaitedWrites: [], deferredWrites: [] };
 
-      await withScope({ isInPrismaBatch: inPrismaBatch }, () =>
+      await withScope(inPrismaBatch ? { prismaBatch } : {}, () =>
         runAuditedOperation({ operation: interceptedOf(), auditContext, baseClient, atomic: true }, deps),
       );
 
-      expect(scopeSeenBy(deps.singleExecutor).inPrismaBatch).toBe(inPrismaBatch);
+      expect(scopeSeenBy(deps.singleExecutor).prismaBatch !== undefined).toBe(inPrismaBatch);
+    });
+
+    it.each([
+      { policy: 'atomic', atomic: true, queue: 'awaitedWrites' },
+      { policy: 'not atomic', atomic: false, queue: 'deferredWrites' },
+    ] as const)(
+      'queues the write of an operation of a batch Prisma runs on the batch when the policy is $policy, among its $queue',
+      async ({ atomic, queue }) => {
+        const baseClient = createBaseClient();
+        const deps = createDeps();
+        const prismaBatch: ActivePrismaBatch = { awaitedWrites: [], deferredWrites: [] };
+
+        await withScope({ prismaBatch }, () =>
+          runAuditedOperation({ operation: interceptedOf(), auditContext, baseClient, atomic }, deps),
+        );
+
+        const scope = scopeSeenBy(deps.singleExecutor);
+        expect(scope.handle).toBe(baseClient);
+        expect(scope.transaction).toBeUndefined();
+        expect(scope.atomic).toBe(false);
+        expect(getPendingWriteCount()).toBe(0);
+        expect(auditWriteOf(deps)).not.toHaveBeenCalled();
+        const queued = prismaBatch[queue];
+        expect(queued).toHaveLength(1);
+        expect(prismaBatch.awaitedWrites.length + prismaBatch.deferredWrites.length).toBe(1);
+        await queued[0]?.();
+        expect(auditWriteOf(deps)).toHaveBeenCalledWith(baseClient, [record]);
+      },
+    );
+
+    it('writes the audit of an operation of a batch Prisma runs inside a transaction by that transaction', async () => {
+      const baseClient = createBaseClient();
+      const deps = createDeps();
+      const deferredWrites: Array<() => Promise<void>> = [];
+      const prismaBatch: ActivePrismaBatch = { awaitedWrites: [], deferredWrites: [] };
+
+      await withScope({ transaction: { client: transactionClient, deferredWrites }, prismaBatch }, () =>
+        runAuditedOperation({ operation: interceptedOf(), auditContext, baseClient, atomic: true }, deps),
+      );
+
+      expect(scopeSeenBy(deps.singleExecutor).atomic).toBe(true);
+      expect(prismaBatch).toEqual({ awaitedWrites: [], deferredWrites: [] });
+      expect(auditWriteOf(deps)).toHaveBeenCalledWith(transactionClient, [record]);
     });
 
     it('queues the writes after commit of several operations in one transaction in order', async () => {

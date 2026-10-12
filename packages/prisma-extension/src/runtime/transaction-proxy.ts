@@ -12,8 +12,8 @@
  * methods (`operation-recipe.ts`): a write whose audit is awaited runs in an interactive
  * transaction of the client it was called on, and a batch `$transaction([...])` of the client's
  * operations runs as one interactive transaction when one of them is an audited write whose audit
- * is awaited, as Prisma's own batch otherwise. Without it, the sequential form passes through
- * untouched.
+ * is awaited, as Prisma's own batch otherwise. Without it, the sequential form runs as Prisma's own
+ * batch.
  *
  * @module runtime/transaction-proxy
  */
@@ -21,7 +21,13 @@
 import type { AuditContext, AuditContextProvider } from '@kuruwic/db-audit-core';
 import type { PrismaHandle } from '../internal-types.js';
 import { createRecipeClient, type RecipeConfig, takeBatchRecipes } from './operation-recipe.js';
-import { drainAfterCommit, enterTransaction, withScope } from './scope.js';
+import {
+  type ActivePrismaBatch,
+  drainAfterCommit,
+  drainBatchAfterCommit,
+  enterTransaction,
+  withScope,
+} from './scope.js';
 
 type TransactionMethod = (...args: unknown[]) => Promise<unknown>;
 
@@ -92,9 +98,19 @@ export const createTransactionProxyHandler = (
     return result;
   };
 
-  /** Prisma's own batch, its operations marked as parts of it while Prisma triggers them */
-  const runPrismaBatch = (batchArgs: unknown[]): Promise<unknown> =>
-    withScope({ isInPrismaBatch: true }, () => originalTransaction.apply(target, batchArgs));
+  /**
+   * Prisma's own batch, its operations marked as parts of it while Prisma triggers them. Prisma
+   * resolves the batch once every operation, its audit hook included, has resolved, so the writes
+   * the hooks queued are all on the batch by then; they start after the batch has committed, and
+   * the ones the write policy awaits finish before the caller resumes. On rejection the queue is
+   * discarded, together with what a hook still running queues on it later.
+   */
+  const runPrismaBatch = async (batchArgs: unknown[]): Promise<unknown> => {
+    const prismaBatch: ActivePrismaBatch = { awaitedWrites: [], deferredWrites: [] };
+    const result = await withScope({ prismaBatch }, () => originalTransaction.apply(target, batchArgs));
+    await drainBatchAfterCommit(prismaBatch);
+    return result;
+  };
 
   /** In the interactive transaction, the recipes run one after another in list order, as Prisma runs a batch */
   const runRecipeBatch = async (

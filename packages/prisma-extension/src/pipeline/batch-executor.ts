@@ -198,7 +198,7 @@ const prepareLimited = (
   if (typeof limit !== 'number' || !Number.isInteger(limit) || limit <= 0) {
     return { kind: 'limited-as-given', reportsUnidentified: false };
   }
-  if (scope.inPrismaBatch) {
+  if (scope.prismaBatch) {
     return { kind: 'limited-as-given', reportsUnidentified: true };
   }
   const rounds = scope.transaction ? LIMITED_WRITE_ROUNDS : 1;

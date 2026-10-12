@@ -47,7 +47,6 @@ const scope: ExecutionScope = {
   auditContext: { actor: { category: 'model', type: 'User', id: 'user-1' } },
   handle: transactionClient,
   baseClient,
-  inPrismaBatch: false,
   atomic: true,
 };
 

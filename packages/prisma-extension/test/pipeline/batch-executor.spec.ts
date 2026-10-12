@@ -70,7 +70,6 @@ const scopeOn = (client: PrismaBaseClient): ExecutionScope => ({
   auditContext,
   handle: client,
   baseClient: client,
-  inPrismaBatch: false,
   atomic: true,
 });
 
@@ -679,9 +678,14 @@ describe('createBatchExecutor', () => {
       });
 
       it.each([
-        { scope: 'inside a batch Prisma runs', limit: 2, inPrismaBatch: true, reported: { unidentified: 2 } },
-        { scope: 'with a limit that is not a positive integer', limit: 0, inPrismaBatch: false, reported: undefined },
-      ])('runs the update as given $scope and audits none of its rows', async ({ limit, inPrismaBatch, reported }) => {
+        {
+          scope: 'inside a batch Prisma runs',
+          limit: 2,
+          prismaBatch: { afterCommit: () => {} },
+          reported: { unidentified: 2 },
+        },
+        { scope: 'with a limit that is not a positive integer', limit: 0, prismaBatch: undefined, reported: undefined },
+      ])('runs the update as given $scope and audits none of its rows', async ({ limit, prismaBatch, reported }) => {
         const findMany = vi.fn(async () => []);
         const updateMany = vi.fn(async () => ({ count: 2 }));
         const client = clientWith({ user: { findMany, updateMany } });
@@ -691,7 +695,7 @@ describe('createBatchExecutor', () => {
         const outcome = await runWithRecords(
           executor,
           operationOn(client, 'updateMany', args),
-          { ...scopeOn(client), inPrismaBatch },
+          { ...scopeOn(client), prismaBatch },
           produceRecords,
         );
 
