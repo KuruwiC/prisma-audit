@@ -19,7 +19,7 @@
     "README.md"
   ],
   "engines": {
-    "node": ">=20.19.0"
+    "node": "^20.19 || ^22.12 || >=24.0"
   },
   "scripts": {
     "build": "tsup",
@@ -45,7 +45,7 @@
     "url": "https://github.com/kuruwic/prisma-audit/issues"
   },
   "peerDependencies": {
-    "@prisma/client": ">=5.10.0 <8.0.0"
+    "@prisma/client": ">=6.16.0 <8.0.0"
   },
   "peerDependenciesMeta": {
     "@prisma/client": {
