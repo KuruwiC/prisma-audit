@@ -17,11 +17,14 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "@kuruwic/prisma-audit": "workspace:*",
     "@kuruwic/db-audit-core": "workspace:*",
+    "@kuruwic/prisma-audit": "workspace:*",
     "@kuruwic/prisma-audit-database": "workspace:*",
     "@kuruwic/prisma-audit-generator": "workspace:*",
     "@kuruwic/prisma-audit-typescript-config": "workspace:*",
+    "@prisma/adapter-better-sqlite3": "6.19.0",
+    "@prisma/adapter-mariadb": "6.19.0",
+    "@prisma/adapter-pg": "6.19.0",
     "@prisma/client": "^6.19.0",
     "@testcontainers/mysql": "^11.8.1",
     "@testcontainers/postgresql": "^11.8.0",

@@ -11,6 +11,7 @@ import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { createAuditClient, flushAllPendingWrites } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
+import { PrismaPg } from '@prisma/adapter-pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   cleanDatabase,
@@ -40,7 +41,7 @@ describe('Interactive $transaction scope', () => {
   });
 
   const createAudited = (awaitWrite: boolean) => {
-    const raw = new PrismaClient({ datasources: { db: { url: context.databaseUrl } } });
+    const raw = new PrismaClient({ adapter: new PrismaPg({ connectionString: context.databaseUrl }) });
     const provider = createAsyncLocalStorageProvider();
     const prisma = createAuditClient(raw, {
       Prisma,

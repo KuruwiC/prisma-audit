@@ -3,6 +3,7 @@ import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { createAuditClient, defineEntity, type PrismaAuditExtensionOptions } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
+import { PrismaPg } from '@prisma/adapter-pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, inject, it } from 'vitest';
 import { cleanDatabase } from './helpers/setup.js';
 
@@ -15,7 +16,7 @@ describe('createAuditClient with the Prisma namespace option', () => {
 
   beforeAll(async () => {
     basePrisma = new PrismaClient({
-      datasources: { db: { url: inject('databaseUrl') } },
+      adapter: new PrismaPg({ connectionString: inject('databaseUrl') }),
     });
     await basePrisma.$connect();
   });

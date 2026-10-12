@@ -14,9 +14,11 @@
  * statement is there. A change that moves the sequence must update the list and its comments
  * to describe the new sequence — never loosen the assertion instead.
  *
- * Every statement Prisma sends is listed (BEGIN and COMMIT included) except the bare
- * `SELECT 1` it issues to check a connection it re-opens, which depends on pool state and
- * load rather than on the implementation.
+ * Every data statement Prisma sends is listed. Two kinds are left out because they do not depend
+ * on the implementation: the bare `SELECT 1` Prisma issues to check a connection it re-opens,
+ * which depends on pool state, and transaction control (`BEGIN`, `COMMIT`, `ROLLBACK`,
+ * `SAVEPOINT`), which Prisma reports through a driver adapter only in part (a `COMMIT` without
+ * its `BEGIN`) and, on Prisma 7, does not send around a single-statement write.
  */
 
 import type { AuditContext, AuditContextProvider } from '@kuruwic/db-audit-core';
@@ -25,6 +27,7 @@ import type { AggregateMapping } from '@kuruwic/prisma-audit';
 import { createAuditClient, defineEntity, foreignKey, to } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
+import { PrismaPg } from '@prisma/adapter-pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, inject, it } from 'vitest';
 import { cleanDatabase } from './helpers/setup.js';
 
@@ -38,22 +41,20 @@ const testActor: AuditContext = {
 };
 
 const CONNECTION_HEALTH_CHECK = 'SELECT 1';
+const TRANSACTION_CONTROL = /^\s*(BEGIN|START\s+TRANSACTION|COMMIT|ROLLBACK|SAVEPOINT|RELEASE)\b/i;
 
 const collectStatement = (statements: string[], query: string): void => {
-  if (query !== CONNECTION_HEALTH_CHECK) {
+  if (query !== CONNECTION_HEALTH_CHECK && !TRANSACTION_CONTROL.test(query)) {
     statements.push(query);
   }
 };
 
 /**
  * Reduces a statement to its leading verb and the table it targets (`SELECT users`,
- * `INSERT audit_logs`, `UPDATE posts`, `DELETE posts`); `BEGIN` and `COMMIT` stay as they are.
+ * `INSERT audit_logs`, `UPDATE posts`, `DELETE posts`).
  */
 const statementShape = (query: string): string => {
   const verb = query.match(/^\s*(\w+)/)?.[1]?.toUpperCase() ?? query;
-  if (verb === 'BEGIN' || verb === 'COMMIT') {
-    return verb;
-  }
   const targetPattern = { INSERT: /\bINTO\s+(\S+)/, UPDATE: /^\s*UPDATE\s+(\S+)/ }[verb] ?? /\bFROM\s+(\S+)/;
   const qualifiedTable = query.match(targetPattern)?.[1] ?? '';
   return `${verb} ${qualifiedTable.replaceAll('"', '').split('.').pop()}`;
@@ -69,7 +70,7 @@ const createAuditedClientWithQueryLog = (
   statements: string[],
 ): { basePrisma: PrismaClient; provider: AuditContextProvider; prisma: ReturnType<typeof createAuditClient> } => {
   const basePrisma = new PrismaClient({
-    datasources: { db: { url: databaseUrl } },
+    adapter: new PrismaPg({ connectionString: databaseUrl }),
     log: [{ emit: 'event', level: 'query' }],
   });
   basePrisma.$on('query', (event) => {
@@ -143,7 +144,7 @@ describe('Database Round-Trip Guard', () => {
     expect(statements.map(statementShape)).toEqual(['SELECT users', 'UPDATE users', 'INSERT audit_logs']);
   });
 
-  it('nested create (1 nested post, with include) issues 9 statements', async () => {
+  it('nested create (1 nested post, with include) issues 5 statements', async () => {
     await provider.runAsync(testActor, async () => {
       await prisma.user.create({
         data: {
@@ -156,31 +157,23 @@ describe('Database Round-Trip Guard', () => {
       });
     });
 
-    // 1. BEGIN                  — Prisma's own transaction around a nested write
-    // 2. INSERT INTO users      — the caller's own create (parent)
-    // 3. INSERT INTO posts      — the caller's own create (nested child)
-    // 4. SELECT FROM users      — Prisma's own resolution of `include: { posts: true }` on the
+    // 1. INSERT INTO users      — the caller's own create (parent)
+    // 2. INSERT INTO posts      — the caller's own create (nested child)
+    // 3. SELECT FROM users      — Prisma's own resolution of `include: { posts: true }` on the
     //                             create() result: base record...
-    // 5. SELECT FROM posts      — ...and the included relation, fetched as a separate query
-    // 6. COMMIT
-    // 7. BEGIN                  — Prisma's own transaction around a write of several rows
-    // 8. INSERT INTO audit_logs — one batched write: user + post + the post's aggregate-owner
+    // 4. SELECT FROM posts      — ...and the included relation, fetched as a separate query
+    // 5. INSERT INTO audit_logs — one batched write: user + post + the post's aggregate-owner
     //                             (User) propagation log — 3 rows, 1 statement
-    // 9. COMMIT
     expect(statements.map(statementShape)).toEqual([
-      'BEGIN',
       'INSERT users',
       'INSERT posts',
       'SELECT users',
       'SELECT posts',
-      'COMMIT',
-      'BEGIN',
       'INSERT audit_logs',
-      'COMMIT',
     ]);
   });
 
-  it('update with a nested create under an existing parent (1 existing post) issues 11 statements', async () => {
+  it('update with a nested create under an existing parent (1 existing post) issues 7 statements', async () => {
     const user = await provider.runAsync(testActor, async () => {
       return prisma.user.create({
         data: {
@@ -204,35 +197,27 @@ describe('Database Round-Trip Guard', () => {
     // 2. SELECT id FROM posts   — the snapshot of the posts the user already holds, primary key
     //                             only, so the created post is told apart from its sibling in the
     //                             included relation
-    // 3. BEGIN                  — Prisma's own transaction around a nested write
-    // 4. SELECT FROM users      — Prisma's own read of the parent row the nested create attaches
+    // 3. SELECT FROM users      — Prisma's own read of the parent row the nested create attaches
     //                             to (no UPDATE statement: the data changes no scalar column)
-    // 5. INSERT INTO posts      — the caller's own nested create
-    // 6. SELECT FROM users      — Prisma's resolution of the injected `include: { posts: true }`
+    // 4. INSERT INTO posts      — the caller's own nested create
+    // 5. SELECT FROM users      — Prisma's resolution of the injected `include: { posts: true }`
     //                             on the update() result: base record...
-    // 7. SELECT FROM posts      — ...and the included relation, fetched as a separate query
-    // 8. COMMIT
-    // 9. BEGIN                  — Prisma's own transaction around a write of several rows
-    // 10. INSERT INTO audit_logs — one batched write: the created post + its aggregate-owner
+    // 6. SELECT FROM posts      — ...and the included relation, fetched as a separate query
+    // 7. INSERT INTO audit_logs — one batched write: the created post + its aggregate-owner
     //                             (User) propagation log — 2 rows, 1 statement; the user's
     //                             columns did not change and the existing post gets no row
-    // 11. COMMIT
     expect(statements.map(statementShape)).toEqual([
       'SELECT users',
       'SELECT posts',
-      'BEGIN',
       'SELECT users',
       'INSERT posts',
       'SELECT users',
       'SELECT posts',
-      'COMMIT',
-      'BEGIN',
       'INSERT audit_logs',
-      'COMMIT',
     ]);
   });
 
-  it("update with a nested create the caller's include filters out (1 existing post) issues 13 statements", async () => {
+  it("update with a nested create the caller's include filters out (1 existing post) issues 9 statements", async () => {
     const user = await provider.runAsync(testActor, async () => {
       return prisma.user.create({
         data: {
@@ -255,39 +240,31 @@ describe('Database Round-Trip Guard', () => {
 
     // 1. SELECT FROM users      — the before-state fetch (fetchBefore, default: true)
     // 2. SELECT id FROM posts   — the snapshot of the posts the user already holds, primary key only
-    // 3. BEGIN                  — Prisma's own transaction around a nested write
-    // 4. SELECT FROM users      — Prisma's own read of the parent row the nested create attaches to
-    // 5. INSERT INTO posts      — the caller's own nested create
-    // 6. SELECT FROM users      — Prisma's resolution of the caller's `include` on the update()
+    // 3. SELECT FROM users      — Prisma's own read of the parent row the nested create attaches to
+    // 4. INSERT INTO posts      — the caller's own nested create
+    // 5. SELECT FROM users      — Prisma's resolution of the caller's `include` on the update()
     //                             result: base record...
-    // 7. SELECT FROM posts      — ...and the included relation, filtered to published posts, so
+    // 6. SELECT FROM posts      — ...and the included relation, filtered to published posts, so
     //                             the created draft is not among the returned rows
-    // 8. COMMIT
-    // 9. SELECT id FROM posts   — the primary keys the relation holds under the user after the
+    // 7. SELECT id FROM posts   — the primary keys the relation holds under the user after the
     //                             write; the one the snapshot does not hold is the created post
-    // 10. SELECT FROM posts     — the created post read whole, since the result left it out
-    // 11. BEGIN                 — Prisma's own transaction around a write of several rows
-    // 12. INSERT INTO audit_logs — one batched write: the created post + its aggregate-owner
+    // 8. SELECT FROM posts      — the created post read whole, since the result left it out
+    // 9. INSERT INTO audit_logs — one batched write: the created post + its aggregate-owner
     //                             (User) propagation log — 2 rows; the user's columns did not change
-    // 13. COMMIT
     expect(statements.map(statementShape)).toEqual([
       'SELECT users',
       'SELECT posts',
-      'BEGIN',
       'SELECT users',
       'INSERT posts',
       'SELECT users',
       'SELECT posts',
-      'COMMIT',
       'SELECT posts',
       'SELECT posts',
-      'BEGIN',
       'INSERT audit_logs',
-      'COMMIT',
     ]);
   });
 
-  it('update with a nested updateMany under an existing parent (1 matching post, 1 other) issues 12 statements', async () => {
+  it('update with a nested updateMany under an existing parent (1 matching post, 1 other) issues 8 statements', async () => {
     const user = await provider.runAsync(testActor, async () => {
       return prisma.user.create({
         data: {
@@ -317,38 +294,30 @@ describe('Database Round-Trip Guard', () => {
     //                             under this user (the filter plus the back-relation to the
     //                             parent), whole rows since fetchBefore defaults to
     //                             true; the updateMany is attributed to these rows
-    // 3. BEGIN                  — Prisma's own transaction around a nested write
-    // 4. SELECT FROM users      — Prisma's own read of the parent row the nested write applies to
-    // 5. SELECT id FROM posts   — Prisma's own resolution of the rows the nested updateMany
+    // 3. SELECT FROM users      — Prisma's own read of the parent row the nested write applies to
+    // 4. SELECT id FROM posts   — Prisma's own resolution of the rows the nested updateMany
     //                             filter matches under that parent...
-    // 6. UPDATE posts           — ...which it then updates by primary key
-    // 7. SELECT FROM users      — Prisma's resolution of the injected `include: { posts: true }`
+    // 5. UPDATE posts           — ...which it then updates by primary key
+    // 6. SELECT FROM users      — Prisma's resolution of the injected `include: { posts: true }`
     //                             on the update() result: base record...
-    // 8. SELECT FROM posts      — ...and the included relation, fetched as a separate query
-    // 9. COMMIT
-    // 10. BEGIN                 — Prisma's own transaction around a write of several rows
-    // 11. INSERT INTO audit_logs — one batched write: the matched post + its aggregate-owner
+    // 7. SELECT FROM posts      — ...and the included relation, fetched as a separate query
+    // 8. INSERT INTO audit_logs — one batched write: the matched post + its aggregate-owner
     //                             (User) propagation log — 2 rows, 1 statement; the user's
     //                             columns did not change and the post the filter did not match
     //                             gets no row
-    // 12. COMMIT
     expect(statements.map(statementShape)).toEqual([
       'SELECT users',
       'SELECT posts',
-      'BEGIN',
       'SELECT users',
       'SELECT posts',
       'UPDATE posts',
       'SELECT users',
       'SELECT posts',
-      'COMMIT',
-      'BEGIN',
       'INSERT audit_logs',
-      'COMMIT',
     ]);
   });
 
-  it('update with a nested connect that moves 1 post from another user issues 11 statements', async () => {
+  it('update with a nested connect that moves 1 post from another user issues 7 statements', async () => {
     const user = await provider.runAsync(testActor, async () => {
       return prisma.user.create({
         data: { email: 'nested-connect-target@example.com', name: 'Target', password: 'secret123' },
@@ -374,33 +343,25 @@ describe('Database Round-Trip Guard', () => {
 
     // 1. SELECT FROM users      — the before-state fetch (fetchBefore, default: true)
     // 2. SELECT FROM posts      — the connected post read whole before the write: its old authorId
-    // 3. BEGIN                  — Prisma's own transaction around a nested write
-    // 4. SELECT FROM users      — Prisma's own read of the parent row the connect attaches to
-    // 5. UPDATE posts           — the caller's own connect: the post's authorId (and updatedAt)
-    // 6. SELECT FROM users      — Prisma's read of the update() result
-    // 7. COMMIT
-    // 8. SELECT FROM posts      — the connected post read again by primary key: its new authorId
-    // 9. BEGIN                  — Prisma's own transaction around a write of several rows
-    // 10. INSERT INTO audit_logs — one batched write: the post's update (authorId old → new) + its
+    // 3. SELECT FROM users      — Prisma's own read of the parent row the connect attaches to
+    // 4. UPDATE posts           — the caller's own connect: the post's authorId (and updatedAt)
+    // 5. SELECT FROM users      — Prisma's read of the update() result
+    // 6. SELECT FROM posts      — the connected post read again by primary key: its new authorId
+    // 7. INSERT INTO audit_logs — one batched write: the post's update (authorId old → new) + its
     //                             aggregate-owner (User) propagation logs, under the user it
     //                             joined and the user it left — 3 rows, 1 statement
-    // 11. COMMIT
     expect(statements.map(statementShape)).toEqual([
       'SELECT users',
       'SELECT posts',
-      'BEGIN',
       'SELECT users',
       'UPDATE posts',
       'SELECT users',
-      'COMMIT',
       'SELECT posts',
-      'BEGIN',
       'INSERT audit_logs',
-      'COMMIT',
     ]);
   });
 
-  it('deleteMany (2 rows) issues 5 statements', async () => {
+  it('deleteMany (2 rows) issues 3 statements', async () => {
     const user = await provider.runAsync(testActor, async () => {
       return prisma.user.create({
         data: {
@@ -426,19 +387,11 @@ describe('Database Round-Trip Guard', () => {
     // 1. SELECT FROM posts      — the batch executor's findMany, capturing before-state for
     //                             the 2 rows about to be deleted
     // 2. DELETE FROM posts      — the caller's own deleteMany
-    // 3. BEGIN                  — Prisma's own transaction around a write of several rows
-    // 4. INSERT INTO audit_logs — one batched write covering both deleted rows (2 rows, 1 statement)
-    // 5. COMMIT
-    expect(statements.map(statementShape)).toEqual([
-      'SELECT posts',
-      'DELETE posts',
-      'BEGIN',
-      'INSERT audit_logs',
-      'COMMIT',
-    ]);
+    // 3. INSERT INTO audit_logs — one batched write covering both deleted rows (2 rows, 1 statement)
+    expect(statements.map(statementShape)).toEqual(['SELECT posts', 'DELETE posts', 'INSERT audit_logs']);
   });
 
-  it('updateManyAndReturn (2 rows) issues 7 statements', async () => {
+  it('updateManyAndReturn (2 rows) issues 3 statements', async () => {
     const user = await provider.runAsync(testActor, async () => {
       return prisma.user.create({
         data: {
@@ -461,22 +414,10 @@ describe('Database Round-Trip Guard', () => {
 
     // 1. SELECT FROM posts      — the batch executor's findMany, capturing before-state for
     //                             the 2 rows about to be updated
-    // 2. BEGIN                  — Prisma's own transaction around the update
-    // 3. UPDATE posts RETURNING — the caller's own updateManyAndReturn; its returned rows are the
+    // 2. UPDATE posts RETURNING — the caller's own updateManyAndReturn; its returned rows are the
     //                             after-state, so they are not read again
-    // 4. COMMIT
-    // 5. BEGIN                  — Prisma's own transaction around a write of several rows
-    // 6. INSERT INTO audit_logs — one batched write covering both updated rows (2 rows, 1 statement)
-    // 7. COMMIT
-    expect(statements.map(statementShape)).toEqual([
-      'SELECT posts',
-      'BEGIN',
-      'UPDATE posts',
-      'COMMIT',
-      'BEGIN',
-      'INSERT audit_logs',
-      'COMMIT',
-    ]);
+    // 3. INSERT INTO audit_logs — one batched write covering both updated rows (2 rows, 1 statement)
+    expect(statements.map(statementShape)).toEqual(['SELECT posts', 'UPDATE posts', 'INSERT audit_logs']);
   });
 
   it('single-record delete issues 3 statements (includes the before-state fetch)', async () => {
@@ -497,7 +438,7 @@ describe('Database Round-Trip Guard', () => {
     expect(statements.map(statementShape)).toEqual(['SELECT users', 'DELETE users', 'INSERT audit_logs']);
   });
 
-  it.each([2, 3])('plain updateMany (%i rows) issues 8 statements, one read of the updated rows', async (rows) => {
+  it.each([2, 3])('plain updateMany (%i rows) issues 4 statements, one read of the updated rows', async (rows) => {
     const user = await provider.runAsync(testActor, async () => {
       return prisma.user.create({
         data: {
@@ -517,26 +458,18 @@ describe('Database Round-Trip Guard', () => {
 
     // 1. SELECT FROM posts      — the batch executor's findMany, capturing before-state for
     //                             the rows about to be updated
-    // 2. BEGIN                  — Prisma's own transaction around the update
-    // 3. UPDATE posts           — the caller's own updateMany, which returns only a count
-    // 4. COMMIT
-    // 5. SELECT FROM posts      — the updated rows read by primary key at once: after-state
-    // 6. BEGIN                  — Prisma's own transaction around a write of several rows
-    // 7. INSERT INTO audit_logs — one batched write covering every updated row
-    // 8. COMMIT
+    // 2. UPDATE posts           — the caller's own updateMany, which returns only a count
+    // 3. SELECT FROM posts      — the updated rows read by primary key at once: after-state
+    // 4. INSERT INTO audit_logs — one batched write covering every updated row
     expect(statements.map(statementShape)).toEqual([
       'SELECT posts',
-      'BEGIN',
       'UPDATE posts',
-      'COMMIT',
       'SELECT posts',
-      'BEGIN',
       'INSERT audit_logs',
-      'COMMIT',
     ]);
   });
 
-  it.each([2, 3])('plain createMany (%i rows) issues 7 statements, one read of the created rows', async (rows) => {
+  it.each([2, 3])('plain createMany (%i rows) issues 3 statements, one read of the created rows', async (rows) => {
     await provider.runAsync(testActor, async () => {
       await prisma.user.createMany({
         data: Array.from({ length: rows }, (_, index) => ({
@@ -546,25 +479,13 @@ describe('Database Round-Trip Guard', () => {
       });
     });
 
-    // 1. BEGIN                  — Prisma's own transaction around a write of several rows
-    // 2. INSERT INTO users      — the caller's own createMany, every row in one statement
-    // 3. COMMIT
-    // 4. SELECT FROM users      — every created row, read by primary key at once
-    // 5. BEGIN                  — Prisma's own transaction around a write of several rows
-    // 6. INSERT INTO audit_logs — one batched write covering every created row
-    // 7. COMMIT
-    expect(statements.map(statementShape)).toEqual([
-      'BEGIN',
-      'INSERT users',
-      'COMMIT',
-      'SELECT users',
-      'BEGIN',
-      'INSERT audit_logs',
-      'COMMIT',
-    ]);
+    // 1. INSERT INTO users      — the caller's own createMany, every row in one statement
+    // 2. SELECT FROM users      — every created row, read by primary key at once
+    // 3. INSERT INTO audit_logs — one batched write covering every created row
+    expect(statements.map(statementShape)).toEqual(['INSERT users', 'SELECT users', 'INSERT audit_logs']);
   });
 
-  it('top-level upsert that updates an existing row issues 7 statements', async () => {
+  it('top-level upsert that updates an existing row issues 5 statements', async () => {
     const user = await provider.runAsync(testActor, async () => {
       return prisma.user.create({
         data: { email: 'upsert-existing@example.com', name: 'Original', password: 'secret123' },
@@ -581,19 +502,15 @@ describe('Database Round-Trip Guard', () => {
     });
 
     // 1. SELECT FROM users      — the before-state fetch (fetchBefore, default: true)
-    // 2. BEGIN                  — Prisma's own transaction around the upsert
-    // 3. SELECT id FROM users   — Prisma's own existence check on the `where`
-    // 4. UPDATE users           — the caller's own upsert, taking the update branch
-    // 5. SELECT FROM users      — Prisma's read of the upsert() result
-    // 6. COMMIT
-    // 7. INSERT INTO audit_logs — the audit log write, awaited once the upsert has committed
+    // 2. SELECT id FROM users   — Prisma's own existence check on the `where`
+    // 3. UPDATE users           — the caller's own upsert, taking the update branch
+    // 4. SELECT FROM users      — Prisma's read of the upsert() result
+    // 5. INSERT INTO audit_logs — the audit log write, awaited once the upsert has committed
     expect(statements.map(statementShape)).toEqual([
       'SELECT users',
-      'BEGIN',
       'SELECT users',
       'UPDATE users',
       'SELECT users',
-      'COMMIT',
       'INSERT audit_logs',
     ]);
   });
@@ -622,7 +539,7 @@ describe('Database Round-Trip Guard: fields an entity lists in auditOmittedField
 
   beforeAll(async () => {
     const loggingPrisma = new PrismaClient({
-      datasources: { db: { url: inject('databaseUrl') } },
+      adapter: new PrismaPg({ connectionString: inject('databaseUrl') }),
       log: [{ emit: 'event', level: 'query' }],
       omit: { user: { password: true }, post: { content: true } },
     });
@@ -680,7 +597,7 @@ describe('Database Round-Trip Guard: fields an entity lists in auditOmittedField
     ]);
   });
 
-  it.each([2, 3])('updateManyAndReturn (%i rows) issues 8 statements, one read of the listed field', async (rows) => {
+  it.each([2, 3])('updateManyAndReturn (%i rows) issues 4 statements, one read of the listed field', async (rows) => {
     const user = await provider.runAsync(testActor, async () => {
       return prisma.user.create({
         data: {
@@ -699,27 +616,19 @@ describe('Database Round-Trip Guard: fields an entity lists in auditOmittedField
     });
 
     // 1. SELECT FROM posts      — the batch executor's findMany, with the listed field
-    // 2. BEGIN                  — Prisma's own transaction around the update
-    // 3. UPDATE posts RETURNING — the caller's own updateManyAndReturn, in the client's default shape
-    // 4. COMMIT
-    // 5. SELECT FROM posts      — the listed field of every updated row, read by primary key at once
-    // 6. BEGIN                  — Prisma's own transaction around a write of several rows
-    // 7. INSERT INTO audit_logs — one batched write covering every updated row
-    // 8. COMMIT
+    // 2. UPDATE posts RETURNING — the caller's own updateManyAndReturn, in the client's default shape
+    // 3. SELECT FROM posts      — the listed field of every updated row, read by primary key at once
+    // 4. INSERT INTO audit_logs — one batched write covering every updated row
     expect(statements.map(statementShape)).toEqual([
       'SELECT posts',
-      'BEGIN',
       'UPDATE posts',
-      'COMMIT',
       'SELECT posts',
-      'BEGIN',
       'INSERT audit_logs',
-      'COMMIT',
     ]);
   });
 
   it.each([2, 3])(
-    'createMany (%i rows) issues 7 statements, one read of the created rows, which holds the listed field',
+    'createMany (%i rows) issues 3 statements, one read of the created rows, which holds the listed field',
     async (rows) => {
       await provider.runAsync(testActor, async () => {
         await prisma.user.createMany({
@@ -730,22 +639,10 @@ describe('Database Round-Trip Guard: fields an entity lists in auditOmittedField
         });
       });
 
-      // 1. BEGIN                  — Prisma's own transaction around a write of several rows
-      // 2. INSERT INTO users      — the caller's own createMany, every row in one statement
-      // 3. COMMIT
-      // 4. SELECT FROM users      — every created row with the listed field, read by primary key at once
-      // 5. BEGIN                  — Prisma's own transaction around a write of several rows
-      // 6. INSERT INTO audit_logs — one batched write covering every created row
-      // 7. COMMIT
-      expect(statements.map(statementShape)).toEqual([
-        'BEGIN',
-        'INSERT users',
-        'COMMIT',
-        'SELECT users',
-        'BEGIN',
-        'INSERT audit_logs',
-        'COMMIT',
-      ]);
+      // 1. INSERT INTO users      — the caller's own createMany, every row in one statement
+      // 2. SELECT FROM users      — every created row with the listed field, read by primary key at once
+      // 3. INSERT INTO audit_logs — one batched write covering every created row
+      expect(statements.map(statementShape)).toEqual(['INSERT users', 'SELECT users', 'INSERT audit_logs']);
     },
   );
 });

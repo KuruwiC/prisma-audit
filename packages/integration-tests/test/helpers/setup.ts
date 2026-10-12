@@ -4,6 +4,7 @@ import type { AggregateMapping } from '@kuruwic/prisma-audit';
 import { createAuditClient, defineEntity, foreignKey, to } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
+import { PrismaPg } from '@prisma/adapter-pg';
 import { afterEach, beforeAll, beforeEach, inject } from 'vitest';
 
 export const testAggregateMapping: AggregateMapping = {
@@ -161,7 +162,7 @@ export const testAuditOptions = (provider: AuditContextProvider) => ({
 
 export const createTestClients = (databaseUrl: string): TestContext => {
   const basePrisma = new PrismaClient({
-    datasources: { db: { url: databaseUrl } },
+    adapter: new PrismaPg({ connectionString: databaseUrl }),
   });
 
   const provider = createAsyncLocalStorageProvider();
@@ -196,7 +197,7 @@ export const aggregatesOf = async (prisma: PrismaClient, entityType: string): Pr
  */
 export const cleanDatabase = async (prisma: PrismaClient | ReturnType<typeof createAuditClient>): Promise<void> => {
   const result = await prisma.$queryRaw<Array<{ tablename: string }>>`
-    SELECT tablename FROM pg_tables WHERE schemaname = 'public'
+    SELECT tablename::text AS tablename FROM pg_tables WHERE schemaname = 'public'
   `;
 
   const tableNames = result

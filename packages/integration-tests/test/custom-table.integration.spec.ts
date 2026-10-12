@@ -4,6 +4,7 @@ import type { AggregateMapping } from '@kuruwic/prisma-audit';
 import { createAuditClient, defineEntity, foreignKey, to } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
+import { PrismaPg } from '@prisma/adapter-pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, inject, it } from 'vitest';
 import { cleanDatabase, disposeTestContext, type TestContext } from './helpers/setup.js';
 
@@ -27,7 +28,7 @@ describe('Custom Audit Log Table', () => {
     const databaseUrl = inject('databaseUrl');
 
     const basePrisma = new PrismaClient({
-      datasources: { db: { url: databaseUrl } },
+      adapter: new PrismaPg({ connectionString: databaseUrl }),
     });
 
     const provider = createAsyncLocalStorageProvider();
@@ -43,7 +44,7 @@ describe('Custom Audit Log Table', () => {
     });
 
     customBasePrisma = new PrismaClient({
-      datasources: { db: { url: databaseUrl } },
+      adapter: new PrismaPg({ connectionString: databaseUrl }),
     });
     const customPrisma = createAuditClient(customBasePrisma, {
       provider,

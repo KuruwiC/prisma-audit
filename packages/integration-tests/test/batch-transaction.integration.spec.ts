@@ -17,6 +17,7 @@ import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { createAuditClient, flushAllPendingWrites } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
+import { PrismaPg } from '@prisma/adapter-pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   cleanDatabase,
@@ -95,7 +96,7 @@ describe('Batch $transaction under the audit extension', () => {
 
   const createAudited = (options: AuditedClientOptions) => {
     const raw = new PrismaClient({
-      datasources: { db: { url: context.databaseUrl } },
+      adapter: new PrismaPg({ connectionString: context.databaseUrl }),
       ...(options.transactionOptions ? { transactionOptions: options.transactionOptions } : {}),
     });
     const provider = createAsyncLocalStorageProvider();
@@ -330,7 +331,10 @@ describe('Batch $transaction under the audit extension', () => {
         transactionOptions: { timeout: 200 },
       });
       try {
-        const result = await runAudited(audited, (client) => [createA(client), client.$queryRaw`SELECT pg_sleep(0.5)`]);
+        const result = await runAudited(audited, (client) => [
+          createA(client),
+          client.$queryRaw`SELECT 1 AS slept FROM pg_sleep(0.5)`,
+        ]);
         expect(result.outcome).toMatchObject({ status: 'rejected', code: 'P2028' });
         expect(result.rows.users.map((user) => user.email)).toEqual(['owner@example.com', 'taken@example.com']);
         expect(result.audits).toEqual([]);

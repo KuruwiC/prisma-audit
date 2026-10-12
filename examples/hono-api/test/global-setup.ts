@@ -32,7 +32,7 @@ export async function setup() {
   const schemaPath = join(databasePackagePath, 'prisma', 'schema.prisma');
 
   try {
-    execSync(`npx prisma db push --schema=${schemaPath} --skip-generate`, {
+    execSync(`npx prisma db push --schema=${schemaPath}`, {
       cwd: databasePackagePath,
       stdio: 'inherit',
       env: { ...process.env, DATABASE_URL: databaseUrl },

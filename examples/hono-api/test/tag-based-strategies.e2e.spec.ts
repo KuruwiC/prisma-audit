@@ -14,6 +14,7 @@ import {
 } from '@kuruwic/prisma-audit';
 import { type AuditModelName, auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
+import { PrismaPg } from '@prisma/adapter-pg';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 describe('Tag-based Strategies E2E', () => {
@@ -21,7 +22,7 @@ describe('Tag-based Strategies E2E', () => {
   const auditProvider = createAsyncLocalStorageProvider();
 
   beforeEach(async () => {
-    basePrisma = new PrismaClient();
+    basePrisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }) });
   });
 
   afterEach(async () => {

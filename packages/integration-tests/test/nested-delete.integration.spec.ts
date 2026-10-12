@@ -4,6 +4,7 @@ import type { AuditErrorObserver } from '@kuruwic/prisma-audit';
 import { createAuditClient, defineEntity, foreignKey, to } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
+import { PrismaPg } from '@prisma/adapter-pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   cleanDatabase,
@@ -365,7 +366,7 @@ describe('Nested Delete Operations', () => {
       const post = await context.basePrisma.post.create({
         data: { title: 'Doomed', content: 'Content', authorId: user.id },
       });
-      const basePrisma = new PrismaClient({ datasources: { db: { url: context.databaseUrl } } });
+      const basePrisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: context.databaseUrl }) });
       const provider = createAsyncLocalStorageProvider();
       const prisma = createAuditClient(basePrisma, {
         Prisma,
@@ -485,7 +486,7 @@ describe('Nested Delete Operations', () => {
 
     it('records every row of a delete list whose before state is not read', async () => {
       const { user, a, b } = await seedPosts('delete-list-no-pre-fetch@example.com');
-      const basePrisma = new PrismaClient({ datasources: { db: { url: context.databaseUrl } } });
+      const basePrisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: context.databaseUrl }) });
       const provider = createAsyncLocalStorageProvider();
       const prisma = createAuditClient(basePrisma, {
         Prisma,
@@ -537,7 +538,7 @@ describe('Nested Delete Operations', () => {
       await context.basePrisma.subscription.create({
         data: { id: 'rekeyed-subscription', topic: 'news', userEmail: BEFORE_EMAIL },
       });
-      const basePrisma = new PrismaClient({ datasources: { db: { url: context.databaseUrl } } });
+      const basePrisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: context.databaseUrl }) });
       const provider = createAsyncLocalStorageProvider();
       const prisma = createAuditClient(basePrisma, {
         Prisma,
@@ -589,7 +590,7 @@ describe('Nested Delete Operations', () => {
         data: { email: 'unidentified-delete@example.com', name: 'Author', password: 'secret123' },
       });
       await context.basePrisma.profile.create({ data: { id: 'unidentified-profile', userId: user.id, bio: 'bio' } });
-      const basePrisma = new PrismaClient({ datasources: { db: { url: context.databaseUrl } } });
+      const basePrisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: context.databaseUrl }) });
       const provider = createAsyncLocalStorageProvider();
       const observer = vi.fn<AuditErrorObserver>();
       const prisma = createAuditClient(basePrisma, {

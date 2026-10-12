@@ -7,6 +7,7 @@
 // Re-export all Prisma Client types and utilities
 export * from '../generated/client';
 
+import { PrismaPg } from '@prisma/adapter-pg';
 import { Prisma, PrismaClient } from '../generated/client';
 
 // Explicitly export Prisma namespace (not covered by export *)
@@ -26,6 +27,7 @@ let basePrismaInstance: PrismaClient | null = null;
 export const getBasePrisma = (): PrismaClient => {
   if (!basePrismaInstance) {
     basePrismaInstance = new PrismaClient({
+      adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }),
       transactionOptions: {
         maxWait: 30000, // Maximum time to wait for a transaction slot (30 seconds)
         timeout: 30000, // Maximum time a transaction can run (30 seconds)

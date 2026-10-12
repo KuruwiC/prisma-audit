@@ -9,6 +9,7 @@ import type { PrismaAuditExtensionOptions } from '@kuruwic/prisma-audit';
 import { createAuditClient, flushAllPendingWrites } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
+import { PrismaPg } from '@prisma/adapter-pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   cleanDatabase,
@@ -30,7 +31,7 @@ interface ScenarioOptions {
 }
 
 const createScenario = (databaseUrl: string, options: ScenarioOptions) => {
-  const basePrisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
+  const basePrisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl }) });
   const provider = createAsyncLocalStorageProvider();
   const prisma = createAuditClient(basePrisma, {
     Prisma,

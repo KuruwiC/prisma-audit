@@ -13,6 +13,7 @@ import type { AuditErrorObserver } from '@kuruwic/prisma-audit';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
+import { PrismaPg } from '@prisma/adapter-pg';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
 
@@ -32,7 +33,7 @@ describe('before-state read failing in the database inside a PostgreSQL transact
     { scope: 'inside an explicit $transaction', openImplicitTransaction: false },
     { scope: 'in the transaction openImplicitTransaction opens', openImplicitTransaction: true },
   ])("fails the caller's update and rolls it back, $scope", async ({ openImplicitTransaction }) => {
-    const raw = new PrismaClient({ datasources: { db: { url: await getSharedDatabaseUrl() } } });
+    const raw = new PrismaClient({ adapter: new PrismaPg({ connectionString: await getSharedDatabaseUrl() }) });
     rawBasePrisma = raw;
     const basePrisma = raw.$extends({
       name: 'rejected-before-state-read',

@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import type { AuditContextProvider } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { createAuditClient } from '@kuruwic/prisma-audit';
+import { PrismaMariaDb } from '@prisma/adapter-mariadb';
 import { MySqlContainer, type StartedMySqlContainer } from '@testcontainers/mysql';
 import { auditSchema } from '../../generated/mysql-audit/index.js';
 import { Prisma, PrismaClient } from '../../generated/mysql-client/index.js';
@@ -34,7 +35,7 @@ export const setupMySQLDatabase = async (): Promise<MySQLTestContext> => {
   const schemaPath = join(integrationTestsPath, 'prisma/schema.mysql.prisma');
 
   try {
-    execSync(`npx prisma db push --schema=${schemaPath} --accept-data-loss --skip-generate`, {
+    execSync(`npx prisma db push --schema=${schemaPath}`, {
       cwd: integrationTestsPath,
       stdio: 'inherit',
       env: { ...process.env, DATABASE_URL: databaseUrl },
@@ -46,7 +47,7 @@ export const setupMySQLDatabase = async (): Promise<MySQLTestContext> => {
   }
 
   const basePrisma = new PrismaClient({
-    datasources: { db: { url: databaseUrl } },
+    adapter: new PrismaMariaDb(databaseUrl),
   });
 
   const provider = createAsyncLocalStorageProvider();

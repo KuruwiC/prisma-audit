@@ -19,6 +19,7 @@ import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { createAuditClient, defineEntity, flushAllPendingWrites } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
+import { PrismaPg } from '@prisma/adapter-pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, inject, it } from 'vitest';
 import { cleanDatabase } from './helpers/setup.js';
 
@@ -36,7 +37,7 @@ interface SeenOperation {
  * operation it sees, applied before the audit extension.
  */
 const createClients = (databaseUrl: string, awaitWrite: boolean, openImplicitTransaction = false) => {
-  const rawBasePrisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
+  const rawBasePrisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl }) });
   const seen: SeenOperation[] = [];
 
   const basePrisma = rawBasePrisma.$extends({

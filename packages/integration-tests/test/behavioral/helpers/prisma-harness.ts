@@ -136,7 +136,7 @@ export const createPrismaHarness = (
 
     async cleanDatabase() {
       const result = await basePrisma.$queryRaw<Array<{ tablename: string }>>`
-        SELECT tablename FROM pg_tables WHERE schemaname = 'public'
+        SELECT tablename::text AS tablename FROM pg_tables WHERE schemaname = 'public'
       `;
 
       const tableNames = result

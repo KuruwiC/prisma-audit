@@ -4,6 +4,7 @@ import type { AggregateMapping, AuditLogData } from '@kuruwic/prisma-audit';
 import { createAuditClient, defineEntity, flushAllPendingWrites, foreignKey, to } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
+import { PrismaPg } from '@prisma/adapter-pg';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, inject, it } from 'vitest';
 import { cleanDatabase, disposeTestContext, type TestContext } from './helpers/setup.js';
 
@@ -69,7 +70,7 @@ describe('hooks.writer Coverage', () => {
     const databaseUrl = inject('databaseUrl');
 
     const basePrisma = new PrismaClient({
-      datasources: { db: { url: databaseUrl } },
+      adapter: new PrismaPg({ connectionString: databaseUrl }),
     });
 
     const provider = createAsyncLocalStorageProvider();
@@ -273,7 +274,7 @@ describe('hooks.writer Coverage', () => {
 
     beforeAll(async () => {
       const basePrisma = new PrismaClient({
-        datasources: { db: { url: context.databaseUrl } },
+        adapter: new PrismaPg({ connectionString: context.databaseUrl }),
       });
 
       const provider = createAsyncLocalStorageProvider();
@@ -407,7 +408,7 @@ describe('hooks.writer Coverage', () => {
      * each audited user's email, then writes the audit logs with the default write
      */
     const createClient = (awaitWrite: boolean) => {
-      const basePrisma = new PrismaClient({ datasources: { db: { url: context.databaseUrl } } });
+      const basePrisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: context.databaseUrl }) });
       const handles: unknown[] = [];
       const prisma = createAuditClient(basePrisma, {
         Prisma,
@@ -496,7 +497,7 @@ describe('hooks.writer Coverage', () => {
     });
 
     const createClient = (awaitWrite: boolean, openImplicitTransaction = false) => {
-      const basePrisma = new PrismaClient({ datasources: { db: { url: context.databaseUrl } } });
+      const basePrisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: context.databaseUrl }) });
       const flags: boolean[] = [];
       const prisma = createAuditClient(basePrisma, {
         Prisma,

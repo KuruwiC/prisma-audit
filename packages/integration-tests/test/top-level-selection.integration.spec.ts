@@ -11,6 +11,7 @@ import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { createAuditClient, defineEntity } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
+import { PrismaPg } from '@prisma/adapter-pg';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { cleanDatabase, getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
 
@@ -39,7 +40,7 @@ describe("an audited row read in the client's default shape whatever the caller 
   });
 
   const setup = async () => {
-    const basePrisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
+    const basePrisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl }) });
     const provider = createAsyncLocalStorageProvider();
     const prisma = createAuditClient(basePrisma, {
       Prisma,

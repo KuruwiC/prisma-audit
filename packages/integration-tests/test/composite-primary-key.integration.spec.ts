@@ -43,6 +43,7 @@ import type { AuditErrorObserver } from '@kuruwic/prisma-audit';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
+import { PrismaPg } from '@prisma/adapter-pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   cleanDatabase,
@@ -427,7 +428,7 @@ describe('Composite Primary Key (PostLike)', () => {
     });
 
     it('records the real composite entityId from the WHERE clause alone, and does not report it as unresolved', async () => {
-      const basePrisma = new PrismaClient({ datasources: { db: { url: sharedDatabaseUrl } } });
+      const basePrisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: sharedDatabaseUrl }) });
       const provider = createAsyncLocalStorageProvider();
       const observer = vi.fn<AuditErrorObserver>();
       const prisma = createAuditClient(basePrisma, {

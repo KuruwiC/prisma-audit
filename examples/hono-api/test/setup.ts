@@ -3,10 +3,11 @@
  */
 
 import { PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
+import { PrismaPg } from '@prisma/adapter-pg';
 import { afterAll, beforeEach } from 'vitest';
 import { prisma } from '../src/prisma.js';
 
-const basePrisma = new PrismaClient();
+const basePrisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }) });
 
 beforeEach(async () => {
   await basePrisma.auditLog.deleteMany();

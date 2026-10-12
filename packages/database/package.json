@@ -47,12 +47,14 @@
     "db:studio": "prisma studio"
   },
   "dependencies": {
+    "@prisma/adapter-pg": "6.19.0",
     "@prisma/client": "^6.19.0"
   },
   "devDependencies": {
     "@kuruwic/prisma-audit": "workspace:*",
     "@kuruwic/prisma-audit-generator": "workspace:*",
     "@kuruwic/prisma-audit-typescript-config": "workspace:*",
+    "@types/node": "^24.10.1",
     "prisma": "^6.19.0",
     "tsup": "^8.5.0",
     "typescript": "^5.9.3"

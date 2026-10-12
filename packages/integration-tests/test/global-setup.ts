@@ -73,7 +73,7 @@ export async function setup({ provide }: TestProject) {
 
   console.log('[Global Setup] Pushing Prisma schema...');
   try {
-    execSync(`npx prisma db push --schema=${schemaPath} --skip-generate`, {
+    execSync(`npx prisma db push --schema=${schemaPath}`, {
       cwd: databasePackagePath,
       stdio: 'inherit',
       env: { ...process.env, DATABASE_URL: databaseUrl },

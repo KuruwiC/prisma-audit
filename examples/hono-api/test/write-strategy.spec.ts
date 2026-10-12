@@ -14,6 +14,7 @@ import {
 } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
+import { PrismaPg } from '@prisma/adapter-pg';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 const testAggregateMapping: AggregateMapping = {
@@ -31,6 +32,7 @@ describe('Write Strategy Tests', () => {
 
   beforeEach(() => {
     db = new PrismaClient({
+      adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }),
       transactionOptions: {
         maxWait: 30000,
         timeout: 30000,

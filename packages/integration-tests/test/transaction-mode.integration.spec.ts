@@ -16,6 +16,7 @@ import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { createAuditClient, defineEntity, flushAllPendingWrites } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
+import { PrismaPg } from '@prisma/adapter-pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, inject, it, vi } from 'vitest';
 import { cleanDatabase } from './helpers/setup.js';
 
@@ -88,7 +89,7 @@ describe('openImplicitTransaction', () => {
   let raw: PrismaClient;
 
   beforeAll(() => {
-    raw = new PrismaClient({ datasources: { db: { url: databaseUrl() } } });
+    raw = new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl() }) });
   });
 
   afterAll(async () => {
@@ -108,7 +109,7 @@ describe('openImplicitTransaction', () => {
    * client) appends `?`.
    */
   const createClients = (options: ClientOptions) => {
-    const base = new PrismaClient({ datasources: { db: { url: databaseUrl() } } });
+    const base = new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl() }) });
     const before: Seen = { updates: 0, others: 0 };
     const after: Seen = { updates: 0, others: 0 };
     const provider = createAsyncLocalStorageProvider();
@@ -179,7 +180,7 @@ describe('openImplicitTransaction', () => {
    */
   const runSlowBatch = (options: SlowBatchOptions) => {
     const limited = new PrismaClient({
-      datasources: { db: { url: databaseUrl() } },
+      adapter: new PrismaPg({ connectionString: databaseUrl() }),
       transactionOptions: { timeout: 200 },
     });
     disposers.push(async () => {

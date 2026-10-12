@@ -22,6 +22,7 @@ import type { AuditErrorObserver } from '@kuruwic/prisma-audit';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
+import { PrismaPg } from '@prisma/adapter-pg';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { cleanDatabase, getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
 
@@ -50,7 +51,7 @@ describe('nested pre-fetch failures — affected rows', () => {
 
   /** An audited client whose next `fault.operation` call on `fault.model` after `arm()` throws once */
   const setup = async (fault: FaultTarget) => {
-    const rawBasePrisma = new PrismaClient({ datasources: { db: { url: sharedDatabaseUrl } } });
+    const rawBasePrisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: sharedDatabaseUrl }) });
     let armed = false;
     const basePrisma = rawBasePrisma.$extends({
       name: 'fault-injection',

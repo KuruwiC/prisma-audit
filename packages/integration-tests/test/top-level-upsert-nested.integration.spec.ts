@@ -12,6 +12,7 @@ import type { AuditErrorObserver, PrismaAuditExtensionOptions } from '@kuruwic/p
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
+import { PrismaPg } from '@prisma/adapter-pg';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createPostReadFault } from './helpers/post-read-fault.js';
 import { cleanDatabase, getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
@@ -25,7 +26,7 @@ const FAILURE_MESSAGE = 'simulated before-state fetch failure';
 type FetchBeforeConfig = NonNullable<PrismaAuditExtensionOptions['fetchBefore']>;
 
 const createClients = (databaseUrl: string, fetchBefore: FetchBeforeConfig) => {
-  const rawBasePrisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
+  const rawBasePrisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl }) });
 
   const { findUnique, armFindUniqueFailure } = createPostReadFault(FAILURE_MESSAGE);
   const basePrisma = rawBasePrisma.$extends({ name: 'fault-injection', query: { post: { findUnique } } });

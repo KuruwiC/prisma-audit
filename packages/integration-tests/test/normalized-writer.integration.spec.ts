@@ -16,6 +16,7 @@ import {
 } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
+import { PrismaPg } from '@prisma/adapter-pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, inject, it } from 'vitest';
 import { createPostReadFault } from './helpers/post-read-fault.js';
 import { cleanDatabase } from './helpers/setup.js';
@@ -41,7 +42,7 @@ describe('Normalized Writer Helpers', () => {
 
   beforeAll(() => {
     basePrisma = new PrismaClient({
-      datasources: { db: { url: inject('databaseUrl') } },
+      adapter: new PrismaPg({ connectionString: inject('databaseUrl') }),
     });
   });
 

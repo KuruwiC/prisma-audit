@@ -17,6 +17,7 @@ import type { AuditErrorObserver, AuditLogData } from '@kuruwic/prisma-audit';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
+import { PrismaPg } from '@prisma/adapter-pg';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createPostReadFault } from './helpers/post-read-fault.js';
 import { getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
@@ -37,7 +38,7 @@ describe('before state requested but unreadable', () => {
   });
 
   const createClient = (options: { fetchBefore?: FetchBeforeConfig } = {}) => {
-    const rawBasePrisma = new PrismaClient({ datasources: { db: { url: sharedDatabaseUrl } } });
+    const rawBasePrisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: sharedDatabaseUrl }) });
 
     const { findUnique, armFindUniqueFailure } = createPostReadFault(FAILURE_MESSAGE);
     const basePrisma = rawBasePrisma.$extends({ name: 'fault-injection', query: { post: { findUnique } } });

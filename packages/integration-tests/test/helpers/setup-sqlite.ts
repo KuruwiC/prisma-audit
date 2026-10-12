@@ -4,12 +4,25 @@ import { fileURLToPath } from 'node:url';
 import type { AuditContextProvider } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { createAuditClient } from '@kuruwic/prisma-audit';
+import * as sqliteAdapterModule from '@prisma/adapter-better-sqlite3';
 import { auditSchema } from '../../generated/sqlite-audit/index.js';
 import { Prisma, PrismaClient } from '../../generated/sqlite-client/index.js';
 import { testAggregateMapping } from './setup.js';
 
 const Filename = fileURLToPath(import.meta.url);
 const Dirname = dirname(Filename);
+
+type SqliteAdapterFactory = new (config: {
+  url: string;
+  timeout?: number;
+}) => NonNullable<ConstructorParameters<typeof PrismaClient>[0]>['adapter'];
+
+// The adapter class is exported as PrismaBetterSQLite3 up to Prisma 6 and as PrismaBetterSqlite3 from Prisma 7.
+const sqliteExports: {
+  readonly PrismaBetterSqlite3?: SqliteAdapterFactory;
+  readonly PrismaBetterSQLite3?: SqliteAdapterFactory;
+} = sqliteAdapterModule;
+const SqliteAdapter = sqliteExports.PrismaBetterSqlite3 ?? sqliteExports.PrismaBetterSQLite3;
 
 export interface SQLiteTestContext {
   prisma: ReturnType<typeof createAuditClient>;
@@ -34,7 +47,7 @@ export const setupSQLiteDatabase = async (): Promise<SQLiteTestContext> => {
   const schemaPath = join(integrationTestsPath, 'prisma/schema.sqlite.prisma');
 
   try {
-    execSync(`npx prisma db push --schema=${schemaPath} --accept-data-loss --skip-generate`, {
+    execSync(`npx prisma db push --schema=${schemaPath}`, {
       cwd: integrationTestsPath,
       stdio: 'inherit',
       env: { ...process.env, DATABASE_URL: databaseUrl },
@@ -44,8 +57,11 @@ export const setupSQLiteDatabase = async (): Promise<SQLiteTestContext> => {
     throw error;
   }
 
+  if (!SqliteAdapter) {
+    throw new Error('@prisma/adapter-better-sqlite3 exports neither PrismaBetterSqlite3 nor PrismaBetterSQLite3');
+  }
   const basePrisma = new PrismaClient({
-    datasources: { db: { url: databaseUrl } },
+    adapter: new SqliteAdapter({ url: `file:${databaseFile}`, timeout: 30000 }),
     transactionOptions: {
       timeout: 30000,
     },

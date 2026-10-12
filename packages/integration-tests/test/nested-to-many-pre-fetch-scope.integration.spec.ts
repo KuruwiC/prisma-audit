@@ -13,6 +13,7 @@ import type { AuditErrorObserver } from '@kuruwic/prisma-audit';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { type AuditModelName, auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
+import { PrismaPg } from '@prisma/adapter-pg';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
 
@@ -32,7 +33,7 @@ describe('nested to-many pre-fetch — parent row scope', () => {
   });
 
   beforeEach(() => {
-    basePrisma = new PrismaClient({ datasources: { db: { url: sharedDatabaseUrl } } });
+    basePrisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: sharedDatabaseUrl }) });
     provider = createAsyncLocalStorageProvider();
     observer = vi.fn<AuditErrorObserver>();
     prisma = createAuditClient(basePrisma, {

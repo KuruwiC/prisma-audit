@@ -20,6 +20,7 @@ import {
 } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
+import { PrismaPg } from '@prisma/adapter-pg';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { aggregatesOf, cleanDatabase, getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
 
@@ -90,7 +91,7 @@ describe('fields a client-level omit hides', () => {
   });
 
   const setup = async (options: Options = {}, clientOmit: Prisma.GlobalOmitConfig = CLIENT_OMIT) => {
-    const basePrisma = new PrismaClient({ datasources: { db: { url: databaseUrl } }, omit: clientOmit });
+    const basePrisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl }), omit: clientOmit });
     const provider = createAsyncLocalStorageProvider();
     const prisma = createAuditClient(basePrisma, {
       Prisma,
@@ -692,7 +693,7 @@ describe('fields a client-level omit hides', () => {
 
     const withHiddenKey = async (options: Options = {}) => {
       const context = await setup(options, { user: { id: true } });
-      const plainPrisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
+      const plainPrisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl }) });
       disconnects.push(() => plainPrisma.$disconnect());
       await plainPrisma.user.createMany({
         data: MEMBERS.map((id) => ({ id, email: `${id}@example.com`, name: `name of ${id}` })),

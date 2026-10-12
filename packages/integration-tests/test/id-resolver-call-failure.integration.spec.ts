@@ -13,6 +13,7 @@ import type { AuditErrorObserver } from '@kuruwic/prisma-audit';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
+import { PrismaPg } from '@prisma/adapter-pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   aggregatesOf,
@@ -45,7 +46,7 @@ describe('id-resolver-call failures', () => {
   });
 
   const createClient = (post: ReturnType<typeof defineEntity>, observer: AuditErrorObserver) => {
-    const basePrisma = new PrismaClient({ datasources: { db: { url: context.databaseUrl } } });
+    const basePrisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: context.databaseUrl }) });
     const provider = createAsyncLocalStorageProvider();
     const prisma = createAuditClient(basePrisma, {
       Prisma,
@@ -298,7 +299,7 @@ describe('id-resolver-call failures', () => {
 
   describe('a foreignKey root and the columns of the row', () => {
     const createClientWith = (fetchBeforeDelete: boolean, observer: AuditErrorObserver) => {
-      const basePrisma = new PrismaClient({ datasources: { db: { url: context.databaseUrl } } });
+      const basePrisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: context.databaseUrl }) });
       const provider = createAsyncLocalStorageProvider();
       const prisma = createAuditClient(basePrisma, {
         Prisma,

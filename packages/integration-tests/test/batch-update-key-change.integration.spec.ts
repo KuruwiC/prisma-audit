@@ -15,6 +15,7 @@ import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { createAuditClient, defineEntity } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
+import { PrismaPg } from '@prisma/adapter-pg';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { cleanDatabase, getSharedDatabaseUrl } from './helpers/setup.js';
 
@@ -38,7 +39,7 @@ describe('a batch update whose data changes the key of its rows by an operator',
 
   const setup = async () => {
     const observer = vi.fn<AuditErrorObserver>();
-    const basePrisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
+    const basePrisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl }) });
     const provider = createAsyncLocalStorageProvider();
     const prisma = createAuditClient(basePrisma, {
       Prisma,
