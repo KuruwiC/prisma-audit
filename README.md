@@ -89,7 +89,23 @@ pnpm add -D \
   https://github.com/KuruwiC/prisma-audit/releases/download/v0.1.6/kuruwic-prisma-audit-generator-0.1.6.tgz
 ```
 
-**Requirements:** Node.js >=20.19.0 (AsyncLocalStorage), Prisma 5.10+
+### Requirements
+
+- Prisma 6.16 or later, including 7.x (`@prisma/client >=6.16.0 <8.0.0`)
+- Node.js `^20.19 || ^22.12 || >=24.0` (AsyncLocalStorage)
+- A [driver adapter](https://www.prisma.io/docs/orm/overview/databases/database-drivers): Prisma 7 requires one (`@prisma/adapter-pg`, `@prisma/adapter-better-sqlite3` or `@prisma/adapter-mariadb`) unless you connect through Prisma Accelerate (`accelerateUrl`). With Prisma 7, `datasource.url` is set in `prisma.config.ts` and the schema's `datasource` block has no `url`.
+- The `PrismaClient` and the `Prisma` namespace come from your own generator's `output` (for the `prisma-client` generator, `<output>/client`, e.g. `./generated/prisma/client.js`). prisma-audit takes both by injection and does not care where they come from.
+- `generator audit` and `schema: auditSchema` are the same on Prisma 6 and 7.
+
+```typescript
+// prisma.config.ts (Prisma 7)
+import "dotenv/config";
+import { defineConfig } from "prisma/config";
+
+export default defineConfig({
+  datasource: { url: process.env.DATABASE_URL ?? "" },
+});
+```
 
 The extension reads your models' keys and relations from a file that `prisma generate` writes. Add the generator, `@kuruwic/prisma-audit-generator`, to `schema.prisma`:
 
@@ -158,11 +174,14 @@ import {
   to,
   foreignKey,
 } from "@kuruwic/prisma-audit";
-import { Prisma, PrismaClient } from "@prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
+import { Prisma, PrismaClient } from "../generated/prisma/client.js"; // your client generator's output
 import { type AuditModelName, auditSchema } from "../generated/audit/index.js"; // the generator's output
 
 const auditProvider = createAsyncLocalStorageProvider();
-const basePrisma = new PrismaClient();
+const basePrisma = new PrismaClient({
+  adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }),
+});
 
 const aggregateMapping = defineAggregateMapping<AuditModelName, PrismaClient>()({
   User: defineEntity({ type: "User" }),
@@ -527,7 +546,7 @@ Add custom fields via `security.redact.fields`.
 
 ### Fields a client-level `omit` hides
 
-The audit records a row in the client's default shape, so a field the Prisma client omits for every query (`new PrismaClient({ omit: { user: { password: true } } })`) is left out of the audit logs, except where your own query names it or your `createMany` data writes it. To audit such a field with its value masked, list it on its entity (Prisma 6.2 or later):
+The audit records a row in the client's default shape, so a field the Prisma client omits for every query (`new PrismaClient({ omit: { user: { password: true } } })`) is left out of the audit logs, except where your own query names it or your `createMany` data writes it. To audit such a field with its value masked, list it on its entity:
 
 ```typescript
 User: defineEntity({ type: 'User', auditOmittedFields: ['password'] }),
@@ -551,8 +570,8 @@ Nested rows are audited from the operation's own result: the relations a nested 
 
 |             | Supported                                | Minimum                    |
 | ----------- | ---------------------------------------- | -------------------------- |
-| **Prisma**  | 5.10.x — 7.x                             | 5.10.0 (Client Extensions) |
-| **Node.js** | 20.x, 22.x                               | 20.19.0 (AsyncLocalStorage) |
+| **Prisma**  | 6.16 — 7.x                               | 6.16.0                     |
+| **Node.js** | 20.19+, 22.12+, 24+                      | 20.19.0 (AsyncLocalStorage) |
 | **Runtime** | Node.js ✅, Bun ⚠️ Experimental, Edge ❌ | —                          |
 
 ## Limitations
@@ -560,7 +579,7 @@ Nested rows are audited from the operation's own result: the relations a nested 
 - **Edge runtimes**: No AsyncLocalStorage support (Vercel Edge, Cloudflare Workers)
 - **Raw queries**: `$executeRaw` / `$queryRaw` are not intercepted
 - **Many-to-many with multiple aggregates**: Not currently supported
-- **Client-level `omit`**: The fields a client-level `omit` hides are not recorded unless an entity lists them in `auditOmittedFields` (Prisma 6.2 or later), which masks them; one your query names or your `createMany` data writes can be recorded in clear. Before Prisma 6.2, or when the version cannot be determined, a row created under a `select` is recorded with the selected columns only (see [Fields a client-level `omit` hides](#fields-a-client-level-omit-hides))
+- **Client-level `omit`**: The fields a client-level `omit` hides are not recorded unless an entity lists them in `auditOmittedFields`, which masks them; one your query names or your `createMany` data writes can be recorded in clear. When the Prisma version cannot be determined, a row created under a `select` is recorded with the selected columns only (see [Fields a client-level `omit` hides](#fields-a-client-level-omit-hides))
 - **Nested re-read consistency**: A row a nested write updated or inserted that your own `include` / `select` leaves out, and a row a nested `connect`, `set` or `disconnect` re-linked, is read again after the operation on the same client. Outside a transaction (an interactive `$transaction`, or the one `openImplicitTransaction` opens for an awaited audit), that re-read is a separate query and may observe concurrent changes; so may the read, after the write, of the fields an entity lists in `auditOmittedFields`
 - **Composite keys in `updateMany` / `deleteMany` with `limit`**: The audit narrows the write to the rows it read, with an `OR` of one condition per row over the primary key fields (Prisma has no tuple `IN`), so that `where` clause grows with `limit`. When a transaction tops up a short round, the exclusion of rows already read grows the same way. The number of queries does not change with `limit`
 - **Order of the nested keywords of one relation field**: A nested `updateMany` / `deleteMany` matches its filter against the rows as they were before the write, so a row an earlier `create` inserts, or whose filtered columns an earlier `update` / `updateMany` changes, is not identified as one it writes, and a row a nested `updateMany` brings into a later `deleteMany`'s filter is updated and deleted with no record (see [Nested Operations limitations](packages/prisma-extension/README.md#limitations))

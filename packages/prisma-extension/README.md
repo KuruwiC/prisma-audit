@@ -27,6 +27,14 @@ generator audit {
 
 Run `prisma generate`, then pass the `auditSchema` it writes to `createAuditClient` or `defineConfig` as `schema: auditSchema`.
 
+## Requirements
+
+- Prisma 6.16 or later, including 7.x (`@prisma/client >=6.16.0 <8.0.0`)
+- Node.js `^20.19 || ^22.12 || >=24.0` (AsyncLocalStorage)
+- A [driver adapter](https://www.prisma.io/docs/orm/overview/databases/database-drivers): Prisma 7 requires one (`@prisma/adapter-pg`, `@prisma/adapter-better-sqlite3` or `@prisma/adapter-mariadb`) unless you connect through Prisma Accelerate (`accelerateUrl`). With Prisma 7, `datasource.url` is set in `prisma.config.ts` and the schema's `datasource` block has no `url`.
+- The `PrismaClient` and the `Prisma` namespace come from your own generator's `output` (for the `prisma-client` generator, `<output>/client`, e.g. `./generated/prisma/client.js`). prisma-audit takes both by injection and does not care where they come from.
+- `generator audit` and `schema: auditSchema` are the same on Prisma 6 and 7.
+
 ## Quick Start
 
 ### 1. Create Configuration File
@@ -43,7 +51,7 @@ import {
   foreignKey,
 } from '@kuruwic/prisma-audit';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
-import { Prisma, PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '../generated/prisma/client.js'; // your client generator's output
 import { type AuditModelName, auditSchema } from '../generated/audit/index.js'; // the generator's output
 
 export const auditProvider = createAsyncLocalStorageProvider();
@@ -70,10 +78,13 @@ export default defineConfig<PrismaClient>()({
 ```typescript
 // src/db.ts
 import { createAuditClient } from '@kuruwic/prisma-audit';
-import { PrismaClient } from '@prisma/client';
+import { PrismaPg } from '@prisma/adapter-pg';
+import { PrismaClient } from '../generated/prisma/client.js';
 import auditConfig, { auditProvider } from './audit.config.js';
 
-const basePrisma = new PrismaClient();
+const basePrisma = new PrismaClient({
+  adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }),
+});
 export const prisma = createAuditClient(basePrisma, auditConfig);
 
 // Re-export provider for middleware use
@@ -216,10 +227,14 @@ This allows you to:
 The `Prisma` namespace exported by the generated client your `PrismaClient` comes from. The extension reads `Prisma.DbNull` and `Prisma.defineExtension` from it; a client instance does not expose its namespace, so it is passed explicitly. The models' keys and relations come from the `schema` option (see [Installation](#installation)).
 
 ```typescript
-import { Prisma, PrismaClient } from '@prisma/client';
+import { PrismaPg } from '@prisma/adapter-pg';
+import { Prisma, PrismaClient } from '../generated/prisma/client.js'; // your client generator's output
 import { auditSchema } from '../generated/audit/index.js';
 
-const prisma = createAuditClient(new PrismaClient(), { Prisma, schema: auditSchema, provider, aggregateMapping });
+const basePrisma = new PrismaClient({
+  adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }),
+});
+const prisma = createAuditClient(basePrisma, { Prisma, schema: auditSchema, provider, aggregateMapping });
 ```
 
 The Prisma client itself is the first argument of `createAuditClient`. Audited operations run on it, and audit logs are written with it, bypassing the audit extension.
@@ -458,7 +473,7 @@ import {
   createEntityNormalizedWriter,
 } from '@kuruwic/prisma-audit';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
-import { Prisma, type PrismaClient } from '@prisma/client';
+import { Prisma, type PrismaClient } from '../generated/prisma/client.js'; // your client generator's output
 import { type AuditModelName, auditSchema } from '../generated/audit/index.js';
 
 export const auditProvider = createAsyncLocalStorageProvider();
@@ -488,10 +503,14 @@ export default defineConfig<PrismaClient>()({
 ```typescript
 // src/db.ts
 import { createAuditClient } from '@kuruwic/prisma-audit';
-import { PrismaClient } from '@prisma/client';
+import { PrismaPg } from '@prisma/adapter-pg';
+import { PrismaClient } from '../generated/prisma/client.js';
 import auditConfig, { auditProvider } from './audit.config.js';
 
-export const prisma = createAuditClient(new PrismaClient(), auditConfig);
+export const prisma = createAuditClient(
+  new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }) }),
+  auditConfig,
+);
 export { auditProvider };
 ```
 
@@ -601,7 +620,7 @@ import {
   createSharedChangeWriter,
 } from '@kuruwic/prisma-audit';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
-import { Prisma, type PrismaClient } from '@prisma/client';
+import { Prisma, type PrismaClient } from '../generated/prisma/client.js'; // your client generator's output
 import { type AuditModelName, auditSchema } from '../generated/audit/index.js';
 
 export const auditProvider = createAsyncLocalStorageProvider();
@@ -636,10 +655,14 @@ export default defineConfig<PrismaClient>()({
 ```typescript
 // src/db.ts
 import { createAuditClient } from '@kuruwic/prisma-audit';
-import { PrismaClient } from '@prisma/client';
+import { PrismaPg } from '@prisma/adapter-pg';
+import { PrismaClient } from '../generated/prisma/client.js';
 import auditConfig, { auditProvider } from './audit.config.js';
 
-export const prisma = createAuditClient(new PrismaClient(), auditConfig);
+export const prisma = createAuditClient(
+  new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }) }),
+  auditConfig,
+);
 export { auditProvider };
 ```
 
@@ -710,7 +733,7 @@ Their values are masked in before, after and `changes`, whether or not `security
 
 A field the entity's `excludeFields` (or, without one, `diffing.excludeFields`) names is not read, even when listed. A foreign key the client hides and a `foreignKey(...)` root names must be listed: otherwise the row lacks the column, every write of it reports `id-resolver-call`, and the row is not recorded under that aggregate. A listed foreign key that holds `null` reports nothing.
 
-Requires Prisma 6.2 or later, whose queries take an `omit`: creating the audited client throws on an older version or one that cannot be determined. It also throws for a name that is not a scalar or enum field of the model, and for a mapping key that matches no model.
+Creating the audited client throws when the Prisma version cannot be determined, because the audit needs to know that queries take an `omit`. It also throws for a name that is not a scalar or enum field of the model, and for a mapping key that matches no model.
 
 ```typescript
 User: defineEntity({
@@ -729,9 +752,9 @@ Configure sensitive data protection.
 
 Additional fields to redact in audit logs, on top of the 17 defaults, which apply once `security.redact` is set (`redact: {}` turns on the defaults alone). A field is redacted when its name matches an entry exactly (case-sensitive), at any depth of the before / after / changes data as stored, after the custom serializers ran: a value a serializer turns into a string is redacted by its own field name only. Without `security.redact`, nothing is redacted.
 
-The audit cannot tell which columns a client-level `omit` hides (`new PrismaClient({ omit })`) and reads a row in the client's default shape, so those columns are left out of the audit logs unless the entity lists them in [`auditOmittedFields`](#auditomittedfields), which records them masked whether or not `security.redact` is set. Two exceptions record a hidden column other than the row key without the entity listing it. A hidden column the query names itself (`select: { password: true }` or `omit: { password: false }`) reaches its result as usual, and the record of a row without a captured before state (a create, an upsert that created, an update whose before read is off or failed) holds it as the query read it, in clear unless listed in `redact.fields`; the record of a row whose before state the audit read (an update or delete with `fetchBefore` on, an upsert that updated) keeps only the columns that read holds, so the column is not recorded there. Before Prisma 6.2, or when the version cannot be determined, a query's `select` is read by listing every column; a column the audit added that way is recorded only when the row's before state holds it, so a row created under a `select` is recorded with the selected columns only, on any client, whether or not it hides fields.
+The audit cannot tell which columns a client-level `omit` hides (`new PrismaClient({ omit })`) and reads a row in the client's default shape, so those columns are left out of the audit logs unless the entity lists them in [`auditOmittedFields`](#auditomittedfields), which records them masked whether or not `security.redact` is set. Two exceptions record a hidden column other than the row key without the entity listing it. A hidden column the query names itself (`select: { password: true }` or `omit: { password: false }`) reaches its result as usual, and the record of a row without a captured before state (a create, an upsert that created, an update whose before read is off or failed) holds it as the query read it, in clear unless listed in `redact.fields`; the record of a row whose before state the audit read (an update or delete with `fetchBefore` on, an upsert that updated) keeps only the columns that read holds, so the column is not recorded there. When the Prisma version cannot be determined, a query's `select` is read by listing every column; a column the audit added that way is recorded only when the row's before state holds it, so a row created under a `select` is recorded with the selected columns only, on any client, whether or not it hides fields.
 
-The [row key](#batch-operations-updatemany--deletemany) follows its own rule. On Prisma 6.2 or later the audit reads it whatever a client-level `omit` hides, in its own reads and under a query's `select`, and records it in the row's states; the value returned keeps the shape the query requested. Under a client-level `omit` that hides the key, a row a write returns without a `select` lacks it, and takes it from the row read before the write (an `update` or `delete` with `fetchBefore` on, an `upsert` that updated). When there is no such read or the write changes the key, the row cannot be identified, gets no audit log and is not reported as `row-identification`: the row of a `create`, of an `upsert` that created, of an `update` or `delete` whose before read is off or failed, of an `update` or `upsert` whose arguments change the key other than by giving a key field a literal value, and each row `createManyAndReturn` returns. Each row `updateManyAndReturn` returns without a `select` gets no audit log either, but their number is reported as `row-identification`. Before Prisma 6.2, or when the version cannot be determined, the audit adds the key to none of its reads, so under a client-level `omit` that hides it only a row returned with a `select` is identified.
+The [row key](#batch-operations-updatemany--deletemany) follows its own rule. The audit reads it whatever a client-level `omit` hides, in its own reads and under a query's `select`, and records it in the row's states; the value returned keeps the shape the query requested. Under a client-level `omit` that hides the key, a row a write returns without a `select` lacks it, and takes it from the row read before the write (an `update` or `delete` with `fetchBefore` on, an `upsert` that updated). When there is no such read or the write changes the key, the row cannot be identified, gets no audit log and is not reported as `row-identification`: the row of a `create`, of an `upsert` that created, of an `update` or `delete` whose before read is off or failed, of an `update` or `upsert` whose arguments change the key other than by giving a key field a literal value, and each row `createManyAndReturn` returns. Each row `updateManyAndReturn` returns without a `select` gets no audit log either, but their number is reported as `row-identification`. When the Prisma version cannot be determined, the audit adds the key to none of its reads, so under a client-level `omit` that hides it only a row returned with a `select` is identified.
 
 ```typescript
 {
@@ -1074,7 +1097,7 @@ Two independent options, both receiving the same structured failure context (`{ 
 - `'log'`: log to console and let the operation succeed (**default**)
 - `'ignore'`: do neither
 
-**Policy-gated phases: `log-write`, and `diff-generation` only for the dropped entry of a committed write (below).** `pre-fetch`, `row-identification` and `id-resolver-call` failures never fail the caller's operation (except a `pre-fetch` read that aborts a PostgreSQL transaction, see "Before state that could not be read") — they degrade gracefully instead (e.g. an update or delete whose before-state fetch failed is recorded with `beforeUnavailable: true`, and an upsert whose before-state fetch failed skips its log entry rather than mislabeling it `create`; a record a nested `connect`, `set` or `disconnect` names whose read of the records it may re-link failed is recorded with `beforeUnavailable: true` too; a nested delete whose primary key cannot be determined from the fetched row, its WHERE or the operation data gets no log entry and is reported as `row-identification`, and so are the rows an `updateMany` or `deleteMany` with a `limit` cannot tell apart from rows another writer changed, the rows of one that runs in a batch `$transaction([...])` Prisma runs itself (see "Batch Operations"), the rows of an `updateMany` or `updateManyAndReturn` whose `data` changes the key in a way the audit cannot follow, the rows of an `updateMany` that another writer deletes or gives another key before the read after the write, the rows an `updateManyAndReturn` returned that pair with no row read before by their key (recorded with an unavailable before state; see "Batch Operations"), and the rows a `createMany` created that its read back by key does not find (see "Batch Creates"); a row whose `idResolver` throws gets no log entry, and a row whose `to()` resolver throws (a `foreignKey(field)` resolver does for a row that lacks the field) gets no entry under that aggregate, each reported once per row as `id-resolver-call` with the row's `identity` and the failed resolver in `params` — likewise for a resolver that returns an id that cannot be normalized to a string, or a `batchLookup` resolver that returns a different number of ids than rows). `diff-generation` failures are different: `writeFailurePolicy` does not decide whether they fail the caller, since building the audit log entry has already failed by the time it could apply. A failure before the caller's write — reading the primary keys a to-many relation holds before a nested create under an existing row, or, for batch operations and nested `updateMany` / `deleteMany`, fetching the rows the filter matches — always propagates to the caller as a thrown error, and the write is not attempted. A failure after the caller's write — enrichment, redaction, reading again a row a nested write updated or inserted that the caller's own `include` / `select` left out of the result, reading again the records a nested `connect`, `set` or `disconnect` re-linked, or, for `updateMany`, reading again the rows it updated — propagates as well when the operation runs inside a transaction: your interactive `$transaction`, or the one the client opens with `openImplicitTransaction` (around the operation, or around a batch `$transaction([...])`, where every operation of the batch rolls back with the one whose audit failed, together with the audit logs already written), so the write rolls back with it. Outside any transaction, awaited or not (including a sequential `$transaction([...])` that Prisma runs itself, which it commits before its operations return), the write has already committed by then: the operation succeeds with its result, the observer hears `diff-generation` once, and that operation gets no audit log entry. Reporting the committed write as failed would invite a retry that writes it twice. The dropped entry is reported like a failed detached write: the observer hears `diff-generation`, then `writeFailurePolicy` applies to the drop. The default `'log'` prints a console line that names the model and the operation (`Error in build of the audit records of User.update; the committed write's records are dropped:` followed by the error's message and stack, never the record values); `'ignore'` stays silent; `'throw'` logs, because the write has committed. A policy function receives the same context as the observer (`phase: 'diff-generation'`, with the operation's `modelName`, `operation` and `params`) and its result is applied the same way. `observer` hears about all five phases either way.
+**Policy-gated phases: `log-write`, and `diff-generation` only for the dropped entry of a committed write (below).** `pre-fetch`, `row-identification` and `id-resolver-call` failures never fail the caller's operation (except a `pre-fetch` read that aborts a PostgreSQL transaction, see "Before state that could not be read") — they degrade gracefully instead (e.g. an update or delete whose before-state fetch failed is recorded with `beforeUnavailable: true`, and an upsert whose before-state fetch failed skips its log entry rather than mislabeling it `create`; a record a nested `connect`, `set` or `disconnect` names whose read of the records it may re-link failed is recorded with `beforeUnavailable: true` too; a nested delete whose primary key cannot be determined from the fetched row, its WHERE or the operation data gets no log entry and is reported as `row-identification`, and so are the rows an `updateMany` or `deleteMany` with a `limit` cannot tell apart from rows another writer changed, the rows of one that runs in a batch `$transaction([...])` Prisma runs itself (see "Batch Operations"), the rows of an `updateMany` or `updateManyAndReturn` whose `data` changes the key in a way the audit cannot follow, the rows of an `updateMany` that another writer deletes or gives another key before the read after the write, the rows an `updateManyAndReturn` returned that pair with no row read before by their key (recorded with an unavailable before state; see "Batch Operations"), and the rows a `createMany` created that its read back by key does not find (see "Batch Creates"); a row whose `idResolver` throws gets no log entry, and a row whose `to()` resolver throws (a `foreignKey(field)` resolver does for a row that lacks the field) gets no entry under that aggregate, each reported once per row as `id-resolver-call` with the row's `identity` and the failed resolver in `params` — likewise for a resolver that returns an id that cannot be normalized to a string, or a `batchLookup` resolver that returns a different number of ids than rows). `diff-generation` failures are different: `writeFailurePolicy` does not decide whether they fail the caller, since building the audit log entry has already failed by the time it could apply. A failure before the caller's write — reading the primary keys a to-many relation holds before a nested create under an existing row, or, for batch operations and nested `updateMany` / `deleteMany`, fetching the rows the filter matches — always propagates to the caller as a thrown error, and the write is not attempted. A failure after the caller's write — enrichment, redaction, reading again a row a nested write updated or inserted that the caller's own `include` / `select` left out of the result, reading again the records a nested `connect`, `set` or `disconnect` re-linked, or, for `updateMany`, reading again the rows it updated — propagates as well when the operation runs inside a transaction: your interactive `$transaction`, or the one the client opens with `openImplicitTransaction` (around the operation, or around a batch `$transaction([...])`, where every operation of the batch rolls back with the one whose audit failed, together with the audit logs already written), so the write rolls back with it. Outside any transaction, awaited or not (including a sequential `$transaction([...])` that Prisma runs itself, whose operations return once the database has run the whole batch), the write has already committed by then: the operation succeeds with its result, the observer hears `diff-generation` once, and that operation gets no audit log entry. Reporting the committed write as failed would invite a retry that writes it twice. The dropped entry is reported like a failed detached write: the observer hears `diff-generation`, then `writeFailurePolicy` applies to the drop. The default `'log'` prints a console line that names the model and the operation (`Error in build of the audit records of User.update; the committed write's records are dropped:` followed by the error's message and stack, never the record values); `'ignore'` stays silent; `'throw'` logs, because the write has committed. A policy function receives the same context as the observer (`phase: 'diff-generation'`, with the operation's `modelName`, `operation` and `params`) and its result is applied the same way. `observer` hears about all five phases either way.
 
 **`awaitWrite: false` (deferred / fire-and-forget writes):** once the audit-log write has been queued (inside a transaction) or detached (outside one), the caller has already received its result — there is nothing left to fail. `'throw'` fails the caller only while the write is awaited inside a transaction that has not committed (`awaitWrite: true`, the default, inside your `$transaction` or the one `openImplicitTransaction` opens); once the write is queued or detached, or awaited after the operation has committed outside any transaction, `'throw'` logs instead, exactly like `'log'`. Outside any transaction, a failure to build the entry after the write does not fail the caller either: the entry is dropped, the observer hears `diff-generation` and `writeFailurePolicy` applies to the drop, so the default `'log'` prints a line and `'ignore'` stays silent (see above).
 
@@ -1354,7 +1377,7 @@ import {
   foreignKey,
 } from '@kuruwic/prisma-audit';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
-import { Prisma, type PrismaClient } from '@prisma/client';
+import { Prisma, type PrismaClient } from '../generated/prisma/client.js'; // your client generator's output
 import { type AuditModelName, auditSchema } from '../generated/audit/index.js';
 
 export const auditProvider = createAsyncLocalStorageProvider();
@@ -1440,10 +1463,13 @@ export default defineConfig<PrismaClient>()({
 ```typescript
 // src/db.ts
 import { createAuditClient } from '@kuruwic/prisma-audit';
-import { PrismaClient } from '@prisma/client';
+import { PrismaPg } from '@prisma/adapter-pg';
+import { PrismaClient } from '../generated/prisma/client.js';
 import auditConfig, { auditProvider } from './audit.config.js';
 
-const basePrisma = new PrismaClient();
+const basePrisma = new PrismaClient({
+  adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }),
+});
 export const prisma = createAuditClient(basePrisma, auditConfig);
 export { auditProvider };
 ```

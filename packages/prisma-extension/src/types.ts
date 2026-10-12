@@ -195,10 +195,15 @@ export interface PrismaAuditExtensionOptions<TModelName extends string = string,
    *
    * @example
    * ```typescript
-   * import { Prisma, PrismaClient } from './generated/prisma';
+   * import { PrismaPg } from '@prisma/adapter-pg';
+   * import { Prisma, PrismaClient } from './generated/prisma/client.js';
    * import { auditSchema } from './generated/audit/index.js';
    *
-   * const prisma = createAuditClient(new PrismaClient(), {
+   * const basePrisma = new PrismaClient({
+   *   adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }),
+   * });
+   *
+   * const prisma = createAuditClient(basePrisma, {
    *   Prisma,
    *   schema: auditSchema,
    *   provider,
