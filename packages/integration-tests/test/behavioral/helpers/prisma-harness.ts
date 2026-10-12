@@ -8,6 +8,7 @@
 import type { AuditContext, AuditContextProvider } from '@kuruwic/db-audit-core';
 import type { createAuditClient } from '@kuruwic/prisma-audit';
 import type { PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
+import { cleanDatabase } from '../../helpers/setup.js';
 import type { AuditLogFilter, AuditLogRecord, AuditTestHarness } from './harness.js';
 
 type AuditedPrismaClient = ReturnType<typeof createAuditClient>;
@@ -135,19 +136,7 @@ export const createPrismaHarness = (
     },
 
     async cleanDatabase() {
-      const result = await basePrisma.$queryRaw<Array<{ tablename: string }>>`
-        SELECT tablename::text AS tablename FROM pg_tables WHERE schemaname = 'public'
-      `;
-
-      const tableNames = result
-        .map(({ tablename }) => tablename)
-        .filter((name) => !name.startsWith('_prisma_migrations'));
-
-      if (tableNames.length === 0) return;
-
-      await basePrisma.$executeRawUnsafe(
-        `TRUNCATE TABLE ${tableNames.map((name) => `"${name}"`).join(', ')} RESTART IDENTITY CASCADE;`,
-      );
+      await cleanDatabase(basePrisma);
     },
   };
 
