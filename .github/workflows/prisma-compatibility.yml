@@ -18,26 +18,10 @@ jobs:
       matrix:
         node: [20, 22]
         prisma:
-          - "5.10.0"
-          - "5.20.0"
-          - "6.0.0"
+          - "6.16.0"
+          - "6.19.3"
           - "7.0.0"
-          - "latest"
-
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: prisma
-          POSTGRES_PASSWORD: prisma
-          POSTGRES_DB: prisma_audit_test
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
+          - "7.10.0"
 
     steps:
       - name: Checkout
@@ -57,22 +41,22 @@ jobs:
 
       - name: Override Prisma version
         run: |
-          pnpm add -D prisma@${{ matrix.prisma }} --workspace-root
-          pnpm add @prisma/client@${{ matrix.prisma }} --workspace-root
+          node scripts/sync-datasource-url.mjs ${{ matrix.prisma }}
+          pnpm pkg set \
+            pnpm.overrides.prisma=${{ matrix.prisma }} \
+            pnpm.overrides.@prisma/client=${{ matrix.prisma }} \
+            pnpm.overrides.@prisma/adapter-pg=${{ matrix.prisma }} \
+            pnpm.overrides.@prisma/adapter-better-sqlite3=${{ matrix.prisma }} \
+            pnpm.overrides.@prisma/adapter-mariadb=${{ matrix.prisma }}
+          pnpm install --no-frozen-lockfile
 
       - name: Build packages
         run: pnpm build
 
-      - name: Generate additional Prisma Clients
-        run: |
-          pnpm --filter @kuruwic/prisma-audit-integration-tests generate:sqlite
-          pnpm --filter @kuruwic/prisma-audit-integration-tests generate:mysql
-
       - name: Run integration tests
         env:
-          DATABASE_URL: postgresql://prisma:prisma@localhost:5432/prisma_audit_test
           NODE_ENV: test
-        run: pnpm --filter @kuruwic/prisma-audit-integration-tests test
+        run: pnpm --filter @kuruwic/prisma-audit-integration-tests test:all-dbs
 
       - name: Report compatibility
         if: always()
