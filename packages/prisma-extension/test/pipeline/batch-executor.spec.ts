@@ -6,7 +6,7 @@
  */
 
 import type { AuditContext, FailureSink } from '@kuruwic/db-audit-core';
-import { Decimal } from '@prisma/client/runtime/library';
+import { Decimal } from '@prisma/client/runtime/client';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PrismaBaseClient, PrismaNamespace } from '../../src/internal-types.js';
 import { createBatchExecutor } from '../../src/pipeline/batch-executor.js';

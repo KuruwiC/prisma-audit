@@ -7,9 +7,9 @@ datasource db {
 }
 
 generator client {
-  provider      = "prisma-client-js"
-  output        = "../generated/mysql-client"
-  binaryTargets = ["native"]
+  provider     = "prisma-client"
+  output       = "../generated/mysql-client"
+  moduleFormat = "esm"
 }
 
 generator audit {

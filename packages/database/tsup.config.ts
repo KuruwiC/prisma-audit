@@ -2,12 +2,9 @@ import { defineConfig } from 'tsup';
 
 export default defineConfig({
   entry: ['src/index.ts'],
-  format: ['cjs', 'esm'],
+  format: ['esm'],
   dts: false,
   clean: true,
-  splitting: false,
   sourcemap: true,
-  treeshake: true,
-  noExternal: [],
-  external: ['@prisma/client', '@kuruwic/db-audit-core', /^\.\.\/generated\/client/],
+  external: ['@prisma/client', '@prisma/adapter-pg', '@kuruwic/db-audit-core'],
 });

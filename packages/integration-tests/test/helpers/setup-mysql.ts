@@ -7,7 +7,7 @@ import { createAuditClient } from '@kuruwic/prisma-audit';
 import { PrismaMariaDb } from '@prisma/adapter-mariadb';
 import { MySqlContainer, type StartedMySqlContainer } from '@testcontainers/mysql';
 import { auditSchema } from '../../generated/mysql-audit/index.js';
-import { Prisma, PrismaClient } from '../../generated/mysql-client/index.js';
+import { Prisma, PrismaClient } from '../../generated/mysql-client/client';
 import { testAggregateMapping } from './setup.js';
 
 const Filename = fileURLToPath(import.meta.url);

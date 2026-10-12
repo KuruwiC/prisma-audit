@@ -2,7 +2,6 @@
   "extends": "@kuruwic/prisma-audit-typescript-config/base.json",
   "compilerOptions": {
     "outDir": "./dist",
-    "rootDir": "./test",
     "noEmit": true
   },
   "include": ["test/**/*"],

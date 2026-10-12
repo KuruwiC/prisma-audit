@@ -1,5 +1,5 @@
 import { normalizeId } from '@kuruwic/db-audit-core';
-import { Decimal } from '@prisma/client/runtime/library';
+import { Decimal } from '@prisma/client/runtime/client';
 import { describe, expect, it } from 'vitest';
 import { deserializeEntityId } from '../../src/grammar/nested-operations.js';
 import { extractEntityIdentity, sameKeyValue, serializeKeyValue } from '../../src/utils/id-generation.js';

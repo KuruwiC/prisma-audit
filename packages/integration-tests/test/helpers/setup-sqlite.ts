@@ -6,7 +6,7 @@ import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import * as sqliteAdapterModule from '@prisma/adapter-better-sqlite3';
 import { auditSchema } from '../../generated/sqlite-audit/index.js';
-import { Prisma, PrismaClient } from '../../generated/sqlite-client/index.js';
+import { Prisma, PrismaClient } from '../../generated/sqlite-client/client';
 import { testAggregateMapping } from './setup.js';
 
 const Filename = fileURLToPath(import.meta.url);

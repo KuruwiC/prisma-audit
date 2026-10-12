@@ -1,4 +1,4 @@
-import { Decimal } from '@prisma/client/runtime/library';
+import { Decimal } from '@prisma/client/runtime/client';
 import { describe, expect, it } from 'vitest';
 import type { UniqueConstraint } from '../../src/schema/types.js';
 import {

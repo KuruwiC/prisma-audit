@@ -4,7 +4,7 @@
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import type { Prisma } from '../../generated/mysql-client/index.js';
+import type { Prisma } from '../../generated/mysql-client/client';
 import type { MySQLTestContext } from '../helpers/setup-mysql.js';
 import { cleanMySQLDatabase, setupMySQLDatabase, teardownMySQLDatabase } from '../helpers/setup-mysql.js';
 

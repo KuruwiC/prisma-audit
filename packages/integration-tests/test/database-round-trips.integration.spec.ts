@@ -531,8 +531,10 @@ describe('Database Round-Trip Guard', () => {
   });
 });
 
+const ROUND_TRIP_OMIT = { user: { password: true }, post: { content: true } } satisfies Prisma.GlobalOmitConfig;
+
 describe('Database Round-Trip Guard: fields an entity lists in auditOmittedFields', () => {
-  let basePrisma: PrismaClient;
+  let basePrisma: PrismaClient<'query', typeof ROUND_TRIP_OMIT>;
   let provider: AuditContextProvider;
   let prisma: ReturnType<typeof createAuditClient>;
   const statements: string[] = [];
@@ -541,7 +543,7 @@ describe('Database Round-Trip Guard: fields an entity lists in auditOmittedField
     const loggingPrisma = new PrismaClient({
       adapter: new PrismaPg({ connectionString: inject('databaseUrl') }),
       log: [{ emit: 'event', level: 'query' }],
-      omit: { user: { password: true }, post: { content: true } },
+      omit: ROUND_TRIP_OMIT,
     });
     loggingPrisma.$on('query', (event) => {
       collectStatement(statements, event.query);

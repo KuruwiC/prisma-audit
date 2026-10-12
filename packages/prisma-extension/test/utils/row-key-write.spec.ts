@@ -3,7 +3,7 @@
  * key each row has after the write follows, or in a way the audit cannot follow.
  */
 
-import { Decimal } from '@prisma/client/runtime/library';
+import { Decimal } from '@prisma/client/runtime/client';
 import { describe, expect, it } from 'vitest';
 import { rowKeyWriteOf, withWrittenKey } from '../../src/utils/row-key-write.js';
 import { column, model, relation, schemaMetadataOf } from '../support/audit-schema.js';

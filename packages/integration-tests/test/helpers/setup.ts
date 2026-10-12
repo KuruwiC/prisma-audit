@@ -186,7 +186,10 @@ export const disposeTestContext = async (context: TestContext): Promise<void> =>
 };
 
 /** `entityId:aggregateType:aggregateId` of every audit log of `entityType`, sorted */
-export const aggregatesOf = async (prisma: PrismaClient, entityType: string): Promise<string[]> =>
+export const aggregatesOf = async (
+  prisma: PrismaClient | PrismaClient<never, Prisma.GlobalOmitConfig>,
+  entityType: string,
+): Promise<string[]> =>
   (await prisma.auditLog.findMany({ where: { entityType } }))
     .map((log) => `${log.entityId}:${log.aggregateType}:${log.aggregateId}`)
     .sort();
@@ -195,7 +198,9 @@ export const aggregatesOf = async (prisma: PrismaClient, entityType: string): Pr
  * Truncates all tables in the database, resetting sequences and handling foreign key constraints.
  * Migration tables are preserved.
  */
-export const cleanDatabase = async (prisma: PrismaClient | ReturnType<typeof createAuditClient>): Promise<void> => {
+export const cleanDatabase = async (
+  prisma: PrismaClient | PrismaClient<never, Prisma.GlobalOmitConfig> | ReturnType<typeof createAuditClient>,
+): Promise<void> => {
   const result = await prisma.$queryRaw<Array<{ tablename: string }>>`
     SELECT tablename::text AS tablename FROM pg_tables WHERE schemaname = 'public'
   `;

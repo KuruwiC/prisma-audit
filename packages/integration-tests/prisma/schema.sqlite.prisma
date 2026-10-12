@@ -7,9 +7,9 @@ datasource db {
 }
 
 generator client {
-  provider      = "prisma-client-js"
-  output        = "../generated/sqlite-client"
-  binaryTargets = ["native"]
+  provider     = "prisma-client"
+  output       = "../generated/sqlite-client"
+  moduleFormat = "esm"
 }
 
 generator audit {

@@ -5,24 +5,16 @@
   "type": "module",
   "description": "Shared Prisma database schema and client for prisma-audit monorepo",
   "license": "MIT",
-  "main": "./dist/index.cjs",
   "module": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "types": "./dist/src/index.d.ts",
   "exports": {
     ".": {
-      "import": {
-        "types": "./dist/index.d.ts",
-        "default": "./dist/index.js"
-      },
-      "require": {
-        "types": "./dist/index.d.ts",
-        "default": "./dist/index.cjs"
-      }
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/index.js"
     },
     "./generated/client": {
-      "types": "./generated/client/index.d.ts",
-      "import": "./generated/client/index.js",
-      "require": "./generated/client/index.js"
+      "types": "./generated/client/client.ts",
+      "import": "./generated/client/client.ts"
     },
     "./generated/audit": {
       "types": "./generated/audit/index.d.ts",

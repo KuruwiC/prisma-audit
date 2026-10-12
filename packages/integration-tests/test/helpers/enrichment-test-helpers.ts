@@ -1,6 +1,6 @@
 import type { AggregateMapping } from '@kuruwic/prisma-audit';
 import { defineEntity, foreignKey, to } from '@kuruwic/prisma-audit';
-import type { PrismaClient } from '@kuruwic/prisma-audit-database';
+import type { PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import type { Mock } from 'vitest';
 import { vi } from 'vitest';
 

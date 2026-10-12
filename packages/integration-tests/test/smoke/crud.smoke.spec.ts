@@ -4,7 +4,7 @@
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import type { Prisma } from '../../generated/sqlite-client/index.js';
+import type { Prisma } from '../../generated/sqlite-client/client';
 import type { SQLiteTestContext } from '../helpers/setup-sqlite.js';
 import { cleanSQLiteDatabase, setupSQLiteDatabase, teardownSQLiteDatabase } from '../helpers/setup-sqlite.js';
 

@@ -5,10 +5,10 @@
  */
 
 // Re-export all Prisma Client types and utilities
-export * from '../generated/client';
+export * from '../generated/client/client';
 
 import { PrismaPg } from '@prisma/adapter-pg';
-import { Prisma, PrismaClient } from '../generated/client';
+import { Prisma, PrismaClient } from '../generated/client/client';
 
 // Explicitly export Prisma namespace (not covered by export *)
 export { Prisma };

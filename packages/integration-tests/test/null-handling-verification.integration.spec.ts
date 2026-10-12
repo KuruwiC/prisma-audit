@@ -8,8 +8,8 @@
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAuditClient } from '@kuruwic/prisma-audit';
-import { Prisma } from '@kuruwic/prisma-audit-database';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
+import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   cleanDatabase,
