@@ -10,6 +10,8 @@
 
 import { type AuditContext, createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { createAuditClient } from '@kuruwic/prisma-audit';
+import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
+import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   cleanDatabase,
@@ -36,7 +38,7 @@ describe('Batch operations record the before state whatever fetchBefore says', (
     context = await createTestContext();
     provider = createAsyncLocalStorageProvider();
     prisma = createAuditClient(context.basePrisma, {
-      ...testAuditOptions(provider),
+      ...testAuditOptions(provider, { Prisma, schema: auditSchema }),
       fetchBefore: { update: false, delete: false },
     });
   });

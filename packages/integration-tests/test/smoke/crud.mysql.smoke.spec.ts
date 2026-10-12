@@ -5,8 +5,9 @@
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import type { Prisma } from '../../generated/mysql-client/client';
+import { deleteAllRows } from '../helpers/setup.js';
 import type { MySQLTestContext } from '../helpers/setup-mysql.js';
-import { cleanMySQLDatabase, setupMySQLDatabase, teardownMySQLDatabase } from '../helpers/setup-mysql.js';
+import { setupMySQLDatabase, teardownMySQLDatabase } from '../helpers/setup-mysql.js';
 
 describe('CRUD Smoke Tests (MySQL)', () => {
   let context: MySQLTestContext;
@@ -28,7 +29,7 @@ describe('CRUD Smoke Tests (MySQL)', () => {
   });
 
   afterEach(async () => {
-    await cleanMySQLDatabase(context.prisma);
+    await deleteAllRows(context.prisma);
   });
 
   describe('CREATE operations', () => {

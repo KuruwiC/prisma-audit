@@ -7,7 +7,7 @@ import { createAuditClient } from '@kuruwic/prisma-audit';
 import * as sqliteAdapterModule from '@prisma/adapter-better-sqlite3';
 import { auditSchema } from '../../generated/sqlite-audit/index.js';
 import { Prisma, PrismaClient } from '../../generated/sqlite-client/client';
-import { testAggregateMapping } from './setup.js';
+import { testAuditOptions } from './setup.js';
 
 const Filename = fileURLToPath(import.meta.url);
 const Dirname = dirname(Filename);
@@ -41,8 +41,6 @@ export const setupSQLiteDatabase = async (): Promise<SQLiteTestContext> => {
   const databaseFile = join(integrationTestsPath, 'prisma', `test-${Date.now()}.db`);
   const databaseUrl = `file:${databaseFile}?busy_timeout=30000&journal_mode=WAL`;
 
-  process.env.DATABASE_URL = databaseUrl;
-
   console.log('Pushing Prisma schema to SQLite...');
   const schemaPath = join(integrationTestsPath, 'prisma/schema.sqlite.prisma');
 
@@ -69,37 +67,7 @@ export const setupSQLiteDatabase = async (): Promise<SQLiteTestContext> => {
 
   const provider = createAsyncLocalStorageProvider();
 
-  const prisma = createAuditClient(basePrisma, {
-    Prisma,
-    schema: auditSchema,
-    provider,
-    aggregateMapping: testAggregateMapping,
-    diffing: {
-      excludeFields: ['createdAt'],
-    },
-    security: {
-      redact: {
-        fields: [],
-      },
-    },
-    performance: {
-      awaitWrite: true,
-    },
-    fetchBefore: {
-      update: true,
-      delete: true,
-    },
-    contextEnricher: {
-      actor: {
-        enricher: async (actor: unknown) => ({
-          name: (actor as { name?: string }).name,
-          role: (actor as { role?: string }).role,
-        }),
-        onError: 'log',
-        fallback: null,
-      },
-    },
-  });
+  const prisma = createAuditClient(basePrisma, testAuditOptions(provider, { Prisma, schema: auditSchema }));
 
   console.log('SQLite database setup complete');
 
@@ -129,23 +97,4 @@ export const teardownSQLiteDatabase = async (context: SQLiteTestContext): Promis
   }
 
   console.log('SQLite database teardown complete');
-};
-
-export const cleanSQLiteDatabase = async (prisma: ReturnType<typeof createAuditClient>): Promise<void> => {
-  await prisma.commentAttachment.deleteMany();
-  await prisma.postAttachment.deleteMany();
-  await prisma.postLike.deleteMany();
-  await prisma.postBookmarkNote.deleteMany();
-  await prisma.postBookmark.deleteMany();
-  await prisma.avatarImage.deleteMany();
-  await prisma.avatar.deleteMany();
-  await prisma.profile.deleteMany();
-  await prisma.attachment.deleteMany();
-  await prisma.postTag.deleteMany();
-  await prisma.tag.deleteMany();
-  await prisma.comment.deleteMany();
-  await prisma.post.deleteMany();
-  await prisma.user.deleteMany();
-  await prisma.device.deleteMany();
-  await prisma.auditLog.deleteMany();
 };

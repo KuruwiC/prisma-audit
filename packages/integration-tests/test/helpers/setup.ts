@@ -127,11 +127,20 @@ export const getSharedDatabaseUrl = async (): Promise<string> => {
   return inject('databaseUrl');
 };
 
-/** The audit options every test client is built with. */
-export const testAuditOptions = (provider: AuditContextProvider) => ({
+/** The parts of the audit options that come from the generated client of the database under test */
+interface GeneratedAuditInputs<TPrisma, TSchema> {
+  readonly Prisma: TPrisma;
+  readonly schema: TSchema;
+}
+
+/** The audit options every test client is built with, on PostgreSQL, SQLite and MySQL alike */
+export const testAuditOptions = <TPrisma, TSchema>(
+  provider: AuditContextProvider,
+  generated: GeneratedAuditInputs<TPrisma, TSchema>,
+) => ({
   provider,
-  Prisma,
-  schema: auditSchema,
+  Prisma: generated.Prisma,
+  schema: generated.schema,
   aggregateMapping: testAggregateMapping,
   diffing: {
     excludeFields: ['createdAt'],
@@ -167,7 +176,7 @@ export const createTestClients = (databaseUrl: string): TestContext => {
 
   const provider = createAsyncLocalStorageProvider();
 
-  const prisma = createAuditClient(basePrisma, testAuditOptions(provider));
+  const prisma = createAuditClient(basePrisma, testAuditOptions(provider, { Prisma, schema: auditSchema }));
 
   return { prisma, basePrisma, provider, databaseUrl };
 };
@@ -221,6 +230,29 @@ export const cleanDatabase = async (
     console.error('Error truncating database:', error);
     throw error;
   }
+};
+
+/**
+ * Deletes every row, child tables first, through the audited client. The SQLite and MySQL smoke
+ * suites clean up this way; PostgreSQL suites use {@link cleanDatabase}.
+ */
+export const deleteAllRows = async (prisma: ReturnType<typeof createAuditClient>): Promise<void> => {
+  await prisma.commentAttachment.deleteMany();
+  await prisma.postAttachment.deleteMany();
+  await prisma.postLike.deleteMany();
+  await prisma.postBookmarkNote.deleteMany();
+  await prisma.postBookmark.deleteMany();
+  await prisma.avatarImage.deleteMany();
+  await prisma.avatar.deleteMany();
+  await prisma.profile.deleteMany();
+  await prisma.attachment.deleteMany();
+  await prisma.postTag.deleteMany();
+  await prisma.tag.deleteMany();
+  await prisma.comment.deleteMany();
+  await prisma.post.deleteMany();
+  await prisma.user.deleteMany();
+  await prisma.device.deleteMany();
+  await prisma.auditLog.deleteMany();
 };
 
 /**

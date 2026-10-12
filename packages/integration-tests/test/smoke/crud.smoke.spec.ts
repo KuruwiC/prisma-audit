@@ -5,8 +5,9 @@
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import type { Prisma } from '../../generated/sqlite-client/client';
+import { deleteAllRows } from '../helpers/setup.js';
 import type { SQLiteTestContext } from '../helpers/setup-sqlite.js';
-import { cleanSQLiteDatabase, setupSQLiteDatabase, teardownSQLiteDatabase } from '../helpers/setup-sqlite.js';
+import { setupSQLiteDatabase, teardownSQLiteDatabase } from '../helpers/setup-sqlite.js';
 
 describe('CRUD Smoke Tests (SQLite)', () => {
   let context: SQLiteTestContext;
@@ -28,7 +29,7 @@ describe('CRUD Smoke Tests (SQLite)', () => {
   });
 
   afterEach(async () => {
-    await cleanSQLiteDatabase(context.prisma);
+    await deleteAllRows(context.prisma);
   });
 
   describe('CREATE operations', () => {

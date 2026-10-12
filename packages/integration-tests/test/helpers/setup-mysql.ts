@@ -8,7 +8,7 @@ import { PrismaMariaDb } from '@prisma/adapter-mariadb';
 import { MySqlContainer, type StartedMySqlContainer } from '@testcontainers/mysql';
 import { auditSchema } from '../../generated/mysql-audit/index.js';
 import { Prisma, PrismaClient } from '../../generated/mysql-client/client';
-import { testAggregateMapping } from './setup.js';
+import { testAuditOptions } from './setup.js';
 
 const Filename = fileURLToPath(import.meta.url);
 const Dirname = dirname(Filename);
@@ -27,8 +27,6 @@ export const setupMySQLDatabase = async (): Promise<MySQLTestContext> => {
 
   const databaseUrl = container.getConnectionUri();
   console.log('MySQL container started');
-
-  process.env.DATABASE_URL = databaseUrl;
 
   console.log('Pushing Prisma schema to MySQL...');
   const integrationTestsPath = join(Dirname, '../..');
@@ -52,37 +50,7 @@ export const setupMySQLDatabase = async (): Promise<MySQLTestContext> => {
 
   const provider = createAsyncLocalStorageProvider();
 
-  const prisma = createAuditClient(basePrisma, {
-    Prisma,
-    schema: auditSchema,
-    provider,
-    aggregateMapping: testAggregateMapping,
-    diffing: {
-      excludeFields: ['createdAt'],
-    },
-    security: {
-      redact: {
-        fields: [],
-      },
-    },
-    performance: {
-      awaitWrite: true,
-    },
-    fetchBefore: {
-      update: true,
-      delete: true,
-    },
-    contextEnricher: {
-      actor: {
-        enricher: async (actor: unknown) => ({
-          name: (actor as { name?: string }).name,
-          role: (actor as { role?: string }).role,
-        }),
-        onError: 'log',
-        fallback: null,
-      },
-    },
-  });
+  const prisma = createAuditClient(basePrisma, testAuditOptions(provider, { Prisma, schema: auditSchema }));
 
   console.log('MySQL database setup complete');
 
@@ -105,23 +73,4 @@ export const teardownMySQLDatabase = async (context: MySQLTestContext): Promise<
   }
 
   console.log('MySQL database teardown complete');
-};
-
-export const cleanMySQLDatabase = async (prisma: ReturnType<typeof createAuditClient>): Promise<void> => {
-  await prisma.commentAttachment.deleteMany();
-  await prisma.postAttachment.deleteMany();
-  await prisma.postLike.deleteMany();
-  await prisma.postBookmarkNote.deleteMany();
-  await prisma.postBookmark.deleteMany();
-  await prisma.avatarImage.deleteMany();
-  await prisma.avatar.deleteMany();
-  await prisma.profile.deleteMany();
-  await prisma.attachment.deleteMany();
-  await prisma.postTag.deleteMany();
-  await prisma.tag.deleteMany();
-  await prisma.comment.deleteMany();
-  await prisma.post.deleteMany();
-  await prisma.user.deleteMany();
-  await prisma.device.deleteMany();
-  await prisma.auditLog.deleteMany();
 };
