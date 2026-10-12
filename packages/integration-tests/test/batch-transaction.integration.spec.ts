@@ -9,7 +9,7 @@
  * Each case runs the same batch on a plain `PrismaClient` first, from the same seeded rows, and
  * expects the audited client to leave the same rows and to settle the same way, with the same
  * results in the same order. A batch that never settles is detected by a timer raced inside the
- * test.
+ * test; the plain run is the baseline, so it must settle before the two are compared.
  */
 
 import type { AuditContext, AuditRecord, WriteContext } from '@kuruwic/db-audit-core';
@@ -146,6 +146,7 @@ describe('Batch $transaction under the audit extension', () => {
     options?: BatchOptions,
   ) => {
     const plain = await runPlain(batchOf, options);
+    expect(plain.outcome.status).not.toBe('unsettled');
     const result = await runAudited(audited, batchOf, options);
     expect(comparable(result.outcome)).toEqual(comparable(plain.outcome));
     expect(result.rows).toEqual(plain.rows);
