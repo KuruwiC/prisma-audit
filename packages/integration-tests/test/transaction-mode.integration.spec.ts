@@ -161,31 +161,52 @@ describe('openImplicitTransaction', () => {
     throw new Error('audit write failed');
   };
 
-  interface SlowBatchOptions {
+  interface BatchOptions {
     readonly openImplicitTransaction: boolean;
     readonly awaitWrite?: boolean;
     /** The one model whose audit is awaited, through `awaitWriteIf` */
     readonly awaitedModel?: string;
     /** The model the audit records; the batch writes a User */
     readonly audited?: 'User' | 'Post';
-    /** Whether the batch writes a User before its slow read */
+    /** Whether the batch writes a User before its read */
     readonly writes?: boolean;
     /** Whether an audit context is set when the batch runs (default: true) */
     readonly withContext?: boolean;
+    /** Whether the batch read takes 500 ms on a client whose interactive transactions time out after 200 ms */
+    readonly slow?: boolean;
   }
 
   /**
-   * A batch whose read takes 500 ms, on an audited client whose interactive transactions time out
-   * after 200 ms: it fails with P2028 exactly when it runs as an interactive transaction
+   * Records every `$transaction` call the audit hands to Prisma on `client`'s behalf as `batch` (an
+   * array of operations) or `interactive` (a callback). The caller's own `$transaction` call goes to
+   * the audited client and is not recorded.
    */
-  const runSlowBatch = (options: SlowBatchOptions) => {
+  const recordTransactions = (client: PrismaClient, calls: string[]): void => {
+    const transaction = client.$transaction.bind(client) as (...args: unknown[]) => unknown;
+    Object.defineProperty(client, '$transaction', {
+      value: (...args: unknown[]) => {
+        calls.push(typeof args[0] === 'function' ? 'interactive' : 'batch');
+        return transaction(...args);
+      },
+    });
+  };
+
+  /**
+   * Runs a batch of a read and, optionally, a User write through an audited client and reports how
+   * the audit handed it to Prisma: as Prisma's own batch `$transaction([...])` or as an interactive
+   * transaction `$transaction(callback)`. With `slow`, the read outlasts the client's interactive
+   * transaction timeout.
+   */
+  const runBatch = (options: BatchOptions) => {
     const limited = new PrismaClient({
       adapter: new PrismaPg({ connectionString: databaseUrl() }),
-      transactionOptions: { timeout: 200 },
+      ...(options.slow ? { transactionOptions: { timeout: 200 } } : {}),
     });
     disposers.push(async () => {
       await limited.$disconnect();
     });
+    const transactions: string[] = [];
+    recordTransactions(limited, transactions);
     const provider = createAsyncLocalStorageProvider();
     const audited = createAuditClient(limited, {
       Prisma,
@@ -201,13 +222,18 @@ describe('openImplicitTransaction', () => {
         openImplicitTransaction: options.openImplicitTransaction,
       },
     });
-    const operations: Prisma.PrismaPromise<unknown>[] = [audited.$queryRaw`SELECT 1 AS slept FROM pg_sleep(0.5)`];
+    const read = options.slow
+      ? audited.$queryRaw`SELECT 1 AS slept FROM pg_sleep(0.5)`
+      : audited.$queryRaw`SELECT 1 AS one`;
+    const operations: Prisma.PrismaPromise<unknown>[] = [read];
     if (options.writes) {
       operations.unshift(audited.user.create({ data: { email: 'slow@example.com', name: 'Slow' } }));
     }
-    return options.withContext === false
-      ? audited.$transaction(operations)
-      : provider.runAsync(testActor, () => audited.$transaction(operations));
+    const result =
+      options.withContext === false
+        ? audited.$transaction(operations)
+        : provider.runAsync(testActor, () => audited.$transaction(operations));
+    return { result, transactions };
   };
 
   describe.each([
@@ -342,26 +368,34 @@ describe('openImplicitTransaction', () => {
       expect(clients.observer).toHaveBeenCalledWith(expect.objectContaining({ phase: 'diff-generation' }));
     });
 
-    it("runs a read-only batch as Prisma's own batch, outside the client's interactive transaction limits", async () => {
-      await expect(runSlowBatch({ openImplicitTransaction: false })).resolves.toHaveLength(1);
+    it("runs a read-only batch as Prisma's own batch, without an interactive transaction of its own", async () => {
+      const { result, transactions } = runBatch({ openImplicitTransaction: false });
+
+      await expect(result).resolves.toHaveLength(1);
+      expect(transactions).toEqual(['batch']);
     });
   });
 
   describe('with openImplicitTransaction', () => {
-    it("runs a read-only batch as Prisma's own batch, outside the client's interactive transaction limits", async () => {
-      await expect(runSlowBatch({ openImplicitTransaction: true })).resolves.toHaveLength(1);
+    it("runs a read-only batch as Prisma's own batch, without an interactive transaction of its own", async () => {
+      const { result, transactions } = runBatch({ openImplicitTransaction: true });
+
+      await expect(result).resolves.toHaveLength(1);
+      expect(transactions).toEqual(['batch']);
     });
 
     it("runs a batch that writes only a model the audit does not record as Prisma's own batch", async () => {
-      await expect(
-        runSlowBatch({ openImplicitTransaction: true, audited: 'Post', writes: true }),
-      ).resolves.toHaveLength(2);
+      const { result, transactions } = runBatch({ openImplicitTransaction: true, audited: 'Post', writes: true });
+
+      await expect(result).resolves.toHaveLength(2);
+      expect(transactions).toEqual(['batch']);
     });
 
     it("runs a batch without an audit context as Prisma's own batch", async () => {
-      await expect(
-        runSlowBatch({ openImplicitTransaction: true, writes: true, withContext: false }),
-      ).resolves.toHaveLength(2);
+      const { result, transactions } = runBatch({ openImplicitTransaction: true, writes: true, withContext: false });
+
+      await expect(result).resolves.toHaveLength(2);
+      expect(transactions).toEqual(['batch']);
     });
 
     it("runs Prisma's own batch at the caller's isolation level", async () => {
@@ -378,15 +412,22 @@ describe('openImplicitTransaction', () => {
     });
 
     it("runs a batch whose write does not await its audit as Prisma's own batch", async () => {
-      await expect(
-        runSlowBatch({ openImplicitTransaction: true, awaitWrite: false, awaitedModel: 'Post', writes: true }),
-      ).resolves.toHaveLength(2);
+      const { result, transactions } = runBatch({
+        openImplicitTransaction: true,
+        awaitWrite: false,
+        awaitedModel: 'Post',
+        writes: true,
+      });
+
+      await expect(result).resolves.toHaveLength(2);
+      expect(transactions).toEqual(['batch']);
     });
 
     it("runs a batch holding a write whose audit is awaited as an interactive transaction, bound by the client's limits", async () => {
-      await expect(runSlowBatch({ openImplicitTransaction: true, writes: true })).rejects.toMatchObject({
-        code: 'P2028',
-      });
+      const { result, transactions } = runBatch({ openImplicitTransaction: true, writes: true, slow: true });
+
+      await expect(result).rejects.toMatchObject({ code: 'P2028' });
+      expect(transactions).toEqual(['interactive']);
       expect(await raw.user.count()).toBe(0);
     });
 
