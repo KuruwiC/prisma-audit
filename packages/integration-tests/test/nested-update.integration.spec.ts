@@ -79,7 +79,7 @@ describe('Nested Update Operations', () => {
 
   // NOTE: The tests in this file use the setup.ts configuration (fetchBefore.update: true).
   // The fetchBefore.update: false path is covered by nested-batch-parent-scope.integration.spec.ts
-  // and performance.integration.spec.ts, each with its own client.
+  // and audit-log-row-counts.integration.spec.ts, each with its own client.
 
   describe('Transaction Atomicity', () => {
     it("rolls back the audit rows of a nested update with the caller's interactive transaction", async () => {
