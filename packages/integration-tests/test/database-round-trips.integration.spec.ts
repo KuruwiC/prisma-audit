@@ -27,7 +27,7 @@ import type { AggregateMapping } from '@kuruwic/prisma-audit';
 import { createAuditClient, defineEntity, foreignKey, to } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
-import { afterAll, beforeAll, beforeEach, describe, expect, inject, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { cleanDatabase, createBasePrisma } from './helpers/setup.js';
 
 const testAggregateMapping: AggregateMapping = {
@@ -65,10 +65,9 @@ const statementShape = (query: string): string => {
  * extension proxies the same underlying connection) is captured in `statements`.
  */
 const createAuditedClientWithQueryLog = (
-  databaseUrl: string,
   statements: string[],
 ): { basePrisma: PrismaClient; provider: AuditContextProvider; prisma: ReturnType<typeof createAuditClient> } => {
-  const basePrisma = createBasePrisma(databaseUrl, { log: [{ emit: 'event', level: 'query' }] });
+  const basePrisma = createBasePrisma({ log: [{ emit: 'event', level: 'query' }] });
   basePrisma.$on('query', (event) => {
     collectStatement(statements, event.query);
   });
@@ -91,9 +90,8 @@ describe('Database Round-Trip Guard', () => {
   let statements: string[];
 
   beforeAll(async () => {
-    const databaseUrl = inject('databaseUrl');
     statements = [];
-    const scenario = createAuditedClientWithQueryLog(databaseUrl, statements);
+    const scenario = createAuditedClientWithQueryLog(statements);
     basePrisma = scenario.basePrisma;
     provider = scenario.provider;
     prisma = scenario.prisma;
@@ -536,7 +534,7 @@ describe('Database Round-Trip Guard: fields an entity lists in auditOmittedField
   const statements: string[] = [];
 
   beforeAll(async () => {
-    const loggingPrisma = createBasePrisma(inject('databaseUrl'), {
+    const loggingPrisma = createBasePrisma({
       log: [{ emit: 'event', level: 'query' }],
       omit: ROUND_TRIP_OMIT,
     });

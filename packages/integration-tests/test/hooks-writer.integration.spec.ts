@@ -4,7 +4,7 @@ import type { AggregateMapping, AuditLogData } from '@kuruwic/prisma-audit';
 import { createAuditClient, defineEntity, flushAllPendingWrites, foreignKey, to } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, inject, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { cleanDatabase, createBasePrisma, disposeTestContext, type TestContext } from './helpers/setup.js';
 
 const testAggregateMapping: AggregateMapping = {
@@ -66,9 +66,7 @@ describe('hooks.writer Coverage', () => {
   };
 
   beforeAll(async () => {
-    const databaseUrl = inject('databaseUrl');
-
-    const basePrisma = createBasePrisma(databaseUrl);
+    const basePrisma = createBasePrisma();
 
     const provider = createAsyncLocalStorageProvider();
     const writerSpy = { callCount: 0, calls: [] as Array<{ logCount: number; contextId: string }> };
@@ -79,7 +77,6 @@ describe('hooks.writer Coverage', () => {
       prisma,
       basePrisma,
       provider,
-      databaseUrl,
       writerSpy,
     };
   });
@@ -270,7 +267,7 @@ describe('hooks.writer Coverage', () => {
     };
 
     beforeAll(async () => {
-      const basePrisma = createBasePrisma(context.databaseUrl);
+      const basePrisma = createBasePrisma();
 
       const provider = createAsyncLocalStorageProvider();
       const writerSpy = {
@@ -286,7 +283,6 @@ describe('hooks.writer Coverage', () => {
         prisma,
         basePrisma,
         provider,
-        databaseUrl: context.databaseUrl,
         writerSpy,
       };
     });
@@ -403,7 +399,7 @@ describe('hooks.writer Coverage', () => {
      * each audited user's email, then writes the audit logs with the default write
      */
     const createClient = (awaitWrite: boolean) => {
-      const basePrisma = createBasePrisma(context.databaseUrl);
+      const basePrisma = createBasePrisma();
       const handles: unknown[] = [];
       const prisma = createAuditClient(basePrisma, {
         Prisma,
@@ -492,7 +488,7 @@ describe('hooks.writer Coverage', () => {
     });
 
     const createClient = (awaitWrite: boolean, openImplicitTransaction = false) => {
-      const basePrisma = createBasePrisma(context.databaseUrl);
+      const basePrisma = createBasePrisma();
       const flags: boolean[] = [];
       const prisma = createAuditClient(basePrisma, {
         Prisma,

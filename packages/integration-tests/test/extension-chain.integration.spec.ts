@@ -19,7 +19,7 @@ import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { createAuditClient, defineEntity, flushAllPendingWrites } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
-import { afterAll, beforeAll, beforeEach, describe, expect, inject, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { cleanDatabase, createBasePrisma } from './helpers/setup.js';
 
 const testActor: AuditContext = {
@@ -35,8 +35,8 @@ interface SeenOperation {
  * Builds an audited client whose base client carries a query extension that records every
  * operation it sees, applied before the audit extension.
  */
-const createClients = (databaseUrl: string, awaitWrite: boolean, openImplicitTransaction = false) => {
-  const rawBasePrisma = createBasePrisma(databaseUrl);
+const createClients = (awaitWrite: boolean, openImplicitTransaction = false) => {
+  const rawBasePrisma = createBasePrisma();
   const seen: SeenOperation[] = [];
 
   const basePrisma = rawBasePrisma.$extends({
@@ -73,10 +73,9 @@ describe('Extension Chain Guard', () => {
   let opening: Clients;
 
   beforeAll(async () => {
-    const databaseUrl = inject('databaseUrl');
-    awaited = createClients(databaseUrl, true);
-    detached = createClients(databaseUrl, false);
-    opening = createClients(databaseUrl, true, true);
+    awaited = createClients(true);
+    detached = createClients(false);
+    opening = createClients(true, true);
   });
 
   afterAll(async () => {

@@ -3,7 +3,7 @@ import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { createAuditClient, defineEntity, type PrismaAuditExtensionOptions } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
-import { afterAll, beforeAll, beforeEach, describe, expect, inject, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { cleanDatabase, createBasePrisma } from './helpers/setup.js';
 
 const testActor: AuditContext = {
@@ -14,7 +14,7 @@ describe('createAuditClient with the Prisma namespace option', () => {
   let basePrisma: PrismaClient;
 
   beforeAll(async () => {
-    basePrisma = createBasePrisma(inject('databaseUrl'));
+    basePrisma = createBasePrisma();
     await basePrisma.$connect();
   });
 

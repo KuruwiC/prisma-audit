@@ -19,20 +19,14 @@ import type { AuditErrorObserver } from '@kuruwic/prisma-audit';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
-import { beforeAll, describe, expect, it, vi } from 'vitest';
-import { cleanDatabase, createBasePrisma, getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
+import { describe, expect, it, vi } from 'vitest';
+import { cleanDatabase, createBasePrisma, testAggregateMapping } from './helpers/setup.js';
 
 const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'nested-pre-fetch-actor' },
 };
 
 describe('nested pre-fetch failures — observer notification', () => {
-  let sharedDatabaseUrl: string;
-
-  beforeAll(async () => {
-    sharedDatabaseUrl = await getSharedDatabaseUrl();
-  });
-
   /**
    * Builds an audited client whose base Prisma client can fail `comment.findUnique`
    * on specific 1-indexed call numbers, armed via the returned `armFault`.
@@ -40,8 +34,8 @@ describe('nested pre-fetch failures — observer notification', () => {
    * `armFault` resets the call counter to zero, so any `comment.findUnique` the setup
    * work before it issues never consumes the armed call numbers.
    */
-  const createClient = (databaseUrl: string, observer: AuditErrorObserver) => {
-    const rawBasePrisma = createBasePrisma(databaseUrl);
+  const createClient = (observer: AuditErrorObserver) => {
+    const rawBasePrisma = createBasePrisma();
 
     let callCount = 0;
     let failOnCalls: Set<number> = new Set();
@@ -85,7 +79,7 @@ describe('nested pre-fetch failures — observer notification', () => {
   it('a nested update whose pre-fetch fails still runs, notifies the observer once under pre-fetch, and is recorded with beforeUnavailable, a null before and no changes', async () => {
     const FAILURE_MESSAGE = 'simulated nested pre-fetch failure (update)';
     const observer = vi.fn<AuditErrorObserver>();
-    const { rawBasePrisma, basePrisma, provider, prisma, armFault } = createClient(sharedDatabaseUrl, observer);
+    const { rawBasePrisma, basePrisma, provider, prisma, armFault } = createClient(observer);
 
     try {
       await cleanDatabase(rawBasePrisma);
@@ -149,7 +143,7 @@ describe('nested pre-fetch failures — observer notification', () => {
   it('a nested delete array whose read of one item fails records that item as unavailable and the items around it with their before state, and reports that item', async () => {
     const FAILURE_MESSAGE = 'simulated nested pre-fetch failure (delete #2)';
     const observer = vi.fn<AuditErrorObserver>();
-    const { rawBasePrisma, basePrisma, provider, prisma, armFault } = createClient(sharedDatabaseUrl, observer);
+    const { rawBasePrisma, basePrisma, provider, prisma, armFault } = createClient(observer);
 
     try {
       await cleanDatabase(rawBasePrisma);

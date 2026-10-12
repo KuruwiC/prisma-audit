@@ -17,8 +17,8 @@ import type { AggregateMapping } from '@kuruwic/prisma-audit';
 import { createAuditClient, defineEntity, foreignKey, to } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { cleanDatabase, createBasePrisma, getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
+import { afterEach, describe, expect, it } from 'vitest';
+import { cleanDatabase, createBasePrisma, testAggregateMapping } from './helpers/setup.js';
 
 const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'moved-row-actor' },
@@ -31,12 +31,7 @@ const aggregateMapping: AggregateMapping = {
 };
 
 describe('aggregates of a row moved to another parent', () => {
-  let databaseUrl: string;
   const disconnects: Array<() => Promise<void>> = [];
-
-  beforeAll(async () => {
-    databaseUrl = await getSharedDatabaseUrl();
-  });
 
   afterEach(async () => {
     for (const disconnect of disconnects.splice(0)) {
@@ -45,7 +40,7 @@ describe('aggregates of a row moved to another parent', () => {
   });
 
   const setup = async (options: { readonly fetchBeforeUpdate?: boolean } = {}) => {
-    const basePrisma = createBasePrisma(databaseUrl);
+    const basePrisma = createBasePrisma();
     const provider = createAsyncLocalStorageProvider();
     const prisma = createAuditClient(basePrisma, {
       Prisma,

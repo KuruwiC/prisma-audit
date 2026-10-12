@@ -9,8 +9,8 @@ import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { createBasePrisma, getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { createBasePrisma, testAggregateMapping } from './helpers/setup.js';
 
 const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'relation-fields-actor' },
@@ -19,14 +19,8 @@ const testActor: AuditContext = {
 const stateKeys = (state: unknown): string[] => (state !== null && typeof state === 'object' ? Object.keys(state) : []);
 
 describe('relation fields in audited entity state', () => {
-  let sharedDatabaseUrl: string;
-
-  beforeAll(async () => {
-    sharedDatabaseUrl = await getSharedDatabaseUrl();
-  });
-
-  const createClient = (databaseUrl: string) => {
-    const basePrisma = createBasePrisma(databaseUrl);
+  const createClient = () => {
+    const basePrisma = createBasePrisma();
     const provider = createAsyncLocalStorageProvider();
     const prisma = createAuditClient(basePrisma, {
       Prisma,
@@ -42,7 +36,7 @@ describe('relation fields in audited entity state', () => {
   let scenario: ReturnType<typeof createClient>;
 
   beforeEach(async () => {
-    scenario = createClient(sharedDatabaseUrl);
+    scenario = createClient();
     await scenario.basePrisma.auditLog.deleteMany();
     await scenario.basePrisma.post.deleteMany();
     await scenario.basePrisma.user.deleteMany();

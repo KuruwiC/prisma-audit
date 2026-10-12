@@ -16,7 +16,7 @@ import {
 } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
-import { afterAll, beforeAll, beforeEach, describe, expect, inject, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createPostReadFault } from './helpers/post-read-fault.js';
 import { cleanDatabase, createBasePrisma } from './helpers/setup.js';
 
@@ -40,7 +40,7 @@ describe('Normalized Writer Helpers', () => {
   const provider = createAsyncLocalStorageProvider();
 
   beforeAll(() => {
-    basePrisma = createBasePrisma(inject('databaseUrl'));
+    basePrisma = createBasePrisma();
   });
 
   afterAll(async () => {

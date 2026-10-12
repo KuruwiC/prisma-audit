@@ -12,15 +12,15 @@ import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { cleanDatabase, createBasePrisma, getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { cleanDatabase, createBasePrisma, testAggregateMapping } from './helpers/setup.js';
 
 const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'nested-batch-parent-scope-actor' },
 };
 
-const createClients = (databaseUrl: string, fetchBeforeUpdate: boolean) => {
-  const basePrisma = createBasePrisma(databaseUrl);
+const createClients = (fetchBeforeUpdate: boolean) => {
+  const basePrisma = createBasePrisma();
   const provider = createAsyncLocalStorageProvider();
   const prisma = createAuditClient(basePrisma, {
     Prisma,
@@ -38,7 +38,6 @@ const createClients = (databaseUrl: string, fetchBeforeUpdate: boolean) => {
 };
 
 describe('nested updateMany / deleteMany parent scope', () => {
-  let databaseUrl: string;
   let clients: ReturnType<typeof createClients>;
 
   const asActor = <T>(fn: () => Promise<T>): Promise<T> => clients.provider.runAsync(testActor, fn);
@@ -81,12 +80,8 @@ describe('nested updateMany / deleteMany parent scope', () => {
       orderBy: { aggregateType: 'asc' },
     });
 
-  beforeAll(async () => {
-    databaseUrl = await getSharedDatabaseUrl();
-  });
-
   beforeEach(async () => {
-    clients = createClients(databaseUrl, true);
+    clients = createClients(true);
     await cleanDatabase(clients.basePrisma);
   });
 
@@ -146,7 +141,7 @@ describe('nested updateMany / deleteMany parent scope', () => {
   it('a nested updateMany without a before-state read still audits the matched posts of the parent only', async () => {
     await clients.prisma.$disconnect();
     await clients.basePrisma.$disconnect();
-    clients = createClients(databaseUrl, false);
+    clients = createClients(false);
     const { userA, a1, a2, b1 } = await seedTwoUsers();
 
     await asActor(() =>

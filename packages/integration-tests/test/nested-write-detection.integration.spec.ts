@@ -12,15 +12,15 @@ import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { cleanDatabase, createBasePrisma, getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { cleanDatabase, createBasePrisma, testAggregateMapping } from './helpers/setup.js';
 
 const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'nested-write-detection-actor' },
 };
 
-const createClients = (databaseUrl: string) => {
-  const basePrisma = createBasePrisma(databaseUrl);
+const createClients = () => {
+  const basePrisma = createBasePrisma();
   const provider = createAsyncLocalStorageProvider();
   const prisma = createAuditClient(basePrisma, {
     Prisma,
@@ -38,7 +38,6 @@ const createClients = (databaseUrl: string) => {
 };
 
 describe('nested write detection', () => {
-  let databaseUrl: string;
   let clients: ReturnType<typeof createClients>;
 
   const asActor = <T>(fn: () => Promise<T>): Promise<T> => clients.provider.runAsync(testActor, fn);
@@ -54,12 +53,8 @@ describe('nested write detection', () => {
 
   const aggregateTypes = (logs: { aggregateType: string }[]) => logs.map((log) => log.aggregateType);
 
-  beforeAll(async () => {
-    databaseUrl = await getSharedDatabaseUrl();
-  });
-
   beforeEach(async () => {
-    clients = createClients(databaseUrl);
+    clients = createClients();
     await cleanDatabase(clients.basePrisma);
   });
 

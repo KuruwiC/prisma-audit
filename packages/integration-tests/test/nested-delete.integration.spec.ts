@@ -347,7 +347,7 @@ describe('Nested Delete Operations', () => {
       const post = await context.basePrisma.post.create({
         data: { title: 'Doomed', content: 'Content', authorId: user.id },
       });
-      const basePrisma = createBasePrisma(context.databaseUrl);
+      const basePrisma = createBasePrisma();
       const provider = createAsyncLocalStorageProvider();
       const prisma = createAuditClient(basePrisma, {
         Prisma,
@@ -467,7 +467,7 @@ describe('Nested Delete Operations', () => {
 
     it('records every row of a delete list whose before state is not read', async () => {
       const { user, a, b } = await seedPosts('delete-list-no-pre-fetch@example.com');
-      const basePrisma = createBasePrisma(context.databaseUrl);
+      const basePrisma = createBasePrisma();
       const provider = createAsyncLocalStorageProvider();
       const prisma = createAuditClient(basePrisma, {
         Prisma,
@@ -519,7 +519,7 @@ describe('Nested Delete Operations', () => {
       await context.basePrisma.subscription.create({
         data: { id: 'rekeyed-subscription', topic: 'news', userEmail: BEFORE_EMAIL },
       });
-      const basePrisma = createBasePrisma(context.databaseUrl);
+      const basePrisma = createBasePrisma();
       const provider = createAsyncLocalStorageProvider();
       const prisma = createAuditClient(basePrisma, {
         Prisma,
@@ -571,7 +571,7 @@ describe('Nested Delete Operations', () => {
         data: { email: 'unidentified-delete@example.com', name: 'Author', password: 'secret123' },
       });
       await context.basePrisma.profile.create({ data: { id: 'unidentified-profile', userId: user.id, bio: 'bio' } });
-      const basePrisma = createBasePrisma(context.databaseUrl);
+      const basePrisma = createBasePrisma();
       const provider = createAsyncLocalStorageProvider();
       const observer = vi.fn<AuditErrorObserver>();
       const prisma = createAuditClient(basePrisma, {

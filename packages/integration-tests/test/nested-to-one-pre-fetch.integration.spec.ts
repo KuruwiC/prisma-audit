@@ -11,15 +11,15 @@ import type { AuditErrorObserver } from '@kuruwic/prisma-audit';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanDatabase, createBasePrisma, getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { cleanDatabase, createBasePrisma, testAggregateMapping } from './helpers/setup.js';
 
 const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'nested-to-one-actor' },
 };
 
-const createClients = (databaseUrl: string, observer: AuditErrorObserver) => {
-  const basePrisma = createBasePrisma(databaseUrl);
+const createClients = (observer: AuditErrorObserver) => {
+  const basePrisma = createBasePrisma();
   const provider = createAsyncLocalStorageProvider();
   const prisma = createAuditClient(basePrisma, {
     Prisma,
@@ -38,19 +38,14 @@ const createClients = (databaseUrl: string, observer: AuditErrorObserver) => {
 };
 
 describe('nested to-one pre-fetch', () => {
-  let databaseUrl: string;
   let observer: ReturnType<typeof vi.fn<AuditErrorObserver>>;
   let clients: ReturnType<typeof createClients>;
 
   const asActor = <T>(fn: () => Promise<T>): Promise<T> => clients.provider.runAsync(testActor, fn);
 
-  beforeAll(async () => {
-    databaseUrl = await getSharedDatabaseUrl();
-  });
-
   beforeEach(async () => {
     observer = vi.fn<AuditErrorObserver>();
-    clients = createClients(databaseUrl, observer);
+    clients = createClients(observer);
     await cleanDatabase(clients.basePrisma);
   });
 

@@ -76,10 +76,7 @@ describe('Batch $transaction under the audit extension', () => {
   const context = setupTestContext();
 
   const createAudited = (options: AuditedClientOptions) => {
-    const raw = createBasePrisma(
-      context.databaseUrl,
-      options.transactionOptions ? { transactionOptions: options.transactionOptions } : {},
-    );
+    const raw = createBasePrisma(options.transactionOptions ? { transactionOptions: options.transactionOptions } : {});
     const provider = createAsyncLocalStorageProvider();
     const observer = vi.fn();
     const prisma = createAuditClient(raw, {

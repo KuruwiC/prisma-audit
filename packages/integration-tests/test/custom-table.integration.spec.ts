@@ -4,7 +4,7 @@ import type { AggregateMapping } from '@kuruwic/prisma-audit';
 import { createAuditClient, defineEntity, foreignKey, to } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
-import { afterAll, beforeAll, beforeEach, describe, expect, inject, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { cleanDatabase, createBasePrisma, disposeTestContext, type TestContext } from './helpers/setup.js';
 
 const testAggregateMapping: AggregateMapping = {
@@ -24,9 +24,7 @@ describe('Custom Audit Log Table', () => {
   let customBasePrisma: PrismaClient;
 
   beforeAll(async () => {
-    const databaseUrl = inject('databaseUrl');
-
-    const basePrisma = createBasePrisma(databaseUrl);
+    const basePrisma = createBasePrisma();
 
     const provider = createAsyncLocalStorageProvider();
 
@@ -40,7 +38,7 @@ describe('Custom Audit Log Table', () => {
       },
     });
 
-    customBasePrisma = createBasePrisma(databaseUrl);
+    customBasePrisma = createBasePrisma();
     const customPrisma = createAuditClient(customBasePrisma, {
       provider,
       Prisma,
@@ -62,7 +60,6 @@ describe('Custom Audit Log Table', () => {
       prisma,
       basePrisma,
       provider,
-      databaseUrl,
     };
 
     customContext = {

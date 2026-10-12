@@ -18,8 +18,8 @@ import type { AuditErrorObserver } from '@kuruwic/prisma-audit';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { cleanDatabase, createBasePrisma, getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { cleanDatabase, createBasePrisma, testAggregateMapping } from './helpers/setup.js';
 
 const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'nested-upsert-pre-fetch-actor' },
@@ -28,14 +28,8 @@ const testActor: AuditContext = {
 const FAILURE_MESSAGE = 'simulated nested pre-fetch failure';
 
 describe('nested upsert and connectOrCreate whose target could not be read', () => {
-  let sharedDatabaseUrl: string;
-
-  beforeAll(async () => {
-    sharedDatabaseUrl = await getSharedDatabaseUrl();
-  });
-
   const createClient = () => {
-    const rawBasePrisma = createBasePrisma(sharedDatabaseUrl);
+    const rawBasePrisma = createBasePrisma();
 
     const armed = { commentFindUnique: false, profileFindFirst: false };
     const basePrisma = rawBasePrisma.$extends({

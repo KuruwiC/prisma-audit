@@ -11,8 +11,8 @@ import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { createAuditClient, defineEntity } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { cleanDatabase, createBasePrisma, getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
+import { afterEach, describe, expect, it } from 'vitest';
+import { cleanDatabase, createBasePrisma, testAggregateMapping } from './helpers/setup.js';
 
 const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'top-level-selection-actor' },
@@ -25,12 +25,7 @@ const keysOf = (value: unknown): string[] =>
   value !== null && typeof value === 'object' ? Object.keys(value).sort() : [];
 
 describe("an audited row read in the client's default shape whatever the caller selects", () => {
-  let databaseUrl: string;
   const disconnects: Array<() => Promise<void>> = [];
-
-  beforeAll(async () => {
-    databaseUrl = await getSharedDatabaseUrl();
-  });
 
   afterEach(async () => {
     for (const disconnect of disconnects.splice(0)) {
@@ -39,7 +34,7 @@ describe("an audited row read in the client's default shape whatever the caller 
   });
 
   const setup = async () => {
-    const basePrisma = createBasePrisma(databaseUrl);
+    const basePrisma = createBasePrisma();
     const provider = createAsyncLocalStorageProvider();
     const prisma = createAuditClient(basePrisma, {
       Prisma,

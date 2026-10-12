@@ -34,7 +34,6 @@ interface FailingRead {
 }
 
 interface ScenarioOptions {
-  readonly databaseUrl: string;
   readonly awaitWrite: boolean;
   readonly openImplicitTransaction?: boolean;
   readonly fault: FailingRead | 'actor-enricher';
@@ -44,7 +43,7 @@ interface ScenarioOptions {
 
 const createScenario = (options: ScenarioOptions) => {
   const error = new Error('simulated failure after the write');
-  const rawBasePrisma = createBasePrisma(options.databaseUrl);
+  const rawBasePrisma = createBasePrisma();
   let failed = false;
   const { fault } = options;
   const failOnWrittenState = (model: FailingRead['model'], rows: readonly Row[]): void => {
@@ -147,7 +146,6 @@ describe('A failed audit build after the write', () => {
   describe('keeps the write and drops its audit rows when the caller does not await them outside any transaction', () => {
     it('a failed re-read of the rows a batch update wrote', async () => {
       const scenario = createScenario({
-        databaseUrl: context.databaseUrl,
         awaitWrite: false,
         fault: { model: 'user', seesWrite: renamed },
       });
@@ -171,7 +169,6 @@ describe('A failed audit build after the write', () => {
 
     it('a failed re-read of a nested row the result does not hold', async () => {
       const scenario = createScenario({
-        databaseUrl: context.databaseUrl,
         awaitWrite: false,
         fault: { model: 'post', seesWrite: retitled },
       });
@@ -203,7 +200,6 @@ describe('A failed audit build after the write', () => {
       const newOwner = await seedUser('new-owner@example.com');
       const post = await seedPost(previousOwner.id, 'Moved');
       const scenario = createScenario({
-        databaseUrl: context.databaseUrl,
         awaitWrite: false,
         fault: { model: 'post', seesWrite: (rows) => rows.some((row) => row.authorId === newOwner.id) },
       });
@@ -231,7 +227,6 @@ describe('A failed audit build after the write', () => {
       const user = await seedUser('hidden-insert@example.com');
       const existing = await seedPost(user.id, 'Existing');
       const scenario = createScenario({
-        databaseUrl: context.databaseUrl,
         awaitWrite: false,
         fault: { model: 'post', seesWrite: (rows) => rows.some((row) => row.id !== existing.id) },
       });
@@ -264,7 +259,6 @@ describe('A failed audit build after the write', () => {
 
     it('an actor enricher that throws', async () => {
       const scenario = createScenario({
-        databaseUrl: context.databaseUrl,
         awaitWrite: false,
         fault: 'actor-enricher',
       });
@@ -288,7 +282,6 @@ describe('A failed audit build after the write', () => {
 
     it('a failed re-read inside a batch transaction, which Prisma commits before its operations return', async () => {
       const scenario = createScenario({
-        databaseUrl: context.databaseUrl,
         awaitWrite: false,
         fault: { model: 'user', seesWrite: renamed },
       });
@@ -316,7 +309,6 @@ describe('A failed audit build after the write', () => {
   describe('without an observer, reports the dropped audit rows of a committed write by the write-failure policy', () => {
     const renameUser = async (errorHandling: ErrorHandlingConfig) => {
       const scenario = createScenario({
-        databaseUrl: context.databaseUrl,
         awaitWrite: false,
         fault: 'actor-enricher',
         errorHandling,
@@ -372,7 +364,6 @@ describe('A failed audit build after the write', () => {
   describe('rejects the operation and rolls its write back', () => {
     it('inside a transaction, with an audit written after commit: a failed re-read of a nested row', async () => {
       const scenario = createScenario({
-        databaseUrl: context.databaseUrl,
         awaitWrite: false,
         fault: { model: 'post', seesWrite: retitled },
       });
@@ -403,7 +394,6 @@ describe('A failed audit build after the write', () => {
 
     it('in the transaction openImplicitTransaction opens for an awaited audit: a failed re-read of the rows a batch update wrote', async () => {
       const scenario = createScenario({
-        databaseUrl: context.databaseUrl,
         awaitWrite: true,
         openImplicitTransaction: true,
         fault: { model: 'user', seesWrite: renamed },
@@ -429,7 +419,6 @@ describe('A failed audit build after the write', () => {
 
   it('rolls back every operation of a batch transaction whose awaited audit failed, with openImplicitTransaction', async () => {
     const scenario = createScenario({
-      databaseUrl: context.databaseUrl,
       awaitWrite: true,
       openImplicitTransaction: true,
       fault: { model: 'user', seesWrite: (rows) => rows.some((row) => row.name === 'Second') },

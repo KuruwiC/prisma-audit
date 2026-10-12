@@ -22,8 +22,8 @@ import type { AuditErrorObserver } from '@kuruwic/prisma-audit';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { cleanDatabase, createBasePrisma, getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { cleanDatabase, createBasePrisma, testAggregateMapping } from './helpers/setup.js';
 
 const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'nested-pre-fetch-scope-actor' },
@@ -35,12 +35,7 @@ type FaultTarget = {
 };
 
 describe('nested pre-fetch failures — affected rows', () => {
-  let sharedDatabaseUrl: string;
   const disconnects: Array<() => Promise<void>> = [];
-
-  beforeAll(async () => {
-    sharedDatabaseUrl = await getSharedDatabaseUrl();
-  });
 
   afterEach(async () => {
     for (const disconnect of disconnects.splice(0)) {
@@ -50,7 +45,7 @@ describe('nested pre-fetch failures — affected rows', () => {
 
   /** An audited client whose next `fault.operation` call on `fault.model` after `arm()` throws once */
   const setup = async (fault: FaultTarget) => {
-    const rawBasePrisma = createBasePrisma(sharedDatabaseUrl);
+    const rawBasePrisma = createBasePrisma();
     let armed = false;
     const basePrisma = rawBasePrisma.$extends({
       name: 'fault-injection',

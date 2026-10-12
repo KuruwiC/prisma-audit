@@ -14,7 +14,7 @@ import type { AggregateMapping } from '@kuruwic/prisma-audit';
 import { createAuditClient, defineEntity, foreignKey, to } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
-import { afterAll, beforeAll, beforeEach, describe, expect, inject, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { cleanDatabase, createBasePrisma } from './helpers/setup.js';
 
 const testActor: AuditContext = {
@@ -130,7 +130,7 @@ describe('A write that stores the values a row already holds', () => {
   };
 
   beforeAll(async () => {
-    basePrisma = createBasePrisma(inject('databaseUrl'));
+    basePrisma = createBasePrisma();
     await basePrisma.$connect();
   });
 

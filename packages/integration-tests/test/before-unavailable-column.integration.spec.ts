@@ -12,23 +12,17 @@ import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { createPostReadFault } from './helpers/post-read-fault.js';
-import { createBasePrisma, getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
+import { createBasePrisma, testAggregateMapping } from './helpers/setup.js';
 
 const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'before-unavailable-column-actor' },
 };
 
 describe('beforeUnavailable column of the audit-log model', () => {
-  let sharedDatabaseUrl: string;
-
-  beforeAll(async () => {
-    sharedDatabaseUrl = await getSharedDatabaseUrl();
-  });
-
   const createClient = (auditLogModel?: 'Activity') => {
-    const rawBasePrisma = createBasePrisma(sharedDatabaseUrl);
+    const rawBasePrisma = createBasePrisma();
 
     const { findUnique, armFindUniqueFailure } = createPostReadFault('simulated before-state read failure');
     const basePrisma = rawBasePrisma.$extends({ name: 'fault-injection', query: { post: { findUnique } } });

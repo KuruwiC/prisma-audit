@@ -16,7 +16,7 @@ import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { createAuditClient, defineEntity, flushAllPendingWrites } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
-import { afterAll, beforeAll, beforeEach, describe, expect, inject, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanDatabase, createBasePrisma } from './helpers/setup.js';
 
 const testActor: AuditContext = {
@@ -42,7 +42,6 @@ const narrowedIds = (args: Record<string, unknown>): string[] => {
 };
 
 describe('updateMany and deleteMany with a limit', () => {
-  const databaseUrl = () => inject('databaseUrl');
   let raw: PrismaClient;
   let plain: PrismaClient;
   const provider = createAsyncLocalStorageProvider();
@@ -94,8 +93,8 @@ describe('updateMany and deleteMany with a limit', () => {
   let audited: ReturnType<typeof createAudited>;
 
   beforeAll(() => {
-    raw = createBasePrisma(databaseUrl());
-    plain = createBasePrisma(databaseUrl());
+    raw = createBasePrisma();
+    plain = createBasePrisma();
     audited = createAudited();
   });
 

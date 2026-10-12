@@ -17,9 +17,9 @@ import type { AuditErrorObserver, AuditLogData } from '@kuruwic/prisma-audit';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createPostReadFault } from './helpers/post-read-fault.js';
-import { createBasePrisma, getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
+import { createBasePrisma, testAggregateMapping } from './helpers/setup.js';
 
 type FetchBeforeConfig = Parameters<typeof createAuditClient>[1]['fetchBefore'];
 
@@ -30,14 +30,8 @@ const testActor: AuditContext = {
 const FAILURE_MESSAGE = 'simulated before-state read failure';
 
 describe('before state requested but unreadable', () => {
-  let sharedDatabaseUrl: string;
-
-  beforeAll(async () => {
-    sharedDatabaseUrl = await getSharedDatabaseUrl();
-  });
-
   const createClient = (options: { fetchBefore?: FetchBeforeConfig } = {}) => {
-    const rawBasePrisma = createBasePrisma(sharedDatabaseUrl);
+    const rawBasePrisma = createBasePrisma();
 
     const { findUnique, armFindUniqueFailure } = createPostReadFault(FAILURE_MESSAGE);
     const basePrisma = rawBasePrisma.$extends({ name: 'fault-injection', query: { post: { findUnique } } });

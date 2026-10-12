@@ -106,13 +106,7 @@ export interface TestContext {
   prisma: ReturnType<typeof createAuditClient>;
   basePrisma: PrismaClient;
   provider: AuditContextProvider;
-  databaseUrl: string;
 }
-
-/** Reads the URL of the database the shared global-setup container serves (see test/global-setup.ts) */
-export const getSharedDatabaseUrl = async (): Promise<string> => {
-  return inject('databaseUrl');
-};
 
 /** The parts of the audit options that come from the generated client of the database under test */
 interface GeneratedAuditInputs<TPrisma, TSchema> {
@@ -159,29 +153,29 @@ export const testAuditOptions = <TPrisma, TSchema>(
 type BaseClientOptions<TOptions> = TOptions & { adapter: PrismaPg };
 
 /**
- * A client without the audit extension on the PostgreSQL database at `databaseUrl`, through the
- * driver adapter every base client uses. `options` adds the other constructor options; the client's
- * type follows them, as it would for `new PrismaClient(...)` (`log` events, `omit`).
+ * A client without the audit extension on the PostgreSQL database the shared global-setup container
+ * serves (see test/global-setup.ts), through the driver adapter every base client uses. `options`
+ * adds the other constructor options; the client's type follows them, as it would for
+ * `new PrismaClient(...)` (`log` events, `omit`).
  */
 export const createBasePrisma = <const TOptions extends Prisma.PrismaClientBaseOptions = Record<never, never>>(
-  databaseUrl: string,
   options?: TOptions,
 ): InstanceType<typeof PrismaClient<BaseClientOptions<TOptions>>> => {
-  const clientOptions = { ...options, adapter: new PrismaPg({ connectionString: databaseUrl }) };
+  const clientOptions = { ...options, adapter: new PrismaPg({ connectionString: inject('databaseUrl') }) };
   // The constructor's argument type is conditional on its options type, which does not resolve while TOptions is generic
   return new PrismaClient<BaseClientOptions<TOptions>>(
     clientOptions as Prisma.PrismaClientConstructorArgs<BaseClientOptions<TOptions>>,
   );
 };
 
-export const createTestClients = (databaseUrl: string): TestContext => {
-  const basePrisma = createBasePrisma(databaseUrl);
+export const createTestClients = (): TestContext => {
+  const basePrisma = createBasePrisma();
 
   const provider = createAsyncLocalStorageProvider();
 
   const prisma = createAuditClient(basePrisma, testAuditOptions(provider, { Prisma, schema: auditSchema }));
 
-  return { prisma, basePrisma, provider, databaseUrl };
+  return { prisma, basePrisma, provider };
 };
 
 /**
@@ -269,7 +263,7 @@ export const setupTestContext = (): TestContext => {
   const context = {} as TestContext;
 
   beforeAll(() => {
-    Object.assign(context, createTestClients(inject('databaseUrl')));
+    Object.assign(context, createTestClients());
   });
 
   afterAll(async () => {

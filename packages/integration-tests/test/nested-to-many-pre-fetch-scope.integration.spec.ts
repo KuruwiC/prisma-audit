@@ -13,26 +13,21 @@ import type { AuditErrorObserver } from '@kuruwic/prisma-audit';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { type AuditModelName, auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createBasePrisma, getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createBasePrisma, testAggregateMapping } from './helpers/setup.js';
 
 const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'nested-to-many-scope-actor' },
 };
 
 describe('nested to-many pre-fetch — parent row scope', () => {
-  let sharedDatabaseUrl: string;
   let basePrisma: PrismaClient;
   let prisma: ReturnType<typeof createAuditClient<PrismaClient, AuditModelName>>;
   let provider: ReturnType<typeof createAsyncLocalStorageProvider>;
   let observer: ReturnType<typeof vi.fn<AuditErrorObserver>>;
 
-  beforeAll(async () => {
-    sharedDatabaseUrl = await getSharedDatabaseUrl();
-  });
-
   beforeEach(() => {
-    basePrisma = createBasePrisma(sharedDatabaseUrl);
+    basePrisma = createBasePrisma();
     provider = createAsyncLocalStorageProvider();
     observer = vi.fn<AuditErrorObserver>();
     prisma = createAuditClient(basePrisma, {

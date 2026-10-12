@@ -16,7 +16,7 @@ import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { createAuditClient, defineEntity, flushAllPendingWrites } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
-import { afterAll, beforeAll, beforeEach, describe, expect, inject, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanDatabase, createBasePrisma } from './helpers/setup.js';
 
 const testActor: AuditContext = {
@@ -83,12 +83,11 @@ const companionCreator = Prisma.defineExtension({
 });
 
 describe('openImplicitTransaction', () => {
-  const databaseUrl = () => inject('databaseUrl');
   const disposers: Array<() => Promise<void>> = [];
   let raw: PrismaClient;
 
   beforeAll(() => {
-    raw = createBasePrisma(databaseUrl());
+    raw = createBasePrisma();
   });
 
   afterAll(async () => {
@@ -108,7 +107,7 @@ describe('openImplicitTransaction', () => {
    * client) appends `?`.
    */
   const createClients = (options: ClientOptions) => {
-    const base = createBasePrisma(databaseUrl());
+    const base = createBasePrisma();
     const before: Seen = { updates: 0, others: 0 };
     const after: Seen = { updates: 0, others: 0 };
     const provider = createAsyncLocalStorageProvider();
@@ -197,7 +196,7 @@ describe('openImplicitTransaction', () => {
    * transaction timeout.
    */
   const runBatch = (options: BatchOptions) => {
-    const limited = createBasePrisma(databaseUrl(), options.slow ? { transactionOptions: { timeout: 200 } } : {});
+    const limited = createBasePrisma(options.slow ? { transactionOptions: { timeout: 200 } } : {});
     disposers.push(async () => {
       await limited.$disconnect();
     });

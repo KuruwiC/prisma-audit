@@ -22,7 +22,7 @@ describe('Interactive $transaction scope', () => {
   const context = setupTestContext();
 
   const createAudited = (awaitWrite: boolean) => {
-    const raw = createBasePrisma(context.databaseUrl);
+    const raw = createBasePrisma();
     const provider = createAsyncLocalStorageProvider();
     const prisma = createAuditClient(raw, {
       Prisma,

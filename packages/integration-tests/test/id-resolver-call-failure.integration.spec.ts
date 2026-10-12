@@ -26,7 +26,7 @@ describe('id-resolver-call failures', () => {
   const context = setupTestContext();
 
   const createClient = (post: ReturnType<typeof defineEntity>, observer: AuditErrorObserver) => {
-    const basePrisma = createBasePrisma(context.databaseUrl);
+    const basePrisma = createBasePrisma();
     const provider = createAsyncLocalStorageProvider();
     const prisma = createAuditClient(basePrisma, {
       Prisma,
@@ -279,7 +279,7 @@ describe('id-resolver-call failures', () => {
 
   describe('a foreignKey root and the columns of the row', () => {
     const createClientWith = (fetchBeforeDelete: boolean, observer: AuditErrorObserver) => {
-      const basePrisma = createBasePrisma(context.databaseUrl);
+      const basePrisma = createBasePrisma();
       const provider = createAsyncLocalStorageProvider();
       const prisma = createAuditClient(basePrisma, {
         Prisma,

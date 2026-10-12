@@ -20,14 +20,8 @@ import {
 } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import {
-  aggregatesOf,
-  cleanDatabase,
-  createBasePrisma,
-  getSharedDatabaseUrl,
-  testAggregateMapping,
-} from './helpers/setup.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { aggregatesOf, cleanDatabase, createBasePrisma, testAggregateMapping } from './helpers/setup.js';
 
 const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'client-omitted-fields-actor' },
@@ -81,12 +75,7 @@ const prismaReportingVersion = (version: string | undefined): typeof Prisma =>
   });
 
 describe('fields a client-level omit hides', () => {
-  let databaseUrl: string;
   const disconnects: Array<() => Promise<void>> = [];
-
-  beforeAll(async () => {
-    databaseUrl = await getSharedDatabaseUrl();
-  });
 
   afterEach(async () => {
     vi.restoreAllMocks();
@@ -96,7 +85,7 @@ describe('fields a client-level omit hides', () => {
   });
 
   const setup = async (options: Options = {}, clientOmit: Prisma.GlobalOmitConfig = CLIENT_OMIT) => {
-    const basePrisma = createBasePrisma(databaseUrl, { omit: clientOmit });
+    const basePrisma = createBasePrisma({ omit: clientOmit });
     const provider = createAsyncLocalStorageProvider();
     const prisma = createAuditClient(basePrisma, {
       Prisma,
@@ -698,7 +687,7 @@ describe('fields a client-level omit hides', () => {
 
     const withHiddenKey = async (options: Options = {}) => {
       const context = await setup(options, { user: { id: true } });
-      const plainPrisma = createBasePrisma(databaseUrl);
+      const plainPrisma = createBasePrisma();
       disconnects.push(() => plainPrisma.$disconnect());
       await plainPrisma.user.createMany({
         data: MEMBERS.map((id) => ({ id, email: `${id}@example.com`, name: `name of ${id}` })),

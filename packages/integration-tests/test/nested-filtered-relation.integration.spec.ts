@@ -11,20 +11,15 @@ import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { cleanDatabase, createBasePrisma, getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
+import { afterEach, describe, expect, it } from 'vitest';
+import { cleanDatabase, createBasePrisma, testAggregateMapping } from './helpers/setup.js';
 
 const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'filtered-relation-actor' },
 };
 
 describe('nested rows a relation filter leaves out of the result', () => {
-  let databaseUrl: string;
   const disconnects: Array<() => Promise<void>> = [];
-
-  beforeAll(async () => {
-    databaseUrl = await getSharedDatabaseUrl();
-  });
 
   afterEach(async () => {
     for (const disconnect of disconnects.splice(0)) {
@@ -33,7 +28,7 @@ describe('nested rows a relation filter leaves out of the result', () => {
   });
 
   const setup = async () => {
-    const basePrisma = createBasePrisma(databaseUrl);
+    const basePrisma = createBasePrisma();
     const provider = createAsyncLocalStorageProvider();
     const prisma = createAuditClient(basePrisma, {
       Prisma,

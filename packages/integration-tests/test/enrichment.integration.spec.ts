@@ -46,7 +46,7 @@ describe('Context Enrichment Integration', () => {
    * disconnected after the test, whether it passed or not.
    */
   const openClient = (options: ClientOptions) => {
-    const basePrisma = createBasePrisma(context.databaseUrl);
+    const basePrisma = createBasePrisma();
     openedBaseClients.push(basePrisma);
     const provider = createAsyncLocalStorageProvider();
     const prisma = createAuditClient(basePrisma, {

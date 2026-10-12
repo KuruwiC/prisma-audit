@@ -12,9 +12,9 @@ import type { AuditErrorObserver, PrismaAuditExtensionOptions } from '@kuruwic/p
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createPostReadFault } from './helpers/post-read-fault.js';
-import { cleanDatabase, createBasePrisma, getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
+import { cleanDatabase, createBasePrisma, testAggregateMapping } from './helpers/setup.js';
 
 const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'top-level-upsert-nested-actor' },
@@ -24,8 +24,8 @@ const FAILURE_MESSAGE = 'simulated before-state fetch failure';
 
 type FetchBeforeConfig = NonNullable<PrismaAuditExtensionOptions['fetchBefore']>;
 
-const createClients = (databaseUrl: string, fetchBefore: FetchBeforeConfig) => {
-  const rawBasePrisma = createBasePrisma(databaseUrl);
+const createClients = (fetchBefore: FetchBeforeConfig) => {
+  const rawBasePrisma = createBasePrisma();
 
   const { findUnique, armFindUniqueFailure } = createPostReadFault(FAILURE_MESSAGE);
   const basePrisma = rawBasePrisma.$extends({ name: 'fault-injection', query: { post: { findUnique } } });
@@ -55,18 +55,13 @@ const createClients = (databaseUrl: string, fetchBefore: FetchBeforeConfig) => {
 };
 
 describe('top-level upsert nested audit entries', () => {
-  let databaseUrl: string;
   let clients: ReturnType<typeof createClients> | undefined;
 
   const setUp = async (fetchBefore: FetchBeforeConfig) => {
-    clients = createClients(databaseUrl, fetchBefore);
+    clients = createClients(fetchBefore);
     await cleanDatabase(clients.rawBasePrisma);
     return clients;
   };
-
-  beforeAll(async () => {
-    databaseUrl = await getSharedDatabaseUrl();
-  });
 
   afterEach(async () => {
     await clients?.prisma.$disconnect();

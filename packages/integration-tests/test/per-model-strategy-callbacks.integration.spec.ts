@@ -23,8 +23,8 @@ interface ScenarioOptions {
   failingWriter?: boolean;
 }
 
-const createScenario = (databaseUrl: string, options: ScenarioOptions) => {
-  const basePrisma = createBasePrisma(databaseUrl);
+const createScenario = (options: ScenarioOptions) => {
+  const basePrisma = createBasePrisma();
   const provider = createAsyncLocalStorageProvider();
   const prisma = createAuditClient(basePrisma, {
     Prisma,
@@ -62,7 +62,7 @@ describe('Per-model strategy callbacks for models without tags', () => {
   describe('samplingIf', () => {
     it('skips auditing a model without tags whose samplingIf rate is 0', async () => {
       const samplingIf = vi.fn((modelName: string, _tags: string[]) => (modelName === 'Tag' ? 0 : 1));
-      const scenario = createScenario(context.databaseUrl, { performance: { awaitWrite: true, samplingIf } });
+      const scenario = createScenario({ performance: { awaitWrite: true, samplingIf } });
 
       try {
         await scenario.run(async () => {
@@ -79,7 +79,7 @@ describe('Per-model strategy callbacks for models without tags', () => {
     });
 
     it('audits a model without tags whose samplingIf rate is 1 under a global sampling of 0', async () => {
-      const scenario = createScenario(context.databaseUrl, {
+      const scenario = createScenario({
         performance: { awaitWrite: true, sampling: 0, samplingIf: (modelName) => (modelName === 'Tag' ? 1 : 0) },
       });
 
@@ -97,7 +97,7 @@ describe('Per-model strategy callbacks for models without tags', () => {
     });
     it('does not consult samplingIf for a read operation', async () => {
       const samplingIf = vi.fn((_modelName: string, _tags: string[]) => 1);
-      const scenario = createScenario(context.databaseUrl, { performance: { awaitWrite: true, samplingIf } });
+      const scenario = createScenario({ performance: { awaitWrite: true, samplingIf } });
 
       try {
         await scenario.run(async () => {
@@ -117,7 +117,7 @@ describe('Per-model strategy callbacks for models without tags', () => {
     // the operation has returned, so the operation resolves.
     const createAwaitWriteIfScenario = () => {
       const awaitWriteIf = vi.fn((modelName: string, _tags: string[]) => modelName === 'Tag');
-      const scenario = createScenario(context.databaseUrl, {
+      const scenario = createScenario({
         // The client opens a transaction around a write whose audit is awaited, which the writer's
         // error rolls back under 'throw'.
         performance: { awaitWrite: false, awaitWriteIf, openImplicitTransaction: true },

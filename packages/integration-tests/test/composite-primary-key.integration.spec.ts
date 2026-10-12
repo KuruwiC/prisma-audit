@@ -43,8 +43,8 @@ import type { AuditErrorObserver } from '@kuruwic/prisma-audit';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { createBasePrisma, getSharedDatabaseUrl, setupTestContext, testAggregateMapping } from './helpers/setup.js';
+import { afterAll, describe, expect, it, vi } from 'vitest';
+import { createBasePrisma, setupTestContext, testAggregateMapping } from './helpers/setup.js';
 
 const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'composite-pk-actor' },
@@ -395,12 +395,7 @@ describe('Composite Primary Key (PostLike)', () => {
    * still resolved and recorded — no fabricated entry, and no dropped one either.
    */
   describe('nested delete from Post (fetchBefore.delete: false)', () => {
-    let sharedDatabaseUrl: string;
     let scenario: { basePrisma: PrismaClient; prisma: ReturnType<typeof createAuditClient> } | undefined;
-
-    beforeAll(async () => {
-      sharedDatabaseUrl = await getSharedDatabaseUrl();
-    });
 
     afterAll(async () => {
       await scenario?.basePrisma.$disconnect();
@@ -408,7 +403,7 @@ describe('Composite Primary Key (PostLike)', () => {
     });
 
     it('records the real composite entityId from the WHERE clause alone, and does not report it as unresolved', async () => {
-      const basePrisma = createBasePrisma(sharedDatabaseUrl);
+      const basePrisma = createBasePrisma();
       const provider = createAsyncLocalStorageProvider();
       const observer = vi.fn<AuditErrorObserver>();
       const prisma = createAuditClient(basePrisma, {

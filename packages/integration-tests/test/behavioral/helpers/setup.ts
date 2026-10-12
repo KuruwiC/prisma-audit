@@ -5,8 +5,8 @@
  * Swap createPrismaHarness with a Drizzle harness to run the same tests on Drizzle.
  */
 
-import { afterEach, beforeAll, beforeEach } from 'vitest';
-import { createTestClients, disposeTestContext, getSharedDatabaseUrl, type TestContext } from '../../helpers/setup.js';
+import { afterEach, beforeEach } from 'vitest';
+import { createTestClients, disposeTestContext, type TestContext } from '../../helpers/setup.js';
 import type { AuditTestHarness } from './harness.js';
 import { createPrismaHarness } from './prisma-harness.js';
 
@@ -28,16 +28,11 @@ export type { AuditLogFilter, AuditLogRecord, AuditTestHarness } from './harness
  * ```
  */
 export const setupBehavioralTests = () => {
-  let sharedDatabaseUrl: string;
   let testContext: TestContext;
   let harness: AuditTestHarness;
 
-  beforeAll(async () => {
-    sharedDatabaseUrl = await getSharedDatabaseUrl();
-  });
-
   beforeEach(async () => {
-    testContext = createTestClients(sharedDatabaseUrl);
+    testContext = createTestClients();
 
     await testContext.prisma.$connect();
     await testContext.basePrisma.$connect();

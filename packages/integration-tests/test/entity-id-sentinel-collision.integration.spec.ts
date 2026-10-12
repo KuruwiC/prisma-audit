@@ -18,7 +18,7 @@ import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createBasePrisma, getSharedDatabaseUrl, testAggregateMapping } from './helpers/setup.js';
+import { createBasePrisma, testAggregateMapping } from './helpers/setup.js';
 
 type FetchBeforeConfig = Parameters<typeof createAuditClient>[1]['fetchBefore'];
 
@@ -32,8 +32,8 @@ describe('nested delete of a row whose primary key is "__default__"', () => {
   let basePrisma: PrismaClient;
   let observer: ReturnType<typeof vi.fn<AuditErrorObserver>>;
 
-  beforeAll(async () => {
-    basePrisma = createBasePrisma(await getSharedDatabaseUrl());
+  beforeAll(() => {
+    basePrisma = createBasePrisma();
   });
 
   afterAll(async () => {
