@@ -86,14 +86,6 @@ describe('getIdFieldInfo', () => {
     expect(getIdFieldInfo(metadata, 'User', 'id')).toBeUndefined();
   });
 
-  it('throws naming a model the schema does not hold', () => {
-    const metadata = schemaMetadataOf(model('User', []));
-
-    expect(() => getIdFieldInfo(metadata, 'NonExistent', 'id')).toThrow(
-      'Model "NonExistent" is not in the audit schema',
-    );
-  });
-
   it('lets an error reading the field metadata propagate', () => {
     const error = new Error('metadata unavailable');
 

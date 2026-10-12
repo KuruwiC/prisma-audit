@@ -135,7 +135,7 @@ describe('serializeForAuditJson', () => {
       });
     });
 
-    it('should handle deeply nested structures', () => {
+    it('serializes a BigInt and a Date nested two levels deep', () => {
       const obj = {
         level1: {
           level2: {

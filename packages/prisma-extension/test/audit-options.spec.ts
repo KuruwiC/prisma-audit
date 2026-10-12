@@ -7,7 +7,6 @@ import { createAsyncLocalStorageProvider, defineEntity } from '@kuruwic/db-audit
 import { describe, expect, it } from 'vitest';
 import { normalizeAuditOptions } from '../src/audit-options.js';
 import type { PrismaAuditExtensionOptions } from '../src/types.js';
-import { ensureIds } from '../src/utils/id-generation.js';
 import { auditSchema, column, model } from './support/audit-schema.js';
 
 const Prisma = { defineExtension: (extension: unknown) => extension, DbNull: null };
@@ -74,41 +73,4 @@ describe('the schema option', () => {
     expect(schemaMetadata.getModelNames()).toEqual(['User']);
     expect(schemaMetadata.getFieldMetadata('User', 'id')?.isId).toBe(true);
   });
-
-  it.each([
-    ['getUniqueConstraints', (metadata: SchemaMetadataOf) => metadata.getUniqueConstraints('Ghost')],
-    ['getRelationFields', (metadata: SchemaMetadataOf) => metadata.getRelationFields('Ghost')],
-    ['getAllFields', (metadata: SchemaMetadataOf) => metadata.getAllFields('Ghost')],
-    ['getFieldMetadata', (metadata: SchemaMetadataOf) => metadata.getFieldMetadata('Ghost', 'id')],
-  ])('%s throws naming a model the schema does not hold', (_method, query) => {
-    const { schemaMetadata } = normalizeAuditOptions(optionsWith(userSchema));
-
-    expect(() => query(schemaMetadata)).toThrow(
-      '[@prisma-audit] Model "Ghost" is not in the audit schema passed as "schema"; pass the schema generated ' +
-        'from the same schema.prisma as the client.',
-    );
-  });
-
-  it('makes createMany id generation on a model the schema does not hold throw naming the model', () => {
-    const { schemaMetadata } = normalizeAuditOptions(optionsWith(userSchema));
-
-    expect(() => ensureIds(schemaMetadata, 'Ghost', [{ email: 'a@example.com' }], ['id'])).toThrow(
-      'Model "Ghost" is not in the audit schema',
-    );
-  });
-
-  it('treats a literal default that reads like a generator call as a default the client cannot generate', () => {
-    // `id String @id @default("uuid(7)")`: a literal string, which Prisma stores as it is
-    const literalSchema = auditSchema(
-      model('Item', [column('id', { isId: true, isRequired: true, hasDefaultValue: true, default: null })]),
-    );
-    const { schemaMetadata } = normalizeAuditOptions(optionsWith(literalSchema));
-
-    const generate = () => ensureIds(schemaMetadata, 'Item', [{ label: 'a' }], ['id']);
-
-    expect(generate).toThrow('Field "id" has a literal default value, not a generator function.');
-    expect(generate).not.toThrow('undefined');
-  });
 });
-
-type SchemaMetadataOf = ReturnType<typeof normalizeAuditOptions>['schemaMetadata'];

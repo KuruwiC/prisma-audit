@@ -259,7 +259,7 @@ describe('edge cases', () => {
     expect(redacted).toEqual({});
   });
 
-  it('should handle deeply nested structures', () => {
+  it('redacts a sensitive field four levels deep', () => {
     const redactor = createRedactor();
     const data = {
       level1: {
