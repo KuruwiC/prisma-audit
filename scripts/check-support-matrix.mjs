@@ -4,19 +4,7 @@
  * README state the same thing. The peer range of `@prisma/client` in packages/prisma-extension and
  * `engines.node` in the root package.json are the sources; every other copy is derived from them.
  *
- * 1. The peer range has an upper bound.
- * 2. Every matrix row has an exact `prisma` version (no tag, no range) and an integer `node` major.
- * 3. Every matrix `prisma` version satisfies the peer range.
- * 4. The peer range's minimum is a matrix row (the floor is tested).
- * 5. Every Prisma major the peer range admits has a matrix row.
- * 6. Every matrix `node` major intersects the root `engines.node`.
- * 7. Every `||` alternative of the root `engines.node` has a matrix row on its minimum's major.
- * 8. Every non-private workspace package that declares `engines.node` declares the root value.
- * 9. README.md contains the peer range and the root `engines.node` verbatim.
- *
- * The matrix is read from `jobs.compatibility.strategy.matrix.include` of
- * .github/workflows/prisma-compatibility.yml. Prints one line per rule; each violation is one
- * `FAIL` line, and the script then exits with status 1.
+ * Prints one line per rule; each violation is one `FAIL` line, and the script then exits with status 1.
  *
  * Usage: node scripts/check-support-matrix.mjs [repo-root]
  */
@@ -75,7 +63,6 @@ function loadEngines() {
   return engines;
 }
 
-/** Lists the non-private workspace packages (repo-relative package.json path and parsed content) */
 function loadPublishablePackages() {
   return WORKSPACE_DIRS.flatMap((dir) => {
     if (!existsSync(path.join(ROOT, dir))) return [];
@@ -97,7 +84,10 @@ function hasExactVersion(row) {
   return typeof row?.prisma === 'string' && semver.valid(row.prisma) === row.prisma;
 }
 
-/** Rows whose `prisma` is an exact version that satisfies the peer range */
+function hasNodeMajor(row) {
+  return Number.isInteger(row?.node) && row.node >= 1;
+}
+
 function rowsInRange(rows, range) {
   return rows.filter((row) => hasExactVersion(row) && semver.satisfies(row.prisma, range));
 }
@@ -116,7 +106,7 @@ function checkRowShape({ rows }) {
     if (!hasExactVersion(row)) {
       problems.push(`${describeRow(row, index)}: prisma is not an exact version`);
     }
-    if (!Number.isInteger(row?.node) || row.node < 1) {
+    if (!hasNodeMajor(row)) {
       problems.push(`${describeRow(row, index)}: node is not an integer major`);
     }
     return problems;
@@ -159,7 +149,7 @@ function checkMajorsCovered({ rows, range }) {
 
 function checkNodeInEngines({ rows, engines }) {
   return rows.flatMap((row, index) =>
-    Number.isInteger(row?.node) && row.node >= 1 && !semver.intersects(engines, `${row.node}.x.x`)
+    hasNodeMajor(row) && !semver.intersects(engines, `${row.node}.x.x`)
       ? [`${describeRow(row, index)}: Node ${row.node} is outside engines.node "${engines}"`]
       : [],
   );
