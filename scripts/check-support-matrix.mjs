@@ -4,6 +4,9 @@
  * README state the same thing. The peer range of `@prisma/client` in packages/prisma-extension and
  * `engines.node` in the root package.json are the sources; every other copy is derived from them.
  *
+ * The README copies are the peer range literals in README.md and packages/prisma-extension/README.md,
+ * the engines.node string in README.md, and the "Tested in CI" cells of the Compatibility table.
+ *
  * Prints one line per rule; each violation is one `FAIL` line, and the script then exits with status 1.
  *
  * Usage: node scripts/check-support-matrix.mjs [repo-root]
@@ -23,6 +26,10 @@ const ROOT_PACKAGE = 'package.json';
 const PEER_PACKAGE = 'packages/prisma-extension/package.json';
 const PEER_NAME = '@prisma/client';
 const README = 'README.md';
+const PEER_README_FILES = [README, 'packages/prisma-extension/README.md'];
+const TESTED_COLUMN = 'Tested in CI';
+/** The shape in which the docs write a bounded peer range, e.g. `>=6.16.0 <8.0.0` */
+const PEER_RANGE_LITERAL = />=\d+\.\d+\.\d+ <\d+\.\d+\.\d+/g;
 const WORKSPACE_DIRS = ['packages', 'examples'];
 /** A version no real peer range admits: a range that still satisfies it has no upper bound */
 const FAR_FUTURE = '999.0.0';
@@ -128,11 +135,11 @@ function checkFloorIsTested({ rows, range }) {
     : [`peer range minimum ${floor} has no matrix row (rows: ${rows.map((row) => row?.prisma).join(', ')})`];
 }
 
-/** Majors from the peer range's minimum upward that the range admits; the range must be bounded */
+/** Every major from the peer range's minimum up to the far-future bound that the range admits; the range must be bounded */
 function admittedMajors(range) {
   const majors = [];
-  for (let major = semver.minVersion(range).major; semver.intersects(range, `${major}.x.x`); major += 1) {
-    majors.push(major);
+  for (let major = semver.minVersion(range).major; major < semver.major(FAR_FUTURE); major += 1) {
+    if (semver.intersects(range, `${major}.x.x`)) majors.push(major);
   }
   return majors;
 }
@@ -175,12 +182,54 @@ function checkPackageEngines({ engines, packages }) {
   });
 }
 
-function checkReadme({ range, engines }) {
-  const readme = read(README);
-  return [
-    [`${PEER_NAME} peer range`, range],
-    ['engines.node', engines],
-  ].flatMap(([label, value]) => (readme.includes(value) ? [] : [`${README} does not contain the ${label} "${value}"`]));
+function checkReadmeEngines({ engines }) {
+  return read(README).includes(engines) ? [] : [`${README} does not contain engines.node "${engines}"`];
+}
+
+function checkPeerRangeCopies({ range }) {
+  return PEER_README_FILES.flatMap((file) => {
+    const lines = read(file).split('\n');
+    const stale = lines.flatMap((line, index) =>
+      (line.replaceAll(range, '').match(PEER_RANGE_LITERAL) ?? []).map(
+        (literal) => `${file}:${index + 1}: peer range "${literal}" differs from "${range}"`,
+      ),
+    );
+    return lines.some((line) => line.includes(range)) ? stale : [...stale, `${file} does not contain "${range}"`];
+  });
+}
+
+function splitTableCells(line) {
+  return line
+    .trim()
+    .replace(/^\||\|$/g, '')
+    .split('|')
+    .map((cell) => cell.trim());
+}
+
+function checkTestedInCi({ rows }) {
+  const table = read(README)
+    .split('\n')
+    .filter((line) => line.trimStart().startsWith('|'))
+    .map(splitTableCells);
+  const column = table.find((cells) => cells.includes(TESTED_COLUMN))?.indexOf(TESTED_COLUMN);
+  if (column === undefined) {
+    return [`${README}: no table has a "${TESTED_COLUMN}" column`];
+  }
+  const exactRows = rows.filter(hasExactVersion);
+  const expected = [
+    ['**Prisma**', [...new Set(exactRows.map((row) => row.prisma))].sort(semver.compare)],
+    ['**Node.js**', [...new Set(rows.filter(hasNodeMajor).map((row) => row.node))].sort((a, b) => a - b)],
+  ];
+  return expected.flatMap(([label, values]) => {
+    const cells = table.find((row) => row[0] === label);
+    if (cells === undefined) {
+      return [`${README}: no compatibility table row "${label}"`];
+    }
+    const want = values.join(', ');
+    return cells[column] === want
+      ? []
+      : [`${README}: "${TESTED_COLUMN}" cell of ${label} is "${cells[column]}", the matrix gives "${want}"`];
+  });
 }
 
 const RULES = [
@@ -195,7 +244,9 @@ const RULES = [
     check: checkEngineAlternativesCovered,
   },
   { title: "publishable packages declare the root's engines.node", check: checkPackageEngines },
-  { title: `${README} states the peer range and engines.node`, check: checkReadme },
+  { title: `${README} states engines.node`, check: checkReadmeEngines },
+  { title: 'the README files state the peer range and no other range literal', check: checkPeerRangeCopies },
+  { title: `the ${README} "${TESTED_COLUMN}" cells list the matrix's versions`, check: checkTestedInCi },
 ];
 
 function main() {
