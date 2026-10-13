@@ -1,6 +1,6 @@
 # Migrating from v0.1.6
 
-This guide covers an application that uses the `v0.1.6` GitHub Release (`kuruwic-prisma-audit-0.1.6.tgz`). Each section pairs the v0.1.6 behaviour with the current one and says what to change.
+This guide covers an application that uses the `v0.1.6` GitHub Release (`kuruwic-prisma-audit-0.1.6.tgz`).
 
 ## Installation and requirements
 

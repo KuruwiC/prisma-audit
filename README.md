@@ -588,7 +588,7 @@ The [compatibility workflow](.github/workflows/prisma-compatibility.yml) runs th
 
 ## Prisma 8
 
-Prisma 8 is not supported. As of 2026-10, Prisma ORM 8 is a release candidate (`prisma@latest` is `8.0.0-rc.22`; see Prisma's [release status](https://www.prisma.io/docs/orm/release-status)). It has no `PrismaClient` and no `$extends`: middleware replaces query extensions. Supporting it means a new adapter on `@kuruwic/db-audit-core`, not a port of this extension. That work starts once Prisma 8.0.0 is generally available and supports MySQL and SQLite; as of 2026-10, Prisma lists MySQL as coming soon and SQLite as experimental ([supported databases](https://www.prisma.io/docs/orm/supported-databases)).
+Prisma 8 is not supported. As of 2026-10, Prisma ORM 8 is a release candidate (`prisma@latest` is `8.0.0-rc.22`; see Prisma's [release status](https://www.prisma.io/docs/orm/release-status)). It has no `PrismaClient` and no `$extends`: middleware replaces query extensions. Supporting it means a new adapter on `@kuruwic/db-audit-core`, not a port of this extension. That work starts once Prisma 8.0.0 is generally available and supports MySQL and SQLite; Prisma lists MySQL as coming soon and SQLite as experimental ([supported databases](https://www.prisma.io/docs/orm/supported-databases)).
 
 ## Upgrading
 
