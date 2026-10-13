@@ -4,17 +4,19 @@ Audit logging for Prisma. Tracks who changed what and when.
 
 ## Installation
 
-> **Note**: This package is not yet published to npm. Install from GitHub Releases.
+> **Note**: This package is not yet published to npm. Install it from the tarballs attached to a [GitHub Release](https://github.com/KuruwiC/prisma-audit/releases).
 
-Each release attaches one tarball per package; `@kuruwic/prisma-audit` depends on `@kuruwic/db-audit-core`, so install both together:
+A release attaches one tarball per package; `@kuruwic/prisma-audit` depends on `@kuruwic/db-audit-core`, so install both together, replacing `<version>` with the release's version:
 
 ```bash
 pnpm add \
-  https://github.com/KuruwiC/prisma-audit/releases/download/v0.1.6/kuruwic-db-audit-core-0.1.6.tgz \
-  https://github.com/KuruwiC/prisma-audit/releases/download/v0.1.6/kuruwic-prisma-audit-0.1.6.tgz
+  https://github.com/KuruwiC/prisma-audit/releases/download/v<version>/kuruwic-db-audit-core-<version>.tgz \
+  https://github.com/KuruwiC/prisma-audit/releases/download/v<version>/kuruwic-prisma-audit-<version>.tgz
 pnpm add -D \
-  https://github.com/KuruwiC/prisma-audit/releases/download/v0.1.6/kuruwic-prisma-audit-generator-0.1.6.tgz
+  https://github.com/KuruwiC/prisma-audit/releases/download/v<version>/kuruwic-prisma-audit-generator-<version>.tgz
 ```
+
+Install Prisma with an explicit major, such as `prisma@^7` and `@prisma/client@^7` (or `^6.16`): `prisma@latest` on npm is a Prisma 8 release candidate, which is not supported.
 
 The extension reads your models' keys and relations from a file that `prisma generate` writes. Add the generator, `@kuruwic/prisma-audit-generator`, to `schema.prisma`:
 

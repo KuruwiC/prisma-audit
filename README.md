@@ -77,17 +77,27 @@ Branded types (`ActorId`, `EntityId`, `AggregateId`) prevent ID mix-ups at compi
 
 ## Installation
 
-> **Note**: This package is not yet published to npm. Install from GitHub Releases.
+> **Note**: These packages are not yet published to npm. Install them from the tarballs attached to a [GitHub Release](https://github.com/KuruwiC/prisma-audit/releases).
 
-Each release attaches one tarball per package; `@kuruwic/prisma-audit` depends on `@kuruwic/db-audit-core`, so install both together:
+### Packages
+
+| Package                           | Role                                                                                                        | Install as     |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------- | -------------- |
+| `@kuruwic/db-audit-core`          | ORM-independent core: turns the rows an adapter reports into audit records and decides how they are written | dependency     |
+| `@kuruwic/prisma-audit`           | Prisma 6/7 Client Extension; depends on `@kuruwic/db-audit-core`                                            | dependency     |
+| `@kuruwic/prisma-audit-generator` | `prisma generate` step that writes the schema file (`auditSchema`) the extension reads at runtime           | dev dependency |
+
+A release attaches one tarball per package (`v0.1.6` and earlier attach a single `@kuruwic/prisma-audit` tarball; see the [migration guide](docs/migration-guide.md)). Install the core and the extension tarballs of the same release in one command (the core is not on npm, so the extension tarball alone does not resolve), replacing `<version>` with the release's version:
 
 ```bash
 pnpm add \
-  https://github.com/KuruwiC/prisma-audit/releases/download/v0.1.6/kuruwic-db-audit-core-0.1.6.tgz \
-  https://github.com/KuruwiC/prisma-audit/releases/download/v0.1.6/kuruwic-prisma-audit-0.1.6.tgz
+  https://github.com/KuruwiC/prisma-audit/releases/download/v<version>/kuruwic-db-audit-core-<version>.tgz \
+  https://github.com/KuruwiC/prisma-audit/releases/download/v<version>/kuruwic-prisma-audit-<version>.tgz
 pnpm add -D \
-  https://github.com/KuruwiC/prisma-audit/releases/download/v0.1.6/kuruwic-prisma-audit-generator-0.1.6.tgz
+  https://github.com/KuruwiC/prisma-audit/releases/download/v<version>/kuruwic-prisma-audit-generator-<version>.tgz
 ```
+
+Install Prisma with an explicit major, such as `prisma@^7` and `@prisma/client@^7` (or `^6.16`): `prisma@latest` on npm is a Prisma 8 release candidate, which is not supported (see [Prisma 8](#prisma-8)).
 
 ### Requirements
 
@@ -568,11 +578,22 @@ Nested rows are audited from the operation's own result: the relations a nested 
 
 ## Compatibility
 
-|             | Supported                                | Minimum                    |
-| ----------- | ---------------------------------------- | -------------------------- |
-| **Prisma**  | 6.16 — 7.x                               | 6.16.0                     |
-| **Node.js** | 20.19+, 22.12+, 24+                      | 20.19.0 (AsyncLocalStorage) |
-| **Runtime** | Node.js ✅, Bun ⚠️ Experimental, Edge ❌ | —                          |
+|             | Supported                               | Tested in CI                  |
+| ----------- | --------------------------------------- | ----------------------------- |
+| **Prisma**  | 6.16 — 7.x (`>=6.16.0 <8.0.0`)          | 6.16.0, 6.19.3, 7.0.0, 7.10.0 |
+| **Node.js** | 20.19+, 22.12+, 24+ (AsyncLocalStorage) | 20, 22, 24                    |
+| **Runtime** | Node.js ✅, Bun ⚠️ Experimental, Edge ❌  | Node.js                       |
+
+The [compatibility workflow](.github/workflows/prisma-compatibility.yml) runs the integration tests against PostgreSQL, SQLite and MySQL for each tested Prisma version on two Node.js majors, skipping the pairs for which `better-sqlite3` ships no Linux x64 prebuild. It runs on pushes and pull requests to `main`, and weekly.
+
+## Prisma 8
+
+Prisma 8 is not supported. As of 2026-10, Prisma ORM 8 is a release candidate (`prisma@latest` is `8.0.0-rc.22`; see Prisma's [release status](https://www.prisma.io/docs/orm/release-status)). It has no `PrismaClient` and no `$extends`: middleware replaces query extensions. Supporting it means a new adapter on `@kuruwic/db-audit-core`, not a port of this extension. That work starts once Prisma 8.0.0 is generally available and supports MySQL and SQLite; as of 2026-10, Prisma lists MySQL as coming soon and SQLite as experimental ([supported databases](https://www.prisma.io/docs/orm/supported-databases)).
+
+## Upgrading
+
+- From the `v0.1.6` release: [docs/migration-guide.md](docs/migration-guide.md)
+- Removing Prisma 6 from the supported range: [docs/dropping-prisma-6.md](docs/dropping-prisma-6.md)
 
 ## Limitations
 
