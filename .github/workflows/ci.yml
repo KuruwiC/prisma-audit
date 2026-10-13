@@ -40,6 +40,9 @@ jobs:
       - name: Check core invariants
         run: pnpm check:invariants
 
+      - name: Check support matrix
+        run: pnpm check:support-matrix
+
   typecheck:
     name: Type Check
     runs-on: ubuntu-latest
