@@ -17,10 +17,10 @@ The one Prisma version check in `packages/*/src`, `supportsQueryOmit` in `packag
    - delete the `6.x` rows of `jobs.compatibility.strategy.matrix.include`;
    - delete the `node scripts/sync-datasource-url.mjs ${{ matrix.prisma }}` line of the "Override Prisma version" step.
 3. Delete `scripts/sync-datasource-url.mjs`.
-4. Update the documentation: replace `>=6.16.0 <8.0.0` with `>=7.0.0 <8.0.0` in `README.md` and `packages/prisma-extension/README.md`, and rewrite the other statements of Prisma 6 support. To find them:
+4. Update the documentation: replace `>=6.16.0 <8.0.0` with `>=7.0.0 <8.0.0` in `README.md` and `packages/prisma-extension/README.md`, remove the `6.x` versions from the "Tested in CI" cell of the Prisma row in the README's Compatibility table, and rewrite the other statements of Prisma 6 support, including the prebuild comment above `include` in the workflow. To find them:
 
    ```bash
-   git grep -nE "6\.16|Prisma 6|6\.x" -- README.md 'packages/*/README.md' docs
+   git grep -nE "6\.16|Prisma 6|6\.x" -- README.md 'packages/*/README.md' docs .github
    ```
 
    The "Current" column of [docs/migration-guide.md](migration-guide.md) states the peer range too. Delete this page and its link in the README's "Upgrading" section.
@@ -35,6 +35,6 @@ The one Prisma version check in `packages/*/src`, `supportsQueryOmit` in `packag
    pnpm --filter @kuruwic/prisma-audit-integration-tests test:sqlite
    ```
 
-`pnpm check:support-matrix` fails until steps 1, 2 and 4 agree: it reports a matrix row outside the peer range, and a `README.md` that does not state the peer range verbatim.
+`pnpm check:support-matrix` fails until steps 1, 2 and 4 agree: it reports a matrix row outside the peer range, a README that still states the old peer range, and a "Tested in CI" cell that differs from the matrix.
 
 Optional: `packages/integration-tests/test/helpers/setup-sqlite.ts` also accepts `PrismaBetterSQLite3`, the class name `@prisma/adapter-better-sqlite3` exports up to Prisma 6. It is test code and keeps working on Prisma 7; the fallback can be removed with the rest.
