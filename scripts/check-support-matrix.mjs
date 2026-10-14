@@ -4,9 +4,6 @@
  * README state the same thing. The peer range of `@prisma/client` in packages/prisma-extension and
  * `engines.node` in the root package.json are the sources; every other copy is derived from them.
  *
- * The README copies are the peer range literals and the Node.js requirement literals in README.md and
- * packages/prisma-extension/README.md, and the "Tested in CI" cells of the Compatibility table.
- *
  * Prints one line per rule; each violation is one `FAIL` line, and the script then exits with status 1.
  *
  * Usage: node scripts/check-support-matrix.mjs [repo-root]
@@ -144,7 +141,7 @@ function checkFloorIsTested({ rows, range }) {
     : [`peer range minimum ${floor} has no matrix row (rows: ${rows.map((row) => row?.prisma).join(', ')})`];
 }
 
-/** Every major from the peer range's minimum up to the far-future bound that the range admits; the range must be bounded */
+/** Majors the range admits, scanning past gaps such as `^6.16.0 || ^8.0.0`; the range must be bounded */
 function admittedMajors(range) {
   const majors = [];
   for (let major = semver.minVersion(range).major; major < semver.major(FAR_FUTURE); major += 1) {
