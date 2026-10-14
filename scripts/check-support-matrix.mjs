@@ -4,8 +4,8 @@
  * README state the same thing. The peer range of `@prisma/client` in packages/prisma-extension and
  * `engines.node` in the root package.json are the sources; every other copy is derived from them.
  *
- * The README copies are the peer range literals in README.md and packages/prisma-extension/README.md,
- * the engines.node string in README.md, and the "Tested in CI" cells of the Compatibility table.
+ * The README copies are the peer range literals and the Node.js requirement literals in README.md and
+ * packages/prisma-extension/README.md, and the "Tested in CI" cells of the Compatibility table.
  *
  * Prints one line per rule; each violation is one `FAIL` line, and the script then exits with status 1.
  *
@@ -21,15 +21,17 @@ import { parse as parseYaml } from 'yaml';
 const ROOT = path.resolve(process.argv[2] ?? path.join(path.dirname(fileURLToPath(import.meta.url)), '..'));
 
 const WORKFLOW = '.github/workflows/prisma-compatibility.yml';
-const MATRIX_PATH = 'jobs.compatibility.strategy.matrix.include';
+const MATRIX_PATH = 'jobs.compatibility.strategy.matrix';
 const ROOT_PACKAGE = 'package.json';
 const PEER_PACKAGE = 'packages/prisma-extension/package.json';
 const PEER_NAME = '@prisma/client';
 const README = 'README.md';
-const PEER_README_FILES = [README, 'packages/prisma-extension/README.md'];
+const README_FILES = [README, 'packages/prisma-extension/README.md'];
 const TESTED_COLUMN = 'Tested in CI';
 /** The shape in which the docs write a bounded peer range, e.g. `>=6.16.0 <8.0.0` */
 const PEER_RANGE_LITERAL = />=\d+\.\d+\.\d+ <\d+\.\d+\.\d+/g;
+/** The shape in which the docs state the Node.js requirement, e.g. Node.js `^22.12 || >=24.0`; group 1 is the range */
+const NODE_REQUIREMENT_LITERAL = /Node\.js `([^`]+)`/g;
 const WORKSPACE_DIRS = ['packages', 'examples'];
 /** A version no real peer range admits: a range that still satisfies it has no upper bound */
 const FAR_FUTURE = '999.0.0';
@@ -46,12 +48,19 @@ function readJson(file) {
   return JSON.parse(read(file));
 }
 
+/** The matrix is include-only, so that its rows are exactly the jobs it creates */
 function loadMatrix() {
-  const include = parseYaml(read(WORKFLOW))?.jobs?.compatibility?.strategy?.matrix?.include;
-  if (!Array.isArray(include) || include.length === 0) {
-    throw new Error(`${WORKFLOW}: ${MATRIX_PATH} is missing or is not a non-empty list`);
+  const matrix = parseYaml(read(WORKFLOW))?.jobs?.compatibility?.strategy?.matrix;
+  const otherKeys = Object.keys(matrix ?? {}).filter((key) => key !== 'include');
+  if (otherKeys.length > 0) {
+    throw new Error(
+      `${WORKFLOW}: ${MATRIX_PATH} has keys other than include (${otherKeys.join(', ')}); the matrix must be include-only`,
+    );
   }
-  return include;
+  if (!Array.isArray(matrix?.include) || matrix.include.length === 0) {
+    throw new Error(`${WORKFLOW}: ${MATRIX_PATH}.include is missing or is not a non-empty list`);
+  }
+  return matrix.include;
 }
 
 function loadPeerRange() {
@@ -176,18 +185,29 @@ function checkEngineAlternativesCovered({ rows, engines }) {
 function checkPackageEngines({ engines, packages }) {
   return packages.flatMap(({ file, json }) => {
     const declared = json.engines?.node;
-    return declared === undefined || declared === engines
-      ? []
-      : [`${file}: engines.node "${declared}" differs from the root "${engines}"`];
+    if (declared === undefined) {
+      return [`${file}: engines.node is missing, the root declares "${engines}"`];
+    }
+    return declared === engines ? [] : [`${file}: engines.node "${declared}" differs from the root "${engines}"`];
   });
 }
 
-function checkReadmeEngines({ engines }) {
-  return read(README).includes(engines) ? [] : [`${README} does not contain engines.node "${engines}"`];
+function checkNodeRequirementCopies({ engines }) {
+  return README_FILES.flatMap((file) => {
+    const statements = read(file)
+      .split('\n')
+      .flatMap((line, index) =>
+        [...line.matchAll(NODE_REQUIREMENT_LITERAL)].map((match) => ({ index, value: match[1] })),
+      );
+    const stale = statements
+      .filter(({ value }) => value !== engines)
+      .map(({ index, value }) => `${file}:${index + 1}: Node.js requirement "${value}" differs from "${engines}"`);
+    return statements.length > 0 ? stale : [`${file} does not state the Node.js requirement "${engines}"`];
+  });
 }
 
 function checkPeerRangeCopies({ range }) {
-  return PEER_README_FILES.flatMap((file) => {
+  return README_FILES.flatMap((file) => {
     const lines = read(file).split('\n');
     const stale = lines.flatMap((line, index) =>
       (line.replaceAll(range, '').match(PEER_RANGE_LITERAL) ?? []).map(
@@ -243,8 +263,8 @@ const RULES = [
     title: 'every engines.node alternative has a matrix row on its minimum major',
     check: checkEngineAlternativesCovered,
   },
-  { title: "publishable packages declare the root's engines.node", check: checkPackageEngines },
-  { title: `${README} states engines.node`, check: checkReadmeEngines },
+  { title: "every publishable package declares the root's engines.node", check: checkPackageEngines },
+  { title: 'the README files state engines.node as the Node.js requirement', check: checkNodeRequirementCopies },
   { title: 'the README files state the peer range and no other range literal', check: checkPeerRangeCopies },
   { title: `the ${README} "${TESTED_COLUMN}" cells list the matrix's versions`, check: checkTestedInCi },
 ];
