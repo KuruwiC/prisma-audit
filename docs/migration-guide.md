@@ -113,6 +113,13 @@ hooks: {
 },
 ```
 
+The records a writer receives are `AuditRecord`s (`AuditLogData` is the same type):
+
+- Their fields are `readonly`: build a new object (`{ ...record, after: mask(record.after) }`) instead of assigning to a record.
+- `action` is typed `'create' | 'update' | 'delete'` (v0.1.6: `string`).
+- Each record carries `beforeUnavailable` (see [Audit rows](#audit-rows)). A writer that passes the records unchanged to a model's `createMany` needs that column on the model, or leaves the field out, since Prisma rejects a field the model does not declare.
+- `createAuditLogData(input)` requires `beforeUnavailable` in its input, and takes the same `action` type.
+
 A write-failure policy function receives the same context as the observer and returns a strategy instead of throwing:
 
 ```typescript
@@ -143,6 +150,7 @@ The observer's `phase` is one of `'pre-fetch' | 'log-write' | 'diff-generation' 
 | Failed awaited audit write inside your interactive `$transaction` | Always thrown | Decided by `errorHandling.writeFailurePolicy`, default `'log'`: logged, the operation continues |
 | Failed audit write with `awaitWrite: false` | `hooks.errorHandler`, default `'log'` | `errorHandling.writeFailurePolicy`, default `'log'`; `'throw'` logs, since the operation has already returned |
 | Prisma's batch `$transaction([...])` | Each operation is audited on its own; an operation the batch rolls back can keep its audit row (observed on Prisma 7) | The audit rows are written after the batch commits, and not at all when it rejects; with `awaitWrite`, `$transaction([...])` resolves after they are written |
+| `samplingIf` / `awaitWriteIf` for a model whose `defineEntity` sets no `tags` | Not called; the model uses `sampling` / `awaitWrite` | Called with `tags` `[]`; its result applies |
 | A Prisma error of your own operation (for example `P2002`) | Single-record operations rethrow it with the message prefixed `[@prisma-audit] Audited operation failed for model "…" and action "…": ` | The error Prisma threw, unchanged |
 
 To keep the v0.1.6 guarantee that an operation and its audit rows commit or roll back together, and that a failed audit write fails the operation:
@@ -153,6 +161,8 @@ errorHandling: { writeFailurePolicy: "throw" },
 ```
 
 With `openImplicitTransaction`, a call on a model delegate returns a lazy operation that runs when awaited or passed to a batch `$transaction([...])` of the same client; see `openImplicitTransaction` in the `@kuruwic/prisma-audit` README.
+
+A callback written for tagged models, such as `samplingIf: (_, tags) => (tags.includes("critical") ? 1 : 0)`, samples out every model without tags. To keep the v0.1.6 result, return the global value when `tags` is empty: `(_, tags) => (tags.length === 0 ? sampling : tags.includes("critical") ? 1 : 0)`, with `sampling` the value of `performance.sampling` (default `1`); an `awaitWriteIf` returns `performance.awaitWrite` (default `true`) the same way.
 
 ## Audit rows
 
