@@ -11,6 +11,7 @@
 import type { WritePlan } from '../domain/mutation-event.js';
 import type { ResolverFailure } from '../resolve/index.js';
 import { createErrorHandler, type ErrorStrategy } from '../utils/error-handler.js';
+import { toError } from '../utils/to-error.js';
 
 /**
  * The stage of the audit pipeline a failure occurred in. What each observer-only phase does to
@@ -135,7 +136,7 @@ const WRITE_LOG_LABELS: Readonly<Record<WritePlan['kind'], string>> = {
   detached: 'async audit log write',
 };
 
-const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+const messageOf = (error: unknown): string => toError(error).message;
 
 export const createFailureSink = (config: ErrorHandlingConfig): FailureSink => {
   const { observer } = config;

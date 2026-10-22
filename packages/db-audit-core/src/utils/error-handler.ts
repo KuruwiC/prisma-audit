@@ -7,6 +7,8 @@
  * Configurable error handling strategies: throw, log, or ignore audit failures.
  */
 
+import { toError } from './to-error.js';
+
 /**
  * Error handling strategy
  * - `throw`: Re-throw the error. As a write-failure policy it fails the caller's operation only
@@ -24,17 +26,11 @@ const executeCustomHandler = (customHandler: ErrorHandler, error: Error, context
     const result = customHandler(error, context);
     if (result && typeof (result as Promise<void>).catch === 'function') {
       (result as Promise<void>).catch((handlerError) => {
-        console.error(
-          '[db-audit-core] Error in async custom error handler:',
-          handlerError instanceof Error ? handlerError.message : String(handlerError),
-        );
+        console.error('[db-audit-core] Error in async custom error handler:', toError(handlerError).message);
       });
     }
   } catch (handlerError) {
-    console.error(
-      '[db-audit-core] Error in custom error handler:',
-      handlerError instanceof Error ? handlerError.message : String(handlerError),
-    );
+    console.error('[db-audit-core] Error in custom error handler:', toError(handlerError).message);
   }
 };
 
@@ -80,7 +76,7 @@ export const createErrorHandler = (strategy: ErrorStrategy = 'log', customHandle
 
       default: {
         const exhaustiveCheck: never = strategy;
-        console.error(`[db-audit-core] Unknown error strategy: ${exhaustiveCheck}`);
+        console.error('[db-audit-core] Unknown error strategy:', exhaustiveCheck);
       }
     }
   };

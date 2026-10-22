@@ -62,6 +62,17 @@ describe('createErrorHandler', () => {
     });
   });
 
+  describe('unknown strategy', () => {
+    it('should log a strategy that cannot be converted to a string instead of throwing', () => {
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const strategy = Object.create(null);
+      const handler = createErrorHandler(strategy as never);
+
+      expect(() => handler(new Error('Test error'), 'test context')).not.toThrow();
+      expect(consoleErrorSpy.mock.calls).toEqual([['[db-audit-core] Unknown error strategy:', strategy]]);
+    });
+  });
+
   describe('custom handler', () => {
     it('should use custom handler when provided', () => {
       const customHandler = vi.fn();
@@ -98,6 +109,31 @@ describe('createErrorHandler', () => {
 
       expect(consoleErrorSpy.mock.calls).toEqual([
         ['[db-audit-core] Error in async custom error handler:', 'handler rejected'],
+      ]);
+    });
+
+    it("should log a custom handler's synchronous throw of a value that cannot be converted to a string", () => {
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const handler = createErrorHandler('ignore', () => {
+        throw Object.create(null);
+      });
+
+      expect(() => handler(new Error('Test error'), 'test context')).not.toThrow();
+      expect(consoleErrorSpy.mock.calls).toEqual([
+        ['[db-audit-core] Error in custom error handler:', 'Thrown value could not be converted to a string'],
+      ]);
+    });
+
+    it("should log a custom handler's rejection with a value that cannot be converted to a string", async () => {
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const rejection = Promise.reject(Object.create(null));
+      const handler = createErrorHandler('ignore', () => rejection);
+
+      expect(() => handler(new Error('Test error'), 'test context')).not.toThrow();
+      await rejection.catch(() => {});
+
+      expect(consoleErrorSpy.mock.calls).toEqual([
+        ['[db-audit-core] Error in async custom error handler:', 'Thrown value could not be converted to a string'],
       ]);
     });
   });

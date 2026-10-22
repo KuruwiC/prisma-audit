@@ -126,6 +126,28 @@ describe('createFailureSink', () => {
       );
       expect(consoleError).toHaveBeenCalledWith('[db-audit-core] Error in audit log write:', 'insert failed');
     });
+
+    it("falls back to 'log' when the policy function throws a value that cannot be converted to a string", async () => {
+      const sink = createFailureSink({
+        writeFailurePolicy: () => {
+          throw Object.create(null);
+        },
+      });
+
+      await expect(sink.reportWriteFailure(planOf('immediate'), writeError)).resolves.toBeUndefined();
+
+      expect(consoleError).toHaveBeenCalledWith(
+        "[db-audit-core] Error in writeFailurePolicy function; falling back to 'log':",
+        'Thrown value could not be converted to a string',
+      );
+      expect(consoleError).toHaveBeenCalledWith('[db-audit-core] Error in audit log write:', 'insert failed');
+    });
+
+    it('resolves when the policy function returns a value that cannot be converted to a string', async () => {
+      const sink = createFailureSink({ writeFailurePolicy: () => Object.create(null) });
+
+      await expect(sink.reportWriteFailure(planOf('immediate'), writeError)).resolves.toBeUndefined();
+    });
   });
 
   describe('reportDroppedBuild', () => {
@@ -248,6 +270,23 @@ describe('createFailureSink', () => {
       expect(consoleError).toHaveBeenCalledWith(
         '[db-audit-core] Error in error-handling observer:',
         'observer exploded',
+      );
+    });
+
+    it('logs and ignores an observer that throws a value that cannot be converted to a string', async () => {
+      const sink = createFailureSink({
+        observer: () => {
+          throw Object.create(null);
+        },
+      });
+
+      await expect(
+        sink.notify({ phase: 'pre-fetch', modelName: 'Post', operation: 'update', params: {}, error: writeError }),
+      ).resolves.toBeUndefined();
+
+      expect(consoleError).toHaveBeenCalledWith(
+        '[db-audit-core] Error in error-handling observer:',
+        'Thrown value could not be converted to a string',
       );
     });
 
