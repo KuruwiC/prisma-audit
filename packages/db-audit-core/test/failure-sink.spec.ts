@@ -143,11 +143,29 @@ describe('createFailureSink', () => {
       expect(consoleError).toHaveBeenCalledWith('[db-audit-core] Error in audit log write:', 'insert failed');
     });
 
-    it('resolves when the policy function returns a value that cannot be converted to a string', async () => {
-      const sink = createFailureSink({ writeFailurePolicy: () => Object.create(null) });
+    const unconvertible = Object.create(null);
+    it.each([
+      ['a policy that is no strategy', 'skip', 'skip'],
+      ['a policy function that returns no strategy', () => undefined, undefined],
+      [
+        'a policy function that returns a value that cannot be converted to a string',
+        () => unconvertible,
+        unconvertible,
+      ],
+    ])(
+      "falls back to 'log' for %s, logging the invalid value and the write failure",
+      async (_case, policy, invalid) => {
+        const sink = createFailureSink({ writeFailurePolicy: policy as never });
 
-      await expect(sink.reportWriteFailure(planOf('immediate'), writeError)).resolves.toBeUndefined();
-    });
+        await expect(sink.reportWriteFailure(planOf('immediate'), writeError)).resolves.toBeUndefined();
+
+        expect(consoleError.mock.calls[0]).toEqual([
+          "[db-audit-core] Invalid writeFailurePolicy strategy; falling back to 'log':",
+          invalid,
+        ]);
+        expect(consoleError).toHaveBeenCalledWith('[db-audit-core] Error in audit log write:', 'insert failed');
+      },
+    );
   });
 
   describe('reportDroppedBuild', () => {

@@ -10,7 +10,7 @@
 
 import type { WritePlan } from '../domain/mutation-event.js';
 import type { ResolverFailure } from '../resolve/index.js';
-import { createErrorHandler, type ErrorStrategy } from '../utils/error-handler.js';
+import { createErrorHandler, type ErrorStrategy, isErrorStrategy } from '../utils/error-handler.js';
 import { toError } from '../utils/to-error.js';
 
 /**
@@ -73,8 +73,8 @@ export type AuditErrorObserver = (context: AuditErrorContext) => void | Promise<
  * A strategy string (`'throw'` re-throws and fails the operation, `'log'` logs to the
  * console and lets the operation succeed, `'ignore'` does neither), or a function that
  * receives the same {@link AuditErrorContext} the observer receives and RETURNS one of
- * those three strings. The function must not throw; if it does, its error is logged to
- * the console and `'log'` applies.
+ * those three strings. The function must not throw; if it does, or if the policy is or
+ * returns anything else, the problem is logged to the console and `'log'` applies.
  *
  * **Policy-gated phases**: `log-write`, and `diff-generation` when `dispatch` dropped the
  * records of a write that has already committed (the context then names the operation's
@@ -153,15 +153,14 @@ export const createFailureSink = (config: ErrorHandlingConfig): FailureSink => {
   };
 
   /**
-   * A policy function that throws falls back to `'log'`: unlike `'throw'` it cannot fail the
-   * caller's operation, and unlike `'ignore'` it still surfaces the `log-write` failure.
+   * A policy function that throws, or a policy that is or returns no valid strategy, falls back to
+   * `'log'`: unlike `'throw'` it cannot fail the caller's operation, and unlike `'ignore'` it still
+   * surfaces the failure.
    */
   const resolveStrategy = async (context: AuditErrorContext): Promise<ErrorStrategy> => {
-    if (typeof writeFailurePolicy !== 'function') {
-      return writeFailurePolicy;
-    }
+    let strategy: unknown;
     try {
-      return await writeFailurePolicy(context);
+      strategy = typeof writeFailurePolicy === 'function' ? await writeFailurePolicy(context) : writeFailurePolicy;
     } catch (policyError) {
       console.error(
         "[db-audit-core] Error in writeFailurePolicy function; falling back to 'log':",
@@ -169,6 +168,11 @@ export const createFailureSink = (config: ErrorHandlingConfig): FailureSink => {
       );
       return 'log';
     }
+    if (isErrorStrategy(strategy)) {
+      return strategy;
+    }
+    console.error("[db-audit-core] Invalid writeFailurePolicy strategy; falling back to 'log':", strategy);
+    return 'log';
   };
 
   const reportResolverFailures = async (failures: readonly ResolverFailure[]): Promise<void> => {

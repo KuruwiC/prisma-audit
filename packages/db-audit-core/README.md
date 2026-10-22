@@ -203,7 +203,7 @@ What the adapter must provide:
   the user-facing contract: the observer hears every failure and never affects the operation (an
   observer that throws is logged), and only a failed write, or the records of a committed write
   that `dispatch` dropped, consult `writeFailurePolicy` (default `'log'`; a policy function that
-  throws falls back to `'log'`).
+  throws, or a policy that is or returns anything other than a strategy, falls back to `'log'`).
   - `notify(context)` for a failure the adapter detects itself: `pre-fetch` (a read before the
     write failed), `diff-generation` (other work that builds the records failed before the write)
     and `row-identification` (the adapter could not identify a row the operation wrote). What each

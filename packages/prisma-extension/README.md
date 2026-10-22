@@ -1080,7 +1080,7 @@ Customize how audit logs are written. `handle` is the client the write runs on, 
 Two independent options, both receiving the same structured failure context (`{ phase, modelName, operation, params, error }`):
 
 - **`observer`** — notified of *every* audit-pipeline failure (`pre-fetch`, `log-write`, `diff-generation`, `row-identification`, `id-resolver-call`). Read-only: it is always invoked inside a try/catch, so a handler that itself throws is logged to the console and otherwise ignored — it can never affect whether the caller's own database operation succeeds.
-- **`writeFailurePolicy`** — decides whether a failed audit-log **write** also fails the caller's own operation. `'throw' | 'log' | 'ignore'`, or a function that receives the same context and *returns* one of those three strings (never throws — a return value keeps conditional failure unambiguous).
+- **`writeFailurePolicy`** — decides whether a failed audit-log **write** also fails the caller's own operation. `'throw' | 'log' | 'ignore'`, or a function that receives the same context and *returns* one of those three strings (never throws — a return value keeps conditional failure unambiguous). When the function throws, or the policy is or returns anything else, the failure is logged and handled as `'log'`.
 
 ```typescript
 {

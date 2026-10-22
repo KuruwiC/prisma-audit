@@ -5,7 +5,7 @@
  */
 
 import { ENRICHMENT_TIMEOUTS } from '../constants.js';
-import type { ErrorStrategy } from '../utils/error-handler.js';
+import { type ErrorStrategy, isErrorStrategy } from '../utils/error-handler.js';
 import { toError } from '../utils/to-error.js';
 import type { EnricherConfig, EnricherOnError } from './types.js';
 
@@ -23,10 +23,6 @@ const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number): Promise<T
     if (timeoutId !== undefined) clearTimeout(timeoutId);
   }
 };
-
-const ERROR_STRATEGIES: ReadonlySet<unknown> = new Set<ErrorStrategy>(['throw', 'log', 'ignore']);
-
-const isErrorStrategy = (value: unknown): value is ErrorStrategy => ERROR_STRATEGIES.has(value);
 
 /**
  * An `onError` function that throws, or an `onError` that is or returns no valid strategy, falls

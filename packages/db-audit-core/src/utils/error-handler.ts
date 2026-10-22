@@ -18,6 +18,10 @@ import { toError } from './to-error.js';
  */
 export type ErrorStrategy = 'throw' | 'log' | 'ignore';
 
+const ERROR_STRATEGIES: ReadonlySet<unknown> = new Set<ErrorStrategy>(['throw', 'log', 'ignore']);
+
+export const isErrorStrategy = (value: unknown): value is ErrorStrategy => ERROR_STRATEGIES.has(value);
+
 export type ErrorHandler = (error: Error, context: string) => void | Promise<void>;
 
 /** Runs the custom handler so that its own failures, sync or async, are logged rather than propagated */
