@@ -4,24 +4,24 @@ export type { EntityConfigLookup } from './aggregate/entity-config-lookup.js';
 export { createEntityConfigLookup } from './aggregate/entity-config-lookup.js';
 export {
   batchLookup,
-  defineAggregateMapping,
+  defineEntities,
   defineEntity,
   foreignKey,
   lookup,
   normalizeId,
   self,
   to,
-  validateAggregateMapping,
+  validateEntityMap,
 } from './aggregate/helpers.js';
 export type {
-  AggregateMapping,
-  AggregateRoot,
-  LoggableEntity,
+  AggregateProjection,
+  EntityConfig,
+  EntityMap,
   ResolvedId,
 } from './aggregate/types.js';
 export type { ComposeAmbient, ComposeConfig, EntityComposeConfig } from './compose/index.js';
 export { compose } from './compose/index.js';
-export type { GlobalContextEnricherConfig, SerializationConfig } from './config.types.js';
+export type { ActorContextConfig, SerializationConfig } from './config.types.js';
 export { createAsyncLocalStorageProvider } from './context-provider.js';
 export type { DispatchConfig } from './dispatch/index.js';
 export { dispatch } from './dispatch/index.js';

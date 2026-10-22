@@ -116,7 +116,7 @@ export interface ShouldAuditModelInput {
 
 /**
  * Whether operations on a model are audited: neither the audit-log model itself nor a model the
- * aggregate mapping does not declare.
+ * entity map does not declare.
  *
  * @example
  * ```typescript

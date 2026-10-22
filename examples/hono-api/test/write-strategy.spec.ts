@@ -2,7 +2,7 @@
  * Write Strategy Tests
  */
 
-import type { AggregateMapping } from '@kuruwic/prisma-audit';
+import type { EntityMap } from '@kuruwic/prisma-audit';
 import {
   createAsyncLocalStorageProvider,
   createAuditClient,
@@ -17,7 +17,7 @@ import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/c
 import { PrismaPg } from '@prisma/adapter-pg';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-const testAggregateMapping: AggregateMapping = {
+const testEntities: EntityMap = {
   User: defineEntity({
     type: 'User',
   }),
@@ -49,8 +49,8 @@ describe('Write Strategy Tests', () => {
       const auditProvider = createAsyncLocalStorageProvider();
 
       const prisma = createAuditClient(db, {
-        provider: auditProvider,
-        aggregateMapping: testAggregateMapping,
+        contextProvider: auditProvider,
+        entities: testEntities,
         performance: { awaitWrite: false },
         Prisma,
         schema: auditSchema,
@@ -93,8 +93,8 @@ describe('Write Strategy Tests', () => {
       const auditProvider = createAsyncLocalStorageProvider();
 
       const prisma = createAuditClient(db, {
-        provider: auditProvider,
-        aggregateMapping: testAggregateMapping,
+        contextProvider: auditProvider,
+        entities: testEntities,
         performance: { awaitWrite: false },
         Prisma,
         schema: auditSchema,
@@ -147,8 +147,8 @@ describe('Write Strategy Tests', () => {
       const auditProvider = createAsyncLocalStorageProvider();
 
       const prisma = createAuditClient(db, {
-        provider: auditProvider,
-        aggregateMapping: testAggregateMapping,
+        contextProvider: auditProvider,
+        entities: testEntities,
         performance: { awaitWrite: true },
         Prisma,
         schema: auditSchema,
@@ -202,8 +202,8 @@ describe('Write Strategy Tests', () => {
       const auditProvider = createAsyncLocalStorageProvider();
 
       const prisma = createAuditClient(db, {
-        provider: auditProvider,
-        aggregateMapping: testAggregateMapping,
+        contextProvider: auditProvider,
+        entities: testEntities,
         performance: { awaitWrite: true },
         Prisma,
         schema: auditSchema,

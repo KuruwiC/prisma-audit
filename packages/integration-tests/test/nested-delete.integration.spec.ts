@@ -5,7 +5,7 @@ import { createAuditClient, defineEntity, foreignKey, to } from '@kuruwic/prisma
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { describe, expect, it, vi } from 'vitest';
-import { createBasePrisma, setupTestContext, testAggregateMapping } from './helpers/setup.js';
+import { createBasePrisma, setupTestContext, testEntities } from './helpers/setup.js';
 
 describe('Nested Delete Operations', () => {
   const context = setupTestContext();
@@ -352,8 +352,8 @@ describe('Nested Delete Operations', () => {
       const prisma = createAuditClient(basePrisma, {
         Prisma,
         schema: auditSchema,
-        provider,
-        aggregateMapping: testAggregateMapping,
+        contextProvider: provider,
+        entities: testEntities,
         performance: { awaitWrite: true },
         fetchBefore,
       });
@@ -472,8 +472,8 @@ describe('Nested Delete Operations', () => {
       const prisma = createAuditClient(basePrisma, {
         Prisma,
         schema: auditSchema,
-        provider,
-        aggregateMapping: testAggregateMapping,
+        contextProvider: provider,
+        entities: testEntities,
         performance: { awaitWrite: true },
         fetchBefore: { delete: false },
       });
@@ -524,9 +524,9 @@ describe('Nested Delete Operations', () => {
       const prisma = createAuditClient(basePrisma, {
         Prisma,
         schema: auditSchema,
-        provider,
-        aggregateMapping: {
-          ...testAggregateMapping,
+        contextProvider: provider,
+        entities: {
+          ...testEntities,
           Subscription: defineEntity({ type: 'Subscription', aggregates: [to('User', foreignKey('userEmail'))] }),
         },
         performance: { awaitWrite: true },
@@ -577,8 +577,8 @@ describe('Nested Delete Operations', () => {
       const prisma = createAuditClient(basePrisma, {
         Prisma,
         schema: auditSchema,
-        provider,
-        aggregateMapping: testAggregateMapping,
+        contextProvider: provider,
+        entities: testEntities,
         performance: { awaitWrite: true },
         // Without the read ahead of the write, a to-one delete (`delete: true`) names no row
         fetchBefore: { delete: false },

@@ -18,7 +18,7 @@ import { createAuditClient, flushAllPendingWrites } from '@kuruwic/prisma-audit'
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { describe, expect, it, vi } from 'vitest';
-import { cleanDatabase, createBasePrisma, setupTestContext, testAggregateMapping } from './helpers/setup.js';
+import { cleanDatabase, createBasePrisma, setupTestContext, testEntities } from './helpers/setup.js';
 
 const actor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'batch-transaction-actor', name: 'Batch Actor' },
@@ -82,8 +82,8 @@ describe('Batch $transaction under the audit extension', () => {
     const prisma = createAuditClient(raw, {
       Prisma,
       schema: auditSchema,
-      provider,
-      aggregateMapping: testAggregateMapping,
+      contextProvider: provider,
+      entities: testEntities,
       performance: {
         awaitWrite: options.awaitWrite,
         ...(options.awaitWriteIf ? { awaitWriteIf: options.awaitWriteIf } : {}),

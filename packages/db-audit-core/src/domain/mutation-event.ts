@@ -59,7 +59,7 @@ export interface ResolvedEvent<TModelName extends string = string> extends Mutat
   /** Output of the entity's idResolver, normalized with `normalizeId`. */
   readonly entityId: string;
   /**
-   * Self projection (unless `self: false`) plus every `to()` root that resolved from the row after
+   * Self aggregate (unless `selfAggregate: false`) plus every `to()` root that resolved from the row after
    * the write and, for an update or a delete whose before state was captured and that carries
    * `after`, from the row before the write.
    * Empty means no record.

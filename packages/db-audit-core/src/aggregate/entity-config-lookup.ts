@@ -4,15 +4,15 @@
  * @module aggregate/entity-config-lookup
  *
  * @remarks
- * Validates an aggregate mapping once, then looks its entity configs up by model name
+ * Validates an entity map once, then looks its entity configs up by model name
  * (case-insensitive) and by aggregate identity (category and type).
  */
 
-import { validateAggregateMapping } from './helpers.js';
-import type { AggregateMapping, LoggableEntity } from './types.js';
+import { validateEntityMap } from './helpers.js';
+import type { EntityConfig, EntityMap } from './types.js';
 
 /**
- * Lookup of the entity configs of an aggregate mapping
+ * Lookup of the entity configs of an entity map
  *
  * @example
  * ```typescript
@@ -28,32 +28,32 @@ import type { AggregateMapping, LoggableEntity } from './types.js';
  */
 export interface EntityConfigLookup {
   /** Entity config of a model (model name case-insensitive) */
-  byModel: (modelName: string) => LoggableEntity | undefined;
+  byModel: (modelName: string) => EntityConfig | undefined;
 
   /**
    * Entity config of an aggregate root, by its identity: category and type as declared in
    * defineEntity() and to(), case-sensitive. Finds the root entity's config (e.g. its
-   * `aggregateContext` enricher) when another entity projects onto it; validateAggregateMapping
-   * rejects a mapping in which two entities share an identity.
+   * `aggregateContext` enricher) when another entity projects onto it; validateEntityMap
+   * rejects an entity map in which two entities share an identity.
    */
-  byCategoryAndType: (category: string, type: string) => LoggableEntity | undefined;
+  byCategoryAndType: (category: string, type: string) => EntityConfig | undefined;
 
   /** Whether a model is configured for audit logging (model name case-insensitive) */
   isLoggable: (modelName: string) => boolean;
 }
 
 /**
- * Create the entity config lookup of a mapping
+ * Create the entity config lookup of an entity map
  *
- * @throws Error if the mapping configuration is invalid
+ * @throws Error if the entity map is invalid
  */
-export const createEntityConfigLookup = (mapping: AggregateMapping): EntityConfigLookup => {
-  validateAggregateMapping(mapping);
+export const createEntityConfigLookup = (entities: EntityMap): EntityConfigLookup => {
+  validateEntityMap(entities);
 
-  const configByNormalizedName: Record<string, LoggableEntity> = {};
-  const configByRootIdentity: Map<string, LoggableEntity> = new Map();
+  const configByNormalizedName: Record<string, EntityConfig> = {};
+  const configByRootIdentity: Map<string, EntityConfig> = new Map();
 
-  for (const [modelName, entityConfig] of Object.entries(mapping)) {
+  for (const [modelName, entityConfig] of Object.entries(entities)) {
     if (!entityConfig) continue;
 
     configByNormalizedName[modelName.toLowerCase()] = entityConfig;
@@ -61,9 +61,9 @@ export const createEntityConfigLookup = (mapping: AggregateMapping): EntityConfi
   }
 
   return {
-    byModel: (modelName: string): LoggableEntity | undefined => configByNormalizedName[modelName.toLowerCase()],
+    byModel: (modelName: string): EntityConfig | undefined => configByNormalizedName[modelName.toLowerCase()],
 
-    byCategoryAndType: (category: string, type: string): LoggableEntity | undefined =>
+    byCategoryAndType: (category: string, type: string): EntityConfig | undefined =>
       configByRootIdentity.get(`${category}:${type}`),
 
     isLoggable: (modelName: string): boolean => modelName.toLowerCase() in configByNormalizedName,

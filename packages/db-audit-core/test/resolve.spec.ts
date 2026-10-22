@@ -8,7 +8,7 @@ import {
   resetUnbatchedResolverWarnings,
   to,
 } from '../src/aggregate/helpers.js';
-import type { AggregateMapping } from '../src/aggregate/types.js';
+import type { EntityMap } from '../src/aggregate/types.js';
 import type { MutationEvent } from '../src/domain/mutation-event.js';
 import type { ProjectionEnrichmentMeta } from '../src/enrichment/types.js';
 import { type ResolveConfig, resolve } from '../src/resolve/index.js';
@@ -34,9 +34,9 @@ const event = (model: string, after: Row, overrides: Partial<MutationEvent> = {}
   ...overrides,
 });
 
-const configOf = (mapping: AggregateMapping, actor?: ResolveConfig['actor']): ResolveConfig => {
-  const entityConfigs = createEntityConfigLookup(mapping);
-  return { entity: entityConfigs.byModel, rootEntity: entityConfigs.byCategoryAndType, actor };
+const configOf = (entities: EntityMap, actorContext?: ResolveConfig['actorContext']): ResolveConfig => {
+  const entityConfigs = createEntityConfigLookup(entities);
+  return { entity: entityConfigs.byModel, rootEntity: entityConfigs.byCategoryAndType, actorContext };
 };
 
 const rowsOf = (model: string, count: number): MutationEvent[] =>
@@ -178,11 +178,11 @@ describe('resolve', () => {
       const config = configOf({
         Post: defineEntity({
           type: 'Post',
-          self: false,
+          selfAggregate: false,
           aggregates: [to('User', foreignKey('authorId'))],
-          context: { enricher: postEnricher },
+          entityContext: { enricher: postEnricher },
         }),
-        Comment: defineEntity({ type: 'Comment', context: { enricher: commentEnricher } }),
+        Comment: defineEntity({ type: 'Comment', entityContext: { enricher: commentEnricher } }),
         User: defineEntity({ type: 'User' }),
       });
       const events = [
@@ -392,7 +392,7 @@ describe('resolve', () => {
       const config = configOf({
         PostTag: defineEntity({
           type: 'PostTag',
-          self: false,
+          selfAggregate: false,
           aggregates: [to('Post', foreignKey('postId')), to('Tag', foreignKey('tagId'))],
         }),
       });
@@ -409,7 +409,11 @@ describe('resolve', () => {
 
     it('yields nothing for a row without any root', async () => {
       const config = configOf({
-        PostTag: defineEntity({ type: 'PostTag', self: false, aggregates: [to('Post', foreignKey('postId'))] }),
+        PostTag: defineEntity({
+          type: 'PostTag',
+          selfAggregate: false,
+          aggregates: [to('Post', foreignKey('postId'))],
+        }),
       });
 
       const { resolved } = await resolve(
@@ -424,7 +428,7 @@ describe('resolve', () => {
 
     it('drops the rows without roots and keeps the others', async () => {
       const config = configOf({
-        Post: defineEntity({ type: 'Post', self: false, aggregates: [to('User', foreignKey('authorId'))] }),
+        Post: defineEntity({ type: 'Post', selfAggregate: false, aggregates: [to('User', foreignKey('authorId'))] }),
       });
       const events = [
         event('Post', { id: 'p1', authorId: 'u1' }),
@@ -768,7 +772,7 @@ describe('resolve', () => {
       const config = configOf({
         Post: defineEntity({
           type: 'Post',
-          aggregates: [to('User', foreignKey('authorId'), { context: { enricher } })],
+          aggregates: [to('User', foreignKey('authorId'), { aggregateContext: { enricher } })],
         }),
       });
       const before = { id: 'p1', authorId: 'u-old', title: 'old' };
@@ -891,10 +895,10 @@ describe('resolve', () => {
         }),
         Post: defineEntity({
           type: 'Post',
-          self: false,
+          selfAggregate: false,
           aggregates: [
             to('User', foreignKey('authorId'), {
-              context: {
+              aggregateContext: {
                 enricher: async (rows) => rows.map((row) => ({ postTitle: row.title, shared: 'projection' })),
               },
             }),
@@ -926,10 +930,10 @@ describe('resolve', () => {
         User: defineEntity({ type: 'User', aggregateContext: { enricher: async (ids) => ids.map(() => rootContext) } }),
         Post: defineEntity({
           type: 'Post',
-          self: false,
+          selfAggregate: false,
           aggregates: [
             to('User', foreignKey('authorId'), {
-              context: { enricher: async (rows) => rows.map(() => projectionContext) },
+              aggregateContext: { enricher: async (rows) => rows.map(() => projectionContext) },
             }),
           ],
         }),
@@ -944,7 +948,7 @@ describe('resolve', () => {
       const rootEnricher = vi.fn(async (ids: string[]) => ids.map((id) => ({ userName: `name-${id}` })));
       const config = configOf({
         User: defineEntity({ type: 'User', aggregateContext: { enricher: rootEnricher } }),
-        Post: defineEntity({ type: 'Post', self: false, aggregates: [to('User', foreignKey('authorId'))] }),
+        Post: defineEntity({ type: 'Post', selfAggregate: false, aggregates: [to('User', foreignKey('authorId'))] }),
       });
       const events = [
         event('Post', { id: 'p1', authorId: 'u1' }),
@@ -963,11 +967,13 @@ describe('resolve', () => {
       ]);
     });
 
-    it('enriches the self projection through self.context with the rows and their ids', async () => {
+    it('enriches the self aggregate through selfAggregate.aggregateContext with the rows and their ids', async () => {
       const selfEnricher = vi.fn(async (rows: Row[], _db: unknown, meta: ProjectionEnrichmentMeta) =>
         rows.map((_row, i) => ({ selfCtx: meta.aggregateIds[i] })),
       );
-      const config = configOf({ Post: defineEntity({ type: 'Post', self: { context: { enricher: selfEnricher } } }) });
+      const config = configOf({
+        Post: defineEntity({ type: 'Post', selfAggregate: { aggregateContext: { enricher: selfEnricher } } }),
+      });
 
       const { resolved } = await resolve(
         [event('Post', { id: 'p1' }), event('Post', { id: 'p2' })],
@@ -998,10 +1004,10 @@ describe('resolve', () => {
       const config = configOf({
         Friendship: defineEntity({
           type: 'Friendship',
-          self: false,
+          selfAggregate: false,
           aggregates: [
-            to('User', foreignKey('userAId'), { context: { enricher: enricherA } }),
-            to('User', foreignKey('userBId'), { context: { enricher: enricherB } }),
+            to('User', foreignKey('userAId'), { aggregateContext: { enricher: enricherA } }),
+            to('User', foreignKey('userBId'), { aggregateContext: { enricher: enricherB } }),
           ],
         }),
       });
@@ -1031,10 +1037,10 @@ describe('resolve', () => {
       const config = configOf({
         Friendship: defineEntity({
           type: 'Friendship',
-          self: false,
+          selfAggregate: false,
           aggregates: [
-            to('User', foreignKey('userAId'), { context: { enricher: enricherA } }),
-            to('User', foreignKey('userBId'), { context: { enricher: enricherB } }),
+            to('User', foreignKey('userAId'), { aggregateContext: { enricher: enricherA } }),
+            to('User', foreignKey('userBId'), { aggregateContext: { enricher: enricherB } }),
           ],
         }),
       });
@@ -1067,7 +1073,7 @@ describe('resolve', () => {
       const config = configOf({
         Friendship: defineEntity({
           type: 'Friendship',
-          self: false,
+          selfAggregate: false,
           aggregates: [
             to('User', foreignKey('userAId'), { category: 'member' }),
             to('User', foreignKey('userBId'), { category: 'guest' }),
@@ -1097,10 +1103,10 @@ describe('resolve', () => {
       const config = configOf({
         Friendship: defineEntity({
           type: 'Friendship',
-          self: false,
+          selfAggregate: false,
           aggregates: [
-            to('User', foreignKey('userAId'), { category: 'member', context: { enricher: memberEnricher } }),
-            to('User', foreignKey('userBId'), { category: 'guest', context: { enricher: guestEnricher } }),
+            to('User', foreignKey('userAId'), { category: 'member', aggregateContext: { enricher: memberEnricher } }),
+            to('User', foreignKey('userBId'), { category: 'guest', aggregateContext: { enricher: guestEnricher } }),
           ],
         }),
       });
@@ -1138,7 +1144,7 @@ describe('resolve', () => {
         Post: defineEntity({
           type: 'Post',
           idResolver: async () => null,
-          self: false,
+          selfAggregate: false,
           aggregates: [to('User', foreignKey('authorId'))],
         }),
       });
@@ -1174,7 +1180,7 @@ describe('resolve', () => {
             if (row.id === 'p1') throw error;
             return row.id as string;
           },
-          self: false,
+          selfAggregate: false,
           aggregates: [to('User', foreignKey('authorId'))],
         }),
       });
@@ -1227,7 +1233,7 @@ describe('resolve', () => {
             return row.id as string;
           },
           aggregates: [to('User', lookup(userResolver))],
-          context: { enricher },
+          entityContext: { enricher },
         }),
       });
       const events = [event('Post', { id: 'p1', authorId: 'u1' }), event('Post', { id: 'p2', authorId: 'u2' })];
@@ -1256,10 +1262,10 @@ describe('resolve', () => {
             type: 'Post',
             idResolver: record('p1'),
             aggregates: [
-              to('User', lookup(record('u1')), { context: { enricher: record([{ projection: true }]) } }),
+              to('User', lookup(record('u1')), { aggregateContext: { enricher: record([{ projection: true }]) } }),
               to('Tag', batchLookup(record(['t1']))),
             ],
-            context: { enricher: record([{ entity: true }]) },
+            entityContext: { enricher: record([{ entity: true }]) },
           }),
         },
         { enricher: record({ actor: true }) },
@@ -1281,7 +1287,7 @@ describe('resolve', () => {
       const config = configOf({
         Post: defineEntity({
           type: 'Post',
-          context: {
+          entityContext: {
             enricher: async () => {
               throw new Error('enricher broken');
             },
@@ -1298,7 +1304,7 @@ describe('resolve', () => {
         {
           Post: defineEntity({
             type: 'Post',
-            context: {
+            entityContext: {
               enricher: async () => {
                 throw new Error('enricher broken');
               },

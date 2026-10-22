@@ -70,8 +70,8 @@ describe('updateMany and deleteMany with a limit', () => {
       {
         Prisma,
         schema: auditSchema,
-        provider,
-        aggregateMapping: { User: defineEntity({ type: 'User' }) },
+        contextProvider: provider,
+        entities: { User: defineEntity({ type: 'User' }) },
         performance: { awaitWrite: false },
         errorHandling: { observer },
       },

@@ -1,11 +1,5 @@
 import type { AuditActor, AuditErrorObserver, AuditRecord } from '@kuruwic/db-audit-core';
-import {
-  createAsyncLocalStorageProvider,
-  defineAggregateMapping,
-  defineEntity,
-  foreignKey,
-  to,
-} from '@kuruwic/db-audit-core';
+import { createAsyncLocalStorageProvider, defineEntities, defineEntity, foreignKey, to } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
 import {
   createMemoryAuditAdapter,
@@ -31,7 +25,7 @@ const actor: AuditActor = { category: 'model', type: 'User', id: 'u1', name: 'Al
 const withContext = <T>(fn: () => Promise<T>): Promise<T> =>
   provider.runAsync({ actor, request: { path: '/posts' } }, fn);
 
-const defineMapping = defineAggregateMapping<ModelName, Db>();
+const defineMapping = defineEntities<ModelName, Db>();
 
 const baseMapping = defineMapping({
   User: defineEntity<UserRow, Db>({ type: 'User' }),
@@ -39,7 +33,7 @@ const baseMapping = defineMapping({
 });
 
 const createAdapter = (overrides: Partial<MemoryAuditOptions<ModelName>> = {}) =>
-  createMemoryAuditAdapter<ModelName>({ schema, provider, aggregateMapping: baseMapping, ...overrides });
+  createMemoryAuditAdapter<ModelName>({ schema, contextProvider: provider, entities: baseMapping, ...overrides });
 
 const projection = ({ aggregateType, aggregateId, entityId }: AuditRecord) => ({
   aggregateType,
@@ -160,7 +154,7 @@ describe('aggregate resolution and enrichment', () => {
     const observer = vi.fn<AuditErrorObserver>();
     const adapter = createAdapter({
       errorHandling: { observer },
-      aggregateMapping: defineMapping({
+      entities: defineMapping({
         User: defineEntity<UserRow, Db>({ type: 'User' }),
         Post: defineEntity<PostRow, Db>({
           type: 'Post',
@@ -197,11 +191,11 @@ describe('aggregate resolution and enrichment', () => {
 
   it('entity enricher: reads another table through the database handle into entityContext', async () => {
     const adapter = createAdapter({
-      aggregateMapping: defineMapping({
+      entities: defineMapping({
         User: defineEntity<UserRow, Db>({ type: 'User' }),
         Post: defineEntity<PostRow, Db>({
           type: 'Post',
-          context: {
+          entityContext: {
             enricher: async (posts, db) =>
               posts.map((post) => ({ authorName: db.find('User', post.authorId)?.name ?? null })),
           },
@@ -220,10 +214,8 @@ describe('aggregate resolution and enrichment', () => {
 
   it('actor enricher: reads the actor row through the database handle into actorContext', async () => {
     const adapter = createAdapter({
-      contextEnricher: {
-        actor: {
-          enricher: async (currentActor, db) => ({ email: db.find('User', currentActor.id)?.email ?? null }),
-        },
+      actorContext: {
+        enricher: async (currentActor, db) => ({ email: db.find('User', currentActor.id)?.email ?? null }),
       },
     });
 
@@ -238,7 +230,7 @@ describe('aggregate resolution and enrichment', () => {
 
   it('aggregate context: the root-side and projection-side contexts merge with projection keys winning', async () => {
     const adapter = createAdapter({
-      aggregateMapping: defineMapping({
+      entities: defineMapping({
         User: defineEntity<UserRow, Db>({
           type: 'User',
           aggregateContext: {
@@ -250,7 +242,7 @@ describe('aggregate resolution and enrichment', () => {
           type: 'Post',
           aggregates: [
             to('User', foreignKey('authorId'), {
-              context: {
+              aggregateContext: {
                 enricher: async (posts, _db, meta) =>
                   posts.map((post, index) => ({
                     source: 'projection',
@@ -286,10 +278,10 @@ describe('transaction membership', () => {
   it('read-your-writes: a callback inside a transaction reads the uncommitted row through the handle', async () => {
     const seen: unknown[] = [];
     const adapter = createAdapter({
-      aggregateMapping: defineMapping({
+      entities: defineMapping({
         User: defineEntity<UserRow, Db>({
           type: 'User',
-          context: {
+          entityContext: {
             enricher: async (users, db) =>
               users.map((user) => {
                 const name = db.find('User', user.id)?.name;
@@ -342,10 +334,10 @@ describe('transaction membership', () => {
     const handles: unknown[] = [];
     const adapter = createAdapter({
       awaitWrite: false,
-      aggregateMapping: defineMapping({
+      entities: defineMapping({
         User: defineEntity<UserRow, Db>({
           type: 'User',
-          context: {
+          entityContext: {
             enricher: async (users, db) => {
               handles.push(db);
               return users.map(() => null);
@@ -528,11 +520,9 @@ describe('transaction membership', () => {
       const adapter = createAdapter({
         awaitWrite,
         errorHandling: { observer },
-        contextEnricher: {
-          actor: {
-            enricher: async () => {
-              throw failure;
-            },
+        actorContext: {
+          enricher: async () => {
+            throw failure;
           },
         },
       });
@@ -578,11 +568,11 @@ describe('transaction membership', () => {
     const handles = new Map<string, unknown>();
     const adapter = createAdapter({
       awaitWriteIf: (_model, tags) => tags.includes('critical'),
-      aggregateMapping: defineMapping({
+      entities: defineMapping({
         User: defineEntity<UserRow, Db>({
           type: 'User',
           tags: ['critical'],
-          context: {
+          entityContext: {
             enricher: async (users, db) => {
               handles.set('User', db);
               return users.map(() => null);
@@ -591,7 +581,7 @@ describe('transaction membership', () => {
         }),
         Post: defineEntity<PostRow, Db>({
           type: 'Post',
-          context: {
+          entityContext: {
             enricher: async (posts, db) => {
               handles.set('Post', db);
               return posts.map(() => null);
@@ -650,7 +640,7 @@ describe('sampling', () => {
     const adapter = createAdapter({
       sampling: 1,
       samplingIf: (_model, tags) => (tags.includes('critical') ? 1 : 0),
-      aggregateMapping: defineMapping({
+      entities: defineMapping({
         User: defineEntity<UserRow, Db>({ type: 'User', tags: ['critical'] }),
         Post: defineEntity<PostRow, Db>({ type: 'Post' }),
       }),

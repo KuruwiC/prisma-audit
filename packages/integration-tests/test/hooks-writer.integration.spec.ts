@@ -1,13 +1,13 @@
 import type { AuditContext, AuditContextProvider } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
-import type { AggregateMapping, AuditLogData } from '@kuruwic/prisma-audit';
+import type { AuditLogData, EntityMap } from '@kuruwic/prisma-audit';
 import { createAuditClient, defineEntity, flushAllPendingWrites, foreignKey, to } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { cleanDatabase, createBasePrisma, disposeTestContext, type TestContext } from './helpers/setup.js';
 
-const testAggregateMapping: AggregateMapping = {
+const testEntities: EntityMap = {
   User: defineEntity({
     type: 'User',
     excludeFields: ['updatedAt'],
@@ -30,8 +30,8 @@ const createAuditedClientWithWriterSpy = (
   return createAuditClient(basePrisma, {
     Prisma,
     schema: auditSchema,
-    provider,
-    aggregateMapping: testAggregateMapping,
+    contextProvider: provider,
+    entities: testEntities,
     diffing: {
       excludeFields: ['createdAt'],
     },
@@ -404,8 +404,8 @@ describe('hooks.writer Coverage', () => {
       const prisma = createAuditClient(basePrisma, {
         Prisma,
         schema: auditSchema,
-        provider: context.provider,
-        aggregateMapping: testAggregateMapping,
+        contextProvider: context.provider,
+        entities: testEntities,
         performance: { awaitWrite },
         hooks: {
           writer: async (records, { handle, defaultWrite }) => {
@@ -493,8 +493,8 @@ describe('hooks.writer Coverage', () => {
       const prisma = createAuditClient(basePrisma, {
         Prisma,
         schema: auditSchema,
-        provider: context.provider,
-        aggregateMapping: testAggregateMapping,
+        contextProvider: context.provider,
+        entities: testEntities,
         performance: { awaitWrite, openImplicitTransaction },
         hooks: {
           writer: async (records, { inTransaction, defaultWrite }) => {

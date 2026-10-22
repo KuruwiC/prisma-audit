@@ -30,8 +30,8 @@ describe('createAuditClient with the Prisma namespace option', () => {
     // Options without `schema`, as a JavaScript caller or a configuration assembled at runtime passes them
     const options: Omit<PrismaAuditExtensionOptions, 'schema'> = {
       Prisma,
-      provider: createAsyncLocalStorageProvider(),
-      aggregateMapping: { User: defineEntity({ type: 'User' }) },
+      contextProvider: createAsyncLocalStorageProvider(),
+      entities: { User: defineEntity({ type: 'User' }) },
     };
 
     expect(() => createAuditClient(basePrisma, options as PrismaAuditExtensionOptions)).toThrow(
@@ -53,8 +53,8 @@ describe('createAuditClient with the Prisma namespace option', () => {
     const prisma = createAuditClient(basePrisma, {
       Prisma,
       schema: auditSchema,
-      provider,
-      aggregateMapping: {
+      contextProvider: provider,
+      entities: {
         User: defineEntity({ type: 'User' }),
       },
       performance: { awaitWrite: true },
@@ -78,8 +78,8 @@ describe('createAuditClient with the Prisma namespace option', () => {
     const prisma = createAuditClient(extendedClient, {
       Prisma,
       schema: auditSchema,
-      provider,
-      aggregateMapping: {
+      contextProvider: provider,
+      entities: {
         User: defineEntity({ type: 'User' }),
       },
       performance: { awaitWrite: true },

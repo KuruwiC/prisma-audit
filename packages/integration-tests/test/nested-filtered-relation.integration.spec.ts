@@ -12,7 +12,7 @@ import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, describe, expect, it } from 'vitest';
-import { cleanDatabase, createBasePrisma, testAggregateMapping } from './helpers/setup.js';
+import { cleanDatabase, createBasePrisma, testEntities } from './helpers/setup.js';
 
 const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'filtered-relation-actor' },
@@ -33,8 +33,8 @@ describe('nested rows a relation filter leaves out of the result', () => {
     const prisma = createAuditClient(basePrisma, {
       Prisma,
       schema: auditSchema,
-      provider,
-      aggregateMapping: testAggregateMapping,
+      contextProvider: provider,
+      entities: testEntities,
       diffing: { excludeFields: ['createdAt', 'updatedAt'] },
       security: { redact: { fields: [] } },
     });

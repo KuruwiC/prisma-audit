@@ -1,5 +1,5 @@
 /**
- * `Tag` and `User` declare no tags in `testAggregateMapping`, so `performance.samplingIf` and
+ * `Tag` and `User` declare no tags in `testEntities`, so `performance.samplingIf` and
  * `performance.awaitWriteIf` receive an empty tag list for them.
  */
 
@@ -10,7 +10,7 @@ import { createAuditClient, flushAllPendingWrites } from '@kuruwic/prisma-audit'
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { describe, expect, it, vi } from 'vitest';
-import { createBasePrisma, setupTestContext, testAggregateMapping } from './helpers/setup.js';
+import { createBasePrisma, setupTestContext, testEntities } from './helpers/setup.js';
 
 const AUDIT_WRITE_FAILURE_MESSAGE = 'simulated audit log write failure';
 
@@ -29,8 +29,8 @@ const createScenario = (options: ScenarioOptions) => {
   const prisma = createAuditClient(basePrisma, {
     Prisma,
     schema: auditSchema,
-    provider,
-    aggregateMapping: testAggregateMapping,
+    contextProvider: provider,
+    entities: testEntities,
     performance: options.performance,
     ...(options.failingWriter
       ? {

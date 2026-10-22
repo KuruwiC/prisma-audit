@@ -55,8 +55,8 @@ const createClients = (awaitWrite: boolean, openImplicitTransaction = false) => 
   const prisma = createAuditClient(basePrisma, {
     Prisma,
     schema: auditSchema,
-    provider,
-    aggregateMapping: { User: defineEntity({ type: 'User' }) },
+    contextProvider: provider,
+    entities: { User: defineEntity({ type: 'User' }) },
     performance: { awaitWrite, openImplicitTransaction },
   });
 

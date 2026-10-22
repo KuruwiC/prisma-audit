@@ -47,7 +47,7 @@ Create `src/audit.config.ts` (or at your project root):
 // src/audit.config.ts
 import {
   defineConfig,
-  defineAggregateMapping,
+  defineEntities,
   defineEntity,
   to,
   foreignKey,
@@ -61,8 +61,8 @@ export const auditProvider = createAsyncLocalStorageProvider();
 export default defineConfig<PrismaClient>()({
   Prisma,
   schema: auditSchema,
-  provider: auditProvider,
-  aggregateMapping: defineAggregateMapping<AuditModelName, PrismaClient>()({
+  contextProvider: auditProvider,
+  entities: defineEntities<AuditModelName, PrismaClient>()({
     User: defineEntity({ type: 'User' }),
     Post: defineEntity({
       type: 'Post',
@@ -116,7 +116,7 @@ await auditProvider.runAsync(
 
 ### Required Options
 
-#### `provider`
+#### `contextProvider`
 **Type:** `AuditContextProvider`
 
 Context provider for managing audit context across async operations.
@@ -166,13 +166,13 @@ await prisma.$transaction(async (tx) => {
 
 Common use cases: pre-auth login flows, impersonation, system→user handoff.
 
-#### `aggregateMapping`
-**Type:** `AggregateMapping<AuditModelName, PrismaClient>`
+#### `entities`
+**Type:** `EntityMap<AuditModelName, PrismaClient>`
 
 Defines how entities relate to aggregate roots for audit log organization. Its keys, like those of `fetchBefore.models`, are typed by the model names of `schema`, spelled as `schema.prisma` declares them (`AuditModelName` from the generator's output).
 
 ```typescript
-const aggregateMapping = defineAggregateMapping<AuditModelName, PrismaClient>()({
+const entities = defineEntities<AuditModelName, PrismaClient>()({
   User: defineEntity({ type: 'User' }),
   Post: defineEntity({
     type: 'Post',
@@ -193,7 +193,7 @@ const aggregateMapping = defineAggregateMapping<AuditModelName, PrismaClient>()(
 ```typescript
 import { defineEntity, to, foreignKey } from '@kuruwic/prisma-audit';
 
-const aggregateMapping = defineAggregateMapping<AuditModelName, PrismaClient>()({
+const entities = defineEntities<AuditModelName, PrismaClient>()({
   User: defineEntity({
     type: 'UserAccount',     // Custom entityType (stored in AuditLog.entityType)
     category: 'identity',    // Custom entityCategory (stored in AuditLog.entityCategory)
@@ -201,11 +201,11 @@ const aggregateMapping = defineAggregateMapping<AuditModelName, PrismaClient>()(
   AuditLog: defineEntity({
     type: 'AuditEvent',      // Custom entityType
     category: 'system',      // Custom category
-    self: false,             // Don't create self aggregate
+    selfAggregate: false,    // Don't create self aggregate
   }),
   PostTag: defineEntity({
     type: 'PostTag',
-    self: false,             // Join table - only log aggregates
+    selfAggregate: false,    // Join table - only log aggregates
     aggregates: [
       to('Post', foreignKey('postId')),
       to('Tag', foreignKey('tagId')),
@@ -221,7 +221,7 @@ An update that changes a row's parent (a changed `authorId`, or a nested `connec
 This allows you to:
 - Use custom names in `entityType`/`aggregateType` fields (e.g., `"UserAccount"` instead of `"User"`)
 - Categorize entities with custom `category` values (e.g., `"identity"`, `"system"`, `"business"`)
-- Control which entities create self aggregates with `self: false`
+- Control which entities create self aggregates with `selfAggregate: false`
 
 #### `Prisma`
 **Type:** Prisma namespace
@@ -236,7 +236,7 @@ import { auditSchema } from '../generated/audit/index.js';
 const basePrisma = new PrismaClient({
   adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }),
 });
-const prisma = createAuditClient(basePrisma, { Prisma, schema: auditSchema, provider, aggregateMapping });
+const prisma = createAuditClient(basePrisma, { Prisma, schema: auditSchema, contextProvider: provider, entities });
 ```
 
 The Prisma client itself is the first argument of `createAuditClient`. Audited operations run on it, and audit logs are written with it, bypassing the audit extension.
@@ -290,8 +290,8 @@ model Activity {
 
 // Configuration
 createAuditClient(basePrisma, {
-  provider,
-  aggregateMapping,
+  contextProvider: provider,
+  entities,
   Prisma,
   schema: auditSchema,
   auditLogModel: 'Activity',  // Use 'Activity' instead of 'AuditLog'
@@ -322,8 +322,8 @@ model CustomAuditLog {
 
 // Configuration
 createAuditClient(basePrisma, {
-  provider,
-  aggregateMapping,
+  contextProvider: provider,
+  entities,
   Prisma,
   schema: auditSchema,
   auditLogModel: 'CustomAuditLog',
@@ -468,7 +468,7 @@ The helper writes on the client each write runs on: in the operation's transacti
 // src/audit.config.ts
 import {
   defineConfig,
-  defineAggregateMapping,
+  defineEntities,
   defineEntity,
   to,
   foreignKey,
@@ -483,8 +483,8 @@ export const auditProvider = createAsyncLocalStorageProvider();
 export default defineConfig<PrismaClient>()({
   Prisma,
   schema: auditSchema,
-  provider: auditProvider,
-  aggregateMapping: defineAggregateMapping<AuditModelName, PrismaClient>()({
+  contextProvider: auditProvider,
+  entities: defineEntities<AuditModelName, PrismaClient>()({
     User: defineEntity({ type: 'User' }),
     Post: defineEntity({
       type: 'Post',
@@ -615,7 +615,7 @@ The helper writes on the client each write runs on: in the operation's transacti
 // src/audit.config.ts
 import {
   defineConfig,
-  defineAggregateMapping,
+  defineEntities,
   defineEntity,
   to,
   foreignKey,
@@ -630,8 +630,8 @@ export const auditProvider = createAsyncLocalStorageProvider();
 export default defineConfig<PrismaClient>()({
   Prisma,
   schema: auditSchema,
-  provider: auditProvider,
-  aggregateMapping: defineAggregateMapping<AuditModelName, PrismaClient>()({
+  contextProvider: auditProvider,
+  entities: defineEntities<AuditModelName, PrismaClient>()({
     User: defineEntity({ type: 'User' }),
     Post: defineEntity({
       type: 'Post',
@@ -717,7 +717,7 @@ Fields to exclude from change tracking (globally or per-model). An update whose 
 
 Per-model exclusion:
 ```typescript
-const aggregateMapping = defineAggregateMapping<AuditModelName, PrismaClient>()({
+const entities = defineEntities<AuditModelName, PrismaClient>()({
   User: defineEntity({
     type: 'User',
     excludeFields: ['lastLoginAt', 'sessionToken'],
@@ -818,7 +818,7 @@ Controls whether audit log writes are synchronous or asynchronous.
 #### `awaitWriteIf`
 **Type:** `(modelName: string, tags: string[]) => boolean`
 
-Conditionally control the write strategy per operation. Called once per operation the audit records, once sampling has kept it (with `openImplicitTransaction` once per call, which the client decides before the call runs; see [`openImplicitTransaction`](#openimplicittransaction)), with its top-level model and that model's `tags` from `aggregateMapping` (`[]` for a model without tags); its return value replaces `performance.awaitWrite` for the whole operation, the audit rows of its nested writes to other models included.
+Conditionally control the write strategy per operation. Called once per operation the audit records, once sampling has kept it (with `openImplicitTransaction` once per call, which the client decides before the call runs; see [`openImplicitTransaction`](#openimplicittransaction)), with its top-level model and that model's `tags` from `entities` (`[]` for a model without tags); its return value replaces `performance.awaitWrite` for the whole operation, the audit rows of its nested writes to other models included.
 
 ```typescript
 {
@@ -868,7 +868,7 @@ Constraints:
 
 The extension uses three different write strategies for audit logs, selected automatically based on configuration and transaction context.
 
-> The `createAuditClient` calls below show only the option under discussion. In your code, combine it with the full configuration shown in [Quick Start](#2-create-audited-client) (`Prisma`, `provider`, `aggregateMapping`, and so on).
+> The `createAuditClient` calls below show only the option under discussion. In your code, combine it with the full configuration shown in [Quick Start](#2-create-audited-client) (`Prisma`, `contextProvider`, `entities`, and so on).
 
 #### 1. Synchronous Strategy (`awaitWrite: true`)
 
@@ -977,7 +977,7 @@ createAuditClient(prisma, {
       return true;
     },
   },
-  aggregateMapping: defineAggregateMapping<AuditModelName, PrismaClient>()({
+  entities: defineEntities<AuditModelName, PrismaClient>()({
     Payment: defineEntity({
       type: 'Payment',
       tags: ['critical', 'payment'], // Will use synchronous strategy (default)
@@ -1028,7 +1028,7 @@ Sample rate for audit logging (0.0 = 0%, 1.0 = 100%).
 #### `samplingIf`
 **Type:** `(modelName: string, tags: string[]) => number`
 
-Sampling rate per operation. Called once per audited operation (with `openImplicitTransaction` once per call, which the client decides before the call runs), with its top-level model and that model's `tags` from `aggregateMapping` (`[]` for a model without tags); its return value replaces `performance.sampling` for the whole operation, its nested writes included.
+Sampling rate per operation. Called once per audited operation (with `openImplicitTransaction` once per call, which the client decides before the call runs), with its top-level model and that model's `tags` from `entities` (`[]` for a model without tags); its return value replaces `performance.sampling` for the whole operation, its nested writes included.
 
 ```typescript
 {
@@ -1160,19 +1160,21 @@ Database-generated defaults (`autoincrement()`, `dbgenerated()`) cannot be pre-g
 
 With `skipDuplicates`, a row the database skipped gets no audit log, except a row skipped because a row with its key already exists, as the database compares keys: that row is read back and recorded as a create of the existing row. To avoid this, leave the key out of `data`, so the extension generates it, or use `createManyAndReturn`, which audits only the rows it created.
 
-### Context Enrichment (`contextEnricher`)
+### Context Enrichment
 
-Add additional metadata to audit logs via database queries.
+Add additional metadata to audit logs via database queries. Each key is named after the `AuditLog` column it fills: `actorContext`, `entityContext` and `aggregateContext`.
 
-#### `actor`
-**Type:** `(actor: ActorInfo, prisma: PrismaClient) => Promise<object | null>`
+Every enricher config takes `enricher`, `onError` and `fallback`. `onError` decides what a failure (an error or a timeout) becomes: `'throw'` (the default) rethrows it, `'log'` warns and stores `fallback ?? null`, and `'ignore'` stores `fallback ?? null` silently. A function receives the error and returns one of those strategies, sync or async; when it throws or returns anything else, the failure is logged and handled as `'log'`.
 
-Enrich actor information with database data.
+#### `actorContext`
+**Type:** `ActorContextConfig` from `@kuruwic/db-audit-core`: `enricher(actor, prisma)`, `onError`, `fallback`
+
+Enrich actor information with database data. The enricher runs once per operation.
 
 ```typescript
 {
-  contextEnricher: {
-    actor: async (actor, prisma) => {
+  actorContext: {
+    enricher: async (actor, prisma) => {
       if (actor.category !== 'user' || actor.type !== 'User') {
         return null;
       }
@@ -1188,6 +1190,7 @@ Enrich actor information with database data.
         department: user?.department,
       };
     },
+    onError: 'log',
   }
 }
 ```
@@ -1208,10 +1211,10 @@ Enrich actor information with database data.
 
 #### Entity / aggregate context
 
-Entity and aggregate contexts are configured per entity in the aggregate mapping (not in `contextEnricher`), using three orthogonal batch-first hooks:
+Entity and aggregate contexts are configured per entity in `entities`, using three orthogonal batch-first hooks:
 
 ```typescript
-const aggregateMapping = defineAggregateMapping<AuditModelName, PrismaClient>()({
+const entities = defineEntities<AuditModelName, PrismaClient>()({
   User: defineEntity({
     type: 'User',
     // Root-side: applied whenever ANY log projects onto a User aggregate.
@@ -1230,7 +1233,7 @@ const aggregateMapping = defineAggregateMapping<AuditModelName, PrismaClient>()(
   Post: defineEntity({
     type: 'Post',
     // Entity-log context: stored in AuditLog.entityContext.
-    context: {
+    entityContext: {
       enricher: async (posts, prisma) =>
         posts.map((post) => ({ title: post.title })),
     },
@@ -1239,7 +1242,7 @@ const aggregateMapping = defineAggregateMapping<AuditModelName, PrismaClient>()(
       // The enricher receives the WRITTEN rows (posts), and meta.aggregateIds[i]
       // is the aggregate ID resolved for row i.
       to('User', foreignKey('authorId'), {
-        context: {
+        aggregateContext: {
           enricher: async (posts, prisma, meta) =>
             posts.map((post) => ({ postTitle: post.title })),
         },
@@ -1249,7 +1252,7 @@ const aggregateMapping = defineAggregateMapping<AuditModelName, PrismaClient>()(
 });
 ```
 
-The stored `aggregateContext` is the shallow merge of the root-side and projection-side results (projection keys win). The self aggregate log can be enriched via `self: { context: { ... } }`.
+The stored `aggregateContext` is the shallow merge of the root-side and projection-side results (projection keys win). The self aggregate log can be enriched via `selfAggregate: { aggregateContext: { ... } }`.
 
 **⚠️ Performance Note:** Enrichers execute database queries per operation (batched, N+1 free). Root-side enrichers run once per aggregate type with unique IDs.
 
@@ -1277,7 +1280,7 @@ With `update` off, a nested `update` still has the key columns of its row read w
 #### `models`
 **Type:** `{ [Model]?: { update?: boolean; delete?: boolean } }`
 
-Per-model settings, keyed by the model names of `schema` like [`aggregateMapping`](#aggregatemapping). For each operation, the written model's setting wins, then the global setting, then the default.
+Per-model settings, keyed by the model names of `schema` like [`entities`](#entities). For each operation, the written model's setting wins, then the global setting, then the default.
 
 ```typescript
 {
@@ -1310,7 +1313,7 @@ Supports the following operations, including deep nesting:
   - On a to-one relation whose optional foreign key is on the related record, the record the parent held before is unlinked: it gets an `update` audit log too (foreign key `→ null`), and so does the record a to-one `create` or `connectOrCreate` replaces
   - When the parent holds the foreign key (e.g., `post.author`): the parent's own `update` audit log carries the change
   - A to-one `update`, `upsert` or `delete` next to a `connect` applies to the record the `connect` names, which Prisma links first: that record gets the `update` or `delete` audit log, with its state before the operation
-  - Creates audit logs for join table entities (e.g., PostTag) if defined in `aggregateMapping`
+  - Creates audit logs for join table entities (e.g., PostTag) if defined in `entities`
 - `set` - Replaces the records linked through an optional foreign key: an `update` audit log for each record it moves in and for each record it unlinks (foreign key `→ null`); the records it keeps get none
 - `disconnect` - Unlinks records through an optional foreign key (the named records of a to-many relation, the parent's record of a to-one relation): an `update` audit log for each unlinked record (foreign key `→ null`); a record linked to another parent is left as it was and gets none
 - `connectOrCreate` - Connects to existing record or creates new one
@@ -1345,7 +1348,7 @@ await prisma.post.update({
 2. **`connect`, `set` and `disconnect` behavior**:
    - A foreign key on the related record is that record's column: each record whose foreign key the write changed gets an `update` audit log, `changes` holding the old and new value. The records the writes at one relation path name, and the records linked to their parent rows when a write unlinks those (a `set`, or a to-one `connect`, `create`, `connectOrCreate` or `disconnect` on an optional foreign key), are read once before the write (whole rows, when `fetchBefore.update` is on for the related model) and once after it by primary key; a record whose foreign key did not change (already linked, kept by a `set`, linked to another parent) gets no audit log. Prisma also sets an `@updatedAt` column on every connected record, so with the foreign key in `excludeFields` such a record is still logged, with `updatedAt` as its only change
    - Creates join table records (e.g., PostTag) for many-to-many relations
-   - Creates audit logs for join table entities if defined in `aggregateMapping`
+   - Creates audit logs for join table entities if defined in `entities`
    - Does not create audit logs for a record whose link lives elsewhere (e.g., Tag, linked through PostTag's foreign key)
 3. **`connectOrCreate` behavior**:
    - Uses pre-fetch to check record existence
@@ -1373,7 +1376,7 @@ await prisma.post.update({
 // src/audit.config.ts
 import {
   defineConfig,
-  defineAggregateMapping,
+  defineEntities,
   defineEntity,
   to,
   foreignKey,
@@ -1387,8 +1390,8 @@ export const auditProvider = createAsyncLocalStorageProvider();
 export default defineConfig<PrismaClient>()({
   Prisma,
   schema: auditSchema,
-  provider: auditProvider,
-  aggregateMapping: defineAggregateMapping<AuditModelName, PrismaClient>()({
+  contextProvider: auditProvider,
+  entities: defineEntities<AuditModelName, PrismaClient>()({
     User: defineEntity({
       type: 'User',
       excludeFields: ['lastLoginAt'],
@@ -1440,9 +1443,9 @@ export default defineConfig<PrismaClient>()({
     },
   },
 
-  // Context enrichment
-  contextEnricher: {
-    actor: async (actor, prisma) => {
+  // Actor context enrichment
+  actorContext: {
+    enricher: async (actor, prisma) => {
       if (actor.type === 'User') {
         const user = await prisma.user.findUnique({
           where: { id: actor.id },

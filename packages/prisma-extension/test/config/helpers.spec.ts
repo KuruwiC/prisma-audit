@@ -50,7 +50,7 @@ describe('resolveFetchBefore', () => {
     expect(fetchBefore('User', 'update', config)).toBe(false);
   });
 
-  it('applies a model setting to a model declared with a lowercase first letter, like the aggregate mapping', () => {
+  it('applies a model setting to a model declared with a lowercase first letter, like the entity map keys', () => {
     const config: FetchBeforeConfig = { models: { AuditEvent: { update: false } } };
 
     expect(fetchBefore('auditEvent', 'update', config)).toBe(false);

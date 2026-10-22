@@ -36,8 +36,8 @@ describe('a model identified by a unique field instead of a primary key', () => 
     const prisma = createAuditClient(basePrisma, {
       Prisma,
       schema: auditSchema,
-      provider,
-      aggregateMapping: { Device: defineEntity({ type: 'Device', idResolver }) },
+      contextProvider: provider,
+      entities: { Device: defineEntity({ type: 'Device', idResolver }) },
       performance: { awaitWrite: true },
       ...(observer ? { errorHandling: { observer } } : {}),
     });

@@ -5,14 +5,14 @@
  */
 
 import type {
-  AggregateMapping,
+  ActorContextConfig,
   AuditActor,
   AuditContextProvider,
   AuditRecord,
   AuditLogData as CoreAuditLogData,
   AuditLogInput as CoreAuditLogInput,
+  EntityMap,
   ErrorHandlingConfig,
-  GlobalContextEnricherConfig,
   WriteContext,
   WriteFn,
 } from '@kuruwic/db-audit-core';
@@ -85,7 +85,7 @@ export interface PerformanceConfig {
    * Dynamic `awaitWrite` decision, called once per operation the audit records, once sampling
    * has kept it (with `openImplicitTransaction` once per call, which the client decides before the
    * call runs, for every query the call runs through the audit extension), with the name of its
-   * top-level model and that model's `tags` from `aggregateMapping`
+   * top-level model and that model's `tags` from `entities`
    * (`tags` is `[]` for a model whose entity config declares no tags). Its return value replaces
    * {@link PerformanceConfig.awaitWrite} for the whole operation, the audit rows of its nested
    * writes to other models included.
@@ -94,7 +94,7 @@ export interface PerformanceConfig {
   /**
    * Dynamic sampling rate, called once per audited operation (with `openImplicitTransaction` once
    * per call, as `awaitWriteIf`) with the name of its top-level model and that model's `tags` from
-   * `aggregateMapping` (`tags` is `[]` for a model whose entity config declares no tags). Its
+   * `entities` (`tags` is `[]` for a model whose entity config declares no tags). Its
    * return value replaces {@link PerformanceConfig.sampling} for the whole operation, its nested
    * writes included.
    */
@@ -164,7 +164,7 @@ export interface FetchBeforeByOperation {
  */
 export interface FetchBeforeConfig<TModelName extends string = string> extends FetchBeforeByOperation {
   /**
-   * Per-model settings, keyed by model name like the aggregate mapping, and like it matched to a
+   * Per-model settings, keyed by model name like `entities`, and like it matched to a
    * model case-insensitively
    */
   models?: { readonly [K in TModelName]?: FetchBeforeByOperation };
@@ -183,12 +183,12 @@ export type {
  * Prisma Extension configuration options
  *
  * @template TModelName - Model names of `schema`, as `schema.prisma` declares them. They are inferred
- *   from `schema` alone and key `aggregateMapping` and `fetchBefore.models`; defaults to any string
+ *   from `schema` alone and key `entities` and `fetchBefore.models`; defaults to any string
  * @template TClient - The audited client type, passed to every resolver and enricher as `db`
  */
 export interface PrismaAuditExtensionOptions<TModelName extends string = string, TClient = unknown> {
-  provider: AuditContextProvider;
-  aggregateMapping: AggregateMapping<NoInfer<TModelName>, TClient>;
+  contextProvider: AuditContextProvider;
+  entities: EntityMap<NoInfer<TModelName>, TClient>;
   /**
    * Prisma namespace exported by the generated client that the audited `PrismaClient` comes from.
    * Required because a client instance does not expose its namespace.
@@ -206,8 +206,8 @@ export interface PrismaAuditExtensionOptions<TModelName extends string = string,
    * const prisma = createAuditClient(basePrisma, {
    *   Prisma,
    *   schema: auditSchema,
-   *   provider,
-   *   aggregateMapping,
+   *   contextProvider,
+   *   entities,
    * });
    * ```
    */
@@ -241,8 +241,11 @@ export interface PrismaAuditExtensionOptions<TModelName extends string = string,
   security?: SecurityConfig;
   performance?: PerformanceConfig;
   hooks?: HooksConfig<TClient>;
-  /** Actor enrichment; the enricher receives the operation's `AuditActor` and the client. */
-  contextEnricher?: GlobalContextEnricherConfig<AuditActor, unknown, TClient>;
+  /**
+   * Actor context enrichment, stored in AuditLog.actorContext; the enricher receives the
+   * operation's `AuditActor` and the client.
+   */
+  actorContext?: ActorContextConfig<AuditActor, unknown, TClient>;
   fetchBefore?: FetchBeforeConfig<NoInfer<TModelName>>;
   /**
    * Audit-failure observation and policy. See {@link ErrorHandlingConfig}. What each phase

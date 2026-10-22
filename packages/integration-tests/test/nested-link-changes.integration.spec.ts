@@ -11,19 +11,19 @@
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
-import type { AggregateMapping, AuditErrorObserver } from '@kuruwic/prisma-audit';
+import type { AuditErrorObserver, EntityMap } from '@kuruwic/prisma-audit';
 import { createAuditClient, defineEntity } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanDatabase, createBasePrisma, testAggregateMapping } from './helpers/setup.js';
+import { cleanDatabase, createBasePrisma, testEntities } from './helpers/setup.js';
 
 const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'link-changes-actor' },
 };
 
 interface SetupOptions {
-  readonly aggregateMapping?: AggregateMapping;
+  readonly entities?: EntityMap;
   readonly fetchBeforeLabelUpdate?: boolean;
   /** The first `findMany` of this model made after `arm()` fails */
   readonly faultModel?: 'Label';
@@ -60,8 +60,8 @@ describe('foreign-key changes of related rows', () => {
     const prisma = createAuditClient(faultyPrisma, {
       Prisma,
       schema: auditSchema,
-      provider,
-      aggregateMapping: options.aggregateMapping ?? testAggregateMapping,
+      contextProvider: provider,
+      entities: options.entities ?? testEntities,
       diffing: { excludeFields: ['createdAt', 'updatedAt'] },
       security: { redact: { fields: [] } },
       fetchBefore: {
@@ -197,8 +197,8 @@ describe('foreign-key changes of related rows', () => {
 
     it('skips a row whose only change is a foreign key the entity excludes', async () => {
       const { basePrisma, prisma, run, recordsOf } = await setup({
-        aggregateMapping: {
-          ...testAggregateMapping,
+        entities: {
+          ...testEntities,
           Label: defineEntity({ type: 'Label', excludeFields: ['postId'] }),
         },
       });

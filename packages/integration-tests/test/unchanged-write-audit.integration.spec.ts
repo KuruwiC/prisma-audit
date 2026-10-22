@@ -10,7 +10,7 @@
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
-import type { AggregateMapping } from '@kuruwic/prisma-audit';
+import type { EntityMap } from '@kuruwic/prisma-audit';
 import { createAuditClient, defineEntity, foreignKey, to } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
@@ -21,7 +21,7 @@ const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'unchanged-write-actor' },
 };
 
-const createMapping = (excludeFields: string[] | undefined): AggregateMapping => ({
+const createMapping = (excludeFields: string[] | undefined): EntityMap => ({
   User: defineEntity({ type: 'User' }),
   Profile: defineEntity({ type: 'Profile', excludeFields, aggregates: [to('User', foreignKey('userId'))] }),
   Avatar: defineEntity({ type: 'Avatar', excludeFields, aggregates: [to('Profile', foreignKey('profileId'))] }),
@@ -36,8 +36,8 @@ describe('A write that stores the values a row already holds', () => {
     createAuditClient(basePrisma, {
       Prisma,
       schema: auditSchema,
-      provider,
-      aggregateMapping: createMapping(excludeFields),
+      contextProvider: provider,
+      entities: createMapping(excludeFields),
       diffing: { excludeFields: ['createdAt'] },
       performance: { awaitWrite: true },
       fetchBefore: { update: true, delete: true },

@@ -13,19 +13,19 @@
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
-import type { AggregateMapping } from '@kuruwic/prisma-audit';
+import type { EntityMap } from '@kuruwic/prisma-audit';
 import { createAuditClient, defineEntity, foreignKey, to } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, describe, expect, it } from 'vitest';
-import { cleanDatabase, createBasePrisma, testAggregateMapping } from './helpers/setup.js';
+import { cleanDatabase, createBasePrisma, testEntities } from './helpers/setup.js';
 
 const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'moved-row-actor' },
 };
 
-const aggregateMapping: AggregateMapping = {
-  ...testAggregateMapping,
+const entities: EntityMap = {
+  ...testEntities,
   Label: defineEntity({ type: 'Label', aggregates: [to('Post', foreignKey('postId'))] }),
   Badge: defineEntity({ type: 'Badge', aggregates: [to('User', foreignKey('userId'))] }),
 };
@@ -45,8 +45,8 @@ describe('aggregates of a row moved to another parent', () => {
     const prisma = createAuditClient(basePrisma, {
       Prisma,
       schema: auditSchema,
-      provider,
-      aggregateMapping,
+      contextProvider: provider,
+      entities,
       diffing: { excludeFields: ['createdAt', 'updatedAt'] },
       security: { redact: { fields: [] } },
       fetchBefore: { update: options.fetchBeforeUpdate ?? true, delete: true },

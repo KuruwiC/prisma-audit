@@ -40,10 +40,11 @@ dispatch({ buildRecords, modelName, operation, params, atomic, auditContext }, c
   configuration does not ask for, a read that found no row), or `unavailable` when the read was
   asked for and failed. The adapter reports the failure itself; the event only says that the row
   is unknown.
-- **`resolve`** adds the entity id, the aggregate roots (the self projection unless disabled, plus
-  every `to()` root that resolves), and the actor, entity and aggregate contexts from the configured
-  enrichers. Id resolvers and enrichers receive the database handle through the `read` thunk,
-  evaluated at each call, so a callback running inside a transaction reads that transaction's writes.
+- **`resolve`** adds the entity id, the aggregate roots (the self aggregate unless `selfAggregate` is
+  `false`, plus every `to()` root that resolves), and the actor, entity and aggregate contexts from
+  the configured enrichers. Id resolvers and enrichers receive the database handle through the
+  `read` thunk, evaluated at each call, so a callback running inside a transaction reads that
+  transaction's writes.
   The entity's id resolver runs once per row, on the row after the write, and the self root is its
   id. Each `to()` root is resolved from the row after the write and, for an update whose before
   state is `captured`, from the row before it too: a row moved to another parent gets a record under
@@ -52,7 +53,7 @@ dispatch({ buildRecords, modelName, operation, params, atomic, auditContext }, c
   write moved to another parent and then deleted gets a record under both. The roots of the row
   before the write come after the others, and roots equal in category, type and id are kept once. A
   resolver that reads the database (`lookup()`, `batchLookup()`) runs for the row before the write
-  too and reads the database as it is after the write; a projection's `context` enricher receives,
+  too and reads the database as it is after the write; a projection's `aggregateContext` enricher receives,
   for each root, the row that resolved it. Without a captured before state (a read not asked for,
   or one that failed) only the aggregates the row names after the write are known. A resolver that
   throws, or returns an id `normalizeId` rejects, is returned in `failures` (the row, which
@@ -97,8 +98,8 @@ dispatch({ buildRecords, modelName, operation, params, atomic, auditContext }, c
 
 ## Configuration API
 
-- **Aggregate mapping**: `defineAggregateMapping`, `defineEntity`, `to`, `self`, `foreignKey`,
-  `lookup`, `batchLookup`, `validateAggregateMapping`, `createEntityConfigLookup`. The database
+- **Entity map**: `defineEntities`, `defineEntity`, `to`, `self`, `foreignKey`,
+  `lookup`, `batchLookup`, `validateEntityMap`, `createEntityConfigLookup`. The database
   handle is the opaque type parameter `TDbHandle`; the adapter supplies its type.
 - **Context provider**: `createAsyncLocalStorageProvider()` returns an `AuditContextProvider`
   (`run`, `runAsync`, `getContext`, `withActor`) that carries the actor and request context through
@@ -138,7 +139,7 @@ write the adapter runs, in order:
 1. **`policy(model, tags, policyConfig)`**, before any statement runs, to learn whether the
    operation is sampled in and, when it is, whether the audit rows are written atomically with the
    write. A sampled-out operation runs as it would without the adapter. The tags come from the
-   entity's configuration (`createEntityConfigLookup(mapping).byModel(model)?.tags`).
+   entity's configuration (`createEntityConfigLookup(entities).byModel(model)?.tags`).
 2. **The write, in its scope.** When `atomic` is true and no transaction is active, the adapter
    may open an implicit transaction and run the write, and everything below, on that transaction's
    handle; otherwise the write runs on the base handle and `dispatch` writes the atomic records
@@ -271,9 +272,9 @@ shows how such an adapter would plug into the boundary.
 - **Interception.** A `Proxy` over the Drizzle `db` replaces `insert`, `update`, `delete` and
   `transaction` with builders that run only when awaited. `policy` runs when the builder is
   awaited, before its first statement.
-- **Models and mapping.** Drizzle identifies a table by its `Table` object. The adapter names each
+- **Models and entity map.** Drizzle identifies a table by its `Table` object. The adapter names each
   table (the SQL name from `getTableName`, or the schema key) and builds the string-keyed
-  aggregate mapping; a table-level helper translates a parent table into `to(type, resolver)`.
+  entity map; a table-level helper translates a parent table into `to(type, resolver)`.
   The primary key, and so `identity`, comes from `getTableColumns(table)` (`primary` columns) or a
   composite `primaryKey` in the table's extra config.
 - **Change capture and before state.** On PostgreSQL and SQLite, `insert(...).returning()` gives

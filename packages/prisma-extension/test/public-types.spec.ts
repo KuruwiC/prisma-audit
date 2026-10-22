@@ -4,12 +4,29 @@
  */
 
 import { describe, expectTypeOf, it } from 'vitest';
-import type { AuditRecord, PrismaAuditExtensionOptions, WriteContext } from '../src/index.js';
+import type {
+  AuditContextProvider,
+  AuditRecord,
+  EntityMap,
+  PrismaAuditExtensionOptions,
+  WriteContext,
+} from '../src/index.js';
 
-type Writer = NonNullable<NonNullable<PrismaAuditExtensionOptions<'User', { id: string }>['hooks']>['writer']>;
+type Options = PrismaAuditExtensionOptions<'User', { id: string }>;
+type Writer = NonNullable<NonNullable<Options['hooks']>['writer']>;
 
 describe('package entry types', () => {
   it("exports the record and context types of hooks.writer's parameters", () => {
     expectTypeOf<Parameters<Writer>>().toEqualTypeOf<[AuditRecord[], WriteContext<{ id: string }>]>();
+  });
+
+  it('exports the types of entities and contextProvider', () => {
+    expectTypeOf<Options['entities']>().toEqualTypeOf<EntityMap<'User', { id: string }>>();
+    expectTypeOf<Options['contextProvider']>().toEqualTypeOf<AuditContextProvider>();
+  });
+
+  it("passes the client to actorContext's enricher", () => {
+    type ActorEnricher = NonNullable<Options['actorContext']>['enricher'];
+    expectTypeOf<Parameters<ActorEnricher>[1]>().toEqualTypeOf<{ id: string }>();
   });
 });

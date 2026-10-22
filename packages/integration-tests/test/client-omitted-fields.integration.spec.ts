@@ -11,17 +11,17 @@
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider, self } from '@kuruwic/db-audit-core';
 import {
-  type AggregateMapping,
   type AuditErrorObserver,
   createAuditClient,
   defineEntity,
+  type EntityMap,
   foreignKey,
   to,
 } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { aggregatesOf, cleanDatabase, createBasePrisma, testAggregateMapping } from './helpers/setup.js';
+import { aggregatesOf, cleanDatabase, createBasePrisma, testEntities } from './helpers/setup.js';
 
 const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'client-omitted-fields-actor' },
@@ -49,8 +49,8 @@ const CALLER_NAMED_PASSWORD: Array<[string, Pick<Prisma.UserUpdateArgs, 'select'
 ];
 
 /** The mapping whose User and Post audit the fields the client omits */
-const auditingOmittedFields: AggregateMapping = {
-  ...testAggregateMapping,
+const auditingOmittedFields: EntityMap = {
+  ...testEntities,
   User: defineEntity({ type: 'User', excludeFields: ['updatedAt'], auditOmittedFields: ['password'] }),
   Post: defineEntity({
     type: 'Post',
@@ -62,7 +62,7 @@ const auditingOmittedFields: AggregateMapping = {
 interface Options {
   readonly Prisma?: typeof Prisma;
   readonly errorHandling?: { readonly observer?: AuditErrorObserver };
-  readonly aggregateMapping?: AggregateMapping;
+  readonly entities?: EntityMap;
   readonly security?: { readonly redact?: { readonly fields?: string[] } };
   readonly fetchBefore?: { readonly update?: boolean; readonly delete?: boolean };
 }
@@ -90,8 +90,8 @@ describe('fields a client-level omit hides', () => {
     const prisma = createAuditClient(basePrisma, {
       Prisma,
       schema: auditSchema,
-      provider,
-      aggregateMapping: testAggregateMapping,
+      contextProvider: provider,
+      entities: testEntities,
       diffing: { excludeFields: ['createdAt', 'updatedAt'] },
       ...options,
     });
@@ -121,7 +121,7 @@ describe('fields a client-level omit hides', () => {
     return { basePrisma, prisma, run, recordsOf, recordOf };
   };
 
-  const optedIn = (options: Options = {}) => setup({ aggregateMapping: auditingOmittedFields, ...options });
+  const optedIn = (options: Options = {}) => setup({ entities: auditingOmittedFields, ...options });
 
   describe('by default', () => {
     it('records no update whose only change is to a hidden field, and returns the default fields', async () => {
@@ -377,7 +377,7 @@ describe('fields a client-level omit hides', () => {
 
     describe('a field excludeFields also names', () => {
       const excludingPassword: Options = {
-        aggregateMapping: {
+        entities: {
           ...auditingOmittedFields,
           User: defineEntity({
             type: 'User',
@@ -516,8 +516,8 @@ describe('fields a client-level omit hides', () => {
         const { basePrisma, prisma, run } = await setup(
           {
             errorHandling: { observer },
-            aggregateMapping: {
-              ...testAggregateMapping,
+            entities: {
+              ...testEntities,
               Label: defineEntity({
                 type: 'Label',
                 aggregates: [to('Post', foreignKey('postId'))],
@@ -642,8 +642,8 @@ describe('fields a client-level omit hides', () => {
 
     describe('configuration errors', () => {
       const listing = (auditOmittedFields: string[]): Options => ({
-        aggregateMapping: {
-          ...testAggregateMapping,
+        entities: {
+          ...testEntities,
           User: defineEntity({ type: 'User', excludeFields: ['updatedAt'], auditOmittedFields }),
         },
       });
@@ -658,8 +658,8 @@ describe('fields a client-level omit hides', () => {
 
       it('rejects the option on a mapping key that names no model', async () => {
         const options: Options = {
-          aggregateMapping: {
-            ...testAggregateMapping,
+          entities: {
+            ...testEntities,
             Usr: defineEntity({ type: 'Usr', auditOmittedFields: ['password'] }),
           },
         };
@@ -1031,8 +1031,8 @@ describe('fields a client-level omit hides', () => {
     it('records an update of a model without a primary key under the unique field its before state holds', async () => {
       const { basePrisma, prisma, run, recordOf } = await setup(
         {
-          aggregateMapping: {
-            ...testAggregateMapping,
+          entities: {
+            ...testEntities,
             Device: defineEntity({ type: 'Device', idResolver: self('code') }),
           },
         },

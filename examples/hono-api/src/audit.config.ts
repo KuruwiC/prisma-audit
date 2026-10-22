@@ -4,8 +4,8 @@
 
 import {
   createAsyncLocalStorageProvider,
-  defineAggregateMapping,
   defineConfig,
+  defineEntities,
   defineEntity,
   foreignKey,
   lookup,
@@ -267,7 +267,7 @@ const enrichAvatarImageContext = async (avatarImages: AvatarImageRow[], db: Pris
   });
 };
 
-const aggregateMapping = defineAggregateMapping<AuditModelName, PrismaClient>()({
+const entities = defineEntities<AuditModelName, PrismaClient>()({
   User: defineEntity({
     type: 'User',
     excludeFields: ['updatedAt'],
@@ -276,19 +276,19 @@ const aggregateMapping = defineAggregateMapping<AuditModelName, PrismaClient>()(
     type: 'Post',
     aggregates: [
       to('User', foreignKey('authorId'), {
-        context: {
+        aggregateContext: {
           enricher: async (posts) => posts.map((post) => ({ name: post.author ? userDisplayName(post.author) : null })),
           onError: 'log',
         },
       }),
     ],
-    self: {
-      context: {
+    selfAggregate: {
+      aggregateContext: {
         enricher: async (posts) => posts.map((post) => ({ name: post.title })),
         onError: 'log',
       },
     },
-    context: {
+    entityContext: {
       enricher: async (posts) => posts.map((post) => ({ title: post.title, published: post.published })),
       onError: 'log',
     },
@@ -297,20 +297,20 @@ const aggregateMapping = defineAggregateMapping<AuditModelName, PrismaClient>()(
     type: 'Comment',
     aggregates: [
       to('Post', foreignKey('postId'), {
-        context: {
+        aggregateContext: {
           enricher: async (comments) => comments.map((comment) => ({ name: comment.post?.title ?? null })),
           onError: 'log',
         },
       }),
       to('User', foreignKey('authorId'), {
-        context: {
+        aggregateContext: {
           enricher: async (comments) =>
             comments.map((comment) => ({ name: comment.author ? userDisplayName(comment.author) : null })),
           onError: 'log',
         },
       }),
     ],
-    context: {
+    entityContext: {
       enricher: enrichCommentContext,
       onError: 'log',
     },
@@ -320,10 +320,10 @@ const aggregateMapping = defineAggregateMapping<AuditModelName, PrismaClient>()(
   }),
   PostTag: defineEntity<PostTagRow, PrismaClient>({
     type: 'PostTag',
-    self: false,
+    selfAggregate: false,
     aggregates: [
       to('Tag', foreignKey('tagId'), {
-        context: {
+        aggregateContext: {
           enricher: async (postTags, db) => {
             const tagIds = new Set<string>();
             for (const postTag of postTags) {
@@ -350,7 +350,7 @@ const aggregateMapping = defineAggregateMapping<AuditModelName, PrismaClient>()(
         },
       }),
       to('Post', foreignKey('postId'), {
-        context: {
+        aggregateContext: {
           enricher: async (postTags, db) => {
             const postIds = new Set<string>();
             for (const postTag of postTags) {
@@ -368,7 +368,7 @@ const aggregateMapping = defineAggregateMapping<AuditModelName, PrismaClient>()(
         },
       }),
     ],
-    context: {
+    entityContext: {
       enricher: enrichPostTagContext,
       onError: 'log',
     },
@@ -377,7 +377,7 @@ const aggregateMapping = defineAggregateMapping<AuditModelName, PrismaClient>()(
     type: 'Attachment',
     aggregates: [
       to('User', foreignKey('ownerId'), {
-        context: {
+        aggregateContext: {
           enricher: async (attachments, db) => {
             const ownerIds = new Set<string>();
             for (const attachment of attachments) {
@@ -400,7 +400,7 @@ const aggregateMapping = defineAggregateMapping<AuditModelName, PrismaClient>()(
           return attachment.postAttachments?.[0]?.postId ?? null;
         }),
         {
-          context: {
+          aggregateContext: {
             enricher: async (attachments, db) => {
               // The first postAttachment stands for the post (1:1 in this schema)
               const postIds = new Set<string>();
@@ -429,7 +429,7 @@ const aggregateMapping = defineAggregateMapping<AuditModelName, PrismaClient>()(
           return attachment.commentAttachments?.[0]?.commentId ?? null;
         }),
         {
-          context: {
+          aggregateContext: {
             enricher: async (attachments) =>
               attachments.map((attachment) => ({
                 name: attachment.commentAttachments?.[0]?.comment?.content ?? null,
@@ -439,7 +439,7 @@ const aggregateMapping = defineAggregateMapping<AuditModelName, PrismaClient>()(
         },
       ),
     ],
-    context: {
+    entityContext: {
       enricher: async (attachments) =>
         attachments.map((attachment) => ({
           fileUrl: attachment.fileUrl,
@@ -452,7 +452,7 @@ const aggregateMapping = defineAggregateMapping<AuditModelName, PrismaClient>()(
     type: 'Profile',
     aggregates: [
       to('User', foreignKey('userId'), {
-        context: {
+        aggregateContext: {
           enricher: async (profiles, db) => {
             const missingUserIds = new Set<string>();
             for (const profile of profiles) {
@@ -470,7 +470,7 @@ const aggregateMapping = defineAggregateMapping<AuditModelName, PrismaClient>()(
         },
       }),
     ],
-    context: {
+    entityContext: {
       enricher: async (profiles) => profiles.map((profile) => ({ bio: profile.bio })),
       onError: 'log',
     },
@@ -491,14 +491,14 @@ const aggregateMapping = defineAggregateMapping<AuditModelName, PrismaClient>()(
           return profile?.userId ?? null;
         }),
         {
-          context: {
+          aggregateContext: {
             enricher: enrichAvatarContext,
             onError: 'log',
           },
         },
       ),
     ],
-    context: {
+    entityContext: {
       enricher: enrichAvatarContext,
       onError: 'log',
     },
@@ -523,14 +523,14 @@ const aggregateMapping = defineAggregateMapping<AuditModelName, PrismaClient>()(
           return avatar.profile.userId;
         }),
         {
-          context: {
+          aggregateContext: {
             enricher: enrichAvatarImageContext,
             onError: 'log',
           },
         },
       ),
     ],
-    context: {
+    entityContext: {
       enricher: enrichAvatarImageContext,
       onError: 'log',
     },
@@ -538,10 +538,10 @@ const aggregateMapping = defineAggregateMapping<AuditModelName, PrismaClient>()(
 });
 
 export default defineConfig<PrismaClient>()({
-  provider: auditProvider,
+  contextProvider: auditProvider,
   Prisma,
   schema: auditSchema,
-  aggregateMapping,
+  entities,
 
   diffing: {
     excludeFields: ['updatedAt', 'createdAt'],
@@ -557,34 +557,32 @@ export default defineConfig<PrismaClient>()({
     awaitWrite: true,
   },
 
-  contextEnricher: {
-    actor: {
-      enricher: async (actor, db) => {
-        if (actor.type !== 'User' || !actor.id) {
-          return null;
-        }
+  actorContext: {
+    enricher: async (actor, db) => {
+      if (actor.type !== 'User' || !actor.id) {
+        return null;
+      }
 
-        const user = await db.user.findUnique({
-          where: { id: actor.id },
-          select: {
-            id: true,
-            email: true,
-            name: true,
-          },
-        });
+      const user = await db.user.findUnique({
+        where: { id: actor.id },
+        select: {
+          id: true,
+          email: true,
+          name: true,
+        },
+      });
 
-        if (!user) {
-          return null;
-        }
+      if (!user) {
+        return null;
+      }
 
-        return {
-          displayName: userDisplayName(user),
-          email: user.email,
-          name: user.name,
-        };
-      },
-      onError: 'log',
-      fallback: null,
+      return {
+        displayName: userDisplayName(user),
+        email: user.email,
+        name: user.name,
+      };
     },
+    onError: 'log',
+    fallback: null,
   },
 });

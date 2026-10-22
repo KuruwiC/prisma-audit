@@ -38,8 +38,8 @@ describe('a batch update whose data changes the key of its rows by an operator',
     const prisma = createAuditClient(basePrisma, {
       Prisma,
       schema: auditSchema,
-      provider,
-      aggregateMapping: { AutoIncItem: defineEntity({ type: 'AutoIncItem' }) },
+      contextProvider: provider,
+      entities: { AutoIncItem: defineEntity({ type: 'AutoIncItem' }) },
       performance: { awaitWrite: true },
       errorHandling: { observer },
     });

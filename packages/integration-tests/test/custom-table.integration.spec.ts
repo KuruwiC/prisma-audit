@@ -1,13 +1,13 @@
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
-import type { AggregateMapping } from '@kuruwic/prisma-audit';
+import type { EntityMap } from '@kuruwic/prisma-audit';
 import { createAuditClient, defineEntity, foreignKey, to } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { cleanDatabase, createBasePrisma, disposeTestContext, type TestContext } from './helpers/setup.js';
 
-const testAggregateMapping: AggregateMapping = {
+const testEntities: EntityMap = {
   User: defineEntity({
     type: 'User',
     excludeFields: ['updatedAt'],
@@ -31,8 +31,8 @@ describe('Custom Audit Log Table', () => {
     const prisma = createAuditClient(basePrisma, {
       Prisma,
       schema: auditSchema,
-      provider,
-      aggregateMapping: testAggregateMapping,
+      contextProvider: provider,
+      entities: testEntities,
       performance: {
         awaitWrite: true,
       },
@@ -40,10 +40,10 @@ describe('Custom Audit Log Table', () => {
 
     customBasePrisma = createBasePrisma();
     const customPrisma = createAuditClient(customBasePrisma, {
-      provider,
+      contextProvider: provider,
       Prisma,
       schema: auditSchema,
-      aggregateMapping: testAggregateMapping,
+      entities: testEntities,
       auditLogModel: 'Activity',
       performance: {
         awaitWrite: true,

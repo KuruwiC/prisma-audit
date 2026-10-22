@@ -1,13 +1,13 @@
 import type { AuditContextProvider } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
-import type { AggregateMapping } from '@kuruwic/prisma-audit';
+import type { EntityMap } from '@kuruwic/prisma-audit';
 import { createAuditClient, defineEntity, foreignKey, to } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { afterAll, beforeAll, beforeEach, inject } from 'vitest';
 
-export const testAggregateMapping: AggregateMapping = {
+export const testEntities: EntityMap = {
   User: defineEntity({
     type: 'User',
     excludeFields: ['updatedAt'],
@@ -119,10 +119,10 @@ export const testAuditOptions = <TPrisma, TSchema>(
   provider: AuditContextProvider,
   generated: GeneratedAuditInputs<TPrisma, TSchema>,
 ) => ({
-  provider,
+  contextProvider: provider,
   Prisma: generated.Prisma,
   schema: generated.schema,
-  aggregateMapping: testAggregateMapping,
+  entities: testEntities,
   diffing: {
     excludeFields: ['createdAt'],
   },
@@ -138,15 +138,13 @@ export const testAuditOptions = <TPrisma, TSchema>(
     update: true,
     delete: true,
   },
-  contextEnricher: {
-    actor: {
-      enricher: async (actor: unknown) => ({
-        name: (actor as { name?: string }).name,
-        role: (actor as { role?: string }).role,
-      }),
-      onError: 'log' as const,
-      fallback: null,
-    },
+  actorContext: {
+    enricher: async (actor: unknown) => ({
+      name: (actor as { name?: string }).name,
+      role: (actor as { role?: string }).role,
+    }),
+    onError: 'log' as const,
+    fallback: null,
   },
 });
 

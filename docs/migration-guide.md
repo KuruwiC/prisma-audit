@@ -38,8 +38,9 @@ The extension reads the models' keys and relations from a file the generator wri
    ```
 
 2. Pass `Prisma` and `schema: auditSchema` to `createAuditClient`, and drop `basePrisma`. `Prisma` is the namespace of the generated client your `PrismaClient` comes from; it is required, and its shape is `{ defineExtension, DbNull }` (no `dmmf`).
-3. Type the aggregate mapping by the generated model names: `defineAggregateMapping<AuditModelName, PrismaClient>()`. Its keys are the model names as `schema.prisma` declares them.
-4. `defineConfig` takes the client type first: `defineConfig<PrismaClient>()({ ... })`.
+3. Rename `aggregateMapping` to `entities`, and type it by the generated model names: `defineEntities<AuditModelName, PrismaClient>()`. Its keys are the model names as `schema.prisma` declares them.
+4. Rename `provider` to `contextProvider`.
+5. `defineConfig` takes the client type first: `defineConfig<PrismaClient>()({ ... })`.
 
 Before (v0.1.6):
 
@@ -62,20 +63,20 @@ const prisma = createAuditClient(basePrisma, {
 After:
 
 ```typescript
-import { createAuditClient, defineAggregateMapping, defineEntity } from "@kuruwic/prisma-audit";
+import { createAuditClient, defineEntities, defineEntity } from "@kuruwic/prisma-audit";
 import { Prisma, PrismaClient } from "../generated/prisma/client.js"; // your client generator's output
 import { type AuditModelName, auditSchema } from "../generated/audit/index.js";
 
 const basePrisma = new PrismaClient({ adapter }); // Prisma 7: a driver adapter
-const aggregateMapping = defineAggregateMapping<AuditModelName, PrismaClient>()({
+const entities = defineEntities<AuditModelName, PrismaClient>()({
   User: defineEntity({ type: "User" }),
 });
 
 const prisma = createAuditClient(basePrisma, {
   Prisma,
   schema: auditSchema,
-  provider: auditProvider,
-  aggregateMapping,
+  contextProvider: auditProvider,
+  entities,
 });
 ```
 
@@ -84,6 +85,13 @@ const prisma = createAuditClient(basePrisma, {
 | v0.1.6                                                              | Current                                                                         |
 | ------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
 | `basePrisma`                                                        | Removed. Audit writes run on the client passed to `createAuditClient`, or on the transaction's client |
+| `aggregateMapping`                                                  | `entities`                                                                      |
+| `provider`                                                          | `contextProvider`                                                               |
+| `contextEnricher: { actor: { enricher, onError, fallback } }`       | `actorContext: { enricher, onError, fallback }`                                 |
+| `defineEntity({ context })`                                         | `defineEntity({ entityContext })`                                               |
+| `defineEntity({ self: false })`, `defineEntity({ self: { context } })` | `defineEntity({ selfAggregate: false })`, `defineEntity({ selfAggregate: { aggregateContext } })` |
+| `to(type, resolver, { context })`                                   | `to(type, resolver, { aggregateContext })`                                      |
+| Enricher `onError: 'fail' \| 'log' \| 'skip' \| (error) => value`  | `onError: 'throw' \| 'log' \| 'ignore' \| (error) => strategy`; the stored value comes from `fallback` |
 | `nestedOperations: { update: { fetchBeforeOperation }, delete: { fetchBeforeOperation } }` | `fetchBefore: { update, delete }`                         |
 | `defineEntity({ nestedOperations: { ... } })`                       | `fetchBefore: { models: { Post: { update, delete } } }`                         |
 | `hooks.writer(logs, context, defaultWrite)`                         | `hooks.writer(records, { auditContext, handle, inTransaction, defaultWrite })`  |
@@ -150,6 +158,8 @@ The observer's `phase` is one of `'pre-fetch' | 'log-write' | 'diff-generation' 
 | Failed awaited audit write inside your interactive `$transaction` | Always thrown | Decided by `errorHandling.writeFailurePolicy`, default `'log'`: logged, the operation continues |
 | Failed audit write with `awaitWrite: false` | `hooks.errorHandler`, default `'log'` | `errorHandling.writeFailurePolicy`, default `'log'`; `'throw'` logs, since the operation has already returned |
 | Prisma's batch `$transaction([...])` | Each operation is audited on its own; an operation the batch rolls back can keep its audit row (observed on Prisma 7) | The audit rows are written after the batch commits, and not at all when it rejects; with `awaitWrite`, `$transaction([...])` resolves after they are written |
+| An enricher fails under `'skip'` / `'ignore'` with a `fallback` | `'skip'` stores `null`, ignoring `fallback` | `'ignore'` stores `fallback ?? null`, as `'log'` does, without the warning |
+| An enricher's `onError` function | Its return value is stored, or `fallback` when it returns `null` or `undefined` | It returns `'throw'`, `'log'` or `'ignore'` (or a promise of one), applied as above; when it throws or returns anything else, the failure is logged and handled as `'log'` |
 | `samplingIf` / `awaitWriteIf` for a model whose `defineEntity` sets no `tags` | Not called; the model uses `sampling` / `awaitWrite` | Called with `tags` `[]`; its result applies |
 | A Prisma error of your own operation (for example `P2002`) | Single-record operations rethrow it with the message prefixed `[@prisma-audit] Audited operation failed for model "…" and action "…": ` | The error Prisma threw, unchanged |
 
@@ -181,14 +191,18 @@ A callback written for tagged models, such as `samplingIf: (_, tags) => (tags.in
 `@kuruwic/prisma-audit` exports the API a user calls. Some names moved to `@kuruwic/db-audit-core`, some were renamed, and the internal pipeline is not exported.
 
 Import from `@kuruwic/db-audit-core`:
-`self`, `normalizeId`, `batchLookup`, `validateAggregateMapping`, `UNHANDLED`, and the types `AggregateRoot`, `AuditActor`, `ErrorStrategy`, `GlobalContextEnricherConfig`, `LoggableEntity`, `ProjectionEnrichmentMeta`, `RedactConfig`, `ResolvedId`, `SerializationConfig`, `ValueSerializer`, `WriteExecutor`, `WriteFn`.
+`self`, `normalizeId`, `batchLookup`, `validateEntityMap`, `UNHANDLED`, and the types `ActorContextConfig`, `AggregateProjection`, `AuditActor`, `EntityConfig`, `ErrorStrategy`, `ProjectionEnrichmentMeta`, `RedactConfig`, `ResolvedId`, `SerializationConfig`, `ValueSerializer`, `WriteExecutor`, `WriteFn`.
 
 Renamed:
 
 | v0.1.6 | Current |
 | ------ | ------- |
 | `resolveId`, `batchResolveIds` | `lookup`, `batchLookup` |
-| `PrismaModelNames`, `CapitalizedModelNames`, `TypedAggregateMapping` | `AuditModelName` from the generator's output, `AggregateMapping<AuditModelName, PrismaClient>` |
+| `defineAggregateMapping`, `validateAggregateMapping`, `AggregateMapping` | `defineEntities`, `validateEntityMap`, `EntityMap` |
+| `LoggableEntity` | `EntityConfig` |
+| `AggregateRoot` (`resolve`, `batchResolve`) | `AggregateProjection` (`idResolver`, `batchIdResolver`) |
+| `GlobalContextEnricherConfig` (`actor`) | `ActorContextConfig` (the former `actor` object) |
+| `PrismaModelNames`, `CapitalizedModelNames`, `TypedAggregateMapping` | `AuditModelName` from the generator's output, `EntityMap<AuditModelName, PrismaClient>` |
 | `ErrorHandler`, `AuditErrorHandler` | `WriteFailurePolicy`, `AuditErrorObserver` |
 | `CoreAuditLogData`, `CoreAuditLogInput` | `AuditLogData`, `AuditLogInput` |
 | `createAuditLogExtension` | `createAuditClient` |

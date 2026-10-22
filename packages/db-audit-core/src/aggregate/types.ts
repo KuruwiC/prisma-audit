@@ -1,5 +1,5 @@
 /**
- * Aggregate Mapping Type Definitions - Callback-based design with type inference
+ * Entity Map Type Definitions - Callback-based design with type inference
  *
  * @module aggregate/types
  *
@@ -7,16 +7,12 @@
  * Aggregate configuration types. The database handle the adapter passes to user callbacks is
  * an opaque `TDbHandle` type parameter (default `unknown`); the entity row type is `TEntity`
  * (default `Record<string, unknown>`). Configs typed for a specific handle and row are stored in
- * the mapping with both erased to their defaults, so the callback members are declared as method
- * signatures: their parameters are bivariant, which is what lets `LoggableEntity<Client, Post>`
- * be assigned where `LoggableEntity` is expected.
+ * the entity map with both erased to their defaults, so the callback members are declared as method
+ * signatures: their parameters are bivariant, which is what lets `EntityConfig<Client, Post>`
+ * be assigned where `EntityConfig` is expected.
  */
 
-import type {
-  AggregateContextEnricherConfig,
-  EntityEnricherConfig,
-  ProjectionEnricherConfig,
-} from '../enrichment/types.js';
+import type { AggregateRootContextConfig, EntityContextConfig, ProjectionContextConfig } from '../enrichment/types.js';
 
 // ============================================================================
 // Core Types - Aggregate Resolution
@@ -63,21 +59,24 @@ export const DEFAULT_ENTITY_CATEGORY = 'model' as const;
 // ============================================================================
 
 /**
- * Aggregate root definition
+ * Projection of an entity onto an aggregate root
  *
  * @template TDbHandle - Database handle type passed to the resolvers and the projection enricher
  * @template TEntity - Row type of the entity being projected
  *
  * @example
  * ```typescript
- * const postAggregate: AggregateRoot = {
+ * const postAggregate: AggregateProjection = {
  *   category: 'model',
  *   type: 'Post',
- *   resolve: async (comment) => comment.postId
+ *   idResolver: async (comment) => comment.postId
  * };
  * ```
  */
-export interface AggregateRoot<TDbHandle = unknown, TEntity extends Record<string, unknown> = Record<string, unknown>> {
+export interface AggregateProjection<
+  TDbHandle = unknown,
+  TEntity extends Record<string, unknown> = Record<string, unknown>,
+> {
   /** Aggregate category stored in AuditLog.aggregateCategory (default: 'model') */
   category: string;
   /** Aggregate type name (typically matches model name) */
@@ -88,43 +87,43 @@ export interface AggregateRoot<TDbHandle = unknown, TEntity extends Record<strin
    * row after it, with the row before the write too, so that a row moved to another parent is
    * recorded under both; `db` reads the database after the write.
    */
-  resolve(entity: TEntity, db: TDbHandle): Promise<string | null | undefined>;
+  idResolver(entity: TEntity, db: TDbHandle): Promise<string | null | undefined>;
   /**
-   * Batch resolver for N+1 prevention; takes precedence over `resolve` when processing multiple
+   * Batch resolver for N+1 prevention; takes precedence over `idResolver` when processing multiple
    * entities. Called once per operation and model with the rows after the write followed by the
    * rows before the writes.
    */
-  batchResolve?(entities: TEntity[], db: TDbHandle): Promise<(string | null | undefined)[]>;
-  /** Whether `resolve` performs DB queries. Set automatically by lookup(). Used for N+1 warnings. */
+  batchIdResolver?(entities: TEntity[], db: TDbHandle): Promise<(string | null | undefined)[]>;
+  /** Whether `idResolver` performs DB queries. Set automatically by lookup(). Used for N+1 warnings. */
   requiresDbAccess?: boolean;
   /**
-   * Projection-specific context enricher for this projection.
+   * Projection-side aggregate context enrichment, stored in AuditLog.aggregateContext.
    * Receives the written entity rows (NOT the aggregate root rows).
    * Merged over the root entity's `aggregateContext` (projection keys win).
    */
-  context?: ProjectionEnricherConfig<TDbHandle, TEntity>;
+  aggregateContext?: ProjectionContextConfig<TDbHandle, TEntity>;
 }
 
 /**
- * Self-projection configuration
+ * Configuration of the aggregate log an entity records under itself
  *
  * - `false` disables the self aggregate log (useful for join tables)
- * - An object includes the self aggregate log; `context` enriches it with the entity's own rows
+ * - An object includes the self aggregate log; `aggregateContext` enriches it with the entity's own rows
  */
-export type SelfProjectionConfig<
+export type SelfAggregateConfig<
   TDbHandle = unknown,
   TEntity extends Record<string, unknown> = Record<string, unknown>,
-> = false | { context?: ProjectionEnricherConfig<TDbHandle, TEntity> };
+> = false | { aggregateContext?: ProjectionContextConfig<TDbHandle, TEntity> };
 
 /**
- * Loggable entity configuration
+ * Entity configuration
  *
  * @template TDbHandle - Database handle type passed to the resolvers and enrichers
  * @template TEntity - Row type of this entity
  *
  * @example
  * ```typescript
- * const userConfig: LoggableEntity = {
+ * const userConfig: EntityConfig = {
  *   category: 'model',
  *   type: 'User',
  *   idResolver: self('id'),
@@ -132,7 +131,7 @@ export type SelfProjectionConfig<
  *   excludeFields: ['password', 'passwordHash']
  * };
  *
- * const postConfig: LoggableEntity = {
+ * const postConfig: EntityConfig = {
  *   category: 'model',
  *   type: 'Post',
  *   idResolver: self('id'),
@@ -142,10 +141,7 @@ export type SelfProjectionConfig<
  * };
  * ```
  */
-export interface LoggableEntity<
-  TDbHandle = unknown,
-  TEntity extends Record<string, unknown> = Record<string, unknown>,
-> {
+export interface EntityConfig<TDbHandle = unknown, TEntity extends Record<string, unknown> = Record<string, unknown>> {
   /** Entity category stored in AuditLog.entityCategory (default: 'model') */
   category: string;
   /** Entity type name (typically matches model name) */
@@ -153,9 +149,9 @@ export interface LoggableEntity<
   /** Resolver function to extract this entity's ID */
   idResolver(entity: TEntity, db: TDbHandle): Promise<string | null | undefined>;
   /** List of aggregate roots this entity belongs to */
-  aggregates: AggregateRoot<TDbHandle, TEntity>[];
-  /** Self-projection configuration (default: included, no projection context) */
-  self?: SelfProjectionConfig<TDbHandle, TEntity>;
+  aggregates: AggregateProjection<TDbHandle, TEntity>[];
+  /** Self aggregate log configuration (default: included, no projection-side aggregate context) */
+  selfAggregate?: SelfAggregateConfig<TDbHandle, TEntity>;
   /** Field names to exclude from change tracking */
   excludeFields?: string[];
   /**
@@ -172,7 +168,7 @@ export interface LoggableEntity<
    * @example
    * ```typescript
    * Post: defineEntity({
-   *   context: {
+   *   entityContext: {
    *     enricher: async (posts, db) => {
    *       const authorIds = posts.map(p => p.authorId).filter(Boolean);
    *       const authors = await db.users.findAll({ id: authorIds });
@@ -186,7 +182,7 @@ export interface LoggableEntity<
    * })
    * ```
    */
-  context?: EntityEnricherConfig<TDbHandle, TEntity>;
+  entityContext?: EntityContextConfig<TDbHandle, TEntity>;
 
   /**
    * Root-side aggregate context enrichment, applied whenever ANY entity
@@ -207,35 +203,35 @@ export interface LoggableEntity<
    * })
    * ```
    */
-  aggregateContext?: AggregateContextEnricherConfig<TDbHandle>;
+  aggregateContext?: AggregateRootContextConfig<TDbHandle>;
   /** Tags for tag-based configuration and filtering */
   tags?: string[];
 }
 
 // ============================================================================
-// Mapping Types - Configuration Collections
+// Entity Map - Configuration Collections
 // ============================================================================
 
 /**
  * Mapping of model name to its entity configuration
  *
- * @template TModelName - Union of the model names the mapping may declare (default: any string)
+ * @template TModelName - Union of the model names the entity map may declare (default: any string)
  * @template TDbHandle - Database handle type passed to the entities' resolvers and enrichers
  *
  * @example
  * ```typescript
- * const mapping: AggregateMapping = {
+ * const entities: EntityMap = {
  *   User: defineEntity({ type: 'User', ... }),
  *   Post: defineEntity({ type: 'Post', ... }),
  *   Comment: defineEntity({ type: 'Comment', ... }),
  * };
  *
  * // Keys restricted to the adapter's model names, callbacks typed with its handle
- * type Mapping = AggregateMapping<'User' | 'Post' | 'Comment', DbHandle>;
+ * type Entities = EntityMap<'User' | 'Post' | 'Comment', DbHandle>;
  * ```
  */
-export type AggregateMapping<TModelName extends string = string, TDbHandle = unknown> = {
-  [K in TModelName]?: LoggableEntity<TDbHandle>;
+export type EntityMap<TModelName extends string = string, TDbHandle = unknown> = {
+  [K in TModelName]?: EntityConfig<TDbHandle>;
 };
 
 // ============================================================================

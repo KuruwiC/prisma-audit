@@ -5,7 +5,7 @@
 import {
   createAsyncLocalStorageProvider,
   createAuditClient,
-  defineAggregateMapping,
+  defineEntities,
   defineEntity,
   flushAllPendingWrites,
   foreignKey,
@@ -32,7 +32,7 @@ describe('Tag-based Strategies E2E', () => {
 
   describe('awaitWriteIf with database operations', () => {
     it('should write audit log synchronously for critical tagged models', async () => {
-      const aggregateMapping = defineAggregateMapping<AuditModelName, PrismaClient>()({
+      const entities = defineEntities<AuditModelName, PrismaClient>()({
         User: defineEntity({
           type: 'User',
           excludeFields: ['updatedAt'],
@@ -45,8 +45,8 @@ describe('Tag-based Strategies E2E', () => {
       });
 
       const prisma = createAuditClient(basePrisma, {
-        provider: auditProvider,
-        aggregateMapping,
+        contextProvider: auditProvider,
+        entities,
         performance: {
           awaitWrite: false,
           awaitWriteIf: awaitWriteIfSpy,
@@ -80,7 +80,7 @@ describe('Tag-based Strategies E2E', () => {
     });
 
     it('should write audit log asynchronously for non-critical tagged models', async () => {
-      const aggregateMapping = defineAggregateMapping<AuditModelName, PrismaClient>()({
+      const entities = defineEntities<AuditModelName, PrismaClient>()({
         Post: defineEntity({
           type: 'Post',
           aggregates: [to('User', foreignKey('authorId'))],
@@ -93,8 +93,8 @@ describe('Tag-based Strategies E2E', () => {
       });
 
       const prisma = createAuditClient(basePrisma, {
-        provider: auditProvider,
-        aggregateMapping,
+        contextProvider: auditProvider,
+        entities,
         performance: {
           awaitWrite: false,
           awaitWriteIf: awaitWriteIfSpy,
@@ -140,7 +140,7 @@ describe('Tag-based Strategies E2E', () => {
 
   describe('samplingIf with database operations', () => {
     it('should apply 100% sampling for financial tagged models', async () => {
-      const aggregateMapping = defineAggregateMapping<AuditModelName, PrismaClient>()({
+      const entities = defineEntities<AuditModelName, PrismaClient>()({
         User: defineEntity({
           type: 'User',
           excludeFields: ['updatedAt'],
@@ -153,8 +153,8 @@ describe('Tag-based Strategies E2E', () => {
       });
 
       const prisma = createAuditClient(basePrisma, {
-        provider: auditProvider,
-        aggregateMapping,
+        contextProvider: auditProvider,
+        entities,
         performance: {
           sampling: 0.5,
           samplingIf: samplingIfSpy,
@@ -193,7 +193,7 @@ describe('Tag-based Strategies E2E', () => {
     });
 
     it('should apply reduced sampling rate for analytics tagged models', async () => {
-      const aggregateMapping = defineAggregateMapping<AuditModelName, PrismaClient>()({
+      const entities = defineEntities<AuditModelName, PrismaClient>()({
         Post: defineEntity({
           type: 'Post',
           aggregates: [to('User', foreignKey('authorId'))],
@@ -210,8 +210,8 @@ describe('Tag-based Strategies E2E', () => {
       });
 
       const prisma = createAuditClient(basePrisma, {
-        provider: auditProvider,
-        aggregateMapping,
+        contextProvider: auditProvider,
+        entities,
         performance: {
           sampling: 1.0, // Global default (overridden by samplingIf)
           samplingIf: samplingIfSpy,
@@ -263,7 +263,7 @@ describe('Tag-based Strategies E2E', () => {
 
   describe('Combined tag-based strategies in transactions', () => {
     it('should apply different strategies to different models in same transaction', async () => {
-      const aggregateMapping = defineAggregateMapping<AuditModelName, PrismaClient>()({
+      const entities = defineEntities<AuditModelName, PrismaClient>()({
         User: defineEntity({
           type: 'User',
           excludeFields: ['updatedAt'],
@@ -287,8 +287,8 @@ describe('Tag-based Strategies E2E', () => {
       });
 
       const prisma = createAuditClient(basePrisma, {
-        provider: auditProvider,
-        aggregateMapping,
+        contextProvider: auditProvider,
+        entities,
         performance: {
           awaitWrite: false,
           awaitWriteIf: awaitWriteIfSpy,

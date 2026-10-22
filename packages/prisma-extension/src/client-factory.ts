@@ -30,7 +30,7 @@ export type PrismaClientLike = {
  * Creates a Prisma client instance with the audit logging extension applied
  *
  * @template TClient - The client type: the `db` type every resolver and enricher in `options` receives
- * @template TModelName - Model names of `options.schema`, which key `options.aggregateMapping` and
+ * @template TModelName - Model names of `options.schema`, which key `options.entities` and
  *   `options.fetchBefore.models`
  * @param prisma - Client to audit. Audited operations run on it, and audit logs are written
  *   with it, bypassing the audit extension.
@@ -53,8 +53,8 @@ export type PrismaClientLike = {
  * const prisma = createAuditClient(basePrisma, {
  *   Prisma,
  *   schema: auditSchema,
- *   provider: auditProvider,
- *   aggregateMapping: {
+ *   contextProvider: auditProvider,
+ *   entities: {
  *     User: defineEntity({ type: 'User' }),
  *     Post: defineEntity({
  *       type: 'Post',
@@ -69,8 +69,8 @@ export type PrismaClientLike = {
  * const prisma = createAuditClient(basePrisma, {
  *   Prisma,
  *   schema: auditSchema,
- *   provider: auditProvider,
- *   aggregateMapping,
+ *   contextProvider: auditProvider,
+ *   entities,
  *   diffing: {
  *     excludeFields: ['updatedAt', 'createdAt'],
  *   },
@@ -90,16 +90,14 @@ export type PrismaClientLike = {
  *       ]);
  *     },
  *   },
- *   contextEnricher: {
- *     actor: {
- *       // `db` is typed as the client passed above
- *       enricher: async (actor, db) => {
- *         if (actor.type === 'User') {
- *           const user = await db.user.findUnique({ where: { id: actor.id } });
- *           return { email: user?.email, role: user?.role };
- *         }
- *         return null;
- *       },
+ *   actorContext: {
+ *     // `db` is typed as the client passed above
+ *     enricher: async (actor, db) => {
+ *       if (actor.type === 'User') {
+ *         const user = await db.user.findUnique({ where: { id: actor.id } });
+ *         return { email: user?.email, role: user?.role };
+ *       }
+ *       return null;
  *     },
  *   },
  * });
@@ -107,8 +105,8 @@ export type PrismaClientLike = {
  */
 // TClient is inferred from `prisma` alone: the callbacks in `options` take the client as a
 // parameter, and inferring from them as well would widen it with the `unknown` an erased
-// mapping declares. TModelName is inferred from `options.schema` alone (see
-// PrismaAuditExtensionOptions): the mapping keys are typed by it and never widen it.
+// entity map declares. TModelName is inferred from `options.schema` alone (see
+// PrismaAuditExtensionOptions): the entity map keys are typed by it and never widen it.
 export const createAuditClient = <TClient extends PrismaClientLike, TModelName extends string>(
   prisma: TClient,
   options: PrismaAuditExtensionOptions<TModelName, NoInfer<TClient>>,
@@ -132,15 +130,15 @@ export type PrismaClientWithAudit<T extends PrismaClientLike = PrismaClientLike>
  *
  * @remarks
  * Curried so that `TClient` is given explicitly while the model names are inferred from
- * `schema`: they key `aggregateMapping` and `fetchBefore.models`, spelled as `schema.prisma`
+ * `schema`: they key `entities` and `fetchBefore.models`, spelled as `schema.prisma`
  * declares them. The returned function is the identity; it only types the configuration.
  *
  * @example Defining configuration in a separate file
  * ```typescript
  * // audit.config.ts
  * import {
- *   defineAggregateMapping,
  *   defineConfig,
+ *   defineEntities,
  *   defineEntity,
  *   foreignKey,
  *   to,
@@ -152,8 +150,8 @@ export type PrismaClientWithAudit<T extends PrismaClientLike = PrismaClientLike>
  * export default defineConfig<PrismaClient>()({
  *   Prisma,
  *   schema: auditSchema,
- *   provider: createAsyncLocalStorageProvider(),
- *   aggregateMapping: defineAggregateMapping<AuditModelName, PrismaClient>()({
+ *   contextProvider: createAsyncLocalStorageProvider(),
+ *   entities: defineEntities<AuditModelName, PrismaClient>()({
  *     User: defineEntity({ type: 'User' }),
  *     Post: defineEntity<Post, PrismaClient>({
  *       type: 'Post',

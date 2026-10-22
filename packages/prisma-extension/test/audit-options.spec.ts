@@ -14,8 +14,8 @@ const Prisma = { defineExtension: (extension: unknown) => extension, DbNull: nul
 /** Options whose `schema` comes from a caller the option types do not reach: plain JavaScript, or options assembled at runtime */
 const optionsWith = (schema: unknown) =>
   ({
-    provider: createAsyncLocalStorageProvider(),
-    aggregateMapping: { User: defineEntity({ type: 'User' }) },
+    contextProvider: createAsyncLocalStorageProvider(),
+    entities: { User: defineEntity({ type: 'User' }) },
     Prisma,
     schema,
   }) as PrismaAuditExtensionOptions;

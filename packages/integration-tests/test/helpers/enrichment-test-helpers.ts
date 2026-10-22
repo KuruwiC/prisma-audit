@@ -1,17 +1,17 @@
-import type { AggregateMapping } from '@kuruwic/prisma-audit';
+import type { EntityMap } from '@kuruwic/prisma-audit';
 import { defineEntity, foreignKey, to } from '@kuruwic/prisma-audit';
 import type { PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import type { Mock } from 'vitest';
 import { vi } from 'vitest';
 
-export interface EntityEnricherConfig<TEntity = unknown, TContext = unknown> {
+export interface EntityContextConfig<TEntity = unknown, TContext = unknown> {
   enrichFn: (entities: TEntity[], prisma: PrismaClient) => TContext[] | Promise<TContext[]>;
-  onError?: 'log' | 'fail';
+  onError?: 'log' | 'throw';
   fallback?: TContext | null;
 }
 
 export function createEntityEnricher<TEntity = unknown, TContext = unknown>(
-  config: EntityEnricherConfig<TEntity, TContext>,
+  config: EntityContextConfig<TEntity, TContext>,
 ): Mock<(entities: TEntity[], prisma: PrismaClient) => Promise<TContext[]>> {
   return vi.fn(async (entities: TEntity[], prisma: PrismaClient): Promise<TContext[]> => {
     const result = await config.enrichFn(entities, prisma);
@@ -31,7 +31,7 @@ export interface AggregateEnricherConfig<TEntity = unknown, TContext = unknown> 
     prisma: PrismaClient,
     meta: ProjectionEnrichmentMeta,
   ) => TContext[] | Promise<TContext[]>;
-  onError?: 'log' | 'fail';
+  onError?: 'log' | 'throw';
   fallback?: TContext | null;
 }
 
@@ -86,10 +86,10 @@ export function createProfileAggregateEnricher() {
   });
 }
 
-export function createCommentAggregateMapping(
+export function createCommentEntities(
   entityEnricher: Mock<(entities: unknown[], prisma: PrismaClient) => Promise<unknown[]>>,
   aggregateEnricher: Mock<(aggregates: unknown[], prisma: PrismaClient) => Promise<unknown[]>>,
-): AggregateMapping {
+): EntityMap {
   return {
     User: defineEntity({ type: 'User', excludeFields: ['updatedAt'] }),
     Post: defineEntity({
@@ -104,27 +104,27 @@ export function createCommentAggregateMapping(
       type: 'Comment',
       aggregates: [
         to('Post', foreignKey('postId'), {
-          context: {
+          aggregateContext: {
             enricher: aggregateEnricher as unknown as (input: unknown[], prisma: unknown) => Promise<unknown[]>,
           },
         }),
         to('User', foreignKey('authorId'), {
-          context: {
+          aggregateContext: {
             enricher: aggregateEnricher as unknown as (input: unknown[], prisma: unknown) => Promise<unknown[]>,
           },
         }),
       ],
-      context: {
+      entityContext: {
         enricher: entityEnricher as unknown as (input: unknown[], prisma: unknown) => Promise<unknown[]>,
       },
     }),
   };
 }
 
-export function createProfileAggregateMapping(
+export function createProfileEntities(
   entityEnricher: Mock<(entities: unknown[], prisma: PrismaClient) => Promise<unknown[]>>,
   aggregateEnricher: Mock<(aggregates: unknown[], prisma: PrismaClient) => Promise<unknown[]>>,
-): AggregateMapping {
+): EntityMap {
   return {
     User: defineEntity({ type: 'User', excludeFields: ['updatedAt'] }),
     Post: defineEntity({
@@ -139,12 +139,12 @@ export function createProfileAggregateMapping(
       type: 'Profile',
       aggregates: [
         to('User', foreignKey('userId'), {
-          context: {
+          aggregateContext: {
             enricher: aggregateEnricher as unknown as (input: unknown[], prisma: unknown) => Promise<unknown[]>,
           },
         }),
       ],
-      context: {
+      entityContext: {
         enricher: entityEnricher as unknown as (input: unknown[], prisma: unknown) => Promise<unknown[]>,
       },
     }),
@@ -172,14 +172,14 @@ export function createUserAggregateEnricher() {
   });
 }
 
-export function createUserEntityAggregateMapping(
+export function createUserEntityContextEntities(
   entityEnricher: Mock<(entities: unknown[], prisma: PrismaClient) => Promise<unknown[]>>,
-): AggregateMapping {
+): EntityMap {
   return {
     User: defineEntity({
       type: 'User',
       excludeFields: ['updatedAt'],
-      context: {
+      entityContext: {
         enricher: entityEnricher as unknown as (input: unknown[], prisma: unknown) => Promise<unknown[]>,
       },
     }),
@@ -198,15 +198,15 @@ export function createUserEntityAggregateMapping(
   };
 }
 
-export function createUserAggregateAggregateMapping(
+export function createUserAggregateContextEntities(
   aggregateEnricher: Mock<(aggregates: unknown[], prisma: PrismaClient) => Promise<unknown[]>>,
-): AggregateMapping {
+): EntityMap {
   return {
     User: defineEntity({
       type: 'User',
       excludeFields: ['updatedAt'],
-      self: {
-        context: {
+      selfAggregate: {
+        aggregateContext: {
           enricher: aggregateEnricher as unknown as (input: unknown[], prisma: unknown) => Promise<unknown[]>,
         },
       },

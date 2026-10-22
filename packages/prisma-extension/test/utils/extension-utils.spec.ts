@@ -122,11 +122,11 @@ describe('shouldAuditModel', () => {
     AuditLog: defineEntity({ type: 'AuditLog' }),
   });
 
-  it('audits a model the aggregate mapping declares', () => {
+  it('audits a model the entity map declares', () => {
     expect(shouldAuditModel({ modelName: 'User', auditLogModel: 'AuditLog', isLoggable })).toBe(true);
   });
 
-  it('skips a model the aggregate mapping does not declare', () => {
+  it('skips a model the entity map does not declare', () => {
     expect(shouldAuditModel({ modelName: 'Session', auditLogModel: 'AuditLog', isLoggable })).toBe(false);
   });
 

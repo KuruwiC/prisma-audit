@@ -14,7 +14,7 @@ import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createPostReadFault } from './helpers/post-read-fault.js';
-import { createBasePrisma, testAggregateMapping } from './helpers/setup.js';
+import { createBasePrisma, testEntities } from './helpers/setup.js';
 
 const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'before-unavailable-column-actor' },
@@ -31,8 +31,8 @@ describe('beforeUnavailable column of the audit-log model', () => {
     const prisma = createAuditClient(basePrisma, {
       Prisma,
       schema: auditSchema,
-      provider,
-      aggregateMapping: testAggregateMapping,
+      contextProvider: provider,
+      entities: testEntities,
       ...(auditLogModel ? { auditLogModel } : {}),
       errorHandling: { writeFailurePolicy: 'throw' },
     });

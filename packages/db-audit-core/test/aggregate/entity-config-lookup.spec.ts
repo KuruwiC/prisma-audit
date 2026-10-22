@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { createEntityConfigLookup } from '../../src/aggregate/entity-config-lookup.js';
 import { defineEntity, foreignKey, to } from '../../src/aggregate/helpers.js';
-import type { AggregateMapping } from '../../src/aggregate/types.js';
+import type { EntityMap } from '../../src/aggregate/types.js';
 
 describe('createEntityConfigLookup', () => {
-  const createTestMapping = (): AggregateMapping => ({
+  const createTestMapping = (): EntityMap => ({
     User: defineEntity({
       type: 'User',
     }),
@@ -97,9 +97,9 @@ describe('createEntityConfigLookup', () => {
     it('should throw on missing required fields', () => {
       const invalidMapping = {
         User: { category: 'model', aggregates: [] },
-      } as unknown as AggregateMapping;
+      } as unknown as EntityMap;
 
-      expect(() => createEntityConfigLookup(invalidMapping)).toThrow('Invalid aggregate mapping configuration');
+      expect(() => createEntityConfigLookup(invalidMapping)).toThrow('Invalid entity map configuration');
     });
   });
 });

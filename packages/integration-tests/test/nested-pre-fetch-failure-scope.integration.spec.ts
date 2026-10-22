@@ -23,7 +23,7 @@ import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanDatabase, createBasePrisma, testAggregateMapping } from './helpers/setup.js';
+import { cleanDatabase, createBasePrisma, testEntities } from './helpers/setup.js';
 
 const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'nested-pre-fetch-scope-actor' },
@@ -67,8 +67,8 @@ describe('nested pre-fetch failures — affected rows', () => {
     const prisma = createAuditClient(basePrisma, {
       Prisma,
       schema: auditSchema,
-      provider,
-      aggregateMapping: testAggregateMapping,
+      contextProvider: provider,
+      entities: testEntities,
       diffing: { excludeFields: ['createdAt', 'updatedAt'] },
       security: { redact: { fields: [] } },
       errorHandling: { observer },

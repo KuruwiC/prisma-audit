@@ -23,7 +23,7 @@ import { createAuditClient, flushAllPendingWrites } from '@kuruwic/prisma-audit'
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { describe, expect, it, vi } from 'vitest';
-import { createBasePrisma, setupTestContext, testAggregateMapping } from './helpers/setup.js';
+import { createBasePrisma, setupTestContext, testEntities } from './helpers/setup.js';
 
 type Row = Record<string, unknown>;
 
@@ -77,18 +77,16 @@ const createScenario = (options: ScenarioOptions) => {
   const prisma = createAuditClient(basePrisma, {
     Prisma,
     schema: auditSchema,
-    provider,
-    aggregateMapping: testAggregateMapping,
+    contextProvider: provider,
+    entities: testEntities,
     performance: { awaitWrite: options.awaitWrite, openImplicitTransaction: options.openImplicitTransaction },
     fetchBefore: { update: true },
     errorHandling: options.errorHandling ?? { writeFailurePolicy: policy, observer },
     ...(fault === 'actor-enricher'
       ? {
-          contextEnricher: {
-            actor: {
-              enricher: async () => {
-                throw error;
-              },
+          actorContext: {
+            enricher: async () => {
+              throw error;
             },
           },
         }

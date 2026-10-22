@@ -9,7 +9,7 @@
  * `NestedPreFetchResults` map by hand to reach `collectToOneDeleteRecords` directly.
  *
  * Because a composite-key entity has no `entity.id` field, the default
- * `idResolver` (`self('id')`) cannot resolve it — `testAggregateMapping` gives
+ * `idResolver` (`self('id')`) cannot resolve it — `testEntities` gives
  * `PostLike` an explicit `idResolver` that serializes `[postId, userId]` as JSON,
  * matching the format `getPrimaryKeyConstraint`/`extractEntityIdentity`
  * (`packages/prisma-extension/src/utils/id-generation.ts`) derive from the
@@ -44,7 +44,7 @@ import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, describe, expect, it, vi } from 'vitest';
-import { createBasePrisma, setupTestContext, testAggregateMapping } from './helpers/setup.js';
+import { createBasePrisma, setupTestContext, testEntities } from './helpers/setup.js';
 
 const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'composite-pk-actor' },
@@ -409,8 +409,8 @@ describe('Composite Primary Key (PostLike)', () => {
       const prisma = createAuditClient(basePrisma, {
         Prisma,
         schema: auditSchema,
-        provider,
-        aggregateMapping: testAggregateMapping,
+        contextProvider: provider,
+        entities: testEntities,
         diffing: { excludeFields: ['createdAt'] },
         security: { redact: { fields: [] } },
         performance: { awaitWrite: true },

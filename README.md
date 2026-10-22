@@ -179,7 +179,7 @@ model AuditLog {
 import {
   createAsyncLocalStorageProvider,
   createAuditClient,
-  defineAggregateMapping,
+  defineEntities,
   defineEntity,
   to,
   foreignKey,
@@ -193,7 +193,7 @@ const basePrisma = new PrismaClient({
   adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }),
 });
 
-const aggregateMapping = defineAggregateMapping<AuditModelName, PrismaClient>()({
+const entities = defineEntities<AuditModelName, PrismaClient>()({
   User: defineEntity({ type: "User" }),
   Post: defineEntity({
     type: "Post",
@@ -204,8 +204,8 @@ const aggregateMapping = defineAggregateMapping<AuditModelName, PrismaClient>()(
 const prisma = createAuditClient(basePrisma, {
   Prisma,
   schema: auditSchema,
-  provider: auditProvider,
-  aggregateMapping,
+  contextProvider: auditProvider,
+  entities,
 });
 
 export { prisma, auditProvider };
@@ -283,8 +283,8 @@ The library automatically selects the optimal write strategy based on your confi
 createAuditClient(basePrisma, {
   Prisma,
   schema: auditSchema,
-  provider: auditProvider,
-  aggregateMapping,
+  contextProvider: auditProvider,
+  entities,
 
   // Exclude noisy fields from change tracking
   diffing: {
@@ -410,38 +410,38 @@ await prisma.$transaction(async (tx) => {
 
 ## Context Enrichment
 
-Context enrichers add metadata to audit logs by querying additional data. The API is **batch-first** (inspired by DataLoader) to prevent N+1 queries.
+Context enrichers add metadata to audit logs by querying additional data. The API is **batch-first** (inspired by DataLoader) to prevent N+1 queries. Each key is named after the `AuditLog` column it fills: `actorContext`, `entityContext` and `aggregateContext`.
+
+Every enricher takes `onError`, which decides what a failure (an error or a timeout) becomes: `'throw'` (the default) rethrows it, `'log'` warns and stores `fallback ?? null`, and `'ignore'` stores `fallback ?? null` silently. A function receives the error and returns one of those strategies; when it throws or returns anything else, the failure is logged and handled as `'log'`.
 
 ### Actor Context
 
 Called once per operation, cached for reuse across all logs in that operation:
 
 ```typescript
-contextEnricher: {
-  actor: {
-    enricher: async (actor, prisma) => {
-      if (actor.type !== "User") return null;
-      const user = await prisma.user.findUnique({
-        where: { id: actor.id },
-        select: { email: true, role: true },
-      });
-      return { email: user?.email, role: user?.role };
-    },
-    onError: "log",    // 'fail' | 'log' | custom function
-    fallback: null,
+actorContext: {
+  enricher: async (actor, prisma) => {
+    if (actor.type !== "User") return null;
+    const user = await prisma.user.findUnique({
+      where: { id: actor.id },
+      select: { email: true, role: true },
+    });
+    return { email: user?.email, role: user?.role };
   },
+  onError: "log",    // 'throw' (default) | 'log' | 'ignore' | (error) => strategy
+  fallback: null,
 },
 ```
 
 ### Entity Context
 
-The `context` enricher receives the written rows in batch and must return contexts in the same order and length. The result is stored in the log's `entityContext`:
+The `entityContext` enricher receives the written rows in batch and must return contexts in the same order and length. The result is stored in the log's `entityContext`:
 
 ```typescript
 Post: defineEntity({
   type: "Post",
   aggregates: [to("User", foreignKey("authorId"))],
-  context: {
+  entityContext: {
     enricher: async (posts, prisma) => {
       const authorIds = posts.map((p) => p.authorId).filter(Boolean);
       const authors = await prisma.user.findMany({
@@ -482,21 +482,21 @@ User: defineEntity({
 }),
 ```
 
-**Projection-side — `context` on the `to()` declaration.** Specific to one projection; the enricher receives the _written_ rows (not the root rows), with `meta.aggregateIds[i]` holding the aggregate ID resolved for row `i` (for the aggregate a row left in an update, row `i` is the row as it was before the write):
+**Projection-side — `aggregateContext` on the `to()` declaration.** Specific to one projection; the enricher receives the _written_ rows (not the root rows), with `meta.aggregateIds[i]` holding the aggregate ID resolved for row `i` (for the aggregate a row left in an update, row `i` is the row as it was before the write):
 
 ```typescript
 PostTag: defineEntity({
   type: "PostTag",
-  self: false, // join table — no self aggregate log
+  selfAggregate: false, // join table — no self aggregate log
   aggregates: [
     to("Post", foreignKey("postId"), {
-      context: {
+      aggregateContext: {
         enricher: async (postTags, prisma, meta) =>
           postTags.map((pt) => ({ tagId: pt.tagId })), // Post-perspective context
       },
     }),
     to("Tag", foreignKey("tagId"), {
-      context: {
+      aggregateContext: {
         enricher: async (postTags, prisma, meta) =>
           postTags.map((pt) => ({ postId: pt.postId })), // Tag-perspective context
       },
@@ -505,14 +505,14 @@ PostTag: defineEntity({
 }),
 ```
 
-The self aggregate log (enabled by default) can be enriched the same way via `self: { context: { ... } }`.
+The self aggregate log (enabled by default) can be enriched the same way via `selfAggregate: { aggregateContext: { ... } }`.
 
 ## Aggregate Mapping
 
 Define domain relationships so child entity changes reference their parent aggregate:
 
 ```typescript
-const aggregateMapping = defineAggregateMapping<AuditModelName, PrismaClient>()({
+const entities = defineEntities<AuditModelName, PrismaClient>()({
   // Aggregate root
   Order: defineEntity({
     type: "Order",
@@ -572,7 +572,7 @@ Nested creates, updates, and deletes are automatically tracked at all depths:
 - **update / delete**: Before state captured when `fetchBefore.update` / `fetchBefore.delete` is `true` (default)
 - **upsert**: Automatically detects create vs update path
 - **connectOrCreate**: Smart detection — logs a create when creating a new record, and connects like `connect` otherwise
-- **connect / set / disconnect**: an `update` log of each related record whose foreign key the write changed, with the old and new value in `changes` (join table log if defined in mapping)
+- **connect / set / disconnect**: an `update` log of each related record whose foreign key the write changed, with the old and new value in `changes` (join table log if defined in `entities`)
 
 Nested rows are audited from the operation's own result: the relations a nested write touches are added to its `include` (or `select`) and removed again before the result is returned. A nested row is read again after the write in two cases, on the same client as the operation: your own `include` / `select` on the written relation leaves out a row a nested write updated or inserted (one read per relation path, preceded by a primary-key-only read of the relation when an inserted row may be hidden by a filter on it, so up to two), and a `connect`, `set` or `disconnect` may have re-linked rows (one read per relation path, after a read of the same rows before the write; both only when `fetchBefore.update` is on for the related model).
 

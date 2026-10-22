@@ -66,12 +66,12 @@ export interface AuditOptions {
 const RELATION_COUNT_FIELD = '_count';
 
 /**
- * @throws {Error} If the `schema` option is missing or of another format version, the aggregate
- *   mapping is invalid, the diffing and redaction settings conflict, or an entity's
+ * @throws {Error} If the `schema` option is missing or of another format version, the entity
+ *   map is invalid, the diffing and redaction settings conflict, or an entity's
  *   `auditOmittedFields` names a field the audit cannot read
  */
 export const normalizeAuditOptions = (options: PrismaAuditExtensionOptions): AuditOptions => {
-  const { provider, aggregateMapping, diffing, security, performance, hooks, contextEnricher, errorHandling } = options;
+  const { contextProvider, entities, diffing, security, performance, hooks, actorContext, errorHandling } = options;
 
   const schemaMetadata = loadSchemaMetadata(options.schema);
   const Prisma = options.Prisma as PrismaNamespace;
@@ -80,10 +80,10 @@ export const normalizeAuditOptions = (options: PrismaAuditExtensionOptions): Aud
   const awaitWriteIf = performance?.awaitWriteIf;
   const samplingIf = performance?.samplingIf;
 
-  const entityConfigs = createEntityConfigLookup(aggregateMapping);
-  validateFieldConflicts(excludeFields, redact, aggregateMapping);
+  const entityConfigs = createEntityConfigLookup(entities);
+  validateFieldConflicts(excludeFields, redact, entities);
   const queryOmitSupported = supportsQueryOmit(Prisma.prismaVersion?.client);
-  validateAuditOmittedFields(aggregateMapping, schemaMetadata, schemaMetadata.getModelNames(), queryOmitSupported);
+  validateAuditOmittedFields(entities, schemaMetadata, schemaMetadata.getModelNames(), queryOmitSupported);
 
   const modelTags = (modelName: string): string[] => entityConfigs.byModel(modelName)?.tags ?? [];
   const relationFieldNamesByModel = new Map<string, ReadonlySet<string>>();
@@ -102,7 +102,7 @@ export const normalizeAuditOptions = (options: PrismaAuditExtensionOptions): Aud
   const auditedOmittedFields = createAuditedOmittedFields(entityConfigs.byModel, excludeFields);
 
   return {
-    provider,
+    provider: contextProvider,
     Prisma,
     schemaMetadata,
     queryOmitSupported,
@@ -119,7 +119,7 @@ export const normalizeAuditOptions = (options: PrismaAuditExtensionOptions): Aud
     resolveConfig: {
       entity: entityConfigs.byModel,
       rootEntity: entityConfigs.byCategoryAndType,
-      actor: contextEnricher?.actor,
+      actorContext,
     },
     composeConfig: {
       entity: entityConfigs.byModel,

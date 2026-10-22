@@ -116,8 +116,8 @@ describe('openImplicitTransaction', () => {
     const audited = createAuditClient(options.companionCreate ? recorded.$extends(companionCreator) : recorded, {
       Prisma,
       schema: auditSchema,
-      provider,
-      aggregateMapping: { User: defineEntity({ type: 'User' }), Post: defineEntity({ type: 'Post' }) },
+      contextProvider: provider,
+      entities: { User: defineEntity({ type: 'User' }), Post: defineEntity({ type: 'Post' }) },
       performance: {
         awaitWrite: options.awaitWrite ?? true,
         ...(options.awaitWriteIf ? { awaitWriteIf: options.awaitWriteIf } : {}),
@@ -129,11 +129,9 @@ describe('openImplicitTransaction', () => {
       ...(options.writer ? { hooks: { writer: options.writer } } : {}),
       ...(options.failingEnricher
         ? {
-            contextEnricher: {
-              actor: {
-                enricher: async () => {
-                  throw new Error('actor enricher is broken');
-                },
+            actorContext: {
+              enricher: async () => {
+                throw new Error('actor enricher is broken');
               },
             },
           }
@@ -206,8 +204,8 @@ describe('openImplicitTransaction', () => {
     const audited = createAuditClient(limited, {
       Prisma,
       schema: auditSchema,
-      provider,
-      aggregateMapping:
+      contextProvider: provider,
+      entities:
         options.audited === 'Post'
           ? { Post: defineEntity({ type: 'Post' }) }
           : { User: defineEntity({ type: 'User' }) },

@@ -3,7 +3,7 @@ import { createAuditClient, flushAllPendingWrites } from '@kuruwic/prisma-audit'
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { describe, expect, it } from 'vitest';
-import { setupTestContext, testAggregateMapping } from './helpers/setup.js';
+import { setupTestContext, testEntities } from './helpers/setup.js';
 
 describe('Before/After Field Validation', () => {
   const context = setupTestContext();
@@ -84,8 +84,8 @@ describe('Before/After Field Validation', () => {
       const prisma = createAuditClient(context.basePrisma, {
         Prisma,
         schema: auditSchema,
-        provider: context.provider,
-        aggregateMapping: testAggregateMapping,
+        contextProvider: context.provider,
+        entities: testEntities,
         performance: { awaitWrite: false },
       });
 

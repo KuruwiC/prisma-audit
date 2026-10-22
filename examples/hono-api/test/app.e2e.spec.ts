@@ -633,7 +633,7 @@ describe('Hono + Prisma Audit E2E Tests', () => {
       );
 
       // Verify audit logs for PostTag contain enriched aggregate context
-      // Note: PostTag uses self: false, so no self aggregate log is created for PostTag itself
+      // Note: PostTag uses selfAggregate: false, so no self aggregate log is created for PostTag itself
       // Only aggregate logs (Tag and Post) are created with enriched aggregateContext
       const postTagLogs = await testPrisma.auditLog.findMany({
         where: {
@@ -645,7 +645,7 @@ describe('Hono + Prisma Audit E2E Tests', () => {
 
       expect(postTagLogs).toHaveLength(2);
 
-      // With self: false, PostTag should NOT have itself as aggregate root
+      // With selfAggregate: false, PostTag should NOT have itself as aggregate root
       const aggregateTypes = postTagLogs.map((log: AuditLog) => log.aggregateType);
       expect(aggregateTypes).not.toContain('PostTag'); // Self excluded
       expect(aggregateTypes).toContain('Tag');
@@ -888,7 +888,7 @@ describe('Hono + Prisma Audit E2E Tests', () => {
         expect(tagLogs.map((log: AuditLog) => log.action)).toEqual(['create']);
       }
 
-      // Verify PostTag audit logs (with self: false, should not have PostTag aggregate)
+      // Verify PostTag audit logs (with selfAggregate: false, should not have PostTag aggregate)
       for (const postTag of postTags) {
         const postTagLogs = await testPrisma.auditLog.findMany({
           where: {
@@ -898,7 +898,7 @@ describe('Hono + Prisma Audit E2E Tests', () => {
         });
         expect(postTagLogs).toHaveLength(2);
         const aggregateTypes = postTagLogs.map((log: AuditLog) => log.aggregateType);
-        expect(aggregateTypes).not.toContain('PostTag'); // self: false
+        expect(aggregateTypes).not.toContain('PostTag'); // selfAggregate: false
         expect(aggregateTypes).toContain('Post');
         expect(aggregateTypes).toContain('Tag');
       }

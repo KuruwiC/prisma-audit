@@ -330,8 +330,8 @@ const writeInTransaction = (
  * @example
  * ```typescript
  * const prisma = createAuditClient(basePrisma, {
- *   provider,
- *   aggregateMapping,
+ *   contextProvider: provider,
+ *   entities,
  *   Prisma,
  *   hooks: {
  *     writer: createEntityNormalizedWriter({
@@ -393,8 +393,8 @@ const groupLogsByChange = (logs: AuditRecord[]): Map<string, AuditRecord[]> => {
  * @example
  * ```typescript
  * const prisma = createAuditClient(basePrisma, {
- *   provider,
- *   aggregateMapping,
+ *   contextProvider: provider,
+ *   entities,
  *   Prisma,
  *   hooks: {
  *     writer: createSharedChangeWriter({

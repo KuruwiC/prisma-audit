@@ -5,7 +5,7 @@ import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { describe, expect, it, vi } from 'vitest';
-import { createBasePrisma, setupTestContext, testAggregateMapping } from './helpers/setup.js';
+import { createBasePrisma, setupTestContext, testEntities } from './helpers/setup.js';
 
 /** Message thrown by the failing `hooks.writer` used to simulate an audit-log write failure. */
 const AUDIT_WRITE_FAILURE_MESSAGE = 'simulated audit log write failure';
@@ -27,8 +27,8 @@ const createFailingWriterClient = (options: FailingWriterClientOptions) => {
   const prisma = createAuditClient(basePrisma, {
     Prisma,
     schema: auditSchema,
-    provider,
-    aggregateMapping: testAggregateMapping,
+    contextProvider: provider,
+    entities: testEntities,
     diffing: {
       excludeFields: ['createdAt'],
     },
@@ -642,15 +642,13 @@ describe('Error Handling Integration', () => {
       const prisma = createAuditClient(basePrisma, {
         Prisma,
         schema: auditSchema,
-        provider,
-        aggregateMapping: testAggregateMapping,
+        contextProvider: provider,
+        entities: testEntities,
         performance: { awaitWrite: true, openImplicitTransaction: true },
         errorHandling: { writeFailurePolicy: policy, observer },
-        contextEnricher: {
-          actor: {
-            enricher: async () => {
-              throw enricherError;
-            },
+        actorContext: {
+          enricher: async () => {
+            throw enricherError;
           },
         },
       });
@@ -728,8 +726,8 @@ describe('Error Handling Integration', () => {
       const prisma = createAuditClient(rawBasePrisma, {
         Prisma,
         schema: auditSchema,
-        provider,
-        aggregateMapping: testAggregateMapping,
+        contextProvider: provider,
+        entities: testEntities,
         performance: { awaitWrite: true, openImplicitTransaction: true },
         fetchBefore: { update: true },
         errorHandling: { writeFailurePolicy: policy, observer },
@@ -804,8 +802,8 @@ describe('Error Handling Integration', () => {
         const prisma = createAuditClient(basePrisma, {
           Prisma,
           schema: auditSchema,
-          provider,
-          aggregateMapping: testAggregateMapping,
+          contextProvider: provider,
+          entities: testEntities,
           performance: { awaitWrite },
           errorHandling: { writeFailurePolicy: policy, observer },
         });
@@ -867,8 +865,8 @@ describe('Error Handling Integration', () => {
       const prisma = createAuditClient(basePrisma, {
         Prisma,
         schema: auditSchema,
-        provider,
-        aggregateMapping: testAggregateMapping,
+        contextProvider: provider,
+        entities: testEntities,
         performance: { awaitWrite: true },
         errorHandling: { writeFailurePolicy: policy, observer },
       });
@@ -914,8 +912,8 @@ describe('Error Handling Integration', () => {
       const prisma = createAuditClient(basePrisma, {
         Prisma,
         schema: auditSchema,
-        provider,
-        aggregateMapping: testAggregateMapping,
+        contextProvider: provider,
+        entities: testEntities,
         performance: { awaitWrite: true },
         errorHandling: { writeFailurePolicy: policy, observer },
       });
@@ -973,8 +971,8 @@ describe('Error Handling Integration', () => {
       const prisma = createAuditClient(basePrisma, {
         Prisma,
         schema: auditSchema,
-        provider,
-        aggregateMapping: testAggregateMapping,
+        contextProvider: provider,
+        entities: testEntities,
         performance: { awaitWrite: true },
         errorHandling: { writeFailurePolicy: policy, observer },
       });

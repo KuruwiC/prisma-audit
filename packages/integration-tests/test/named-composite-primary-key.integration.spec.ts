@@ -11,7 +11,7 @@ import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanDatabase, createBasePrisma, testAggregateMapping } from './helpers/setup.js';
+import { cleanDatabase, createBasePrisma, testEntities } from './helpers/setup.js';
 
 const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'named-composite-pk-actor' },
@@ -56,8 +56,8 @@ describe('Named Composite Primary Key (PostBookmark)', () => {
     const prisma = createAuditClient(basePrisma, {
       Prisma,
       schema: auditSchema,
-      provider,
-      aggregateMapping: testAggregateMapping,
+      contextProvider: provider,
+      entities: testEntities,
       diffing: { excludeFields: ['createdAt'] },
       security: { redact: { fields: [] } },
       performance: { awaitWrite: true },

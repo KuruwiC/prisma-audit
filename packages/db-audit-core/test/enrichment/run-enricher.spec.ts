@@ -35,8 +35,8 @@ describe('runEnricher', () => {
     expect(enricher).toHaveBeenCalledWith({ id: 'user-1' }, 'prisma-client', meta);
   });
 
-  describe('error strategy: fail (default)', () => {
-    it('should re-throw enricher error', async () => {
+  describe("error strategy: 'throw' (default)", () => {
+    it('should re-throw enricher error when onError is not set', async () => {
       const config = {
         enricher: async () => {
           throw new Error('enricher failed');
@@ -44,9 +44,20 @@ describe('runEnricher', () => {
       };
       await expect(runEnricher(config, {}, null, 5000)).rejects.toThrow('enricher failed');
     });
+
+    it("should re-throw enricher error when onError is 'throw', even with a fallback", async () => {
+      const config = {
+        enricher: async (): Promise<{ default: boolean }> => {
+          throw new Error('enricher failed');
+        },
+        onError: 'throw' as const,
+        fallback: { default: true },
+      };
+      await expect(runEnricher(config, {}, null, 5000)).rejects.toThrow('enricher failed');
+    });
   });
 
-  describe('error strategy: log', () => {
+  describe("error strategy: 'log'", () => {
     it('should log warning and return fallback', async () => {
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const config = {
@@ -74,74 +85,176 @@ describe('runEnricher', () => {
     });
   });
 
-  describe('error strategy: skip', () => {
-    it('should silently return null', async () => {
-      const config = {
-        enricher: async () => {
-          throw new Error('enricher failed');
-        },
-        onError: 'skip' as const,
-      };
-      const result = await runEnricher(config, {}, null, 5000);
-      expect(result).toBeNull();
-    });
-
-    it('should return null even when a fallback is configured', async () => {
+  describe("error strategy: 'ignore'", () => {
+    it('should return the fallback without logging', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const config = {
         enricher: async (): Promise<{ default: boolean }> => {
           throw new Error('enricher failed');
         },
-        onError: 'skip' as const,
+        onError: 'ignore' as const,
         fallback: { default: true },
+      };
+      const result = await runEnricher(config, {}, null, 5000);
+      expect(result).toEqual({ default: true });
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it('should return null when no fallback provided', async () => {
+      const config = {
+        enricher: async () => {
+          throw new Error('enricher failed');
+        },
+        onError: 'ignore' as const,
       };
       const result = await runEnricher(config, {}, null, 5000);
       expect(result).toBeNull();
     });
   });
 
-  describe('error strategy: custom function', () => {
-    it('should call custom handler and use its return value', async () => {
-      const handler = vi.fn().mockReturnValue({ recovered: true });
-      const config = {
-        enricher: async () => {
-          throw new Error('enricher failed');
-        },
-        onError: handler,
-      };
-      const result = await runEnricher(config, {}, null, 5000);
-      expect(result).toEqual({ recovered: true });
-      expect(handler).toHaveBeenCalledWith(expect.objectContaining({ message: 'enricher failed' }));
-    });
-
-    it.each([
-      ['null', null],
-      ['undefined', undefined],
-    ])('should return the fallback when the custom handler returns %s', async (_label, handlerResult) => {
+  describe('error strategy: invalid value', () => {
+    it("should treat a value that is not a strategy as 'log'", async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const config = {
         enricher: async (): Promise<{ default: boolean }> => {
           throw new Error('enricher failed');
         },
-        onError: () => handlerResult,
+        onError: 'fail' as never,
         fallback: { default: true },
       };
       const result = await runEnricher(config, {}, null, 5000);
       expect(result).toEqual({ default: true });
+      expect(warnSpy).toHaveBeenCalledWith(
+        "[db-audit-core] Invalid enricher onError strategy; falling back to 'log':",
+        'fail',
+      );
+      expect(warnSpy).toHaveBeenCalledWith('[db-audit-core] Enricher failed:', expect.any(Error));
     });
+    it.each([
+      ['given directly', () => Object.create(null) as never],
+      ['returned by a function', () => (async () => Object.create(null)) as never],
+    ])("should treat a value that cannot be converted to a string as 'log' when %s", async (_label, onErrorOf) => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const config = {
+        enricher: async (): Promise<{ default: boolean }> => {
+          throw new Error('enricher failed');
+        },
+        onError: onErrorOf(),
+        fallback: { default: true },
+      };
+      const result = await runEnricher(config, {}, null, 5000);
+      expect(result).toEqual({ default: true });
+      expect(warnSpy).toHaveBeenCalledWith(
+        "[db-audit-core] Invalid enricher onError strategy; falling back to 'log':",
+        expect.anything(),
+      );
+      expect(warnSpy).toHaveBeenCalledWith('[db-audit-core] Enricher failed:', expect.any(Error));
+    });
+  });
 
-    it('should return fallback when custom handler throws', async () => {
-      vi.spyOn(console, 'warn').mockImplementation(() => {});
-      const handler = vi.fn().mockImplementation(() => {
-        throw new Error('handler failed');
-      });
+  describe('error strategy: function', () => {
+    it('should pass the error to the function', async () => {
+      const handler = vi.fn().mockReturnValue('ignore');
       const config = {
         enricher: async () => {
           throw new Error('enricher failed');
         },
         onError: handler,
-        fallback: { fallbackUsed: true },
+      };
+      await runEnricher(config, {}, null, 5000);
+      expect(handler).toHaveBeenCalledWith(expect.objectContaining({ message: 'enricher failed' }));
+    });
+
+    it("should re-throw when the function returns 'throw'", async () => {
+      const config = {
+        enricher: async () => {
+          throw new Error('enricher failed');
+        },
+        onError: () => 'throw' as const,
+      };
+      await expect(runEnricher(config, {}, null, 5000)).rejects.toThrow('enricher failed');
+    });
+
+    it("should log and return the fallback when the function resolves to 'log'", async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const config = {
+        enricher: async (): Promise<{ default: boolean }> => {
+          throw new Error('enricher failed');
+        },
+        onError: async () => 'log' as const,
+        fallback: { default: true },
       };
       const result = await runEnricher(config, {}, null, 5000);
-      expect(result).toEqual({ fallbackUsed: true });
+      expect(result).toEqual({ default: true });
+      expect(warnSpy).toHaveBeenCalledWith('[db-audit-core] Enricher failed:', expect.any(Error));
+    });
+
+    it("should return the fallback silently when the function returns 'ignore'", async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const config = {
+        enricher: async (): Promise<{ default: boolean }> => {
+          throw new Error('enricher failed');
+        },
+        onError: () => 'ignore' as const,
+        fallback: { default: true },
+      };
+      const result = await runEnricher(config, {}, null, 5000);
+      expect(result).toEqual({ default: true });
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it("should treat a throwing function as 'log'", async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const config = {
+        enricher: async (): Promise<{ default: boolean }> => {
+          throw new Error('enricher failed');
+        },
+        onError: () => {
+          throw new Error('handler failed');
+        },
+        fallback: { default: true },
+      };
+      const result = await runEnricher(config, {}, null, 5000);
+      expect(result).toEqual({ default: true });
+      expect(warnSpy).toHaveBeenCalledWith(
+        "[db-audit-core] Error in enricher onError function; falling back to 'log':",
+        expect.objectContaining({ message: 'handler failed' }),
+      );
+      expect(warnSpy).toHaveBeenCalledWith('[db-audit-core] Enricher failed:', expect.any(Error));
+    });
+
+    it("should treat a function that throws a value that cannot be converted to a string as 'log'", async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const config = {
+        enricher: async (): Promise<{ default: boolean }> => {
+          throw new Error('enricher failed');
+        },
+        onError: () => {
+          throw Object.create(null);
+        },
+        fallback: { default: true },
+      };
+      const result = await runEnricher(config, {}, null, 5000);
+      expect(result).toEqual({ default: true });
+      expect(warnSpy).toHaveBeenCalledWith('[db-audit-core] Enricher failed:', expect.any(Error));
+    });
+
+    it("should treat a function that returns no valid strategy as 'log'", async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const config = {
+        enricher: async (): Promise<{ default: boolean }> => {
+          throw new Error('enricher failed');
+        },
+        onError: (() => 'skip') as never,
+        fallback: { default: true },
+      };
+      const result = await runEnricher(config, {}, null, 5000);
+      expect(result).toEqual({ default: true });
+      expect(warnSpy).toHaveBeenCalledWith(
+        "[db-audit-core] Invalid enricher onError strategy; falling back to 'log':",
+        'skip',
+      );
+      expect(warnSpy).toHaveBeenCalledWith('[db-audit-core] Enricher failed:', expect.any(Error));
     });
   });
 
@@ -193,7 +306,7 @@ describe('runBatchEnricher', () => {
     expect(result).toEqual([{ enriched: 'a' }, { enriched: 'b' }]);
   });
 
-  it('should throw when enricher returns wrong length (default fail strategy)', async () => {
+  it("should throw when enricher returns wrong length (default 'throw' strategy)", async () => {
     const config = {
       enricher: async (_inputs: { id: string }[]) => [{ enriched: 'a' }],
     };
@@ -202,10 +315,10 @@ describe('runBatchEnricher', () => {
     );
   });
 
-  it('should return fallback nulls when enricher returns wrong length with skip strategy', async () => {
+  it("should return nulls when enricher returns wrong length with the 'ignore' strategy", async () => {
     const config = {
       enricher: async (_inputs: { id: string }[]) => [{ enriched: 'a' }],
-      onError: 'skip' as const,
+      onError: 'ignore' as const,
     };
     const result = await runBatchEnricher(config, [{ id: 'a' }, { id: 'b' }], null, 5000);
     expect(result).toEqual([null, null]);
@@ -232,7 +345,7 @@ describe('runBatchEnricher', () => {
     expect(enricher).toHaveBeenCalledWith(inputs, 'prisma-client', meta);
   });
 
-  describe('error strategy: log', () => {
+  describe("error strategy: 'log'", () => {
     it('should log warning and return fallback array', async () => {
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const config = {
@@ -260,58 +373,60 @@ describe('runBatchEnricher', () => {
     });
   });
 
-  describe('error strategy: custom function', () => {
-    it('should use custom handler return value when it returns array', async () => {
-      const handler = vi.fn().mockReturnValue([{ recovered: 'a' }, { recovered: 'b' }]);
-      const config = {
-        enricher: async (): Promise<({ recovered: string } | null)[]> => {
-          throw new Error('batch failed');
-        },
-        onError: handler,
-      };
-      const result = await runBatchEnricher(config, [{ id: 'a' }, { id: 'b' }], null, 5000);
-      expect(result).toEqual([{ recovered: 'a' }, { recovered: 'b' }]);
-    });
-
-    it.each([
-      ['null', null],
-      ['an object', { recovered: true }],
-    ])('should use the fallback array when the custom handler returns %s', async (_label, handlerResult) => {
+  describe("error strategy: 'ignore'", () => {
+    it('should return the fallback array without logging', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const config = {
         enricher: async (): Promise<({ ctx: string } | null)[]> => {
           throw new Error('batch failed');
         },
-        onError: () => handlerResult,
+        onError: 'ignore' as const,
         fallback: [{ ctx: 'a' }, { ctx: 'b' }],
       };
       const result = await runBatchEnricher(config, [{ id: 'a' }, { id: 'b' }], null, 5000);
       expect(result).toEqual([{ ctx: 'a' }, { ctx: 'b' }]);
+      expect(warnSpy).not.toHaveBeenCalled();
     });
+  });
 
-    it('should return null array when the custom handler returns a non-array and no fallback is configured', async () => {
+  describe('error strategy: function', () => {
+    it("should re-throw when the function returns 'throw'", async () => {
       const config = {
         enricher: async (): Promise<null[]> => {
           throw new Error('batch failed');
         },
-        onError: () => 'recovered',
+        onError: () => 'throw' as const,
       };
-      const result = await runBatchEnricher(config, [{ id: 'a' }, { id: 'b' }], null, 5000);
-      expect(result).toEqual([null, null]);
+      await expect(runBatchEnricher(config, [{ id: 'a' }], null, 5000)).rejects.toThrow('batch failed');
     });
 
-    it('should return null array when custom handler throws', async () => {
-      vi.spyOn(console, 'warn').mockImplementation(() => {});
-      const handler = vi.fn().mockImplementation(() => {
-        throw new Error('handler failed');
-      });
+    it("should return the fallback array silently when the function resolves to 'ignore'", async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const config = {
+        enricher: async (): Promise<({ ctx: string } | null)[]> => {
+          throw new Error('batch failed');
+        },
+        onError: async () => 'ignore' as const,
+        fallback: [{ ctx: 'a' }, { ctx: 'b' }],
+      };
+      const result = await runBatchEnricher(config, [{ id: 'a' }, { id: 'b' }], null, 5000);
+      expect(result).toEqual([{ ctx: 'a' }, { ctx: 'b' }]);
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it("should treat a throwing function as 'log' and return nulls without a fallback", async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const config = {
         enricher: async (): Promise<null[]> => {
           throw new Error('batch failed');
         },
-        onError: handler,
+        onError: () => {
+          throw new Error('handler failed');
+        },
       };
       const result = await runBatchEnricher(config, [{ id: 'a' }, { id: 'b' }], null, 5000);
       expect(result).toEqual([null, null]);
+      expect(warnSpy).toHaveBeenCalledWith('[db-audit-core] Batch enricher failed:', expect.any(Error));
     });
   });
 

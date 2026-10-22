@@ -12,14 +12,14 @@
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type {
-  AggregateMapping,
+  ActorContextConfig,
   AuditActor,
   AuditContextProvider,
   AuditErrorContext,
   ComposeConfig,
   DispatchConfig,
+  EntityMap,
   ErrorHandlingConfig,
-  GlobalContextEnricherConfig,
   MutationAction,
   MutationEvent,
   PolicyConfig,
@@ -42,8 +42,8 @@ import { memoryWriteExecutor } from './write-executor.js';
 
 export interface MemoryAuditOptions<TModelName extends string> {
   readonly schema: MemorySchema<TModelName>;
-  readonly aggregateMapping: AggregateMapping<TModelName, MemoryHandle<TModelName>>;
-  readonly provider: AuditContextProvider;
+  readonly entities: EntityMap<TModelName, MemoryHandle<TModelName>>;
+  readonly contextProvider: AuditContextProvider;
   /** Whether audit rows are written in the operation's transaction by default (default: true) */
   readonly awaitWrite?: boolean;
   readonly awaitWriteIf?: PolicyConfig['awaitWriteIf'];
@@ -53,7 +53,7 @@ export interface MemoryAuditOptions<TModelName extends string> {
   readonly excludeFields?: readonly string[];
   readonly redact?: RedactConfig;
   readonly serialization?: SerializationConfig;
-  readonly contextEnricher?: GlobalContextEnricherConfig<AuditActor, unknown, MemoryHandle<TModelName>>;
+  readonly actorContext?: ActorContextConfig<AuditActor, unknown, MemoryHandle<TModelName>>;
   /** The user's observer and write-failure policy; the policy defaults to `'throw'` */
   readonly errorHandling?: ErrorHandlingConfig;
 }
@@ -93,9 +93,9 @@ interface AppliedMutation {
 export const createMemoryAuditAdapter = <TModelName extends string>(
   options: MemoryAuditOptions<TModelName>,
 ): MemoryAuditAdapter<TModelName> => {
-  const { schema, provider } = options;
+  const { schema, contextProvider } = options;
   const store = createMemoryStore<TModelName>();
-  const entityConfigs = createEntityConfigLookup(options.aggregateMapping);
+  const entityConfigs = createEntityConfigLookup(options.entities);
   const policyConfig: PolicyConfig = {
     awaitWrite: options.awaitWrite ?? true,
     awaitWriteIf: options.awaitWriteIf,
@@ -105,7 +105,7 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
   const resolveConfig: ResolveConfig<TModelName, MemoryHandle<TModelName>> = {
     entity: entityConfigs.byModel,
     rootEntity: entityConfigs.byCategoryAndType,
-    actor: options.contextEnricher?.actor,
+    actorContext: options.actorContext,
   };
   const composeConfig: ComposeConfig<TModelName> = {
     entity: entityConfigs.byModel,
@@ -195,7 +195,7 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
     op: string,
     mutate: (handle: MemoryHandle<TModelName>) => AppliedMutation,
   ): Promise<void> => {
-    const auditContext = provider.useContext();
+    const auditContext = contextProvider.useContext();
     const tags = entityConfigs.byModel(model)?.tags ?? [];
     const writePolicy = policy(model, tags, policyConfig);
     if (!writePolicy.sampled) {

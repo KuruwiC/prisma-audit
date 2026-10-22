@@ -7,9 +7,9 @@ import {
   normalizeId,
   self,
   to,
-  validateAggregateMapping,
+  validateEntityMap,
 } from '../../src/aggregate/helpers.js';
-import type { AggregateMapping } from '../../src/aggregate/types.js';
+import type { EntityMap } from '../../src/aggregate/types.js';
 
 describe('normalizeId', () => {
   it('should convert primitive types to string', () => {
@@ -170,7 +170,7 @@ describe('Resolver helper functions', () => {
       expect(aggregateRoot).toEqual({
         category: 'model',
         type: 'User',
-        resolve: resolver,
+        idResolver: resolver,
       });
     });
 
@@ -180,17 +180,17 @@ describe('Resolver helper functions', () => {
       expect(aggregateRoot).toEqual({
         category: 'system',
         type: 'AuditLog',
-        resolve: resolver,
+        idResolver: resolver,
       });
     });
 
-    it('should attach projection context enricher', () => {
+    it('should attach the projection-side aggregate context enricher', () => {
       const resolver = self();
       const context = {
         enricher: async (rows: Record<string, unknown>[]) => rows.map(() => ({})),
       };
-      const aggregateRoot = to('User', resolver, { context });
-      expect(aggregateRoot.context).toBe(context);
+      const aggregateRoot = to('User', resolver, { aggregateContext: context });
+      expect(aggregateRoot.aggregateContext).toBe(context);
     });
   });
 });
@@ -205,7 +205,7 @@ describe('defineEntity', () => {
     expect(entity.type).toBe('User');
     await expect(entity.idResolver({ id: 'user-1' }, null)).resolves.toBe('user-1');
     expect(entity.aggregates).toHaveLength(0);
-    expect(entity.self).toBeUndefined();
+    expect(entity.selfAggregate).toBeUndefined();
   });
 
   it('should create entity with custom id resolver', () => {
@@ -228,27 +228,27 @@ describe('defineEntity', () => {
     expect(entity.aggregates[0]?.type).toBe('User');
   });
 
-  it('should support self: false option', () => {
+  it('should support selfAggregate: false', () => {
     const entity = defineEntity({
       type: 'PostTag',
-      self: false,
+      selfAggregate: false,
       aggregates: [to('Post', foreignKey('postId')), to('Tag', foreignKey('tagId'))],
     });
 
-    expect(entity.self).toBe(false);
+    expect(entity.selfAggregate).toBe(false);
     expect(entity.aggregates).toHaveLength(2);
   });
 
-  it('should support self projection with context enricher', () => {
+  it('should support a self aggregate with an aggregate context enricher', () => {
     const selfContext = {
       enricher: async (rows: Record<string, unknown>[]) => rows.map(() => ({})),
     };
     const entity = defineEntity({
       type: 'Post',
-      self: { context: selfContext },
+      selfAggregate: { aggregateContext: selfContext },
     });
 
-    expect(entity.self).toEqual({ context: selfContext });
+    expect(entity.selfAggregate).toEqual({ aggregateContext: selfContext });
   });
 
   it('keeps the fields the entity excludes and the omitted fields it audits', () => {
@@ -268,13 +268,13 @@ describe('defineEntity', () => {
   });
 });
 
-describe('validateAggregateMapping', () => {
+describe('validateEntityMap', () => {
   it('should validate correct mapping', () => {
-    const mapping: AggregateMapping = {
+    const mapping: EntityMap = {
       User: defineEntity({ type: 'User' }),
     };
 
-    expect(() => validateAggregateMapping(mapping)).not.toThrow();
+    expect(() => validateEntityMap(mapping)).not.toThrow();
   });
 
   it('should throw on missing type field', () => {
@@ -284,19 +284,19 @@ describe('validateAggregateMapping', () => {
         idResolver: self(),
         aggregates: [],
       },
-    } as unknown as AggregateMapping;
+    } as unknown as EntityMap;
 
-    expect(() => validateAggregateMapping(mapping)).toThrow('type is required');
+    expect(() => validateEntityMap(mapping)).toThrow('type is required');
   });
 
   it('reports every invalid entity in one error, one line per problem', () => {
     const mapping = {
       User: { category: 'model', idResolver: self() },
       Post: { category: 'model', type: 'Post' },
-    } as unknown as AggregateMapping;
+    } as unknown as EntityMap;
 
-    expect(() => validateAggregateMapping(mapping)).toThrow(
-      '[db-audit-core] Invalid aggregate mapping configuration:\n' +
+    expect(() => validateEntityMap(mapping)).toThrow(
+      '[db-audit-core] Invalid entity map configuration:\n' +
         'Entity "User": type is required\n' +
         'Entity "Post": idResolver is required',
     );
@@ -309,27 +309,27 @@ describe('validateAggregateMapping', () => {
         type: 'User',
         aggregates: [],
       },
-    } as unknown as AggregateMapping;
+    } as unknown as EntityMap;
 
-    expect(() => validateAggregateMapping(mapping)).toThrow('idResolver is required');
+    expect(() => validateEntityMap(mapping)).toThrow('idResolver is required');
   });
 
   it('should throw when two entities share the same category and type', () => {
-    const mapping: AggregateMapping = {
+    const mapping: EntityMap = {
       User: defineEntity({ type: 'User' }),
       Account: defineEntity({ type: 'User' }),
     };
 
-    expect(() => validateAggregateMapping(mapping)).toThrow('share the same category/type "model:User"');
+    expect(() => validateEntityMap(mapping)).toThrow('share the same category/type "model:User"');
   });
 
   it('should allow the same type under different categories', () => {
-    const mapping: AggregateMapping = {
+    const mapping: EntityMap = {
       User: defineEntity({ type: 'User' }),
       ExternalUser: defineEntity({ type: 'User', category: 'external' }),
     };
 
-    expect(() => validateAggregateMapping(mapping)).not.toThrow();
+    expect(() => validateEntityMap(mapping)).not.toThrow();
   });
 });
 
@@ -342,12 +342,12 @@ describe('batchLookup', () => {
     expect(result).toBe('resolved-a');
   });
 
-  it('should propagate batchResolve via to()', () => {
+  it('should propagate batchIdResolver via to()', () => {
     const resolver = batchLookup(async (entities: { id: string }[]) => {
       return entities.map((e) => e.id);
     });
     const root = to('User', resolver);
-    expect(root.batchResolve).toBeDefined();
+    expect(root.batchIdResolver).toBeDefined();
     expect(root.requiresDbAccess).toBeUndefined();
   });
 });
@@ -359,12 +359,12 @@ describe('to - resolver metadata propagation', () => {
       lookup(async (entity: { id: string }) => entity.id),
     );
     expect(root.requiresDbAccess).toBe(true);
-    expect(root.batchResolve).toBeUndefined();
+    expect(root.batchIdResolver).toBeUndefined();
   });
 
-  it('should not set requiresDbAccess or batchResolve for foreignKey', () => {
+  it('should not set requiresDbAccess or batchIdResolver for foreignKey', () => {
     const root = to('User', foreignKey('authorId'));
-    expect(root.batchResolve).toBeUndefined();
+    expect(root.batchIdResolver).toBeUndefined();
     expect(root.requiresDbAccess).toBeUndefined();
   });
 });

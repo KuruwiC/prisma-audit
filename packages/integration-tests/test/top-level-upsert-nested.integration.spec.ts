@@ -14,7 +14,7 @@ import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createPostReadFault } from './helpers/post-read-fault.js';
-import { cleanDatabase, createBasePrisma, testAggregateMapping } from './helpers/setup.js';
+import { cleanDatabase, createBasePrisma, testEntities } from './helpers/setup.js';
 
 const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'top-level-upsert-nested-actor' },
@@ -35,8 +35,8 @@ const createClients = (fetchBefore: FetchBeforeConfig) => {
   const prisma = createAuditClient(basePrisma, {
     Prisma,
     schema: auditSchema,
-    provider,
-    aggregateMapping: testAggregateMapping,
+    contextProvider: provider,
+    entities: testEntities,
     diffing: { excludeFields: ['createdAt'] },
     security: { redact: { fields: [] } },
     performance: { awaitWrite: true },

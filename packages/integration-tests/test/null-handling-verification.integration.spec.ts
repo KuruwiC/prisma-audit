@@ -11,7 +11,7 @@ import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { describe, expect, it } from 'vitest';
-import { setupTestContext, testAggregateMapping } from './helpers/setup.js';
+import { setupTestContext, testEntities } from './helpers/setup.js';
 
 describe('NULL Handling Verification', () => {
   const context = setupTestContext();
@@ -197,8 +197,8 @@ describe('NULL Handling Verification', () => {
       const unreadBefore = createAuditClient(context.basePrisma, {
         Prisma,
         schema: auditSchema,
-        provider: context.provider,
-        aggregateMapping: testAggregateMapping,
+        contextProvider: context.provider,
+        entities: testEntities,
         performance: { awaitWrite: true },
         fetchBefore: { update: false },
       });

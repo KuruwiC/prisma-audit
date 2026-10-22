@@ -14,7 +14,7 @@ import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { describe, expect, it, vi } from 'vitest';
-import { aggregatesOf, createBasePrisma, setupTestContext, testAggregateMapping } from './helpers/setup.js';
+import { aggregatesOf, createBasePrisma, setupTestContext, testEntities } from './helpers/setup.js';
 
 const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'id-resolver-call-actor' },
@@ -31,8 +31,8 @@ describe('id-resolver-call failures', () => {
     const prisma = createAuditClient(basePrisma, {
       Prisma,
       schema: auditSchema,
-      provider,
-      aggregateMapping: { ...testAggregateMapping, Post: post },
+      contextProvider: provider,
+      entities: { ...testEntities, Post: post },
       performance: { awaitWrite: true },
       errorHandling: { observer },
     });
@@ -284,9 +284,9 @@ describe('id-resolver-call failures', () => {
       const prisma = createAuditClient(basePrisma, {
         Prisma,
         schema: auditSchema,
-        provider,
-        aggregateMapping: {
-          ...testAggregateMapping,
+        contextProvider: provider,
+        entities: {
+          ...testEntities,
           Label: defineEntity({ type: 'Label', aggregates: [to('Post', foreignKey('postId'))] }),
         },
         performance: { awaitWrite: true },

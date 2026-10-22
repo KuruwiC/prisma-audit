@@ -4,7 +4,7 @@
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
-import type { AggregateMapping, AuditLogWriter } from '@kuruwic/prisma-audit';
+import type { AuditLogWriter, EntityMap } from '@kuruwic/prisma-audit';
 import {
   createAuditClient,
   createEntityNormalizedWriter,
@@ -20,7 +20,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createPostReadFault } from './helpers/post-read-fault.js';
 import { cleanDatabase, createBasePrisma } from './helpers/setup.js';
 
-const testAggregateMapping: AggregateMapping = {
+const testEntities: EntityMap = {
   User: defineEntity({
     type: 'User',
     excludeFields: ['updatedAt'],
@@ -81,8 +81,8 @@ describe('Normalized Writer Helpers', () => {
       const prisma = createAuditClient(basePrisma, {
         Prisma,
         schema: auditSchema,
-        provider,
-        aggregateMapping: testAggregateMapping,
+        contextProvider: provider,
+        entities: testEntities,
         performance: { awaitWrite: false },
         hooks: { writer: createEntityNormalizedWriter(entitySchema) },
       });
@@ -100,8 +100,8 @@ describe('Normalized Writer Helpers', () => {
       const prisma = createAuditClient(basePrisma, {
         Prisma,
         schema: auditSchema,
-        provider,
-        aggregateMapping: testAggregateMapping,
+        contextProvider: provider,
+        entities: testEntities,
         performance: { awaitWrite: false },
         hooks: { writer: createSharedChangeWriter(sharedChangeSchema) },
       });
@@ -121,8 +121,8 @@ describe('Normalized Writer Helpers', () => {
       const prisma = createAuditClient(basePrisma, {
         Prisma,
         schema: auditSchema,
-        provider,
-        aggregateMapping: testAggregateMapping,
+        contextProvider: provider,
+        entities: testEntities,
         performance: { awaitWrite: true },
         hooks: { writer: createEntityNormalizedWriter(entitySchema) },
       });
@@ -143,8 +143,8 @@ describe('Normalized Writer Helpers', () => {
       const prisma = createAuditClient(basePrisma, {
         Prisma,
         schema: auditSchema,
-        provider,
-        aggregateMapping: testAggregateMapping,
+        contextProvider: provider,
+        entities: testEntities,
         performance: { awaitWrite: true },
         hooks: { writer: createSharedChangeWriter(sharedChangeSchema) },
       });
@@ -167,8 +167,8 @@ describe('Normalized Writer Helpers', () => {
       const prisma = createAuditClient(basePrisma, {
         Prisma,
         schema: auditSchema,
-        provider,
-        aggregateMapping: testAggregateMapping,
+        contextProvider: provider,
+        entities: testEntities,
         performance: {
           awaitWrite: true,
         },
@@ -229,8 +229,8 @@ describe('Normalized Writer Helpers', () => {
       const prisma = createAuditClient(basePrisma, {
         Prisma,
         schema: auditSchema,
-        provider,
-        aggregateMapping: testAggregateMapping,
+        contextProvider: provider,
+        entities: testEntities,
         performance: {
           awaitWrite: true,
         },
@@ -271,8 +271,8 @@ describe('Normalized Writer Helpers', () => {
       const prisma = createAuditClient(basePrisma, {
         Prisma,
         schema: auditSchema,
-        provider,
-        aggregateMapping: testAggregateMapping,
+        contextProvider: provider,
+        entities: testEntities,
         performance: {
           awaitWrite: true,
         },
@@ -302,8 +302,8 @@ describe('Normalized Writer Helpers', () => {
       const prisma = createAuditClient(basePrisma, {
         Prisma,
         schema: auditSchema,
-        provider,
-        aggregateMapping: testAggregateMapping,
+        contextProvider: provider,
+        entities: testEntities,
         performance: {
           awaitWrite: true,
         },
@@ -352,8 +352,8 @@ describe('Normalized Writer Helpers', () => {
       const prisma = createAuditClient(basePrisma, {
         Prisma,
         schema: auditSchema,
-        provider,
-        aggregateMapping: testAggregateMapping,
+        contextProvider: provider,
+        entities: testEntities,
         performance: {
           awaitWrite: true,
         },
@@ -412,8 +412,8 @@ describe('Normalized Writer Helpers', () => {
       const prisma = createAuditClient(basePrisma, {
         Prisma,
         schema: auditSchema,
-        provider,
-        aggregateMapping: testAggregateMapping,
+        contextProvider: provider,
+        entities: testEntities,
         performance: {
           awaitWrite: true,
         },
@@ -452,8 +452,8 @@ describe('Normalized Writer Helpers', () => {
       const prisma = createAuditClient(faulty, {
         Prisma,
         schema: auditSchema,
-        provider,
-        aggregateMapping: testAggregateMapping,
+        contextProvider: provider,
+        entities: testEntities,
         performance: { awaitWrite: true },
         hooks: { writer },
       });

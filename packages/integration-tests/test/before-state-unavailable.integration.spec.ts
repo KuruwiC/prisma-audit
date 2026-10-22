@@ -19,7 +19,7 @@ import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createPostReadFault } from './helpers/post-read-fault.js';
-import { createBasePrisma, testAggregateMapping } from './helpers/setup.js';
+import { createBasePrisma, testEntities } from './helpers/setup.js';
 
 type FetchBeforeConfig = Parameters<typeof createAuditClient>[1]['fetchBefore'];
 
@@ -42,8 +42,8 @@ describe('before state requested but unreadable', () => {
     const prisma = createAuditClient(basePrisma, {
       Prisma,
       schema: auditSchema,
-      provider,
-      aggregateMapping: testAggregateMapping,
+      contextProvider: provider,
+      entities: testEntities,
       diffing: { excludeFields: ['createdAt'] },
       security: { redact: { fields: [] } },
       errorHandling: { observer },

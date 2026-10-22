@@ -519,8 +519,8 @@ describe('createTransactionProxy', () => {
       const extend = createAuditLogExtension({
         Prisma: { defineExtension: (definition: unknown) => definition, DbNull: null },
         schema: auditSchema(model('User', [column('id', { isId: true, isRequired: true })])),
-        provider,
-        aggregateMapping: { User: defineEntity({ type: 'User' }) },
+        contextProvider: provider,
+        entities: { User: defineEntity({ type: 'User' }) },
         hooks: { writer },
       }) as (client: PrismaBaseClient) => ExtendedClient;
       return extend(extendableBaseClient);

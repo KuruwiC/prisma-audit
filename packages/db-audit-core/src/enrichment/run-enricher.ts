@@ -5,8 +5,9 @@
  */
 
 import { ENRICHMENT_TIMEOUTS } from '../constants.js';
+import type { ErrorStrategy } from '../utils/error-handler.js';
 import { toError } from '../utils/to-error.js';
-import type { EnricherConfig, EnricherErrorStrategy } from './types.js';
+import type { EnricherConfig, EnricherOnError } from './types.js';
 
 /** Rejects with 'Enricher timeout' when `timeoutMs` elapses first; the timer is cleared either way so a settled call leaves nothing pending. */
 const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number): Promise<T> => {
@@ -23,34 +24,38 @@ const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number): Promise<T
   }
 };
 
-const handleEnricherError = <TContext>(
-  error: Error,
-  errorStrategy: EnricherErrorStrategy,
-  fallback: TContext | undefined,
-): TContext | null => {
-  if (errorStrategy === 'fail') {
+const ERROR_STRATEGIES: ReadonlySet<unknown> = new Set<ErrorStrategy>(['throw', 'log', 'ignore']);
+
+const isErrorStrategy = (value: unknown): value is ErrorStrategy => ERROR_STRATEGIES.has(value);
+
+/**
+ * An `onError` function that throws, or an `onError` that is or returns no valid strategy, falls
+ * back to `'log'`: unlike `'throw'` it cannot fail the write, and unlike `'ignore'` it still
+ * surfaces the enricher failure.
+ */
+const resolveStrategy = async (onError: EnricherOnError, error: Error): Promise<ErrorStrategy> => {
+  let strategy: unknown;
+  try {
+    strategy = typeof onError === 'function' ? await onError(error) : onError;
+  } catch (handlerError) {
+    console.warn("[db-audit-core] Error in enricher onError function; falling back to 'log':", handlerError);
+    return 'log';
+  }
+  if (isErrorStrategy(strategy)) {
+    return strategy;
+  }
+  console.warn("[db-audit-core] Invalid enricher onError strategy; falling back to 'log':", strategy);
+  return 'log';
+};
+
+const handleEnricherError = async (error: Error, onError: EnricherOnError, logMessage: string): Promise<void> => {
+  const strategy = await resolveStrategy(onError, error);
+  if (strategy === 'throw') {
     throw error;
   }
-
-  if (errorStrategy === 'log') {
-    console.warn('[db-audit-core] Enricher failed:', error);
-    return fallback ?? null;
+  if (strategy === 'log') {
+    console.warn(logMessage, error);
   }
-
-  if (typeof errorStrategy === 'function') {
-    try {
-      const customResult = errorStrategy(error);
-      if (customResult === null || customResult === undefined) {
-        return fallback ?? null;
-      }
-      return customResult as TContext;
-    } catch (handlerError) {
-      console.warn('[db-audit-core] Custom error handler failed:', handlerError);
-      return fallback ?? null;
-    }
-  }
-
-  return null;
 };
 
 /**
@@ -71,49 +76,9 @@ export const runEnricher = async <TInput, TContext, TMeta = void>(
   try {
     return await withTimeout(config.enricher(input, db, meta as TMeta), timeoutMs);
   } catch (unknownError) {
-    const error = toError(unknownError);
-    const errorStrategy = config.onError ?? 'fail';
-
-    return handleEnricherError<TContext>(error, errorStrategy, config.fallback);
+    await handleEnricherError(toError(unknownError), config.onError ?? 'throw', '[db-audit-core] Enricher failed:');
+    return config.fallback ?? null;
   }
-};
-
-const handleBatchEnricherError = <TContext>(
-  error: Error,
-  errorStrategy: EnricherErrorStrategy,
-  fallback: (TContext | null)[] | undefined,
-  inputCount: number,
-): (TContext | null)[] => {
-  if (errorStrategy === 'fail') {
-    throw error;
-  }
-
-  const createFallbackArray = (): (TContext | null)[] => {
-    if (Array.isArray(fallback)) {
-      return fallback;
-    }
-    return Array(inputCount).fill(null);
-  };
-
-  if (errorStrategy === 'log') {
-    console.warn('[db-audit-core] Batch enricher failed:', error);
-    return createFallbackArray();
-  }
-
-  if (typeof errorStrategy === 'function') {
-    try {
-      const customResult = errorStrategy(error);
-      if (Array.isArray(customResult)) {
-        return customResult as (TContext | null)[];
-      }
-      return createFallbackArray();
-    } catch (handlerError) {
-      console.warn('[db-audit-core] Custom error handler failed:', handlerError);
-      return createFallbackArray();
-    }
-  }
-
-  return Array(inputCount).fill(null);
 };
 
 /**
@@ -141,9 +106,11 @@ export const runBatchEnricher = async <TInput, TContext, TMeta = void>(
     }
     return enrichedContexts;
   } catch (unknownError) {
-    const error = toError(unknownError);
-    const errorStrategy = config.onError ?? 'fail';
-
-    return handleBatchEnricherError<TContext>(error, errorStrategy, config.fallback, inputs.length);
+    await handleEnricherError(
+      toError(unknownError),
+      config.onError ?? 'throw',
+      '[db-audit-core] Batch enricher failed:',
+    );
+    return config.fallback ?? inputs.map(() => null);
   }
 };

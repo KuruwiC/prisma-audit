@@ -3,7 +3,7 @@
  * `schema` option, spelled as the schema declares them
  */
 
-import { createAsyncLocalStorageProvider, defineAggregateMapping, defineEntity } from '@kuruwic/db-audit-core';
+import { createAsyncLocalStorageProvider, defineEntities, defineEntity } from '@kuruwic/db-audit-core';
 import { describe, expectTypeOf, it } from 'vitest';
 import { createAuditClient, defineConfig } from '../src/client-factory.js';
 import type { AuditSchema } from '../src/schema/audit-schema.js';
@@ -28,7 +28,7 @@ const schema: AuditSchema<ModelName> = {
 const base = {
   Prisma: { defineExtension: (extension: unknown) => extension, DbNull: null },
   schema,
-  provider: createAsyncLocalStorageProvider(),
+  contextProvider: createAsyncLocalStorageProvider(),
 };
 
 const userProfile = defineEntity<{ id: string }, MockPrismaClient>({ type: 'UserProfile' });
@@ -37,35 +37,35 @@ describe('defineConfig', () => {
   it('infers the model names from schema and keeps the client given explicitly', () => {
     const config = defineConfig<MockPrismaClient>()({
       ...base,
-      aggregateMapping: { UserProfile: userProfile },
+      entities: { UserProfile: userProfile },
       fetchBefore: { models: { UserProfile: { delete: false } } },
     });
 
     expectTypeOf(config).toEqualTypeOf<PrismaAuditExtensionOptions<ModelName, MockPrismaClient>>();
   });
 
-  it('keys aggregateMapping by the declared model names only', () => {
-    const config = defineConfig<MockPrismaClient>()({ ...base, aggregateMapping: {} });
+  it('keys entities by the declared model names only', () => {
+    const config = defineConfig<MockPrismaClient>()({ ...base, entities: {} });
 
-    expectTypeOf(config.aggregateMapping).toHaveProperty('UserProfile');
-    expectTypeOf(config.aggregateMapping).not.toHaveProperty('userProfile');
-    expectTypeOf(config.aggregateMapping).not.toHaveProperty('Comment');
+    expectTypeOf(config.entities).toHaveProperty('UserProfile');
+    expectTypeOf(config.entities).not.toHaveProperty('userProfile');
+    expectTypeOf(config.entities).not.toHaveProperty('Comment');
   });
 
-  it('rejects an aggregateMapping key the schema does not declare', () => {
+  it('rejects an entities key the schema does not declare', () => {
     defineConfig<MockPrismaClient>()({
       ...base,
-      aggregateMapping: {
+      entities: {
         // @ts-expect-error Comment is not a model of the schema
         Comment: defineEntity({ type: 'Comment' }),
       },
     });
   });
 
-  it('rejects an aggregateMapping key in the delegate spelling', () => {
+  it('rejects an entities key in the delegate spelling', () => {
     defineConfig<MockPrismaClient>()({
       ...base,
-      aggregateMapping: {
+      entities: {
         // @ts-expect-error the schema declares UserProfile, not the delegate's spelling
         userProfile,
       },
@@ -75,7 +75,7 @@ describe('defineConfig', () => {
   it('rejects fetchBefore.models keys the schema does not declare', () => {
     defineConfig<MockPrismaClient>()({
       ...base,
-      aggregateMapping: {},
+      entities: {},
       fetchBefore: {
         models: {
           UserProfile: { update: false },
@@ -86,7 +86,7 @@ describe('defineConfig', () => {
     });
     defineConfig<MockPrismaClient>()({
       ...base,
-      aggregateMapping: {},
+      entities: {},
       fetchBefore: {
         models: {
           // @ts-expect-error the schema declares UserProfile, not the delegate's spelling
@@ -97,9 +97,9 @@ describe('defineConfig', () => {
   });
 
   it('accepts a mapping defined ahead with the schema model names', () => {
-    const aggregateMapping = defineAggregateMapping<ModelName, MockPrismaClient>()({ UserProfile: userProfile });
+    const entities = defineEntities<ModelName, MockPrismaClient>()({ UserProfile: userProfile });
 
-    expectTypeOf(defineConfig<MockPrismaClient>()({ ...base, aggregateMapping })).toEqualTypeOf<
+    expectTypeOf(defineConfig<MockPrismaClient>()({ ...base, entities })).toEqualTypeOf<
       PrismaAuditExtensionOptions<ModelName, MockPrismaClient>
     >();
   });
@@ -112,18 +112,18 @@ describe('createAuditClient', () => {
     const build = (prisma: MockPrismaClient) =>
       createAuditClient(prisma, {
         ...base,
-        aggregateMapping: { UserProfile: userProfile },
+        entities: { UserProfile: userProfile },
         fetchBefore: { models: { UserProfile: { update: false } } },
       });
 
     expectTypeOf(build).returns.toExtend<MockPrismaClient>();
   });
 
-  it('rejects an aggregateMapping key the schema does not declare', () => {
+  it('rejects an entities key the schema does not declare', () => {
     const build = (prisma: MockPrismaClient) =>
       createAuditClient(prisma, {
         ...base,
-        aggregateMapping: {
+        entities: {
           // @ts-expect-error Comment is not a model of the schema
           Comment: defineEntity({ type: 'Comment' }),
         },
@@ -136,7 +136,7 @@ describe('createAuditClient', () => {
     const build = (prisma: MockPrismaClient) =>
       createAuditClient(prisma, {
         ...base,
-        aggregateMapping: {},
+        entities: {},
         fetchBefore: {
           models: {
             // @ts-expect-error the schema declares UserProfile, not the delegate's spelling
@@ -149,7 +149,7 @@ describe('createAuditClient', () => {
   });
 
   it('accepts a configuration from defineConfig for the same client', () => {
-    const config = defineConfig<MockPrismaClient>()({ ...base, aggregateMapping: { UserProfile: userProfile } });
+    const config = defineConfig<MockPrismaClient>()({ ...base, entities: { UserProfile: userProfile } });
     const build = (prisma: MockPrismaClient) => createAuditClient(prisma, config);
 
     expectTypeOf(build).returns.toExtend<MockPrismaClient>();
@@ -170,24 +170,24 @@ describe('a model name spelled unlike its delegate', () => {
   it('keys the options by the declared spelling', () => {
     const config = defineConfig<MockPrismaClient>()({
       ...snakeBase,
-      aggregateMapping: { user_profile: userProfile },
+      entities: { user_profile: userProfile },
       fetchBefore: { models: { user_profile: { update: false } } },
     });
 
     expectTypeOf(config).toEqualTypeOf<PrismaAuditExtensionOptions<'User' | 'user_profile', MockPrismaClient>>();
   });
 
-  it('rejects aggregateMapping keys in another spelling', () => {
+  it('rejects entities keys in another spelling', () => {
     defineConfig<MockPrismaClient>()({
       ...snakeBase,
-      aggregateMapping: {
+      entities: {
         // @ts-expect-error the schema declares user_profile, not its capitalized accessor
         User_profile: userProfile,
       },
     });
     defineConfig<MockPrismaClient>()({
       ...snakeBase,
-      aggregateMapping: {
+      entities: {
         // @ts-expect-error the schema declares user_profile, not UserProfile
         UserProfile: userProfile,
       },
@@ -197,7 +197,7 @@ describe('a model name spelled unlike its delegate', () => {
   it('rejects fetchBefore.models keys in another spelling', () => {
     defineConfig<MockPrismaClient>()({
       ...snakeBase,
-      aggregateMapping: {},
+      entities: {},
       fetchBefore: {
         models: {
           // @ts-expect-error the schema declares user_profile, not its capitalized accessor
@@ -207,7 +207,7 @@ describe('a model name spelled unlike its delegate', () => {
     });
     defineConfig<MockPrismaClient>()({
       ...snakeBase,
-      aggregateMapping: {},
+      entities: {},
       fetchBefore: {
         models: {
           // @ts-expect-error the schema declares user_profile, not UserProfile

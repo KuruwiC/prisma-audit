@@ -87,7 +87,7 @@ const recipeConfigOf = (audit: AuditOptions): RecipeConfig => {
  * Internal extension factory, not exported from the package entry: `createAuditClient`
  * applies it via `prisma.$extends()` and returns the typed client.
  *
- * @throws {Error} If the aggregate mapping is invalid or the diffing and redaction settings conflict
+ * @throws {Error} If the entity map is invalid or the diffing and redaction settings conflict
  */
 export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) => {
   const audit = normalizeAuditOptions(options);

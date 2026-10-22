@@ -69,7 +69,7 @@ describe('Batch operations record the before state whatever fetchBefore says', (
 
     // Filtered to the Post's own aggregate row (aggregateType: 'Post') — Post also
     // fans out a second row with aggregateType: 'User' (its parent aggregate, see
-    // testAggregateMapping), which carries the same before/changes and would
+    // testEntities), which carries the same before/changes and would
     // otherwise double-count entries per post.
     const updateLogs = await prisma.auditLog.findMany({
       where: { entityType: 'Post', action: 'update', aggregateType: 'Post' },

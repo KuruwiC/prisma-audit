@@ -10,8 +10,8 @@
 import type { FetchBeforeByOperation, FetchBeforeConfig } from '../types.js';
 
 /**
- * The setting `models` holds for `modelName`, matched case-insensitively like the aggregate
- * mapping: the key type spells a model with an uppercase first letter, while a model declared
+ * The setting `models` holds for `modelName`, matched case-insensitively like the entity
+ * map keys: the key type spells a model with an uppercase first letter, while a model declared
  * with a lowercase one (`model auditEvent`) reaches the extension under its declared name
  */
 const modelSettingOf = (models: FetchBeforeConfig['models'], modelName: string): FetchBeforeByOperation | undefined => {

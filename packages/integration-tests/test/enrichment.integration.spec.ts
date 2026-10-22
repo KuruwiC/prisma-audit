@@ -1,6 +1,6 @@
 import type { AuditActor, AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
-import type { AggregateMapping } from '@kuruwic/prisma-audit';
+import type { EntityMap } from '@kuruwic/prisma-audit';
 import { createAuditClient, defineEntity, foreignKey, to } from '@kuruwic/prisma-audit';
 import { type AuditModelName, auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
@@ -8,17 +8,17 @@ import type { Mock } from 'vitest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createCommentAggregateEnricher,
-  createCommentAggregateMapping,
+  createCommentEntities,
   createCommentEntityEnricher,
   createProfileAggregateEnricher,
-  createProfileAggregateMapping,
+  createProfileEntities,
   createProfileEntityEnricher,
-  createUserAggregateAggregateMapping,
+  createUserAggregateContextEntities,
   createUserAggregateEnricher,
-  createUserEntityAggregateMapping,
+  createUserEntityContextEntities,
   createUserEntityEnricher,
 } from './helpers/enrichment-test-helpers.js';
-import { createBasePrisma, setupTestContext, testAggregateMapping } from './helpers/setup.js';
+import { createBasePrisma, setupTestContext, testEntities } from './helpers/setup.js';
 
 type TestAuditActor = AuditActor & {
   role?: string; // Custom property for enrichment testing
@@ -30,7 +30,7 @@ type TestAuditContext = Omit<AuditContext, 'actor'> & {
 
 type ClientOptions = Omit<
   Parameters<typeof createAuditClient<PrismaClient, AuditModelName>>[1],
-  'Prisma' | 'schema' | 'provider'
+  'Prisma' | 'schema' | 'contextProvider'
 >;
 
 /** Orders values by their JSON text, for comparing rows read in no fixed order */
@@ -52,7 +52,7 @@ describe('Context Enrichment Integration', () => {
     const prisma = createAuditClient(basePrisma, {
       Prisma,
       schema: auditSchema,
-      provider,
+      contextProvider: provider,
       performance: { awaitWrite: true },
       ...options,
     });
@@ -297,12 +297,12 @@ describe('Context Enrichment Integration', () => {
     it('should enrich entity and aggregate context when deleting Comment', async () => {
       const entityEnricher = createCommentEntityEnricher();
       const aggregateEnricher = createCommentAggregateEnricher();
-      const aggregateMapping = createCommentAggregateMapping(
+      const entities = createCommentEntities(
         entityEnricher as Mock<(entities: unknown[], prisma: PrismaClient) => Promise<unknown[]>>,
         aggregateEnricher as Mock<(aggregates: unknown[], prisma: PrismaClient) => Promise<unknown[]>>,
       );
 
-      const { basePrisma: customBasePrisma, prisma: customPrisma, provider } = openClient({ aggregateMapping });
+      const { basePrisma: customBasePrisma, prisma: customPrisma, provider } = openClient({ entities });
 
       const actor: AuditContext = {
         actor: { category: 'model', type: 'User', id: 'delete-comment-actor' },
@@ -355,12 +355,12 @@ describe('Context Enrichment Integration', () => {
     it('should enrich entity and aggregate context when deleting Profile', async () => {
       const entityEnricher = createProfileEntityEnricher();
       const aggregateEnricher = createProfileAggregateEnricher();
-      const aggregateMapping = createProfileAggregateMapping(
+      const entities = createProfileEntities(
         entityEnricher as Mock<(entities: unknown[], prisma: PrismaClient) => Promise<unknown[]>>,
         aggregateEnricher as Mock<(aggregates: unknown[], prisma: PrismaClient) => Promise<unknown[]>>,
       );
 
-      const { basePrisma: customBasePrisma, prisma: customPrisma, provider } = openClient({ aggregateMapping });
+      const { basePrisma: customBasePrisma, prisma: customPrisma, provider } = openClient({ entities });
 
       const actor: AuditContext = {
         actor: { category: 'model', type: 'User', id: 'delete-profile-actor' },
@@ -408,12 +408,12 @@ describe('Context Enrichment Integration', () => {
     it('should call the entity enricher once with the three deleted comments for a deleteMany and enrich every row of each', async () => {
       const entityEnricher = createCommentEntityEnricher();
       const aggregateEnricher = createCommentAggregateEnricher();
-      const aggregateMapping = createCommentAggregateMapping(
+      const entities = createCommentEntities(
         entityEnricher as Mock<(entities: unknown[], prisma: PrismaClient) => Promise<unknown[]>>,
         aggregateEnricher as Mock<(aggregates: unknown[], prisma: PrismaClient) => Promise<unknown[]>>,
       );
 
-      const { basePrisma: customBasePrisma, prisma: customPrisma, provider } = openClient({ aggregateMapping });
+      const { basePrisma: customBasePrisma, prisma: customPrisma, provider } = openClient({ entities });
 
       const actor: AuditContext = {
         actor: { category: 'model', type: 'User', id: 'delete-many-comment-actor' },
@@ -471,11 +471,11 @@ describe('Context Enrichment Integration', () => {
 
     it('should call aggregate enricher exactly once (batch) for deleteMany operation', async () => {
       const aggregateEnricher = createUserAggregateEnricher();
-      const aggregateMapping = createUserAggregateAggregateMapping(
+      const entities = createUserAggregateContextEntities(
         aggregateEnricher as Mock<(aggregates: unknown[], prisma: PrismaClient) => Promise<unknown[]>>,
       );
 
-      const { basePrisma: customBasePrisma, prisma: customPrisma, provider } = openClient({ aggregateMapping });
+      const { basePrisma: customBasePrisma, prisma: customPrisma, provider } = openClient({ entities });
 
       const actor: AuditContext = {
         actor: { category: 'model', type: 'User', id: 'delete-agg-batch-actor' },
@@ -521,12 +521,12 @@ describe('Context Enrichment Integration', () => {
         prisma: customPrisma,
         provider,
       } = openClient({
-        aggregateMapping: {
-          ...testAggregateMapping,
+        entities: {
+          ...testEntities,
           Post: defineEntity({
             type: 'Post',
             aggregates: [to('User', foreignKey('authorId'))],
-            context: {
+            entityContext: {
               enricher: async (posts, prisma) =>
                 Promise.all(
                   posts.map(async (post) => {
@@ -579,7 +579,7 @@ describe('Context Enrichment Integration', () => {
 
   describe('Enricher Error Handling', () => {
     it("should write a Comment create without entity context when its entity enricher throws under onError: 'log'", async () => {
-      const customAggregateMapping: AggregateMapping = {
+      const customEntities: EntityMap = {
         User: defineEntity({ type: 'User', excludeFields: ['updatedAt'] }),
         Profile: defineEntity({
           type: 'Profile',
@@ -592,7 +592,7 @@ describe('Context Enrichment Integration', () => {
         Comment: defineEntity({
           type: 'Comment',
           aggregates: [to('Post', foreignKey('postId')), to('User', foreignKey('authorId'))],
-          context: {
+          entityContext: {
             enricher: async (_entities: unknown[], _prisma: unknown) => {
               throw new Error('Simulated enricher error');
             },
@@ -607,15 +607,13 @@ describe('Context Enrichment Integration', () => {
         prisma: customPrisma,
         provider: customProvider,
       } = openClient({
-        aggregateMapping: customAggregateMapping,
-        contextEnricher: {
-          actor: {
-            enricher: async (actor: unknown) => ({
-              name: (actor as { name?: string }).name,
-            }),
-            onError: 'log',
-            fallback: null,
-          },
+        entities: customEntities,
+        actorContext: {
+          enricher: async (actor: unknown) => ({
+            name: (actor as { name?: string }).name,
+          }),
+          onError: 'log',
+          fallback: null,
         },
       });
 
@@ -651,7 +649,7 @@ describe('Context Enrichment Integration', () => {
     });
 
     it("should write a Comment create without entity or aggregate context when its enrichers throw under onError: 'log'", async () => {
-      const customAggregateMapping: AggregateMapping = {
+      const customEntities: EntityMap = {
         User: defineEntity({ type: 'User', excludeFields: ['updatedAt'] }),
         Profile: defineEntity({
           type: 'Profile',
@@ -665,7 +663,7 @@ describe('Context Enrichment Integration', () => {
           type: 'Comment',
           aggregates: [
             to('Post', foreignKey('postId'), {
-              context: {
+              aggregateContext: {
                 enricher: async (_rows: unknown[], _prisma: unknown, _meta: unknown) => {
                   throw new Error('Simulated aggregate enricher error');
                 },
@@ -674,7 +672,7 @@ describe('Context Enrichment Integration', () => {
               },
             }),
             to('User', foreignKey('authorId'), {
-              context: {
+              aggregateContext: {
                 enricher: async (_rows: unknown[], _prisma: unknown, _meta: unknown) => {
                   throw new Error('Simulated aggregate enricher error');
                 },
@@ -683,7 +681,7 @@ describe('Context Enrichment Integration', () => {
               },
             }),
           ],
-          context: {
+          entityContext: {
             enricher: async (_entities: unknown[], _prisma: unknown) => {
               throw new Error('Simulated entity enricher error');
             },
@@ -698,15 +696,13 @@ describe('Context Enrichment Integration', () => {
         prisma: customPrisma,
         provider: customProvider,
       } = openClient({
-        aggregateMapping: customAggregateMapping,
-        contextEnricher: {
-          actor: {
-            enricher: async (actor: unknown) => ({
-              name: (actor as { name?: string }).name,
-            }),
-            onError: 'log',
-            fallback: null,
-          },
+        entities: customEntities,
+        actorContext: {
+          enricher: async (actor: unknown) => ({
+            name: (actor as { name?: string }).name,
+          }),
+          onError: 'log',
+          fallback: null,
         },
       });
 
@@ -749,15 +745,13 @@ describe('Context Enrichment Integration', () => {
         prisma: customPrisma,
         provider: customProvider,
       } = openClient({
-        aggregateMapping: testAggregateMapping,
-        contextEnricher: {
-          actor: {
-            enricher: async (_actor: unknown, _prisma: unknown) => {
-              throw new Error('Actor enricher error');
-            },
-            onError: 'log',
-            fallback: actorFallback,
+        entities: testEntities,
+        actorContext: {
+          enricher: async (_actor: unknown, _prisma: unknown) => {
+            throw new Error('Actor enricher error');
           },
+          onError: 'log',
+          fallback: actorFallback,
         },
       });
 
@@ -779,14 +773,14 @@ describe('Context Enrichment Integration', () => {
       expect(auditLogs[0]?.actorContext).toEqual(actorFallback);
     });
 
-    describe("an entity enricher that throws under the default onError ('fail')", () => {
+    describe("an entity enricher that throws under the default onError ('throw')", () => {
       const enricherError = new Error('entity enricher failed');
-      const failingEntityMapping: AggregateMapping = {
-        ...testAggregateMapping,
+      const failingEntityMapping: EntityMap = {
+        ...testEntities,
         User: defineEntity({
           type: 'User',
           excludeFields: ['updatedAt'],
-          context: {
+          entityContext: {
             enricher: async () => {
               throw enricherError;
             },
@@ -805,7 +799,7 @@ describe('Context Enrichment Integration', () => {
           prisma: customPrisma,
           provider,
         } = openClient({
-          aggregateMapping: failingEntityMapping,
+          entities: failingEntityMapping,
           errorHandling: { observer },
         });
 
@@ -834,7 +828,7 @@ describe('Context Enrichment Integration', () => {
           prisma: customPrisma,
           provider,
         } = openClient({
-          aggregateMapping: failingEntityMapping,
+          entities: failingEntityMapping,
           errorHandling: { observer },
         });
 
@@ -866,7 +860,7 @@ describe('Context Enrichment Integration', () => {
         prisma: customPrisma,
         provider,
       } = openClient({
-        aggregateMapping: createUserEntityAggregateMapping(
+        entities: createUserEntityContextEntities(
           entityEnricher as Mock<(entities: unknown[], prisma: PrismaClient) => Promise<unknown[]>>,
         ),
       });
@@ -913,19 +907,17 @@ describe('Context Enrichment Integration', () => {
         prisma: customPrisma,
         provider: customProvider,
       } = openClient({
-        aggregateMapping: testAggregateMapping,
-        contextEnricher: {
-          actor: {
-            enricher: async (actor: unknown) => {
-              actorEnricherCallCount++;
-              return {
-                name: (actor as { name?: string }).name,
-                role: (actor as { role?: string }).role,
-              };
-            },
-            onError: 'log',
-            fallback: null,
+        entities: testEntities,
+        actorContext: {
+          enricher: async (actor: unknown) => {
+            actorEnricherCallCount++;
+            return {
+              name: (actor as { name?: string }).name,
+              role: (actor as { role?: string }).role,
+            };
           },
+          onError: 'log',
+          fallback: null,
         },
       });
 
@@ -965,19 +957,17 @@ describe('Context Enrichment Integration', () => {
       let actorEnricherCallCount = 0;
 
       const { prisma: customPrisma, provider: customProvider } = openClient({
-        aggregateMapping: testAggregateMapping,
-        contextEnricher: {
-          actor: {
-            enricher: async (actor: unknown) => {
-              actorEnricherCallCount++;
-              return {
-                name: (actor as { name?: string }).name,
-                role: (actor as { role?: string }).role,
-              };
-            },
-            onError: 'log',
-            fallback: null,
+        entities: testEntities,
+        actorContext: {
+          enricher: async (actor: unknown) => {
+            actorEnricherCallCount++;
+            return {
+              name: (actor as { name?: string }).name,
+              role: (actor as { role?: string }).role,
+            };
           },
+          onError: 'log',
+          fallback: null,
         },
       });
 
@@ -1010,19 +1000,17 @@ describe('Context Enrichment Integration', () => {
       let actorEnricherCallCount = 0;
 
       const { prisma: customPrisma, provider: customProvider } = openClient({
-        aggregateMapping: testAggregateMapping,
-        contextEnricher: {
-          actor: {
-            enricher: async (actor: unknown) => {
-              actorEnricherCallCount++;
-              return {
-                name: (actor as { name?: string }).name,
-                role: (actor as { role?: string }).role,
-              };
-            },
-            onError: 'log',
-            fallback: null,
+        entities: testEntities,
+        actorContext: {
+          enricher: async (actor: unknown) => {
+            actorEnricherCallCount++;
+            return {
+              name: (actor as { name?: string }).name,
+              role: (actor as { role?: string }).role,
+            };
           },
+          onError: 'log',
+          fallback: null,
         },
       });
 
@@ -1065,11 +1053,11 @@ describe('Context Enrichment Integration', () => {
     it('should call entity enricher exactly once (batch) for createMany operation', async () => {
       let entityEnricherCallCount = 0;
 
-      const customAggregateMapping: AggregateMapping = {
+      const customEntities: EntityMap = {
         User: defineEntity({
           type: 'User',
           excludeFields: ['updatedAt'],
-          context: {
+          entityContext: {
             enricher: async (entities: unknown[], _prisma: unknown) => {
               entityEnricherCallCount++;
               return (entities as Record<string, unknown>[]).map((entity) => ({
@@ -1097,16 +1085,14 @@ describe('Context Enrichment Integration', () => {
         prisma: customPrisma,
         provider: customProvider,
       } = openClient({
-        aggregateMapping: customAggregateMapping,
-        contextEnricher: {
-          actor: {
-            enricher: async (actor: unknown) => ({
-              name: (actor as { name?: string }).name,
-              role: (actor as { role?: string }).role,
-            }),
-            onError: 'log',
-            fallback: null,
-          },
+        entities: customEntities,
+        actorContext: {
+          enricher: async (actor: unknown) => ({
+            name: (actor as { name?: string }).name,
+            role: (actor as { role?: string }).role,
+          }),
+          onError: 'log',
+          fallback: null,
         },
       });
 
@@ -1139,11 +1125,11 @@ describe('Context Enrichment Integration', () => {
     it('should call the entity enricher once per operation for multiple individual create operations', async () => {
       let entityEnricherCallCount = 0;
 
-      const customAggregateMapping: AggregateMapping = {
+      const customEntities: EntityMap = {
         User: defineEntity({
           type: 'User',
           excludeFields: ['updatedAt'],
-          context: {
+          entityContext: {
             enricher: async (entities: unknown[], _prisma: unknown) => {
               entityEnricherCallCount++;
               return (entities as Record<string, unknown>[]).map((entity) => ({
@@ -1167,16 +1153,14 @@ describe('Context Enrichment Integration', () => {
       };
 
       const { prisma: customPrisma, provider: customProvider } = openClient({
-        aggregateMapping: customAggregateMapping,
-        contextEnricher: {
-          actor: {
-            enricher: async (actor: unknown) => ({
-              name: (actor as { name?: string }).name,
-              role: (actor as { role?: string }).role,
-            }),
-            onError: 'log',
-            fallback: null,
-          },
+        entities: customEntities,
+        actorContext: {
+          enricher: async (actor: unknown) => ({
+            name: (actor as { name?: string }).name,
+            role: (actor as { role?: string }).role,
+          }),
+          onError: 'log',
+          fallback: null,
         },
       });
 
@@ -1205,12 +1189,12 @@ describe('Context Enrichment Integration', () => {
       let aggregateEnricherCallCount = 0;
       const receivedEntityCounts: number[] = [];
 
-      const customAggregateMapping: AggregateMapping = {
+      const customEntities: EntityMap = {
         User: defineEntity({
           type: 'User',
           excludeFields: ['updatedAt'],
-          self: {
-            context: {
+          selfAggregate: {
+            aggregateContext: {
               enricher: async (rows, _prisma, meta) => {
                 aggregateEnricherCallCount++;
                 receivedEntityCounts.push(rows.length);
@@ -1241,15 +1225,13 @@ describe('Context Enrichment Integration', () => {
         prisma: customPrisma,
         provider: customProvider,
       } = openClient({
-        aggregateMapping: customAggregateMapping,
-        contextEnricher: {
-          actor: {
-            enricher: async (actor: unknown) => ({
-              name: (actor as { name?: string }).name,
-            }),
-            onError: 'log',
-            fallback: null,
-          },
+        entities: customEntities,
+        actorContext: {
+          enricher: async (actor: unknown) => ({
+            name: (actor as { name?: string }).name,
+          }),
+          onError: 'log',
+          fallback: null,
         },
       });
 
@@ -1299,7 +1281,7 @@ describe('Context Enrichment Integration', () => {
       // One shared projection context attached to every aggregate target (self, Post, User)
       const sharedContext = { enricher: sharedEnricher };
 
-      const customAggregateMapping: AggregateMapping = {
+      const customEntities: EntityMap = {
         User: defineEntity({
           type: 'User',
           excludeFields: ['updatedAt'],
@@ -1316,10 +1298,10 @@ describe('Context Enrichment Integration', () => {
         Comment: defineEntity({
           type: 'Comment',
           aggregates: [
-            to('Post', foreignKey('postId'), { context: sharedContext }),
-            to('User', foreignKey('authorId'), { context: sharedContext }),
+            to('Post', foreignKey('postId'), { aggregateContext: sharedContext }),
+            to('User', foreignKey('authorId'), { aggregateContext: sharedContext }),
           ],
-          self: { context: sharedContext },
+          selfAggregate: { aggregateContext: sharedContext },
         }),
       };
 
@@ -1328,7 +1310,7 @@ describe('Context Enrichment Integration', () => {
         prisma: customPrisma,
         provider: customProvider,
       } = openClient({
-        aggregateMapping: customAggregateMapping,
+        entities: customEntities,
       });
 
       const author = await customBasePrisma.user.create({
@@ -1361,7 +1343,7 @@ describe('Context Enrichment Integration', () => {
 
   describe('[Aggregate Context] Root-side aggregateContext and projection merge semantics', () => {
     it('should apply root-side aggregateContext to self logs and child-projected logs', async () => {
-      const customAggregateMapping: AggregateMapping = {
+      const customEntities: EntityMap = {
         User: defineEntity({
           type: 'User',
           excludeFields: ['updatedAt'],
@@ -1380,7 +1362,7 @@ describe('Context Enrichment Integration', () => {
         prisma: customPrisma,
         provider: customProvider,
       } = openClient({
-        aggregateMapping: customAggregateMapping,
+        entities: customEntities,
       });
 
       const actor: AuditContext = {
@@ -1420,7 +1402,7 @@ describe('Context Enrichment Integration', () => {
     });
 
     it('should merge projection context over root-side aggregateContext (projection keys win)', async () => {
-      const customAggregateMapping: AggregateMapping = {
+      const customEntities: EntityMap = {
         User: defineEntity({
           type: 'User',
           excludeFields: ['updatedAt'],
@@ -1432,7 +1414,7 @@ describe('Context Enrichment Integration', () => {
           type: 'Post',
           aggregates: [
             to('User', foreignKey('authorId'), {
-              context: {
+              aggregateContext: {
                 enricher: async (posts, _prisma, _meta) => posts.map(() => ({ source: 'projection' })),
               },
             }),
@@ -1445,7 +1427,7 @@ describe('Context Enrichment Integration', () => {
         prisma: customPrisma,
         provider: customProvider,
       } = openClient({
-        aggregateMapping: customAggregateMapping,
+        entities: customEntities,
       });
 
       const actor: AuditContext = {
@@ -1480,7 +1462,7 @@ describe('Context Enrichment Integration', () => {
     it('should pass aggregateIds aligned with the written rows to to() projection enrichers', async () => {
       const receivedCalls: { rows: Record<string, unknown>[]; aggregateIds: string[] }[] = [];
 
-      const customAggregateMapping: AggregateMapping = {
+      const customEntities: EntityMap = {
         User: defineEntity({
           type: 'User',
           excludeFields: ['updatedAt'],
@@ -1489,7 +1471,7 @@ describe('Context Enrichment Integration', () => {
           type: 'Post',
           aggregates: [
             to('User', foreignKey('authorId'), {
-              context: {
+              aggregateContext: {
                 enricher: async (rows, _prisma, meta) => {
                   receivedCalls.push({ rows, aggregateIds: meta.aggregateIds });
                   return rows.map((_row, i) => ({ authorIdFromMeta: meta.aggregateIds[i] }));
@@ -1505,7 +1487,7 @@ describe('Context Enrichment Integration', () => {
         prisma: customPrisma,
         provider: customProvider,
       } = openClient({
-        aggregateMapping: customAggregateMapping,
+        entities: customEntities,
       });
 
       const userA = await customBasePrisma.user.create({
@@ -1556,7 +1538,7 @@ describe('Context Enrichment Integration', () => {
         prisma: customPrisma,
         provider,
       } = openClient({
-        aggregateMapping: {
+        entities: {
           User: defineEntity({
             type: 'User',
             excludeFields: ['updatedAt'],

@@ -12,7 +12,7 @@ import { createAuditClient, flushAllPendingWrites } from '@kuruwic/prisma-audit'
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { describe, expect, it } from 'vitest';
-import { createBasePrisma, setupTestContext, testAggregateMapping } from './helpers/setup.js';
+import { createBasePrisma, setupTestContext, testEntities } from './helpers/setup.js';
 
 const actor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'transaction-scope-actor', name: 'Scope Actor' },
@@ -27,8 +27,8 @@ describe('Interactive $transaction scope', () => {
     const prisma = createAuditClient(raw, {
       Prisma,
       schema: auditSchema,
-      provider,
-      aggregateMapping: testAggregateMapping,
+      contextProvider: provider,
+      entities: testEntities,
       performance: { awaitWrite },
       fetchBefore: { update: true },
     });

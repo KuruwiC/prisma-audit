@@ -24,11 +24,11 @@ describe('Transaction Enrichment Consistency', () => {
       const prisma = createAuditClient(context.basePrisma, {
         Prisma,
         schema: auditSchema,
-        provider,
-        aggregateMapping: {
+        contextProvider: provider,
+        entities: {
           User: defineEntity({
             type: 'User',
-            context: {
+            entityContext: {
               enricher: async (entities, prismaClient) => {
                 const user = await (prismaClient as typeof context.basePrisma).user.findUnique({
                   where: { id: (entities[0] as { id: string }).id },
@@ -83,12 +83,12 @@ describe('Transaction Enrichment Consistency', () => {
       const prisma = createAuditClient(context.basePrisma, {
         Prisma,
         schema: auditSchema,
-        provider,
-        aggregateMapping: {
+        contextProvider: provider,
+        entities: {
           Post: defineEntity({
             type: 'Post',
             aggregates: [to('User', foreignKey('authorId'))],
-            context: {
+            entityContext: {
               enricher: async (entities, prismaClient) => {
                 const post = await (prismaClient as typeof context.basePrisma).post.findUnique({
                   where: { id: (entities[0] as { id: string }).id },
@@ -184,13 +184,13 @@ describe('Transaction Enrichment Consistency', () => {
       const prisma = createAuditClient(context.basePrisma, {
         Prisma,
         schema: auditSchema,
-        provider,
-        aggregateMapping: {
+        contextProvider: provider,
+        entities: {
           Post: defineEntity({
             type: 'Post',
             aggregates: [
               to('User', foreignKey('authorId'), {
-                context: {
+                aggregateContext: {
                   enricher: async (rows, prismaClient: unknown) => {
                     const posts = rows as PostWithAuthor[];
                     const authorIds = extractAuthorIds(posts);
@@ -267,40 +267,38 @@ describe('Transaction Enrichment Consistency', () => {
       const prisma = createAuditClient(context.basePrisma, {
         Prisma,
         schema: auditSchema,
-        provider,
-        aggregateMapping: {
+        contextProvider: provider,
+        entities: {
           Post: defineEntity({
             type: 'Post',
             aggregates: [to('User', foreignKey('authorId'))],
           }),
           User: defineEntity({ type: 'User' }),
         },
-        contextEnricher: {
-          actor: {
-            enricher: async (actor, prismaClient) => {
-              const actorData = actor as { category: string; type: string; id: string };
-              if (actorData.category === 'model' && actorData.type === 'User') {
-                const user = await (
-                  prismaClient as unknown as {
-                    user: {
-                      findUnique: (args: {
-                        where: { id: string };
-                        select: { name: boolean; email: boolean };
-                      }) => Promise<{ name: string; email: string } | null>;
-                    };
-                  }
-                ).user.findUnique({
-                  where: { id: actorData.id },
-                  select: { name: true, email: true },
-                });
-                enrichedActorName = user?.name ?? undefined;
-                return { userName: user?.name ?? undefined, userEmail: user?.email ?? undefined };
-              }
-              return null;
-            },
-            onError: 'log',
-            fallback: null,
+        actorContext: {
+          enricher: async (actor, prismaClient) => {
+            const actorData = actor as { category: string; type: string; id: string };
+            if (actorData.category === 'model' && actorData.type === 'User') {
+              const user = await (
+                prismaClient as unknown as {
+                  user: {
+                    findUnique: (args: {
+                      where: { id: string };
+                      select: { name: boolean; email: boolean };
+                    }) => Promise<{ name: string; email: string } | null>;
+                  };
+                }
+              ).user.findUnique({
+                where: { id: actorData.id },
+                select: { name: true, email: true },
+              });
+              enrichedActorName = user?.name ?? undefined;
+              return { userName: user?.name ?? undefined, userEmail: user?.email ?? undefined };
+            }
+            return null;
           },
+          onError: 'log',
+          fallback: null,
         },
         performance: {
           awaitWrite: true,
@@ -354,11 +352,11 @@ describe('Transaction Enrichment Consistency', () => {
       const prisma = createAuditClient(context.basePrisma, {
         Prisma,
         schema: auditSchema,
-        provider,
-        aggregateMapping: {
+        contextProvider: provider,
+        entities: {
           User: defineEntity({
             type: 'User',
-            context: {
+            entityContext: {
               enricher: async (entities, prismaClient) => {
                 const ids = entities.map((e) => (e as { id: string }).id);
                 const users = await (prismaClient as typeof context.basePrisma).user.findMany({

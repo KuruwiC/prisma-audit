@@ -1,25 +1,21 @@
 /**
- * Aggregate mapping helpers
+ * Entity map helpers
  *
  * @module aggregate/helpers
  *
  * @remarks
- * Helpers for declaring an aggregate mapping, plus the runtime resolution of one aggregate id.
+ * Helpers for declaring an entity map, plus the runtime resolution of one aggregate id.
  */
 
-import type {
-  AggregateContextEnricherConfig,
-  EntityEnricherConfig,
-  ProjectionEnricherConfig,
-} from '../enrichment/types.js';
+import type { AggregateRootContextConfig, EntityContextConfig, ProjectionContextConfig } from '../enrichment/types.js';
 import { getGlobalSingleton } from '../global-singleton.js';
 import type {
-  AggregateMapping,
-  AggregateRoot,
+  AggregateProjection,
   BatchIdResolver,
+  EntityConfig,
+  EntityMap,
   IdResolver,
-  LoggableEntity,
-  SelfProjectionConfig,
+  SelfAggregateConfig,
 } from './types.js';
 import { DEFAULT_ENTITY_CATEGORY } from './types.js';
 
@@ -63,7 +59,11 @@ const warnedAggregateTypes = getGlobalSingleton('aggregate-unbatched-resolver-wa
  * Warn, once per aggregate type, when a `lookup()` resolver runs row by row for more rows
  * than the warning threshold: `batchLookup()` would resolve them in one query.
  */
-export const warnAboutUnbatchedResolver = (entityType: string, aggregate: AggregateRoot, rowCount: number): void => {
+export const warnAboutUnbatchedResolver = (
+  entityType: string,
+  aggregate: AggregateProjection,
+  rowCount: number,
+): void => {
   if (
     !aggregate.requiresDbAccess ||
     rowCount <= BATCH_RESOLVE_WARNING_THRESHOLD ||
@@ -319,7 +319,7 @@ export const lookup = <TEntity = unknown, TDbHandle = unknown>(
  * same length and order. Each element is a string ID (logged), null, or
  * undefined (both skip logging for that entity).
  *
- * @returns An IdResolver. The batch function is registered internally via WeakMap and propagated to AggregateRoot.batchResolve by to().
+ * @returns An IdResolver. The batch function is registered internally via WeakMap and propagated to AggregateProjection.batchIdResolver by to().
  *
  * @example Reverse FK lookup
  * ```typescript
@@ -356,12 +356,12 @@ export type ToOptions<TDbHandle = unknown, TEntity extends Record<string, unknow
   /** Aggregate category (default: DEFAULT_ENTITY_CATEGORY) */
   category?: string;
   /**
-   * Projection-specific context enricher.
+   * Projection-side aggregate context enrichment, stored in AuditLog.aggregateContext.
    * Receives the written entity rows (NOT the aggregate root rows);
    * `meta.aggregateIds[i]` is the aggregate ID resolved for row i.
    * Merged over the root entity's `aggregateContext` (projection keys win).
    */
-  context?: ProjectionEnricherConfig<TDbHandle, TEntity>;
+  aggregateContext?: ProjectionContextConfig<TDbHandle, TEntity>;
 };
 
 /**
@@ -378,10 +378,10 @@ export type ToOptions<TDbHandle = unknown, TEntity extends Record<string, unknow
  * to('User', foreignKey('authorId'))
  * ```
  *
- * @example With projection-specific context (enricher receives the WRITTEN rows, e.g. postTags)
+ * @example With a projection-side aggregate context (enricher receives the WRITTEN rows, e.g. postTags)
  * ```typescript
  * to('Post', foreignKey('postId'), {
- *   context: {
+ *   aggregateContext: {
  *     enricher: async (postTags, db, meta) =>
  *       postTags.map((pt, i) => ({ tagId: pt.tagId, postId: meta.aggregateIds[i] })),
  *   },
@@ -403,7 +403,7 @@ export type ToOptions<TDbHandle = unknown, TEntity extends Record<string, unknow
  */
 // A resolver from the helpers (foreignKey, self, lookup) carries no row or handle type, so
 // this overload takes TEntity/TDbHandle from the call's contextual type (the `aggregates` slot
-// of defineEntity) and flows them into `options.context`.
+// of defineEntity) and flows them into `options.aggregateContext`.
 export function to<
   TAggregateName extends string = string,
   TEntity extends Record<string, unknown> = Record<string, unknown>,
@@ -412,7 +412,7 @@ export function to<
   type: TAggregateName,
   resolver: IdResolver,
   options?: ToOptions<TDbHandle, TEntity>,
-): AggregateRoot<TDbHandle, TEntity>;
+): AggregateProjection<TDbHandle, TEntity>;
 export function to<
   TAggregateName extends string = string,
   TEntity extends Record<string, unknown> = Record<string, unknown>,
@@ -421,24 +421,24 @@ export function to<
   type: TAggregateName,
   resolver: (entity: TEntity, db: TDbHandle) => Promise<string | null | undefined>,
   options?: ToOptions<TDbHandle, TEntity>,
-): AggregateRoot<TDbHandle, TEntity>;
+): AggregateProjection<TDbHandle, TEntity>;
 export function to<TAggregateName extends string = string>(
   type: TAggregateName,
   resolver: IdResolver | ((entity: unknown, db: unknown) => Promise<string | null | undefined>),
   options?: ToOptions,
-): AggregateRoot {
+): AggregateProjection {
   const typedResolver = resolver as IdResolver;
-  const root: AggregateRoot = {
+  const root: AggregateProjection = {
     category: options?.category ?? DEFAULT_ENTITY_CATEGORY,
     type,
-    resolve: typedResolver,
+    idResolver: typedResolver,
   };
-  if (options?.context) {
-    root.context = options.context;
+  if (options?.aggregateContext) {
+    root.aggregateContext = options.aggregateContext;
   }
   const batchFn = getRegisteredBatchResolver(typedResolver);
   if (batchFn) {
-    root.batchResolve = batchFn;
+    root.batchIdResolver = batchFn;
   }
   if (isAsyncResolver(typedResolver)) {
     root.requiresDbAccess = true;
@@ -451,7 +451,7 @@ export function to<TAggregateName extends string = string>(
 // ============================================================================
 
 /**
- * Configuration options for defining an entity in the aggregate mapping.
+ * Configuration options for defining an entity in the entity map.
  *
  * @template TEntity - Row type of the entity, passed to its resolvers and enrichers
  * @template TDbHandle - Database handle type passed to its resolvers and enrichers
@@ -467,13 +467,13 @@ export type DefineEntityOptions<
   /** Custom ID resolver for this entity (defaults to self('id')) */
   idResolver?: IdResolver<TEntity, TDbHandle>;
   /** Aggregate roots this entity belongs to. Use helpers: to(), foreignKey(), lookup() */
-  aggregates?: AggregateRoot<TDbHandle, TEntity>[];
+  aggregates?: AggregateProjection<TDbHandle, TEntity>[];
   /**
-   * Self-projection configuration (default: included).
+   * Self aggregate log configuration (default: included).
    * `false` skips the self aggregate log (useful for join tables);
-   * `{ context }` enriches the self aggregate log with the entity's own rows.
+   * `{ aggregateContext }` enriches the self aggregate log with the entity's own rows.
    */
-  self?: SelfProjectionConfig<TDbHandle, TEntity>;
+  selfAggregate?: SelfAggregateConfig<TDbHandle, TEntity>;
   /** Fields to exclude when calculating changes for this entity */
   excludeFields?: string[];
   /**
@@ -484,19 +484,19 @@ export type DefineEntityOptions<
   auditOmittedFields?: string[];
 
   /** Entity-log context enrichment, stored in AuditLog.entityContext */
-  context?: EntityEnricherConfig<TDbHandle, TEntity>;
+  entityContext?: EntityContextConfig<TDbHandle, TEntity>;
   /**
-   * Root-side aggregate context enrichment. Applied whenever ANY entity
+   * Root-side aggregate context enrichment, stored in AuditLog.aggregateContext. Applied whenever ANY entity
    * (self or child) projects onto this entity as its aggregate root.
    * The enricher receives the unique aggregate IDs involved in the operation.
    */
-  aggregateContext?: AggregateContextEnricherConfig<TDbHandle>;
+  aggregateContext?: AggregateRootContextConfig<TDbHandle>;
   /** Tags for tag-based configuration rules */
   tags?: string[];
 };
 
 /**
- * Define a loggable entity with type safety
+ * Define an entity configuration with type safety
  *
  * @template TEntity - Row type of the entity (optional; types every resolver and enricher input)
  * @template TDbHandle - Database handle type (optional; types every resolver and enricher handle)
@@ -536,17 +536,17 @@ export type DefineEntityOptions<
  */
 export const defineEntity = <TEntity extends Record<string, unknown> = Record<string, unknown>, TDbHandle = unknown>(
   options: DefineEntityOptions<TEntity, TDbHandle>,
-): LoggableEntity<TDbHandle, TEntity> => {
+): EntityConfig<TDbHandle, TEntity> => {
   const entityCategory = options.category ?? DEFAULT_ENTITY_CATEGORY;
 
   const {
     type,
     idResolver,
     aggregates = [],
-    self: selfProjection,
+    selfAggregate,
     excludeFields,
     auditOmittedFields,
-    context,
+    entityContext,
     aggregateContext,
     tags,
   } = options;
@@ -556,31 +556,31 @@ export const defineEntity = <TEntity extends Record<string, unknown> = Record<st
     type,
     idResolver: idResolver ?? self('id'),
     aggregates,
-    self: selfProjection,
+    selfAggregate,
     excludeFields,
     auditOmittedFields,
-    context,
+    entityContext,
     aggregateContext,
     tags,
   };
 };
 
 // ============================================================================
-// Mapping Configuration Helpers
+// Entity Map Helpers
 // ============================================================================
 
 /**
- * Create a type-safe aggregate mapping
+ * Create a type-safe entity map
  *
- * @template TModelName - Union of the model names the mapping may declare; an adapter derives
+ * @template TModelName - Union of the model names the entity map may declare; an adapter derives
  *   it from its client type. Defaults to any string
  * @template TDbHandle - Database handle type passed to the entities' resolvers and enrichers
  *
- * @returns A function that checks a mapping object's keys against TModelName and returns it unchanged
+ * @returns A function that checks an entity map's keys against TModelName and returns it unchanged
  *
- * @example Type-safe mapping with the adapter's model names and handle
+ * @example Type-safe entity map with the adapter's model names and handle
  * ```typescript
- * const mapping = defineAggregateMapping<ModelName, DbHandle>()({
+ * const entities = defineEntities<ModelName, DbHandle>()({
  *   User: defineEntity({
  *     type: 'User',
  *     excludeFields: ['password']
@@ -595,7 +595,7 @@ export const defineEntity = <TEntity extends Record<string, unknown> = Record<st
  *
  * @example With custom categories
  * ```typescript
- * const mapping = defineAggregateMapping()({
+ * const entities = defineEntities()({
  *   User: defineEntity({
  *     type: 'User',
  *     category: 'identity'
@@ -603,44 +603,44 @@ export const defineEntity = <TEntity extends Record<string, unknown> = Record<st
  *   AuditLog: defineEntity({
  *     type: 'AuditLog',
  *     category: 'system',
- *     self: false
+ *     selfAggregate: false
  *   }),
  * });
  * ```
  */
-export const defineAggregateMapping =
+export const defineEntities =
   <TModelName extends string = string, TDbHandle = unknown>() =>
-  <TMapping extends AggregateMapping<TModelName, TDbHandle>>(mapping: TMapping): TMapping =>
-    mapping;
+  <TEntities extends EntityMap<TModelName, TDbHandle>>(entities: TEntities): TEntities =>
+    entities;
 
 // ============================================================================
 // Validation Utilities
 // ============================================================================
 
 /**
- * Validate aggregate mapping configuration
+ * Validate an entity map
  *
- * @throws Error if the mapping contains invalid configurations
+ * @throws Error if the entity map contains invalid configurations
  *
  * @example
  * ```typescript
- * const mapping = {
+ * const entities = {
  *   User: defineEntity({ type: 'User' }),
  *   Post: defineEntity({ type: 'Post' })
  * };
  *
  * // Validate before use
- * validateAggregateMapping(mapping); // Throws if invalid
+ * validateEntityMap(entities); // Throws if invalid
  *
  * // Or let createEntityConfigLookup handle it
- * const entityConfigs = createEntityConfigLookup(mapping); // Automatically validates
+ * const entityConfigs = createEntityConfigLookup(entities); // Automatically validates
  * ```
  */
-export const validateAggregateMapping = (mapping: AggregateMapping): void => {
+export const validateEntityMap = (entities: EntityMap): void => {
   const validationErrors: string[] = [];
   const entityNameByRootKey = new Map<string, string>();
 
-  for (const [entityName, entityConfig] of Object.entries(mapping)) {
+  for (const [entityName, entityConfig] of Object.entries(entities)) {
     if (!entityConfig) continue;
 
     if (!entityConfig.type) {
@@ -667,6 +667,6 @@ export const validateAggregateMapping = (mapping: AggregateMapping): void => {
   }
 
   if (validationErrors.length > 0) {
-    throw new Error(`[db-audit-core] Invalid aggregate mapping configuration:\n${validationErrors.join('\n')}`);
+    throw new Error(`[db-audit-core] Invalid entity map configuration:\n${validationErrors.join('\n')}`);
   }
 };
