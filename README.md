@@ -48,7 +48,7 @@ No decorators, no wrapper functions, no code changes. Attach the extension once 
 
 ### Transaction Safety
 
-Inside a transaction, audit logs and data operations share it: if the operation fails, the audit log rolls back too — no orphaned or inconsistent log entries. Outside one, an awaited audit log is written once the operation has committed, and its failure never fails the committed operation; with `performance.openImplicitTransaction` the audited client opens the transaction for you instead.
+Inside a transaction, audit logs and data operations share it: if the operation fails, the audit log rolls back too — no orphaned or inconsistent log entries. Outside one, an awaited audit log is written once the operation has committed, and its failure never fails the committed operation; with `write.implicitTransaction` the audited client opens the transaction for you instead.
 
 App context (actor, request metadata) and library transaction state (transactional client, deferred-write queue) live in separate AsyncLocalStorage stores. Establishing a fresh context via `runAsync` or `run` inside a `$transaction` callback never detaches writes from the transaction.
 
@@ -73,7 +73,7 @@ Branded types (`ActorId`, `EntityId`, `AggregateId`) prevent ID mix-ups at compi
 | **Architecture**  | DDD aggregate root mapping, AsyncLocalStorage context propagation, one audit pipeline for single and batch writes              |
 | **Performance**   | 3 write strategies (sync/deferred/fire-and-forget), probabilistic sampling, batch context enrichment (N+1 free)                |
 | **Security**      | PII redaction once `security.redact` is set (passwords, tokens, SSN, etc.), masking of the fields a client-level `omit` hides that an entity lists in `auditOmittedFields` |
-| **Extensibility** | Custom writer hooks, custom serializers, pluggable error handling, framework-agnostic core                                     |
+| **Extensibility** | Custom writer, custom serializers, error observer and write-failure strategy, framework-agnostic core                         |
 
 ## Installation
 
@@ -244,8 +244,9 @@ Every intercepted write operation, single or batch, passes through one pipeline:
 ```
 Operation arrives
   │
-  ├─ 1. Write Policy ───────── Decide whether the audit rows are awaited (awaitWrite / awaitWriteIf);
-  │                            with openImplicitTransaction the client opens a transaction for them
+  ├─ 1. Write Policy ───────── Decide whether the operation is sampled in (samplingRate) and its audit
+  │                            rows awaited (write.awaited); with write.implicitTransaction the client
+  │                            opens a transaction for them
   ├─ 2. Read Before State ──── Capture the target row (UPDATE/DELETE/UPSERT) and the nested rows the write touches
   ├─ 3. Execute Operation ──── Run the original Prisma operation
   ├─ 4. Collect Events ─────── One mutation event per row written, top-level, nested or batch
@@ -259,7 +260,7 @@ Operation arrives
 The library automatically selects the optimal write strategy based on your configuration and runtime context:
 
 ```
-                  awaitWrite: true?
+                  write.awaited: true?
                   ┌─── Yes ──→  In transaction?
                   │             ┌─── Yes ──→  Synchronous     (same transaction, blocks until written)
                   │             └─── No ───→  Synchronous     (after commit, blocks until written)
@@ -269,7 +270,7 @@ The library automatically selects the optimal write strategy based on your confi
                                 └─── No ───→  Fire & Forget   (background, zero latency impact)
 ```
 
-"In transaction" means your interactive `$transaction`, or, with `performance.openImplicitTransaction`, the interactive transaction the audited client opens around a write whose audit is awaited and around a batch `$transaction([...])` of its operations that holds such a write.
+"In transaction" means your interactive `$transaction`, or, with `write.implicitTransaction`, the interactive transaction the audited client opens around a write whose audit is awaited and around a batch `$transaction([...])` of its operations that holds such a write.
 
 | Strategy          | Atomicity      | Latency Impact | Use Case                                          |
 | ----------------- | -------------- | -------------- | ------------------------------------------------- |
@@ -298,27 +299,22 @@ createAuditClient(basePrisma, {
     },
   },
 
-  // Write strategy control
-  performance: {
-    awaitWrite: true, // Synchronous by default
-    awaitWriteIf: (
-      model,
-      tags, // Fine-grained: sync only for critical models
-    ) => tags.includes("critical"),
-    sampling: 1.0, // Log all operations (0.0 - 1.0)
-    samplingIf: (model, tags) => {
-      // Per-model sampling rates
-      if (tags.includes("critical")) return 1.0;
-      if (tags.includes("high-volume")) return 0.05;
-      return 0.1;
-    },
+  // Per-operation sampling: a rate, or a function of the operation's top-level model
+  samplingRate: (model) => {
+    if (model === "Order") return 1.0;
+    if (model === "PageView") return 0.05;
+    return 0.1;
   },
 
-  // Custom writer hook
-  hooks: {
+  // Write strategy control
+  write: {
+    // Synchronous by default; as a function of the operation's top-level model,
+    // sync only for critical models
+    awaited: (model) => model === "Order",
+    // Custom writer
     writer: async (records, { defaultWrite }) => {
       await defaultWrite(records);
-      await sendToExternalService(logs);
+      await sendToExternalService(records);
     },
   },
 
@@ -516,7 +512,6 @@ const entities = defineEntities<AuditModelName, PrismaClient>()({
   // Aggregate root
   Order: defineEntity({
     type: "Order",
-    tags: ["critical"],
   }),
 
   // Child entities reference their aggregate root
@@ -601,7 +596,7 @@ Prisma 8 is not supported. As of 2026-10, Prisma ORM 8 is a release candidate (`
 - **Raw queries**: `$executeRaw` / `$queryRaw` are not intercepted
 - **Many-to-many with multiple aggregates**: Not currently supported
 - **Client-level `omit`**: The fields a client-level `omit` hides are not recorded unless an entity lists them in `auditOmittedFields`, which masks them; one your query names or your `createMany` data writes can be recorded in clear. When the Prisma version cannot be determined, a row created under a `select` is recorded with the selected columns only (see [Fields a client-level `omit` hides](#fields-a-client-level-omit-hides))
-- **Nested re-read consistency**: A row a nested write updated or inserted that your own `include` / `select` leaves out, and a row a nested `connect`, `set` or `disconnect` re-linked, is read again after the operation on the same client. Outside a transaction (an interactive `$transaction`, or the one `openImplicitTransaction` opens for an awaited audit), that re-read is a separate query and may observe concurrent changes; so may the read, after the write, of the fields an entity lists in `auditOmittedFields`
+- **Nested re-read consistency**: A row a nested write updated or inserted that your own `include` / `select` leaves out, and a row a nested `connect`, `set` or `disconnect` re-linked, is read again after the operation on the same client. Outside a transaction (an interactive `$transaction`, or the one `write.implicitTransaction` opens for an awaited audit), that re-read is a separate query and may observe concurrent changes; so may the read, after the write, of the fields an entity lists in `auditOmittedFields`
 - **Composite keys in `updateMany` / `deleteMany` with `limit`**: The audit narrows the write to the rows it read, with an `OR` of one condition per row over the primary key fields (Prisma has no tuple `IN`), so that `where` clause grows with `limit`. When a transaction tops up a short round, the exclusion of rows already read grows the same way. The number of queries does not change with `limit`
 - **Order of the nested keywords of one relation field**: A nested `updateMany` / `deleteMany` matches its filter against the rows as they were before the write, so a row an earlier `create` inserts, or whose filtered columns an earlier `update` / `updateMany` changes, is not identified as one it writes, and a row a nested `updateMany` brings into a later `deleteMany`'s filter is updated and deleted with no record (see [Nested Operations limitations](packages/prisma-extension/README.md#limitations))
 - **`updateMany` / `deleteMany` without `limit`**: The audit reads every matching row before the write to record the before states, so the cost grows with the number of rows the `where` matches

@@ -9,14 +9,16 @@
  */
 
 export interface PolicyConfig {
-  /** Whether audit rows are written in the caller's transaction by default. */
-  readonly awaitWrite: boolean;
-  /** Per-model override of `awaitWrite`, called with the model's name and its configured tags. */
-  readonly awaitWriteIf?: (modelName: string, tags: readonly string[]) => boolean;
-  /** Share of operations audited, from 0 (none) to 1 (every one). */
-  readonly sampling: number;
-  /** Per-model override of `sampling`, called with the model's name and its configured tags. */
-  readonly samplingIf?: (modelName: string, tags: readonly string[]) => number;
+  /**
+   * Whether audit rows are written in the caller's transaction: a value for every operation, or a
+   * function of the operation's top-level model name
+   */
+  readonly awaited: boolean | ((modelName: string) => boolean);
+  /**
+   * Share of operations audited, from 0 (none) to 1 (every one): a value for every operation, or a
+   * function of the operation's top-level model name
+   */
+  readonly samplingRate: number | ((modelName: string) => number);
 }
 
 /**
@@ -26,13 +28,13 @@ export interface PolicyConfig {
 export type WritePolicy = { readonly sampled: false } | { readonly sampled: true; readonly atomic: boolean };
 
 /**
- * Called once per audited operation. `samplingIf` (else `sampling`) gives the rate an operation is
- * sampled in with; `awaitWriteIf` (else `awaitWrite`) is consulted only for a sampled-in operation.
+ * Called once per audited operation, with the name of its top-level model. `samplingRate` gives the
+ * rate an operation is sampled in with; `awaited` is consulted only for a sampled-in operation.
  */
-export const policy = (modelName: string, tags: readonly string[], config: PolicyConfig): WritePolicy => {
-  const rate = config.samplingIf ? config.samplingIf(modelName, tags) : config.sampling;
+export const policy = (modelName: string, config: PolicyConfig): WritePolicy => {
+  const rate = typeof config.samplingRate === 'function' ? config.samplingRate(modelName) : config.samplingRate;
   if (!(Math.random() < rate)) {
     return { sampled: false };
   }
-  return { sampled: true, atomic: config.awaitWriteIf ? config.awaitWriteIf(modelName, tags) : config.awaitWrite };
+  return { sampled: true, atomic: typeof config.awaited === 'function' ? config.awaited(modelName) : config.awaited };
 };

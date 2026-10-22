@@ -57,7 +57,7 @@ describe('createAuditClient with the Prisma namespace option', () => {
       entities: {
         User: defineEntity({ type: 'User' }),
       },
-      performance: { awaitWrite: true },
+      write: { awaited: true },
     });
 
     const user = await provider.runAsync(testActor, () =>
@@ -82,7 +82,7 @@ describe('createAuditClient with the Prisma namespace option', () => {
       entities: {
         User: defineEntity({ type: 'User' }),
       },
-      performance: { awaitWrite: true },
+      write: { awaited: true },
     });
 
     const user = await provider.runAsync(testActor, () =>

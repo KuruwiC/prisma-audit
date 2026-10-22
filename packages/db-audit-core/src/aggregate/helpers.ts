@@ -491,8 +491,6 @@ export type DefineEntityOptions<
    * The enricher receives the unique aggregate IDs involved in the operation.
    */
   aggregateContext?: AggregateRootContextConfig<TDbHandle>;
-  /** Tags for tag-based configuration rules */
-  tags?: string[];
 };
 
 /**
@@ -548,7 +546,6 @@ export const defineEntity = <TEntity extends Record<string, unknown> = Record<st
     auditOmittedFields,
     entityContext,
     aggregateContext,
-    tags,
   } = options;
 
   return {
@@ -561,7 +558,6 @@ export const defineEntity = <TEntity extends Record<string, unknown> = Record<st
     auditOmittedFields,
     entityContext,
     aggregateContext,
-    tags,
   };
 };
 

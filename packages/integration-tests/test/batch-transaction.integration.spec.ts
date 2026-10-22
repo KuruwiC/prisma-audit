@@ -1,6 +1,6 @@
 /**
  * A batch `$transaction([...])` stays all-or-nothing for the caller, as on a client without the
- * audit extension. With `openImplicitTransaction`, when an audit can be awaited, the batch runs as
+ * audit extension. With `implicitTransaction`, when an audit can be awaited, the batch runs as
  * one interactive transaction on the client it was called on: its operations run in order,
  * awaited audit rows are written in it, and a failure of any operation, of the build of any
  * operation's audit rows, or of an awaited audit write the policy rethrows rolls back every
@@ -63,11 +63,10 @@ interface Seeded {
 type BatchOf = (client: PrismaClient, seeded: Seeded) => Prisma.PrismaPromise<unknown>[];
 
 interface AuditedClientOptions {
-  readonly awaitWrite?: boolean;
-  readonly awaitWriteIf?: (modelName: string) => boolean;
+  readonly awaited?: boolean | ((modelName: string) => boolean);
   readonly writer?: (records: AuditRecord[], context: WriteContext<PrismaClient>) => Promise<void>;
   readonly transactionOptions?: { readonly timeout: number };
-  readonly openImplicitTransaction?: boolean;
+  readonly implicitTransaction?: boolean;
 }
 
 type BatchOptions = { readonly isolationLevel?: Prisma.TransactionIsolationLevel };
@@ -84,14 +83,13 @@ describe('Batch $transaction under the audit extension', () => {
       schema: auditSchema,
       contextProvider: provider,
       entities: testEntities,
-      performance: {
-        awaitWrite: options.awaitWrite,
-        ...(options.awaitWriteIf ? { awaitWriteIf: options.awaitWriteIf } : {}),
-        openImplicitTransaction: options.openImplicitTransaction,
+      write: {
+        awaited: options.awaited,
+        implicitTransaction: options.implicitTransaction,
+        ...(options.writer ? { writer: options.writer } : {}),
       },
       fetchBefore: { update: true },
-      errorHandling: { observer },
-      ...(options.writer ? { hooks: { writer: options.writer } } : {}),
+      errorObserver: observer,
     });
     const dispose = async () => {
       await prisma.$disconnect();
@@ -158,9 +156,9 @@ describe('Batch $transaction under the audit extension', () => {
   const createTaken = (client: PrismaClient) =>
     client.user.create({ data: { email: 'taken@example.com', name: 'Duplicate' }, select: { email: true } });
 
-  describe('when an audit is awaited, with openImplicitTransaction', () => {
+  describe('when an audit is awaited, with implicitTransaction', () => {
     it("rolls back every operation of the batch when one operation's write fails", async () => {
-      const audited = createAudited({ openImplicitTransaction: true, awaitWrite: true });
+      const audited = createAudited({ implicitTransaction: true, awaited: true });
       try {
         for (const batchOf of [
           (client: PrismaClient) => [createA(client), createTaken(client)],
@@ -176,7 +174,7 @@ describe('Batch $transaction under the audit extension', () => {
     });
 
     it('rolls back the nested writes of an operation when another operation of the batch fails', async () => {
-      const audited = createAudited({ openImplicitTransaction: true, awaitWrite: true });
+      const audited = createAudited({ implicitTransaction: true, awaited: true });
       try {
         const result = await expectSameAsPlain(audited, (client, { ownerId }) => [
           client.user.update({
@@ -195,7 +193,7 @@ describe('Batch $transaction under the audit extension', () => {
     });
 
     it('runs the operations the audit does not record in the same transaction, in order, with the results of a plain batch', async () => {
-      const audited = createAudited({ openImplicitTransaction: true, awaitWrite: true });
+      const audited = createAudited({ implicitTransaction: true, awaited: true });
       try {
         const withRead = await expectSameAsPlain(audited, (client) => [
           createA(client),
@@ -220,7 +218,7 @@ describe('Batch $transaction under the audit extension', () => {
     });
 
     it('rolls back a raw statement of the batch together with the audited operations when a later operation fails', async () => {
-      const audited = createAudited({ openImplicitTransaction: true, awaitWrite: true });
+      const audited = createAudited({ implicitTransaction: true, awaited: true });
       try {
         const result = await expectSameAsPlain(audited, (client, { ownerId }) => [
           createA(client),
@@ -237,8 +235,8 @@ describe('Batch $transaction under the audit extension', () => {
     it('writes the audit rows of every operation in the one transaction of the batch', async () => {
       const writes: Array<Pick<WriteContext<PrismaClient>, 'handle' | 'inTransaction'>> = [];
       const audited = createAudited({
-        openImplicitTransaction: true,
-        awaitWrite: true,
+        implicitTransaction: true,
+        awaited: true,
         writer: async (records, writeContext) => {
           writes.push({ handle: writeContext.handle, inTransaction: writeContext.inTransaction });
           await writeContext.defaultWrite(records);
@@ -267,9 +265,8 @@ describe('Batch $transaction under the audit extension', () => {
 
     it('rolls back every operation of the batch when only some of its models await their audit', async () => {
       const audited = createAudited({
-        openImplicitTransaction: true,
-        awaitWrite: false,
-        awaitWriteIf: (modelName) => modelName === 'Post',
+        implicitTransaction: true,
+        awaited: (modelName) => modelName === 'Post',
       });
       try {
         const result = await expectSameAsPlain(audited, (client, { ownerId }) => [
@@ -287,7 +284,7 @@ describe('Batch $transaction under the audit extension', () => {
     });
 
     it("runs the batch at the caller's isolation level", async () => {
-      const audited = createAudited({ openImplicitTransaction: true, awaitWrite: true });
+      const audited = createAudited({ implicitTransaction: true, awaited: true });
       try {
         const result = await expectSameAsPlain(
           audited,
@@ -305,8 +302,8 @@ describe('Batch $transaction under the audit extension', () => {
 
     it("runs the batch as an interactive transaction bound by the client's transaction options", async () => {
       const audited = createAudited({
-        openImplicitTransaction: true,
-        awaitWrite: true,
+        implicitTransaction: true,
+        awaited: true,
         transactionOptions: { timeout: 200 },
       });
       try {
@@ -323,7 +320,7 @@ describe('Batch $transaction under the audit extension', () => {
     });
 
     it('keeps the batch all-or-nothing on a client derived from the audited client', async () => {
-      const audited = createAudited({ openImplicitTransaction: true, awaitWrite: true });
+      const audited = createAudited({ implicitTransaction: true, awaited: true });
       const derived = audited.prisma.$extends({ name: 'derived' });
       try {
         await seed();
@@ -351,7 +348,7 @@ describe('Batch $transaction under the audit extension', () => {
 
   describe('when no audit is awaited', () => {
     it("rolls back every operation of the batch when one operation's write fails, and records nothing", async () => {
-      const audited = createAudited({ awaitWrite: false });
+      const audited = createAudited({ awaited: false });
       try {
         const result = await expectSameAsPlain(audited, (client) => [createA(client), createTaken(client)]);
         expect(result.outcome).toMatchObject({ status: 'rejected', code: 'P2002' });

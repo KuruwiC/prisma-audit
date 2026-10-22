@@ -44,14 +44,14 @@ describe('Write Strategy Tests', () => {
     await db.$disconnect();
   });
 
-  describe('Async Mode (awaitWrite: false)', () => {
+  describe('Async Mode (write.awaited: false)', () => {
     it('should write audit logs asynchronously without blocking the main operation (fire and forget)', async () => {
       const auditProvider = createAsyncLocalStorageProvider();
 
       const prisma = createAuditClient(db, {
         contextProvider: auditProvider,
         entities: testEntities,
-        performance: { awaitWrite: false },
+        write: { awaited: false },
         Prisma,
         schema: auditSchema,
       });
@@ -95,7 +95,7 @@ describe('Write Strategy Tests', () => {
       const prisma = createAuditClient(db, {
         contextProvider: auditProvider,
         entities: testEntities,
-        performance: { awaitWrite: false },
+        write: { awaited: false },
         Prisma,
         schema: auditSchema,
       });
@@ -149,7 +149,7 @@ describe('Write Strategy Tests', () => {
       const prisma = createAuditClient(db, {
         contextProvider: auditProvider,
         entities: testEntities,
-        performance: { awaitWrite: true },
+        write: { awaited: true },
         Prisma,
         schema: auditSchema,
       });
@@ -204,7 +204,7 @@ describe('Write Strategy Tests', () => {
       const prisma = createAuditClient(db, {
         contextProvider: auditProvider,
         entities: testEntities,
-        performance: { awaitWrite: true },
+        write: { awaited: true },
         Prisma,
         schema: auditSchema,
       });

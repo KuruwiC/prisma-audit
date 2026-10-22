@@ -29,9 +29,9 @@ describe('before-state read failing in the database inside a PostgreSQL transact
   });
 
   it.each([
-    { scope: 'inside an explicit $transaction', openImplicitTransaction: false },
-    { scope: 'in the transaction openImplicitTransaction opens', openImplicitTransaction: true },
-  ])("fails the caller's update and rolls it back, $scope", async ({ openImplicitTransaction }) => {
+    { scope: 'inside an explicit $transaction', implicitTransaction: false },
+    { scope: 'in the transaction implicitTransaction opens', implicitTransaction: true },
+  ])("fails the caller's update and rolls it back, $scope", async ({ implicitTransaction }) => {
     const raw = createBasePrisma();
     rawBasePrisma = raw;
     const basePrisma = raw.$extends({
@@ -51,8 +51,10 @@ describe('before-state read failing in the database inside a PostgreSQL transact
       schema: auditSchema,
       contextProvider: provider,
       entities: testEntities,
-      errorHandling: { observer },
-      performance: { openImplicitTransaction },
+      errorObserver: observer,
+      write: {
+        implicitTransaction: implicitTransaction,
+      },
     });
     await raw.auditLog.deleteMany();
     await raw.post.deleteMany();
@@ -65,7 +67,7 @@ describe('before-state read failing in the database inside a PostgreSQL transact
 
     await expect(
       provider.runAsync(testActor, () =>
-        openImplicitTransaction ? prisma.post.update(update) : prisma.$transaction((tx) => tx.post.update(update)),
+        implicitTransaction ? prisma.post.update(update) : prisma.$transaction((tx) => tx.post.update(update)),
       ),
     ).rejects.toThrow('current transaction is aborted');
 

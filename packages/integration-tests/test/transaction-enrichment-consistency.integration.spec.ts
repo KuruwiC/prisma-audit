@@ -40,8 +40,8 @@ describe('Transaction Enrichment Consistency', () => {
             },
           }),
         },
-        performance: {
-          awaitWrite: true,
+        write: {
+          awaited: true,
         },
       });
 
@@ -101,8 +101,8 @@ describe('Transaction Enrichment Consistency', () => {
           }),
           User: defineEntity({ type: 'User' }),
         },
-        performance: {
-          awaitWrite: true,
+        write: {
+          awaited: true,
         },
       });
 
@@ -212,8 +212,8 @@ describe('Transaction Enrichment Consistency', () => {
           }),
           User: defineEntity({ type: 'User' }),
         },
-        performance: {
-          awaitWrite: true,
+        write: {
+          awaited: true,
         },
       });
 
@@ -300,8 +300,8 @@ describe('Transaction Enrichment Consistency', () => {
           onError: 'log',
           fallback: null,
         },
-        performance: {
-          awaitWrite: true,
+        write: {
+          awaited: true,
         },
       });
 
@@ -370,8 +370,8 @@ describe('Transaction Enrichment Consistency', () => {
             },
           }),
         },
-        performance: {
-          awaitWrite: true,
+        write: {
+          awaited: true,
         },
       });
 

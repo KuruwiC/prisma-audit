@@ -521,7 +521,7 @@ describe('createTransactionProxy', () => {
         schema: auditSchema(model('User', [column('id', { isId: true, isRequired: true })])),
         contextProvider: provider,
         entities: { User: defineEntity({ type: 'User' }) },
-        hooks: { writer },
+        write: { writer },
       }) as (client: PrismaBaseClient) => ExtendedClient;
       return extend(extendableBaseClient);
     };
@@ -1002,10 +1002,7 @@ describe("createTransactionProxy (audit of Prisma's own batch)", () => {
     const observer = vi.fn();
     const writeError = new Error('audit table unavailable');
     const events: string[] = [];
-    const deps = createDeps(
-      loggingWrite(events, writeError),
-      createFailureSink({ writeFailurePolicy: 'throw', observer }),
-    );
+    const deps = createDeps(loggingWrite(events, writeError), createFailureSink({ writeOnError: 'throw', observer }));
 
     try {
       const { outcome, write } = await runBatch(

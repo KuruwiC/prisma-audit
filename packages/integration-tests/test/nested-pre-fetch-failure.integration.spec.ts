@@ -64,7 +64,7 @@ describe('nested pre-fetch failures — observer notification', () => {
       entities: testEntities,
       diffing: { excludeFields: ['createdAt'] },
       security: { redact: { fields: [] } },
-      errorHandling: { observer },
+      errorObserver: observer,
     });
 
     const armFault = (callNumbersToFail: Set<number>, message: string): void => {

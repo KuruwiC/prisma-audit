@@ -83,8 +83,10 @@ describe('Normalized Writer Helpers', () => {
         schema: auditSchema,
         contextProvider: provider,
         entities: testEntities,
-        performance: { awaitWrite: false },
-        hooks: { writer: createEntityNormalizedWriter(entitySchema) },
+        write: {
+          awaited: false,
+          writer: createEntityNormalizedWriter(entitySchema),
+        },
       });
 
       await provider.runAsync(testActor, () =>
@@ -102,8 +104,10 @@ describe('Normalized Writer Helpers', () => {
         schema: auditSchema,
         contextProvider: provider,
         entities: testEntities,
-        performance: { awaitWrite: false },
-        hooks: { writer: createSharedChangeWriter(sharedChangeSchema) },
+        write: {
+          awaited: false,
+          writer: createSharedChangeWriter(sharedChangeSchema),
+        },
       });
 
       await provider.runAsync(testActor, () =>
@@ -123,8 +127,10 @@ describe('Normalized Writer Helpers', () => {
         schema: auditSchema,
         contextProvider: provider,
         entities: testEntities,
-        performance: { awaitWrite: true },
-        hooks: { writer: createEntityNormalizedWriter(entitySchema) },
+        write: {
+          awaited: true,
+          writer: createEntityNormalizedWriter(entitySchema),
+        },
       });
 
       const rolledBack = provider.runAsync(testActor, () =>
@@ -145,8 +151,10 @@ describe('Normalized Writer Helpers', () => {
         schema: auditSchema,
         contextProvider: provider,
         entities: testEntities,
-        performance: { awaitWrite: true },
-        hooks: { writer: createSharedChangeWriter(sharedChangeSchema) },
+        write: {
+          awaited: true,
+          writer: createSharedChangeWriter(sharedChangeSchema),
+        },
       });
 
       const rolledBack = provider.runAsync(testActor, () =>
@@ -169,10 +177,8 @@ describe('Normalized Writer Helpers', () => {
         schema: auditSchema,
         contextProvider: provider,
         entities: testEntities,
-        performance: {
-          awaitWrite: true,
-        },
-        hooks: {
+        write: {
+          awaited: true,
           writer: createEntityNormalizedWriter({
             actorModel: 'Actor',
             entityModel: 'Entity',
@@ -231,10 +237,8 @@ describe('Normalized Writer Helpers', () => {
         schema: auditSchema,
         contextProvider: provider,
         entities: testEntities,
-        performance: {
-          awaitWrite: true,
-        },
-        hooks: {
+        write: {
+          awaited: true,
           writer: createEntityNormalizedWriter({
             actorModel: 'Actor',
             entityModel: 'Entity',
@@ -273,10 +277,8 @@ describe('Normalized Writer Helpers', () => {
         schema: auditSchema,
         contextProvider: provider,
         entities: testEntities,
-        performance: {
-          awaitWrite: true,
-        },
-        hooks: {
+        write: {
+          awaited: true,
           writer: createEntityNormalizedWriter({
             actorModel: 'actor',
             entityModel: 'entity',
@@ -304,10 +306,8 @@ describe('Normalized Writer Helpers', () => {
         schema: auditSchema,
         contextProvider: provider,
         entities: testEntities,
-        performance: {
-          awaitWrite: true,
-        },
-        hooks: {
+        write: {
+          awaited: true,
           writer: createSharedChangeWriter({
             changeModel: 'AuditChange',
             aggregateModel: 'AuditAggregate',
@@ -354,10 +354,8 @@ describe('Normalized Writer Helpers', () => {
         schema: auditSchema,
         contextProvider: provider,
         entities: testEntities,
-        performance: {
-          awaitWrite: true,
-        },
-        hooks: {
+        write: {
+          awaited: true,
           writer: createSharedChangeWriter({
             changeModel: 'AuditChange',
             aggregateModel: 'AuditAggregate',
@@ -414,10 +412,8 @@ describe('Normalized Writer Helpers', () => {
         schema: auditSchema,
         contextProvider: provider,
         entities: testEntities,
-        performance: {
-          awaitWrite: true,
-        },
-        hooks: {
+        write: {
+          awaited: true,
           writer: createSharedChangeWriter({
             changeModel: 'auditChange',
             aggregateModel: 'auditAggregate',
@@ -454,8 +450,10 @@ describe('Normalized Writer Helpers', () => {
         schema: auditSchema,
         contextProvider: provider,
         entities: testEntities,
-        performance: { awaitWrite: true },
-        hooks: { writer },
+        write: {
+          awaited: true,
+          writer,
+        },
       });
       return { prisma, armFindUniqueFailure };
     };

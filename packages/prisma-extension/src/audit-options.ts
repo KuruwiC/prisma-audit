@@ -8,14 +8,18 @@
 import type {
   AuditContextProvider,
   ComposeConfig,
-  ErrorHandlingConfig,
+  FailureSinkConfig,
   PolicyConfig,
   ResolveConfig,
   WriteFn,
 } from '@kuruwic/db-audit-core';
 import { createEntityConfigLookup } from '@kuruwic/db-audit-core';
 import { resolveFetchBefore } from './config/helpers.js';
-import { validateAuditOmittedFields, validateFieldConflicts } from './config/validation.js';
+import {
+  validateAuditOmittedFields,
+  validateFieldConflicts,
+  validateImplicitTransaction,
+} from './config/validation.js';
 import type { ShouldFetchBefore } from './grammar/pre-fetch-selection.js';
 import type { PrismaNamespace } from './internal-types.js';
 import { loadSchemaMetadata } from './schema/schema-metadata.js';
@@ -45,16 +49,15 @@ export interface AuditOptions {
    */
   readonly auditedOmittedFieldsWithRowKey: AuditedOmittedFields;
   /** Accessor of the audit-log model on the client (camelCase) */
-  readonly auditLogModel: string;
+  readonly auditLogAccessor: string;
   readonly policyConfig: PolicyConfig;
   /** Whether the client proxy opens an interactive transaction for an operation whose audit is awaited */
-  readonly openImplicitTransaction: boolean;
+  readonly implicitTransaction: boolean;
   readonly resolveConfig: ResolveConfig;
   readonly composeConfig: ComposeConfig;
   readonly writer: WriteFn | undefined;
-  readonly errorHandling: ErrorHandlingConfig;
+  readonly failureSinkConfig: FailureSinkConfig;
   readonly shouldFetchBefore: ShouldFetchBefore;
-  readonly modelTags: (modelName: string) => string[];
   /**
    * Whether operations on `modelName` are audited at all: it is not the audit-log model and is
    * loggable. Sampling is decided by `policyConfig`.
@@ -67,25 +70,24 @@ const RELATION_COUNT_FIELD = '_count';
 
 /**
  * @throws {Error} If the `schema` option is missing or of another format version, the entity
- *   map is invalid, the diffing and redaction settings conflict, or an entity's
- *   `auditOmittedFields` names a field the audit cannot read
+ *   map is invalid, the diffing and redaction settings conflict, an entity's
+ *   `auditOmittedFields` names a field the audit cannot read, or `write.implicitTransaction` is set
+ *   with `write.awaited: false`
  */
 export const normalizeAuditOptions = (options: PrismaAuditExtensionOptions): AuditOptions => {
-  const { contextProvider, entities, diffing, security, performance, hooks, actorContext, errorHandling } = options;
+  const { contextProvider, entities, diffing, security, write, actorContext, errorObserver } = options;
 
   const schemaMetadata = loadSchemaMetadata(options.schema);
   const Prisma = options.Prisma as PrismaNamespace;
   const excludeFields = diffing?.excludeFields ?? [];
   const redact = security?.redact;
-  const awaitWriteIf = performance?.awaitWriteIf;
-  const samplingIf = performance?.samplingIf;
 
   const entityConfigs = createEntityConfigLookup(entities);
   validateFieldConflicts(excludeFields, redact, entities);
+  validateImplicitTransaction(write);
   const queryOmitSupported = supportsQueryOmit(Prisma.prismaVersion?.client);
   validateAuditOmittedFields(entities, schemaMetadata, schemaMetadata.getModelNames(), queryOmitSupported);
 
-  const modelTags = (modelName: string): string[] => entityConfigs.byModel(modelName)?.tags ?? [];
   const relationFieldNamesByModel = new Map<string, ReadonlySet<string>>();
   const relationFieldNames = (modelName: string): ReadonlySet<string> => {
     let names = relationFieldNamesByModel.get(modelName);
@@ -98,7 +100,7 @@ export const normalizeAuditOptions = (options: PrismaAuditExtensionOptions): Aud
     }
     return names;
   };
-  const auditLogModel = options.auditLogModel ? getModelAccessor(options.auditLogModel) : 'auditLog';
+  const auditLogAccessor = write?.model ? getModelAccessor(write.model) : 'auditLog';
   const auditedOmittedFields = createAuditedOmittedFields(entityConfigs.byModel, excludeFields);
 
   return {
@@ -108,13 +110,11 @@ export const normalizeAuditOptions = (options: PrismaAuditExtensionOptions): Aud
     queryOmitSupported,
     auditedOmittedFields,
     auditedOmittedFieldsWithRowKey: withRowKeyFields(auditedOmittedFields, schemaMetadata, queryOmitSupported),
-    auditLogModel,
-    openImplicitTransaction: performance?.openImplicitTransaction ?? false,
+    auditLogAccessor,
+    implicitTransaction: write?.implicitTransaction ?? false,
     policyConfig: {
-      awaitWrite: performance?.awaitWrite ?? true,
-      awaitWriteIf: awaitWriteIf && ((modelName, tags) => awaitWriteIf(modelName, [...tags])),
-      sampling: performance?.sampling ?? 1.0,
-      samplingIf: samplingIf && ((modelName, tags) => samplingIf(modelName, [...tags])),
+      awaited: write?.awaited ?? true,
+      samplingRate: options.samplingRate ?? 1,
     },
     resolveConfig: {
       entity: entityConfigs.byModel,
@@ -128,10 +128,9 @@ export const normalizeAuditOptions = (options: PrismaAuditExtensionOptions): Aud
       serialization: options.serialization,
       relationFieldNames,
     },
-    writer: hooks?.writer,
-    errorHandling: errorHandling ?? {},
+    writer: write?.writer,
+    failureSinkConfig: { observer: errorObserver, writeOnError: write?.onError },
     shouldFetchBefore: (modelName, operation) => resolveFetchBefore(modelName, operation, options.fetchBefore),
-    modelTags,
-    shouldAudit: (modelName) => shouldAuditModel({ modelName, auditLogModel, isLoggable: entityConfigs.isLoggable }),
+    shouldAudit: (modelName) => shouldAuditModel({ modelName, auditLogAccessor, isLoggable: entityConfigs.isLoggable }),
   };
 };

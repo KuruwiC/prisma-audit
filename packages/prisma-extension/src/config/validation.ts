@@ -9,7 +9,7 @@
 
 import type { EntityMap } from '@kuruwic/db-audit-core';
 import type { SchemaMetadata } from '../schema/types.js';
-import type { SecurityConfig } from '../types.js';
+import type { SecurityConfig, WriteConfig } from '../types.js';
 
 /**
  * Validates that no field is both excluded (`diffing.excludeFields` or an entity's `excludeFields`)
@@ -51,6 +51,23 @@ export const validateFieldConflicts = (
         }
       }
     }
+  }
+};
+
+/**
+ * Validates that `write.implicitTransaction` is not set with `write.awaited: false`: the implicit
+ * transaction is opened only around an operation whose audit is awaited, so none would get one.
+ * A function `awaited` is not checked, since it may await some models.
+ *
+ * @throws {Error} If `write.implicitTransaction` is true and `write.awaited` is false
+ */
+export const validateImplicitTransaction = (write: WriteConfig | undefined): void => {
+  if (write?.implicitTransaction === true && write.awaited === false) {
+    throw new Error(
+      "Configuration error: 'write.implicitTransaction' opens a transaction only around an operation whose audit is " +
+        "awaited, and 'write.awaited' is false, so no operation would get one. Remove 'write.implicitTransaction', or " +
+        "set 'write.awaited' to true or to a function.",
+    );
   }
 };
 

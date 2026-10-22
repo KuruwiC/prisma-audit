@@ -1,10 +1,10 @@
 /**
- * A failure while building an operation's audit rows after its write. With `awaitWrite: false`
+ * A failure while building an operation's audit rows after its write. With `awaited: false`
  * outside any transaction the write has committed by then, so the operation resolves with its
  * result, the observer hears `diff-generation` once and the operation keeps no audit rows. Inside
- * a transaction, the caller's own or the one `openImplicitTransaction` opens for an awaited audit,
+ * a transaction, the caller's own or the one `implicitTransaction` opens for an awaited audit,
  * the write can still be rolled back, so the operation fails with the original error and keeps no
- * audit rows. With `openImplicitTransaction`, a batch `$transaction([...])` with an awaited audit
+ * audit rows. With `implicitTransaction`, a batch `$transaction([...])` with an awaited audit
  * runs as one interactive transaction, so every operation of the batch rolls back.
  *
  * Without an observer the dropped rows of a committed write are reported by the write-failure
@@ -18,7 +18,7 @@
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
-import type { AuditErrorContext, ErrorHandlingConfig } from '@kuruwic/prisma-audit';
+import type { AuditErrorContext, WriteOnError } from '@kuruwic/prisma-audit';
 import { createAuditClient, flushAllPendingWrites } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
@@ -34,11 +34,11 @@ interface FailingRead {
 }
 
 interface ScenarioOptions {
-  readonly awaitWrite: boolean;
-  readonly openImplicitTransaction?: boolean;
+  readonly awaited: boolean;
+  readonly implicitTransaction?: boolean;
   readonly fault: FailingRead | 'actor-enricher';
-  /** Replaces the observer and policy spies, to exercise the default error handling */
-  readonly errorHandling?: ErrorHandlingConfig;
+  /** Leaves out the errorObserver and write.onError spies: write.onError is the one given here, else the default */
+  readonly withoutSpies?: { readonly onError?: WriteOnError };
 }
 
 const createScenario = (options: ScenarioOptions) => {
@@ -79,9 +79,13 @@ const createScenario = (options: ScenarioOptions) => {
     schema: auditSchema,
     contextProvider: provider,
     entities: testEntities,
-    performance: { awaitWrite: options.awaitWrite, openImplicitTransaction: options.openImplicitTransaction },
+    write: {
+      awaited: options.awaited,
+      implicitTransaction: options.implicitTransaction,
+      ...(options.withoutSpies ? options.withoutSpies : { onError: policy }),
+    },
     fetchBefore: { update: true },
-    errorHandling: options.errorHandling ?? { writeFailurePolicy: policy, observer },
+    ...(options.withoutSpies ? {} : { errorObserver: observer }),
     ...(fault === 'actor-enricher'
       ? {
           actorContext: {
@@ -144,7 +148,7 @@ describe('A failed audit build after the write', () => {
   describe('keeps the write and drops its audit rows when the caller does not await them outside any transaction', () => {
     it('a failed re-read of the rows a batch update wrote', async () => {
       const scenario = createScenario({
-        awaitWrite: false,
+        awaited: false,
         fault: { model: 'user', seesWrite: renamed },
       });
       try {
@@ -167,7 +171,7 @@ describe('A failed audit build after the write', () => {
 
     it('a failed re-read of a nested row the result does not hold', async () => {
       const scenario = createScenario({
-        awaitWrite: false,
+        awaited: false,
         fault: { model: 'post', seesWrite: retitled },
       });
       try {
@@ -198,7 +202,7 @@ describe('A failed audit build after the write', () => {
       const newOwner = await seedUser('new-owner@example.com');
       const post = await seedPost(previousOwner.id, 'Moved');
       const scenario = createScenario({
-        awaitWrite: false,
+        awaited: false,
         fault: { model: 'post', seesWrite: (rows) => rows.some((row) => row.authorId === newOwner.id) },
       });
       try {
@@ -225,7 +229,7 @@ describe('A failed audit build after the write', () => {
       const user = await seedUser('hidden-insert@example.com');
       const existing = await seedPost(user.id, 'Existing');
       const scenario = createScenario({
-        awaitWrite: false,
+        awaited: false,
         fault: { model: 'post', seesWrite: (rows) => rows.some((row) => row.id !== existing.id) },
       });
       try {
@@ -257,7 +261,7 @@ describe('A failed audit build after the write', () => {
 
     it('an actor enricher that throws', async () => {
       const scenario = createScenario({
-        awaitWrite: false,
+        awaited: false,
         fault: 'actor-enricher',
       });
       try {
@@ -280,7 +284,7 @@ describe('A failed audit build after the write', () => {
 
     it('a failed re-read inside a batch transaction, which Prisma commits before its operations return', async () => {
       const scenario = createScenario({
-        awaitWrite: false,
+        awaited: false,
         fault: { model: 'user', seesWrite: renamed },
       });
       try {
@@ -305,11 +309,11 @@ describe('A failed audit build after the write', () => {
   });
 
   describe('without an observer, reports the dropped audit rows of a committed write by the write-failure policy', () => {
-    const renameUser = async (errorHandling: ErrorHandlingConfig) => {
+    const renameUser = async (onError?: WriteOnError) => {
       const scenario = createScenario({
-        awaitWrite: false,
+        awaited: false,
         fault: 'actor-enricher',
-        errorHandling,
+        withoutSpies: onError ? { onError } : {},
       });
       try {
         const user = await seedUser('no-observer@example.com');
@@ -330,7 +334,7 @@ describe('A failed audit build after the write', () => {
     it("logs one console line naming the model and the operation under the default 'log' policy", async () => {
       const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
       try {
-        await renameUser({});
+        await renameUser();
 
         const lines = consoleError.mock.calls.map(([line]) => String(line));
         expect(lines.filter((line) => /User\.update.*dropped/.test(line))).toHaveLength(1);
@@ -348,7 +352,7 @@ describe('A failed audit build after the write', () => {
       const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
       const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {});
       try {
-        await renameUser({ writeFailurePolicy: 'ignore' });
+        await renameUser('ignore');
 
         expect(consoleError).not.toHaveBeenCalled();
         expect(consoleWarn).not.toHaveBeenCalled();
@@ -362,7 +366,7 @@ describe('A failed audit build after the write', () => {
   describe('rejects the operation and rolls its write back', () => {
     it('inside a transaction, with an audit written after commit: a failed re-read of a nested row', async () => {
       const scenario = createScenario({
-        awaitWrite: false,
+        awaited: false,
         fault: { model: 'post', seesWrite: retitled },
       });
       try {
@@ -390,10 +394,10 @@ describe('A failed audit build after the write', () => {
       }
     });
 
-    it('in the transaction openImplicitTransaction opens for an awaited audit: a failed re-read of the rows a batch update wrote', async () => {
+    it('in the transaction implicitTransaction opens for an awaited audit: a failed re-read of the rows a batch update wrote', async () => {
       const scenario = createScenario({
-        awaitWrite: true,
-        openImplicitTransaction: true,
+        awaited: true,
+        implicitTransaction: true,
         fault: { model: 'user', seesWrite: renamed },
       });
       try {
@@ -415,10 +419,10 @@ describe('A failed audit build after the write', () => {
     });
   });
 
-  it('rolls back every operation of a batch transaction whose awaited audit failed, with openImplicitTransaction', async () => {
+  it('rolls back every operation of a batch transaction whose awaited audit failed, with implicitTransaction', async () => {
     const scenario = createScenario({
-      awaitWrite: true,
-      openImplicitTransaction: true,
+      awaited: true,
+      implicitTransaction: true,
       fault: { model: 'user', seesWrite: (rows) => rows.some((row) => row.name === 'Second') },
     });
     try {

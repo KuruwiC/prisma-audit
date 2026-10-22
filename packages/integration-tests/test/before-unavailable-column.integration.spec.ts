@@ -21,7 +21,7 @@ const testActor: AuditContext = {
 };
 
 describe('beforeUnavailable column of the audit-log model', () => {
-  const createClient = (auditLogModel?: 'Activity') => {
+  const createClient = (model?: 'Activity') => {
     const rawBasePrisma = createBasePrisma();
 
     const { findUnique, armFindUniqueFailure } = createPostReadFault('simulated before-state read failure');
@@ -33,8 +33,7 @@ describe('beforeUnavailable column of the audit-log model', () => {
       schema: auditSchema,
       contextProvider: provider,
       entities: testEntities,
-      ...(auditLogModel ? { auditLogModel } : {}),
-      errorHandling: { writeFailurePolicy: 'throw' },
+      write: { ...(model ? { model } : {}), onError: 'throw' },
     });
 
     return { rawBasePrisma, basePrisma, provider, prisma, armFindUniqueFailure };
@@ -42,8 +41,8 @@ describe('beforeUnavailable column of the audit-log model', () => {
 
   let scenario: ReturnType<typeof createClient> | undefined;
 
-  const setUp = async (auditLogModel?: 'Activity') => {
-    scenario = createClient(auditLogModel);
+  const setUp = async (model?: 'Activity') => {
+    scenario = createClient(model);
     const { basePrisma, provider, prisma } = scenario;
     await basePrisma.auditLog.deleteMany();
     await basePrisma.activity.deleteMany();

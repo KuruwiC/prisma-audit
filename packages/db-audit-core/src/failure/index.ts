@@ -2,7 +2,7 @@
  * Failure contract
  *
  * Every failure notifies the observer, which never affects the caller's operation; only the phases
- * {@link WriteFailurePolicy} lists also consult the write-failure policy. An adapter detects the
+ * {@link WriteOnError} lists also consult the write-failure policy. An adapter detects the
  * failures of its own phases and decides what each observer-only phase does to the operation,
  * `dispatch` reports a failed build of the records and the failed writes, and the
  * {@link FailureSink} applies the rest.
@@ -20,7 +20,7 @@ import { toError } from '../utils/to-error.js';
  * - `pre-fetch`: a read the adapter makes before the write (the before state) failed. Observer
  *   only; the event carries an `unavailable` before state, or the adapter skips a record whose
  *   action depends on the read.
- * - `log-write`: persisting the records failed. Decided by {@link ErrorHandlingConfig.writeFailurePolicy}.
+ * - `log-write`: persisting the records failed. Decided by {@link FailureSinkConfig.writeOnError}.
  * - `diff-generation`: other work that builds the records failed. Before the operation's write, the
  *   adapter reports it and decides whether the caller's operation fails; it is observer only
  *   there. The build `dispatch` runs once the write has run is reported by `dispatch`: it fails the
@@ -45,8 +45,8 @@ export type AuditErrorPhase = 'pre-fetch' | 'log-write' | 'diff-generation' | 'r
 
 /**
  * A single audit-pipeline failure, passed in the same shape to
- * {@link ErrorHandlingConfig.observer} and, when it is a function, to
- * {@link ErrorHandlingConfig.writeFailurePolicy}.
+ * {@link FailureSinkConfig.observer} and, when it is a function, to
+ * {@link FailureSinkConfig.writeOnError}.
  */
 export interface AuditErrorContext {
   phase: AuditErrorPhase;
@@ -62,7 +62,7 @@ export interface AuditErrorContext {
  * Read-only: it NEVER affects whether the caller's own database operation succeeds or
  * fails. A handler that throws (synchronously or by returning a rejected promise) has that
  * failure logged to the console and otherwise ignored. Use
- * {@link ErrorHandlingConfig.writeFailurePolicy} to control the caller's operation.
+ * {@link FailureSinkConfig.writeOnError} to control the caller's operation.
  */
 export type AuditErrorObserver = (context: AuditErrorContext) => void | Promise<void>;
 
@@ -73,7 +73,7 @@ export type AuditErrorObserver = (context: AuditErrorContext) => void | Promise<
  * A strategy string (`'throw'` re-throws and fails the operation, `'log'` logs to the
  * console and lets the operation succeed, `'ignore'` does neither), or a function that
  * receives the same {@link AuditErrorContext} the observer receives and RETURNS one of
- * those three strings. The function must not throw; if it does, or if the policy is or
+ * those three strings. The function must not throw; if it does, or if the value is or
  * returns anything else, the problem is logged to the console and `'log'` applies.
  *
  * **Policy-gated phases**: `log-write`, and `diff-generation` when `dispatch` dropped the
@@ -84,24 +84,25 @@ export type AuditErrorObserver = (context: AuditErrorContext) => void | Promise<
  * **Writes the caller does not await** (after commit, or detached) and **dropped builds**: the
  * caller has already received its result, so `'throw'` logs instead, like `'log'`.
  */
-export type WriteFailurePolicy =
-  | ErrorStrategy
-  | ((context: AuditErrorContext) => ErrorStrategy | Promise<ErrorStrategy>);
+export type WriteOnError = ErrorStrategy | ((context: AuditErrorContext) => ErrorStrategy | Promise<ErrorStrategy>);
 
-/** Audit-failure observation and write-failure policy */
-export interface ErrorHandlingConfig {
+/**
+ * What an adapter builds its {@link FailureSink} from: the user's observer and write-failure
+ * strategy, which an adapter exposes as the `errorObserver` and `write.onError` options
+ */
+export interface FailureSinkConfig {
   /** Observer notified of every audit-pipeline failure. See {@link AuditErrorObserver}. */
   observer?: AuditErrorObserver;
   /**
    * Decides whether a failed audit-log write fails the caller's operation.
-   * See {@link WriteFailurePolicy}.
+   * See {@link WriteOnError}.
    *
    * @default 'log'
    */
-  writeFailurePolicy?: WriteFailurePolicy;
+  writeOnError?: WriteOnError;
 }
 
-/** The one place an adapter reports audit failures, built from the user's {@link ErrorHandlingConfig} */
+/** The one place an adapter reports audit failures, built from a {@link FailureSinkConfig} */
 export interface FailureSink {
   /**
    * Notifies the observer of a failure in an observer-only phase, detected by the adapter or, for a
@@ -138,40 +139,37 @@ const WRITE_LOG_LABELS: Readonly<Record<WritePlan['kind'], string>> = {
 
 const messageOf = (error: unknown): string => toError(error).message;
 
-export const createFailureSink = (config: ErrorHandlingConfig): FailureSink => {
+export const createFailureSink = (config: FailureSinkConfig): FailureSink => {
   const { observer } = config;
   // An audit library must not break the caller's write by default.
-  const writeFailurePolicy = config.writeFailurePolicy ?? 'log';
+  const writeOnError = config.writeOnError ?? 'log';
 
   const observe = async (context: AuditErrorContext): Promise<void> => {
     if (!observer) return;
     try {
       await observer(context);
     } catch (observerError) {
-      console.error('[db-audit-core] Error in error-handling observer:', messageOf(observerError));
+      console.error('[db-audit-core] Error in errorObserver:', messageOf(observerError));
     }
   };
 
   /**
-   * A policy function that throws, or a policy that is or returns no valid strategy, falls back to
+   * A `writeOnError` function that throws, or a `writeOnError` that is or returns no valid strategy, falls back to
    * `'log'`: unlike `'throw'` it cannot fail the caller's operation, and unlike `'ignore'` it still
    * surfaces the failure.
    */
   const resolveStrategy = async (context: AuditErrorContext): Promise<ErrorStrategy> => {
     let strategy: unknown;
     try {
-      strategy = typeof writeFailurePolicy === 'function' ? await writeFailurePolicy(context) : writeFailurePolicy;
+      strategy = typeof writeOnError === 'function' ? await writeOnError(context) : writeOnError;
     } catch (policyError) {
-      console.error(
-        "[db-audit-core] Error in writeFailurePolicy function; falling back to 'log':",
-        messageOf(policyError),
-      );
+      console.error("[db-audit-core] Error in write.onError function; falling back to 'log':", messageOf(policyError));
       return 'log';
     }
     if (isErrorStrategy(strategy)) {
       return strategy;
     }
-    console.error("[db-audit-core] Invalid writeFailurePolicy strategy; falling back to 'log':", strategy);
+    console.error("[db-audit-core] Invalid write.onError strategy; falling back to 'log':", strategy);
     return 'log';
   };
 
@@ -187,11 +185,7 @@ export const createFailureSink = (config: ErrorHandlingConfig): FailureSink => {
     }
   };
 
-  const applyWriteFailurePolicy = async (
-    context: AuditErrorContext,
-    failsCaller: boolean,
-    label: string,
-  ): Promise<void> => {
+  const applyWriteOnError = async (context: AuditErrorContext, failsCaller: boolean, label: string): Promise<void> => {
     await observe(context);
     const strategy = await resolveStrategy(context);
     const applied = strategy === 'throw' && !failsCaller ? 'log' : strategy;
@@ -199,7 +193,7 @@ export const createFailureSink = (config: ErrorHandlingConfig): FailureSink => {
   };
 
   const reportWriteFailure = async (plan: WritePlan, error: Error): Promise<void> => {
-    await applyWriteFailurePolicy(
+    await applyWriteOnError(
       {
         phase: 'log-write',
         modelName: plan.records[0]?.entityType ?? '',
@@ -215,7 +209,7 @@ export const createFailureSink = (config: ErrorHandlingConfig): FailureSink => {
   const reportDroppedBuild = async (
     context: AuditErrorContext & { readonly phase: 'diff-generation' },
   ): Promise<void> => {
-    await applyWriteFailurePolicy(
+    await applyWriteOnError(
       context,
       false,
       `build of the audit records of ${context.modelName}.${context.operation}; the committed write's records are dropped`,

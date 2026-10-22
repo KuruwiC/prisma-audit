@@ -8,13 +8,14 @@ import type {
   ActorContextConfig,
   AuditActor,
   AuditContextProvider,
+  AuditErrorObserver,
   AuditRecord,
   AuditLogData as CoreAuditLogData,
   AuditLogInput as CoreAuditLogInput,
   EntityMap,
-  ErrorHandlingConfig,
   WriteContext,
   WriteFn,
+  WriteOnError,
 } from '@kuruwic/db-audit-core';
 import type { AuditSchema } from './schema/audit-schema.js';
 
@@ -58,20 +59,37 @@ export interface SecurityConfig {
 }
 
 /**
- * Performance optimization configuration
+ * Writing the audit rows: where they go, when, and what a failed write does to the caller's
+ * operation
+ *
+ * @template TClient - The audited client type, which the writer's `handle` is typed as
  */
-export interface PerformanceConfig {
-  /** Sampling rate (0.0 to 1.0). Default: 1.0 */
-  sampling?: number;
-  /** Whether to await audit log writes. Default: true */
-  awaitWrite?: boolean;
+export interface WriteConfig<TClient = unknown> {
+  /**
+   * Prisma model name for storing audit logs (PascalCase).
+   *
+   * @default 'AuditLog'
+   */
+  model?: string;
+  /**
+   * Whether the caller's operation awaits its audit rows, written in its transaction when it runs
+   * in one: a value for every operation, or a function called with the name of the operation's
+   * top-level model. The function is called once per operation, once sampling has kept it (with
+   * `implicitTransaction` once per call, which the client decides before the call runs, for every
+   * query the call runs through the audit extension), and its return value applies to the whole
+   * operation, the audit rows of its nested writes to other models included.
+   *
+   * @default true
+   */
+  awaited?: boolean | ((modelName: string) => boolean);
   /**
    * Whether the audited client opens an interactive transaction for an operation whose audit is
    * awaited and that runs outside your own interactive `$transaction`: around a single write, and
    * around a batch `$transaction([...])` of the client's operations that holds such a write.
    * The operation and its audit rows then commit or roll back together. Default: `false`: the
    * audit of such an operation is written once the operation has committed, and its failure is
-   * reported without failing the operation.
+   * reported without failing the operation. `true` with `awaited: false` is a configuration error,
+   * since no operation would be awaited.
    *
    * With `true`, a call on a model delegate or a raw-query method returns a lazy operation of the
    * library's own, which runs when it is awaited or given to a batch `$transaction` of the same
@@ -80,43 +98,17 @@ export interface PerformanceConfig {
    * is awaited runs as one interactive transaction, bound by the client's interactive transaction
    * limits. See the README.
    */
-  openImplicitTransaction?: boolean;
-  /**
-   * Dynamic `awaitWrite` decision, called once per operation the audit records, once sampling
-   * has kept it (with `openImplicitTransaction` once per call, which the client decides before the
-   * call runs, for every query the call runs through the audit extension), with the name of its
-   * top-level model and that model's `tags` from `entities`
-   * (`tags` is `[]` for a model whose entity config declares no tags). Its return value replaces
-   * {@link PerformanceConfig.awaitWrite} for the whole operation, the audit rows of its nested
-   * writes to other models included.
-   */
-  awaitWriteIf?: (modelName: string, tags: string[]) => boolean;
-  /**
-   * Dynamic sampling rate, called once per audited operation (with `openImplicitTransaction` once
-   * per call, as `awaitWriteIf`) with the name of its top-level model and that model's `tags` from
-   * `entities` (`tags` is `[]` for a model whose entity config declares no tags). Its
-   * return value replaces {@link PerformanceConfig.sampling} for the whole operation, its nested
-   * writes included.
-   */
-  samplingIf?: (modelName: string, tags: string[]) => number;
-}
-
-/**
- * Lifecycle hooks configuration
- *
- * @template TClient - The audited client type, which the writer's `handle` is typed as
- */
-export interface HooksConfig<TClient = unknown> {
+  implicitTransaction?: boolean;
   /**
    * Custom audit log writer, replacing the default persistence step. It receives the records
    * and a context with the audit context, the client the write runs on (`handle`) and
    * `defaultWrite`, the default persistence on that client.
    *
-   * With `awaitWrite: true` (the default), inside a transaction (the caller's `$transaction`, or
-   * the one the client opens with `openImplicitTransaction`) `handle` is the client of that
+   * With `awaited: true` (the default), inside a transaction (the caller's `$transaction`, or
+   * the one the client opens with `implicitTransaction`) `handle` is the client of that
    * transaction and the writer runs before commit, so a later rollback undoes rows it wrote
    * through `handle` or `defaultWrite`; outside any transaction `handle` is the base client and
-   * the writer runs, awaited, once the operation has committed. With `awaitWrite: false`, `handle`
+   * the writer runs, awaited, once the operation has committed. With `awaited: false`, `handle`
    * is the base client: the write starts after the operation, and inside `$transaction` only once
    * `$transaction` has resolved; a transaction that throws discards the queued write unrun, so the
    * writer never runs for it. For an awaited write inside a transaction the handle is typed as the
@@ -124,13 +116,20 @@ export interface HooksConfig<TClient = unknown> {
    *
    * Either way, side effects the writer performs outside the database transaction (an HTTP
    * call, a queue publish) are never rolled back — they have already happened by the time a
-   * rollback occurs. Use `awaitWrite: false` (or `awaitWriteIf`) to defer such delivery
-   * until after commit.
+   * rollback occurs. Use `awaited: false` (for every model or, as a function, for some) to defer
+   * such delivery until after commit.
    *
    * A method signature: its parameters are bivariant, so a writer typed for the client is
    * assignable where the handle is erased to `unknown`.
    */
   writer?(records: AuditRecord[], context: WriteContext<TClient>): Promise<void>;
+  /**
+   * Decides whether a failed audit-log write fails the caller's operation. See {@link WriteOnError}
+   * and, for what each phase means for a Prisma operation, {@link PrismaAuditExtensionOptions.errorObserver}.
+   *
+   * @default 'log'
+   */
+  onError?: WriteOnError;
 }
 
 /**
@@ -171,13 +170,7 @@ export interface FetchBeforeConfig<TModelName extends string = string> extends F
 }
 
 /** Audit-failure observation and policy types, defined by `@kuruwic/db-audit-core` and re-exported */
-export type {
-  AuditErrorContext,
-  AuditErrorObserver,
-  AuditErrorPhase,
-  ErrorHandlingConfig,
-  WriteFailurePolicy,
-} from '@kuruwic/db-audit-core';
+export type { AuditErrorContext, AuditErrorObserver, AuditErrorPhase, WriteOnError } from '@kuruwic/db-audit-core';
 
 /**
  * Prisma Extension configuration options
@@ -230,17 +223,20 @@ export interface PrismaAuditExtensionOptions<TModelName extends string = string,
    */
   schema: AuditSchema<TModelName>;
 
+  /** Where, when and how the audit rows are written. See {@link WriteConfig}. */
+  write?: WriteConfig<TClient>;
   /**
-   * Prisma model name for storing audit logs (PascalCase).
+   * Share of operations audited, from 0 (none) to 1 (every one): a value for every operation, or a
+   * function called with the name of the operation's top-level model. The function is called once
+   * per operation (with `write.implicitTransaction` once per call, as `write.awaited`), and its
+   * return value applies to the whole operation, its nested writes included.
    *
-   * @default 'AuditLog'
+   * @default 1
    */
-  auditLogModel?: string;
+  samplingRate?: number | ((modelName: string) => number);
 
   diffing?: DiffingConfig;
   security?: SecurityConfig;
-  performance?: PerformanceConfig;
-  hooks?: HooksConfig<TClient>;
   /**
    * Actor context enrichment, stored in AuditLog.actorContext; the enricher receives the
    * operation's `AuditActor` and the client.
@@ -248,8 +244,9 @@ export interface PrismaAuditExtensionOptions<TModelName extends string = string,
   actorContext?: ActorContextConfig<AuditActor, unknown, TClient>;
   fetchBefore?: FetchBeforeConfig<NoInfer<TModelName>>;
   /**
-   * Audit-failure observation and policy. See {@link ErrorHandlingConfig}. What each phase
-   * means for a Prisma operation:
+   * Observer notified of every audit-pipeline failure. See {@link AuditErrorObserver}; whether a
+   * failed write fails the caller's operation is `write.onError`'s. What each phase means for a
+   * Prisma operation:
    *
    * - `pre-fetch`: fetching the before-state (for update / delete / upsert), or reading the rows a
    *   nested `connect`, `set` or `disconnect` may re-link, failed. The caller's operation
@@ -269,7 +266,7 @@ export interface PrismaAuditExtensionOptions<TModelName extends string = string,
    *   `beforeUnavailable: true` (a `disconnect` only when it left the row unlinked); a row unlinked
    *   without being named is not recorded.
    * - `log-write`: persisting the audit log entry itself failed. The only phase whose outcome
-   *   `writeFailurePolicy` decides; `'throw'` fails the caller only for an awaited write inside a
+   *   `write.onError` decides; `'throw'` fails the caller only for an awaited write inside a
    *   transaction, and logs once the operation has committed (an awaited write outside any
    *   transaction, or a queued or detached one).
    * - `diff-generation`: other audit-support work around the caller's operation failed —
@@ -279,9 +276,9 @@ export interface PrismaAuditExtensionOptions<TModelName extends string = string,
    *   after the write, a nested row the operation updated or inserted that its result did not
    *   return, or a row a nested `connect`, `set` or `disconnect` re-linked, or, for batch
    *   operations, fetching the affected rows before or after the mutation. It propagates to the
-   *   caller as a thrown error, regardless of `writeFailurePolicy`, when the caller's write has not
+   *   caller as a thrown error, regardless of `write.onError`, when the caller's write has not
    *   run or runs inside a transaction; outside any transaction a failure after the write drops
-   *   the entry and `writeFailurePolicy` applies to the drop.
+   *   the entry and `write.onError` applies to the drop.
    * - `row-identification`: a nested delete's primary key could not be resolved, from the
    *   pre-fetched row, its WHERE or the operation data; or an `updateMany` or `deleteMany` with a
    *   `limit` wrote rows it cannot tell apart from rows another writer changed, or ran inside a
@@ -299,7 +296,7 @@ export interface PrismaAuditExtensionOptions<TModelName extends string = string,
    *   is `{ identity, resolver }` with the row's serialized primary key and the failed resolver.
    *   A failed `batchLookup` resolver is reported once for every row of its call.
    */
-  errorHandling?: ErrorHandlingConfig;
+  errorObserver?: AuditErrorObserver;
   /** Custom serialization for non-JSON-safe types (BigInt, Date are handled by default) */
   serialization?: import('@kuruwic/db-audit-core').SerializationConfig;
 }

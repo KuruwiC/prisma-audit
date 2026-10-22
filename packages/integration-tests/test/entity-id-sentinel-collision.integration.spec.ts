@@ -56,7 +56,7 @@ describe('nested delete of a row whose primary key is "__default__"', () => {
       diffing: { excludeFields: ['createdAt'] },
       security: { redact: { fields: [] } },
       fetchBefore,
-      errorHandling: { observer },
+      errorObserver: observer,
     });
     return { provider, prisma };
   };

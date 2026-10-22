@@ -353,6 +353,6 @@ describe('Nested Update Operations', () => {
   // NOTE: Every test here uses the setup.ts defaults; the per-model vs global resolution of
   // fetchBefore is covered by nested-delete.integration.spec.ts.
 
-  // NOTE: Audit-pipeline failures reach errorHandling.observer; nested pre-fetch failures are covered
+  // NOTE: Audit-pipeline failures reach errorObserver; nested pre-fetch failures are covered
   // by nested-pre-fetch-failure.integration.spec.ts.
 });

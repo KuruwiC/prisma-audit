@@ -16,10 +16,10 @@ import type {
   AuditActor,
   AuditContextProvider,
   AuditErrorContext,
+  AuditErrorObserver,
   ComposeConfig,
   DispatchConfig,
   EntityMap,
-  ErrorHandlingConfig,
   MutationAction,
   MutationEvent,
   PolicyConfig,
@@ -27,6 +27,7 @@ import type {
   ResolveConfig,
   SerializationConfig,
   TransactionRuntime,
+  WriteOnError,
 } from '@kuruwic/db-audit-core';
 import {
   compose,
@@ -44,18 +45,25 @@ export interface MemoryAuditOptions<TModelName extends string> {
   readonly schema: MemorySchema<TModelName>;
   readonly entities: EntityMap<TModelName, MemoryHandle<TModelName>>;
   readonly contextProvider: AuditContextProvider;
-  /** Whether audit rows are written in the operation's transaction by default (default: true) */
-  readonly awaitWrite?: boolean;
-  readonly awaitWriteIf?: PolicyConfig['awaitWriteIf'];
-  /** Share of operations audited, from 0 (none) to 1 (every one; the default) */
-  readonly sampling?: number;
-  readonly samplingIf?: PolicyConfig['samplingIf'];
+  /**
+   * Share of operations audited, from 0 (none) to 1 (every one; the default): a value, or a
+   * function called once per operation with its model's name
+   */
+  readonly samplingRate?: PolicyConfig['samplingRate'];
+  readonly write?: {
+    /**
+     * Whether audit rows are written in the operation's transaction (default: true): a value, or
+     * a function called once per sampled-in operation with its model's name
+     */
+    readonly awaited?: PolicyConfig['awaited'];
+    /** Whether a failed audit write fails the operation; defaults to `'throw'` */
+    readonly onError?: WriteOnError;
+  };
   readonly excludeFields?: readonly string[];
   readonly redact?: RedactConfig;
   readonly serialization?: SerializationConfig;
   readonly actorContext?: ActorContextConfig<AuditActor, unknown, MemoryHandle<TModelName>>;
-  /** The user's observer and write-failure policy; the policy defaults to `'throw'` */
-  readonly errorHandling?: ErrorHandlingConfig;
+  readonly errorObserver?: AuditErrorObserver;
 }
 
 export interface MemoryAuditAdapter<TModelName extends string> {
@@ -97,10 +105,8 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
   const store = createMemoryStore<TModelName>();
   const entityConfigs = createEntityConfigLookup(options.entities);
   const policyConfig: PolicyConfig = {
-    awaitWrite: options.awaitWrite ?? true,
-    awaitWriteIf: options.awaitWriteIf,
-    sampling: options.sampling ?? 1,
-    samplingIf: options.samplingIf,
+    awaited: options.write?.awaited ?? true,
+    samplingRate: options.samplingRate ?? 1,
   };
   const resolveConfig: ResolveConfig<TModelName, MemoryHandle<TModelName>> = {
     entity: entityConfigs.byModel,
@@ -123,9 +129,9 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
 
   const writeFailures: AuditErrorContext[] = [];
   const resolverFailures: AuditErrorContext[] = [];
-  const userObserver = options.errorHandling?.observer;
+  const userObserver = options.errorObserver;
   const failureSink = createFailureSink({
-    writeFailurePolicy: options.errorHandling?.writeFailurePolicy ?? 'throw',
+    writeOnError: options.write?.onError ?? 'throw',
     observer: async (context) => {
       if (context.phase === 'log-write') {
         writeFailures.push(context);
@@ -196,8 +202,7 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
     mutate: (handle: MemoryHandle<TModelName>) => AppliedMutation,
   ): Promise<void> => {
     const auditContext = contextProvider.useContext();
-    const tags = entityConfigs.byModel(model)?.tags ?? [];
-    const writePolicy = policy(model, tags, policyConfig);
+    const writePolicy = policy(model, policyConfig);
     if (!writePolicy.sampled) {
       mutate(currentHandle());
       return;

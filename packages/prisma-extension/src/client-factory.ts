@@ -64,7 +64,7 @@ export type PrismaClientLike = {
  * });
  * ```
  *
- * @example Full configuration with hooks and enrichment
+ * @example Full configuration with a custom writer and enrichment
  * ```typescript
  * const prisma = createAuditClient(basePrisma, {
  *   Prisma,
@@ -79,10 +79,8 @@ export type PrismaClientLike = {
  *       fields: ['ssn', 'creditCard'],
  *     },
  *   },
- *   performance: {
- *     awaitWrite: true,
- *   },
- *   hooks: {
+ *   write: {
+ *     awaited: true,
  *     writer: async (records, { defaultWrite }) => {
  *       await Promise.all([
  *         defaultWrite(records),

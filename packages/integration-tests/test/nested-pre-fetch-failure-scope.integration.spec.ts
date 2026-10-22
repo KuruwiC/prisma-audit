@@ -71,7 +71,7 @@ describe('nested pre-fetch failures — affected rows', () => {
       entities: testEntities,
       diffing: { excludeFields: ['createdAt', 'updatedAt'] },
       security: { redact: { fields: [] } },
-      errorHandling: { observer },
+      errorObserver: observer,
     });
     disconnects.push(async () => {
       await prisma.$disconnect();

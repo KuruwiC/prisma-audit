@@ -333,7 +333,7 @@ const writeInTransaction = (
  *   contextProvider: provider,
  *   entities,
  *   Prisma,
- *   hooks: {
+ *   write: {
  *     writer: createEntityNormalizedWriter({
  *       actorModel: 'actor',
  *       entityModel: 'entity',
@@ -396,7 +396,7 @@ const groupLogsByChange = (logs: AuditRecord[]): Map<string, AuditRecord[]> => {
  *   contextProvider: provider,
  *   entities,
  *   Prisma,
- *   hooks: {
+ *   write: {
  *     writer: createSharedChangeWriter({
  *       changeModel: 'auditChange',
  *       aggregateModel: 'auditAggregate',

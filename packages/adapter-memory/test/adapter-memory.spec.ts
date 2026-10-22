@@ -153,7 +153,7 @@ describe('aggregate resolution and enrichment', () => {
     const resolverError = new Error('entity id resolver is broken');
     const observer = vi.fn<AuditErrorObserver>();
     const adapter = createAdapter({
-      errorHandling: { observer },
+      errorObserver: observer,
       entities: defineMapping({
         User: defineEntity<UserRow, Db>({ type: 'User' }),
         Post: defineEntity<PostRow, Db>({
@@ -308,7 +308,7 @@ describe('transaction membership', () => {
   });
 
   it('rollback: discards the data, the immediate audit rows and the after-commit plans', async () => {
-    const adapter = createAdapter({ awaitWriteIf: (model) => model === 'User' });
+    const adapter = createAdapter({ write: { awaited: (model) => model === 'User' } });
 
     await withContext(async () => {
       await adapter.create('User', { id: 'u0', name: 'Existing' });
@@ -330,10 +330,10 @@ describe('transaction membership', () => {
     expect(adapter.store.auditLogs().map((log) => log.entityId)).toEqual(['u0']);
   });
 
-  it('awaitWrite false: inside a transaction the record lands after commit, outside after flush', async () => {
+  it('awaited false: inside a transaction the record lands after commit, outside after flush', async () => {
     const handles: unknown[] = [];
     const adapter = createAdapter({
-      awaitWrite: false,
+      write: { awaited: false },
       entities: defineMapping({
         User: defineEntity<UserRow, Db>({
           type: 'User',
@@ -429,8 +429,8 @@ describe('transaction membership', () => {
       expect(adapter.store.auditLogs().map((log) => log.entityId)).toEqual(['u1']);
     });
 
-    it('awaitWrite false: the inner after-commit records start once the outer commits and are dropped when the outer throws', async () => {
-      const adapter = createAdapter({ awaitWrite: false });
+    it('awaited false: the inner after-commit records start once the outer commits and are dropped when the outer throws', async () => {
+      const adapter = createAdapter({ write: { awaited: false } });
 
       await withContext(async () => {
         await adapter.transaction(async () => {
@@ -460,7 +460,7 @@ describe('transaction membership', () => {
   });
 
   it('a detached write that fails is recorded in writeFailures and flush resolves', async () => {
-    const adapter = createAdapter({ awaitWrite: false });
+    const adapter = createAdapter({ write: { awaited: false } });
     const failure = new Error('audit-log store unavailable');
     vi.spyOn(adapter.store, 'appendAuditLogs').mockImplementation(() => {
       throw failure;
@@ -476,7 +476,7 @@ describe('transaction membership', () => {
   });
 
   it('a write after commit that fails is recorded in writeFailures, the transaction stays committed and flush resolves', async () => {
-    const adapter = createAdapter({ awaitWrite: false });
+    const adapter = createAdapter({ write: { awaited: false } });
     const failure = new Error('audit-log store unavailable');
     const write = vi.spyOn(memoryWriteExecutor, 'write').mockRejectedValue(failure);
 
@@ -515,11 +515,11 @@ describe('transaction membership', () => {
 
   describe('a record build that fails after the write', () => {
     const failure = new Error('actor enricher is broken');
-    const adapterWithFailingEnricher = (awaitWrite: boolean) => {
+    const adapterWithFailingEnricher = (awaited: boolean) => {
       const observer = vi.fn<AuditErrorObserver>();
       const adapter = createAdapter({
-        awaitWrite,
-        errorHandling: { observer },
+        write: { awaited },
+        errorObserver: observer,
         actorContext: {
           enricher: async () => {
             throw failure;
@@ -536,7 +536,7 @@ describe('transaction membership', () => {
       error: failure,
     };
 
-    it('awaitWrite false outside a transaction: keeps the write, notifies diff-generation once, logs the drop and writes no record', async () => {
+    it('awaited false outside a transaction: keeps the write, notifies diff-generation once, logs the drop and writes no record', async () => {
       const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
       const { adapter, observer } = adapterWithFailingEnricher(false);
 
@@ -564,14 +564,13 @@ describe('transaction membership', () => {
     });
   });
 
-  it('awaitWriteIf by tag: a tagged model writes atomically in an implicit transaction, an untagged one detached', async () => {
+  it('awaited as a function: a model it returns true for writes atomically in an implicit transaction, another detached', async () => {
     const handles = new Map<string, unknown>();
     const adapter = createAdapter({
-      awaitWriteIf: (_model, tags) => tags.includes('critical'),
+      write: { awaited: (model) => model === 'User' },
       entities: defineMapping({
         User: defineEntity<UserRow, Db>({
           type: 'User',
-          tags: ['critical'],
           entityContext: {
             enricher: async (users, db) => {
               handles.set('User', db);
@@ -604,9 +603,9 @@ describe('transaction membership', () => {
   });
 });
 
-describe('sampling', () => {
-  it('sampling 0: the row is written and no record is', async () => {
-    const adapter = createAdapter({ sampling: 0 });
+describe('samplingRate', () => {
+  it('samplingRate 0: the row is written and no record is', async () => {
+    const adapter = createAdapter({ samplingRate: 0 });
 
     await withContext(() => adapter.create('User', { id: 'u1', name: 'Alice' }));
 
@@ -614,8 +613,8 @@ describe('sampling', () => {
     expect(adapter.store.auditLogs()).toEqual([]);
   });
 
-  it('sampling 0 inside a transaction: the row is written on the transaction handle and commits or rolls back with it', async () => {
-    const adapter = createAdapter({ sampling: 0 });
+  it('samplingRate 0 inside a transaction: the row is written on the transaction handle and commits or rolls back with it', async () => {
+    const adapter = createAdapter({ samplingRate: 0 });
 
     await withContext(async () => {
       await adapter.transaction(async (db) => {
@@ -636,15 +635,8 @@ describe('sampling', () => {
     expect(adapter.store.auditLogs()).toEqual([]);
   });
 
-  it('samplingIf by tag: a tagged model is audited, an untagged one is not', async () => {
-    const adapter = createAdapter({
-      sampling: 1,
-      samplingIf: (_model, tags) => (tags.includes('critical') ? 1 : 0),
-      entities: defineMapping({
-        User: defineEntity<UserRow, Db>({ type: 'User', tags: ['critical'] }),
-        Post: defineEntity<PostRow, Db>({ type: 'Post' }),
-      }),
-    });
+  it('samplingRate as a function: a model it returns 1 for is audited, one it returns 0 for is not', async () => {
+    const adapter = createAdapter({ samplingRate: (model) => (model === 'User' ? 1 : 0) });
 
     await withContext(async () => {
       await adapter.create('User', { id: 'u1', name: 'Alice' });

@@ -15,7 +15,7 @@
  *   b. runAsync({ actor: actor2 }) inside $transaction — same FK success
  *   c. Rollback path — no rows and no audit logs after a thrown transaction
  *   d. Audit-log atomicity — audit logs written within the same transaction
- *      (awaitWrite: true) are visible after commit
+ *      (awaited: true) are visible after commit
  */
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
@@ -135,7 +135,7 @@ describe('Actor Override Inside Transactions (Integration)', () => {
 
       expect(users).toHaveLength(0);
       expect(posts).toHaveLength(0);
-      // With awaitWrite: true the audit logs are written synchronously inside the
+      // With awaited: true the audit logs are written synchronously inside the
       // transaction, so they roll back together with the data rows
       expect(auditLogs).toHaveLength(0);
     });

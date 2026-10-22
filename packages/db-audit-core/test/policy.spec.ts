@@ -6,66 +6,55 @@ describe('policy', () => {
     vi.restoreAllMocks();
   });
 
-  it.each([true, false])('is atomic exactly when awaitWrite is %s and no awaitWriteIf is configured', (awaitWrite) => {
-    expect(policy('User', [], { awaitWrite, sampling: 1 })).toEqual({ sampled: true, atomic: awaitWrite });
+  it.each([true, false])('is atomic exactly when awaited is %s', (awaited) => {
+    expect(policy('User', { awaited, samplingRate: 1 })).toEqual({ sampled: true, atomic: awaited });
   });
 
-  it.each([
-    [true, false],
-    [false, true],
-  ])('lets awaitWriteIf override awaitWrite %s with %s', (awaitWrite, override) => {
-    expect(policy('User', [], { awaitWrite, awaitWriteIf: () => override, sampling: 1 })).toEqual({
-      sampled: true,
-      atomic: override,
-    });
+  it.each([true, false])('is atomic exactly when the awaited function returns %s', (awaited) => {
+    expect(policy('User', { awaited: () => awaited, samplingRate: 1 })).toEqual({ sampled: true, atomic: awaited });
   });
 
-  it('passes the model name and its tags to awaitWriteIf', () => {
-    const awaitWriteIf = vi.fn(() => true);
+  it('calls the awaited function once with the model name', () => {
+    const awaited = vi.fn(() => true);
 
-    policy('Payment', ['critical', 'financial'], { awaitWrite: false, awaitWriteIf, sampling: 1 });
+    policy('Payment', { awaited, samplingRate: 1 });
 
-    expect(awaitWriteIf).toHaveBeenCalledTimes(1);
-    expect(awaitWriteIf).toHaveBeenCalledWith('Payment', ['critical', 'financial']);
+    expect(awaited).toHaveBeenCalledTimes(1);
+    expect(awaited).toHaveBeenCalledWith('Payment');
   });
 
-  it('decides per model from the tags', () => {
-    const config = {
-      awaitWrite: false,
-      awaitWriteIf: (_modelName: string, tags: readonly string[]) => tags.includes('critical'),
-      sampling: 1,
-    };
+  it('decides per model with the awaited function', () => {
+    const config = { awaited: (modelName: string) => modelName === 'Payment', samplingRate: 1 };
 
-    expect(policy('Payment', ['critical'], config)).toEqual({ sampled: true, atomic: true });
-    expect(policy('Comment', [], config)).toEqual({ sampled: true, atomic: false });
+    expect(policy('Payment', config)).toEqual({ sampled: true, atomic: true });
+    expect(policy('Comment', config)).toEqual({ sampled: true, atomic: false });
   });
 
-  describe('sampling', () => {
-    it('samples out every operation at a rate of 0 and never consults awaitWriteIf for it', () => {
-      const awaitWriteIf = vi.fn(() => true);
+  describe('samplingRate', () => {
+    it('samples out every operation at a rate of 0 and never calls the awaited function for it', () => {
+      const awaited = vi.fn(() => true);
 
-      expect(policy('User', [], { awaitWrite: true, awaitWriteIf, sampling: 0 })).toEqual({ sampled: false });
-      expect(awaitWriteIf).not.toHaveBeenCalled();
+      expect(policy('User', { awaited, samplingRate: 0 })).toEqual({ sampled: false });
+      expect(awaited).not.toHaveBeenCalled();
     });
 
     it('samples in an operation whose random draw is below the rate, and out one at the rate', () => {
       const random = vi.spyOn(Math, 'random');
 
       random.mockReturnValueOnce(0.49);
-      expect(policy('User', [], { awaitWrite: true, sampling: 0.5 })).toEqual({ sampled: true, atomic: true });
+      expect(policy('User', { awaited: true, samplingRate: 0.5 })).toEqual({ sampled: true, atomic: true });
       random.mockReturnValueOnce(0.5);
-      expect(policy('User', [], { awaitWrite: true, sampling: 0.5 })).toEqual({ sampled: false });
+      expect(policy('User', { awaited: true, samplingRate: 0.5 })).toEqual({ sampled: false });
     });
 
-    it('lets samplingIf replace sampling, called once with the model name and its tags', () => {
-      const samplingIf = vi.fn(() => 1);
+    it('takes the rate from the samplingRate function, called once with the model name', () => {
+      const samplingRate = vi.fn((modelName: string) => (modelName === 'Payment' ? 1 : 0));
 
-      expect(policy('Payment', ['financial'], { awaitWrite: false, sampling: 0, samplingIf })).toEqual({
-        sampled: true,
-        atomic: false,
-      });
-      expect(samplingIf).toHaveBeenCalledTimes(1);
-      expect(samplingIf).toHaveBeenCalledWith('Payment', ['financial']);
+      expect(policy('Payment', { awaited: false, samplingRate })).toEqual({ sampled: true, atomic: false });
+      expect(policy('Comment', { awaited: false, samplingRate })).toEqual({ sampled: false });
+      expect(samplingRate).toHaveBeenCalledTimes(2);
+      expect(samplingRate).toHaveBeenNthCalledWith(1, 'Payment');
+      expect(samplingRate).toHaveBeenNthCalledWith(2, 'Comment');
     });
   });
 });

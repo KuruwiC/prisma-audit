@@ -1,5 +1,6 @@
 /**
- * Tag-based Performance Strategies E2E Tests
+ * Per-model write strategies E2E tests: `write.awaited` and `samplingRate` as functions of the
+ * operation's model name
  */
 
 import {
@@ -17,7 +18,12 @@ import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/c
 import { PrismaPg } from '@prisma/adapter-pg';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-describe('Tag-based Strategies E2E', () => {
+/** Models whose audit is awaited and always sampled in */
+const criticalModels = new Set(['User']);
+/** Models sampled in at a reduced rate */
+const moderateVolumeModels = new Set(['Post']);
+
+describe('Per-model Strategies E2E', () => {
   let basePrisma: PrismaClient;
   const auditProvider = createAsyncLocalStorageProvider();
 
@@ -30,26 +36,22 @@ describe('Tag-based Strategies E2E', () => {
     await basePrisma.$disconnect();
   });
 
-  describe('awaitWriteIf with database operations', () => {
-    it('should write audit log synchronously for critical tagged models', async () => {
+  describe('write.awaited as a function with database operations', () => {
+    it('should write audit log synchronously for a model the function awaits', async () => {
       const entities = defineEntities<AuditModelName, PrismaClient>()({
         User: defineEntity({
           type: 'User',
           excludeFields: ['updatedAt'],
-          tags: ['critical', 'pii'],
         }),
       });
 
-      const awaitWriteIfSpy = vi.fn((_modelName: string, tags: string[]) => {
-        return tags.includes('critical');
-      });
+      const awaitedSpy = vi.fn((modelName: string) => criticalModels.has(modelName));
 
       const prisma = createAuditClient(basePrisma, {
         contextProvider: auditProvider,
         entities,
-        performance: {
-          awaitWrite: false,
-          awaitWriteIf: awaitWriteIfSpy,
+        write: {
+          awaited: awaitedSpy,
         },
         Prisma,
         schema: auditSchema,
@@ -76,28 +78,24 @@ describe('Tag-based Strategies E2E', () => {
       expect(auditLogs).toHaveLength(1);
       expect(auditLogs[0]?.action).toBe('create');
       expect(auditLogs[0]?.entityCategory).toBe('model');
-      expect(awaitWriteIfSpy).toHaveBeenCalledWith('User', ['critical', 'pii']);
+      expect(awaitedSpy).toHaveBeenCalledWith('User');
     });
 
-    it('should write audit log asynchronously for non-critical tagged models', async () => {
+    it('should write audit log asynchronously for a model the function does not await', async () => {
       const entities = defineEntities<AuditModelName, PrismaClient>()({
         Post: defineEntity({
           type: 'Post',
           aggregates: [to('User', foreignKey('authorId'))],
-          tags: ['analytics', 'non-critical'],
         }),
       });
 
-      const awaitWriteIfSpy = vi.fn((_modelName: string, tags: string[]) => {
-        return tags.includes('critical');
-      });
+      const awaitedSpy = vi.fn((modelName: string) => criticalModels.has(modelName));
 
       const prisma = createAuditClient(basePrisma, {
         contextProvider: auditProvider,
         entities,
-        performance: {
-          awaitWrite: false,
-          awaitWriteIf: awaitWriteIfSpy,
+        write: {
+          awaited: awaitedSpy,
         },
         Prisma,
         schema: auditSchema,
@@ -134,31 +132,27 @@ describe('Tag-based Strategies E2E', () => {
       });
 
       expect(auditLogs.map((log) => log.aggregateType).sort()).toEqual(['Post', 'User']);
-      expect(awaitWriteIfSpy).toHaveBeenCalledWith('Post', ['analytics', 'non-critical']);
+      expect(awaitedSpy).toHaveBeenCalledWith('Post');
     });
   });
 
-  describe('samplingIf with database operations', () => {
-    it('should apply 100% sampling for financial tagged models', async () => {
+  describe('samplingRate as a function with database operations', () => {
+    it('should apply 100% sampling to a model the function returns 1 for', async () => {
       const entities = defineEntities<AuditModelName, PrismaClient>()({
         User: defineEntity({
           type: 'User',
           excludeFields: ['updatedAt'],
-          tags: ['financial', 'critical'],
         }),
       });
 
-      const samplingIfSpy = vi.fn((_modelName: string, tags: string[]) => {
-        return tags.includes('financial') ? 1.0 : 0.0;
-      });
+      const samplingRateSpy = vi.fn((modelName: string) => (criticalModels.has(modelName) ? 1.0 : 0.0));
 
       const prisma = createAuditClient(basePrisma, {
         contextProvider: auditProvider,
         entities,
-        performance: {
-          sampling: 0.5,
-          samplingIf: samplingIfSpy,
-          awaitWrite: true, // Ensure synchronous for testing
+        samplingRate: samplingRateSpy,
+        write: {
+          awaited: true, // Ensure synchronous for testing
         },
         Prisma,
         schema: auditSchema,
@@ -189,20 +183,19 @@ describe('Tag-based Strategies E2E', () => {
       });
 
       expect(auditLogs).toHaveLength(10);
-      expect(samplingIfSpy).toHaveBeenCalledWith('User', ['financial', 'critical']);
+      expect(samplingRateSpy).toHaveBeenCalledWith('User');
     });
 
-    it('should apply reduced sampling rate for analytics tagged models', async () => {
+    it('should apply a reduced sampling rate to a model the function returns one for', async () => {
       const entities = defineEntities<AuditModelName, PrismaClient>()({
         Post: defineEntity({
           type: 'Post',
           aggregates: [to('User', foreignKey('authorId'))],
-          tags: ['analytics', 'high-volume'],
         }),
       });
       let callCount = 0;
-      const samplingIfSpy = vi.fn((_modelName: string, tags: string[]) => {
-        if (!tags.includes('analytics')) {
+      const samplingRateSpy = vi.fn((modelName: string) => {
+        if (!moderateVolumeModels.has(modelName)) {
           return 1.0;
         }
         callCount++;
@@ -212,10 +205,9 @@ describe('Tag-based Strategies E2E', () => {
       const prisma = createAuditClient(basePrisma, {
         contextProvider: auditProvider,
         entities,
-        performance: {
-          sampling: 1.0, // Global default (overridden by samplingIf)
-          samplingIf: samplingIfSpy,
-          awaitWrite: true,
+        samplingRate: samplingRateSpy,
+        write: {
+          awaited: true,
         },
         Prisma,
         schema: auditSchema,
@@ -256,44 +248,38 @@ describe('Tag-based Strategies E2E', () => {
       expect(auditLogs.filter((log) => log.aggregateType === 'Post')).toHaveLength(sampledInCreates);
       expect(auditLogs.filter((log) => log.aggregateType === 'User')).toHaveLength(sampledInCreates);
       expect(auditLogs).toHaveLength(sampledInCreates * 2);
-      expect(samplingIfSpy).toHaveBeenCalledTimes(operationCount);
-      expect(samplingIfSpy).toHaveBeenCalledWith('Post', ['analytics', 'high-volume']);
+      expect(samplingRateSpy).toHaveBeenCalledTimes(operationCount);
+      expect(samplingRateSpy).toHaveBeenCalledWith('Post');
     });
   });
 
-  describe('Combined tag-based strategies in transactions', () => {
+  describe('Combined per-model strategies in transactions', () => {
     it('should apply different strategies to different models in same transaction', async () => {
       const entities = defineEntities<AuditModelName, PrismaClient>()({
         User: defineEntity({
           type: 'User',
           excludeFields: ['updatedAt'],
-          tags: ['critical', 'pii'],
         }),
         Post: defineEntity({
           type: 'Post',
           aggregates: [to('User', foreignKey('authorId'))],
-          tags: ['user-content', 'moderate-volume'],
         }),
       });
 
-      const awaitWriteIfSpy = vi.fn((_modelName: string, tags: string[]) => {
-        return tags.includes('critical');
-      });
+      const awaitedSpy = vi.fn((modelName: string) => criticalModels.has(modelName));
 
-      const samplingIfSpy = vi.fn((_modelName: string, tags: string[]) => {
-        if (tags.includes('critical')) return 1.0;
-        if (tags.includes('moderate-volume')) return 0.5;
+      const samplingRateSpy = vi.fn((modelName: string) => {
+        if (criticalModels.has(modelName)) return 1.0;
+        if (moderateVolumeModels.has(modelName)) return 0.5;
         return 1.0;
       });
 
       const prisma = createAuditClient(basePrisma, {
         contextProvider: auditProvider,
         entities,
-        performance: {
-          awaitWrite: false,
-          awaitWriteIf: awaitWriteIfSpy,
-          sampling: 1.0,
-          samplingIf: samplingIfSpy,
+        samplingRate: samplingRateSpy,
+        write: {
+          awaited: awaitedSpy,
         },
         Prisma,
         schema: auditSchema,
@@ -308,7 +294,7 @@ describe('Tag-based Strategies E2E', () => {
         },
         async () => {
           await prisma.$transaction(async (tx) => {
-            // User creation (critical, should use awaitWrite: true)
+            // User creation (critical, awaited)
             const user = await tx.user.create({
               data: {
                 email: 'txn-user@example.com',
@@ -316,7 +302,7 @@ describe('Tag-based Strategies E2E', () => {
               },
             });
 
-            // Post creation (moderate-volume, should use awaitWrite: false)
+            // Post creation (moderate-volume, not awaited)
             await tx.post.create({
               data: {
                 title: 'Transaction Post',
@@ -343,10 +329,10 @@ describe('Tag-based Strategies E2E', () => {
       });
       expect(postAuditLogs.map((log) => log.aggregateType)).toEqual(['Post', 'User']);
 
-      expect(awaitWriteIfSpy).toHaveBeenCalledWith('User', ['critical', 'pii']);
-      expect(awaitWriteIfSpy).toHaveBeenCalledWith('Post', ['user-content', 'moderate-volume']);
-      expect(samplingIfSpy).toHaveBeenCalledWith('User', ['critical', 'pii']);
-      expect(samplingIfSpy).toHaveBeenCalledWith('Post', ['user-content', 'moderate-volume']);
+      expect(awaitedSpy).toHaveBeenCalledWith('User');
+      expect(awaitedSpy).toHaveBeenCalledWith('Post');
+      expect(samplingRateSpy).toHaveBeenCalledWith('User');
+      expect(samplingRateSpy).toHaveBeenCalledWith('Post');
     });
   });
 });

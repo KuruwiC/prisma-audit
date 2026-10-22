@@ -33,8 +33,8 @@ describe('Custom Audit Log Table', () => {
       schema: auditSchema,
       contextProvider: provider,
       entities: testEntities,
-      performance: {
-        awaitWrite: true,
+      write: {
+        awaited: true,
       },
     });
 
@@ -44,12 +44,10 @@ describe('Custom Audit Log Table', () => {
       Prisma,
       schema: auditSchema,
       entities: testEntities,
-      auditLogModel: 'Activity',
-      performance: {
-        awaitWrite: true,
-      },
-      errorHandling: {
-        writeFailurePolicy: (context) => {
+      write: {
+        model: 'Activity',
+        awaited: true,
+        onError: (context) => {
           console.error(`[Custom Table Test] Audit error in ${context.phase}:`, context.error);
           return 'throw';
         },
@@ -110,7 +108,7 @@ describe('Custom Audit Log Table', () => {
   });
 
   describe('Custom activities table', () => {
-    it('should write to activities table when auditLogModel is set', async () => {
+    it('should write to activities table when write.model is set', async () => {
       await customContext.provider.runAsync(testActor, async () => {
         await customContext.customPrisma.user.create({
           data: {

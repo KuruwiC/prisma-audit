@@ -413,9 +413,9 @@ describe('Composite Primary Key (PostLike)', () => {
         entities: testEntities,
         diffing: { excludeFields: ['createdAt'] },
         security: { redact: { fields: [] } },
-        performance: { awaitWrite: true },
+        write: { awaited: true },
         fetchBefore: { models: { PostLike: { delete: false } } },
-        errorHandling: { observer },
+        errorObserver: observer,
       });
       scenario = { basePrisma, prisma };
 
@@ -472,7 +472,7 @@ describe('Composite Primary Key (PostLike)', () => {
 
       // No fabricated identity, but also no false "unresolved" report: the entityId was
       // genuinely resolved from the WHERE clause, so `onUnresolvedDeleteEntityId` (and by
-      // extension `errorHandling.observer`) is never reached for this delete.
+      // extension `errorObserver`) is never reached for this delete.
       expect(observer).not.toHaveBeenCalled();
     });
   });

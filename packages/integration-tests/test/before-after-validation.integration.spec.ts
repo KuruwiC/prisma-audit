@@ -80,13 +80,13 @@ describe('Before/After Field Validation', () => {
       expect(updated.updatedAt).toBeInstanceOf(Date);
     });
 
-    it('returns Date instances from a create with awaitWrite: false', async () => {
+    it('returns Date instances from a create with awaited: false', async () => {
       const prisma = createAuditClient(context.basePrisma, {
         Prisma,
         schema: auditSchema,
         contextProvider: context.provider,
         entities: testEntities,
-        performance: { awaitWrite: false },
+        write: { awaited: false },
       });
 
       const user = await context.provider.runAsync(testActor, () =>

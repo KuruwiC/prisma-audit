@@ -44,7 +44,7 @@ describe('createPrismaWriteExecutor', () => {
     const create = vi.fn(async (_args: { data: Record<string, unknown> }) => ({}));
     const client = { activity: { create } };
 
-    await createPrismaWriteExecutor(DbNull, { auditLogModel: 'activity', storesBeforeUnavailable: false }).write(
+    await createPrismaWriteExecutor(DbNull, { auditLogAccessor: 'activity', storesBeforeUnavailable: false }).write(
       client,
       [record],
     );
@@ -55,7 +55,7 @@ describe('createPrismaWriteExecutor', () => {
   it('leaves beforeUnavailable out of the row when the audit-log model has no column for it', async () => {
     const { client, create } = clientWithAuditLog();
 
-    await createPrismaWriteExecutor(DbNull, { auditLogModel: 'auditLog', storesBeforeUnavailable: false }).write(
+    await createPrismaWriteExecutor(DbNull, { auditLogAccessor: 'auditLog', storesBeforeUnavailable: false }).write(
       client,
       [record],
     );
@@ -68,7 +68,7 @@ describe('createPrismaWriteExecutor', () => {
   it('writes beforeUnavailable when the audit-log model has a column for it', async () => {
     const { client, create } = clientWithAuditLog();
 
-    await createPrismaWriteExecutor(DbNull, { auditLogModel: 'auditLog', storesBeforeUnavailable: true }).write(
+    await createPrismaWriteExecutor(DbNull, { auditLogAccessor: 'auditLog', storesBeforeUnavailable: true }).write(
       client,
       [record],
     );
@@ -89,7 +89,7 @@ describe('createPrismaWriteExecutor', () => {
   it.each(nullableColumns)('writes %s as DbNull when the record has null there', async (column) => {
     const { client, create } = clientWithAuditLog();
 
-    await createPrismaWriteExecutor(DbNull, { auditLogModel: 'auditLog', storesBeforeUnavailable: false }).write(
+    await createPrismaWriteExecutor(DbNull, { auditLogAccessor: 'auditLog', storesBeforeUnavailable: false }).write(
       client,
       [{ ...record, [column]: null }],
     );
@@ -101,7 +101,7 @@ describe('createPrismaWriteExecutor', () => {
     const { client, create } = clientWithAuditLog();
     const value = { marker: column };
 
-    await createPrismaWriteExecutor(DbNull, { auditLogModel: 'auditLog', storesBeforeUnavailable: false }).write(
+    await createPrismaWriteExecutor(DbNull, { auditLogAccessor: 'auditLog', storesBeforeUnavailable: false }).write(
       client,
       [{ ...record, [column]: value }],
     );
@@ -110,7 +110,10 @@ describe('createPrismaWriteExecutor', () => {
   });
 
   it('rejects a write when the client has no audit-log model, even for no record', async () => {
-    const executor = createPrismaWriteExecutor(DbNull, { auditLogModel: 'auditLog', storesBeforeUnavailable: false });
+    const executor = createPrismaWriteExecutor(DbNull, {
+      auditLogAccessor: 'auditLog',
+      storesBeforeUnavailable: false,
+    });
 
     await expect(executor.write({}, [])).rejects.toThrow(
       'Audit log model "auditLog" not found in Prisma client. Ensure the model name matches your Prisma schema.',
@@ -118,7 +121,10 @@ describe('createPrismaWriteExecutor', () => {
   });
 
   it('rejects a write when the audit-log model has no create method', async () => {
-    const executor = createPrismaWriteExecutor(DbNull, { auditLogModel: 'auditLog', storesBeforeUnavailable: false });
+    const executor = createPrismaWriteExecutor(DbNull, {
+      auditLogAccessor: 'auditLog',
+      storesBeforeUnavailable: false,
+    });
 
     await expect(executor.write({ auditLog: { createMany: vi.fn() } }, [record])).rejects.toThrow(
       'Audit log model "auditLog" has no create method. Verify that the model is correctly defined in your Prisma schema.',
@@ -138,7 +144,7 @@ describe('the inserts a write issues', () => {
     return { client: { auditLog: withCreateMany ? { create, createMany } : { create } }, create, createMany };
   };
   const write = (client: Record<string, unknown>, records: AuditRecord[]) =>
-    createPrismaWriteExecutor(DbNull, { auditLogModel: 'auditLog', storesBeforeUnavailable: false }).write(
+    createPrismaWriteExecutor(DbNull, { auditLogAccessor: 'auditLog', storesBeforeUnavailable: false }).write(
       client,
       records,
     );

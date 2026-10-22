@@ -94,9 +94,15 @@ const prisma = createAuditClient(basePrisma, {
 | Enricher `onError: 'fail' \| 'log' \| 'skip' \| (error) => value`  | `onError: 'throw' \| 'log' \| 'ignore' \| (error) => strategy`; the stored value comes from `fallback` |
 | `nestedOperations: { update: { fetchBeforeOperation }, delete: { fetchBeforeOperation } }` | `fetchBefore: { update, delete }`                         |
 | `defineEntity({ nestedOperations: { ... } })`                       | `fetchBefore: { models: { Post: { update, delete } } }`                         |
-| `hooks.writer(logs, context, defaultWrite)`                         | `hooks.writer(records, { auditContext, handle, inTransaction, defaultWrite })`  |
-| `hooks.errorHandler`                                                | `errorHandling.writeFailurePolicy`                                              |
-| `onAuditErrorHandler`                                               | `errorHandling.observer`                                                        |
+| `auditLogModel`                                                     | `write.model`                                                                   |
+| `performance.awaitWrite`                                            | `write.awaited`                                                                 |
+| `performance.awaitWriteIf: (modelName, tags) => boolean`            | `write.awaited: (modelName) => boolean`                                         |
+| `performance.sampling`                                              | `samplingRate`                                                                  |
+| `performance.samplingIf: (modelName, tags) => number`               | `samplingRate: (modelName) => number`                                           |
+| `defineEntity({ tags })`                                            | Removed. A `write.awaited` or `samplingRate` function branches on the model name |
+| `hooks.writer(logs, context, defaultWrite)`                         | `write.writer(records, { auditContext, handle, inTransaction, defaultWrite })`  |
+| `hooks.errorHandler`                                                | `write.onError`                                                                 |
+| `onAuditErrorHandler`                                               | `errorObserver`                                                                 |
 | `createEntityNormalizedWriter(schema, basePrisma)`, `createSharedChangeWriter(schema, basePrisma)` | `createEntityNormalizedWriter(schema)`, `createSharedChangeWriter(schema)` |
 | `resolveId(fn)`, `batchResolveIds(fn)`                              | `lookup(fn)`, `batchLookup(fn)` (`batchLookup` from `@kuruwic/db-audit-core`)   |
 | `defineEntity<TDbClient, TModelName>(...)`                          | `defineEntity<TEntity, TDbHandle>(...)`: the row type, then the client type     |
@@ -113,7 +119,7 @@ hooks: {
 },
 
 // Current
-hooks: {
+write: {
   writer: async (records, { auditContext, defaultWrite }) => {
     await defaultWrite(records);
     await sendToExternalService(records, auditContext);
@@ -128,7 +134,7 @@ The records a writer receives are `AuditRecord`s (`AuditLogData` is the same typ
 - Each record carries `beforeUnavailable` (see [Audit rows](#audit-rows)). A writer that passes the records unchanged to a model's `createMany` needs that column on the model, or leaves the field out, since Prisma rejects a field the model does not declare.
 - `createAuditLogData(input)` requires `beforeUnavailable` in its input, and takes the same `action` type.
 
-A write-failure policy function receives the same context as the observer and returns a strategy instead of throwing:
+A `write.onError` function receives the same context as `errorObserver` and returns a strategy instead of throwing:
 
 ```typescript
 // v0.1.6
@@ -140,39 +146,38 @@ hooks: {
 onAuditErrorHandler: ({ phase, modelName, error }) => { /* ... */ },
 
 // Current
-errorHandling: {
-  writeFailurePolicy: (context) => (context.modelName === "Payment" ? "throw" : "log"),
-  observer: ({ phase, modelName, error }) => {
-    Sentry.captureException(error);
-  },
+write: {
+  onError: (context) => (context.modelName === "Payment" ? "throw" : "log"),
+},
+errorObserver: ({ phase, modelName, error }) => {
+  Sentry.captureException(error);
 },
 ```
 
-The observer's `phase` is one of `'pre-fetch' | 'log-write' | 'diff-generation' | 'row-identification' | 'id-resolver-call'` (v0.1.6: the first three).
+The `phase` `errorObserver` receives is one of `'pre-fetch' | 'log-write' | 'diff-generation' | 'row-identification' | 'id-resolver-call'` (v0.1.6: the first three).
 
 ## Write and failure behaviour
 
 | Case | v0.1.6 | Current |
 | ---- | ------ | ------- |
-| `awaitWrite: true`, outside your interactive `$transaction` | The extension opens a transaction around the operation and its audit write; a failed audit write fails the operation and rolls it back | The operation commits, then its audit is written and awaited; a failed audit write is reported and the operation succeeds |
-| Failed awaited audit write inside your interactive `$transaction` | Always thrown | Decided by `errorHandling.writeFailurePolicy`, default `'log'`: logged, the operation continues |
-| Failed audit write with `awaitWrite: false` | `hooks.errorHandler`, default `'log'` | `errorHandling.writeFailurePolicy`, default `'log'`; `'throw'` logs, since the operation has already returned |
-| Prisma's batch `$transaction([...])` | Each operation is audited on its own; an operation the batch rolls back can keep its audit row (observed on Prisma 7) | The audit rows are written after the batch commits, and not at all when it rejects; with `awaitWrite`, `$transaction([...])` resolves after they are written |
+| An awaited audit write (v0.1.6 `awaitWrite: true`, current `write.awaited: true`), outside your interactive `$transaction` | The extension opens a transaction around the operation and its audit write; a failed audit write fails the operation and rolls it back | The operation commits, then its audit is written and awaited; a failed audit write is reported and the operation succeeds |
+| Failed awaited audit write inside your interactive `$transaction` | Always thrown | Decided by `write.onError`, default `'log'`: logged, the operation continues |
+| Failed audit write that is not awaited (v0.1.6 `awaitWrite: false`, current `write.awaited: false`) | `hooks.errorHandler`, default `'log'` | `write.onError`, default `'log'`; `'throw'` logs, since the operation has already returned |
+| Prisma's batch `$transaction([...])` | Each operation is audited on its own; an operation the batch rolls back can keep its audit row (observed on Prisma 7) | The audit rows are written after the batch commits, and not at all when it rejects; with `write.awaited`, `$transaction([...])` resolves after they are written |
 | An enricher fails under `'skip'` / `'ignore'` with a `fallback` | `'skip'` stores `null`, ignoring `fallback` | `'ignore'` stores `fallback ?? null`, as `'log'` does, without the warning |
 | An enricher's `onError` function | Its return value is stored, or `fallback` when it returns `null` or `undefined` | It returns `'throw'`, `'log'` or `'ignore'` (or a promise of one), applied as above; when it throws or returns anything else, the failure is logged and handled as `'log'` |
-| `samplingIf` / `awaitWriteIf` for a model whose `defineEntity` sets no `tags` | Not called; the model uses `sampling` / `awaitWrite` | Called with `tags` `[]`; its result applies |
+| Per-model sampling and write strategy for a model whose `defineEntity` sets no `tags` | `samplingIf` / `awaitWriteIf` are not called; the model uses `sampling` / `awaitWrite` | There are no tags: a `samplingRate` / `write.awaited` function is called with the name of every audited operation's top-level model, and its result applies to the whole operation, nested writes included |
 | A Prisma error of your own operation (for example `P2002`) | Single-record operations rethrow it with the message prefixed `[@prisma-audit] Audited operation failed for model "…" and action "…": ` | The error Prisma threw, unchanged |
 
 To keep the v0.1.6 guarantee that an operation and its audit rows commit or roll back together, and that a failed audit write fails the operation:
 
 ```typescript
-performance: { awaitWrite: true, openImplicitTransaction: true },
-errorHandling: { writeFailurePolicy: "throw" },
+write: { awaited: true, implicitTransaction: true, onError: "throw" },
 ```
 
-With `openImplicitTransaction`, a call on a model delegate returns a lazy operation that runs when awaited or passed to a batch `$transaction([...])` of the same client; see `openImplicitTransaction` in the `@kuruwic/prisma-audit` README.
+With `write.implicitTransaction`, a call on a model delegate returns a lazy operation that runs when awaited or passed to a batch `$transaction([...])` of the same client; see `write.implicitTransaction` in the `@kuruwic/prisma-audit` README.
 
-A callback written for tagged models, such as `samplingIf: (_, tags) => (tags.includes("critical") ? 1 : 0)`, samples out every model without tags. To keep the v0.1.6 result, return the global value when `tags` is empty: `(_, tags) => (tags.length === 0 ? sampling : tags.includes("critical") ? 1 : 0)`, with `sampling` the value of `performance.sampling` (default `1`); an `awaitWriteIf` returns `performance.awaitWrite` (default `true`) the same way.
+A v0.1.6 callback written for tagged models, such as `samplingIf: (_, tags) => (tags.includes("critical") ? 1 : 0)` with `sampling: 0.1`, becomes a function of the model name that lists the models instead of tagging them and returns the global value for the others, since it is now called for every model: `samplingRate: (modelName) => (criticalModels.has(modelName) ? 1 : 0.1)`, with `criticalModels` a `Set` of model names. An `awaitWriteIf` becomes a `write.awaited` function the same way, returning the former `awaitWrite` (default `true`) for the other models.
 
 ## Audit rows
 
@@ -203,11 +208,12 @@ Renamed:
 | `AggregateRoot` (`resolve`, `batchResolve`) | `AggregateProjection` (`idResolver`, `batchIdResolver`) |
 | `GlobalContextEnricherConfig` (`actor`) | `ActorContextConfig` (the former `actor` object) |
 | `PrismaModelNames`, `CapitalizedModelNames`, `TypedAggregateMapping` | `AuditModelName` from the generator's output, `EntityMap<AuditModelName, PrismaClient>` |
-| `ErrorHandler`, `AuditErrorHandler` | `WriteFailurePolicy`, `AuditErrorObserver` |
+| `ErrorHandler`, `AuditErrorHandler` | `WriteOnError`, `AuditErrorObserver` |
 | `CoreAuditLogData`, `CoreAuditLogInput` | `AuditLogData`, `AuditLogInput` |
 | `createAuditLogExtension` | `createAuditClient` |
 | `flushPendingWrites`, `flushPendingDeferredWrites` | `flushAllPendingWrites` |
-| `HooksConfig`, `DiffingConfig`, `SecurityConfig` | `PrismaAuditExtensionOptions['hooks']`, `['diffing']`, `['security']` |
+| `HooksConfig`, `PerformanceConfig` | `WriteConfig` (`write.writer`, `write.awaited`), and `PrismaAuditExtensionOptions['samplingRate']` |
+| `DiffingConfig`, `SecurityConfig` | `PrismaAuditExtensionOptions['diffing']`, `['security']` |
 
 Removed, with no replacement:
 

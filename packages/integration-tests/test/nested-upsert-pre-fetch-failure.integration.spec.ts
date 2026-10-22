@@ -65,7 +65,7 @@ describe('nested upsert and connectOrCreate whose target could not be read', () 
       entities: testEntities,
       diffing: { excludeFields: ['createdAt', 'updatedAt'] },
       security: { redact: { fields: [] } },
-      errorHandling: { observer },
+      errorObserver: observer,
     });
 
     return { rawBasePrisma, basePrisma, provider, prisma, observer, armed };

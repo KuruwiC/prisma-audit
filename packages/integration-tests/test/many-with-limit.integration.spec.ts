@@ -72,8 +72,8 @@ describe('updateMany and deleteMany with a limit', () => {
         schema: auditSchema,
         contextProvider: provider,
         entities: { User: defineEntity({ type: 'User' }) },
-        performance: { awaitWrite: false },
-        errorHandling: { observer },
+        write: { awaited: false },
+        errorObserver: observer,
       },
     ).$extends({
       name: 'update-recorder',

@@ -5,7 +5,7 @@
  * base client before the audit extension sees every audited operation on its way in, and one
  * applied to the audited client after it sees the operation once the audit extension continues
  * it through `query`. The audit extension always continues the caller's operation that way, and
- * with `openImplicitTransaction` the transaction is opened before the operation enters the chain,
+ * with `implicitTransaction` the transaction is opened before the operation enters the chain,
  * so each extension sees one audited `user.update` once in every execution scope. The audit's own
  * reads and writes are separate queries; the counts are of the caller's update only. A change that
  * moves a count must update the number and its comment, never loosen the assertion instead. A write
@@ -35,7 +35,7 @@ interface SeenOperation {
  * Builds an audited client whose base client carries a query extension that records every
  * operation it sees, applied before the audit extension.
  */
-const createClients = (awaitWrite: boolean, openImplicitTransaction = false) => {
+const createClients = (awaited: boolean, implicitTransaction = false) => {
   const rawBasePrisma = createBasePrisma();
   const seen: SeenOperation[] = [];
 
@@ -57,7 +57,10 @@ const createClients = (awaitWrite: boolean, openImplicitTransaction = false) => 
     schema: auditSchema,
     contextProvider: provider,
     entities: { User: defineEntity({ type: 'User' }) },
-    performance: { awaitWrite, openImplicitTransaction },
+    write: {
+      awaited,
+      implicitTransaction,
+    },
   });
 
   const userUpdatesSeen = () => seen.filter((call) => call.model === 'User' && call.operation === 'update');
@@ -119,7 +122,7 @@ describe('Extension Chain Guard', () => {
 
   describe.each([
     { scope: 'outside any transaction, written once the update has committed', clients: () => awaited },
-    { scope: 'in the transaction openImplicitTransaction opens around it', clients: () => opening },
+    { scope: 'in the transaction implicitTransaction opens around it', clients: () => opening },
   ])('an update whose audit is awaited, $scope', ({ clients: clientsOf }) => {
     it('reaches an extension applied before the audit extension once', async () => {
       const clients = clientsOf();
@@ -159,7 +162,7 @@ describe('Extension Chain Guard', () => {
       );
 
       // 1. the caller's call, in Prisma's batch, or replayed on the client of the interactive
-      //    transaction the batch runs in with openImplicitTransaction
+      //    transaction the batch runs in with implicitTransaction
       expect(clients.userUpdatesSeen()).toHaveLength(1);
       expect(await auditRowsForUpdate(clients)).toHaveLength(1);
     });
@@ -204,7 +207,7 @@ describe('Extension Chain Guard', () => {
   });
 
   it.each([
-    { scope: 'with openImplicitTransaction', clients: () => opening, explicitTransaction: false },
+    { scope: 'with implicitTransaction', clients: () => opening, explicitTransaction: false },
     { scope: 'inside an explicit $transaction', clients: () => awaited, explicitTransaction: true },
   ])(
     "does not audit a write an extension applied after the audit extension issues while it handles the audit's own read, $scope",
@@ -242,7 +245,7 @@ describe('Extension Chain Guard', () => {
     },
   );
 
-  it('an update outside any transaction with awaitWrite: false reaches the extension once', async () => {
+  it('an update outside any transaction with awaited: false reaches the extension once', async () => {
     const user = await createUser(detached, 'detached-write@example.com');
     detached.seen.length = 0;
 

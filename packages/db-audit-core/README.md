@@ -17,7 +17,7 @@ It is installed as a dependency of `@kuruwic/prisma-audit`. Each GitHub release 
 An adapter calls four functions for each intercepted write:
 
 ```
-policy(model, tags, config)                    -> { sampled, atomic } before the write runs
+policy(model, config)                          -> { sampled, atomic } before the write runs
   adapter runs the write
 dispatch({ buildRecords, modelName, operation, params, atomic, auditContext }, config, runtime)
                                                -> builds the records, then writes them immediately, after commit, or detached
@@ -28,9 +28,11 @@ dispatch({ buildRecords, modelName, operation, params, atomic, auditContext }, c
 ```
 
 - **`policy`** decides, once per audited operation, whether the operation is sampled in
-  (`Math.random()` below `samplingIf(model, tags)` when configured, otherwise below `sampling`)
-  and, only when it is, whether the audit rows are written atomically with it:
-  `awaitWriteIf(model, tags)` when configured, otherwise `awaitWrite`. A sampled-out operation
+  (`Math.random()` below `samplingRate`, or below `samplingRate(model)` when it is a function)
+  and, only when it is, whether the audit rows are written atomically with it: `awaited`, or
+  `awaited(model)` when it is a function. `model` is the operation's top-level model, and the
+  decision covers its nested writes too. An adapter's user-facing `write.awaited` option is the
+  `awaited` that decides `atomic`. A sampled-out operation
   gets `{ sampled: false }` and writes no audit rows. It runs before the write so that an adapter
   may open a transaction around an atomic operation when none is active.
 - **`MutationEvent`** is one written row as the adapter saw it: model, identity, action
@@ -104,9 +106,10 @@ dispatch({ buildRecords, modelName, operation, params, atomic, auditContext }, c
 - **Context provider**: `createAsyncLocalStorageProvider()` returns an `AuditContextProvider`
   (`run`, `runAsync`, `getContext`, `withActor`) that carries the actor and request context through
   async calls.
-- **Failure handling**: `ErrorHandlingConfig` (`observer`, `writeFailurePolicy`, default
-  `'log'`), `AuditErrorPhase`, `AuditErrorContext`, `AuditErrorObserver`, `WriteFailurePolicy`,
-  and `createFailureSink`, which an adapter builds from the user's `ErrorHandlingConfig`.
+- **Failure handling**: `FailureSinkConfig` (`observer`, `writeOnError`, default `'log'`),
+  `AuditErrorPhase`, `AuditErrorContext`, `AuditErrorObserver`, `WriteOnError`, and
+  `createFailureSink`, which an adapter builds from the user's `errorObserver` and `write.onError`
+  options.
 - **Utilities**: the branded id constructors (`createActorId`, `createEntityId`,
   `createAggregateId`), `unwrapId`, and `createAuditLogData`.
 - **Debug output**: the core logs through [`debug`](https://www.npmjs.com/package/debug) under the
@@ -136,10 +139,9 @@ An adapter owns everything that touches the database: intercepting writes, readi
 transactions and persisting records. The core owns the decisions in between. For each intercepted
 write the adapter runs, in order:
 
-1. **`policy(model, tags, policyConfig)`**, before any statement runs, to learn whether the
+1. **`policy(model, policyConfig)`**, before any statement runs, to learn whether the
    operation is sampled in and, when it is, whether the audit rows are written atomically with the
-   write. A sampled-out operation runs as it would without the adapter. The tags come from the
-   entity's configuration (`createEntityConfigLookup(entities).byModel(model)?.tags`).
+   write. A sampled-out operation runs as it would without the adapter.
 2. **The write, in its scope.** When `atomic` is true and no transaction is active, the adapter
    may open an implicit transaction and run the write, and everything below, on that transaction's
    handle; otherwise the write runs on the base handle and `dispatch` writes the atomic records
@@ -199,11 +201,11 @@ What the adapter must provide:
   commit (and dropping it on rollback), and tracking detached work are the adapter's; `dispatch`
   sees only the runtime's `baseHandle`, `transaction` and `detach`.
 - **Failure routing.** The adapter builds one `FailureSink` with
-  `createFailureSink(errorHandlingConfig)` and reports every failure through it. The sink owns
+  `createFailureSink(failureSinkConfig)` and reports every failure through it. The sink owns
   the user-facing contract: the observer hears every failure and never affects the operation (an
   observer that throws is logged), and only a failed write, or the records of a committed write
-  that `dispatch` dropped, consult `writeFailurePolicy` (default `'log'`; a policy function that
-  throws, or a policy that is or returns anything other than a strategy, falls back to `'log'`).
+  that `dispatch` dropped, consult `writeOnError` (default `'log'`; a function that throws, or a
+  `writeOnError` that is or returns anything other than a strategy, falls back to `'log'`).
   - `notify(context)` for a failure the adapter detects itself: `pre-fetch` (a read before the
     write failed), `diff-generation` (other work that builds the records failed before the write)
     and `row-identification` (the adapter could not identify a row the operation wrote). What each
@@ -211,7 +213,7 @@ What the adapter must provide:
     is reported by `dispatch` as `diff-generation`, and the adapter does not report it again.
   - `reportDroppedBuild(context)` for the records of a committed write whose build failed and
     that no write is left to await: notifies the observer under `diff-generation`, then applies
-    `writeFailurePolicy`. `'throw'` logs, because the caller has returned. `dispatch` calls it; an
+    `writeOnError`. `'throw'` logs, because the caller has returned. `dispatch` calls it; an
     adapter does not.
   - `reportResolverFailures(failures)` with the `ResolverFailure`s `resolve` returned instead of
     throwing (an id resolver threw or returned no usable id), one `id-resolver-call` notification
@@ -225,7 +227,7 @@ What the adapter must provide:
 `runAudited` in `src/adapter.ts` is the whole sequence:
 
 ```typescript
-const writePolicy = policy(model, tags, policyConfig);
+const writePolicy = policy(model, policyConfig);
 if (!writePolicy.sampled) {
   mutate(currentHandle());
   return;
@@ -299,8 +301,8 @@ shows how such an adapter would plug into the boundary.
   `transaction`, and a `detach` that tracks the write in a set the adapter can wait on.
 - **`WriteExecutor`.** A `WriteExecutor` over the Drizzle database or transaction type, constructed
   with the audit-log `Table`: `write(handle, records)` runs `handle.insert(auditLogTable).values(rows)`.
-- **Sampling and failures.** A per-table sampling rate is `samplingIf(model, tags)` in the policy
-  configuration. A failed before-read goes to the failure sink's `notify` as `pre-fetch`; a failed
+- **Sampling and failures.** A per-table sampling rate is a `samplingRate(model)` function in the
+  policy configuration. A failed before-read goes to the failure sink's `notify` as `pre-fetch`; a failed
   record build (the statement's returned rows resolved and composed inside `buildRecords`) and a
   failed audit write are reported by `dispatch`, a detached one no caller awaits included.
 - **Relation fields.** Rows returned by `insert`, `update` and `delete` hold columns only, so

@@ -72,7 +72,7 @@ describe('nested rows attributed through their parent row', () => {
         update: options.fetchBeforeUpdate ?? true,
         models: Object.fromEntries((options.unreadModels ?? []).map((model) => [model, { update: false }])),
       },
-      errorHandling: { observer },
+      errorObserver: observer,
     });
     disconnects.push(async () => {
       await prisma.$disconnect();

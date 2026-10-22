@@ -23,7 +23,7 @@ const createAuditedClientWithWriterSpy = (
   provider: AuditContextProvider,
   writerSpy: { callCount: number; calls: Array<{ logCount: number; contextId: string }> },
   config: {
-    awaitWrite?: boolean;
+    awaited?: boolean;
     fetchBefore?: boolean;
   } = {},
 ) => {
@@ -40,14 +40,8 @@ const createAuditedClientWithWriterSpy = (
         fields: [],
       },
     },
-    performance: {
-      awaitWrite: config.awaitWrite ?? true,
-    },
-    fetchBefore: {
-      update: config.fetchBefore ?? false,
-      delete: config.fetchBefore ?? false,
-    },
-    hooks: {
+    write: {
+      awaited: config.awaited ?? true,
       writer: async (records: AuditLogData[], { auditContext, defaultWrite }) => {
         writerSpy.callCount++;
         writerSpy.calls.push({
@@ -57,10 +51,14 @@ const createAuditedClientWithWriterSpy = (
         await defaultWrite(records);
       },
     },
+    fetchBefore: {
+      update: config.fetchBefore ?? false,
+      delete: config.fetchBefore ?? false,
+    },
   });
 };
 
-describe('hooks.writer Coverage', () => {
+describe('write.writer Coverage', () => {
   let context: TestContext & {
     writerSpy: { callCount: number; calls: Array<{ logCount: number; contextId: string }> };
   };
@@ -100,8 +98,8 @@ describe('hooks.writer Coverage', () => {
     },
   };
 
-  describe('Synchronous Write Path (awaitWrite: true)', () => {
-    it('should call hooks.writer for top-level create', async () => {
+  describe('Synchronous Write Path (awaited: true)', () => {
+    it('should call write.writer for top-level create', async () => {
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.user.create({
           data: {
@@ -116,7 +114,7 @@ describe('hooks.writer Coverage', () => {
       expect(context.writerSpy.calls).toEqual([{ logCount: 1, contextId: 'test-user-1' }]);
     });
 
-    it('should call hooks.writer for top-level update', async () => {
+    it('should call write.writer for top-level update', async () => {
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -142,7 +140,7 @@ describe('hooks.writer Coverage', () => {
       expect(context.writerSpy.calls).toEqual([{ logCount: 1, contextId: 'test-user-1' }]);
     });
 
-    it('should call hooks.writer for top-level delete', async () => {
+    it('should call write.writer for top-level delete', async () => {
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -167,7 +165,7 @@ describe('hooks.writer Coverage', () => {
       expect(context.writerSpy.calls).toEqual([{ logCount: 1, contextId: 'test-user-1' }]);
     });
 
-    it('should call hooks.writer for nested update', async () => {
+    it('should call write.writer for nested update', async () => {
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -208,7 +206,7 @@ describe('hooks.writer Coverage', () => {
   });
 
   describe('Explicit Transaction Path ($transaction)', () => {
-    it('should call hooks.writer once per operation for the creates of an explicit transaction', async () => {
+    it('should call write.writer once per operation for the creates of an explicit transaction', async () => {
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.$transaction(async (tx: typeof context.prisma) => {
           await tx.user.create({
@@ -235,7 +233,7 @@ describe('hooks.writer Coverage', () => {
       ]);
     });
 
-    it('should call hooks.writer for nested operations inside transaction', async () => {
+    it('should call write.writer for nested operations inside transaction', async () => {
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.$transaction(async (tx: typeof context.prisma) => {
           await tx.user.create({
@@ -261,7 +259,7 @@ describe('hooks.writer Coverage', () => {
     });
   });
 
-  describe('Asynchronous Write Path (awaitWrite: false)', () => {
+  describe('Asynchronous Write Path (awaited: false)', () => {
     let asyncContext: TestContext & {
       writerSpy: { callCount: number; calls: Array<{ logCount: number; contextId: string }> };
     };
@@ -276,7 +274,7 @@ describe('hooks.writer Coverage', () => {
       };
 
       const prisma = createAuditedClientWithWriterSpy(basePrisma, provider, writerSpy, {
-        awaitWrite: false, // Async writes
+        awaited: false, // Async writes
       });
 
       asyncContext = {
@@ -297,7 +295,7 @@ describe('hooks.writer Coverage', () => {
       asyncContext.writerSpy.calls = [];
     });
 
-    it('should not call hooks.writer or persist audit logs when a deferred write is queued inside a transaction that then throws', async () => {
+    it('should not call write.writer or persist audit logs when a deferred write is queued inside a transaction that then throws', async () => {
       const transactionPromise = asyncContext.provider.runAsync(testActor, async () => {
         return asyncContext.prisma.$transaction(async (tx: typeof asyncContext.prisma) => {
           await tx.user.create({
@@ -325,7 +323,7 @@ describe('hooks.writer Coverage', () => {
   });
 
   describe('Edge Cases', () => {
-    it("should pass a nested create's rows to hooks.writer in a single call", async () => {
+    it("should pass a nested create's rows to write.writer in a single call", async () => {
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.user.create({
           data: {
@@ -351,7 +349,7 @@ describe('hooks.writer Coverage', () => {
   });
 
   describe('Multiple Contexts', () => {
-    it('should call hooks.writer with correct context for each operation', async () => {
+    it('should call write.writer with correct context for each operation', async () => {
       const actor1: AuditContext = {
         actor: { category: 'model', type: 'User', id: 'actor-1', name: 'Actor 1' },
       };
@@ -398,7 +396,7 @@ describe('hooks.writer Coverage', () => {
      * An audited client whose writer creates, through the handle it receives, one Tag named after
      * each audited user's email, then writes the audit logs with the default write
      */
-    const createClient = (awaitWrite: boolean) => {
+    const createClient = (awaited: boolean) => {
       const basePrisma = createBasePrisma();
       const handles: unknown[] = [];
       const prisma = createAuditClient(basePrisma, {
@@ -406,8 +404,8 @@ describe('hooks.writer Coverage', () => {
         schema: auditSchema,
         contextProvider: context.provider,
         entities: testEntities,
-        performance: { awaitWrite },
-        hooks: {
+        write: {
+          awaited: awaited,
           writer: async (records, { handle, defaultWrite }) => {
             handles.push(handle);
             for (const record of records) {
@@ -487,7 +485,7 @@ describe('hooks.writer Coverage', () => {
       }
     });
 
-    const createClient = (awaitWrite: boolean, openImplicitTransaction = false) => {
+    const createClient = (awaited: boolean, implicitTransaction = false) => {
       const basePrisma = createBasePrisma();
       const flags: boolean[] = [];
       const prisma = createAuditClient(basePrisma, {
@@ -495,8 +493,9 @@ describe('hooks.writer Coverage', () => {
         schema: auditSchema,
         contextProvider: context.provider,
         entities: testEntities,
-        performance: { awaitWrite, openImplicitTransaction },
-        hooks: {
+        write: {
+          awaited: awaited,
+          implicitTransaction: implicitTransaction,
           writer: async (records, { inTransaction, defaultWrite }) => {
             flags.push(inTransaction);
             await defaultWrite(records);
@@ -522,7 +521,7 @@ describe('hooks.writer Coverage', () => {
       expect(flags).toEqual([true]);
     });
 
-    it('is true for an awaited write in the transaction the client opens around the operation with openImplicitTransaction', async () => {
+    it('is true for an awaited write in the transaction the client opens around the operation with implicitTransaction', async () => {
       const { prisma, flags } = createClient(true, true);
 
       await context.provider.runAsync(testActor, () => createUser(prisma, 'implicit-transaction@example.com'));

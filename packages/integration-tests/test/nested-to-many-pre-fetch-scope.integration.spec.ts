@@ -37,12 +37,12 @@ describe('nested to-many pre-fetch — parent row scope', () => {
       entities: testEntities,
       diffing: { excludeFields: ['createdAt'] },
       security: { redact: { fields: [] } },
-      performance: { awaitWrite: true },
+      write: { awaited: true },
       fetchBefore: {
         update: true,
         delete: true,
       },
-      errorHandling: { observer },
+      errorObserver: observer,
     });
   });
 

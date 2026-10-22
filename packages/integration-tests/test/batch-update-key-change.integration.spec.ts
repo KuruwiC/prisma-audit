@@ -40,8 +40,8 @@ describe('a batch update whose data changes the key of its rows by an operator',
       schema: auditSchema,
       contextProvider: provider,
       entities: { AutoIncItem: defineEntity({ type: 'AutoIncItem' }) },
-      performance: { awaitWrite: true },
-      errorHandling: { observer },
+      write: { awaited: true },
+      errorObserver: observer,
     });
     disconnects.push(async () => {
       await prisma.$disconnect();

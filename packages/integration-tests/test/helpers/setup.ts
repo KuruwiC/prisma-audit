@@ -131,8 +131,8 @@ export const testAuditOptions = <TPrisma, TSchema>(
       fields: [],
     },
   },
-  performance: {
-    awaitWrite: true,
+  write: {
+    awaited: true,
   },
   fetchBefore: {
     update: true,

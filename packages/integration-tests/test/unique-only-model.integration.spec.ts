@@ -38,8 +38,8 @@ describe('a model identified by a unique field instead of a primary key', () => 
       schema: auditSchema,
       contextProvider: provider,
       entities: { Device: defineEntity({ type: 'Device', idResolver }) },
-      performance: { awaitWrite: true },
-      ...(observer ? { errorHandling: { observer } } : {}),
+      write: { awaited: true },
+      ...(observer ? { errorObserver: observer } : {}),
     });
     disconnects.push(async () => {
       await prisma.$disconnect();

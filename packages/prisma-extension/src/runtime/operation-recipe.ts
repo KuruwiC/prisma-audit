@@ -1,7 +1,7 @@
 /**
  * Operation recipes
  *
- * With `openImplicitTransaction`, a call on a model delegate or a raw-query method of the audited
+ * With `write.implicitTransaction`, a call on a model delegate or a raw-query method of the audited
  * client, or of a client derived from it, does not reach Prisma when it is made. It returns a
  * recipe: a lazy thenable holding the client the call was made on, the call, and the fluent
  * relation calls chained on it. Awaiting the recipe replays the calls on that client, inside an
@@ -354,7 +354,7 @@ export const takeBatchRecipes = (items: readonly unknown[], receiver: object, co
             : undefined;
     if (recipe === undefined || problem !== undefined) {
       throw new Error(
-        `The operation at index ${index} of the batch $transaction ${problem}: with openImplicitTransaction, every operation of a batch is created by the client $transaction is called on and passed to it before it is awaited`,
+        `The operation at index ${index} of the batch $transaction ${problem}: with write.implicitTransaction, every operation of a batch is created by the client $transaction is called on and passed to it before it is awaited`,
       );
     }
     return recipe;

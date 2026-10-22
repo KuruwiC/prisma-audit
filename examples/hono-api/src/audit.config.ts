@@ -553,8 +553,8 @@ export default defineConfig<PrismaClient>()({
     },
   },
 
-  performance: {
-    awaitWrite: true,
+  write: {
+    awaited: true,
   },
 
   actorContext: {

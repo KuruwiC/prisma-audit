@@ -123,16 +123,16 @@ describe('shouldAuditModel', () => {
   });
 
   it('audits a model the entity map declares', () => {
-    expect(shouldAuditModel({ modelName: 'User', auditLogModel: 'AuditLog', isLoggable })).toBe(true);
+    expect(shouldAuditModel({ modelName: 'User', auditLogAccessor: 'AuditLog', isLoggable })).toBe(true);
   });
 
   it('skips a model the entity map does not declare', () => {
-    expect(shouldAuditModel({ modelName: 'Session', auditLogModel: 'AuditLog', isLoggable })).toBe(false);
+    expect(shouldAuditModel({ modelName: 'Session', auditLogAccessor: 'AuditLog', isLoggable })).toBe(false);
   });
 
   it('skips the audit-log model whatever the case it is configured in, even when the mapping declares it', () => {
-    expect(shouldAuditModel({ modelName: 'AuditLog', auditLogModel: 'AuditLog', isLoggable })).toBe(false);
-    expect(shouldAuditModel({ modelName: 'AuditLog', auditLogModel: 'auditLog', isLoggable })).toBe(false);
-    expect(shouldAuditModel({ modelName: 'AuditLog', auditLogModel: 'AUDITLOG', isLoggable })).toBe(false);
+    expect(shouldAuditModel({ modelName: 'AuditLog', auditLogAccessor: 'AuditLog', isLoggable })).toBe(false);
+    expect(shouldAuditModel({ modelName: 'AuditLog', auditLogAccessor: 'auditLog', isLoggable })).toBe(false);
+    expect(shouldAuditModel({ modelName: 'AuditLog', auditLogAccessor: 'AUDITLOG', isLoggable })).toBe(false);
   });
 });

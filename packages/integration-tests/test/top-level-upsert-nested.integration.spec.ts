@@ -39,9 +39,9 @@ const createClients = (fetchBefore: FetchBeforeConfig) => {
     entities: testEntities,
     diffing: { excludeFields: ['createdAt'] },
     security: { redact: { fields: [] } },
-    performance: { awaitWrite: true },
+    write: { awaited: true },
     fetchBefore,
-    errorHandling: { observer },
+    errorObserver: observer,
   });
 
   return {

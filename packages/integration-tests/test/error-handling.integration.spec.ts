@@ -1,23 +1,24 @@
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
-import type { AuditErrorContext, ErrorHandlingConfig } from '@kuruwic/prisma-audit';
+import type { AuditErrorContext, AuditErrorObserver, WriteOnError } from '@kuruwic/prisma-audit';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { describe, expect, it, vi } from 'vitest';
 import { createBasePrisma, setupTestContext, testEntities } from './helpers/setup.js';
 
-/** Message thrown by the failing `hooks.writer` used to simulate an audit-log write failure. */
+/** Message thrown by the failing `write.writer` used to simulate an audit-log write failure. */
 const AUDIT_WRITE_FAILURE_MESSAGE = 'simulated audit log write failure';
 
 interface FailingWriterClientOptions {
-  errorHandling?: ErrorHandlingConfig;
+  onError?: WriteOnError;
+  errorObserver?: AuditErrorObserver;
 }
 
 /**
- * Builds an audited client whose `hooks.writer` always throws, so every audit-log
- * write fails on purpose (see hooks-writer.integration.spec.ts for the base pattern).
- * Each scenario gets its own Prisma client so the `errorHandling` config under test
+ * Builds an audited client whose `write.writer` always throws, so every audit-log
+ * write fails on purpose (see write-writer.integration.spec.ts for the base pattern).
+ * Each scenario gets its own Prisma client so the `write.onError` and `errorObserver` under test
  * cannot leak into other scenarios.
  */
 const createFailingWriterClient = (options: FailingWriterClientOptions) => {
@@ -39,16 +40,15 @@ const createFailingWriterClient = (options: FailingWriterClientOptions) => {
     },
     // Every write runs in the transaction the client opens around it, which an awaited audit
     // write that fails under 'throw' rolls back.
-    performance: {
-      awaitWrite: true,
-      openImplicitTransaction: true,
-    },
-    hooks: {
+    write: {
+      awaited: true,
+      implicitTransaction: true,
       writer: async () => {
         throw new Error(AUDIT_WRITE_FAILURE_MESSAGE);
       },
+      ...(options.onError ? { onError: options.onError } : {}),
     },
-    ...(options.errorHandling ? { errorHandling: options.errorHandling } : {}),
+    ...(options.errorObserver ? { errorObserver: options.errorObserver } : {}),
   });
 
   return { basePrisma, provider, prisma };
@@ -75,17 +75,15 @@ describe('Error Handling Integration', () => {
   };
 
   describe('Audit-log write failures — error policy contract', () => {
-    // Every scenario below drives a real audit-log write failure via a `hooks.writer`
-    // that always throws (see hooks-writer.integration.spec.ts for the base pattern),
+    // Every scenario below drives a real audit-log write failure via a `write.writer`
+    // that always throws (see write-writer.integration.spec.ts for the base pattern),
     // then observes whether the caller's own `user.create` succeeds or fails, whether
     // anything is logged to the console, and whether the observer was notified.
 
-    it("writeFailurePolicy: 'ignore' — commits the caller's row and stays silent", async () => {
+    it("write.onError: 'ignore' — commits the caller's row and stays silent", async () => {
       const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       const observer = vi.fn();
-      const scenario = createFailingWriterClient({
-        errorHandling: { writeFailurePolicy: 'ignore', observer },
-      });
+      const scenario = createFailingWriterClient({ onError: 'ignore', errorObserver: observer });
 
       try {
         const user = await scenario.provider.runAsync(testActor, async () =>
@@ -116,12 +114,10 @@ describe('Error Handling Integration', () => {
       }
     });
 
-    it("writeFailurePolicy: 'log' — commits the caller's row and reports the error to the console", async () => {
+    it("write.onError: 'log' — commits the caller's row and reports the error to the console", async () => {
       const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       const observer = vi.fn();
-      const scenario = createFailingWriterClient({
-        errorHandling: { writeFailurePolicy: 'log', observer },
-      });
+      const scenario = createFailingWriterClient({ onError: 'log', errorObserver: observer });
 
       try {
         const user = await scenario.provider.runAsync(testActor, async () =>
@@ -155,11 +151,9 @@ describe('Error Handling Integration', () => {
       }
     });
 
-    it("writeFailurePolicy: 'throw' — fails the caller's operation and rolls back the row", async () => {
+    it("write.onError: 'throw' — fails the caller's operation and rolls back the row", async () => {
       const observer = vi.fn();
-      const scenario = createFailingWriterClient({
-        errorHandling: { writeFailurePolicy: 'throw', observer },
-      });
+      const scenario = createFailingWriterClient({ onError: 'throw', errorObserver: observer });
 
       try {
         await expect(
@@ -187,11 +181,11 @@ describe('Error Handling Integration', () => {
       }
     });
 
-    it("default (no errorHandling.writeFailurePolicy configured) — behaves like 'log', not 'throw'", async () => {
-      // An audit library must not break the caller's write by default — see WriteFailurePolicy's JSDoc.
+    it("default (no write.onError configured) — behaves like 'log', not 'throw'", async () => {
+      // An audit library must not break the caller's write by default — see WriteOnError's JSDoc.
       const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       const observer = vi.fn();
-      const scenario = createFailingWriterClient({ errorHandling: { observer } });
+      const scenario = createFailingWriterClient({ errorObserver: observer });
 
       try {
         const user = await scenario.provider.runAsync(testActor, async () =>
@@ -225,13 +219,11 @@ describe('Error Handling Integration', () => {
       }
     });
 
-    it("writeFailurePolicy function — returning 'ignore' is invoked with the failure context and lets the operation succeed", async () => {
+    it("write.onError function — returning 'ignore' is invoked with the failure context and lets the operation succeed", async () => {
       const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       const observer = vi.fn();
       const policy = vi.fn((_context: AuditErrorContext) => 'ignore' as const);
-      const scenario = createFailingWriterClient({
-        errorHandling: { writeFailurePolicy: policy, observer },
-      });
+      const scenario = createFailingWriterClient({ onError: policy, errorObserver: observer });
 
       try {
         const user = await scenario.provider.runAsync(testActor, async () =>
@@ -272,12 +264,10 @@ describe('Error Handling Integration', () => {
       }
     });
 
-    it("writeFailurePolicy function — returning 'throw' fails the operation with the original audit-write error", async () => {
+    it("write.onError function — returning 'throw' fails the operation with the original audit-write error", async () => {
       const observer = vi.fn();
       const policy = vi.fn((_context: AuditErrorContext) => 'throw' as const);
-      const scenario = createFailingWriterClient({
-        errorHandling: { writeFailurePolicy: policy, observer },
-      });
+      const scenario = createFailingWriterClient({ onError: policy, errorObserver: observer });
 
       try {
         await expect(
@@ -315,21 +305,19 @@ describe('Error Handling Integration', () => {
       }
     });
 
-    it("a throwing writeFailurePolicy function never fails the caller's operation — it falls back to 'log' instead", async () => {
+    it("a throwing write.onError function never fails the caller's operation — it falls back to 'log' instead", async () => {
       // The policy function's contract says it must return 'throw' | 'log' | 'ignore' and
-      // never throw (see WriteFailurePolicy's JSDoc). A policy that throws anyway must not
+      // never throw (see WriteOnError's JSDoc). A policy that throws anyway must not
       // get to decide anything — unlike the observer (always read-only), the policy is the
       // one thing that can fail the caller's operation, so letting its own bug propagate
       // would be worse than the audit-write failure it was supposed to be deciding about.
       const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-      const POLICY_FAILURE_MESSAGE = 'writeFailurePolicy function is broken';
+      const POLICY_FAILURE_MESSAGE = 'write.onError function is broken';
       const observer = vi.fn();
       const policy = vi.fn((_context: AuditErrorContext) => {
         throw new Error(POLICY_FAILURE_MESSAGE);
       });
-      const scenario = createFailingWriterClient({
-        errorHandling: { writeFailurePolicy: policy, observer },
-      });
+      const scenario = createFailingWriterClient({ onError: policy, errorObserver: observer });
 
       try {
         const user = await scenario.provider.runAsync(testActor, async () =>
@@ -355,7 +343,7 @@ describe('Error Handling Integration', () => {
 
         // The broken policy function itself is reported to the console...
         expect(consoleErrorSpy).toHaveBeenCalledWith(
-          "[db-audit-core] Error in writeFailurePolicy function; falling back to 'log':",
+          "[db-audit-core] Error in write.onError function; falling back to 'log':",
           POLICY_FAILURE_MESSAGE,
         );
         // ...and the fallback ('log') also reports the original audit-write failure it
@@ -388,9 +376,7 @@ describe('Error Handling Integration', () => {
       const observer = vi.fn(() => {
         throw new Error(OBSERVER_FAILURE_MESSAGE);
       });
-      const scenario = createFailingWriterClient({
-        errorHandling: { writeFailurePolicy: 'ignore', observer },
-      });
+      const scenario = createFailingWriterClient({ onError: 'ignore', errorObserver: observer });
 
       try {
         const user = await scenario.provider.runAsync(testActor, async () =>
@@ -414,7 +400,7 @@ describe('Error Handling Integration', () => {
         );
 
         expect(consoleErrorSpy).toHaveBeenCalledWith(
-          '[db-audit-core] Error in error-handling observer:',
+          '[db-audit-core] Error in errorObserver:',
           OBSERVER_FAILURE_MESSAGE,
         );
       } finally {
@@ -427,20 +413,18 @@ describe('Error Handling Integration', () => {
   describe('Batch operations — error policy contract', () => {
     // A batch operation's own `log-write` failure notifies the observer exactly
     // once, with `phase: 'log-write'`, through the same audited-operation pipeline
-    // as a single operation. Under `writeFailurePolicy: 'throw'`, that failure
+    // as a single operation. Under `write.onError: 'throw'`, that failure
     // rolls the caller's rows back with it.
 
-    // The next two tests use `writeFailurePolicy: 'throw'` specifically: it is the
+    // The next two tests use `write.onError: 'throw'` specifically: it is the
     // only policy that re-throws the `log-write` failure out of the audit-log write,
     // so it is the one policy under which the once-only guarantee has to hold
     // end to end — the failure must propagate back to the caller without being
     // reported a second time along the way.
 
-    it("a failing hooks.writer on a batch operation (createMany) notifies the observer exactly once, with phase: 'log-write'", async () => {
+    it("a failing write.writer on a batch operation (createMany) notifies the observer exactly once, with phase: 'log-write'", async () => {
       const observer = vi.fn();
-      const scenario = createFailingWriterClient({
-        errorHandling: { writeFailurePolicy: 'throw', observer },
-      });
+      const scenario = createFailingWriterClient({ onError: 'throw', errorObserver: observer });
 
       try {
         await expect(
@@ -473,11 +457,9 @@ describe('Error Handling Integration', () => {
       }
     });
 
-    it("a failing hooks.writer on a batch operation (updateMany) notifies the observer exactly once, with phase: 'log-write'", async () => {
+    it("a failing write.writer on a batch operation (updateMany) notifies the observer exactly once, with phase: 'log-write'", async () => {
       const observer = vi.fn();
-      const scenario = createFailingWriterClient({
-        errorHandling: { writeFailurePolicy: 'throw', observer },
-      });
+      const scenario = createFailingWriterClient({ onError: 'throw', errorObserver: observer });
 
       try {
         // Seed directly through the raw (non-audited) base client — the audited client's
@@ -521,14 +503,12 @@ describe('Error Handling Integration', () => {
       }
     });
 
-    it("writeFailurePolicy: 'ignore' on a batch operation (updateMany) lets the caller's operation succeed", async () => {
-      // `writeFailurePolicy: 'ignore'` lets a batch operation's own `log-write`
+    it("write.onError: 'ignore' on a batch operation (updateMany) lets the caller's operation succeed", async () => {
+      // `write.onError: 'ignore'` lets a batch operation's own `log-write`
       // failure through without affecting the caller's operation, the same as the
       // single-operation path.
       const observer = vi.fn();
-      const scenario = createFailingWriterClient({
-        errorHandling: { writeFailurePolicy: 'ignore', observer },
-      });
+      const scenario = createFailingWriterClient({ onError: 'ignore', errorObserver: observer });
 
       try {
         const [userA, userB] = await scenario.provider.runAsync(testActor, async () => [
@@ -569,15 +549,16 @@ describe('Error Handling Integration', () => {
     });
 
     it.each([
-      { policy: "writeFailurePolicy: 'log'", errorHandling: { writeFailurePolicy: 'log' as const } },
-      { policy: 'the default writeFailurePolicy', errorHandling: {} },
+      { policyName: "write.onError: 'log'", onError: 'log' as const },
+      { policyName: 'the default write.onError' },
     ])(
-      "$policy on a batch operation (updateMany) lets the caller's operation succeed and reports the failed write to the console",
-      async ({ errorHandling }) => {
+      "$policyName on a batch operation (updateMany) lets the caller's operation succeed and reports the failed write to the console",
+      async (policy) => {
         const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
         const observer = vi.fn();
         const scenario = createFailingWriterClient({
-          errorHandling: { ...errorHandling, observer },
+          ...(policy.onError ? { onError: policy.onError } : {}),
+          errorObserver: observer,
         });
 
         try {
@@ -632,7 +613,7 @@ describe('Error Handling Integration', () => {
     // A `diff-generation` phase failure reaches the caller as the original error, the observer
     // is notified once, and the write-failure policy is never consulted.
 
-    it('a diff-generation failure on the single-operation path inside the transaction the client opens propagates the original error to the caller, regardless of writeFailurePolicy', async () => {
+    it('a diff-generation failure on the single-operation path inside the transaction the client opens propagates the original error to the caller, regardless of write.onError', async () => {
       const ENRICHER_FAILURE_MESSAGE = 'actor enricher is broken';
       const enricherError = new Error(ENRICHER_FAILURE_MESSAGE);
       const basePrisma = createBasePrisma();
@@ -644,8 +625,12 @@ describe('Error Handling Integration', () => {
         schema: auditSchema,
         contextProvider: provider,
         entities: testEntities,
-        performance: { awaitWrite: true, openImplicitTransaction: true },
-        errorHandling: { writeFailurePolicy: policy, observer },
+        errorObserver: observer,
+        write: {
+          awaited: true,
+          implicitTransaction: true,
+          onError: policy,
+        },
         actorContext: {
           enricher: async () => {
             throw enricherError;
@@ -728,9 +713,13 @@ describe('Error Handling Integration', () => {
         schema: auditSchema,
         contextProvider: provider,
         entities: testEntities,
-        performance: { awaitWrite: true, openImplicitTransaction: true },
+        errorObserver: observer,
+        write: {
+          awaited: true,
+          implicitTransaction: true,
+          onError: policy,
+        },
         fetchBefore: { update: true },
-        errorHandling: { writeFailurePolicy: policy, observer },
       }).$extends(faultInjection);
 
       try {
@@ -778,7 +767,7 @@ describe('Error Handling Integration', () => {
       // diff-generation failure before the caller's write is attempted.
       const SNAPSHOT_FAILURE_MESSAGE = 'simulated to-many snapshot failure';
 
-      const runWithFailingSnapshot = async (awaitWrite: boolean) => {
+      const runWithFailingSnapshot = async (awaited: boolean) => {
         const snapshotError = new Error(SNAPSHOT_FAILURE_MESSAGE);
         const rawBasePrisma = createBasePrisma();
         let snapshotArmed = false;
@@ -804,8 +793,11 @@ describe('Error Handling Integration', () => {
           schema: auditSchema,
           contextProvider: provider,
           entities: testEntities,
-          performance: { awaitWrite },
-          errorHandling: { writeFailurePolicy: policy, observer },
+          errorObserver: observer,
+          write: {
+            awaited: awaited,
+            onError: policy,
+          },
         });
 
         try {
@@ -849,7 +841,7 @@ describe('Error Handling Integration', () => {
       });
 
       it('fails before the caller write runs: without a transaction around the operation, no created row remains either', async () => {
-        // With `awaitWrite: false` no transaction wraps the operation, so a write that had run
+        // With `awaited: false` no transaction wraps the operation, so a write that had run
         // would stay committed; the absent row shows the write was never attempted.
         await runWithFailingSnapshot(false);
       });
@@ -867,8 +859,11 @@ describe('Error Handling Integration', () => {
         schema: auditSchema,
         contextProvider: provider,
         entities: testEntities,
-        performance: { awaitWrite: true },
-        errorHandling: { writeFailurePolicy: policy, observer },
+        errorObserver: observer,
+        write: {
+          awaited: true,
+          onError: policy,
+        },
       });
 
       try {
@@ -914,8 +909,11 @@ describe('Error Handling Integration', () => {
         schema: auditSchema,
         contextProvider: provider,
         entities: testEntities,
-        performance: { awaitWrite: true },
-        errorHandling: { writeFailurePolicy: policy, observer },
+        errorObserver: observer,
+        write: {
+          awaited: true,
+          onError: policy,
+        },
       });
 
       try {
@@ -973,8 +971,11 @@ describe('Error Handling Integration', () => {
         schema: auditSchema,
         contextProvider: provider,
         entities: testEntities,
-        performance: { awaitWrite: true },
-        errorHandling: { writeFailurePolicy: policy, observer },
+        errorObserver: observer,
+        write: {
+          awaited: true,
+          onError: policy,
+        },
       });
 
       try {

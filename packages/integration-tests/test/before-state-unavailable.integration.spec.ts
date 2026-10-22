@@ -46,9 +46,9 @@ describe('before state requested but unreadable', () => {
       entities: testEntities,
       diffing: { excludeFields: ['createdAt'] },
       security: { redact: { fields: [] } },
-      errorHandling: { observer },
+      errorObserver: observer,
       ...options,
-      hooks: {
+      write: {
         writer: async (records, { defaultWrite }) => {
           written.push(...records);
           await defaultWrite(records);

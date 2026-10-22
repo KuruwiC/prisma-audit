@@ -354,7 +354,7 @@ describe('Nested Delete Operations', () => {
         schema: auditSchema,
         contextProvider: provider,
         entities: testEntities,
-        performance: { awaitWrite: true },
+        write: { awaited: true },
         fetchBefore,
       });
 
@@ -401,7 +401,7 @@ describe('Nested Delete Operations', () => {
     });
   });
 
-  // NOTE: Audit-pipeline failures reach errorHandling.observer; nested pre-fetch failures are covered
+  // NOTE: Audit-pipeline failures reach errorObserver; nested pre-fetch failures are covered
   // by nested-pre-fetch-failure.integration.spec.ts.
   describe('a nested delete next to other operations at the same path', () => {
     // Every operation at a path reads its targets ahead of the write into the same place; a
@@ -474,7 +474,7 @@ describe('Nested Delete Operations', () => {
         schema: auditSchema,
         contextProvider: provider,
         entities: testEntities,
-        performance: { awaitWrite: true },
+        write: { awaited: true },
         fetchBefore: { delete: false },
       });
 
@@ -529,7 +529,7 @@ describe('Nested Delete Operations', () => {
           ...testEntities,
           Subscription: defineEntity({ type: 'Subscription', aggregates: [to('User', foreignKey('userEmail'))] }),
         },
-        performance: { awaitWrite: true },
+        write: { awaited: true },
         fetchBefore,
       });
 
@@ -579,10 +579,10 @@ describe('Nested Delete Operations', () => {
         schema: auditSchema,
         contextProvider: provider,
         entities: testEntities,
-        performance: { awaitWrite: true },
+        write: { awaited: true },
         // Without the read ahead of the write, a to-one delete (`delete: true`) names no row
         fetchBefore: { delete: false },
-        errorHandling: { observer },
+        errorObserver: observer,
       });
 
       try {

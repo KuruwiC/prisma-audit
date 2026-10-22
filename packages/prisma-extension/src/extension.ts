@@ -5,7 +5,7 @@
  * kind, then the write policy's sampling), selects the relations its nested writes touch, runs it
  * through the audited-operation pipeline on the library-owned runtime context, and returns the
  * result in the shape the caller requested. The hook always continues the caller's operation
- * through `query`; with `openImplicitTransaction` the client proxy opens the interactive
+ * through `query`; with `write.implicitTransaction` the client proxy opens the interactive
  * transaction before the operation enters the extension chain.
  *
  * @module extension
@@ -31,7 +31,7 @@ import { getModelAccessor } from './utils/model-accessor.js';
 
 const createPipelineDependencies = (audit: AuditOptions): AuditPipelineDependencies => {
   const { Prisma, schemaMetadata, shouldFetchBefore, auditedOmittedFields, auditedOmittedFieldsWithRowKey } = audit;
-  const failureSink = createFailureSink(audit.errorHandling);
+  const failureSink = createFailureSink(audit.failureSinkConfig);
 
   return {
     singleExecutor: createSingleExecutor({
@@ -50,8 +50,8 @@ const createPipelineDependencies = (audit: AuditOptions): AuditPipelineDependenc
     }),
     dispatchConfig: {
       writeExecutor: createPrismaWriteExecutor(Prisma.DbNull, {
-        auditLogModel: audit.auditLogModel,
-        storesBeforeUnavailable: declaresBeforeUnavailableColumn(schemaMetadata, audit.auditLogModel),
+        auditLogAccessor: audit.auditLogAccessor,
+        storesBeforeUnavailable: declaresBeforeUnavailableColumn(schemaMetadata, audit.auditLogAccessor),
       }),
       writer: audit.writer,
       failureSink,
@@ -75,7 +75,7 @@ const recipeConfigOf = (audit: AuditOptions): RecipeConfig => {
     relatedModel: (modelName, field) => relatedModels.get(modelName)?.get(field),
     decideWritePolicy: (modelName, action) =>
       audit.provider.getContext() !== undefined && isAuditableAction(action) && audit.shouldAudit(modelName)
-        ? policy(modelName, audit.modelTags(modelName), policyConfig)
+        ? policy(modelName, policyConfig)
         : undefined,
   };
 };
@@ -87,12 +87,12 @@ const recipeConfigOf = (audit: AuditOptions): RecipeConfig => {
  * Internal extension factory, not exported from the package entry: `createAuditClient`
  * applies it via `prisma.$extends()` and returns the typed client.
  *
- * @throws {Error} If the entity map is invalid or the diffing and redaction settings conflict
+ * @throws {Error} If the options are invalid (see `normalizeAuditOptions`)
  */
 export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) => {
   const audit = normalizeAuditOptions(options);
 
-  const recipeConfig = audit.openImplicitTransaction ? recipeConfigOf(audit) : undefined;
+  const recipeConfig = audit.implicitTransaction ? recipeConfigOf(audit) : undefined;
   const deps = createPipelineDependencies(audit);
   const shape: ClientShape = { schemaMetadata: audit.schemaMetadata, queryOmitSupported: audit.queryOmitSupported };
 
@@ -109,8 +109,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     if (!isAuditableAction(operation)) {
       return query(args);
     }
-    const writePolicy =
-      decidedWritePolicyFor(model, operation) ?? policy(model, audit.modelTags(model), audit.policyConfig);
+    const writePolicy = decidedWritePolicyFor(model, operation) ?? policy(model, audit.policyConfig);
     if (!writePolicy.sampled) {
       return query(args);
     }

@@ -2,7 +2,7 @@
  * Integration Tests: Database Round-Trip Guard
  *
  * `audit-log-row-counts.integration.spec.ts` counts audit *log rows* written (via
- * `hooks.writer`), not SQL round trips — a regression that adds extra queries per
+ * `write.writer`), not SQL round trips — a regression that adds extra queries per
  * operation (the audit extension's central performance risk) would not move that
  * counter at all. This spec counts the actual SQL statements Prisma sends, using
  * Prisma's query event API (`log: [{ emit: 'event', level: 'query' }]` +

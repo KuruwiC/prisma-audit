@@ -16,7 +16,7 @@ const BEFORE_UNAVAILABLE_FIELD = 'beforeUnavailable';
 
 export interface PrismaWriteExecutorOptions {
   /** The client property of the audit-log model (`auditLog`, `activity`) the executor writes to */
-  readonly auditLogModel: string;
+  readonly auditLogAccessor: string;
   /** The audit-log model declares a `beforeUnavailable` column (see {@link declaresBeforeUnavailableColumn}) */
   readonly storesBeforeUnavailable: boolean;
 }
@@ -25,11 +25,11 @@ export interface PrismaWriteExecutorOptions {
  * Whether the audit-log model declares a `beforeUnavailable` column, which the default write then
  * fills. The column is optional: the audit-log model is the user's.
  *
- * @param auditLogModel - The client property of the audit-log model (`auditLog`, `activity`)
+ * @param auditLogAccessor - The client property of the audit-log model (`auditLog`, `activity`)
  * @throws {Error} When the model declares a `beforeUnavailable` field that is not a single Boolean
  */
-export const declaresBeforeUnavailableColumn = (schemaMetadata: SchemaMetadata, auditLogModel: string): boolean => {
-  const model = schemaMetadata.getModelNames().find((candidate) => getModelAccessor(candidate) === auditLogModel);
+export const declaresBeforeUnavailableColumn = (schemaMetadata: SchemaMetadata, auditLogAccessor: string): boolean => {
+  const model = schemaMetadata.getModelNames().find((candidate) => getModelAccessor(candidate) === auditLogAccessor);
   const field = model === undefined ? undefined : schemaMetadata.getFieldMetadata(model, BEFORE_UNAVAILABLE_FIELD);
   if (model === undefined || field === undefined) {
     return false;
@@ -186,7 +186,7 @@ const writeAuditLogs = async (
  * @example
  * ```typescript
  * const writeExecutor = createPrismaWriteExecutor(Prisma.DbNull, {
- *   auditLogModel: 'auditLog',
+ *   auditLogAccessor: 'auditLog',
  *   storesBeforeUnavailable: declaresBeforeUnavailableColumn(schemaMetadata, 'auditLog'),
  * });
  * await writeExecutor.write(prisma, logs);
@@ -196,12 +196,12 @@ export const createPrismaWriteExecutor = (
   DbNull: unknown,
   options: PrismaWriteExecutorOptions,
 ): WriteExecutor<PrismaHandle> => {
-  const { auditLogModel } = options;
+  const { auditLogAccessor } = options;
   return {
     write: async (client, logs) => {
-      const model = client[auditLogModel];
+      const model = client[auditLogAccessor];
       const convertedLogs = logs.map((log) => toAuditLogRow(log, DbNull, options));
-      await writeAuditLogs(model as Record<string, unknown>, convertedLogs, auditLogModel);
+      await writeAuditLogs(model as Record<string, unknown>, convertedLogs, auditLogAccessor);
     },
   };
 };

@@ -103,14 +103,14 @@ export const extractDeleteOperationEntityId = (data: unknown, pkConstraint: Uniq
   return undefined;
 };
 
-/** Case-insensitive: `auditLogModel` may be given as PascalCase or camelCase */
-const isAuditLogModel = (modelName: string, auditLogModel: string): boolean => {
-  return modelName.toLowerCase() === auditLogModel.toLowerCase();
+/** Case-insensitive: the model name is PascalCase and the accessor camelCase */
+const isAuditLogModel = (modelName: string, auditLogAccessor: string): boolean => {
+  return modelName.toLowerCase() === auditLogAccessor.toLowerCase();
 };
 
 export interface ShouldAuditModelInput {
   modelName: string;
-  auditLogModel: string;
+  auditLogAccessor: string;
   isLoggable: (modelName: string) => boolean;
 }
 
@@ -122,12 +122,12 @@ export interface ShouldAuditModelInput {
  * ```typescript
  * const should = shouldAuditModel({
  *   modelName: 'User',
- *   auditLogModel: 'auditLog',
+ *   auditLogAccessor: 'auditLog',
  *   isLoggable: entityConfigs.isLoggable,
  * });
  * ```
  */
 export const shouldAuditModel = (input: ShouldAuditModelInput): boolean => {
-  const { modelName, auditLogModel, isLoggable } = input;
-  return !isAuditLogModel(modelName, auditLogModel) && isLoggable(modelName);
+  const { modelName, auditLogAccessor, isLoggable } = input;
+  return !isAuditLogModel(modelName, auditLogAccessor) && isLoggable(modelName);
 };

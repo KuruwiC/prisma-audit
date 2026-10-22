@@ -98,7 +98,7 @@ const failingWrite = async (): Promise<void> => {
 const throwingPolicySink = () => {
   const observed: AuditErrorContext[] = [];
   const failureSink = createFailureSink({
-    writeFailurePolicy: 'throw',
+    writeOnError: 'throw',
     observer: (context) => {
       observed.push(context);
     },

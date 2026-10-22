@@ -13,10 +13,10 @@ import type {
 } from '../src/index.js';
 
 type Options = PrismaAuditExtensionOptions<'User', { id: string }>;
-type Writer = NonNullable<NonNullable<Options['hooks']>['writer']>;
+type Writer = NonNullable<NonNullable<Options['write']>['writer']>;
 
 describe('package entry types', () => {
-  it("exports the record and context types of hooks.writer's parameters", () => {
+  it("exports the record and context types of write.writer's parameters", () => {
     expectTypeOf<Parameters<Writer>>().toEqualTypeOf<[AuditRecord[], WriteContext<{ id: string }>]>();
   });
 

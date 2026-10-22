@@ -1,7 +1,7 @@
 /**
  * Integration Tests: Audit log rows written by nested and bulk writes
  *
- * Counts the audit log rows handed to `hooks.writer` for each scenario. Nothing here is timed.
+ * Counts the audit log rows handed to `write.writer` for each scenario. Nothing here is timed.
  */
 
 import type { AuditContext, AuditContextProvider } from '@kuruwic/db-audit-core';
@@ -28,7 +28,7 @@ const testEntities: EntityMap = {
   }),
 };
 
-/** Create audit client with audit log row counter using hooks.writer */
+/** Create audit client with audit log row counter using write.writer */
 const createAuditedClientWithAuditLogRowCounter = (
   basePrisma: PrismaClient,
   provider: AuditContextProvider,
@@ -47,18 +47,16 @@ const createAuditedClientWithAuditLogRowCounter = (
         fields: [],
       },
     },
-    performance: {
-      awaitWrite: true,
-    },
-    fetchBefore: {
-      update: false,
-      delete: false,
-    },
-    hooks: {
+    write: {
+      awaited: true,
       writer: async (records, { defaultWrite }) => {
         auditLogRowCount.value += records.length;
         await defaultWrite(records);
       },
+    },
+    fetchBefore: {
+      update: false,
+      delete: false,
     },
   });
 };
@@ -81,18 +79,16 @@ const createAuditedClientFetchingBeforeState = (
         fields: [],
       },
     },
-    performance: {
-      awaitWrite: true,
-    },
-    fetchBefore: {
-      update: true,
-      delete: true,
-    },
-    hooks: {
+    write: {
+      awaited: true,
       writer: async (records, { defaultWrite }) => {
         auditLogRowCount.value += records.length;
         await defaultWrite(records);
       },
+    },
+    fetchBefore: {
+      update: true,
+      delete: true,
     },
   });
 };

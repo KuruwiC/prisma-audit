@@ -60,9 +60,9 @@ describe('Named Composite Primary Key (PostBookmark)', () => {
       entities: testEntities,
       diffing: { excludeFields: ['createdAt'] },
       security: { redact: { fields: [] } },
-      performance: { awaitWrite: true },
+      write: { awaited: true },
       ...(options.fetchBeforeDelete ? {} : { fetchBefore: { models: { PostBookmark: { delete: false } } } }),
-      errorHandling: { observer },
+      errorObserver: observer,
     });
     const scenario = { basePrisma, prisma, provider, observer };
     openScenarios.push(scenario);

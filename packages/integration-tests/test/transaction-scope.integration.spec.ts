@@ -21,7 +21,7 @@ const actor: AuditContext = {
 describe('Interactive $transaction scope', () => {
   const context = setupTestContext();
 
-  const createAudited = (awaitWrite: boolean) => {
+  const createAudited = (awaited: boolean) => {
     const raw = createBasePrisma();
     const provider = createAsyncLocalStorageProvider();
     const prisma = createAuditClient(raw, {
@@ -29,7 +29,7 @@ describe('Interactive $transaction scope', () => {
       schema: auditSchema,
       contextProvider: provider,
       entities: testEntities,
-      performance: { awaitWrite },
+      write: { awaited: awaited },
       fetchBefore: { update: true },
     });
     const dispose = async () => {
@@ -48,11 +48,11 @@ describe('Interactive $transaction scope', () => {
   const rollback = new Error('the caller rolls back');
 
   describe.each([
-    { awaitWrite: true, audit: 'an awaited audit' },
-    { awaitWrite: false, audit: 'an audit written after commit' },
-  ])('with $audit', ({ awaitWrite }) => {
+    { awaited: true, audit: 'an awaited audit' },
+    { awaited: false, audit: 'an audit written after commit' },
+  ])('with $audit', ({ awaited }) => {
     it('rolls back the write and its audit when the audit context is set inside the callback', async () => {
-      const audited = createAudited(awaitWrite);
+      const audited = createAudited(awaited);
       try {
         await expect(
           audited.prisma.$transaction(async (tx) => {
@@ -72,7 +72,7 @@ describe('Interactive $transaction scope', () => {
     });
 
     it('keeps the write and its audit out of sight of other connections until commit when the audit context is set inside the callback', async () => {
-      const audited = createAudited(awaitWrite);
+      const audited = createAudited(awaited);
       let seenBeforeCommit: { readonly users: number; readonly auditRows: number } | undefined;
       try {
         await audited.prisma.$transaction(async (tx) => {
@@ -93,7 +93,7 @@ describe('Interactive $transaction scope', () => {
     });
 
     it('rolls back the write and its audit inside a transaction of a client derived from the audited client', async () => {
-      const audited = createAudited(awaitWrite);
+      const audited = createAudited(awaited);
       const derived = audited.prisma.$extends({ name: 'derived' });
       try {
         await expect(

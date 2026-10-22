@@ -204,8 +204,6 @@ export interface EntityConfig<TDbHandle = unknown, TEntity extends Record<string
    * ```
    */
   aggregateContext?: AggregateRootContextConfig<TDbHandle>;
-  /** Tags for tag-based configuration and filtering */
-  tags?: string[];
 }
 
 // ============================================================================

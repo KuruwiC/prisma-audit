@@ -46,7 +46,7 @@ describe('Transaction Consistency Integration', () => {
             ],
           }),
         },
-        performance: { awaitWrite: true },
+        write: { awaited: true },
       });
 
       const { user, post } = await context.provider.runAsync(auditContext, async () =>

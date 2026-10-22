@@ -32,7 +32,7 @@ const createClients = (observer: AuditErrorObserver) => {
       update: true,
       delete: true,
     },
-    errorHandling: { observer },
+    errorObserver: observer,
   });
   return { basePrisma, provider, prisma };
 };

@@ -69,7 +69,7 @@ describe('foreign-key changes of related rows', () => {
         delete: true,
         models: options.fetchBeforeLabelUpdate === false ? { Label: { update: false } } : {},
       },
-      errorHandling: { observer },
+      errorObserver: observer,
     });
     disconnects.push(async () => {
       await prisma.$disconnect();

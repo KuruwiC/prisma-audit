@@ -12,12 +12,14 @@ the active transaction or opens an implicit one, and its audit rows are written 
 transaction's buffer, so they commit and roll back with the data. A non-atomic operation inside a
 transaction queues its write until commit; outside one it starts a detached write that `flush()`
 waits for. Id resolvers and enrichers read through the handle of the transaction they run in.
+`samplingRate` takes a value, or a function called once per operation with its model's name;
+`write.awaited` takes a value, or a function called once per sampled-in operation.
 
 Failures go through the core failure sink. Each failed audit write is listed in `writeFailures`
 (phase `log-write`) and each row an id resolver failed for in `resolverFailures` (phase
-`id-resolver-call`), before the context is forwarded to `errorHandling.observer` when one is
-given. `errorHandling.writeFailurePolicy` defaults to `'throw'`: a failed write the operation
-awaits rejects the operation; a queued or detached one is logged. A resolver failure leaves that
+`id-resolver-call`), before the context is forwarded to `errorObserver` when one is given.
+`write.onError` defaults to `'throw'`: a failed write the operation awaits rejects the operation;
+a queued or detached one is logged. A resolver failure leaves that
 row without its records and never fails the operation. A record build that fails after a detached
 write has committed drops that write's records: the observer hears `diff-generation` and the
 policy applies to the drop, logging it (`'throw'` logs here, since the caller has returned).

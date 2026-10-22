@@ -61,7 +61,7 @@ const auditingOmittedFields: EntityMap = {
 
 interface Options {
   readonly Prisma?: typeof Prisma;
-  readonly errorHandling?: { readonly observer?: AuditErrorObserver };
+  readonly errorObserver?: AuditErrorObserver;
   readonly entities?: EntityMap;
   readonly security?: { readonly redact?: { readonly fields?: string[] } };
   readonly fetchBefore?: { readonly update?: boolean; readonly delete?: boolean };
@@ -241,7 +241,7 @@ describe('fields a client-level omit hides', () => {
 
     it('fails a foreignKey root on a hidden column the entity does not list, naming the option, and records the row under its own root', async () => {
       const observer = vi.fn<AuditErrorObserver>();
-      const { basePrisma, prisma, run } = await setup({ errorHandling: { observer } });
+      const { basePrisma, prisma, run } = await setup({ errorObserver: observer });
 
       await run(() => prisma.post.update({ where: { id: 'p1' }, data: { title: 'T1b' } }));
 
@@ -259,7 +259,7 @@ describe('fields a client-level omit hides', () => {
 
     it('fails a foreignKey root on a hidden column of a nested deleted row the same way, recording it under its own root only', async () => {
       const observer = vi.fn<AuditErrorObserver>();
-      const { basePrisma, prisma, run } = await setup({ errorHandling: { observer } });
+      const { basePrisma, prisma, run } = await setup({ errorObserver: observer });
 
       await run(() => prisma.user.update({ where: { id: 'u1' }, data: { posts: { delete: { id: 'p1' } } } }));
 
@@ -515,7 +515,7 @@ describe('fields a client-level omit hides', () => {
         const observer = vi.fn<AuditErrorObserver>();
         const { basePrisma, prisma, run } = await setup(
           {
-            errorHandling: { observer },
+            errorObserver: observer,
             entities: {
               ...testEntities,
               Label: defineEntity({
@@ -774,7 +774,7 @@ describe('fields a client-level omit hides', () => {
 
     it('records none of the rows an updateManyAndReturn without a select returns in the shape that hides the key, and reports them all', async () => {
       const observer = vi.fn<AuditErrorObserver>();
-      const { inScope, members, recordsOf } = await withHiddenKey({ errorHandling: { observer } });
+      const { inScope, members, recordsOf } = await withHiddenKey({ errorObserver: observer });
 
       const result = await inScope((client) =>
         client.user.updateManyAndReturn({ where: OF_MEMBERS, data: { name: 'renamed' } }),
@@ -906,7 +906,7 @@ describe('fields a client-level omit hides', () => {
 
     it('returns exactly the selection of each row updateManyAndReturn updates and records each with its before state and change', async () => {
       const observer = vi.fn<AuditErrorObserver>();
-      const { prisma, run, recordsOf } = await setup({ errorHandling: { observer } }, HIDDEN_ID);
+      const { prisma, run, recordsOf } = await setup({ errorObserver: observer }, HIDDEN_ID);
 
       const result = await run(() =>
         prisma.user.updateManyAndReturn({
@@ -1004,7 +1004,7 @@ describe('fields a client-level omit hides', () => {
     it('records no update whose before read is off, reporting nothing', async () => {
       const observer = vi.fn<AuditErrorObserver>();
       const { prisma, run, recordsOf } = await setup(
-        { errorHandling: { observer }, fetchBefore: { update: false } },
+        { errorObserver: observer, fetchBefore: { update: false } },
         HIDDEN_ID,
       );
 
@@ -1017,7 +1017,7 @@ describe('fields a client-level omit hides', () => {
 
     it('records no upsert that created its row, reporting nothing', async () => {
       const observer = vi.fn<AuditErrorObserver>();
-      const { prisma, run, recordsOf } = await setup({ errorHandling: { observer } }, HIDDEN_ID);
+      const { prisma, run, recordsOf } = await setup({ errorObserver: observer }, HIDDEN_ID);
 
       const result = await run(() =>
         prisma.user.upsert({ where: { id: 'u3' }, update: {}, create: { id: 'u3', email: 'u3@example.com' } }),
@@ -1051,7 +1051,7 @@ describe('fields a client-level omit hides', () => {
 
     it('records an update that gives the row another id under that id, with the change from the id its before state holds', async () => {
       const observer = vi.fn<AuditErrorObserver>();
-      const { prisma, run, recordsOf } = await setup({ errorHandling: { observer } }, HIDDEN_ID);
+      const { prisma, run, recordsOf } = await setup({ errorObserver: observer }, HIDDEN_ID);
 
       const result = await run(() => prisma.user.update({ where: { id: 'u1' }, data: { id: 'u9', name: 'Bea' } }));
 

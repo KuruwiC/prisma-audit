@@ -53,7 +53,7 @@ describe('Context Enrichment Integration', () => {
       Prisma,
       schema: auditSchema,
       contextProvider: provider,
-      performance: { awaitWrite: true },
+      write: { awaited: true },
       ...options,
     });
     return { basePrisma, prisma, provider };
@@ -800,7 +800,7 @@ describe('Context Enrichment Integration', () => {
           provider,
         } = openClient({
           entities: failingEntityMapping,
-          errorHandling: { observer },
+          errorObserver: observer,
         });
 
         try {
@@ -829,7 +829,7 @@ describe('Context Enrichment Integration', () => {
           provider,
         } = openClient({
           entities: failingEntityMapping,
-          errorHandling: { observer },
+          errorObserver: observer,
         });
 
         await expect(

@@ -8,7 +8,7 @@
  * drained strictly after `$transaction` resolves; on rejection it is discarded unrun. The proxy
  * also wraps every client derived from the client by `$extends`.
  *
- * With `openImplicitTransaction`, the proxy also wraps the client's model delegates and raw-query
+ * With `write.implicitTransaction`, the proxy also wraps the client's model delegates and raw-query
  * methods (`operation-recipe.ts`): a write whose audit is awaited runs in an interactive
  * transaction of the client it was called on, and a batch `$transaction([...])` of the client's
  * operations runs as one interactive transaction when one of them is an audited write whose audit
@@ -33,7 +33,7 @@ type TransactionMethod = (...args: unknown[]) => Promise<unknown>;
 
 export interface TransactionProxyConfig {
   readonly provider: AuditContextProvider;
-  /** Present with `openImplicitTransaction`: how the client's operations open their transaction */
+  /** Present with `write.implicitTransaction`: how the client's operations open their transaction */
   readonly recipeConfig?: RecipeConfig;
 }
 

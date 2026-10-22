@@ -39,7 +39,7 @@ describe('A write that stores the values a row already holds', () => {
       contextProvider: provider,
       entities: createMapping(excludeFields),
       diffing: { excludeFields: ['createdAt'] },
-      performance: { awaitWrite: true },
+      write: { awaited: true },
       fetchBefore: { update: true, delete: true },
     });
   type AuditedClient = ReturnType<typeof createClient>;
