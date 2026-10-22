@@ -83,6 +83,24 @@ describe('runEnricher', () => {
       const result = await runEnricher(config, {}, null, 5000);
       expect(result).toBeNull();
     });
+
+    it('should log and return the fallback when the enricher throws a value that cannot be converted to a string', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const thrown = Object.create(null);
+      const config = {
+        enricher: async (): Promise<{ default: boolean }> => {
+          throw thrown;
+        },
+        onError: 'log' as const,
+        fallback: { default: true },
+      };
+      const result = await runEnricher(config, {}, null, 5000);
+      expect(result).toEqual({ default: true });
+      expect(warnSpy).toHaveBeenCalledWith(
+        '[db-audit-core] Enricher failed:',
+        expect.objectContaining({ cause: thrown }),
+      );
+    });
   });
 
   describe("error strategy: 'ignore'", () => {
@@ -358,6 +376,24 @@ describe('runBatchEnricher', () => {
       const result = await runBatchEnricher(config, [{ id: 'a' }, { id: 'b' }], null, 5000);
       expect(result).toEqual([{ ctx: 'a' }, { ctx: 'b' }]);
       expect(warnSpy).toHaveBeenCalledWith('[db-audit-core] Batch enricher failed:', expect.any(Error));
+    });
+
+    it('should log and return the fallback array when the enricher throws a value that cannot be converted to a string', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const thrown = Object.create(null);
+      const config = {
+        enricher: async (): Promise<({ ctx: string } | null)[]> => {
+          throw thrown;
+        },
+        onError: 'log' as const,
+        fallback: [{ ctx: 'a' }],
+      };
+      const result = await runBatchEnricher(config, [{ id: 'a' }], null, 5000);
+      expect(result).toEqual([{ ctx: 'a' }]);
+      expect(warnSpy).toHaveBeenCalledWith(
+        '[db-audit-core] Batch enricher failed:',
+        expect.objectContaining({ cause: thrown }),
+      );
     });
 
     it('should return null array when no fallback provided', async () => {
