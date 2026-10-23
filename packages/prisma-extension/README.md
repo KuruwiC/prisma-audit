@@ -778,6 +778,26 @@ socialSecurityNumber, creditCard, cardNumber, cvv, pin
 }
 ```
 
+### Serialization
+
+#### `serializers`
+**Type:** `ValueSerializer[]` from `@kuruwic/db-audit-core` (top-level only)
+**Default:** none
+
+Conversions for values JSON cannot hold, applied to the stored before, after and `changes` and to the stored contexts (`actorContext`, `entityContext`, `aggregateContext` and the request context). Every value, at any depth and containers included, goes through the serializers in order before the built-in conversions (a BigInt to its string, a value with a `toJSON` method, such as a Date, a decimal.js `Decimal` or a Buffer, to what its `toJSON` returns). The first serializer that returns something other than `UNHANDLED` decides the value, which is stored as returned and so must be JSON-safe; a value every serializer passes on with `UNHANDLED` gets the built-in conversion. A serializer can therefore replace a built-in conversion, as the example below does for Buffer.
+
+Serializers run before redaction, so a value a serializer turns into a string is redacted by its own field name only (see [`redactFields`](#redactfields)).
+
+```typescript
+import { UNHANDLED } from '@kuruwic/db-audit-core';
+
+{
+  serializers: [
+    (value) => (value instanceof Buffer ? value.toString('base64') : UNHANDLED),
+  ],
+}
+```
+
 ### Sampling (`samplingRate`)
 **Type:** `number | ((modelName: string) => number)` (0.0 - 1.0)
 **Default:** `1.0` (100%)
@@ -1336,7 +1356,7 @@ import {
   to,
   foreignKey,
 } from '@kuruwic/prisma-audit';
-import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
+import { createAsyncLocalStorageProvider, UNHANDLED } from '@kuruwic/db-audit-core';
 import { Prisma, type PrismaClient } from '../generated/prisma/client.js'; // your client generator's output
 import { type AuditModelName, auditSchema } from '../generated/audit/index.js';
 
@@ -1370,6 +1390,12 @@ export default defineConfig<PrismaClient>()({
 
   // Redaction, on top of the built-in sensitive fields
   redactFields: ['phoneNumber'],
+
+  // Custom serialization, before the built-in BigInt and toJSON conversions: store a Buffer as
+  // base64 instead of { type, data }
+  serializers: [
+    (value) => (value instanceof Buffer ? value.toString('base64') : UNHANDLED),
+  ],
 
   // Sampling (default: log all operations)
   samplingRate: 1.0,

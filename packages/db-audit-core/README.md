@@ -172,7 +172,7 @@ write the adapter runs, in order:
 5. **`resolve(events, auditContext, resolveConfig, read)`**. `read` is a thunk that returns the
    handle of the scope active when a resolver or enricher runs; the core calls it at each callback,
    so callbacks read the transaction's uncommitted writes. `resolveConfig` is `entity`
-   (`byModel`), `rootEntity` (`byCategoryAndType`) and the optional `actor` enricher.
+   (`byModel`), `rootEntity` (`byCategoryAndType`) and the optional `actorContext`, which holds the actor enricher.
 6. **`compose(resolved, { auditContext, config: composeConfig }, now)`** into the `AuditRecord`s
    `buildRecords` returns. `composeConfig` carries the entity lookup, `diffExcludeFields`,
    `redactFields`, `serializers`, `relationFieldNames(model)`, the keys of a row that are not its
