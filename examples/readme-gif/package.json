@@ -1,0 +1,14 @@
+{
+  "name": "@kuruwic/prisma-audit-examples/readme-gif",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Records the README animation from stage.html",
+  "scripts": {
+    "preview": "node record.mjs --preview",
+    "record": "node record.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.60.0"
+  }
+}

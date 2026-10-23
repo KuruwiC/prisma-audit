@@ -4,18 +4,9 @@
 
 **Zero-intrusion audit logging for Prisma.** Tracks who changed what and when — without modifying a single line of your application code.
 
-<table>
-  <tr>
-    <td width="50%">
-      <img src="https://github.com/user-attachments/assets/89d9eb31-b53b-45df-8402-e41298de4c6e" alt="Audit Log Dashboard" width="100%" />
-      <p align="center"><i>Comprehensive audit log dashboard</i></p>
-    </td>
-    <td width="50%">
-      <img src="https://github.com/user-attachments/assets/7386c37e-9583-4604-b81e-e4e7c5b02e4d" alt="Activity Feed" width="100%" />
-      <p align="center"><i>Real-time activity feed</i></p>
-    </td>
-  </tr>
-</table>
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/6c941e3e-a4a4-4936-94b1-5fbcdb3bdbdd" alt="A Prisma update recorded with its field diff, a comment recorded under its post and its author, a redacted password change, a rolled-back transaction that leaves no audit rows, and the same rows read back as an activity feed" width="100%" />
+</p>
 
 ## How It Works
 
@@ -603,6 +594,18 @@ pnpm install
 pnpm build
 pnpm test
 ```
+
+### Demo app
+
+[`examples/`](examples) holds Commons, a small social feed whose handlers are plain Prisma calls. Beside the feed, an audit trail shows each row the extension writes, grouped by request and by the aggregates a write was recorded under. A history view per post and person reads the same rows as an activity feed, and an audit log page shows them raw. A Config page shows the API's `audit.config.ts` itself, and each recorded write links to the entry that mapped it. There is no sign-in: pick who you act as in the header.
+
+```bash
+docker compose up -d
+DATABASE_URL=postgresql://prisma:prisma@localhost:5432/prisma_audit_dev pnpm db:push
+pnpm dev
+```
+
+The API (`examples/hono-api`) seeds an empty database on start; open http://localhost:5173. The design tokens and components are described in [`examples/web-client/DESIGN.md`](examples/web-client/DESIGN.md). The animation above is recorded from [`examples/readme-gif/stage.html`](examples/readme-gif/stage.html) with `pnpm --filter @kuruwic/prisma-audit-examples/readme-gif record`.
 
 ## License
 

@@ -1,0 +1,872 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=960" />
+    <title>prisma-audit README stage</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Martian+Mono:wdth,wght@75..112.5,400..600&family=Schibsted+Grotesk:wght@400..700&display=block"
+    />
+    <style>
+      :root {
+        --paper: #f2f4f7;
+        --surface: #ffffff;
+        --ink: #1a2233;
+        --ink-muted: #5d6679;
+        --line: #dce1ea;
+        --trace: #151c2e;
+        --trace-raised: #1e2742;
+        --trace-line: #2e3a5c;
+        --trace-ink: #e6eaf5;
+        --trace-muted: #8d98b6;
+        --danger: #f08a7e;
+        --user: #b6a2ff;
+        --post: #7db9ff;
+        --comment: #62d5c4;
+        --tag: #f0c066;
+        --sans: 'Schibsted Grotesk', system-ui, sans-serif;
+        --mono: 'Martian Mono', ui-monospace, monospace;
+      }
+      * {
+        box-sizing: border-box;
+        margin: 0;
+      }
+      html,
+      body {
+        width: 960px;
+        height: 540px;
+        overflow: hidden;
+        background: var(--trace);
+        color: var(--trace-ink);
+        font-family: var(--sans);
+        -webkit-font-smoothing: antialiased;
+      }
+      code,
+      .mono {
+        font-family: var(--mono);
+        font-stretch: 75%;
+      }
+
+      .stage {
+        position: relative;
+        height: 540px;
+        padding: 24px 28px 0;
+      }
+      .top {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        height: 32px;
+      }
+      .wordmark {
+        font-size: 18px;
+        font-weight: 650;
+        letter-spacing: -0.01em;
+      }
+      .tagline {
+        font-size: 13px;
+        color: var(--trace-muted);
+        margin-left: 4px;
+      }
+      .scenes {
+        margin-left: auto;
+        display: flex;
+        gap: 4px;
+        font-size: 12px;
+      }
+      .scenes span {
+        padding: 4px 9px;
+        border-radius: 999px;
+        color: var(--trace-muted);
+      }
+      .scenes span.on {
+        background: var(--trace-raised);
+        color: var(--trace-ink);
+      }
+
+      .main {
+        display: grid;
+        grid-template-columns: 350px 160px 1fr;
+        gap: 16px;
+        margin-top: 20px;
+        height: 382px;
+      }
+      .layer {
+        position: relative;
+      }
+      .layer > .scene {
+        position: absolute;
+        inset: 0;
+      }
+
+      .code-card {
+        height: 100%;
+        background: var(--surface);
+        color: var(--ink);
+        border-radius: 14px;
+        padding: 14px 0;
+        display: flex;
+        flex-direction: column;
+      }
+      .code-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 0 16px 12px;
+        border-bottom: 1px solid var(--line);
+        font-size: 12px;
+      }
+      .code-head code {
+        color: var(--ink-muted);
+        font-size: 11px;
+      }
+      .badge {
+        margin-left: auto;
+        font-size: 11.5px;
+        color: var(--ink-muted);
+        background: var(--paper);
+        padding: 2px 8px;
+        border-radius: 999px;
+      }
+      pre {
+        padding: 12px 0;
+        font-size: 12.5px;
+        line-height: 1.7;
+        overflow: hidden;
+      }
+      pre .ln {
+        display: block;
+        padding: 0 16px;
+        white-space: pre;
+        color: var(--ink);
+        border-left: 3px solid transparent;
+      }
+      pre .ln.hl {
+        background: rgba(125, 185, 255, calc(var(--p, 0) * 0.22));
+        border-left-color: rgba(26, 111, 209, var(--p, 0));
+      }
+      pre .ln.throw {
+        background: rgba(180, 35, 24, calc(var(--p, 0) * 0.14));
+        border-left-color: rgba(180, 35, 24, var(--p, 0));
+      }
+      pre .k {
+        font-weight: 600;
+      }
+      pre .s {
+        color: #44506a;
+      }
+      pre .c {
+        color: #8b93a5;
+      }
+
+      .pipe {
+        padding: 6px 4px;
+      }
+      .pipe h3 {
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--trace-muted);
+        margin-bottom: 14px;
+      }
+      .steps {
+        list-style: none;
+        padding: 0;
+        position: relative;
+      }
+      .steps::before {
+        content: '';
+        position: absolute;
+        left: 10px;
+        top: 10px;
+        bottom: 10px;
+        border-left: 1px solid var(--trace-line);
+      }
+      .steps li {
+        position: relative;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        height: 46px;
+        font-size: 13px;
+        color: var(--trace-muted);
+      }
+      .steps li .n {
+        position: relative;
+        display: grid;
+        place-items: center;
+        width: 21px;
+        height: 21px;
+        border-radius: 999px;
+        background: var(--trace);
+        border: 1px solid var(--trace-line);
+        font-family: var(--mono);
+        font-stretch: 75%;
+        font-size: 10px;
+      }
+      .steps li.done {
+        color: var(--trace-ink);
+      }
+      .steps li.done .n {
+        background: var(--trace-raised);
+        border-color: var(--trace-muted);
+        color: var(--trace-ink);
+      }
+      .steps li.active {
+        color: var(--trace-ink);
+      }
+      .steps li.active .n {
+        background: var(--post);
+        border-color: var(--post);
+        color: var(--trace);
+        box-shadow: 0 0 0 4px rgba(125, 185, 255, 0.18);
+      }
+      .pipe.idle .steps li {
+        opacity: 0.35;
+      }
+      .pipe-note {
+        margin-top: 12px;
+        font-size: 12px;
+        color: var(--trace-muted);
+        line-height: 1.45;
+      }
+
+      .out {
+        position: relative;
+        height: 100%;
+        background: var(--trace-raised);
+        border-radius: 14px;
+        padding: 14px 16px;
+        overflow: hidden;
+      }
+      .out-head {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid var(--trace-line);
+        margin-bottom: 12px;
+      }
+      .out-head code {
+        font-size: 12px;
+        font-weight: 600;
+      }
+      .count {
+        margin-left: auto;
+        font-size: 12px;
+        color: var(--trace-muted);
+      }
+      .count b {
+        color: var(--trace-ink);
+        font-weight: 600;
+      }
+      .req {
+        font-size: 12px;
+        color: var(--trace-muted);
+        margin-bottom: 12px;
+      }
+      .req code {
+        color: var(--trace-ink);
+        font-size: 11px;
+      }
+      .mut {
+        margin-bottom: 12px;
+      }
+      .mut-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 13.5px;
+        font-weight: 600;
+      }
+      .mut-head code {
+        font-size: 10.5px;
+        color: var(--trace-muted);
+        font-weight: 400;
+      }
+      .mark {
+        display: inline-grid;
+        place-items: center;
+        width: 19px;
+        height: 19px;
+        border-radius: 5px;
+        font-family: var(--mono);
+        font-stretch: 75%;
+        font-size: 11px;
+        font-weight: 600;
+      }
+      .mark.create {
+        background: var(--trace-ink);
+        color: var(--trace);
+      }
+      .mark.update {
+        border: 1px solid var(--trace-ink);
+      }
+      .branches {
+        list-style: none;
+        padding: 0;
+        margin: 5px 0 0 9px;
+      }
+      .branches li {
+        position: relative;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 3px 0 3px 24px;
+        font-size: 12.5px;
+      }
+      .branches li::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 0;
+        height: 50%;
+        width: 15px;
+        border-left: 1px solid var(--trace-line);
+        border-bottom: 1px solid var(--trace-line);
+        border-bottom-left-radius: 6px;
+      }
+      .branches li:not(:last-child)::after {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 50%;
+        bottom: 0;
+        border-left: 1px solid var(--trace-line);
+      }
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        flex-shrink: 0;
+      }
+      .branches .label {
+        color: var(--trace-muted);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .diff {
+        margin: 8px 0 0 27px;
+        background: var(--trace);
+        border-radius: 8px;
+        padding: 8px 10px;
+        display: grid;
+        grid-template-columns: max-content 1fr;
+        gap: 4px 12px;
+        font-family: var(--mono);
+        font-stretch: 75%;
+        font-size: 11px;
+      }
+      .diff dt {
+        color: var(--trace-muted);
+      }
+      .diff .old {
+        color: var(--trace-muted);
+        text-decoration: line-through;
+      }
+      .diff .arrow {
+        color: var(--trace-muted);
+        margin: 0 6px;
+      }
+      .lock {
+        color: var(--tag);
+        background: rgba(240, 192, 102, 0.14);
+        border-radius: 4px;
+        padding: 0 6px;
+      }
+      .pending {
+        border: 1px dashed var(--trace-line);
+        border-radius: 10px;
+        padding: 10px 12px;
+      }
+      .pending-note {
+        font-size: 11.5px;
+        color: var(--trace-muted);
+        margin-bottom: 8px;
+      }
+      .rolled {
+        font-size: 14px;
+        line-height: 1.5;
+        padding: 14px;
+        border-radius: 10px;
+        border: 1px dashed var(--trace-line);
+      }
+      .rolled b {
+        display: block;
+        font-size: 15px;
+        margin-bottom: 4px;
+      }
+      .rolled span {
+        color: var(--trace-muted);
+      }
+
+      .hist {
+        position: absolute;
+        left: 16px;
+        right: 16px;
+        bottom: 12px;
+        border-top: 1px solid var(--trace-line);
+        padding: 8px 0 0;
+        list-style: none;
+        font-size: 11.5px;
+        color: var(--trace-muted);
+      }
+      .hist li {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        height: 21px;
+      }
+      .hist li:first-child {
+        font-size: 11px;
+      }
+      .hist .mark {
+        width: 15px;
+        height: 15px;
+        font-size: 9px;
+        opacity: 0.7;
+      }
+      .hist code {
+        font-size: 10.5px;
+      }
+      .feed {
+        list-style: none;
+        padding: 0;
+        background: var(--surface);
+        color: var(--ink);
+        border-radius: 10px;
+      }
+      .feed li {
+        display: flex;
+        gap: 10px;
+        padding: 11px 12px;
+        border-bottom: 1px solid var(--line);
+        font-size: 13px;
+        line-height: 1.4;
+      }
+      .feed li:last-child {
+        border-bottom: 0;
+      }
+      .feed .mark.create {
+        background: var(--ink);
+        color: var(--surface);
+      }
+      .feed .mark.update {
+        border-color: var(--ink);
+        color: var(--ink);
+      }
+      .feed b {
+        font-weight: 600;
+      }
+      .feed .q {
+        color: var(--ink-muted);
+      }
+      .feed small {
+        display: block;
+        color: var(--ink-muted);
+        font-size: 11.5px;
+      }
+
+      .caption {
+        position: absolute;
+        left: 28px;
+        right: 28px;
+        bottom: 26px;
+        height: 44px;
+        font-size: 17px;
+        line-height: 1.35;
+        letter-spacing: -0.005em;
+      }
+      .caption > div {
+        position: absolute;
+        inset: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="stage">
+      <header class="top">
+        <svg viewBox="0 0 32 32" width="26" height="26" aria-hidden="true">
+          <rect width="32" height="32" rx="8" fill="#e6eaf5" />
+          <path
+            d="M10 9v14M10 16h6M16 16l6-6M16 16l6 6"
+            stroke="#1a6fd1"
+            stroke-width="2.5"
+            stroke-linecap="round"
+            fill="none"
+          />
+        </svg>
+        <span class="wordmark">prisma-audit</span>
+        <span class="tagline">Zero-intrusion audit logging for Prisma</span>
+        <nav class="scenes" id="scene-tabs"></nav>
+      </header>
+      <div class="main">
+        <div class="layer" id="code"></div>
+        <div class="layer" id="pipe"></div>
+        <div class="layer" id="out"></div>
+      </div>
+      <div class="caption" id="caption"></div>
+    </div>
+
+    <script>
+      // Every frame is a pure function of time: window.__seek(ms) renders that moment, so the
+      // recorder can capture frames at an exact rate with no animation timing involved
+      const FADE = 260;
+
+      const k = (text) => `<span class="k">${text}</span>`;
+      const s = (text) => `<span class="s">${text}</span>`;
+      const c = (text) => `<span class="c">${text}</span>`;
+
+      const dot = (agg) => `<span class="dot" style="background:var(--${agg.toLowerCase()})"></span>`;
+      const hue = (agg) => `style="color:var(--${agg.toLowerCase()})"`;
+      const known = new Set(['User', 'Post', 'Comment', 'Tag']);
+      const entity = (type) => (known.has(type) ? `<span ${hue(type)}>${type}</span>` : type);
+      const glyph = { create: '+', update: '~' };
+
+      const mutation = ({ type, id, action, at, branches, diff }) => `
+        <div class="mut" data-in="${at}">
+          <div class="mut-head"><span class="mark ${action}">${glyph[action]}</span>${entity(type)}<code>${id}</code></div>
+          <ul class="branches">
+            ${branches
+              .map(
+                ([agg, label], i) =>
+                  `<li data-in="${at + 160 * (i + 1)}">${dot(agg)}<span ${hue(agg)}>${agg}</span><span class="label">${label}</span></li>`,
+              )
+              .join('')}
+          </ul>
+          ${
+            diff
+              ? `<dl class="diff" data-in="${at + 160 * (branches.length + 1)}">${diff
+                  .map(([field, from, to]) =>
+                    from === null
+                      ? `<dt>${field}</dt><dd>${to}</dd>`
+                      : `<dt>${field}</dt><dd><span class="old">${from}</span><span class="arrow">⟶</span>${to}</dd>`,
+                  )
+                  .join('')}</dl>`
+              : ''
+          }
+        </div>`;
+
+      const codeCard = (file, lines, highlight = [], throwLine = -1, throwAt = 0) => `
+        <div class="code-card">
+          <div class="code-head"><code>${file}</code><span class="badge">Your code, unchanged</span></div>
+          <pre>${lines
+            .map((line, i) => {
+              const cls = i === throwLine ? 'ln throw' : highlight.includes(i) ? 'ln hl' : 'ln';
+              const at = i === throwLine ? throwAt : highlight.includes(i) ? 300 : -1;
+              return `<span class="${cls}" ${at >= 0 ? `data-glow="${at}"` : ''}>${line || ' '}</span>`;
+            })
+            .join('')}</pre>
+        </div>`;
+
+      const STEPS = ['Read before state', 'Run the query', 'Diff the fields', 'Resolve aggregates', 'Enrich context', 'Write audit rows'];
+
+      const scenes = [
+        {
+          tab: 'Diffs',
+          duration: 3900,
+          caption: 'Your handler stays a plain Prisma call. The extension records who changed which fields.',
+          rowsBefore: 0,
+          rowsAfter: 2,
+          code: codeCard(
+            'routes/posts.ts',
+            [
+              `app.${k('patch')}(${s("'/posts/:id'")}, ${k('async')} (c) => {`,
+              `  ${k('return')} prisma.post.update({`,
+              `    where: { id: c.req.param(${s("'id'")}) },`,
+              `    data: {`,
+              `      title: ${s("'Hello, audit'")},`,
+              `      published: ${k('true')},`,
+              `    },`,
+              `  });`,
+              `});`,
+            ],
+            [1, 2, 3, 4, 5, 6],
+          ),
+          out: `
+            <p class="req" data-in="1150"><code>PATCH /posts/p_42</code> by Mina Sato</p>
+            ${mutation({
+              type: 'Post',
+              id: 'p_42',
+              action: 'update',
+              at: 1250,
+              branches: [
+                ['Post', 'Hello, audit'],
+                ['User', 'Mina Sato'],
+              ],
+              diff: [
+                ['title', '"Draft"', '"Hello, audit"'],
+                ['published', 'false', 'true'],
+              ],
+            })}`,
+        },
+        {
+          tab: 'Aggregates',
+          duration: 3700,
+          caption: 'A comment is recorded under itself, its post and its author: one write, every aggregate.',
+          rowsBefore: 2,
+          rowsAfter: 5,
+          code: codeCard(
+            'routes/comments.ts',
+            [
+              `app.${k('post')}(${s("'/posts/:id/comments'")}, (c) =>`,
+              `  prisma.comment.create({`,
+              `    data: {`,
+              `      postId: c.req.param(${s("'id'")}),`,
+              `      authorId: viewerId,`,
+              `      content: ${s("'Ship it.'")},`,
+              `    },`,
+              `  }),`,
+              `);`,
+            ],
+            [1, 2, 3, 4, 5, 6, 7],
+          ),
+          out: `
+            <p class="req" data-in="1150"><code>POST /posts/p_42/comments</code> by Theo Lindqvist</p>
+            ${mutation({
+              type: 'Comment',
+              id: 'c_7',
+              action: 'create',
+              at: 1250,
+              branches: [
+                ['Comment', '“Ship it.”'],
+                ['Post', 'Hello, audit'],
+                ['User', 'Theo Lindqvist'],
+              ],
+            })}`,
+        },
+        {
+          tab: 'Redaction',
+          duration: 3300,
+          caption: 'Secrets never reach the log. A redacted field records only that it changed.',
+          rowsBefore: 5,
+          rowsAfter: 6,
+          code: codeCard(
+            'routes/users.ts',
+            [
+              `app.${k('patch')}(${s("'/me/password'")}, ${k('async')} (c) =>`,
+              `  prisma.user.update({`,
+              `    where: { id: viewerId },`,
+              `    data: { password: ${k('await')} hash(next) },`,
+              `  }),`,
+              `);`,
+            ],
+            [1, 2, 3],
+          ),
+          out: `
+            <p class="req" data-in="1150"><code>PATCH /me/password</code> by Mina Sato</p>
+            ${mutation({
+              type: 'User',
+              id: 'u_1',
+              action: 'update',
+              at: 1250,
+              branches: [['User', 'Mina Sato']],
+              diff: [['password', null, '<span class="lock">changed, value redacted</span>']],
+            })}`,
+        },
+        {
+          tab: 'Rollback',
+          duration: 4300,
+          caption: 'Inside a transaction the audit rows commit and roll back with it. A rollback leaves nothing behind.',
+          rowsBefore: 6,
+          rowsPending: 2,
+          rowsAfter: 6,
+          rollbackAt: 2500,
+          code: codeCard(
+            'routes/orders.ts',
+            [
+              `${k('await')} prisma.$transaction(${k('async')} (tx) => {`,
+              `  ${k('await')} tx.post.create({`,
+              `    data: {`,
+              `      title: ${s("'Launch notes'")},`,
+              `      authorId,`,
+              `    },`,
+              `  });`,
+              `  ${k('throw')} ${k('new')} Error(${s("'publish failed'")});`,
+              `});`,
+            ],
+            [1, 2, 3, 4, 5, 6],
+            7,
+            2100,
+          ),
+          out: `
+            <div data-out="2500">
+              <p class="req" data-in="1150"><code>POST /posts</code> by Priya Raman</p>
+              <div class="pending" data-in="1200">
+                <p class="pending-note">Written in the transaction, not committed yet</p>
+                ${mutation({
+                  type: 'Post',
+                  id: 'p_43',
+                  action: 'create',
+                  at: 1250,
+                  branches: [
+                    ['Post', 'Launch notes'],
+                    ['User', 'Priya Raman'],
+                  ],
+                })}
+              </div>
+            </div>
+            <div class="rolled" data-in="2750" style="position:absolute;left:0;right:0;top:0">
+              <b>Rolled back</b>
+              <span>The post and both of its audit rows are gone. Nothing half-written to clean up.</span>
+            </div>`,
+        },
+        {
+          tab: 'Activity feed',
+          duration: 3900,
+          read: true,
+          caption: 'The same rows are your activity feed. One query by aggregate, no extra tables.',
+          rowsBefore: 6,
+          rowsAfter: 6,
+          code: codeCard(
+            'routes/activity.ts',
+            [
+              c('// Everything that happened to one post'),
+              `prisma.auditLog.findMany({`,
+              `  where: {`,
+              `    aggregateType: ${s("'Post'")},`,
+              `    aggregateId: ${s("'p_42'")},`,
+              `  },`,
+              `  orderBy: { createdAt: ${s("'desc'")} },`,
+              `});`,
+            ],
+            [1, 2, 3, 4, 5, 6, 7],
+          ),
+          out: `
+            <p class="req" data-in="500">Post <code>p_42</code>, read as an activity feed</p>
+            <ul class="feed" data-in="600">
+              <li data-in="700"><span class="mark create">+</span><div><b>Theo Lindqvist</b> commented <span class="q">“Ship it.”</span><small>just now</small></div></li>
+              <li data-in="900"><span class="mark update">~</span><div><b>Mina Sato</b> edited <span class="q">“Hello, audit”</span><small>title, published</small></div></li>
+              <li data-in="1100"><span class="mark create">+</span><div><b>Mina Sato</b> posted <span class="q">“Draft”</span><small>yesterday</small></div></li>
+            </ul>`,
+        },
+      ];
+
+      const ROWS = {
+        edit: [
+          ['update', 'Post', 'p_42', 'User'],
+          ['update', 'Post', 'p_42', 'Post'],
+        ],
+        comment: [
+          ['create', 'Comment', 'c_7', 'User'],
+          ['create', 'Comment', 'c_7', 'Post'],
+          ['create', 'Comment', 'c_7', 'Comment'],
+        ],
+        password: [['update', 'User', 'u_1', 'User']],
+      };
+      const earlier = { 1: ROWS.edit, 2: [...ROWS.comment, ...ROWS.edit], 3: [...ROWS.password, ...ROWS.comment, ...ROWS.edit] };
+      const HISTORY_LIMIT = 4;
+      const history = (index) => {
+        const rows = earlier[index];
+        if (!rows) return '';
+        const shown = rows.slice(0, HISTORY_LIMIT);
+        const more = rows.length - shown.length;
+        return `<ul class="hist"><li>Earlier rows</li>${shown
+          .map(
+            ([action, type, id, agg]) =>
+              `<li><span class="mark ${action}">${glyph[action]}</span><code>${type} ${id}</code>${dot(agg)}<span>${agg}</span></li>`,
+          )
+          .join('')}${more > 0 ? `<li>and ${more} more</li>` : ''}</ul>`;
+      };
+
+      const total = scenes.reduce((sum, scene) => sum + scene.duration, 0);
+      window.__duration = total;
+      window.__sceneDuration = (index) => scenes[index].duration;
+
+      const clamp = (value) => Math.min(1, Math.max(0, value));
+      const easeOut = (p) => 1 - (1 - p) ** 3;
+
+      const layers = {
+        code: document.getElementById('code'),
+        pipe: document.getElementById('pipe'),
+        out: document.getElementById('out'),
+        caption: document.getElementById('caption'),
+        tabs: document.getElementById('scene-tabs'),
+      };
+
+      layers.tabs.innerHTML = scenes.map((scene) => `<span>${scene.tab}</span>`).join('');
+
+      const outHead = (scene) => `
+        <div class="out-head"><code>audit_logs</code><span class="count" data-count><b>${scene.rowsBefore}</b> rows</span></div>`;
+
+      const pipe = (scene) => `
+        <div class="pipe ${scene.read ? 'idle' : ''}">
+          <h3>prisma-audit extension</h3>
+          <ol class="steps">${STEPS.map((step, i) => `<li data-step="${i}"><span class="n">${i + 1}</span>${step}</li>`).join('')}</ol>
+          ${scene.read ? '<p class="pipe-note" data-in="500">Reads pass straight through. Only writes are audited.</p>' : ''}
+        </div>`;
+
+      let mounted = -1;
+      const mount = (index) => {
+        const scene = scenes[index];
+        layers.code.innerHTML = `<div class="scene">${scene.code}</div>`;
+        layers.pipe.innerHTML = `<div class="scene">${pipe(scene)}</div>`;
+        layers.out.innerHTML = `<div class="scene"><div class="out">${outHead(scene)}<div style="position:relative">${scene.out}</div>${history(index)}</div></div>`;
+        layers.caption.innerHTML = `<div>${scene.caption}</div>`;
+        for (const [i, tab] of [...layers.tabs.querySelectorAll('span')].entries()) tab.classList.toggle('on', i === index);
+        mounted = index;
+      };
+
+      const rowsAt = (scene, local) => {
+        if (scene.rowsPending !== undefined) {
+          if (local >= scene.rollbackAt) return scene.rowsAfter;
+          if (local >= 1250) return scene.rowsBefore + scene.rowsPending;
+          return scene.rowsBefore;
+        }
+        return local >= 1250 ? scene.rowsAfter : scene.rowsBefore;
+      };
+
+      window.__seek = (time) => {
+        let t = ((time % total) + total) % total;
+        let index = 0;
+        while (t >= scenes[index].duration) {
+          t -= scenes[index].duration;
+          index += 1;
+        }
+        if (index !== mounted) mount(index);
+        const scene = scenes[index];
+
+        const sceneOpacity = Math.min(clamp(t / FADE), clamp((scene.duration - t) / FADE));
+        for (const layer of [layers.code, layers.out, layers.caption]) layer.style.opacity = String(easeOut(sceneOpacity));
+        layers.pipe.style.opacity = String(easeOut(sceneOpacity));
+
+        for (const el of document.querySelectorAll('[data-in], [data-out]')) {
+          const p = easeOut(clamp((t - Number(el.dataset.in ?? 0)) / FADE));
+          const out = el.dataset.out ? easeOut(clamp((t - Number(el.dataset.out)) / FADE)) : 0;
+          el.style.opacity = String(p * (1 - out));
+          el.style.transform = `translateY(${(1 - p) * 6 - out * 4}px)`;
+        }
+        for (const el of document.querySelectorAll('[data-glow]')) {
+          el.style.setProperty('--p', String(easeOut(clamp((t - Number(el.dataset.glow)) / FADE))));
+        }
+
+        if (!scene.read) {
+          const stepLength = 150;
+          const start = 320;
+          for (const el of document.querySelectorAll('[data-step]')) {
+            const i = Number(el.dataset.step);
+            const begin = start + i * stepLength;
+            el.classList.toggle('active', t >= begin && t < begin + stepLength);
+            el.classList.toggle('done', t >= begin + stepLength);
+          }
+        }
+
+        const count = document.querySelector('[data-count] b');
+        if (count) count.textContent = String(rowsAt(scene, t));
+      };
+
+      window.__ready = document.fonts.ready.then(() => window.__seek(0));
+      if (!navigator.webdriver) {
+        const begin = performance.now();
+        const tick = () => {
+          window.__seek(performance.now() - begin);
+          requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      }
+    </script>
+  </body>
+</html>
