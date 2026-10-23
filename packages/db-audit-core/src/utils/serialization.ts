@@ -31,8 +31,8 @@ export const UNHANDLED: unique symbol = Symbol('UNHANDLED');
  *
  * Return the serialized value, or `UNHANDLED` to delegate to the next serializer / built-in logic.
  *
- * The returned value MUST be JSON-safe (no BigInt, Date, etc.). If your serializer returns
- * a container with nested non-JSON-safe values, call `serializeForAuditJson` within the serializer.
+ * The returned value is stored as is, without further serialization, so it MUST be JSON-safe at
+ * every depth (no BigInt, Date, etc.).
  */
 export type ValueSerializer = (value: unknown) => unknown | typeof UNHANDLED;
 
