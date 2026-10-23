@@ -1,0 +1,111 @@
+@import "tailwindcss";
+@import "@fontsource-variable/schibsted-grotesk";
+@import "@fontsource-variable/martian-mono/standard.css";
+
+@theme {
+  --font-sans: "Schibsted Grotesk Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Martian Mono Variable", ui-monospace, monospace;
+
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 15px;
+  --text-lg: 18px;
+  --text-xl: 22px;
+  --text-2xl: 27px;
+
+  --color-paper: #f2f4f7;
+  --color-surface: #ffffff;
+  --color-ink: #1a2233;
+  --color-ink-muted: #5d6679;
+  --color-line: #dce1ea;
+  --color-danger: #b42318;
+
+  --color-trace: #151c2e;
+  --color-trace-raised: #1e2742;
+  --color-trace-line: #2e3a5c;
+  --color-trace-ink: #e6eaf5;
+  --color-trace-muted: #8d98b6;
+
+  --color-agg-user: #6d44e8;
+  --color-agg-post: #1a6fd1;
+  --color-agg-comment: #0b8a7b;
+  --color-agg-tag: #a86a07;
+  --color-agg-user-glow: #b6a2ff;
+  /* Opaque, so an avatar keeps its look on any surface, the dark active chip included */
+  --color-agg-user-tint: #f0ecfd;
+  --color-agg-post-glow: #7db9ff;
+  --color-agg-comment-glow: #62d5c4;
+  --color-agg-tag-glow: #f0c066;
+
+  --radius-chip: 6px;
+  --radius-control: 10px;
+  --radius-sheet: 16px;
+
+  --animate-arrive: arrive 420ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  --animate-collapse: collapse 900ms ease-in 1.6s forwards;
+
+  @keyframes arrive {
+    from {
+      opacity: 0;
+      transform: translateY(-6px);
+      background-color: color-mix(in oklab, var(--color-agg-post-glow) 18%, transparent);
+    }
+  }
+  @keyframes collapse {
+    to {
+      opacity: 0.45;
+    }
+  }
+}
+
+/*
+ * Prose wraps; a label never does. Japanese text may break between any two
+ * characters, so a label left to wrap is squeezed down to one character per line
+ */
+@utility label {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+/* A name inside a sentence: kept whole, cut with an ellipsis only when it alone outgrows the line */
+@utility label-inline {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
+@layer base {
+  html {
+    background: var(--color-paper);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: var(--text-base);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    min-height: 100dvh;
+    overflow-wrap: break-word;
+  }
+  .font-mono,
+  code,
+  pre {
+    font-stretch: 75%;
+    font-size: 0.8em;
+  }
+  h1,
+  h2,
+  h3 {
+    line-height: 1.2;
+    letter-spacing: -0.01em;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-agg-post);
+    outline-offset: 2px;
+  }
+  ::selection {
+    background: color-mix(in oklab, var(--color-agg-post) 22%, transparent);
+  }
+}

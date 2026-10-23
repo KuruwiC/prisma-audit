@@ -8,22 +8,15 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
+      // The API's source, imported as text where the demo shows it
+      '@api': path.resolve(__dirname, '../hono-api/src'),
     },
   },
   server: {
     port: 5173,
     proxy: {
-      '/auth': 'http://localhost:3000',
-      '/feed': 'http://localhost:3000',
-      '/users': 'http://localhost:3000',
-      '/posts': 'http://localhost:3000',
-      '/posts-with-tags': 'http://localhost:3000',
-      '/profiles': 'http://localhost:3000',
-      '/comments': 'http://localhost:3000',
-      '/attachments': 'http://localhost:3000',
-      '/avatar-images': 'http://localhost:3000',
-      '/audit-logs': 'http://localhost:3000',
-      '/tags': 'http://localhost:3000',
+      // DEMO_API_URL points the proxy at an API started on another port (PORT=3001 pnpm dev:api)
+      '/api': process.env.DEMO_API_URL ?? 'http://localhost:3000',
     },
   },
 });

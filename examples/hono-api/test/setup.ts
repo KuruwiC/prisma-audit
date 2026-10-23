@@ -11,13 +11,9 @@ const basePrisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: 
 
 beforeEach(async () => {
   await basePrisma.auditLog.deleteMany();
-  await basePrisma.commentAttachment.deleteMany();
-  await basePrisma.postAttachment.deleteMany();
+  await basePrisma.postLike.deleteMany();
   await basePrisma.postTag.deleteMany();
-  await basePrisma.avatarImage.deleteMany();
-  await basePrisma.avatar.deleteMany();
   await basePrisma.profile.deleteMany();
-  await basePrisma.attachment.deleteMany();
   await basePrisma.tag.deleteMany();
   await basePrisma.comment.deleteMany();
   await basePrisma.post.deleteMany();
