@@ -31,7 +31,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { cleanDatabase, createBasePrisma } from './helpers/setup.js';
 
 const testEntities: EntityMap = {
-  User: defineEntity({ type: 'User', excludeFields: ['updatedAt'] }),
+  User: defineEntity({ type: 'User', diffExcludeFields: ['updatedAt'] }),
   Post: defineEntity({ type: 'Post', aggregates: [to('User', foreignKey('authorId'))] }),
 };
 
@@ -527,7 +527,7 @@ describe('Database Round-Trip Guard', () => {
 
 const ROUND_TRIP_OMIT = { user: { password: true }, post: { content: true } } satisfies Prisma.GlobalOmitConfig;
 
-describe('Database Round-Trip Guard: fields an entity lists in auditOmittedFields', () => {
+describe('Database Round-Trip Guard: fields an entity lists in recordOmittedFields', () => {
   let basePrisma: PrismaClient<'query', typeof ROUND_TRIP_OMIT>;
   let provider: AuditContextProvider;
   let prisma: ReturnType<typeof createAuditClient>;
@@ -548,11 +548,11 @@ describe('Database Round-Trip Guard: fields an entity lists in auditOmittedField
       schema: auditSchema,
       contextProvider: provider,
       entities: {
-        User: defineEntity({ type: 'User', excludeFields: ['updatedAt'], auditOmittedFields: ['password'] }),
+        User: defineEntity({ type: 'User', diffExcludeFields: ['updatedAt'], recordOmittedFields: ['password'] }),
         Post: defineEntity({
           type: 'Post',
           aggregates: [to('User', foreignKey('authorId'))],
-          auditOmittedFields: ['content'],
+          recordOmittedFields: ['content'],
         }),
       },
     });

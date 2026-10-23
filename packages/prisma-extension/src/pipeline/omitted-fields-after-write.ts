@@ -1,8 +1,8 @@
 /**
- * The omitted fields an entity audits, read after the write
+ * The omitted fields an entity records, read after the write
  *
  * An after state taken from the caller's operation result is in the client's default shape, which
- * lacks the fields a client-level `omit` hides. The fields an entity lists in `auditOmittedFields`
+ * lacks the fields a client-level `omit` hides. The fields an entity lists in `recordOmittedFields`
  * are read for those rows in one query per model, by row key (`rowKeyFieldsOf`), selecting the key
  * and those fields only, so the caller's query is never widened with them. Rows the audit read
  * itself, through `withOmittedFieldsInFinds`, already hold them, and a deleted row has no after

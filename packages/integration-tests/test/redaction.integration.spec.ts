@@ -1,12 +1,15 @@
 /**
  * Integration Tests: PII Redaction
+ *
+ * The client configures no `redactFields`: the built-in sensitive fields, `password` among them,
+ * are masked without it.
  */
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { describe, expect, it } from 'vitest';
 import { setupTestContext } from './helpers/setup.js';
 
-describe('PII Redaction Integration', () => {
+describe('PII Redaction Integration: built-in sensitive fields with no redactFields configured', () => {
   const context = setupTestContext();
 
   const testActor: AuditContext = {

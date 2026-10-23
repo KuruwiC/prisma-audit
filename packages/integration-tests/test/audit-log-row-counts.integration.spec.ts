@@ -16,7 +16,7 @@ import { cleanDatabase, createBasePrisma, type TestContext } from './helpers/set
 const testEntities: EntityMap = {
   User: defineEntity({
     type: 'User',
-    excludeFields: ['updatedAt'],
+    diffExcludeFields: ['updatedAt'],
   }),
   Post: defineEntity({
     type: 'Post',
@@ -39,14 +39,7 @@ const createAuditedClientWithAuditLogRowCounter = (
     schema: auditSchema,
     contextProvider: provider,
     entities: testEntities,
-    diffing: {
-      excludeFields: ['createdAt'],
-    },
-    security: {
-      redact: {
-        fields: [],
-      },
-    },
+    diffExcludeFields: ['createdAt'],
     write: {
       awaited: true,
       writer: async (records, { defaultWrite }) => {
@@ -71,14 +64,7 @@ const createAuditedClientFetchingBeforeState = (
     schema: auditSchema,
     contextProvider: provider,
     entities: testEntities,
-    diffing: {
-      excludeFields: ['createdAt'],
-    },
-    security: {
-      redact: {
-        fields: [],
-      },
-    },
+    diffExcludeFields: ['createdAt'],
     write: {
       awaited: true,
       writer: async (records, { defaultWrite }) => {

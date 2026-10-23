@@ -12,6 +12,7 @@
  * be assigned where `EntityConfig` is expected.
  */
 
+import type { FetchBeforeConfig } from '../config.types.js';
 import type { AggregateRootContextConfig, EntityContextConfig, ProjectionContextConfig } from '../enrichment/types.js';
 
 // ============================================================================
@@ -128,7 +129,7 @@ export type SelfAggregateConfig<
  *   type: 'User',
  *   idResolver: self('id'),
  *   aggregates: [],
- *   excludeFields: ['password', 'passwordHash']
+ *   diffExcludeFields: ['lastLoginAt']
  * };
  *
  * const postConfig: EntityConfig = {
@@ -152,15 +153,25 @@ export interface EntityConfig<TDbHandle = unknown, TEntity extends Record<string
   aggregates: AggregateProjection<TDbHandle, TEntity>[];
   /** Self aggregate log configuration (default: included, no projection-side aggregate context) */
   selfAggregate?: SelfAggregateConfig<TDbHandle, TEntity>;
-  /** Field names to exclude from change tracking */
-  excludeFields?: string[];
+  /**
+   * Fields left out of the change set of an update, in place of the global list (`[]` tracks every
+   * field; omitted, the global list applies). An update that changes only these fields is not
+   * recorded; the fields stay in the stored before and after states.
+   */
+  diffExcludeFields?: string[];
   /**
    * Fields the client leaves out of its default reads (such as the fields an ORM client is
-   * configured to omit) that the audit reads in its own queries and records anyway, their values
-   * masked in the stored states and changes. A field also in the entity's `excludeFields` is not
-   * read.
+   * configured to omit) that the audit reads in its own queries anyway and records with their
+   * values masked in the stored states and changes. A field the entity's `diffExcludeFields`
+   * names (or, without one, the global list) is not read.
    */
-  auditOmittedFields?: string[];
+  recordOmittedFields?: string[];
+  /**
+   * Whether the before state of this entity's updates and deletes is read ahead of the write, per
+   * operation in place of the global setting. Applied by an adapter that reads the row before the
+   * write; see {@link FetchBeforeConfig}.
+   */
+  fetchBefore?: FetchBeforeConfig;
 
   /**
    * Entity-log context enrichment, stored in AuditLog.entityContext

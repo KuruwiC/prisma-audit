@@ -28,8 +28,7 @@ const createClients = (fetchBeforeUpdate = true) => {
     schema: auditSchema,
     contextProvider: provider,
     entities: testEntities,
-    diffing: { excludeFields: ['createdAt'] },
-    security: { redact: { fields: [] } },
+    diffExcludeFields: ['createdAt'],
     fetchBefore: {
       update: fetchBeforeUpdate,
       delete: true,

@@ -14,6 +14,8 @@ transaction queues its write until commit; outside one it starts a detached writ
 waits for. Id resolvers and enrichers read through the handle of the transaction they run in.
 `samplingRate` takes a value, or a function called once per operation with its model's name;
 `write.awaited` takes a value, or a function called once per sampled-in operation.
+`diffExcludeFields`, `redactFields` and `serializers` work as in the Prisma extension. The store
+holds every row's before state, so the adapter has no `fetchBefore` option and ignores an entity's.
 
 Failures go through the core failure sink. Each failed audit write is listed in `writeFailures`
 (phase `log-write`) and each row an id resolver failed for in `resolverFailures` (phase

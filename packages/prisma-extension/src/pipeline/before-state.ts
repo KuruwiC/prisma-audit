@@ -4,7 +4,7 @@
  * Read with `findUnique` on the operation's `where` before the write: always for an upsert,
  * whose executed branch is what the before state tells; for an update or a delete only when
  * its `fetchBefore` setting is on; never for a create. The read holds the omitted fields the
- * entity audits and, on a client that takes a query omit, the row key whatever a client-level
+ * entity records and, on a client that takes a query omit, the row key whatever a client-level
  * omit hides, so the row is identified by it even when the row the write returns lacks it.
  */
 

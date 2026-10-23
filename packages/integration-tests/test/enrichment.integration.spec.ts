@@ -580,7 +580,7 @@ describe('Context Enrichment Integration', () => {
   describe('Enricher Error Handling', () => {
     it("should write a Comment create without entity context when its entity enricher throws under onError: 'log'", async () => {
       const customEntities: EntityMap = {
-        User: defineEntity({ type: 'User', excludeFields: ['updatedAt'] }),
+        User: defineEntity({ type: 'User', diffExcludeFields: ['updatedAt'] }),
         Profile: defineEntity({
           type: 'Profile',
           aggregates: [to('User', foreignKey('userId'))],
@@ -650,7 +650,7 @@ describe('Context Enrichment Integration', () => {
 
     it("should write a Comment create without entity or aggregate context when its enrichers throw under onError: 'log'", async () => {
       const customEntities: EntityMap = {
-        User: defineEntity({ type: 'User', excludeFields: ['updatedAt'] }),
+        User: defineEntity({ type: 'User', diffExcludeFields: ['updatedAt'] }),
         Profile: defineEntity({
           type: 'Profile',
           aggregates: [to('User', foreignKey('userId'))],
@@ -779,7 +779,7 @@ describe('Context Enrichment Integration', () => {
         ...testEntities,
         User: defineEntity({
           type: 'User',
-          excludeFields: ['updatedAt'],
+          diffExcludeFields: ['updatedAt'],
           entityContext: {
             enricher: async () => {
               throw enricherError;
@@ -1056,7 +1056,7 @@ describe('Context Enrichment Integration', () => {
       const customEntities: EntityMap = {
         User: defineEntity({
           type: 'User',
-          excludeFields: ['updatedAt'],
+          diffExcludeFields: ['updatedAt'],
           entityContext: {
             enricher: async (entities: unknown[], _prisma: unknown) => {
               entityEnricherCallCount++;
@@ -1128,7 +1128,7 @@ describe('Context Enrichment Integration', () => {
       const customEntities: EntityMap = {
         User: defineEntity({
           type: 'User',
-          excludeFields: ['updatedAt'],
+          diffExcludeFields: ['updatedAt'],
           entityContext: {
             enricher: async (entities: unknown[], _prisma: unknown) => {
               entityEnricherCallCount++;
@@ -1192,7 +1192,7 @@ describe('Context Enrichment Integration', () => {
       const customEntities: EntityMap = {
         User: defineEntity({
           type: 'User',
-          excludeFields: ['updatedAt'],
+          diffExcludeFields: ['updatedAt'],
           selfAggregate: {
             aggregateContext: {
               enricher: async (rows, _prisma, meta) => {
@@ -1284,7 +1284,7 @@ describe('Context Enrichment Integration', () => {
       const customEntities: EntityMap = {
         User: defineEntity({
           type: 'User',
-          excludeFields: ['updatedAt'],
+          diffExcludeFields: ['updatedAt'],
         }),
         Profile: defineEntity({
           type: 'Profile',
@@ -1293,7 +1293,7 @@ describe('Context Enrichment Integration', () => {
         Post: defineEntity({
           type: 'Post',
           aggregates: [to('User', foreignKey('authorId'))],
-          excludeFields: ['updatedAt'],
+          diffExcludeFields: ['updatedAt'],
         }),
         Comment: defineEntity({
           type: 'Comment',
@@ -1346,7 +1346,7 @@ describe('Context Enrichment Integration', () => {
       const customEntities: EntityMap = {
         User: defineEntity({
           type: 'User',
-          excludeFields: ['updatedAt'],
+          diffExcludeFields: ['updatedAt'],
           aggregateContext: {
             enricher: async (userIds, _prisma) => userIds.map((id) => ({ rootUserId: id, source: 'root' })),
           },
@@ -1405,7 +1405,7 @@ describe('Context Enrichment Integration', () => {
       const customEntities: EntityMap = {
         User: defineEntity({
           type: 'User',
-          excludeFields: ['updatedAt'],
+          diffExcludeFields: ['updatedAt'],
           aggregateContext: {
             enricher: async (userIds, _prisma) => userIds.map(() => ({ source: 'root', rootOnly: true })),
           },
@@ -1465,7 +1465,7 @@ describe('Context Enrichment Integration', () => {
       const customEntities: EntityMap = {
         User: defineEntity({
           type: 'User',
-          excludeFields: ['updatedAt'],
+          diffExcludeFields: ['updatedAt'],
         }),
         Post: defineEntity({
           type: 'Post',
@@ -1541,7 +1541,7 @@ describe('Context Enrichment Integration', () => {
         entities: {
           User: defineEntity({
             type: 'User',
-            excludeFields: ['updatedAt'],
+            diffExcludeFields: ['updatedAt'],
             aggregateContext: {
               enricher: async (userIds, _prisma) => {
                 receivedIds.push([...userIds]);

@@ -16,7 +16,7 @@ import type { AuditContext } from '../src/types.js';
 
 const MISSING_AUTHOR_ID =
   'The row has no "authorId" column; if the client leaves it out of its default reads, list it in the ' +
-  "entity's auditOmittedFields";
+  "entity's recordOmittedFields";
 
 type Row = Record<string, unknown>;
 

@@ -10,7 +10,7 @@ import { cleanDatabase, createBasePrisma, disposeTestContext, type TestContext }
 const testEntities: EntityMap = {
   User: defineEntity({
     type: 'User',
-    excludeFields: ['updatedAt'],
+    diffExcludeFields: ['updatedAt'],
   }),
   Post: defineEntity({
     type: 'Post',
@@ -32,14 +32,7 @@ const createAuditedClientWithWriterSpy = (
     schema: auditSchema,
     contextProvider: provider,
     entities: testEntities,
-    diffing: {
-      excludeFields: ['createdAt'],
-    },
-    security: {
-      redact: {
-        fields: [],
-      },
-    },
+    diffExcludeFields: ['createdAt'],
     write: {
       awaited: config.awaited ?? true,
       writer: async (records: AuditLogData[], { auditContext, defaultWrite }) => {

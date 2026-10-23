@@ -2,7 +2,7 @@
  * Integration Test: fields a client-level omit hides
  *
  * By default the audit records the client's default shape: a field a client-level `omit` hides is
- * neither read nor recorded. An entity lists the hidden fields to audit in `auditOmittedFields`:
+ * neither read nor recorded. An entity lists the hidden fields to audit in `recordOmittedFields`:
  * the audit reads them in its own queries, the read before the write and a read by primary key
  * after it, records their change, and masks their values. The caller receives exactly the fields
  * it asked for either way.
@@ -51,11 +51,11 @@ const CALLER_NAMED_PASSWORD: Array<[string, Pick<Prisma.UserUpdateArgs, 'select'
 /** The mapping whose User and Post audit the fields the client omits */
 const auditingOmittedFields: EntityMap = {
   ...testEntities,
-  User: defineEntity({ type: 'User', excludeFields: ['updatedAt'], auditOmittedFields: ['password'] }),
+  User: defineEntity({ type: 'User', diffExcludeFields: ['updatedAt'], recordOmittedFields: ['password'] }),
   Post: defineEntity({
     type: 'Post',
     aggregates: [to('User', foreignKey('authorId'))],
-    auditOmittedFields: ['content', 'authorId'],
+    recordOmittedFields: ['content', 'authorId'],
   }),
 };
 
@@ -63,7 +63,7 @@ interface Options {
   readonly Prisma?: typeof Prisma;
   readonly errorObserver?: AuditErrorObserver;
   readonly entities?: EntityMap;
-  readonly security?: { readonly redact?: { readonly fields?: string[] } };
+  readonly redactFields?: string[];
   readonly fetchBefore?: { readonly update?: boolean; readonly delete?: boolean };
 }
 
@@ -92,7 +92,7 @@ describe('fields a client-level omit hides', () => {
       schema: auditSchema,
       contextProvider: provider,
       entities: testEntities,
-      diffing: { excludeFields: ['createdAt', 'updatedAt'] },
+      diffExcludeFields: ['createdAt', 'updatedAt'],
       ...options,
     });
     disconnects.push(async () => {
@@ -252,7 +252,7 @@ describe('fields a client-level omit hides', () => {
           phase: 'id-resolver-call',
           modelName: 'Post',
           params: expect.objectContaining({ resolver: expect.objectContaining({ aggregateType: 'User' }) }),
-          error: expect.objectContaining({ message: expect.stringContaining('auditOmittedFields') }),
+          error: expect.objectContaining({ message: expect.stringContaining('recordOmittedFields') }),
         }),
       );
     });
@@ -269,7 +269,7 @@ describe('fields a client-level omit hides', () => {
     });
   });
 
-  describe('fields an entity lists in auditOmittedFields', () => {
+  describe('fields an entity lists in recordOmittedFields', () => {
     describe('a top-level row', () => {
       it('records a change of a listed field masked, and returns the default fields', async () => {
         const { prisma, run, recordOf } = await optedIn();
@@ -364,8 +364,8 @@ describe('fields a client-level omit hides', () => {
         expect(keysOf(record?.after)).toEqual(USER_COLUMNS);
       });
 
-      it('masks a listed field the redact config also names once', async () => {
-        const { prisma, run, recordOf } = await optedIn({ security: { redact: { fields: ['password'] } } });
+      it('masks a listed field that redactFields also names once', async () => {
+        const { prisma, run, recordOf } = await optedIn({ redactFields: ['password'] });
 
         await run(() => prisma.user.update({ where: { id: 'u1' }, data: { password: 'hash-new' } }));
 
@@ -375,14 +375,14 @@ describe('fields a client-level omit hides', () => {
       });
     });
 
-    describe('a field excludeFields also names', () => {
+    describe('a field diffExcludeFields also names', () => {
       const excludingPassword: Options = {
         entities: {
           ...auditingOmittedFields,
           User: defineEntity({
             type: 'User',
-            excludeFields: ['createdAt', 'updatedAt', 'password'],
-            auditOmittedFields: ['password'],
+            diffExcludeFields: ['createdAt', 'updatedAt', 'password'],
+            recordOmittedFields: ['password'],
           }),
         },
       };
@@ -521,7 +521,7 @@ describe('fields a client-level omit hides', () => {
               Label: defineEntity({
                 type: 'Label',
                 aggregates: [to('Post', foreignKey('postId'))],
-                auditOmittedFields: ['postId'],
+                recordOmittedFields: ['postId'],
               }),
             },
           },
@@ -641,30 +641,30 @@ describe('fields a client-level omit hides', () => {
     });
 
     describe('configuration errors', () => {
-      const listing = (auditOmittedFields: string[]): Options => ({
+      const listing = (recordOmittedFields: string[]): Options => ({
         entities: {
           ...testEntities,
-          User: defineEntity({ type: 'User', excludeFields: ['updatedAt'], auditOmittedFields }),
+          User: defineEntity({ type: 'User', diffExcludeFields: ['updatedAt'], recordOmittedFields }),
         },
       });
 
       it('rejects a field the model does not have', async () => {
-        await expect(setup(listing(['passwrod']))).rejects.toThrow(/User.*auditOmittedFields.*passwrod/);
+        await expect(setup(listing(['passwrod']))).rejects.toThrow(/User.*recordOmittedFields.*passwrod/);
       });
 
       it('rejects a relation field', async () => {
-        await expect(setup(listing(['posts']))).rejects.toThrow(/User.*auditOmittedFields.*posts/);
+        await expect(setup(listing(['posts']))).rejects.toThrow(/User.*recordOmittedFields.*posts/);
       });
 
       it('rejects the option on a mapping key that names no model', async () => {
         const options: Options = {
           entities: {
             ...testEntities,
-            Usr: defineEntity({ type: 'Usr', auditOmittedFields: ['password'] }),
+            Usr: defineEntity({ type: 'Usr', recordOmittedFields: ['password'] }),
           },
         };
 
-        await expect(setup(options)).rejects.toThrow(/'Usr'.*auditOmittedFields.*matches no model/);
+        await expect(setup(options)).rejects.toThrow(/'Usr'.*recordOmittedFields.*matches no model/);
       });
 
       it.each([
@@ -672,7 +672,7 @@ describe('fields a client-level omit hides', () => {
         ['of an unknown version', undefined],
       ])('rejects the option on a client %s, which takes no query omit', async (_label, version) => {
         await expect(setup({ ...listing(['password']), Prisma: prismaReportingVersion(version) })).rejects.toThrow(
-          /auditOmittedFields.*Prisma 6\.2/,
+          /recordOmittedFields.*Prisma 6\.2/,
         );
       });
     });
@@ -1111,13 +1111,13 @@ describe('fields a client-level omit hides', () => {
   });
 
   describe('a client without omit', () => {
-    it('records every column as it reads it, masking nothing it was not told to', async () => {
+    it('records every column as it reads it, masking only the built-in sensitive fields', async () => {
       const { prisma, run, recordOf } = await setup({}, {});
 
       const result = await run(() => prisma.user.update({ where: { id: 'u1' }, data: { password: 'hash-new' } }));
 
       expect(keysOf(result)).toEqual(USER_COLUMNS);
-      expect((await recordOf('User', 'u1'))?.changes).toEqual({ password: { old: 'hash-old', new: 'hash-new' } });
+      expect((await recordOf('User', 'u1'))?.changes).toEqual({ password: { old: MASKED, new: MASKED_CHANGED } });
     });
 
     it('records every column of a row whose operation selects some of them', async () => {
@@ -1143,9 +1143,9 @@ describe('fields a client-level omit hides', () => {
       expect(keysOf(record?.after)).toEqual(USER_COLUMNS);
       expect(record?.changes).toEqual({
         name: { old: 'Ada', new: 'Bea' },
-        password: { old: 'hash-old', new: 'hash-new' },
+        password: { old: MASKED, new: MASKED_CHANGED },
       });
-      expect((await recordOf('User', 'u3'))?.after).toMatchObject({ email: 'u3@example.com', password: 'hash-3' });
+      expect((await recordOf('User', 'u3'))?.after).toMatchObject({ email: 'u3@example.com', password: MASKED });
     });
   });
 });

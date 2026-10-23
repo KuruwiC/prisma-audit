@@ -30,8 +30,7 @@ export type PrismaClientLike = {
  * Creates a Prisma client instance with the audit logging extension applied
  *
  * @template TClient - The client type: the `db` type every resolver and enricher in `options` receives
- * @template TModelName - Model names of `options.schema`, which key `options.entities` and
- *   `options.fetchBefore.models`
+ * @template TModelName - Model names of `options.schema`, which key `options.entities`
  * @param prisma - Client to audit. Audited operations run on it, and audit logs are written
  *   with it, bypassing the audit extension.
  * @param options - Audit configuration, including the `Prisma` namespace of the generated
@@ -71,14 +70,8 @@ export type PrismaClientLike = {
  *   schema: auditSchema,
  *   contextProvider: auditProvider,
  *   entities,
- *   diffing: {
- *     excludeFields: ['updatedAt', 'createdAt'],
- *   },
- *   security: {
- *     redact: {
- *       fields: ['ssn', 'creditCard'],
- *     },
- *   },
+ *   diffExcludeFields: ['updatedAt', 'createdAt'],
+ *   redactFields: ['phoneNumber'],
  *   write: {
  *     awaited: true,
  *     writer: async (records, { defaultWrite }) => {
@@ -128,7 +121,7 @@ export type PrismaClientWithAudit<T extends PrismaClientLike = PrismaClientLike>
  *
  * @remarks
  * Curried so that `TClient` is given explicitly while the model names are inferred from
- * `schema`: they key `entities` and `fetchBefore.models`, spelled as `schema.prisma`
+ * `schema`: they key `entities`, spelled as `schema.prisma`
  * declares them. The returned function is the identity; it only types the configuration.
  *
  * @example Defining configuration in a separate file
@@ -156,9 +149,7 @@ export type PrismaClientWithAudit<T extends PrismaClientLike = PrismaClientLike>
  *       aggregates: [to('User', foreignKey('authorId'))],
  *     }),
  *   }),
- *   diffing: {
- *     excludeFields: ['updatedAt', 'createdAt'],
- *   },
+ *   diffExcludeFields: ['updatedAt', 'createdAt'],
  * });
  * ```
  *

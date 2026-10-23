@@ -7,6 +7,7 @@
  * Helpers for declaring an entity map, plus the runtime resolution of one aggregate id.
  */
 
+import type { FetchBeforeConfig } from '../config.types.js';
 import type { AggregateRootContextConfig, EntityContextConfig, ProjectionContextConfig } from '../enrichment/types.js';
 import { getGlobalSingleton } from '../global-singleton.js';
 import type {
@@ -205,7 +206,7 @@ export const self = (idKey: string | IdTransformer = 'id'): IdResolver => {
  *
  * A field that holds `null` is a row without a parent: no id, nothing reported. A row that lacks
  * the field fails the resolver, reported like any resolver failure (a field the client leaves out
- * of its default reads is in the row only when the entity lists it in `auditOmittedFields`),
+ * of its default reads is in the row only when the entity lists it in `recordOmittedFields`),
  * except the row of a delete whose before state was not read: it holds only what the adapter
  * knows without reading it, so the resolver is not called and the row is left out of that root
  * silently.
@@ -248,7 +249,7 @@ export const foreignKey = (foreignKeyField: string | IdTransformer): IdResolver 
     if (fieldValue === undefined) {
       throw new Error(
         `The row has no "${foreignKeyField}" column; if the client leaves it out of its default reads, ` +
-          "list it in the entity's auditOmittedFields",
+          "list it in the entity's recordOmittedFields",
       );
     }
     return fieldValue === null ? null : normalizeId(fieldValue);
@@ -474,14 +475,25 @@ export type DefineEntityOptions<
    * `{ aggregateContext }` enriches the self aggregate log with the entity's own rows.
    */
   selfAggregate?: SelfAggregateConfig<TDbHandle, TEntity>;
-  /** Fields to exclude when calculating changes for this entity */
-  excludeFields?: string[];
+  /**
+   * Fields left out of the change set of an update, in place of the global list (`[]` tracks every
+   * field; omitted, the global list applies). An update that changes only these fields is not
+   * recorded; the fields stay in the stored before and after states.
+   */
+  diffExcludeFields?: string[];
   /**
    * Fields the client leaves out of its default reads (such as the fields an ORM client is
-   * configured to omit) that the audit reads and records anyway, values masked. `excludeFields`
-   * wins over this list.
+   * configured to omit) that the audit reads in its own queries anyway and records with their
+   * values masked in the stored states and changes. A field the entity's `diffExcludeFields`
+   * names (or, without one, the global list) is not read.
    */
-  auditOmittedFields?: string[];
+  recordOmittedFields?: string[];
+  /**
+   * Whether the before state of this entity's updates and deletes is read ahead of the write, per
+   * operation in place of the global setting. Applied by an adapter that reads the row before the
+   * write; see {@link FetchBeforeConfig}.
+   */
+  fetchBefore?: FetchBeforeConfig;
 
   /** Entity-log context enrichment, stored in AuditLog.entityContext */
   entityContext?: EntityContextConfig<TDbHandle, TEntity>;
@@ -503,7 +515,7 @@ export type DefineEntityOptions<
  * ```typescript
  * defineEntity({
  *   type: 'User',
- *   excludeFields: ['password']
+ *   diffExcludeFields: ['lastLoginAt']
  * })
  * ```
  *
@@ -542,8 +554,9 @@ export const defineEntity = <TEntity extends Record<string, unknown> = Record<st
     idResolver,
     aggregates = [],
     selfAggregate,
-    excludeFields,
-    auditOmittedFields,
+    diffExcludeFields,
+    recordOmittedFields,
+    fetchBefore,
     entityContext,
     aggregateContext,
   } = options;
@@ -554,8 +567,9 @@ export const defineEntity = <TEntity extends Record<string, unknown> = Record<st
     idResolver: idResolver ?? self('id'),
     aggregates,
     selfAggregate,
-    excludeFields,
-    auditOmittedFields,
+    diffExcludeFields,
+    recordOmittedFields,
+    fetchBefore,
     entityContext,
     aggregateContext,
   };
@@ -579,7 +593,7 @@ export const defineEntity = <TEntity extends Record<string, unknown> = Record<st
  * const entities = defineEntities<ModelName, DbHandle>()({
  *   User: defineEntity({
  *     type: 'User',
- *     excludeFields: ['password']
+ *     diffExcludeFields: ['lastLoginAt']
  *   }),
  *   Post: defineEntity({
  *     type: 'Post',

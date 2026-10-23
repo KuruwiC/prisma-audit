@@ -51,7 +51,7 @@ export const safeStringify = (value: unknown): string | undefined => {
 
 const applyCustomSerializers = (
   value: unknown,
-  serializers: ValueSerializer[] | undefined,
+  serializers: readonly ValueSerializer[] | undefined,
 ): typeof UNHANDLED | unknown => {
   if (!serializers) return UNHANDLED;
   for (const serializer of serializers) {
@@ -66,11 +66,11 @@ const hasToJSON = (value: object): value is { toJSON: () => unknown } =>
 
 const serializeObjectEntries = (
   obj: object,
-  customSerializers: ValueSerializer[] | undefined,
+  serializers: readonly ValueSerializer[] | undefined,
 ): Record<string, unknown> => {
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(obj)) {
-    result[key] = serializeForAuditJson(value, customSerializers);
+    result[key] = serializeForAuditJson(value, serializers);
   }
   return result;
 };
@@ -103,20 +103,20 @@ const serializeObjectEntries = (
  * // => { data: 'aGVsbG8=' }
  * ```
  */
-export const serializeForAuditJson = (obj: unknown, customSerializers?: ValueSerializer[]): unknown =>
-  serializeValue(obj, customSerializers, true);
+export const serializeForAuditJson = (obj: unknown, serializers?: readonly ValueSerializer[]): unknown =>
+  serializeValue(obj, serializers, true);
 
 const serializeValue = (
   value: unknown,
-  customSerializers: ValueSerializer[] | undefined,
+  serializers: readonly ValueSerializer[] | undefined,
   callToJSON: boolean,
 ): unknown => {
-  const customResult = applyCustomSerializers(value, customSerializers);
+  const customResult = applyCustomSerializers(value, serializers);
   if (customResult !== UNHANDLED) return customResult;
 
   if (typeof value === 'bigint') return value.toString();
   if (value === null || typeof value !== 'object') return value;
-  if (callToJSON && hasToJSON(value)) return serializeValue(value.toJSON(), customSerializers, false);
-  if (Array.isArray(value)) return value.map((item) => serializeForAuditJson(item, customSerializers));
-  return serializeObjectEntries(value, customSerializers);
+  if (callToJSON && hasToJSON(value)) return serializeValue(value.toJSON(), serializers, false);
+  if (Array.isArray(value)) return value.map((item) => serializeForAuditJson(item, serializers));
+  return serializeObjectEntries(value, serializers);
 };

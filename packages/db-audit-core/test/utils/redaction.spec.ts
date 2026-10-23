@@ -35,7 +35,7 @@ describe('createRedactor', () => {
   });
 
   it('should support custom sensitive fields', () => {
-    const redactor = createRedactor({ fields: ['customSecret'] });
+    const redactor = createRedactor(['customSecret']);
     const data = {
       name: 'John',
       customSecret: 'my-secret',
@@ -216,13 +216,10 @@ describe('redactSensitiveData', () => {
     });
   });
 
-  it('should accept custom config', () => {
+  it('should redact the given fields on top of the built-in ones', () => {
     const data = { password: 'secret', customField: 'sensitive' };
-    const config = {
-      fields: ['customField'],
-    };
 
-    const redacted = redactSensitiveData(data, config) as Record<string, unknown>;
+    const redacted = redactSensitiveData(data, ['customField']) as Record<string, unknown>;
 
     expect(redacted).toEqual({
       password: {

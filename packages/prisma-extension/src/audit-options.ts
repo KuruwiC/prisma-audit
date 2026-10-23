@@ -14,11 +14,11 @@ import type {
   WriteFn,
 } from '@kuruwic/db-audit-core';
 import { createEntityConfigLookup } from '@kuruwic/db-audit-core';
-import { resolveFetchBefore } from './config/helpers.js';
+import { createShouldFetchBefore } from './config/helpers.js';
 import {
-  validateAuditOmittedFields,
   validateFieldConflicts,
   validateImplicitTransaction,
+  validateRecordOmittedFields,
 } from './config/validation.js';
 import type { ShouldFetchBefore } from './grammar/pre-fetch-selection.js';
 import type { PrismaNamespace } from './internal-types.js';
@@ -40,7 +40,7 @@ export interface AuditOptions {
   readonly schemaMetadata: SchemaMetadata;
   /** Whether the client accepts a query `omit`, used to read a caller `select` in the default shape */
   readonly queryOmitSupported: boolean;
-  /** The fields a client-level `omit` hides that the audit reads, from the entities' `auditOmittedFields` */
+  /** The fields a client-level `omit` hides that the audit reads, from the entities' `recordOmittedFields` */
   readonly auditedOmittedFields: AuditedOmittedFields;
   /**
    * `auditedOmittedFields` with each model's row key on a client that takes a query omit: the fields
@@ -70,23 +70,23 @@ const RELATION_COUNT_FIELD = '_count';
 
 /**
  * @throws {Error} If the `schema` option is missing or of another format version, the entity
- *   map is invalid, the diffing and redaction settings conflict, an entity's
- *   `auditOmittedFields` names a field the audit cannot read, or `write.implicitTransaction` is set
- *   with `write.awaited: false`
+ *   map is invalid, `diffExcludeFields` and `redactFields` name the same field, an entity's
+ *   `recordOmittedFields` names a field the audit cannot read, or `write.implicitTransaction` is
+ *   set with `write.awaited: false`
  */
 export const normalizeAuditOptions = (options: PrismaAuditExtensionOptions): AuditOptions => {
-  const { contextProvider, entities, diffing, security, write, actorContext, errorObserver } = options;
+  const { contextProvider, entities, write, actorContext, errorObserver } = options;
 
   const schemaMetadata = loadSchemaMetadata(options.schema);
   const Prisma = options.Prisma as PrismaNamespace;
-  const excludeFields = diffing?.excludeFields ?? [];
-  const redact = security?.redact;
+  const diffExcludeFields = options.diffExcludeFields ?? [];
+  const redactFields = options.redactFields ?? [];
 
   const entityConfigs = createEntityConfigLookup(entities);
-  validateFieldConflicts(excludeFields, redact, entities);
+  validateFieldConflicts(diffExcludeFields, redactFields, entities);
   validateImplicitTransaction(write);
   const queryOmitSupported = supportsQueryOmit(Prisma.prismaVersion?.client);
-  validateAuditOmittedFields(entities, schemaMetadata, schemaMetadata.getModelNames(), queryOmitSupported);
+  validateRecordOmittedFields(entities, schemaMetadata, schemaMetadata.getModelNames(), queryOmitSupported);
 
   const relationFieldNamesByModel = new Map<string, ReadonlySet<string>>();
   const relationFieldNames = (modelName: string): ReadonlySet<string> => {
@@ -101,7 +101,7 @@ export const normalizeAuditOptions = (options: PrismaAuditExtensionOptions): Aud
     return names;
   };
   const auditLogAccessor = write?.model ? getModelAccessor(write.model) : 'auditLog';
-  const auditedOmittedFields = createAuditedOmittedFields(entityConfigs.byModel, excludeFields);
+  const auditedOmittedFields = createAuditedOmittedFields(entityConfigs.byModel, diffExcludeFields);
 
   return {
     provider: contextProvider,
@@ -123,14 +123,14 @@ export const normalizeAuditOptions = (options: PrismaAuditExtensionOptions): Aud
     },
     composeConfig: {
       entity: entityConfigs.byModel,
-      excludeFields,
-      redact,
-      serialization: options.serialization,
+      diffExcludeFields,
+      redactFields,
+      serializers: options.serializers,
       relationFieldNames,
     },
     writer: write?.writer,
     failureSinkConfig: { observer: errorObserver, writeOnError: write?.onError },
-    shouldFetchBefore: (modelName, operation) => resolveFetchBefore(modelName, operation, options.fetchBefore),
+    shouldFetchBefore: createShouldFetchBefore(entityConfigs.byModel, options.fetchBefore),
     shouldAudit: (modelName) => shouldAuditModel({ modelName, auditLogAccessor, isLoggable: entityConfigs.isLoggable }),
   };
 };

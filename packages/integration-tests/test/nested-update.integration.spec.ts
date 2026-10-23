@@ -350,8 +350,9 @@ describe('Nested Update Operations', () => {
     });
   });
 
-  // NOTE: Every test here uses the setup.ts defaults; the per-model vs global resolution of
-  // fetchBefore is covered by nested-delete.integration.spec.ts.
+  // NOTE: Every test here uses the setup.ts defaults. An entity's own fetchBefore.update over the
+  // global one is covered by nested-parent-attribution.integration.spec.ts and
+  // nested-link-changes.integration.spec.ts.
 
   // NOTE: Audit-pipeline failures reach errorObserver; nested pre-fetch failures are covered
   // by nested-pre-fetch-failure.integration.spec.ts.

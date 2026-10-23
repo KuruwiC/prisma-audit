@@ -1,4 +1,4 @@
-import type { AuditContextProvider } from '@kuruwic/db-audit-core';
+import type { AuditContextProvider, FetchBeforeConfig } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import type { EntityMap } from '@kuruwic/prisma-audit';
 import { createAuditClient, defineEntity, foreignKey, to } from '@kuruwic/prisma-audit';
@@ -10,7 +10,7 @@ import { afterAll, beforeAll, beforeEach, inject } from 'vitest';
 export const testEntities: EntityMap = {
   User: defineEntity({
     type: 'User',
-    excludeFields: ['updatedAt'],
+    diffExcludeFields: ['updatedAt'],
   }),
   Profile: defineEntity({
     type: 'Profile',
@@ -102,6 +102,23 @@ export const testEntities: EntityMap = {
   }),
 };
 
+/** `entities` with the `fetchBefore` of each entity named in `fetchBefore` replaced */
+export const withFetchBefore = (
+  entities: EntityMap,
+  fetchBefore: Readonly<Record<string, FetchBeforeConfig>>,
+): EntityMap => {
+  const unknown = Object.keys(fetchBefore).filter((model) => !entities[model]);
+  if (unknown.length > 0) {
+    throw new Error(`withFetchBefore: no entity for `);
+  }
+  return Object.fromEntries(
+    Object.entries(entities).map(([model, entity]) => [
+      model,
+      entity && model in fetchBefore ? { ...entity, fetchBefore: fetchBefore[model] } : entity,
+    ]),
+  );
+};
+
 export interface TestContext {
   prisma: ReturnType<typeof createAuditClient>;
   basePrisma: PrismaClient;
@@ -123,14 +140,7 @@ export const testAuditOptions = <TPrisma, TSchema>(
   Prisma: generated.Prisma,
   schema: generated.schema,
   entities: testEntities,
-  diffing: {
-    excludeFields: ['createdAt'],
-  },
-  security: {
-    redact: {
-      fields: [],
-    },
-  },
+  diffExcludeFields: ['createdAt'],
   write: {
     awaited: true,
   },

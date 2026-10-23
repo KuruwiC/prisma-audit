@@ -133,7 +133,7 @@ describe('Resolver helper functions', () => {
     it('rejects a row that lacks the foreign key field, naming the option that reads a hidden column', async () => {
       const resolver = foreignKey('authorId');
       await expect(resolver({ id: 'post-123' }, null)).rejects.toThrow(
-        'The row has no "authorId" column; if the client leaves it out of its default reads, list it in the entity\'s auditOmittedFields',
+        'The row has no "authorId" column; if the client leaves it out of its default reads, list it in the entity\'s recordOmittedFields',
       );
     });
 
@@ -251,11 +251,17 @@ describe('defineEntity', () => {
     expect(entity.selfAggregate).toEqual({ aggregateContext: selfContext });
   });
 
-  it('keeps the fields the entity excludes and the omitted fields it audits', () => {
-    const entity = defineEntity({ type: 'User', excludeFields: ['updatedAt'], auditOmittedFields: ['password'] });
+  it('keeps the diffExcludeFields, recordOmittedFields and fetchBefore of the entity', () => {
+    const entity = defineEntity({
+      type: 'User',
+      diffExcludeFields: ['updatedAt'],
+      recordOmittedFields: ['password'],
+      fetchBefore: { delete: false },
+    });
 
-    expect(entity.excludeFields).toEqual(['updatedAt']);
-    expect(entity.auditOmittedFields).toEqual(['password']);
+    expect(entity.diffExcludeFields).toEqual(['updatedAt']);
+    expect(entity.recordOmittedFields).toEqual(['password']);
+    expect(entity.fetchBefore).toEqual({ delete: false });
   });
 
   it('should support system category', () => {

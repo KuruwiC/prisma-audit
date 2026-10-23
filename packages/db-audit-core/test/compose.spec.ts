@@ -4,7 +4,6 @@ import { type ComposeAmbient, type ComposeConfig, compose } from '../src/compose
 import { IdValidationError } from '../src/domain/branded-types.js';
 import type { ResolvedEvent } from '../src/domain/mutation-event.js';
 import type { AuditContext } from '../src/types.js';
-import type { RedactConfig } from '../src/utils/redaction.js';
 import { UNHANDLED } from '../src/utils/serialization.js';
 
 // Lets a test make redaction return a structure it never returns on its own, to reach the type guards.
@@ -14,8 +13,8 @@ vi.mock('../src/utils/redaction.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/utils/redaction.js')>();
   return {
     ...actual,
-    redactSensitiveData: (data: unknown, config?: RedactConfig): unknown =>
-      redaction.override ? redaction.override(data) : actual.redactSensitiveData(data, config),
+    redactSensitiveData: (data: unknown, fields?: readonly string[]): unknown =>
+      redaction.override ? redaction.override(data) : actual.redactSensitiveData(data, fields),
   };
 });
 
@@ -50,7 +49,8 @@ const ambient = (config: Partial<ComposeConfig> = {}): ComposeAmbient => ({
   auditContext,
   config: {
     entity: () => ({ category: 'model', type: 'Post' }),
-    excludeFields: [],
+    diffExcludeFields: [],
+    redactFields: [],
     relationFieldNames: () => undefined,
     ...config,
   },
@@ -301,7 +301,7 @@ describe('compose', () => {
     it('skips an update whose changed fields are all excluded globally', () => {
       const resolved = updateEvent({ id: 'post-1', updatedAt: 1 }, { id: 'post-1', updatedAt: 2 });
 
-      expect(compose([resolved], ambient({ excludeFields: ['updatedAt'] }), now)).toEqual([]);
+      expect(compose([resolved], ambient({ diffExcludeFields: ['updatedAt'] }), now)).toEqual([]);
     });
 
     it('skips an update with no changed fields', () => {
@@ -316,15 +316,15 @@ describe('compose', () => {
         { id: 'post-1', title: 'New', updatedAt: 2 },
       );
 
-      expect(composeOne(resolved, { excludeFields: ['updatedAt'] }).changes).toEqual({
+      expect(composeOne(resolved, { diffExcludeFields: ['updatedAt'] }).changes).toEqual({
         title: { old: 'Old', new: 'New' },
       });
     });
 
-    it('uses the entity excludeFields in place of the global list', () => {
+    it('uses the entity diffExcludeFields in place of the global list', () => {
       const config: Partial<ComposeConfig> = {
-        entity: () => ({ category: 'model', type: 'Post', excludeFields: ['title'] }),
-        excludeFields: ['updatedAt'],
+        entity: () => ({ category: 'model', type: 'Post', diffExcludeFields: ['title'] }),
+        diffExcludeFields: ['updatedAt'],
       };
 
       const titleOnly = updateEvent({ id: 'post-1', title: 'Old' }, { id: 'post-1', title: 'New' });
@@ -334,18 +334,38 @@ describe('compose', () => {
       expect(composeOne(updatedAtOnly, config).changes).toEqual({ updatedAt: { old: 1, new: 2 } });
     });
 
+    it('tracks every field for an entity whose diffExcludeFields is empty, clearing the global list', () => {
+      const config: Partial<ComposeConfig> = {
+        entity: () => ({ category: 'model', type: 'Post', diffExcludeFields: [] }),
+        diffExcludeFields: ['updatedAt'],
+      };
+
+      const updatedAtOnly = updateEvent({ id: 'post-1', updatedAt: 1 }, { id: 'post-1', updatedAt: 2 });
+      expect(composeOne(updatedAtOnly, config).changes).toEqual({ updatedAt: { old: 1, new: 2 } });
+    });
+
+    it('uses the global list for an entity without diffExcludeFields', () => {
+      const config: Partial<ComposeConfig> = {
+        entity: () => ({ category: 'model', type: 'Post', diffExcludeFields: undefined }),
+        diffExcludeFields: ['updatedAt'],
+      };
+
+      const updatedAtOnly = updateEvent({ id: 'post-1', updatedAt: 1 }, { id: 'post-1', updatedAt: 2 });
+      expect(compose([updatedAtOnly], ambient(config), now)).toEqual([]);
+    });
+
     it('never skips a delete', () => {
       const resolved = event({ action: 'delete', before: { kind: 'captured', row: { id: 'post-1', updatedAt: 1 } } });
 
-      expect(compose([resolved], ambient({ excludeFields: ['updatedAt'] }), now)).toHaveLength(1);
+      expect(compose([resolved], ambient({ diffExcludeFields: ['updatedAt'] }), now)).toHaveLength(1);
     });
   });
 
   describe('redaction', () => {
-    it('redacts default sensitive fields in before, after and changes once redact is configured', () => {
+    it('redacts the built-in sensitive fields in before, after and changes with no redactFields configured', () => {
       const resolved = updateEvent({ id: 'post-1', password: 'old' }, { id: 'post-1', password: 'new' });
 
-      const record = composeOne(resolved, { redact: {} });
+      const record = composeOne(resolved);
 
       expect(record.before).toEqual({ id: 'post-1', password: { redacted: true, hadValue: true } });
       expect(record.after).toEqual({ id: 'post-1', password: { redacted: true, hadValue: true } });
@@ -357,18 +377,18 @@ describe('compose', () => {
       });
     });
 
-    it('redacts the fields named in the redact config', () => {
+    it('redacts the redactFields on top of the built-in sensitive fields', () => {
       const record = composeOne(event({ after: { id: 'post-1', nickname: 'kuro' } }), {
-        redact: { fields: ['nickname'] },
+        redactFields: ['nickname'],
       });
 
       expect(record.after).toEqual({ id: 'post-1', nickname: { redacted: true, hadValue: true } });
     });
 
-    it('stores states verbatim without a redact config', () => {
-      const record = composeOne(event({ after: { id: 'post-1', password: 'plain' } }));
+    it('stores a column outside the built-in sensitive fields and redactFields verbatim', () => {
+      const record = composeOne(event({ after: { id: 'post-1', nickname: 'kuro' } }));
 
-      expect(record.after).toEqual({ id: 'post-1', password: 'plain' });
+      expect(record.after).toEqual({ id: 'post-1', nickname: 'kuro' });
     });
 
     it('redacts a sensitive key inside a class instance among the column values', () => {
@@ -383,7 +403,7 @@ describe('compose', () => {
         { id: 'post-1', credentials: new Credentials('a', 'new') },
       );
 
-      const record = composeOne(resolved, { redact: {} });
+      const record = composeOne(resolved);
 
       const redacted = { redacted: true, hadValue: true };
       expect(record.before).toEqual({ id: 'post-1', credentials: { user: 'a', token: redacted } });
@@ -399,7 +419,7 @@ describe('compose', () => {
         { id: 'post-1', secret: new Date('2025-02-01T00:00:00.000Z'), pin: 1234n },
       );
 
-      const record = composeOne(resolved, { redact: {} });
+      const record = composeOne(resolved);
 
       const redacted = { redacted: true, hadValue: true };
       expect(record.before).toEqual({ id: 'post-1', secret: redacted, pin: redacted });
@@ -420,8 +440,7 @@ describe('compose', () => {
       );
 
       const record = composeOne(resolved, {
-        redact: {},
-        serialization: { customSerializers: [(value) => (value instanceof Pin ? `pin:${value.digits}` : UNHANDLED)] },
+        serializers: [(value) => (value instanceof Pin ? `pin:${value.digits}` : UNHANDLED)],
       });
 
       // The diff compares the column values; isDifferent compares what is stored.
@@ -437,8 +456,7 @@ describe('compose', () => {
     it('throws when a custom serializer turns a whole state into a value that is not a record', () => {
       const isState = (value: unknown) => typeof value === 'object' && value !== null && 'password' in value;
       const config: Partial<ComposeConfig> = {
-        redact: {},
-        serialization: { customSerializers: [(value) => (isState(value) ? JSON.stringify(value) : UNHANDLED)] },
+        serializers: [(value) => (isState(value) ? JSON.stringify(value) : UNHANDLED)],
       };
 
       expect(() => compose([event({ after: { id: 'post-1', password: 'plain' } })], ambient(config), now)).toThrow(
@@ -449,9 +467,7 @@ describe('compose', () => {
     it('throws when redaction does not return a record for a state', () => {
       redaction.override = () => ['not', 'a', 'record'];
 
-      expect(() => compose([event()], ambient({ redact: {} }), now)).toThrow(
-        '[db-audit-core] Redaction produced unexpected type',
-      );
+      expect(() => compose([event()], ambient(), now)).toThrow('[db-audit-core] Redaction produced unexpected type');
     });
 
     it('throws when redaction does not return a record for the changes', () => {
@@ -460,71 +476,71 @@ describe('compose', () => {
       redaction.override = (data) => (++call === 3 ? ['not', 'a', 'record'] : data);
       const resolved = updateEvent({ id: 'post-1', title: 'Old' }, { id: 'post-1', title: 'New' });
 
-      expect(() => compose([resolved], ambient({ redact: {} }), now)).toThrow(
+      expect(() => compose([resolved], ambient(), now)).toThrow(
         '[db-audit-core] Redaction of changes produced unexpected type',
       );
     });
   });
 
-  describe('omitted fields the entity audits', () => {
+  describe('omitted fields the entity records', () => {
     const masked = { redacted: true, hadValue: true };
-    const maskedSecret: Partial<ComposeConfig> = {
+    const maskedMemo: Partial<ComposeConfig> = {
       entity: (model) =>
         model === 'Post'
-          ? { category: 'model', type: 'Post', auditOmittedFields: ['secret'] }
+          ? { category: 'model', type: 'Post', recordOmittedFields: ['memo'] }
           : { category: 'model', type: model },
     };
 
-    it('masks them in before, after and changes, without a redact config', () => {
-      const resolved = updateEvent({ id: 'post-1', secret: 'old' }, { id: 'post-1', secret: 'new' });
+    it('masks them in before, after and changes', () => {
+      const resolved = updateEvent({ id: 'post-1', memo: 'old' }, { id: 'post-1', memo: 'new' });
 
-      const record = composeOne(resolved, maskedSecret);
+      const record = composeOne(resolved, maskedMemo);
 
-      expect(record.before).toEqual({ id: 'post-1', secret: masked });
-      expect(record.after).toEqual({ id: 'post-1', secret: masked });
-      expect(record.changes).toEqual({ secret: { old: masked, new: { ...masked, isDifferent: true } } });
+      expect(record.before).toEqual({ id: 'post-1', memo: masked });
+      expect(record.after).toEqual({ id: 'post-1', memo: masked });
+      expect(record.changes).toEqual({ memo: { old: masked, new: { ...masked, isDifferent: true } } });
     });
 
     it('records no change of one that did not change', () => {
       const resolved = updateEvent(
-        { id: 'post-1', title: 'Old', secret: 'same' },
-        { id: 'post-1', title: 'New', secret: 'same' },
+        { id: 'post-1', title: 'Old', memo: 'same' },
+        { id: 'post-1', title: 'New', memo: 'same' },
       );
 
-      const record = composeOne(resolved, maskedSecret);
+      const record = composeOne(resolved, maskedMemo);
 
       expect(record.changes).toEqual({ title: { old: 'Old', new: 'New' } });
-      expect(record.after).toEqual({ id: 'post-1', title: 'New', secret: masked });
+      expect(record.after).toEqual({ id: 'post-1', title: 'New', memo: masked });
     });
 
     it('records one that became null as a change with a null new side', () => {
-      const resolved = updateEvent({ id: 'post-1', secret: 'old' }, { id: 'post-1', secret: null });
+      const resolved = updateEvent({ id: 'post-1', memo: 'old' }, { id: 'post-1', memo: null });
 
-      const record = composeOne(resolved, maskedSecret);
+      const record = composeOne(resolved, maskedMemo);
 
-      expect(record.after).toEqual({ id: 'post-1', secret: null });
-      expect(record.changes).toEqual({ secret: { old: masked, new: null } });
+      expect(record.after).toEqual({ id: 'post-1', memo: null });
+      expect(record.changes).toEqual({ memo: { old: masked, new: null } });
     });
 
     it('leaves a column of the same name on another entity unmasked', () => {
-      const record = composeOne(event({ model: 'Comment', after: { id: 'c-1', secret: 'plain' } }), maskedSecret);
+      const record = composeOne(event({ model: 'Comment', after: { id: 'c-1', memo: 'plain' } }), maskedMemo);
 
-      expect(record.after).toEqual({ id: 'c-1', secret: 'plain' });
+      expect(record.after).toEqual({ id: 'c-1', memo: 'plain' });
     });
 
     it('masks top-level columns only, not a key of that name inside a column value', () => {
-      const record = composeOne(event({ after: { id: 'post-1', meta: { secret: 'inner' } } }), maskedSecret);
+      const record = composeOne(event({ after: { id: 'post-1', meta: { memo: 'inner' } } }), maskedMemo);
 
-      expect(record.after).toEqual({ id: 'post-1', meta: { secret: 'inner' } });
+      expect(record.after).toEqual({ id: 'post-1', meta: { memo: 'inner' } });
     });
 
-    it('masks one that the redact config also names once', () => {
-      const resolved = updateEvent({ id: 'post-1', secret: 'old' }, { id: 'post-1', secret: 'new' });
+    it('masks one that redactFields also names once', () => {
+      const resolved = updateEvent({ id: 'post-1', memo: 'old' }, { id: 'post-1', memo: 'new' });
 
-      const record = composeOne(resolved, { ...maskedSecret, redact: { fields: ['secret'] } });
+      const record = composeOne(resolved, { ...maskedMemo, redactFields: ['memo'] });
 
-      expect(record.after).toEqual({ id: 'post-1', secret: masked });
-      expect(record.changes).toEqual({ secret: { old: masked, new: { ...masked, isDifferent: true } } });
+      expect(record.after).toEqual({ id: 'post-1', memo: masked });
+      expect(record.changes).toEqual({ memo: { old: masked, new: { ...masked, isDifferent: true } } });
     });
   });
 
@@ -611,11 +627,9 @@ describe('compose', () => {
       expect(record?.requestContext).toEqual({ traceId: '42' });
     });
 
-    it('applies the custom serializers of the serialization config', () => {
+    it('applies the serializers to the contexts', () => {
       const record = composeOne(event({ actorContext: { data: new Uint8Array([1, 2, 3]) } }), {
-        serialization: {
-          customSerializers: [(value) => (value instanceof Uint8Array ? `bytes:${value.length}` : UNHANDLED)],
-        },
+        serializers: [(value) => (value instanceof Uint8Array ? `bytes:${value.length}` : UNHANDLED)],
       });
 
       expect(record.actorContext).toEqual({ data: 'bytes:3' });
@@ -625,9 +639,7 @@ describe('compose', () => {
       const record = composeOne(
         updateEvent({ id: 'post-1', data: new Uint8Array([1]) }, { id: 'post-1', data: new Uint8Array([1, 2, 3]) }),
         {
-          serialization: {
-            customSerializers: [(value) => (value instanceof Uint8Array ? `bytes:${value.length}` : UNHANDLED)],
-          },
+          serializers: [(value) => (value instanceof Uint8Array ? `bytes:${value.length}` : UNHANDLED)],
         },
       );
 
@@ -636,7 +648,7 @@ describe('compose', () => {
       expect(record.changes).toEqual({ data: { old: 'bytes:1', new: 'bytes:3' } });
     });
 
-    it('applies the custom serializers to the class instances among the column values when redact is configured', () => {
+    it('applies the custom serializers to the class instances among the column values before redaction', () => {
       class Decimal {
         constructor(readonly digits: string) {}
       }
@@ -646,16 +658,13 @@ describe('compose', () => {
           { id: 'post-1', data: Buffer.from([1, 2]), price: new Decimal('7'), password: 'new' },
         ),
         {
-          redact: {},
-          serialization: {
-            customSerializers: [
-              (value) => {
-                if (Buffer.isBuffer(value)) return `buffer:${value.toString('hex')}`;
-                if (value instanceof Decimal) return `decimal:${value.digits}`;
-                return UNHANDLED;
-              },
-            ],
-          },
+          serializers: [
+            (value) => {
+              if (Buffer.isBuffer(value)) return `buffer:${value.toString('hex')}`;
+              if (value instanceof Decimal) return `decimal:${value.digits}`;
+              return UNHANDLED;
+            },
+          ],
         },
       );
 

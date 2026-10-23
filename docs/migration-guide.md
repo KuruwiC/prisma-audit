@@ -93,7 +93,11 @@ const prisma = createAuditClient(basePrisma, {
 | `to(type, resolver, { context })`                                   | `to(type, resolver, { aggregateContext })`                                      |
 | Enricher `onError: 'fail' \| 'log' \| 'skip' \| (error) => value`  | `onError: 'throw' \| 'log' \| 'ignore' \| (error) => strategy`; the stored value comes from `fallback` |
 | `nestedOperations: { update: { fetchBeforeOperation }, delete: { fetchBeforeOperation } }` | `fetchBefore: { update, delete }`                         |
-| `defineEntity({ nestedOperations: { ... } })`                       | `fetchBefore: { models: { Post: { update, delete } } }`                         |
+| `defineEntity({ nestedOperations: { ... } })`                       | `defineEntity({ fetchBefore: { update, delete } })`; per operation, the entity's setting wins over the top-level `fetchBefore` |
+| `diffing: { excludeFields }`                                        | `diffExcludeFields`                                                             |
+| `defineEntity({ excludeFields })`                                   | `defineEntity({ diffExcludeFields })`                                           |
+| `security: { redact: { fields } }`                                  | `redactFields`, on top of the built-in sensitive fields, which are redacted without it (see [Audit rows](#audit-rows)) |
+| `serialization: { customSerializers }`                              | `serializers`                                                                   |
 | `auditLogModel`                                                     | `write.model`                                                                   |
 | `performance.awaitWrite`                                            | `write.awaited`                                                                 |
 | `performance.awaitWriteIf: (modelName, tags) => boolean`            | `write.awaited: (modelName) => boolean`                                         |
@@ -187,6 +191,7 @@ A v0.1.6 callback written for tagged models, such as `samplingIf: (_, tags) => (
 | An update that moves a row to another parent | Recorded under the parent it joined | Recorded under the parent it left and the one it joined (needs `fetchBefore.update`, on by default) |
 | The before-state read fails | `before: null`, as for a row that did not exist; an `upsert` is recorded as `create` | An update or delete is recorded with `before: null` and `beforeUnavailable: true`; an `upsert` entry is skipped; both are reported under `pre-fetch` |
 | `DateTime` or `Bytes` id | Stored as the value's `toString()` | Stored as ISO 8601 (`DateTime`) or base64 (`Bytes`) |
+| No redaction option set | Without `security.redact`, before, after and `changes` are stored as read | Without `redactFields`, the built-in sensitive fields (`password`, `token`, `apiKey`, ...) are still redacted |
 
 - To store the `beforeUnavailable` flag, add the optional column to the audit-log model: `beforeUnavailable Boolean @default(false)`. Without it the flag is not stored. The normalized writers store it under the field their schema names in `beforeUnavailableField`.
 - Rows of a `DateTime` or `Bytes` keyed model written before and after the upgrade carry different `entityId` / `aggregateId` strings for the same row; queries that join them by id must convert one form.
@@ -196,7 +201,7 @@ A v0.1.6 callback written for tagged models, such as `samplingIf: (_, tags) => (
 `@kuruwic/prisma-audit` exports the API a user calls. Some names moved to `@kuruwic/db-audit-core`, some were renamed, and the internal pipeline is not exported.
 
 Import from `@kuruwic/db-audit-core`:
-`self`, `normalizeId`, `batchLookup`, `validateEntityMap`, `UNHANDLED`, and the types `ActorContextConfig`, `AggregateProjection`, `AuditActor`, `EntityConfig`, `ErrorStrategy`, `ProjectionEnrichmentMeta`, `RedactConfig`, `ResolvedId`, `SerializationConfig`, `ValueSerializer`, `WriteExecutor`, `WriteFn`.
+`self`, `normalizeId`, `batchLookup`, `validateEntityMap`, `UNHANDLED`, and the types `ActorContextConfig`, `AggregateProjection`, `AuditActor`, `EntityConfig`, `ErrorStrategy`, `FetchBeforeConfig`, `ProjectionEnrichmentMeta`, `ResolvedId`, `ValueSerializer`, `WriteExecutor`, `WriteFn`.
 
 Renamed:
 
@@ -213,7 +218,7 @@ Renamed:
 | `createAuditLogExtension` | `createAuditClient` |
 | `flushPendingWrites`, `flushPendingDeferredWrites` | `flushAllPendingWrites` |
 | `HooksConfig`, `PerformanceConfig` | `WriteConfig` (`write.writer`, `write.awaited`), and `PrismaAuditExtensionOptions['samplingRate']` |
-| `DiffingConfig`, `SecurityConfig` | `PrismaAuditExtensionOptions['diffing']`, `['security']` |
+| `DiffingConfig`, `SecurityConfig`, `RedactConfig`, `SerializationConfig` | `PrismaAuditExtensionOptions['diffExcludeFields']`, `['redactFields']` (`string[]`), `['serializers']` (`ValueSerializer[]`) |
 
 Removed, with no replacement:
 

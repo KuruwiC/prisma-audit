@@ -35,8 +35,7 @@ describe('nested rows a relation filter leaves out of the result', () => {
       schema: auditSchema,
       contextProvider: provider,
       entities: testEntities,
-      diffing: { excludeFields: ['createdAt', 'updatedAt'] },
-      security: { redact: { fields: [] } },
+      diffExcludeFields: ['createdAt', 'updatedAt'],
     });
     disconnects.push(async () => {
       await prisma.$disconnect();

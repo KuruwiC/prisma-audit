@@ -174,14 +174,15 @@ write the adapter runs, in order:
    so callbacks read the transaction's uncommitted writes. `resolveConfig` is `entity`
    (`byModel`), `rootEntity` (`byCategoryAndType`) and the optional `actor` enricher.
 6. **`compose(resolved, { auditContext, config: composeConfig }, now)`** into the `AuditRecord`s
-   `buildRecords` returns. `composeConfig` carries the entity lookup, `excludeFields`, `redact`,
-   `serialization`, `relationFieldNames(model)`, the keys of a row that are not its columns (the
-   relation fields, and any aggregate of related records the ORM returns with the row, such as
-   Prisma's `_count`). An update's `changes` compares the row's columns only: the relation fields
-   and those aggregates are left out of the comparison, so an update whose columns are unchanged
-   yields no record. An entity's `auditOmittedFields`, the fields its client leaves out of its
-   default reads that the adapter reads anyway, are masked in the stored states and changes
-   whether or not `redact` is set.
+   `buildRecords` returns. `composeConfig` carries the entity lookup, `diffExcludeFields`,
+   `redactFields`, `serializers`, `relationFieldNames(model)`, the keys of a row that are not its
+   columns (the relation fields, and any aggregate of related records the ORM returns with the
+   row, such as Prisma's `_count`). An update's `changes` compares the row's columns only: the
+   relation fields and those aggregates are left out of the comparison, so an update whose columns
+   are unchanged yields no record. The built-in sensitive fields and `redactFields` are masked in the stored
+   states and changes, and so is an entity's `recordOmittedFields`, the fields its client leaves
+   out of its default reads that the adapter reads anyway. An entity's `fetchBefore` is for an
+   adapter that reads the row before the write; the core does not read it.
 
 What the adapter must provide:
 

@@ -14,7 +14,7 @@ import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanDatabase, createBasePrisma, testEntities } from './helpers/setup.js';
+import { cleanDatabase, createBasePrisma, testEntities, withFetchBefore } from './helpers/setup.js';
 
 const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'parent-attribution-actor' },
@@ -38,7 +38,7 @@ describe('nested rows attributed through their parent row', () => {
   const setup = async (
     options: {
       readonly fetchBeforeUpdate?: boolean;
-      /** Models whose `fetchBefore.update` is off while the default stays on */
+      /** Entities whose own `fetchBefore.update` is off while the global setting stays on */
       readonly unreadModels?: readonly string[];
       readonly fault?: FaultTarget;
     } = {},
@@ -65,13 +65,12 @@ describe('nested rows attributed through their parent row', () => {
       Prisma,
       schema: auditSchema,
       contextProvider: provider,
-      entities: testEntities,
-      diffing: { excludeFields: ['createdAt', 'updatedAt'] },
-      security: { redact: { fields: [] } },
-      fetchBefore: {
-        update: options.fetchBeforeUpdate ?? true,
-        models: Object.fromEntries((options.unreadModels ?? []).map((model) => [model, { update: false }])),
-      },
+      entities: withFetchBefore(
+        testEntities,
+        Object.fromEntries((options.unreadModels ?? []).map((model) => [model, { update: false }])),
+      ),
+      diffExcludeFields: ['createdAt', 'updatedAt'],
+      fetchBefore: { update: options.fetchBeforeUpdate ?? true },
       errorObserver: observer,
     });
     disconnects.push(async () => {

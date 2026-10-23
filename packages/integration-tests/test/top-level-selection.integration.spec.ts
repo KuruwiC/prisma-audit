@@ -41,7 +41,7 @@ describe("an audited row read in the client's default shape whatever the caller 
       schema: auditSchema,
       contextProvider: provider,
       entities: { ...testEntities, Subscription: defineEntity({ type: 'Subscription' }) },
-      diffing: { excludeFields: ['createdAt', 'updatedAt'] },
+      diffExcludeFields: ['createdAt', 'updatedAt'],
     });
     disconnects.push(async () => {
       await prisma.$disconnect();

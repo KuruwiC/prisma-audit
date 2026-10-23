@@ -1,10 +1,10 @@
 /**
- * The omitted fields an entity audits
+ * The omitted fields an entity records
  *
  * A client created with `new PrismaClient({ omit })` leaves the fields it hides out of every read
  * that does not name them, and the audit records the rows in that default shape. An entity lists
- * the hidden fields to audit anyway in `auditOmittedFields`; those, less the fields the entity's
- * `excludeFields` names, are read in the audit's own queries: its whole-row reads, before and
+ * the hidden fields to record anyway in `recordOmittedFields`; those, less the fields the entity's
+ * `diffExcludeFields` names, are read in the audit's own queries: its whole-row reads, before and
  * after the write, through {@link withOmittedFieldsInFinds}, and a read by row key after the
  * write of the written rows it did not read itself (`pipeline/omitted-fields-after-write.ts`). The
  * caller's query is never widened with them. The audit's batch reads, which tell rows apart by their
@@ -24,8 +24,8 @@ export interface AuditedOmittedFields {
 }
 
 interface OmittedFieldsEntity {
-  readonly auditOmittedFields?: readonly string[];
-  readonly excludeFields?: readonly string[];
+  readonly recordOmittedFields?: readonly string[];
+  readonly diffExcludeFields?: readonly string[];
 }
 
 const NONE: ReadonlySet<string> = new Set();
@@ -33,11 +33,11 @@ const NONE: ReadonlySet<string> = new Set();
 export const NO_AUDITED_OMITTED_FIELDS: AuditedOmittedFields = { of: () => NONE };
 
 /**
- * @param excludeFields - The global `excludeFields`, which applies to an entity without its own list
+ * @param diffExcludeFields - The global `diffExcludeFields`, which applies to an entity without its own list
  */
 export const createAuditedOmittedFields = (
   entityOf: (modelName: string) => OmittedFieldsEntity | undefined,
-  excludeFields: readonly string[],
+  diffExcludeFields: readonly string[],
 ): AuditedOmittedFields => {
   const byModel = new Map<string, ReadonlySet<string>>();
   return {
@@ -45,8 +45,8 @@ export const createAuditedOmittedFields = (
       let fields = byModel.get(modelName);
       if (fields === undefined) {
         const entity = entityOf(modelName);
-        const excluded = new Set(entity?.excludeFields ?? excludeFields);
-        const listed = (entity?.auditOmittedFields ?? []).filter((field) => !excluded.has(field));
+        const excluded = new Set(entity?.diffExcludeFields ?? diffExcludeFields);
+        const listed = (entity?.recordOmittedFields ?? []).filter((field) => !excluded.has(field));
         fields = listed.length > 0 ? new Set(listed) : NONE;
         byModel.set(modelName, fields);
       }
@@ -97,7 +97,7 @@ const withOmitEntries = (args: unknown, omit: Record<string, false>): unknown =>
 
 /**
  * `delegate` with its finds reading `fields` too when their args name no `select`, so a whole row
- * the audit reads holds the omitted fields its entity audits; `delegate` itself when there is none.
+ * the audit reads holds the omitted fields its entity records; `delegate` itself when there is none.
  */
 export const withOmittedFieldsInFinds = <TDelegate extends object>(
   delegate: TDelegate,

@@ -167,7 +167,10 @@ describe('updateMany and deleteMany with a limit', () => {
     expect(updateLogs).toHaveLength(2);
     for (const log of updateLogs) {
       expect((log.before as Record<string, unknown>).name).toBe(`Queued ${seededIds.indexOf(log.entityId)}`);
-      expect((log.after as Record<string, unknown>).password).toBe('rotated');
+      expect((log.changes as Record<string, unknown>).password).toEqual({
+        old: null,
+        new: { redacted: true, hadValue: true, isDifferent: true },
+      });
     }
   });
 

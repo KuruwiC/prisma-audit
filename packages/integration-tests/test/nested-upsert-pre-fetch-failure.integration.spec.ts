@@ -63,8 +63,7 @@ describe('nested upsert and connectOrCreate whose target could not be read', () 
       schema: auditSchema,
       contextProvider: provider,
       entities: testEntities,
-      diffing: { excludeFields: ['createdAt', 'updatedAt'] },
-      security: { redact: { fields: [] } },
+      diffExcludeFields: ['createdAt', 'updatedAt'],
       errorObserver: observer,
     });
 

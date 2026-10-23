@@ -16,7 +16,7 @@ import { createAuditClient, defineEntity } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanDatabase, createBasePrisma, testEntities } from './helpers/setup.js';
+import { cleanDatabase, createBasePrisma, testEntities, withFetchBefore } from './helpers/setup.js';
 
 const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'link-changes-actor' },
@@ -61,14 +61,12 @@ describe('foreign-key changes of related rows', () => {
       Prisma,
       schema: auditSchema,
       contextProvider: provider,
-      entities: options.entities ?? testEntities,
-      diffing: { excludeFields: ['createdAt', 'updatedAt'] },
-      security: { redact: { fields: [] } },
-      fetchBefore: {
-        update: true,
-        delete: true,
-        models: options.fetchBeforeLabelUpdate === false ? { Label: { update: false } } : {},
-      },
+      entities: withFetchBefore(
+        options.entities ?? testEntities,
+        options.fetchBeforeLabelUpdate === false ? { Label: { update: false } } : {},
+      ),
+      diffExcludeFields: ['createdAt', 'updatedAt'],
+      fetchBefore: { update: true, delete: true },
       errorObserver: observer,
     });
     disconnects.push(async () => {
@@ -199,7 +197,7 @@ describe('foreign-key changes of related rows', () => {
       const { basePrisma, prisma, run, recordsOf } = await setup({
         entities: {
           ...testEntities,
-          Label: defineEntity({ type: 'Label', excludeFields: ['postId'] }),
+          Label: defineEntity({ type: 'Label', diffExcludeFields: ['postId'] }),
         },
       });
       await basePrisma.label.create({ data: { id: 'l1', name: 'l1', postId: 'p-live' } });

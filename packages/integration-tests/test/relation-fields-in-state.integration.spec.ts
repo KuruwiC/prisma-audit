@@ -27,8 +27,7 @@ describe('relation fields in audited entity state', () => {
       schema: auditSchema,
       contextProvider: provider,
       entities: testEntities,
-      diffing: { excludeFields: ['createdAt'] },
-      security: { redact: { fields: [] } },
+      diffExcludeFields: ['createdAt'],
     });
     return { basePrisma, provider, prisma };
   };

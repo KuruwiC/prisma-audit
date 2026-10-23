@@ -1,5 +1,5 @@
 /**
- * Unit tests for the omitted fields an entity audits, and for the audit's reads that include them
+ * Unit tests for the omitted fields an entity records, and for the audit's reads that include them
  */
 
 import { defineEntity } from '@kuruwic/db-audit-core';
@@ -13,8 +13,13 @@ import { column, model, schemaMetadataOf } from '../support/audit-schema.js';
 
 describe('createAuditedOmittedFields', () => {
   const entities = {
-    user: defineEntity({ type: 'User', excludeFields: ['updatedAt'], auditOmittedFields: ['password', 'updatedAt'] }),
-    post: defineEntity({ type: 'Post', auditOmittedFields: ['content', 'createdAt'] }),
+    user: defineEntity({
+      type: 'User',
+      diffExcludeFields: ['updatedAt'],
+      recordOmittedFields: ['password', 'updatedAt', 'createdAt'],
+    }),
+    label: defineEntity({ type: 'Label', diffExcludeFields: [], recordOmittedFields: ['createdAt'] }),
+    post: defineEntity({ type: 'Post', recordOmittedFields: ['content', 'createdAt'] }),
     comment: defineEntity({ type: 'Comment' }),
   };
   const fields = createAuditedOmittedFields(
@@ -22,11 +27,15 @@ describe('createAuditedOmittedFields', () => {
     ['createdAt'],
   );
 
-  it('lists the fields an entity audits, without the ones its own excludeFields names', () => {
-    expect(fields.of('User')).toEqual(new Set(['password']));
+  it('lists the fields an entity records, without the ones its own diffExcludeFields names in place of the global list', () => {
+    expect(fields.of('User')).toEqual(new Set(['password', 'createdAt']));
   });
 
-  it('leaves out the fields the global excludeFields names for an entity without its own list', () => {
+  it('lists every field an entity records when its diffExcludeFields is empty', () => {
+    expect(fields.of('Label')).toEqual(new Set(['createdAt']));
+  });
+
+  it('leaves out the fields the global diffExcludeFields names for an entity without its own list', () => {
     expect(fields.of('Post')).toEqual(new Set(['content']));
   });
 
@@ -46,7 +55,7 @@ describe('withRowKeyFields', () => {
     model('Note', [column('label', { isUnique: true }), column('text', { isRequired: true })]),
   );
   const audited = createAuditedOmittedFields(
-    (model) => (model === 'User' ? defineEntity({ type: 'User', auditOmittedFields: ['password'] }) : undefined),
+    (model) => (model === 'User' ? defineEntity({ type: 'User', recordOmittedFields: ['password'] }) : undefined),
     [],
   );
 

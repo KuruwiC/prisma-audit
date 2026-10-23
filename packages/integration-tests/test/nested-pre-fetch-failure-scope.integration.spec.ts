@@ -69,8 +69,7 @@ describe('nested pre-fetch failures — affected rows', () => {
       schema: auditSchema,
       contextProvider: provider,
       entities: testEntities,
-      diffing: { excludeFields: ['createdAt', 'updatedAt'] },
-      security: { redact: { fields: [] } },
+      diffExcludeFields: ['createdAt', 'updatedAt'],
       errorObserver: observer,
     });
     disconnects.push(async () => {

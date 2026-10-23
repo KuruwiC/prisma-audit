@@ -1,67 +1,64 @@
+import { createEntityConfigLookup, defineEntity, type EntityMap, type FetchBeforeConfig } from '@kuruwic/db-audit-core';
 import { describe, expect, it } from 'vitest';
-import { resolveFetchBefore } from '../../src/config/helpers.js';
-import type { FetchBeforeConfig } from '../../src/types.js';
+import { createShouldFetchBefore } from '../../src/config/helpers.js';
 
-const fetchBefore = (modelName: string, operation: string, config?: FetchBeforeConfig) =>
-  resolveFetchBefore(modelName, operation, config);
+const shouldFetchBefore = (entities: EntityMap, fetchBefore?: FetchBeforeConfig) =>
+  createShouldFetchBefore(createEntityConfigLookup(entities).byModel, fetchBefore);
 
-describe('resolveFetchBefore', () => {
+const post = (fetchBefore?: FetchBeforeConfig) => ({ Post: defineEntity({ type: 'Post', fetchBefore }) });
+
+describe('createShouldFetchBefore', () => {
   it('reads the before state of updates and deletes when nothing is configured', () => {
+    const fetchBefore = shouldFetchBefore(post());
+
     expect(fetchBefore('Post', 'update')).toBe(true);
     expect(fetchBefore('Post', 'delete')).toBe(true);
   });
 
   it('applies the global setting to every model', () => {
-    const config: FetchBeforeConfig = { update: false };
+    const fetchBefore = shouldFetchBefore(post(), { update: false });
 
-    expect(fetchBefore('Post', 'update', config)).toBe(false);
-    expect(fetchBefore('User', 'update', config)).toBe(false);
-    expect(fetchBefore('Post', 'delete', config)).toBe(true);
+    expect(fetchBefore('Post', 'update')).toBe(false);
+    expect(fetchBefore('User', 'update')).toBe(false);
+    expect(fetchBefore('Post', 'delete')).toBe(true);
   });
 
-  it('lets a model setting win over the global one, for that model only', () => {
-    const config: FetchBeforeConfig = {
-      delete: true,
-      models: { Post: { delete: false } },
-    };
+  it('lets an entity setting win over the global one, for that entity only', () => {
+    const fetchBefore = shouldFetchBefore(post({ delete: false }), { delete: true });
 
-    expect(fetchBefore('Post', 'delete', config)).toBe(false);
-    expect(fetchBefore('User', 'delete', config)).toBe(true);
+    expect(fetchBefore('Post', 'delete')).toBe(false);
+    expect(fetchBefore('User', 'delete')).toBe(true);
   });
 
-  it('falls back to the global setting for an operation the model setting leaves out', () => {
-    const config: FetchBeforeConfig = {
-      update: false,
-      models: { Post: { delete: false } },
-    };
+  it('falls back to the global setting for an operation the entity setting leaves out', () => {
+    const fetchBefore = shouldFetchBefore(post({ delete: false }), { update: false });
 
-    expect(fetchBefore('Post', 'update', config)).toBe(false);
-    expect(fetchBefore('Post', 'delete', config)).toBe(false);
-    expect(fetchBefore('User', 'delete', config)).toBe(true);
+    expect(fetchBefore('Post', 'update')).toBe(false);
+    expect(fetchBefore('Post', 'delete')).toBe(false);
+    expect(fetchBefore('User', 'delete')).toBe(true);
   });
 
-  it('turns the read on for a model when the global setting turns it off', () => {
-    const config: FetchBeforeConfig = {
-      update: false,
-      models: { Post: { update: true } },
-    };
+  it('turns the read on for an entity when the global setting turns it off', () => {
+    const fetchBefore = shouldFetchBefore(post({ update: true }), { update: false });
 
-    expect(fetchBefore('Post', 'update', config)).toBe(true);
-    expect(fetchBefore('User', 'update', config)).toBe(false);
+    expect(fetchBefore('Post', 'update')).toBe(true);
+    expect(fetchBefore('User', 'update')).toBe(false);
   });
 
-  it('applies a model setting to a model declared with a lowercase first letter, like the entity map keys', () => {
-    const config: FetchBeforeConfig = { models: { AuditEvent: { update: false } } };
+  it('applies the entity setting to a model declared with a lowercase first letter', () => {
+    const fetchBefore = shouldFetchBefore({
+      AuditEvent: defineEntity({ type: 'AuditEvent', fetchBefore: { update: false } }),
+    });
 
-    expect(fetchBefore('auditEvent', 'update', config)).toBe(false);
-    expect(fetchBefore('AuditEvent', 'update', config)).toBe(false);
+    expect(fetchBefore('auditEvent', 'update')).toBe(false);
+    expect(fetchBefore('AuditEvent', 'update')).toBe(false);
   });
 
   it('reads no before state for the other operations', () => {
-    const config: FetchBeforeConfig = { models: { Post: { update: true } } };
+    const fetchBefore = shouldFetchBefore(post({ update: true }));
 
     for (const operation of ['create', 'upsert', 'connectOrCreate']) {
-      expect(fetchBefore('Post', operation, config)).toBe(false);
+      expect(fetchBefore('Post', operation)).toBe(false);
     }
   });
 });

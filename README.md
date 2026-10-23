@@ -72,7 +72,7 @@ Branded types (`ActorId`, `EntityId`, `AggregateId`) prevent ID mix-ups at compi
 | **Operations**    | Batch operations (createMany, updateMany, deleteMany, createManyAndReturn, updateManyAndReturn), nested operations at all depths (including nested createMany), smart upsert/connectOrCreate detection |
 | **Architecture**  | DDD aggregate root mapping, AsyncLocalStorage context propagation, one audit pipeline for single and batch writes              |
 | **Performance**   | 3 write strategies (sync/deferred/fire-and-forget), probabilistic sampling, batch context enrichment (N+1 free)                |
-| **Security**      | PII redaction once `security.redact` is set (passwords, tokens, SSN, etc.), masking of the fields a client-level `omit` hides that an entity lists in `auditOmittedFields` |
+| **Security**      | PII redaction of built-in sensitive fields (passwords, tokens, SSN, etc.) plus `redactFields`, masking of the fields a client-level `omit` hides that an entity lists in `recordOmittedFields` |
 | **Extensibility** | Custom writer, custom serializers, error observer and write-failure strategy, framework-agnostic core                         |
 
 ## Installation
@@ -287,17 +287,11 @@ createAuditClient(basePrisma, {
   contextProvider: auditProvider,
   entities,
 
-  // Exclude noisy fields from change tracking
-  diffing: {
-    excludeFields: ["updatedAt", "createdAt"],
-  },
+  // Exclude noisy fields from change tracking; an entity's own diffExcludeFields replaces this list
+  diffExcludeFields: ["updatedAt", "createdAt"],
 
-  // PII redaction: the defaults plus these fields, applied only when `redact` is set
-  security: {
-    redact: {
-      fields: ["password", "token", "ssn"],
-    },
-  },
+  // PII redaction: these fields on top of the built-in sensitive fields, which are always redacted
+  redactFields: ["phoneNumber", "dateOfBirth"],
 
   // Per-operation sampling: a rate, or a function of the operation's top-level model
   samplingRate: (model) => {
@@ -320,16 +314,14 @@ createAuditClient(basePrisma, {
 
   // Custom serialization. BigInt and values with a toJSON method (Date, Decimal, Buffer) are
   // handled by default; this serializer stores a Buffer as base64 instead of { type, data }
-  serialization: {
-    customSerializers: [
-      (value) => {
-        if (value instanceof Buffer) return value.toString("base64");
-        return UNHANDLED;
-      },
-    ],
-  },
+  serializers: [
+    (value) => {
+      if (value instanceof Buffer) return value.toString("base64");
+      return UNHANDLED;
+    },
+  ],
 
-  // Before-state reads (defaults shown)
+  // Before-state reads (defaults shown); an entity's own fetchBefore overrides them per operation
   fetchBefore: {
     update: true,
     delete: true,
@@ -537,7 +529,7 @@ When an update moves a row to another parent (an OrderItem whose `orderId` chang
 
 ## PII Redaction
 
-Redaction applies only when `security.redact` is set (`redact: {}` turns on the defaults alone); without it, before, after and `changes` are stored as read. The defaults cover: `password`, `passwordHash`, `hashedPassword`, `salt`, `token`, `accessToken`, `refreshToken`, `apiKey`, `secret`, `secretKey`, `privateKey`, `ssn`, `socialSecurityNumber`, `creditCard`, `cardNumber`, `cvv`, `pin`.
+Redaction always applies to the stored before, after and `changes`. The built-in sensitive fields are: `password`, `passwordHash`, `hashedPassword`, `salt`, `token`, `accessToken`, `refreshToken`, `apiKey`, `secret`, `secretKey`, `privateKey`, `ssn`, `socialSecurityNumber`, `creditCard`, `cardNumber`, `cvv`, `pin`.
 
 ```typescript
 // Before redaction
@@ -547,17 +539,17 @@ Redaction applies only when `security.redact` is set (`redact: {}` turns on the 
 { password: { redacted: true, hadValue: true }, email: "user@example.com" }
 ```
 
-Add custom fields via `security.redact.fields`.
+Add fields via the top-level `redactFields`. The enriched contexts (`actorContext`, `entityContext`, `aggregateContext`) and the request context are not redacted: they are stored as your enrichers and context provider return them.
 
 ### Fields a client-level `omit` hides
 
 The audit records a row in the client's default shape, so a field the Prisma client omits for every query (`new PrismaClient({ omit: { user: { password: true } } })`) is left out of the audit logs, except where your own query names it or your `createMany` data writes it. To audit such a field with its value masked, list it on its entity:
 
 ```typescript
-User: defineEntity({ type: 'User', auditOmittedFields: ['password'] }),
+User: defineEntity({ type: 'User', recordOmittedFields: ['password'] }),
 ```
 
-The reads a listed field adds, and how it combines with `excludeFields`, `security.redact` and `foreignKey(...)` roots, are described under [`auditOmittedFields`](packages/prisma-extension/README.md#auditomittedfields); when a hidden field is recorded in clear, under [`redact.fields`](packages/prisma-extension/README.md#redactfields).
+The reads a listed field adds, and how it combines with `diffExcludeFields`, `redactFields` and `foreignKey(...)` roots, are described under [`recordOmittedFields`](packages/prisma-extension/README.md#recordomittedfields); when a hidden field is recorded in clear, under [`redactFields`](packages/prisma-extension/README.md#redactfields).
 
 ## Nested Operations
 
@@ -595,8 +587,8 @@ Prisma 8 is not supported. As of 2026-10, Prisma ORM 8 is a release candidate (`
 - **Edge runtimes**: No AsyncLocalStorage support (Vercel Edge, Cloudflare Workers)
 - **Raw queries**: `$executeRaw` / `$queryRaw` are not intercepted
 - **Many-to-many with multiple aggregates**: Not currently supported
-- **Client-level `omit`**: The fields a client-level `omit` hides are not recorded unless an entity lists them in `auditOmittedFields`, which masks them; one your query names or your `createMany` data writes can be recorded in clear. When the Prisma version cannot be determined, a row created under a `select` is recorded with the selected columns only (see [Fields a client-level `omit` hides](#fields-a-client-level-omit-hides))
-- **Nested re-read consistency**: A row a nested write updated or inserted that your own `include` / `select` leaves out, and a row a nested `connect`, `set` or `disconnect` re-linked, is read again after the operation on the same client. Outside a transaction (an interactive `$transaction`, or the one `write.implicitTransaction` opens for an awaited audit), that re-read is a separate query and may observe concurrent changes; so may the read, after the write, of the fields an entity lists in `auditOmittedFields`
+- **Client-level `omit`**: The fields a client-level `omit` hides are not recorded unless an entity lists them in `recordOmittedFields`, which masks them; one your query names or your `createMany` data writes can be recorded in clear. When the Prisma version cannot be determined, a row created under a `select` is recorded with the selected columns only (see [Fields a client-level `omit` hides](#fields-a-client-level-omit-hides))
+- **Nested re-read consistency**: A row a nested write updated or inserted that your own `include` / `select` leaves out, and a row a nested `connect`, `set` or `disconnect` re-linked, is read again after the operation on the same client. Outside a transaction (an interactive `$transaction`, or the one `write.implicitTransaction` opens for an awaited audit), that re-read is a separate query and may observe concurrent changes; so may the read, after the write, of the fields an entity lists in `recordOmittedFields`
 - **Composite keys in `updateMany` / `deleteMany` with `limit`**: The audit narrows the write to the rows it read, with an `OR` of one condition per row over the primary key fields (Prisma has no tuple `IN`), so that `where` clause grows with `limit`. When a transaction tops up a short round, the exclusion of rows already read grows the same way. The number of queries does not change with `limit`
 - **Order of the nested keywords of one relation field**: A nested `updateMany` / `deleteMany` matches its filter against the rows as they were before the write, so a row an earlier `create` inserts, or whose filtered columns an earlier `update` / `updateMany` changes, is not identified as one it writes, and a row a nested `updateMany` brings into a later `deleteMany`'s filter is updated and deleted with no record (see [Nested Operations limitations](packages/prisma-extension/README.md#limitations))
 - **`updateMany` / `deleteMany` without `limit`**: The audit reads every matching row before the write to record the before states, so the cost grows with the number of rows the `where` matches

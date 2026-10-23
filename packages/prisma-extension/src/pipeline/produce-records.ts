@@ -8,7 +8,7 @@
  * The database handle those callbacks receive is the scope's, looked up when each one runs: the
  * client of the transaction the operation runs in when there is one, else the base client, so a
  * callback inside a transaction reads that transaction's writes. The resolvers see the omitted
- * fields an entity audits, so a foreign key the client hides resolves once its entity lists it.
+ * fields an entity records, so a foreign key the client hides resolves once its entity lists it.
  */
 
 import type { AuditRecord, ComposeConfig, FailureSink, MutationEvent, ResolveConfig } from '@kuruwic/db-audit-core';

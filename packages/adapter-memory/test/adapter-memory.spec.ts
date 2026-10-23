@@ -70,7 +70,7 @@ describe('audited writes', () => {
   });
 
   it('update: before, after and the diff of the changed fields; a change of excluded fields alone yields no record', async () => {
-    const adapter = createAdapter({ excludeFields: ['updatedAt'] });
+    const adapter = createAdapter({ diffExcludeFields: ['updatedAt'] });
 
     await withContext(async () => {
       await adapter.create('User', { id: 'u1', name: 'Alice', updatedAt: 1 });
@@ -649,8 +649,8 @@ describe('samplingRate', () => {
 });
 
 describe('record composition', () => {
-  it('redaction and serialization: sensitive fields are masked, Date and BigInt become strings', async () => {
-    const adapter = createAdapter({ redact: { fields: ['email'] } });
+  it('masks the built-in sensitive fields and redactFields, and stores Date and BigInt values as strings', async () => {
+    const adapter = createAdapter({ redactFields: ['email'] });
     const createdAt = new Date('2026-01-02T03:04:05.000Z');
 
     await withContext(() =>
@@ -682,7 +682,7 @@ describe('record composition', () => {
         readonly token: string,
       ) {}
     }
-    const adapter = createAdapter({ redact: {} });
+    const adapter = createAdapter();
     const credentials = new Credentials('alice', 'placeholder-token');
 
     await withContext(() => adapter.create('User', { id: 'u1', name: 'Alice', credentials }));

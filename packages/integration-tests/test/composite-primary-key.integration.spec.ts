@@ -44,7 +44,7 @@ import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, describe, expect, it, vi } from 'vitest';
-import { createBasePrisma, setupTestContext, testEntities } from './helpers/setup.js';
+import { createBasePrisma, setupTestContext, testEntities, withFetchBefore } from './helpers/setup.js';
 
 const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'composite-pk-actor' },
@@ -410,11 +410,9 @@ describe('Composite Primary Key (PostLike)', () => {
         Prisma,
         schema: auditSchema,
         contextProvider: provider,
-        entities: testEntities,
-        diffing: { excludeFields: ['createdAt'] },
-        security: { redact: { fields: [] } },
+        entities: withFetchBefore(testEntities, { PostLike: { delete: false } }),
+        diffExcludeFields: ['createdAt'],
         write: { awaited: true },
-        fetchBefore: { models: { PostLike: { delete: false } } },
         errorObserver: observer,
       });
       scenario = { basePrisma, prisma };

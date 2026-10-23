@@ -13,6 +13,8 @@ import type {
   AuditLogData as CoreAuditLogData,
   AuditLogInput as CoreAuditLogInput,
   EntityMap,
+  FetchBeforeConfig,
+  ValueSerializer,
   WriteContext,
   WriteFn,
   WriteOnError,
@@ -41,22 +43,6 @@ export type AuditLogInput = CoreAuditLogInput;
  * @template TClient - The client type the writer's `handle` is typed as
  */
 export type AuditLogWriter<TClient = unknown> = WriteFn<TClient>;
-
-/**
- * Change calculation configuration
- */
-export interface DiffingConfig {
-  /** Fields to exclude when calculating changes */
-  excludeFields?: string[];
-}
-
-/**
- * Sensitive data protection configuration
- */
-export interface SecurityConfig {
-  /** Redaction configuration for sensitive fields */
-  redact?: import('@kuruwic/db-audit-core').RedactConfig;
-}
 
 /**
  * Writing the audit rows: where they go, when, and what a failed write does to the caller's
@@ -132,43 +118,6 @@ export interface WriteConfig<TClient = unknown> {
   onError?: WriteOnError;
 }
 
-/**
- * Before-state reads of update and delete operations
- *
- * `true` reads the row's `before` value ahead of the write, for a top-level update or delete as
- * well as for one nested in another operation. Default: `true`.
- */
-export interface FetchBeforeByOperation {
-  /** Update operations, top-level and nested */
-  update?: boolean;
-  /** Delete operations, top-level and nested */
-  delete?: boolean;
-}
-
-/**
- * Before-state reads of update and delete operations, for every model and per model
- *
- * For each operation, the setting of the written model under `models` wins, then the global
- * setting, then the default (`true`).
- *
- * @template TModelName - Model names `models` may be keyed with, as the schema declares them
- *
- * @example
- * ```typescript
- * fetchBefore: {
- *   update: false,                      // every model
- *   models: { Post: { delete: false } },  // Post only
- * }
- * ```
- */
-export interface FetchBeforeConfig<TModelName extends string = string> extends FetchBeforeByOperation {
-  /**
-   * Per-model settings, keyed by model name like `entities`, and like it matched to a
-   * model case-insensitively
-   */
-  models?: { readonly [K in TModelName]?: FetchBeforeByOperation };
-}
-
 /** Audit-failure observation and policy types, defined by `@kuruwic/db-audit-core` and re-exported */
 export type { AuditErrorContext, AuditErrorObserver, AuditErrorPhase, WriteOnError } from '@kuruwic/db-audit-core';
 
@@ -176,7 +125,7 @@ export type { AuditErrorContext, AuditErrorObserver, AuditErrorPhase, WriteOnErr
  * Prisma Extension configuration options
  *
  * @template TModelName - Model names of `schema`, as `schema.prisma` declares them. They are inferred
- *   from `schema` alone and key `entities` and `fetchBefore.models`; defaults to any string
+ *   from `schema` alone and key `entities`; defaults to any string
  * @template TClient - The audited client type, passed to every resolver and enricher as `db`
  */
 export interface PrismaAuditExtensionOptions<TModelName extends string = string, TClient = unknown> {
@@ -235,14 +184,41 @@ export interface PrismaAuditExtensionOptions<TModelName extends string = string,
    */
   samplingRate?: number | ((modelName: string) => number);
 
-  diffing?: DiffingConfig;
-  security?: SecurityConfig;
+  /**
+   * Fields left out of the change set of an update, for every entity without its own
+   * `diffExcludeFields`. An update that changes only these fields is not recorded; the fields stay
+   * in the stored before and after states.
+   *
+   * @default []
+   */
+  diffExcludeFields?: string[];
+  /**
+   * Fields masked in every stored state and change set, on top of the built-in sensitive fields
+   * (`password`, `token`, `apiKey` and the like), which are always masked. The enrichment contexts
+   * and the request context are stored as they are, unmasked.
+   *
+   * @default []
+   */
+  redactFields?: string[];
+  /**
+   * Serializers for values JSON cannot hold, applied before the built-in conversions (BigInt,
+   * Date) to the stored states, changes and contexts. Return `UNHANDLED` to leave a value to the
+   * next serializer.
+   */
+  serializers?: ValueSerializer[];
+  /**
+   * Whether the before state of updates and deletes, top-level and nested, is read ahead of the
+   * write, for every entity without its own `fetchBefore` for that operation.
+   *
+   * @default { update: true, delete: true }
+   */
+  fetchBefore?: FetchBeforeConfig;
+
   /**
    * Actor context enrichment, stored in AuditLog.actorContext; the enricher receives the
    * operation's `AuditActor` and the client.
    */
   actorContext?: ActorContextConfig<AuditActor, unknown, TClient>;
-  fetchBefore?: FetchBeforeConfig<NoInfer<TModelName>>;
   /**
    * Observer notified of every audit-pipeline failure. See {@link AuditErrorObserver}; whether a
    * failed write fails the caller's operation is `write.onError`'s. What each phase means for a
@@ -292,11 +268,9 @@ export interface PrismaAuditExtensionOptions<TModelName extends string = string,
    *   returned an id that cannot be normalized to a string, or, for a `batchLookup` resolver,
    *   returned a different number of ids than rows. A `foreignKey` resolver throws for a row that
    *   lacks its column, such as one a client-level `omit` hides that the entity does not list in
-   *   `auditOmittedFields`. The caller's operation continues; `params`
+   *   `recordOmittedFields`. The caller's operation continues; `params`
    *   is `{ identity, resolver }` with the row's serialized primary key and the failed resolver.
    *   A failed `batchLookup` resolver is reported once for every row of its call.
    */
   errorObserver?: AuditErrorObserver;
-  /** Custom serialization for non-JSON-safe types (BigInt, Date are handled by default) */
-  serialization?: import('@kuruwic/db-audit-core').SerializationConfig;
 }

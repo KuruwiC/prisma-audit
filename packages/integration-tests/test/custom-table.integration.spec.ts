@@ -10,7 +10,7 @@ import { cleanDatabase, createBasePrisma, disposeTestContext, type TestContext }
 const testEntities: EntityMap = {
   User: defineEntity({
     type: 'User',
-    excludeFields: ['updatedAt'],
+    diffExcludeFields: ['updatedAt'],
   }),
   Post: defineEntity({
     type: 'Post',

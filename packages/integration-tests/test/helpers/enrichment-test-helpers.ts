@@ -91,7 +91,7 @@ export function createCommentEntities(
   aggregateEnricher: Mock<(aggregates: unknown[], prisma: PrismaClient) => Promise<unknown[]>>,
 ): EntityMap {
   return {
-    User: defineEntity({ type: 'User', excludeFields: ['updatedAt'] }),
+    User: defineEntity({ type: 'User', diffExcludeFields: ['updatedAt'] }),
     Post: defineEntity({
       type: 'Post',
       aggregates: [to('User', foreignKey('authorId'))],
@@ -126,7 +126,7 @@ export function createProfileEntities(
   aggregateEnricher: Mock<(aggregates: unknown[], prisma: PrismaClient) => Promise<unknown[]>>,
 ): EntityMap {
   return {
-    User: defineEntity({ type: 'User', excludeFields: ['updatedAt'] }),
+    User: defineEntity({ type: 'User', diffExcludeFields: ['updatedAt'] }),
     Post: defineEntity({
       type: 'Post',
       aggregates: [to('User', foreignKey('authorId'))],
@@ -178,7 +178,7 @@ export function createUserEntityContextEntities(
   return {
     User: defineEntity({
       type: 'User',
-      excludeFields: ['updatedAt'],
+      diffExcludeFields: ['updatedAt'],
       entityContext: {
         enricher: entityEnricher as unknown as (input: unknown[], prisma: unknown) => Promise<unknown[]>,
       },
@@ -204,7 +204,7 @@ export function createUserAggregateContextEntities(
   return {
     User: defineEntity({
       type: 'User',
-      excludeFields: ['updatedAt'],
+      diffExcludeFields: ['updatedAt'],
       selfAggregate: {
         aggregateContext: {
           enricher: aggregateEnricher as unknown as (input: unknown[], prisma: unknown) => Promise<unknown[]>,

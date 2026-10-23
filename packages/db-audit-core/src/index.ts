@@ -21,7 +21,7 @@ export type {
 } from './aggregate/types.js';
 export type { ComposeAmbient, ComposeConfig, EntityComposeConfig } from './compose/index.js';
 export { compose } from './compose/index.js';
-export type { ActorContextConfig, SerializationConfig } from './config.types.js';
+export type { ActorContextConfig, FetchBeforeConfig } from './config.types.js';
 export { createAsyncLocalStorageProvider } from './context-provider.js';
 export type { DispatchConfig } from './dispatch/index.js';
 export { dispatch } from './dispatch/index.js';
@@ -71,6 +71,5 @@ export type {
 export { resolve } from './resolve/index.js';
 export type { AuditActor, AuditContext, AuditContextProvider } from './types.js';
 export type { ErrorStrategy } from './utils/error-handler.js';
-export type { RedactConfig } from './utils/redaction.js';
 export type { ValueSerializer } from './utils/serialization.js';
 export { UNHANDLED } from './utils/serialization.js';

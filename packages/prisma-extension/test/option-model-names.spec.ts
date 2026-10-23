@@ -1,6 +1,6 @@
 /**
- * Type-level tests: the options keyed by model name take their keys from the model names of the
- * `schema` option, spelled as the schema declares them
+ * Type-level tests: the entity map takes its keys from the model names of the `schema` option,
+ * spelled as the schema declares them
  */
 
 import { createAsyncLocalStorageProvider, defineEntities, defineEntity } from '@kuruwic/db-audit-core';
@@ -38,7 +38,6 @@ describe('defineConfig', () => {
     const config = defineConfig<MockPrismaClient>()({
       ...base,
       entities: { UserProfile: userProfile },
-      fetchBefore: { models: { UserProfile: { delete: false } } },
     });
 
     expectTypeOf(config).toEqualTypeOf<PrismaAuditExtensionOptions<ModelName, MockPrismaClient>>();
@@ -72,30 +71,6 @@ describe('defineConfig', () => {
     });
   });
 
-  it('rejects fetchBefore.models keys the schema does not declare', () => {
-    defineConfig<MockPrismaClient>()({
-      ...base,
-      entities: {},
-      fetchBefore: {
-        models: {
-          UserProfile: { update: false },
-          // @ts-expect-error Comment is not a model of the schema
-          Comment: { update: false },
-        },
-      },
-    });
-    defineConfig<MockPrismaClient>()({
-      ...base,
-      entities: {},
-      fetchBefore: {
-        models: {
-          // @ts-expect-error the schema declares UserProfile, not the delegate's spelling
-          userProfile: { update: false },
-        },
-      },
-    });
-  });
-
   it('accepts a mapping defined ahead with the schema model names', () => {
     const entities = defineEntities<ModelName, MockPrismaClient>()({ UserProfile: userProfile });
 
@@ -113,7 +88,6 @@ describe('createAuditClient', () => {
       createAuditClient(prisma, {
         ...base,
         entities: { UserProfile: userProfile },
-        fetchBefore: { models: { UserProfile: { update: false } } },
       });
 
     expectTypeOf(build).returns.toExtend<MockPrismaClient>();
@@ -126,22 +100,6 @@ describe('createAuditClient', () => {
         entities: {
           // @ts-expect-error Comment is not a model of the schema
           Comment: defineEntity({ type: 'Comment' }),
-        },
-      });
-
-    expectTypeOf(build).returns.toExtend<MockPrismaClient>();
-  });
-
-  it('rejects a fetchBefore.models key in the delegate spelling', () => {
-    const build = (prisma: MockPrismaClient) =>
-      createAuditClient(prisma, {
-        ...base,
-        entities: {},
-        fetchBefore: {
-          models: {
-            // @ts-expect-error the schema declares UserProfile, not the delegate's spelling
-            userProfile: { update: false },
-          },
         },
       });
 
@@ -167,11 +125,10 @@ describe('a model name spelled unlike its delegate', () => {
   };
   const snakeBase = { ...base, schema: snakeSchema };
 
-  it('keys the options by the declared spelling', () => {
+  it('keys the entities by the declared spelling', () => {
     const config = defineConfig<MockPrismaClient>()({
       ...snakeBase,
       entities: { user_profile: userProfile },
-      fetchBefore: { models: { user_profile: { update: false } } },
     });
 
     expectTypeOf(config).toEqualTypeOf<PrismaAuditExtensionOptions<'User' | 'user_profile', MockPrismaClient>>();
@@ -190,29 +147,6 @@ describe('a model name spelled unlike its delegate', () => {
       entities: {
         // @ts-expect-error the schema declares user_profile, not UserProfile
         UserProfile: userProfile,
-      },
-    });
-  });
-
-  it('rejects fetchBefore.models keys in another spelling', () => {
-    defineConfig<MockPrismaClient>()({
-      ...snakeBase,
-      entities: {},
-      fetchBefore: {
-        models: {
-          // @ts-expect-error the schema declares user_profile, not its capitalized accessor
-          User_profile: { update: false },
-        },
-      },
-    });
-    defineConfig<MockPrismaClient>()({
-      ...snakeBase,
-      entities: {},
-      fetchBefore: {
-        models: {
-          // @ts-expect-error the schema declares user_profile, not UserProfile
-          UserProfile: { update: false },
-        },
       },
     });
   });

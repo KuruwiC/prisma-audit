@@ -69,9 +69,7 @@ export default defineConfig<PrismaClient>()({
       aggregates: [to('User', foreignKey('authorId'))],
     }),
   }),
-  diffing: {
-    excludeFields: ['updatedAt', 'createdAt'],
-  },
+  diffExcludeFields: ['updatedAt', 'createdAt'],
 });
 ```
 
@@ -169,7 +167,7 @@ Common use cases: pre-auth login flows, impersonation, system→user handoff.
 #### `entities`
 **Type:** `EntityMap<AuditModelName, PrismaClient>`
 
-Defines how entities relate to aggregate roots for audit log organization. Its keys, like those of `fetchBefore.models`, are typed by the model names of `schema`, spelled as `schema.prisma` declares them (`AuditModelName` from the generator's output).
+Defines how entities relate to aggregate roots for audit log organization. Its keys are typed by the model names of `schema`, spelled as `schema.prisma` declares them (`AuditModelName` from the generator's output).
 
 ```typescript
 const entities = defineEntities<AuditModelName, PrismaClient>()({
@@ -214,7 +212,7 @@ const entities = defineEntities<AuditModelName, PrismaClient>()({
 });
 ```
 
-`foreignKey('authorId')` reads the column of the row: a row whose `authorId` is `null` has no parent and gets no audit log under `User`, with nothing reported. A row that lacks the column fails the resolver, reported as `id-resolver-call` (see "Error Handling"); the row keeps its other audit logs. The rows the extension hands a resolver carry every column the client reads by default and the fields the entity lists in [`auditOmittedFields`](#auditomittedfields), except a row a nested `delete` removes without reading it (see [`fetchBefore`](#before-state-reads-fetchbefore)), which is never reported for a column it lacks. A delete whose row the audit read before the write hands its resolvers and enrichers that read row, which holds no relation your `include` asks for; a top-level delete whose row was not read hands them the row the operation returned, and a nested one the key and link columns described there.
+`foreignKey('authorId')` reads the column of the row: a row whose `authorId` is `null` has no parent and gets no audit log under `User`, with nothing reported. A row that lacks the column fails the resolver, reported as `id-resolver-call` (see "Error Handling"); the row keeps its other audit logs. The rows the extension hands a resolver carry every column the client reads by default and the fields the entity lists in [`recordOmittedFields`](#recordomittedfields), except a row a nested `delete` removes without reading it (see [`fetchBefore`](#before-state-reads-fetchbefore)), which is never reported for a column it lacks. A delete whose row the audit read before the write hands its resolvers and enrichers that read row, which holds no relation your `include` asks for; a top-level delete whose row was not read hands them the row the operation returned, and a nested one the key and link columns described there.
 
 An update that changes a row's parent (a changed `authorId`, or a nested `connect`, `set` or `disconnect`) is recorded under the parent it left as well as the one it joined: each `to()` resolver runs on the row after the write and on the row read before it (`fetchBefore.update`, on by default). A `lookup()` or `batchLookup()` resolver runs for the row before the write too, and reads the database as it is after the write. The same holds for a row a nested `connect` or `set` links to a parent and a nested `delete` or `deleteMany` under that parent then removes in the same write (for a `deleteMany`, a `connectOrCreate` too): it is recorded under the parent it left and the one it was deleted from, its resolvers running on the row read before the write and on that row holding the key of the parent it was deleted from as the database stores it (from that parent row's own read before the write, or, for the top-level row, the operation's result). This needs the row read before the write: `fetchBefore.delete`, and for a to-many `delete` `fetchBefore.update` too, which reads the rows a `connect` or `set` links; without that read, only the parent it was deleted from is known, and without a read of the parent row, only the parent it left. A nested delete of a row no keyword before it linked is recorded from the row read before the write alone.
 
@@ -697,80 +695,72 @@ Use shared change normalization if:
 - You prioritize storage efficiency over write speed
 - You need to query "what aggregates were affected by this change?"
 
-### Change Tracking Options (`diffing`)
+### Change Tracking
 
 Control how changes are tracked and recorded.
 
-An update's `changes` compares the columns of the row. The audited row is read with every column of the client's default shape whatever the query's `select` or `omit` (the value returned keeps the shape the query requested), so a column the query does not read is still compared and a change to it is recorded; a column the client omits for every query is left out, unless the entity lists it in [`auditOmittedFields`](#auditomittedfields); the relation fields and relation counts (`_count`) read with the row are neither compared nor stored. An update whose columns did not change, such as one that writes only nested relations, gets no audit log.
+An update's `changes` compares the columns of the row. The audited row is read with every column of the client's default shape whatever the query's `select` or `omit` (the value returned keeps the shape the query requested), so a column the query does not read is still compared and a change to it is recorded; a column the client omits for every query is left out, unless the entity lists it in [`recordOmittedFields`](#recordomittedfields); the relation fields and relation counts (`_count`) read with the row are neither compared nor stored. An update whose columns did not change, such as one that writes only nested relations, gets no audit log.
 
-#### `excludeFields`
-**Type:** `string[]`
+#### `diffExcludeFields`
+**Type:** `string[]` (top-level, and per model on `defineEntity`)
 **Default:** `[]`
 
-Fields to exclude from change tracking (globally or per-model). An update whose only changes are in excluded fields gets no audit log. Prisma sets an `@updatedAt` column on every update, so an update or upsert that stores the values the row already holds is logged with `updatedAt` as its only change unless that column is excluded.
+Fields left out of an update's `changes`. An update whose only changes are in excluded fields gets no audit log. An excluded field stays in the stored `before` and `after`; to mask its value, use [`redactFields`](#redactfields) instead (a field cannot be in both). Prisma sets an `@updatedAt` column on every update, so an update or upsert that stores the values the row already holds is logged with `updatedAt` as its only change unless that column is excluded.
 
 ```typescript
 {
-  diffing: {
-    excludeFields: ['updatedAt', 'createdAt', 'lastModifiedAt'],
-  }
+  diffExcludeFields: ['updatedAt', 'createdAt', 'lastModifiedAt'],
 }
 ```
 
-Per-model exclusion:
+An entity's own `diffExcludeFields` replaces the top-level list for that entity: list the top-level fields again to keep them excluded, and `[]` tracks every field. Without one, the entity uses the top-level list.
 ```typescript
 const entities = defineEntities<AuditModelName, PrismaClient>()({
   User: defineEntity({
     type: 'User',
-    excludeFields: ['lastLoginAt', 'sessionToken'],
+    diffExcludeFields: ['updatedAt', 'createdAt', 'lastLoginAt'],
   }),
 });
 ```
 
-#### `auditOmittedFields`
+#### `recordOmittedFields`
 **Type:** `string[]` (per model, on `defineEntity`)
 **Default:** none
 
-The fields a client-level `omit` hides (`new PrismaClient({ omit })`) that the audit reads and records anyway. The audit reads them in its own queries only, the read before the write and one read by [row key](#batch-operations-updatemany--deletemany) per listed model after it, one extra statement for a single write (none for `createMany`, `updateMany` and `deleteMany`, whose own reads of the rows hold them); the query you run and the value it returns are never widened with them. With `fetchBefore.delete` off, a deleted row's listed fields are not recorded.
+The fields a client-level `omit` hides (`new PrismaClient({ omit })`) that the audit reads anyway, though the client omits them, and records masked. The audit reads them in its own queries only, the read before the write and one read by [row key](#batch-operations-updatemany--deletemany) per listed model after it, one extra statement for a single write (none for `createMany`, `updateMany` and `deleteMany`, whose own reads of the rows hold them); the query you run and the value it returns are never widened with them. With `fetchBefore.delete` off, a deleted row's listed fields are not recorded.
 
-Their values are masked in before, after and `changes`, whether or not `security.redact` is set, and there is no option to record them unmasked: a changed field shows as `{ old: { redacted: true, hadValue: true }, new: { redacted: true, hadValue: true, isDifferent: true } }` (a side is `null` when the value was or became null), and an unchanged one has no entry in `changes`. A field `security.redact` also names is masked once, in the same shape, and a listed field the client does not hide is masked all the same.
+Their values are masked in before, after and `changes`, and there is no option to record them unmasked: a changed field shows as `{ old: { redacted: true, hadValue: true }, new: { redacted: true, hadValue: true, isDifferent: true } }` (a side is `null` when the value was or became null), and an unchanged one has no entry in `changes`. A field that is also a built-in sensitive field or in `redactFields` is masked once, in the same shape, and a listed field the client does not hide is masked all the same.
 
-A field the entity's `excludeFields` (or, without one, `diffing.excludeFields`) names is not read, even when listed. A foreign key the client hides and a `foreignKey(...)` root names must be listed: otherwise the row lacks the column, every write of it reports `id-resolver-call`, and the row is not recorded under that aggregate. A listed foreign key that holds `null` reports nothing.
+A field the entity's `diffExcludeFields` (or, without one, the top-level `diffExcludeFields`) names is not read, even when listed. A foreign key the client hides and a `foreignKey(...)` root names must be listed: otherwise the row lacks the column, every write of it reports `id-resolver-call`, and the row is not recorded under that aggregate. A listed foreign key that holds `null` reports nothing.
 
 Creating the audited client throws when the Prisma version cannot be determined, because the audit needs to know that queries take an `omit`. It also throws for a name that is not a scalar or enum field of the model, and for a mapping key that matches no model.
 
 ```typescript
 User: defineEntity({
   type: 'User',
-  auditOmittedFields: ['password'],
+  recordOmittedFields: ['password'],
 }),
 ```
 
-### Security Options (`security`)
+### Redaction
 
-Configure sensitive data protection.
+#### `redactFields`
+**Type:** `string[]` (top-level only)
+**Default:** `[]`
 
-#### `redact.fields`
-**Type:** `string[]`
-**Default:** none; redaction applies only when `security.redact` is set
+Fields to redact in audit logs on top of the 17 built-in sensitive fields, which are always redacted. A field is redacted when its name matches an entry exactly (case-sensitive), at any depth of the before / after / changes data as stored, after the custom serializers ran: a value a serializer turns into a string is redacted by its own field name only. Redaction covers the stored before, after and `changes` only: the enriched contexts (`actorContext`, `entityContext`, `aggregateContext`) and the request context are stored as the enrichers and the context provider return them.
 
-Additional fields to redact in audit logs, on top of the 17 defaults, which apply once `security.redact` is set (`redact: {}` turns on the defaults alone). A field is redacted when its name matches an entry exactly (case-sensitive), at any depth of the before / after / changes data as stored, after the custom serializers ran: a value a serializer turns into a string is redacted by its own field name only. Without `security.redact`, nothing is redacted.
-
-The audit cannot tell which columns a client-level `omit` hides (`new PrismaClient({ omit })`) and reads a row in the client's default shape, so those columns are left out of the audit logs unless the entity lists them in [`auditOmittedFields`](#auditomittedfields), which records them masked whether or not `security.redact` is set. Two exceptions record a hidden column other than the row key without the entity listing it. A hidden column the query names itself (`select: { password: true }` or `omit: { password: false }`) reaches its result as usual, and the record of a row without a captured before state (a create, an upsert that created, an update whose before read is off or failed) holds it as the query read it, in clear unless listed in `redact.fields`; the record of a row whose before state the audit read (an update or delete with `fetchBefore` on, an upsert that updated) keeps only the columns that read holds, so the column is not recorded there. When the Prisma version cannot be determined, a query's `select` is read by listing every column; a column the audit added that way is recorded only when the row's before state holds it, so a row created under a `select` is recorded with the selected columns only, on any client, whether or not it hides fields.
+The audit cannot tell which columns a client-level `omit` hides (`new PrismaClient({ omit })`) and reads a row in the client's default shape, so those columns are left out of the audit logs unless the entity lists them in [`recordOmittedFields`](#recordomittedfields), which records them masked. Two exceptions record a hidden column other than the row key without the entity listing it. A hidden column the query names itself (`select: { password: true }` or `omit: { password: false }`) reaches its result as usual, and the record of a row without a captured before state (a create, an upsert that created, an update whose before read is off or failed) holds it as the query read it, in clear unless it is a built-in sensitive field or listed in `redactFields`; the record of a row whose before state the audit read (an update or delete with `fetchBefore` on, an upsert that updated) keeps only the columns that read holds, so the column is not recorded there. When the Prisma version cannot be determined, a query's `select` is read by listing every column; a column the audit added that way is recorded only when the row's before state holds it, so a row created under a `select` is recorded with the selected columns only, on any client, whether or not it hides fields.
 
 The [row key](#batch-operations-updatemany--deletemany) follows its own rule. The audit reads it whatever a client-level `omit` hides, in its own reads and under a query's `select`, and records it in the row's states; the value returned keeps the shape the query requested. Under a client-level `omit` that hides the key, a row a write returns without a `select` lacks it, and takes it from the row read before the write (an `update` or `delete` with `fetchBefore` on, an `upsert` that updated). When there is no such read or the write changes the key, the row cannot be identified, gets no audit log and is not reported as `row-identification`: the row of a `create`, of an `upsert` that created, of an `update` or `delete` whose before read is off or failed, of an `update` or `upsert` whose arguments change the key other than by giving a key field a literal value, and each row `createManyAndReturn` returns. Each row `updateManyAndReturn` returns without a `select` gets no audit log either, but their number is reported as `row-identification`. When the Prisma version cannot be determined, the audit adds the key to none of its reads, so under a client-level `omit` that hides it only a row returned with a `select` is identified.
 
 ```typescript
 {
-  security: {
-    redact: {
-      fields: ['ssn', 'creditCardNumber', 'bankAccount'],
-    },
-  }
+  redactFields: ['phoneNumber', 'bankAccount', 'dateOfBirth'],
 }
 ```
 
-**Default redacted fields** (`DEFAULT_SENSITIVE_FIELDS` in `@kuruwic/db-audit-core`'s `src/utils/redaction.ts`):
+**Built-in sensitive fields** (`DEFAULT_SENSITIVE_FIELDS` in `@kuruwic/db-audit-core`'s `src/utils/redaction.ts`):
 ```
 password, passwordHash, hashedPassword, salt, token, accessToken,
 refreshToken, apiKey, secret, secretKey, privateKey, ssn,
@@ -1110,7 +1100,7 @@ A write whose `data` writes a key field can give each row a key other than the o
 
 #### Batch Creates (createMany / createManyAndReturn)
 
-`createManyAndReturn` delegates ID generation entirely to Prisma: audit logs are built from the rows Prisma actually created, read with every column of the client's default shape whatever the query's `select` or `omit`, and the fields the entity lists in `auditOmittedFields` read by row key after the write. Any `@default` works — including database-generated ones like `autoincrement()` — and logs stay accurate under `skipDuplicates` (skipped rows produce no logs).
+`createManyAndReturn` delegates ID generation entirely to Prisma: audit logs are built from the rows Prisma actually created, read with every column of the client's default shape whatever the query's `select` or `omit`, and the fields the entity lists in `recordOmittedFields` read by row key after the write. Any `@default` works — including database-generated ones like `autoincrement()` — and logs stay accurate under `skipDuplicates` (skipped rows produce no logs).
 
 `createMany` only returns `{ count }`, so the extension pre-generates client-side every key field that a row of `data` leaves out, and injects it into `data`, matching the format the schema declares. The key is the [row key](#batch-operations-updatemany--deletemany), and `createMany` throws for a model without one:
 
@@ -1121,7 +1111,7 @@ A write whose `data` writes a key field can give each row a key other than the o
 | `uuid()` / `uuid(4)` | UUID v4 |
 | `uuid(7)` | UUID v7 |
 
-After the write, the extension reads the created rows back by those keys (one query per 1,000 rows) and audits every row the read returns, in the client's default shape plus the fields the entity lists in `auditOmittedFields`: columns the database fills (`@default`, `@updatedAt`) are recorded, and a column a client-level `omit` hides is not, even when `data` writes it, except the key fields, which the read always reads to tell the rows apart. The database compares the keys, so a row whose key it stores or returns otherwise than `data` gave it (another case under a case-insensitive collation, a `BigInt` given as a number, a `DateTime` the column truncates) is recorded with the key as read. The read follows the rules of the read after an `updateMany` (see Batch Operations above): outside a transaction, a batch `$transaction([...])` that Prisma runs itself included, a row another writer changes before the read is recorded as changed. When the read returns fewer rows than the count `createMany` returns (a row another writer or a later operation of that batch deleted, a read replica that lags behind the write), the rows it misses get no audit log, and their number is reported as `row-identification`.
+After the write, the extension reads the created rows back by those keys (one query per 1,000 rows) and audits every row the read returns, in the client's default shape plus the fields the entity lists in `recordOmittedFields`: columns the database fills (`@default`, `@updatedAt`) are recorded, and a column a client-level `omit` hides is not, even when `data` writes it, except the key fields, which the read always reads to tell the rows apart. The database compares the keys, so a row whose key it stores or returns otherwise than `data` gave it (another case under a case-insensitive collation, a `BigInt` given as a number, a `DateTime` the column truncates) is recorded with the key as read. The read follows the rules of the read after an `updateMany` (see Batch Operations above): outside a transaction, a batch `$transaction([...])` that Prisma runs itself included, a row another writer changes before the read is recorded as changed. When the read returns fewer rows than the count `createMany` returns (a row another writer or a later operation of that batch deleted, a read replica that lags behind the write), the rows it misses get no audit log, and their number is reported as `row-identification`.
 
 Database-generated defaults (`autoincrement()`, `dbgenerated()`) cannot be pre-generated, so `createMany` throws when a row of its `data` leaves out a key field that has such a default, or no default at all. A key field every row supplies needs no default. Use `createManyAndReturn` or individual `create` calls instead.
 
@@ -1244,20 +1234,18 @@ With `update` off, a nested `update` still has the key columns of its row read w
 }
 ```
 
-#### `models`
-**Type:** `{ [Model]?: { update?: boolean; delete?: boolean } }`
+#### Per-entity `fetchBefore`
+**Type:** `{ update?: boolean; delete?: boolean }` (on `defineEntity`)
 
-Per-model settings, keyed by the model names of `schema` like [`entities`](#entities). For each operation, the written model's setting wins, then the global setting, then the default.
+An entity's own setting for the operations it names. For each operation of a written model, top-level or nested, the setting of its entity wins, then the top-level setting, then the default.
 
 ```typescript
 {
-  fetchBefore: {
-    update: false,                 // Every model
-    models: {
-      Post: { update: true },      // Post updates still read the before state
-      PostTag: { delete: false },  // PostTag deletes skip it
-    },
-  }
+  fetchBefore: { update: false },  // Every entity
+  entities: defineEntities<AuditModelName, PrismaClient>()({
+    Post: defineEntity({ type: 'Post', fetchBefore: { update: true } }),       // Post updates still read the before state
+    PostTag: defineEntity({ type: 'PostTag', fetchBefore: { delete: false } }), // PostTag deletes skip it
+  }),
 }
 ```
 
@@ -1311,9 +1299,9 @@ await prisma.post.update({
 
 #### Important Notes
 
-1. **No `include` needed**: The relations a nested write touches are added to the query's `include` so their rows can be audited; a `select` on the audited record or on a written relation is read as the client's default shape with the relations it selects included, and the fields an `omit` there leaves out are read, so the records are audited with every column the client reads by default (and the fields the entity lists in `auditOmittedFields`, read by [row key](#batch-operations-updatemany--deletemany) after the write), and the rows written below a returned record are found by its keys when the result leaves them out. The value returned to the caller keeps the shape the query requested.
+1. **No `include` needed**: The relations a nested write touches are added to the query's `include` so their rows can be audited; a `select` on the audited record or on a written relation is read as the client's default shape with the relations it selects included, and the fields an `omit` there leaves out are read, so the records are audited with every column the client reads by default (and the fields the entity lists in `recordOmittedFields`, read by [row key](#batch-operations-updatemany--deletemany) after the write), and the rows written below a returned record are found by its keys when the result leaves them out. The value returned to the caller keeps the shape the query requested.
 2. **`connect`, `set` and `disconnect` behavior**:
-   - A foreign key on the related record is that record's column: each record whose foreign key the write changed gets an `update` audit log, `changes` holding the old and new value. The records the writes at one relation path name, and the records linked to their parent rows when a write unlinks those (a `set`, or a to-one `connect`, `create`, `connectOrCreate` or `disconnect` on an optional foreign key), are read once before the write (whole rows, when `fetchBefore.update` is on for the related model) and once after it by primary key; a record whose foreign key did not change (already linked, kept by a `set`, linked to another parent) gets no audit log. Prisma also sets an `@updatedAt` column on every connected record, so with the foreign key in `excludeFields` such a record is still logged, with `updatedAt` as its only change
+   - A foreign key on the related record is that record's column: each record whose foreign key the write changed gets an `update` audit log, `changes` holding the old and new value. The records the writes at one relation path name, and the records linked to their parent rows when a write unlinks those (a `set`, or a to-one `connect`, `create`, `connectOrCreate` or `disconnect` on an optional foreign key), are read once before the write (whole rows, when `fetchBefore.update` is on for the related model) and once after it by primary key; a record whose foreign key did not change (already linked, kept by a `set`, linked to another parent) gets no audit log. Prisma also sets an `@updatedAt` column on every connected record, so with the foreign key in `diffExcludeFields` such a record is still logged, with `updatedAt` as its only change
    - Creates join table records (e.g., PostTag) for many-to-many relations
    - Creates audit logs for join table entities if defined in `entities`
    - Does not create audit logs for a record whose link lives elsewhere (e.g., Tag, linked through PostTag's foreign key)
@@ -1361,7 +1349,7 @@ export default defineConfig<PrismaClient>()({
   entities: defineEntities<AuditModelName, PrismaClient>()({
     User: defineEntity({
       type: 'User',
-      excludeFields: ['lastLoginAt'],
+      diffExcludeFields: ['updatedAt', 'createdAt', 'lastLoginAt'],
     }),
     Post: defineEntity({
       type: 'Post',
@@ -1373,21 +1361,15 @@ export default defineConfig<PrismaClient>()({
         to('Post', foreignKey('postId')),
         to('User', foreignKey('authorId')),
       ],
-      excludeFields: ['editCount'],
+      diffExcludeFields: ['updatedAt', 'createdAt', 'editCount'],
     }),
   }),
 
-  // Change tracking
-  diffing: {
-    excludeFields: ['updatedAt', 'createdAt'],
-  },
+  // Change tracking (an entity's own diffExcludeFields replaces this list)
+  diffExcludeFields: ['updatedAt', 'createdAt'],
 
-  // Security
-  security: {
-    redact: {
-      fields: ['ssn', 'creditCardNumber'],
-    },
-  },
+  // Redaction, on top of the built-in sensitive fields
+  redactFields: ['phoneNumber'],
 
   // Sampling (default: log all operations)
   samplingRate: 1.0,

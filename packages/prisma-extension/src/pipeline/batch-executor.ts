@@ -13,7 +13,7 @@
  * as `row-identification` and not audited, and the rows an updateManyAndReturn returns are recorded
  * without a before state and reported. A row another writer re-keys or deletes between the reads
  * does not pair, and is reported the same way. Every read of the executor reads the row key
- * whatever a client-level omit hides, and the omitted fields the entity audits
+ * whatever a client-level omit hides, and the omitted fields the entity records
  * (`withRowKeyFields`).
  */
 

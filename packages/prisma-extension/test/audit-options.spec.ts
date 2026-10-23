@@ -1,6 +1,7 @@
 /**
  * Options checked once when they are normalized: the `schema` option, the audit schema the
- * extension reads every model's structure from, and the `write` and `samplingRate` options
+ * extension reads every model's structure from, the `write` and `samplingRate` options, and the
+ * diff-exclusion and redaction options
  */
 
 import { createAsyncLocalStorageProvider, defineEntity } from '@kuruwic/db-audit-core';
@@ -119,5 +120,50 @@ describe('the write and samplingRate options', () => {
     expect(normalizeAuditOptions({ ...optionsWith(userSchema), samplingRate }).policyConfig.samplingRate).toBe(
       samplingRate,
     );
+  });
+});
+
+describe('the diffExcludeFields and redactFields options', () => {
+  const withOptions = (options: Partial<PrismaAuditExtensionOptions>): PrismaAuditExtensionOptions => ({
+    ...optionsWith(userSchema),
+    ...options,
+  });
+
+  it('defaults to no diff exclusions and no redactFields', () => {
+    const { composeConfig } = normalizeAuditOptions(withOptions({}));
+
+    expect(composeConfig.diffExcludeFields).toEqual([]);
+    expect(composeConfig.redactFields).toEqual([]);
+  });
+
+  it('passes diffExcludeFields, redactFields and serializers to the record composition unchanged', () => {
+    const serializers = [(value: unknown) => value];
+    const { composeConfig } = normalizeAuditOptions(
+      withOptions({ diffExcludeFields: ['updatedAt'], redactFields: ['phone'], serializers }),
+    );
+
+    expect(composeConfig.diffExcludeFields).toEqual(['updatedAt']);
+    expect(composeConfig.redactFields).toEqual(['phone']);
+    expect(composeConfig.serializers).toBe(serializers);
+  });
+
+  it('rejects a field both in the global diffExcludeFields and in redactFields', () => {
+    expect(() =>
+      normalizeAuditOptions(withOptions({ diffExcludeFields: ['updatedAt', 'phone'], redactFields: ['phone'] })),
+    ).toThrow("Fields cannot be both in 'diffExcludeFields' and 'redactFields'. Conflicting fields: phone.");
+  });
+
+  it("rejects a field both in an entity's diffExcludeFields and in redactFields", () => {
+    const entities = { User: defineEntity({ type: 'User', diffExcludeFields: ['phone'] }) };
+
+    expect(() => normalizeAuditOptions(withOptions({ entities, redactFields: ['phone'] }))).toThrow(
+      "Configuration error for model 'User': Fields cannot be both in entity 'diffExcludeFields' and 'redactFields'. Conflicting fields: phone.",
+    );
+  });
+
+  it('accepts redactFields next to an entity diffExcludeFields that names other fields', () => {
+    const entities = { User: defineEntity({ type: 'User', diffExcludeFields: ['updatedAt'] }) };
+
+    expect(() => normalizeAuditOptions(withOptions({ entities, redactFields: ['phone'] }))).not.toThrow();
   });
 });

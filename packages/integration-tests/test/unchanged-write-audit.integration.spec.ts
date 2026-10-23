@@ -4,7 +4,7 @@
  * Prisma sets an `@updatedAt` column on every update, so an `update` or the update branch of an
  * `upsert` that writes identical values still changes that column. An `upsert` and an `update`
  * record the same audit logs for it: with `updatedAt` an ordinary field the logs are `update`
- * logs whose only change is `updatedAt`, and with `updatedAt` in the entity's `excludeFields`
+ * logs whose only change is `updatedAt`, and with `updatedAt` in the entity's `diffExcludeFields`
  * neither writes a log. Each case runs the same data through both operations.
  */
 
@@ -21,24 +21,28 @@ const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'unchanged-write-actor' },
 };
 
-const createMapping = (excludeFields: string[] | undefined): EntityMap => ({
+const createMapping = (diffExcludeFields: string[] | undefined): EntityMap => ({
   User: defineEntity({ type: 'User' }),
-  Profile: defineEntity({ type: 'Profile', excludeFields, aggregates: [to('User', foreignKey('userId'))] }),
-  Avatar: defineEntity({ type: 'Avatar', excludeFields, aggregates: [to('Profile', foreignKey('profileId'))] }),
-  AvatarImage: defineEntity({ type: 'AvatarImage', excludeFields, aggregates: [to('Avatar', foreignKey('avatarId'))] }),
+  Profile: defineEntity({ type: 'Profile', diffExcludeFields, aggregates: [to('User', foreignKey('userId'))] }),
+  Avatar: defineEntity({ type: 'Avatar', diffExcludeFields, aggregates: [to('Profile', foreignKey('profileId'))] }),
+  AvatarImage: defineEntity({
+    type: 'AvatarImage',
+    diffExcludeFields,
+    aggregates: [to('Avatar', foreignKey('avatarId'))],
+  }),
 });
 
 describe('A write that stores the values a row already holds', () => {
   let basePrisma: PrismaClient;
   const provider = createAsyncLocalStorageProvider();
 
-  const createClient = (excludeFields: string[] | undefined) =>
+  const createClient = (diffExcludeFields: string[] | undefined) =>
     createAuditClient(basePrisma, {
       Prisma,
       schema: auditSchema,
       contextProvider: provider,
-      entities: createMapping(excludeFields),
-      diffing: { excludeFields: ['createdAt'] },
+      entities: createMapping(diffExcludeFields),
+      diffExcludeFields: ['createdAt'],
       write: { awaited: true },
       fetchBefore: { update: true, delete: true },
     });
@@ -156,7 +160,7 @@ describe('A write that stores the values a row already holds', () => {
     );
 
     it.each(['upsert', 'update'] as const)(
-      'records nothing when %s runs with updatedAt in the entities excludeFields',
+      'records nothing when %s runs with updatedAt in the entities diffExcludeFields',
       async (operation) => {
         const user = await seedUser();
         const prisma = createClient(['updatedAt']);

@@ -10,14 +10,14 @@ import { safeStringify } from './serialization.js';
  * Protects sensitive information in audit logs through field-level redaction.
  *
  * **Features:**
- * - Default sensitive field list (passwords, tokens, SSN, etc.)
+ * - Built-in sensitive field list (passwords, tokens, SSN, etc.), always redacted
  * - Structured redaction preserves metadata without exposing values
  * - Deep object traversal for nested fields
  * - Change detection via `isDifferent` flag
  *
  * @example
  * ```typescript
- * const redactor = createRedactor({ fields: ['ssn'] });
+ * const redactor = createRedactor(['ssn']);
  *
  * redactor({ name: 'Alice', ssn: '123-45-6789' });
  * // => { name: 'Alice', ssn: { redacted: true, hadValue: true } }
@@ -58,10 +58,6 @@ export interface RedactedFieldInfo {
   hadValue: boolean;
   /** Present in 'after' state for updates to indicate value changed */
   isDifferent?: boolean;
-}
-
-export interface RedactConfig {
-  fields?: string[];
 }
 
 export type Redactor = (data: unknown) => unknown;
@@ -121,10 +117,10 @@ const processObjectEntry = (
 };
 
 /**
- * Create a redactor function with the specified configuration
+ * Create a redactor of the built-in sensitive fields and `fields`
  */
-export const createRedactor = (config: RedactConfig = {}): Redactor => {
-  const sensitiveFields = new Set([...DEFAULT_SENSITIVE_FIELDS, ...(config.fields || [])]);
+export const createRedactor = (fields: readonly string[] = []): Redactor => {
+  const sensitiveFields = new Set([...DEFAULT_SENSITIVE_FIELDS, ...fields]);
 
   const redactArray = (arr: unknown[], redactData: (data: unknown) => unknown): unknown[] => {
     return arr.map((item) => redactData(item));
@@ -168,10 +164,11 @@ export const createRedactor = (config: RedactConfig = {}): Redactor => {
 };
 
 /**
- * Redact the sensitive fields of a state or a change set
+ * Redact the built-in sensitive fields and `fields` of a state or a change set
  *
  * @remarks
  * Plain objects and arrays, the shape of serialized (JSON-safe) data, are walked and come back as
  * new containers; the input is never changed. Any other object is neither traversed nor copied.
  */
-export const redactSensitiveData = (data: unknown, config: RedactConfig = {}): unknown => createRedactor(config)(data);
+export const redactSensitiveData = (data: unknown, fields: readonly string[] = []): unknown =>
+  createRedactor(fields)(data);

@@ -30,14 +30,7 @@ const createFailingWriterClient = (options: FailingWriterClientOptions) => {
     schema: auditSchema,
     contextProvider: provider,
     entities: testEntities,
-    diffing: {
-      excludeFields: ['createdAt'],
-    },
-    security: {
-      redact: {
-        fields: [],
-      },
-    },
+    diffExcludeFields: ['createdAt'],
     // Every write runs in the transaction the client opens around it, which an awaited audit
     // write that fails under 'throw' rolls back.
     write: {

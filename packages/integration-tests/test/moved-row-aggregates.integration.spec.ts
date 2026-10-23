@@ -47,8 +47,7 @@ describe('aggregates of a row moved to another parent', () => {
       schema: auditSchema,
       contextProvider: provider,
       entities,
-      diffing: { excludeFields: ['createdAt', 'updatedAt'] },
-      security: { redact: { fields: [] } },
+      diffExcludeFields: ['createdAt', 'updatedAt'],
       fetchBefore: { update: options.fetchBeforeUpdate ?? true, delete: true },
     });
     disconnects.push(async () => {

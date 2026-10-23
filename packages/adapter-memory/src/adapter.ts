@@ -23,10 +23,9 @@ import type {
   MutationAction,
   MutationEvent,
   PolicyConfig,
-  RedactConfig,
   ResolveConfig,
-  SerializationConfig,
   TransactionRuntime,
+  ValueSerializer,
   WriteOnError,
 } from '@kuruwic/db-audit-core';
 import {
@@ -59,9 +58,12 @@ export interface MemoryAuditOptions<TModelName extends string> {
     /** Whether a failed audit write fails the operation; defaults to `'throw'` */
     readonly onError?: WriteOnError;
   };
-  readonly excludeFields?: readonly string[];
-  readonly redact?: RedactConfig;
-  readonly serialization?: SerializationConfig;
+  /** Fields left out of an update's change set, for every entity without its own `diffExcludeFields` */
+  readonly diffExcludeFields?: readonly string[];
+  /** Fields masked in the stored states and changes, on top of the built-in sensitive fields */
+  readonly redactFields?: readonly string[];
+  /** Serializers applied before the built-in conversions (BigInt, Date) */
+  readonly serializers?: readonly ValueSerializer[];
   readonly actorContext?: ActorContextConfig<AuditActor, unknown, MemoryHandle<TModelName>>;
   readonly errorObserver?: AuditErrorObserver;
 }
@@ -115,9 +117,9 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
   };
   const composeConfig: ComposeConfig<TModelName> = {
     entity: entityConfigs.byModel,
-    excludeFields: options.excludeFields ?? [],
-    redact: options.redact,
-    serialization: options.serialization,
+    diffExcludeFields: options.diffExcludeFields ?? [],
+    redactFields: options.redactFields ?? [],
+    serializers: options.serializers,
     relationFieldNames: () => new Set(),
   };
 

@@ -1,33 +1,34 @@
 /** Record composition: resolved mutation events to audit records */
 
-import type { SerializationConfig } from '../config.types.js';
 import { createActorId, createAggregateId, createEntityId } from '../domain/branded-types.js';
 import { type AuditRecord, aggregateRootKey, type ResolvedEvent } from '../domain/mutation-event.js';
 import type { AuditContext } from '../types.js';
 import { createDiffCalculator, type DiffResult } from '../utils/diff-calculator.js';
-import { maskChanges, maskColumns, type RedactConfig, redactSensitiveData } from '../utils/redaction.js';
+import { maskChanges, maskColumns, redactSensitiveData } from '../utils/redaction.js';
 import { removeRelations } from '../utils/remove-relations.js';
 import { serializeForAuditJson, type ValueSerializer } from '../utils/serialization.js';
 
 export interface EntityComposeConfig {
   readonly category: string;
   readonly type: string;
-  /** Fields excluded from change tracking; overrides the global list when present. */
-  readonly excludeFields?: readonly string[];
+  /** Fields excluded from change tracking; replaces the global list when present (`[]` clears it). */
+  readonly diffExcludeFields?: readonly string[];
   /**
    * Fields the client leaves out of its default reads that the adapter reads anyway: masked in the
    * stored states and changes after the diff, so a change to one is recorded without its values.
    */
-  readonly auditOmittedFields?: readonly string[];
+  readonly recordOmittedFields?: readonly string[];
 }
 
 export interface ComposeConfig<TModelName extends string = string> {
   /** Entity configuration of a written model, or undefined when the model is not audited. */
   readonly entity: (model: TModelName) => EntityComposeConfig | undefined;
   /** Fields excluded from change tracking for every entity without its own list. */
-  readonly excludeFields: readonly string[];
-  readonly redact?: RedactConfig;
-  readonly serialization?: SerializationConfig;
+  readonly diffExcludeFields: readonly string[];
+  /** Fields masked in every stored state and change set, on top of the built-in sensitive fields. */
+  readonly redactFields: readonly string[];
+  /** Serializers applied before the built-in conversions (BigInt, Date) to every stored value. */
+  readonly serializers?: readonly ValueSerializer[];
   /**
    * The keys of a row of a model that are not its columns: its relation fields and any aggregate
    * the ORM returns with the row (such as `_count`). Neither compared nor stored; undefined strips
@@ -64,10 +65,10 @@ const isRecordOrNullish = (value: unknown): value is Record<string, unknown> | n
  * Serialize the states with the custom serializers first, so a class instance among the column
  * values reaches the redactor as the plain data stored for it.
  */
-const serializeStates = (states: RecordStates, customSerializers?: ValueSerializer[]): StoredStates => ({
-  before: serializeForAuditJson(states.before, customSerializers),
-  after: serializeForAuditJson(states.after, customSerializers),
-  changes: serializeForAuditJson(states.changes, customSerializers),
+const serializeStates = (states: RecordStates, serializers?: readonly ValueSerializer[]): StoredStates => ({
+  before: serializeForAuditJson(states.before, serializers),
+  after: serializeForAuditJson(states.after, serializers),
+  changes: serializeForAuditJson(states.changes, serializers),
 });
 
 /**
@@ -75,9 +76,9 @@ const serializeStates = (states: RecordStates, customSerializers?: ValueSerializ
  * turn a state that is not a record, which the redactor cannot match by key, into an error instead
  * of storing it.
  */
-const redactStates = (states: StoredStates, redactConfig: RedactConfig): StoredStates => {
-  const before = redactSensitiveData(states.before, redactConfig);
-  const after = redactSensitiveData(states.after, redactConfig);
+const redactStates = (states: StoredStates, redactFields: readonly string[]): StoredStates => {
+  const before = redactSensitiveData(states.before, redactFields);
+  const after = redactSensitiveData(states.after, redactFields);
 
   if (!isRecordOrNullish(before) || !isRecordOrNullish(after)) {
     throw new Error('[db-audit-core] Redaction produced unexpected type');
@@ -85,7 +86,7 @@ const redactStates = (states: StoredStates, redactConfig: RedactConfig): StoredS
 
   let changes: unknown = null;
   if (states.changes) {
-    changes = redactSensitiveData(states.changes, redactConfig);
+    changes = redactSensitiveData(states.changes, redactFields);
     if (!isRecordOrNullish(changes)) {
       throw new Error('[db-audit-core] Redaction of changes produced unexpected type');
     }
@@ -117,12 +118,12 @@ const changedOnlyExcludedFields = (changes: DiffResult, before: State): boolean 
  * database driver; the states arrive serialized. `createdAt` is a DateTime column and the ids and
  * categories are plain strings, so they pass through.
  */
-const serializeContexts = (record: AuditRecord, customSerializers?: ValueSerializer[]): AuditRecord => ({
+const serializeContexts = (record: AuditRecord, serializers?: readonly ValueSerializer[]): AuditRecord => ({
   ...record,
-  actorContext: serializeForAuditJson(record.actorContext, customSerializers),
-  entityContext: serializeForAuditJson(record.entityContext, customSerializers),
-  aggregateContext: serializeForAuditJson(record.aggregateContext, customSerializers),
-  requestContext: serializeForAuditJson(record.requestContext, customSerializers),
+  actorContext: serializeForAuditJson(record.actorContext, serializers),
+  entityContext: serializeForAuditJson(record.entityContext, serializers),
+  aggregateContext: serializeForAuditJson(record.aggregateContext, serializers),
+  requestContext: serializeForAuditJson(record.requestContext, serializers),
 });
 
 const resolveStates = <TModelName extends string>(
@@ -139,14 +140,14 @@ const resolveStates = <TModelName extends string>(
   const afterColumns = columnsOf(after);
 
   const isUpdate = event.action === 'update';
-  const excludeFields = entity.excludeFields ?? config.excludeFields;
-  const changes = isUpdate ? createDiffCalculator(new Set(excludeFields))(beforeColumns, afterColumns) : null;
+  const diffExcludeFields = entity.diffExcludeFields ?? config.diffExcludeFields;
+  const changes = isUpdate ? createDiffCalculator(new Set(diffExcludeFields))(beforeColumns, afterColumns) : null;
 
   if (isUpdate && changedOnlyExcludedFields(changes, before)) {
     return undefined;
   }
 
-  const maskedFields = new Set(entity.auditOmittedFields);
+  const maskedFields = new Set(entity.recordOmittedFields);
   const columns = { before: beforeColumns, after: afterColumns, changes };
   return maskedFields.size > 0 ? maskStates(columns, maskedFields) : columns;
 };
@@ -168,9 +169,8 @@ const composeEvent = <TModelName extends string>(
     return [];
   }
 
-  const customSerializers = config.serialization?.customSerializers;
-  const serialized = serializeStates(states, customSerializers);
-  const stored = config.redact ? redactStates(serialized, config.redact) : serialized;
+  const serialized = serializeStates(states, config.serializers);
+  const stored = redactStates(serialized, config.redactFields);
   const requestContext = auditContext.request || null;
 
   // Each root's record holds its own states, so a writer that changes one record leaves the others as composed
@@ -202,7 +202,7 @@ const composeEvent = <TModelName extends string>(
         requestContext,
         createdAt: now,
       },
-      customSerializers,
+      config.serializers,
     );
   });
 };
@@ -214,7 +214,7 @@ const composeEvent = <TModelName extends string>(
  * root resolved, or when an update changed only excluded fields of an existing before state.
  *
  * @throws {IdValidationError} When the actor id, the resolved entity id or an aggregate id is empty
- * @throws {Error} When redaction is configured and a serialized state or change set is not a record
+ * @throws {Error} When a serialized state or change set is not a record
  */
 export const compose = <TModelName extends string>(
   events: readonly ResolvedEvent<TModelName>[],

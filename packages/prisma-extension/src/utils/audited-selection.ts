@@ -11,7 +11,7 @@
  * audit identifies the row. A client that takes no query `omit` is read in that shape only by
  * selecting every scalar field, which reads such a field too: the columns that adds are named per
  * model (`widened`), and a record keeps one only when the row's before state holds it
- * (`pipeline/audited-columns.ts`). The omitted fields an entity audits are never added here: the
+ * (`pipeline/audited-columns.ts`). The omitted fields an entity records are never added here: the
  * audit reads them in its own queries (`utils/audited-omitted-fields.ts`).
  *
  * Nested writes are audited from the records the operation returns, so the relations an operation

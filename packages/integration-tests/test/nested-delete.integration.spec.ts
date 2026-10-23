@@ -1,11 +1,11 @@
-import type { AuditContext } from '@kuruwic/db-audit-core';
+import type { AuditContext, FetchBeforeConfig } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import type { AuditErrorObserver } from '@kuruwic/prisma-audit';
 import { createAuditClient, defineEntity, foreignKey, to } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { describe, expect, it, vi } from 'vitest';
-import { createBasePrisma, setupTestContext, testEntities } from './helpers/setup.js';
+import { createBasePrisma, setupTestContext, testEntities, withFetchBefore } from './helpers/setup.js';
 
 describe('Nested Delete Operations', () => {
   const context = setupTestContext();
@@ -75,7 +75,7 @@ describe('Nested Delete Operations', () => {
 
   // NOTE: Unless a test builds its own client, it uses the setup.ts configuration (fetchBefore.delete: true).
   // The paths where the before state of a nested delete is not read are covered below by
-  // 'before-state read configured per model' and 'a nested delete next to other operations at the same path'.
+  // 'before-state read configured per entity' and 'a nested delete next to other operations at the same path'.
 
   describe('Empty Results', () => {
     it('should handle nested delete with no matching records', async () => {
@@ -338,11 +338,14 @@ describe('Nested Delete Operations', () => {
     });
   });
 
-  describe('before-state read configured per model', () => {
-    type FetchBeforeConfig = Parameters<typeof createAuditClient>[1]['fetchBefore'];
-
-    /** Deletes one post through its author and returns the `before` of the post's own audit log */
-    const deletePostThroughAuthor = async (email: string, fetchBefore: FetchBeforeConfig) => {
+  describe('before-state read configured per entity', () => {
+    /** Deletes one post, through its author unless `options.topLevel`, and returns its own audit log's `before` */
+    const deletePost = async (
+      email: string,
+      fetchBefore: FetchBeforeConfig,
+      entityFetchBefore: Readonly<Record<string, FetchBeforeConfig>>,
+      options: { readonly topLevel?: boolean } = {},
+    ) => {
       const user = await context.basePrisma.user.create({ data: { email, name: 'Author', password: 'secret123' } });
       const post = await context.basePrisma.post.create({
         data: { title: 'Doomed', content: 'Content', authorId: user.id },
@@ -353,15 +356,19 @@ describe('Nested Delete Operations', () => {
         Prisma,
         schema: auditSchema,
         contextProvider: provider,
-        entities: testEntities,
+        entities: withFetchBefore(testEntities, entityFetchBefore),
         write: { awaited: true },
         fetchBefore,
       });
 
       try {
-        await provider.runAsync(testActor, () =>
-          prisma.user.update({ where: { id: user.id }, data: { posts: { delete: { id: post.id } } } }),
-        );
+        await provider.runAsync(testActor, async () => {
+          if (options.topLevel) {
+            await prisma.post.delete({ where: { id: post.id } });
+          } else {
+            await prisma.user.update({ where: { id: user.id }, data: { posts: { delete: { id: post.id } } } });
+          }
+        });
       } finally {
         await prisma.$disconnect();
         await basePrisma.$disconnect();
@@ -373,29 +380,33 @@ describe('Nested Delete Operations', () => {
       return log.before;
     };
 
-    it('skips the read for a model whose own setting turns it off, whatever the global setting', async () => {
-      const before = await deletePostThroughAuthor('model-off@example.com', {
-        delete: true,
-        models: { Post: { delete: false } },
-      });
+    it('skips the read for an entity whose own setting turns it off, whatever the global setting', async () => {
+      const before = await deletePost('model-off@example.com', { delete: true }, { Post: { delete: false } });
 
       expect(before).toBeNull();
     });
 
-    it('reads the before state of a model whose own setting turns it on, whatever the global setting', async () => {
-      const before = await deletePostThroughAuthor('model-on@example.com', {
-        delete: false,
-        models: { Post: { delete: true } },
-      });
+    it('reads the before state of an entity whose own setting turns it on, whatever the global setting', async () => {
+      const before = await deletePost('model-on@example.com', { delete: false }, { Post: { delete: true } });
 
       expect(before).toMatchObject({ title: 'Doomed' });
     });
 
-    it('applies the global setting to a model the per-model settings do not name', async () => {
-      const before = await deletePostThroughAuthor('other-model@example.com', {
-        delete: false,
-        models: { Comment: { delete: true } },
-      });
+    it('applies the global setting to an entity without its own setting', async () => {
+      const before = await deletePost('other-model@example.com', { delete: false }, { Comment: { delete: true } });
+
+      expect(before).toBeNull();
+    });
+
+    it('applies the entity setting to a top-level delete as well', async () => {
+      const before = await deletePost(
+        'top-level@example.com',
+        { delete: true },
+        { Post: { delete: false } },
+        {
+          topLevel: true,
+        },
+      );
 
       expect(before).toBeNull();
     });

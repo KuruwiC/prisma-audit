@@ -201,7 +201,7 @@ describe('CRUD Operations Integration', () => {
       });
     });
 
-    it('should respect per-model excludeFields for User (excludes updatedAt, keeps password as a redacted change)', async () => {
+    it('should respect per-model diffExcludeFields for User (excludes updatedAt, keeps password as a redacted change)', async () => {
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -250,11 +250,11 @@ describe('CRUD Operations Integration', () => {
       // Should NOT have updatedAt changes (excluded by per-model config)
       expect(changes).not.toHaveProperty('updatedAt');
 
-      // No createdAt assertion: User's excludeFields ['updatedAt'] overrides the global ['createdAt'],
+      // No createdAt assertion: User's diffExcludeFields ['updatedAt'] overrides the global ['createdAt'],
       // and createdAt never changes on update anyway
     });
 
-    it('should respect global excludeFields for Post (excludes only createdAt)', async () => {
+    it('should respect global diffExcludeFields for Post (excludes only createdAt)', async () => {
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -295,7 +295,7 @@ describe('CRUD Operations Integration', () => {
       expect(changes).toHaveProperty('title');
       expect(changes).toHaveProperty('content');
 
-      // Should have updatedAt changes (NOT excluded for Post - only global excludeFields apply)
+      // Should have updatedAt changes (NOT excluded for Post - only global diffExcludeFields apply)
       expect(changes).toHaveProperty('updatedAt');
 
       // Should NOT have createdAt changes (excluded by global config)

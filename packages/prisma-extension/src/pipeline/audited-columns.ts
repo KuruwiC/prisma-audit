@@ -1,7 +1,7 @@
 /**
  * The columns an audit record stores of a row
  *
- * A record holds the client's default shape of its row, plus the omitted fields its entity audits.
+ * A record holds the client's default shape of its row, plus the omitted fields its entity records.
  * A column a caller names in its `select` or `omit`, or one a widened `select` adds on a client that
  * takes no query `omit`, can be one a client-level `omit` hides, which the audit cannot tell from
  * the row alone. A row whose before state was read holds exactly the audited columns in that state,

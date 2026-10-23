@@ -41,7 +41,7 @@ describe('Per-model Strategies E2E', () => {
       const entities = defineEntities<AuditModelName, PrismaClient>()({
         User: defineEntity({
           type: 'User',
-          excludeFields: ['updatedAt'],
+          diffExcludeFields: ['updatedAt'],
         }),
       });
 
@@ -141,7 +141,7 @@ describe('Per-model Strategies E2E', () => {
       const entities = defineEntities<AuditModelName, PrismaClient>()({
         User: defineEntity({
           type: 'User',
-          excludeFields: ['updatedAt'],
+          diffExcludeFields: ['updatedAt'],
         }),
       });
 
@@ -258,7 +258,7 @@ describe('Per-model Strategies E2E', () => {
       const entities = defineEntities<AuditModelName, PrismaClient>()({
         User: defineEntity({
           type: 'User',
-          excludeFields: ['updatedAt'],
+          diffExcludeFields: ['updatedAt'],
         }),
         Post: defineEntity({
           type: 'Post',

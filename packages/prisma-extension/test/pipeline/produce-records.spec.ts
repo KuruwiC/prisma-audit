@@ -36,7 +36,7 @@ const event: MutationEvent = {
 };
 
 const postSchemaMetadata = schemaMetadataOf(
-  model('Post', [column('id', { isId: true }), column('title'), column('secret')]),
+  model('Post', [column('id', { isId: true }), column('title'), column('memo')]),
 );
 
 const producerWith = (
@@ -50,7 +50,12 @@ const producerWith = (
   const entityConfigs = createEntityConfigLookup({ Post: defineEntity({ type: 'Post', idResolver }) });
   return createRecordProducer({
     resolveConfig: { entity: entityConfigs.byModel, rootEntity: entityConfigs.byCategoryAndType },
-    composeConfig: { entity: entityConfigs.byModel, excludeFields: [], relationFieldNames: () => undefined },
+    composeConfig: {
+      entity: entityConfigs.byModel,
+      diffExcludeFields: [],
+      redactFields: [],
+      relationFieldNames: () => undefined,
+    },
     omittedFieldReads,
     failureSink,
   });
@@ -123,21 +128,21 @@ describe('createRecordProducer', () => {
       identity: 'p1',
       action: 'create',
       before: { kind: 'none' },
-      after: { id: 'p1', title: 'new', secret: 'hidden' },
+      after: { id: 'p1', title: 'new', memo: 'hidden' },
       origin: { path: '', op: 'create' },
     };
     const produce = producerWith(async (row) => row.id as string);
 
-    const [widenedRecord] = await produce([created], scopeOn(baseClient), new Map([['Post', new Set(['secret'])]]));
+    const [widenedRecord] = await produce([created], scopeOn(baseClient), new Map([['Post', new Set(['memo'])]]));
     const [plainRecord] = await produce([created], scopeOn(baseClient), new Map());
 
     expect(widenedRecord?.after).toEqual({ id: 'p1', title: 'new' });
-    expect(plainRecord?.after).toEqual({ id: 'p1', title: 'new', secret: 'hidden' });
+    expect(plainRecord?.after).toEqual({ id: 'p1', title: 'new', memo: 'hidden' });
   });
 
-  it('reads the omitted fields an entity audits on the handle of the scope, completing the stored after state', async () => {
-    const baseFindMany = vi.fn(async () => [{ id: 'p1', secret: 'read-on-base' }]);
-    const transactionFindMany = vi.fn(async () => [{ id: 'p1', secret: 'read-after-write' }]);
+  it('reads the omitted fields an entity records on the handle of the scope, completing the stored after state', async () => {
+    const baseFindMany = vi.fn(async () => [{ id: 'p1', memo: 'read-on-base' }]);
+    const transactionFindMany = vi.fn(async () => [{ id: 'p1', memo: 'read-after-write' }]);
     const base: PrismaBaseClient = Object.assign(Object.create(null), {
       post: { findMany: baseFindMany },
     });
@@ -150,7 +155,7 @@ describe('createRecordProducer', () => {
       {
         schemaMetadata: postSchemaMetadata,
         auditedOmittedFields: createAuditedOmittedFields(
-          (model) => (model === 'Post' ? { auditOmittedFields: ['secret'] } : undefined),
+          (model) => (model === 'Post' ? { recordOmittedFields: ['memo'] } : undefined),
           [],
         ),
       },
@@ -158,16 +163,16 @@ describe('createRecordProducer', () => {
 
     const written: MutationEvent = {
       ...event,
-      before: { kind: 'captured', row: { id: 'p1', title: 'old', secret: 'old-secret' } },
+      before: { kind: 'captured', row: { id: 'p1', title: 'old', memo: 'old-memo' } },
     };
 
     const [record] = await produce([written], { ...scopeOn(transaction), baseClient: base }, new Map());
 
     expect(transactionFindMany).toHaveBeenCalledWith({
       where: { id: { in: ['p1'] } },
-      select: { id: true, secret: true },
+      select: { id: true, memo: true },
     });
     expect(baseFindMany).not.toHaveBeenCalled();
-    expect(record?.after).toEqual({ id: 'p1', title: 'new', secret: 'read-after-write' });
+    expect(record?.after).toEqual({ id: 'p1', title: 'new', memo: 'read-after-write' });
   });
 });

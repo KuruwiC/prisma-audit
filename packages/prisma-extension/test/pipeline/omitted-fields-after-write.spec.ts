@@ -1,5 +1,5 @@
 /**
- * Unit tests for the read, after the write, of the omitted fields an entity audits
+ * Unit tests for the read, after the write, of the omitted fields an entity records
  */
 
 import type { MutationEvent } from '@kuruwic/db-audit-core';
@@ -24,7 +24,7 @@ const listed: Record<string, string[]> = {
   Device: ['secret'],
 };
 const auditedOmittedFields = createAuditedOmittedFields(
-  (model) => (listed[model] ? { auditOmittedFields: listed[model] } : undefined),
+  (model) => (listed[model] ? { recordOmittedFields: listed[model] } : undefined),
   [],
 );
 

@@ -1,25 +1,19 @@
 import type { EnricherOnError } from './enrichment/types.js';
-import type { ValueSerializer } from './utils/serialization.js';
 
 export type { ErrorStrategy } from './utils/error-handler.js';
 
 /**
- * Configuration for custom serialization of non-JSON-safe types in audit log data
+ * Whether the before state of update and delete operations is read ahead of the write
  *
- * @example
- * ```typescript
- * import { UNHANDLED } from '@kuruwic/db-audit-core';
- *
- * const config: SerializationConfig = {
- *   customSerializers: [
- *     (value) => value instanceof Buffer ? value.toString('base64') : UNHANDLED,
- *   ],
- * };
- * ```
+ * `true` reads the row's `before` value, for a top-level update or delete as well as for one
+ * nested in another operation. Applied by an adapter that reads the row before the write; an
+ * adapter that holds the before state itself has nothing to read and ignores it.
  */
-export interface SerializationConfig {
-  /** Custom serializers applied before built-in converters (BigInt, Date) */
-  customSerializers?: ValueSerializer[];
+export interface FetchBeforeConfig {
+  /** Update operations, top-level and nested */
+  update?: boolean;
+  /** Delete operations, top-level and nested */
+  delete?: boolean;
 }
 
 /**

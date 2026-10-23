@@ -270,7 +270,6 @@ const enrichAvatarImageContext = async (avatarImages: AvatarImageRow[], db: Pris
 const entities = defineEntities<AuditModelName, PrismaClient>()({
   User: defineEntity({
     type: 'User',
-    excludeFields: ['updatedAt'],
   }),
   Post: defineEntity<PostRow, PrismaClient>({
     type: 'Post',
@@ -543,15 +542,7 @@ export default defineConfig<PrismaClient>()({
   schema: auditSchema,
   entities,
 
-  diffing: {
-    excludeFields: ['updatedAt', 'createdAt'],
-  },
-
-  security: {
-    redact: {
-      fields: [],
-    },
-  },
+  diffExcludeFields: ['updatedAt', 'createdAt'],
 
   write: {
     awaited: true,

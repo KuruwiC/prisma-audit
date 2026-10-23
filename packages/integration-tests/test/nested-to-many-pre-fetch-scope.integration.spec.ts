@@ -35,8 +35,7 @@ describe('nested to-many pre-fetch — parent row scope', () => {
       schema: auditSchema,
       contextProvider: provider,
       entities: testEntities,
-      diffing: { excludeFields: ['createdAt'] },
-      security: { redact: { fields: [] } },
+      diffExcludeFields: ['createdAt'],
       write: { awaited: true },
       fetchBefore: {
         update: true,

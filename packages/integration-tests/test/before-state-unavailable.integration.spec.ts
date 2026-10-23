@@ -44,8 +44,7 @@ describe('before state requested but unreadable', () => {
       schema: auditSchema,
       contextProvider: provider,
       entities: testEntities,
-      diffing: { excludeFields: ['createdAt'] },
-      security: { redact: { fields: [] } },
+      diffExcludeFields: ['createdAt'],
       errorObserver: observer,
       ...options,
       write: {
