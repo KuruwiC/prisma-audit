@@ -184,6 +184,7 @@ import {
   to,
   foreignKey,
 } from "@kuruwic/prisma-audit";
+import { UNHANDLED } from "@kuruwic/db-audit-core";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Prisma, PrismaClient } from "../generated/prisma/client.js"; // your client generator's output
 import { type AuditModelName, auditSchema } from "../generated/audit/index.js"; // the generator's output
