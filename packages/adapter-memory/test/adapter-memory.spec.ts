@@ -1,5 +1,12 @@
 import type { AuditActor, AuditErrorObserver, AuditRecord } from '@kuruwic/db-audit-core';
-import { createAsyncLocalStorageProvider, defineEntities, defineEntity, foreignKey, to } from '@kuruwic/db-audit-core';
+import {
+  createAsyncLocalStorageProvider,
+  defineEntities,
+  defineEntity,
+  foreignKey,
+  to,
+  UNHANDLED,
+} from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
 import {
   createMemoryAuditAdapter,
@@ -693,6 +700,18 @@ describe('record composition', () => {
       credentials: { user: 'alice', token: { redacted: true, hadValue: true } },
     });
     expect(adapter.store.find('User', 'u1')?.credentials).toBe(credentials);
+  });
+
+  it('applies the serializers before the built-in conversions, the stored row keeping the value', async () => {
+    const adapter = createAdapter({
+      serializers: [(value) => (value instanceof Uint8Array ? `bytes:${value.length}` : UNHANDLED)],
+    });
+    const avatar = new Uint8Array([1, 2, 3]);
+
+    await withContext(() => adapter.create('User', { id: 'u1', name: 'Alice', avatar }));
+
+    expect(adapter.store.auditLogs()[0]?.after).toEqual({ id: 'u1', name: 'Alice', avatar: 'bytes:3' });
+    expect(adapter.store.find('User', 'u1')?.avatar).toBe(avatar);
   });
 });
 
