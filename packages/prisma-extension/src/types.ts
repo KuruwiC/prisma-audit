@@ -191,7 +191,7 @@ export interface PrismaAuditExtensionOptions<TModelName extends string = string,
    *
    * @default []
    */
-  diffExcludeFields?: string[];
+  diffExcludeFields?: readonly string[];
   /**
    * Fields masked in every stored state and change set, on top of the built-in sensitive fields
    * (`password`, `token`, `apiKey` and the like), which are always masked. The enrichment contexts
@@ -199,13 +199,13 @@ export interface PrismaAuditExtensionOptions<TModelName extends string = string,
    *
    * @default []
    */
-  redactFields?: string[];
+  redactFields?: readonly string[];
   /**
    * Serializers for values JSON cannot hold, applied before the built-in conversions (BigInt,
    * Date) to the stored states, changes and contexts. Return `UNHANDLED` to leave a value to the
    * next serializer.
    */
-  serializers?: ValueSerializer[];
+  serializers?: readonly ValueSerializer[];
   /**
    * Whether the before state of updates and deletes, top-level and nested, is read ahead of the
    * write, for every entity without its own `fetchBefore` for that operation.

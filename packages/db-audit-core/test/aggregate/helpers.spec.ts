@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
+import type { DefineEntityOptions } from '../../src/aggregate/helpers.js';
 import {
   batchLookup,
   defineEntity,
@@ -9,7 +10,7 @@ import {
   to,
   validateEntityMap,
 } from '../../src/aggregate/helpers.js';
-import type { EntityMap } from '../../src/aggregate/types.js';
+import type { EntityConfig, EntityMap } from '../../src/aggregate/types.js';
 
 describe('normalizeId', () => {
   it('should convert primitive types to string', () => {
@@ -372,5 +373,16 @@ describe('to - resolver metadata propagation', () => {
     const root = to('User', foreignKey('authorId'));
     expect(root.batchIdResolver).toBeUndefined();
     expect(root.requiresDbAccess).toBeUndefined();
+  });
+});
+
+describe('defineEntity field lists', () => {
+  it('accepts readonly lists', () => {
+    const fields = ['updatedAt'] as const;
+
+    expectTypeOf(fields).toExtend<NonNullable<DefineEntityOptions['diffExcludeFields']>>();
+    expectTypeOf(fields).toExtend<NonNullable<DefineEntityOptions['recordOmittedFields']>>();
+    expectTypeOf(fields).toExtend<NonNullable<EntityConfig['diffExcludeFields']>>();
+    expectTypeOf(fields).toExtend<NonNullable<EntityConfig['recordOmittedFields']>>();
   });
 });

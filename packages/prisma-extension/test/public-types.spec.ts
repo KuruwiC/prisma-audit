@@ -29,4 +29,13 @@ describe('package entry types', () => {
     type ActorEnricher = NonNullable<Options['actorContext']>['enricher'];
     expectTypeOf<Parameters<ActorEnricher>[1]>().toEqualTypeOf<{ id: string }>();
   });
+
+  it('accepts readonly lists for the field and serializer options', () => {
+    const fields = ['updatedAt'] as const;
+    const serializers = [(value: unknown) => value] as const;
+
+    expectTypeOf(fields).toExtend<NonNullable<Options['diffExcludeFields']>>();
+    expectTypeOf(fields).toExtend<NonNullable<Options['redactFields']>>();
+    expectTypeOf(serializers).toExtend<NonNullable<Options['serializers']>>();
+  });
 });

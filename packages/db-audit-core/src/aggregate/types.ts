@@ -158,14 +158,14 @@ export interface EntityConfig<TDbHandle = unknown, TEntity extends Record<string
    * field; omitted, the global list applies). An update that changes only these fields is not
    * recorded; the fields stay in the stored before and after states.
    */
-  diffExcludeFields?: string[];
+  diffExcludeFields?: readonly string[];
   /**
    * Fields the client leaves out of its default reads (such as the fields an ORM client is
    * configured to omit) that the audit reads in its own queries anyway and records with their
    * values masked in the stored states and changes. A field the entity's `diffExcludeFields`
    * names (or, without one, the global list) is not read.
    */
-  recordOmittedFields?: string[];
+  recordOmittedFields?: readonly string[];
   /**
    * Whether the before state of this entity's updates and deletes is read ahead of the write, per
    * operation in place of the global setting. Applied by an adapter that reads the row before the
