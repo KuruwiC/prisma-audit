@@ -125,11 +125,13 @@ export type UpsertBranch = 'create' | 'update';
  *   could write is found (e.g. to pre-fetch its before-state). `topLevelUpsertBranch` is the
  *   branch the top-level upsert will execute when its row was read ahead of the operation, and
  *   only that branch's top-level args are scanned; absent, both are.
- * - `executed`: the operation ran, and only the writes of the branches that executed are reported.
- *   `topLevelUpsertBranch` is the branch the top-level upsert executed; it is absent when the
+ * - `resolved`: the branches are resolved from the reads made before the operation, and only the
+ *   writes of the resolved branches are reported. Prisma does not report the branch it ran, so a
+ *   write that lands between a read and the operation can make the two differ.
+ *   `topLevelUpsertBranch` is the branch the top-level upsert is resolved to; it is absent when the
  *   operation is not an upsert, and the top-level `create` / `update` args are then not scanned.
  *   `branchAt(operation, where)` is the branch an element of the nested upsert or connectOrCreate
- *   `operation` executed: `update` (a connect, for a connectOrCreate) when its target existed
+ *   `operation` is resolved to: `update` (a connect, for a connectOrCreate) when its target existed
  *   before the operation, `create` when it did not, undefined when that could not be read, and
  *   then nothing of the element is scanned. `where` is the element's unique WHERE, absent for a
  *   to-one upsert, which targets the related row of its parent row. A connectOrCreate's `create`
@@ -138,7 +140,7 @@ export type UpsertBranch = 'create' | 'update';
 export type NestedDetectionPass =
   | { readonly kind: 'discovery'; readonly topLevelUpsertBranch?: UpsertBranch }
   | {
-      readonly kind: 'executed';
+      readonly kind: 'resolved';
       readonly topLevelUpsertBranch?: UpsertBranch;
       readonly branchAt: (
         operation: NestedOperationInfo,
@@ -304,7 +306,7 @@ const extractDataSources = (args: Record<string, unknown>, pass: NestedDetection
  * value both branches share is detected once.
  *
  * **Upsert branches:** `pass` decides which branches of the top-level upsert and of nested upserts
- * are scanned — all of them in the discovery pass, the executed ones in the executed pass
+ * are scanned — all of them in the discovery pass, the resolved ones in the resolved pass
  * (see {@link NestedDetectionPass}).
  *
  * **Path Format:**
@@ -324,9 +326,9 @@ const extractDataSources = (args: Record<string, unknown>, pass: NestedDetection
  * detectNestedOperations(schemaMetadata, 'User', args, { kind: 'discovery' });
  * // Result: profile create, profile upsert, avatar update
  *
- * // Executed pass: the user existed and so did its profile
+ * // Resolved pass: the reads found the user and its profile
  * detectNestedOperations(schemaMetadata, 'User', args, {
- *   kind: 'executed',
+ *   kind: 'resolved',
  *   topLevelUpsertBranch: 'update',
  *   branchAt: (operation) => (operation.path === 'profile' ? 'update' : 'create'),
  * });

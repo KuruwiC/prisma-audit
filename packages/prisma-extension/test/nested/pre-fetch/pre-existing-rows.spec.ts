@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { NestedPreFetchResults } from '../../../src/grammar/nested-operations.js';
 import type { ShouldFetchBefore } from '../../../src/grammar/pre-fetch-selection.js';
 import type { PrismaBaseClient } from '../../../src/internal-types.js';
-import { buildNestedWriteSets, detectExecutedNestedOperations } from '../../../src/nested/events/write-set.js';
+import { buildNestedWriteSets, detectResolvedNestedOperations } from '../../../src/nested/events/write-set.js';
 import { snapshotPreExistingRows } from '../../../src/nested/pre-fetch/pre-existing-rows.js';
 import { storePreFetchResult, storeUnreadRows } from '../../../src/nested/pre-fetch/pre-fetch-result-store.js';
 import { NO_AUDITED_OMITTED_FIELDS } from '../../../src/utils/audited-omitted-fields.js';
@@ -44,7 +44,7 @@ const snapshot = (
   nestedPreFetchResults: NestedPreFetchResults = new Map(),
   fetchesBefore: ShouldFetchBefore = shouldFetchBefore,
 ) => {
-  const nestedOperations = detectExecutedNestedOperations(
+  const nestedOperations = detectResolvedNestedOperations(
     schemaMetadata,
     'User',
     args,

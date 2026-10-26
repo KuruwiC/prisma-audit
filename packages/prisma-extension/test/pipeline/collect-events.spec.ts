@@ -11,10 +11,10 @@ import type {
   NestedPreFetchResults,
 } from '../../src/grammar/nested-operations.js';
 import type { PrismaBaseClient, PrismaHandle, PrismaNamespace } from '../../src/internal-types.js';
-import { buildNestedWriteSets, detectExecutedNestedOperations } from '../../src/nested/events/write-set.js';
+import { buildNestedWriteSets, detectResolvedNestedOperations } from '../../src/nested/events/write-set.js';
 import type { PreExistingRows } from '../../src/nested/pre-fetch/pre-existing-rows.js';
 import { markPathUnread, storePreFetchResult } from '../../src/nested/pre-fetch/pre-fetch-result-store.js';
-import { executedUpsertBranch } from '../../src/pipeline/before-state.js';
+import { resolvedUpsertBranch } from '../../src/pipeline/before-state.js';
 import {
   type BatchOperationOutcome,
   collectBatchOperationEvents,
@@ -74,7 +74,7 @@ type SingleCase = Partial<
   }
 >;
 
-/** An outcome whose executed nested operations and write sets are resolved from `args`, as the executor does */
+/** An outcome whose resolved nested operations and write sets are resolved from `args`, as the executor does */
 const single = (overrides: SingleCase = {}): SingleOperationOutcome => {
   const { args = { data: { name: 'Ann' } }, batchTargets = new Map(), ...outcome } = overrides;
   const base = {
@@ -88,11 +88,11 @@ const single = (overrides: SingleCase = {}): SingleOperationOutcome => {
     client,
     ...outcome,
   };
-  const nestedOperations = detectExecutedNestedOperations(
+  const nestedOperations = detectResolvedNestedOperations(
     schemaMetadata,
     base.modelName,
     args,
-    executedUpsertBranch(base.action, base.beforeState),
+    resolvedUpsertBranch(base.action, base.beforeState),
     base.nestedPreFetchResults,
   );
   return {
@@ -874,7 +874,7 @@ describe('collectSingleOperationEvents', () => {
     });
   });
 
-  it('collects only the nested writes of the branch an upsert executed', async () => {
+  it('collects only the nested writes of the branch an upsert resolves to', async () => {
     const args = {
       where: { id: 'u1' },
       create: { name: 'Ann', posts: { create: { title: 'A' } } },

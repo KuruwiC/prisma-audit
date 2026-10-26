@@ -7,7 +7,7 @@ import type { BeforeState } from '@kuruwic/db-audit-core';
 import { describe, expect, it } from 'vitest';
 import type { NestedBatchTargets, NestedPreFetchResults } from '../../../src/grammar/nested-operations.js';
 import { TOP_LEVEL_ROW } from '../../../src/grammar/nested-state.js';
-import { buildNestedWriteSets, detectExecutedNestedOperations } from '../../../src/nested/events/write-set.js';
+import { buildNestedWriteSets, detectResolvedNestedOperations } from '../../../src/nested/events/write-set.js';
 import { markPathUnread, storePreFetchResult } from '../../../src/nested/pre-fetch/pre-fetch-result-store.js';
 import { UNRESOLVED_ENTITY_ID } from '../../../src/utils/identity-key.js';
 import { column, model, relation, schemaMetadataOf } from '../../support/audit-schema.js';
@@ -47,11 +47,11 @@ const writeSetsOf = (
   results: NestedPreFetchResults = new Map(),
   batchTargets: NestedBatchTargets = new Map(),
 ) => {
-  const operations = detectExecutedNestedOperations(schemaMetadata, 'User', { data }, undefined, results);
+  const operations = detectResolvedNestedOperations(schemaMetadata, 'User', { data }, undefined, results);
   return { operations, writeSets: buildNestedWriteSets(schemaMetadata, operations, results, batchTargets) };
 };
 
-describe('detectExecutedNestedOperations', () => {
+describe('detectResolvedNestedOperations', () => {
   it('takes the update branch of a nested upsert whose target row was pre-fetched', () => {
     const data = {
       posts: {
@@ -71,7 +71,7 @@ describe('detectExecutedNestedOperations', () => {
   });
 });
 
-describe('detectExecutedNestedOperations of a to-one upsert', () => {
+describe('detectResolvedNestedOperations of a to-one upsert', () => {
   const args = {
     data: {
       profile: {
@@ -83,7 +83,7 @@ describe('detectExecutedNestedOperations of a to-one upsert', () => {
     },
   };
   const operationsGiven = (results: NestedPreFetchResults) =>
-    detectExecutedNestedOperations(schemaMetadata, 'User', args, undefined, results).map(
+    detectResolvedNestedOperations(schemaMetadata, 'User', args, undefined, results).map(
       (op) => `${op.path}:${op.operation}`,
     );
   const readUnderTopLevelRow = (before: BeforeState): NestedPreFetchResults => {

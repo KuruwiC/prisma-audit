@@ -219,8 +219,8 @@ describe('detectNestedOperations', () => {
   });
 });
 
-const executedPass = (existingPaths: readonly string[], topLevelUpsertBranch?: UpsertBranch): NestedDetectionPass => ({
-  kind: 'executed',
+const resolvedPass = (existingPaths: readonly string[], topLevelUpsertBranch?: UpsertBranch): NestedDetectionPass => ({
+  kind: 'resolved',
   topLevelUpsertBranch,
   branchAt: ({ path }) => (existingPaths.includes(path) ? 'update' : 'create'),
 });
@@ -312,18 +312,18 @@ describe('detectNestedOperations with upsert branch filtering', () => {
     operations.map((op) => `${op.path}:${op.operation}`);
 
   it('should detect only the update branch when the upserted record existed', () => {
-    const operations = detectNestedOperations(schemaMetadata, 'User', profileUpsertArgs, executedPass(['profile']));
+    const operations = detectNestedOperations(schemaMetadata, 'User', profileUpsertArgs, resolvedPass(['profile']));
 
     expect(operationKeys(operations)).toEqual(['profile:upsert', 'profile.avatar:update']);
   });
 
   it('should detect only the create branch when the upserted record did not exist', () => {
-    const operations = detectNestedOperations(schemaMetadata, 'User', profileUpsertArgs, executedPass([]));
+    const operations = detectNestedOperations(schemaMetadata, 'User', profileUpsertArgs, resolvedPass([]));
 
     expect(operationKeys(operations)).toEqual(['profile:upsert', 'profile.avatar:create']);
   });
 
-  it('reports a nested upsert once when only the executed branch of its parent upsert is scanned', () => {
+  it('reports a nested upsert once when only the resolved branch of its parent upsert is scanned', () => {
     const args = {
       data: {
         email: 'user@example.com',
@@ -353,7 +353,7 @@ describe('detectNestedOperations with upsert branch filtering', () => {
     };
 
     // Profile exists but avatar does not
-    const operations = detectNestedOperations(schemaMetadata, 'User', args, executedPass(['profile']));
+    const operations = detectNestedOperations(schemaMetadata, 'User', args, resolvedPass(['profile']));
 
     // Profile takes the update branch (it exists) and recurses into it, reporting the nested avatar
     // upsert once regardless of which of its own branches it will take.
@@ -368,7 +368,7 @@ describe('detectNestedOperations with upsert branch filtering', () => {
     expect(operationKeys(operations)).toEqual(['profile:upsert', 'profile.avatar:update', 'profile.avatar:create']);
   });
 
-  it('should detect only the executed branch for a 3-level nested upsert chain', () => {
+  it('should detect only the resolved branch for a 3-level nested upsert chain', () => {
     // avatar and avatarImage repeat under both branches of their parent upsert, so scanning
     // every branch would report them once per create/update combination.
 
@@ -437,7 +437,7 @@ describe('detectNestedOperations with upsert branch filtering', () => {
       schemaMetadata,
       'User',
       args,
-      executedPass(['profile', 'profile.avatar', 'profile.avatar.avatarImage']),
+      resolvedPass(['profile', 'profile.avatar', 'profile.avatar.avatarImage']),
     );
 
     // Each level is reported exactly once: the recursion follows only the update branch
@@ -469,12 +469,12 @@ describe('detectNestedOperations top-level upsert branches', () => {
     expect(detectedOperations({ kind: 'discovery' })).toEqual(['profile:create', 'profile:update']);
   });
 
-  it.each(['create', 'update'] as const)('scans only the %s branch the top-level upsert executed', (branch) => {
-    expect(detectedOperations(executedPass([], branch))).toEqual([`profile:${branch}`]);
+  it.each(['create', 'update'] as const)('scans only the %s branch the top-level upsert resolves to', (branch) => {
+    expect(detectedOperations(resolvedPass([], branch))).toEqual([`profile:${branch}`]);
   });
 
-  it('scans neither branch in the executed pass of an operation that is not an upsert', () => {
-    expect(detectedOperations(executedPass([]))).toEqual([]);
+  it('scans neither branch in the resolved pass of an operation that is not an upsert', () => {
+    expect(detectedOperations(resolvedPass([]))).toEqual([]);
   });
 
   it.each(['create', 'update'] as const)(
@@ -529,7 +529,7 @@ describe('detectNestedOperations inside nested updates', () => {
 
   const passes: [string, NestedDetectionPass][] = [
     ['discovery', { kind: 'discovery' }],
-    ['executed', executedPass([])],
+    ['resolved', resolvedPass([])],
   ];
 
   const detectedOperations = (args: Record<string, unknown>, pass: NestedDetectionPass) =>
@@ -608,7 +608,7 @@ describe('detectNestedOperations inside nested updates', () => {
           posts: { update: { where: { id: 'post-1' }, data: { comments: { create: { id: 'comment-1' } } } } },
         },
       };
-      const upsertPass: NestedDetectionPass = pass.kind === 'discovery' ? pass : executedPass([], 'update');
+      const upsertPass: NestedDetectionPass = pass.kind === 'discovery' ? pass : resolvedPass([], 'update');
 
       expect(detectedOperations(args, upsertPass)).toEqual(
         pass.kind === 'discovery'
@@ -618,7 +618,7 @@ describe('detectNestedOperations inside nested updates', () => {
     });
   });
 
-  it('scans only the executed branch of an upsert nested inside a nested update', () => {
+  it('scans only the resolved branch of an upsert nested inside a nested update', () => {
     const args = {
       data: {
         posts: {
@@ -644,12 +644,12 @@ describe('detectNestedOperations inside nested updates', () => {
       'posts.comments.attachments:deleteMany',
       'posts.comments.attachments:create',
     ]);
-    expect(detectedOperations(args, executedPass(['posts.comments']))).toEqual([
+    expect(detectedOperations(args, resolvedPass(['posts.comments']))).toEqual([
       'posts:update',
       'posts.comments:upsert',
       'posts.comments.attachments:deleteMany',
     ]);
-    expect(detectedOperations(args, executedPass([]))).toEqual([
+    expect(detectedOperations(args, resolvedPass([]))).toEqual([
       'posts:update',
       'posts.comments:upsert',
       'posts.comments.attachments:create',
@@ -688,7 +688,7 @@ describe('detectNestedOperations inside nested updates', () => {
     it('asks whether each element targets an existing row by its own WHERE and takes its branch', () => {
       const asked: [string, Record<string, unknown> | undefined][] = [];
       const pass: NestedDetectionPass = {
-        kind: 'executed',
+        kind: 'resolved',
         branchAt: ({ path }, where) => {
           asked.push([path, where]);
           return where?.id === 'post-1' ? 'update' : 'create';
@@ -708,7 +708,7 @@ describe('detectNestedOperations inside nested updates', () => {
 
     it('scans neither branch of an element whose target could not be read', () => {
       const pass: NestedDetectionPass = {
-        kind: 'executed',
+        kind: 'resolved',
         branchAt: (_operation, where) => (where?.id === 'post-1' ? undefined : 'create'),
       };
 
@@ -718,7 +718,7 @@ describe('detectNestedOperations inside nested updates', () => {
     it('passes no WHERE for a to-one upsert', () => {
       const asked: unknown[] = [];
       const pass: NestedDetectionPass = {
-        kind: 'executed',
+        kind: 'resolved',
         branchAt: (_operation, where) => {
           asked.push(where);
           return 'create';
@@ -743,7 +743,7 @@ describe('detectNestedOperations inside nested updates', () => {
       },
     };
     const connectsPost1: NestedDetectionPass = {
-      kind: 'executed',
+      kind: 'resolved',
       branchAt: (_operation, where) => (where?.id === 'post-1' ? 'update' : 'create'),
     };
 
@@ -755,7 +755,7 @@ describe('detectNestedOperations inside nested updates', () => {
       ]);
     });
 
-    it('is scanned only for the elements that created their row in the executed pass', () => {
+    it('is scanned only for the elements that created their row in the resolved pass', () => {
       expect(detectedOperations(args, connectsPost1)).toEqual(['posts:connectOrCreate', 'posts.comments:create']);
     });
 
@@ -766,13 +766,13 @@ describe('detectNestedOperations inside nested updates', () => {
         },
       };
 
-      expect(detectedOperations(toOne, { kind: 'executed', branchAt: () => 'update' })).toEqual([
+      expect(detectedOperations(toOne, { kind: 'resolved', branchAt: () => 'update' })).toEqual([
         'profile:connectOrCreate',
       ]);
-      expect(detectedOperations(toOne, { kind: 'executed', branchAt: () => undefined })).toEqual([
+      expect(detectedOperations(toOne, { kind: 'resolved', branchAt: () => undefined })).toEqual([
         'profile:connectOrCreate',
       ]);
-      expect(detectedOperations(toOne, { kind: 'executed', branchAt: () => 'create' })).toEqual([
+      expect(detectedOperations(toOne, { kind: 'resolved', branchAt: () => 'create' })).toEqual([
         'profile:connectOrCreate',
         'profile.avatar:create',
       ]);
@@ -820,7 +820,7 @@ describe('detectNestedOperations inside nested updates', () => {
 
       expect(
         parentOf(args, {
-          kind: 'executed',
+          kind: 'resolved',
           branchAt: (_operation, where) => (where?.id === 'missing' ? 'create' : undefined),
         }),
       ).toEqual(['posts:upsert', 'posts.comments:create in posts:upsert[1]']);
@@ -841,7 +841,7 @@ describe('detectNestedOperations inside nested updates', () => {
       };
 
       detectNestedOperations(schemaMetadata, 'User', args, {
-        kind: 'executed',
+        kind: 'resolved',
         branchAt: (operation) => {
           asked.push(`${operation.path} in ${operation.parent?.operation.path}[${operation.parent?.element}]`);
           return 'update';

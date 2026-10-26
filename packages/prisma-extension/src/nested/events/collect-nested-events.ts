@@ -102,7 +102,7 @@ export interface NestedEventCollectionInput {
   /** Client the operation ran on; reads the nested rows the result does not hold */
   client: PrismaHandle;
   nestedPreFetchResults: NestedPreFetchResults;
-  /** The nested operations the operation executed, in detection order */
+  /** The nested operations the operation is resolved to write, in detection order */
   nestedOperations: readonly NestedOperationInfo[];
   writeSets: NestedWriteSets;
   preExistingRows: PreExistingRows;
@@ -738,7 +738,7 @@ const auditedIdentitiesAt = (walk: CollectionWalk, path: string): Set<string> =>
 };
 
 /**
- * Collect the events of the nested records an operation wrote: one per row each executed nested
+ * Collect the events of the nested records an operation wrote: one per row each resolved nested
  * operation is attributed, operation by operation in detection order.
  */
 export const collectNestedEvents = async (
