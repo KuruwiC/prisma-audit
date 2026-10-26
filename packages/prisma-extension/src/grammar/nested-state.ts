@@ -53,9 +53,10 @@ export type ResolvedNestedState = {
 };
 
 /**
- * The branch an upsert took, from the read of its target made before the write: `update` when
- * the row was captured, `create` when there was none, undefined when the read failed. A
- * connectOrCreate takes its `update` branch as a connect.
+ * The branch an upsert is resolved to, from the read of its target made before the write: `update`
+ * when the row was captured, `create` when there was none, undefined when the read failed. A
+ * connectOrCreate takes its `update` branch as a connect. Prisma does not report the branch it
+ * ran, so a write that lands between the read and the upsert can make the two differ.
  */
 export const upsertBranchOf = (before: BeforeState): UpsertBranch | undefined => {
   switch (before.kind) {

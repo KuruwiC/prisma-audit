@@ -2,7 +2,7 @@
  * Before state of a single operation's target row
  *
  * Read with `findUnique` on the operation's `where` before the write: always for an upsert,
- * whose executed branch is what the before state tells; for an update or a delete only when
+ * whose branch is resolved from the before state; for an update or a delete only when
  * its `fetchBefore` setting is on; never for a create. The read holds the omitted fields the
  * entity records and, on a client that takes a query omit, the row key whatever a client-level
  * omit hides, so the row is identified by it even when the row the write returns lacks it.
@@ -20,11 +20,13 @@ import { getModelDelegate, hasOperation } from '../utils/model-accessor.js';
 import { toError } from '../utils/to-error.js';
 
 /**
- * The branch a top-level upsert executed: `update` when its before state was captured, `create`
- * when no row existed (an upsert always reads it, so `none` means the row was absent). Undefined
- * when the read failed (the branch is unknown) or the operation is not an upsert.
+ * The branch a top-level upsert is resolved to from the read ahead of it: `update` when its before
+ * state was captured, `create` when no row existed (an upsert always reads it, so `none` means the
+ * row was absent). Undefined when the read failed (the branch is unknown) or the operation is not
+ * an upsert. Prisma does not report the branch it ran; see `fetchBeforeState` for when the two can
+ * differ.
  */
-export const executedUpsertBranch = (action: AuditAction, before: BeforeState): UpsertBranch | undefined =>
+export const resolvedUpsertBranch = (action: AuditAction, before: BeforeState): UpsertBranch | undefined =>
   action === AUDIT_ACTION.UPSERT ? upsertBranchOf(before) : undefined;
 
 /**
@@ -32,7 +34,7 @@ export const executedUpsertBranch = (action: AuditAction, before: BeforeState): 
  * it, an upsert whose row was absent creates it, and an upsert whose read failed cannot tell.
  */
 export const targetRowExistsBefore = (action: AuditAction, before: BeforeState): boolean =>
-  action === AUDIT_ACTION.UPDATE || action === AUDIT_ACTION.DELETE || executedUpsertBranch(action, before) === 'update';
+  action === AUDIT_ACTION.UPDATE || action === AUDIT_ACTION.DELETE || resolvedUpsertBranch(action, before) === 'update';
 
 export interface BeforeStateInput {
   readonly handle: PrismaHandle;
@@ -81,10 +83,13 @@ const findExistingRow = async (
  * A failed read is reported and returned as `unavailable`, never thrown: the caller's operation
  * proceeds, and event collection decides what the missing before state means for it.
  *
- * TOCTOU note for upsert: there is a time gap between this fetch and the upsert itself. With
- * an atomic write policy both run inside the same transaction, which closes the gap; otherwise
- * a concurrent write may make the audited action (create vs update) diverge from what happened.
- * Prisma does not expose which branch an upsert executed, so this is an accepted trade-off.
+ * The read and the write are separate statements, so another transaction can commit between
+ * them. They share a transaction only inside the caller's interactive transaction or the one
+ * `write.implicitTransaction` opens, and even then READ COMMITTED and InnoDB's REPEATABLE READ let
+ * the write apply a commit the read did not see: the before state can be stale, and an upsert's
+ * resolved branch can differ from the branch Prisma ran. Under a stronger isolation level the
+ * interleaving write either waits and is serialized or one of the transactions is aborted,
+ * depending on the database. The audit takes no row lock; locking and isolation are the caller's.
  */
 export const fetchBeforeState = async (
   input: BeforeStateInput,

@@ -5,7 +5,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import type { NestedPreFetchResults } from '../../../src/grammar/nested-operations.js';
-import { detectExecutedNestedOperations } from '../../../src/nested/events/write-set.js';
+import { detectResolvedNestedOperations } from '../../../src/nested/events/write-set.js';
 import { linkWriteOf, type ReadLinkRowsDependencies, readLinkRows } from '../../../src/nested/pre-fetch/link-rows.js';
 import { storeReadResult } from '../../../src/nested/pre-fetch/pre-fetch-result-store.js';
 import {
@@ -218,7 +218,7 @@ describe('readLinkRows', () => {
     deps: Partial<ReadLinkRowsDependencies> = {},
   ) => {
     const nestedPreFetchResults = twoParents();
-    const nestedOperations = detectExecutedNestedOperations(
+    const nestedOperations = detectResolvedNestedOperations(
       schemaMetadata,
       'User',
       args,

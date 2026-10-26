@@ -34,7 +34,7 @@ import type { SchemaMetadata } from '../schema/types.js';
 import { beforeStateOf } from '../utils/before-state.js';
 import { rowKeyFieldsOf } from '../utils/id-generation.js';
 import { type PrismaValues, rowKeyWriteOf, withWrittenKey } from '../utils/row-key-write.js';
-import { executedUpsertBranch } from './before-state.js';
+import { resolvedUpsertBranch } from './before-state.js';
 
 type Row = Record<string, unknown>;
 
@@ -54,7 +54,7 @@ export interface SingleOperationOutcome {
   readonly result: unknown;
   readonly beforeState: BeforeState;
   readonly nestedPreFetchResults: NestedPreFetchResults;
-  /** The nested operations the operation executed, resolved before it ran */
+  /** The nested operations the operation is resolved to write, from the reads made before it ran */
   readonly nestedOperations: readonly NestedOperationInfo[];
   readonly writeSets: NestedWriteSets;
   readonly preExistingRows: PreExistingRows;
@@ -110,7 +110,7 @@ const withKeyFromBefore = (row: Row, keyFields: readonly string[], write: TopLev
  * The top-level row carries the before state as read: captured, none, or unavailable when the
  * read failed. An upsert whose read failed yields no event at all: a failed read cannot tell an
  * absent row from an existing one, so neither the top-level action nor the nested writes of the
- * executed branch can be told (the read already reported its failure).
+ * resolved branch can be told (the read already reported its failure).
  */
 export const collectSingleOperationEvents = async (
   outcome: SingleOperationOutcome,
@@ -119,7 +119,7 @@ export const collectSingleOperationEvents = async (
   const { modelName, action, args, result, beforeState, client } = outcome;
   const { nestedPreFetchResults, nestedOperations, writeSets, preExistingRows, linkReads } = outcome;
 
-  if (action === AUDIT_ACTION.UPSERT && executedUpsertBranch(action, beforeState) === undefined) {
+  if (action === AUDIT_ACTION.UPSERT && resolvedUpsertBranch(action, beforeState) === undefined) {
     return [];
   }
 

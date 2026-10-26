@@ -13,7 +13,7 @@ import type { ShouldFetchBefore } from '../grammar/pre-fetch-selection.js';
 import type { PrismaNamespace } from '../internal-types.js';
 import {
   buildNestedWriteSets,
-  detectExecutedNestedOperations,
+  detectResolvedNestedOperations,
   type NestedWriteSets,
 } from '../nested/events/write-set.js';
 import { preFetchNestedRecordsBeforeOperation } from '../nested/pre-fetch/coordinator.js';
@@ -21,7 +21,7 @@ import { type LinkReads, readLinkRows } from '../nested/pre-fetch/link-rows.js';
 import { type PreExistingRows, snapshotPreExistingRows } from '../nested/pre-fetch/pre-existing-rows.js';
 import type { SchemaMetadata } from '../schema/types.js';
 import type { AuditedOmittedFields } from '../utils/audited-omitted-fields.js';
-import { executedUpsertBranch, fetchBeforeState, targetRowExistsBefore } from './before-state.js';
+import { fetchBeforeState, resolvedUpsertBranch, targetRowExistsBefore } from './before-state.js';
 import { collectSingleOperationEvents } from './collect-events.js';
 import type { ExecutionScope } from './execution-scope.js';
 import { type AuditedOperation, createExecutor, type OperationExecutor } from './executor.js';
@@ -60,7 +60,7 @@ export const createSingleExecutor = (deps: SingleExecutorDependencies): Operatio
       { handle: scope.handle, modelName, action, args },
       { shouldFetchBefore, auditedOmittedFieldsWithRowKey, onFetchFailure: failureSink.notify },
     );
-    const topLevelUpsertBranch = executedUpsertBranch(action, beforeState);
+    const topLevelUpsertBranch = resolvedUpsertBranch(action, beforeState);
     const { results: nestedPreFetchResults, batchTargets } = await preFetchNestedRecordsBeforeOperation(
       scope.handle,
       modelName,
@@ -68,7 +68,7 @@ export const createSingleExecutor = (deps: SingleExecutorDependencies): Operatio
       { schemaMetadata, shouldFetchBefore, auditedOmittedFields, onPreFetchFailure: failureSink.notify },
       topLevelUpsertBranch,
     );
-    const nestedOperations = detectExecutedNestedOperations(
+    const nestedOperations = detectResolvedNestedOperations(
       schemaMetadata,
       modelName,
       args,

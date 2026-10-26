@@ -68,13 +68,13 @@ export interface NestedWriteSet {
 export type NestedWriteSets = ReadonlyMap<string, NestedWriteSet>;
 
 /**
- * The nested operations an operation executes: the executed pass of the detection, with each
- * upsert and connectOrCreate element taking the branch its pre-fetched target decides, and none
- * when that target could not be read. A to-many upsert or a connectOrCreate element names its
+ * The nested operations an operation is resolved to write: the resolved pass of the detection,
+ * with each upsert and connectOrCreate element taking the branch its pre-fetched target decides,
+ * and none when that target could not be read. A to-many upsert or a connectOrCreate element names its
  * target by unique WHERE; a to-one upsert targets the related row of the row its parent element
  * names, so each parent row decides the branch of the upsert nested under it.
  */
-export const detectExecutedNestedOperations = (
+export const detectResolvedNestedOperations = (
   schemaMetadata: SchemaMetadata,
   modelName: string,
   args: Row,
@@ -82,7 +82,7 @@ export const detectExecutedNestedOperations = (
   nestedPreFetchResults: NestedPreFetchResults,
 ): NestedOperationInfo[] =>
   detectNestedOperations(schemaMetadata, modelName, args, {
-    kind: 'executed',
+    kind: 'resolved',
     topLevelUpsertBranch,
     branchAt: (operation, where) => {
       if (!targetsNamedByWhere(operation)) {
