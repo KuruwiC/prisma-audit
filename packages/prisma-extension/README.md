@@ -843,7 +843,7 @@ Controls whether audit log writes are synchronous or asynchronous: a value for e
 **Options:**
 - `true` (default): Synchronous writes, in the operation's transaction inside one and once it has committed outside any
   - ✅ Atomicity inside a transaction, yours or the one [`write.implicitTransaction`](#writeimplicittransaction) opens (`write.onError: 'throw'` fails the operation together with the audit write); the default policy (`'log'`) lets the operation succeed instead
-  - ✅ Complete and accurate audit trails with tracking of all changes
+  - ✅ Every audit record of the operation is written before the operation returns
   - ✅ Suitable for compliance-sensitive operations
   - ⚠️ Slightly slower for high-throughput scenarios
 - `false`: Fire-and-forget async writes
@@ -920,7 +920,7 @@ createAuditClient(prisma, {
 **Behavior:**
 - Inside a transaction (yours, or the one [`write.implicitTransaction`](#writeimplicittransaction) opens): written in it, before it commits. Whether the operation fails when the audit log write fails is controlled by `write.onError` (default `'log'`: the operation still succeeds) — see "Error Handling (`errorObserver`, `write.onError`)" below; `'throw'` makes the operation and its audit logs atomic
 - Outside any transaction: written once the operation has committed, before it returns; a failure of the audit is reported and never fails the operation
-- Ensures complete and accurate audit trail with all changes tracked
+- Every audit record of the operation is written before it returns
 
 #### 2. Deferred Strategy (`write.awaited: false` inside transactions)
 
@@ -1100,13 +1100,13 @@ Every record carries `beforeUnavailable`. The default write stores it when the a
 
 #### Upsert Action Accuracy
 
-Inside a transaction (yours, or the one `write.implicitTransaction` opens when the audit is awaited), the before-state fetch and the upsert operation run in it, so the audited action (`create` vs `update`) accurately reflects what happened.
+The audited action (`create` vs `update`) is resolved from the before-state fetch, because Prisma does not report which branch of an upsert ran. The fetch and the upsert are separate statements, so another transaction can commit between them.
 
-Outside any transaction, awaited or not, there is a time gap between the before-state fetch and the upsert execution. Concurrent operations during this gap may cause the audited action to diverge from the actual database operation. This is an inherent limitation because Prisma does not expose which branch of an upsert was executed.
+Outside any transaction, awaited or not, nothing keeps such a commit out, and the audited action can diverge from what the database did. Inside a transaction (yours, or the one `write.implicitTransaction` opens when the audit is awaited) the fetch and the upsert share it, but at READ COMMITTED (PostgreSQL's default) and at InnoDB's REPEATABLE READ (MySQL's default) the upsert still applies a commit the fetch did not see, so the action can diverge there too. Under a stronger isolation level the interleaving write either waits and is serialized or one of the transactions is aborted, depending on the database. The audit takes no row lock: choose the isolation level or lock the row in your own transaction.
 
 #### Batch Operations (updateMany / deleteMany)
 
-Inside a transaction (yours, or the one `write.implicitTransaction` opens when the audit is awaited), batch operations (updateMany, deleteMany) run in it with the before-state fetch and the after-state fetch, so the rows they update or delete stay locked until it commits.
+Inside a transaction (yours, or the one `write.implicitTransaction` opens when the audit is awaited), batch operations (updateMany, deleteMany) run in it with the before-state fetch and the after-state fetch, so the rows they update or delete stay locked until it commits. The before-state fetch itself takes no lock: at READ COMMITTED and at InnoDB's REPEATABLE READ, a row another transaction brings into the filter between the fetch and the write is updated without a record, and a row it deletes in between is still recorded as deleted by a `deleteMany`.
 
 Outside any transaction (a batch `$transaction([...])` that Prisma runs itself included), these operations run without transaction isolation, awaited or not. The audit log is best-effort in this case: when reading again the rows an `updateMany` updated fails, the operation still succeeds and gets no audit log entry, the observer hears `diff-generation` and `write.onError` applies to the dropped entry.
 
@@ -1329,9 +1329,9 @@ await prisma.post.update({
    - Uses pre-fetch to check record existence
    - If exists: Same as `connect`
    - If not exists: Creates audit log for the new entity
-   - Pre-fetch is enabled by default to ensure accurate detection
+   - Pre-fetch is enabled by default to tell a create from a connect
 4. **Performance**: Each nested operation may require additional database queries for pre-fetching
-   - **Default behavior** (`fetchBefore` `update` / `delete`: `true`): Pre-fetches data to ensure complete and accurate audit trails
+   - **Default behavior** (`fetchBefore` `update` / `delete`: `true`): Pre-fetches data to record before states and every nested change
    - **Optimization** (`fetchBefore` `update` / `delete`: `false`): Skips pre-fetching for improved performance (trade-off: may miss some nested operation details)
 5. **Primary-key snapshot for nested creates under an existing row**: when the audited row exists before the operation (an `update`, or an `upsert` that takes its update branch) and a to-many relation under it receives a nested `create` or `createMany` — or an `upsert` / `connectOrCreate` whose pre-fetch found no target — the extension reads, before the write, the primary keys of the rows that relation already holds: one `findMany` on the related model per parent row of that relation, selecting the primary-key fields only. A parent row the same operation creates has no rows yet and issues no read. The relation is read back whole after the write, and the snapshot is what tells the created rows apart from their existing siblings. The cost is one primary-key-only query per affected relation path and parent row, and the rows it returns grow linearly with the number of children the parent already has. A failed snapshot fails the operation before the caller's write runs: the observer hears it under `diff-generation` and the original error is rethrown, since without the snapshot existing rows could not be told apart from created ones.
 6. **Rows the result leaves out**: the caller's own `where`, `take`, `skip`, `cursor` or `distinct` on a written relation keeps its effect on the value returned, so a row the operation wrote there may be missing from the result. Such rows are read once per relation path after the write, with the relations written below them: an updated row by the primary key read ahead of it (or its `where`), and, under a parent row whose relation the caller restricted and an operation nested there inserts into, the rows that were not there before. Finding those costs one primary-key-only query of the relation under those parent rows per path (its rows are compared with the snapshot above), and a second query reads the rows the result left out, when there are any. A relation the caller does not restrict issues neither query.

@@ -77,6 +77,12 @@ export interface WriteConfig<TClient = unknown> {
    * reported without failing the operation. `true` with `awaited: false` is a configuration error,
    * since no operation would be awaited.
    *
+   * It gives atomicity only. The transaction runs at the client's default isolation level, so a
+   * write another transaction commits between the audit's read of the before state and the
+   * operation can still make the recorded before state or upsert action differ from what happened
+   * (at READ COMMITTED and at InnoDB's REPEATABLE READ). For a stronger isolation level, run the
+   * operation in your own `$transaction(fn, { isolationLevel })`, retrying on conflicts yourself.
+   *
    * With `true`, a call on a model delegate or a raw-query method returns a lazy operation of the
    * library's own, which runs when it is awaited or given to a batch `$transaction` of the same
    * client, and Prisma's `$transaction` of another client rejects it. A batch accepts only
