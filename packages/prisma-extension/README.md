@@ -822,6 +822,30 @@ As a function, it gives the rate per operation. It is called once per audited op
 }
 ```
 
+### Required Audit Context (`requireContext`)
+**Type:** `boolean | ((modelName: string) => boolean)`
+**Default:** `false`
+
+Whether a write fails when no audit context is set, instead of running unaudited: a value for every model, or a function of the model name. A write is audited when it writes rows of a model in `entities`, its own or one its nested writes write (a `connect`, `set` or `disconnect` writes the related rows when they hold the foreign key). Without an audit context, it is rejected with `AuditContextMissingError` (exported by the package) when `requireContext` holds for one of those models, before Prisma runs any of it, and runs unaudited otherwise.
+
+```typescript
+{
+  requireContext: true,  // Every audited write needs an audit context
+}
+```
+
+```typescript
+{
+  // Only writes of Order rows, top-level or nested, need one
+  requireContext: (modelName) => modelName === 'Order',
+}
+```
+
+- It applies to the models of nested writes too, below a model that is not in `entities` included
+- Sampling does not affect it: a write is rejected at a `samplingRate` of 0 as well
+- A model that is not in `entities` is not audited, so it has no effect on it
+- It does not reach the writes the audit extension does not see: raw queries, a write on a client without the audit extension, and a write an extension applied after the audit adds to an operation's arguments (see [Coverage of Prisma writes](../../docs/guarantees.md#coverage-of-prisma-writes))
+
 ### Write Options (`write`)
 
 Where, when and how the audit logs are written, and what a failed write does to your operation. `write` and each of its keys are optional. [`write.model`](#writemodel) is described above, [`write.writer`](#custom-writer-writewriter) and [`write.onError`](#error-handling-errorobserver-writeonerror) below.
@@ -1096,29 +1120,19 @@ An `update` or `delete`, top-level or nested, reads its target row before the wr
 
 Every record carries `beforeUnavailable`. The default write stores it when the audit-log model declares a `beforeUnavailable Boolean` column and leaves it out otherwise, so no column is required; a `write.writer` sees it on each record and can store it however it likes. The normalized writers (`createEntityNormalizedWriter`, `createSharedChangeWriter`) store it the same way, in the field their schema config names as `beforeUnavailableField`, and leave it out when the config names none.
 
-### Concurrency Considerations
+### Concurrency
 
-#### Upsert Action Accuracy
+The audit reads the before state of a write, and the rows a batch operation touches, ahead of the write with separate statements, and takes no lock. What a write another transaction commits in between does to the records, at each isolation level, and what you can add against it, is described in [Accuracy of Prisma operations under concurrent writes](../../docs/guarantees.md#accuracy-of-prisma-operations-under-concurrent-writes).
 
-The audited action (`create` vs `update`) is resolved from the before-state fetch, because Prisma does not report which branch of an upsert ran. The fetch and the upsert are separate statements, so another transaction can commit between them.
-
-Outside any transaction, awaited or not, nothing keeps such a commit out, and the audited action can diverge from what the database did. Inside a transaction (yours, or the one `write.implicitTransaction` opens when the audit is awaited) the fetch and the upsert share it, but at READ COMMITTED (PostgreSQL's default) and at InnoDB's REPEATABLE READ (MySQL's default) the upsert still applies a commit the fetch did not see, so the action can diverge there too. Under a stronger isolation level the interleaving write either waits and is serialized or one of the transactions is aborted, depending on the database. The audit takes no row lock: choose the isolation level or lock the row in your own transaction.
-
-#### Batch Operations (updateMany / deleteMany)
-
-Inside a transaction (yours, or the one `write.implicitTransaction` opens when the audit is awaited), batch operations (updateMany, deleteMany) run in it with the before-state fetch and the after-state fetch, so the rows they update or delete stay locked until it commits. The before-state fetch itself takes no lock: at READ COMMITTED and at InnoDB's REPEATABLE READ, a row another transaction brings into the filter between the fetch and the write is updated without a record, and a row it deletes in between is still recorded as deleted by a `deleteMany`.
-
-Outside any transaction (a batch `$transaction([...])` that Prisma runs itself included), these operations run without transaction isolation, awaited or not. The audit log is best-effort in this case: when reading again the rows an `updateMany` updated fails, the operation still succeeds and gets no audit log entry, the observer hears `diff-generation` and `write.onError` applies to the dropped entry.
+### Batch Operations (updateMany / deleteMany)
 
 **Row key.** Batch operations read and pair rows by the model's primary key (the `@id` field, or each field of an `@@id`); a model without one is keyed by its first `@unique` field, else `@@unique`, whose fields are all required, since a nullable unique column can hold null in any number of rows. `createMany`, `updateMany`, `updateManyAndReturn` and an `updateMany` or `deleteMany` with a `limit` throw before the write for a model with neither, naming the model; a `limit` the extension passes to Prisma unchanged (see below) needs no key. The row key is also the `identity` a failure report names a top-level or batch row by (`params.identity` of an `id-resolver-call`): the value of a single key field, or the JSON array of a composite key's values; a nested row is named by its primary key.
 
-Either way, the audit covers the rows the filter matched when they were read before the write. Outside a transaction, a row another writer deletes or gives another key between the update and the re-read of the updated rows gets no audit log, and is reported as `row-identification`. Inside one or not, a row another writer changes to match the filter after that read is updated or deleted without an audit log unless the isolation level prevents it (Serializable does).
-
 A write whose `data` writes a key field can give each row a key other than the one it was read under, even the key another row had before the write. When the key fields it writes are given literal values (`data: { code: 'd-9' }` on a model keyed by `code`, or `{ set: value }`), the key each row has after the write is the key it had with those fields replaced, each value converted to the column's type (a `DateTime` given as a string is a `Date`, a `BigInt` given as a number a `bigint`, a `Decimal` given as a string a `Prisma.Decimal`): the extension reads the rows again by those keys and pairs each with the row it was, so the audit log records the change of key under the new key. A row whose column stores the value differently (rounded to the column's precision) is not found by the derived key and is reported as `row-identification`. When `data` gives a key field an operator (`data: { id: { increment: 1 } }`), the key after the write cannot be told from the arguments, so the extension runs the caller's operation as given, with its `limit`, and reads no row: an `updateMany` gets no audit log for its rows, and the number it wrote is reported as `row-identification` (`params` is `{ unidentified }`); each row an `updateManyAndReturn` returns is recorded as an update with an unavailable before state (`before: null`, `changes: null`, `beforeUnavailable: true`), and their number is reported the same way.
 
-**`updateMany` and `deleteMany` with a `limit`.** A `limit` that is not a positive integer is passed to Prisma unchanged, which rejects it. Otherwise the extension first reads the rows the limit selects (the caller's `where`, with the limit as `take`), then continues the caller's own `updateMany` or `deleteMany` without the limit and with its `where` narrowed to their row keys (`{ AND: [where, { id: { in: [...] } }] }` for a single-field key `id`), so the rows it audits are the rows the operation wrote. Another writer may change some of the read rows before the narrowed write runs, which then writes fewer rows than it read. Inside an interactive transaction (yours, or the one `write.implicitTransaction` opens) the extension then reads further rows that match the caller's `where` and were not read yet and writes them the same way, three rounds at most, so the count is the one a plain operation with the same limit returns, `min(limit, matching rows)`, except under contention that lasts past the third round. Outside any transaction the operation is one narrowed statement and is not topped up, since a later round could fail after the first has committed: under contention its count may be lower than a plain operation's. When a round wrote fewer rows than it read, the extension tells the written rows apart when it builds the records: an update wrote the read rows that still match the caller's `where`, and a delete deleted the read rows that are gone when exactly as many are gone as it deleted; a written row the update made stop matching, or a deleted row next to one another writer deleted, cannot be told apart, so such rows are not audited and their number is reported as `row-identification`. That read follows the rule of every read after the write: outside any transaction its failure drops the operation's records and is reported (`errorObserver`, `write.onError`) without failing the operation. A deleted row is audited with the state read before the delete. Inside a batch `$transaction([...])` that Prisma runs itself, no read can see what the batch's earlier operations wrote before the batch runs, so the extension continues the caller's operation unchanged, with its `limit`: the count is Prisma's own, no row of it is audited, and the number of rows it wrote is reported as `row-identification`. Query extensions applied after the audit extension see the narrowed operation without the `limit`, once per round.
+**`updateMany` and `deleteMany` with a `limit`.** A `limit` that is not a positive integer is passed to Prisma unchanged, which rejects it. Otherwise the extension first reads the rows the limit selects (the caller's `where`, with the limit as `take`), then continues the caller's own `updateMany` or `deleteMany` without the limit and with its `where` narrowed to their row keys (`{ AND: [where, { id: { in: [...] } }] }` for a single-field key `id`), so the rows it audits are the rows the operation wrote. Another writer may change some of the read rows before the narrowed write runs, which then writes fewer rows than it read. Inside an interactive transaction (yours, or the one `write.implicitTransaction` opens) the extension then reads further rows that match the caller's `where` and were not read yet and writes them the same way, three rounds at most, so the count is the one a plain operation with the same limit returns, `min(limit, matching rows)`, except under contention that lasts past the third round. Outside any transaction the operation is one narrowed statement and is not topped up, since a later round could fail after the first has committed: under contention its count may be lower than a plain operation's. When a round wrote fewer rows than it read, the extension tells the written rows apart when it builds the records: an update wrote the read rows that still match the caller's `where`, and a delete deleted the read rows that are gone when exactly as many are gone as it deleted; a written row the update made stop matching, or a deleted row next to one another writer deleted, cannot be told apart, so such rows are not audited and their number is reported as `row-identification`. That read follows the rule of every read after the write: outside any transaction its failure drops the operation's records and is reported (`errorObserver`, `write.onError`) without failing the operation. A deleted row is audited with the state read before the delete. Inside a batch `$transaction([...])` that Prisma runs itself, the extension continues the caller's operation unchanged, with its `limit` (see [Exceptions](../../docs/guarantees.md#exceptions)). Query extensions applied after the audit extension see the narrowed operation without the `limit`, once per round.
 
-#### Batch Creates (createMany / createManyAndReturn)
+### Batch Creates (createMany / createManyAndReturn)
 
 `createManyAndReturn` delegates ID generation entirely to Prisma: audit logs are built from the rows Prisma actually created, read with every column of the client's default shape whatever the query's `select` or `omit`, and the fields the entity lists in `recordOmittedFields` read by row key after the write. Any `@default` works — including database-generated ones like `autoincrement()` — and logs stay accurate under `skipDuplicates` (skipped rows produce no logs).
 
@@ -1131,7 +1145,7 @@ A write whose `data` writes a key field can give each row a key other than the o
 | `uuid()` / `uuid(4)` | UUID v4 |
 | `uuid(7)` | UUID v7 |
 
-After the write, the extension reads the created rows back by those keys (one query per 1,000 rows) and audits every row the read returns, in the client's default shape plus the fields the entity lists in `recordOmittedFields`: columns the database fills (`@default`, `@updatedAt`) are recorded, and a column a client-level `omit` hides is not, even when `data` writes it, except the key fields, which the read always reads to tell the rows apart. The database compares the keys, so a row whose key it stores or returns otherwise than `data` gave it (another case under a case-insensitive collation, a `BigInt` given as a number, a `DateTime` the column truncates) is recorded with the key as read. The read follows the rules of the read after an `updateMany` (see Batch Operations above): outside a transaction, a batch `$transaction([...])` that Prisma runs itself included, a row another writer changes before the read is recorded as changed. When the read returns fewer rows than the count `createMany` returns (a row another writer or a later operation of that batch deleted, a read replica that lags behind the write), the rows it misses get no audit log, and their number is reported as `row-identification`.
+After the write, the extension reads the created rows back by those keys (one query per 1,000 rows) and audits every row the read returns, in the client's default shape plus the fields the entity lists in `recordOmittedFields`: columns the database fills (`@default`, `@updatedAt`) are recorded, and a column a client-level `omit` hides is not, even when `data` writes it, except the key fields, which the read always reads to tell the rows apart. The database compares the keys, so a row whose key it stores or returns otherwise than `data` gave it (another case under a case-insensitive collation, a `BigInt` given as a number, a `DateTime` the column truncates) is recorded with the key as read. The read is a separate statement after the write, like the read after an `updateMany` (see [Table A](../../docs/guarantees.md#table-a-by-operation)). When the read returns fewer rows than the count `createMany` returns (a row another writer or a later operation of that batch deleted, a read replica that lags behind the write), the rows it misses get no audit log, and their number is reported as `row-identification`.
 
 Database-generated defaults (`autoincrement()`, `dbgenerated()`) cannot be pre-generated, so `createMany` throws when a row of its `data` leaves out a key field that has such a default, or no default at all. A key field every row supplies needs no default. Use `createManyAndReturn` or individual `create` calls instead.
 
@@ -1339,11 +1353,11 @@ await prisma.post.update({
 #### Limitations
 
 - A nested `update` that changes a column its own `where` names is found again after the write by the primary key read ahead of it; with `fetchBefore.update: false`, when that read failed, or when the update changes the primary key itself, it is not audited.
-- `connect`, `set` and `disconnect` on an implicit many-to-many relation (no relation model, e.g. `categories Category[]` on both sides) change rows of Prisma's join table, which has no model: they are not audited.
 - With `fetchBefore.update` off for the related model, `connect`, `set` and `disconnect` are not audited: the old foreign key is not read, so a record could not tell where the row was linked, and a `connect` of a record already linked (which Prisma still writes) could not be told from a move.
 - Prisma runs the keywords of one relation field in the order the data lists them. A nested `updateMany` / `deleteMany` is audited for the rows related to its parent when it runs: those related before the write, with the rows a `connect`, `connectOrCreate` or `set` listed before it links added and those a `disconnect`, `delete` or `set` listed before it unlinks removed. Its filter is matched against the rows as they were before the write, so a row a `create` listed before it inserts, or a row whose filtered columns an `update` or `updateMany` listed before it changes, is not identified as one it writes. A row a nested `updateMany` listed before a `deleteMany` brings into the `deleteMany`'s filter (it sets a column the filter names) is updated and deleted with no record at all, neither of the update nor of the delete.
 - A row a nested `connectOrCreate` finds and a nested `delete` of the same write then removes is recorded only under the parent it is deleted from, without its before state.
-- Rows a database referential action (`onDelete` / `onUpdate`, such as `Cascade` or `SetNull`) removes or changes are not audited: the database writes them itself, without a Prisma query for the extension to intercept. Deleting a `Post` whose `Comment` rows cascade records the deleted `Post` and none of its comments, and a row `SetNull` clears the foreign key of is left without a record of the change.
+
+The writes the audit does not see at all, such as the rows a database referential action changes and the rows of an implicit many-to-many join table, are listed under [Coverage of Prisma writes](../../docs/guarantees.md#coverage-of-prisma-writes).
 
 ## Complete Example
 
@@ -1592,7 +1606,7 @@ See the [main README](../../README.md) for:
 - [Aggregate mapping patterns](../../README.md#aggregate-mapping)
 - [Framework integration](../../README.md#framework-integration) (Hono, Express)
 - [Limitations](../../README.md#limitations)
-- [Transaction safety](../../README.md#transaction-safety)
+- [Guarantees](../../README.md#guarantees), and [docs/guarantees.md](../../docs/guarantees.md) for what each operation and execution context guarantees
 
 ## License
 
