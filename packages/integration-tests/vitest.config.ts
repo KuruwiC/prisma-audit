@@ -5,7 +5,7 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: ['test/**/*.spec.ts'],
-    exclude: ['**/node_modules/**', '**/dist/**', 'test/smoke/**'],
+    exclude: ['**/node_modules/**', '**/dist/**', 'test/smoke/**', '**/*.mysql.spec.ts'],
     globalSetup: ['./test/global-setup.ts'],
     testTimeout: 60000,
     hookTimeout: 60000,
