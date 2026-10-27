@@ -1616,6 +1616,117 @@ describe('createBatchExecutor', () => {
     });
   });
 
+  describe('a count that differs from the rows read before the write', () => {
+    const where = { email: { contains: '@' } };
+    const report = (action: string, count: number, message: string) => ({
+      phase: 'row-identification',
+      modelName: 'User',
+      operation: action,
+      params: { unidentified: count },
+      error: new Error(message),
+    });
+    const notReadReport = (count: number) =>
+      report(
+        'updateMany',
+        count,
+        `${count} of the rows an updateMany wrote ${count === 1 ? 'was' : 'were'} not read before it, so they are not audited: another writer made them match its where after the read`,
+      );
+    const notDeletedReport = (count: number) =>
+      report(
+        'deleteMany',
+        count,
+        `${count} of the rows read before a deleteMany ${count === 1 ? 'was' : 'were'} not deleted by it, yet every row read is audited as deleted: another writer deleted them or moved them out of its where after the read, and which ones cannot be told`,
+      );
+
+    it('reports the rows an updateMany wrote beyond the rows it read, and audits the rows it read', async () => {
+      const findMany = findManyReturning([a1], [a2]);
+      const updateMany = vi.fn(async () => ({ count: 3 }));
+      const client = clientWith({ user: { findMany, updateMany } });
+      const produceRecords = produce();
+
+      const outcome = await runWithRecords(
+        executor,
+        operationOn(client, 'updateMany', { where, data: { email: 'x' } }),
+        scopeOn(client),
+        produceRecords,
+      );
+
+      expect(outcome.result).toEqual({ count: 3 });
+      expect(failureSink.notify).toHaveBeenCalledExactlyOnceWith(notReadReport(2));
+      expect(produceRecords).toHaveBeenCalledWith(
+        [eventOf({ identity: 'a', action: 'update', before: { kind: 'captured', row: a1 }, after: a2 })],
+        expect.anything(),
+        new Map(),
+      );
+    });
+
+    it('reports the rows an updateMany wrote when it read none, and audits none', async () => {
+      const findMany = findManyReturning([]);
+      const updateMany = vi.fn(async () => ({ count: 1 }));
+      const client = clientWith({ user: { findMany, updateMany } });
+      const produceRecords = produce();
+
+      await runWithRecords(
+        executor,
+        operationOn(client, 'updateMany', { where, data: { email: 'x' } }),
+        scopeOn(client),
+        produceRecords,
+      );
+
+      expect(failureSink.notify).toHaveBeenCalledExactlyOnceWith(notReadReport(1));
+      expect(findMany).toHaveBeenCalledTimes(1);
+      expect(produceRecords).toHaveBeenCalledWith([], expect.anything(), new Map());
+    });
+
+    it('reports nothing when an updateMany wrote as many rows as it read', async () => {
+      const findMany = findManyReturning([a1, b1], [a2, b2]);
+      const client = clientWith({ user: { findMany, updateMany: vi.fn(async () => ({ count: 2 })) } });
+
+      await runWithRecords(
+        executor,
+        operationOn(client, 'updateMany', { where, data: { email: 'x' } }),
+        scopeOn(client),
+        produce(),
+      );
+
+      expect(failureSink.notify).not.toHaveBeenCalled();
+    });
+
+    it('reports the rows read before a deleteMany beyond the rows it deleted, and still audits every row read as deleted', async () => {
+      const findMany = vi.fn(async () => [a1, b1]);
+      const deleteMany = vi.fn(async () => ({ count: 1 }));
+      const client = clientWith({ user: { findMany, deleteMany } });
+      const produceRecords = produce();
+
+      const outcome = await runWithRecords(
+        executor,
+        operationOn(client, 'deleteMany', { where }),
+        scopeOn(client),
+        produceRecords,
+      );
+
+      expect(outcome.result).toEqual({ count: 1 });
+      expect(failureSink.notify).toHaveBeenCalledExactlyOnceWith(notDeletedReport(1));
+      expect(produceRecords).toHaveBeenCalledWith(
+        [
+          eventOf({ identity: 'a', action: 'delete', before: { kind: 'captured', row: a1 } }),
+          eventOf({ identity: 'b', action: 'delete', before: { kind: 'captured', row: b1 } }),
+        ],
+        expect.anything(),
+        new Map(),
+      );
+    });
+
+    it('reports nothing when a deleteMany deleted as many rows as it read', async () => {
+      const findMany = vi.fn(async () => [a1, b1]);
+      const client = clientWith({ user: { findMany, deleteMany: vi.fn(async () => ({ count: 2 })) } });
+
+      await runWithRecords(executor, operationOn(client, 'deleteMany', { where }), scopeOn(client), produce());
+
+      expect(failureSink.notify).not.toHaveBeenCalled();
+    });
+  });
+
   describe('failures', () => {
     it('fails an update or delete when the model delegate has no findMany', async () => {
       const client = clientWith({ user: { updateMany: vi.fn() } });
