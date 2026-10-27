@@ -37,9 +37,13 @@ await prisma.post.update({
 
 No decorators, no wrapper functions, no code changes. Attach the extension once and every Prisma write operation is automatically audited. Remove it, and your app works exactly as before.
 
-### Transaction Safety
+### Guarantees
 
-Inside a transaction, audit logs and data operations share it: if the operation fails, the audit log rolls back too — no orphaned or inconsistent log entries. Outside one, an awaited audit log is written once the operation has committed, and its failure never fails the committed operation; with `write.implicitTransaction` the audited client opens the transaction for you instead.
+- **Atomicity**: inside a transaction, yours or the one `write.implicitTransaction` opens, an awaited audit log is written in it, so the data and its audit logs commit or roll back together. Outside one, it is written once the operation has committed, and its failure never fails the committed operation.
+- **Accuracy under concurrent writes**: a transaction alone does not give it. The audit reads the before state ahead of the write, and whether a write another transaction commits in between is recorded wrongly or rejected depends on the database and the isolation level.
+- **Coverage**: a write that writes rows of a model in `entities` is audited when an audit context is set. Without one it runs unaudited, or is rejected with `requireContext`. Sampling, raw queries and the database's own writes are not recorded.
+
+[docs/guarantees.md](docs/guarantees.md) states what each operation and each execution context guarantees, and cites the tests that pin it down.
 
 App context (actor, request metadata) and library transaction state (transactional client, deferred-write queue) live in separate AsyncLocalStorage stores. Establishing a fresh context via `runAsync` or `run` inside a `$transaction` callback never detaches writes from the transaction.
 
@@ -49,7 +53,7 @@ Model your domain with aggregate roots. When a child entity (e.g., OrderItem) ch
 
 ### Production-Ready Performance
 
-Choose your trade-off per model: synchronous writes for compliance-critical tables, fire-and-forget for high-throughput ones. Probabilistic sampling lets you log 100% of financial transactions while sampling 5% of analytics events.
+Choose your trade-off per model: synchronous writes for compliance-critical tables, fire-and-forget for high-throughput ones. Probabilistic sampling lets you log 100% of financial transactions while sampling 5% of analytics events; a write sampling leaves out is a declared gap in [coverage](docs/guarantees.md#coverage).
 
 ### Type Safety
 
@@ -270,6 +274,8 @@ The library automatically selects the optimal write strategy based on your confi
 | **Deferred**      | None (post-TX) | Minimal        | Operations inside an interactive `$transaction()` |
 | **Fire & Forget** | None           | Zero           | High-throughput, non-critical                     |
 
+Atomicity is not accuracy under concurrent writes: see [docs/guarantees.md](docs/guarantees.md#accuracy-under-concurrent-writes).
+
 ## Configuration
 
 ```typescript
@@ -291,6 +297,10 @@ createAuditClient(basePrisma, {
     if (model === "PageView") return 0.05;
     return 0.1;
   },
+
+  // Reject a write without an audit context instead of running it unaudited: a value for every
+  // model, or a function of the model name; it applies to the models of nested writes too
+  requireContext: (model) => model === "Order",
 
   // Write strategy control
   write: {
@@ -576,16 +586,14 @@ Prisma 8 is not supported. As of 2026-10, Prisma ORM 8 is a release candidate (`
 
 ## Limitations
 
+What the audit does not record, and where a concurrent write makes a record inaccurate, is described in [docs/guarantees.md](docs/guarantees.md): raw queries, the database's referential actions, and the reads after a write outside a transaction among them.
+
 - **Edge runtimes**: No AsyncLocalStorage support (Vercel Edge, Cloudflare Workers)
-- **Raw queries**: `$executeRaw` / `$queryRaw` are not intercepted
 - **Many-to-many with multiple aggregates**: Not currently supported
 - **Client-level `omit`**: The fields a client-level `omit` hides are not recorded unless an entity lists them in `recordOmittedFields`, which masks them; one your query names or your `createMany` data writes can be recorded in clear. When the Prisma version cannot be determined, a row created under a `select` is recorded with the selected columns only (see [Fields a client-level `omit` hides](#fields-a-client-level-omit-hides))
-- **Nested re-read consistency**: A row a nested write updated or inserted that your own `include` / `select` leaves out, and a row a nested `connect`, `set` or `disconnect` re-linked, is read again after the operation on the same client. Outside a transaction (an interactive `$transaction`, or the one `write.implicitTransaction` opens for an awaited audit), that re-read is a separate query and may observe concurrent changes; so may the read, after the write, of the fields an entity lists in `recordOmittedFields`
 - **Composite keys in `updateMany` / `deleteMany` with `limit`**: The audit narrows the write to the rows it read, with an `OR` of one condition per row over the primary key fields (Prisma has no tuple `IN`), so that `where` clause grows with `limit`. When a transaction tops up a short round, the exclusion of rows already read grows the same way. The number of queries does not change with `limit`
-- **Order of the nested keywords of one relation field**: A nested `updateMany` / `deleteMany` matches its filter against the rows as they were before the write, so a row an earlier `create` inserts, or whose filtered columns an earlier `update` / `updateMany` changes, is not identified as one it writes, and a row a nested `updateMany` brings into a later `deleteMany`'s filter is updated and deleted with no record (see [Nested Operations limitations](packages/prisma-extension/README.md#limitations))
 - **`updateMany` / `deleteMany` without `limit`**: The audit reads every matching row before the write to record the before states, so the cost grows with the number of rows the `where` matches
-- **A row `connectOrCreate` finds and `delete` removes in one write**: Recorded only under the parent it is deleted from, without its before state (see [Nested Operations limitations](packages/prisma-extension/README.md#limitations))
-- **Database referential actions**: Rows an `onDelete` / `onUpdate` action (`Cascade`, `SetNull`) removes or changes are not audited, because the database writes them without a Prisma query (see [Nested Operations limitations](packages/prisma-extension/README.md#limitations))
+- **Nested writes**: The order of the nested keywords of one relation field, and a row a `connectOrCreate` finds and a `delete` of the same write removes, limit what a nested write records (see [Nested Operations limitations](packages/prisma-extension/README.md#limitations))
 
 ## Development
 
