@@ -43,6 +43,9 @@ jobs:
       - name: Check support matrix
         run: pnpm check:support-matrix
 
+      - name: Check guarantees
+        run: pnpm check:guarantees
+
   typecheck:
     name: Type Check
     runs-on: ubuntu-latest
