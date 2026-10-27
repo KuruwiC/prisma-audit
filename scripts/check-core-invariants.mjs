@@ -22,6 +22,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
+import { ORM_NAME, ORM_VOCABULARY } from './lib/orm-vocabulary.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CORE_DIR = 'packages/db-audit-core';
@@ -30,9 +31,6 @@ const CORE_PACKAGE_JSON = `${CORE_DIR}/package.json`;
 const CONTEXT_PROVIDER = `${CORE_SRC}/context-provider.ts`;
 const SKIPPED_DIRS = new Set(['node_modules', 'dist', 'generated']);
 
-const ORM_NAME = /prisma|drizzle/gi;
-const ORM_VOCABULARY =
-  /\b(findUnique|findMany|findFirst|connectOrCreate|createMany|updateMany|deleteMany|createManyAndReturn|updateManyAndReturn|upsert|dmmf|DMMF)\b/g;
 const CLIENT_SHAPE_INFERENCE = /extends \{\s*(findUnique|findMany|create|update|delete)\b/g;
 const ASYNC_LOCAL_STORAGE = /\bAsyncLocalStorage\b/g;
 const DMMF = /dmmf/g;
