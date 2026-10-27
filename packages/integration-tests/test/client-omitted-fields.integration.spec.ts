@@ -33,7 +33,7 @@ const MASKED_CHANGED = { redacted: true, hadValue: true, isDifferent: true };
 const CLIENT_OMIT: Prisma.GlobalOmitConfig = { user: { password: true }, post: { content: true, authorId: true } };
 
 const USER_COLUMNS = ['createdAt', 'email', 'id', 'name', 'password', 'updatedAt'];
-const POST_COLUMNS = ['authorId', 'content', 'createdAt', 'id', 'published', 'title', 'updatedAt'];
+const POST_COLUMNS = ['authorId', 'content', 'createdAt', 'id', 'published', 'title', 'updatedAt', 'version'];
 const USER_DEFAULT_COLUMNS = USER_COLUMNS.filter((column) => column !== 'password');
 const POST_DEFAULT_COLUMNS = POST_COLUMNS.filter((column) => column !== 'content' && column !== 'authorId');
 

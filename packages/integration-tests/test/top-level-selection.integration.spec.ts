@@ -19,7 +19,7 @@ const testActor: AuditContext = {
 };
 
 const USER_COLUMNS = ['createdAt', 'email', 'id', 'name', 'password', 'updatedAt'];
-const POST_COLUMNS = ['authorId', 'content', 'createdAt', 'id', 'published', 'title', 'updatedAt'];
+const POST_COLUMNS = ['authorId', 'content', 'createdAt', 'id', 'published', 'title', 'updatedAt', 'version'];
 
 const keysOf = (value: unknown): string[] =>
   value !== null && typeof value === 'object' ? Object.keys(value).sort() : [];
