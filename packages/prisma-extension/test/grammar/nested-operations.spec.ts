@@ -11,6 +11,7 @@ import {
   NESTED_OPERATION_KEYWORDS,
   type NestedDetectionPass,
   namedTargets,
+  nestedValueWritesRows,
   relationRowsOf,
   targetWhereClauses,
   type UpsertBranch,
@@ -880,6 +881,40 @@ describe('batchFilterClauses', () => {
 describe('isNestedBatchKeyword', () => {
   it('holds for exactly updateMany and deleteMany', () => {
     expect(NESTED_OPERATION_KEYWORDS.filter(isNestedBatchKeyword)).toEqual(['updateMany', 'deleteMany']);
+  });
+});
+
+describe('nestedValueWritesRows', () => {
+  it.each([
+    ['delete', false],
+    ['disconnect', false],
+    ['create', []],
+    ['createMany', { data: [] }],
+    ['connect', []],
+    ['disconnect', []],
+    ['update', []],
+    ['upsert', []],
+    ['delete', []],
+    ['updateMany', []],
+    ['deleteMany', []],
+    ['connectOrCreate', []],
+  ] as const)('is false for %s: %j, which writes no row', (keyword, data) => {
+    expect(nestedValueWritesRows(keyword, data)).toBe(false);
+  });
+
+  it.each([
+    ['set', []],
+    ['delete', true],
+    ['disconnect', true],
+    ['create', {}],
+    ['create', [{}]],
+    ['createMany', { data: [{}] }],
+    ['connect', { id: 'p1' }],
+    ['connect', [{ id: 'p1' }]],
+    ['deleteMany', {}],
+    ['update', { data: {} }],
+  ] as const)('is true for %s: %j', (keyword, data) => {
+    expect(nestedValueWritesRows(keyword, data)).toBe(true);
   });
 });
 

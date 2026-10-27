@@ -83,7 +83,7 @@ describe('operation recipes', () => {
     await createUserOn(config, clients, { email: 'a' });
 
     expect(config.decideWritePolicy).toHaveBeenCalledTimes(1);
-    expect(config.decideWritePolicy).toHaveBeenCalledWith('User', 'create');
+    expect(config.decideWritePolicy).toHaveBeenCalledWith('User', 'create', { email: 'a' });
     expect(clients.ran).toEqual([
       { client: 'client', transactionClient: undefined, decided: { sampled: true, atomic: false } },
     ]);

@@ -67,10 +67,10 @@ export interface RecipeConfig {
   /** The model a relation field of `model` leads to */
   readonly relatedModel: (model: string, field: string) => string | undefined;
   /**
-   * The write policy of a call of `action` on `model`, decided now, sampling included; undefined
-   * when the call is not audited
+   * The write policy of a call of `action` on `model` with `args`, the arguments the call was made
+   * with, decided now, sampling included; undefined when the call is not audited
    */
-  readonly decideWritePolicy: (model: string, action: string) => WritePolicy | undefined;
+  readonly decideWritePolicy: (model: string, action: string, args: unknown) => WritePolicy | undefined;
 }
 
 interface RecipeCall {
@@ -132,7 +132,7 @@ const decisionOf = (recipe: Recipe, config: RecipeConfig): WritePolicyDecision |
   if (recipe.model === undefined || isProcessingAuditLog()) {
     return undefined;
   }
-  const policy = config.decideWritePolicy(recipe.model, recipe.call.method);
+  const policy = config.decideWritePolicy(recipe.model, recipe.call.method, recipe.call.args[0]);
   return policy && { model: recipe.model, action: recipe.call.method, policy };
 };
 

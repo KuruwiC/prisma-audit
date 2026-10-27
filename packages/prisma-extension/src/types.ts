@@ -63,7 +63,8 @@ export interface WriteConfig<TClient = unknown> {
    * top-level model. The function is called once per operation, once sampling has kept it (with
    * `implicitTransaction` once per call, which the client decides before the call runs, for every
    * query the call runs through the audit extension), and its return value applies to the whole
-   * operation, the audit rows of its nested writes to other models included.
+   * operation, the audit rows of its nested writes to other models included. The model may be one
+   * that is not in `entities`, when the operation's nested writes write rows of one that is.
    *
    * @default true
    */
@@ -82,6 +83,10 @@ export interface WriteConfig<TClient = unknown> {
    * operation can still make the recorded before state or upsert action differ from what happened
    * (at READ COMMITTED and at InnoDB's REPEATABLE READ). For a stronger isolation level, run the
    * operation in your own `$transaction(fn, { isolationLevel })`, retrying on conflicts yourself.
+   *
+   * Whether the transaction opens is decided from the arguments the call is made with. When an
+   * extension applied before the audit adds a nested write of an audited model to them, none
+   * opens, and an awaited audit is written once the operation has committed.
    *
    * With `true`, a call on a model delegate or a raw-query method returns a lazy operation of the
    * library's own, which runs when it is awaited or given to a batch `$transaction` of the same
@@ -184,11 +189,33 @@ export interface PrismaAuditExtensionOptions<TModelName extends string = string,
    * Share of operations audited, from 0 (none) to 1 (every one): a value for every operation, or a
    * function called with the name of the operation's top-level model. The function is called once
    * per operation (with `write.implicitTransaction` once per call, as `write.awaited`), and its
-   * return value applies to the whole operation, its nested writes included.
+   * return value applies to the whole operation, its nested writes included. The model may be one
+   * that is not in `entities`, when the operation's nested writes write rows of one that is.
    *
    * @default 1
    */
   samplingRate?: number | ((modelName: string) => number);
+  /**
+   * Whether a write to a model fails when no audit context is set, instead of running unaudited: a
+   * value for every model, or a function called with a model name. A write is audited when it
+   * writes rows of a model in `entities`, its own or one its nested writes write (a `connect`,
+   * `set` or `disconnect` writes the related rows when they hold the foreign key). Without an
+   * audit context, it is rejected with `AuditContextMissingError` when this holds for one of
+   * those models, before Prisma runs any of it, and runs unaudited otherwise.
+   *
+   * - It applies to the models of nested writes too, below a model that is not in `entities`
+   *   included
+   * - Sampling does not affect it: a write is rejected at a `samplingRate` of 0 as well
+   * - A model that is not in `entities` is not audited, so this has no effect on it
+   * - It does not reach writes the audit extension does not see: an operation without a model
+   *   (`$executeRaw` and the other raw queries), a write made on the base client rather than the
+   *   audited client, and a write an extension applied after the audit extension (on the audited
+   *   client) adds to an operation's arguments. Apply an extension that changes arguments to the
+   *   client you pass to `createAuditClient`, before the audit.
+   *
+   * @default false
+   */
+  requireContext?: boolean | ((modelName: string) => boolean);
 
   /**
    * Fields left out of the change set of an update, for every entity without its own

@@ -1,19 +1,21 @@
 /**
  * Prisma Audit Extension
  *
- * The `$allOperations` hook: decides whether an intercepted operation is audited (its model, its
- * kind, then the write policy's sampling), selects the relations its nested writes touch, runs it
- * through the audited-operation pipeline on the library-owned runtime context, and returns the
- * result in the shape the caller requested. The hook always continues the caller's operation
- * through `query`; with `write.implicitTransaction` the client proxy opens the interactive
- * transaction before the operation enters the extension chain.
+ * The `$allOperations` hook: decides whether an intercepted operation is audited (its kind, then
+ * the audit gate, from the audit context and the audited models the operation's arguments write,
+ * then the write policy's sampling), rejects it before it runs when the gate does, selects the
+ * relations its nested writes touch, runs it through the audited-operation pipeline on the
+ * library-owned runtime context, and returns the result in the shape the caller requested. The
+ * hook continues the caller's operation through `query` unless the gate rejects it; with
+ * `write.implicitTransaction` the client proxy opens the interactive transaction before the
+ * operation enters the extension chain.
  *
  * @module extension
  * @see {@link createAuditLogExtension}
  * @see {@link PrismaAuditExtensionOptions}
  */
 
-import { createFailureSink, policy } from '@kuruwic/db-audit-core';
+import { AuditContextMissingError, auditGate, createFailureSink, policy } from '@kuruwic/db-audit-core';
 import { createPrismaWriteExecutor, declaresBeforeUnavailableColumn } from './adapters/write-executor.js';
 import { type AuditOptions, normalizeAuditOptions } from './audit-options.js';
 import type { ExtensionParams, PrismaBaseClient } from './internal-types.js';
@@ -60,7 +62,11 @@ const createPipelineDependencies = (audit: AuditOptions): AuditPipelineDependenc
   };
 };
 
-/** What the client proxy needs to open the interactive transaction of an operation whose audit is awaited */
+/**
+ * What the client proxy needs to open the interactive transaction of an operation whose audit is
+ * awaited. Whether one is opened is decided from the arguments the call was made with; the hook
+ * decides whether the operation is audited, or rejected, from the arguments that reach it.
+ */
 const recipeConfigOf = (audit: AuditOptions): RecipeConfig => {
   const { policyConfig, schemaMetadata } = audit;
   const modelNames = schemaMetadata.getModelNames();
@@ -73,8 +79,10 @@ const recipeConfigOf = (audit: AuditOptions): RecipeConfig => {
   return {
     modelOfAccessor: new Map(modelNames.map((modelName) => [getModelAccessor(modelName), modelName])),
     relatedModel: (modelName, field) => relatedModels.get(modelName)?.get(field),
-    decideWritePolicy: (modelName, action) =>
-      audit.provider.getContext() !== undefined && isAuditableAction(action) && audit.shouldAudit(modelName)
+    decideWritePolicy: (modelName, action, args) =>
+      audit.provider.getContext() !== undefined &&
+      isAuditableAction(action) &&
+      audit.auditedModelsOf(modelName, args).length > 0
         ? policy(modelName, policyConfig)
         : undefined,
   };
@@ -98,17 +106,18 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
 
   const auditOperation = async (params: ExtensionParams, baseClient: PrismaBaseClient) => {
     const { operation, model, args, query } = params;
-    const auditContext = audit.provider.getContext();
+    if (isProcessingAuditLog() || !model || !isAuditableAction(operation)) {
+      return query(args);
+    }
 
-    if (isProcessingAuditLog()) {
+    const gate = auditGate(audit.provider.getContext(), audit.auditedModelsOf(model, args), audit.gateConfig);
+    if (gate.kind === 'reject') {
+      throw new AuditContextMissingError({ modelName: gate.modelName, operationModelName: model, operation });
+    }
+    if (gate.kind === 'skip') {
       return query(args);
     }
-    if (!model || !auditContext || !audit.shouldAudit(model)) {
-      return query(args);
-    }
-    if (!isAuditableAction(operation)) {
-      return query(args);
-    }
+    const auditContext = gate.context;
     const writePolicy = decidedWritePolicyFor(model, operation) ?? policy(model, audit.policyConfig);
     if (!writePolicy.sampled) {
       return query(args);
