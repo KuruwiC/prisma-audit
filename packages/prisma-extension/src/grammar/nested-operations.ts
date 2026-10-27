@@ -43,6 +43,25 @@ export const isNestedBatchKeyword = (keyword: NestedOperationKeyword): keyword i
  */
 export const linksNamedRows = (keyword: NestedOperationKeyword): boolean => keyword === 'connect' || keyword === 'set';
 
+/**
+ * Whether the value a nested keyword holds writes any row. `false` (`delete: false`,
+ * `disconnect: false`), an empty list (`create: []`) and a `createMany` with no `data` rows write
+ * none. `set: []` does: it unlinks every row the relation holds. {@link detectNestedOperations}
+ * reports these values as operations all the same, leaving out only `undefined`.
+ */
+export const nestedValueWritesRows = (keyword: NestedOperationKeyword, data: unknown): boolean => {
+  if (data === false) {
+    return false;
+  }
+  if (Array.isArray(data)) {
+    return data.length > 0 || keyword === 'set';
+  }
+  if (keyword === 'createMany' && isRecord(data) && Array.isArray(data.data)) {
+    return data.data.length > 0;
+  }
+  return true;
+};
+
 /** Information about a detected nested operation */
 export interface NestedOperationInfo {
   /** Relation field name (e.g., 'posts') */

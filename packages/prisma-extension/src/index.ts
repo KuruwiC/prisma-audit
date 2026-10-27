@@ -25,6 +25,7 @@ export type {
 } from '@kuruwic/db-audit-core';
 
 export {
+  AuditContextMissingError,
   createActorId,
   createAggregateId,
   createAsyncLocalStorageProvider,

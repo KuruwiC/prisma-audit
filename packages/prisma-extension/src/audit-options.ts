@@ -7,6 +7,7 @@
 
 import type {
   AuditContextProvider,
+  AuditGateConfig,
   ComposeConfig,
   FailureSinkConfig,
   PolicyConfig,
@@ -25,6 +26,7 @@ import type { PrismaNamespace } from './internal-types.js';
 import { loadSchemaMetadata } from './schema/schema-metadata.js';
 import type { SchemaMetadata } from './schema/types.js';
 import type { PrismaAuditExtensionOptions } from './types.js';
+import { auditedModelsWrittenBy } from './utils/audited-models.js';
 import {
   type AuditedOmittedFields,
   createAuditedOmittedFields,
@@ -50,6 +52,8 @@ export interface AuditOptions {
   readonly auditedOmittedFieldsWithRowKey: AuditedOmittedFields;
   /** Accessor of the audit-log model on the client (camelCase) */
   readonly auditLogAccessor: string;
+  /** Whether a write runs without an audit context, from `requireContext` */
+  readonly gateConfig: AuditGateConfig;
   readonly policyConfig: PolicyConfig;
   /** Whether the client proxy opens an interactive transaction for an operation whose audit is awaited */
   readonly implicitTransaction: boolean;
@@ -59,10 +63,11 @@ export interface AuditOptions {
   readonly failureSinkConfig: FailureSinkConfig;
   readonly shouldFetchBefore: ShouldFetchBefore;
   /**
-   * Whether operations on `modelName` are audited at all: it is not the audit-log model and is
-   * loggable. Sampling is decided by `policyConfig`.
+   * The audited models an operation on `modelName` with `args` writes rows of, its nested writes
+   * included: the input of the audit gate. A model is audited when it is in the entity map and is
+   * not the audit-log model. Sampling is decided by `policyConfig`.
    */
-  readonly shouldAudit: (modelName: string) => boolean;
+  readonly auditedModelsOf: (modelName: string, args: unknown) => string[];
 }
 
 /** The relation counts Prisma returns with a row when a query includes or selects `_count` */
@@ -112,6 +117,7 @@ export const normalizeAuditOptions = (options: PrismaAuditExtensionOptions): Aud
     auditedOmittedFieldsWithRowKey: withRowKeyFields(auditedOmittedFields, schemaMetadata, queryOmitSupported),
     auditLogAccessor,
     implicitTransaction: write?.implicitTransaction ?? false,
+    gateConfig: { requireContext: options.requireContext ?? false },
     policyConfig: {
       awaited: write?.awaited ?? true,
       samplingRate: options.samplingRate ?? 1,
@@ -131,6 +137,12 @@ export const normalizeAuditOptions = (options: PrismaAuditExtensionOptions): Aud
     writer: write?.writer,
     failureSinkConfig: { observer: errorObserver, writeOnError: write?.onError },
     shouldFetchBefore: createShouldFetchBefore(entityConfigs.byModel, options.fetchBefore),
-    shouldAudit: (modelName) => shouldAuditModel({ modelName, auditLogAccessor, isLoggable: entityConfigs.isLoggable }),
+    auditedModelsOf: (modelName, args) =>
+      auditedModelsWrittenBy(
+        schemaMetadata,
+        (written) => shouldAuditModel({ modelName: written, auditLogAccessor, isLoggable: entityConfigs.isLoggable }),
+        modelName,
+        args,
+      ),
   };
 };
