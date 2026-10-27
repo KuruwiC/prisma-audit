@@ -1134,7 +1134,7 @@ A write whose `data` writes a key field can give each row a key other than the o
 
 ### Batch Creates (createMany / createManyAndReturn)
 
-`createManyAndReturn` delegates ID generation entirely to Prisma: audit logs are built from the rows Prisma actually created, read with every column of the client's default shape whatever the query's `select` or `omit`, and the fields the entity lists in `recordOmittedFields` read by row key after the write. Any `@default` works — including database-generated ones like `autoincrement()` — and logs stay accurate under `skipDuplicates` (skipped rows produce no logs).
+`createManyAndReturn` delegates ID generation entirely to Prisma: audit logs are built from the rows Prisma actually created, read with every column of the client's default shape whatever the query's `select` or `omit`, and the fields the entity lists in `recordOmittedFields` read by row key after the write. Any `@default` works — including database-generated ones like `autoincrement()` — and under `skipDuplicates` only the rows Prisma inserted are logged (skipped rows produce no logs).
 
 `createMany` only returns `{ count }`, so the extension pre-generates client-side every key field that a row of `data` leaves out, and injects it into `data`, matching the format the schema declares. The key is the [row key](#batch-operations-updatemany--deletemany), and `createMany` throws for a model without one:
 
