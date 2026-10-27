@@ -12,9 +12,10 @@
  * `increment`), the update runs as given and reads no row: the rows of an updateMany are reported
  * as `row-identification` and not audited, and the rows an updateManyAndReturn returns are recorded
  * without a before state and reported. A row another writer re-keys or deletes between the reads
- * does not pair, and is reported the same way. Every read of the executor reads the row key
- * whatever a client-level omit hides, and the omitted fields the entity records
- * (`withRowKeyFields`).
+ * does not pair, and is reported the same way, as are the rows an updateMany wrote beyond the
+ * rows it read and the rows a deleteMany read beyond the rows it deleted. Every read of the
+ * executor reads the row key whatever a client-level omit hides, and the omitted fields the entity
+ * records (`withRowKeyFields`).
  */
 
 import type { FailureSink, MutationEvent } from '@kuruwic/db-audit-core';
@@ -317,6 +318,12 @@ const writtenRowsKeyNotFollowed: UnidentifiedReason = (operation, unidentified) 
 const returnedRowsKeyNotFollowed: UnidentifiedReason = (operation, unidentified) =>
   `${unidentified} of the rows an ${operation.action} returned are recorded without a before state: its data changes their key in a way the audit cannot follow`;
 
+const writtenRowsNotRead: UnidentifiedReason = (operation, unidentified) =>
+  `${unidentified} of the rows an ${operation.action} wrote ${unidentified === 1 ? 'was' : 'were'} not read before it, so they are not audited: another writer made them match its where after the read`;
+
+const readRowsNotDeleted: UnidentifiedReason = (operation, unidentified) =>
+  `${unidentified} of the rows read before a ${operation.action} ${unidentified === 1 ? 'was' : 'were'} not deleted by it, yet every row read is audited as deleted: another writer deleted them or moved them out of its where after the read, and which ones cannot be told`;
+
 const reportUnidentified = async (
   operation: AuditedOperation,
   unidentified: number,
@@ -511,6 +518,27 @@ const limitedWriteRows = async (
   return pairReReadRows(operation, afterRows, written, keyFields, keyWrite, failureSink);
 };
 
+/**
+ * Counts see only a surplus: when another writer also moves a read row out of the `where`, the
+ * count can match while that row is audited as updated and the row moved in is not, unreported.
+ */
+const reportRowsWrittenBeyondRead = (
+  operation: AuditedOperation,
+  readRows: readonly Row[],
+  executed: BatchExecuted,
+  failureSink: FailureSink,
+): Promise<void> =>
+  reportUnidentified(operation, countOf(executed.result) - readRows.length, failureSink, writtenRowsNotRead);
+
+/** Prisma does not return the rows a `deleteMany` deleted, so every row read stays audited as deleted */
+const reportRowsReadBeyondDeleted = (
+  operation: AuditedOperation,
+  readRows: readonly Row[],
+  executed: BatchExecuted,
+  failureSink: FailureSink,
+): Promise<void> =>
+  reportUnidentified(operation, readRows.length - countOf(executed.result), failureSink, readRowsNotDeleted);
+
 export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationExecutor => {
   const { schemaMetadata, auditedOmittedFieldsWithRowKey, failureSink } = deps;
 
@@ -596,6 +624,7 @@ export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationE
       case 'limited':
         return limitedWriteRows(operation, delegateOf(scope, operation.model), prepared, executed, failureSink);
       case 'update': {
+        await reportRowsWrittenBeyondRead(operation, prepared.beforeRows, executed, failureSink);
         if (prepared.beforeRows.length === 0) {
           return { rows: [] };
         }
@@ -607,6 +636,7 @@ export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationE
         return pairReReadRows(operation, afterRows, beforeRows, keyFields, keyWrite, failureSink);
       }
       case 'delete':
+        await reportRowsReadBeyondDeleted(operation, prepared.beforeRows, executed, failureSink);
         return { rows: prepared.beforeRows, beforeStates: prepared.beforeRows };
       default: {
         const exhaustiveCheck: never = prepared;
