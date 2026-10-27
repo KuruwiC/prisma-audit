@@ -14,10 +14,11 @@ It is installed as a dependency of `@kuruwic/prisma-audit`. Each GitHub release 
 
 ## Boundary
 
-An adapter calls four functions for each intercepted write:
+An adapter calls five functions for each intercepted write:
 
 ```
-policy(model, config)                          -> { sampled, atomic } before the write runs
+auditGate(hasContext, auditedModels, config)   -> audit / skip / reject before the write runs
+policy(model, config)                          -> { sampled, atomic } before the write runs, for an audited write
   adapter runs the write
 dispatch({ buildRecords, modelName, operation, params, atomic, auditContext }, config, runtime)
                                                -> builds the records, then writes them immediately, after commit, or detached
@@ -27,8 +28,19 @@ dispatch({ buildRecords, modelName, operation, params, atomic, auditContext }, c
     compose(resolvedEvents, ambient, now)        -> AuditRecord[]
 ```
 
-- **`policy`** decides, once per audited operation, whether the operation is sampled in
-  (`Math.random()` below `samplingRate`, or below `samplingRate(model)` when it is a function)
+- **`auditGate`** decides whether the write goes through the audit at all: its coverage.
+  `auditedModels` names the audited models the write writes rows of, its nested writes included;
+  the adapter derives them from the write and the entity map, so the core never reads a write's
+  arguments. A write of no audited model is `skip`ped. With an audit context, any other write is
+  `audit`ed. Without one, the write is `reject`ed, naming the model, when `requireContext` (a value,
+  or a function of the model name) holds for one of those models, and `skip`ped otherwise. The
+  adapter throws `AuditContextMissingError` for a rejected write before any of it runs. The gate
+  sees every write, before sampling, so a write that requires a context is rejected at any
+  `samplingRate`; the adapter calls it on the arguments the write actually runs with, each time.
+- **`policy`** decides how much of what the gate audits is recorded, and how. Unlike the gate it
+  sees only the operation's top-level model, and an adapter may decide it once for an operation
+  and carry the decision to the queries the operation runs. It decides, once per audited
+  operation, whether the operation is sampled in (`Math.random()` below `samplingRate`, or below `samplingRate(model)` when it is a function)
   and, only when it is, whether the audit rows are written atomically with it: `awaited`, or
   `awaited(model)` when it is a function. `model` is the operation's top-level model, and the
   decision covers its nested writes too. An adapter's user-facing `write.awaited` option is the
@@ -106,6 +118,9 @@ dispatch({ buildRecords, modelName, operation, params, atomic, auditContext }, c
 - **Context provider**: `createAsyncLocalStorageProvider()` returns an `AuditContextProvider`
   (`run`, `runAsync`, `getContext`, `withActor`) that carries the actor and request context through
   async calls.
+- **Audit gate**: `auditGate`, `AuditGateConfig` (`requireContext`), `AuditGate`, and
+  `AuditContextMissingError` (with `modelName`, `operationModelName` and `operation`), which an
+  adapter throws for a write the gate rejects.
 - **Failure handling**: `FailureSinkConfig` (`observer`, `writeOnError`, default `'log'`),
   `AuditErrorPhase`, `AuditErrorContext`, `AuditErrorObserver`, `WriteOnError`, and
   `createFailureSink`, which an adapter builds from the user's `errorObserver` and `write.onError`
@@ -139,15 +154,20 @@ An adapter owns everything that touches the database: intercepting writes, readi
 transactions and persisting records. The core owns the decisions in between. For each intercepted
 write the adapter runs, in order:
 
-1. **`policy(model, policyConfig)`**, before any statement runs, to learn whether the
+1. **`auditGate(auditContext !== undefined, auditedModels, gateConfig)`**, before any statement
+   runs, on the arguments the write runs with. `skip` runs the write as it would without the
+   adapter; `reject` throws `AuditContextMissingError` and runs nothing. Only an `audit` write
+   continues. The adapter does not check again whether the operation's model is audited: the
+   gate's input already says which audited models the write writes.
+2. **`policy(model, policyConfig)`**, before any statement runs, to learn whether the
    operation is sampled in and, when it is, whether the audit rows are written atomically with the
    write. A sampled-out operation runs as it would without the adapter.
-2. **The write, in its scope.** When `atomic` is true and no transaction is active, the adapter
+3. **The write, in its scope.** When `atomic` is true and no transaction is active, the adapter
    may open an implicit transaction and run the write, and everything below, on that transaction's
    handle; otherwise the write runs on the base handle and `dispatch` writes the atomic records
    once it has committed (`awaited-after-commit`).
-3. **`dispatch({ buildRecords, modelName, operation, params, atomic, auditContext }, dispatchConfig,
-   runtime)`**, which runs `buildRecords` (steps 4 to 6) and writes the records: `immediate` on the
+4. **`dispatch({ buildRecords, modelName, operation, params, atomic, auditContext }, dispatchConfig,
+   runtime)`**, which runs `buildRecords` (steps 5 to 7) and writes the records: `immediate` on the
    transaction's handle before it resolves, `awaited-after-commit` on `runtime.baseHandle` before it
    resolves when the operation ran outside any transaction, `after-commit` registered with
    `runtime.transaction.afterCommit` and run on `runtime.baseHandle` once the transaction commits,
@@ -158,7 +178,7 @@ write the adapter runs, in order:
    failed, and when an immediate write failed and the write-failure policy rethrows. Outside any
    transaction a failed build drops the records and a failed write follows the policy, with
    `'throw'` logging.
-4. **The mutation events**, inside `buildRecords`: one `MutationEvent` per written row, with what
+5. **The mutation events**, inside `buildRecords`: one `MutationEvent` per written row, with what
    the adapter reads after the write when the write itself does not return it. Each row an event
    carries holds every column of the table, `null` where the row has no value: a `foreignKey`
    resolver fails for a row that lacks its column. The exception is the row of a delete whose
@@ -169,11 +189,11 @@ write the adapter runs, in order:
    rows (such as Prisma's `createMany`) lacks the columns the database fills itself (`@default`,
    `@updatedAt`); a row read through a client that leaves some columns out of every read lacks
    them when the adapter cannot learn which columns those are.
-5. **`resolve(events, auditContext, resolveConfig, read)`**. `read` is a thunk that returns the
+6. **`resolve(events, auditContext, resolveConfig, read)`**. `read` is a thunk that returns the
    handle of the scope active when a resolver or enricher runs; the core calls it at each callback,
    so callbacks read the transaction's uncommitted writes. `resolveConfig` is `entity`
    (`byModel`), `rootEntity` (`byCategoryAndType`) and the optional `actorContext`, which holds the actor enricher.
-6. **`compose(resolved, { auditContext, config: composeConfig }, now)`** into the `AuditRecord`s
+7. **`compose(resolved, { auditContext, config: composeConfig }, now)`** into the `AuditRecord`s
    `buildRecords` returns. `composeConfig` carries the entity lookup, `diffExcludeFields`,
    `redactFields`, `serializers`, `relationFieldNames(model)`, the keys of a row that are not its
    columns (the relation fields, and any aggregate of related records the ORM returns with the
