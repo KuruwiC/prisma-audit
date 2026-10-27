@@ -2,8 +2,10 @@
  * Memory audit adapter
  *
  * Audited create, update and delete on an in-memory store. Each operation runs the core
- * pipeline: the write policy decides whether the operation is sampled in and whether its audit
- * rows join the operation's transaction, an implicit transaction opens when they do and none is
+ * pipeline: the audit gate decides whether it is audited, runs unaudited or is rejected, from the
+ * audit context and whether its model is in the entity map; for an audited one the write policy
+ * decides whether the operation is sampled in and whether its audit rows join the operation's
+ * transaction, an implicit transaction opens when they do and none is
  * active, and the mutation is applied on the scope's handle and collected as one mutation event.
  * Core's `dispatch` then builds the records, resolving the event with the id resolvers and
  * enrichers reading through the scope's handle and composing it, and writes them with the scope as
@@ -17,6 +19,7 @@ import type {
   AuditContextProvider,
   AuditErrorContext,
   AuditErrorObserver,
+  AuditGateConfig,
   ComposeConfig,
   DispatchConfig,
   EntityMap,
@@ -29,6 +32,8 @@ import type {
   WriteOnError,
 } from '@kuruwic/db-audit-core';
 import {
+  AuditContextMissingError,
+  auditGate,
   compose,
   createEntityConfigLookup,
   createFailureSink,
@@ -44,6 +49,12 @@ export interface MemoryAuditOptions<TModelName extends string> {
   readonly schema: MemorySchema<TModelName>;
   readonly entities: EntityMap<TModelName, MemoryHandle<TModelName>>;
   readonly contextProvider: AuditContextProvider;
+  /**
+   * Whether a write to a model in `entities` fails with `AuditContextMissingError` when no audit
+   * context is set, before it is applied, instead of running unaudited (the default, `false`): a
+   * value, or a function called with the model's name. Sampling does not affect it.
+   */
+  readonly requireContext?: AuditGateConfig['requireContext'];
   /**
    * Share of operations audited, from 0 (none) to 1 (every one; the default): a value, or a
    * function called once per operation with its model's name
@@ -106,6 +117,7 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
   const { schema, contextProvider } = options;
   const store = createMemoryStore<TModelName>();
   const entityConfigs = createEntityConfigLookup(options.entities);
+  const gateConfig: AuditGateConfig = { requireContext: options.requireContext ?? false };
   const policyConfig: PolicyConfig = {
     awaited: options.write?.awaited ?? true,
     samplingRate: options.samplingRate ?? 1,
@@ -203,7 +215,16 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
     op: string,
     mutate: (handle: MemoryHandle<TModelName>) => AppliedMutation,
   ): Promise<void> => {
-    const auditContext = contextProvider.useContext();
+    const auditContext = contextProvider.getContext();
+    const gate = auditGate(auditContext !== undefined, entityConfigs.isLoggable(model) ? [model] : [], gateConfig);
+    if (gate.kind === 'reject') {
+      throw new AuditContextMissingError({ modelName: gate.modelName, operationModelName: model, operation: op });
+    }
+    // An audited write has an audit context; the check only narrows its type
+    if (gate.kind === 'skip' || auditContext === undefined) {
+      mutate(currentHandle());
+      return;
+    }
     const writePolicy = policy(model, policyConfig);
     if (!writePolicy.sampled) {
       mutate(currentHandle());

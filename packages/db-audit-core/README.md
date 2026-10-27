@@ -248,6 +248,15 @@ What the adapter must provide:
 `runAudited` in `src/adapter.ts` is the whole sequence:
 
 ```typescript
+const auditContext = contextProvider.getContext();
+const gate = auditGate(auditContext !== undefined, entityConfigs.isLoggable(model) ? [model] : [], gateConfig);
+if (gate.kind === 'reject') {
+  throw new AuditContextMissingError({ modelName: gate.modelName, operationModelName: model, operation: op });
+}
+if (gate.kind === 'skip' || auditContext === undefined) {
+  mutate(currentHandle());
+  return;
+}
 const writePolicy = policy(model, policyConfig);
 if (!writePolicy.sampled) {
   mutate(currentHandle());
@@ -278,7 +287,8 @@ await inScope(atomic, async (scope) => {
 });
 ```
 
-`inScope` opens the implicit transaction, `currentHandle` reads the active transaction from an
+Its writes have no nested writes, so the audited models of a write are its own model when the
+entity map declares it, and none otherwise. `inScope` opens the implicit transaction, `currentHandle` reads the active transaction from an
 `AsyncLocalStorage` of its own, `transaction` starts the queued after-commit writes once its
 callback has resolved, and `src/write-executor.ts` appends records to the handle's audit-log rows.
 `runtimeOf(scope)` is the runtime: the store as `baseHandle`, the scope's handle and queue as

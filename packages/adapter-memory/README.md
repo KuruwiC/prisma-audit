@@ -2,9 +2,16 @@
 
 A private, in-memory audit adapter built only on the public API of `@kuruwic/db-audit-core`. It
 keeps tables in maps keyed by model and serialized primary key, appends audit records to an
-in-memory list, and runs every audited `create`, `update` and `delete` through `policy` and
-`dispatch`, handing `dispatch` a build of the records (`resolve`, then `compose`), its own
-`WriteExecutor`, and its store and transactions as the transaction runtime.
+in-memory list, and runs every `create`, `update` and `delete` through `auditGate`, then every
+audited one through `policy` and `dispatch`, handing `dispatch` a build of the records
+(`resolve`, then `compose`), its own `WriteExecutor`, and its store and transactions as the
+transaction runtime.
+
+A write is audited when its model is in `entities` and an audit context is set. Without one it
+runs unaudited, unless `requireContext` (a value, or a function of the model's name; default
+`false`) holds for its model: it is then rejected with `AuditContextMissingError` before it is
+applied, at any `samplingRate`. A write of a model that is not in `entities` always runs
+unaudited, without calling the policy functions or the actor enricher.
 
 Transactions are copy-on-write overlays of the store. A transaction opened inside another nests in
 it and is discarded when the outer one rolls back. An operation whose policy is atomic runs in
