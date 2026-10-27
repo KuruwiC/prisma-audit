@@ -1,5 +1,6 @@
 import type { AuditActor, AuditErrorObserver, AuditRecord } from '@kuruwic/db-audit-core';
 import {
+  AuditContextMissingError,
   createAsyncLocalStorageProvider,
   defineEntities,
   defineEntity,
@@ -652,6 +653,88 @@ describe('samplingRate', () => {
 
     expect(adapter.store.find('Post', 'p1')).toEqual({ id: 'p1', authorId: 'u1', title: 'Hello' });
     expect(adapter.store.auditLogs().map((log) => log.entityType)).toEqual(['User']);
+  });
+});
+
+describe('the audit gate', () => {
+  const userOnly = defineMapping({ User: defineEntity<UserRow, Db>({ type: 'User' }) });
+
+  it('runs a write without an audit context unaudited by default', async () => {
+    const adapter = createAdapter();
+
+    await adapter.create('User', { id: 'u1', name: 'Alice' });
+
+    expect(adapter.store.find('User', 'u1')).toEqual({ id: 'u1', name: 'Alice' });
+    expect(adapter.store.auditLogs()).toEqual([]);
+  });
+
+  it.each([
+    ['create', (adapter: ReturnType<typeof createAdapter>) => adapter.create('User', { id: 'u2', name: 'Bob' })],
+    ['update', (adapter: ReturnType<typeof createAdapter>) => adapter.update('User', 'u1', { name: 'Changed' })],
+    ['delete', (adapter: ReturnType<typeof createAdapter>) => adapter.delete('User', 'u1')],
+  ])(
+    'rejects a %s without an audit context when requireContext is true, leaving the store unchanged',
+    async (_operation, write) => {
+      const adapter = createAdapter({ requireContext: true });
+      await withContext(() => adapter.create('User', { id: 'u1', name: 'Alice' }));
+
+      await expect(write(adapter)).rejects.toBeInstanceOf(AuditContextMissingError);
+      await expect(write(adapter)).rejects.toMatchObject({ modelName: 'User', operationModelName: 'User' });
+      expect(adapter.store.find('User', 'u1')).toEqual({ id: 'u1', name: 'Alice' });
+      expect(adapter.store.find('User', 'u2')).toBeUndefined();
+      expect(adapter.store.auditLogs()).toHaveLength(1);
+    },
+  );
+
+  it('rejects without an audit context a model the requireContext function holds for, and runs another unaudited', async () => {
+    const adapter = createAdapter({ requireContext: (model) => model === 'Post' });
+
+    await adapter.create('User', { id: 'u1', name: 'Alice' });
+    await expect(adapter.create('Post', { id: 'p1', authorId: 'u1', title: 'Hello' })).rejects.toMatchObject({
+      name: 'AuditContextMissingError',
+      modelName: 'Post',
+    });
+
+    expect(adapter.store.find('User', 'u1')).toEqual({ id: 'u1', name: 'Alice' });
+    expect(adapter.store.find('Post', 'p1')).toBeUndefined();
+    expect(adapter.store.auditLogs()).toEqual([]);
+  });
+
+  it('rejects a write without an audit context at a samplingRate of 0', async () => {
+    const adapter = createAdapter({ requireContext: true, samplingRate: 0 });
+
+    await expect(adapter.create('User', { id: 'u1', name: 'Alice' })).rejects.toBeInstanceOf(AuditContextMissingError);
+    expect(adapter.store.find('User', 'u1')).toBeUndefined();
+  });
+
+  it('runs without an audit context a write of a model that is not in entities, even with requireContext: true', async () => {
+    const adapter = createAdapter({ entities: userOnly, requireContext: true });
+
+    await adapter.create('Post', { id: 'p1', authorId: 'u1', title: 'Hello' });
+
+    expect(adapter.store.find('Post', 'p1')).toEqual({ id: 'p1', authorId: 'u1', title: 'Hello' });
+    expect(adapter.store.auditLogs()).toEqual([]);
+  });
+
+  it('writes, with an audit context, a model that is not in entities without a record, calling no policy function or actor enricher', async () => {
+    const samplingRate = vi.fn(() => 1);
+    const awaited = vi.fn(() => true);
+    const enricher = vi.fn(async () => ({}));
+    const adapter = createAdapter({
+      entities: userOnly,
+      samplingRate,
+      write: { awaited },
+      actorContext: { enricher },
+    });
+
+    await withContext(() => adapter.create('Post', { id: 'p1', authorId: 'u1', title: 'Hello' }));
+    await adapter.flush();
+
+    expect(adapter.store.find('Post', 'p1')).toEqual({ id: 'p1', authorId: 'u1', title: 'Hello' });
+    expect(adapter.store.auditLogs()).toEqual([]);
+    expect(samplingRate).not.toHaveBeenCalled();
+    expect(awaited).not.toHaveBeenCalled();
+    expect(enricher).not.toHaveBeenCalled();
   });
 });
 
