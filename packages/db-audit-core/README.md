@@ -93,9 +93,10 @@ dispatch({ buildRecords, modelName, operation, params, atomic, auditContext }, c
   committed: a failed build then notifies the observer as `diff-generation` with the operation's
   `modelName`, `operation` and `params` and rejects with its error. Outside any transaction the
   operation's write has committed, and reporting it as failed would invite a retry that writes it
-  twice: a failed build drops the records, the sink's `reportDroppedBuild` applies the
-  write-failure policy to the drop, and `dispatch` resolves. A failed write goes to the failure sink
-  with its plan.
+  twice: a failed build drops the records, the sink's `reportDroppedBuild` reports the drop, and
+  `dispatch` resolves. A failed write goes to the failure sink with its plan: an `immediate` one
+  rejects `dispatch` with the write's error, since the transaction may not survive a failed
+  statement; any other leaves `dispatch` resolved.
 - **`TransactionRuntime<TDbHandle>`** is what the adapter knows about where the operation's write
   can run: `baseHandle` (a handle outside any transaction), `transaction` when the operation runs in
   one (its `handle` and `afterCommit(work)`, which starts the work once the transaction has
@@ -121,10 +122,9 @@ dispatch({ buildRecords, modelName, operation, params, atomic, auditContext }, c
 - **Audit gate**: `auditGate`, `AuditGateConfig` (`requireContext`), `AuditGate`, and
   `AuditContextMissingError` (with `modelName`, `operationModelName` and `operation`), which an
   adapter throws for a write the gate rejects.
-- **Failure handling**: `FailureSinkConfig` (`observer`, `writeOnError`, default `'log'`),
-  `AuditErrorPhase`, `AuditErrorContext`, `AuditErrorObserver`, `WriteOnError`, and
-  `createFailureSink`, which an adapter builds from the user's `errorObserver` and `write.onError`
-  options.
+- **Failure handling**: `FailureSinkConfig` (`observer`), `AuditErrorPhase`, `AuditErrorContext`,
+  `AuditErrorObserver`, and `createFailureSink`, which an adapter builds from the user's
+  `errorObserver` option.
 - **Utilities**: the branded id constructors (`createActorId`, `createEntityId`,
   `createAggregateId`), `unwrapId`, and `createAuditLogData`.
 - **Debug output**: the core logs through [`debug`](https://www.npmjs.com/package/debug) under the
@@ -175,9 +175,8 @@ write the adapter runs, in order:
    and `params` name the operation in a failure report. `dispatchConfig` is the adapter's
    `writeExecutor`, the user's optional `writer` (a `WriteFn` run in place of the executor's write,
    on the same handle) and the `failureSink`. It rejects only inside a transaction: when the build
-   failed, and when an immediate write failed and the write-failure policy rethrows. Outside any
-   transaction a failed build drops the records and a failed write follows the policy, with
-   `'throw'` logging.
+   failed, and when an immediate write failed. Outside any transaction a failed build drops the
+   records and a failed write is reported without rejecting.
 5. **The mutation events**, inside `buildRecords`: one `MutationEvent` per written row, with what
    the adapter reads after the write when the write itself does not return it. Each row an event
    carries holds every column of the table, `null` where the row has no value: a `foreignKey`
@@ -224,25 +223,27 @@ What the adapter must provide:
 - **Failure routing.** The adapter builds one `FailureSink` with
   `createFailureSink(failureSinkConfig)` and reports every failure through it. The sink owns
   the user-facing contract: the observer hears every failure and never affects the operation (an
-  observer that throws is logged), and only a failed write, or the records of a committed write
-  that `dispatch` dropped, consult `writeOnError` (default `'log'`; a function that throws, or a
-  `writeOnError` that is or returns anything other than a strategy, falls back to `'log'`).
+  observer that throws is logged with the message of the failure it was given). A failed
+  `immediate` write fails the operation with the write's error; a failed write of any other plan
+  and the records of a committed write that `dispatch` dropped never do, and are logged to the
+  console when no observer is configured.
   - `notify(context)` for a failure the adapter detects itself: `pre-fetch` (a read before the
     write failed), `diff-generation` (other work that builds the records failed before the write)
     and `row-identification` (the adapter could not identify a row the operation wrote). What each
     does to the operation is the adapter's choice, documented by it. A failure of `buildRecords`
     is reported by `dispatch` as `diff-generation`, and the adapter does not report it again.
   - `reportDroppedBuild(context)` for the records of a committed write whose build failed and
-    that no write is left to await: notifies the observer under `diff-generation`, then applies
-    `writeOnError`. `'throw'` logs, because the caller has returned. `dispatch` calls it; an
-    adapter does not.
+    that no write is left to await: notifies the observer under `diff-generation`, or logs a line
+    naming the model and the operation when no observer is configured. It never rejects, because
+    the caller has returned. `dispatch` calls it; an adapter does not.
   - `reportResolverFailures(failures)` with the `ResolverFailure`s `resolve` returned instead of
     throwing (an id resolver threw or returned no usable id), one `id-resolver-call` notification
     each.
   - `reportWriteFailure(plan, error)`, which `dispatch` calls when a write it executes failed (the
-    adapter does not): a `log-write` notification, then the policy. `'throw'` rejects with the
-    error only for an `immediate` plan, whose transaction has not committed; for the other plans
-    the operation's write has committed, so it logs, and the call never rejects.
+    adapter does not): a `log-write` notification. For an `immediate` plan, whose transaction has
+    not committed, it then rejects with the error, without a console line. For the other plans the
+    operation's write has committed: the call never rejects, and logs the failure when no observer
+    is configured.
 
 `@kuruwic/audit-adapter-memory` (`packages/adapter-memory`) is the smallest complete adapter. Its
 `runAudited` in `src/adapter.ts` is the whole sequence:

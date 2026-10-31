@@ -39,7 +39,7 @@ No decorators, no wrapper functions, no code changes. Attach the extension once 
 
 ### Guarantees
 
-- **Atomicity**: inside a transaction, yours or the one `write.implicitTransaction` opens, an awaited audit log is written in it, so the data and its audit logs commit or roll back together. Outside one, it is written once the operation has committed, and its failure never fails the committed operation.
+- **Atomicity**: inside a transaction, yours or the one `write.implicitTransaction` opens, an awaited audit log is written in it, so the data and its audit logs commit or roll back together: a failed audit write fails the operation and rolls its data back. Outside one, it is written once the operation has committed, and its failure never fails the committed operation.
 - **Accuracy under concurrent writes**: a transaction alone does not give it. The audit reads the before state ahead of the write, and whether a write another transaction commits in between is recorded wrongly or rejected depends on the database and the isolation level.
 - **Coverage**: a write that writes rows of a model in `entities` is audited when an audit context is set. Without one it runs unaudited, or is rejected with `requireContext`. Sampling, raw queries and the database's own writes are not recorded.
 
@@ -68,7 +68,7 @@ Branded types (`ActorId`, `EntityId`, `AggregateId`) prevent ID mix-ups at compi
 | **Architecture**  | DDD aggregate root mapping, AsyncLocalStorage context propagation, one audit pipeline for single and batch writes              |
 | **Performance**   | 3 write strategies (sync/deferred/fire-and-forget), probabilistic sampling, batch context enrichment (N+1 free)                |
 | **Security**      | PII redaction of built-in sensitive fields (passwords, tokens, SSN, etc.) plus `redactFields`, masking of the fields a client-level `omit` hides that an entity lists in `recordOmittedFields` |
-| **Extensibility** | Custom writer, custom serializers, error observer and write-failure strategy, framework-agnostic core                         |
+| **Extensibility** | Custom writer, custom serializers, error observer, framework-agnostic core                                                     |
 
 ## Installation
 
