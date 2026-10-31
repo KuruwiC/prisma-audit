@@ -47,10 +47,6 @@ describe('Custom Audit Log Table', () => {
       write: {
         model: 'Activity',
         awaited: true,
-        onError: (context) => {
-          console.error(`[Custom Table Test] Audit error in ${context.phase}:`, context.error);
-          return 'throw';
-        },
       },
     });
 

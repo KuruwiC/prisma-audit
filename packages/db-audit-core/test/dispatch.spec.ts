@@ -3,8 +3,8 @@
  * writes them on the right handle at the right time (immediately and awaited, after commit, or
  * detached), the writer hook receives where the write runs, a failed write reaches the failure sink
  * with the write plan it belongs to, and a failed build is reported as diff-generation and fails
- * the caller unless the write would be detached, where the dropped records follow the write-failure
- * policy.
+ * the caller unless the write would be detached, where the dropped records are reported without
+ * failing it.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -94,11 +94,10 @@ const failingWrite = async (): Promise<void> => {
   throw writeError;
 };
 
-/** The sink a user's 'throw' policy builds, with an observer that keeps every context */
-const throwingPolicySink = () => {
+/** A real sink with an observer that keeps every context */
+const observingSink = () => {
   const observed: AuditErrorContext[] = [];
   const failureSink = createFailureSink({
-    writeOnError: 'throw',
     observer: (context) => {
       observed.push(context);
     },
@@ -184,18 +183,19 @@ describe('dispatch', () => {
       expect(vi.mocked(failureSink.reportWriteFailure).mock.calls[0]?.[0].records).toBe(records);
     });
 
-    it("rejects with the original error under a 'throw' policy, after notifying the observer", async () => {
-      const { failureSink, observed } = throwingPolicySink();
+    it('rejects with the original error, after notifying the observer', async () => {
+      const { failureSink, observed } = observingSink();
       const { config } = createConfig({ write: failingWrite, failureSink });
 
       await expect(dispatch(audited(true), config, createRuntime(true).runtime)).rejects.toBe(writeError);
       expect(observed).toEqual([logWriteContext]);
     });
 
-    it("resolves under the default 'log' policy", async () => {
+    it('rejects with the original error without an observer, logging nothing', async () => {
       const { config } = createConfig({ write: failingWrite, failureSink: createFailureSink({}) });
 
-      await expect(dispatch(audited(true), config, createRuntime(true).runtime)).resolves.toBeUndefined();
+      await expect(dispatch(audited(true), config, createRuntime(true).runtime)).rejects.toBe(writeError);
+      expect(consoleError).not.toHaveBeenCalled();
     });
   });
 
@@ -226,8 +226,8 @@ describe('dispatch', () => {
       expect(failureSink.reportWriteFailure).toHaveBeenCalledWith({ kind: 'after-commit', records }, writeError);
     });
 
-    it("never rejects from the registered work, even under a 'throw' policy", async () => {
-      const { failureSink, observed } = throwingPolicySink();
+    it('never rejects from the registered work, after notifying the observer', async () => {
+      const { failureSink, observed } = observingSink();
       const { config } = createConfig({ write: failingWrite, failureSink });
       const { runtime, afterCommitted } = createRuntime(true);
 
@@ -264,8 +264,8 @@ describe('dispatch', () => {
       expect(vi.mocked(failureSink.reportWriteFailure).mock.calls[0]?.[1]?.message).toBe('insert failed');
     });
 
-    it("never rejects from the detached work, even under a 'throw' policy", async () => {
-      const { failureSink, observed } = throwingPolicySink();
+    it('never rejects from the detached work, after notifying the observer', async () => {
+      const { failureSink, observed } = observingSink();
       const { config } = createConfig({ write: failingWrite, failureSink });
       const { runtime, detached } = createRuntime(false);
 
@@ -396,12 +396,19 @@ describe('dispatch', () => {
       );
     });
 
-    it("resolves under a 'throw' policy, after notifying the observer, since the operation's write has committed", async () => {
-      const { failureSink, observed } = throwingPolicySink();
+    it("resolves after notifying the observer, since the operation's write has committed", async () => {
+      const { failureSink, observed } = observingSink();
       const { config } = createConfig({ write: failingWrite, failureSink });
 
       await expect(dispatch(audited(true), config, createRuntime(false).runtime)).resolves.toBeUndefined();
       expect(observed).toEqual([logWriteContext]);
+      expect(consoleError).not.toHaveBeenCalled();
+    });
+
+    it("resolves and logs the failure without an observer, since the operation's write has committed", async () => {
+      const { config } = createConfig({ write: failingWrite, failureSink: createFailureSink({}) });
+
+      await expect(dispatch(audited(true), config, createRuntime(false).runtime)).resolves.toBeUndefined();
       expect(consoleError).toHaveBeenCalledWith(
         '[db-audit-core] Error in audit log write after commit:',
         writeError.message,

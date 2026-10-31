@@ -46,11 +46,12 @@ const planOf = <TDbHandle>(
  * The build runs before `dispatch` resolves, whatever the write plan. `dispatch` rejects only
  * while the operation's write is inside a transaction that has not committed: with the error of a
  * failed build, after notifying the observer under `diff-generation` with the operation's
- * `modelName`, `operation` and `params`, and with the error of a failed immediate write that the
- * write-failure policy rethrows. Outside any transaction the operation's write has committed, and
- * reporting it as failed would invite a retry that writes it twice: a failed build drops the
- * records (reported through {@link FailureSink.reportDroppedBuild}) and a failed write follows the
- * write-failure policy, with `'throw'` logging.
+ * `modelName`, `operation` and `params`, and with the error of a failed immediate write, after
+ * notifying it under `log-write`. The transaction may not survive a failed statement, so its
+ * records and the operation's write commit together or not at all. Outside any transaction the
+ * operation's write has committed, and reporting it as failed would invite a retry that writes it
+ * twice: a failed build drops the records (reported through {@link FailureSink.reportDroppedBuild})
+ * and a failed write is reported without failing the operation.
  *
  * Resolves once an awaited write has finished, or once the write is handed to the runtime; the
  * work handed to `afterCommit` or `detach` reports its own failure and never rejects.

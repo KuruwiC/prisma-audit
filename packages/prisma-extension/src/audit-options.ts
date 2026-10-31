@@ -135,7 +135,7 @@ export const normalizeAuditOptions = (options: PrismaAuditExtensionOptions): Aud
       relationFieldNames,
     },
     writer: write?.writer,
-    failureSinkConfig: { observer: errorObserver, writeOnError: write?.onError },
+    failureSinkConfig: { observer: errorObserver },
     shouldFetchBefore: createShouldFetchBefore(entityConfigs.byModel, options.fetchBefore),
     auditedModelsOf: (modelName, args) =>
       auditedModelsWrittenBy(

@@ -1,6 +1,6 @@
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
-import type { AuditErrorContext, AuditErrorObserver, WriteOnError } from '@kuruwic/prisma-audit';
+import type { AuditErrorObserver } from '@kuruwic/prisma-audit';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
@@ -11,14 +11,18 @@ import { createBasePrisma, setupTestContext, testEntities } from './helpers/setu
 const AUDIT_WRITE_FAILURE_MESSAGE = 'simulated audit log write failure';
 
 interface FailingWriterClientOptions {
-  onError?: WriteOnError;
   errorObserver?: AuditErrorObserver;
+  /**
+   * Whether every write runs in the transaction the client opens around it, so its awaited audit
+   * write is written before commit (the default), or outside any transaction, once it has committed
+   */
+  implicitTransaction?: boolean;
 }
 
 /**
  * Builds an audited client whose `write.writer` always throws, so every audit-log
  * write fails on purpose (see write-writer.integration.spec.ts for the base pattern).
- * Each scenario gets its own Prisma client so the `write.onError` and `errorObserver` under test
+ * Each scenario gets its own Prisma client so the `errorObserver` under test
  * cannot leak into other scenarios.
  */
 const createFailingWriterClient = (options: FailingWriterClientOptions) => {
@@ -31,15 +35,12 @@ const createFailingWriterClient = (options: FailingWriterClientOptions) => {
     contextProvider: provider,
     entities: testEntities,
     diffExcludeFields: ['createdAt'],
-    // Every write runs in the transaction the client opens around it, which an awaited audit
-    // write that fails under 'throw' rolls back.
     write: {
       awaited: true,
-      implicitTransaction: true,
+      implicitTransaction: options.implicitTransaction ?? true,
       writer: async () => {
         throw new Error(AUDIT_WRITE_FAILURE_MESSAGE);
       },
-      ...(options.onError ? { onError: options.onError } : {}),
     },
     ...(options.errorObserver ? { errorObserver: options.errorObserver } : {}),
   });
@@ -55,6 +56,12 @@ const disconnectScenario = async (scenario: {
   await scenario.basePrisma.$disconnect();
 };
 
+const logWriteFailure = expect.objectContaining({
+  phase: 'log-write',
+  modelName: 'User',
+  error: expect.objectContaining({ message: AUDIT_WRITE_FAILURE_MESSAGE }),
+});
+
 describe('Error Handling Integration', () => {
   const context = setupTestContext();
 
@@ -67,16 +74,109 @@ describe('Error Handling Integration', () => {
     },
   };
 
-  describe('Audit-log write failures — error policy contract', () => {
+  describe('Audit-log write failures', () => {
     // Every scenario below drives a real audit-log write failure via a `write.writer`
     // that always throws (see write-writer.integration.spec.ts for the base pattern),
     // then observes whether the caller's own `user.create` succeeds or fails, whether
     // anything is logged to the console, and whether the observer was notified.
 
-    it("write.onError: 'ignore' — commits the caller's row and stays silent", async () => {
+    it("an awaited write inside the transaction the client opens fails the caller's operation with the original error and rolls back the row", async () => {
       const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       const observer = vi.fn();
-      const scenario = createFailingWriterClient({ onError: 'ignore', errorObserver: observer });
+      const scenario = createFailingWriterClient({ errorObserver: observer });
+
+      try {
+        await expect(
+          scenario.provider.runAsync(testActor, async () =>
+            scenario.prisma.user.create({
+              data: { email: 'throw-strategy@example.com', name: 'Throw User', password: 'secret123' },
+            }),
+          ),
+        ).rejects.toThrow(AUDIT_WRITE_FAILURE_MESSAGE);
+
+        const persisted = await context.basePrisma.user.findUnique({
+          where: { email: 'throw-strategy@example.com' },
+        });
+        expect(persisted).toBeNull();
+
+        expect(observer).toHaveBeenCalledTimes(1);
+        expect(observer).toHaveBeenCalledWith(logWriteFailure);
+        // The thrown error is the report: nothing goes to the console.
+        expect(consoleErrorSpy).not.toHaveBeenCalled();
+      } finally {
+        consoleErrorSpy.mockRestore();
+        await disconnectScenario(scenario);
+      }
+    });
+
+    it("an awaited write inside the transaction the client opens fails the caller's operation without an observer, and logs nothing", async () => {
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const scenario = createFailingWriterClient({});
+
+      try {
+        await expect(
+          scenario.provider.runAsync(testActor, async () =>
+            scenario.prisma.user.create({
+              data: { email: 'default-strategy@example.com', name: 'Default User', password: 'secret123' },
+            }),
+          ),
+        ).rejects.toThrow(AUDIT_WRITE_FAILURE_MESSAGE);
+
+        const persisted = await context.basePrisma.user.findUnique({
+          where: { email: 'default-strategy@example.com' },
+        });
+        expect(persisted).toBeNull();
+
+        expect(consoleErrorSpy).not.toHaveBeenCalled();
+      } finally {
+        consoleErrorSpy.mockRestore();
+        await disconnectScenario(scenario);
+      }
+    });
+
+    it("a throwing observer is caught and logged with the write failure, and the caller's operation still fails with the original error", async () => {
+      // The observer is read-only by construction: every invocation is wrapped in its
+      // own try/catch, so a broken observer callback cannot change what the caller sees.
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const OBSERVER_FAILURE_MESSAGE = 'observer callback is broken';
+      const observer = vi.fn(() => {
+        throw new Error(OBSERVER_FAILURE_MESSAGE);
+      });
+      const scenario = createFailingWriterClient({ errorObserver: observer });
+
+      try {
+        await expect(
+          scenario.provider.runAsync(testActor, async () =>
+            scenario.prisma.user.create({
+              data: { email: 'broken-observer@example.com', name: 'Broken Observer User', password: 'secret123' },
+            }),
+          ),
+        ).rejects.toThrow(AUDIT_WRITE_FAILURE_MESSAGE);
+
+        const persisted = await context.basePrisma.user.findUnique({
+          where: { email: 'broken-observer@example.com' },
+        });
+        expect(persisted).toBeNull();
+
+        expect(observer).toHaveBeenCalledWith(logWriteFailure);
+
+        expect(consoleErrorSpy.mock.calls).toEqual([
+          [
+            '[db-audit-core] Error in errorObserver:',
+            OBSERVER_FAILURE_MESSAGE,
+            `(while reporting a log-write failure: ${AUDIT_WRITE_FAILURE_MESSAGE})`,
+          ],
+        ]);
+      } finally {
+        consoleErrorSpy.mockRestore();
+        await disconnectScenario(scenario);
+      }
+    });
+
+    it("an awaited write outside any transaction keeps the caller's committed row and leaves the failure to the observer", async () => {
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const observer = vi.fn();
+      const scenario = createFailingWriterClient({ errorObserver: observer, implicitTransaction: false });
 
       try {
         const user = await scenario.provider.runAsync(testActor, async () =>
@@ -92,25 +192,18 @@ describe('Error Handling Integration', () => {
         });
         expect(persisted).not.toBeNull();
 
+        expect(observer).toHaveBeenCalledTimes(1);
+        expect(observer).toHaveBeenCalledWith(logWriteFailure);
         expect(consoleErrorSpy).not.toHaveBeenCalled();
-
-        expect(observer).toHaveBeenCalledWith(
-          expect.objectContaining({
-            phase: 'log-write',
-            modelName: 'User',
-            error: expect.objectContaining({ message: AUDIT_WRITE_FAILURE_MESSAGE }),
-          }),
-        );
       } finally {
         consoleErrorSpy.mockRestore();
         await disconnectScenario(scenario);
       }
     });
 
-    it("write.onError: 'log' — commits the caller's row and reports the error to the console", async () => {
+    it("an awaited write outside any transaction keeps the caller's committed row and logs the failure to the console without an observer", async () => {
       const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-      const observer = vi.fn();
-      const scenario = createFailingWriterClient({ onError: 'log', errorObserver: observer });
+      const scenario = createFailingWriterClient({ implicitTransaction: false });
 
       try {
         const user = await scenario.provider.runAsync(testActor, async () =>
@@ -127,274 +220,8 @@ describe('Error Handling Integration', () => {
         expect(persisted).not.toBeNull();
 
         expect(consoleErrorSpy).toHaveBeenCalledWith(
-          '[db-audit-core] Error in audit log write:',
+          '[db-audit-core] Error in audit log write after commit:',
           AUDIT_WRITE_FAILURE_MESSAGE,
-        );
-
-        expect(observer).toHaveBeenCalledWith(
-          expect.objectContaining({
-            phase: 'log-write',
-            modelName: 'User',
-            error: expect.objectContaining({ message: AUDIT_WRITE_FAILURE_MESSAGE }),
-          }),
-        );
-      } finally {
-        consoleErrorSpy.mockRestore();
-        await disconnectScenario(scenario);
-      }
-    });
-
-    it("write.onError: 'throw' — fails the caller's operation and rolls back the row", async () => {
-      const observer = vi.fn();
-      const scenario = createFailingWriterClient({ onError: 'throw', errorObserver: observer });
-
-      try {
-        await expect(
-          scenario.provider.runAsync(testActor, async () =>
-            scenario.prisma.user.create({
-              data: { email: 'throw-strategy@example.com', name: 'Throw User', password: 'secret123' },
-            }),
-          ),
-        ).rejects.toThrow(AUDIT_WRITE_FAILURE_MESSAGE);
-
-        const persisted = await context.basePrisma.user.findUnique({
-          where: { email: 'throw-strategy@example.com' },
-        });
-        expect(persisted).toBeNull();
-
-        expect(observer).toHaveBeenCalledWith(
-          expect.objectContaining({
-            phase: 'log-write',
-            modelName: 'User',
-            error: expect.objectContaining({ message: AUDIT_WRITE_FAILURE_MESSAGE }),
-          }),
-        );
-      } finally {
-        await disconnectScenario(scenario);
-      }
-    });
-
-    it("default (no write.onError configured) — behaves like 'log', not 'throw'", async () => {
-      // An audit library must not break the caller's write by default — see WriteOnError's JSDoc.
-      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-      const observer = vi.fn();
-      const scenario = createFailingWriterClient({ errorObserver: observer });
-
-      try {
-        const user = await scenario.provider.runAsync(testActor, async () =>
-          scenario.prisma.user.create({
-            data: { email: 'default-strategy@example.com', name: 'Default User', password: 'secret123' },
-          }),
-        );
-
-        expect(user.email).toBe('default-strategy@example.com');
-
-        const persisted = await context.basePrisma.user.findUnique({
-          where: { email: 'default-strategy@example.com' },
-        });
-        expect(persisted).not.toBeNull();
-
-        expect(consoleErrorSpy).toHaveBeenCalledWith(
-          '[db-audit-core] Error in audit log write:',
-          AUDIT_WRITE_FAILURE_MESSAGE,
-        );
-
-        expect(observer).toHaveBeenCalledWith(
-          expect.objectContaining({
-            phase: 'log-write',
-            modelName: 'User',
-            error: expect.objectContaining({ message: AUDIT_WRITE_FAILURE_MESSAGE }),
-          }),
-        );
-      } finally {
-        consoleErrorSpy.mockRestore();
-        await disconnectScenario(scenario);
-      }
-    });
-
-    it("write.onError function — returning 'ignore' is invoked with the failure context and lets the operation succeed", async () => {
-      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-      const observer = vi.fn();
-      const policy = vi.fn((_context: AuditErrorContext) => 'ignore' as const);
-      const scenario = createFailingWriterClient({ onError: policy, errorObserver: observer });
-
-      try {
-        const user = await scenario.provider.runAsync(testActor, async () =>
-          scenario.prisma.user.create({
-            data: { email: 'policy-fn-ignore@example.com', name: 'Policy Fn User', password: 'secret123' },
-          }),
-        );
-
-        expect(user.email).toBe('policy-fn-ignore@example.com');
-
-        const persisted = await context.basePrisma.user.findUnique({
-          where: { email: 'policy-fn-ignore@example.com' },
-        });
-        expect(persisted).not.toBeNull();
-
-        // The function decided 'ignore' — nothing goes to the console.
-        expect(consoleErrorSpy).not.toHaveBeenCalled();
-
-        expect(policy).toHaveBeenCalledWith(
-          expect.objectContaining({
-            phase: 'log-write',
-            modelName: 'User',
-            error: expect.objectContaining({ message: AUDIT_WRITE_FAILURE_MESSAGE }),
-          }),
-        );
-
-        // The observer is notified independently of what the policy function returned.
-        expect(observer).toHaveBeenCalledWith(
-          expect.objectContaining({
-            phase: 'log-write',
-            modelName: 'User',
-            error: expect.objectContaining({ message: AUDIT_WRITE_FAILURE_MESSAGE }),
-          }),
-        );
-      } finally {
-        consoleErrorSpy.mockRestore();
-        await disconnectScenario(scenario);
-      }
-    });
-
-    it("write.onError function — returning 'throw' fails the operation with the original audit-write error", async () => {
-      const observer = vi.fn();
-      const policy = vi.fn((_context: AuditErrorContext) => 'throw' as const);
-      const scenario = createFailingWriterClient({ onError: policy, errorObserver: observer });
-
-      try {
-        await expect(
-          scenario.provider.runAsync(testActor, async () =>
-            scenario.prisma.user.create({
-              data: { email: 'policy-fn-throw@example.com', name: 'Policy Fn Throw User', password: 'secret123' },
-            }),
-          ),
-          // A policy function only ever picks among 'throw' | 'log' | 'ignore' — it never
-          // substitutes a different error, so the caller sees the original write failure.
-        ).rejects.toThrow(AUDIT_WRITE_FAILURE_MESSAGE);
-
-        const persisted = await context.basePrisma.user.findUnique({
-          where: { email: 'policy-fn-throw@example.com' },
-        });
-        expect(persisted).toBeNull();
-
-        expect(policy).toHaveBeenCalledWith(
-          expect.objectContaining({
-            phase: 'log-write',
-            modelName: 'User',
-            error: expect.objectContaining({ message: AUDIT_WRITE_FAILURE_MESSAGE }),
-          }),
-        );
-
-        expect(observer).toHaveBeenCalledWith(
-          expect.objectContaining({
-            phase: 'log-write',
-            modelName: 'User',
-            error: expect.objectContaining({ message: AUDIT_WRITE_FAILURE_MESSAGE }),
-          }),
-        );
-      } finally {
-        await disconnectScenario(scenario);
-      }
-    });
-
-    it("a throwing write.onError function never fails the caller's operation — it falls back to 'log' instead", async () => {
-      // The policy function's contract says it must return 'throw' | 'log' | 'ignore' and
-      // never throw (see WriteOnError's JSDoc). A policy that throws anyway must not
-      // get to decide anything — unlike the observer (always read-only), the policy is the
-      // one thing that can fail the caller's operation, so letting its own bug propagate
-      // would be worse than the audit-write failure it was supposed to be deciding about.
-      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-      const POLICY_FAILURE_MESSAGE = 'write.onError function is broken';
-      const observer = vi.fn();
-      const policy = vi.fn((_context: AuditErrorContext) => {
-        throw new Error(POLICY_FAILURE_MESSAGE);
-      });
-      const scenario = createFailingWriterClient({ onError: policy, errorObserver: observer });
-
-      try {
-        const user = await scenario.provider.runAsync(testActor, async () =>
-          scenario.prisma.user.create({
-            data: { email: 'policy-fn-throws@example.com', name: 'Policy Fn Broken User', password: 'secret123' },
-          }),
-        );
-
-        expect(user.email).toBe('policy-fn-throws@example.com');
-
-        const persisted = await context.basePrisma.user.findUnique({
-          where: { email: 'policy-fn-throws@example.com' },
-        });
-        expect(persisted).not.toBeNull();
-
-        expect(policy).toHaveBeenCalledWith(
-          expect.objectContaining({
-            phase: 'log-write',
-            modelName: 'User',
-            error: expect.objectContaining({ message: AUDIT_WRITE_FAILURE_MESSAGE }),
-          }),
-        );
-
-        // The broken policy function itself is reported to the console...
-        expect(consoleErrorSpy).toHaveBeenCalledWith(
-          "[db-audit-core] Error in write.onError function; falling back to 'log':",
-          POLICY_FAILURE_MESSAGE,
-        );
-        // ...and the fallback ('log') also reports the original audit-write failure it
-        // was supposed to decide about.
-        expect(consoleErrorSpy).toHaveBeenCalledWith(
-          '[db-audit-core] Error in audit log write:',
-          AUDIT_WRITE_FAILURE_MESSAGE,
-        );
-
-        // The observer is notified independently of the policy function's own failure.
-        expect(observer).toHaveBeenCalledWith(
-          expect.objectContaining({
-            phase: 'log-write',
-            modelName: 'User',
-            error: expect.objectContaining({ message: AUDIT_WRITE_FAILURE_MESSAGE }),
-          }),
-        );
-      } finally {
-        consoleErrorSpy.mockRestore();
-        await disconnectScenario(scenario);
-      }
-    });
-
-    it("a throwing observer never affects the caller's operation — it is caught and logged instead", async () => {
-      // The observer is read-only by construction: every invocation is wrapped in its
-      // own try/catch, so a broken observer callback cannot change whether the caller's
-      // write succeeds (unlike the policy, which is the only thing that can).
-      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-      const OBSERVER_FAILURE_MESSAGE = 'observer callback is broken';
-      const observer = vi.fn(() => {
-        throw new Error(OBSERVER_FAILURE_MESSAGE);
-      });
-      const scenario = createFailingWriterClient({ onError: 'ignore', errorObserver: observer });
-
-      try {
-        const user = await scenario.provider.runAsync(testActor, async () =>
-          scenario.prisma.user.create({
-            data: { email: 'broken-observer@example.com', name: 'Broken Observer User', password: 'secret123' },
-          }),
-        );
-
-        expect(user.email).toBe('broken-observer@example.com');
-
-        const persisted = await context.basePrisma.user.findUnique({
-          where: { email: 'broken-observer@example.com' },
-        });
-        expect(persisted).not.toBeNull();
-
-        expect(observer).toHaveBeenCalledWith(
-          expect.objectContaining({
-            phase: 'log-write',
-            error: expect.objectContaining({ message: AUDIT_WRITE_FAILURE_MESSAGE }),
-          }),
-        );
-
-        expect(consoleErrorSpy).toHaveBeenCalledWith(
-          '[db-audit-core] Error in errorObserver:',
-          OBSERVER_FAILURE_MESSAGE,
         );
       } finally {
         consoleErrorSpy.mockRestore();
@@ -403,21 +230,17 @@ describe('Error Handling Integration', () => {
     });
   });
 
-  describe('Batch operations — error policy contract', () => {
+  describe('Batch operations — audit-log write failures', () => {
     // A batch operation's own `log-write` failure notifies the observer exactly
     // once, with `phase: 'log-write'`, through the same audited-operation pipeline
-    // as a single operation. Under `write.onError: 'throw'`, that failure
-    // rolls the caller's rows back with it.
-
-    // The next two tests use `write.onError: 'throw'` specifically: it is the
-    // only policy that re-throws the `log-write` failure out of the audit-log write,
-    // so it is the one policy under which the once-only guarantee has to hold
+    // as a single operation. Inside a transaction that failure fails the caller's
+    // operation and rolls its rows back with it; the once-only guarantee has to hold
     // end to end — the failure must propagate back to the caller without being
     // reported a second time along the way.
 
     it("a failing write.writer on a batch operation (createMany) notifies the observer exactly once, with phase: 'log-write'", async () => {
       const observer = vi.fn();
-      const scenario = createFailingWriterClient({ onError: 'throw', errorObserver: observer });
+      const scenario = createFailingWriterClient({ errorObserver: observer });
 
       try {
         await expect(
@@ -438,13 +261,7 @@ describe('Error Handling Integration', () => {
         expect(persisted).toHaveLength(0);
 
         expect(observer).toHaveBeenCalledTimes(1);
-        expect(observer).toHaveBeenCalledWith(
-          expect.objectContaining({
-            phase: 'log-write',
-            modelName: 'User',
-            error: expect.objectContaining({ message: AUDIT_WRITE_FAILURE_MESSAGE }),
-          }),
-        );
+        expect(observer).toHaveBeenCalledWith(logWriteFailure);
       } finally {
         await disconnectScenario(scenario);
       }
@@ -452,12 +269,12 @@ describe('Error Handling Integration', () => {
 
     it("a failing write.writer on a batch operation (updateMany) notifies the observer exactly once, with phase: 'log-write'", async () => {
       const observer = vi.fn();
-      const scenario = createFailingWriterClient({ onError: 'throw', errorObserver: observer });
+      const scenario = createFailingWriterClient({ errorObserver: observer });
 
       try {
         // Seed directly through the raw (non-audited) base client — the audited client's
-        // writer always fails, so any audited write here (even under the same 'throw'
-        // policy under test) would itself reject before there is anything to update.
+        // writer always fails, so any audited write here would itself reject before there
+        // is anything to update.
         const [userA, userB] = await Promise.all([
           scenario.basePrisma.user.create({
             data: { email: 'batch-update-log-write-a@example.com', name: 'A', password: 'secret123' },
@@ -484,35 +301,27 @@ describe('Error Handling Integration', () => {
         expect(stillOriginal.map((u) => u.name).sort()).toEqual(['A', 'B']);
 
         expect(observer).toHaveBeenCalledTimes(1);
-        expect(observer).toHaveBeenCalledWith(
-          expect.objectContaining({
-            phase: 'log-write',
-            modelName: 'User',
-            error: expect.objectContaining({ message: AUDIT_WRITE_FAILURE_MESSAGE }),
-          }),
-        );
+        expect(observer).toHaveBeenCalledWith(logWriteFailure);
       } finally {
         await disconnectScenario(scenario);
       }
     });
 
-    it("write.onError: 'ignore' on a batch operation (updateMany) lets the caller's operation succeed", async () => {
-      // `write.onError: 'ignore'` lets a batch operation's own `log-write`
-      // failure through without affecting the caller's operation, the same as the
-      // single-operation path.
+    it("a batch operation (updateMany) outside any transaction keeps the caller's committed rows and leaves the failure to the observer", async () => {
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       const observer = vi.fn();
-      const scenario = createFailingWriterClient({ onError: 'ignore', errorObserver: observer });
+      const scenario = createFailingWriterClient({ errorObserver: observer, implicitTransaction: false });
 
       try {
-        const [userA, userB] = await scenario.provider.runAsync(testActor, async () => [
-          await scenario.prisma.user.create({
+        // Seeded through the raw base client: the audited client's writer always fails.
+        const [userA, userB] = await Promise.all([
+          scenario.basePrisma.user.create({
             data: { email: 'batch-ignore-a@example.com', name: 'Batch Ignore A', password: 'secret123' },
           }),
-          await scenario.prisma.user.create({
+          scenario.basePrisma.user.create({
             data: { email: 'batch-ignore-b@example.com', name: 'Batch Ignore B', password: 'secret123' },
           }),
         ]);
-        observer.mockClear();
 
         const updateResult = await scenario.provider.runAsync(testActor, async () =>
           scenario.prisma.user.updateMany({
@@ -529,90 +338,67 @@ describe('Error Handling Integration', () => {
         });
         expect(updated.map((u) => u.name)).toEqual(['Batch Ignore Updated', 'Batch Ignore Updated']);
 
-        expect(observer).toHaveBeenCalledWith(
-          expect.objectContaining({
-            phase: 'log-write',
-            modelName: 'User',
-            error: expect.objectContaining({ message: AUDIT_WRITE_FAILURE_MESSAGE }),
-          }),
-        );
+        expect(observer).toHaveBeenCalledTimes(1);
+        expect(observer).toHaveBeenCalledWith(logWriteFailure);
+        expect(consoleErrorSpy).not.toHaveBeenCalled();
       } finally {
+        consoleErrorSpy.mockRestore();
         await disconnectScenario(scenario);
       }
     });
 
-    it.each([
-      { policyName: "write.onError: 'log'", onError: 'log' as const },
-      { policyName: 'the default write.onError' },
-    ])(
-      "$policyName on a batch operation (updateMany) lets the caller's operation succeed and reports the failed write to the console",
-      async (policy) => {
-        const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-        const observer = vi.fn();
-        const scenario = createFailingWriterClient({
-          ...(policy.onError ? { onError: policy.onError } : {}),
-          errorObserver: observer,
-        });
+    it("a batch operation (updateMany) outside any transaction keeps the caller's committed rows and logs the failed write to the console without an observer", async () => {
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const scenario = createFailingWriterClient({ implicitTransaction: false });
 
-        try {
-          // Seeded through the raw base client: the audited client's writer always fails.
-          const [userA, userB] = await Promise.all([
-            scenario.basePrisma.user.create({
-              data: { email: 'batch-log-a@example.com', name: 'Batch Log A', password: 'secret123' },
-            }),
-            scenario.basePrisma.user.create({
-              data: { email: 'batch-log-b@example.com', name: 'Batch Log B', password: 'secret123' },
-            }),
-          ]);
+      try {
+        // Seeded through the raw base client: the audited client's writer always fails.
+        const [userA, userB] = await Promise.all([
+          scenario.basePrisma.user.create({
+            data: { email: 'batch-log-a@example.com', name: 'Batch Log A', password: 'secret123' },
+          }),
+          scenario.basePrisma.user.create({
+            data: { email: 'batch-log-b@example.com', name: 'Batch Log B', password: 'secret123' },
+          }),
+        ]);
 
-          const updateResult = await scenario.provider.runAsync(testActor, async () =>
-            scenario.prisma.user.updateMany({
-              where: { id: { in: [userA.id, userB.id] } },
-              data: { name: 'Batch Log Updated' },
-            }),
-          );
-
-          expect(updateResult.count).toBe(2);
-
-          const updated = await context.basePrisma.user.findMany({
+        const updateResult = await scenario.provider.runAsync(testActor, async () =>
+          scenario.prisma.user.updateMany({
             where: { id: { in: [userA.id, userB.id] } },
-            select: { name: true },
-          });
-          expect(updated.map((u) => u.name)).toEqual(['Batch Log Updated', 'Batch Log Updated']);
+            data: { name: 'Batch Log Updated' },
+          }),
+        );
 
-          // The message line, then the error's stack
-          expect(consoleErrorSpy.mock.calls.map(([line]) => String(line).split('\n')[0])).toEqual([
-            '[db-audit-core] Error in audit log write:',
-            `Error: ${AUDIT_WRITE_FAILURE_MESSAGE}`,
-          ]);
+        expect(updateResult.count).toBe(2);
 
-          expect(observer).toHaveBeenCalledTimes(1);
-          expect(observer).toHaveBeenCalledWith(
-            expect.objectContaining({
-              phase: 'log-write',
-              modelName: 'User',
-              error: expect.objectContaining({ message: AUDIT_WRITE_FAILURE_MESSAGE }),
-            }),
-          );
-        } finally {
-          consoleErrorSpy.mockRestore();
-          await disconnectScenario(scenario);
-        }
-      },
-    );
+        const updated = await context.basePrisma.user.findMany({
+          where: { id: { in: [userA.id, userB.id] } },
+          select: { name: true },
+        });
+        expect(updated.map((u) => u.name)).toEqual(['Batch Log Updated', 'Batch Log Updated']);
+
+        // The message line, then the error's stack
+        expect(consoleErrorSpy.mock.calls.map(([line]) => String(line).split('\n')[0])).toEqual([
+          '[db-audit-core] Error in audit log write after commit:',
+          `Error: ${AUDIT_WRITE_FAILURE_MESSAGE}`,
+        ]);
+      } finally {
+        consoleErrorSpy.mockRestore();
+        await disconnectScenario(scenario);
+      }
+    });
   });
 
   describe('Single operations — diff-generation failures', () => {
     // A `diff-generation` phase failure reaches the caller as the original error, the observer
-    // is notified once, and the write-failure policy is never consulted.
+    // is notified once.
 
-    it('a diff-generation failure on the single-operation path inside the transaction the client opens propagates the original error to the caller, regardless of write.onError', async () => {
+    it('a diff-generation failure on the single-operation path inside the transaction the client opens propagates the original error to the caller', async () => {
       const ENRICHER_FAILURE_MESSAGE = 'actor enricher is broken';
       const enricherError = new Error(ENRICHER_FAILURE_MESSAGE);
       const basePrisma = createBasePrisma();
       const provider = createAsyncLocalStorageProvider();
       const observer = vi.fn();
-      const policy = vi.fn((_context: AuditErrorContext) => 'ignore' as const);
       const prisma = createAuditClient(basePrisma, {
         Prisma,
         schema: auditSchema,
@@ -622,7 +408,6 @@ describe('Error Handling Integration', () => {
         write: {
           awaited: true,
           implicitTransaction: true,
-          onError: policy,
         },
         actorContext: {
           enricher: async () => {
@@ -657,7 +442,6 @@ describe('Error Handling Integration', () => {
         expect(observer).toHaveBeenCalledWith(
           expect.objectContaining({ phase: 'diff-generation', modelName: 'User', error: enricherError }),
         );
-        expect(policy).not.toHaveBeenCalled();
       } finally {
         await prisma.$disconnect();
         await basePrisma.$disconnect();
@@ -700,7 +484,6 @@ describe('Error Handling Integration', () => {
       });
       const provider = createAsyncLocalStorageProvider();
       const observer = vi.fn();
-      const policy = vi.fn((_context: AuditErrorContext) => 'ignore' as const);
       const prisma = createAuditClient(rawBasePrisma, {
         Prisma,
         schema: auditSchema,
@@ -710,7 +493,6 @@ describe('Error Handling Integration', () => {
         write: {
           awaited: true,
           implicitTransaction: true,
-          onError: policy,
         },
         fetchBefore: { update: true },
       }).$extends(faultInjection);
@@ -746,7 +528,6 @@ describe('Error Handling Integration', () => {
         expect(observer).toHaveBeenCalledWith(
           expect.objectContaining({ phase: 'diff-generation', modelName: 'User', error: rereadError }),
         );
-        expect(policy).not.toHaveBeenCalled();
       } finally {
         await prisma.$disconnect();
         await rawBasePrisma.$disconnect();
@@ -780,7 +561,6 @@ describe('Error Handling Integration', () => {
         });
         const provider = createAsyncLocalStorageProvider();
         const observer = vi.fn();
-        const policy = vi.fn((_context: AuditErrorContext) => 'ignore' as const);
         const prisma = createAuditClient(basePrisma, {
           Prisma,
           schema: auditSchema,
@@ -789,7 +569,6 @@ describe('Error Handling Integration', () => {
           errorObserver: observer,
           write: {
             awaited: awaited,
-            onError: policy,
           },
         });
 
@@ -822,7 +601,6 @@ describe('Error Handling Integration', () => {
           expect(observer).toHaveBeenCalledWith(
             expect.objectContaining({ phase: 'diff-generation', modelName: 'User', error: snapshotError }),
           );
-          expect(policy).not.toHaveBeenCalled();
         } finally {
           await prisma.$disconnect();
           await rawBasePrisma.$disconnect();
@@ -842,11 +620,10 @@ describe('Error Handling Integration', () => {
   });
 
   describe('Database constraint violations', () => {
-    it('a foreign key violation on a single-record create propagates raw as P2003, leaving no row and no audit log and without reaching the audit observer or policy', async () => {
+    it('a foreign key violation on a single-record create propagates raw as P2003, leaving no row and no audit log and without reaching the audit observer', async () => {
       const basePrisma = createBasePrisma();
       const provider = createAsyncLocalStorageProvider();
       const observer = vi.fn();
-      const policy = vi.fn((_context: AuditErrorContext) => 'ignore' as const);
       const prisma = createAuditClient(basePrisma, {
         Prisma,
         schema: auditSchema,
@@ -855,7 +632,6 @@ describe('Error Handling Integration', () => {
         errorObserver: observer,
         write: {
           awaited: true,
-          onError: policy,
         },
       });
 
@@ -879,24 +655,22 @@ describe('Error Handling Integration', () => {
         expect(await context.basePrisma.post.count()).toBe(0);
         expect(await context.basePrisma.auditLog.count({ where: { entityType: 'Post' } })).toBe(0);
         expect(observer).not.toHaveBeenCalled();
-        expect(policy).not.toHaveBeenCalled();
       } finally {
         await prisma.$disconnect();
         await basePrisma.$disconnect();
       }
     });
 
-    it('a batch (updateMany) unique constraint violation propagates raw, without reaching the audit observer or policy', async () => {
+    it('a batch (updateMany) unique constraint violation propagates raw, without reaching the audit observer', async () => {
       // The batch executor calls the caller's own `updateMany` in the middle of
       // audit-support work (before-fetch, after-refetch, record production). Only the
       // audit-support work is an audit failure — the caller's own database error must
-      // never be reported to `observer` or routed through `policy`. Uses a normal
+      // never be reported to `observer`. Uses a normal
       // (non-failing) writer so the only failure in play is the caller's own — the setup
       // creates below must not themselves trip the observer.
       const basePrisma = createBasePrisma();
       const provider = createAsyncLocalStorageProvider();
       const observer = vi.fn();
-      const policy = vi.fn((_context: AuditErrorContext) => 'ignore' as const);
       const prisma = createAuditClient(basePrisma, {
         Prisma,
         schema: auditSchema,
@@ -905,7 +679,6 @@ describe('Error Handling Integration', () => {
         errorObserver: observer,
         write: {
           awaited: true,
-          onError: policy,
         },
       });
 
@@ -918,9 +691,8 @@ describe('Error Handling Integration', () => {
             data: { email: 'batch-collision-b@example.com', name: 'Batch B', password: 'secret123' },
           }),
         ]);
-        // The setup creates above must not themselves trip the observer/policy.
+        // The setup creates above must not themselves trip the observer.
         observer.mockClear();
-        policy.mockClear();
 
         await expect(
           provider.runAsync(testActor, async () =>
@@ -941,24 +713,22 @@ describe('Error Handling Integration', () => {
         );
 
         expect(observer).not.toHaveBeenCalled();
-        expect(policy).not.toHaveBeenCalled();
       } finally {
         await prisma.$disconnect();
         await basePrisma.$disconnect();
       }
     });
 
-    it('a single-record create unique constraint violation propagates raw, without reaching the audit observer or policy', async () => {
+    it('a single-record create unique constraint violation propagates raw, without reaching the audit observer', async () => {
       // The single-operation executor runs the caller's own `create` alongside audit-support
       // work (before-state fetch, enrichment, record building). Only the audit-support work
       // is an audit failure — the caller's own database error (a unique constraint violation
-      // here) must never reach `observer` or `policy`, and must reach the caller exactly as
+      // here) must never reach `observer`, and must reach the caller exactly as
       // Prisma threw it. Uses a normal (non-failing) writer so the only failure in play is
       // the caller's own.
       const basePrisma = createBasePrisma();
       const provider = createAsyncLocalStorageProvider();
       const observer = vi.fn();
-      const policy = vi.fn((_context: AuditErrorContext) => 'ignore' as const);
       const prisma = createAuditClient(basePrisma, {
         Prisma,
         schema: auditSchema,
@@ -967,7 +737,6 @@ describe('Error Handling Integration', () => {
         errorObserver: observer,
         write: {
           awaited: true,
-          onError: policy,
         },
       });
 
@@ -978,9 +747,8 @@ describe('Error Handling Integration', () => {
             data: { email, name: 'First User', password: 'secret123' },
           }),
         );
-        // The setup create above must not itself trip the observer/policy.
+        // The setup create above must not itself trip the observer.
         observer.mockClear();
-        policy.mockClear();
         const auditLogCount = await context.basePrisma.auditLog.count();
 
         const duplicateCreate = provider.runAsync(testActor, async () =>
@@ -1001,7 +769,6 @@ describe('Error Handling Integration', () => {
         expect(await context.basePrisma.auditLog.count()).toBe(auditLogCount);
 
         expect(observer).not.toHaveBeenCalled();
-        expect(policy).not.toHaveBeenCalled();
       } finally {
         await prisma.$disconnect();
         await basePrisma.$disconnect();

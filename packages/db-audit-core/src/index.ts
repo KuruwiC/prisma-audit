@@ -53,7 +53,6 @@ export type {
   AuditErrorPhase,
   FailureSink,
   FailureSinkConfig,
-  WriteOnError,
 } from './failure/index.js';
 export { createFailureSink } from './failure/index.js';
 // Exported because the adapter package imports it across the package boundary;

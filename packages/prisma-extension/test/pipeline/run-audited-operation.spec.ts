@@ -513,7 +513,7 @@ describe('runAuditedOperation', () => {
               throw writeError;
             }),
           },
-          failureSink: createFailureSink({ writeOnError: 'throw' }),
+          failureSink: createFailureSink({}),
         },
       });
 

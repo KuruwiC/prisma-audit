@@ -29,7 +29,6 @@ import type {
   ResolveConfig,
   TransactionRuntime,
   ValueSerializer,
-  WriteOnError,
 } from '@kuruwic/db-audit-core';
 import {
   AuditContextMissingError,
@@ -66,8 +65,6 @@ export interface MemoryAuditOptions<TModelName extends string> {
      * a function called once per sampled-in operation with its model's name
      */
     readonly awaited?: PolicyConfig['awaited'];
-    /** Whether a failed audit write fails the operation; defaults to `'throw'` */
-    readonly onError?: WriteOnError;
   };
   /** Fields left out of an update's change set, for every entity without its own `diffExcludeFields` */
   readonly diffExcludeFields?: readonly string[];
@@ -145,7 +142,6 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
   const resolverFailures: AuditErrorContext[] = [];
   const userObserver = options.errorObserver;
   const failureSink = createFailureSink({
-    writeOnError: options.write?.onError ?? 'throw',
     observer: async (context) => {
       if (context.phase === 'log-write') {
         writeFailures.push(context);

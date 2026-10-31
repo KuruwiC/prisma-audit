@@ -52,26 +52,39 @@ describe('createFailureSink', () => {
   describe('reportWriteFailure', () => {
     it('notifies the observer under log-write with the entity type of the first record and the records as params', async () => {
       const observer = vi.fn();
-      const sink = createFailureSink({ observer, writeOnError: 'ignore' });
+      const sink = createFailureSink({ observer });
 
-      await sink.reportWriteFailure(planOf('immediate'), writeError);
+      await sink.reportWriteFailure(planOf('after-commit'), writeError);
 
       expect(observer).toHaveBeenCalledTimes(1);
       expect(observer).toHaveBeenCalledWith(logWriteContext);
     });
 
-    it("applies 'log' when no policy is configured: the call resolves and the failure is logged", async () => {
-      const sink = createFailureSink({});
+    it('rejects with the original error for an immediate plan, after notifying the observer, and logs nothing', async () => {
+      const order: string[] = [];
+      const observer = vi.fn(async () => {
+        order.push('observer');
+      });
+      const sink = createFailureSink({ observer });
 
-      await expect(sink.reportWriteFailure(planOf('immediate'), writeError)).resolves.toBeUndefined();
+      await expect(
+        sink.reportWriteFailure(planOf('immediate'), writeError).catch((error: unknown) => {
+          order.push('rejected');
+          throw error;
+        }),
+      ).rejects.toBe(writeError);
 
-      expect(consoleError).toHaveBeenCalledWith('[db-audit-core] Error in audit log write:', 'insert failed');
+      expect(observer).toHaveBeenCalledWith(logWriteContext);
+      expect(order).toEqual(['observer', 'rejected']);
+      expect(consoleError).not.toHaveBeenCalled();
     });
 
-    it("rejects with the original error under 'throw' for an immediate plan", async () => {
-      const sink = createFailureSink({ writeOnError: 'throw' });
+    it('rejects with the original error for an immediate plan without an observer, and logs nothing', async () => {
+      const sink = createFailureSink({});
 
       await expect(sink.reportWriteFailure(planOf('immediate'), writeError)).rejects.toBe(writeError);
+
+      expect(consoleError).not.toHaveBeenCalled();
     });
 
     it.each([
@@ -79,9 +92,9 @@ describe('createFailureSink', () => {
       ['detached', 'async audit log write'],
       ['awaited-after-commit', 'audit log write after commit'],
     ] as const)(
-      "logs instead under 'throw' for an %s plan, whose operation's write has committed",
+      "resolves for an %s plan, whose operation's write has committed, and logs the failure without an observer",
       async (kind, label) => {
-        const sink = createFailureSink({ writeOnError: 'throw' });
+        const sink = createFailureSink({});
 
         await expect(sink.reportWriteFailure(planOf(kind), writeError)).resolves.toBeUndefined();
 
@@ -89,83 +102,50 @@ describe('createFailureSink', () => {
       },
     );
 
-    it("stays silent under 'ignore'", async () => {
-      const sink = createFailureSink({ writeOnError: 'ignore' });
+    it.each(['after-commit', 'detached', 'awaited-after-commit'] as const)(
+      'resolves for an %s plan and leaves the failure to the observer when one is configured',
+      async (kind) => {
+        const observer = vi.fn();
+        const sink = createFailureSink({ observer });
 
-      await expect(sink.reportWriteFailure(planOf('immediate'), writeError)).resolves.toBeUndefined();
+        await expect(sink.reportWriteFailure(planOf(kind), writeError)).resolves.toBeUndefined();
 
-      expect(consoleError).not.toHaveBeenCalled();
-    });
+        expect(observer).toHaveBeenCalledWith(logWriteContext);
+        expect(consoleError).not.toHaveBeenCalled();
+      },
+    );
 
-    it('passes a policy function the context the observer received and applies what it returns', async () => {
-      const observer = vi.fn();
-      const writeOnError = vi.fn(async (_context: AuditErrorContext) => 'throw' as const);
-      const sink = createFailureSink({ observer, writeOnError });
+    it('logs the error of an observer that throws with the message of the write failure, then rejects for an immediate plan', async () => {
+      const sink = createFailureSink({
+        observer: () => {
+          throw new Error('observer exploded');
+        },
+      });
 
       await expect(sink.reportWriteFailure(planOf('immediate'), writeError)).rejects.toBe(writeError);
 
-      expect(writeOnError).toHaveBeenCalledWith(logWriteContext);
-      expect(writeOnError.mock.calls[0]?.[0]).toBe(observer.mock.calls[0]?.[0]);
+      expect(consoleError.mock.calls).toEqual([
+        [
+          '[db-audit-core] Error in errorObserver:',
+          'observer exploded',
+          '(while reporting a log-write failure: insert failed)',
+        ],
+      ]);
     });
 
-    it("falls back to 'log' when the policy function throws, so the caller's operation is not failed", async () => {
-      const observer = vi.fn(async () => {});
-      const sink = createFailureSink({
-        observer,
-        writeOnError: async () => {
-          throw new Error('policy exploded');
-        },
-      });
+    it('logs the error of an observer that rejects with the message of the write failure, and resolves for a committed write', async () => {
+      const sink = createFailureSink({ observer: async () => Promise.reject(new Error('observer exploded')) });
 
-      await expect(sink.reportWriteFailure(planOf('immediate'), writeError)).resolves.toBeUndefined();
+      await expect(sink.reportWriteFailure(planOf('detached'), writeError)).resolves.toBeUndefined();
 
-      expect(observer).toHaveBeenCalledWith(logWriteContext);
-      expect(consoleError).toHaveBeenCalledWith(
-        "[db-audit-core] Error in write.onError function; falling back to 'log':",
-        'policy exploded',
-      );
-      expect(consoleError).toHaveBeenCalledWith('[db-audit-core] Error in audit log write:', 'insert failed');
+      expect(consoleError.mock.calls).toEqual([
+        [
+          '[db-audit-core] Error in errorObserver:',
+          'observer exploded',
+          '(while reporting a log-write failure: insert failed)',
+        ],
+      ]);
     });
-
-    it("falls back to 'log' when the policy function throws a value that cannot be converted to a string", async () => {
-      const sink = createFailureSink({
-        writeOnError: () => {
-          throw Object.create(null);
-        },
-      });
-
-      await expect(sink.reportWriteFailure(planOf('immediate'), writeError)).resolves.toBeUndefined();
-
-      expect(consoleError).toHaveBeenCalledWith(
-        "[db-audit-core] Error in write.onError function; falling back to 'log':",
-        'Thrown value could not be converted to a string',
-      );
-      expect(consoleError).toHaveBeenCalledWith('[db-audit-core] Error in audit log write:', 'insert failed');
-    });
-
-    const unconvertible = Object.create(null);
-    it.each([
-      ['a policy that is no strategy', 'skip', 'skip'],
-      ['a policy function that returns no strategy', () => undefined, undefined],
-      [
-        'a policy function that returns a value that cannot be converted to a string',
-        () => unconvertible,
-        unconvertible,
-      ],
-    ])(
-      "falls back to 'log' for %s, logging the invalid value and the write failure",
-      async (_case, policy, invalid) => {
-        const sink = createFailureSink({ writeOnError: policy as never });
-
-        await expect(sink.reportWriteFailure(planOf('immediate'), writeError)).resolves.toBeUndefined();
-
-        expect(consoleError.mock.calls[0]).toEqual([
-          "[db-audit-core] Invalid write.onError strategy; falling back to 'log':",
-          invalid,
-        ]);
-        expect(consoleError).toHaveBeenCalledWith('[db-audit-core] Error in audit log write:', 'insert failed');
-      },
-    );
   });
 
   describe('reportDroppedBuild', () => {
@@ -179,17 +159,18 @@ describe('createFailureSink', () => {
     } as const;
     const droppedLine = expect.stringMatching(/Post\.update.*dropped/);
 
-    it('notifies the observer with the context it is given', async () => {
+    it('notifies the observer with the context it is given, and leaves the failure to it', async () => {
       const observer = vi.fn();
       const sink = createFailureSink({ observer });
 
-      await sink.reportDroppedBuild(dropped);
+      await expect(sink.reportDroppedBuild(dropped)).resolves.toBeUndefined();
 
       expect(observer).toHaveBeenCalledTimes(1);
       expect(observer).toHaveBeenCalledWith(dropped);
+      expect(consoleError).not.toHaveBeenCalled();
     });
 
-    it("applies 'log' when no policy is configured, naming the model and operation without the params", async () => {
+    it('logs the failure without an observer, naming the model and operation without the params', async () => {
       const sink = createFailureSink({});
 
       await expect(sink.reportDroppedBuild(dropped)).resolves.toBeUndefined();
@@ -198,58 +179,29 @@ describe('createFailureSink', () => {
       expect(JSON.stringify(consoleError.mock.calls)).not.toContain('"p1"');
     });
 
-    it("stays silent under 'ignore', after notifying the observer", async () => {
-      const observer = vi.fn();
-      const sink = createFailureSink({ observer, writeOnError: 'ignore' });
-
-      await expect(sink.reportDroppedBuild(dropped)).resolves.toBeUndefined();
-
-      expect(observer).toHaveBeenCalledWith(dropped);
-      expect(consoleError).not.toHaveBeenCalled();
-    });
-
-    it("logs instead of rejecting under 'throw', whose caller has returned", async () => {
-      const sink = createFailureSink({ writeOnError: 'throw' });
-
-      await expect(sink.reportDroppedBuild(dropped)).resolves.toBeUndefined();
-
-      expect(consoleError).toHaveBeenCalledWith(droppedLine, 'read after the write failed');
-    });
-
-    it('passes a policy function the context the observer received and applies what it returns', async () => {
-      const observer = vi.fn();
-      const writeOnError = vi.fn((_context: AuditErrorContext) => 'ignore' as const);
-      const sink = createFailureSink({ observer, writeOnError });
-
-      await sink.reportDroppedBuild(dropped);
-
-      expect(writeOnError).toHaveBeenCalledWith(dropped);
-      expect(writeOnError.mock.calls[0]?.[0]).toBe(observer.mock.calls[0]?.[0]);
-      expect(consoleError).not.toHaveBeenCalled();
-    });
-
-    it("falls back to 'log' when the policy function throws", async () => {
+    it('resolves when the observer throws, logging its error with the message of the build failure', async () => {
       const sink = createFailureSink({
-        writeOnError: () => {
-          throw new Error('policy exploded');
+        observer: () => {
+          throw new Error('observer exploded');
         },
       });
 
       await expect(sink.reportDroppedBuild(dropped)).resolves.toBeUndefined();
 
-      expect(consoleError).toHaveBeenCalledWith(
-        "[db-audit-core] Error in write.onError function; falling back to 'log':",
-        'policy exploded',
-      );
-      expect(consoleError).toHaveBeenCalledWith(droppedLine, 'read after the write failed');
+      expect(consoleError.mock.calls).toEqual([
+        [
+          '[db-audit-core] Error in errorObserver:',
+          'observer exploded',
+          '(while reporting a diff-generation failure: read after the write failed)',
+        ],
+      ]);
     });
   });
 
   describe('notify', () => {
-    it('notifies the observer without consulting the policy', async () => {
+    it('notifies the observer', async () => {
       const observer = vi.fn();
-      const writeOnError = vi.fn(() => 'throw' as const);
-      const sink = createFailureSink({ observer, writeOnError });
+      const sink = createFailureSink({ observer });
       const context = {
         phase: 'pre-fetch',
         modelName: 'Post',
@@ -261,7 +213,6 @@ describe('createFailureSink', () => {
       await expect(sink.notify(context)).resolves.toBeUndefined();
 
       expect(observer).toHaveBeenCalledWith(context);
-      expect(writeOnError).not.toHaveBeenCalled();
     });
 
     it.each([
@@ -285,7 +236,11 @@ describe('createFailureSink', () => {
         }),
       ).resolves.toBeUndefined();
 
-      expect(consoleError).toHaveBeenCalledWith('[db-audit-core] Error in errorObserver:', 'observer exploded');
+      expect(consoleError).toHaveBeenCalledWith(
+        '[db-audit-core] Error in errorObserver:',
+        'observer exploded',
+        '(while reporting a diff-generation failure: insert failed)',
+      );
     });
 
     it('logs and ignores an observer that throws a value that cannot be converted to a string', async () => {
@@ -302,15 +257,18 @@ describe('createFailureSink', () => {
       expect(consoleError).toHaveBeenCalledWith(
         '[db-audit-core] Error in errorObserver:',
         'Thrown value could not be converted to a string',
+        '(while reporting a pre-fetch failure: insert failed)',
       );
     });
 
-    it('resolves without an observer', async () => {
+    it('resolves without an observer and logs nothing', async () => {
       const sink = createFailureSink({});
 
       await expect(
         sink.notify({ phase: 'pre-fetch', modelName: 'Post', operation: 'update', params: {}, error: writeError }),
       ).resolves.toBeUndefined();
+
+      expect(consoleError).not.toHaveBeenCalled();
     });
   });
 
