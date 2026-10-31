@@ -23,11 +23,10 @@ import { toError } from '../utils/to-error.js';
  * - `log-write`: persisting the records failed. Decided by {@link FailureSinkConfig.writeOnError}.
  * - `diff-generation`: other work that builds the records failed. Before the operation's write, the
  *   adapter reports it and decides whether the caller's operation fails; it is observer only
- *   there. The build `dispatch` runs once the write has run is reported by `dispatch`: it fails the
- *   caller's operation with the original error, except when the records would be written detached
- *   (not atomic, outside any transaction), where the write has committed and the caller does not
- *   wait for its audit: the operation's records are dropped and the operation succeeds; only
- *   this drop is policy-gated.
+ *   there. The build `dispatch` runs once the write has run is reported by `dispatch`: inside a
+ *   transaction that has not committed, it fails the caller's operation with the original error;
+ *   outside any transaction the write has committed, so the operation's records are dropped and
+ *   the operation succeeds, awaited or not. Only this drop is policy-gated.
  * - `row-identification`: the adapter itself could not identify a row the operation wrote (no
  *   user callback is involved). Observer only; the row's record is skipped.
  * - `id-resolver-call`: a user-supplied id resolver (the entity's `idResolver` or a `to()` root's
