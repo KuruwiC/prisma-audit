@@ -27,10 +27,11 @@ holds every row's before state, so the adapter has no `fetchBefore` option and i
 Failures go through the core failure sink. Each failed audit write is listed in `writeFailures`
 (phase `log-write`) and each row an id resolver failed for in `resolverFailures` (phase
 `id-resolver-call`), before the context is forwarded to `errorObserver` when one is given.
-`write.onError` defaults to `'throw'`: a failed write the operation awaits rejects the operation;
-a queued or detached one is logged. A resolver failure leaves that
-row without its records and never fails the operation. A record build that fails after a detached
-write has committed drops that write's records: the observer hears `diff-generation` and the
-policy applies to the drop, logging it (`'throw'` logs here, since the caller has returned).
+A failed write in a transaction (an atomic operation) rejects the operation and rolls it back; a
+queued or detached one never fails it. A resolver failure leaves that row without its records and
+never fails the operation. A record build that fails after a detached write has committed drops
+that write's records, and the observer hears `diff-generation`. The adapter always observes
+failures itself, to fill `writeFailures` and `resolverFailures`, so the core failure sink never
+logs them to the console, whether or not `errorObserver` is given.
 
 The package is not published. `pnpm --filter @kuruwic/audit-adapter-memory test` runs its spec.
