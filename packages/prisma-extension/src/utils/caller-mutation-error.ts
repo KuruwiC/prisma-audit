@@ -3,7 +3,7 @@
  * constraint violation), as opposed to the audit-support work around it (the before-state
  * and nested pre-fetches, event collection, record production).
  * `pipeline/run-audited-operation.ts` uses this pair to let such an error propagate
- * untouched instead of routing it through the audit observer or policy.
+ * untouched instead of routing it through the audit observer.
  *
  * The symbol is module-scoped because the tag carries no per-extension-instance state.
  *

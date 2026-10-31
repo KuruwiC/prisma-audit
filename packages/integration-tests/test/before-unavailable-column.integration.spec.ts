@@ -33,7 +33,7 @@ describe('beforeUnavailable column of the audit-log model', () => {
       schema: auditSchema,
       contextProvider: provider,
       entities: testEntities,
-      write: { ...(model ? { model } : {}), onError: 'throw' },
+      ...(model ? { write: { model } } : {}),
     });
 
     return { rawBasePrisma, basePrisma, provider, prisma, armFindUniqueFailure };

@@ -121,7 +121,6 @@ describe('implicitTransaction', () => {
       write: {
         awaited: options.awaited ?? true,
         implicitTransaction: options.implicitTransaction,
-        onError: 'throw',
         ...(options.writer ? { writer: options.writer } : {}),
       },
       ...(options.failingEnricher
@@ -322,7 +321,7 @@ describe('implicitTransaction', () => {
   });
 
   describe('by default', () => {
-    it('keeps a committed write whose awaited audit write failed, and applies the write-failure policy', async () => {
+    it('keeps a committed write whose awaited audit write failed, and reports the failure', async () => {
       const user = await seedUser();
       const clients = createClients({ implicitTransaction: false, writer: failingWriter });
 

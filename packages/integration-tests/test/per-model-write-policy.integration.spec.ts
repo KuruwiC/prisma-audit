@@ -45,13 +45,12 @@ const createScenario = (options: ScenarioOptions) => {
       ...(options.failingWriter
         ? {
             // The client opens a transaction around a write whose audit is awaited, which the
-            // writer's error rolls back under 'throw'.
+            // writer's error rolls back.
             implicitTransaction: true,
             writer: async (records, { inTransaction }) => {
               writerCalls.push({ inTransaction, entityTypes: records.map((record) => record.entityType) });
               throw new Error(AUDIT_WRITE_FAILURE_MESSAGE);
             },
-            onError: 'throw' as const,
           }
         : {}),
     },
@@ -154,7 +153,7 @@ describe('Per-model write policy functions', () => {
   });
 
   describe('write.awaited', () => {
-    // A throwing writer under 'throw': a model the function awaits fails the caller's operation
+    // A throwing writer: a model the function awaits fails the caller's operation
     // with the writer's error; a model it does not await writes after the operation has returned,
     // so the operation resolves.
     const createAwaitedScenario = (awaitedModel: string) => {

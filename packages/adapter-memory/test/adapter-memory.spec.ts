@@ -544,7 +544,7 @@ describe('transaction membership', () => {
       error: failure,
     };
 
-    it('awaited false outside a transaction: keeps the write, notifies diff-generation once, logs the drop and writes no record', async () => {
+    it('awaited false outside a transaction: keeps the write, notifies diff-generation once, leaves the drop to the observer and writes no record', async () => {
       const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
       const { adapter, observer } = adapterWithFailingEnricher(false);
 
@@ -553,7 +553,7 @@ describe('transaction membership', () => {
         await adapter.flush();
 
         expect(observer.mock.calls).toEqual([[diffGeneration]]);
-        expect(consoleError).toHaveBeenCalledWith(expect.stringMatching(/User\.create.*dropped/), failure.message);
+        expect(consoleError).not.toHaveBeenCalled();
       } finally {
         consoleError.mockRestore();
       }

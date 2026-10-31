@@ -17,7 +17,6 @@ import type {
   ValueSerializer,
   WriteContext,
   WriteFn,
-  WriteOnError,
 } from '@kuruwic/db-audit-core';
 import type { AuditSchema } from './schema/audit-schema.js';
 
@@ -120,17 +119,10 @@ export interface WriteConfig<TClient = unknown> {
    * assignable where the handle is erased to `unknown`.
    */
   writer?(records: AuditRecord[], context: WriteContext<TClient>): Promise<void>;
-  /**
-   * Decides whether a failed audit-log write fails the caller's operation. See {@link WriteOnError}
-   * and, for what each phase means for a Prisma operation, {@link PrismaAuditExtensionOptions.errorObserver}.
-   *
-   * @default 'log'
-   */
-  onError?: WriteOnError;
 }
 
-/** Audit-failure observation and policy types, defined by `@kuruwic/db-audit-core` and re-exported */
-export type { AuditErrorContext, AuditErrorObserver, AuditErrorPhase, WriteOnError } from '@kuruwic/db-audit-core';
+/** Audit-failure observation types, defined by `@kuruwic/db-audit-core` and re-exported */
+export type { AuditErrorContext, AuditErrorObserver, AuditErrorPhase } from '@kuruwic/db-audit-core';
 
 /**
  * Prisma Extension configuration options
@@ -253,9 +245,10 @@ export interface PrismaAuditExtensionOptions<TModelName extends string = string,
    */
   actorContext?: ActorContextConfig<AuditActor, unknown, TClient>;
   /**
-   * Observer notified of every audit-pipeline failure. See {@link AuditErrorObserver}; whether a
-   * failed write fails the caller's operation is `write.onError`'s. What each phase means for a
-   * Prisma operation:
+   * Observer notified of every audit-pipeline failure. See {@link AuditErrorObserver}. Without
+   * one, a failure the caller cannot see (a failed write, or a dropped entry, of an operation that
+   * has committed) is logged to the console; with one, only the observer receives it. What each
+   * phase means for a Prisma operation:
    *
    * - `pre-fetch`: fetching the before-state (for update / delete / upsert), or reading the rows a
    *   nested `connect`, `set` or `disconnect` may re-link, failed. The caller's operation
@@ -274,10 +267,11 @@ export interface PrismaAuditExtensionOptions<TModelName extends string = string,
    *   When the read of the re-linked rows fails, a row the write names is still recorded, with
    *   `beforeUnavailable: true` (a `disconnect` only when it left the row unlinked); a row unlinked
    *   without being named is not recorded.
-   * - `log-write`: persisting the audit log entry itself failed. The only phase whose outcome
-   *   `write.onError` decides; `'throw'` fails the caller only for an awaited write inside a
-   *   transaction, and logs once the operation has committed (an awaited write outside any
-   *   transaction, or a queued or detached one).
+   * - `log-write`: persisting the audit log entry itself failed. An awaited write inside a
+   *   transaction fails the caller's operation with the write's original error and the
+   *   transaction rolls back: the entry and the caller's write commit together or not at all. Once
+   *   the operation has committed (an awaited write outside any transaction, or a queued or
+   *   detached one) the caller's operation succeeds.
    * - `diff-generation`: other audit-support work around the caller's operation failed —
    *   building the entry (enrichment, redaction), reading the primary keys a to-many relation
    *   holds before a nested create under an existing row or the rows a nested `updateMany` /
@@ -285,9 +279,9 @@ export interface PrismaAuditExtensionOptions<TModelName extends string = string,
    *   after the write, a nested row the operation updated or inserted that its result did not
    *   return, or a row a nested `connect`, `set` or `disconnect` re-linked, or, for batch
    *   operations, fetching the affected rows before or after the mutation. It propagates to the
-   *   caller as a thrown error, regardless of `write.onError`, when the caller's write has not
-   *   run or runs inside a transaction; outside any transaction a failure after the write drops
-   *   the entry and `write.onError` applies to the drop.
+   *   caller as a thrown error when the caller's write has not run or runs inside a transaction;
+   *   outside any transaction a failure after the write drops the entry and the caller's
+   *   operation succeeds.
    * - `row-identification`: a nested delete's primary key could not be resolved, from the
    *   pre-fetched row, its WHERE or the operation data; or an `updateMany` or `deleteMany` with a
    *   `limit` wrote rows it cannot tell apart from rows another writer changed, or ran inside a

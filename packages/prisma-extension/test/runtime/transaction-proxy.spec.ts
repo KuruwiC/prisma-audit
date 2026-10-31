@@ -997,12 +997,12 @@ describe("createTransactionProxy (audit of Prisma's own batch)", () => {
     expect(events).toEqual(['committed', 'started u1', 'started u2', 'written u1', 'written u2', 'resolved']);
   });
 
-  it("resolves the caller's committed batch when an awaited audit write fails under the 'throw' write-failure policy", async () => {
+  it("resolves the caller's committed batch when an awaited audit write fails", async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     const observer = vi.fn();
     const writeError = new Error('audit table unavailable');
     const events: string[] = [];
-    const deps = createDeps(loggingWrite(events, writeError), createFailureSink({ writeOnError: 'throw', observer }));
+    const deps = createDeps(loggingWrite(events, writeError), createFailureSink({ observer }));
 
     try {
       const { outcome, write } = await runBatch(
