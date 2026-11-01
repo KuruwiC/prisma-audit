@@ -238,7 +238,7 @@ describe('nested pre-fetch failures — affected rows', () => {
 
     const created = await rawBasePrisma.comment.findFirstOrThrow({ where: { content: 'three' } });
     const commentLogs = await logsOf('Comment');
-    expect(commentLogs.length).toBeGreaterThan(0);
+    expect(commentLogs).toHaveLength(3);
     for (const log of commentLogs) {
       expect(log).toMatchObject({ entityId: created.id, action: 'create', before: null });
     }

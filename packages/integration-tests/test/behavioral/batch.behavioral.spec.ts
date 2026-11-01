@@ -83,8 +83,7 @@ describe('Batch Operations (Behavioral)', () => {
         ]),
       );
 
-      expect(Array.isArray(rows)).toBe(true);
-      expect(rows).toHaveLength(2);
+      expect(rows.map((row) => row.email).sort()).toEqual(['cmr1@example.com', 'cmr2@example.com']);
       for (const row of rows) expect(row.id).toBeTruthy();
     });
 
@@ -191,8 +190,7 @@ describe('Batch Operations (Behavioral)', () => {
         h.updateManyAndReturn('User', { id: { in: [user1.id, user2.id] } }, { name: 'After' }),
       );
 
-      expect(Array.isArray(rows)).toBe(true);
-      expect(rows).toHaveLength(2);
+      expect(rows.map((row) => row.id).sort()).toEqual([user1.id, user2.id].sort());
       for (const row of rows) expect(row.name).toBe('After');
     });
 

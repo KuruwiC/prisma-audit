@@ -142,7 +142,7 @@ describe('top-level upsert nested audit entries', () => {
     const profileLogs = await basePrisma.auditLog.findMany({
       where: { entityType: 'Profile', entityId: user.profile?.id },
     });
-    expect(profileLogs.length).toBeGreaterThan(0);
+    expect(profileLogs.map((log) => log.aggregateType).sort()).toEqual(['Profile', 'User']);
     expect([...new Set(profileLogs.map((log) => log.action))]).toEqual(['update']);
   });
 

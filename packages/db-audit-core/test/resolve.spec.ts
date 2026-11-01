@@ -1283,7 +1283,7 @@ describe('resolve', () => {
   });
 
   describe('enricher failures', () => {
-    it('fails the resolution when an enricher with the fail strategy throws', async () => {
+    it('fails the resolution when an enricher with the default throw strategy throws', async () => {
       const config = configOf({
         Post: defineEntity({
           type: 'Post',

@@ -439,10 +439,11 @@ describe('CRUD Operations Integration', () => {
         });
       });
 
+      const created = await context.prisma.user.findFirstOrThrow({ where: { email: 'single@example.com' } });
       const logs = await context.prisma.auditLog.findMany({
         where: { entityType: 'User', action: 'create' },
       });
-      expect(logs).toHaveLength(1);
+      expect(logs).toEqual([expect.objectContaining({ entityId: created.id })]);
     });
 
     it('records the rows a createMany inside an interactive transaction created, read back in that transaction', async () => {

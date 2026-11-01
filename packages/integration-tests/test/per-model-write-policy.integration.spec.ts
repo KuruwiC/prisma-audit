@@ -107,7 +107,7 @@ describe('Per-model write policy functions', () => {
 
         expect(samplingRate.mock.calls).toEqual([['User']]);
         expect(await countAuditLogs('User')).toBe(1);
-        expect(await countAuditLogs('Post')).toBeGreaterThan(0);
+        expect(await countAuditLogs('Post')).toBe(2);
       } finally {
         await scenario.dispose();
       }

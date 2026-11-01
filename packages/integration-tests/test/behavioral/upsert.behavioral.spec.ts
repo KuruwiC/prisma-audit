@@ -113,9 +113,13 @@ describe('Upsert Operations (Behavioral)', () => {
       );
 
       const logs = await h.readAuditLogs({ entityType: 'Post', entityId: post.id as string });
-      const aggregateTypes = logs.map((l) => l.aggregateType).sort();
-      expect(aggregateTypes).toContain('Post');
-      expect(aggregateTypes).toContain('User');
+      const aggregates = logs
+        .map((l) => [l.aggregateType, l.aggregateId])
+        .sort(([a], [b]) => String(a).localeCompare(String(b)));
+      expect(aggregates).toEqual([
+        ['Post', post.id],
+        ['User', user.id],
+      ]);
     });
   });
 });
