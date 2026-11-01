@@ -1025,7 +1025,11 @@ describe('Context Enrichment Integration', () => {
     it('should call actor enricher separately for concurrent operations', async () => {
       let actorEnricherCallCount = 0;
 
-      const { prisma: customPrisma, provider: customProvider } = openClient({
+      const {
+        basePrisma: customBasePrisma,
+        prisma: customPrisma,
+        provider: customProvider,
+      } = openClient({
         entities: testEntities,
         actorContext: {
           enricher: async (actor: unknown) => {
@@ -1074,6 +1078,21 @@ describe('Context Enrichment Integration', () => {
       ]);
 
       expect(actorEnricherCallCount).toBe(2);
+
+      const userCreateLogs = async (email: string) => {
+        const user = await customBasePrisma.user.findUniqueOrThrow({ where: { email } });
+        return customBasePrisma.auditLog.findMany({
+          where: { entityType: 'User', entityId: user.id, action: 'create' },
+        });
+      };
+      const [logs1, logs2] = await Promise.all([
+        userCreateLogs('concurrent1@example.com'),
+        userCreateLogs('concurrent2@example.com'),
+      ]);
+      expect(logs1).toHaveLength(1);
+      expect(logs1[0]).toMatchObject({ actorId: 'concurrent-1', actorContext: { name: 'Actor 1', role: 'admin' } });
+      expect(logs2).toHaveLength(1);
+      expect(logs2[0]).toMatchObject({ actorId: 'concurrent-2', actorContext: { name: 'Actor 2', role: 'user' } });
     });
 
     it('should call entity enricher exactly once (batch) for createMany operation', async () => {
@@ -1282,11 +1301,18 @@ describe('Context Enrichment Integration', () => {
         where: { actorId: 'batch-agg-opt-actor' },
       });
       expect(auditLogs).toHaveLength(3);
-      for (const log of auditLogs) {
-        expect(log.aggregateContext).toBeDefined();
-        const aggregateContext = log.aggregateContext as Record<string, unknown>;
-        expect(aggregateContext.aggregateType).toBe('User');
-      }
+
+      const users = await customBasePrisma.user.findMany({
+        where: { email: { in: ['batch-opt-1@example.com', 'batch-opt-2@example.com', 'batch-opt-3@example.com'] } },
+      });
+      const byEntityId = (a: { entityId: string }, b: { entityId: string }) => a.entityId.localeCompare(b.entityId);
+      expect(
+        auditLogs.map(({ entityId, aggregateContext }) => ({ entityId, aggregateContext })).sort(byEntityId),
+      ).toEqual(
+        users
+          .map((user) => ({ entityId: user.id, aggregateContext: { aggregateType: 'User', aggregateId: user.id } }))
+          .sort(byEntityId),
+      );
     });
 
     it('should call aggregate enricher once per distinct aggregateType for createMany (multiple aggregateTypes)', async () => {
@@ -1364,6 +1390,14 @@ describe('Context Enrichment Integration', () => {
       expect(enricherCallsByType.Comment).toBe(1);
       expect(enricherCallsByType.Post).toBe(1);
       expect(enricherCallsByType.User).toBe(1);
+
+      const auditLogs = await customBasePrisma.auditLog.findMany({
+        where: { actorId: 'batch-agg-multi-actor' },
+      });
+      expect(auditLogs).toHaveLength(9);
+      for (const log of auditLogs) {
+        expect(log.aggregateContext).toEqual({ aggregateType: log.aggregateType, entityId: log.entityId });
+      }
     });
   });
 

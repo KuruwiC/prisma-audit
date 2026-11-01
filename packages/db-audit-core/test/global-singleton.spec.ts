@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { getGlobalSingleton } from '../src/global-singleton.js';
 
 describe('getGlobalSingleton', () => {
@@ -33,5 +33,19 @@ describe('getGlobalSingleton', () => {
     getGlobalSingleton(key, factory);
 
     expect(calls).toBe(1);
+  });
+
+  it('should share the instance across two loaded copies of the module', async () => {
+    const key = `test-two-copies-${Math.random()}`;
+    const first = { value: 'first' };
+
+    vi.resetModules();
+    const firstCopy = await import('../src/global-singleton.js');
+    vi.resetModules();
+    const secondCopy = await import('../src/global-singleton.js');
+
+    expect(firstCopy.getGlobalSingleton).not.toBe(secondCopy.getGlobalSingleton);
+    expect(firstCopy.getGlobalSingleton(key, () => first)).toBe(first);
+    expect(secondCopy.getGlobalSingleton(key, () => ({ value: 'second' }))).toBe(first);
   });
 });

@@ -110,16 +110,15 @@ describe('Deep Nested Upsert Operations (Profile → Avatar → AvatarImage)', (
         where: {
           entityType: 'AvatarImage',
           entityId: profile?.avatar?.avatarImage?.id,
-          action: 'update',
         },
       });
 
       // One log per aggregate root: AvatarImage self-projects (aggregateType: 'AvatarImage') and
       // projects onto its Avatar aggregate (aggregateType: 'Avatar', via `to('Avatar', foreignKey('avatarId'))`).
       expect(avatarImageLogs).toHaveLength(2);
+      expect(avatarImageLogs.map((log: { action: string }) => log.action)).toEqual(['update', 'update']);
 
       const log = avatarImageLogs[0];
-      expect(log.action).toBe('update');
       expect(log.before).not.toBeNull();
       const before = log.before as { imageUrl?: string };
       expect(before.imageUrl).toBe('https://example.com/original.png');
@@ -212,15 +211,14 @@ describe('Deep Nested Upsert Operations (Profile → Avatar → AvatarImage)', (
         where: {
           entityType: 'AvatarImage',
           entityId: profile?.avatar?.avatarImage?.id,
-          action: 'create',
         },
       });
 
       // One log per aggregate root: AvatarImage self-projects (aggregateType: 'AvatarImage') and
       // projects onto its Avatar aggregate (aggregateType: 'Avatar', via `to('Avatar', foreignKey('avatarId'))`).
       expect(avatarImageLogs).toHaveLength(2);
+      expect(avatarImageLogs.map((log: { action: string }) => log.action)).toEqual(['create', 'create']);
       const log = avatarImageLogs[0];
-      expect(log.action).toBe('create');
       expect(log.before).toBeNull(); // Create always has null 'before'
       const after = log.after as { imageUrl?: string };
       expect(after.imageUrl).toBe('https://example.com/new.png');

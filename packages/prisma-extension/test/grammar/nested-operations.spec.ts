@@ -102,8 +102,12 @@ describe('detectNestedOperations', () => {
     });
 
     expect(operations).toHaveLength(2);
-    expect(operations.find((op) => op.fieldName === 'posts')).toBeDefined();
-    expect(operations.find((op) => op.fieldName === 'profile')).toBeDefined();
+    expect(operations.map((op) => [op.fieldName, op.operation]).sort()).toEqual(
+      [
+        ['posts', 'create'],
+        ['profile', 'create'],
+      ].sort(),
+    );
   });
 
   it('should NOT detect operation keywords in JSON fields as nested operations', () => {
@@ -213,10 +217,14 @@ describe('detectNestedOperations', () => {
     });
 
     expect(operations).toHaveLength(4);
-    expect(operations.find((op) => op.operation === 'create')).toBeDefined();
-    expect(operations.find((op) => op.operation === 'update')).toBeDefined();
-    expect(operations.find((op) => op.operation === 'delete')).toBeDefined();
-    expect(operations.find((op) => op.operation === 'upsert')).toBeDefined();
+    expect(operations.map((op) => [op.fieldName, op.operation]).sort()).toEqual(
+      [
+        ['posts', 'create'],
+        ['posts', 'update'],
+        ['posts', 'delete'],
+        ['profile', 'upsert'],
+      ].sort(),
+    );
   });
 });
 

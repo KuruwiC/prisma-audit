@@ -123,8 +123,8 @@ describe('Nested ConnectOrCreate Operations', () => {
     });
 
     it('should handle multiple connectOrCreate operations with mixed create/connect paths', async () => {
-      const existingTag = await context.provider.runAsync(testActor, async () => {
-        return await context.prisma.tag.create({
+      await context.provider.runAsync(testActor, async () => {
+        await context.prisma.tag.create({
           data: { name: 'javascript' },
         });
       });
@@ -185,16 +185,11 @@ describe('Nested ConnectOrCreate Operations', () => {
       expect(jsTag).not.toBeNull();
       expect(tsTag).not.toBeNull();
 
-      // Verify: Only typescript tag should have create audit log (javascript was connected)
-      const jsTagLogs = await context.prisma.auditLog.findMany({
-        where: { entityType: 'Tag', entityId: existingTag.id, action: 'create' },
-      });
-      expect(jsTagLogs.length).toBe(0);
-
-      const tsTagLogs = await context.prisma.auditLog.findMany({
-        where: { entityType: 'Tag', entityId: tsTag?.id, action: 'create' },
-      });
-      expect(tsTagLogs.length).toBe(1);
+      // Only the new typescript tag is audited: javascript was connected, not written
+      const tagLogs = await context.prisma.auditLog.findMany({ where: { entityType: 'Tag' } });
+      expect(
+        tagLogs.map((log: { entityId: string; action: string }) => ({ entityId: log.entityId, action: log.action })),
+      ).toEqual([{ entityId: tsTag?.id, action: 'create' }]);
     });
   });
 

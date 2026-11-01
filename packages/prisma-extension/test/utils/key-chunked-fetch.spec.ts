@@ -50,9 +50,14 @@ describe('findManyByKeys', () => {
     const result = await findManyByKeys(delegate, ['tenantId', 'userId'], entities);
 
     expect(delegate.findMany).toHaveBeenCalledTimes(1);
-    const call = delegate.findMany.mock.calls[0];
-    const where = (call as unknown[])[0] as { where: { OR: unknown[] } };
-    expect(where.where.OR).toHaveLength(2);
+    expect(delegate.findMany).toHaveBeenCalledWith({
+      where: {
+        OR: [
+          { tenantId: 'a', userId: '1' },
+          { tenantId: 'a', userId: '2' },
+        ],
+      },
+    });
     expect(result).toHaveLength(2);
   });
 });

@@ -27,8 +27,8 @@ describe('Before/After Field Validation', () => {
         });
       });
 
-      expect(user.createdAt instanceof Date).toBe(true);
-      expect(user.updatedAt instanceof Date).toBe(true);
+      expect(user.createdAt).toBeInstanceOf(Date);
+      expect(user.updatedAt).toBeInstanceOf(Date);
 
       const auditLogs = await context.prisma.auditLog.findMany({
         where: { entityType: 'User', entityId: user.id, action: 'create' },
@@ -37,14 +37,8 @@ describe('Before/After Field Validation', () => {
       expect(auditLogs).toHaveLength(1);
       const afterData = auditLogs[0]?.after as Record<string, unknown>;
 
-      const createdAt = afterData.createdAt;
-      const updatedAt = afterData.updatedAt;
-      expect(typeof createdAt).toBe('string');
-      expect(typeof updatedAt).toBe('string');
-
-      // Should be valid ISO date strings
-      expect(createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
-      expect(updatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+      expect(afterData.createdAt).toBe(user.createdAt.toISOString());
+      expect(afterData.updatedAt).toBe(user.updatedAt.toISOString());
     });
 
     it('should serialize the before and after Date fields of an update as the ISO strings of the stored dates', async () => {

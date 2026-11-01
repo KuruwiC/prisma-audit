@@ -94,11 +94,10 @@ describe('getIdFieldInfo', () => {
 
   it('should return field info with generator for cuid()', () => {
     const info = getIdFieldInfo(metadataWithIdDefault({ name: 'cuid', args: [] }), 'Item', 'id');
-    expect(info).toBeDefined();
     expect(info?.name).toBe('id');
     expect(info?.hasDefault).toBe(true);
     expect(info?.defaultFunction).toBe('cuid()');
-    expect(info?.generator).toBeDefined();
+    expect(info?.generator?.()).toMatch(CUID_V1_RE);
   });
 
   it('should preserve uuid version args from function defaults', () => {

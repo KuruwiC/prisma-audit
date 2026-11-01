@@ -337,10 +337,7 @@ describe('Transaction Enrichment Consistency', () => {
         where: { entityType: 'Post', action: 'create' },
       });
 
-      expect(auditLog).toBeDefined();
-      expect(auditLog?.actorContext).toBeDefined();
-      const actorContext = auditLog?.actorContext as Record<string, unknown>;
-      expect(actorContext.userName).toBe('New Actor Name');
+      expect(auditLog).toMatchObject({ actorContext: { userName: 'New Actor Name' } });
     });
   });
 
@@ -380,12 +377,14 @@ describe('Transaction Enrichment Consistency', () => {
       };
 
       await provider.runAsync(auditContext, async () => {
-        await prisma.user.createMany({
-          data: [
-            { email: 'user1@example.com', name: 'User 1', password: 'secret' },
-            { email: 'user2@example.com', name: 'User 2', password: 'secret' },
-            { email: 'user3@example.com', name: 'User 3', password: 'secret' },
-          ],
+        await prisma.$transaction(async (tx) => {
+          await tx.user.createMany({
+            data: [
+              { email: 'user1@example.com', name: 'User 1', password: 'secret' },
+              { email: 'user2@example.com', name: 'User 2', password: 'secret' },
+              { email: 'user3@example.com', name: 'User 3', password: 'secret' },
+            ],
+          });
         });
       });
 
