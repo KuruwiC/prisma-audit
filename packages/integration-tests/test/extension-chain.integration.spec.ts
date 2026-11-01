@@ -4,14 +4,17 @@
  * Prisma runs query extensions in the order they were applied, so an extension applied to the
  * base client before the audit extension sees every audited operation on its way in, and one
  * applied to the audited client after it sees the operation once the audit extension continues
- * it through `query`. The audit extension always continues the caller's operation that way, and
- * with `implicitTransaction` the transaction is opened before the operation enters the chain,
- * so each extension sees one audited `user.update` once in every execution scope. The audit's own
- * reads and writes are separate queries; the counts are of the caller's update only. A change that
- * moves a count must update the number and its comment, never loosen the assertion instead. A write
- * an extension applied after the audit extension issues of its own is audited when it issues it
- * while continuing the caller's operation, and not when it issues it while handling the audit's
- * own read.
+ * it through `query`. This file checks that the extension applied before the audit extension sees
+ * the caller's update once outside a transaction with `awaited: false` and inside an explicit
+ * `$transaction`; the audit's own reads and writes are separate queries, and the counts are of the
+ * caller's update only. A change that moves a count must update the number and its comment, never
+ * loosen the assertion instead. The counts for the awaited audit and for `implicitTransaction`,
+ * where the transaction is opened before the operation enters the chain, are in
+ * `transaction-mode.integration.spec.ts`.
+ *
+ * A write an extension applied after the audit extension issues of its own is audited when it
+ * issues it while continuing the caller's operation (awaited, and in the transaction
+ * `implicitTransaction` opens), and not when it issues it while handling the audit's own read.
  */
 
 import type { AuditContext } from '@kuruwic/db-audit-core';

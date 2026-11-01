@@ -178,7 +178,7 @@ describe('Aggregate Root Resolution Integration', () => {
     });
   });
 
-  describe('Aggregate deletion cascade', () => {
+  describe('Aggregate delete logs', () => {
     it('should track Post deletion in User aggregate', async () => {
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
