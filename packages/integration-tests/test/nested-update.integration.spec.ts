@@ -163,7 +163,7 @@ describe('Nested Update Operations', () => {
         });
       });
 
-      await expect(updatePromise).rejects.toThrow();
+      await expect(updatePromise).rejects.toMatchObject({ code: 'P2025' });
 
       // Verify: No audit logs should be created due to transaction rollback
       const auditLogs = await context.prisma.auditLog.findMany();

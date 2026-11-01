@@ -139,7 +139,7 @@ describe('nested to-many pre-fetch — parent row scope', () => {
           data: { posts: { update: { where: { id: postB.id }, data: { title: 'x' } } } },
         }),
       ),
-    ).rejects.toThrow();
+    ).rejects.toMatchObject({ code: 'P2025' });
 
     expect((await basePrisma.post.findUnique({ where: { id: postB.id } }))?.title).toBe('B post');
     expect(await logsFor('Post', [postB.id])).toEqual([]);

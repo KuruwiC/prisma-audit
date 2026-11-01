@@ -49,6 +49,9 @@ describe('createManyAndReturn relies on Prisma-generated IDs', () => {
         return await context.prisma.autoIncItem.createMany({ data: [{ label: 'auto-x' }] });
       }),
     ).rejects.toThrow('unsupported default');
+
+    expect(await context.basePrisma.autoIncItem.count()).toBe(0);
+    expect(await context.basePrisma.auditLog.count()).toBe(0);
   });
 
   it('logs only the rows actually created under skipDuplicates', async () => {

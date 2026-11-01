@@ -366,7 +366,7 @@ export const describeCrudSmoke = <TContext extends SmokeContext>(
           });
         });
 
-        await expect(transactionPromise).rejects.toThrow();
+        await expect(transactionPromise).rejects.toMatchObject({ code: 'P2002' });
 
         const auditLogs = await context.prisma.auditLog.findMany();
         expect(auditLogs).toHaveLength(0);

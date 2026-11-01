@@ -106,7 +106,7 @@ describe('Nested Delete Operations', () => {
         });
       });
 
-      await expect(deletePromise).rejects.toThrow();
+      await expect(deletePromise).rejects.toMatchObject({ code: 'P2017' });
 
       // Verify: No audit logs should be created due to transaction rollback
       const auditLogs = await context.prisma.auditLog.findMany();

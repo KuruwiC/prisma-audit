@@ -305,7 +305,7 @@ describe('Nested Connect Operations', () => {
       });
 
       // Verify: Should throw error (foreign key constraint)
-      await expect(connectPromise).rejects.toThrow();
+      await expect(connectPromise).rejects.toMatchObject({ code: 'P2025' });
 
       // Verify: No audit log created (operation failed)
       const postTagLogs = await context.prisma.auditLog.findMany({
@@ -367,7 +367,7 @@ describe('Nested Connect Operations', () => {
         });
       });
 
-      await expect(duplicateConnectPromise).rejects.toThrow();
+      await expect(duplicateConnectPromise).rejects.toMatchObject({ code: 'P2002' });
 
       // Verify: No new audit log (operation failed)
       const postTagLogs = await context.prisma.auditLog.findMany({

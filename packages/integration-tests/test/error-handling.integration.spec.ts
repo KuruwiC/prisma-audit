@@ -699,14 +699,18 @@ describe('Error Handling Integration', () => {
         // The setup creates above must not themselves trip the observer.
         observer.mockClear();
 
-        await expect(
-          provider.runAsync(testActor, async () =>
-            prisma.user.updateMany({
-              where: { id: { in: [userA.id, userB.id] } },
-              data: { email: 'batch-collision-shared@example.com' },
-            }),
-          ),
-        ).rejects.toThrow();
+        const collidingUpdate = provider.runAsync(testActor, async () =>
+          prisma.user.updateMany({
+            where: { id: { in: [userA.id, userB.id] } },
+            data: { email: 'batch-collision-shared@example.com' },
+          }),
+        );
+
+        await expect(collidingUpdate).rejects.toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
+        await expect(collidingUpdate).rejects.toMatchObject({
+          code: 'P2002',
+          message: expect.not.stringContaining('[@prisma-audit]'),
+        });
 
         const emails = await context.basePrisma.user.findMany({
           where: { id: { in: [userA.id, userB.id] } },
