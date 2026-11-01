@@ -15,14 +15,17 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { auditSchema } from '../../generated/mysql-audit/index.js';
 import { Prisma, PrismaClient } from '../../generated/mysql-client/client';
 import { carriedDatabaseCode, databaseCodeOf } from '../helpers/database-error-code.js';
-import { type BarrierTarget, createReadBarrier, interleave, type Settled } from '../helpers/read-barrier.js';
+import {
+  type BarrierTarget,
+  createReadBarrier,
+  HELD_TRANSACTION_TIMEOUT_MS,
+  interleave,
+  type Settled,
+} from '../helpers/read-barrier.js';
 import { testAuditOptions } from '../helpers/setup.js';
 import { type MySQLTestContext, setupMySQLDatabase, teardownMySQLDatabase } from '../helpers/setup-mysql.js';
 
 const actor: AuditContext = { actor: { category: 'model', type: 'User', id: 'concurrent-writer' } };
-
-/** Longer than the barrier holds a read, so a held transaction never times out on its own */
-const TRANSACTION_TIMEOUT_MS = 30_000;
 
 const POST_ID = 'contended-post';
 
@@ -79,7 +82,7 @@ describe('concurrent writes on MySQL under REPEATABLE READ: a commit between the
   type Transaction = Parameters<Parameters<ReturnType<typeof createClients>['prisma']['$transaction']>[0]>[0];
 
   const inDefaultTransaction = <T>(run: (tx: Transaction) => Promise<T>) =>
-    asActor(() => clientsOf().prisma.$transaction(run, { timeout: TRANSACTION_TIMEOUT_MS }));
+    asActor(() => clientsOf().prisma.$transaction(run, { timeout: HELD_TRANSACTION_TIMEOUT_MS }));
 
   const postRecords = (entityId: string) =>
     clientsOf().other.auditLog.findMany({ where: { entityType: 'Post', entityId, aggregateType: 'Post' } });

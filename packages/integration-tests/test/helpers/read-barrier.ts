@@ -47,6 +47,9 @@ interface QueryParams {
 
 const DEFAULT_REACH_TIMEOUT_MS = 10_000;
 
+/** The timeout of a transaction whose read the barrier holds: longer than a hold lasts, so it never times out on its own */
+export const HELD_TRANSACTION_TIMEOUT_MS = 30_000;
+
 interface Deferred<T> {
   readonly promise: Promise<T>;
   readonly resolve: (value: T) => void;

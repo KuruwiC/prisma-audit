@@ -17,13 +17,16 @@ import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { carriedDatabaseCode, databaseCodeOf } from '../helpers/database-error-code.js';
-import { type BarrierTarget, createReadBarrier, interleave, type Settled } from '../helpers/read-barrier.js';
+import {
+  type BarrierTarget,
+  createReadBarrier,
+  HELD_TRANSACTION_TIMEOUT_MS,
+  interleave,
+  type Settled,
+} from '../helpers/read-barrier.js';
 import { cleanDatabase, createBasePrisma, testAuditOptions } from '../helpers/setup.js';
 
 const actor: AuditContext = { actor: { category: 'model', type: 'User', id: 'concurrent-writer' } };
-
-/** Longer than the barrier holds a read, so a held transaction never times out on its own */
-const TRANSACTION_TIMEOUT_MS = 30_000;
 
 const POST_ID = 'contended-post';
 
@@ -63,7 +66,7 @@ describe('concurrent writes on PostgreSQL: a commit between the audit read and t
   const asActor = <T>(run: () => Promise<T>) => provider.runAsync(actor, run);
 
   const inTransaction = <T>(isolationLevel: Prisma.TransactionIsolationLevel, run: (tx: Transaction) => Promise<T>) =>
-    asActor(() => prisma.$transaction(run, { isolationLevel, timeout: TRANSACTION_TIMEOUT_MS }));
+    asActor(() => prisma.$transaction(run, { isolationLevel, timeout: HELD_TRANSACTION_TIMEOUT_MS }));
 
   const readCommitted = <T>(run: (tx: Transaction) => Promise<T>) =>
     inTransaction(Prisma.TransactionIsolationLevel.ReadCommitted, run);
