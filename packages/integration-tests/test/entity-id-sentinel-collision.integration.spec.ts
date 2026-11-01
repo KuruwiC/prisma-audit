@@ -16,9 +16,9 @@ import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import type { AuditErrorObserver } from '@kuruwic/prisma-audit';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
-import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createBasePrisma, testEntities } from './helpers/setup.js';
+import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { setupTestContext, testEntities } from './helpers/setup.js';
 
 type FetchBeforeConfig = Parameters<typeof createAuditClient>[1]['fetchBefore'];
 
@@ -29,26 +29,16 @@ const testActor: AuditContext = {
 const COLLIDING_ID = '__default__';
 
 describe('nested delete of a row whose primary key is "__default__"', () => {
-  let basePrisma: PrismaClient;
+  const context = setupTestContext();
   let observer: ReturnType<typeof vi.fn<AuditErrorObserver>>;
 
-  beforeAll(() => {
-    basePrisma = createBasePrisma();
-  });
-
-  afterAll(async () => {
-    await basePrisma?.$disconnect();
-  });
-
-  beforeEach(async () => {
+  beforeEach(() => {
     observer = vi.fn<AuditErrorObserver>();
-    await basePrisma.postTag.deleteMany({ where: { id: COLLIDING_ID } });
-    await basePrisma.auditLog.deleteMany({ where: { entityId: COLLIDING_ID } });
   });
 
   const createClient = (fetchBefore: FetchBeforeConfig | undefined) => {
     const provider = createAsyncLocalStorageProvider();
-    const prisma = createAuditClient(basePrisma, {
+    const prisma = createAuditClient(context.basePrisma, {
       Prisma,
       schema: auditSchema,
       contextProvider: provider,
@@ -61,11 +51,12 @@ describe('nested delete of a row whose primary key is "__default__"', () => {
   };
 
   const seedPostTag = async (postTagId: string) => {
-    const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const user = await basePrisma.user.create({ data: { email: `collision-${runId}@example.com`, name: 'Owner' } });
-    const post = await basePrisma.post.create({ data: { title: 'Tagged', authorId: user.id } });
-    const tag = await basePrisma.tag.create({ data: { name: `collision-${runId}` } });
-    await basePrisma.postTag.create({ data: { id: postTagId, postId: post.id, tagId: tag.id } });
+    const user = await context.basePrisma.user.create({
+      data: { email: `${postTagId}@example.com`, name: 'Owner' },
+    });
+    const post = await context.basePrisma.post.create({ data: { title: 'Tagged', authorId: user.id } });
+    const tag = await context.basePrisma.tag.create({ data: { name: postTagId } });
+    await context.basePrisma.postTag.create({ data: { id: postTagId, postId: post.id, tagId: tag.id } });
     return { user, post, tag };
   };
 
@@ -80,19 +71,17 @@ describe('nested delete of a row whose primary key is "__default__"', () => {
       }),
     );
 
-    const remaining = await basePrisma.postTag.findUnique({ where: { id: postTagId } });
-    const logs = await basePrisma.auditLog.findMany({
+    const remaining = await context.basePrisma.postTag.findUnique({ where: { id: postTagId } });
+    const logs = await context.basePrisma.auditLog.findMany({
       where: { entityType: 'PostTag', entityId: postTagId, action: 'delete' },
     });
 
-    await basePrisma.tag.delete({ where: { id: seed.tag.id } });
-    await basePrisma.user.delete({ where: { id: seed.user.id } });
     return { seed, remaining, logs: logs.map((log) => [log.aggregateType, log.aggregateId]).sort() };
   };
 
   it('logs the delete when the before-state fetch is disabled, as for any other id', async () => {
     const config: FetchBeforeConfig = { delete: false };
-    const regularId = `regular-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const regularId = 'regular-post-tag';
 
     const regular = await deleteThroughParent(config, regularId);
     const colliding = await deleteThroughParent(config, COLLIDING_ID);

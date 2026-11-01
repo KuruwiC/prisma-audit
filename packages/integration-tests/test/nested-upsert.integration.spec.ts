@@ -308,14 +308,23 @@ describe('Nested Upsert Operations', () => {
         where: { entityType: 'Profile' },
       });
 
-      // Every committed upsert wrote its Profile and User aggregate logs; a failed one wrote none.
-      // The profile is created exactly once and every other committed upsert updated it.
+      // Every committed upsert wrote one log under each of the Profile and User aggregates, with
+      // the same action; a failed one wrote none. An upsert whose read saw no profile records a
+      // create even when the other's commit made Prisma update the row it found (a documented
+      // limitation), so how many are creates depends on the interleaving. The first to commit
+      // read no profile, so at least one is.
+      const actionsUnder = (aggregateType: string) =>
+        profileLogs
+          .filter((log: { aggregateType: string }) => log.aggregateType === aggregateType)
+          .map((log: { action: string }) => log.action)
+          .sort();
       expect(profileLogs.every((log: { entityId: string }) => log.entityId === profile?.id)).toBe(true);
-      expect(profileLogs.filter((log: { action: string }) => log.action === 'create')).toHaveLength(2);
-      expect(profileLogs.filter((log: { action: string }) => log.action === 'update')).toHaveLength(
-        2 * (successCount - 1),
-      );
       expect(profileLogs).toHaveLength(2 * successCount);
+      const profileActions = actionsUnder('Profile');
+      expect(profileActions).toHaveLength(successCount);
+      expect(actionsUnder('User')).toEqual(profileActions);
+      expect(profileActions).toContain('create');
+      expect(profileActions.filter((action: string) => action !== 'create' && action !== 'update')).toEqual([]);
     });
   });
 

@@ -14,7 +14,7 @@ import { createAuditClient } from '@kuruwic/prisma-audit';
 import { type AuditModelName, auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createBasePrisma, testEntities } from './helpers/setup.js';
+import { cleanDatabase, createBasePrisma, testEntities } from './helpers/setup.js';
 
 const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'nested-to-many-scope-actor' },
@@ -26,8 +26,9 @@ describe('nested to-many pre-fetch — parent row scope', () => {
   let provider: ReturnType<typeof createAsyncLocalStorageProvider>;
   let observer: ReturnType<typeof vi.fn<AuditErrorObserver>>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     basePrisma = createBasePrisma();
+    await cleanDatabase(basePrisma);
     provider = createAsyncLocalStorageProvider();
     observer = vi.fn<AuditErrorObserver>();
     prisma = createAuditClient(basePrisma, {
@@ -50,18 +51,17 @@ describe('nested to-many pre-fetch — parent row scope', () => {
     await basePrisma.$disconnect();
   });
 
-  const seedUsers = async (label: string) => {
-    const suffix = `${label}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const seedUsers = async () => {
     const userA = await basePrisma.user.create({
-      data: { email: `scope-a-${suffix}@example.com`, name: 'A', password: 'secret123' },
+      data: { email: 'scope-a@example.com', name: 'A', password: 'secret123' },
     });
     const userB = await basePrisma.user.create({
-      data: { email: `scope-b-${suffix}@example.com`, name: 'B', password: 'secret123' },
+      data: { email: 'scope-b@example.com', name: 'B', password: 'secret123' },
     });
     const postB = await basePrisma.post.create({
       data: { title: 'B post', content: 'owned by B', authorId: userB.id },
     });
-    return { suffix, userA, userB, postB };
+    return { userA, userB, postB };
   };
 
   const upsertPostWithCommentUnder = (userId: string, postWhereId: string) =>
@@ -111,7 +111,7 @@ describe('nested to-many pre-fetch — parent row scope', () => {
   };
 
   it("an upsert whose WHERE names another parent's row creates a new row and audits the writes nested in its create branch", async () => {
-    const { userA, postB } = await seedUsers('other-parent');
+    const { userA, postB } = await seedUsers();
 
     await upsertPostWithCommentUnder(userA.id, postB.id);
 
@@ -121,16 +121,16 @@ describe('nested to-many pre-fetch — parent row scope', () => {
   });
 
   it('an upsert whose WHERE names no row creates a new row and audits the writes nested in its create branch', async () => {
-    const { suffix, userA } = await seedUsers('missing');
+    const { userA } = await seedUsers();
 
-    await upsertPostWithCommentUnder(userA.id, `missing-${suffix}`);
+    await upsertPostWithCommentUnder(userA.id, 'missing-post-id');
 
     await expectCreateLogsForNewPostAndComment(userA.id, []);
     expect(observer).not.toHaveBeenCalled();
   });
 
   it("an update whose WHERE names another parent's row is rejected by Prisma and writes no audit log", async () => {
-    const { userA, postB } = await seedUsers('update-other-parent');
+    const { userA, postB } = await seedUsers();
 
     await expect(
       provider.runAsync(testActor, async () =>

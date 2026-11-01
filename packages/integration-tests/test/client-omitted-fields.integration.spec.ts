@@ -86,6 +86,7 @@ describe('fields a client-level omit hides', () => {
 
   const setup = async (options: Options = {}, clientOmit: Prisma.GlobalOmitConfig = CLIENT_OMIT) => {
     const basePrisma = createBasePrisma({ omit: clientOmit });
+    disconnects.push(() => basePrisma.$disconnect());
     const provider = createAsyncLocalStorageProvider();
     const prisma = createAuditClient(basePrisma, {
       Prisma,
@@ -95,10 +96,7 @@ describe('fields a client-level omit hides', () => {
       diffExcludeFields: ['createdAt', 'updatedAt'],
       ...options,
     });
-    disconnects.push(async () => {
-      await prisma.$disconnect();
-      await basePrisma.$disconnect();
-    });
+    disconnects.push(() => prisma.$disconnect());
     await cleanDatabase(basePrisma);
 
     const run = <T>(operation: () => Promise<T>) => provider.runAsync(testActor, operation);
