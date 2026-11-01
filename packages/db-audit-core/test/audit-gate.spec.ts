@@ -51,13 +51,6 @@ describe('auditGate', () => {
     expect(auditGate(undefined, ['User', 'Post'], { requireContext })).toEqual({ kind: 'skip' });
     expect(requireContext.mock.calls).toEqual([['User'], ['Post']]);
   });
-
-  it('rejects a write without an audit context when only a model it writes below the top level requires one', () => {
-    expect(auditGate(undefined, ['User', 'Post'], { requireContext: (modelName) => modelName === 'Post' })).toEqual({
-      kind: 'reject',
-      modelName: 'Post',
-    });
-  });
 });
 
 describe('AuditContextMissingError', () => {

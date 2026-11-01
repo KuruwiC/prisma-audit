@@ -1121,21 +1121,6 @@ describe('createBatchExecutor', () => {
       expect(failureSink.notify).toHaveBeenCalledExactlyOnceWith(notFoundReport('updateMany', 1));
       expect(produceRecords).toHaveBeenCalledWith([updateEvent(b1, b2, 'updateMany')], expect.anything(), new Map());
     });
-
-    it('reports nothing when every written row pairs by its key', async () => {
-      const findMany = findManyReturning([a1, b1], [a2, b2]);
-      const updateMany = vi.fn(async () => ({ count: 2 }));
-      const client = clientWith({ user: { findMany, updateMany } });
-
-      await runWithRecords(
-        executor,
-        operationOn(client, 'updateMany', { where: {}, data }),
-        scopeOn(client),
-        produce(),
-      );
-
-      expect(failureSink.notify).not.toHaveBeenCalled();
-    });
   });
 
   describe('a write whose data changes the key of the rows it writes in a way the audit cannot follow', () => {

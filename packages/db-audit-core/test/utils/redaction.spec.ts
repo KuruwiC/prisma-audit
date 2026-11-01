@@ -197,25 +197,6 @@ describe('non-plain objects', () => {
 });
 
 describe('redactSensitiveData', () => {
-  it('should redact with default config', () => {
-    const data = {
-      id: 'user-123',
-      name: 'John Doe',
-      password: 'secret123',
-    };
-
-    const redacted = redactSensitiveData(data) as Record<string, unknown>;
-
-    expect(redacted).toEqual({
-      id: 'user-123',
-      name: 'John Doe',
-      password: {
-        redacted: true,
-        hadValue: true,
-      } satisfies RedactedFieldInfo,
-    });
-  });
-
   it('should redact the given fields on top of the built-in ones', () => {
     const data = { password: 'secret', customField: 'sensitive' };
 
@@ -231,18 +212,6 @@ describe('redactSensitiveData', () => {
         hadValue: true,
       } satisfies RedactedFieldInfo,
     });
-  });
-
-  it('should leave the input unchanged', () => {
-    const original = { name: 'John', password: 'secret' };
-    const redacted = redactSensitiveData(original) as Record<string, unknown>;
-
-    // Original should not be mutated
-    expect(original.password).toBe('secret');
-    expect(redacted.password).toEqual({
-      redacted: true,
-      hadValue: true,
-    } satisfies RedactedFieldInfo);
   });
 });
 

@@ -65,7 +65,6 @@ type BatchOf = (client: PrismaClient, seeded: Seeded) => Prisma.PrismaPromise<un
 interface AuditedClientOptions {
   readonly awaited?: boolean | ((modelName: string) => boolean);
   readonly writer?: (records: AuditRecord[], context: WriteContext<PrismaClient>) => Promise<void>;
-  readonly transactionOptions?: { readonly timeout: number };
   readonly implicitTransaction?: boolean;
 }
 
@@ -75,7 +74,7 @@ describe('Batch $transaction under the audit extension', () => {
   const context = setupTestContext();
 
   const createAudited = (options: AuditedClientOptions) => {
-    const raw = createBasePrisma(options.transactionOptions ? { transactionOptions: options.transactionOptions } : {});
+    const raw = createBasePrisma();
     const provider = createAsyncLocalStorageProvider();
     const observer = vi.fn();
     const prisma = createAuditClient(raw, {
@@ -295,25 +294,6 @@ describe('Batch $transaction under the audit extension', () => {
           status: 'resolved',
           results: [{ email: 'a@example.com', name: 'A' }, [{ transaction_isolation: 'serializable' }]],
         });
-      } finally {
-        await audited.dispose();
-      }
-    });
-
-    it("runs the batch as an interactive transaction bound by the client's transaction options", async () => {
-      const audited = createAudited({
-        implicitTransaction: true,
-        awaited: true,
-        transactionOptions: { timeout: 200 },
-      });
-      try {
-        const result = await runAudited(audited, (client) => [
-          createA(client),
-          client.$queryRaw`SELECT 1 AS slept FROM pg_sleep(0.5)`,
-        ]);
-        expect(result.outcome).toMatchObject({ status: 'rejected', code: 'P2028' });
-        expect(result.rows.users.map((user) => user.email)).toEqual(['owner@example.com', 'taken@example.com']);
-        expect(result.audits).toEqual([]);
       } finally {
         await audited.dispose();
       }

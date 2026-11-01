@@ -419,6 +419,7 @@ describe('implicitTransaction', () => {
       await expect(result).rejects.toMatchObject({ code: 'P2028' });
       expect(transactions).toEqual(['interactive']);
       expect(await raw.user.count()).toBe(0);
+      expect(await auditRows()).toEqual([]);
     });
 
     it('runs a write through the audited client inside a callback of your transaction in a transaction of its own, together with its audit', async () => {

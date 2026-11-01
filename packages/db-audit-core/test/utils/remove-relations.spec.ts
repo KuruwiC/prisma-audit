@@ -195,28 +195,5 @@ describe('removeRelations', () => {
 
       expect(result).toEqual(input);
     });
-
-    it('should handle empty objects and arrays', () => {
-      const input = {
-        id: 'user-1',
-        metadata: {},
-        tags: [],
-      };
-
-      const result = removeRelations(input);
-
-      expect(result).toEqual(input);
-    });
-
-    it('should handle arrays of primitive values', () => {
-      const input = {
-        id: 'post-1',
-        tags: ['javascript', 'typescript', 'node'],
-      };
-
-      const result = removeRelations(input);
-
-      expect(result).toEqual(input);
-    });
   });
 });

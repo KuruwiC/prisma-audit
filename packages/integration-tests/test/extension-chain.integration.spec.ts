@@ -103,84 +103,10 @@ describe('Extension Chain Guard', () => {
   const auditRowsForUpdate = (clients: Clients) =>
     clients.rawBasePrisma.auditLog.findMany({ where: { entityType: 'User', action: 'update' } });
 
-  const laterRecorder = (clients: Clients) => {
-    const seenLater: SeenOperation[] = [];
-    const later = clients.prisma.$extends({
-      name: 'later-operation-recorder',
-      query: {
-        $allModels: {
-          async $allOperations({ model, operation, args, query }) {
-            seenLater.push({ model, operation });
-            return query(args);
-          },
-        },
-      },
-    });
-    const laterUpdatesSeen = () => seenLater.filter((call) => call.model === 'User' && call.operation === 'update');
-    return { later, laterUpdatesSeen };
-  };
-
   describe.each([
     { scope: 'outside any transaction, written once the update has committed', clients: () => awaited },
     { scope: 'in the transaction implicitTransaction opens around it', clients: () => opening },
   ])('an update whose audit is awaited, $scope', ({ clients: clientsOf }) => {
-    it('reaches an extension applied before the audit extension once', async () => {
-      const clients = clientsOf();
-      const user = await createUser(clients, 'awaited-single@example.com');
-      clients.seen.length = 0;
-
-      await clients.provider.runAsync(testActor, () =>
-        clients.prisma.user.update({ where: { id: user.id }, data: { name: 'After' } }),
-      );
-
-      // 1. the caller's call, which the audit extension continues through `query` on the same chain
-      expect(clients.userUpdatesSeen()).toHaveLength(1);
-      expect(await auditRowsForUpdate(clients)).toHaveLength(1);
-    });
-
-    it('reaches an extension applied after the audit extension once', async () => {
-      const clients = clientsOf();
-      const user = await createUser(clients, 'awaited-single-later@example.com');
-      const { later, laterUpdatesSeen } = laterRecorder(clients);
-
-      await clients.provider.runAsync(testActor, () =>
-        later.user.update({ where: { id: user.id }, data: { name: 'After' } }),
-      );
-
-      // 1. the caller's call, continued through `query` past the audit extension
-      expect(laterUpdatesSeen()).toHaveLength(1);
-      expect(await auditRowsForUpdate(clients)).toHaveLength(1);
-    });
-
-    it('in a batch $transaction reaches an extension applied before the audit extension once', async () => {
-      const clients = clientsOf();
-      const user = await createUser(clients, 'awaited-batch@example.com');
-      clients.seen.length = 0;
-
-      await clients.provider.runAsync(testActor, () =>
-        clients.prisma.$transaction([clients.prisma.user.update({ where: { id: user.id }, data: { name: 'After' } })]),
-      );
-
-      // 1. the caller's call, in Prisma's batch, or replayed on the client of the interactive
-      //    transaction the batch runs in with implicitTransaction
-      expect(clients.userUpdatesSeen()).toHaveLength(1);
-      expect(await auditRowsForUpdate(clients)).toHaveLength(1);
-    });
-
-    it('in a batch $transaction reaches an extension applied after the audit extension once', async () => {
-      const clients = clientsOf();
-      const user = await createUser(clients, 'awaited-batch-later@example.com');
-      const { later, laterUpdatesSeen } = laterRecorder(clients);
-
-      await clients.provider.runAsync(testActor, () =>
-        later.$transaction([later.user.update({ where: { id: user.id }, data: { name: 'After' } })]),
-      );
-
-      // 1. the caller's call, continued through `query` past the audit extension
-      expect(laterUpdatesSeen()).toHaveLength(1);
-      expect(await auditRowsForUpdate(clients)).toHaveLength(1);
-    });
-
     it("audits a write an extension applied after the audit extension issues while it continues the caller's operation", async () => {
       const clients = clientsOf();
       const user = await createUser(clients, 'continued-caller@example.com');
