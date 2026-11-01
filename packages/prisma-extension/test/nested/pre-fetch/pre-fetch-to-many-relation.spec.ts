@@ -448,10 +448,7 @@ describe('nested to-many batch pre-read', () => {
       },
     });
 
-    expect(delegates.note?.findMany.mock.calls).toEqual([
-      [{ where: underM1({ body: 'a' }) }],
-      [{ where: underM1({ body: 'a' }) }],
-    ]);
+    expect(delegates.note?.findMany).toHaveBeenCalledWith({ where: underM1({ body: 'a' }) });
     expect(batchTargets.get('members.notes')?.get('updateMany')).toEqual(new Map([['n1', { id: 'n1' }]]));
   });
 

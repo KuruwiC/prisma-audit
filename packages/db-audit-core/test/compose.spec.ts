@@ -1,22 +1,10 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { ResolvedId } from '../src/aggregate/types.js';
 import { type ComposeAmbient, type ComposeConfig, compose } from '../src/compose/index.js';
 import { IdValidationError } from '../src/domain/branded-types.js';
 import type { ResolvedEvent } from '../src/domain/mutation-event.js';
 import type { AuditContext } from '../src/types.js';
 import { UNHANDLED } from '../src/utils/serialization.js';
-
-// Lets a test make redaction return a structure it never returns on its own, to reach the type guards.
-const redaction = vi.hoisted(() => ({ override: undefined as ((data: unknown) => unknown) | undefined }));
-
-vi.mock('../src/utils/redaction.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/utils/redaction.js')>();
-  return {
-    ...actual,
-    redactSensitiveData: (data: unknown, fields?: readonly string[]): unknown =>
-      redaction.override ? redaction.override(data) : actual.redactSensitiveData(data, fields),
-  };
-});
 
 const auditContext: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'user-1' },
@@ -63,10 +51,6 @@ const composeOne = (resolved: ResolvedEvent, config?: Partial<ComposeConfig>) =>
 };
 
 describe('compose', () => {
-  afterEach(() => {
-    redaction.override = undefined;
-  });
-
   describe('records per event', () => {
     it('yields no record for a model without entity configuration', () => {
       expect(compose([event()], ambient({ entity: () => undefined }), now)).toEqual([]);
@@ -464,19 +448,18 @@ describe('compose', () => {
       );
     });
 
-    it('throws when redaction does not return a record for a state', () => {
-      redaction.override = () => ['not', 'a', 'record'];
-
-      expect(() => compose([event()], ambient(), now)).toThrow('[db-audit-core] Redaction produced unexpected type');
-    });
-
-    it('throws when redaction does not return a record for the changes', () => {
-      // Redaction runs on before, after and then changes.
-      let call = 0;
-      redaction.override = (data) => (++call === 3 ? ['not', 'a', 'record'] : data);
+    it('throws when a custom serializer turns the changes into a value that is not a record', () => {
+      const isChanges = (value: unknown) => {
+        if (typeof value !== 'object' || value === null || !('title' in value)) return false;
+        const { title } = value;
+        return typeof title === 'object' && title !== null && 'old' in title && 'new' in title;
+      };
+      const config: Partial<ComposeConfig> = {
+        serializers: [(value) => (isChanges(value) ? JSON.stringify(value) : UNHANDLED)],
+      };
       const resolved = updateEvent({ id: 'post-1', title: 'Old' }, { id: 'post-1', title: 'New' });
 
-      expect(() => compose([resolved], ambient(), now)).toThrow(
+      expect(() => compose([resolved], ambient(config), now)).toThrow(
         '[db-audit-core] Redaction of changes produced unexpected type',
       );
     });

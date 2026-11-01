@@ -26,19 +26,22 @@ const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'nested-pre-fetch-actor' },
 };
 
+type FaultPredicate = (args: { where: { id?: string } }, callNumber: number) => boolean;
+
 describe('nested pre-fetch failures — observer notification', () => {
   /**
    * Builds an audited client whose base Prisma client can fail `comment.findUnique`
-   * on specific 1-indexed call numbers, armed via the returned `armFault`.
+   * for the reads a predicate selects (by their arguments or 1-indexed call number),
+   * armed via the returned `armFault`.
    *
-   * `armFault` resets the call counter to zero, so any `comment.findUnique` the setup
-   * work before it issues never consumes the armed call numbers.
+   * `armFault` resets the call counter to zero, so the call number a predicate sees
+   * counts only the `comment.findUnique` reads issued after arming.
    */
   const createClient = (observer: AuditErrorObserver) => {
     const rawBasePrisma = createBasePrisma();
 
     let callCount = 0;
-    let failOnCalls: Set<number> = new Set();
+    let shouldFail: FaultPredicate = () => false;
     let failureMessage = '';
 
     const basePrisma = rawBasePrisma.$extends({
@@ -47,7 +50,7 @@ describe('nested pre-fetch failures — observer notification', () => {
         comment: {
           async findUnique({ args, query }) {
             callCount += 1;
-            if (failOnCalls.has(callCount)) {
+            if (shouldFail(args, callCount)) {
               throw new Error(failureMessage);
             }
             return query(args);
@@ -66,9 +69,9 @@ describe('nested pre-fetch failures — observer notification', () => {
       errorObserver: observer,
     });
 
-    const armFault = (callNumbersToFail: Set<number>, message: string): void => {
+    const armFault = (predicate: FaultPredicate, message: string): void => {
       callCount = 0;
-      failOnCalls = callNumbersToFail;
+      shouldFail = predicate;
       failureMessage = message;
     };
 
@@ -95,7 +98,7 @@ describe('nested pre-fetch failures — observer notification', () => {
 
       // Arm the fault only now: the audit's read of the updated comment is the very next
       // `comment.findUnique` call.
-      armFault(new Set([1]), FAILURE_MESSAGE);
+      armFault((_args, callNumber) => callNumber === 1, FAILURE_MESSAGE);
       observer.mockClear();
 
       const updatedPost = await provider.runAsync(testActor, async () =>
@@ -163,9 +166,9 @@ describe('nested pre-fetch failures — observer notification', () => {
         prisma.comment.create({ data: { content: 'Comment 3', postId: post.id, authorId: user.id } }),
       );
 
-      // Arm the fault only now: the audit reads the deleted comments one `findUnique` per
-      // item, in array order, so the second read is c2's.
-      armFault(new Set([2]), FAILURE_MESSAGE);
+      // Arm the fault only now: the audit reads each deleted comment with its own `findUnique`;
+      // fail the one for c2, whichever order the reads are issued in.
+      armFault((args) => args.where.id === c2.id, FAILURE_MESSAGE);
       observer.mockClear();
 
       const updatedPost = await provider.runAsync(testActor, async () =>

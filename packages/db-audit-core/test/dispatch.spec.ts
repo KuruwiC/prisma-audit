@@ -327,14 +327,24 @@ describe('dispatch', () => {
     });
   });
 
-  it('hands the executor a copy of the records', async () => {
-    const { config, writeExecutor } = createConfig();
+  it('reports every record of a failed write even when the writer emptied the array it was given', async () => {
+    const built = [record];
+    const writer = vi.fn(async (received: AuditRecord[]) => {
+      received.length = 0;
+      throw writeError;
+    });
+    const { config, failureSink } = createConfig({ writer });
 
-    await dispatch(audited(true), config, createRuntime(true).runtime);
+    await dispatch(
+      audited(true, async () => built),
+      config,
+      createRuntime(true).runtime,
+    );
 
-    const written = writeExecutor.write.mock.calls[0]?.[1];
-    expect(written).toEqual([record]);
-    expect(written).not.toBe(records);
+    expect(failureSink.reportWriteFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ records: [record] }),
+      writeError,
+    );
   });
 
   it.each([
