@@ -33,6 +33,7 @@ import {
   getRowKeyFields,
 } from '../utils/id-generation.js';
 import type { EntityIdentityKey } from '../utils/identity-key.js';
+import { isRecord } from '../utils/is-record.js';
 import { getModelDelegate, hasOperation } from '../utils/model-accessor.js';
 import { requiresBeforeState } from '../utils/operation-classifier.js';
 import { type DerivableRowKeyWrite, NO_ROW_KEY_WRITE, rowKeyWriteOf, withWrittenKey } from '../utils/row-key-write.js';
@@ -76,6 +77,8 @@ export type BatchPrepared =
    * way its arguments do not tell: run as given, no row read
    */
   | { readonly kind: 'key-not-followed' }
+  /** updateMany or updateManyAndReturn whose data writes no field: it changes no row, so it is run as given, no row read */
+  | { readonly kind: 'writes-no-field' }
   /** updateMany or deleteMany with a positive integer `limit`: the rows are read round by round as the write runs */
   | {
       readonly kind: 'limited';
@@ -213,8 +216,14 @@ const prepareLimited = (
  * outside any. Inside a batch `$transaction([...])` Prisma runs, a read before the write cannot see
  * what the batch's earlier operations wrote, so the operation runs as given. An update whose data
  * changes the key in a way its arguments do not tell runs as given too: no row it writes could be
- * found or paired by key, so none is read.
+ * found or paired by key, so none is read. An update whose data writes no field changes no row:
+ * Prisma runs no `UPDATE` for it, and the count it returns does not count rows written (0 on
+ * SQLite, the rows the `where` matches on PostgreSQL), so it runs as given and reads none either.
  */
+/** Whether `data` gives no field a value: every field it names is `undefined` or `Prisma.skip` */
+const writesNoField = (data: unknown, skip: unknown): boolean =>
+  isRecord(data) && Object.values(data).every((value) => value === undefined || value === skip);
+
 const prepareUpdateOrDelete = async (
   operation: AuditedOperation,
   scope: ExecutionScope,
@@ -225,6 +234,9 @@ const prepareUpdateOrDelete = async (
   const delegate = batchDelegate(scope, model, deps.auditedOmittedFieldsWithRowKey);
   const where = args.where ?? {};
   const { limit } = args;
+  if (action !== AUDIT_ACTION.DELETE_MANY && writesNoField(args.data, deps.Prisma.skip)) {
+    return { kind: 'writes-no-field' };
+  }
   const keyWrite =
     action === AUDIT_ACTION.DELETE_MANY
       ? NO_ROW_KEY_WRITE
@@ -320,6 +332,9 @@ const returnedRowsKeyNotFollowed: UnidentifiedReason = (operation, unidentified)
 
 const writtenRowsNotRead: UnidentifiedReason = (operation, unidentified) =>
   `${unidentified} of the rows an ${operation.action} wrote ${unidentified === 1 ? 'was' : 'were'} not read before it, so they are not audited: another writer made them match its where after the read`;
+
+const readRowsNotUpdated: UnidentifiedReason = (operation, unidentified) =>
+  `${unidentified} of the rows read before an ${operation.action} ${unidentified === 1 ? 'was' : 'were'} not updated by it, and which ones cannot be told: another writer moved them out of its where after the read, and the audit treats every read row it finds after the write as updated`;
 
 const readRowsNotDeleted: UnidentifiedReason = (operation, unidentified) =>
   `${unidentified} of the rows read before a ${operation.action} ${unidentified === 1 ? 'was' : 'were'} not deleted by it, yet every row read is audited as deleted: another writer deleted them or moved them out of its where after the read, and which ones cannot be told`;
@@ -530,6 +545,18 @@ const reportRowsWrittenBeyondRead = (
 ): Promise<void> =>
   reportUnidentified(operation, countOf(executed.result) - readRows.length, failureSink, writtenRowsNotRead);
 
+/**
+ * The re-read finds the read rows another writer moved out of the `where` too, which the update did
+ * not write: a count below the rows found shows at least that many of them.
+ */
+const reportRowsFoundBeyondUpdated = (
+  operation: AuditedOperation,
+  written: WrittenRows,
+  executed: BatchExecuted,
+  failureSink: FailureSink,
+): Promise<void> =>
+  reportUnidentified(operation, written.rows.length - countOf(executed.result), failureSink, readRowsNotUpdated);
+
 /** Prisma does not return the rows a `deleteMany` deleted, so every row read stays audited as deleted */
 const reportRowsReadBeyondDeleted = (
   operation: AuditedOperation,
@@ -574,6 +601,7 @@ export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationE
       }
       case 'limited':
         return runLimitedWrite(operation, delegateOf(scope, operation.model), prepared);
+      case 'writes-no-field':
       case 'limited-as-given':
       case 'update':
       case 'delete':
@@ -621,6 +649,8 @@ export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationE
         return { rows: [] };
       case 'key-not-followed':
         return keyNotFollowedRows(operation, executed, failureSink);
+      case 'writes-no-field':
+        return { rows: [] };
       case 'limited':
         return limitedWriteRows(operation, delegateOf(scope, operation.model), prepared, executed, failureSink);
       case 'update': {
@@ -633,7 +663,9 @@ export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationE
         const { beforeRows, keyFields, keyWrite } = prepared;
         const delegate = delegateOf(scope, operation.model);
         const afterRows = await findManyByKeys(delegate, keyFields, underWrittenKeys(beforeRows, keyWrite));
-        return pairReReadRows(operation, afterRows, beforeRows, keyFields, keyWrite, failureSink);
+        const written = await pairReReadRows(operation, afterRows, beforeRows, keyFields, keyWrite, failureSink);
+        await reportRowsFoundBeyondUpdated(operation, written, executed, failureSink);
+        return written;
       }
       case 'delete':
         await reportRowsReadBeyondDeleted(operation, prepared.beforeRows, executed, failureSink);

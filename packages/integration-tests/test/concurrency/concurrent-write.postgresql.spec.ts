@@ -371,6 +371,35 @@ describe('concurrent writes on PostgreSQL: a commit between the audit read and t
       expect(observer).not.toHaveBeenCalled();
     });
 
+    it('records a row another transaction moves out of the where of an updateMany between the read and the update as updated, and reports as row-identification that the updateMany updated fewer rows than it found again', async () => {
+      await seedPost('moved-out');
+      await seedPost('stays');
+
+      const outcome = await interleave(barrier, postFindMany, {
+        operation: () => readCommitted((tx) => tx.post.updateMany({ ...unpublished, data: { title: '120' } })),
+        interleaved: () => other.post.update({ where: { id: 'moved-out' }, data: { published: true } }),
+      });
+
+      expect(outcome.operation).toEqual({ status: 'fulfilled', value: { count: 1 } });
+      expect(await postOf('moved-out')).toMatchObject({ title: '100', published: true });
+      expect(await postRecords('moved-out')).toEqual([
+        expect.objectContaining({
+          action: 'update',
+          before: expect.objectContaining({ title: '100', published: false }),
+          after: expect.objectContaining({ title: '100', published: true }),
+        }),
+      ]);
+      expect(await postRecords('stays')).toEqual([expect.objectContaining({ action: 'update' })]);
+      expect(observer).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          phase: 'row-identification',
+          modelName: 'Post',
+          operation: 'updateMany',
+          params: { unidentified: 1 },
+        }),
+      );
+    });
+
     it('records the delete of a row another transaction deletes between the read and a deleteMany, and reports as row-identification that the deleteMany deleted fewer rows than it read', async () => {
       await seedPost('deleted-first');
       await seedPost('deleted-by-many');

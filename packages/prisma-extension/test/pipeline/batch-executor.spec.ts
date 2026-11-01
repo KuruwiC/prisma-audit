@@ -490,7 +490,7 @@ describe('createBatchExecutor', () => {
 
       await runWithRecords(
         executor,
-        operationOn(client, 'updateMany', { where: {}, data: {} }),
+        operationOn(client, 'updateMany', { where: {}, data: { email: 'x' } }),
         scopeOn(client),
         produceRecords,
       );
@@ -503,7 +503,12 @@ describe('createBatchExecutor', () => {
       const findMany = vi.fn(async () => []);
       const client = clientWith({ user: { findMany, updateMany: vi.fn(async () => ({ count: 0 })) } });
 
-      await runWithRecords(executor, operationOn(client, 'updateMany', { data: {} }), scopeOn(client), produce());
+      await runWithRecords(
+        executor,
+        operationOn(client, 'updateMany', { data: { email: 'x' } }),
+        scopeOn(client),
+        produce(),
+      );
 
       expect(findMany).toHaveBeenCalledWith({ where: {} });
     });
@@ -1616,6 +1621,44 @@ describe('createBatchExecutor', () => {
     });
   });
 
+  describe('an update whose data writes no field', () => {
+    const skip = Symbol('skip');
+    const executorWithSkip = () =>
+      createBatchExecutor({
+        Prisma: { ...Prisma, skip },
+        schemaMetadata,
+        auditedOmittedFieldsWithRowKey: withRowKeyFields(NO_AUDITED_OMITTED_FIELDS, schemaMetadata, false),
+        failureSink,
+      });
+
+    it.each([
+      ['empty data', {}],
+      ['data whose every field is undefined or Prisma.skip', { email: undefined, name: skip }],
+    ])(
+      'runs an updateMany with %s as given, reading no row, auditing none and reporting nothing',
+      async (_case, data) => {
+        const findMany = vi.fn();
+        const updateMany = vi.fn(async () => ({ count: 0 }));
+        const client = clientWith({ user: { findMany, updateMany } });
+        const produceRecords = produce();
+        const args = { where: { email: { contains: '@' } }, data };
+
+        const outcome = await runWithRecords(
+          executorWithSkip(),
+          operationOn(client, 'updateMany', args),
+          scopeOn(client),
+          produceRecords,
+        );
+
+        expect(outcome.result).toEqual({ count: 0 });
+        expect(updateMany).toHaveBeenCalledWith(args);
+        expect(findMany).not.toHaveBeenCalled();
+        expect(failureSink.notify).not.toHaveBeenCalled();
+        expect(produceRecords).toHaveBeenCalledWith([], expect.anything(), new Map());
+      },
+    );
+  });
+
   describe('a count that differs from the rows read before the write', () => {
     const where = { email: { contains: '@' } };
     const report = (action: string, count: number, message: string) => ({
@@ -1630,6 +1673,12 @@ describe('createBatchExecutor', () => {
         'updateMany',
         count,
         `${count} of the rows an updateMany wrote ${count === 1 ? 'was' : 'were'} not read before it, so they are not audited: another writer made them match its where after the read`,
+      );
+    const notUpdatedReport = (count: number) =>
+      report(
+        'updateMany',
+        count,
+        `${count} of the rows read before an updateMany ${count === 1 ? 'was' : 'were'} not updated by it, and which ones cannot be told: another writer moved them out of its where after the read, and the audit treats every read row it finds after the write as updated`,
       );
     const notDeletedReport = (count: number) =>
       report(
@@ -1692,6 +1741,55 @@ describe('createBatchExecutor', () => {
       expect(failureSink.notify).not.toHaveBeenCalled();
     });
 
+    it('reports the rows an updateMany found again after the write beyond the rows it updated, and still audits every row found as updated', async () => {
+      const findMany = findManyReturning([a1, b1], [a2, b2]);
+      const updateMany = vi.fn(async () => ({ count: 1 }));
+      const client = clientWith({ user: { findMany, updateMany } });
+      const produceRecords = produce();
+
+      const outcome = await runWithRecords(
+        executor,
+        operationOn(client, 'updateMany', { where, data: { email: 'x' } }),
+        scopeOn(client),
+        produceRecords,
+      );
+
+      expect(outcome.result).toEqual({ count: 1 });
+      expect(failureSink.notify).toHaveBeenCalledExactlyOnceWith(notUpdatedReport(1));
+      expect(produceRecords).toHaveBeenCalledWith(
+        [
+          eventOf({ identity: 'a', action: 'update', before: { kind: 'captured', row: a1 }, after: a2 }),
+          eventOf({ identity: 'b', action: 'update', before: { kind: 'captured', row: b1 }, after: b2 }),
+        ],
+        expect.anything(),
+        new Map(),
+      );
+    });
+
+    it('reports apart the rows an updateMany does not find again and the rows it found beyond the rows it updated', async () => {
+      const c1: Row = { id: 'c', email: 'c@1' };
+      const findMany = findManyReturning([a1, b1, c1], [a2, b2]);
+      const client = clientWith({ user: { findMany, updateMany: vi.fn(async () => ({ count: 1 })) } });
+
+      await runWithRecords(
+        executor,
+        operationOn(client, 'updateMany', { where, data: { email: 'x' } }),
+        scopeOn(client),
+        produce(),
+      );
+
+      expect(vi.mocked(failureSink.notify).mock.calls).toEqual([
+        [
+          report(
+            'updateMany',
+            1,
+            '1 of the rows read before an updateMany are not found by key after it, so they are not audited: another writer changed their key or deleted them',
+          ),
+        ],
+        [notUpdatedReport(1)],
+      ]);
+    });
+
     it('reports the rows read before a deleteMany beyond the rows it deleted, and still audits every row read as deleted', async () => {
       const findMany = vi.fn(async () => [a1, b1]);
       const deleteMany = vi.fn(async () => ({ count: 1 }));
@@ -1734,7 +1832,7 @@ describe('createBatchExecutor', () => {
       await expect(
         runWithRecords(
           executor,
-          operationOn(client, 'updateMany', { where: {}, data: {} }),
+          operationOn(client, 'updateMany', { where: {}, data: { email: 'x' } }),
           scopeOn(client),
           produce(),
         ),
