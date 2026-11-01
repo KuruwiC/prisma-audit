@@ -31,6 +31,7 @@ const actor: AuditContext = { actor: { category: 'model', type: 'User', id: 'con
 const POST_ID = 'contended-post';
 
 const postFindUnique: BarrierTarget = { model: 'Post', read: 'findUnique' };
+const userFindUnique: BarrierTarget = { model: 'User', read: 'findUnique' };
 const postFindMany: BarrierTarget = { model: 'Post', read: 'findMany' };
 
 const errorCodesOf = (settled: Settled<unknown>) => {
@@ -424,26 +425,26 @@ describe('concurrent writes on PostgreSQL: a commit between the audit read and t
         }),
       );
     });
+  });
 
-    it("records a child another transaction inserts under the parent between the read of the parent's children and a nested to-many create as created by the nested create", async () => {
-      await seedPost('existing-child');
+  it('records only the child a nested to-many create inserts, by the key the extension gives it, when another transaction inserts a child under the parent while it runs, reading no child before the write', async () => {
+    await seedPost('existing-child');
 
-      const outcome = await interleave(barrier, postFindMany, {
-        operation: () =>
-          readCommitted((tx) =>
-            tx.user.update({
-              where: { id: authorId },
-              data: { posts: { create: { id: 'nested-child', title: 'created' } } },
-            }),
-          ),
-        interleaved: () => seedPost('inserted-child', { title: 'by the other' }),
-      });
-
-      expect(outcome.operation.status).toBe('fulfilled');
-      for (const id of ['nested-child', 'inserted-child']) {
-        expect(await postRecords(id)).toEqual([expect.objectContaining({ action: 'create', before: null })]);
-      }
-      expect(await postRecords('existing-child')).toEqual([]);
+    const outcome = await interleave(barrier, userFindUnique, {
+      operation: () =>
+        readCommitted((tx) =>
+          tx.user.update({ where: { id: authorId }, data: { posts: { create: { title: 'created' } } } }),
+        ),
+      interleaved: () => seedPost('inserted-child', { title: 'by the other' }),
     });
+
+    expect(outcome.operation.status).toBe('fulfilled');
+    const created = await other.post.findFirstOrThrow({ where: { title: 'created' } });
+    expect(await postRecords(created.id)).toEqual([expect.objectContaining({ action: 'create', before: null })]);
+    expect(await postRecords('inserted-child')).toEqual([]);
+    expect(await postRecords('existing-child')).toEqual([]);
+    const insert = queries.findIndex((query) => /^INSERT INTO "public"\."posts"/.test(query));
+    expect(insert).toBeGreaterThan(-1);
+    expect(queries.slice(0, insert).some((query) => /FROM "public"\."posts"/.test(query))).toBe(false);
   });
 });

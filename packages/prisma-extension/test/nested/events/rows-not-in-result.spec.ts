@@ -11,7 +11,7 @@ import {
   type RowsNotInResultInput,
   readRowsNotInResult,
 } from '../../../src/nested/events/rows-not-in-result.js';
-import type { NestedWriteTarget } from '../../../src/nested/events/write-set.js';
+import { EMPTY_WRITE_SET, isInsertedAt, type NestedWriteTarget } from '../../../src/nested/events/write-set.js';
 import type { PreFetchListClient } from '../../../src/nested/pre-fetch/model-client.js';
 import type { ToManyPath } from '../../../src/nested/pre-fetch/to-many-path.js';
 import type { UniqueConstraint } from '../../../src/schema/types.js';
@@ -69,7 +69,7 @@ const inputOf = (
   path: 'rows',
   pkFields: ['id'],
   targets: [],
-  preExisting: new Set(),
+  isInserted: () => true,
   parents,
   resolvePath: () => path,
   include: undefined,
@@ -171,7 +171,34 @@ describe('readRowsNotInResult', () => {
       const rows = await readRowsNotInResult({
         ...inputOf(client, 'Post', path, [{ ...hiddenParent('u1'), rows: [{ id: 'held', authorId: 'u1' }] }]),
         targets: [named],
-        preExisting: new Set([extractEntityIdentity({ id: 'old' }, ['id'])]),
+        isInserted: isInsertedAt(
+          { ...EMPTY_WRITE_SET, anyNewRowIsInserted: true },
+          new Set([extractEntityIdentity({ id: 'old' }, ['id'])]),
+        ),
+      });
+
+      expect(findMany).toHaveBeenLastCalledWith({ where: { OR: [{ id: 'new' }] } });
+      expect(rows).toEqual([[inserted]]);
+    });
+
+    it('returns only the inserted rows whose key the data of the operations at the path gives', async () => {
+      const path: ToManyPath = {
+        parentModelName: 'User',
+        parentPk: pk,
+        pk,
+        scope: {
+          backField: 'author',
+          filter: 'is',
+          parentFields: ['id'],
+          foreignKey: { fields: ['authorId'], references: ['id'] },
+        },
+      };
+      const inserted = { id: 'new', authorId: 'u1' };
+      const { client, findMany } = clientReading([{ id: 'by-another-writer' }, { id: 'new' }], [inserted]);
+
+      const rows = await readRowsNotInResult({
+        ...inputOf(client, 'Post', path, [hiddenParent('u1')]),
+        isInserted: isInsertedAt({ ...EMPTY_WRITE_SET, generatedKeys: new Set(['new']) }, undefined),
       });
 
       expect(findMany).toHaveBeenLastCalledWith({ where: { OR: [{ id: 'new' }] } });

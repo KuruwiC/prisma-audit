@@ -75,7 +75,14 @@ import { identityOf } from './event-fields.js';
 import { collectLinkChanges } from './link-changes.js';
 import { type ParentAtPath, readRowsNotInResult } from './rows-not-in-result.js';
 import { resolveNestedRowState } from './state-resolver.js';
-import { insertsRows, type NestedWriteSet, type NestedWriteSets, type NestedWriteTarget } from './write-set.js';
+import {
+  EMPTY_WRITE_SET,
+  insertsRows,
+  isInsertedAt,
+  type NestedWriteSet,
+  type NestedWriteSets,
+  type NestedWriteTarget,
+} from './write-set.js';
 
 type Row = Record<string, unknown>;
 
@@ -276,10 +283,10 @@ const attributeToManyRows = (
   if (!recorded) {
     return attributed;
   }
-  const preExisting = walk.input.preExistingRows.get(path);
+  const inserted = isInsertedAt(writeSet, walk.input.preExistingRows.get(path));
   const origin = { model: recorded.relatedModel, path };
   for (const { row, selection } of rows) {
-    if (claimed.has(row) || targetOf(row, writeSet.targets) || preExisting?.has(identityOf(row, pkFields, origin))) {
+    if (claimed.has(row) || targetOf(row, writeSet.targets) || !inserted(identityOf(row, pkFields, origin))) {
       continue;
     }
     claimed.add(row);
@@ -290,7 +297,7 @@ const attributeToManyRows = (
 };
 
 const writeSetAt = (walk: CollectionWalk, path: string): NestedWriteSet =>
-  walk.input.writeSets.get(path) ?? { targets: [], createsPending: false };
+  walk.input.writeSets.get(path) ?? EMPTY_WRITE_SET;
 
 const ownTargetsOf = (writeSet: NestedWriteSet, candidates: readonly NestedOperationInfo[]): NestedWriteTarget[] =>
   writeSet.targets.filter((target) => candidates.includes(target.operation));
@@ -505,7 +512,7 @@ const rowsNotInResult = async (
     path,
     pkFields,
     targets: writeSetAt(walk, path).targets,
-    preExisting: input.preExistingRows.get(path),
+    isInserted: isInsertedAt(writeSetAt(walk, path), input.preExistingRows.get(path)),
     parents,
     resolvePath: () => (operation ? resolveToManyPath(deps.schemaMetadata, input.modelName, operation) : undefined),
     include,

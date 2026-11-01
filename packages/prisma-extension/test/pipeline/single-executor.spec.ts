@@ -25,6 +25,13 @@ const schemaMetadata = schemaMetadataOf(
     column('name'),
     relation('profile', 'Profile', 'UserProfile'),
     relation('posts', 'Post', 'UserPosts', { isList: true }),
+    relation('notes', 'Note', 'UserNotes', { isList: true }),
+  ]),
+  model('Note', [
+    column('id', { isId: true, hasDefaultValue: true, default: { name: 'cuid', args: [] } }),
+    column('body'),
+    column('userId'),
+    relation('user', 'User', 'UserNotes', { foreignKeyFields: ['userId'], referencedFields: ['id'] }),
   ]),
   model('Post', [
     column('id', { isId: true }),
@@ -501,6 +508,108 @@ describe('createSingleExecutor', () => {
       expect(update).not.toHaveBeenCalled();
       expect(produceRecords).not.toHaveBeenCalled();
       expect(failureSink.notify).not.toHaveBeenCalled();
+    });
+
+    it('fills in a key the data of a nested create leaves out, reads no row before the write, and audits only the row with that key', async () => {
+      const findMany = vi.fn();
+      const update = vi.fn(async (args: Row) => {
+        const data = args.data as { notes: { create: Row } };
+        const created = { ...data.notes.create, userId: 'u1' };
+        // A note another writer inserted under the same user before the write
+        return { ...user, notes: [{ id: 'other', body: 'by another writer', userId: 'u1' }, created] };
+      });
+      const client = clientWith({ user: { findUnique: vi.fn(async () => user), update }, note: { findMany } });
+      const { executor, produceRecords } = executorWith();
+      const operation = operationOn(client, 'update', {
+        where: { id: 'u1' },
+        data: { notes: { create: { body: 'B' } } },
+      });
+
+      await runWithRecords(executor, operation, scopeOn(client), produceRecords);
+
+      expect(findMany).not.toHaveBeenCalled();
+      const [written] = update.mock.calls[0] ?? [];
+      const generatedId = (written?.data as { notes: { create: Row } }).notes.create.id;
+      expect(generatedId).toEqual(expect.any(String));
+      expect(operation.args).toEqual({ where: { id: 'u1' }, data: { notes: { create: { body: 'B' } } } });
+      expect(produceRecords).toHaveBeenCalledWith(
+        [
+          expect.objectContaining({ model: 'User', action: 'update' }),
+          expect.objectContaining({ model: 'Note', identity: generatedId, action: 'create' }),
+        ],
+        expect.anything(),
+        new Map(),
+      );
+    });
+
+    it('reads the rows held before the write for a key the caller gives, which the database may store otherwise, and audits only the row it created', async () => {
+      const findMany = vi.fn(async () => [{ id: 'other' }]);
+      const update = vi.fn(async () => ({
+        ...user,
+        notes: [
+          { id: 'other', body: 'held before the write', userId: 'u1' },
+          { id: 'given', body: 'B', userId: 'u1' },
+        ],
+      }));
+      const client = clientWith({ user: { findUnique: vi.fn(async () => user), update }, note: { findMany } });
+      const { executor, produceRecords } = executorWith();
+      const args = { where: { id: 'u1' }, data: { notes: { createMany: { data: [{ id: 'given', body: 'B' }] } } } };
+
+      await runWithRecords(executor, operationOn(client, 'update', args), scopeOn(client), produceRecords);
+
+      expect(findMany).toHaveBeenCalledTimes(1);
+      expect(update).toHaveBeenCalledWith(args);
+      expect(produceRecords).toHaveBeenCalledWith(
+        [
+          expect.objectContaining({ model: 'User', action: 'update' }),
+          expect.objectContaining({ model: 'Note', identity: 'given', action: 'create' }),
+        ],
+        expect.anything(),
+        new Map(),
+      );
+    });
+
+    it('reads the rows a createMany with skipDuplicates may skip, and audits none it held before the write', async () => {
+      const findMany = vi.fn(async () => [{ id: 'held' }]);
+      const update = vi.fn(async () => ({
+        ...user,
+        notes: [
+          { id: 'held', body: 'A', userId: 'u1' },
+          { id: 'given', body: 'B', userId: 'u1' },
+        ],
+      }));
+      const client = clientWith({ user: { findUnique: vi.fn(async () => user), update }, note: { findMany } });
+      const { executor, produceRecords } = executorWith();
+
+      await runWithRecords(
+        executor,
+        operationOn(client, 'update', {
+          where: { id: 'u1' },
+          data: {
+            notes: {
+              createMany: {
+                data: [
+                  { id: 'held', body: 'A' },
+                  { id: 'given', body: 'B' },
+                ],
+                skipDuplicates: true,
+              },
+            },
+          },
+        }),
+        scopeOn(client),
+        produceRecords,
+      );
+
+      expect(findMany).toHaveBeenCalledTimes(1);
+      expect(produceRecords).toHaveBeenCalledWith(
+        [
+          expect.objectContaining({ model: 'User', action: 'update' }),
+          expect.objectContaining({ model: 'Note', identity: 'given', action: 'create' }),
+        ],
+        expect.anything(),
+        new Map(),
+      );
     });
 
     it('snapshots nothing under a row the operation creates', async () => {

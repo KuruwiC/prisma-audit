@@ -175,7 +175,7 @@ interface ScannedElement {
   readonly data: Record<string, unknown>;
 }
 
-const elementsOf = (data: unknown): unknown[] => (Array.isArray(data) ? data : [data]);
+export const elementsOf = (data: unknown): unknown[] => (Array.isArray(data) ? data : [data]);
 
 const elementBranches = (
   pass: NestedDetectionPass,

@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 import type { NestedBatchTargets, NestedPreFetchResults } from '../../../src/grammar/nested-operations.js';
 import { TOP_LEVEL_ROW } from '../../../src/grammar/nested-state.js';
 import { buildNestedWriteSets, detectResolvedNestedOperations } from '../../../src/nested/events/write-set.js';
+import { createDataOf } from '../../../src/nested/inserted-row-keys.js';
 import { markPathUnread, storePreFetchResult } from '../../../src/nested/pre-fetch/pre-fetch-result-store.js';
 import { UNRESOLVED_ENTITY_ID } from '../../../src/utils/identity-key.js';
 import { column, model, relation, schemaMetadataOf } from '../../support/audit-schema.js';
@@ -42,13 +43,24 @@ const preFetched = (entries: [string, string, Record<string, unknown> | null][])
   return results;
 };
 
+/**
+ * The write sets of `data`; with `generatedKeys`, as if the extension had generated the key of
+ * every row the nested creates insert
+ */
 const writeSetsOf = (
   data: Record<string, unknown>,
   results: NestedPreFetchResults = new Map(),
   batchTargets: NestedBatchTargets = new Map(),
+  generatedKeys = false,
 ) => {
   const operations = detectResolvedNestedOperations(schemaMetadata, 'User', { data }, undefined, results);
-  return { operations, writeSets: buildNestedWriteSets(schemaMetadata, operations, results, batchTargets) };
+  const rowsWithGeneratedKeys = new Set<object>(
+    generatedKeys ? operations.flatMap((operation) => createDataOf(operation).map((row) => row.data)) : [],
+  );
+  return {
+    operations,
+    writeSets: buildNestedWriteSets(schemaMetadata, operations, rowsWithGeneratedKeys, results, batchTargets),
+  };
 };
 
 describe('detectResolvedNestedOperations', () => {
@@ -154,7 +166,9 @@ describe('buildNestedWriteSets', () => {
           before: { kind: 'none' },
         },
       ],
-      createsPending: false,
+      generatedKeys: new Set(),
+      anyNewRowIsInserted: false,
+      readsPreExisting: false,
     });
   });
 
@@ -203,17 +217,116 @@ describe('buildNestedWriteSets', () => {
   it.each([
     ['create', { posts: { create: { title: 'A' } } }],
     ['createMany', { posts: { createMany: { data: [{ title: 'A' }] } } }],
-  ])('marks a path with a nested %s as inserting rows', (_keyword, data) => {
-    expect(writeSetsOf(data).writeSets.get('posts')).toEqual({ targets: [], createsPending: true });
+  ])(
+    'marks a path with a nested %s whose data gives no key as inserting rows the snapshot tells apart',
+    (_keyword, data) => {
+      expect(writeSetsOf(data).writeSets.get('posts')).toEqual({
+        targets: [],
+        generatedKeys: new Set(),
+        anyNewRowIsInserted: true,
+        readsPreExisting: true,
+      });
+    },
+  );
+
+  it.each([
+    [
+      'create',
+      {
+        posts: {
+          create: [
+            { id: 'p8', title: 'A' },
+            { id: 'p9', title: 'B' },
+          ],
+        },
+      },
+    ],
+    [
+      'createMany',
+      {
+        posts: {
+          createMany: {
+            data: [
+              { id: 'p8', title: 'A' },
+              { id: 'p9', title: 'B' },
+            ],
+          },
+        },
+      },
+    ],
+  ])(
+    'holds the keys the extension generated for the rows a nested %s inserts, and reads no row before the write',
+    (_keyword, data) => {
+      expect(writeSetsOf(data, new Map(), new Map(), true).writeSets.get('posts')).toEqual({
+        targets: [],
+        generatedKeys: new Set(['p8', 'p9']),
+        anyNewRowIsInserted: false,
+        readsPreExisting: false,
+      });
+    },
+  );
+
+  it('treats a key the caller gives as unknown, which the database may store otherwise or a later write may change, and reads the rows held before the write', () => {
+    const data = { posts: { create: [{ id: 'p9', title: 'A' }] } };
+
+    expect(writeSetsOf(data).writeSets.get('posts')).toEqual({
+      targets: [],
+      generatedKeys: new Set(),
+      anyNewRowIsInserted: true,
+      readsPreExisting: true,
+    });
+  });
+
+  it.each([
+    ['updateMany', { updateMany: { where: { title: 'A' }, data: { id: 'changed' } } }],
+    ['update', { update: { where: { id: 'p1' }, data: { id: 'changed' } } }],
+  ])(
+    'reads the rows held before the write when an %s at the path writes a key field, which may change a generated key',
+    (_keyword, write) => {
+      const data = { posts: { create: { id: 'p9', title: 'A' }, ...write } };
+
+      expect(writeSetsOf(data, new Map(), new Map(), true).writeSets.get('posts')).toMatchObject({
+        generatedKeys: new Set(['p9']),
+        anyNewRowIsInserted: true,
+        readsPreExisting: true,
+      });
+    },
+  );
+
+  it('reads the rows held before the write for a createMany with skipDuplicates, which may skip a row whose key it gives', () => {
+    const data = { posts: { createMany: { data: [{ id: 'p9', title: 'A' }], skipDuplicates: true } } };
+
+    expect(writeSetsOf(data, new Map(), new Map(), true).writeSets.get('posts')).toEqual({
+      targets: [],
+      generatedKeys: new Set(['p9']),
+      anyNewRowIsInserted: false,
+      readsPreExisting: true,
+    });
   });
 
   it.each(['upsert', 'connectOrCreate'] as const)(
-    'marks a path with a nested %s as inserting rows only when a target was not pre-fetched',
+    'holds the key generated for the create of a nested %s only when its target was not pre-fetched',
+    (keyword) => {
+      const data = { posts: { [keyword]: { where: { id: 'p1' }, create: { id: 'p1', title: 'A' }, update: {} } } };
+      const generatedKeysWith = (before: Record<string, unknown> | null) =>
+        writeSetsOf(data, preFetched([['posts', 'p1', before]]), new Map(), true).writeSets.get('posts')?.generatedKeys;
+
+      expect(generatedKeysWith(p1)).toEqual(new Set());
+      expect(generatedKeysWith(null)).toEqual(new Set(['p1']));
+    },
+  );
+
+  it.each(['upsert', 'connectOrCreate'] as const)(
+    'marks a path with a nested %s whose create gives no key as inserting rows only when a target was not pre-fetched',
     (keyword) => {
       const data = { posts: { [keyword]: { where: { id: 'p1' }, create: { title: 'A' }, update: {} } } };
 
-      expect(writeSetsOf(data, preFetched([['posts', 'p1', p1]])).writeSets.get('posts')?.createsPending).toBe(false);
-      expect(writeSetsOf(data, preFetched([['posts', 'p1', null]])).writeSets.get('posts')?.createsPending).toBe(true);
+      expect(writeSetsOf(data, preFetched([['posts', 'p1', p1]])).writeSets.get('posts')?.anyNewRowIsInserted).toBe(
+        false,
+      );
+      expect(writeSetsOf(data, preFetched([['posts', 'p1', null]])).writeSets.get('posts')?.anyNewRowIsInserted).toBe(
+        true,
+      );
     },
   );
 
@@ -250,7 +363,9 @@ describe('buildNestedWriteSets', () => {
           },
           { locator: { by: 'primaryKey', where: { id: 'p2' } }, operation: operations[0], before: { kind: 'none' } },
         ],
-        createsPending: false,
+        generatedKeys: new Set(),
+        anyNewRowIsInserted: false,
+        readsPreExisting: false,
       });
     },
   );
@@ -258,7 +373,9 @@ describe('buildNestedWriteSets', () => {
   it('names no row for a batch keyword whose filter matched nothing', () => {
     expect(writeSetsOf({ posts: { deleteMany: { title: 'x' } } }).writeSets.get('posts')).toEqual({
       targets: [],
-      createsPending: false,
+      generatedKeys: new Set(),
+      anyNewRowIsInserted: false,
+      readsPreExisting: false,
     });
   });
 
@@ -275,7 +392,9 @@ describe('buildNestedWriteSets', () => {
           before: { kind: 'none' },
         },
       ],
-      createsPending: true,
+      generatedKeys: new Set(),
+      anyNewRowIsInserted: true,
+      readsPreExisting: true,
     });
   });
 
@@ -287,7 +406,9 @@ describe('buildNestedWriteSets', () => {
       targets: [
         { locator: { by: 'uniqueWhere', where: { id: 'p1' } }, operation: set, element: 0, before: { kind: 'none' } },
       ],
-      createsPending: true,
+      generatedKeys: new Set(),
+      anyNewRowIsInserted: true,
+      readsPreExisting: true,
     });
   });
 

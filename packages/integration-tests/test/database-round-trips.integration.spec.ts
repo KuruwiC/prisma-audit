@@ -167,7 +167,7 @@ describe('Database Round-Trip Guard', () => {
     ]);
   });
 
-  it('update with a nested create under an existing parent (1 existing post) issues 7 statements', async () => {
+  it('update with a nested create under an existing parent (1 existing post) issues 6 statements', async () => {
     const user = await provider.runAsync(testActor, async () => {
       return prisma.user.create({
         data: {
@@ -188,21 +188,19 @@ describe('Database Round-Trip Guard', () => {
     });
 
     // 1. SELECT FROM users      — the before-state fetch (fetchBefore, default: true)
-    // 2. SELECT id FROM posts   — the snapshot of the posts the user already holds, primary key
-    //                             only, so the created post is told apart from its sibling in the
-    //                             included relation
-    // 3. SELECT FROM users      — Prisma's own read of the parent row the nested create attaches
+    // 2. SELECT FROM users      — Prisma's own read of the parent row the nested create attaches
     //                             to (no UPDATE statement: the data changes no scalar column)
-    // 4. INSERT INTO posts      — the caller's own nested create
-    // 5. SELECT FROM users      — Prisma's resolution of the injected `include: { posts: true }`
+    // 3. INSERT INTO posts      — the caller's own nested create, with the id the extension
+    //                             generated, which tells the created post apart from its sibling
+    //                             in the included relation without reading the posts before
+    // 4. SELECT FROM users      — Prisma's resolution of the injected `include: { posts: true }`
     //                             on the update() result: base record...
-    // 6. SELECT FROM posts      — ...and the included relation, fetched as a separate query
-    // 7. INSERT INTO audit_logs — one batched write: the created post + its aggregate-owner
+    // 5. SELECT FROM posts      — ...and the included relation, fetched as a separate query
+    // 6. INSERT INTO audit_logs — one batched write: the created post + its aggregate-owner
     //                             (User) propagation log — 2 rows, 1 statement; the user's
     //                             columns did not change and the existing post gets no row
     expect(statements.map(statementShape)).toEqual([
       'SELECT users',
-      'SELECT posts',
       'SELECT users',
       'INSERT posts',
       'SELECT users',
@@ -211,7 +209,7 @@ describe('Database Round-Trip Guard', () => {
     ]);
   });
 
-  it("update with a nested create the caller's include filters out (1 existing post) issues 9 statements", async () => {
+  it("update with a nested create the caller's include filters out (1 existing post) issues 8 statements", async () => {
     const user = await provider.runAsync(testActor, async () => {
       return prisma.user.create({
         data: {
@@ -233,21 +231,19 @@ describe('Database Round-Trip Guard', () => {
     });
 
     // 1. SELECT FROM users      — the before-state fetch (fetchBefore, default: true)
-    // 2. SELECT id FROM posts   — the snapshot of the posts the user already holds, primary key only
-    // 3. SELECT FROM users      — Prisma's own read of the parent row the nested create attaches to
-    // 4. INSERT INTO posts      — the caller's own nested create
-    // 5. SELECT FROM users      — Prisma's resolution of the caller's `include` on the update()
+    // 2. SELECT FROM users      — Prisma's own read of the parent row the nested create attaches to
+    // 3. INSERT INTO posts      — the caller's own nested create, with the id the extension generated
+    // 4. SELECT FROM users      — Prisma's resolution of the caller's `include` on the update()
     //                             result: base record...
-    // 6. SELECT FROM posts      — ...and the included relation, filtered to published posts, so
+    // 5. SELECT FROM posts      — ...and the included relation, filtered to published posts, so
     //                             the created draft is not among the returned rows
-    // 7. SELECT id FROM posts   — the primary keys the relation holds under the user after the
-    //                             write; the one the snapshot does not hold is the created post
-    // 8. SELECT FROM posts      — the created post read whole, since the result left it out
-    // 9. INSERT INTO audit_logs — one batched write: the created post + its aggregate-owner
+    // 6. SELECT id FROM posts   — the primary keys the relation holds under the user after the
+    //                             write; the one with the generated id is the created post
+    // 7. SELECT FROM posts      — the created post read whole, since the result left it out
+    // 8. INSERT INTO audit_logs — one batched write: the created post + its aggregate-owner
     //                             (User) propagation log — 2 rows; the user's columns did not change
     expect(statements.map(statementShape)).toEqual([
       'SELECT users',
-      'SELECT posts',
       'SELECT users',
       'INSERT posts',
       'SELECT users',

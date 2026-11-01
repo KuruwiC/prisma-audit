@@ -6,14 +6,16 @@
  * and, per to-many path, the rows those operations name by unique WHERE or, for an `updateMany`
  * / `deleteMany`, the rows their filter matched when read ahead of the operation. A relation
  * written at a to-many path is read back whole, so the write set is what tells the rows an
- * operation wrote from their siblings. A create at a to-many path inserts rows whose identity is
- * unknown until the operation ran; the write set marks such a path so the rows the relation held
- * before the operation can be snapshotted.
+ * operation wrote from their siblings. A create at a to-many path inserts rows: the write set holds
+ * the keys the extension generated for them (`nested/inserted-row-keys`), and marks a path where
+ * that does not tell them apart, so the rows the relation held before the operation can be
+ * snapshotted.
  */
 
 import type { BeforeState } from '@kuruwic/db-audit-core';
 import {
   detectNestedOperations,
+  elementsOf,
   getPrimaryKeyConstraint,
   isNestedBatchKeyword,
   type NestedBatchTargets,
@@ -25,7 +27,10 @@ import {
 } from '../../grammar/nested-operations.js';
 import { upsertBranchOf } from '../../grammar/nested-state.js';
 import type { SchemaMetadata } from '../../schema/types.js';
-import { primaryKeyOf } from '../../utils/id-generation.js';
+import { extractEntityIdentity, primaryKeyOf } from '../../utils/id-generation.js';
+import type { EntityIdentityKey } from '../../utils/identity-key.js';
+import { isRecord } from '../../utils/is-record.js';
+import { createDataOf, skipsDuplicates } from '../inserted-row-keys.js';
 import { parentRowIdentityOf, targetsNamedByWhere } from '../pre-fetch/parent-rows.js';
 import { preFetchedStateNamedBy, preFetchedStateUnder } from '../pre-fetch/pre-fetch-result-store.js';
 
@@ -60,9 +65,38 @@ export interface NestedWriteTarget {
 
 export interface NestedWriteSet {
   readonly targets: readonly NestedWriteTarget[];
-  /** An operation at the path inserts rows whose identity is unknown before it runs */
-  readonly createsPending: boolean;
+  readonly generatedKeys: ReadonlySet<EntityIdentityKey>;
+  /**
+   * The generated keys do not tell the inserted rows apart, so any row the relation did not hold
+   * before the operation counts as inserted
+   */
+  readonly anyNewRowIsInserted: boolean;
+  /**
+   * The rows the relation holds before the operation are read to tell the inserted rows apart: an
+   * operation inserts a row whose key the extension did not generate, a `createMany` with
+   * `skipDuplicates` may skip a row whose key was generated, or a write at the path gives a row
+   * another key than the one generated for it
+   */
+  readonly readsPreExisting: boolean;
 }
+
+export const EMPTY_WRITE_SET: NestedWriteSet = {
+  targets: [],
+  generatedKeys: new Set(),
+  anyNewRowIsInserted: false,
+  readsPreExisting: false,
+};
+
+/**
+ * Whether the row `identity` names at a path is one the operations there inserted: a row with a key
+ * the extension generated for them, or any row when one of them inserts a row whose key it did not
+ * generate or writes a key field; never a row the relation held before the operation
+ * (`preExisting`, when it was read)
+ */
+export const isInsertedAt =
+  (writeSet: NestedWriteSet, preExisting: ReadonlySet<EntityIdentityKey> | undefined) =>
+  (identity: EntityIdentityKey): boolean =>
+    (writeSet.generatedKeys.has(identity) || writeSet.anyNewRowIsInserted) && !preExisting?.has(identity);
 
 /** Write sets keyed by to-many path; a to-one path has none, its single related row is what its operations write */
 export type NestedWriteSets = ReadonlyMap<string, NestedWriteSet>;
@@ -133,25 +167,99 @@ const targetsOf = (
   });
 };
 
+/**
+ * The data of the rows `operation` inserts: every row of a `create` or `createMany`, and the
+ * `create` of each `upsert` or `connectOrCreate` element whose target did not exist
+ */
+const rowsInsertedBy = (operation: NestedOperationInfo, targets: readonly NestedWriteTarget[]): Row[] => {
+  const rows = createDataOf(operation);
+  if (INSERTING_KEYWORDS.has(operation.operation)) {
+    return rows.map(({ data }) => data);
+  }
+  return rows.flatMap(({ element, data }) =>
+    targets.some((target) => target.element === element && target.before.kind === 'none') ? [data] : [],
+  );
+};
+
+interface WriteSetDraft {
+  readonly targets: NestedWriteTarget[];
+  readonly generatedKeys: Set<EntityIdentityKey>;
+  anyNewRowIsInserted: boolean;
+  readsPreExisting: boolean;
+}
+
+const updateDataOf = (operation: NestedOperationInfo): Row[] => {
+  if (operation.operation !== 'update' && operation.operation !== 'updateMany' && operation.operation !== 'upsert') {
+    return [];
+  }
+  const branch = operation.operation === 'upsert' ? 'update' : 'data';
+  return elementsOf(operation.data).flatMap((element) => {
+    const data = isRecord(element) ? element[branch] : undefined;
+    return isRecord(data) ? [data] : [];
+  });
+};
+
+/**
+ * Whether `operation` writes a key field of the rows it updates, which can give a row the
+ * operations at the path insert another key than the one the extension generated for it
+ */
+const writesKeyField = (operation: NestedOperationInfo, pkFields: readonly string[] | undefined): boolean =>
+  pkFields !== undefined && updateDataOf(operation).some((data) => pkFields.some((field) => data[field] !== undefined));
+
+/** Records in `writeSet` the key of each row `operation` inserts that the extension generated, else that the path inserts a row without one */
+const addInsertedRows = (
+  writeSet: WriteSetDraft,
+  operation: NestedOperationInfo,
+  inserted: readonly Row[],
+  rowsWithGeneratedKeys: ReadonlySet<object>,
+  pkFields: readonly string[] | undefined,
+): void => {
+  for (const row of inserted) {
+    const key = rowsWithGeneratedKeys.has(row) ? completePrimaryKeyOf(row, pkFields) : undefined;
+    if (key && pkFields) {
+      writeSet.generatedKeys.add(extractEntityIdentity(key, pkFields));
+    } else {
+      writeSet.anyNewRowIsInserted = true;
+    }
+  }
+  writeSet.readsPreExisting =
+    writeSet.readsPreExisting || writeSet.anyNewRowIsInserted || (inserted.length > 0 && skipsDuplicates(operation));
+};
+
+/**
+ * @param rowsWithGeneratedKeys - The data of each row the operations insert whose key the extension
+ *   generated (`withInsertedRowKeys`)
+ */
 export const buildNestedWriteSets = (
   schemaMetadata: SchemaMetadata,
   operations: readonly NestedOperationInfo[],
+  rowsWithGeneratedKeys: ReadonlySet<object>,
   nestedPreFetchResults: NestedPreFetchResults,
   batchTargets: NestedBatchTargets,
 ): NestedWriteSets => {
-  const writeSets = new Map<string, { targets: NestedWriteTarget[]; createsPending: boolean }>();
+  const writeSets = new Map<string, WriteSetDraft>();
 
   for (const operation of operations) {
     if (!operation.isList) {
       continue;
     }
-    const writeSet = writeSets.get(operation.path) ?? { targets: [], createsPending: false };
+    const writeSet = writeSets.get(operation.path) ?? {
+      targets: [],
+      generatedKeys: new Set(),
+      anyNewRowIsInserted: false,
+      readsPreExisting: false,
+    };
     writeSets.set(operation.path, writeSet);
 
     const pkFields = getPrimaryKeyConstraint(schemaMetadata, operation.relatedModel)?.fields;
     const targets = targetsOf(operation, nestedPreFetchResults, batchTargets, pkFields);
     writeSet.targets.push(...targets);
-    writeSet.createsPending = writeSet.createsPending || insertsRows(operation, targets);
+
+    addInsertedRows(writeSet, operation, rowsInsertedBy(operation, targets), rowsWithGeneratedKeys, pkFields);
+    if (writesKeyField(operation, pkFields)) {
+      writeSet.anyNewRowIsInserted = true;
+      writeSet.readsPreExisting = true;
+    }
   }
 
   return writeSets;

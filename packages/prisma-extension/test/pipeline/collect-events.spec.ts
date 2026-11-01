@@ -99,7 +99,13 @@ const single = (overrides: SingleCase = {}): SingleOperationOutcome => {
     ...base,
     args,
     nestedOperations,
-    writeSets: buildNestedWriteSets(schemaMetadata, nestedOperations, base.nestedPreFetchResults, batchTargets),
+    writeSets: buildNestedWriteSets(
+      schemaMetadata,
+      nestedOperations,
+      new Set(),
+      base.nestedPreFetchResults,
+      batchTargets,
+    ),
   };
 };
 

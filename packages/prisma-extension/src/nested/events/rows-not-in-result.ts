@@ -8,9 +8,9 @@
  *
  * - an updated row the result does not hold is named by its target's locator;
  * - a row inserted under a parent row whose relation the caller restricted is found by reading
- *   the primary keys the relation holds under those parent rows and leaving out the rows it held
- *   before the write (the pre-write snapshot), the rows the result holds, and the rows a target
- *   names.
+ *   the primary keys the relation holds under those parent rows and keeping the rows the
+ *   operations at the path inserted (`isInsertedAt`), leaving out the rows the result holds and
+ *   the rows a target names.
  *
  * Those rows are then read whole, with the relations the operation writes below them, so the
  * walk continues under them. A failed read rejects: the rows it would return cannot be left out
@@ -48,8 +48,8 @@ export interface RowsNotInResultInput {
   readonly pkFields: readonly string[];
   /** Every target at the path */
   readonly targets: readonly NestedWriteTarget[];
-  /** The primary keys the path held before the write; undefined when no row was snapshotted */
-  readonly preExisting: ReadonlySet<EntityIdentityKey> | undefined;
+  /** Whether the row a key names is one the operations at the path inserted */
+  readonly isInserted: (identity: EntityIdentityKey) => boolean;
   readonly parents: readonly ParentAtPath[];
   /** The relation of the path; resolved only when inserted rows are looked for */
   readonly resolvePath: () => ToManyPath | undefined;
@@ -62,7 +62,7 @@ const readHiddenInsertedKeys = async (
   path: ToManyPath,
   parents: readonly ParentAtPath[],
 ): Promise<Row[]> => {
-  const { client, pkFields, targets, preExisting } = input;
+  const { client, pkFields, targets, isInserted } = input;
   const { scope } = path;
   const parentScopes = parents.flatMap((parent) => {
     const key = parentKeyOf(parent.row, scope.parentFields);
@@ -80,7 +80,7 @@ const readHiddenInsertedKeys = async (
     const identity = extractEntityIdentity(key, pkFields);
     return (
       !held.has(identity) &&
-      !preExisting?.has(identity) &&
+      isInserted(identity) &&
       !targets.some(
         (target) =>
           target.locator.by === 'primaryKey' && extractEntityIdentity(target.locator.where, pkFields) === identity,

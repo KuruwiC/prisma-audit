@@ -404,6 +404,33 @@ describe('CRUD Operations Integration', () => {
       expect(auditLogs.map((log: { entityId: string }) => log.entityId).sort()).toEqual(persistedIds);
     });
 
+    it('records the post a nested createMany with single object data creates under an existing user, and not the post the user held', async () => {
+      const user = await context.provider.runAsync(testActor, async () =>
+        context.prisma.user.create({
+          data: {
+            email: 'nested-single@example.com',
+            name: 'Owner',
+            password: 'x',
+            posts: { create: { title: 'Held', content: 'held' } },
+          },
+        }),
+      );
+      await context.prisma.auditLog.deleteMany();
+
+      await context.provider.runAsync(testActor, async () =>
+        context.prisma.user.update({
+          where: { id: user.id },
+          data: { posts: { createMany: { data: { title: 'Single', content: 'single' } } } },
+        }),
+      );
+
+      const created = await context.prisma.post.findFirstOrThrow({ where: { title: 'Single' } });
+      const logs = await context.prisma.auditLog.findMany({
+        where: { entityType: 'Post', aggregateType: 'Post' },
+      });
+      expect(logs).toEqual([expect.objectContaining({ entityId: created.id, action: 'create' })]);
+    });
+
     it('should create audit log for createMany with single object data', async () => {
       await context.provider.runAsync(testActor, async () => {
         // Pass a single object instead of an array

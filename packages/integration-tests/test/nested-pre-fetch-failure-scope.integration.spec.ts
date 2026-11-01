@@ -193,16 +193,21 @@ describe('nested pre-fetch failures — affected rows', () => {
     }
   });
 
-  it('fails the operation when a create is nested below a row that cannot be identified', async () => {
+  it('fails the operation when a createMany with skipDuplicates is nested below a row that cannot be identified', async () => {
     const { rawBasePrisma, prisma, post, arm, run, phases } = await setup({ model: 'User', operation: 'findFirst' });
 
+    // skipDuplicates may skip a row whose key the data gives, so the rows the relation holds are read before the write
     arm();
     await expect(
       run(() =>
         prisma.post.update({
           where: { id: post.id },
           data: {
-            author: { update: { comments: { create: { content: 'three', post: { connect: { id: post.id } } } } } },
+            author: {
+              update: {
+                comments: { createMany: { data: [{ content: 'three', postId: post.id }], skipDuplicates: true } },
+              },
+            },
           },
         }),
       ),
@@ -213,6 +218,31 @@ describe('nested pre-fetch failures — affected rows', () => {
       ['pre-fetch', 'User', 'update'],
       ['diff-generation', 'Post', 'update'],
     ]);
+  });
+
+  it('records a create nested below a row that cannot be identified by the key the extension gives the created row', async () => {
+    const { rawBasePrisma, prisma, post, arm, run, logsOf, phases } = await setup({
+      model: 'User',
+      operation: 'findFirst',
+    });
+
+    arm();
+    await run(() =>
+      prisma.post.update({
+        where: { id: post.id },
+        data: {
+          author: { update: { comments: { create: { content: 'three', post: { connect: { id: post.id } } } } } },
+        },
+      }),
+    );
+
+    const created = await rawBasePrisma.comment.findFirstOrThrow({ where: { content: 'three' } });
+    const commentLogs = await logsOf('Comment');
+    expect(commentLogs.length).toBeGreaterThan(0);
+    for (const log of commentLogs) {
+      expect(log).toMatchObject({ entityId: created.id, action: 'create', before: null });
+    }
+    expect(phases()).toEqual([['pre-fetch', 'User', 'update']]);
   });
 
   it('keeps the result of its own read for an operation next to one whose pre-fetch failed', async () => {

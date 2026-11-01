@@ -57,7 +57,7 @@ const snapshot = (
       modelName: 'User',
       topLevelWhere: args.where,
       nestedOperations,
-      writeSets: buildNestedWriteSets(schemaMetadata, nestedOperations, nestedPreFetchResults, new Map()),
+      writeSets: buildNestedWriteSets(schemaMetadata, nestedOperations, new Set(), nestedPreFetchResults, new Map()),
       nestedPreFetchResults,
     },
     { schemaMetadata, shouldFetchBefore: fetchesBefore, auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS },

@@ -3,8 +3,9 @@
  *
  * create, update, upsert and delete: reads the target row's before state and the nested rows
  * the operation will write (including the rows a nested batch filter matches under its parent
- * and the rows a to-many relation holds before a nested create), then runs the operation and
- * collects the top-level row and the nested rows it wrote.
+ * and the rows a to-many relation holds before a nested create whose rows' keys the extension
+ * does not generate), generates the keys of the rows nested creates insert under a row that exists,
+ * then runs the operation with them and collects the top-level row and the nested rows it wrote.
  */
 
 import type { BeforeState, FailureSink, MutationEvent } from '@kuruwic/db-audit-core';
@@ -16,6 +17,7 @@ import {
   detectResolvedNestedOperations,
   type NestedWriteSets,
 } from '../nested/events/write-set.js';
+import { withInsertedRowKeys } from '../nested/inserted-row-keys.js';
 import { preFetchNestedRecordsBeforeOperation } from '../nested/pre-fetch/coordinator.js';
 import { type LinkReads, readLinkRows } from '../nested/pre-fetch/link-rows.js';
 import { type PreExistingRows, snapshotPreExistingRows } from '../nested/pre-fetch/pre-existing-rows.js';
@@ -36,6 +38,8 @@ export interface SingleExecutorDependencies {
 }
 
 export interface SinglePrepared {
+  /** The operation's args, with the keys of the rows its nested creates insert filled in */
+  readonly args: Record<string, unknown>;
   readonly beforeState: BeforeState;
   readonly nestedPreFetchResults: NestedPreFetchResults;
   readonly nestedOperations: readonly NestedOperationInfo[];
@@ -68,16 +72,30 @@ export const createSingleExecutor = (deps: SingleExecutorDependencies): Operatio
       { schemaMetadata, shouldFetchBefore, auditedOmittedFields, onPreFetchFailure: failureSink.notify },
       topLevelUpsertBranch,
     );
-    const nestedOperations = detectResolvedNestedOperations(
+    const detect = (detectedIn: Record<string, unknown>) =>
+      detectResolvedNestedOperations(
+        schemaMetadata,
+        modelName,
+        detectedIn,
+        topLevelUpsertBranch,
+        nestedPreFetchResults,
+      );
+    // A top-level row the operation creates has no children yet: no other writer can insert a row
+    // below it, so neither are keys filled in nor rows snapshotted under it.
+    const rowExists = targetRowExistsBefore(action, beforeState);
+    const detected = detect(args);
+    const { args: writtenArgs, rowsWithGeneratedKeys } = rowExists
+      ? withInsertedRowKeys(schemaMetadata, args, detected)
+      : { args, rowsWithGeneratedKeys: new Set<object>() };
+    const nestedOperations = writtenArgs === args ? detected : detect(writtenArgs);
+    const writeSets = buildNestedWriteSets(
       schemaMetadata,
-      modelName,
-      args,
-      topLevelUpsertBranch,
+      nestedOperations,
+      rowsWithGeneratedKeys,
       nestedPreFetchResults,
+      batchTargets,
     );
-    const writeSets = buildNestedWriteSets(schemaMetadata, nestedOperations, nestedPreFetchResults, batchTargets);
-    // A top-level row the operation creates has no children yet, so nothing is snapshotted under it.
-    const preExistingRows = targetRowExistsBefore(action, beforeState)
+    const preExistingRows = rowExists
       ? await snapshotPreExistingRows(
           {
             prismaClient: scope.handle,
@@ -100,10 +118,19 @@ export const createSingleExecutor = (deps: SingleExecutorDependencies): Operatio
       },
       { schemaMetadata, shouldFetchBefore, auditedOmittedFields, onPreFetchFailure: failureSink.notify },
     );
-    return { beforeState, nestedPreFetchResults, nestedOperations, writeSets, preExistingRows, linkReads };
+    return {
+      args: writtenArgs,
+      beforeState,
+      nestedPreFetchResults,
+      nestedOperations,
+      writeSets,
+      preExistingRows,
+      linkReads,
+    };
   };
 
-  const execute = (operation: AuditedOperation): Promise<unknown> => operation.execute(operation.args);
+  const execute = (operation: AuditedOperation, _scope: ExecutionScope, prepared: SinglePrepared): Promise<unknown> =>
+    operation.execute(prepared.args);
 
   const collect = (
     operation: AuditedOperation,
@@ -115,7 +142,7 @@ export const createSingleExecutor = (deps: SingleExecutorDependencies): Operatio
       {
         modelName: operation.model,
         action: operation.action,
-        args: operation.args,
+        args: prepared.args,
         result: executed,
         beforeState: prepared.beforeState,
         nestedPreFetchResults: prepared.nestedPreFetchResults,

@@ -165,6 +165,28 @@ export const ensureIds = <T extends Record<string, unknown>>(
     return rows.map((row) => (row[field] !== undefined ? row : { ...row, [field]: generate() }));
   }, entities);
 
+/**
+ * `row` with the key fields `keyFields` it leaves out filled in by the generator each field's
+ * default declares; `row` itself when it gives every one. `undefined` when a field it leaves out
+ * has no default the client can generate, so the key of the row is known only once it is written.
+ */
+export const withGeneratedKeyFields = <T extends Record<string, unknown>>(
+  schemaMetadata: SchemaMetadata,
+  modelName: string,
+  row: T,
+  keyFields: readonly string[],
+): T | undefined => {
+  const missing = keyFields.filter((field) => row[field] === undefined);
+  if (missing.length === 0) {
+    return row;
+  }
+  const generators = missing.map((field) => getIdFieldInfo(schemaMetadata, modelName, field)?.generator);
+  if (generators.some((generate) => generate === undefined)) {
+    return undefined;
+  }
+  return { ...row, ...Object.fromEntries(missing.map((field, index) => [field, generators[index]?.()])) };
+};
+
 const KEY_CHUNK_SIZE = 1000;
 
 /**

@@ -534,11 +534,12 @@ describe('Error Handling Integration', () => {
       }
     });
     describe('a failed snapshot of the rows a to-many relation holds before a nested create', () => {
-      // A nested create under an existing user tells the new post apart from the user's
-      // existing posts by the primary keys the relation held before the write. That snapshot
-      // (the first `post.findMany` once armed) is injected to fail; without it the existing
-      // posts would be indistinguishable from the created one, so the operation fails as a
-      // diff-generation failure before the caller's write is attempted.
+      // A nested createMany with skipDuplicates under an existing user may skip a post whose key
+      // it gives, so it tells the new post apart from the user's existing posts by the primary
+      // keys the relation held before the write. That snapshot (the first `post.findMany` once
+      // armed) is injected to fail; without it the existing posts would be indistinguishable from
+      // the created one, so the operation fails as a diff-generation failure before the caller's
+      // write is attempted.
       const SNAPSHOT_FAILURE_MESSAGE = 'simulated to-many snapshot failure';
 
       const runWithFailingSnapshot = async (awaited: boolean) => {
@@ -588,7 +589,11 @@ describe('Error Handling Integration', () => {
             provider.runAsync(testActor, async () =>
               prisma.user.update({
                 where: { id: user.id },
-                data: { posts: { create: { title: 'Should Not Persist', content: 'new' } } },
+                data: {
+                  posts: {
+                    createMany: { data: [{ title: 'Should Not Persist', content: 'new' }], skipDuplicates: true },
+                  },
+                },
               }),
             ),
           ).rejects.toBe(snapshotError);
