@@ -1824,7 +1824,7 @@ describe('createBatchExecutor', () => {
       ).rejects.toThrow('Model User does not have findMany operation');
     });
 
-    it("propagates the operation's own failure as it is and produces no records", async () => {
+    it("propagates the operation's own failure as it is and reports nothing", async () => {
       const callerError = new Error('Unique constraint failed on the fields: (`email`)');
       const client = clientWith({
         user: {
@@ -1844,7 +1844,7 @@ describe('createBatchExecutor', () => {
         ),
       ).rejects.toBe(callerError);
 
-      expect(produceRecords).not.toHaveBeenCalled();
+      expect(failureSink.notify).not.toHaveBeenCalled();
     });
   });
 });

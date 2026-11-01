@@ -6,7 +6,7 @@
  */
 
 import type { AuditContext, AuditRecord } from '@kuruwic/db-audit-core';
-import { createActorId, createAggregateId, createEntityId, createFailureSink } from '@kuruwic/db-audit-core';
+import { createActorId, createAggregateId, createEntityId } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
 import type { PrismaBaseClient, PrismaHandle } from '../../src/internal-types.js';
 import type { ExecutionScope } from '../../src/pipeline/execution-scope.js';
@@ -506,6 +506,10 @@ describe('runAuditedOperation', () => {
 
     it('lets a write failure inside a transaction propagate without reporting it as diff-generation', async () => {
       const writeError = new Error('DB write failed');
+      const failureSink = stubFailureSink();
+      vi.mocked(failureSink.reportWriteFailure).mockImplementation(async (_plan, error) => {
+        throw error;
+      });
       const deps = createDeps({
         dispatchConfig: {
           writeExecutor: {
@@ -513,8 +517,9 @@ describe('runAuditedOperation', () => {
               throw writeError;
             }),
           },
-          failureSink: createFailureSink({}),
+          failureSink,
         },
+        failureSink,
       });
 
       await expect(
@@ -526,7 +531,11 @@ describe('runAuditedOperation', () => {
         ),
       ).rejects.toBe(writeError);
 
-      expect(deps.failureSink.notify).not.toHaveBeenCalled();
+      expect(failureSink.reportWriteFailure).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: 'immediate' }),
+        writeError,
+      );
+      expect(failureSink.notify).not.toHaveBeenCalledWith(expect.objectContaining({ phase: 'diff-generation' }));
     });
   });
 });

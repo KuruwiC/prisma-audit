@@ -4,8 +4,8 @@ import type { EntityMap } from '@kuruwic/prisma-audit';
 import { createAuditClient, defineEntity, foreignKey, to } from '@kuruwic/prisma-audit';
 import { type AuditModelName, auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
-import type { Mock } from 'vitest';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { Mock, MockInstance } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createCommentAggregateEnricher,
   createCommentEntities,
@@ -578,6 +578,16 @@ describe('Context Enrichment Integration', () => {
   });
 
   describe('Enricher Error Handling', () => {
+    let warn: MockInstance<typeof console.warn>;
+
+    beforeEach(() => {
+      warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+      warn.mockRestore();
+    });
+
     it("should write a Comment create without entity context when its entity enricher throws under onError: 'log'", async () => {
       const customEntities: EntityMap = {
         User: defineEntity({ type: 'User', diffExcludeFields: ['updatedAt'] }),
@@ -646,6 +656,10 @@ describe('Context Enrichment Integration', () => {
       for (const log of auditLogs) {
         expect(log.entityContext).toBeNull();
       }
+      expect(warn).toHaveBeenCalledWith(
+        '[db-audit-core] Batch enricher failed:',
+        expect.objectContaining({ message: 'Simulated enricher error' }),
+      );
     });
 
     it("should write a Comment create without entity or aggregate context when its enrichers throw under onError: 'log'", async () => {
@@ -735,6 +749,14 @@ describe('Context Enrichment Integration', () => {
         expect(log.entityContext).toBeNull();
         expect(log.aggregateContext).toBeNull();
       }
+      expect(warn).toHaveBeenCalledWith(
+        '[db-audit-core] Batch enricher failed:',
+        expect.objectContaining({ message: 'Simulated entity enricher error' }),
+      );
+      expect(warn).toHaveBeenCalledWith(
+        '[db-audit-core] Batch enricher failed:',
+        expect.objectContaining({ message: 'Simulated aggregate enricher error' }),
+      );
     });
 
     it('should handle actor enricher error with fallback', async () => {
@@ -771,6 +793,10 @@ describe('Context Enrichment Integration', () => {
 
       expect(auditLogs).toHaveLength(1);
       expect(auditLogs[0]?.actorContext).toEqual(actorFallback);
+      expect(warn).toHaveBeenCalledWith(
+        '[db-audit-core] Enricher failed:',
+        expect.objectContaining({ message: 'Actor enricher error' }),
+      );
     });
 
     describe("an entity enricher that throws under the default onError ('throw')", () => {

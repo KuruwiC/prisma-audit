@@ -506,7 +506,6 @@ describe('createSingleExecutor', () => {
       ).rejects.toBe(snapshotError);
 
       expect(update).not.toHaveBeenCalled();
-      expect(produceRecords).not.toHaveBeenCalled();
       expect(failureSink.notify).not.toHaveBeenCalled();
     });
 
@@ -763,7 +762,7 @@ describe('createSingleExecutor', () => {
       expect(outcome.result).toBe(user);
     });
 
-    it("propagates the operation's own failure as it is and produces no records", async () => {
+    it("propagates the operation's own failure as it is and reports nothing", async () => {
       const callerError = new Error('Unique constraint failed on the fields: (`name`)');
       const client = clientWith({
         user: {
@@ -772,7 +771,7 @@ describe('createSingleExecutor', () => {
           }),
         },
       });
-      const { executor, produceRecords } = executorWith();
+      const { executor, produceRecords, failureSink } = executorWith();
 
       const run = runWithRecords(
         executor,
@@ -782,7 +781,7 @@ describe('createSingleExecutor', () => {
       );
 
       await expect(run).rejects.toBe(callerError);
-      expect(produceRecords).not.toHaveBeenCalled();
+      expect(failureSink.notify).not.toHaveBeenCalled();
     });
   });
 });

@@ -97,20 +97,35 @@ describe('createExecutor', () => {
     expect(produceRecords).toHaveBeenCalledWith(events, scope, new Map());
   });
 
-  it('stops at the first failing step', async () => {
-    const execute = vi.fn(async () => {
-      throw new Error('execute failed');
-    });
-    const collect = vi.fn(async () => []);
+  it('does not run result when execute fails', async () => {
+    const result = vi.fn(async () => undefined);
     const executor = createExecutor({
       prepare: async () => undefined,
-      execute,
-      collect,
-      result: async () => undefined,
+      execute: async () => {
+        throw new Error('execute failed');
+      },
+      collect: async () => [],
+      result,
     });
 
     await expect(executor.run(operationOf(), scope, vi.fn())).rejects.toThrow('execute failed');
 
-    expect(collect).not.toHaveBeenCalled();
+    expect(result).not.toHaveBeenCalled();
+  });
+
+  it('does not run execute when prepare fails', async () => {
+    const execute = vi.fn(async () => undefined);
+    const executor = createExecutor({
+      prepare: async () => {
+        throw new Error('prepare failed');
+      },
+      execute,
+      collect: async () => [],
+      result: async () => undefined,
+    });
+
+    await expect(executor.run(operationOf(), scope, vi.fn())).rejects.toThrow('prepare failed');
+
+    expect(execute).not.toHaveBeenCalled();
   });
 });

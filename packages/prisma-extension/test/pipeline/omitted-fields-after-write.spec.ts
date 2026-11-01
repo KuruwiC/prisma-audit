@@ -13,6 +13,7 @@ const schemaMetadata = schemaMetadataOf(
   model('User', [column('id', { isId: true }), column('name'), column('password')]),
   model('Post', [column('id', { isId: true }), column('title'), column('content')]),
   model('Tag', [column('id', { isId: true }), column('label')]),
+  model('Account', [column('id', { isId: true }), column('apiKey'), column('token')]),
   model('Legacy', [column('code'), column('secret')]),
   model('Device', [column('code', { isUnique: true, isRequired: true }), column('label'), column('secret')]),
 );
@@ -20,6 +21,7 @@ const schemaMetadata = schemaMetadataOf(
 const listed: Record<string, string[]> = {
   User: ['password'],
   Post: ['content'],
+  Account: ['apiKey', 'token'],
   Legacy: ['secret'],
   Device: ['secret'],
 };
@@ -34,6 +36,7 @@ const stored: Record<string, Array<Record<string, unknown>>> = {
     { id: 'u2', password: 'hash-2' },
   ],
   post: [{ id: 'p1', content: 'Body' }],
+  account: [{ id: 'a1', apiKey: 'stored-key', token: 'stored-token' }],
 };
 
 const clientOf = () => {
@@ -47,6 +50,7 @@ const clientOf = () => {
     user: { findMany: findMany('user') },
     post: { findMany: findMany('post') },
     tag: { findMany: findMany('tag') },
+    account: { findMany: findMany('account') },
   };
 };
 
@@ -107,6 +111,13 @@ describe('readOmittedFieldsAfterWrite', () => {
 
     expect(client.user.findMany).not.toHaveBeenCalled();
     expect(completed[0]).toBe(holding);
+  });
+
+  it('reads the listed fields a row lacks and keeps those it holds, when it holds only some', async () => {
+    const { completed, client } = await read([eventOf('Account', 'update', { id: 'a1', apiKey: 'from-the-write' })]);
+
+    expect(client.account.findMany).toHaveBeenCalledTimes(1);
+    expect(completed[0]?.after).toEqual({ id: 'a1', apiKey: 'from-the-write', token: 'stored-token' });
   });
 
   it('reads nothing for a delete, whose after state is not stored', async () => {

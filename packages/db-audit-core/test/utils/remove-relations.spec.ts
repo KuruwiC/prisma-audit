@@ -193,7 +193,7 @@ describe('removeRelations', () => {
 
       const result = removeRelations(input);
 
-      expect(result).toEqual(input);
+      expect(result).toStrictEqual(input);
     });
   });
 });

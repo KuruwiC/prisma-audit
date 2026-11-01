@@ -254,6 +254,10 @@ describe('runEnricher', () => {
       };
       const result = await runEnricher(config, {}, null, 5000);
       expect(result).toEqual({ default: true });
+      expect(warnSpy).toHaveBeenCalledWith(
+        "[db-audit-core] Error in enricher onError function; falling back to 'log':",
+        expect.anything(),
+      );
       expect(warnSpy).toHaveBeenCalledWith('[db-audit-core] Enricher failed:', expect.any(Error));
     });
 

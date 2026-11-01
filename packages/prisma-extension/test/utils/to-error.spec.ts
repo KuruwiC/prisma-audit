@@ -24,6 +24,7 @@ describe('toError', () => {
     const caught = Object.create(null);
     const error = toError(caught);
     expect(error).toBeInstanceOf(Error);
+    expect(error.message).toBe('Thrown value could not be converted to a string');
     expect(error.cause).toBe(caught);
   });
 
@@ -35,6 +36,7 @@ describe('toError', () => {
     };
     const error = toError(caught);
     expect(error).toBeInstanceOf(Error);
+    expect(error.message).toBe('Thrown value could not be converted to a string');
     expect(error.cause).toBe(caught);
   });
 
