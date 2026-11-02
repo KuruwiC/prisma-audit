@@ -82,7 +82,7 @@ Branded types (`ActorId`, `EntityId`, `AggregateId`) prevent ID mix-ups at compi
 | `@kuruwic/prisma-audit`           | Prisma 6/7 Client Extension; depends on `@kuruwic/db-audit-core`                                            | dependency     |
 | `@kuruwic/prisma-audit-generator` | `prisma generate` step that writes the schema file (`auditSchema`) the extension reads at runtime           | dev dependency |
 
-A release attaches one tarball per package (`v0.1.6` and earlier attach a single `@kuruwic/prisma-audit` tarball; see the [migration guide](docs/migration-guide.md)). Install the core and the extension tarballs of the same release in one command (the core is not on npm, so the extension tarball alone does not resolve), replacing `<version>` with the release's version:
+A release attaches one tarball per package (`v0.1.6` and earlier attach a single `@kuruwic/prisma-audit` tarball; moving from it to `v0.2.0` is described in the [v0.2.0 migration guide](https://github.com/KuruwiC/prisma-audit/blob/v0.2.0/docs/migration-guide.md)). Install the core and the extension tarballs of the same release in one command (the core is not on npm, so the extension tarball alone does not resolve), replacing `<version>` with the release's version:
 
 ```bash
 pnpm add \
@@ -579,11 +579,6 @@ The [compatibility workflow](.github/workflows/prisma-compatibility.yml) runs th
 
 Prisma 8 is not supported. As of 2026-10, Prisma ORM 8 is a release candidate (`prisma@latest` is `8.0.0-rc.22`; see Prisma's [release status](https://www.prisma.io/docs/orm/release-status)). It has no `PrismaClient` and no `$extends`: middleware replaces query extensions. Supporting it means a new adapter on `@kuruwic/db-audit-core`, not a port of this extension. That work starts once Prisma 8.0.0 is generally available and supports MySQL and SQLite; Prisma lists MySQL as coming soon and SQLite as experimental ([supported databases](https://www.prisma.io/docs/orm/supported-databases)).
 
-## Upgrading
-
-- From the `v0.1.6` release: [docs/migration-guide.md](docs/migration-guide.md)
-- Removing Prisma 6 from the supported range: [docs/dropping-prisma-6.md](docs/dropping-prisma-6.md)
-
 ## Limitations
 
 What the audit does not record, and where a concurrent write makes a record inaccurate, is described in [docs/guarantees.md](docs/guarantees.md): raw queries, the database's referential actions, and the reads after a write outside a transaction among them.
@@ -613,7 +608,7 @@ DATABASE_URL=postgresql://prisma:prisma@localhost:5432/prisma_audit_dev pnpm db:
 pnpm dev
 ```
 
-The API (`examples/hono-api`) seeds an empty database on start; open http://localhost:5173. The design tokens and components are described in [`examples/web-client/DESIGN.md`](examples/web-client/DESIGN.md). The animation above is recorded from [`examples/readme-gif/stage.html`](examples/readme-gif/stage.html) with `pnpm --filter @kuruwic/prisma-audit-examples/readme-gif record`.
+The API (`examples/hono-api`) seeds an empty database on start; open http://localhost:5173. The design tokens and components are described in [`examples/web-client/DESIGN.md`](examples/web-client/DESIGN.md).
 
 ## License
 
