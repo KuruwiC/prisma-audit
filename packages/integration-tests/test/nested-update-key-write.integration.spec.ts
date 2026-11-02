@@ -481,6 +481,86 @@ describe('a nested update that writes the row key of the row it updates', () => 
       expect(observer).not.toHaveBeenCalled();
     });
 
+    it('records a sensor a nested update names by the new code of its device, with the before state it had under the old code', async () => {
+      const { prisma, basePrisma, run, observer, seedDevice, logsOf } = await setup();
+      await seedDevice('d-1');
+      await basePrisma.deviceSensor.create({ data: { deviceCode: 'd-1', slot: 1, reading: 'reading 1' } });
+
+      await run(() =>
+        prisma.device.update({
+          where: { code: 'd-1' },
+          data: {
+            code: 'd-9',
+            sensors: {
+              update: { where: { deviceCode_slot: { deviceCode: 'd-9', slot: 1 } }, data: { reading: 'changed' } },
+            },
+          },
+        }),
+      );
+
+      expect(await logsOf('DeviceSensor')).toEqual([cascaded]);
+      expect(observer).not.toHaveBeenCalled();
+    });
+
+    it('records a sensor a nested update names by the new code a nested update gives its device, with the before state it had under the old code', async () => {
+      const { prisma, basePrisma, run, observer, owner, seedDevice, logsOf } = await setup();
+      await seedDevice('d-1');
+      await basePrisma.deviceSensor.create({ data: { deviceCode: 'd-1', slot: 1, reading: 'reading 1' } });
+
+      await run(() =>
+        prisma.user.update({
+          where: { id: owner.id },
+          data: {
+            devices: {
+              update: {
+                where: { code: 'd-1' },
+                data: {
+                  code: 'd-9',
+                  sensors: {
+                    update: {
+                      where: { deviceCode_slot: { deviceCode: 'd-9', slot: 1 } },
+                      data: { reading: 'changed' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        }),
+      );
+
+      expect(await logsOf('DeviceSensor')).toEqual([cascaded]);
+      expect(observer).not.toHaveBeenCalled();
+    });
+
+    it('records the update branch of a nested upsert that names a sensor by the new code of its device, with the before state it had under the old code', async () => {
+      const { prisma, basePrisma, run, observer, seedDevice, logsOf } = await setup();
+      await seedDevice('d-1');
+      await basePrisma.deviceSensor.create({ data: { deviceCode: 'd-1', slot: 1, reading: 'reading 1' } });
+
+      await run(() =>
+        prisma.device.update({
+          where: { code: 'd-1' },
+          data: {
+            code: 'd-9',
+            sensors: {
+              upsert: {
+                where: { deviceCode_slot: { deviceCode: 'd-9', slot: 1 } },
+                create: { slot: 1, reading: 'created' },
+                update: { reading: 'changed' },
+              },
+            },
+          },
+        }),
+      );
+
+      expect(
+        await basePrisma.deviceSensor.findMany({ select: { deviceCode: true, slot: true, reading: true } }),
+      ).toEqual([{ deviceCode: 'd-9', slot: 1, reading: 'changed' }]);
+      expect(await logsOf('DeviceSensor')).toEqual([cascaded]);
+      expect(observer).not.toHaveBeenCalled();
+    });
+
     it('does not record a sensor the new code of its device re-keys as created next to a nested create', async () => {
       const { prisma, basePrisma, run, observer, seedDevice, logsOf } = await setup();
       await seedDevice('d-1');

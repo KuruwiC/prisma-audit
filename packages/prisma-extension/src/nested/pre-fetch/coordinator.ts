@@ -18,6 +18,7 @@ import {
   namedTargets,
   targetWhereClauses,
   type UpsertBranch,
+  updateDataOf,
 } from '../../grammar/nested-operations.js';
 import type { ParentRowIdentity } from '../../grammar/nested-state.js';
 import {
@@ -31,7 +32,9 @@ import type { AuditedOmittedFields } from '../../utils/audited-omitted-fields.js
 import { beforeStateOf, NO_BEFORE_STATE } from '../../utils/before-state.js';
 import { preFetchLog } from '../../utils/debug.js';
 import type { EntityIdentityKey } from '../../utils/identity-key.js';
+import { fieldsWriteOf, type PrismaValues } from '../../utils/row-key-write.js';
 import { toError } from '../../utils/to-error.js';
+import { keyLinkOf } from '../key-link.js';
 import { linkWriteOf } from './link-rows.js';
 import {
   getPreFetchListClient,
@@ -40,6 +43,7 @@ import {
   type PreFetchRecord,
 } from './model-client.js';
 import {
+  type ParentKeyLinkWrite,
   preFetchOneToManyRelation,
   preFetchToManyBatch,
   resolveToManyRelationScope,
@@ -71,6 +75,8 @@ import { relationLinkOf } from './relation-link.js';
 import { elementNaming, readEachTarget, type TargetReadFailureHandler } from './target-reads.js';
 
 export interface PreFetchCoordinatorDependencies {
+  /** The client's Prisma namespace, which the data a parent row is written with is read with (`fieldsWriteOf`) */
+  readonly prisma: PrismaValues;
   readonly schemaMetadata: SchemaMetadata;
   readonly shouldFetchBefore: ShouldFetchBefore;
   readonly auditedOmittedFields: AuditedOmittedFields;
@@ -189,7 +195,7 @@ export const preFetchNestedRecordsBeforeOperation = async (
   dependencies: PreFetchCoordinatorDependencies,
   topLevelUpsertBranch?: UpsertBranch,
 ): Promise<NestedPreFetch> => {
-  const { schemaMetadata, shouldFetchBefore, auditedOmittedFields, onPreFetchFailure } = dependencies;
+  const { prisma, schemaMetadata, shouldFetchBefore, auditedOmittedFields, onPreFetchFailure } = dependencies;
 
   const preFetchResults: NestedPreFetchResults = new Map();
   const batchTargets: NestedBatchTargets = new Map();
@@ -233,6 +239,8 @@ export const preFetchNestedRecordsBeforeOperation = async (
     nestedOperations,
     topLevelModelClient: getPreFetchModelClient(prismaClient, modelName, auditedOmittedFields),
     topLevelWhere: args.where,
+    topLevelData: topLevelUpsertBranch === 'update' ? args.update : args.data,
+    prisma,
     preFetchResults,
     batchTargets,
     shouldFetchBefore,
@@ -349,6 +357,9 @@ interface NestedPreFetchContext {
   nestedOperations: readonly NestedOperationInfo[];
   topLevelModelClient: PreFetchModelClient | undefined;
   topLevelWhere: unknown;
+  /** The data the top-level row is written with: an upsert's `update` when it takes that branch */
+  topLevelData: unknown;
+  prisma: PrismaValues;
   preFetchResults: NestedPreFetchResults;
   batchTargets: NestedBatchTargets;
   shouldFetchBefore: ShouldFetchBefore;
@@ -690,7 +701,31 @@ const handleOneToManyRelation = async (
     operation: relation.nestedOp.operation,
     relatedModelClient,
     onTargetReadFailure: targetReadFailureHandler(context, relation.nestedOp),
+    parentKeyLinkWrite: parentKeyLinkWriteOf(context, relation.nestedOp),
   });
+};
+
+/**
+ * How the parent row `nestedOp` is nested under is written in the columns the foreign-key fields
+ * of the related row key reference: the data of the element that writes it, or of the top-level
+ * row
+ */
+const parentKeyLinkWriteOf = (
+  context: NestedPreFetchContext,
+  nestedOp: NestedOperationInfo,
+): ParentKeyLinkWrite | undefined => {
+  const { schemaMetadata } = context;
+  const link = keyLinkOf(schemaMetadata, context.modelName, nestedOp);
+  if (!link) {
+    return undefined;
+  }
+  const { parent } = nestedOp;
+  const data = parent ? updateDataOf(parent.operation)[parent.element] : context.topLevelData;
+  return {
+    parent: parentRowIdentityOf(parent, context.preFetchResults, schemaMetadata),
+    link,
+    write: fieldsWriteOf(schemaMetadata, link.parentModel, data, link.references, context.prisma),
+  };
 };
 
 /** The `fetchBefore` operation (`update` or `delete`) whose setting decides whether a batch keyword reads whole rows */

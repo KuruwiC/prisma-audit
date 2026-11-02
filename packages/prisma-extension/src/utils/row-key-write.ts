@@ -115,6 +115,43 @@ const asReadBack = (value: unknown, type: string | undefined, prisma: PrismaValu
 };
 
 /**
+ * How `data`, the data an update applies to a row of `modelName`, writes `fields`: as
+ * {@link rowKeyWriteOf} reads the row key, for any columns (the columns a relation's foreign key
+ * references, say). `none` for no fields and for data that is not an object.
+ */
+export const fieldsWriteOf = (
+  schemaMetadata: SchemaMetadata,
+  modelName: string,
+  data: unknown,
+  fields: readonly string[],
+  prisma: PrismaValues,
+): RowKeyWrite => {
+  const { skip } = prisma;
+  const written = new Set(fields);
+  if (written.size === 0 || !isPlainObject(data)) {
+    return NO_ROW_KEY_WRITE;
+  }
+  const relationHoldsField = new Set(
+    schemaMetadata
+      .getRelationFields(modelName)
+      .filter((relation) => relation.foreignKeyFields.some((foreignKey) => written.has(foreignKey)))
+      .map((relation) => relation.name),
+  );
+  const values: Row = {};
+  for (const [field, value] of Object.entries(data)) {
+    const write = written.has(field) || relationHoldsField.has(field) ? fieldWriteOf(value, skip) : NOT_WRITTEN;
+    if (!write.written) {
+      continue;
+    }
+    if (!write.literal || relationHoldsField.has(field)) {
+      return NOT_DERIVABLE;
+    }
+    values[field] = asReadBack(write.value, schemaMetadata.getFieldMetadata(modelName, field)?.type, prisma);
+  }
+  return Object.keys(values).length === 0 ? NO_ROW_KEY_WRITE : { kind: 'literal', values };
+};
+
+/**
  * How `data`, the data an update applies to a row of `modelName`, writes the row key. `prisma` is
  * the client's Prisma namespace: its `skip` leaves its field out of the query, and its `Decimal` is
  * the type a `Decimal` column is read back in. `none` for a model with no row key and for data that
@@ -125,31 +162,8 @@ export const rowKeyWriteOf = (
   modelName: string,
   data: unknown,
   prisma: PrismaValues,
-): RowKeyWrite => {
-  const { skip } = prisma;
-  const keyFields = new Set(rowKeyFieldsOf(schemaMetadata, modelName));
-  if (keyFields.size === 0 || !isPlainObject(data)) {
-    return NO_ROW_KEY_WRITE;
-  }
-  const relationHoldsKey = new Set(
-    schemaMetadata
-      .getRelationFields(modelName)
-      .filter((relation) => relation.foreignKeyFields.some((foreignKey) => keyFields.has(foreignKey)))
-      .map((relation) => relation.name),
-  );
-  const values: Row = {};
-  for (const [field, value] of Object.entries(data)) {
-    const write = keyFields.has(field) || relationHoldsKey.has(field) ? fieldWriteOf(value, skip) : NOT_WRITTEN;
-    if (!write.written) {
-      continue;
-    }
-    if (!write.literal || relationHoldsKey.has(field)) {
-      return NOT_DERIVABLE;
-    }
-    values[field] = asReadBack(write.value, schemaMetadata.getFieldMetadata(modelName, field)?.type, prisma);
-  }
-  return Object.keys(values).length === 0 ? NO_ROW_KEY_WRITE : { kind: 'literal', values };
-};
+): RowKeyWrite =>
+  fieldsWriteOf(schemaMetadata, modelName, data, rowKeyFieldsOf(schemaMetadata, modelName) ?? [], prisma);
 
 /** `row` with the key the write gives it: the key fields the write gives literal values replaced */
 export const withWrittenKey = (row: Row, keyWrite: DerivableRowKeyWrite): Row =>

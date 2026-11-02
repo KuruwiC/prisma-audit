@@ -11,6 +11,9 @@ import { preFetchedStateUnder } from '../../../src/nested/pre-fetch/pre-fetch-re
 import { NO_AUDITED_OMITTED_FIELDS } from '../../../src/utils/audited-omitted-fields.js';
 import { column, model, relation, schemaMetadataOf } from '../../support/audit-schema.js';
 
+/** Stands for the client's Prisma namespace: its `skip` and `Decimal` */
+const prisma = { skip: new (class Skip {})(), Decimal: undefined };
+
 type Row = Record<string, unknown>;
 
 const schemaMetadata = schemaMetadataOf(
@@ -93,6 +96,7 @@ const preFetch = async (
 ) =>
   (
     await preFetchNestedRecordsBeforeOperation(client, modelName, args, {
+      prisma,
       schemaMetadata,
       auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS,
       shouldFetchBefore,

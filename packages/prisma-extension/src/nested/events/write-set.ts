@@ -22,7 +22,6 @@
 import type { BeforeState } from '@kuruwic/db-audit-core';
 import {
   detectNestedOperations,
-  elementsOf,
   getRowKeyConstraint,
   isNestedBatchKeyword,
   type NestedBatchTargets,
@@ -31,6 +30,7 @@ import {
   type NestedPreFetchResults,
   namedTargets,
   type UpsertBranch,
+  updateDataOf,
 } from '../../grammar/nested-operations.js';
 import { TOP_LEVEL_ROW, upsertBranchOf } from '../../grammar/nested-state.js';
 import type { SchemaMetadata, UniqueConstraint } from '../../schema/types.js';
@@ -179,23 +179,6 @@ const completeRowKeyOf = (row: Row, keyFields: readonly string[] | undefined): R
   !keyFields || keyFields.some((field) => row[field] === undefined || row[field] === null)
     ? undefined
     : rowKeyOf(row, keyFields);
-
-/**
- * The data each element of `operation` updates its rows with: the `data` of an `update` or
- * `updateMany` element, the `update` of an `upsert` element; none for a keyword that updates no row
- */
-const updateDataOf = (operation: NestedOperationInfo): unknown[] => {
-  const elements = elementsOf(operation.data);
-  switch (operation.operation) {
-    case 'update':
-    case 'updateMany':
-      return elements.map((element) => (isRecord(element) ? element.data : undefined));
-    case 'upsert':
-      return elements.map((element) => (isRecord(element) ? element.update : undefined));
-    default:
-      return [];
-  }
-};
 
 /**
  * How the rows `operation` writes have their row key written. The rows of an `updateMany` are not

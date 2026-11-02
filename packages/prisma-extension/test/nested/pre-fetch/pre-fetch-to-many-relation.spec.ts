@@ -10,9 +10,12 @@ import type { PrismaHandle } from '../../../src/internal-types.js';
 import { preFetchNestedRecordsBeforeOperation } from '../../../src/nested/pre-fetch/coordinator.js';
 import { preFetchOneToManyRelation } from '../../../src/nested/pre-fetch/one-to-many-fetcher.js';
 import { parentKeysFromOperationWheres } from '../../../src/nested/pre-fetch/parent-rows.js';
-import { preFetchedResultFor } from '../../../src/nested/pre-fetch/pre-fetch-result-store.js';
+import { preFetchedResultFor, preFetchedStateNamedBy } from '../../../src/nested/pre-fetch/pre-fetch-result-store.js';
 import { NO_AUDITED_OMITTED_FIELDS } from '../../../src/utils/audited-omitted-fields.js';
 import { column, model, relation, schemaMetadataOf } from '../../support/audit-schema.js';
+
+/** Stands for the client's Prisma namespace: its `skip` and `Decimal` */
+const prisma = { skip: new (class Skip {})(), Decimal: undefined };
 
 type Row = Record<string, unknown>;
 
@@ -73,6 +76,7 @@ const preFetch = (
   shouldFetchBefore: ShouldFetchBefore = fetchBefore,
 ) =>
   preFetchNestedRecordsBeforeOperation(client, modelName, args, {
+    prisma,
     schemaMetadata,
     auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS,
     shouldFetchBefore,
@@ -81,6 +85,7 @@ const preFetch = (
 const preFetchReporting = (client: PrismaHandle, args: Row, shouldFetchBefore: ShouldFetchBefore = fetchBefore) => {
   const onPreFetchFailure = vi.fn();
   const preFetched = preFetchNestedRecordsBeforeOperation(client, 'Account', args, {
+    prisma,
     schemaMetadata,
     auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS,
     shouldFetchBefore,
@@ -483,6 +488,7 @@ describe('nested to-many batch pre-read', () => {
         'Account',
         { where: { id: 'a1' }, data: { members: { deleteMany: { name: 'draft' } } } },
         {
+          prisma,
           schemaMetadata,
           auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS,
           shouldFetchBefore: fetchBefore,
@@ -762,5 +768,85 @@ describe('parentKeysFromOperationWheres', () => {
     );
 
     expect(keys).toEqual([{ tenantId: 't1', itemId: 'i1' }]);
+  });
+});
+
+describe('nested to-many pre-fetch of a row key that holds the foreign key to the parent', () => {
+  const deviceSchema = schemaMetadataOf(
+    model('Device', [
+      column('code', { isUnique: true, isRequired: true }),
+      column('label'),
+      relation('sensors', 'DeviceSensor', 'DeviceSensors', { isList: true }),
+    ]),
+    model(
+      'DeviceSensor',
+      [
+        column('deviceCode', { isRequired: true }),
+        column('slot', { isRequired: true }),
+        column('reading'),
+        relation('device', 'Device', 'DeviceSensors', {
+          isRequired: true,
+          foreignKeyFields: ['deviceCode'],
+          referencedFields: ['code'],
+        }),
+      ],
+      { uniqueIndexes: [{ fields: ['deviceCode', 'slot'], name: null }] },
+    ),
+  );
+  const where = { deviceCode_slot: { deviceCode: 'd-9', slot: 1 } };
+  const preFetchDevice = (client: PrismaHandle, code: unknown, named: Row = where) =>
+    preFetchNestedRecordsBeforeOperation(
+      client,
+      'Device',
+      {
+        where: { code: 'd-1' },
+        data: { code, sensors: { update: { where: named, data: { reading: 'changed' } } } },
+      },
+      {
+        prisma,
+        schemaMetadata: deviceSchema,
+        auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS,
+        shouldFetchBefore: fetchBefore,
+      },
+    );
+
+  it('reads the row a WHERE names by the code the parent is given under the code the parent held before the write', async () => {
+    const { client, delegates } = createClient({ deviceSensor: [] });
+
+    await preFetchDevice(client, 'd-9');
+
+    expect(delegates.deviceSensor?.findUnique.mock.calls).toEqual([
+      [{ where: { deviceCode_slot: { deviceCode: 'd-1', slot: 1 }, AND: [{ device: { is: { code: 'd-1' } } }] } }],
+    ]);
+  });
+
+  it('reads the WHERE as it is when the parent keeps its code', async () => {
+    const { client, delegates } = createClient({ deviceSensor: [] });
+    const named = { deviceCode_slot: { deviceCode: 'd-1', slot: 1 } };
+
+    await preFetchDevice(client, undefined, named);
+
+    expect(delegates.deviceSensor?.findUnique.mock.calls).toEqual([
+      [{ where: { ...named, AND: [{ device: { is: { code: 'd-1' } } }] } }],
+    ]);
+  });
+
+  it('stores no row, without a read, for a WHERE that names the code the parent leaves', async () => {
+    const { client, delegates } = createClient({ deviceSensor: [] });
+    const named = { deviceCode_slot: { deviceCode: 'd-1', slot: 1 } };
+
+    const { results } = await preFetchDevice(client, 'd-9', named);
+
+    expect(delegates.deviceSensor?.findUnique).not.toHaveBeenCalled();
+    expect(preFetchedStateNamedBy(results, 'sensors', named)).toEqual({ kind: 'none' });
+  });
+
+  it('stores the row as unavailable, without a read, when the parent is given a code its arguments do not tell', async () => {
+    const { client, delegates } = createClient({ deviceSensor: [] });
+
+    const { results } = await preFetchDevice(client, { increment: 1 });
+
+    expect(delegates.deviceSensor?.findUnique).not.toHaveBeenCalled();
+    expect(preFetchedStateNamedBy(results, 'sensors', where).kind).toBe('unavailable');
   });
 });

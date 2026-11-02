@@ -187,7 +187,7 @@ interface ScannedElement {
   readonly data: Record<string, unknown>;
 }
 
-export const elementsOf = (data: unknown): unknown[] => (Array.isArray(data) ? data : [data]);
+const elementsOf = (data: unknown): unknown[] => (Array.isArray(data) ? data : [data]);
 
 const elementBranches = (
   pass: NestedDetectionPass,
@@ -395,6 +395,23 @@ export interface NamedTarget {
   readonly element: number;
   readonly where: Record<string, unknown>;
 }
+
+/**
+ * The data each element of `operation` updates its rows with: the `data` of an `update` or
+ * `updateMany` element, the `update` of an `upsert` element; none for a keyword that updates no row
+ */
+export const updateDataOf = (operation: NestedOperationInfo): unknown[] => {
+  const elements = elementsOf(operation.data);
+  switch (operation.operation) {
+    case 'update':
+    case 'updateMany':
+      return elements.map((element) => (isRecord(element) ? element.data : undefined));
+    case 'upsert':
+      return elements.map((element) => (isRecord(element) ? element.update : undefined));
+    default:
+      return [];
+  }
+};
 
 /**
  * The unique WHERE of every row a nested operation names: the `where` of each `update`, `upsert`

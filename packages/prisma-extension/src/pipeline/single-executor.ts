@@ -76,7 +76,13 @@ export const createSingleExecutor = (deps: SingleExecutorDependencies): Operatio
       scope.handle,
       modelName,
       args,
-      { schemaMetadata, shouldFetchBefore, auditedOmittedFields, onPreFetchFailure: failureSink.notify },
+      {
+        prisma: Prisma,
+        schemaMetadata,
+        shouldFetchBefore,
+        auditedOmittedFields,
+        onPreFetchFailure: failureSink.notify,
+      },
       topLevelUpsertBranch,
     );
     const detect = (detectedIn: Record<string, unknown>) =>

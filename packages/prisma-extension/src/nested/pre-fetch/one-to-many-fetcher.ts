@@ -6,6 +6,11 @@
  * `updateMany` / `deleteMany` matches. Prisma applies such an operation only to rows related to
  * the parent row, so a row that matches under another parent is not its target.
  *
+ * Prisma writes the parent row before the writes nested in it, so a unique WHERE names the
+ * foreign-key fields of the row key (`nested/key-link`) by the parent's referenced columns as the
+ * parent's write leaves them. The read ahead of the write names them by the parent's columns
+ * before it: the row the WHERE names after the parent's write held those before it.
+ *
  * @module nested/pre-fetch/one-to-many-fetcher
  */
 
@@ -16,14 +21,17 @@ import {
   namedTargets,
   type PrecedingNestedWrite,
 } from '../../grammar/nested-operations.js';
+import type { ParentRowIdentity } from '../../grammar/nested-state.js';
 import type { RelationField, SchemaMetadata, UniqueConstraint } from '../../schema/types.js';
 import { NO_BEFORE_STATE } from '../../utils/before-state.js';
-import { uniqueWhereAsFilter } from '../../utils/compound-where.js';
+import { uniqueWhereAsFilter, unwrapCompoundWhere } from '../../utils/compound-where.js';
 import { preFetchLog } from '../../utils/debug.js';
-import { extractEntityIdentity, rowKeyOf } from '../../utils/id-generation.js';
+import { extractEntityIdentity, rowKeyOf, sameKeyValue } from '../../utils/id-generation.js';
 import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID } from '../../utils/identity-key.js';
+import type { RowKeyWrite } from '../../utils/row-key-write.js';
+import { type KeyLink, keyLinkValuesOf } from '../key-link.js';
 import type { PreFetchListClient, PreFetchModelClient, PreFetchRecord } from './model-client.js';
-import { parentKeyOf, type ResolveParentRowsInput, resolveParentRows } from './parent-rows.js';
+import { type ParentRow, parentKeyOf, type ResolveParentRowsInput, resolveParentRows } from './parent-rows.js';
 import { preFetchedResultFor, storePreFetchResult, storeReadResult } from './pre-fetch-result-store.js';
 import { findBackRelationField } from './relation-link.js';
 import { readEachTarget, type TargetReadFailureHandler } from './target-reads.js';
@@ -103,43 +111,110 @@ export interface ToManyScopeInput extends Omit<ResolveParentRowsInput, 'parentFi
 }
 
 interface ScopedParentRows {
-  readonly rows: readonly PreFetchRecord[];
+  readonly rows: readonly ParentRow[];
   readonly allKnown: boolean;
 }
 
-const resolveScopedParentRows = async (input: ToManyScopeInput): Promise<ScopedParentRows> => {
-  const { rows, allKnown } = await resolveParentRows({ ...input, parentFields: input.scope.parentFields });
-  return { rows: rows.map((parent) => parent.row), allKnown };
-};
+const resolveScopedParentRows = (input: ToManyScopeInput): Promise<ScopedParentRows> =>
+  resolveParentRows({ ...input, parentFields: input.scope.parentFields });
+
+/**
+ * How the write of the parent row an operation is nested under writes the columns the foreign-key
+ * fields of the related row key reference
+ */
+export interface ParentKeyLinkWrite {
+  /** The identity of that parent row before the write; undefined when unknown */
+  readonly parent: ParentRowIdentity | undefined;
+  readonly link: KeyLink;
+  /** How the parent's data writes `link.references` */
+  readonly write: RowKeyWrite;
+}
 
 export interface PreFetchOneToManyRelationInput extends ToManyScopeInput {
   operation: NestedOperationKeyword;
   relatedModelClient: PreFetchModelClient;
   onTargetReadFailure: TargetReadFailureHandler;
+  /** Undefined when the related row key holds no foreign key to the parent */
+  parentKeyLinkWrite?: ParentKeyLinkWrite;
+}
+
+/**
+ * What `where` names under `parent` before the parent's write: itself; another WHERE, its
+ * foreign-key fields of the row key given the values the parent held before the write; no row,
+ * when it names those fields by values the parent does not hold after the write; or a row that
+ * cannot be told, when the parent's data writes those columns in a way its arguments do not tell
+ * or the parent's columns before the write are unknown
+ */
+type NamedBeforeParentWrite =
+  | { readonly kind: 'where'; readonly where: PreFetchRecord }
+  | { readonly kind: 'none' }
+  | { readonly kind: 'unknown' };
+
+const namedBeforeParentWrite = (
+  input: PreFetchOneToManyRelationInput,
+  where: PreFetchRecord,
+  parent: ParentRow,
+): NamedBeforeParentWrite => {
+  const { parentKeyLinkWrite: linkWrite, keyConstraint } = input;
+  if (
+    !linkWrite ||
+    linkWrite.write.kind === 'none' ||
+    (linkWrite.parent !== undefined && linkWrite.parent !== parent.identity)
+  ) {
+    return { kind: 'where', where };
+  }
+  const flat = unwrapCompoundWhere(where, keyConstraint);
+  const named = linkWrite.link.fields.filter((field) => field in flat);
+  if (named.length === 0) {
+    return { kind: 'where', where };
+  }
+  const before = keyLinkValuesOf(linkWrite.link, parent.row);
+  if (linkWrite.write.kind === 'not-derivable' || linkWrite.parent === undefined || !before) {
+    return { kind: 'unknown' };
+  }
+  const after = keyLinkValuesOf(linkWrite.link, { ...parent.row, ...linkWrite.write.values });
+  if (!after || named.some((field) => !sameKeyValue(flat[field], after[field]))) {
+    return { kind: 'none' };
+  }
+  const values = { ...flat, ...Object.fromEntries(named.map((field) => [field, before[field]])) };
+  // A compound key is named through its wrapper, the only shape a `WhereUniqueInput` takes it in
+  return {
+    kind: 'where',
+    where: flat === where ? values : { ...where, [keyConstraint.name ?? keyConstraint.fields.join('_')]: values },
+  };
+};
+
+interface TargetRead {
+  readonly record: PreFetchRecord | null;
+  /** A parent row the WHERE may name a row under, whose row cannot be told */
+  readonly untold: boolean;
 }
 
 /** Reads the row `where` names under each parent row in turn until one holds it */
 const readTargetUnderParents = async (
   input: PreFetchOneToManyRelationInput,
   where: PreFetchRecord,
-  parentRows: readonly PreFetchRecord[],
-): Promise<PreFetchRecord | null> => {
+  parentRows: readonly ParentRow[],
+): Promise<TargetRead> => {
   const { path, scope, relatedModelClient } = input;
-  for (const parentRow of parentRows) {
-    const parentKey = parentKeyOf(parentRow, scope.parentFields);
-    if (!parentKey) {
+  let untold = false;
+  for (const parent of parentRows) {
+    const parentKey = parentKeyOf(parent.row, scope.parentFields);
+    const named = namedBeforeParentWrite(input, where, parent);
+    untold = untold || named.kind === 'unknown';
+    if (!parentKey || named.kind !== 'where') {
       continue;
     }
 
-    const scopedWhere = scopeWhereToParent(where, scope, parentKey);
+    const scopedWhere = scopeWhereToParent(named.where, scope, parentKey);
     preFetchLog('1:N scoped where: path=%s where=%O', path, scopedWhere);
 
     const beforeRecord = await relatedModelClient.findUnique({ where: scopedWhere });
     if (beforeRecord) {
-      return beforeRecord;
+      return { record: beforeRecord, untold: false };
     }
   }
-  return null;
+  return { record: null, untold };
 };
 
 /**
@@ -151,7 +226,8 @@ const readTargetUnderParents = async (
  * (`{ a_b: { a, b } }`, or a custom name from `@@id([a, b], name: "custom")`). Entity-identity
  * derivation and `matchesUniqueWhere` unwrap that shape. Parent rows are tried in turn until one
  * holds the row; when no parent row exists, nothing is queried or stored. When a parent row could
- * not be read and is not known by its key, a row no known parent holds is stored as unavailable.
+ * not be read and is not known by its key, or the row a WHERE names under a parent row cannot be
+ * told before the parent's write, a row no known parent holds is stored as unavailable.
  * Each target is read on its own: a failed read goes to `onTargetReadFailure` and the next target
  * is still read.
  *
@@ -176,9 +252,9 @@ export const preFetchOneToManyRelation = async (input: PreFetchOneToManyRelation
   await readEachTarget(
     targets,
     async (where) => {
-      const beforeRecord = await readTargetUnderParents(input, where, parentRows);
-      storeReadResult(preFetchResults, path, where, beforeRecord, keyConstraint, allKnown);
-      preFetchLog('1:N stored: path=%s found=%s', path, beforeRecord !== null);
+      const { record, untold } = await readTargetUnderParents(input, where, parentRows);
+      storeReadResult(preFetchResults, path, where, record, keyConstraint, allKnown && !untold);
+      preFetchLog('1:N stored: path=%s found=%s', path, record !== null);
     },
     onTargetReadFailure,
   );
@@ -282,7 +358,11 @@ export const preFetchToManyBatch = async (
     );
   }
   const wheres = batchFilterClauses(operation, data).flatMap((filter) =>
-    scopeFilterToParents(filter, input, parentRows),
+    scopeFilterToParents(
+      filter,
+      input,
+      parentRows.map((parent) => parent.row),
+    ),
   );
   preFetchLog('1:N batch parent rows: path=%s operation=%s queries=%d', path, operation, wheres.length);
 
