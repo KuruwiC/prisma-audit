@@ -376,6 +376,25 @@ describe('nested to-many batch pre-read', () => {
     ]);
   });
 
+  it.each([
+    ['set', [{ id: 'm9' }], { OR: [{ id: 'm9' }] }],
+    [
+      'connectOrCreate',
+      { where: { id: 'm9' }, create: { name: 'new' } },
+      { OR: [{ account: { is: { id: 'a1' } } }, { id: 'm9' }] },
+    ],
+    ['delete', { id: 'm2' }, { AND: [{ account: { is: { id: 'a1' } } }, { NOT: { OR: [{ id: 'm2' }] } }] }],
+  ])('reads the rows related to the parent when a deleteMany runs after a %s', async (keyword, data, related) => {
+    const { client, delegates } = createClient({ member: draftOrFinal });
+
+    await preFetch(client, 'Account', {
+      where: { id: 'a1' },
+      data: { members: { [keyword]: data, deleteMany: { name: 'draft' } } },
+    });
+
+    expect(delegates.member?.findMany.mock.calls).toContainEqual([{ where: { name: 'draft', AND: [related] } }]);
+  });
+
   it('reads no row for a deleteMany listed after a set that names none', async () => {
     const { client, delegates } = createClient({ member: draftOrFinal });
 

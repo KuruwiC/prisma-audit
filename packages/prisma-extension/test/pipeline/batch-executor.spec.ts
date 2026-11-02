@@ -1616,27 +1616,32 @@ describe('createBatchExecutor', () => {
         failureSink,
       });
 
+    const returnedRows = [{ id: 'u1', email: 'a@example.com', name: 'A' }];
+    const everyFieldSkipped = { email: undefined, name: skip };
+
     it.each([
-      ['empty data', {}],
-      ['data whose every field is undefined or Prisma.skip', { email: undefined, name: skip }],
-    ])(
-      'runs an updateMany with %s as given, reading no row, auditing none and reporting nothing',
-      async (_case, data) => {
+      ['updateMany', 'empty data', {}, { count: 0 }],
+      ['updateMany', 'data whose every field is undefined or Prisma.skip', everyFieldSkipped, { count: 0 }],
+      ['updateManyAndReturn', 'empty data', {}, returnedRows],
+      ['updateManyAndReturn', 'data whose every field is undefined or Prisma.skip', everyFieldSkipped, returnedRows],
+    ] as const)(
+      'runs an %s with %s as given, reading no row, auditing none and reporting nothing',
+      async (action, _case, data, returned) => {
         const findMany = vi.fn();
-        const updateMany = vi.fn(async () => ({ count: 0 }));
-        const client = clientWith({ user: { findMany, updateMany } });
+        const write = vi.fn(async () => returned);
+        const client = clientWith({ user: { findMany, [action]: write } });
         const produceRecords = produce();
         const args = { where: { email: { contains: '@' } }, data };
 
         const outcome = await runWithRecords(
           executorWithSkip(),
-          operationOn(client, 'updateMany', args),
+          operationOn(client, action, args),
           scopeOn(client),
           produceRecords,
         );
 
-        expect(outcome.result).toEqual({ count: 0 });
-        expect(updateMany).toHaveBeenCalledWith(args);
+        expect(outcome.result).toEqual(returned);
+        expect(write).toHaveBeenCalledWith(args);
         expect(findMany).not.toHaveBeenCalled();
         expect(failureSink.notify).not.toHaveBeenCalled();
         expect(produceRecords).toHaveBeenCalledWith([], expect.anything(), new Map());

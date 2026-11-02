@@ -37,15 +37,19 @@ const schema = auditSchema(
 
 interface AuditedClient {
   readonly $transaction: (first: unknown) => Promise<unknown>;
-  readonly user: { readonly create: (args: unknown) => PromiseLike<unknown> };
+  readonly $queryRaw: (args: unknown) => PromiseLike<unknown>;
+  readonly user: {
+    readonly create: (args: unknown) => PromiseLike<unknown>;
+    readonly findMany: (args: unknown) => PromiseLike<unknown>;
+  };
 }
 
 type Options = Partial<Omit<PrismaAuditExtensionOptions, 'Prisma' | 'schema' | 'contextProvider'>>;
 
 /**
- * A client the audit extension extends, as `createAuditClient` does: `user.create` runs through the
- * extension's hook, whose `query` returns `result`, and an interactive `$transaction` calls its
- * callback with the client. Audit rows go to `writer`.
+ * A client the audit extension extends, as `createAuditClient` does: `user.create`, `user.findMany`
+ * and `$queryRaw` run through the extension's hook, whose `query` returns `result`, and an
+ * interactive `$transaction` calls its callback with the client. Audit rows go to `writer`.
  */
 const auditedClient = (options: Options, result: unknown = { id: 'u1' }) => {
   const provider = createAsyncLocalStorageProvider();
@@ -65,7 +69,11 @@ const auditedClient = (options: Options, result: unknown = { id: 'u1' }) => {
           transaction();
           return (first as (tx: AuditedClient) => Promise<unknown>)(client);
         },
-        user: { create: (args) => $allOperations({ model: 'User', operation: 'create', args, query }) },
+        $queryRaw: (args) => $allOperations({ model: undefined, operation: '$queryRaw', args, query }),
+        user: {
+          create: (args) => $allOperations({ model: 'User', operation: 'create', args, query }),
+          findMany: (args) => $allOperations({ model: 'User', operation: 'findMany', args, query }),
+        },
       };
       return client;
     },
@@ -160,6 +168,27 @@ describe('the audit gate of the extension hook', () => {
       await expect(client.user.create({ data: { id: 'u1' } })).resolves.toEqual({ id: 'u1' });
     });
     expect(query).toHaveBeenCalledTimes(1);
+    expect(writer).not.toHaveBeenCalled();
+  });
+
+  it('runs a read and a raw query untouched and unaudited, with or without a context, even when every model requires one', async () => {
+    const { client, provider, query, writer } = auditedClient({ requireContext: true }, [{ id: 'u1' }]);
+    const readArgs = { where: { id: 'u1' }, select: { id: true } };
+    const rawArgs = ['SELECT 1'];
+
+    await expect(client.user.findMany(readArgs)).resolves.toEqual([{ id: 'u1' }]);
+    await expect(client.$queryRaw(rawArgs)).resolves.toEqual([{ id: 'u1' }]);
+    await provider.runAsync(context, async () => {
+      await client.user.findMany(readArgs);
+      await client.$queryRaw(rawArgs);
+    });
+
+    const passed = query.mock.calls.map(([args]) => args);
+    expect(passed).toHaveLength(4);
+    expect(passed[0]).toBe(readArgs);
+    expect(passed[1]).toBe(rawArgs);
+    expect(passed[2]).toBe(readArgs);
+    expect(passed[3]).toBe(rawArgs);
     expect(writer).not.toHaveBeenCalled();
   });
 

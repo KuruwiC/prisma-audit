@@ -21,6 +21,7 @@ const models = [
   model('User', [column('id', { isId: true }), relation('posts', 'Post', 'PostToUser', { isList: true })]),
   model('Post', [
     column('id', { isId: true }),
+    column('slug', { isUnique: true }),
     column('authorId'),
     relation('author', 'User', 'PostToUser', {
       isRequired: true,
@@ -249,6 +250,45 @@ describe('readLinkRows', () => {
 
     expect(findMany.mock.calls).toEqual([[{ where: { OR: [{ id: 'la' }, { postId: 'p1' }, { id: 'lb' }] } }]]);
     expect(reads.get('posts.labels')).toMatchObject({ rows: [{ id: 'la', postId: 'p9' }], failed: false });
+  });
+
+  it('reads the key of the top-level row its WHERE names by another unique field, and the rows a set detaches under it', async () => {
+    const setArgs = { where: { slug: 's1' }, data: { labels: { set: [{ id: 'la' }] } } };
+    const nestedPreFetchResults: NestedPreFetchResults = new Map();
+    const nestedOperations = detectResolvedNestedOperations(
+      schemaMetadata,
+      'Post',
+      setArgs,
+      undefined,
+      nestedPreFetchResults,
+    );
+    const post = { findUnique: vi.fn(async () => ({ id: 'p1' })), findFirst: vi.fn() };
+    const findMany = vi.fn(async () => [
+      { id: 'la', postId: null },
+      { id: 'lx', postId: 'p1' },
+    ]);
+
+    const reads = await readLinkRows(
+      {
+        prismaClient: { post, label: { findMany } },
+        modelName: 'Post',
+        topLevelWhere: setArgs.where,
+        nestedOperations,
+        nestedPreFetchResults,
+      },
+      { schemaMetadata, auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS, shouldFetchBefore: () => true },
+    );
+
+    expect(post.findUnique.mock.calls).toEqual([[{ where: { slug: 's1' }, select: { id: true } }]]);
+    expect(findMany.mock.calls).toEqual([[{ where: { OR: [{ id: 'la' }, { postId: 'p1' }] } }]]);
+    expect(reads.get('labels')).toMatchObject({
+      failed: false,
+      rows: [
+        { id: 'la', postId: null },
+        { id: 'lx', postId: 'p1' },
+      ],
+    });
+    expect([...(reads.get('labels')?.parentKeys.values() ?? [])]).toEqual([{ id: 'p1' }]);
   });
 
   it('reads nothing when the before state of updates of the related model is not read', async () => {

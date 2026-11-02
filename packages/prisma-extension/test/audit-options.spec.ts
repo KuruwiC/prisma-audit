@@ -1,7 +1,7 @@
 /**
  * Options checked once when they are normalized: the `schema` option, the audit schema the
  * extension reads every model's structure from, the `write` and `samplingRate` options, and the
- * diff-exclusion and redaction options
+ * diff-exclusion and redaction options, and the entity map keys of `recordOmittedFields`
  */
 
 import { createAsyncLocalStorageProvider, defineEntity } from '@kuruwic/db-audit-core';
@@ -165,5 +165,21 @@ describe('the diffExcludeFields and redactFields options', () => {
     const entities = { User: defineEntity({ type: 'User', diffExcludeFields: ['updatedAt'] }) };
 
     expect(() => normalizeAuditOptions(withOptions({ entities, redactFields: ['phone'] }))).not.toThrow();
+  });
+});
+
+describe('the recordOmittedFields option', () => {
+  it('accepts recordOmittedFields on an entity map key that names its model in another case, and reads the field', () => {
+    const schema = auditSchema(model('auditEvent', [column('id', { isId: true, isRequired: true }), column('secret')]));
+    const options = {
+      contextProvider: createAsyncLocalStorageProvider(),
+      entities: { AuditEvent: defineEntity({ type: 'AuditEvent', recordOmittedFields: ['secret'] }) },
+      Prisma: { ...Prisma, prismaVersion: { client: '6.19.0' } },
+      schema,
+    } as PrismaAuditExtensionOptions;
+
+    const audit = normalizeAuditOptions(options);
+
+    expect([...audit.auditedOmittedFields.of('auditEvent')]).toEqual(['secret']);
   });
 });

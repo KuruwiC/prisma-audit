@@ -189,6 +189,56 @@ describe('storeReadResult', () => {
   });
 });
 
+describe('storePreFetchResult', () => {
+  it('replaces the result stored for the row of the same identity, whatever WHERE named it', () => {
+    const store: NestedPreFetchResults = new Map();
+    storeUnreadRows(store, 'comments', [{ id: 'c1' }], pk);
+
+    storeReadResult(store, 'comments', { slug: 's1' }, { id: 'c1', slug: 's1' }, pk);
+
+    expect(store.get('comments')?.results).toEqual([
+      {
+        before: { kind: 'captured', row: { id: 'c1', slug: 's1' } },
+        identity: 'c1',
+        name: { by: 'uniqueWhere', where: { slug: 's1' } },
+      },
+    ]);
+    expect(preFetchedStateNamedBy(store, 'comments', { id: 'c1' })).toEqual({
+      kind: 'captured',
+      row: { id: 'c1', slug: 's1' },
+    });
+  });
+
+  it('keeps a row read under a parent row apart from the same row a unique WHERE named, in either order', () => {
+    const storeNamed = (store: NestedPreFetchResults) =>
+      storeReadResult(store, 'profile', { id: 'pr1' }, { id: 'pr1', bio: 'named' }, pk);
+    const storeUnder = (store: NestedPreFetchResults) =>
+      storePreFetchResult(store, 'profile', {
+        before: { kind: 'captured', row: { id: 'pr1', bio: 'under' } },
+        identity: 'pr1',
+        name: { by: 'parentRow', parent: 'u1' },
+      });
+    const namedFirst: NestedPreFetchResults = new Map();
+    storeNamed(namedFirst);
+    storeUnder(namedFirst);
+    const underFirst: NestedPreFetchResults = new Map();
+    storeUnder(underFirst);
+    storeNamed(underFirst);
+
+    for (const store of [namedFirst, underFirst]) {
+      expect(store.get('profile')?.results).toHaveLength(2);
+      expect(preFetchedResultFor(store, 'profile', 'pr1')?.before).toEqual({
+        kind: 'captured',
+        row: { id: 'pr1', bio: 'named' },
+      });
+      expect(preFetchedStateUnder(store, 'profile', 'u1')).toEqual({
+        kind: 'captured',
+        row: { id: 'pr1', bio: 'under' },
+      });
+    }
+  });
+});
+
 describe('storeIdentifiedRow', () => {
   const where = { postId_tagId: { postId: 'p1', tagId: 't1' } };
 

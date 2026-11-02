@@ -122,6 +122,24 @@ describe('collectLinkChanges', () => {
     expect(findMany).toHaveBeenCalledTimes(1);
   });
 
+  it('when the read before the write failed, reads a row a connect names by a compound unique key through its fields and records it', async () => {
+    const where = { ownerId_slug: { ownerId: 'o1', slug: 'a' } };
+    const named: LinkWrite = { operation: { ...connect, data: where }, named: [where], detaches: false };
+    const failed = readOf({ writes: [named], rows: [], parentKeys: new Map(), failed: true });
+    const after = { id: 'l1', name: 'n', postId: 'p1', ownerId: 'o1', slug: 'a' };
+    const findMany = vi.fn(async () => [after]);
+
+    const records = await collectLinkChanges({
+      ...inputOf(failed, { label: { findMany } }),
+      fieldNamesOf: () => new Set(['id', 'name', 'postId', 'ownerId', 'slug']),
+    });
+
+    expect(findMany).toHaveBeenCalledWith({ where: { OR: [{ ownerId: 'o1', slug: 'a' }] } });
+    expect(records.get(named.operation)).toEqual([
+      { entity: after, action: 'update', beforeState: { kind: 'unavailable' }, relatedModel: 'Label' },
+    ]);
+  });
+
   it('records a row two writes name once, with the before state of the write that read it', async () => {
     const connectOrCreate: NestedOperationInfo = {
       ...connect,
