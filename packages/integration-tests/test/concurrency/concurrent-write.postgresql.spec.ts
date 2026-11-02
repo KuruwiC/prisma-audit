@@ -499,6 +499,28 @@ describe('concurrent writes on PostgreSQL: a commit between the audit read and t
         }),
       );
     });
+
+    it('reports as row-identification, and does not record, a row another transaction inserts into the where of a deleteMany between the read and the delete, which deletes it', async () => {
+      await seedPost('read-1');
+
+      const outcome = await interleave(barrier, postFindMany, {
+        operation: () => readCommitted((tx) => tx.post.deleteMany(unpublished)),
+        interleaved: () => seedPost('inserted'),
+      });
+
+      expect(outcome.operation).toEqual({ status: 'fulfilled', value: { count: 2 } });
+      expect(await postOf('inserted')).toBeNull();
+      expect(await postRecords('inserted')).toEqual([]);
+      expect(await postRecords('read-1')).toEqual([expect.objectContaining({ action: 'delete' })]);
+      expect(observer).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          phase: 'row-identification',
+          modelName: 'Post',
+          operation: 'deleteMany',
+          params: { unidentified: 1 },
+        }),
+      );
+    });
   });
 
   it('records only the child a nested to-many create inserts, by the key the extension gives it, when another transaction inserts a child under the parent while it runs, reading no child before the write', async () => {

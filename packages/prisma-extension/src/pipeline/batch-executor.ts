@@ -336,6 +336,9 @@ const writtenRowsNotRead: UnidentifiedReason = (operation, unidentified) =>
 const readRowsNotUpdated: UnidentifiedReason = (operation, unidentified) =>
   `${unidentified} of the rows read before an ${operation.action} ${unidentified === 1 ? 'was' : 'were'} not updated by it, and which ones cannot be told: another writer moved them out of its where after the read, and the audit treats every read row it finds after the write as updated`;
 
+const deletedRowsNotRead: UnidentifiedReason = (operation, unidentified) =>
+  `${unidentified} of the rows a ${operation.action} deleted ${unidentified === 1 ? 'was' : 'were'} not read before it, so they are not audited: another writer made them match its where after the read`;
+
 const readRowsNotDeleted: UnidentifiedReason = (operation, unidentified) =>
   `${unidentified} of the rows read before a ${operation.action} ${unidentified === 1 ? 'was' : 'were'} not deleted by it, yet every row read is audited as deleted: another writer deleted them or moved them out of its where after the read, and which ones cannot be told`;
 
@@ -557,14 +560,21 @@ const reportRowsFoundBeyondUpdated = (
 ): Promise<void> =>
   reportUnidentified(operation, written.rows.length - countOf(executed.result), failureSink, readRowsNotUpdated);
 
-/** Prisma does not return the rows a `deleteMany` deleted, so every row read stays audited as deleted */
-const reportRowsReadBeyondDeleted = (
+/**
+ * Prisma does not return the rows a `deleteMany` deleted, so every row read stays audited as
+ * deleted. A count below the rows read shows rows another writer deleted first; one above shows
+ * rows it made match the `where`, deleted without a record.
+ */
+const reportDeletedCountMismatch = async (
   operation: AuditedOperation,
   readRows: readonly Row[],
   executed: BatchExecuted,
   failureSink: FailureSink,
-): Promise<void> =>
-  reportUnidentified(operation, readRows.length - countOf(executed.result), failureSink, readRowsNotDeleted);
+): Promise<void> => {
+  const deletedCount = countOf(executed.result);
+  await reportUnidentified(operation, readRows.length - deletedCount, failureSink, readRowsNotDeleted);
+  await reportUnidentified(operation, deletedCount - readRows.length, failureSink, deletedRowsNotRead);
+};
 
 export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationExecutor => {
   const { schemaMetadata, auditedOmittedFieldsWithRowKey, failureSink } = deps;
@@ -668,7 +678,7 @@ export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationE
         return written;
       }
       case 'delete':
-        await reportRowsReadBeyondDeleted(operation, prepared.beforeRows, executed, failureSink);
+        await reportDeletedCountMismatch(operation, prepared.beforeRows, executed, failureSink);
         return { rows: prepared.beforeRows, beforeStates: prepared.beforeRows };
       default: {
         const exhaustiveCheck: never = prepared;

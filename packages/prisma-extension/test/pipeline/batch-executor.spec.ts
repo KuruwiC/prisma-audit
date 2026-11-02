@@ -1805,6 +1805,27 @@ describe('createBatchExecutor', () => {
       );
     });
 
+    it('reports the rows a deleteMany deleted beyond the rows it read, and audits the rows it read as deleted', async () => {
+      const findMany = vi.fn(async () => [a1]);
+      const client = clientWith({ user: { findMany, deleteMany: vi.fn(async () => ({ count: 3 })) } });
+      const produceRecords = produce();
+
+      await runWithRecords(executor, operationOn(client, 'deleteMany', { where }), scopeOn(client), produceRecords);
+
+      expect(failureSink.notify).toHaveBeenCalledExactlyOnceWith(
+        report(
+          'deleteMany',
+          2,
+          '2 of the rows a deleteMany deleted were not read before it, so they are not audited: another writer made them match its where after the read',
+        ),
+      );
+      expect(produceRecords).toHaveBeenCalledWith(
+        [eventOf({ identity: 'a', action: 'delete', before: { kind: 'captured', row: a1 } })],
+        expect.anything(),
+        new Map(),
+      );
+    });
+
     it('reports nothing when a deleteMany deleted as many rows as it read', async () => {
       const findMany = vi.fn(async () => [a1, b1]);
       const client = clientWith({ user: { findMany, deleteMany: vi.fn(async () => ({ count: 2 })) } });
