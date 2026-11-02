@@ -1040,11 +1040,11 @@ describe('fields a client-level omit hides', () => {
 
       const result = await run(() => prisma.device.update({ where: { code: 'd1' }, data: { label: 'two' } }));
 
-      expect(keysOf(result)).toEqual(['createdAt', 'label']);
+      expect(keysOf(result)).toEqual(['createdAt', 'label', 'ownerId']);
       const record = await recordOf('Device', 'd1');
       expect(record?.changes).toEqual({ label: { old: 'one', new: 'two' } });
-      expect(keysOf(record?.before)).toEqual(['code', 'createdAt', 'label']);
-      expect(keysOf(record?.after)).toEqual(['code', 'createdAt', 'label']);
+      expect(keysOf(record?.before)).toEqual(['code', 'createdAt', 'label', 'ownerId']);
+      expect(keysOf(record?.after)).toEqual(['code', 'createdAt', 'label', 'ownerId']);
     });
 
     it('records an update that gives the row another id under that id, with the change from the id its before state holds', async () => {

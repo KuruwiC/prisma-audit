@@ -1,11 +1,11 @@
 /**
- * The relation a to-many nested path goes through: the model it hangs under, the primary keys on
+ * The relation a to-many nested path goes through: the model it hangs under, the row keys on
  * both sides, and how a related row is scoped to its parent row.
  *
  * @module nested/pre-fetch/to-many-path
  */
 
-import { getPrimaryKeyConstraint, type NestedOperationInfo } from '../../grammar/nested-operations.js';
+import { getRowKeyConstraint, type NestedOperationInfo } from '../../grammar/nested-operations.js';
 import type { SchemaMetadata, UniqueConstraint } from '../../schema/types.js';
 import { preFetchLog } from '../../utils/debug.js';
 import { findRelationField, resolveParentModelFromPath } from './coordinator.js';
@@ -18,7 +18,7 @@ export interface ToManyPath {
   readonly scope: ToManyRelationScope;
 }
 
-/** `modelName` is the top-level model; undefined when the schema has no such field or a side has no primary key */
+/** `modelName` is the top-level model; undefined when the schema has no such field or a side has no row key */
 export const resolveToManyPath = (
   schemaMetadata: SchemaMetadata,
   modelName: string,
@@ -31,10 +31,10 @@ export const resolveToManyPath = (
     return undefined;
   }
 
-  const parentKeyConstraint = getPrimaryKeyConstraint(schemaMetadata, parentModel);
-  const keyConstraint = getPrimaryKeyConstraint(schemaMetadata, operation.relatedModel);
+  const parentKeyConstraint = getRowKeyConstraint(schemaMetadata, parentModel);
+  const keyConstraint = getRowKeyConstraint(schemaMetadata, operation.relatedModel);
   if (!parentKeyConstraint || !keyConstraint) {
-    preFetchLog('to-many path: no primary key: model=%s path=%s', operation.relatedModel, operation.path);
+    preFetchLog('to-many path: no row key: model=%s path=%s', operation.relatedModel, operation.path);
     return undefined;
   }
 

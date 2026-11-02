@@ -13,7 +13,7 @@ import { isRecord } from './is-record.js';
  * Unwraps Prisma's compound-unique WHERE wrapper (`{ a_b: { a, b } }`) into the flat
  * scalar record needed to derive an entityId from a WHERE clause.
  *
- * `findUnique` requires a composite primary key to be addressed through a single
+ * `findUnique` requires a composite row key to be addressed through a single
  * generated key on `<Model>WhereUniqueInput` — `keyConstraint.name` when the key has an
  * explicit name (`@@id([a, b], name: "custom")`), or `fields.join('_')` (Prisma's default
  * naming) otherwise. A single-field PK, or a WHERE clause that isn't wrapped this way, is
@@ -60,7 +60,7 @@ export const matchesUniqueWhere = (row: Record<string, unknown>, whereClause: Re
   });
 
 /**
- * Whether `whereClause` names the row whose primary key is `key`: it compares every key field to
+ * Whether `whereClause` names the row whose row key is `key`: it compares every key field to
  * the key's value, directly or inside a compound-unique wrapper (`{ a_b: { a, b } }`).
  */
 export const namesKey = (key: Record<string, unknown>, whereClause: Record<string, unknown>): boolean => {

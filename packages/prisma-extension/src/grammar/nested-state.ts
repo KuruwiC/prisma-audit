@@ -13,7 +13,7 @@ import type { UpsertBranch } from './nested-operations.js';
 import { AUDIT_ACTION } from './operations.js';
 
 /**
- * The row a nested operation's rows hang under: the primary-key identity of a row at the parent
+ * The row a nested operation's rows hang under: the row-key identity of a row at the parent
  * path (`UNRESOLVED_ENTITY_ID` when that row lacks a key field), or {@link TOP_LEVEL_ROW} for
  * the row of the operation itself
  */
@@ -42,7 +42,7 @@ export type NestedPreFetchResult = {
    * The key of the row when the before state holds no row. With no before state (`none`), the
    * key columns of a row a read found without reading its before state (a key-column read, or a
    * batch filter match), absent when the row does not exist. With an `unavailable` one, the
-   * primary key a unique WHERE names (absent when it names the row by another unique field).
+   * row key a unique WHERE names (absent when it names the row by another unique field).
    */
   readonly key?: Record<string, unknown>;
 };

@@ -44,7 +44,7 @@ export interface ToManyRelationScope {
 /**
  * Resolves the scope of `field`, a to-many relation field declared on `parentModelName`: the
  * related model's field with the same `relationName` points back to the parent, which is
- * identified by its primary key.
+ * identified by its row key.
  *
  * @throws Error when the relation has no back-relation field
  */
@@ -98,7 +98,7 @@ const scopeWhereToParent = (
 export interface ToManyScopeInput extends Omit<ResolveParentRowsInput, 'parentFields'> {
   data: unknown;
   scope: ToManyRelationScope;
-  /** The related model's primary key (fields + the name the schema gives it) */
+  /** The related model's row key (fields + the name the schema gives it) */
   keyConstraint: UniqueConstraint;
 }
 
@@ -147,7 +147,7 @@ const readTargetUnderParents = async (
  * under one of its parent rows.
  *
  * The WHERE is a `<Model>WhereUniqueInput`, so it goes to `findUnique` with the back-relation
- * filter added under `AND` — including Prisma's compound-unique shape for composite primary keys
+ * filter added under `AND` — including Prisma's compound-unique shape for composite row keys
  * (`{ a_b: { a, b } }`, or a custom name from `@@id([a, b], name: "custom")`). Entity-identity
  * derivation and `matchesUniqueWhere` unwrap that shape. Parent rows are tried in turn until one
  * holds the row; when no parent row exists, nothing is queried or stored. When a parent row could
@@ -187,7 +187,7 @@ export const preFetchOneToManyRelation = async (input: PreFetchOneToManyRelation
 export interface PreFetchToManyBatchInput extends ToManyScopeInput {
   operation: NestedBatchKeyword;
   relatedModelClient: PreFetchListClient;
-  /** Whether the matched rows are read whole, as their before-state, or by primary key only */
+  /** Whether the matched rows are read whole, as their before-state, or by row key only */
   fetchBefore: boolean;
   /** The writes to the relation that run before the operation (see `NestedOperationInfo.precedingWrites`) */
   precedingWrites: readonly PrecedingNestedWrite[];
@@ -227,7 +227,7 @@ const storeMatchedRow = (
 const whereRelatedWhenRun = (input: PreFetchToManyBatchInput, parentKey: PreFetchRecord): PreFetchRecord => {
   const { scope, precedingWrites, fieldNames, keyConstraint } = input;
   // Prisma reads an empty `OR` nested under `AND` as no condition, so a `set` naming no row keeps
-  // no row through a primary-key `in` with no values
+  // no row through a row-key `in` with no values
   const noRow = { [keyConstraint.fields[0] ?? '']: { in: [] } };
   return precedingWrites.reduce<PreFetchRecord>(
     (related, { operation, data }) => {
@@ -263,9 +263,9 @@ const scopeFilterToParents = (
  * Pre-reads the rows a nested `updateMany` / `deleteMany` filter matches, scoped through the
  * back-relation the way Prisma scopes the write, to the rows related to the parent row when the
  * operation runs (see {@link whereRelatedWhenRun}). Each matched row is stored whole when
- * `fetchBefore` asks for its before-state, else by its primary key with none.
+ * `fetchBefore` asks for its before-state, else by its row key with none.
  *
- * @returns The primary key of every matched row, keyed by its identity
+ * @returns The row key of every matched row, keyed by its identity
  * @throws Error when a parent row could not be read and is not known by its key: the rows the
  *   filter matches under it cannot be identified
  */

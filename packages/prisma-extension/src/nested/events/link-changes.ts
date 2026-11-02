@@ -33,7 +33,7 @@ type Row = Record<string, unknown>;
 interface LinkCandidate {
   readonly write: LinkWrite;
   readonly before: BeforeState;
-  /** Its primary key when its before state was read, else the unique WHERE that names it */
+  /** Its row key when its before state was read, else the unique WHERE that names it */
   readonly locator: { readonly by: 'rowKey' | 'uniqueWhere'; readonly where: Row };
   /** The write detaches it: its foreign key holds nothing after the write */
   readonly detached: boolean;

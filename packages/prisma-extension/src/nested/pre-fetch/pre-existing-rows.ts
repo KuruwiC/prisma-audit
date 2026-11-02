@@ -4,8 +4,8 @@
  * A nested create at a to-many path that inserts a row whose key the extension did not generate
  * (`nested/inserted-row-keys`), or a `createMany` with `skipDuplicates`, which may skip a row whose
  * key was generated, inserts rows the keys do not tell apart from their siblings once the relation
- * is read back whole. They are told apart by the primary keys the relation held under each parent
- * row before the write: one `findMany` per parent row, selecting the primary key only. Parent rows
+ * is read back whole. They are told apart by the row keys the relation held under each parent
+ * row before the write: one `findMany` per parent row, selecting the row key only. Parent rows
  * are resolved the way the pre-fetch resolves them (`resolveParentRows`), so a parent the operation
  * itself creates has no rows and issues no query.
  *
@@ -25,7 +25,7 @@ import { getPreFetchListClient, getPreFetchModelClient, type PreFetchListClient 
 import { parentKeyOf, parentKeysFromOperationWheres, parentPathOf, resolveParentRows } from './parent-rows.js';
 import { resolveToManyPath, type ToManyPath } from './to-many-path.js';
 
-/** Primary-key identities of the rows each to-many path held before the operation, keyed by path */
+/** Row-key identities of the rows each to-many path held before the operation, keyed by path */
 export type PreExistingRows = ReadonlyMap<string, ReadonlySet<EntityIdentityKey>>;
 
 export interface SnapshotPreExistingRowsInput {
@@ -125,7 +125,7 @@ const snapshotPath = async (
 };
 
 /**
- * Snapshot the primary keys each to-many path whose write set reads them holds under its parent rows.
+ * Snapshot the row keys each to-many path whose write set reads them holds under its parent rows.
  * A path whose relation cannot be resolved gets no entry. A failed snapshot query rejects, and so
  * does a path nested under a row that could not be read and is not known by its key: without the
  * snapshot the rows that existed before cannot be told apart from the created ones.

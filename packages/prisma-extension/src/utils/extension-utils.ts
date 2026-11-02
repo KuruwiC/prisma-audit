@@ -50,12 +50,12 @@ export const isAuditableAction = (operation: string): operation is AuditAction =
  * Extracts entity ID from delete operation data
  *
  * Handles direct ID format (`{ id: '123' }`), WHERE clause format
- * (`{ where: { id: '456' } }`), and — for a composite primary key — Prisma's
+ * (`{ where: { id: '456' } }`), and — for a composite row key — Prisma's
  * compound-unique shape (`{ postId_userId: { postId, userId } }`, or `{ custom: { ... } }`
  * for a key declared as `@@id([a, b], name: "custom")`, directly or under `where`),
  * unwrapped with the same `unwrapCompoundWhere` the pre-fetch path uses.
  *
- * @param keyConstraint - The deleted model's primary key, as returned by `getPrimaryKeyConstraint`
+ * @param keyConstraint - The deleted model's row key, as returned by `getRowKeyConstraint`
  *
  * @example
  * ```typescript

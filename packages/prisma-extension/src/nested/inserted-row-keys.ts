@@ -17,7 +17,7 @@
  * @module nested/inserted-row-keys
  */
 
-import { getPrimaryKeyConstraint, type NestedOperationInfo } from '../grammar/nested-operations.js';
+import { getRowKeyConstraint, type NestedOperationInfo } from '../grammar/nested-operations.js';
 import type { SchemaMetadata } from '../schema/types.js';
 import { withGeneratedKeyFields } from '../utils/id-generation.js';
 import { isRecord } from '../utils/is-record.js';
@@ -101,7 +101,7 @@ const keyGeneratorFor = (
   rowsWithGeneratedKeys: Set<object>,
 ) => {
   const model = operation.relatedModel;
-  const keyFields = getPrimaryKeyConstraint(schemaMetadata, model)?.fields;
+  const keyFields = getRowKeyConstraint(schemaMetadata, model)?.fields;
   const foreignKeys = new Set(schemaMetadata.getRelationFields(model).flatMap((field) => field.foreignKeyFields));
   return ({ data: row }: CreateData): Row => {
     if (!keyFields || keyFields.some((field) => row[field] !== undefined || foreignKeys.has(field))) {

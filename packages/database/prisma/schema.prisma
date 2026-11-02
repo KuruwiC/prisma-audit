@@ -35,6 +35,7 @@ model User {
   autoIncChildren AutoIncChild[]
   badge           Badge?
   subscriptions   Subscription[]
+  devices         Device[]
 
   @@map("users")
 }
@@ -347,9 +348,27 @@ model Subscription {
 model Device {
   code      String   @unique @default(cuid())
   label     String
+  ownerId   String?  @map("owner_id")
   createdAt DateTime @default(now()) @map("created_at")
 
+  owner   User?          @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  sensors DeviceSensor[]
+
+  @@index([ownerId])
   @@map("devices")
+}
+
+// DeviceSensor Model (no primary key; identified by a compound unique constraint on required columns,
+// under a parent identified by a unique field)
+model DeviceSensor {
+  deviceCode String @map("device_code")
+  slot       Int
+  reading    String
+
+  device Device @relation(fields: [deviceCode], references: [code], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([deviceCode, slot])
+  @@map("device_sensors")
 }
 
 // ============================================

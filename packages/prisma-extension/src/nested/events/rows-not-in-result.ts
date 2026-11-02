@@ -8,7 +8,7 @@
  *
  * - an updated row the result does not hold is named by its target's locator;
  * - a row inserted under a parent row whose relation the caller restricted is found by reading
- *   the primary keys the relation holds under those parent rows and keeping the rows the
+ *   the row keys the relation holds under those parent rows and keeping the rows the
  *   operations at the path inserted (`isInsertedAt`), leaving out the rows the result holds and
  *   the rows a target names.
  *

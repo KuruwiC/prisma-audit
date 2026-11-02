@@ -9,7 +9,7 @@
  */
 
 import {
-  getPrimaryKeyConstraint,
+  getRowKeyConstraint,
   type NestedOperationInfo,
   type NestedOperationParent,
   type NestedPreFetchResults,
@@ -49,7 +49,7 @@ export interface ResolveParentRowsInput {
   /** Read for the parent path's rows, so operations must be pre-fetched shallowest path first */
   preFetchResults: NestedPreFetchResults;
   /**
-   * Primary keys of parent rows the WHERE of an operation at the parent path names when that
+   * Row keys of parent rows the WHERE of an operation at the parent path names when that
    * operation was not pre-fetched (see {@link parentKeysFromOperationWheres})
    */
   parentKeysFromWhere?: readonly PreFetchRecord[];
@@ -122,7 +122,7 @@ const rowsAtParentPath = (input: ResolveParentRowsInput, parentPath: string): Pa
 /**
  * Returns the rows the nested operation at `path` is nested under. For a deeper path: every row
  * that exists at the parent path and every row a parent operation that was not pre-fetched names
- * by primary key, each once, a row whose read failed or did not run given by its key. For a
+ * by row key, each once, a row whose read failed or did not run given by its key. For a
  * direct child: the top-level row, keyed from `where` without a query when `where` names every
  * key field with a plain value.
  */
@@ -170,7 +170,7 @@ export const parentKeyOf = (parentRow: PreFetchRecord, parentFields: readonly st
 
 /**
  * Parent keys named by the WHERE of operations at the parent path that were not pre-fetched, so
- * their rows are absent from the pre-fetch results. A WHERE that does not name every primary key
+ * their rows are absent from the pre-fetch results. A WHERE that does not name every row key
  * field with a plain value (after unwrapping the compound-unique shape) yields no key.
  */
 export const parentKeysFromOperationWheres = (
@@ -206,7 +206,7 @@ export const writesLinkedRow = (operation: NestedOperationInfo): boolean =>
 /**
  * The identity, before the operation, of the row the element `parent` names: the top-level row
  * when `parent` is absent; for an element of a to-many operation or a connectOrCreate, the row
- * its unique WHERE names (as read, else the primary key the WHERE names); for a to-one
+ * its unique WHERE names (as read, else the row key the WHERE names); for a to-one
  * operation, the related row read under its own parent row. Undefined when that row is unknown:
  * it was not read, does not exist, or the WHERE names it by another unique field and its read
  * found nothing.
@@ -224,7 +224,7 @@ export const parentRowIdentityOf = (
   if (read !== undefined || !where) {
     return read;
   }
-  const keyConstraint = getPrimaryKeyConstraint(schemaMetadata, parent.operation.relatedModel);
+  const keyConstraint = getRowKeyConstraint(schemaMetadata, parent.operation.relatedModel);
   const key = keyConstraint ? rowKeyNamedBy(where, keyConstraint) : undefined;
   return key && keyConstraint ? extractEntityIdentity(key, keyConstraint.fields) : undefined;
 };

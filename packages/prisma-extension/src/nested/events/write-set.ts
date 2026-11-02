@@ -16,7 +16,7 @@ import type { BeforeState } from '@kuruwic/db-audit-core';
 import {
   detectNestedOperations,
   elementsOf,
-  getPrimaryKeyConstraint,
+  getRowKeyConstraint,
   isNestedBatchKeyword,
   type NestedBatchTargets,
   type NestedOperationInfo,
@@ -38,13 +38,13 @@ type Row = Record<string, unknown>;
 
 /**
  * How a row a nested operation writes is found in the result, or read again, after the write:
- * by its primary key when it was read ahead of the operation (its pre-fetched row, or a batch
+ * by its row key when it was read ahead of the operation (its pre-fetched row, or a batch
  * filter's match), since the write may change the columns the operation names it by; otherwise
  * by the unique WHERE the operation names it by.
  */
 export interface NestedRowLocator {
   readonly by: 'rowKey' | 'uniqueWhere';
-  /** The primary-key fields and values, or the unique WHERE */
+  /** The row-key fields and values, or the unique WHERE */
   readonly where: Row;
 }
 
@@ -134,7 +134,7 @@ export const insertsRows = (operation: NestedOperationInfo, targets: readonly Ne
   INSERTING_KEYWORDS.has(operation.operation) ||
   (INSERTING_WHEN_TARGET_MISSING.has(operation.operation) && targets.some((target) => target.before.kind === 'none'));
 
-/** The primary key of `row`, or undefined when the model has none or the row lacks one of its fields */
+/** The row key of `row`, or undefined when the model has none or the row lacks one of its fields */
 const completeRowKeyOf = (row: Row, keyFields: readonly string[] | undefined): Row | undefined =>
   !keyFields || keyFields.some((field) => row[field] === undefined || row[field] === null)
     ? undefined
@@ -251,7 +251,7 @@ export const buildNestedWriteSets = (
     };
     writeSets.set(operation.path, writeSet);
 
-    const keyFields = getPrimaryKeyConstraint(schemaMetadata, operation.relatedModel)?.fields;
+    const keyFields = getRowKeyConstraint(schemaMetadata, operation.relatedModel)?.fields;
     const targets = targetsOf(operation, nestedPreFetchResults, batchTargets, keyFields);
     writeSet.targets.push(...targets);
 

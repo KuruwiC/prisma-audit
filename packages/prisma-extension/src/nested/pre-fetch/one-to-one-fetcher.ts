@@ -100,7 +100,7 @@ const linkWhereOf = (link: ToOneRelationLink, parentRow: PreFetchRecord): PreFet
  * Each related row is read with `findFirst` on the flat link key, which is unique on the related
  * model (the referenced key on the owning side, a unique foreign key on the inverse side), so at
  * most one row matches. A parent row with a null key field (an unset optional foreign key) is
- * skipped, and so is a parent row known only by the primary key its operation's WHERE names when
+ * skipped, and so is a parent row known only by the row key its operation's WHERE names when
  * the link fields are other fields of it (a foreign key on the parent row). Under a parent row a
  * `connect` or `connectOrCreate` links a row to ahead of the write, the row it names is read by its
  * unique WHERE.

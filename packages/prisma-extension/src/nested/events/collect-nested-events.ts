@@ -9,7 +9,7 @@
  * list carry a write at its path. One mutation event is yielded per row an operation wrote.
  *
  * A to-many relation is returned whole, so a row there is an operation's only when the write set
- * says so: a row a target locates belongs to that operation (by the primary key of the row read
+ * says so: a row a target locates belongs to that operation (by the row key of the row read
  * ahead of the operation, or else by its unique WHERE; see `NestedRowLocator`), and a row several
  * targets locate is recorded once, for the first whose write is audited from the row; a row that
  * matches no target and did not exist before the operation was inserted: it is recorded for the first
@@ -26,7 +26,7 @@
 import type { BeforeState, MutationEvent } from '@kuruwic/db-audit-core';
 import {
   deserializeEntityId,
-  getPrimaryKeyConstraint,
+  getRowKeyConstraint,
   linksNamedRows,
   type NestedOperationInfo,
   type NestedOperationKeyword,
@@ -93,7 +93,7 @@ export interface NestedEventCollectorDependencies {
   shouldFetchBefore: ShouldFetchBefore;
   auditedOmittedFields: AuditedOmittedFields;
   /**
-   * Notified when a nested delete's primary key cannot be resolved (see `delete-handler.ts`);
+   * Notified when a nested delete's row key cannot be resolved (see `delete-handler.ts`);
    * that entry is skipped instead of being recorded with a partial or guessed key. Optional:
    * when omitted, the entry is still skipped, just not reported.
    */
@@ -577,7 +577,7 @@ const topLevelKeyBeforeWrite = (input: NestedEventCollectionInput, fields: reado
 
 /**
  * The values of `fields` on the parent row of `nestedOp` before the write: for the top-level row,
- * see {@link topLevelKeyBeforeWrite}; for a nested parent, from the primary key its identity
+ * see {@link topLevelKeyBeforeWrite}; for a nested parent, from the row key its identity
  * encodes when `fields` are among that key's fields. Undefined when neither covers them.
  */
 const knownParentKey = (
@@ -591,7 +591,7 @@ const knownParentKey = (
   if (identity === TOP_LEVEL_ROW) {
     return topLevelKeyBeforeWrite(input, fields);
   }
-  const keyFields = getPrimaryKeyConstraint(deps.schemaMetadata, parentModel)?.fields;
+  const keyFields = getRowKeyConstraint(deps.schemaMetadata, parentModel)?.fields;
   if (identity === undefined || !keyFields || !fields.every((field) => keyFields.includes(field))) {
     return undefined;
   }
@@ -760,7 +760,7 @@ export const collectNestedEvents = async (
   }
 
   const keyConstraints = new Map(
-    nestedOperations.map((op) => [op.path, getPrimaryKeyConstraint(schemaMetadata, op.relatedModel)]),
+    nestedOperations.map((op) => [op.path, getRowKeyConstraint(schemaMetadata, op.relatedModel)]),
   );
   const walk: CollectionWalk = {
     input,
@@ -787,11 +787,7 @@ export const collectNestedEvents = async (
   for (const nestedOp of nestedOperations) {
     const keyConstraint = keyConstraints.get(nestedOp.path);
     if (!keyConstraint) {
-      nestedLog(
-        'model=%s has no primary key; skipping nested records at path=%s',
-        nestedOp.relatedModel,
-        nestedOp.path,
-      );
+      nestedLog('model=%s has no row key; skipping nested records at path=%s', nestedOp.relatedModel, nestedOp.path);
       continue;
     }
     const records = isDelete(nestedOp)

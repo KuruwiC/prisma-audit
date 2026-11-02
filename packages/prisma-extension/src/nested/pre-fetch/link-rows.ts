@@ -19,7 +19,7 @@
 
 import type { FailureSink } from '@kuruwic/db-audit-core';
 import {
-  getPrimaryKeyConstraint,
+  getRowKeyConstraint,
   type NestedOperationInfo,
   type NestedPreFetchResults,
   namedTargets,
@@ -148,7 +148,7 @@ const readParentKeys = async (
   path: string,
   { link, writes }: PathWrites,
 ): Promise<Map<NestedOperationInfo, Row>> => {
-  const parentKeyConstraint = getPrimaryKeyConstraint(deps.schemaMetadata, link.parentModel);
+  const parentKeyConstraint = getRowKeyConstraint(deps.schemaMetadata, link.parentModel);
   if (!parentKeyConstraint) {
     return new Map();
   }
@@ -205,9 +205,7 @@ const readPath = async (
 ): Promise<LinkPathRead | undefined> => {
   const { link, writes } = pathWrites;
   const [first] = writes;
-  const keyFields = first
-    ? getPrimaryKeyConstraint(deps.schemaMetadata, first.operation.relatedModel)?.fields
-    : undefined;
+  const keyFields = first ? getRowKeyConstraint(deps.schemaMetadata, first.operation.relatedModel)?.fields : undefined;
   const client = first
     ? getPreFetchListClient(input.prismaClient, first.operation.relatedModel, deps.auditedOmittedFields)
     : undefined;

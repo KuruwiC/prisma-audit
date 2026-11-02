@@ -9,7 +9,7 @@
 import type { FailureSink } from '@kuruwic/db-audit-core';
 import {
   detectNestedOperations,
-  getPrimaryKeyConstraint,
+  getRowKeyConstraint,
   isNestedBatchKeyword,
   type NestedBatchKeyword,
   type NestedBatchTargets,
@@ -95,7 +95,7 @@ export interface NestedPreFetch {
    * named the row; empty when nothing was pre-fetched
    */
   readonly results: NestedPreFetchResults;
-  /** The primary keys of the rows each nested batch keyword's filter matched under its parent rows */
+  /** The row keys of the rows each nested batch keyword's filter matched under its parent rows */
   readonly batchTargets: NestedBatchTargets;
 }
 
@@ -240,7 +240,7 @@ export const preFetchNestedRecordsBeforeOperation = async (
     onPreFetchFailure,
     resolveKeyConstraint: (model) => {
       if (!keyConstraintCache.has(model)) {
-        keyConstraintCache.set(model, getPrimaryKeyConstraint(schemaMetadata, model));
+        keyConstraintCache.set(model, getRowKeyConstraint(schemaMetadata, model));
       }
       return keyConstraintCache.get(model);
     },
@@ -404,7 +404,7 @@ const resolveNestedRelation = (
 
   const keyConstraint = resolveKeyConstraint(nestedOp.relatedModel);
   if (!keyConstraint) {
-    preFetchLog('model has no primary key, skipping pre-fetch: model=%s path=%s', nestedOp.relatedModel, nestedOp.path);
+    preFetchLog('model has no row key, skipping pre-fetch: model=%s path=%s', nestedOp.relatedModel, nestedOp.path);
     return undefined;
   }
 
@@ -564,9 +564,9 @@ const connectedRowWheresAt = (context: NestedPreFetchContext, path: string): Map
 };
 
 /**
- * The key columns of an `update`'s row the operations below it need: its primary key, and
+ * The key columns of an `update`'s row the operations below it need: its row key, and
  * the fields each to-one relation below it links by (a to-many relation below it links by the
- * primary key)
+ * row key)
  */
 const keyColumnsOf = (
   context: NestedPreFetchContext,
@@ -589,11 +589,11 @@ const keyColumnsOf = (
 
 /**
  * Reads the key columns of the row each element of a to-many `update` whose before state is not
- * read names, when its WHERE names the row by a unique field other than the primary key, or a
+ * read names, when its WHERE names the row by a unique field other than the row key, or a
  * to-one relation below it links by another column of that row (a foreign key on the row): one
  * read per element, so bounded by the caller's args. The key columns read are stored under the
  * element's WHERE, so the element's row is identified by it and the operations below it are read
- * and snapshotted under its key. A WHERE that names the primary key is enough for every other
+ * and snapshotted under its key. A WHERE that names the row key is enough for every other
  * relation below it.
  */
 const identifyRowsNamedByElements = async (
@@ -655,7 +655,7 @@ const resolveToManyScopeInput = (
 
   const parentKeyConstraint = resolveKeyConstraint(parentModel);
   if (!parentKeyConstraint) {
-    preFetchLog('parent model has no primary key, skipping pre-fetch: model=%s path=%s', parentModel, nestedOp.path);
+    preFetchLog('parent model has no row key, skipping pre-fetch: model=%s path=%s', parentModel, nestedOp.path);
     return undefined;
   }
 

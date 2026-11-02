@@ -426,7 +426,7 @@ describe('createSingleExecutor', () => {
         operation: 'delete',
         params: { entityId: undefined, pkFields: ['id'] },
         error: expect.objectContaining({
-          message: expect.stringContaining('Cannot resolve the primary key of a deleted Profile record'),
+          message: expect.stringContaining('Cannot resolve the row key of a deleted Profile record'),
         }),
       });
       expect(produceRecords).toHaveBeenCalledWith(

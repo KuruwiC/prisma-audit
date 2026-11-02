@@ -5,7 +5,7 @@
  * or the parent row of a to-one relation's related row.
  *
  * A read that fails leaves its rows unknown. A row the failed read names by unique WHERE is
- * stored as `unavailable` under that WHERE (and the primary key, when the WHERE names it), so
+ * stored as `unavailable` under that WHERE (and the row key, when the WHERE names it), so
  * another operation at the path keeps what its own read found, and the rows nested below it are
  * still read under that key. A failed read that names no row on its own (the related rows of a
  * to-one relation under their parent rows) marks the path unread, so every row of the path
@@ -148,8 +148,8 @@ export const preFetchedStateUnder = (
   preFetchedResultUnder(nestedPreFetchResults, path, parent)?.before ?? unnamedRowState(nestedPreFetchResults, path);
 
 /**
- * The primary key `where` names, unwrapped from Prisma's compound-unique shape, or undefined when
- * it does not name every primary-key field with a value
+ * The row key `where` names, unwrapped from Prisma's compound-unique shape, or undefined when
+ * it does not name every row-key field with a value
  */
 export const rowKeyNamedBy = (where: Row, keyConstraint: UniqueConstraint): Row | undefined => {
   const unwrapped = unwrapCompoundWhere(where, keyConstraint);
@@ -159,9 +159,9 @@ export const rowKeyNamedBy = (where: Row, keyConstraint: UniqueConstraint): Row 
 
 /**
  * Stores what a read of the row `where` names found: the row, or none, under the WHERE and the
- * primary key it names (when it names one). `parentsKnown` false means the read ran under only
+ * row key it names (when it names one). `parentsKnown` false means the read ran under only
  * some of the parent rows the row may belong to, so a row it did not find is unavailable rather
- * than missing, and keeps the primary key the WHERE names so the rows below it are still read
+ * than missing, and keeps the row key the WHERE names so the rows below it are still read
  * under it.
  */
 export const storeReadResult = (
@@ -218,8 +218,8 @@ export const storeIdentifiedRow = (
 
 /**
  * Records the rows a failed read of `path` left unknown: each row a `where` names that no read
- * captured, under that WHERE and the primary key it names, and the path as a whole when there is
- * no `where` (the related rows of a to-one relation) or the model has no primary key.
+ * captured, under that WHERE and the row key it names, and the path as a whole when there is
+ * no `where` (the related rows of a to-one relation) or the model has no row key.
  */
 export const storeUnreadRows = (
   nestedPreFetchResults: NestedPreFetchResults,

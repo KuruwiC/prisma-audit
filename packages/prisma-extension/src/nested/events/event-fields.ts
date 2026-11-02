@@ -20,7 +20,7 @@ export interface RowOrigin {
   readonly path: string;
 }
 
-/** Identity of `row` from its key fields: the primary key of a nested row, the row key of a top-level or batch row */
+/** Identity of `row` from the fields of its row key */
 export const identityOf = (row: Row, keyFields: readonly string[] | undefined, origin: RowOrigin): string => {
   if (keyFields === undefined) {
     nestedLog('model=%s has no key; the identity of the row at path=%s is unknown', origin.model, origin.path);

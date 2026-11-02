@@ -139,7 +139,7 @@ export interface NestedPathPreFetch {
 export type NestedPreFetchResults = Map<string, NestedPathPreFetch>;
 
 /**
- * The primary key of every row each nested batch keyword's filter matched under its parent rows
+ * The row key of every row each nested batch keyword's filter matched under its parent rows
  * before the operation, keyed by operation path, then by keyword, then by entity identity
  */
 export type NestedBatchTargets = Map<string, Map<NestedBatchKeyword, Map<EntityIdentityKey, Record<string, unknown>>>>;
@@ -447,24 +447,42 @@ export const relationRowsOf = (
 };
 
 /**
- * A model's primary key: its `@@id` constraint, else its `@id` field (with a null name).
+ * The constraint that names one row of a model, its row key: the primary key (its `@@id`
+ * constraint, else its `@id` field with a null name), else the first of its unique constraints
+ * (`@unique` fields in declaration order, then `@@unique` indexes) whose fields are all required,
+ * since a nullable unique column holds null in any number of rows. Prisma rejects a model that has
+ * neither, so every model a client exposes has one.
  *
- * The `@@id` constraint keeps its declared `name` (`@@id([a, b], name: "custom")`), which Prisma
+ * A compound constraint keeps its declared `name` (`@@id([a, b], name: "custom")`), which Prisma
  * uses, or `fields.join('_')` when absent, as the compound-unique WHERE key.
  *
- * @returns The primary key, or `undefined` when the model declares none
+ * @returns The row key, or `undefined` when the model declares none
  */
-export const getPrimaryKeyConstraint = (
+export const getRowKeyConstraint = (
   schemaMetadata: SchemaMetadata,
   modelName: string,
-): UniqueConstraint | undefined =>
-  schemaMetadata.getUniqueConstraints(modelName).find((constraint) => constraint.type === 'primaryKey');
+): UniqueConstraint | undefined => {
+  const constraints = schemaMetadata.getUniqueConstraints(modelName);
+  const primaryKey = constraints.find((constraint) => constraint.type === 'primaryKey');
+  if (primaryKey) {
+    return primaryKey;
+  }
+  const required = new Set(
+    schemaMetadata
+      .getAllFields(modelName)
+      .filter((field) => field.isRequired)
+      .map((field) => field.name),
+  );
+  return constraints.find(
+    (constraint) => constraint.fields.length > 0 && constraint.fields.every((field) => required.has(field)),
+  );
+};
 
 /**
- * Rebuild the primary-key fields of a record from its serialized entity identity: the value
+ * Rebuild the row-key fields of a record from its serialized entity identity: the value
  * itself for a single-field key, a JSON array in `keyFields` order for a composite key.
  *
- * @returns The primary-key fields, or `null` when the full key cannot be recovered: the identity
+ * @returns The row-key fields, or `null` when the full key cannot be recovered: the identity
  *   is {@link UNRESOLVED_ENTITY_ID}, or a composite identity is not a JSON array of
  *   `keyFields.length` elements. A partial key is never returned, since it would read as a complete
  *   identity.

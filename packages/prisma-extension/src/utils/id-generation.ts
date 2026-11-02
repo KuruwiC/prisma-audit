@@ -3,8 +3,8 @@
  *
  * Provides client-side ID generation for `createMany` data, so audit logs can record
  * the IDs of rows the operation does not return, and the key helpers that pair before and
- * after states, serialize a row's entity identity, and read rows by key: the row key
- * (`rowKeyFieldsOf`) of a top-level or batch row, the primary key of a nested one.
+ * after states, serialize a row's entity identity, and read rows by their row key
+ * (`rowKeyFieldsOf`).
  *
  * Generated IDs must match the format the schema declares — Prisma itself
  * generates cuid v1 for `cuid()` and UUID v7 for `uuid(7)`, so injecting a
@@ -31,7 +31,7 @@ import cuidV1 from '@bugsnag/cuid';
 import { normalizeId } from '@kuruwic/db-audit-core';
 import { createId } from '@paralleldrive/cuid2';
 import { v4 as uuidV4, v7 as uuidV7 } from 'uuid';
-import { getPrimaryKeyConstraint } from '../grammar/nested-operations.js';
+import { getRowKeyConstraint } from '../grammar/nested-operations.js';
 import type { SchemaMetadata } from '../schema/types.js';
 import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID } from './identity-key.js';
 
@@ -189,28 +189,9 @@ export const withGeneratedKeyFields = <T extends Record<string, unknown>>(
 
 const KEY_CHUNK_SIZE = 1000;
 
-/**
- * The fields that name one row of `modelName`: its primary key, else the first of its unique
- * constraints (`@unique` fields in declaration order, then `@@unique` indexes) whose fields are all
- * required, since a nullable unique column holds null in any number of rows. `undefined` for a
- * model with neither.
- */
-export const rowKeyFieldsOf = (schemaMetadata: SchemaMetadata, modelName: string): string[] | undefined => {
-  const primaryKey = getPrimaryKeyConstraint(schemaMetadata, modelName);
-  if (primaryKey) {
-    return primaryKey.fields;
-  }
-  const required = new Set(
-    schemaMetadata
-      .getAllFields(modelName)
-      .filter((field) => field.isRequired)
-      .map((field) => field.name),
-  );
-  return schemaMetadata
-    .getUniqueConstraints(modelName)
-    .find((constraint) => constraint.fields.length > 0 && constraint.fields.every((field) => required.has(field)))
-    ?.fields;
-};
+/** The fields of the row key of `modelName` ({@link getRowKeyConstraint}); `undefined` for a model with none */
+export const rowKeyFieldsOf = (schemaMetadata: SchemaMetadata, modelName: string): string[] | undefined =>
+  getRowKeyConstraint(schemaMetadata, modelName)?.fields;
 
 /**
  * {@link rowKeyFieldsOf} for a caller that cannot go on without a key.
@@ -263,11 +244,10 @@ export const sameKeyValue = (left: unknown, right: unknown): boolean => {
 };
 
 /**
- * Extract the entity identity of `record` from `keyFields`, the fields to read (the row key for a
- * top-level or batch row, the primary key for a nested one): the single field's value written by
- * {@link serializeKeyValue}, or the JSON array of a composite key's values written the same way,
- * which keeps `["a:b", "c"]` and `["a", "b:c"]` apart. `UNRESOLVED_ENTITY_ID` when any field is
- * absent or null.
+ * Extract the entity identity of `record` from `keyFields`, the fields of its row key: the single
+ * field's value written by {@link serializeKeyValue}, or the JSON array of a composite key's values
+ * written the same way, which keeps `["a:b", "c"]` and `["a", "b:c"]` apart. `UNRESOLVED_ENTITY_ID`
+ * when any field is absent or null.
  */
 export const extractEntityIdentity = (
   record: Record<string, unknown>,

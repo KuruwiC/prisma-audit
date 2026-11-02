@@ -23,7 +23,7 @@ export type ShouldFetchBefore = (modelName: string, operation: string) => boolea
  *
  * `updateMany` / `deleteMany` are always pre-fetched: their rows are the rows their filter
  * matches under the parent rows, which nothing but a read ahead of the write can tell, so the
- * audit needs at least the primary keys of those rows. Whether that read also carries the rows'
+ * audit needs at least the row keys of those rows. Whether that read also carries the rows'
  * before-state follows the configuration of `update` (for `updateMany`) or `delete` (for
  * `deleteMany`) and is decided by the fetcher.
  */
