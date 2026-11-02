@@ -90,6 +90,23 @@ describe('createRedactor', () => {
     });
   });
 
+  it('masks a sensitive field holding an object or an array whole, without traversing it', () => {
+    const redactor = createRedactor(['settings']);
+    const data = {
+      id: 'user-123',
+      settings: { theme: 'dark', nickname: 'jo' },
+      apiKey: ['key-1', 'key-2'],
+    };
+
+    const redacted = redactor(data);
+
+    expect(redacted).toEqual({
+      id: 'user-123',
+      settings: { redacted: true, hadValue: true } satisfies RedactedFieldInfo,
+      apiKey: { redacted: true, hadValue: true } satisfies RedactedFieldInfo,
+    });
+  });
+
   it('should handle arrays', () => {
     const redactor = createRedactor();
     const data = {
@@ -330,6 +347,21 @@ describe('redaction metadata', () => {
 
     expect(redacted.id).toBe('user-123');
     expect(redacted.password).toBe(null);
+  });
+
+  it.each(['', 0, false])('masks a sensitive field holding %j as a value, not as null', (value) => {
+    const redactor = createRedactor();
+
+    const state = redactor({ id: 'user-123', password: value });
+    const change = redactor({ password: { old: value, new: 'next' } });
+
+    expect(state).toEqual({ id: 'user-123', password: { redacted: true, hadValue: true } });
+    expect(change).toEqual({
+      password: {
+        old: { redacted: true, hadValue: true },
+        new: { redacted: true, hadValue: true, isDifferent: true },
+      },
+    });
   });
 
   it('should redact a sensitive field that is undefined to null', () => {
