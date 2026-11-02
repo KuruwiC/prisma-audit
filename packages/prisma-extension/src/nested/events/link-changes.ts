@@ -2,7 +2,9 @@
  * Foreign-key changes of related rows
  *
  * The rows a link write may have re-linked (read before the write, see
- * `nested/pre-fetch/link-rows.ts`) are read again after the write, once per path. A row whose
+ * `nested/pre-fetch/link-rows.ts`) are read again after the write, once per path, each by the key it
+ * has after the write: a row key that holds the foreign key to the parent row holds the parent's
+ * referenced columns as they are after the write (`nested/key-link`). A row whose
  * foreign key differs between the two reads is audited as an `update` of that row; a row whose
  * foreign key did not change (a `connect` of a row already attached, a `set` keeping a row, a
  * `disconnect` of a row attached elsewhere) yields nothing. When the read before the write failed,
@@ -116,20 +118,27 @@ const candidatesAt = (
   read: LinkPathRead,
   nestedPreFetchResults: NestedPreFetchResults,
   audited: ReadonlySet<EntityIdentityKey>,
+  whereAfterWrite: LinkChangesInput['whereAfterWrite'],
 ): LinkCandidate[] => {
   const seen = new Set<EntityIdentityKey>(audited);
+  const afterWrite = (candidate: LinkCandidate): LinkCandidate => ({
+    ...candidate,
+    locator: { ...candidate.locator, where: whereAfterWrite(candidate.write.operation, candidate.locator.where) },
+  });
   return read.writes.flatMap((write) =>
-    candidatesOf(write, read, nestedPreFetchResults).filter((candidate) => {
-      if (candidate.before.kind !== 'captured') {
+    candidatesOf(write, read, nestedPreFetchResults)
+      .map(afterWrite)
+      .filter((candidate) => {
+        if (candidate.before.kind !== 'captured') {
+          return true;
+        }
+        const identity = extractEntityIdentity(candidate.locator.where, read.keyFields);
+        if (seen.has(identity)) {
+          return false;
+        }
+        seen.add(identity);
         return true;
-      }
-      const identity = extractEntityIdentity(candidate.before.row, read.keyFields);
-      if (seen.has(identity)) {
-        return false;
-      }
-      seen.add(identity);
-      return true;
-    }),
+      }),
   );
 };
 
@@ -176,6 +185,8 @@ export interface LinkChangesInput {
   readonly auditedOmittedFields: AuditedOmittedFields;
   /** The rows other nested writes audit at a path, whose own record already carries the new foreign key */
   readonly auditedAt: (path: string) => ReadonlySet<EntityIdentityKey>;
+  /** The WHERE that names after the write the row `where` names for the link write `operation` before it */
+  readonly whereAfterWrite: (operation: NestedOperationInfo, where: Row) => Row;
   readonly fieldNamesOf: (modelName: string) => ReadonlySet<string>;
 }
 
@@ -189,7 +200,7 @@ export const collectLinkChanges = async (
   const records = new Map<NestedOperationInfo, CollectedNestedRecord[]>();
   for (const [path, read] of input.linkReads) {
     const audited = input.auditedAt(path);
-    const candidates = candidatesAt(read, input.nestedPreFetchResults, audited);
+    const candidates = candidatesAt(read, input.nestedPreFetchResults, audited, input.whereAfterWrite);
     if (candidates.length === 0) {
       continue;
     }

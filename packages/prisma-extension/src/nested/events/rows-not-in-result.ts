@@ -6,11 +6,11 @@
  * `take`, `skip`, `cursor` or `distinct` on the relation keeps its effect, so a row the operation
  * wrote can be missing from the result. Such rows are read once per path after the write:
  *
- * - an updated row the result does not hold is named by its target's locator;
+ * - an updated row the result does not hold is named by its target's locator, as located under
+ *   its parent row;
  * - a row inserted under a parent row whose relation the caller restricted is found by reading
  *   the row keys the relation holds under those parent rows and keeping the rows the
- *   operations at the path inserted (`isInsertedAt`), leaving out the rows the result holds and
- *   the rows a target names.
+ *   operations at the path inserted under one of them, leaving out the rows the result holds.
  *
  * Those rows are then read whole, with the relations the operation writes below them, so the
  * walk continues under them. A failed read rejects: the rows it would return cannot be left out
@@ -21,11 +21,10 @@ import type { SchemaMetadata } from '../../schema/types.js';
 import { matchesUniqueWhere, uniqueWhereAsFilter } from '../../utils/compound-where.js';
 import { nestedLog } from '../../utils/debug.js';
 import { extractEntityIdentity, rowKeyOf } from '../../utils/id-generation.js';
-import type { EntityIdentityKey } from '../../utils/identity-key.js';
 import type { PreFetchListClient } from '../pre-fetch/model-client.js';
 import { parentKeyOf } from '../pre-fetch/parent-rows.js';
 import type { ToManyPath } from '../pre-fetch/to-many-path.js';
-import type { LocatedTarget, NestedWriteTarget } from './write-set.js';
+import type { LocatedTarget } from './write-set.js';
 
 type Row = Record<string, unknown>;
 
@@ -34,10 +33,15 @@ export interface ParentAtPath {
   readonly row: Row;
   /** The rows the result holds under it */
   readonly rows: readonly Row[];
-  /** The updates nested under it whose row it does not hold */
+  /** The updates nested under it whose row it does not hold, located under it */
   readonly absentTargets: readonly LocatedTarget[];
   /** The caller restricted the relation's rows under it, and an operation nested under it inserts rows */
   readonly insertsHidden: boolean;
+  /**
+   * Whether the row a key names is one the operations nested under it inserted: no target at the
+   * path locates it by row key, and it is inserted (`isInsertedAt`) under this parent row
+   */
+  readonly isInserted: (key: Row) => boolean;
 }
 
 export interface RowsNotInResultInput {
@@ -46,10 +50,6 @@ export interface RowsNotInResultInput {
   readonly relatedModel: string;
   readonly path: string;
   readonly keyFields: readonly string[];
-  /** Every target at the path */
-  readonly targets: readonly NestedWriteTarget[];
-  /** Whether the row a key names is one the operations at the path inserted */
-  readonly isInserted: (identity: EntityIdentityKey) => boolean;
   readonly parents: readonly ParentAtPath[];
   /** The relation of the path; resolved only when inserted rows are looked for */
   readonly resolvePath: () => ToManyPath | undefined;
@@ -62,7 +62,7 @@ const readHiddenInsertedKeys = async (
   path: ToManyPath,
   parents: readonly ParentAtPath[],
 ): Promise<Row[]> => {
-  const { client, keyFields, targets, isInserted } = input;
+  const { client, keyFields } = input;
   const { scope } = path;
   const parentScopes = parents.flatMap((parent) => {
     const key = parentKeyOf(parent.row, scope.parentFields);
@@ -76,17 +76,9 @@ const readHiddenInsertedKeys = async (
   const held = new Set(
     input.parents.flatMap((parent) => parent.rows.map((row) => extractEntityIdentity(row, keyFields))),
   );
-  return keys.filter((key) => {
-    const identity = extractEntityIdentity(key, keyFields);
-    return (
-      !held.has(identity) &&
-      isInserted(identity) &&
-      !targets.some(
-        (target) =>
-          target.locator.by === 'rowKey' && extractEntityIdentity(target.locator.where, keyFields) === identity,
-      )
-    );
-  });
+  return keys.filter(
+    (key) => !held.has(extractEntityIdentity(key, keyFields)) && parents.some((parent) => parent.isInserted(key)),
+  );
 };
 
 const locatorFilter = (target: LocatedTarget, fieldNames: ReadonlySet<string>): Row =>

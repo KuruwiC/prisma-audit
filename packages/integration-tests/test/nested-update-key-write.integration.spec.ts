@@ -6,7 +6,10 @@
  * replaced. A `Device` identified by its `code` and a `Post` identified by its primary key are each
  * recorded under the key they have after the write. A write whose data changes the key in a way its
  * arguments do not tell, such as an operator on a key field, is not recorded and is reported as
- * `row-identification`.
+ * `row-identification`, and so are the rows inserted next to it without a generated key, and
+ * targets the keys they have after the write cannot tell apart. A `DeviceSensor`, whose row key
+ * holds the foreign key to its `Device`, is found under the device's code as it is after the write:
+ * moved in by a `connect`, or re-keyed by `ON UPDATE CASCADE` when the device gets a new code.
  */
 
 import type { AuditContext, AuditErrorObserver } from '@kuruwic/db-audit-core';
@@ -240,6 +243,258 @@ describe('a nested update that writes the row key of the row it updates', () => 
           }),
         }),
       );
+    });
+
+    it('does not record a sensor an operator re-keys as created next to a nested create, and reports the sensor the create inserts', async () => {
+      const { prisma, basePrisma, run, observer, seedDevice, logsOf } = await setup();
+      await seedDevice('d-1');
+      await basePrisma.deviceSensor.create({ data: { deviceCode: 'd-1', slot: 1, reading: 'reading 1' } });
+
+      await run(() =>
+        prisma.device.update({
+          where: { code: 'd-1' },
+          data: {
+            sensors: {
+              create: { slot: 2, reading: 'reading 2' },
+              update: { where: { deviceCode_slot: { deviceCode: 'd-1', slot: 1 } }, data: { slot: { increment: 10 } } },
+            },
+          },
+        }),
+      );
+
+      expect(
+        await basePrisma.deviceSensor.findMany({ select: { deviceCode: true, slot: true }, orderBy: { slot: 'asc' } }),
+      ).toEqual([
+        { deviceCode: 'd-1', slot: 2 },
+        { deviceCode: 'd-1', slot: 11 },
+      ]);
+      expect(await logsOf('DeviceSensor')).toEqual([]);
+      expect(observer).toHaveBeenCalledTimes(2);
+      expect(observer).toHaveBeenCalledWith(
+        expect.objectContaining({
+          phase: 'row-identification',
+          modelName: 'DeviceSensor',
+          operation: 'update',
+          params: { path: 'sensors', unidentified: 1 },
+        }),
+      );
+      expect(observer).toHaveBeenCalledWith(
+        expect.objectContaining({
+          phase: 'row-identification',
+          modelName: 'DeviceSensor',
+          operation: 'create',
+          params: { path: 'sensors', unidentified: 1 },
+          error: expect.objectContaining({
+            message:
+              '1 of the rows a nested create at sensors wrote are not audited: they cannot be told apart from a row whose key the write changed in a way the audit cannot follow',
+          }),
+        }),
+      );
+    });
+  });
+
+  describe('targets at one path that the keys they have after the write cannot tell apart', () => {
+    it('does not record the sensors nested updates move onto keys another update names or gives, and reports them', async () => {
+      const { prisma, basePrisma, run, observer, seedDevice, logsOf } = await setup();
+      await seedDevice('d-1');
+      await basePrisma.deviceSensor.create({ data: { deviceCode: 'd-1', slot: 1, reading: 'reading 1' } });
+      await basePrisma.deviceSensor.create({ data: { deviceCode: 'd-1', slot: 2, reading: 'reading 2' } });
+
+      await run(() =>
+        prisma.device.update({
+          where: { code: 'd-1' },
+          data: {
+            sensors: {
+              update: [
+                { where: { deviceCode_slot: { deviceCode: 'd-1', slot: 1 } }, data: { slot: 3 } },
+                { where: { deviceCode_slot: { deviceCode: 'd-1', slot: 3 } }, data: { slot: 4 } },
+                { where: { deviceCode_slot: { deviceCode: 'd-1', slot: 2 } }, data: { slot: 3 } },
+              ],
+            },
+          },
+        }),
+      );
+
+      expect(
+        await basePrisma.deviceSensor.findMany({ select: { slot: true, reading: true }, orderBy: { slot: 'asc' } }),
+      ).toEqual([
+        { slot: 3, reading: 'reading 2' },
+        { slot: 4, reading: 'reading 1' },
+      ]);
+      expect(await logsOf('DeviceSensor')).toEqual([]);
+      expect(observer).toHaveBeenCalledTimes(1);
+      expect(observer).toHaveBeenCalledWith(
+        expect.objectContaining({
+          phase: 'row-identification',
+          modelName: 'DeviceSensor',
+          operation: 'update',
+          params: { path: 'sensors', unidentified: 3 },
+        }),
+      );
+    });
+
+    it('records the device a nested create inserts with a generated code next to updates that move devices onto the codes of one another', async () => {
+      const { prisma, run, observer, owner, seedDevice, logsOf } = await setup();
+      await seedDevice('d-1');
+      await seedDevice('d-2');
+
+      const updated = await run(() =>
+        prisma.user.update({
+          where: { id: owner.id },
+          data: {
+            devices: {
+              create: { label: 'created' },
+              update: [
+                { where: { code: 'd-2' }, data: { code: 'd-3' } },
+                { where: { code: 'd-1' }, data: { code: 'd-2' } },
+              ],
+            },
+          },
+          include: { devices: true },
+        }),
+      );
+
+      const created = updated.devices.find((device) => device.label === 'created');
+      expect(await logsOf('Device')).toEqual([expect.objectContaining({ entityId: created?.code, action: 'create' })]);
+      expect(observer).toHaveBeenCalledTimes(1);
+      expect(observer).toHaveBeenCalledWith(
+        expect.objectContaining({
+          phase: 'row-identification',
+          modelName: 'Device',
+          operation: 'update',
+          params: { path: 'devices', unidentified: 2 },
+        }),
+      );
+    });
+  });
+
+  describe('a row key that holds the foreign key to the parent row', () => {
+    const moved = {
+      entityId: 'd-2#1',
+      action: 'update',
+      changes: { deviceCode: { old: 'd-1', new: 'd-2' } },
+      before: expect.objectContaining({ deviceCode: 'd-1', slot: 1 }),
+    };
+
+    it('records a sensor a nested connect moves in from another device as the change of its device code, under the key it has after the write', async () => {
+      const { prisma, basePrisma, run, observer, seedDevice, logsOf } = await setup();
+      await seedDevice('d-1');
+      await seedDevice('d-2');
+      await basePrisma.deviceSensor.create({ data: { deviceCode: 'd-1', slot: 1, reading: 'reading 1' } });
+
+      await run(() =>
+        prisma.device.update({
+          where: { code: 'd-2' },
+          data: { sensors: { connect: { deviceCode_slot: { deviceCode: 'd-1', slot: 1 } } } },
+        }),
+      );
+
+      expect(await logsOf('DeviceSensor')).toEqual([moved]);
+      expect(observer).not.toHaveBeenCalled();
+    });
+
+    it('records a sensor a nested connect moves in next to a nested create, and the created sensor, each under the key it has after the write', async () => {
+      const { prisma, basePrisma, run, observer, seedDevice, logsOf } = await setup();
+      await seedDevice('d-1');
+      await seedDevice('d-2');
+      await basePrisma.deviceSensor.create({ data: { deviceCode: 'd-1', slot: 1, reading: 'reading 1' } });
+
+      await run(() =>
+        prisma.device.update({
+          where: { code: 'd-2' },
+          data: {
+            sensors: {
+              create: { slot: 2, reading: 'reading 2' },
+              connect: { deviceCode_slot: { deviceCode: 'd-1', slot: 1 } },
+            },
+          },
+        }),
+      );
+
+      expect(await logsOf('DeviceSensor')).toEqual([
+        moved,
+        expect.objectContaining({ entityId: 'd-2#2', action: 'create' }),
+      ]);
+      expect(observer).not.toHaveBeenCalled();
+    });
+
+    const cascaded = {
+      entityId: 'd-9#1',
+      action: 'update',
+      changes: { deviceCode: { old: 'd-1', new: 'd-9' }, reading: { old: 'reading 1', new: 'changed' } },
+      before: expect.objectContaining({ deviceCode: 'd-1', slot: 1, reading: 'reading 1' }),
+    };
+
+    it('records a sensor a nested updateMany writes below a device the same update gives a new code, under the key the cascade gives it', async () => {
+      const { prisma, basePrisma, run, observer, seedDevice, logsOf } = await setup();
+      await seedDevice('d-1');
+      await basePrisma.deviceSensor.create({ data: { deviceCode: 'd-1', slot: 1, reading: 'reading 1' } });
+
+      await run(() =>
+        prisma.device.update({
+          where: { code: 'd-1' },
+          data: { code: 'd-9', sensors: { updateMany: { where: { slot: 1 }, data: { reading: 'changed' } } } },
+        }),
+      );
+
+      expect(await logsOf('DeviceSensor')).toEqual([cascaded]);
+      expect(observer).not.toHaveBeenCalled();
+    });
+
+    it('records a sensor a nested updateMany writes below a device given a new code when the result selects none of the relation', async () => {
+      const { prisma, basePrisma, run, observer, seedDevice, logsOf } = await setup();
+      await seedDevice('d-1');
+      await basePrisma.deviceSensor.create({ data: { deviceCode: 'd-1', slot: 1, reading: 'reading 1' } });
+
+      await run(() =>
+        prisma.device.update({
+          where: { code: 'd-1' },
+          data: { code: 'd-9', sensors: { updateMany: { where: { slot: 1 }, data: { reading: 'changed' } } } },
+          select: { code: true },
+        }),
+      );
+
+      expect(await logsOf('DeviceSensor')).toEqual([cascaded]);
+      expect(observer).not.toHaveBeenCalled();
+    });
+
+    it('records a sensor a nested updateMany writes below a device a nested update gives a new code', async () => {
+      const { prisma, basePrisma, run, observer, owner, seedDevice, logsOf } = await setup();
+      await seedDevice('d-1');
+      await basePrisma.deviceSensor.create({ data: { deviceCode: 'd-1', slot: 1, reading: 'reading 1' } });
+
+      await run(() =>
+        prisma.user.update({
+          where: { id: owner.id },
+          data: {
+            devices: {
+              update: {
+                where: { code: 'd-1' },
+                data: { code: 'd-9', sensors: { updateMany: { where: { slot: 1 }, data: { reading: 'changed' } } } },
+              },
+            },
+          },
+        }),
+      );
+
+      expect(await logsOf('DeviceSensor')).toEqual([cascaded]);
+      expect(observer).not.toHaveBeenCalled();
+    });
+
+    it('does not record a sensor the new code of its device re-keys as created next to a nested create', async () => {
+      const { prisma, basePrisma, run, observer, seedDevice, logsOf } = await setup();
+      await seedDevice('d-1');
+      await basePrisma.deviceSensor.create({ data: { deviceCode: 'd-1', slot: 1, reading: 'reading 1' } });
+
+      await run(() =>
+        prisma.device.update({
+          where: { code: 'd-1' },
+          data: { code: 'd-9', sensors: { create: { slot: 2, reading: 'reading 2' } } },
+        }),
+      );
+
+      expect(await logsOf('DeviceSensor')).toEqual([expect.objectContaining({ entityId: 'd-9#2', action: 'create' })]);
+      expect(observer).not.toHaveBeenCalled();
     });
   });
 });

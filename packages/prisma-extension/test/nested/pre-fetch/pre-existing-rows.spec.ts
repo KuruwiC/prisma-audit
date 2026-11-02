@@ -64,6 +64,7 @@ const snapshot = (
       nestedOperations,
       writeSets: buildNestedWriteSets(
         schemaMetadata,
+        'User',
         nestedOperations,
         new Set(),
         nestedPreFetchResults,

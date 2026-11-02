@@ -101,6 +101,7 @@ const single = (overrides: SingleCase = {}): SingleOperationOutcome => {
     nestedOperations,
     writeSets: buildNestedWriteSets(
       schemaMetadata,
+      base.modelName,
       nestedOperations,
       new Set(),
       base.nestedPreFetchResults,

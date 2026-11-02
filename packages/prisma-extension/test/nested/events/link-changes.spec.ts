@@ -57,6 +57,7 @@ const inputOf = (
   auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS,
   auditedAt: () => new Set(audited.map((id) => extractEntityIdentity({ id }, ['id']))),
   fieldNamesOf: () => new Set(['id', 'name', 'postId']),
+  whereAfterWrite: (_operation, where) => where,
 });
 
 /** The records of a link write at `labels`, with `after` the rows the read after the write returns */
@@ -81,6 +82,30 @@ describe('collectLinkChanges', () => {
         entity: after,
         action: 'update',
         beforeState: { kind: 'captured', row: { id: 'l1', name: 'before', postId: 'p2' } },
+        relatedModel: 'Label',
+      },
+    ]);
+  });
+
+  it('reads a row again by the WHERE that names it after the write, and records it under the key it has then', async () => {
+    const keyed = readOf({ keyFields: ['postId', 'slot'], rows: [{ postId: 'p2', slot: 1, name: 'before' }] });
+    const after = { postId: 'p1', slot: 1, name: 'before' };
+    const findMany = vi.fn(async () => [after]);
+    const whereAfterWrite = vi.fn((_operation: NestedOperationInfo, where: Row) => ({ ...where, postId: 'p1' }));
+    const named: LinkWrite = { ...write, named: [{ postId_slot: { postId: 'p2', slot: 1 } }] };
+
+    const records = await collectLinkChanges({
+      ...inputOf({ ...keyed, writes: [named] }, { label: { findMany } }),
+      whereAfterWrite,
+    });
+
+    expect(whereAfterWrite).toHaveBeenCalledWith(connect, { postId: 'p2', slot: 1 });
+    expect(findMany).toHaveBeenCalledWith({ where: { OR: [{ postId: 'p1', slot: 1 }] } });
+    expect(records.get(connect)).toEqual([
+      {
+        entity: after,
+        action: 'update',
+        beforeState: { kind: 'captured', row: { postId: 'p2', slot: 1, name: 'before' } },
         relatedModel: 'Label',
       },
     ]);

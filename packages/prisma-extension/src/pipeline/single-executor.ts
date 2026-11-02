@@ -12,6 +12,7 @@ import type { BeforeState, FailureSink, MutationEvent } from '@kuruwic/db-audit-
 import type { NestedOperationInfo, NestedPreFetchResults } from '../grammar/nested-operations.js';
 import type { ShouldFetchBefore } from '../grammar/pre-fetch-selection.js';
 import type { PrismaNamespace } from '../internal-types.js';
+import type { UnfollowedRowKeysReason } from '../nested/events/collect-nested-events.js';
 import {
   buildNestedWriteSets,
   detectResolvedNestedOperations,
@@ -47,6 +48,12 @@ export interface SinglePrepared {
   readonly preExistingRows: PreExistingRows;
   readonly linkReads: LinkReads;
 }
+
+/** Why the rows a nested write wrote are not audited, as the observer's error message says it */
+const UNFOLLOWED_ROW_KEYS_CAUSE: Readonly<Record<UnfollowedRowKeysReason, string>> = {
+  'key-not-followed': 'its data changes their key in a way the audit cannot follow',
+  'not-told-apart': 'they cannot be told apart from a row whose key the write changed in a way the audit cannot follow',
+};
 
 export const createSingleExecutor = (deps: SingleExecutorDependencies): OperationExecutor => {
   const {
@@ -90,6 +97,7 @@ export const createSingleExecutor = (deps: SingleExecutorDependencies): Operatio
     const nestedOperations = writtenArgs === args ? detected : detect(writtenArgs);
     const writeSets = buildNestedWriteSets(
       schemaMetadata,
+      modelName,
       nestedOperations,
       rowsWithGeneratedKeys,
       nestedPreFetchResults,
@@ -167,7 +175,7 @@ export const createSingleExecutor = (deps: SingleExecutorDependencies): Operatio
             params: { entityId, keyFields },
             error,
           }),
-        onUnfollowedRowKeys: ({ relatedModel, operation, path, unidentified }) =>
+        onUnfollowedRowKeys: ({ relatedModel, operation, path, unidentified, reason }) =>
           failureSink.notify({
             phase: 'row-identification',
             modelName: relatedModel,
@@ -175,7 +183,7 @@ export const createSingleExecutor = (deps: SingleExecutorDependencies): Operatio
             params: { path, unidentified },
             error: new Error(
               `${unidentified} of the rows a nested ${operation} at ${path} wrote are not audited: ` +
-                'its data changes their key in a way the audit cannot follow',
+                UNFOLLOWED_ROW_KEYS_CAUSE[reason],
             ),
           }),
       },

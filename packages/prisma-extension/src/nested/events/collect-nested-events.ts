@@ -14,7 +14,10 @@
  * targets locate is recorded once, for the first whose write is audited from the row; a row that
  * matches no target and did not exist before the operation was inserted: it is recorded for the first
  * operation nested under its parent that inserts rows, and attributed to every such operation,
- * since which of them inserted it cannot be told; any other row is a sibling and yields nothing. The
+ * since which of them inserted it cannot be told; any other row is a sibling and yields nothing. A
+ * row key that holds the foreign key to the parent row is compared with those fields taken from
+ * the parent row as the walk reaches it, after the write, and with the parent row as it was before
+ * the write against the rows the relation held before it (`nested/key-link`). The
  * rows the operation wrote at a path that the result does not hold are read once for the path (see
  * `rows-not-in-result.ts`). A `deleteMany` yields one delete event per row its filter matched in the
  * read ahead of the operation. A to-one relation holds one related row under its parent row: the
@@ -51,6 +54,7 @@ import { NO_BEFORE_STATE } from '../../utils/before-state.js';
 import { matchesUniqueWhere } from '../../utils/compound-where.js';
 import { nestedLog } from '../../utils/debug.js';
 import { extractEntityIdentity, sameKeyValue } from '../../utils/id-generation.js';
+import { type KeyLink, keyLinkOf, keyLinkValuesOf, relinked } from '../key-link.js';
 import { attachedFilter, type LinkReads } from '../pre-fetch/link-rows.js';
 import { getPreFetchListClient } from '../pre-fetch/model-client.js';
 import {
@@ -101,24 +105,34 @@ export interface NestedEventCollectorDependencies {
    */
   onUnresolvedDeleteEntityId?: UnresolvedDeleteEntityIdReporter;
   /**
-   * Notified of the rows a nested operation at a path updates whose key its data changes in a way
-   * its arguments do not tell (see `write-set.ts`); those rows are not recorded. Optional: when
-   * omitted, they are still not recorded, just not reported.
+   * Notified of the rows a nested operation at a path wrote that are not audited because their key
+   * after the write is unknown (see `write-set.ts`). Optional: when omitted, they are still not
+   * recorded, just not reported.
    */
   onUnfollowedRowKeys?: UnfollowedRowKeysReporter;
 }
 
-/** The rows a nested `operation` at `path` updated that are not audited, their key after the write being unknown */
+/**
+ * Why the rows are not audited:
+ * - `key-not-followed`: the operation's write changes their key in a way the audit cannot follow
+ *   (its data, or another target at the path the key cannot tell apart from it);
+ * - `not-told-apart`: the operation inserted them without a key the extension generated, next to
+ *   a row of the first kind, which they cannot be told apart from
+ */
+export type UnfollowedRowKeysReason = 'key-not-followed' | 'not-told-apart';
+
+/** The rows a nested `operation` at `path` wrote that are not audited, their key after the write being unknown */
 export interface UnfollowedRowKeys {
   relatedModel: string;
   operation: NestedOperationKeyword;
   path: string;
   unidentified: number;
+  reason: UnfollowedRowKeysReason;
 }
 
 export type UnfollowedRowKeysReporter = (info: UnfollowedRowKeys) => Promise<void>;
 
-/** Reports, once per nested operation, the targets whose key after the write is unknown */
+/** Reports, once per nested operation and reason, the rows whose key after the write is unknown */
 const reportUnfollowedRowKeys = async (
   writeSets: NestedWriteSets,
   report: UnfollowedRowKeysReporter | undefined,
@@ -134,7 +148,10 @@ const reportUnfollowedRowKeys = async (
       }
     }
     for (const [{ relatedModel, operation }, unidentified] of unfollowed) {
-      await report({ relatedModel, operation, path, unidentified });
+      await report({ relatedModel, operation, path, unidentified, reason: 'key-not-followed' });
+    }
+    for (const [{ relatedModel, operation }, unidentified] of writeSet.unidentifiedInserts) {
+      await report({ relatedModel, operation, path, unidentified, reason: 'not-told-apart' });
     }
   }
 };
@@ -198,7 +215,25 @@ interface CollectionWalk {
   readonly claimed: Map<string, Set<Row>>;
   /** The to-one operations already attributed a row */
   readonly assigned: Set<NestedOperationInfo>;
+  /**
+   * The values the parent row of each to-many operation gives its key link after the write, as the
+   * walk reached that row; undefined for an operation reached under several parent rows
+   */
+  readonly linkValuesAfter: Map<NestedOperationInfo, Row | undefined>;
 }
+
+/**
+ * The key link of a to-many relation under one parent row (`nested/key-link`): the values the
+ * parent row gives its fields after the write, and before it. Undefined where unknown, and both
+ * for a parent row whose own writes cannot be told apart (an inserted row, which every element of
+ * the inserts above it may have written), where the keys are compared as they are.
+ */
+interface ParentLink {
+  readonly after: Row | undefined;
+  readonly before: Row | undefined;
+}
+
+const NO_PARENT_LINK: ParentLink = { after: undefined, before: undefined };
 
 const toEvent = (
   record: CollectedNestedRecord,
@@ -261,6 +296,19 @@ const claimedAt = (walk: CollectionWalk, path: string): Set<Row> => {
 const isLocatedBy = (row: Row, target: NestedWriteTarget): boolean =>
   isLocated(target) && matchesUniqueWhere(row, target.locator.where);
 
+/** `target` located under a parent row whose key link holds `linkValues` after the write */
+const relocated = (
+  target: NestedWriteTarget,
+  linkValues: Row | undefined,
+  keyConstraint: UniqueConstraint | undefined,
+): NestedWriteTarget =>
+  isLocated(target) && linkValues
+    ? {
+        ...target,
+        locator: { by: target.locator.by, where: relinked(target.locator.where, linkValues, keyConstraint) },
+      }
+    : target;
+
 const targetOf = (row: Row, targets: readonly NestedWriteTarget[]): NestedWriteTarget | undefined =>
   targets.find((target) => isLocatedBy(row, target));
 
@@ -298,15 +346,64 @@ const locatedBeforeState = (walk: CollectionWalk, path: string, row: Row, before
   return linked ? { kind: 'captured', row: linked } : before;
 };
 
+/**
+ * The targets at a path as the rows under one parent row are compared to them: the parent's own
+ * relocated by its key link after the write, and every other target as it is
+ */
+const targetsUnder = (walk: CollectionWalk, relation: CandidateRelation, parentLink: ParentLink) => {
+  const writeSet = writeSetAt(walk, relation.path);
+  const keyConstraint = walk.keyConstraints.get(relation.path);
+  const own = ownTargetsOf(writeSet, relation.candidates).map((target) =>
+    relocated(target, parentLink.after, keyConstraint),
+  );
+  const others = writeSet.targets.filter((target) => !relation.candidates.includes(target.operation));
+  return { own, all: [...own, ...others] };
+};
+
+/**
+ * Whether a row under the parent row, which no target locates, is one the operations at the path
+ * inserted (`isInsertedAt`): the snapshot holds the rows the relation held before the write by
+ * the key they had then, with the parent row's key link values before the write
+ */
+const insertedUnder = (walk: CollectionWalk, relation: CandidateRelation, parentLink: ParentLink) => {
+  const { path, keyFields } = relation;
+  const inserted = isInsertedAt(writeSetAt(walk, path), walk.input.preExistingRows.get(path));
+  const [operation] = relation.candidates;
+  const origin = { model: operation?.relatedModel ?? '', path };
+  return (row: Row): boolean => {
+    if (parentLink.after && !matchesUniqueWhere(row, parentLink.after)) {
+      return false;
+    }
+    const identity = identityOf(row, keyFields, origin);
+    return parentLink.before
+      ? inserted(identity, extractEntityIdentity({ ...row, ...parentLink.before }, keyFields))
+      : inserted(identity);
+  };
+};
+
+/** Records the values the parent row gives the key link of the operations nested at the relation */
+const noteLinkValues = (walk: CollectionWalk, relation: CandidateRelation, parentLink: ParentLink): void => {
+  const { after } = parentLink;
+  for (const candidate of relation.candidates) {
+    const noted = walk.linkValuesAfter.get(candidate);
+    const differs =
+      walk.linkValuesAfter.has(candidate) &&
+      (noted === undefined || after === undefined || !matchesUniqueWhere(noted, after));
+    walk.linkValuesAfter.set(candidate, differs ? undefined : after);
+  }
+};
+
 const attributeToManyRows = (
   walk: CollectionWalk,
   relation: CandidateRelation,
   rows: readonly SourcedRow[],
+  parentLink: ParentLink,
 ): AttributedRow[] => {
-  const { path, candidates, keyFields } = relation;
-  const writeSet = writeSetAt(walk, path);
-  const ownTargets = ownTargetsOf(writeSet, candidates);
+  const { path, candidates } = relation;
+  const targets = targetsUnder(walk, relation, parentLink);
+  const ownTargets = targets.own;
   const claimed = claimedAt(walk, path);
+  noteLinkValues(walk, relation, parentLink);
   const attributed: AttributedRow[] = [];
 
   for (const { row, selection } of rows) {
@@ -323,10 +420,9 @@ const attributeToManyRows = (
   if (!recorded) {
     return attributed;
   }
-  const inserted = isInsertedAt(writeSet, walk.input.preExistingRows.get(path));
-  const origin = { model: recorded.relatedModel, path };
+  const inserted = insertedUnder(walk, relation, parentLink);
   for (const { row, selection } of rows) {
-    if (claimed.has(row) || targetOf(row, writeSet.targets) || !inserted(identityOf(row, keyFields, origin))) {
+    if (claimed.has(row) || targetOf(row, targets.all) || !inserted(row)) {
       continue;
     }
     claimed.add(row);
@@ -439,6 +535,7 @@ interface CandidateRelation {
   readonly path: string;
   readonly isList: boolean;
   readonly keyFields: readonly string[];
+  readonly keyLink: KeyLink | undefined;
   readonly candidates: NestedOperationInfo[];
 }
 
@@ -460,6 +557,7 @@ const candidateRelations = (walk: CollectionWalk, attribution: RowAttribution | 
       path: nestedOp.path,
       isList: nestedOp.isList,
       keyFields: keyConstraint.fields,
+      keyLink: nestedOp.isList ? keyLinkOf(walk.deps.schemaMetadata, walk.input.modelName, nestedOp) : undefined,
       candidates: [],
     };
     byPath.set(nestedOp.path, relation);
@@ -507,17 +605,46 @@ const updatesExistingRow = (target: NestedWriteTarget): boolean => {
   );
 };
 
-const parentAtPath = (walk: CollectionWalk, { parent, relation }: RelationBelow, held: readonly SourcedRow[]) => {
-  const ownTargets = ownTargetsOf(writeSetAt(walk, relation.path), relation.candidates);
+/**
+ * The key link of `relation` under `parent`: none when the relation's row key holds no foreign key
+ * to the parent, or when the parent row is an inserted row whose writes cannot be told apart
+ */
+const parentLinkOf = (walk: CollectionWalk, { parent, relation }: RelationBelow): ParentLink => {
+  const { keyLink, candidates } = relation;
+  const [operation] = candidates;
+  if (!keyLink || !operation || (parent.attribution && parent.attribution.element === undefined)) {
+    return NO_PARENT_LINK;
+  }
+  const parentKey = knownParentKey(operation, walk.input, walk.deps, keyLink.parentModel, keyLink.references);
+  return {
+    after: keyLinkValuesOf(keyLink, parent.row),
+    before: parentKey ? keyLinkValuesOf(keyLink, parentKey) : undefined,
+  };
+};
+
+const parentAtPath = (
+  walk: CollectionWalk,
+  { parent, relation }: RelationBelow,
+  held: readonly SourcedRow[],
+  parentLink: ParentLink,
+) => {
+  const targets = targetsUnder(walk, relation, parentLink);
   const restricted = restrictsRows(relationSelectionOf(parent.selection, relation.fieldName));
+  const inserted = insertedUnder(walk, relation, parentLink);
+  const keyLocated = new Set(
+    targets.all.flatMap((target) =>
+      target.locator.by === 'rowKey' ? [extractEntityIdentity(target.locator.where, relation.keyFields)] : [],
+    ),
+  );
   return {
     row: parent.row,
     rows: held.map(({ row }) => row),
-    absentTargets: ownTargets.filter(
+    absentTargets: targets.own.filter(
       (target): target is LocatedTarget =>
         isLocated(target) && updatesExistingRow(target) && !held.some(({ row }) => isLocatedBy(row, target)),
     ),
-    insertsHidden: restricted && insertingCandidatesOf(relation.candidates, ownTargets).length > 0,
+    insertsHidden: restricted && insertingCandidatesOf(relation.candidates, targets.own).length > 0,
+    isInserted: (key) => !keyLocated.has(extractEntityIdentity(key, relation.keyFields)) && inserted(key),
   } satisfies ParentAtPath;
 };
 
@@ -533,7 +660,7 @@ const rowsNotInResult = async (
   }
   const { path, keyFields, candidates } = first.relation;
   const [operation] = candidates;
-  const parents = below.map((entry, index) => parentAtPath(walk, entry, held[index] ?? []));
+  const parents = below.map((entry, index) => parentAtPath(walk, entry, held[index] ?? [], parentLinkOf(walk, entry)));
   if (parents.every((parent) => parent.absentTargets.length === 0 && !parent.insertsHidden)) {
     return parents.map(() => []);
   }
@@ -552,8 +679,6 @@ const rowsNotInResult = async (
     relatedModel,
     path,
     keyFields,
-    targets: writeSetAt(walk, path).targets,
-    isInserted: isInsertedAt(writeSetAt(walk, path), input.preExistingRows.get(path)),
     parents,
     resolvePath: () => (operation ? resolveToManyPath(deps.schemaMetadata, input.modelName, operation) : undefined),
     include,
@@ -570,8 +695,13 @@ const attributePath = async (walk: CollectionWalk, below: readonly RelationBelow
     );
   }
   const read = await rowsNotInResult(walk, below, held);
-  return below.flatMap(({ relation }, index) =>
-    attributeToManyRows(walk, relation, [...(held[index] ?? []), ...(read[index] ?? [])]),
+  return below.flatMap((entry, index) =>
+    attributeToManyRows(
+      walk,
+      entry.relation,
+      [...(held[index] ?? []), ...(read[index] ?? [])],
+      parentLinkOf(walk, entry),
+    ),
   );
 };
 
@@ -811,6 +941,7 @@ export const collectNestedEvents = async (
     records: new Map(),
     claimed: new Map(),
     assigned: new Set(),
+    linkValuesAfter: new Map(),
   };
   if (isRow(result)) {
     await walkLevels(walk, [{ row: result, attribution: undefined, selection: input.args }]);
@@ -822,6 +953,8 @@ export const collectNestedEvents = async (
     nestedPreFetchResults: input.nestedPreFetchResults,
     auditedOmittedFields: deps.auditedOmittedFields,
     auditedAt: (path) => auditedIdentitiesAt(walk, path),
+    whereAfterWrite: (operation, where) =>
+      relinked(where, walk.linkValuesAfter.get(operation), keyConstraints.get(operation.path)),
     fieldNamesOf: (model) => new Set(schemaMetadata.getAllFields(model).map((field) => field.name)),
   });
 

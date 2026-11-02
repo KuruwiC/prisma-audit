@@ -11,11 +11,10 @@ import {
   type RowsNotInResultInput,
   readRowsNotInResult,
 } from '../../../src/nested/events/rows-not-in-result.js';
-import { EMPTY_WRITE_SET, isInsertedAt, type LocatedTarget } from '../../../src/nested/events/write-set.js';
+import type { LocatedTarget } from '../../../src/nested/events/write-set.js';
 import type { PreFetchListClient } from '../../../src/nested/pre-fetch/model-client.js';
 import type { ToManyPath } from '../../../src/nested/pre-fetch/to-many-path.js';
 import type { UniqueConstraint } from '../../../src/schema/types.js';
-import { extractEntityIdentity } from '../../../src/utils/id-generation.js';
 import { column, model, schemaMetadataOf } from '../../support/audit-schema.js';
 
 type Row = Record<string, unknown>;
@@ -32,6 +31,7 @@ const hiddenParent = (id: string): ParentAtPath => ({
   rows: [],
   absentTargets: [],
   insertsHidden: true,
+  isInserted: () => true,
 });
 
 const postUpdate: NestedOperationInfo = {
@@ -68,8 +68,6 @@ const inputOf = (
   relatedModel,
   path: 'rows',
   keyFields: ['id'],
-  targets: [],
-  isInserted: () => true,
   parents,
   resolvePath: () => path,
   include: undefined,
@@ -136,12 +134,12 @@ describe('readRowsNotInResult', () => {
         rows: [],
         absentTargets: [target],
         insertsHidden: false,
+        isInserted: () => false,
       });
 
-      const rows = await readRowsNotInResult({
-        ...inputOf({ findMany }, 'Post', undefined, [parentOf('u1', byKey), parentOf('u2', byWhere)]),
-        targets: [byKey, byWhere],
-      });
+      const rows = await readRowsNotInResult(
+        inputOf({ findMany }, 'Post', undefined, [parentOf('u1', byKey), parentOf('u2', byWhere)]),
+      );
 
       expect(findMany.mock.calls).toEqual([[{ where: { OR: [{ id: 'pa' }, { authorId: 'u2', slug: 'b' }] } }]]);
       expect(rows).toEqual([[postA], [postB]]);
@@ -149,7 +147,7 @@ describe('readRowsNotInResult', () => {
   });
 
   describe('the inserted rows', () => {
-    it('are the keys under the parent row that neither the result, the pre-write snapshot nor a target holds', async () => {
+    it('are the keys under the parent rows that the result does not hold and a parent row judges inserted', async () => {
       const path: ToManyPath = {
         parentModelName: 'User',
         parentKeyConstraint: pk,
@@ -162,44 +160,14 @@ describe('readRowsNotInResult', () => {
         },
       };
       const inserted = { id: 'new', authorId: 'u1' };
-      const { client, findMany } = clientReading(
-        [{ id: 'held' }, { id: 'old' }, { id: 'named' }, { id: 'new' }],
-        [inserted],
-      );
-      const named = targetBy('rowKey', { id: 'named' });
-
-      const rows = await readRowsNotInResult({
-        ...inputOf(client, 'Post', path, [{ ...hiddenParent('u1'), rows: [{ id: 'held', authorId: 'u1' }] }]),
-        targets: [named],
-        isInserted: isInsertedAt(
-          { ...EMPTY_WRITE_SET, anyNewRowIsInserted: true },
-          new Set([extractEntityIdentity({ id: 'old' }, ['id'])]),
-        ),
-      });
-
-      expect(findMany).toHaveBeenLastCalledWith({ where: { OR: [{ id: 'new' }] } });
-      expect(rows).toEqual([[inserted]]);
-    });
-
-    it('returns only the inserted rows whose key the data of the operations at the path gives', async () => {
-      const path: ToManyPath = {
-        parentModelName: 'User',
-        parentKeyConstraint: pk,
-        keyConstraint: pk,
-        scope: {
-          backField: 'author',
-          filter: 'is',
-          parentFields: ['id'],
-          foreignKey: { fields: ['authorId'], references: ['id'] },
-        },
+      const { client, findMany } = clientReading([{ id: 'held' }, { id: 'old' }, { id: 'new' }], [inserted]);
+      const parent: ParentAtPath = {
+        ...hiddenParent('u1'),
+        rows: [{ id: 'held', authorId: 'u1' }],
+        isInserted: (key) => key.id !== 'old',
       };
-      const inserted = { id: 'new', authorId: 'u1' };
-      const { client, findMany } = clientReading([{ id: 'by-another-writer' }, { id: 'new' }], [inserted]);
 
-      const rows = await readRowsNotInResult({
-        ...inputOf(client, 'Post', path, [hiddenParent('u1')]),
-        isInserted: isInsertedAt({ ...EMPTY_WRITE_SET, generatedKeys: new Set(['new']) }, undefined),
-      });
+      const rows = await readRowsNotInResult(inputOf(client, 'Post', path, [parent]));
 
       expect(findMany).toHaveBeenLastCalledWith({ where: { OR: [{ id: 'new' }] } });
       expect(rows).toEqual([[inserted]]);
@@ -221,7 +189,13 @@ describe('readRowsNotInResult', () => {
 
     it('reads nothing for parents that neither hide inserted rows nor have absent targets', async () => {
       const { client, findMany } = clientReading([], []);
-      const parent: ParentAtPath = { row: { id: 'u1' }, rows: [], absentTargets: [], insertsHidden: false };
+      const parent: ParentAtPath = {
+        row: { id: 'u1' },
+        rows: [],
+        absentTargets: [],
+        insertsHidden: false,
+        isInserted: () => true,
+      };
 
       const rows = await readRowsNotInResult(inputOf(client, 'Post', fkPath, [parent, parent]));
 
@@ -257,17 +231,19 @@ describe('readRowsNotInResult', () => {
   describe('the include of the read', () => {
     const include = { comments: { include: { author: true } } };
     const absent = targetBy('rowKey', { id: 'pa' });
-    const absentParent: ParentAtPath = { row: { id: 'u1' }, rows: [], absentTargets: [absent], insertsHidden: false };
+    const absentParent: ParentAtPath = {
+      row: { id: 'u1' },
+      rows: [],
+      absentTargets: [absent],
+      insertsHidden: false,
+      isInserted: () => false,
+    };
 
     it('passes the relations the operation writes below the path to the read of absent targets', async () => {
       const postA = { id: 'pa', authorId: 'u1' };
       const findMany = vi.fn(async (_args: unknown) => [postA]);
 
-      const rows = await readRowsNotInResult({
-        ...inputOf({ findMany }, 'Post', undefined, [absentParent]),
-        targets: [absent],
-        include,
-      });
+      const rows = await readRowsNotInResult({ ...inputOf({ findMany }, 'Post', undefined, [absentParent]), include });
 
       expect(findMany.mock.calls).toEqual([[{ where: { OR: [{ id: 'pa' }] }, include }]]);
       expect(rows).toEqual([[postA]]);

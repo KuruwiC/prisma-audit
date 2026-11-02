@@ -10,6 +10,13 @@
  * the keys the extension generated for them (`nested/inserted-row-keys`), and marks a path where
  * that does not tell them apart, so the rows the relation held before the operation can be
  * snapshotted.
+ *
+ * Telling rows apart by key holds only while each row the operations write is located by the key
+ * it has after the write. Targets that name different rows but are located by the same key, and a
+ * target that names the key another target's write gives a row, cannot be told apart: neither is
+ * located. At a path holding a target that is not located, a row the snapshot does not hold may be
+ * that target's row under its new key, so the rows inserted there without a key the extension
+ * generated are not inferred as inserted.
  */
 
 import type { BeforeState } from '@kuruwic/db-audit-core';
@@ -25,7 +32,7 @@ import {
   namedTargets,
   type UpsertBranch,
 } from '../../grammar/nested-operations.js';
-import { upsertBranchOf } from '../../grammar/nested-state.js';
+import { TOP_LEVEL_ROW, upsertBranchOf } from '../../grammar/nested-state.js';
 import type { SchemaMetadata, UniqueConstraint } from '../../schema/types.js';
 import { extractEntityIdentity, rowKeyOf } from '../../utils/id-generation.js';
 import type { EntityIdentityKey } from '../../utils/identity-key.js';
@@ -38,6 +45,7 @@ import {
   withWrittenKey,
 } from '../../utils/row-key-write.js';
 import { createDataOf, skipsDuplicates } from '../inserted-row-keys.js';
+import { type KeyLink, keyLinkOf, withoutKeyLink } from '../key-link.js';
 import { parentRowIdentityOf, targetsNamedByWhere } from '../pre-fetch/parent-rows.js';
 import { preFetchedStateNamedBy, preFetchedStateUnder, rowKeyNamedBy } from '../pre-fetch/pre-fetch-result-store.js';
 
@@ -51,7 +59,11 @@ type Row = Record<string, unknown>;
  *   ({@link withWrittenKey}), since the write may change the columns the operation names it by;
  * - `uniqueWhere`: otherwise, by the unique WHERE the operation names it by;
  * - `unknown`: not at all, when the data changes the key in a way its arguments do not tell (an
- *   operator on a key field, or a relation whose foreign key holds one).
+ *   operator on a key field, or a relation whose foreign key holds one), or when another target at
+ *   the path cannot be told apart from it by key.
+ *
+ * The row-key fields that hold the foreign key to the parent row are taken from the parent row as
+ * it is after the write where the row is looked for (`nested/key-link`).
  */
 export type NestedRowLocator =
   | {
@@ -88,9 +100,15 @@ export interface NestedWriteSet {
   readonly generatedKeys: ReadonlySet<EntityIdentityKey>;
   /**
    * The generated keys do not tell the inserted rows apart, so any row the relation did not hold
-   * before the operation counts as inserted
+   * before the operation counts as inserted; never at a path holding a target that is not located,
+   * whose row such a row may be (`unidentifiedInserts`)
    */
   readonly anyNewRowIsInserted: boolean;
+  /**
+   * The number of rows each operation inserts without a key the extension generated at a path
+   * holding a target that is not located: they are not inferred as inserted
+   */
+  readonly unidentifiedInserts: ReadonlyMap<NestedOperationInfo, number>;
   /**
    * The rows the relation holds before the operation are read to tell the inserted rows apart: an
    * operation inserts a row whose key the extension did not generate, a `createMany` with
@@ -104,6 +122,7 @@ export const EMPTY_WRITE_SET: NestedWriteSet = {
   targets: [],
   generatedKeys: new Set(),
   anyNewRowIsInserted: false,
+  unidentifiedInserts: new Map(),
   readsPreExisting: false,
 };
 
@@ -111,12 +130,13 @@ export const EMPTY_WRITE_SET: NestedWriteSet = {
  * Whether the row `identity` names at a path is one the operations there inserted: a row with a key
  * the extension generated for them, or any row when one of them inserts a row whose key it did not
  * generate or writes a key field; never a row the relation held before the operation
- * (`preExisting`, when it was read)
+ * (`preExisting`, when it was read). `identityBeforeWrite` is the key the row had before the write
+ * when the parent row's write changed it (`nested/key-link`), the key the snapshot holds it by.
  */
 export const isInsertedAt =
   (writeSet: NestedWriteSet, preExisting: ReadonlySet<EntityIdentityKey> | undefined) =>
-  (identity: EntityIdentityKey): boolean =>
-    (writeSet.generatedKeys.has(identity) || writeSet.anyNewRowIsInserted) && !preExisting?.has(identity);
+  (identity: EntityIdentityKey, identityBeforeWrite: EntityIdentityKey = identity): boolean =>
+    (writeSet.generatedKeys.has(identity) || writeSet.anyNewRowIsInserted) && !preExisting?.has(identityBeforeWrite);
 
 /** Write sets keyed by to-many path; a to-one path has none, its single related row is what its operations write */
 export type NestedWriteSets = ReadonlyMap<string, NestedWriteSet>;
@@ -205,7 +225,18 @@ interface TargetContext {
   readonly prisma: PrismaValues;
 }
 
-const targetsOf = (operation: NestedOperationInfo, context: TargetContext): NestedWriteTarget[] => {
+/** A target with the row key it names before the write and the one it has after it, when both are known */
+interface KeyedTarget {
+  readonly target: NestedWriteTarget;
+  readonly keys: { readonly named: Row; readonly written: Row } | undefined;
+}
+
+const keyedTarget = (target: NestedWriteTarget, named: Row | undefined, keyWrite: RowKeyWrite): KeyedTarget => ({
+  target,
+  keys: named && keyWrite.kind !== 'not-derivable' ? { named, written: withWrittenKey(named, keyWrite) } : undefined,
+});
+
+const targetsOf = (operation: NestedOperationInfo, context: TargetContext): KeyedTarget[] => {
   const { nestedPreFetchResults, keyConstraint } = context;
   const keyWrites = updateDataOf(operation).map((data) =>
     rowKeyWriteOf(context.schemaMetadata, operation.relatedModel, data, context.prisma),
@@ -213,12 +244,18 @@ const targetsOf = (operation: NestedOperationInfo, context: TargetContext): Nest
   if (isNestedBatchKeyword(operation.operation)) {
     const matched = context.batchTargets.get(operation.path)?.get(operation.operation)?.values() ?? [];
     const keyWrite = batchKeyWriteOf(keyWrites);
-    return Array.from(matched, (key) => ({
-      locator: locatorOf(key, key, keyWrite),
-      operation,
-      element: undefined,
-      before: preFetchedStateNamedBy(nestedPreFetchResults, operation.path, key),
-    }));
+    return Array.from(matched, (key) =>
+      keyedTarget(
+        {
+          locator: locatorOf(key, key, keyWrite),
+          operation,
+          element: undefined,
+          before: preFetchedStateNamedBy(nestedPreFetchResults, operation.path, key),
+        },
+        key,
+        keyWrite,
+      ),
+    );
   }
   return namedTargets(operation.operation, operation.data).map(({ element, where }) => {
     const before = preFetchedStateNamedBy(nestedPreFetchResults, operation.path, where);
@@ -232,8 +269,116 @@ const targetsOf = (operation: NestedOperationInfo, context: TargetContext): Nest
       readKey === undefined && keyWrite.kind !== 'none' && operation.operation === 'update' && keyConstraint
         ? rowKeyNamedBy(where, keyConstraint)
         : undefined;
-    return { locator: locatorOf(readKey ?? namedKey, where, keyWrite), operation, element, before };
+    const target = { locator: locatorOf(readKey ?? namedKey, where, keyWrite), operation, element, before };
+    return keyedTarget(target, readKey ?? (keyConstraint ? rowKeyNamedBy(where, keyConstraint) : undefined), keyWrite);
   });
+};
+
+/** The keywords whose targets are rows that exist before the write and are located after it */
+const LOCATED_KEYWORDS: ReadonlySet<NestedOperationKeyword> = new Set([
+  'update',
+  'updateMany',
+  'upsert',
+  'connect',
+  'set',
+  'connectOrCreate',
+]);
+
+/** The keywords that name rows anywhere, not only among the rows the relation holds under the parent */
+const LINKING_KEYWORDS: ReadonlySet<NestedOperationKeyword> = new Set(['connect', 'set', 'connectOrCreate']);
+
+/** The keys of a target that exists before the write, compared to tell it from the other targets at its path */
+interface ComparedKeys {
+  readonly target: NestedWriteTarget;
+  /** The row it names before the write */
+  readonly named: string;
+  /** The row it is located by after the write, under its parent row */
+  readonly written: string;
+  /** The row it names, under its parent row; undefined for a write that names a row anywhere */
+  readonly namedUnderParent: string | undefined;
+  /** Its write may give its row another key: one a write of its data gives, or a parent a link gives */
+  readonly rewritesKey: boolean;
+}
+
+/**
+ * Keys compared under one parent row: with a key link, the parent row stands in for the
+ * foreign-key fields of the key, whose values after the write only the parent row tells
+ */
+interface KeyComparison {
+  readonly keyFields: readonly string[];
+  readonly keyLink: KeyLink | undefined;
+  readonly schemaMetadata: SchemaMetadata;
+  readonly nestedPreFetchResults: NestedPreFetchResults;
+}
+
+const parentTokenOf = (operation: NestedOperationInfo, comparison: KeyComparison): string => {
+  const identity = parentRowIdentityOf(operation.parent, comparison.nestedPreFetchResults, comparison.schemaMetadata);
+  if (identity === TOP_LEVEL_ROW) {
+    return 'top';
+  }
+  return typeof identity === 'string' ? `row:${identity}` : 'unknown';
+};
+
+const resolvedIdentityOf = (key: Row, keyFields: readonly string[]): string | undefined => {
+  const identity = extractEntityIdentity(key, keyFields);
+  return typeof identity === 'string' ? identity : undefined;
+};
+
+const keyUnderParent = (key: Row, operation: NestedOperationInfo, comparison: KeyComparison): string | undefined => {
+  const { keyLink, keyFields } = comparison;
+  if (!keyLink) {
+    return resolvedIdentityOf(key, keyFields);
+  }
+  const fields = keyFields.filter((field) => !keyLink.fields.includes(field));
+  const identity = resolvedIdentityOf(withoutKeyLink(key, keyLink), fields);
+  return identity === undefined ? undefined : JSON.stringify([parentTokenOf(operation, comparison), identity]);
+};
+
+const comparedKeysOf = (keyed: KeyedTarget, comparison: KeyComparison): ComparedKeys | undefined => {
+  const { target, keys } = keyed;
+  const { operation } = target.operation;
+  const existsBefore = (operation !== 'upsert' && operation !== 'connectOrCreate') || target.before.kind === 'captured';
+  if (!keys || !isLocated(target) || !LOCATED_KEYWORDS.has(operation) || !existsBefore) {
+    return undefined;
+  }
+  const named = resolvedIdentityOf(keys.named, comparison.keyFields);
+  const written = keyUnderParent(keys.written, target.operation, comparison);
+  if (named === undefined || written === undefined) {
+    return undefined;
+  }
+  const linking = LINKING_KEYWORDS.has(operation);
+  const namedUnderParent = linking ? undefined : keyUnderParent(keys.named, target.operation, comparison);
+  return {
+    target,
+    named,
+    written,
+    namedUnderParent,
+    rewritesKey: linking ? comparison.keyLink !== undefined : namedUnderParent !== written,
+  };
+};
+
+/**
+ * The targets at a path that cannot be told apart by key: targets that name different rows but are
+ * located by the same key after the write, and a target that names the key another target's write
+ * gives a row, with that target
+ */
+const indistinguishableTargets = (keyed: readonly KeyedTarget[], comparison: KeyComparison): Set<NestedWriteTarget> => {
+  const compared = keyed.flatMap((entry) => comparedKeysOf(entry, comparison) ?? []);
+  const indistinguishable = new Set<NestedWriteTarget>();
+  for (const left of compared) {
+    for (const right of compared) {
+      if (left === right || left.named === right.named) {
+        continue;
+      }
+      const sameWrittenKey = left.written === right.written;
+      const namesWrittenKey = right.rewritesKey && left.namedUnderParent === right.written;
+      if (sameWrittenKey || namesWrittenKey) {
+        indistinguishable.add(left.target);
+        indistinguishable.add(right.target);
+      }
+    }
+  }
+  return indistinguishable;
 };
 
 /**
@@ -251,10 +396,14 @@ const rowsInsertedBy = (operation: NestedOperationInfo, targets: readonly Nested
 };
 
 interface WriteSetDraft {
-  readonly targets: NestedWriteTarget[];
+  readonly keyed: KeyedTarget[];
   readonly generatedKeys: Set<EntityIdentityKey>;
-  anyNewRowIsInserted: boolean;
+  /** The number of rows each operation inserts without a key the extension generated */
+  readonly withoutGeneratedKey: Map<NestedOperationInfo, number>;
+  /** A write at the path gives a row another key than the one the extension generated for it */
+  writesKey: boolean;
   readsPreExisting: boolean;
+  comparison: KeyComparison | undefined;
 }
 
 /**
@@ -265,7 +414,7 @@ const writesKeyField = (operation: NestedOperationInfo, keyFields: readonly stri
   keyFields !== undefined &&
   updateDataOf(operation).some((data) => isRecord(data) && keyFields.some((field) => data[field] !== undefined));
 
-/** Records in `writeSet` the key of each row `operation` inserts that the extension generated, else that the path inserts a row without one */
+/** Records in `writeSet` the key of each row `operation` inserts that the extension generated, else that the operation inserts a row without one */
 const addInsertedRows = (
   writeSet: WriteSetDraft,
   operation: NestedOperationInfo,
@@ -278,14 +427,34 @@ const addInsertedRows = (
     if (key && keyFields) {
       writeSet.generatedKeys.add(extractEntityIdentity(key, keyFields));
     } else {
-      writeSet.anyNewRowIsInserted = true;
+      writeSet.withoutGeneratedKey.set(operation, (writeSet.withoutGeneratedKey.get(operation) ?? 0) + 1);
     }
   }
   writeSet.readsPreExisting =
-    writeSet.readsPreExisting || writeSet.anyNewRowIsInserted || (inserted.length > 0 && skipsDuplicates(operation));
+    writeSet.readsPreExisting ||
+    writeSet.withoutGeneratedKey.size > 0 ||
+    (inserted.length > 0 && skipsDuplicates(operation));
+};
+
+const UNKNOWN_LOCATOR: NestedRowLocator = { by: 'unknown' };
+
+const finishedWriteSet = (draft: WriteSetDraft): NestedWriteSet => {
+  const indistinguishable = draft.comparison ? indistinguishableTargets(draft.keyed, draft.comparison) : new Set();
+  const targets = draft.keyed.map(({ target }) =>
+    indistinguishable.has(target) ? { ...target, locator: UNKNOWN_LOCATOR } : target,
+  );
+  const followsEveryTarget = targets.every(isLocated);
+  return {
+    targets,
+    generatedKeys: draft.generatedKeys,
+    anyNewRowIsInserted: followsEveryTarget && (draft.withoutGeneratedKey.size > 0 || draft.writesKey),
+    unidentifiedInserts: followsEveryTarget ? new Map() : draft.withoutGeneratedKey,
+    readsPreExisting: draft.readsPreExisting,
+  };
 };
 
 /**
+ * @param modelName - The top-level model the operations are nested under
  * @param rowsWithGeneratedKeys - The data of each row the operations insert whose key the extension
  *   generated (`withInsertedRowKeys`)
  * @param prisma - The client's Prisma namespace, which an update's data is read with
@@ -293,6 +462,7 @@ const addInsertedRows = (
  */
 export const buildNestedWriteSets = (
   schemaMetadata: SchemaMetadata,
+  modelName: string,
   operations: readonly NestedOperationInfo[],
   rowsWithGeneratedKeys: ReadonlySet<object>,
   nestedPreFetchResults: NestedPreFetchResults,
@@ -305,36 +475,46 @@ export const buildNestedWriteSets = (
     if (!operation.isList) {
       continue;
     }
-    const writeSet = writeSets.get(operation.path) ?? {
-      targets: [],
+    const keyConstraint = getRowKeyConstraint(schemaMetadata, operation.relatedModel);
+    const writeSet: WriteSetDraft = writeSets.get(operation.path) ?? {
+      keyed: [],
       generatedKeys: new Set(),
-      anyNewRowIsInserted: false,
+      withoutGeneratedKey: new Map(),
+      writesKey: false,
       readsPreExisting: false,
+      comparison: keyConstraint && {
+        keyFields: keyConstraint.fields,
+        keyLink: keyLinkOf(schemaMetadata, modelName, operation),
+        schemaMetadata,
+        nestedPreFetchResults,
+      },
     };
     writeSets.set(operation.path, writeSet);
 
-    const keyConstraint = getRowKeyConstraint(schemaMetadata, operation.relatedModel);
-    const targets = targetsOf(operation, {
+    const keyed = targetsOf(operation, {
       schemaMetadata,
       nestedPreFetchResults,
       batchTargets,
       keyConstraint,
       prisma,
     });
-    writeSet.targets.push(...targets);
+    writeSet.keyed.push(...keyed);
 
     addInsertedRows(
       writeSet,
       operation,
-      rowsInsertedBy(operation, targets),
+      rowsInsertedBy(
+        operation,
+        keyed.map(({ target }) => target),
+      ),
       rowsWithGeneratedKeys,
       keyConstraint?.fields,
     );
     if (writesKeyField(operation, keyConstraint?.fields)) {
-      writeSet.anyNewRowIsInserted = true;
+      writeSet.writesKey = true;
       writeSet.readsPreExisting = true;
     }
   }
 
-  return writeSets;
+  return new Map(Array.from(writeSets, ([path, draft]) => [path, finishedWriteSet(draft)]));
 };

@@ -8,7 +8,12 @@ import { Decimal } from '@prisma/client/runtime/client';
 import { describe, expect, it } from 'vitest';
 import type { NestedBatchTargets, NestedPreFetchResults } from '../../../src/grammar/nested-operations.js';
 import { TOP_LEVEL_ROW } from '../../../src/grammar/nested-state.js';
-import { buildNestedWriteSets, detectResolvedNestedOperations } from '../../../src/nested/events/write-set.js';
+import {
+  buildNestedWriteSets,
+  detectResolvedNestedOperations,
+  EMPTY_WRITE_SET,
+  isInsertedAt,
+} from '../../../src/nested/events/write-set.js';
 import { createDataOf } from '../../../src/nested/inserted-row-keys.js';
 import { markPathUnread, storePreFetchResult } from '../../../src/nested/pre-fetch/pre-fetch-result-store.js';
 import { UNRESOLVED_ENTITY_ID } from '../../../src/utils/identity-key.js';
@@ -63,7 +68,15 @@ const writeSetsOf = (
   );
   return {
     operations,
-    writeSets: buildNestedWriteSets(schemaMetadata, operations, rowsWithGeneratedKeys, results, batchTargets, prisma),
+    writeSets: buildNestedWriteSets(
+      schemaMetadata,
+      'User',
+      operations,
+      rowsWithGeneratedKeys,
+      results,
+      batchTargets,
+      prisma,
+    ),
   };
 };
 
@@ -172,6 +185,7 @@ describe('buildNestedWriteSets', () => {
       ],
       generatedKeys: new Set(),
       anyNewRowIsInserted: false,
+      unidentifiedInserts: new Map(),
       readsPreExisting: false,
     });
   });
@@ -228,6 +242,7 @@ describe('buildNestedWriteSets', () => {
         targets: [],
         generatedKeys: new Set(),
         anyNewRowIsInserted: true,
+        unidentifiedInserts: new Map(),
         readsPreExisting: true,
       });
     },
@@ -265,6 +280,7 @@ describe('buildNestedWriteSets', () => {
         targets: [],
         generatedKeys: new Set(['p8', 'p9']),
         anyNewRowIsInserted: false,
+        unidentifiedInserts: new Map(),
         readsPreExisting: false,
       });
     },
@@ -277,6 +293,7 @@ describe('buildNestedWriteSets', () => {
       targets: [],
       generatedKeys: new Set(),
       anyNewRowIsInserted: true,
+      unidentifiedInserts: new Map(),
       readsPreExisting: true,
     });
   });
@@ -304,6 +321,7 @@ describe('buildNestedWriteSets', () => {
       targets: [],
       generatedKeys: new Set(['p9']),
       anyNewRowIsInserted: false,
+      unidentifiedInserts: new Map(),
       readsPreExisting: true,
     });
   });
@@ -369,6 +387,7 @@ describe('buildNestedWriteSets', () => {
         ],
         generatedKeys: new Set(),
         anyNewRowIsInserted: false,
+        unidentifiedInserts: new Map(),
         readsPreExisting: false,
       });
     },
@@ -379,6 +398,7 @@ describe('buildNestedWriteSets', () => {
       targets: [],
       generatedKeys: new Set(),
       anyNewRowIsInserted: false,
+      unidentifiedInserts: new Map(),
       readsPreExisting: false,
     });
   });
@@ -398,6 +418,7 @@ describe('buildNestedWriteSets', () => {
       ],
       generatedKeys: new Set(),
       anyNewRowIsInserted: true,
+      unidentifiedInserts: new Map(),
       readsPreExisting: true,
     });
   });
@@ -412,6 +433,7 @@ describe('buildNestedWriteSets', () => {
       ],
       generatedKeys: new Set(),
       anyNewRowIsInserted: true,
+      unidentifiedInserts: new Map(),
       readsPreExisting: true,
     });
   });
@@ -504,5 +526,116 @@ describe('buildNestedWriteSets of an update that writes the row key', () => {
         preFetched([['posts', 'p1', p1]]),
       ),
     ).toEqual([{ by: 'unknown' }]);
+  });
+});
+
+describe('buildNestedWriteSets of targets the keys they have after the write cannot tell apart', () => {
+  const p2 = { id: 'p2', title: 'Second' };
+  const both = preFetched([
+    ['posts', 'p1', p1],
+    ['posts', 'p2', p2],
+  ]);
+  const locatorsOf = (data: Record<string, unknown>, results: NestedPreFetchResults = both) =>
+    writeSetsOf(data, results)
+      .writeSets.get('posts')
+      ?.targets.map((target) => target.locator);
+
+  it('cannot locate updates that name different rows and give them the same key', () => {
+    expect(
+      locatorsOf({
+        posts: {
+          update: [
+            { where: { id: 'p1' }, data: { id: 'p3' } },
+            { where: { id: 'p2' }, data: { id: 'p3' } },
+          ],
+        },
+      }),
+    ).toEqual([{ by: 'unknown' }, { by: 'unknown' }]);
+  });
+
+  it('cannot locate an update that names the key another update gives a row, nor that update', () => {
+    expect(
+      locatorsOf({
+        posts: {
+          update: [
+            { where: { id: 'p2' }, data: { id: 'p3' } },
+            { where: { id: 'p1' }, data: { id: 'p2' } },
+          ],
+        },
+      }),
+    ).toEqual([{ by: 'unknown' }, { by: 'unknown' }]);
+  });
+
+  it('locates updates that give their rows keys no other target names or gives', () => {
+    expect(
+      locatorsOf({
+        posts: {
+          update: [
+            { where: { id: 'p1' }, data: { id: 'p8' } },
+            { where: { id: 'p2' }, data: { id: 'p9' } },
+          ],
+        },
+      }),
+    ).toEqual([
+      { by: 'rowKey', where: { id: 'p8' } },
+      { by: 'rowKey', where: { id: 'p9' } },
+    ]);
+  });
+
+  it('locates an update and a connect that name the same row', () => {
+    expect(
+      locatorsOf({ posts: { connect: { id: 'p1' }, update: { where: { id: 'p1' }, data: { id: 'p9' } } } }),
+    ).not.toContainEqual({ by: 'unknown' });
+  });
+});
+
+describe('buildNestedWriteSets of rows inserted next to a target it cannot locate', () => {
+  const unlocated = { where: { id: 'p1' }, data: { id: { increment: 1 } } };
+
+  it('does not infer the rows a create inserts without a key the extension generated as inserted, and counts them', () => {
+    const { operations, writeSets } = writeSetsOf(
+      { posts: { create: [{ title: 'A' }, { title: 'B' }], update: unlocated } },
+      preFetched([['posts', 'p1', p1]]),
+    );
+    const create = operations.find((operation) => operation.operation === 'create');
+
+    expect(writeSets.get('posts')).toMatchObject({
+      anyNewRowIsInserted: false,
+      unidentifiedInserts: new Map([[create, 2]]),
+      readsPreExisting: true,
+    });
+  });
+
+  it('still holds the keys the extension generated for the rows a create inserts', () => {
+    const { writeSets } = writeSetsOf(
+      { posts: { create: { id: 'n1', title: 'A' }, update: unlocated } },
+      preFetched([['posts', 'p1', p1]]),
+      new Map(),
+      true,
+    );
+
+    expect(writeSets.get('posts')).toMatchObject({
+      generatedKeys: new Set(['n1']),
+      anyNewRowIsInserted: false,
+      unidentifiedInserts: new Map(),
+    });
+  });
+});
+
+describe('isInsertedAt', () => {
+  const insertsWithoutKey = { ...EMPTY_WRITE_SET, anyNewRowIsInserted: true };
+
+  it('is a row the snapshot does not hold, by the key the row had before the write', () => {
+    const inserted = isInsertedAt(insertsWithoutKey, new Set(['before']));
+
+    expect(inserted('after', 'before')).toBe(false);
+    expect(inserted('after')).toBe(true);
+  });
+
+  it('is only a row with a key the extension generated when every row inserted has one', () => {
+    const inserted = isInsertedAt({ ...EMPTY_WRITE_SET, generatedKeys: new Set(['new']) }, undefined);
+
+    expect(inserted('new')).toBe(true);
+    expect(inserted('other')).toBe(false);
   });
 });
