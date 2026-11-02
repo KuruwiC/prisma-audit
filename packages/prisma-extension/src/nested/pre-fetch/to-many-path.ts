@@ -13,8 +13,8 @@ import { resolveToManyRelationScope, type ToManyRelationScope } from './one-to-m
 
 export interface ToManyPath {
   readonly parentModelName: string;
-  readonly parentPk: UniqueConstraint;
-  readonly pk: UniqueConstraint;
+  readonly parentKeyConstraint: UniqueConstraint;
+  readonly keyConstraint: UniqueConstraint;
   readonly scope: ToManyRelationScope;
 }
 
@@ -31,17 +31,17 @@ export const resolveToManyPath = (
     return undefined;
   }
 
-  const parentPk = getPrimaryKeyConstraint(schemaMetadata, parentModel);
-  const pk = getPrimaryKeyConstraint(schemaMetadata, operation.relatedModel);
-  if (!parentPk || !pk) {
+  const parentKeyConstraint = getPrimaryKeyConstraint(schemaMetadata, parentModel);
+  const keyConstraint = getPrimaryKeyConstraint(schemaMetadata, operation.relatedModel);
+  if (!parentKeyConstraint || !keyConstraint) {
     preFetchLog('to-many path: no primary key: model=%s path=%s', operation.relatedModel, operation.path);
     return undefined;
   }
 
   return {
     parentModelName: parentModel,
-    parentPk,
-    pk,
-    scope: resolveToManyRelationScope(schemaMetadata, field, parentModel, parentPk.fields),
+    parentKeyConstraint,
+    keyConstraint,
+    scope: resolveToManyRelationScope(schemaMetadata, field, parentModel, parentKeyConstraint.fields),
   };
 };

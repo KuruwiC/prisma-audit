@@ -154,7 +154,7 @@ describe('buildNestedWriteSets', () => {
     expect(writeSets.get('posts')).toEqual({
       targets: [
         {
-          locator: { by: 'primaryKey', where: { id: 'p1' } },
+          locator: { by: 'rowKey', where: { id: 'p1' } },
           operation: operations[0],
           element: 0,
           before: { kind: 'captured', row: p1 },
@@ -357,11 +357,11 @@ describe('buildNestedWriteSets', () => {
       expect(writeSets.get('posts')).toEqual({
         targets: [
           {
-            locator: { by: 'primaryKey', where: { id: 'p1' } },
+            locator: { by: 'rowKey', where: { id: 'p1' } },
             operation: operations[0],
             before: { kind: 'captured', row: p1 },
           },
-          { locator: { by: 'primaryKey', where: { id: 'p2' } }, operation: operations[0], before: { kind: 'none' } },
+          { locator: { by: 'rowKey', where: { id: 'p2' } }, operation: operations[0], before: { kind: 'none' } },
         ],
         generatedKeys: new Set(),
         anyNewRowIsInserted: false,

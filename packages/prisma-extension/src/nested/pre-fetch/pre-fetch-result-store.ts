@@ -18,7 +18,7 @@ import type { NestedPreFetchResult, ParentRowIdentity } from '../../grammar/nest
 import type { UniqueConstraint } from '../../schema/types.js';
 import { NO_BEFORE_STATE, UNAVAILABLE_BEFORE_STATE } from '../../utils/before-state.js';
 import { matchesUniqueWhere, namesKey, sameUniqueWhere, unwrapCompoundWhere } from '../../utils/compound-where.js';
-import { extractEntityIdentity, primaryKeyOf } from '../../utils/id-generation.js';
+import { extractEntityIdentity, rowKeyOf } from '../../utils/id-generation.js';
 import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID } from '../../utils/identity-key.js';
 
 type Row = Record<string, unknown>;
@@ -151,10 +151,10 @@ export const preFetchedStateUnder = (
  * The primary key `where` names, unwrapped from Prisma's compound-unique shape, or undefined when
  * it does not name every primary-key field with a value
  */
-export const primaryKeyNamedBy = (where: Row, pkConstraint: UniqueConstraint): Row | undefined => {
-  const unwrapped = unwrapCompoundWhere(where, pkConstraint);
-  const key = primaryKeyOf(unwrapped, pkConstraint.fields);
-  return extractEntityIdentity(key, pkConstraint.fields) === UNRESOLVED_ENTITY_ID ? undefined : key;
+export const rowKeyNamedBy = (where: Row, keyConstraint: UniqueConstraint): Row | undefined => {
+  const unwrapped = unwrapCompoundWhere(where, keyConstraint);
+  const key = rowKeyOf(unwrapped, keyConstraint.fields);
+  return extractEntityIdentity(key, keyConstraint.fields) === UNRESOLVED_ENTITY_ID ? undefined : key;
 };
 
 /**
@@ -169,17 +169,17 @@ export const storeReadResult = (
   path: string,
   where: Row,
   record: Row | null,
-  pkConstraint: UniqueConstraint,
+  keyConstraint: UniqueConstraint,
   parentsKnown = true,
 ): void => {
   const name = { by: 'uniqueWhere', where } as const;
   if (record) {
-    const identity = extractEntityIdOrUnresolved(record, pkConstraint.fields);
+    const identity = extractEntityIdOrUnresolved(record, keyConstraint.fields);
     storePreFetchResult(nestedPreFetchResults, path, { before: { kind: 'captured', row: record }, identity, name });
     return;
   }
-  const key = primaryKeyNamedBy(where, pkConstraint);
-  const identity = key ? extractEntityIdentity(key, pkConstraint.fields) : UNRESOLVED_ENTITY_ID;
+  const key = rowKeyNamedBy(where, keyConstraint);
+  const identity = key ? extractEntityIdentity(key, keyConstraint.fields) : UNRESOLVED_ENTITY_ID;
   storePreFetchResult(
     nestedPreFetchResults,
     path,
@@ -199,9 +199,9 @@ export const storeIdentifiedRow = (
   path: string,
   where: Row,
   key: Row,
-  pkConstraint: UniqueConstraint,
+  keyConstraint: UniqueConstraint,
 ): void => {
-  const identity = extractEntityIdOrUnresolved(key, pkConstraint.fields);
+  const identity = extractEntityIdOrUnresolved(key, keyConstraint.fields);
   if (
     preFetchedResultFor(nestedPreFetchResults, path, identity) ||
     preFetchedResultNamedBy(nestedPreFetchResults, path, where)
@@ -225,21 +225,21 @@ export const storeUnreadRows = (
   nestedPreFetchResults: NestedPreFetchResults,
   path: string,
   wheres: readonly Row[] | undefined,
-  pkConstraint: UniqueConstraint | undefined,
+  keyConstraint: UniqueConstraint | undefined,
 ): void => {
-  if (wheres === undefined || pkConstraint === undefined) {
+  if (wheres === undefined || keyConstraint === undefined) {
     markPathUnread(nestedPreFetchResults, path);
     return;
   }
   for (const where of wheres) {
     if (preFetchedStateNamedBy(nestedPreFetchResults, path, where).kind !== 'captured') {
-      storeReadResult(nestedPreFetchResults, path, where, null, pkConstraint, false);
+      storeReadResult(nestedPreFetchResults, path, where, null, keyConstraint, false);
     }
   }
 };
 
 /**
- * Extracts the entity identity of `record` from its `pkFields`, or `UNRESOLVED_ENTITY_ID` when
+ * Extracts the entity identity of `record` from its `keyFields`, or `UNRESOLVED_ENTITY_ID` when
  * `record` is not an object or one of the fields is missing or null.
  *
  * @example
@@ -254,17 +254,17 @@ export const storeUnreadRows = (
  * // Returns: UNRESOLVED_ENTITY_ID
  * ```
  */
-export const extractEntityIdOrUnresolved = (record: unknown, pkFields: readonly string[]): EntityIdentityKey => {
+export const extractEntityIdOrUnresolved = (record: unknown, keyFields: readonly string[]): EntityIdentityKey => {
   if (!record || typeof record !== 'object') {
     return UNRESOLVED_ENTITY_ID;
   }
 
-  return extractEntityIdentity(record as Record<string, unknown>, pkFields);
+  return extractEntityIdentity(record as Record<string, unknown>, keyFields);
 };
 
 /**
  * Extracts the entity identity from `beforeRecord`, else from `whereClause` (unwrapped from Prisma's
- * compound-unique shape by `pkConstraint`), else returns `UNRESOLVED_ENTITY_ID`
+ * compound-unique shape by `keyConstraint`), else returns `UNRESOLVED_ENTITY_ID`
  *
  * @example
  * ```typescript
@@ -277,16 +277,16 @@ export const extractEntityIdOrUnresolved = (record: unknown, pkFields: readonly 
 export const extractEntityId = (
   beforeRecord: Record<string, unknown> | null,
   whereClause: Record<string, unknown> | null,
-  pkConstraint: UniqueConstraint,
+  keyConstraint: UniqueConstraint,
 ): EntityIdentityKey => {
   if (beforeRecord) {
-    const id = extractEntityIdOrUnresolved(beforeRecord, pkConstraint.fields);
+    const id = extractEntityIdOrUnresolved(beforeRecord, keyConstraint.fields);
     if (id !== UNRESOLVED_ENTITY_ID) return id;
   }
 
   if (whereClause) {
-    const unwrapped = unwrapCompoundWhere(whereClause, pkConstraint);
-    const id = extractEntityIdOrUnresolved(unwrapped, pkConstraint.fields);
+    const unwrapped = unwrapCompoundWhere(whereClause, keyConstraint);
+    const id = extractEntityIdOrUnresolved(unwrapped, keyConstraint.fields);
     if (id !== UNRESOLVED_ENTITY_ID) return id;
   }
 

@@ -152,7 +152,7 @@ interface SourcedRow {
 interface CollectionWalk {
   readonly input: NestedEventCollectionInput;
   readonly deps: NestedEventCollectorDependencies;
-  readonly pkConstraints: ReadonlyMap<string, UniqueConstraint | undefined>;
+  readonly keyConstraints: ReadonlyMap<string, UniqueConstraint | undefined>;
   /** The records each operation is attributed, in the order the walk reaches its rows */
   readonly records: Map<NestedOperationInfo, CollectedNestedRecord[]>;
   /** The rows already attributed at each path */
@@ -164,10 +164,10 @@ interface CollectionWalk {
 const toEvent = (
   record: CollectedNestedRecord,
   nestedOp: NestedOperationInfo,
-  pkConstraint: UniqueConstraint,
+  keyConstraint: UniqueConstraint,
 ): MutationEvent => ({
   model: record.relatedModel,
-  identity: identityOf(record.entity, pkConstraint.fields, { model: record.relatedModel, path: nestedOp.path }),
+  identity: identityOf(record.entity, keyConstraint.fields, { model: record.relatedModel, path: nestedOp.path }),
   action: record.action,
   before: record.beforeState,
   after: record.action === AUDIT_ACTION.DELETE ? record.rowAsWritten : record.entity,
@@ -253,8 +253,8 @@ const locatedBeforeState = (walk: CollectionWalk, path: string, row: Row, before
   if (before.kind !== 'none' || !read) {
     return before;
   }
-  const identity = extractEntityIdentity(row, read.pkFields);
-  const linked = read.rows.find((candidate) => extractEntityIdentity(candidate, read.pkFields) === identity);
+  const identity = extractEntityIdentity(row, read.keyFields);
+  const linked = read.rows.find((candidate) => extractEntityIdentity(candidate, read.keyFields) === identity);
   return linked ? { kind: 'captured', row: linked } : before;
 };
 
@@ -263,7 +263,7 @@ const attributeToManyRows = (
   relation: CandidateRelation,
   rows: readonly SourcedRow[],
 ): AttributedRow[] => {
-  const { path, candidates, pkFields } = relation;
+  const { path, candidates, keyFields } = relation;
   const writeSet = writeSetAt(walk, path);
   const ownTargets = ownTargetsOf(writeSet, candidates);
   const claimed = claimedAt(walk, path);
@@ -286,7 +286,7 @@ const attributeToManyRows = (
   const inserted = isInsertedAt(writeSet, walk.input.preExistingRows.get(path));
   const origin = { model: recorded.relatedModel, path };
   for (const { row, selection } of rows) {
-    if (claimed.has(row) || targetOf(row, writeSet.targets) || !inserted(identityOf(row, pkFields, origin))) {
+    if (claimed.has(row) || targetOf(row, writeSet.targets) || !inserted(identityOf(row, keyFields, origin))) {
       continue;
     }
     claimed.add(row);
@@ -398,19 +398,19 @@ interface CandidateRelation {
   readonly fieldName: string;
   readonly path: string;
   readonly isList: boolean;
-  readonly pkFields: readonly string[];
+  readonly keyFields: readonly string[];
   readonly candidates: NestedOperationInfo[];
 }
 
 const candidateRelations = (walk: CollectionWalk, attribution: RowAttribution | undefined): CandidateRelation[] => {
   const byPath = new Map<string, CandidateRelation>();
   for (const nestedOp of walk.input.nestedOperations) {
-    const pkConstraint = walk.pkConstraints.get(nestedOp.path);
+    const keyConstraint = walk.keyConstraints.get(nestedOp.path);
     // A delete or disconnect leaves no row under the parent to attribute
     if (
       isDelete(nestedOp) ||
       nestedOp.operation === 'disconnect' ||
-      !pkConstraint ||
+      !keyConstraint ||
       !isNestedUnder(nestedOp, attribution)
     ) {
       continue;
@@ -419,7 +419,7 @@ const candidateRelations = (walk: CollectionWalk, attribution: RowAttribution | 
       fieldName: nestedOp.fieldName,
       path: nestedOp.path,
       isList: nestedOp.isList,
-      pkFields: pkConstraint.fields,
+      keyFields: keyConstraint.fields,
       candidates: [],
     };
     byPath.set(nestedOp.path, relation);
@@ -490,7 +490,7 @@ const rowsNotInResult = async (
   if (!first) {
     return [];
   }
-  const { path, pkFields, candidates } = first.relation;
+  const { path, keyFields, candidates } = first.relation;
   const [operation] = candidates;
   const parents = below.map((entry, index) => parentAtPath(walk, entry, held[index] ?? []));
   if (parents.every((parent) => parent.absentTargets.length === 0 && !parent.insertsHidden)) {
@@ -510,7 +510,7 @@ const rowsNotInResult = async (
     schemaMetadata: deps.schemaMetadata,
     relatedModel,
     path,
-    pkFields,
+    keyFields,
     targets: writeSetAt(walk, path).targets,
     isInserted: isInsertedAt(writeSetAt(walk, path), input.preExistingRows.get(path)),
     parents,
@@ -591,12 +591,12 @@ const knownParentKey = (
   if (identity === TOP_LEVEL_ROW) {
     return topLevelKeyBeforeWrite(input, fields);
   }
-  const pkFields = getPrimaryKeyConstraint(deps.schemaMetadata, parentModel)?.fields;
-  if (identity === undefined || !pkFields || !fields.every((field) => pkFields.includes(field))) {
+  const keyFields = getPrimaryKeyConstraint(deps.schemaMetadata, parentModel)?.fields;
+  if (identity === undefined || !keyFields || !fields.every((field) => keyFields.includes(field))) {
     return undefined;
   }
-  const primaryKey = deserializeEntityId(identity, pkFields);
-  return primaryKey ? parentKeyOf(primaryKey, fields) : undefined;
+  const rowKey = deserializeEntityId(identity, keyFields);
+  return rowKey ? parentKeyOf(rowKey, fields) : undefined;
 };
 
 /**
@@ -684,10 +684,10 @@ const withLinkColumns = (record: CollectedNestedRecord, linkColumns: Row): Colle
 const collectDeleteRecordsWithLinkColumns = async (
   nestedOp: NestedOperationInfo,
   input: NestedEventCollectionInput,
-  pkConstraint: UniqueConstraint,
+  keyConstraint: UniqueConstraint,
   deps: NestedEventCollectorDependencies,
 ): Promise<CollectedNestedRecord[]> => {
-  const records = await collectDeleteRecords(nestedOp, input, pkConstraint, deps);
+  const records = await collectDeleteRecords(nestedOp, input, keyConstraint, deps);
   if (records.length === 0) {
     return records;
   }
@@ -711,14 +711,14 @@ const linkedRowNamedByAt = (
 const collectDeleteRecords = (
   nestedOp: NestedOperationInfo,
   input: NestedEventCollectionInput,
-  pkConstraint: UniqueConstraint,
+  keyConstraint: UniqueConstraint,
   deps: NestedEventCollectorDependencies,
 ): Promise<CollectedNestedRecord[]> =>
   nestedOp.isList
     ? collectToManyDeleteRecords(
         nestedOp,
         input.writeSets.get(nestedOp.path)?.targets ?? [],
-        pkConstraint,
+        keyConstraint,
         linkedRowNamedByAt(nestedOp, input, deps),
         deps.onUnresolvedDeleteEntityId,
       )
@@ -726,19 +726,19 @@ const collectDeleteRecords = (
         nestedOp,
         parentRowIdentityOf(nestedOp.parent, input.nestedPreFetchResults, deps.schemaMetadata),
         input.nestedPreFetchResults,
-        pkConstraint,
+        keyConstraint,
         deps.onUnresolvedDeleteEntityId,
       );
 
 const auditedIdentitiesAt = (walk: CollectionWalk, path: string): Set<string> => {
-  const pkFields = walk.pkConstraints.get(path)?.fields;
+  const keyFields = walk.keyConstraints.get(path)?.fields;
   const identities = new Set<string>();
   for (const [nestedOp, records] of walk.records) {
-    if (nestedOp.path !== path || !pkFields) {
+    if (nestedOp.path !== path || !keyFields) {
       continue;
     }
     for (const collected of records) {
-      identities.add(identityOf(collected.entity, pkFields, { model: nestedOp.relatedModel, path }));
+      identities.add(identityOf(collected.entity, keyFields, { model: nestedOp.relatedModel, path }));
     }
   }
   return identities;
@@ -759,13 +759,13 @@ export const collectNestedEvents = async (
     return [];
   }
 
-  const pkConstraints = new Map(
+  const keyConstraints = new Map(
     nestedOperations.map((op) => [op.path, getPrimaryKeyConstraint(schemaMetadata, op.relatedModel)]),
   );
   const walk: CollectionWalk = {
     input,
     deps,
-    pkConstraints,
+    keyConstraints,
     records: new Map(),
     claimed: new Map(),
     assigned: new Set(),
@@ -785,8 +785,8 @@ export const collectNestedEvents = async (
 
   const events: MutationEvent[] = [];
   for (const nestedOp of nestedOperations) {
-    const pkConstraint = pkConstraints.get(nestedOp.path);
-    if (!pkConstraint) {
+    const keyConstraint = keyConstraints.get(nestedOp.path);
+    if (!keyConstraint) {
       nestedLog(
         'model=%s has no primary key; skipping nested records at path=%s',
         nestedOp.relatedModel,
@@ -795,9 +795,9 @@ export const collectNestedEvents = async (
       continue;
     }
     const records = isDelete(nestedOp)
-      ? await collectDeleteRecordsWithLinkColumns(nestedOp, input, pkConstraint, deps)
+      ? await collectDeleteRecordsWithLinkColumns(nestedOp, input, keyConstraint, deps)
       : [...(walk.records.get(nestedOp) ?? []), ...(linkRecords.get(nestedOp) ?? [])];
-    events.push(...records.map((collected) => toEvent(collected, nestedOp, pkConstraint)));
+    events.push(...records.map((collected) => toEvent(collected, nestedOp, keyConstraint)));
   }
 
   return events;

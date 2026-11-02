@@ -217,11 +217,11 @@ describe('the entity id the audit stores for a key value', () => {
     ['Bytes', { digest: Buffer.from([0, 255]) }, ['digest']],
     ['a Decimal', { amount: new Decimal('1.25') }, ['amount']],
     ['a composite key with a Date', { tenant: 'a', at: new Date('2026-01-02T03:04:05.678Z') }, ['tenant', 'at']],
-  ] as const)('is the same for a row keyed by %s and for the entity rebuilt from its identity', (_, row, pkFields) => {
-    const rebuilt = deserializeEntityId(extractEntityIdentity(row, pkFields), pkFields);
+  ] as const)('is the same for a row keyed by %s and for the entity rebuilt from its identity', (_, row, keyFields) => {
+    const rebuilt = deserializeEntityId(extractEntityIdentity(row, keyFields), keyFields);
 
     expect(rebuilt).not.toBeNull();
-    for (const field of pkFields) {
+    for (const field of keyFields) {
       expect(normalizeId((rebuilt as Record<string, unknown>)[field])).toBe(
         normalizeId((row as Record<string, unknown>)[field]),
       );

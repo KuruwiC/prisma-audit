@@ -462,30 +462,30 @@ export const getPrimaryKeyConstraint = (
 
 /**
  * Rebuild the primary-key fields of a record from its serialized entity identity: the value
- * itself for a single-field key, a JSON array in `pkFields` order for a composite key.
+ * itself for a single-field key, a JSON array in `keyFields` order for a composite key.
  *
  * @returns The primary-key fields, or `null` when the full key cannot be recovered: the identity
  *   is {@link UNRESOLVED_ENTITY_ID}, or a composite identity is not a JSON array of
- *   `pkFields.length` elements. A partial key is never returned, since it would read as a complete
+ *   `keyFields.length` elements. A partial key is never returned, since it would read as a complete
  *   identity.
  */
 export const deserializeEntityId = (
   entityId: EntityIdentityKey,
-  pkFields: readonly string[],
+  keyFields: readonly string[],
 ): Record<string, unknown> | null => {
   if (entityId === UNRESOLVED_ENTITY_ID) return null;
 
-  if (pkFields.length === 1) {
-    return { [pkFields[0] as string]: entityId };
+  if (keyFields.length === 1) {
+    return { [keyFields[0] as string]: entityId };
   }
   try {
     const parsed: unknown = JSON.parse(entityId);
-    if (!Array.isArray(parsed) || parsed.length !== pkFields.length) return null;
-    const pk: Record<string, unknown> = {};
-    for (let i = 0; i < pkFields.length; i++) {
-      pk[pkFields[i] as string] = parsed[i];
+    if (!Array.isArray(parsed) || parsed.length !== keyFields.length) return null;
+    const key: Record<string, unknown> = {};
+    for (let i = 0; i < keyFields.length; i++) {
+      key[keyFields[i] as string] = parsed[i];
     }
-    return pk;
+    return key;
   } catch {
     // Composite PK but not valid JSON — cannot reconstruct
     return null;

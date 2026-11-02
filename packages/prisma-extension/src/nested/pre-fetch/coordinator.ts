@@ -61,7 +61,7 @@ import {
   extractEntityIdOrUnresolved,
   markPathUnread,
   preFetchedResultUnder,
-  primaryKeyNamedBy,
+  rowKeyNamedBy,
   storeIdentifiedRow,
   storePreFetchResult,
   storeReadResult,
@@ -224,7 +224,7 @@ export const preFetchNestedRecordsBeforeOperation = async (
     sortedOperations.map((op) => ({ path: op.path, depth: op.path.split('.').length })),
   );
 
-  const pkConstraintCache = new Map<string, UniqueConstraint | undefined>();
+  const keyConstraintCache = new Map<string, UniqueConstraint | undefined>();
 
   const context: NestedPreFetchContext = {
     prismaClient,
@@ -238,11 +238,11 @@ export const preFetchNestedRecordsBeforeOperation = async (
     shouldFetchBefore,
     auditedOmittedFields,
     onPreFetchFailure,
-    resolvePkConstraint: (model) => {
-      if (!pkConstraintCache.has(model)) {
-        pkConstraintCache.set(model, getPrimaryKeyConstraint(schemaMetadata, model));
+    resolveKeyConstraint: (model) => {
+      if (!keyConstraintCache.has(model)) {
+        keyConstraintCache.set(model, getPrimaryKeyConstraint(schemaMetadata, model));
       }
-      return pkConstraintCache.get(model);
+      return keyConstraintCache.get(model);
     },
     parentOperationsNotPreFetched: (path) => {
       const parentPath = parentPathOf(path);
@@ -354,7 +354,7 @@ interface NestedPreFetchContext {
   shouldFetchBefore: ShouldFetchBefore;
   auditedOmittedFields: AuditedOmittedFields;
   onPreFetchFailure: FailureSink['notify'] | undefined;
-  resolvePkConstraint: (model: string) => UniqueConstraint | undefined;
+  resolveKeyConstraint: (model: string) => UniqueConstraint | undefined;
   /** Operations at the parent path of `path` that were not pre-fetched; none for a direct child */
   parentOperationsNotPreFetched: (path: string) => NestedOperationInfo[];
 }
@@ -363,7 +363,7 @@ interface NestedRelation {
   readonly nestedOp: NestedOperationInfo;
   readonly field: RelationField;
   readonly parentModel: string;
-  readonly pkConstraint: UniqueConstraint;
+  readonly keyConstraint: UniqueConstraint;
 }
 
 /**
@@ -378,7 +378,7 @@ const recordFailedRead = async (
   params: unknown,
   error: unknown,
 ): Promise<void> => {
-  storeUnreadRows(context.preFetchResults, nestedOp.path, wheres, context.resolvePkConstraint(nestedOp.relatedModel));
+  storeUnreadRows(context.preFetchResults, nestedOp.path, wheres, context.resolveKeyConstraint(nestedOp.relatedModel));
   preFetchLog('pre-fetch failed: path=%s error=%o', nestedOp.path, error);
   await reportNestedPreFetchFailure(context.onPreFetchFailure, nestedOp, params, error);
 };
@@ -393,7 +393,7 @@ const resolveNestedRelation = (
   context: NestedPreFetchContext,
   nestedOp: NestedOperationInfo,
 ): NestedRelation | undefined => {
-  const { modelName, schemaMetadata, resolvePkConstraint } = context;
+  const { modelName, schemaMetadata, resolveKeyConstraint } = context;
 
   const parentModel = resolveParentModelFromPath(nestedOp.path, modelName, schemaMetadata);
   const field = findRelationField(schemaMetadata, parentModel, nestedOp.fieldName);
@@ -402,13 +402,13 @@ const resolveNestedRelation = (
     return undefined;
   }
 
-  const pkConstraint = resolvePkConstraint(nestedOp.relatedModel);
-  if (!pkConstraint) {
+  const keyConstraint = resolveKeyConstraint(nestedOp.relatedModel);
+  if (!keyConstraint) {
     preFetchLog('model has no primary key, skipping pre-fetch: model=%s path=%s', nestedOp.relatedModel, nestedOp.path);
     return undefined;
   }
 
-  return { nestedOp, field, parentModel, pkConstraint };
+  return { nestedOp, field, parentModel, keyConstraint };
 };
 
 const preFetchNestedOperation = async (
@@ -445,7 +445,7 @@ const preFetchNestedOperation = async (
   );
 
   if (nestedOp.operation === 'connectOrCreate') {
-    await handleConnectOrCreate(context, nestedOp, relatedModelClient, relation.pkConstraint);
+    await handleConnectOrCreate(context, nestedOp, relatedModelClient, relation.keyConstraint);
     return;
   }
 
@@ -467,13 +467,13 @@ const handleConnectOrCreate = async (
   context: NestedPreFetchContext,
   nestedOp: NestedOperationInfo,
   relatedModelClient: PreFetchModelClient,
-  pkConstraint: UniqueConstraint,
+  keyConstraint: UniqueConstraint,
 ): Promise<void> => {
   await readEachTarget(
     namedTargets(nestedOp.operation, nestedOp.data),
     async (where) => {
       const beforeRecord = await relatedModelClient.findUnique({ where });
-      storeReadResult(context.preFetchResults, nestedOp.path, where, beforeRecord, pkConstraint);
+      storeReadResult(context.preFetchResults, nestedOp.path, where, beforeRecord, keyConstraint);
       preFetchLog('connectOrCreate stored: path=%s found=%s', nestedOp.path, beforeRecord !== null);
     },
     targetReadFailureHandler(context, nestedOp),
@@ -489,12 +489,12 @@ const storeToOneResults = (
   preFetchResults: NestedPreFetchResults,
   path: string,
   results: readonly PreFetchOneToOneResult[],
-  pkFields: readonly string[],
+  keyFields: readonly string[],
   keyColumnsOnly: boolean,
 ): void => {
   for (const { parent, beforeRecord } of results) {
     const name = { by: 'parentRow', parent } as const;
-    const identity = extractEntityIdOrUnresolved(beforeRecord, pkFields);
+    const identity = extractEntityIdOrUnresolved(beforeRecord, keyFields);
     if (!keyColumnsOnly) {
       storePreFetchResult(preFetchResults, path, { before: beforeStateOf(beforeRecord), identity, name });
     } else if (!preFetchedResultUnder(preFetchResults, path, parent)) {
@@ -515,15 +515,15 @@ const handleOneToOneRelation = async (
   relatedModelClient: PreFetchModelClient,
   keyColumns?: Record<string, true>,
 ): Promise<void> => {
-  const { topLevelWhere, topLevelModelClient, preFetchResults, resolvePkConstraint } = context;
-  const { nestedOp, field, parentModel, pkConstraint } = relation;
-  const parentPkConstraint = resolvePkConstraint(parentModel);
+  const { topLevelWhere, topLevelModelClient, preFetchResults, resolveKeyConstraint } = context;
+  const { nestedOp, field, parentModel, keyConstraint } = relation;
+  const parentKeyConstraint = resolveKeyConstraint(parentModel);
   const { results, parentsKnown } = await preFetchOneToOneRelation({
     path: nestedOp.path,
     link: resolveToOneRelationLink(context.schemaMetadata, field),
-    parentPkFields: parentPkConstraint?.fields ?? [],
-    parentKeysFromWhere: parentPkConstraint
-      ? parentKeysFromOperationWheres(context.parentOperationsNotPreFetched(nestedOp.path), parentPkConstraint)
+    parentKeyFields: parentKeyConstraint?.fields ?? [],
+    parentKeysFromWhere: parentKeyConstraint
+      ? parentKeysFromOperationWheres(context.parentOperationsNotPreFetched(nestedOp.path), parentKeyConstraint)
       : [],
     topLevelWhere,
     topLevelModelClient,
@@ -533,7 +533,7 @@ const handleOneToOneRelation = async (
     ...(keyColumns ? { select: keyColumns } : {}),
   });
 
-  storeToOneResults(preFetchResults, nestedOp.path, results, pkConstraint.fields, keyColumns !== undefined);
+  storeToOneResults(preFetchResults, nestedOp.path, results, keyConstraint.fields, keyColumns !== undefined);
   if (!parentsKnown) {
     markPathUnread(preFetchResults, nestedOp.path);
   }
@@ -573,8 +573,8 @@ const keyColumnsOf = (
   relation: NestedRelation,
   childRelations: ReadonlySet<string>,
 ): Record<string, true> => {
-  const { nestedOp, pkConstraint } = relation;
-  const fields = new Set(pkConstraint.fields);
+  const { nestedOp, keyConstraint } = relation;
+  const fields = new Set(keyConstraint.fields);
   for (const fieldName of childRelations) {
     const childField = findRelationField(context.schemaMetadata, nestedOp.relatedModel, fieldName);
     if (!childField || childField.isList) {
@@ -602,10 +602,10 @@ const identifyRowsNamedByElements = async (
   relatedModelClient: PreFetchModelClient,
   keyColumns: Record<string, true>,
 ): Promise<void> => {
-  const { nestedOp, pkConstraint } = relation;
-  const linksByPrimaryKey = Object.keys(keyColumns).length === pkConstraint.fields.length;
+  const { nestedOp, keyConstraint } = relation;
+  const linksByRowKey = Object.keys(keyColumns).length === keyConstraint.fields.length;
   const targets = namedTargets(nestedOp.operation, nestedOp.data).filter(
-    ({ where }) => !(linksByPrimaryKey && primaryKeyNamedBy(where, pkConstraint)),
+    ({ where }) => !(linksByRowKey && rowKeyNamedBy(where, keyConstraint)),
   );
   await readEachTarget(
     targets,
@@ -613,7 +613,7 @@ const identifyRowsNamedByElements = async (
       const row = await relatedModelClient.findUnique({ where, select: keyColumns });
       preFetchLog('key columns of a to-many update row: path=%s found=%s', nestedOp.path, row !== null);
       if (row) {
-        storeIdentifiedRow(context.preFetchResults, nestedOp.path, where, row, pkConstraint);
+        storeIdentifiedRow(context.preFetchResults, nestedOp.path, where, row, keyConstraint);
       }
     },
     targetReadFailureHandler(context, nestedOp),
@@ -650,11 +650,11 @@ const resolveToManyScopeInput = (
   context: NestedPreFetchContext,
   relation: NestedRelation,
 ): ToManyScopeInput | undefined => {
-  const { topLevelWhere, topLevelModelClient, preFetchResults, resolvePkConstraint } = context;
-  const { nestedOp, field, parentModel, pkConstraint } = relation;
+  const { topLevelWhere, topLevelModelClient, preFetchResults, resolveKeyConstraint } = context;
+  const { nestedOp, field, parentModel, keyConstraint } = relation;
 
-  const parentPkConstraint = resolvePkConstraint(parentModel);
-  if (!parentPkConstraint) {
+  const parentKeyConstraint = resolveKeyConstraint(parentModel);
+  if (!parentKeyConstraint) {
     preFetchLog('parent model has no primary key, skipping pre-fetch: model=%s path=%s', parentModel, nestedOp.path);
     return undefined;
   }
@@ -662,15 +662,15 @@ const resolveToManyScopeInput = (
   return {
     path: nestedOp.path,
     data: nestedOp.data,
-    scope: resolveToManyRelationScope(context.schemaMetadata, field, parentModel, parentPkConstraint.fields),
-    parentPkFields: parentPkConstraint.fields,
+    scope: resolveToManyRelationScope(context.schemaMetadata, field, parentModel, parentKeyConstraint.fields),
+    parentKeyFields: parentKeyConstraint.fields,
     topLevelWhere,
     topLevelModelClient,
     preFetchResults,
-    pkConstraint,
+    keyConstraint,
     parentKeysFromWhere: parentKeysFromOperationWheres(
       context.parentOperationsNotPreFetched(nestedOp.path),
-      parentPkConstraint,
+      parentKeyConstraint,
     ),
   };
 };

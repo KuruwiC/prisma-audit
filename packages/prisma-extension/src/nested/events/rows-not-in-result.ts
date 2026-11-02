@@ -20,7 +20,7 @@
 import type { SchemaMetadata } from '../../schema/types.js';
 import { matchesUniqueWhere, uniqueWhereAsFilter } from '../../utils/compound-where.js';
 import { nestedLog } from '../../utils/debug.js';
-import { extractEntityIdentity, primaryKeyOf } from '../../utils/id-generation.js';
+import { extractEntityIdentity, rowKeyOf } from '../../utils/id-generation.js';
 import type { EntityIdentityKey } from '../../utils/identity-key.js';
 import type { PreFetchListClient } from '../pre-fetch/model-client.js';
 import { parentKeyOf } from '../pre-fetch/parent-rows.js';
@@ -45,7 +45,7 @@ export interface RowsNotInResultInput {
   readonly schemaMetadata: SchemaMetadata;
   readonly relatedModel: string;
   readonly path: string;
-  readonly pkFields: readonly string[];
+  readonly keyFields: readonly string[];
   /** Every target at the path */
   readonly targets: readonly NestedWriteTarget[];
   /** Whether the row a key names is one the operations at the path inserted */
@@ -62,7 +62,7 @@ const readHiddenInsertedKeys = async (
   path: ToManyPath,
   parents: readonly ParentAtPath[],
 ): Promise<Row[]> => {
-  const { client, pkFields, targets, isInserted } = input;
+  const { client, keyFields, targets, isInserted } = input;
   const { scope } = path;
   const parentScopes = parents.flatMap((parent) => {
     const key = parentKeyOf(parent.row, scope.parentFields);
@@ -71,26 +71,26 @@ const readHiddenInsertedKeys = async (
   if (parentScopes.length === 0) {
     return [];
   }
-  const select = Object.fromEntries(pkFields.map((field) => [field, true]));
+  const select = Object.fromEntries(keyFields.map((field) => [field, true]));
   const keys = await client.findMany({ where: { OR: parentScopes }, select });
   const held = new Set(
-    input.parents.flatMap((parent) => parent.rows.map((row) => extractEntityIdentity(row, pkFields))),
+    input.parents.flatMap((parent) => parent.rows.map((row) => extractEntityIdentity(row, keyFields))),
   );
   return keys.filter((key) => {
-    const identity = extractEntityIdentity(key, pkFields);
+    const identity = extractEntityIdentity(key, keyFields);
     return (
       !held.has(identity) &&
       isInserted(identity) &&
       !targets.some(
         (target) =>
-          target.locator.by === 'primaryKey' && extractEntityIdentity(target.locator.where, pkFields) === identity,
+          target.locator.by === 'rowKey' && extractEntityIdentity(target.locator.where, keyFields) === identity,
       )
     );
   });
 };
 
 const locatorFilter = (target: NestedWriteTarget, fieldNames: ReadonlySet<string>): Row =>
-  target.locator.by === 'primaryKey' ? target.locator.where : uniqueWhereAsFilter(target.locator.where, fieldNames);
+  target.locator.by === 'rowKey' ? target.locator.where : uniqueWhereAsFilter(target.locator.where, fieldNames);
 
 /** Whether `row` hangs under `parent`, by the foreign key it holds or the back-relation keys read with it */
 const hangsUnder = (row: Row, parent: Row, path: ToManyPath): boolean => {
@@ -130,7 +130,7 @@ const includeOf = (input: RowsNotInResultInput, path: ToManyPath | undefined, hi
 
 /** The rows each parent at the path wrote that the result does not hold, in the order of `input.parents` */
 export const readRowsNotInResult = async (input: RowsNotInResultInput): Promise<Row[][]> => {
-  const { client, schemaMetadata, relatedModel, pkFields, parents } = input;
+  const { client, schemaMetadata, relatedModel, keyFields, parents } = input;
   const hidden = parents.filter((parent) => parent.insertsHidden);
   const path = hidden.length > 0 ? input.resolvePath() : undefined;
   const insertedKeys = path ? await readHiddenInsertedKeys(input, path, hidden) : [];
@@ -142,20 +142,20 @@ export const readRowsNotInResult = async (input: RowsNotInResultInput): Promise<
   const fieldNames = new Set(schemaMetadata.getAllFields(relatedModel).map((field) => field.name));
   const filters = [
     ...absentTargets.map((target) => locatorFilter(target, fieldNames)),
-    ...insertedKeys.map((key) => primaryKeyOf(key, pkFields)),
+    ...insertedKeys.map((key) => rowKeyOf(key, keyFields)),
   ];
   const include = includeOf(input, path, insertedKeys.length > 0 ? hidden : []);
   const rows = await client.findMany({ where: { OR: filters }, ...(include ? { include } : {}) });
   nestedLog('read %d rows the result does not hold at path=%s', rows.length, input.path);
 
-  const inserted = new Set(insertedKeys.map((key) => extractEntityIdentity(key, pkFields)));
+  const inserted = new Set(insertedKeys.map((key) => extractEntityIdentity(key, keyFields)));
   return parents.map((parent) =>
     rows.flatMap((row) => {
       const ownTarget = parent.absentTargets.some((target) => matchesUniqueWhere(row, target.locator.where));
       const insertedHere =
         path !== undefined &&
         parent.insertsHidden &&
-        inserted.has(extractEntityIdentity(row, pkFields)) &&
+        inserted.has(extractEntityIdentity(row, keyFields)) &&
         hangsUnder(row, parent.row, path);
       if (!ownTarget && !insertedHere) {
         return [];

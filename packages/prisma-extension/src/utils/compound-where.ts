@@ -14,18 +14,18 @@ import { isRecord } from './is-record.js';
  * scalar record needed to derive an entityId from a WHERE clause.
  *
  * `findUnique` requires a composite primary key to be addressed through a single
- * generated key on `<Model>WhereUniqueInput` — `pkConstraint.name` when the key has an
+ * generated key on `<Model>WhereUniqueInput` — `keyConstraint.name` when the key has an
  * explicit name (`@@id([a, b], name: "custom")`), or `fields.join('_')` (Prisma's default
  * naming) otherwise. A single-field PK, or a WHERE clause that isn't wrapped this way, is
  * returned unchanged.
  */
 export const unwrapCompoundWhere = (
   whereClause: Record<string, unknown>,
-  pkConstraint?: UniqueConstraint,
+  keyConstraint?: UniqueConstraint,
 ): Record<string, unknown> => {
-  if (!pkConstraint || pkConstraint.fields.length <= 1) return whereClause;
+  if (!keyConstraint || keyConstraint.fields.length <= 1) return whereClause;
 
-  const compoundKey = pkConstraint.name ?? pkConstraint.fields.join('_');
+  const compoundKey = keyConstraint.name ?? keyConstraint.fields.join('_');
   return (whereClause[compoundKey] as Record<string, unknown> | undefined) ?? whereClause;
 };
 

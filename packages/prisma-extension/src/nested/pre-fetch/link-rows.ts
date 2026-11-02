@@ -58,7 +58,7 @@ export interface LinkWrite {
 /** What was read before the write for the link writes at one path */
 export interface LinkPathRead {
   readonly relatedModel: string;
-  readonly pkFields: readonly string[];
+  readonly keyFields: readonly string[];
   readonly link: RelatedSideLink;
   readonly writes: readonly LinkWrite[];
   /** The rows the read found, whole: their before state */
@@ -148,8 +148,8 @@ const readParentKeys = async (
   path: string,
   { link, writes }: PathWrites,
 ): Promise<Map<NestedOperationInfo, Row>> => {
-  const parentPk = getPrimaryKeyConstraint(deps.schemaMetadata, link.parentModel);
-  if (!parentPk) {
+  const parentKeyConstraint = getPrimaryKeyConstraint(deps.schemaMetadata, link.parentModel);
+  if (!parentKeyConstraint) {
     return new Map();
   }
   const parentPath = parentPathOf(path);
@@ -160,11 +160,11 @@ const readParentKeys = async (
   const { rows } = await resolveParentRows({
     path,
     parentFields: link.references,
-    parentPkFields: parentPk.fields,
+    parentKeyFields: parentKeyConstraint.fields,
     topLevelWhere: input.topLevelWhere,
     topLevelModelClient: getPreFetchModelClient(input.prismaClient, input.modelName, deps.auditedOmittedFields),
     preFetchResults: input.nestedPreFetchResults,
-    parentKeysFromWhere: parentKeysFromOperationWheres(notPreFetched, parentPk),
+    parentKeysFromWhere: parentKeysFromOperationWheres(notPreFetched, parentKeyConstraint),
   });
   const keys = new Map<NestedOperationInfo, Row>();
   for (const { operation } of writes) {
@@ -205,17 +205,17 @@ const readPath = async (
 ): Promise<LinkPathRead | undefined> => {
   const { link, writes } = pathWrites;
   const [first] = writes;
-  const pkFields = first
+  const keyFields = first
     ? getPrimaryKeyConstraint(deps.schemaMetadata, first.operation.relatedModel)?.fields
     : undefined;
   const client = first
     ? getPreFetchListClient(input.prismaClient, first.operation.relatedModel, deps.auditedOmittedFields)
     : undefined;
-  if (!first || !pkFields || !client) {
+  if (!first || !keyFields || !client) {
     return undefined;
   }
   const relatedModel = first.operation.relatedModel;
-  const base = { relatedModel, pkFields, link, writes };
+  const base = { relatedModel, keyFields, link, writes };
   try {
     assertReferencesComplete(link);
     const parentKeys = await readParentKeys(input, deps, path, pathWrites);

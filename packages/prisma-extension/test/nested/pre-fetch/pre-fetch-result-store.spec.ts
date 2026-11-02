@@ -12,7 +12,7 @@ import {
   preFetchedResultNamedBy,
   preFetchedStateNamedBy,
   preFetchedStateUnder,
-  primaryKeyNamedBy,
+  rowKeyNamedBy,
   storeIdentifiedRow,
   storePreFetchResult,
   storeReadResult,
@@ -319,25 +319,25 @@ describe('extractEntityId', () => {
   });
 });
 
-describe('primaryKeyNamedBy', () => {
+describe('rowKeyNamedBy', () => {
   it('gives the key fields of a WHERE that names them', () => {
-    expect(primaryKeyNamedBy({ id: 'p1' }, pk)).toEqual({ id: 'p1' });
+    expect(rowKeyNamedBy({ id: 'p1' }, pk)).toEqual({ id: 'p1' });
   });
 
   it('leaves out the fields of the WHERE that are not part of the key', () => {
-    expect(primaryKeyNamedBy({ id: 'p1', slug: 'first' }, pk)).toEqual({ id: 'p1' });
+    expect(rowKeyNamedBy({ id: 'p1', slug: 'first' }, pk)).toEqual({ id: 'p1' });
   });
 
   it('unwraps the compound-unique shape of a composite key', () => {
-    expect(primaryKeyNamedBy({ postId_tagId: { postId: 'a', tagId: '1' } }, compositePk)).toEqual({
+    expect(rowKeyNamedBy({ postId_tagId: { postId: 'a', tagId: '1' } }, compositePk)).toEqual({
       postId: 'a',
       tagId: '1',
     });
   });
 
   it('is undefined when the WHERE does not name every key field with a value', () => {
-    expect(primaryKeyNamedBy({ slug: 'first' }, pk)).toBeUndefined();
-    expect(primaryKeyNamedBy({ postId: 'a' }, compositePk)).toBeUndefined();
-    expect(primaryKeyNamedBy({ id: null }, pk)).toBeUndefined();
+    expect(rowKeyNamedBy({ slug: 'first' }, pk)).toBeUndefined();
+    expect(rowKeyNamedBy({ postId: 'a' }, compositePk)).toBeUndefined();
+    expect(rowKeyNamedBy({ id: null }, pk)).toBeUndefined();
   });
 });

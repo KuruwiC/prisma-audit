@@ -35,7 +35,7 @@ import type { NestedWriteTarget } from './write-set.js';
 export interface UnresolvedDeleteEntityId {
   relatedModel: string;
   entityId: string | undefined;
-  pkFields: string[];
+  keyFields: string[];
   error: Error;
 }
 
@@ -49,7 +49,7 @@ export type UnresolvedDeleteEntityIdReporter = (info: UnresolvedDeleteEntityId) 
 const reportUnresolvedEntityId = async (
   relatedModel: string,
   entityId: EntityIdentityKey,
-  pkFields: string[],
+  keyFields: string[],
   onUnresolvedDeleteEntityId: UnresolvedDeleteEntityIdReporter | undefined,
 ): Promise<void> => {
   if (!onUnresolvedDeleteEntityId) return;
@@ -59,10 +59,10 @@ const reportUnresolvedEntityId = async (
   await onUnresolvedDeleteEntityId({
     relatedModel,
     entityId: rawEntityId,
-    pkFields,
+    keyFields,
     error: new Error(
       `[@prisma-audit] Cannot resolve the primary key of a deleted ${relatedModel} record ` +
-        `(entityId=${renderedEntityId}, pkFields=[${pkFields.join(', ')}]). Skipping this delete's audit log entry ` +
+        `(entityId=${renderedEntityId}, keyFields=[${keyFields.join(', ')}]). Skipping this delete's audit log entry ` +
         'instead of recording a fabricated identity.',
     ),
   });
@@ -85,7 +85,7 @@ const reportUnresolvedEntityId = async (
  * identity — an idResolver reading fields off a partial entity could produce a plausible but
  * fabricated id — and reported through `onUnresolvedDeleteEntityId` when provided.
  *
- * @param pkConstraint - The deleted model's primary key. The fallback reads the constraint's
+ * @param keyConstraint - The deleted model's primary key. The fallback reads the constraint's
  *   declared name as well as its fields, because a named composite key wraps the WHERE clause
  *   under that name.
  */
@@ -93,12 +93,12 @@ export const collectToOneDeleteRecords = async (
   nestedOp: NestedOperationInfo,
   parent: ParentRowIdentity | undefined,
   nestedPreFetchResults: NestedPreFetchResults | undefined,
-  pkConstraint: UniqueConstraint,
+  keyConstraint: UniqueConstraint,
   onUnresolvedDeleteEntityId?: UnresolvedDeleteEntityIdReporter,
 ): Promise<CollectedNestedRecord[]> => {
   nestedLog('delete operation detected, collecting targets');
 
-  const pkFields = pkConstraint.fields;
+  const keyFields = keyConstraint.fields;
   const preFetched = preFetchedResultUnder(nestedPreFetchResults, nestedOp.path, parent);
 
   if (preFetched) {
@@ -114,29 +114,29 @@ export const collectToOneDeleteRecords = async (
 
   if (nestedPreFetchResults?.get(nestedOp.path)?.unread) {
     nestedLog('the deleted row at path=%s could not be read; skipping delete audit entry', nestedOp.path);
-    await reportUnresolvedEntityId(nestedOp.relatedModel, UNRESOLVED_ENTITY_ID, pkFields, onUnresolvedDeleteEntityId);
+    await reportUnresolvedEntityId(nestedOp.relatedModel, UNRESOLVED_ENTITY_ID, keyFields, onUnresolvedDeleteEntityId);
     return [];
   }
 
   nestedLog('no pre-fetch results for path=%s, falling back to operation data', nestedOp.path);
 
-  const entityId = extractDeleteOperationEntityId(nestedOp.data, pkConstraint);
+  const entityId = extractDeleteOperationEntityId(nestedOp.data, keyConstraint);
   if (!entityId) {
     nestedLog('could not extract entity ID from delete operation data');
     // No raw entityId exists here; report the identity as never determined so the observer
     // can tell this apart from a malformed composite key, which is reported with its raw value.
-    await reportUnresolvedEntityId(nestedOp.relatedModel, UNRESOLVED_ENTITY_ID, pkFields, onUnresolvedDeleteEntityId);
+    await reportUnresolvedEntityId(nestedOp.relatedModel, UNRESOLVED_ENTITY_ID, keyFields, onUnresolvedDeleteEntityId);
     return [];
   }
 
-  const entity = deserializeEntityId(entityId, pkFields);
+  const entity = deserializeEntityId(entityId, keyFields);
   if (entity === null) {
     nestedLog(
       'cannot reconstruct composite primary key for entityId=%s (path=%s); skipping delete audit entry',
       entityId,
       nestedOp.path,
     );
-    await reportUnresolvedEntityId(nestedOp.relatedModel, entityId, pkFields, onUnresolvedDeleteEntityId);
+    await reportUnresolvedEntityId(nestedOp.relatedModel, entityId, keyFields, onUnresolvedDeleteEntityId);
     return [];
   }
 
@@ -177,15 +177,15 @@ const deleteTargetBeforeState = (
 const deletedEntityOf = (
   target: NestedWriteTarget,
   before: BeforeState,
-  pkConstraint: UniqueConstraint,
+  keyConstraint: UniqueConstraint,
 ): Record<string, unknown> | null => {
   if (before.kind === 'captured') {
     return before.row;
   }
-  if (target.locator.by === 'primaryKey') {
+  if (target.locator.by === 'rowKey') {
     return target.locator.where;
   }
-  return deserializeEntityId(extractEntityId(null, target.locator.where, pkConstraint), pkConstraint.fields);
+  return deserializeEntityId(extractEntityId(null, target.locator.where, keyConstraint), keyConstraint.fields);
 };
 
 /**
@@ -202,7 +202,7 @@ const deletedEntityOf = (
 export const collectToManyDeleteRecords = async (
   nestedOp: NestedOperationInfo,
   targets: readonly NestedWriteTarget[],
-  pkConstraint: UniqueConstraint,
+  keyConstraint: UniqueConstraint,
   linkedRowNamedBy: LinkedRowNamedBy | undefined,
   onUnresolvedDeleteEntityId?: UnresolvedDeleteEntityIdReporter,
 ): Promise<CollectedNestedRecord[]> => {
@@ -212,13 +212,13 @@ export const collectToManyDeleteRecords = async (
       continue;
     }
     const before = deleteTargetBeforeState(target, linkedRowNamedBy);
-    const entity = deletedEntityOf(target, before, pkConstraint);
+    const entity = deletedEntityOf(target, before, keyConstraint);
     if (entity === null) {
       nestedLog('cannot resolve primary key of a delete target (path=%s); skipping delete audit entry', nestedOp.path);
       await reportUnresolvedEntityId(
         nestedOp.relatedModel,
         UNRESOLVED_ENTITY_ID,
-        pkConstraint.fields,
+        keyConstraint.fields,
         onUnresolvedDeleteEntityId,
       );
       continue;

@@ -20,7 +20,7 @@ import type { RelationField, SchemaMetadata, UniqueConstraint } from '../../sche
 import { NO_BEFORE_STATE } from '../../utils/before-state.js';
 import { uniqueWhereAsFilter } from '../../utils/compound-where.js';
 import { preFetchLog } from '../../utils/debug.js';
-import { extractEntityIdentity, primaryKeyOf } from '../../utils/id-generation.js';
+import { extractEntityIdentity, rowKeyOf } from '../../utils/id-generation.js';
 import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID } from '../../utils/identity-key.js';
 import type { PreFetchListClient, PreFetchModelClient, PreFetchRecord } from './model-client.js';
 import { parentKeyOf, type ResolveParentRowsInput, resolveParentRows } from './parent-rows.js';
@@ -52,7 +52,7 @@ export const resolveToManyRelationScope = (
   schemaMetadata: SchemaMetadata,
   field: RelationField,
   parentModelName: string,
-  parentPkFields: readonly string[],
+  parentKeyFields: readonly string[],
 ): ToManyRelationScope => {
   const { relationName } = field;
   const backField = findBackRelationField(
@@ -74,7 +74,7 @@ export const resolveToManyRelationScope = (
   return {
     backField: backField.name,
     filter: backField.isList ? 'some' : 'is',
-    parentFields: parentPkFields,
+    parentFields: parentKeyFields,
     ...(foreignKey ? { foreignKey } : {}),
   };
 };
@@ -99,7 +99,7 @@ export interface ToManyScopeInput extends Omit<ResolveParentRowsInput, 'parentFi
   data: unknown;
   scope: ToManyRelationScope;
   /** The related model's primary key (fields + the name the schema gives it) */
-  pkConstraint: UniqueConstraint;
+  keyConstraint: UniqueConstraint;
 }
 
 interface ScopedParentRows {
@@ -158,7 +158,7 @@ const readTargetUnderParents = async (
  * @throws The error of a failed read of the parent rows, before any target is read
  */
 export const preFetchOneToManyRelation = async (input: PreFetchOneToManyRelationInput): Promise<void> => {
-  const { path, operation, data, pkConstraint, preFetchResults, onTargetReadFailure } = input;
+  const { path, operation, data, keyConstraint, preFetchResults, onTargetReadFailure } = input;
 
   const targets = namedTargets(operation, data);
   if (targets.length === 0) {
@@ -177,7 +177,7 @@ export const preFetchOneToManyRelation = async (input: PreFetchOneToManyRelation
     targets,
     async (where) => {
       const beforeRecord = await readTargetUnderParents(input, where, parentRows);
-      storeReadResult(preFetchResults, path, where, beforeRecord, pkConstraint, allKnown);
+      storeReadResult(preFetchResults, path, where, beforeRecord, keyConstraint, allKnown);
       preFetchLog('1:N stored: path=%s found=%s', path, beforeRecord !== null);
     },
     onTargetReadFailure,
@@ -202,7 +202,7 @@ const storeMatchedRow = (
   identity: EntityIdentityKey,
   row: PreFetchRecord,
   fetchBefore: boolean,
-  pkFields: readonly string[],
+  keyFields: readonly string[],
 ): void => {
   const name = { by: 'batchFilter' } as const;
   if (fetchBefore) {
@@ -212,7 +212,7 @@ const storeMatchedRow = (
       before: NO_BEFORE_STATE,
       identity,
       name,
-      key: primaryKeyOf(row, pkFields),
+      key: rowKeyOf(row, keyFields),
     });
   }
 };
@@ -225,10 +225,10 @@ const storeMatchedRow = (
  * write and are not included, and filters match the rows as they were before the write.
  */
 const whereRelatedWhenRun = (input: PreFetchToManyBatchInput, parentKey: PreFetchRecord): PreFetchRecord => {
-  const { scope, precedingWrites, fieldNames, pkConstraint } = input;
+  const { scope, precedingWrites, fieldNames, keyConstraint } = input;
   // Prisma reads an empty `OR` nested under `AND` as no condition, so a `set` naming no row keeps
   // no row through a primary-key `in` with no values
-  const noRow = { [pkConstraint.fields[0] ?? '']: { in: [] } };
+  const noRow = { [keyConstraint.fields[0] ?? '']: { in: [] } };
   return precedingWrites.reduce<PreFetchRecord>(
     (related, { operation, data }) => {
       const named = namedTargets(operation, data).map(({ where }) => uniqueWhereAsFilter(where, fieldNames));
@@ -272,7 +272,7 @@ const scopeFilterToParents = (
 export const preFetchToManyBatch = async (
   input: PreFetchToManyBatchInput,
 ): Promise<Map<EntityIdentityKey, PreFetchRecord>> => {
-  const { path, operation, data, relatedModelClient, pkConstraint, fetchBefore, preFetchResults } = input;
+  const { path, operation, data, relatedModelClient, keyConstraint, fetchBefore, preFetchResults } = input;
 
   const { rows: parentRows, allKnown } = await resolveScopedParentRows(input);
   if (!allKnown) {
@@ -286,18 +286,18 @@ export const preFetchToManyBatch = async (
   );
   preFetchLog('1:N batch parent rows: path=%s operation=%s queries=%d', path, operation, wheres.length);
 
-  const select: Record<string, true> = Object.fromEntries(pkConstraint.fields.map((fieldName) => [fieldName, true]));
+  const select: Record<string, true> = Object.fromEntries(keyConstraint.fields.map((fieldName) => [fieldName, true]));
   const matched = new Map<EntityIdentityKey, PreFetchRecord>();
 
   for (const where of wheres) {
     const rows = await relatedModelClient.findMany(fetchBefore ? { where } : { where, select });
     for (const row of rows) {
-      const identity = extractEntityIdentity(row, pkConstraint.fields);
+      const identity = extractEntityIdentity(row, keyConstraint.fields);
       if (identity === UNRESOLVED_ENTITY_ID) {
         continue;
       }
-      matched.set(identity, primaryKeyOf(row, pkConstraint.fields));
-      storeMatchedRow(preFetchResults, path, identity, row, fetchBefore, pkConstraint.fields);
+      matched.set(identity, rowKeyOf(row, keyConstraint.fields));
+      storeMatchedRow(preFetchResults, path, identity, row, fetchBefore, keyConstraint.fields);
     }
   }
 

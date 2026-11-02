@@ -18,8 +18,8 @@ import {
   getIdFieldInfo,
   getRowKeyFields,
   ID_GENERATOR_FACTORIES,
-  primaryKeyOf,
   rowKeyFieldsOf,
+  rowKeyOf,
 } from '../../src/utils/id-generation.js';
 import { UNRESOLVED_ENTITY_ID } from '../../src/utils/identity-key.js';
 import { column, model, schemaMetadataOf } from '../support/audit-schema.js';
@@ -290,14 +290,14 @@ describe('ensureIds', () => {
     const likeField = (name: string, defaultFunction?: FieldDefault) =>
       column(name, defaultFunction ? { hasDefaultValue: true, default: defaultFunction } : {});
     const metadataForLike = (fields: ReturnType<typeof likeField>[]) => schemaMetadataOf(model('Like', fields));
-    const pkFields = ['postId', 'userId'];
+    const keyFields = ['postId', 'userId'];
 
     it('returns rows that supply every key field unchanged, adding no `id`', () => {
       const rows = [
         { postId: 'p1', userId: 'u1', note: 'a' },
         { postId: 'p1', userId: 'u2', note: 'b' },
       ];
-      const result = ensureIds(metadataForLike([likeField('postId'), likeField('userId')]), 'Like', rows, pkFields);
+      const result = ensureIds(metadataForLike([likeField('postId'), likeField('userId')]), 'Like', rows, keyFields);
       expect(result).toEqual(rows);
     });
 
@@ -306,7 +306,7 @@ describe('ensureIds', () => {
         metadataForLike([likeField('postId'), likeField('userId', { name: 'uuid', args: [7] })]),
         'Like',
         [{ postId: 'p1' }, { postId: 'p2', userId: 'u-supplied' }],
-        pkFields,
+        keyFields,
       );
       expect(result[0]?.postId).toBe('p1');
       expect(result[0]?.userId).toMatch(UUID_V7_RE);
@@ -316,7 +316,7 @@ describe('ensureIds', () => {
 
     it('throws naming the key field a row leaves out that has no default', () => {
       expect(() =>
-        ensureIds(metadataForLike([likeField('postId'), likeField('userId')]), 'Like', [{ postId: 'p1' }], pkFields),
+        ensureIds(metadataForLike([likeField('postId'), likeField('userId')]), 'Like', [{ postId: 'p1' }], keyFields),
       ).toThrow('Field "userId" has no default directive');
     });
   });
@@ -411,16 +411,16 @@ describe('rowKeyFieldsOf', () => {
   });
 });
 
-describe('primaryKeyOf', () => {
+describe('rowKeyOf', () => {
   it('picks the key fields of the row, in the order of the key', () => {
-    const key = primaryKeyOf({ title: 'T', userId: 'u1', postId: 'p1' }, ['postId', 'userId']);
+    const key = rowKeyOf({ title: 'T', userId: 'u1', postId: 'p1' }, ['postId', 'userId']);
 
     expect(key).toEqual({ postId: 'p1', userId: 'u1' });
     expect(Object.keys(key)).toEqual(['postId', 'userId']);
   });
 
   it('reads a field the row lacks as undefined, keeping its entry', () => {
-    const key = primaryKeyOf({ postId: 'p1' }, ['postId', 'userId']);
+    const key = rowKeyOf({ postId: 'p1' }, ['postId', 'userId']);
 
     expect(Object.keys(key)).toEqual(['postId', 'userId']);
     expect(key.userId).toBeUndefined();

@@ -44,7 +44,7 @@ const postUpdate: NestedOperationInfo = {
   path: 'posts',
 };
 
-const targetBy = (by: 'primaryKey' | 'uniqueWhere', where: Row): NestedWriteTarget => ({
+const targetBy = (by: 'rowKey' | 'uniqueWhere', where: Row): NestedWriteTarget => ({
   locator: { by, where },
   operation: postUpdate,
   element: 0,
@@ -67,7 +67,7 @@ const inputOf = (
   schemaMetadata,
   relatedModel,
   path: 'rows',
-  pkFields: ['id'],
+  keyFields: ['id'],
   targets: [],
   isInserted: () => true,
   parents,
@@ -80,8 +80,8 @@ describe('readRowsNotInResult', () => {
     it('returns each inserted row for the parent row whose key its foreign key holds', async () => {
       const path: ToManyPath = {
         parentModelName: 'User',
-        parentPk: pk,
-        pk,
+        parentKeyConstraint: pk,
+        keyConstraint: pk,
         scope: {
           backField: 'author',
           filter: 'is',
@@ -102,8 +102,8 @@ describe('readRowsNotInResult', () => {
     it('returns each inserted row of an implicit many-to-many relation for the parent row it is linked to, without the link keys', async () => {
       const path: ToManyPath = {
         parentModelName: 'Post',
-        parentPk: pk,
-        pk,
+        parentKeyConstraint: pk,
+        keyConstraint: pk,
         scope: { backField: 'posts', filter: 'some', parentFields: ['id'] },
       };
       const categoryA = { id: 'ca', name: 'A' };
@@ -126,7 +126,7 @@ describe('readRowsNotInResult', () => {
 
   describe('updated rows the result does not hold', () => {
     it('reads them by primary key or by unique WHERE and returns each for the parent row it was nested under', async () => {
-      const byKey = targetBy('primaryKey', { id: 'pa' });
+      const byKey = targetBy('rowKey', { id: 'pa' });
       const byWhere = targetBy('uniqueWhere', { authorId_slug: { authorId: 'u2', slug: 'b' } });
       const postA = { id: 'pa', authorId: 'u1', slug: 'a' };
       const postB = { id: 'pb', authorId: 'u2', slug: 'b' };
@@ -152,8 +152,8 @@ describe('readRowsNotInResult', () => {
     it('are the keys under the parent row that neither the result, the pre-write snapshot nor a target holds', async () => {
       const path: ToManyPath = {
         parentModelName: 'User',
-        parentPk: pk,
-        pk,
+        parentKeyConstraint: pk,
+        keyConstraint: pk,
         scope: {
           backField: 'author',
           filter: 'is',
@@ -166,7 +166,7 @@ describe('readRowsNotInResult', () => {
         [{ id: 'held' }, { id: 'old' }, { id: 'named' }, { id: 'new' }],
         [inserted],
       );
-      const named = targetBy('primaryKey', { id: 'named' });
+      const named = targetBy('rowKey', { id: 'named' });
 
       const rows = await readRowsNotInResult({
         ...inputOf(client, 'Post', path, [{ ...hiddenParent('u1'), rows: [{ id: 'held', authorId: 'u1' }] }]),
@@ -184,8 +184,8 @@ describe('readRowsNotInResult', () => {
     it('returns only the inserted rows whose key the data of the operations at the path gives', async () => {
       const path: ToManyPath = {
         parentModelName: 'User',
-        parentPk: pk,
-        pk,
+        parentKeyConstraint: pk,
+        keyConstraint: pk,
         scope: {
           backField: 'author',
           filter: 'is',
@@ -209,8 +209,8 @@ describe('readRowsNotInResult', () => {
   describe('when nothing is missing from the result', () => {
     const fkPath: ToManyPath = {
       parentModelName: 'User',
-      parentPk: pk,
-      pk,
+      parentKeyConstraint: pk,
+      keyConstraint: pk,
       scope: {
         backField: 'author',
         filter: 'is',
@@ -256,7 +256,7 @@ describe('readRowsNotInResult', () => {
 
   describe('the include of the read', () => {
     const include = { comments: { include: { author: true } } };
-    const absent = targetBy('primaryKey', { id: 'pa' });
+    const absent = targetBy('rowKey', { id: 'pa' });
     const absentParent: ParentAtPath = { row: { id: 'u1' }, rows: [], absentTargets: [absent], insertsHidden: false };
 
     it('passes the relations the operation writes below the path to the read of absent targets', async () => {
@@ -276,8 +276,8 @@ describe('readRowsNotInResult', () => {
     it('keeps them beside the link keys it reads for the inserted rows of an implicit many-to-many relation', async () => {
       const path: ToManyPath = {
         parentModelName: 'Post',
-        parentPk: pk,
-        pk,
+        parentKeyConstraint: pk,
+        keyConstraint: pk,
         scope: { backField: 'posts', filter: 'some', parentFields: ['id'] },
       };
       const { client, findMany } = clientReading([{ id: 'ca' }], [{ id: 'ca', posts: [{ id: 'p1' }] }]);

@@ -55,7 +55,7 @@ export const isAuditableAction = (operation: string): operation is AuditAction =
  * for a key declared as `@@id([a, b], name: "custom")`, directly or under `where`),
  * unwrapped with the same `unwrapCompoundWhere` the pre-fetch path uses.
  *
- * @param pkConstraint - The deleted model's primary key, as returned by `getPrimaryKeyConstraint`
+ * @param keyConstraint - The deleted model's primary key, as returned by `getPrimaryKeyConstraint`
  *
  * @example
  * ```typescript
@@ -81,21 +81,21 @@ export const isAuditableAction = (operation: string): operation is AuditAction =
  * // => undefined
  * ```
  */
-export const extractDeleteOperationEntityId = (data: unknown, pkConstraint: UniqueConstraint): string | undefined => {
+export const extractDeleteOperationEntityId = (data: unknown, keyConstraint: UniqueConstraint): string | undefined => {
   if (!data || typeof data !== 'object') {
     return undefined;
   }
 
-  const { fields } = pkConstraint;
+  const { fields } = keyConstraint;
   const record = data as Record<string, unknown>;
 
-  const identity = extractEntityIdentity(unwrapCompoundWhere(record, pkConstraint), fields);
+  const identity = extractEntityIdentity(unwrapCompoundWhere(record, keyConstraint), fields);
   if (identity !== UNRESOLVED_ENTITY_ID) return identity;
 
   if ('where' in record) {
     const where = record.where as Record<string, unknown>;
     if (where) {
-      const whereIdentity = extractEntityIdentity(unwrapCompoundWhere(where, pkConstraint), fields);
+      const whereIdentity = extractEntityIdentity(unwrapCompoundWhere(where, keyConstraint), fields);
       if (whereIdentity !== UNRESOLVED_ENTITY_ID) return whereIdentity;
     }
   }

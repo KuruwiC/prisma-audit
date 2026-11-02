@@ -28,7 +28,7 @@ const nestedOp: NestedOperationInfo = {
   path: 'items',
 };
 
-const pkConstraint: UniqueConstraint = { type: 'primaryKey', fields: ['tenantId', 'itemId'] };
+const keyConstraint: UniqueConstraint = { type: 'primaryKey', fields: ['tenantId', 'itemId'] };
 const idPrimaryKey: UniqueConstraint = { type: 'primaryKey', fields: ['id'] };
 
 describe('collectToOneDeleteRecords — the row read under its parent row', () => {
@@ -127,7 +127,7 @@ describe('collectToOneDeleteRecords — unresolved identity', () => {
       expect.objectContaining({
         relatedModel: 'Comment',
         entityId: undefined,
-        pkFields: ['id'],
+        keyFields: ['id'],
         error: expect.objectContaining({ message: expect.stringContaining('entityId=unresolved') }),
       }),
     );
@@ -165,7 +165,7 @@ describe('collectToOneDeleteRecords — nothing pre-fetched', () => {
       data: { tenantId_itemId: { tenantId: 'tenant-1', itemId: 'item-1' } },
     };
 
-    expect(await collectToOneDeleteRecords(byKey, TOP_LEVEL_ROW, undefined, pkConstraint)).toEqual([
+    expect(await collectToOneDeleteRecords(byKey, TOP_LEVEL_ROW, undefined, keyConstraint)).toEqual([
       {
         entity: { tenantId: 'tenant-1', itemId: 'item-1' },
         action: 'delete',
@@ -226,7 +226,7 @@ describe('collectToOneDeleteRecords — a delete whose data names no identity', 
       expect.objectContaining({
         relatedModel: 'Post',
         entityId: undefined,
-        pkFields: ['id'],
+        keyFields: ['id'],
         error: expect.objectContaining({ message: expect.stringContaining('entityId=unresolved') }),
       }),
     );
@@ -253,7 +253,7 @@ describe('collectToManyDeleteRecords', () => {
         deleteManyOp,
         [
           {
-            locator: { by: 'primaryKey', where: { id: 'post-1' } },
+            locator: { by: 'rowKey', where: { id: 'post-1' } },
             operation: deleteManyOp,
             element: undefined,
             before: { kind: 'captured', row: before },
@@ -273,7 +273,7 @@ describe('collectToManyDeleteRecords', () => {
         deleteManyOp,
         [
           {
-            locator: { by: 'primaryKey', where: { id: 'post-1' } },
+            locator: { by: 'rowKey', where: { id: 'post-1' } },
             operation: deleteManyOp,
             element: undefined,
             before: { kind: 'none' },
@@ -338,7 +338,7 @@ describe('collectToManyDeleteRecords', () => {
         deleteManyOp,
         [
           {
-            locator: { by: 'primaryKey', where: { id: 'post-1' } },
+            locator: { by: 'rowKey', where: { id: 'post-1' } },
             operation: deleteManyOp,
             element: undefined,
             before: { kind: 'unavailable' },
@@ -384,7 +384,7 @@ describe('collectToManyDeleteRecords', () => {
             before: { kind: 'unavailable' },
           },
         ],
-        pkConstraint,
+        keyConstraint,
         undefined,
       ),
     ).toEqual([
@@ -418,7 +418,7 @@ describe('collectToManyDeleteRecords', () => {
 
     expect(collected).toEqual([]);
     expect(onUnresolvedDeleteEntityId).toHaveBeenCalledWith(
-      expect.objectContaining({ relatedModel: 'Post', entityId: undefined, pkFields: ['id'] }),
+      expect.objectContaining({ relatedModel: 'Post', entityId: undefined, keyFields: ['id'] }),
     );
   });
 });

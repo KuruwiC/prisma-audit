@@ -35,7 +35,7 @@ const write: LinkWrite = { operation: connect, named: [{ id: 'l1' }], detaches: 
 /** The read before a connect of `l1` to the post `p1`, which finds `l1` attached to `p2` */
 const readOf = (overrides: Partial<LinkPathRead> = {}): LinkPathRead => ({
   relatedModel: 'Label',
-  pkFields: ['id'],
+  keyFields: ['id'],
   link,
   writes: [write],
   rows: [{ id: 'l1', name: 'before', postId: 'p2' }],

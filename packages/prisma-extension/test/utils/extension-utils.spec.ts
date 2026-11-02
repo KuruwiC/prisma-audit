@@ -50,30 +50,30 @@ describe('extractDeleteOperationEntityId', () => {
   });
 
   describe('composite primary key — Prisma compound-unique WHERE shape', () => {
-    const pkConstraint: UniqueConstraint = { type: 'primaryKey', fields: ['postId', 'userId'] };
+    const keyConstraint: UniqueConstraint = { type: 'primaryKey', fields: ['postId', 'userId'] };
 
     it('unwraps the compound-unique wrapper passed directly (nested delete data shape) and extracts the composite entityId', () => {
       // The data of `post.update({ data: { postLikes: { delete: { postId_userId: { postId, userId } } } } })`.
       const data = { postId_userId: { postId: 'post-1', userId: 'user-1' } };
 
-      expect(extractDeleteOperationEntityId(data, pkConstraint)).toBe(JSON.stringify(['post-1', 'user-1']));
+      expect(extractDeleteOperationEntityId(data, keyConstraint)).toBe(JSON.stringify(['post-1', 'user-1']));
     });
 
     it('unwraps the compound-unique wrapper nested under where', () => {
       const data = { where: { postId_userId: { postId: 'post-2', userId: 'user-2' } } };
 
-      expect(extractDeleteOperationEntityId(data, pkConstraint)).toBe(JSON.stringify(['post-2', 'user-2']));
+      expect(extractDeleteOperationEntityId(data, keyConstraint)).toBe(JSON.stringify(['post-2', 'user-2']));
     });
 
     it('still returns undefined when the WHERE names neither the compound key nor the individual PK fields', () => {
       const data = { note: 'not a valid unique where for this model' };
 
-      expect(extractDeleteOperationEntityId(data, pkConstraint)).toBeUndefined();
+      expect(extractDeleteOperationEntityId(data, keyConstraint)).toBeUndefined();
     });
   });
 
   describe('composite primary key with an explicit name (`@@id([...], name: "bookmarkKey")`)', () => {
-    const namedPkConstraint: UniqueConstraint = {
+    const namedKeyConstraint: UniqueConstraint = {
       type: 'primaryKey',
       fields: ['postId', 'userId'],
       name: 'bookmarkKey',
@@ -82,13 +82,13 @@ describe('extractDeleteOperationEntityId', () => {
     it('unwraps the wrapper keyed by the declared name and extracts the composite entityId', () => {
       const data = { bookmarkKey: { postId: 'post-3', userId: 'user-3' } };
 
-      expect(extractDeleteOperationEntityId(data, namedPkConstraint)).toBe(JSON.stringify(['post-3', 'user-3']));
+      expect(extractDeleteOperationEntityId(data, namedKeyConstraint)).toBe(JSON.stringify(['post-3', 'user-3']));
     });
 
     it('unwraps the wrapper keyed by the declared name nested under where', () => {
       const data = { where: { bookmarkKey: { postId: 'post-4', userId: 'user-4' } } };
 
-      expect(extractDeleteOperationEntityId(data, namedPkConstraint)).toBe(JSON.stringify(['post-4', 'user-4']));
+      expect(extractDeleteOperationEntityId(data, namedKeyConstraint)).toBe(JSON.stringify(['post-4', 'user-4']));
     });
   });
 });

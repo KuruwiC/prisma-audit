@@ -281,9 +281,9 @@ export const extractEntityIdentity = (
   return JSON.stringify(keyFields.map((f) => canonicalKeyValue(record[f])));
 };
 
-/** The fields `pkFields` of `row`, as a key or a filter; a field the row lacks reads `undefined` */
-export const primaryKeyOf = (row: Record<string, unknown>, pkFields: readonly string[]): Record<string, unknown> =>
-  Object.fromEntries(pkFields.map((field) => [field, row[field]]));
+/** The fields `keyFields` of `row`, as a key or a filter; a field the row lacks reads `undefined` */
+export const rowKeyOf = (row: Record<string, unknown>, keyFields: readonly string[]): Record<string, unknown> =>
+  Object.fromEntries(keyFields.map((field) => [field, row[field]]));
 
 export const buildEntityMap = (
   entities: ReadonlyArray<Record<string, unknown>>,

@@ -28,7 +28,7 @@ import {
   extractEntityIdOrUnresolved,
   preFetchedResultNamedBy,
   preFetchedResultUnder,
-  primaryKeyNamedBy,
+  rowKeyNamedBy,
 } from './pre-fetch-result-store.js';
 
 const isKeyValue = (value: unknown): boolean =>
@@ -43,7 +43,7 @@ export const parentPathOf = (path: string): string | undefined => {
 export interface ResolveParentRowsInput {
   path: string;
   parentFields: readonly string[];
-  parentPkFields: readonly string[];
+  parentKeyFields: readonly string[];
   topLevelWhere: unknown;
   topLevelModelClient: PreFetchModelClient | undefined;
   /** Read for the parent path's rows, so operations must be pre-fetched shallowest path first */
@@ -90,10 +90,10 @@ const parentRowOf = (
 };
 
 /** `rows` with one row per identity; a row of unknown identity is kept */
-const distinctParentRows = (rows: readonly PreFetchRecord[], pkFields: readonly string[]): ParentRow[] => {
+const distinctParentRows = (rows: readonly PreFetchRecord[], keyFields: readonly string[]): ParentRow[] => {
   const seen = new Set<string>();
   return rows.flatMap((row) => {
-    const identity = extractEntityIdOrUnresolved(row, pkFields);
+    const identity = extractEntityIdOrUnresolved(row, keyFields);
     if (identity !== UNRESOLVED_ENTITY_ID) {
       if (seen.has(identity)) {
         return [];
@@ -113,7 +113,7 @@ const rowsAtParentPath = (input: ResolveParentRowsInput, parentPath: string): Pa
         ...parentRows.filter((row): row is PreFetchRecord => typeof row === 'object'),
         ...(input.parentKeysFromWhere ?? []),
       ],
-      input.parentPkFields,
+      input.parentKeyFields,
     ),
     allKnown: !pathStore?.unread && !parentRows.includes('unknown'),
   };
@@ -175,14 +175,14 @@ export const parentKeyOf = (parentRow: PreFetchRecord, parentFields: readonly st
  */
 export const parentKeysFromOperationWheres = (
   operations: readonly NestedOperationInfo[],
-  parentPkConstraint: UniqueConstraint,
+  parentKeyConstraint: UniqueConstraint,
 ): PreFetchRecord[] =>
   operations
     .flatMap((operation) => targetWhereClauses(operation.operation, operation.data))
-    .map((where) => unwrapCompoundWhere(where, parentPkConstraint))
-    .filter((flatWhere) => parentPkConstraint.fields.every((fieldName) => isKeyValue(flatWhere[fieldName])))
+    .map((where) => unwrapCompoundWhere(where, parentKeyConstraint))
+    .filter((flatWhere) => parentKeyConstraint.fields.every((fieldName) => isKeyValue(flatWhere[fieldName])))
     .map((flatWhere) =>
-      Object.fromEntries(parentPkConstraint.fields.map((fieldName) => [fieldName, flatWhere[fieldName]])),
+      Object.fromEntries(parentKeyConstraint.fields.map((fieldName) => [fieldName, flatWhere[fieldName]])),
     );
 
 const identityOfResult = (result: NestedPreFetchResult | undefined): EntityIdentityKey | undefined =>
@@ -224,9 +224,9 @@ export const parentRowIdentityOf = (
   if (read !== undefined || !where) {
     return read;
   }
-  const pkConstraint = getPrimaryKeyConstraint(schemaMetadata, parent.operation.relatedModel);
-  const key = pkConstraint ? primaryKeyNamedBy(where, pkConstraint) : undefined;
-  return key && pkConstraint ? extractEntityIdentity(key, pkConstraint.fields) : undefined;
+  const keyConstraint = getPrimaryKeyConstraint(schemaMetadata, parent.operation.relatedModel);
+  const key = keyConstraint ? rowKeyNamedBy(where, keyConstraint) : undefined;
+  return key && keyConstraint ? extractEntityIdentity(key, keyConstraint.fields) : undefined;
 };
 
 /**

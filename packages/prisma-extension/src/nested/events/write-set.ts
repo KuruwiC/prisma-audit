@@ -27,7 +27,7 @@ import {
 } from '../../grammar/nested-operations.js';
 import { upsertBranchOf } from '../../grammar/nested-state.js';
 import type { SchemaMetadata } from '../../schema/types.js';
-import { extractEntityIdentity, primaryKeyOf } from '../../utils/id-generation.js';
+import { extractEntityIdentity, rowKeyOf } from '../../utils/id-generation.js';
 import type { EntityIdentityKey } from '../../utils/identity-key.js';
 import { isRecord } from '../../utils/is-record.js';
 import { createDataOf, skipsDuplicates } from '../inserted-row-keys.js';
@@ -43,7 +43,7 @@ type Row = Record<string, unknown>;
  * by the unique WHERE the operation names it by.
  */
 export interface NestedRowLocator {
-  readonly by: 'primaryKey' | 'uniqueWhere';
+  readonly by: 'rowKey' | 'uniqueWhere';
   /** The primary-key fields and values, or the unique WHERE */
   readonly where: Row;
 }
@@ -135,21 +135,21 @@ export const insertsRows = (operation: NestedOperationInfo, targets: readonly Ne
   (INSERTING_WHEN_TARGET_MISSING.has(operation.operation) && targets.some((target) => target.before.kind === 'none'));
 
 /** The primary key of `row`, or undefined when the model has none or the row lacks one of its fields */
-const completePrimaryKeyOf = (row: Row, pkFields: readonly string[] | undefined): Row | undefined =>
-  !pkFields || pkFields.some((field) => row[field] === undefined || row[field] === null)
+const completeRowKeyOf = (row: Row, keyFields: readonly string[] | undefined): Row | undefined =>
+  !keyFields || keyFields.some((field) => row[field] === undefined || row[field] === null)
     ? undefined
-    : primaryKeyOf(row, pkFields);
+    : rowKeyOf(row, keyFields);
 
 const targetsOf = (
   operation: NestedOperationInfo,
   nestedPreFetchResults: NestedPreFetchResults,
   batchTargets: NestedBatchTargets,
-  pkFields: readonly string[] | undefined,
+  keyFields: readonly string[] | undefined,
 ): NestedWriteTarget[] => {
   if (isNestedBatchKeyword(operation.operation)) {
     const matched = batchTargets.get(operation.path)?.get(operation.operation)?.values() ?? [];
     return Array.from(matched, (key) => ({
-      locator: { by: 'primaryKey', where: key },
+      locator: { by: 'rowKey', where: key },
       operation,
       element: undefined,
       before: preFetchedStateNamedBy(nestedPreFetchResults, operation.path, key),
@@ -157,9 +157,9 @@ const targetsOf = (
   }
   return namedTargets(operation.operation, operation.data).map(({ element, where }) => {
     const before = preFetchedStateNamedBy(nestedPreFetchResults, operation.path, where);
-    const key = before.kind === 'captured' ? completePrimaryKeyOf(before.row, pkFields) : undefined;
+    const key = before.kind === 'captured' ? completeRowKeyOf(before.row, keyFields) : undefined;
     return {
-      locator: key ? { by: 'primaryKey', where: key } : { by: 'uniqueWhere', where },
+      locator: key ? { by: 'rowKey', where: key } : { by: 'uniqueWhere', where },
       operation,
       element,
       before,
@@ -203,8 +203,8 @@ const updateDataOf = (operation: NestedOperationInfo): Row[] => {
  * Whether `operation` writes a key field of the rows it updates, which can give a row the
  * operations at the path insert another key than the one the extension generated for it
  */
-const writesKeyField = (operation: NestedOperationInfo, pkFields: readonly string[] | undefined): boolean =>
-  pkFields !== undefined && updateDataOf(operation).some((data) => pkFields.some((field) => data[field] !== undefined));
+const writesKeyField = (operation: NestedOperationInfo, keyFields: readonly string[] | undefined): boolean =>
+  keyFields !== undefined && updateDataOf(operation).some((data) => keyFields.some((field) => data[field] !== undefined));
 
 /** Records in `writeSet` the key of each row `operation` inserts that the extension generated, else that the path inserts a row without one */
 const addInsertedRows = (
@@ -212,12 +212,12 @@ const addInsertedRows = (
   operation: NestedOperationInfo,
   inserted: readonly Row[],
   rowsWithGeneratedKeys: ReadonlySet<object>,
-  pkFields: readonly string[] | undefined,
+  keyFields: readonly string[] | undefined,
 ): void => {
   for (const row of inserted) {
-    const key = rowsWithGeneratedKeys.has(row) ? completePrimaryKeyOf(row, pkFields) : undefined;
-    if (key && pkFields) {
-      writeSet.generatedKeys.add(extractEntityIdentity(key, pkFields));
+    const key = rowsWithGeneratedKeys.has(row) ? completeRowKeyOf(row, keyFields) : undefined;
+    if (key && keyFields) {
+      writeSet.generatedKeys.add(extractEntityIdentity(key, keyFields));
     } else {
       writeSet.anyNewRowIsInserted = true;
     }
@@ -251,12 +251,12 @@ export const buildNestedWriteSets = (
     };
     writeSets.set(operation.path, writeSet);
 
-    const pkFields = getPrimaryKeyConstraint(schemaMetadata, operation.relatedModel)?.fields;
-    const targets = targetsOf(operation, nestedPreFetchResults, batchTargets, pkFields);
+    const keyFields = getPrimaryKeyConstraint(schemaMetadata, operation.relatedModel)?.fields;
+    const targets = targetsOf(operation, nestedPreFetchResults, batchTargets, keyFields);
     writeSet.targets.push(...targets);
 
-    addInsertedRows(writeSet, operation, rowsInsertedBy(operation, targets), rowsWithGeneratedKeys, pkFields);
-    if (writesKeyField(operation, pkFields)) {
+    addInsertedRows(writeSet, operation, rowsInsertedBy(operation, targets), rowsWithGeneratedKeys, keyFields);
+    if (writesKeyField(operation, keyFields)) {
       writeSet.anyNewRowIsInserted = true;
       writeSet.readsPreExisting = true;
     }

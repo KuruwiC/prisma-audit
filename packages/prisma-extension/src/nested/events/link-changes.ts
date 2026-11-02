@@ -20,7 +20,7 @@ import type { AuditedOmittedFields } from '../../utils/audited-omitted-fields.js
 import { UNAVAILABLE_BEFORE_STATE } from '../../utils/before-state.js';
 import { matchesUniqueWhere, uniqueWhereAsFilter } from '../../utils/compound-where.js';
 import { nestedLog } from '../../utils/debug.js';
-import { extractEntityIdentity, primaryKeyOf, sameKeyValue } from '../../utils/id-generation.js';
+import { extractEntityIdentity, rowKeyOf, sameKeyValue } from '../../utils/id-generation.js';
 import type { EntityIdentityKey } from '../../utils/identity-key.js';
 import { attachedFilter, type LinkPathRead, type LinkReads, type LinkWrite } from '../pre-fetch/link-rows.js';
 import { getPreFetchListClient } from '../pre-fetch/model-client.js';
@@ -34,7 +34,7 @@ interface LinkCandidate {
   readonly write: LinkWrite;
   readonly before: BeforeState;
   /** Its primary key when its before state was read, else the unique WHERE that names it */
-  readonly locator: { readonly by: 'primaryKey' | 'uniqueWhere'; readonly where: Row };
+  readonly locator: { readonly by: 'rowKey' | 'uniqueWhere'; readonly where: Row };
   /** The write detaches it: its foreign key holds nothing after the write */
   readonly detached: boolean;
 }
@@ -45,7 +45,7 @@ const isAttachedTo = (row: Row, read: LinkPathRead, parentKey: Row | undefined):
 const capturedCandidate = (write: LinkWrite, row: Row, read: LinkPathRead, detached: boolean): LinkCandidate => ({
   write,
   before: { kind: 'captured', row },
-  locator: { by: 'primaryKey', where: primaryKeyOf(row, read.pkFields) },
+  locator: { by: 'rowKey', where: rowKeyOf(row, read.keyFields) },
   detached,
 });
 
@@ -123,7 +123,7 @@ const candidatesAt = (
       if (candidate.before.kind !== 'captured') {
         return true;
       }
-      const identity = extractEntityIdentity(candidate.before.row, read.pkFields);
+      const identity = extractEntityIdentity(candidate.before.row, read.keyFields);
       if (seen.has(identity)) {
         return false;
       }
@@ -199,7 +199,7 @@ export const collectLinkChanges = async (
     }
     const fieldNames = input.fieldNamesOf(read.relatedModel);
     const filters = candidates.map(({ locator }) =>
-      locator.by === 'primaryKey' ? locator.where : uniqueWhereAsFilter(locator.where, fieldNames),
+      locator.by === 'rowKey' ? locator.where : uniqueWhereAsFilter(locator.where, fieldNames),
     );
     const after = await client.findMany({ where: { OR: filters } });
     nestedLog('re-linked rows read: path=%s rows=%d', path, after.length);
@@ -207,7 +207,7 @@ export const collectLinkChanges = async (
     const recorded = new Set(audited);
     for (const candidate of capturedFirst(candidates)) {
       const record = recordOf(candidate, after, read);
-      const identity = record ? extractEntityIdentity(record.entity, read.pkFields) : undefined;
+      const identity = record ? extractEntityIdentity(record.entity, read.keyFields) : undefined;
       if (!record || identity === undefined || recorded.has(identity)) {
         continue;
       }

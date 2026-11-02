@@ -85,11 +85,11 @@ const snapshotPath = async (
   deps: SnapshotPreExistingRowsDependencies,
   relation: PathRelation,
 ): Promise<ReadonlySet<EntityIdentityKey>> => {
-  const { operation, parentPk, pk, scope, client } = relation;
+  const { operation, parentKeyConstraint, keyConstraint, scope, client } = relation;
   const { rows: readParentRows, allKnown } = await resolveParentRows({
     path: operation.path,
     parentFields: scope.parentFields,
-    parentPkFields: parentPk.fields,
+    parentKeyFields: parentKeyConstraint.fields,
     topLevelWhere: input.topLevelWhere,
     topLevelModelClient: getPreFetchModelClient(input.prismaClient, input.modelName, deps.auditedOmittedFields),
     preFetchResults: input.nestedPreFetchResults,
@@ -104,11 +104,11 @@ const snapshotPath = async (
     ...readParentRows.map((parent) => parent.row),
     ...parentKeysFromOperationWheres(
       parentOperationsNotPreFetched(operation.path, input.nestedOperations, deps.shouldFetchBefore),
-      parentPk,
+      parentKeyConstraint,
     ),
   ];
 
-  const select: Record<string, true> = Object.fromEntries(pk.fields.map((fieldName) => [fieldName, true]));
+  const select: Record<string, true> = Object.fromEntries(keyConstraint.fields.map((fieldName) => [fieldName, true]));
   const identities = new Set<EntityIdentityKey>();
   for (const parentRow of parentRows) {
     const parentKey = parentKeyOf(parentRow, scope.parentFields);
@@ -117,7 +117,7 @@ const snapshotPath = async (
     }
     const rows = await client.findMany({ where: { [scope.backField]: { [scope.filter]: parentKey } }, select });
     for (const row of rows) {
-      identities.add(extractEntityIdentity(row, pk.fields));
+      identities.add(extractEntityIdentity(row, keyConstraint.fields));
     }
   }
   preFetchLog('snapshot: path=%s parentRows=%d rows=%d', operation.path, parentRows.length, identities.size);
