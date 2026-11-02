@@ -1,6 +1,6 @@
 # Audit guarantees
 
-What the audit guarantees, and what it does not, in three separate properties: atomicity, accuracy under concurrent writes, and coverage. This document is the reference for them; the READMEs link here.
+What the audit guarantees, and what it does not, in three separate properties: atomicity, accuracy under concurrent writes, and coverage. This document is the reference for them.
 
 It has two layers, which follow the package boundary:
 

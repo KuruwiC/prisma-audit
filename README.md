@@ -274,7 +274,7 @@ The library automatically selects the optimal write strategy based on your confi
 | **Deferred**      | None (post-TX) | Minimal        | Operations inside an interactive `$transaction()` |
 | **Fire & Forget** | None           | Zero           | High-throughput, non-critical                     |
 
-Atomicity is not accuracy under concurrent writes: see [docs/guarantees.md](docs/guarantees.md#accuracy-under-concurrent-writes).
+An atomic write strategy does not make the audit log accurate under concurrent writes: see [docs/guarantees.md](docs/guarantees.md#accuracy-under-concurrent-writes).
 
 ## Configuration
 
