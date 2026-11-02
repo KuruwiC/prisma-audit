@@ -228,12 +228,12 @@ interface CollectionWalk {
  * for a parent row whose own writes cannot be told apart (an inserted row, which every element of
  * the inserts above it may have written), where the keys are compared as they are.
  */
-interface ParentLink {
+interface KeyLinkValues {
   readonly after: Row | undefined;
   readonly before: Row | undefined;
 }
 
-const NO_PARENT_LINK: ParentLink = { after: undefined, before: undefined };
+const NO_KEY_LINK_VALUES: KeyLinkValues = { after: undefined, before: undefined };
 
 const toEvent = (
   record: CollectedNestedRecord,
@@ -350,11 +350,11 @@ const locatedBeforeState = (walk: CollectionWalk, path: string, row: Row, before
  * The targets at a path as the rows under one parent row are compared to them: the parent's own
  * relocated by its key link after the write, and every other target as it is
  */
-const targetsUnder = (walk: CollectionWalk, relation: CandidateRelation, parentLink: ParentLink) => {
+const targetsUnder = (walk: CollectionWalk, relation: CandidateRelation, linkValues: KeyLinkValues) => {
   const writeSet = writeSetAt(walk, relation.path);
   const keyConstraint = walk.keyConstraints.get(relation.path);
   const own = ownTargetsOf(writeSet, relation.candidates).map((target) =>
-    relocated(target, parentLink.after, keyConstraint),
+    relocated(target, linkValues.after, keyConstraint),
   );
   const others = writeSet.targets.filter((target) => !relation.candidates.includes(target.operation));
   return { own, all: [...own, ...others] };
@@ -365,25 +365,25 @@ const targetsUnder = (walk: CollectionWalk, relation: CandidateRelation, parentL
  * inserted (`isInsertedAt`): the snapshot holds the rows the relation held before the write by
  * the key they had then, with the parent row's key link values before the write
  */
-const insertedUnder = (walk: CollectionWalk, relation: CandidateRelation, parentLink: ParentLink) => {
+const insertedUnder = (walk: CollectionWalk, relation: CandidateRelation, linkValues: KeyLinkValues) => {
   const { path, keyFields } = relation;
   const inserted = isInsertedAt(writeSetAt(walk, path), walk.input.preExistingRows.get(path));
   const [operation] = relation.candidates;
   const origin = { model: operation?.relatedModel ?? '', path };
   return (row: Row): boolean => {
-    if (parentLink.after && !matchesUniqueWhere(row, parentLink.after)) {
+    if (linkValues.after && !matchesUniqueWhere(row, linkValues.after)) {
       return false;
     }
     const identity = identityOf(row, keyFields, origin);
-    return parentLink.before
-      ? inserted(identity, extractEntityIdentity({ ...row, ...parentLink.before }, keyFields))
+    return linkValues.before
+      ? inserted(identity, extractEntityIdentity({ ...row, ...linkValues.before }, keyFields))
       : inserted(identity);
   };
 };
 
 /** Records the values the parent row gives the key link of the operations nested at the relation */
-const noteLinkValues = (walk: CollectionWalk, relation: CandidateRelation, parentLink: ParentLink): void => {
-  const { after } = parentLink;
+const noteLinkValues = (walk: CollectionWalk, relation: CandidateRelation, linkValues: KeyLinkValues): void => {
+  const { after } = linkValues;
   for (const candidate of relation.candidates) {
     const noted = walk.linkValuesAfter.get(candidate);
     const differs =
@@ -397,13 +397,13 @@ const attributeToManyRows = (
   walk: CollectionWalk,
   relation: CandidateRelation,
   rows: readonly SourcedRow[],
-  parentLink: ParentLink,
+  linkValues: KeyLinkValues,
 ): AttributedRow[] => {
   const { path, candidates } = relation;
-  const targets = targetsUnder(walk, relation, parentLink);
+  const targets = targetsUnder(walk, relation, linkValues);
   const ownTargets = targets.own;
   const claimed = claimedAt(walk, path);
-  noteLinkValues(walk, relation, parentLink);
+  noteLinkValues(walk, relation, linkValues);
   const attributed: AttributedRow[] = [];
 
   for (const { row, selection } of rows) {
@@ -420,7 +420,7 @@ const attributeToManyRows = (
   if (!recorded) {
     return attributed;
   }
-  const inserted = insertedUnder(walk, relation, parentLink);
+  const inserted = insertedUnder(walk, relation, linkValues);
   for (const { row, selection } of rows) {
     if (claimed.has(row) || targetOf(row, targets.all) || !inserted(row)) {
       continue;
@@ -609,11 +609,11 @@ const updatesExistingRow = (target: NestedWriteTarget): boolean => {
  * The key link of `relation` under `parent`: none when the relation's row key holds no foreign key
  * to the parent, or when the parent row is an inserted row whose writes cannot be told apart
  */
-const parentLinkOf = (walk: CollectionWalk, { parent, relation }: RelationBelow): ParentLink => {
+const keyLinkValuesUnder = (walk: CollectionWalk, { parent, relation }: RelationBelow): KeyLinkValues => {
   const { keyLink, candidates } = relation;
   const [operation] = candidates;
   if (!keyLink || !operation || (parent.attribution && parent.attribution.element === undefined)) {
-    return NO_PARENT_LINK;
+    return NO_KEY_LINK_VALUES;
   }
   const parentKey = knownParentKey(operation, walk.input, walk.deps, keyLink.parentModel, keyLink.references);
   return {
@@ -626,11 +626,11 @@ const parentAtPath = (
   walk: CollectionWalk,
   { parent, relation }: RelationBelow,
   held: readonly SourcedRow[],
-  parentLink: ParentLink,
+  linkValues: KeyLinkValues,
 ) => {
-  const targets = targetsUnder(walk, relation, parentLink);
+  const targets = targetsUnder(walk, relation, linkValues);
   const restricted = restrictsRows(relationSelectionOf(parent.selection, relation.fieldName));
-  const inserted = insertedUnder(walk, relation, parentLink);
+  const inserted = insertedUnder(walk, relation, linkValues);
   const keyLocated = new Set(
     targets.all.flatMap((target) =>
       target.locator.by === 'rowKey' ? [extractEntityIdentity(target.locator.where, relation.keyFields)] : [],
@@ -653,6 +653,7 @@ const rowsNotInResult = async (
   walk: CollectionWalk,
   below: readonly RelationBelow[],
   held: readonly SourcedRow[][],
+  linkValues: readonly KeyLinkValues[],
 ): Promise<SourcedRow[][]> => {
   const [first] = below;
   if (!first) {
@@ -660,7 +661,9 @@ const rowsNotInResult = async (
   }
   const { path, keyFields, candidates } = first.relation;
   const [operation] = candidates;
-  const parents = below.map((entry, index) => parentAtPath(walk, entry, held[index] ?? [], parentLinkOf(walk, entry)));
+  const parents = below.map((entry, index) =>
+    parentAtPath(walk, entry, held[index] ?? [], linkValues[index] ?? NO_KEY_LINK_VALUES),
+  );
   if (parents.every((parent) => parent.absentTargets.length === 0 && !parent.insertsHidden)) {
     return parents.map(() => []);
   }
@@ -694,13 +697,14 @@ const attributePath = async (walk: CollectionWalk, below: readonly RelationBelow
       (held[index] ?? []).flatMap((related) => attributeToOneRow(walk, relation, related)),
     );
   }
-  const read = await rowsNotInResult(walk, below, held);
-  return below.flatMap((entry, index) =>
+  const linkValues = below.map((entry) => keyLinkValuesUnder(walk, entry));
+  const read = await rowsNotInResult(walk, below, held, linkValues);
+  return below.flatMap(({ relation }, index) =>
     attributeToManyRows(
       walk,
-      entry.relation,
+      relation,
       [...(held[index] ?? []), ...(read[index] ?? [])],
-      parentLinkOf(walk, entry),
+      linkValues[index] ?? NO_KEY_LINK_VALUES,
     ),
   );
 };

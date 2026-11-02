@@ -10,14 +10,19 @@ import { sameKeyValue } from './id-generation.js';
 import { isRecord } from './is-record.js';
 
 /**
+ * The key `<Model>WhereUniqueInput` names a compound unique constraint by: its declared `name`
+ * (`@@id([a, b], name: "custom")`), else Prisma's default `fields.join('_')`
+ */
+export const compoundWhereKeyOf = (constraint: UniqueConstraint): string =>
+  constraint.name ?? constraint.fields.join('_');
+
+/**
  * Unwraps Prisma's compound-unique WHERE wrapper (`{ a_b: { a, b } }`) into the flat
  * scalar record needed to derive an entityId from a WHERE clause.
  *
  * `findUnique` requires a composite row key to be addressed through a single
- * generated key on `<Model>WhereUniqueInput` — `keyConstraint.name` when the key has an
- * explicit name (`@@id([a, b], name: "custom")`), or `fields.join('_')` (Prisma's default
- * naming) otherwise. A single-field PK, or a WHERE clause that isn't wrapped this way, is
- * returned unchanged.
+ * generated key on `<Model>WhereUniqueInput` ({@link compoundWhereKeyOf}). A single-field key, or
+ * a WHERE clause that isn't wrapped this way, is returned unchanged.
  */
 export const unwrapCompoundWhere = (
   whereClause: Record<string, unknown>,
@@ -25,8 +30,7 @@ export const unwrapCompoundWhere = (
 ): Record<string, unknown> => {
   if (!keyConstraint || keyConstraint.fields.length <= 1) return whereClause;
 
-  const compoundKey = keyConstraint.name ?? keyConstraint.fields.join('_');
-  return (whereClause[compoundKey] as Record<string, unknown> | undefined) ?? whereClause;
+  return (whereClause[compoundWhereKeyOf(keyConstraint)] as Record<string, unknown> | undefined) ?? whereClause;
 };
 
 /** A key value that is neither a string, a number nor a boolean: a BigInt, a Date, Bytes, a Decimal */

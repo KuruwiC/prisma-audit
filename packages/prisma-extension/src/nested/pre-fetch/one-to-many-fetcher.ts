@@ -24,7 +24,7 @@ import {
 import type { ParentRowIdentity } from '../../grammar/nested-state.js';
 import type { RelationField, SchemaMetadata, UniqueConstraint } from '../../schema/types.js';
 import { NO_BEFORE_STATE } from '../../utils/before-state.js';
-import { uniqueWhereAsFilter, unwrapCompoundWhere } from '../../utils/compound-where.js';
+import { compoundWhereKeyOf, uniqueWhereAsFilter, unwrapCompoundWhere } from '../../utils/compound-where.js';
 import { preFetchLog } from '../../utils/debug.js';
 import { extractEntityIdentity, rowKeyOf, sameKeyValue } from '../../utils/id-generation.js';
 import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID } from '../../utils/identity-key.js';
@@ -180,7 +180,7 @@ const namedBeforeParentWrite = (
   // A compound key is named through its wrapper, the only shape a `WhereUniqueInput` takes it in
   return {
     kind: 'where',
-    where: flat === where ? values : { ...where, [keyConstraint.name ?? keyConstraint.fields.join('_')]: values },
+    where: flat === where ? values : { ...where, [compoundWhereKeyOf(keyConstraint)]: values },
   };
 };
 

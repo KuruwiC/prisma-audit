@@ -248,12 +248,10 @@ const targetsOf = (operation: NestedOperationInfo, context: TargetContext): Keye
         ? NO_ROW_KEY_WRITE
         : (keyWrites[element] ?? NO_ROW_KEY_WRITE);
     const readKey = before.kind === 'captured' ? completeRowKeyOf(before.row, keyConstraint?.fields) : undefined;
-    const namedKey =
-      readKey === undefined && keyWrite.kind !== 'none' && operation.operation === 'update' && keyConstraint
-        ? rowKeyNamedBy(where, keyConstraint)
-        : undefined;
-    const target = { locator: locatorOf(readKey ?? namedKey, where, keyWrite), operation, element, before };
-    return keyedTarget(target, readKey ?? (keyConstraint ? rowKeyNamedBy(where, keyConstraint) : undefined), keyWrite);
+    const namedKey = keyConstraint ? rowKeyNamedBy(where, keyConstraint) : undefined;
+    const locatedKey = readKey ?? (keyWrite.kind !== 'none' && operation.operation === 'update' ? namedKey : undefined);
+    const target = { locator: locatorOf(locatedKey, where, keyWrite), operation, element, before };
+    return keyedTarget(target, readKey ?? namedKey, keyWrite);
   });
 };
 
