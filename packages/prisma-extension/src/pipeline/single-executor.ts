@@ -164,7 +164,7 @@ export const createSingleExecutor = (deps: SingleExecutorDependencies): Operatio
             phase: 'row-identification',
             modelName: relatedModel,
             operation: 'delete',
-            params: { entityId, pkFields: keyFields },
+            params: { entityId, keyFields },
             error,
           }),
         onUnfollowedRowKeys: ({ relatedModel, operation, path, unidentified }) =>

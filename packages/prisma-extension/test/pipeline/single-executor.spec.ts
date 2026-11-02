@@ -424,7 +424,7 @@ describe('createSingleExecutor', () => {
         phase: 'row-identification',
         modelName: 'Profile',
         operation: 'delete',
-        params: { entityId: undefined, pkFields: ['id'] },
+        params: { entityId: undefined, keyFields: ['id'] },
         error: expect.objectContaining({
           message: expect.stringContaining('Cannot resolve the row key of a deleted Profile record'),
         }),

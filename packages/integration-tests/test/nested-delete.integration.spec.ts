@@ -612,7 +612,7 @@ describe('Nested Delete Operations', () => {
           phase: 'row-identification',
           modelName: 'Profile',
           operation: 'delete',
-          params: { entityId: undefined, pkFields: ['id'] },
+          params: { entityId: undefined, keyFields: ['id'] },
           error: expect.any(Error),
         }),
       );
@@ -664,7 +664,7 @@ describe('Nested Delete Operations', () => {
           phase: 'row-identification',
           modelName: 'PostTag',
           operation: 'delete',
-          params: { entityId: undefined, pkFields: ['id'] },
+          params: { entityId: undefined, keyFields: ['id'] },
           error: expect.any(Error),
         }),
       );
