@@ -256,10 +256,10 @@ export interface PrismaAuditExtensionOptions<TModelName extends string = string,
    *   `beforeUnavailable: true` and a null `before` and `changes`. An `upsert`
    *   entry, top-level or nested, whose create-vs-update action depends on the before-state, is
    *   skipped with the writes of its branches, and so is a nested `connectOrCreate` entry. A
-   *   nested delete entry the failed fetch leaves without a primary key (a to-one delete, or a
+   *   nested delete entry the failed fetch leaves without a row key (a to-one delete, or a
    *   WHERE naming another unique field) is skipped and also reported as `row-identification`.
    *   A failed nested fetch affects only the rows it was for: the other nested operations keep
-   *   what their own fetches read, and the rows nested below a row named by its primary key are
+   *   what their own fetches read, and the rows nested below a row named by its row key are
    *   still read under that key. Below a row that cannot be identified otherwise (a to-one
    *   relation's row, or one named by another unique field), the nested entries are treated as
    *   if their own fetch had failed, and a nested create or `updateMany` / `deleteMany` there
@@ -273,7 +273,7 @@ export interface PrismaAuditExtensionOptions<TModelName extends string = string,
    *   the operation has committed (an awaited write outside any transaction, or a queued or
    *   detached one) the caller's operation succeeds.
    * - `diff-generation`: other audit-support work around the caller's operation failed —
-   *   building the entry (enrichment, redaction), reading the primary keys a to-many relation
+   *   building the entry (enrichment, redaction), reading the row keys a to-many relation
    *   holds before a nested create under an existing row or the rows a nested `updateMany` /
    *   `deleteMany` filter matches (the caller's write is then never attempted), reading again,
    *   after the write, a nested row the operation updated or inserted that its result did not
@@ -282,8 +282,10 @@ export interface PrismaAuditExtensionOptions<TModelName extends string = string,
    *   caller as a thrown error when the caller's write has not run or runs inside a transaction;
    *   outside any transaction a failure after the write drops the entry and the caller's
    *   operation succeeds.
-   * - `row-identification`: a nested delete's primary key could not be resolved, from the
-   *   pre-fetched row, its WHERE or the operation data; or an `updateMany` or `deleteMany` with a
+   * - `row-identification`: a nested delete's row key could not be resolved, from the
+   *   pre-fetched row, its WHERE or the operation data (`params` is `{ entityId, keyFields }`); or
+   *   a nested write wrote rows whose key after the write the audit cannot follow or tell apart
+   *   from another row's (`params` is `{ path, unidentified }`); or an `updateMany` or `deleteMany` with a
    *   `limit` wrote rows it cannot tell apart from rows another writer changed, or ran inside a
    *   batch `$transaction([...])` Prisma runs; or an `updateMany` or `updateManyAndReturn` wrote
    *   rows it cannot pair by row key with the rows read before it, because its data changes their
@@ -296,7 +298,7 @@ export interface PrismaAuditExtensionOptions<TModelName extends string = string,
    *   returned a different number of ids than rows. A `foreignKey` resolver throws for a row that
    *   lacks its column, such as one a client-level `omit` hides that the entity does not list in
    *   `recordOmittedFields`. The caller's operation continues; `params`
-   *   is `{ identity, resolver }` with the row's serialized primary key and the failed resolver.
+   *   is `{ identity, resolver }` with the row's serialized row key and the failed resolver.
    *   A failed `batchLookup` resolver is reported once for every row of its call.
    */
   errorObserver?: AuditErrorObserver;

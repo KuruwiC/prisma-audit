@@ -213,7 +213,7 @@ describe('buildNestedWriteSets', () => {
     ]);
   });
 
-  it('locates a row by its WHERE when the model declares no primary key', () => {
+  it('locates a row by its WHERE when the model declares no row key', () => {
     const results = preFetched([['posts.comments', 'c1', { id: 'c1', content: 'text' }]]);
 
     const { operations, writeSets } = writeSetsOf(

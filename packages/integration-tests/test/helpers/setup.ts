@@ -61,7 +61,7 @@ export const testEntities: EntityMap = {
   }),
   // Composite primary key (`@@id([postId, userId])`, no single `id` field) — the default
   // idResolver (`self('id')`) cannot resolve it, so entityId is derived explicitly to match
-  // the serialized-composite-key format `getPrimaryKeyConstraint`/`extractEntityIdentity` produce from
+  // the serialized-composite-key format `getRowKeyConstraint`/`extractEntityIdentity` produce from
   // the schema's declared `@@id` field order.
   PostLike: defineEntity({
     type: 'PostLike',
@@ -73,7 +73,7 @@ export const testEntities: EntityMap = {
   }),
   // Named composite primary key (`@@id([postId, userId], name: "bookmarkKey")`) — same
   // resolution need as `PostLike` above; the constraint name does not change the field
-  // order `getPrimaryKeyConstraint`/`extractEntityIdentity` derive it from.
+  // order `getRowKeyConstraint`/`extractEntityIdentity` derive it from.
   PostBookmark: defineEntity({
     type: 'PostBookmark',
     idResolver: async (entity) => {

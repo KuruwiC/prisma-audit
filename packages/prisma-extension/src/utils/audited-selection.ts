@@ -262,7 +262,7 @@ const liftOmittedFields = (omit: unknown): { omit: Selection | undefined; lifted
  * the value handed back.
  *
  * @param keyFields - The row key of a top-level row, so the audit identifies the row whatever a
- *   client-level `omit` hides; empty at a nested level, whose rows are matched by primary key
+ *   client-level `omit` hides; empty at a nested level, whose rows are matched by row key
  * @internal
  */
 const selectionInDefaultShape = (

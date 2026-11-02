@@ -522,7 +522,7 @@ export const deserializeEntityId = (
     }
     return key;
   } catch {
-    // Composite PK but not valid JSON — cannot reconstruct
+    // Composite key but not valid JSON — cannot reconstruct
     return null;
   }
 };
