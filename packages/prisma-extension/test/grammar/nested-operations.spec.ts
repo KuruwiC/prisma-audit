@@ -32,6 +32,15 @@ describe('detectNestedOperations', () => {
     model('Profile', [column('id')]),
   );
 
+  it('leaves out a keyword whose value is neither a boolean, a list nor a plain object, such as Prisma.skip', () => {
+    class Skip {}
+    const args = { data: { posts: { create: new Skip(), connect: { id: 'p1' } }, profile: { create: new Skip() } } };
+
+    const operations = detectNestedOperations(schemaMetadata, 'User', args, { kind: 'discovery' });
+
+    expect(operations.map((operation) => [operation.fieldName, operation.operation])).toEqual([['posts', 'connect']]);
+  });
+
   it('should detect nested create operations', () => {
     const args = {
       data: {
@@ -82,6 +91,20 @@ describe('detectNestedOperations', () => {
         { operation: 'connect', data: { id: 'p1' } },
       ],
     });
+  });
+
+  it('lists no preceding keyword whose value Prisma leaves out, undefined or Prisma.skip', () => {
+    class Skip {}
+    const args = {
+      where: { id: 'u1' },
+      data: { posts: { set: undefined, connect: new Skip(), delete: { id: 'p2' }, deleteMany: { title: 'Old' } } },
+    };
+
+    const operations = detectNestedOperations(schemaMetadata, 'User', args, { kind: 'discovery' });
+
+    expect(operations.find((op) => op.operation === 'deleteMany')?.precedingWrites).toEqual([
+      { operation: 'delete', data: { id: 'p2' } },
+    ]);
   });
 
   it('should detect multiple nested operations', () => {

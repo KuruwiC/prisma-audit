@@ -44,10 +44,21 @@ export const isNestedBatchKeyword = (keyword: NestedOperationKeyword): keyword i
 export const linksNamedRows = (keyword: NestedOperationKeyword): boolean => keyword === 'connect' || keyword === 'set';
 
 /**
+ * Whether a nested keyword's value is one Prisma writes: a boolean (`delete: true`), a list or a
+ * plain object. Prisma leaves out `undefined` and `Prisma.skip`, an instance of a class of its own,
+ * so neither is a write.
+ */
+const isNestedWriteValue = (value: unknown): boolean =>
+  typeof value === 'boolean' ||
+  Array.isArray(value) ||
+  (isRecord(value) && [Object.prototype, null].includes(Object.getPrototypeOf(value)));
+
+/**
  * Whether the value a nested keyword holds writes any row. `false` (`delete: false`,
  * `disconnect: false`), an empty list (`create: []`) and a `createMany` with no `data` rows write
  * none. `set: []` does: it unlinks every row the relation holds. {@link detectNestedOperations}
- * reports these values as operations all the same, leaving out only `undefined`.
+ * reports these values as operations all the same, leaving out only a value Prisma does not write
+ * (`undefined`, `Prisma.skip`).
  */
 export const nestedValueWritesRows = (keyword: NestedOperationKeyword, data: unknown): boolean => {
   if (data === false) {
@@ -102,6 +113,7 @@ const precedingWritesOf = (
   return keys
     .slice(0, keys.indexOf(keyword))
     .filter(isNestedOperationKeyword)
+    .filter((operation) => isNestedWriteValue(fieldValue[operation]))
     .map((operation) => ({ operation, data: fieldValue[operation] }));
 };
 
@@ -297,7 +309,7 @@ const detectOperationsIn = (
     }
     return NESTED_OPERATION_KEYWORDS.flatMap((keyword) => {
       const nestedData = fieldValue[keyword];
-      if (nestedData === undefined || !isNew(relationField, keyword, nestedData)) {
+      if (!isNestedWriteValue(nestedData) || !isNew(relationField, keyword, nestedData)) {
         return [];
       }
       return detectOperationAndNested(schemaMetadata, relationField, keyword, fieldValue, parent, pass);
