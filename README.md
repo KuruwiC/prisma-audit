@@ -573,7 +573,7 @@ Nested rows are audited from the operation's own result: the relations a nested 
 | **Node.js** | 20.19+, 22.12+, 24+ (AsyncLocalStorage) | 20, 22, 24                    |
 | **Runtime** | Node.js ✅, Bun ⚠️ Experimental, Edge ❌  | Node.js                       |
 
-The [compatibility workflow](.github/workflows/prisma-compatibility.yml) runs the integration tests against PostgreSQL, SQLite and MySQL for each tested Prisma version on two Node.js majors, skipping the pairs for which `better-sqlite3` ships no Linux x64 prebuild. It runs on pushes to `main` and `draft`, on pull requests to `main`, and weekly.
+The [compatibility workflow](.github/workflows/prisma-compatibility.yml) runs the integration tests against PostgreSQL, and the CRUD smoke tests against SQLite and MySQL together with the MySQL concurrency tests, for each tested Prisma version on two Node.js majors, skipping the pairs for which `better-sqlite3` ships no Linux x64 prebuild. It runs on pushes to `main` and `draft`, on pull requests to `main`, and weekly.
 
 ## Prisma 8
 
