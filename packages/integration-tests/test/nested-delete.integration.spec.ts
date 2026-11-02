@@ -619,5 +619,57 @@ describe('Nested Delete Operations', () => {
       expect(await context.basePrisma.profile.findUnique({ where: { id: 'unidentified-profile' } })).toBeNull();
       expect(await context.basePrisma.auditLog.findMany({ where: { entityType: 'Profile' } })).toEqual([]);
     });
+
+    it('notifies the observer under row-identification for a to-many delete named by a compound unique, records nothing for it and keeps the write', async () => {
+      const user = await context.basePrisma.user.create({
+        data: { email: 'unidentified-to-many@example.com', name: 'Author', password: 'secret123' },
+      });
+      const post = await context.basePrisma.post.create({
+        data: { title: 'Titled', authorId: user.id },
+      });
+      const tag = await context.basePrisma.tag.create({ data: { name: 'unidentified-tag' } });
+      await context.basePrisma.postTag.create({
+        data: { id: 'unidentified-post-tag', postId: post.id, tagId: tag.id },
+      });
+      const basePrisma = createBasePrisma();
+      const provider = createAsyncLocalStorageProvider();
+      const observer = vi.fn<AuditErrorObserver>();
+      const prisma = createAuditClient(basePrisma, {
+        Prisma,
+        schema: auditSchema,
+        contextProvider: provider,
+        entities: testEntities,
+        write: { awaited: true },
+        // Without the read ahead of the write, a delete named by a compound unique names no primary key
+        fetchBefore: { delete: false },
+        errorObserver: observer,
+      });
+
+      try {
+        const updated = await provider.runAsync(testActor, () =>
+          prisma.post.update({
+            where: { id: post.id },
+            data: { postTags: { delete: { postId_tagId: { postId: post.id, tagId: tag.id } } } },
+          }),
+        );
+        expect(updated).toMatchObject({ id: post.id });
+      } finally {
+        await prisma.$disconnect();
+        await basePrisma.$disconnect();
+      }
+
+      expect(observer).toHaveBeenCalledTimes(1);
+      expect(observer).toHaveBeenCalledWith(
+        expect.objectContaining({
+          phase: 'row-identification',
+          modelName: 'PostTag',
+          operation: 'delete',
+          params: { entityId: undefined, pkFields: ['id'] },
+          error: expect.any(Error),
+        }),
+      );
+      expect(await context.basePrisma.postTag.findUnique({ where: { id: 'unidentified-post-tag' } })).toBeNull();
+      expect(await context.basePrisma.auditLog.findMany({ where: { entityType: 'PostTag' } })).toEqual([]);
+    });
   });
 });

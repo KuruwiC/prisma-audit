@@ -65,6 +65,46 @@ describe('Nested Upsert Operations', () => {
         expect(log.after).toMatchObject({ bio: 'New bio', website: 'https://example.com' });
       }
     });
+
+    it('should create audit log with action=create for a nested to-one upsert under a row whose optional foreign key is null', async () => {
+      const user = await context.basePrisma.user.create({
+        data: { email: 'user@example.com', name: 'User', password: 'secret123' },
+      });
+      await context.basePrisma.label.create({ data: { id: 'l-null', name: 'loose' } });
+
+      await context.provider.runAsync(testActor, async () => {
+        await context.prisma.label.update({
+          where: { id: 'l-null' },
+          data: {
+            post: {
+              upsert: {
+                create: { id: 'p-upserted', title: 'Created', author: { connect: { id: user.id } } },
+                update: { title: 'Updated' },
+              },
+            },
+          },
+        });
+      });
+
+      expect(await context.basePrisma.label.findUnique({ where: { id: 'l-null' } })).toMatchObject({
+        postId: 'p-upserted',
+      });
+      const postLogs = await context.basePrisma.auditLog.findMany({
+        where: { entityType: 'Post', entityId: 'p-upserted' },
+      });
+      // Post has 2 logs: Post aggregate + User aggregate
+      expect(postLogs).toHaveLength(2);
+      for (const log of postLogs) {
+        expect(log.action).toBe('create');
+        expect(log.before).toBeNull();
+        expect(log.after).toMatchObject({ id: 'p-upserted', title: 'Created' });
+      }
+      const labelLogs = await context.basePrisma.auditLog.findMany({
+        where: { entityType: 'Label', entityId: 'l-null' },
+      });
+      expect(labelLogs).toHaveLength(1);
+      expect(labelLogs[0]).toMatchObject({ action: 'update', changes: { postId: { old: null, new: 'p-upserted' } } });
+    });
   });
 
   describe('Update Path (record exists)', () => {

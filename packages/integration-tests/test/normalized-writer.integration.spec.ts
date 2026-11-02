@@ -271,6 +271,62 @@ describe('Normalized Writer Helpers', () => {
       expect(new Set(events.map((event) => event.aggregateId))).toEqual(new Set([aggregates[0]?.id]));
     });
 
+    it('should write one entity row per entity and link each event to its own entity when one operation writes several entities', async () => {
+      const prisma = createAuditClient(basePrisma, {
+        Prisma,
+        schema: auditSchema,
+        contextProvider: provider,
+        entities: testEntities,
+        write: {
+          awaited: true,
+          writer: createEntityNormalizedWriter({
+            actorModel: 'Actor',
+            entityModel: 'Entity',
+            aggregateModel: 'Aggregate',
+            eventModel: 'AuditEvent',
+          }),
+        },
+      });
+
+      await provider.runAsync(testActor, async () => {
+        await prisma.user.create({
+          data: {
+            id: 'multi-user',
+            email: 'multi@example.com',
+            name: 'Multi',
+            posts: {
+              create: [
+                { id: 'multi-p1', title: 'One' },
+                { id: 'multi-p2', title: 'Two' },
+              ],
+            },
+          },
+        });
+      });
+
+      const entities = await basePrisma.entity.findMany();
+      const events = await basePrisma.auditEvent.findMany({ include: { entity: true, aggregate: true } });
+
+      expect(entities.map((entity) => [entity.type, entity.externalId]).sort()).toEqual([
+        ['Post', 'multi-p1'],
+        ['Post', 'multi-p2'],
+        ['User', 'multi-user'],
+      ]);
+      expect(
+        events
+          .map((event) => [event.entity.externalId, event.aggregate.type, event.aggregate.externalId, event.action])
+          .sort(),
+      ).toEqual([
+        ['multi-p1', 'Post', 'multi-p1', 'create'],
+        ['multi-p1', 'User', 'multi-user', 'create'],
+        ['multi-p2', 'Post', 'multi-p2', 'create'],
+        ['multi-p2', 'User', 'multi-user', 'create'],
+        ['multi-user', 'User', 'multi-user', 'create'],
+      ]);
+      expect(await basePrisma.actor.findMany()).toHaveLength(1);
+      expect(await basePrisma.aggregate.findMany()).toHaveLength(3);
+    });
+
     it('should accept lowerCamelCase model names', async () => {
       const prisma = createAuditClient(basePrisma, {
         Prisma,
@@ -404,6 +460,61 @@ describe('Normalized Writer Helpers', () => {
 
       const aggregateTypes = aggregates.map((a: { aggregateType: string }) => a.aggregateType).sort();
       expect(aggregateTypes).toEqual(['Comment', 'Post', 'User']);
+    });
+
+    it('should write one change per entity and link each aggregate row to its own entity change when one operation writes several entities', async () => {
+      const prisma = createAuditClient(basePrisma, {
+        Prisma,
+        schema: auditSchema,
+        contextProvider: provider,
+        entities: testEntities,
+        write: {
+          awaited: true,
+          writer: createSharedChangeWriter({
+            changeModel: 'AuditChange',
+            aggregateModel: 'AuditAggregate',
+          }),
+        },
+      });
+
+      await provider.runAsync(testActor, async () => {
+        await prisma.user.create({
+          data: {
+            id: 'multi-user',
+            email: 'multi@example.com',
+            name: 'Multi',
+            posts: {
+              create: [
+                { id: 'multi-p1', title: 'One' },
+                { id: 'multi-p2', title: 'Two' },
+              ],
+            },
+          },
+        });
+      });
+
+      const changes = await basePrisma.auditChange.findMany();
+      const aggregates = await basePrisma.auditAggregate.findMany({ include: { change: true } });
+
+      expect(changes.map((change) => [change.entityType, change.entityId, change.action]).sort()).toEqual([
+        ['Post', 'multi-p1', 'create'],
+        ['Post', 'multi-p2', 'create'],
+        ['User', 'multi-user', 'create'],
+      ]);
+      for (const change of changes) {
+        expect(change.after).toMatchObject({ id: change.entityId });
+      }
+      expect(
+        aggregates
+          .map((aggregate) => [aggregate.change.entityId, aggregate.aggregateType, aggregate.aggregateId])
+          .sort(),
+      ).toEqual([
+        ['multi-p1', 'Post', 'multi-p1'],
+        ['multi-p1', 'User', 'multi-user'],
+        ['multi-p2', 'Post', 'multi-p2'],
+        ['multi-p2', 'User', 'multi-user'],
+        ['multi-user', 'User', 'multi-user'],
+      ]);
     });
 
     it('should accept lowerCamelCase model names', async () => {
