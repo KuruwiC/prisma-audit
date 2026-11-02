@@ -13,7 +13,7 @@ import type { AuditAction } from '../grammar/operations.js';
 import type { PrismaBaseClient, PrismaHandle } from '../internal-types.js';
 import { withScope } from '../runtime/scope.js';
 import type { WidenedColumns } from '../utils/audited-selection.js';
-import { isCallerMutationError, runCallerMutation } from '../utils/caller-mutation-error.js';
+import { callerMutationFailureOf, runCallerMutation } from '../utils/caller-mutation-failure.js';
 import { isBatchOperation } from '../utils/operation-classifier.js';
 import { toError } from '../utils/to-error.js';
 import { type ExecutionScope, executionScopeOf, transactionRuntimeOf } from './execution-scope.js';
@@ -73,7 +73,7 @@ const operationContinuation =
 
 /**
  * The reads before the write and the write. The caller's own mutation error (see
- * `isCallerMutationError`) propagates untouched, without reaching the observer. Any other failure
+ * `callerMutationFailureOf`) propagates untouched, without reaching the observer. Any other failure
  * happened before the caller's write took effect: it is reported as `diff-generation` and rethrown
  * as the original error.
  */
@@ -86,8 +86,9 @@ const runExecutor = async (
   try {
     return await executor.run(operation, scope, deps.produceRecords);
   } catch (caughtError) {
-    if (isCallerMutationError(caughtError)) {
-      throw caughtError;
+    const callerFailure = callerMutationFailureOf(caughtError);
+    if (callerFailure) {
+      throw callerFailure.thrown;
     }
     const error = toError(caughtError);
     await deps.failureSink.notify({

@@ -19,7 +19,6 @@ import {
 import { flushAllPendingWrites, getPendingWriteCount } from '../../src/runtime/pending-writes.js';
 import { type ActivePrismaBatch, isProcessingAuditLog, withScope } from '../../src/runtime/scope.js';
 import type { AuditLogData } from '../../src/types.js';
-import { isCallerMutationError } from '../../src/utils/caller-mutation-error.js';
 import { stubFailureSink } from '../support/failure-sink.js';
 
 const auditContext: AuditContext = { actor: { category: 'model', type: 'User', id: 'user-1' } };
@@ -333,7 +332,7 @@ describe('runAuditedOperation', () => {
     it.each([
       { path: 'outside any transaction', atomic: false },
       { path: 'with an atomic policy', atomic: true },
-    ])("tags the caller's own mutation error thrown through query $path so it propagates raw", async ({ atomic }) => {
+    ])("propagates the caller's own mutation error thrown through query $path as it is", async ({ atomic }) => {
       const callerError = new Error('Unique constraint failed on the fields: (`email`)');
       const operation = interceptedOf(
         'update',
@@ -347,7 +346,28 @@ describe('runAuditedOperation', () => {
         runAuditedOperation({ operation, auditContext, baseClient: createBaseClient(), atomic }, deps),
       ).rejects.toBe(callerError);
 
-      expect(isCallerMutationError(callerError)).toBe(true);
+      expect(Object.getOwnPropertySymbols(callerError)).toEqual([]);
+      expect(deps.failureSink.notify).not.toHaveBeenCalled();
+      expect(auditWriteOf(deps)).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      { thrown: 'a frozen Error', value: Object.freeze(new Error('denied')) },
+      { thrown: 'an object that is not an Error', value: { code: 'TENANT_DENIED' } },
+      { thrown: 'a string', value: 'denied' },
+    ])("propagates $thrown the caller's own mutation throws through query as it is", async ({ value }) => {
+      const operation = interceptedOf(
+        'update',
+        vi.fn(async () => {
+          throw value;
+        }),
+      );
+      const deps = createDeps({ singleExecutor: runningTheOperation() });
+
+      await expect(
+        runAuditedOperation({ operation, auditContext, baseClient: createBaseClient(), atomic: false }, deps),
+      ).rejects.toBe(value);
+
       expect(deps.failureSink.notify).not.toHaveBeenCalled();
       expect(auditWriteOf(deps)).not.toHaveBeenCalled();
     });
