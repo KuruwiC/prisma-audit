@@ -26,27 +26,47 @@ import {
   type UpsertBranch,
 } from '../../grammar/nested-operations.js';
 import { upsertBranchOf } from '../../grammar/nested-state.js';
-import type { SchemaMetadata } from '../../schema/types.js';
+import type { SchemaMetadata, UniqueConstraint } from '../../schema/types.js';
 import { extractEntityIdentity, rowKeyOf } from '../../utils/id-generation.js';
 import type { EntityIdentityKey } from '../../utils/identity-key.js';
 import { isRecord } from '../../utils/is-record.js';
+import {
+  NO_ROW_KEY_WRITE,
+  type PrismaValues,
+  type RowKeyWrite,
+  rowKeyWriteOf,
+  withWrittenKey,
+} from '../../utils/row-key-write.js';
 import { createDataOf, skipsDuplicates } from '../inserted-row-keys.js';
 import { parentRowIdentityOf, targetsNamedByWhere } from '../pre-fetch/parent-rows.js';
-import { preFetchedStateNamedBy, preFetchedStateUnder } from '../pre-fetch/pre-fetch-result-store.js';
+import { preFetchedStateNamedBy, preFetchedStateUnder, rowKeyNamedBy } from '../pre-fetch/pre-fetch-result-store.js';
 
 type Row = Record<string, unknown>;
 
 /**
  * How a row a nested operation writes is found in the result, or read again, after the write:
- * by its row key when it was read ahead of the operation (its pre-fetched row, or a batch
- * filter's match), since the write may change the columns the operation names it by; otherwise
- * by the unique WHERE the operation names it by.
+ * - `rowKey`: by the key the write gives it, when its row key is known ahead of the operation (its
+ *   pre-fetched row, a batch filter's match, or, for an update that writes the key, a WHERE that
+ *   names the whole key): that key with the key fields the data gives literal values replaced
+ *   ({@link withWrittenKey}), since the write may change the columns the operation names it by;
+ * - `uniqueWhere`: otherwise, by the unique WHERE the operation names it by;
+ * - `unknown`: not at all, when the data changes the key in a way its arguments do not tell (an
+ *   operator on a key field, or a relation whose foreign key holds one).
  */
-export interface NestedRowLocator {
-  readonly by: 'rowKey' | 'uniqueWhere';
-  /** The row-key fields and values, or the unique WHERE */
-  readonly where: Row;
+export type NestedRowLocator =
+  | {
+      readonly by: 'rowKey' | 'uniqueWhere';
+      /** The row-key fields and values, or the unique WHERE */
+      readonly where: Row;
+    }
+  | { readonly by: 'unknown' };
+
+/** A target whose locator names its row */
+export interface LocatedTarget extends NestedWriteTarget {
+  readonly locator: Extract<NestedRowLocator, { readonly where: Row }>;
 }
+
+export const isLocated = (target: NestedWriteTarget): target is LocatedTarget => target.locator.by !== 'unknown';
 
 export interface NestedWriteTarget {
   readonly locator: NestedRowLocator;
@@ -140,16 +160,61 @@ const completeRowKeyOf = (row: Row, keyFields: readonly string[] | undefined): R
     ? undefined
     : rowKeyOf(row, keyFields);
 
-const targetsOf = (
-  operation: NestedOperationInfo,
-  nestedPreFetchResults: NestedPreFetchResults,
-  batchTargets: NestedBatchTargets,
-  keyFields: readonly string[] | undefined,
-): NestedWriteTarget[] => {
+/**
+ * The data each element of `operation` updates its rows with: the `data` of an `update` or
+ * `updateMany` element, the `update` of an `upsert` element; none for a keyword that updates no row
+ */
+const updateDataOf = (operation: NestedOperationInfo): unknown[] => {
+  const elements = elementsOf(operation.data);
+  switch (operation.operation) {
+    case 'update':
+    case 'updateMany':
+      return elements.map((element) => (isRecord(element) ? element.data : undefined));
+    case 'upsert':
+      return elements.map((element) => (isRecord(element) ? element.update : undefined));
+    default:
+      return [];
+  }
+};
+
+/**
+ * How the rows `operation` writes have their row key written. The rows of an `updateMany` are not
+ * told apart by element, so when it has several elements and one writes the key, which rows each
+ * wrote is unknown and so is the key of every row.
+ */
+const batchKeyWriteOf = (writes: readonly RowKeyWrite[]): RowKeyWrite => {
+  const writing = writes.filter((write) => write.kind !== 'none');
+  if (writing.length === 0) {
+    return NO_ROW_KEY_WRITE;
+  }
+  return writes.length === 1 && writing[0] ? writing[0] : { kind: 'not-derivable' };
+};
+
+const locatorOf = (key: Row | undefined, where: Row, keyWrite: RowKeyWrite): NestedRowLocator => {
+  if (!key) {
+    return { by: 'uniqueWhere', where };
+  }
+  return keyWrite.kind === 'not-derivable' ? { by: 'unknown' } : { by: 'rowKey', where: withWrittenKey(key, keyWrite) };
+};
+
+interface TargetContext {
+  readonly schemaMetadata: SchemaMetadata;
+  readonly nestedPreFetchResults: NestedPreFetchResults;
+  readonly batchTargets: NestedBatchTargets;
+  readonly keyConstraint: UniqueConstraint | undefined;
+  readonly prisma: PrismaValues;
+}
+
+const targetsOf = (operation: NestedOperationInfo, context: TargetContext): NestedWriteTarget[] => {
+  const { nestedPreFetchResults, keyConstraint } = context;
+  const keyWrites = updateDataOf(operation).map((data) =>
+    rowKeyWriteOf(context.schemaMetadata, operation.relatedModel, data, context.prisma),
+  );
   if (isNestedBatchKeyword(operation.operation)) {
-    const matched = batchTargets.get(operation.path)?.get(operation.operation)?.values() ?? [];
+    const matched = context.batchTargets.get(operation.path)?.get(operation.operation)?.values() ?? [];
+    const keyWrite = batchKeyWriteOf(keyWrites);
     return Array.from(matched, (key) => ({
-      locator: { by: 'rowKey', where: key },
+      locator: locatorOf(key, key, keyWrite),
       operation,
       element: undefined,
       before: preFetchedStateNamedBy(nestedPreFetchResults, operation.path, key),
@@ -157,13 +222,17 @@ const targetsOf = (
   }
   return namedTargets(operation.operation, operation.data).map(({ element, where }) => {
     const before = preFetchedStateNamedBy(nestedPreFetchResults, operation.path, where);
-    const key = before.kind === 'captured' ? completeRowKeyOf(before.row, keyFields) : undefined;
-    return {
-      locator: key ? { by: 'rowKey', where: key } : { by: 'uniqueWhere', where },
-      operation,
-      element,
-      before,
-    };
+    // The update branch of an upsert runs only on a row the read found
+    const keyWrite =
+      operation.operation === 'upsert' && before.kind !== 'captured'
+        ? NO_ROW_KEY_WRITE
+        : (keyWrites[element] ?? NO_ROW_KEY_WRITE);
+    const readKey = before.kind === 'captured' ? completeRowKeyOf(before.row, keyConstraint?.fields) : undefined;
+    const namedKey =
+      readKey === undefined && keyWrite.kind !== 'none' && operation.operation === 'update' && keyConstraint
+        ? rowKeyNamedBy(where, keyConstraint)
+        : undefined;
+    return { locator: locatorOf(readKey ?? namedKey, where, keyWrite), operation, element, before };
   });
 };
 
@@ -188,23 +257,13 @@ interface WriteSetDraft {
   readsPreExisting: boolean;
 }
 
-const updateDataOf = (operation: NestedOperationInfo): Row[] => {
-  if (operation.operation !== 'update' && operation.operation !== 'updateMany' && operation.operation !== 'upsert') {
-    return [];
-  }
-  const branch = operation.operation === 'upsert' ? 'update' : 'data';
-  return elementsOf(operation.data).flatMap((element) => {
-    const data = isRecord(element) ? element[branch] : undefined;
-    return isRecord(data) ? [data] : [];
-  });
-};
-
 /**
  * Whether `operation` writes a key field of the rows it updates, which can give a row the
  * operations at the path insert another key than the one the extension generated for it
  */
 const writesKeyField = (operation: NestedOperationInfo, keyFields: readonly string[] | undefined): boolean =>
-  keyFields !== undefined && updateDataOf(operation).some((data) => keyFields.some((field) => data[field] !== undefined));
+  keyFields !== undefined &&
+  updateDataOf(operation).some((data) => isRecord(data) && keyFields.some((field) => data[field] !== undefined));
 
 /** Records in `writeSet` the key of each row `operation` inserts that the extension generated, else that the path inserts a row without one */
 const addInsertedRows = (
@@ -229,6 +288,8 @@ const addInsertedRows = (
 /**
  * @param rowsWithGeneratedKeys - The data of each row the operations insert whose key the extension
  *   generated (`withInsertedRowKeys`)
+ * @param prisma - The client's Prisma namespace, which an update's data is read with
+ *   (`rowKeyWriteOf`)
  */
 export const buildNestedWriteSets = (
   schemaMetadata: SchemaMetadata,
@@ -236,6 +297,7 @@ export const buildNestedWriteSets = (
   rowsWithGeneratedKeys: ReadonlySet<object>,
   nestedPreFetchResults: NestedPreFetchResults,
   batchTargets: NestedBatchTargets,
+  prisma: PrismaValues,
 ): NestedWriteSets => {
   const writeSets = new Map<string, WriteSetDraft>();
 
@@ -251,12 +313,24 @@ export const buildNestedWriteSets = (
     };
     writeSets.set(operation.path, writeSet);
 
-    const keyFields = getRowKeyConstraint(schemaMetadata, operation.relatedModel)?.fields;
-    const targets = targetsOf(operation, nestedPreFetchResults, batchTargets, keyFields);
+    const keyConstraint = getRowKeyConstraint(schemaMetadata, operation.relatedModel);
+    const targets = targetsOf(operation, {
+      schemaMetadata,
+      nestedPreFetchResults,
+      batchTargets,
+      keyConstraint,
+      prisma,
+    });
     writeSet.targets.push(...targets);
 
-    addInsertedRows(writeSet, operation, rowsInsertedBy(operation, targets), rowsWithGeneratedKeys, keyFields);
-    if (writesKeyField(operation, keyFields)) {
+    addInsertedRows(
+      writeSet,
+      operation,
+      rowsInsertedBy(operation, targets),
+      rowsWithGeneratedKeys,
+      keyConstraint?.fields,
+    );
+    if (writesKeyField(operation, keyConstraint?.fields)) {
       writeSet.anyNewRowIsInserted = true;
       writeSet.readsPreExisting = true;
     }

@@ -2,6 +2,7 @@
  * Tests for the snapshot of the rows a to-many relation holds before a nested create.
  */
 
+import { Decimal } from '@prisma/client/runtime/client';
 import { describe, expect, it, vi } from 'vitest';
 import type { NestedPreFetchResults } from '../../../src/grammar/nested-operations.js';
 import type { ShouldFetchBefore } from '../../../src/grammar/pre-fetch-selection.js';
@@ -10,7 +11,11 @@ import { buildNestedWriteSets, detectResolvedNestedOperations } from '../../../s
 import { snapshotPreExistingRows } from '../../../src/nested/pre-fetch/pre-existing-rows.js';
 import { storePreFetchResult, storeUnreadRows } from '../../../src/nested/pre-fetch/pre-fetch-result-store.js';
 import { NO_AUDITED_OMITTED_FIELDS } from '../../../src/utils/audited-omitted-fields.js';
+import type { PrismaValues } from '../../../src/utils/row-key-write.js';
 import { column, model, relation, schemaMetadataOf } from '../../support/audit-schema.js';
+
+/** Stands for the client's Prisma namespace; the nested creates under test write no row key */
+const prisma: PrismaValues = { skip: new (class Skip {})(), Decimal };
 
 const schemaMetadata = schemaMetadataOf(
   model('User', [column('id', { isId: true }), relation('posts', 'Post', 'UserPosts', { isList: true })]),
@@ -57,7 +62,14 @@ const snapshot = (
       modelName: 'User',
       topLevelWhere: args.where,
       nestedOperations,
-      writeSets: buildNestedWriteSets(schemaMetadata, nestedOperations, new Set(), nestedPreFetchResults, new Map()),
+      writeSets: buildNestedWriteSets(
+        schemaMetadata,
+        nestedOperations,
+        new Set(),
+        nestedPreFetchResults,
+        new Map(),
+        prisma,
+      ),
       nestedPreFetchResults,
     },
     { schemaMetadata, shouldFetchBefore: fetchesBefore, auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS },

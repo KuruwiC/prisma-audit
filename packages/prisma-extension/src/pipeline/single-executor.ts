@@ -94,6 +94,7 @@ export const createSingleExecutor = (deps: SingleExecutorDependencies): Operatio
       rowsWithGeneratedKeys,
       nestedPreFetchResults,
       batchTargets,
+      Prisma,
     );
     const preExistingRows = rowExists
       ? await snapshotPreExistingRows(
@@ -165,6 +166,17 @@ export const createSingleExecutor = (deps: SingleExecutorDependencies): Operatio
             operation: 'delete',
             params: { entityId, pkFields: keyFields },
             error,
+          }),
+        onUnfollowedRowKeys: ({ relatedModel, operation, path, unidentified }) =>
+          failureSink.notify({
+            phase: 'row-identification',
+            modelName: relatedModel,
+            operation,
+            params: { path, unidentified },
+            error: new Error(
+              `${unidentified} of the rows a nested ${operation} at ${path} wrote are not audited: ` +
+                'its data changes their key in a way the audit cannot follow',
+            ),
           }),
       },
     );

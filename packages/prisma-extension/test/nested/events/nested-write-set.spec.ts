@@ -4,6 +4,7 @@
  */
 
 import type { BeforeState } from '@kuruwic/db-audit-core';
+import { Decimal } from '@prisma/client/runtime/client';
 import { describe, expect, it } from 'vitest';
 import type { NestedBatchTargets, NestedPreFetchResults } from '../../../src/grammar/nested-operations.js';
 import { TOP_LEVEL_ROW } from '../../../src/grammar/nested-state.js';
@@ -30,6 +31,9 @@ const schemaMetadata = schemaMetadataOf(
 );
 
 const p1 = { id: 'p1', title: 'First' };
+
+/** Stands for the client's Prisma namespace: its `skip` and `Decimal` */
+const prisma = { skip: new (class Skip {})(), Decimal };
 
 const preFetched = (entries: [string, string, Record<string, unknown> | null][]): NestedPreFetchResults => {
   const results: NestedPreFetchResults = new Map();
@@ -59,7 +63,7 @@ const writeSetsOf = (
   );
   return {
     operations,
-    writeSets: buildNestedWriteSets(schemaMetadata, operations, rowsWithGeneratedKeys, results, batchTargets),
+    writeSets: buildNestedWriteSets(schemaMetadata, operations, rowsWithGeneratedKeys, results, batchTargets, prisma),
   };
 };
 
@@ -417,12 +421,88 @@ describe('buildNestedWriteSets', () => {
       posts: { update: { where: { id: 'p1' }, data: {} }, delete: { id: 'p2' } },
     });
 
-    expect(writeSets.get('posts')?.targets.map((target) => [target.locator.where, target.operation.operation])).toEqual(
-      [
-        [{ id: 'p1' }, 'update'],
-        [{ id: 'p2' }, 'delete'],
-      ],
-    );
+    expect(writeSets.get('posts')?.targets.map((target) => [target.locator, target.operation.operation])).toEqual([
+      [{ by: 'uniqueWhere', where: { id: 'p1' } }, 'update'],
+      [{ by: 'uniqueWhere', where: { id: 'p2' } }, 'delete'],
+    ]);
     expect(writeSets.get('posts')?.targets.map((target) => target.operation)).toEqual(operations);
+  });
+});
+
+describe('buildNestedWriteSets of an update that writes the row key', () => {
+  const locatorsOf = (
+    data: Record<string, unknown>,
+    results: NestedPreFetchResults = new Map(),
+    batchTargets: NestedBatchTargets = new Map(),
+  ) =>
+    writeSetsOf(data, results, batchTargets)
+      .writeSets.get('posts')
+      ?.targets.map((target) => target.locator);
+
+  it.each([
+    ['a value', 'p9'],
+    ['{ set }', { set: 'p9' }],
+  ])('locates the row a nested update gives a key as %s by the key the write gives it', (_label, id) => {
+    expect(
+      locatorsOf(
+        { posts: { update: { where: { id: 'p1' }, data: { id, title: 'A' } } } },
+        preFetched([['posts', 'p1', p1]]),
+      ),
+    ).toEqual([{ by: 'rowKey', where: { id: 'p9' } }]);
+  });
+
+  it('locates the row by the key the write gives it when its WHERE names the whole row key and no before state was read', () => {
+    expect(locatorsOf({ posts: { update: { where: { id: 'p2' }, data: { id: 'p8' } } } })).toEqual([
+      { by: 'rowKey', where: { id: 'p8' } },
+    ]);
+  });
+
+  it('locates the row the update branch of a nested upsert gives a key by the key the write gives it', () => {
+    expect(
+      locatorsOf(
+        { posts: { upsert: { where: { id: 'p1' }, create: { title: 'A' }, update: { id: 'p9' } } } },
+        preFetched([['posts', 'p1', p1]]),
+      ),
+    ).toEqual([{ by: 'rowKey', where: { id: 'p9' } }]);
+  });
+
+  it('locates the rows a nested updateMany gives a key by the key the write gives them', () => {
+    const batchTargets: NestedBatchTargets = new Map([
+      ['posts', new Map([['updateMany', new Map([['p1', { id: 'p1' }]])]])],
+    ]);
+
+    expect(
+      locatorsOf({ posts: { updateMany: { where: { title: 'First' }, data: { id: 'p9' } } } }, new Map(), batchTargets),
+    ).toEqual([{ by: 'rowKey', where: { id: 'p9' } }]);
+  });
+
+  it('cannot locate the rows of a nested updateMany whose elements write the key, which of its rows each element wrote being unknown', () => {
+    const batchTargets: NestedBatchTargets = new Map([
+      ['posts', new Map([['updateMany', new Map([['p1', { id: 'p1' }]])]])],
+    ]);
+
+    expect(
+      locatorsOf(
+        {
+          posts: {
+            updateMany: [
+              { where: { title: 'First' }, data: { id: 'p9' } },
+              { where: { title: 'Second' }, data: { title: 'x' } },
+            ],
+          },
+        },
+        new Map(),
+        batchTargets,
+      ),
+    ).toEqual([{ by: 'unknown' }]);
+  });
+
+  it('cannot locate the row a nested update gives a key it does not tell, by an operator', () => {
+    expect(
+      locatorsOf(
+        { posts: { update: { where: { id: 'p1' }, data: { id: { increment: 1 } } } } },
+        preFetched([['posts', 'p1', p1]]),
+      ),
+    ).toEqual([{ by: 'unknown' }]);
   });
 });

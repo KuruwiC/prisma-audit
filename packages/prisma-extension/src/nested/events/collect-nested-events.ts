@@ -79,6 +79,8 @@ import {
   EMPTY_WRITE_SET,
   insertsRows,
   isInsertedAt,
+  isLocated,
+  type LocatedTarget,
   type NestedWriteSet,
   type NestedWriteSets,
   type NestedWriteTarget,
@@ -98,7 +100,44 @@ export interface NestedEventCollectorDependencies {
    * when omitted, the entry is still skipped, just not reported.
    */
   onUnresolvedDeleteEntityId?: UnresolvedDeleteEntityIdReporter;
+  /**
+   * Notified of the rows a nested operation at a path updates whose key its data changes in a way
+   * its arguments do not tell (see `write-set.ts`); those rows are not recorded. Optional: when
+   * omitted, they are still not recorded, just not reported.
+   */
+  onUnfollowedRowKeys?: UnfollowedRowKeysReporter;
 }
+
+/** The rows a nested `operation` at `path` updated that are not audited, their key after the write being unknown */
+export interface UnfollowedRowKeys {
+  relatedModel: string;
+  operation: NestedOperationKeyword;
+  path: string;
+  unidentified: number;
+}
+
+export type UnfollowedRowKeysReporter = (info: UnfollowedRowKeys) => Promise<void>;
+
+/** Reports, once per nested operation, the targets whose key after the write is unknown */
+const reportUnfollowedRowKeys = async (
+  writeSets: NestedWriteSets,
+  report: UnfollowedRowKeysReporter | undefined,
+): Promise<void> => {
+  if (!report) {
+    return;
+  }
+  for (const [path, writeSet] of writeSets) {
+    const unfollowed = new Map<NestedOperationInfo, number>();
+    for (const target of writeSet.targets) {
+      if (!isLocated(target)) {
+        unfollowed.set(target.operation, (unfollowed.get(target.operation) ?? 0) + 1);
+      }
+    }
+    for (const [{ relatedModel, operation }, unidentified] of unfollowed) {
+      await report({ relatedModel, operation, path, unidentified });
+    }
+  }
+};
 
 export interface NestedEventCollectionInput {
   modelName: string;
@@ -219,7 +258,8 @@ const claimedAt = (walk: CollectionWalk, path: string): Set<Row> => {
   return claimed;
 };
 
-const isLocatedBy = (row: Row, target: NestedWriteTarget): boolean => matchesUniqueWhere(row, target.locator.where);
+const isLocatedBy = (row: Row, target: NestedWriteTarget): boolean =>
+  isLocated(target) && matchesUniqueWhere(row, target.locator.where);
 
 const targetOf = (row: Row, targets: readonly NestedWriteTarget[]): NestedWriteTarget | undefined =>
   targets.find((target) => isLocatedBy(row, target));
@@ -474,7 +514,8 @@ const parentAtPath = (walk: CollectionWalk, { parent, relation }: RelationBelow,
     row: parent.row,
     rows: held.map(({ row }) => row),
     absentTargets: ownTargets.filter(
-      (target) => updatesExistingRow(target) && !held.some(({ row }) => isLocatedBy(row, target)),
+      (target): target is LocatedTarget =>
+        isLocated(target) && updatesExistingRow(target) && !held.some(({ row }) => isLocatedBy(row, target)),
     ),
     insertsHidden: restricted && insertingCandidatesOf(relation.candidates, ownTargets).length > 0,
   } satisfies ParentAtPath;
@@ -758,6 +799,7 @@ export const collectNestedEvents = async (
   if (nestedOperations.length === 0) {
     return [];
   }
+  await reportUnfollowedRowKeys(input.writeSets, deps.onUnfollowedRowKeys);
 
   const keyConstraints = new Map(
     nestedOperations.map((op) => [op.path, getRowKeyConstraint(schemaMetadata, op.relatedModel)]),

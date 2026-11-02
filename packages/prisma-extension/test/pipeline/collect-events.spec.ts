@@ -105,6 +105,7 @@ const single = (overrides: SingleCase = {}): SingleOperationOutcome => {
       new Set(),
       base.nestedPreFetchResults,
       batchTargets,
+      Prisma,
     ),
   };
 };

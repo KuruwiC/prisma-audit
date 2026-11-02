@@ -11,7 +11,7 @@ import {
   type RowsNotInResultInput,
   readRowsNotInResult,
 } from '../../../src/nested/events/rows-not-in-result.js';
-import { EMPTY_WRITE_SET, isInsertedAt, type NestedWriteTarget } from '../../../src/nested/events/write-set.js';
+import { EMPTY_WRITE_SET, isInsertedAt, type LocatedTarget } from '../../../src/nested/events/write-set.js';
 import type { PreFetchListClient } from '../../../src/nested/pre-fetch/model-client.js';
 import type { ToManyPath } from '../../../src/nested/pre-fetch/to-many-path.js';
 import type { UniqueConstraint } from '../../../src/schema/types.js';
@@ -44,7 +44,7 @@ const postUpdate: NestedOperationInfo = {
   path: 'posts',
 };
 
-const targetBy = (by: 'rowKey' | 'uniqueWhere', where: Row): NestedWriteTarget => ({
+const targetBy = (by: 'rowKey' | 'uniqueWhere', where: Row): LocatedTarget => ({
   locator: { by, where },
   operation: postUpdate,
   element: 0,
@@ -131,7 +131,7 @@ describe('readRowsNotInResult', () => {
       const postA = { id: 'pa', authorId: 'u1', slug: 'a' };
       const postB = { id: 'pb', authorId: 'u2', slug: 'b' };
       const findMany = vi.fn(async (_args: unknown) => [postB, postA]);
-      const parentOf = (id: string, target: NestedWriteTarget): ParentAtPath => ({
+      const parentOf = (id: string, target: LocatedTarget): ParentAtPath => ({
         row: { id },
         rows: [],
         absentTargets: [target],

@@ -166,7 +166,7 @@ const deleteTargetBeforeState = (
   if (target.before.kind !== 'none') {
     return target.before;
   }
-  const linked = linkedRowNamedBy?.(target.locator.where);
+  const linked = target.locator.by === 'unknown' ? undefined : linkedRowNamedBy?.(target.locator.where);
   return linked ? { kind: 'captured', row: linked } : target.before;
 };
 
@@ -181,6 +181,9 @@ const deletedEntityOf = (
 ): Record<string, unknown> | null => {
   if (before.kind === 'captured') {
     return before.row;
+  }
+  if (target.locator.by === 'unknown') {
+    return null;
   }
   if (target.locator.by === 'rowKey') {
     return target.locator.where;

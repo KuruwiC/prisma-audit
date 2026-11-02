@@ -25,7 +25,7 @@ import type { EntityIdentityKey } from '../../utils/identity-key.js';
 import type { PreFetchListClient } from '../pre-fetch/model-client.js';
 import { parentKeyOf } from '../pre-fetch/parent-rows.js';
 import type { ToManyPath } from '../pre-fetch/to-many-path.js';
-import type { NestedWriteTarget } from './write-set.js';
+import type { LocatedTarget, NestedWriteTarget } from './write-set.js';
 
 type Row = Record<string, unknown>;
 
@@ -35,7 +35,7 @@ export interface ParentAtPath {
   /** The rows the result holds under it */
   readonly rows: readonly Row[];
   /** The updates nested under it whose row it does not hold */
-  readonly absentTargets: readonly NestedWriteTarget[];
+  readonly absentTargets: readonly LocatedTarget[];
   /** The caller restricted the relation's rows under it, and an operation nested under it inserts rows */
   readonly insertsHidden: boolean;
 }
@@ -89,7 +89,7 @@ const readHiddenInsertedKeys = async (
   });
 };
 
-const locatorFilter = (target: NestedWriteTarget, fieldNames: ReadonlySet<string>): Row =>
+const locatorFilter = (target: LocatedTarget, fieldNames: ReadonlySet<string>): Row =>
   target.locator.by === 'rowKey' ? target.locator.where : uniqueWhereAsFilter(target.locator.where, fieldNames);
 
 /** Whether `row` hangs under `parent`, by the foreign key it holds or the back-relation keys read with it */
