@@ -203,6 +203,7 @@ describe('concurrent writes on PostgreSQL: a commit between the audit read and t
 
   describe('REPEATABLE READ and SERIALIZABLE', () => {
     const levels = [Prisma.TransactionIsolationLevel.RepeatableRead, Prisma.TransactionIsolationLevel.Serializable];
+    const unpublished = { where: { published: false } };
 
     it.each(levels)(
       'rejects an update under %s with a write conflict when another transaction commits a change to its row between the read and the update, recording nothing',
@@ -240,6 +241,79 @@ describe('concurrent writes on PostgreSQL: a commit between the audit read and t
         expect(ranEmulatedExistenceCheck()).toBe(false);
         expect((await postOf(POST_ID))?.title).toBe('110');
         expect(await postRecords(POST_ID)).toEqual([]);
+      },
+    );
+
+    it.each(levels)(
+      'rejects an updateMany under %s with a write conflict when another transaction moves a read row out of its where between the read and the update, recording nothing',
+      async (isolationLevel) => {
+        await seedPost('moved-out');
+        await seedPost('stays');
+
+        const outcome = await interleave(barrier, postFindMany, {
+          operation: () =>
+            inTransaction(isolationLevel, (tx) => tx.post.updateMany({ ...unpublished, data: { title: '120' } })),
+          interleaved: () => other.post.update({ where: { id: 'moved-out' }, data: { published: true } }),
+        });
+
+        expect(errorCodesOf(outcome.operation)).toEqual({
+          code: 'P2034',
+          sqlState: carriedDatabaseCode(Prisma.prismaVersion.client, '40001'),
+        });
+        expect((await postOf('stays'))?.title).toBe('100');
+        expect(await postOf('moved-out')).toMatchObject({ title: '100', published: true });
+        expect(await postRecords('moved-out')).toEqual([]);
+        expect(await postRecords('stays')).toEqual([]);
+        expect(observer).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(levels)(
+      'rejects a deleteMany under %s with a write conflict when another transaction deletes a read row between the read and the delete, recording nothing',
+      async (isolationLevel) => {
+        await seedPost('deleted-first');
+        await seedPost('deleted-by-many');
+
+        const outcome = await interleave(barrier, postFindMany, {
+          operation: () => inTransaction(isolationLevel, (tx) => tx.post.deleteMany(unpublished)),
+          interleaved: () => other.post.delete({ where: { id: 'deleted-first' } }),
+        });
+
+        expect(errorCodesOf(outcome.operation)).toEqual({
+          code: 'P2034',
+          sqlState: carriedDatabaseCode(Prisma.prismaVersion.client, '40001'),
+        });
+        expect(await postOf('deleted-by-many')).not.toBeNull();
+        expect(await postRecords('deleted-first')).toEqual([]);
+        expect(await postRecords('deleted-by-many')).toEqual([]);
+        expect(observer).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(levels)(
+      'records only the rows an updateMany under %s read when another transaction inserts a row into its where between the read and the update, which it leaves as it is, and reports nothing',
+      async (isolationLevel) => {
+        await seedPost('read-1');
+        await seedPost('read-2');
+
+        const outcome = await interleave(barrier, postFindMany, {
+          operation: () =>
+            inTransaction(isolationLevel, (tx) => tx.post.updateMany({ ...unpublished, data: { title: '120' } })),
+          interleaved: () => seedPost('inserted'),
+        });
+
+        expect(outcome.operation).toEqual({ status: 'fulfilled', value: { count: 2 } });
+        expect((await postOf('inserted'))?.title).toBe('100');
+        expect(await postRecords('inserted')).toEqual([]);
+        for (const id of ['read-1', 'read-2']) {
+          expect(await postRecords(id)).toEqual([
+            expect.objectContaining({
+              action: 'update',
+              changes: expect.objectContaining({ title: { old: '100', new: '120' } }),
+            }),
+          ]);
+        }
+        expect(observer).not.toHaveBeenCalled();
       },
     );
   });
