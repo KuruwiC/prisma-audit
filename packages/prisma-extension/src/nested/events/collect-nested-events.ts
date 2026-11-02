@@ -132,7 +132,6 @@ export interface UnfollowedRowKeys {
 
 export type UnfollowedRowKeysReporter = (info: UnfollowedRowKeys) => Promise<void>;
 
-/** Reports, once per nested operation and reason, the rows whose key after the write is unknown */
 const reportUnfollowedRowKeys = async (
   writeSets: NestedWriteSets,
   report: UnfollowedRowKeysReporter | undefined,
@@ -381,7 +380,6 @@ const insertedUnder = (walk: CollectionWalk, relation: CandidateRelation, linkVa
   };
 };
 
-/** Records the values the parent row gives the key link of the operations nested at the relation */
 const noteLinkValues = (walk: CollectionWalk, relation: CandidateRelation, linkValues: KeyLinkValues): void => {
   const { after } = linkValues;
   for (const candidate of relation.candidates) {
@@ -606,8 +604,9 @@ const updatesExistingRow = (target: NestedWriteTarget): boolean => {
 };
 
 /**
- * The key link of `relation` under `parent`: none when the relation's row key holds no foreign key
- * to the parent, or when the parent row is an inserted row whose writes cannot be told apart
+ * The values `parent` gives the key link of `relation`: none when the relation's row key holds no
+ * foreign key to the parent, or when the parent row is an inserted row whose writes cannot be told
+ * apart
  */
 const keyLinkValuesUnder = (walk: CollectionWalk, { parent, relation }: RelationBelow): KeyLinkValues => {
   const { keyLink, candidates } = relation;

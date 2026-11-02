@@ -66,7 +66,6 @@ export const keyLinkValuesOf = (link: KeyLink, parentRow: Row): Row | undefined 
   return Object.values(values).some((value) => value === undefined || value === null) ? undefined : values;
 };
 
-/** `key` without the key link's fields */
 export const withoutKeyLink = (key: Row, link: KeyLink): Row =>
   Object.fromEntries(Object.entries(key).filter(([field]) => !link.fields.includes(field)));
 

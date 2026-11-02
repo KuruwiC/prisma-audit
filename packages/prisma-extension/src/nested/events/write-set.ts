@@ -379,7 +379,6 @@ const rowsInsertedBy = (operation: NestedOperationInfo, targets: readonly Nested
 interface WriteSetDraft {
   readonly keyed: KeyedTarget[];
   readonly generatedKeys: Set<EntityIdentityKey>;
-  /** The number of rows each operation inserts without a key the extension generated */
   readonly withoutGeneratedKey: Map<NestedOperationInfo, number>;
   /** A write at the path gives a row another key than the one the extension generated for it */
   writesKey: boolean;
