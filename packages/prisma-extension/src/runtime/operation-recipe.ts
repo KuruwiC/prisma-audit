@@ -1,20 +1,31 @@
 /**
  * Operation recipes
  *
- * With `write.implicitTransaction`, a call on a model delegate or a raw-query method of the audited
- * client, or of a client derived from it, does not reach Prisma when it is made. It returns a
- * recipe: a lazy thenable holding the client the call was made on, the call, and the fluent
- * relation calls chained on it. Awaiting the recipe replays the calls on that client, inside an
- * interactive transaction of the client when the call is a write whose audit is awaited, so the
- * call enters the client's extension chain once, already inside the transaction. Inside a callback
- * of your interactive `$transaction` too: the call is not made on the transaction's client, so it
- * runs in a transaction of its own, together with its audit. A batch `$transaction([...])`
- * replays the client's recipes in one transaction. A recipe is not a PrismaPromise: Prisma's own
- * `$transaction` rejects it.
+ * A call on a model delegate or a raw-query method of the audited client, of a client derived from
+ * it, or of the client an interactive `$transaction` callback receives, does not reach Prisma when
+ * it is made. It returns a recipe: a lazy thenable holding the client the call was made on, the
+ * transaction of that client if it is one, the call, and the fluent relation calls chained on it.
+ * Awaiting the recipe replays the calls on that client and starts Prisma's operation inside a scope
+ * that binds it to that transaction, or to none, so the audit takes the operation's transaction
+ * from the client it was issued on, not from whatever transaction is open around the call. With
+ * `write.implicitTransaction`, a recipe of a client outside any transaction runs a write whose audit
+ * is awaited in an interactive transaction of that client, so the call enters the client's
+ * extension chain once, already inside the transaction. A batch `$transaction([...])` takes the
+ * client's recipes and runs them. A recipe is not a PrismaPromise: Prisma's own `$transaction`
+ * rejects it.
  */
 
 import type { WritePolicy } from '@kuruwic/db-audit-core';
-import { isProcessingAuditLog, type WritePolicyDecision, withScope } from './scope.js';
+import type { PrismaHandle } from '../internal-types.js';
+import { isAuditableAction } from '../utils/extension-utils.js';
+import type { OpenTransaction } from './interactive-transaction.js';
+import {
+  type ActiveTransaction,
+  isProcessingAuditLog,
+  type RuntimeScope,
+  type WritePolicyDecision,
+  withScope,
+} from './scope.js';
 
 /** The model actions Prisma's delegates expose as lazy operations */
 const MODEL_ACTIONS: ReadonlySet<string> = new Set([
@@ -67,10 +78,11 @@ export interface RecipeConfig {
   /** The model a relation field of `model` leads to */
   readonly relatedModel: (model: string, field: string) => string | undefined;
   /**
-   * The write policy of a call of `action` on `model` with `args`, the arguments the call was made
-   * with, decided now, sampling included; undefined when the call is not audited
+   * Present with `write.implicitTransaction`: the write policy of a call of `action` on `model` with
+   * `args`, the arguments the call was made with, decided now, sampling included; undefined when the
+   * call is not audited
    */
-  readonly decideWritePolicy: (model: string, action: string, args: unknown) => WritePolicy | undefined;
+  readonly decideWritePolicy?: (model: string, action: string, args: unknown) => WritePolicy | undefined;
 }
 
 interface RecipeCall {
@@ -79,10 +91,12 @@ interface RecipeCall {
 }
 
 interface Recipe {
-  /** The audited client the call was made on, whose `$transaction` the recipe runs in */
+  /** The audited client the call was made on, the one a batch `$transaction([...])` takes it for */
   readonly receiver: object;
-  /** The client behind `receiver`, the one Prisma runs the call on */
+  /** The client behind `receiver`, the one Prisma runs the call on, and opens a transaction on */
   readonly target: object;
+  /** The interactive transaction `target` is the client of; undefined for a client outside any */
+  readonly transaction: ActiveTransaction | undefined;
   /** The model delegate property the call was made on; absent for a raw-query method */
   readonly accessor: string | undefined;
   readonly model: string | undefined;
@@ -125,11 +139,8 @@ const replay = (recipe: Recipe, client: object): unknown => {
   return operation;
 };
 
-const runInTransaction = (receiver: object, run: (tx: object) => Promise<unknown>): Promise<unknown> =>
-  Promise.resolve(invoke(receiver, { method: '$transaction', args: [run] }));
-
 const decisionOf = (recipe: Recipe, config: RecipeConfig): WritePolicyDecision | undefined => {
-  if (recipe.model === undefined || isProcessingAuditLog()) {
+  if (recipe.model === undefined || config.decideWritePolicy === undefined || isProcessingAuditLog()) {
     return undefined;
   }
   const policy = config.decideWritePolicy(recipe.model, recipe.call.method, recipe.call.args[0]);
@@ -137,35 +148,41 @@ const decisionOf = (recipe: Recipe, config: RecipeConfig): WritePolicyDecision |
 };
 
 /**
- * `operation`, each of whose methods runs in a scope that holds `decision`: the `then` an await
- * calls and the method Prisma's own batch starts it with alike, so the queries the operation runs
- * reach the audit extension with the decision made for it, whoever starts it
+ * `operation`, each of whose methods runs in a scope that merges `scope` over the current one: the
+ * `then` an await calls and the method Prisma's own batch starts it with alike, so the queries the
+ * operation runs reach the audit extension with that scope, whoever starts it
  */
-const withWritePolicyDecision = (decision: WritePolicyDecision | undefined, operation: unknown): unknown =>
+const startingIn = (scope: RuntimeScope, operation: unknown): unknown =>
   isObject(operation)
     ? new Proxy(operation, {
         get(target, prop) {
           const value: unknown = Reflect.get(target, prop);
           return typeof value === 'function'
-            ? (...args: unknown[]) =>
-                withScope({ writePolicyDecision: decision }, () => Reflect.apply(value, target, args))
+            ? (...args: unknown[]) => withScope(scope, () => Reflect.apply(value, target, args))
             : value;
         },
       })
     : operation;
 
+const startOn = async (
+  recipe: Recipe,
+  client: object,
+  transaction: ActiveTransaction | undefined,
+  decision: WritePolicyDecision | undefined,
+): Promise<unknown> =>
+  await startingIn({ binding: { transaction }, writePolicyDecision: decision }, replay(recipe, client));
+
 const awaitsAudit = (decision: WritePolicyDecision | undefined): boolean =>
   decision?.policy.sampled === true && decision.policy.atomic;
 
-const createRecipeFactory = (config: RecipeConfig) => {
+const createRecipeFactory = (config: RecipeConfig, openTransaction: OpenTransaction) => {
   const run = async (recipe: Recipe): Promise<unknown> => {
     const decision = decisionOf(recipe, config);
-    return awaitsAudit(decision)
-      ? await runInTransaction(
-          recipe.receiver,
-          async (tx) => await withWritePolicyDecision(decision, replay(recipe, tx)),
+    return recipe.transaction === undefined && awaitsAudit(decision)
+      ? await openTransaction(recipe.target, [], (transaction) =>
+          startOn(recipe, transaction.client, transaction, decision),
         )
-      : await withWritePolicyDecision(decision, replay(recipe, recipe.target));
+      : await startOn(recipe, recipe.target, recipe.transaction, decision);
   };
 
   const start = (recipe: Recipe): Promise<unknown> => {
@@ -242,10 +259,11 @@ const createRecipeFactory = (config: RecipeConfig) => {
 
 /**
  * Wraps the model delegates and raw-query methods of the clients `config` is used for, caching
- * each wrapper per client so that a property read twice returns the same value.
+ * each wrapper per client so that a property read twice returns the same value. `openTransaction`
+ * opens the interactive transaction `write.implicitTransaction` runs a write in.
  */
-export const createRecipeClient = (config: RecipeConfig) => {
-  const factory = createRecipeFactory(config);
+export const createRecipeClient = (config: RecipeConfig, openTransaction: OpenTransaction) => {
+  const factory = createRecipeFactory(config, openTransaction);
   const wrappers = new WeakMap<object, Map<string, unknown>>();
 
   const cached = (receiver: object, key: string, build: () => unknown): unknown => {
@@ -260,8 +278,10 @@ export const createRecipeClient = (config: RecipeConfig) => {
     return byKey.get(key);
   };
 
-  const delegateOf = (receiver: object, target: object, accessor: string, model: string): unknown => {
-    const delegate: unknown = Reflect.get(target, accessor);
+  type IssuingClient = Pick<Recipe, 'receiver' | 'target' | 'transaction'>;
+
+  const delegateOf = (issuer: IssuingClient, accessor: string, model: string): unknown => {
+    const delegate: unknown = Reflect.get(issuer.target, accessor);
     if (!isObject(delegate)) {
       return delegate;
     }
@@ -274,8 +294,7 @@ export const createRecipeClient = (config: RecipeConfig) => {
         if (!actions.has(prop)) {
           actions.set(prop, (...args: unknown[]) =>
             factory.create({
-              receiver,
-              target,
+              ...issuer,
               accessor,
               model,
               call: { method: prop, args },
@@ -290,29 +309,24 @@ export const createRecipeClient = (config: RecipeConfig) => {
     });
   };
 
-  /** The value `receiver` returns for `prop`, or undefined when the property is not wrapped */
-  const propertyOf = (
-    receiver: object,
-    target: object,
-    prop: string | symbol,
-  ): { readonly value: unknown } | undefined => {
+  /** The value `issuer.receiver` returns for `prop`, or undefined when the property is not wrapped */
+  const wrappedPropertyOf = (issuer: IssuingClient, prop: string | symbol): { readonly value: unknown } | undefined => {
     if (typeof prop !== 'string') {
       return undefined;
     }
     const model = config.modelOfAccessor.get(prop);
     if (model !== undefined) {
-      return { value: cached(receiver, prop, () => delegateOf(receiver, target, prop, model)) };
+      return { value: cached(issuer.receiver, prop, () => delegateOf(issuer, prop, model)) };
     }
-    if (RAW_METHODS.has(prop) && typeof Reflect.get(target, prop) === 'function') {
+    if (RAW_METHODS.has(prop) && typeof Reflect.get(issuer.target, prop) === 'function') {
       return {
         value: cached(
-          receiver,
+          issuer.receiver,
           prop,
           () =>
             (...args: unknown[]) =>
               factory.create({
-                receiver,
-                target,
+                ...issuer,
                 accessor: undefined,
                 model: undefined,
                 call: { method: prop, args },
@@ -326,14 +340,41 @@ export const createRecipeClient = (config: RecipeConfig) => {
     return undefined;
   };
 
-  return { propertyOf };
+  /** The value the audited client `receiver`, outside any transaction, returns for `prop`, when it is wrapped */
+  const propertyOf = (receiver: object, target: object, prop: string | symbol) =>
+    wrappedPropertyOf({ receiver, target, transaction: undefined }, prop);
+
+  /**
+   * The client an interactive `$transaction` callback receives: `transaction`'s client, whose
+   * operations are recipes bound to `transaction`. Every other property is the transaction
+   * client's own.
+   */
+  const boundClient = (transaction: ActiveTransaction): PrismaHandle =>
+    new Proxy(transaction.client, {
+      get(target, prop, receiver: object) {
+        const wrapped = wrappedPropertyOf({ receiver, target, transaction }, prop);
+        return wrapped ? wrapped.value : Reflect.get(target, prop);
+      },
+    });
+
+  return { propertyOf, boundClient };
 };
 
+const isModelWrite = (recipe: Recipe): boolean => recipe.model !== undefined && isAuditableAction(recipe.call.method);
+
 export interface BatchRecipes {
-  /** Whether some operation of the batch is an audited write whose audit is awaited */
-  readonly awaitsAudit: boolean;
-  /** The batch's operations made on `client`, not yet started, each to start with the write policy decided for it */
+  /** Whether some operation of the batch is a model write, of an audited model or not */
+  readonly holdsModelWrite: boolean;
+  /**
+   * The batch's operations made on `client`, not yet started, for Prisma's own batch: each starts
+   * without a binding, so an audited write that reached the audit from one would be rejected
+   */
   readonly operationsOn: (client: object) => unknown[];
+  /**
+   * Runs the batch's operations on the client of `transaction`, one after another in list order, as
+   * Prisma runs a batch, each bound to `transaction` and under the write policy decided as it starts
+   */
+  readonly runIn: (transaction: ActiveTransaction) => Promise<unknown[]>;
 }
 
 /**
@@ -354,7 +395,7 @@ export const takeBatchRecipes = (items: readonly unknown[], receiver: object, co
             : undefined;
     if (recipe === undefined || problem !== undefined) {
       throw new Error(
-        `The operation at index ${index} of the batch $transaction ${problem}: with write.implicitTransaction, every operation of a batch is created by the client $transaction is called on and passed to it before it is awaited`,
+        `The operation at index ${index} of the batch $transaction ${problem}: every operation of a batch is created by the client $transaction is called on and passed to it before it is awaited`,
       );
     }
     return recipe;
@@ -362,10 +403,16 @@ export const takeBatchRecipes = (items: readonly unknown[], receiver: object, co
   for (const recipe of taken) {
     recipe.state = { kind: 'taken-by-batch' };
   }
-  const decisions = taken.map((recipe) => decisionOf(recipe, config));
   return {
-    awaitsAudit: decisions.some(awaitsAudit),
+    holdsModelWrite: taken.some(isModelWrite),
     operationsOn: (client) =>
-      taken.map((recipe, index) => withWritePolicyDecision(decisions[index], replay(recipe, client))),
+      taken.map((recipe) => startingIn({ binding: undefined, writePolicyDecision: undefined }, replay(recipe, client))),
+    runIn: async (transaction) => {
+      const results: unknown[] = [];
+      for (const recipe of taken) {
+        results.push(await startOn(recipe, transaction.client, transaction, decisionOf(recipe, config)));
+      }
+      return results;
+    },
   };
 };

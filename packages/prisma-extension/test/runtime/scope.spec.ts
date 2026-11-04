@@ -5,9 +5,10 @@
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import type { PrismaHandle } from '../../src/internal-types.js';
-import { currentScope, decidedWritePolicyFor, enterTransaction, withScope } from '../../src/runtime/scope.js';
+import { currentScope, decidedWritePolicyFor, operationBinding, withScope } from '../../src/runtime/scope.js';
+import { activeTransactionOf } from '../support/active-transaction.js';
 
 const client = (id: string): PrismaHandle => ({ id });
 
@@ -32,11 +33,33 @@ describe('runtime scope', () => {
   });
 
   it('does not leak the frame after withScope returns', () => {
-    withScope({ transaction: { client: client('tx'), deferredWrites: [] } }, () => {
-      expect(currentScope()?.transaction?.client).toBeDefined();
+    withScope({ binding: { transaction: activeTransactionOf(client('tx')) } }, () => {
+      expect(currentScope()?.binding?.transaction?.client).toBeDefined();
     });
 
     expect(currentScope()).toBeUndefined();
+  });
+
+  describe('operationBinding', () => {
+    it('returns the binding the scope holds, and undefined without one', () => {
+      const binding = { transaction: activeTransactionOf(client('tx')) };
+
+      withScope({ binding }, () => {
+        expect(operationBinding()).toBe(binding);
+      });
+      withScope({ binding: { transaction: undefined } }, () => {
+        expect(operationBinding()).toEqual({ transaction: undefined });
+      });
+      expect(operationBinding()).toBeUndefined();
+    });
+
+    it('drops the binding of the enclosing scope when a patch sets none', () => {
+      withScope({ binding: { transaction: activeTransactionOf(client('outer')) } }, () => {
+        withScope({ binding: undefined }, () => {
+          expect(operationBinding()).toBeUndefined();
+        });
+      });
+    });
   });
 
   describe('decidedWritePolicyFor', () => {
@@ -64,10 +87,10 @@ describe('runtime scope', () => {
     it('merges the patch over the current frame', () => {
       const txClient = client('tx');
 
-      withScope({ transaction: { client: txClient, deferredWrites: [] } }, () => {
+      withScope({ binding: { transaction: activeTransactionOf(txClient) } }, () => {
         withScope({ isProcessingAuditLog: true }, () => {
           const scope = currentScope();
-          expect(scope?.transaction?.client).toBe(txClient);
+          expect(scope?.binding?.transaction?.client).toBe(txClient);
           expect(scope?.isProcessingAuditLog).toBe(true);
         });
       });
@@ -77,9 +100,9 @@ describe('runtime scope', () => {
       const outerClient = client('outer');
       const innerClient = client('inner');
 
-      withScope({ transaction: { client: outerClient, deferredWrites: [] } }, () => {
-        withScope({ transaction: { client: innerClient, deferredWrites: [] } }, () => {
-          expect(currentScope()?.transaction?.client).toBe(innerClient);
+      withScope({ binding: { transaction: activeTransactionOf(outerClient) } }, () => {
+        withScope({ binding: { transaction: activeTransactionOf(innerClient) } }, () => {
+          expect(currentScope()?.binding?.transaction?.client).toBe(innerClient);
         });
       });
     });
@@ -89,13 +112,13 @@ describe('runtime scope', () => {
     it('restores the outer frame after a nested withScope returns', () => {
       const outerClient = client('outer');
 
-      withScope({ transaction: { client: outerClient, deferredWrites: [] } }, () => {
+      withScope({ binding: { transaction: activeTransactionOf(outerClient) } }, () => {
         withScope({ isProcessingAuditLog: true }, () => {
           expect(currentScope()?.isProcessingAuditLog).toBe(true);
         });
 
         const scope = currentScope();
-        expect(scope?.transaction?.client).toBe(outerClient);
+        expect(scope?.binding?.transaction?.client).toBe(outerClient);
         expect(scope?.isProcessingAuditLog).toBeUndefined();
       });
     });
@@ -106,13 +129,13 @@ describe('runtime scope', () => {
       const gateA = gate();
       const gateB = gate();
 
-      const flowA = withScope({ transaction: { client: clientA, deferredWrites: [] } }, async () => {
+      const flowA = withScope({ binding: { transaction: activeTransactionOf(clientA) } }, async () => {
         await gateA.opened;
-        return currentScope()?.transaction?.client;
+        return currentScope()?.binding?.transaction?.client;
       });
-      const flowB = withScope({ transaction: { client: clientB, deferredWrites: [] } }, async () => {
+      const flowB = withScope({ binding: { transaction: activeTransactionOf(clientB) } }, async () => {
         await gateB.opened;
-        return currentScope()?.transaction?.client;
+        return currentScope()?.binding?.transaction?.client;
       });
       gateB.open();
       const b = await flowB;
@@ -125,88 +148,16 @@ describe('runtime scope', () => {
     });
   });
 
-  describe('enterTransaction', () => {
-    const context: AuditContext = { actor: { category: 'model', type: 'User', id: 'user-123' } };
-
-    it('runs the callback in the transaction scope, under the audit context it re-establishes', async () => {
-      const provider = createAsyncLocalStorageProvider();
-      const transaction = { client: client('tx'), deferredWrites: [] };
-
-      const seen = await enterTransaction(provider, context, transaction, async () => ({
-        transaction: currentScope()?.transaction,
-        context: provider.getContext(),
-      }));
-
-      expect(seen.transaction).toBe(transaction);
-      expect(seen.context).toEqual(context);
-      expect(currentScope()).toBeUndefined();
-    });
-
-    it('enters the transaction without touching the audit context when there is none', async () => {
-      const provider = { runAsync: vi.fn() };
-      const transaction = { client: client('tx'), deferredWrites: [] };
-
-      const seen = await enterTransaction(provider, undefined, transaction, async () => currentScope()?.transaction);
-
-      expect(seen).toBe(transaction);
-      expect(provider.runAsync).not.toHaveBeenCalled();
-    });
-
-    it('resolves with the result of the callback and rejects with its error', async () => {
-      const provider = createAsyncLocalStorageProvider();
-      const transaction = { client: client('tx'), deferredWrites: [] };
-      const failure = new Error('callback failed');
-
-      await expect(enterTransaction(provider, context, transaction, async () => 'result')).resolves.toBe('result');
-      await expect(
-        enterTransaction(provider, undefined, transaction, async () => {
-          throw failure;
-        }),
-      ).rejects.toBe(failure);
-    });
-
-    it('starts a lazy operation the callback returns without awaiting it inside the transaction scope', async () => {
-      const transaction = { client: client('tx'), deferredWrites: [] };
-      const lazy = {
-        then: (onFulfilled: (value: unknown) => unknown) =>
-          Promise.resolve(currentScope()?.transaction).then(onFulfilled),
-      };
-
-      const startedIn = await enterTransaction(
-        createAsyncLocalStorageProvider(),
-        undefined,
-        transaction,
-        () => lazy as unknown as Promise<unknown>,
-      );
-
-      expect(startedIn).toBe(transaction);
-    });
-
-    it('keeps the fields of the enclosing scope that the entered transaction does not set', async () => {
-      const outer = { client: client('outer'), deferredWrites: [] };
-      const inner = { client: client('inner'), deferredWrites: [] };
-
-      const seen = await withScope({ isProcessingAuditLog: true }, () =>
-        enterTransaction(createAsyncLocalStorageProvider(), undefined, outer, () =>
-          enterTransaction(createAsyncLocalStorageProvider(), undefined, inner, async () => currentScope()),
-        ),
-      );
-
-      expect(seen?.transaction).toBe(inner);
-      expect(seen?.isProcessingAuditLog).toBe(true);
-    });
-  });
-
   describe('queue mutation', () => {
     it('lets callers mutate the current frame queue and see it via currentScope', () => {
-      withScope({ transaction: { client: client('tx'), deferredWrites: [] } }, () => {
-        const scope = currentScope();
-        if (!scope?.transaction) throw new Error('expected a transaction scope');
+      withScope({ binding: { transaction: activeTransactionOf(client('tx')) } }, () => {
+        const transaction = currentScope()?.binding?.transaction;
+        if (!transaction) throw new Error('expected a transaction scope');
 
-        scope.transaction.deferredWrites.push(async () => {});
+        transaction.deferredWrites.push(async () => {});
 
         withScope({ isProcessingAuditLog: true }, () => {
-          expect(currentScope()?.transaction?.deferredWrites).toHaveLength(1);
+          expect(currentScope()?.binding?.transaction?.deferredWrites).toHaveLength(1);
         });
       });
     });
@@ -224,10 +175,10 @@ describe('runtime scope', () => {
       const txClient = client('tx');
 
       provider.run(context, () => {
-        withScope({ transaction: { client: txClient, deferredWrites: [] } }, () => {
+        withScope({ binding: { transaction: activeTransactionOf(txClient) } }, () => {
           provider.withActor(otherActor, () => {
             expect(provider.getContext()?.actor).toEqual(otherActor);
-            expect(currentScope()?.transaction?.client).toBe(txClient);
+            expect(currentScope()?.binding?.transaction?.client).toBe(txClient);
           });
         });
       });
@@ -238,11 +189,11 @@ describe('runtime scope', () => {
       const txClient = client('tx');
 
       await provider.runAsync(context, async () => {
-        await withScope({ transaction: { client: txClient, deferredWrites: [] } }, async () => {
+        await withScope({ binding: { transaction: activeTransactionOf(txClient) } }, async () => {
           await provider.runAsync({ actor: otherActor }, async () => {
             expect(provider.getContext()?.actor).toEqual(otherActor);
             expect(provider.getContext()?.request).toBeUndefined();
-            expect(currentScope()?.transaction?.client).toBe(txClient);
+            expect(currentScope()?.binding?.transaction?.client).toBe(txClient);
           });
         });
       });

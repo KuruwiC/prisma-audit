@@ -60,7 +60,7 @@ const schemaMetadata = schemaMetadataOf(
 /** The scope of an operation inside an interactive transaction whose client is `client` */
 const transactionScopeOn = (client: PrismaBaseClient): ExecutionScope => ({
   ...scopeOn(client),
-  transaction: { deferredWrites: [] },
+  transaction: { deferredWrites: [], recordAuditFailure: () => {} },
 });
 
 /** An executor on a client that takes a query omit (Prisma 6.2 and later) when `queryOmitSupported` */
@@ -640,25 +640,17 @@ describe('createBatchExecutor', () => {
         expect(findMany).toHaveBeenCalledTimes(3);
       });
 
-      it.each([
-        {
-          scope: 'inside a batch Prisma runs',
-          limit: 2,
-          prismaBatch: { afterCommit: () => {} },
-          reported: { unidentified: 2 },
-        },
-        { scope: 'with a limit that is not a positive integer', limit: 0, prismaBatch: undefined, reported: undefined },
-      ])('runs the update as given $scope and audits none of its rows', async ({ limit, prismaBatch, reported }) => {
+      it('runs the update as given with a limit that is not a positive integer and audits none of its rows', async () => {
         const findMany = vi.fn(async () => []);
         const updateMany = vi.fn(async () => ({ count: 2 }));
         const client = clientWith({ user: { findMany, updateMany } });
         const produceRecords = produce();
-        const args = { where, data, limit };
+        const args = { where, data, limit: 0 };
 
         const outcome = await runWithRecords(
           executor,
           operationOn(client, 'updateMany', args),
-          { ...scopeOn(client), prismaBatch },
+          scopeOn(client),
           produceRecords,
         );
 
@@ -666,18 +658,7 @@ describe('createBatchExecutor', () => {
         expect(findMany).not.toHaveBeenCalled();
         expect(outcome.result).toEqual({ count: 2 });
         expect(produceRecords).toHaveBeenCalledWith([], expect.anything(), new Map());
-        if (reported) {
-          expect(failureSink.notify).toHaveBeenCalledTimes(1);
-          expect(failureSink.notify).toHaveBeenCalledWith({
-            phase: 'row-identification',
-            modelName: 'User',
-            operation: 'updateMany',
-            params: reported,
-            error: new Error(unidentifiedMessage('updateMany', reported.unidentified)),
-          });
-        } else {
-          expect(failureSink.notify).not.toHaveBeenCalled();
-        }
+        expect(failureSink.notify).not.toHaveBeenCalled();
       });
     });
 

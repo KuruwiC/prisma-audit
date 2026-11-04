@@ -3,12 +3,13 @@
  *
  * The `$allOperations` hook: decides whether an intercepted operation is audited (its kind, then
  * the audit gate, from the audit context and the audited models the operation's arguments write,
- * then the write policy's sampling), rejects it before it runs when the gate does, selects the
- * relations its nested writes touch, runs it through the audited-operation pipeline on the
- * library-owned runtime context, and returns the result in the shape the caller requested. The
- * hook continues the caller's operation through `query` unless the gate rejects it; with
- * `write.implicitTransaction` the client proxy opens the interactive transaction before the
- * operation enters the extension chain.
+ * then the write policy's sampling), rejects it before it runs when the gate does or when it
+ * reached the hook without the binding the client it was issued on gives it, selects the relations
+ * its nested writes touch, runs it through the audited-operation pipeline in the transaction that
+ * binding names, and returns the result in the shape the caller requested. The hook continues the
+ * caller's operation through `query` unless it rejects it; the client proxy binds the operation,
+ * and with `write.implicitTransaction` opens the interactive transaction, before the operation
+ * enters the extension chain.
  *
  * @module extension
  * @see {@link createAuditLogExtension}
@@ -18,13 +19,14 @@
 import { AuditContextMissingError, auditGate, createFailureSink, policy } from '@kuruwic/db-audit-core';
 import { createPrismaWriteExecutor, declaresBeforeUnavailableColumn } from './adapters/write-executor.js';
 import { type AuditOptions, normalizeAuditOptions } from './audit-options.js';
+import { AuditUnboundWriteError } from './errors.js';
 import type { ExtensionParams, PrismaBaseClient } from './internal-types.js';
 import { createBatchExecutor } from './pipeline/batch-executor.js';
 import { createRecordProducer } from './pipeline/produce-records.js';
 import { type AuditPipelineDependencies, runAuditedOperation } from './pipeline/run-audited-operation.js';
 import { createSingleExecutor } from './pipeline/single-executor.js';
 import type { RecipeConfig } from './runtime/operation-recipe.js';
-import { decidedWritePolicyFor, isProcessingAuditLog, withScope } from './runtime/scope.js';
+import { decidedWritePolicyFor, isProcessingAuditLog, operationBinding, withScope } from './runtime/scope.js';
 import { createTransactionProxy } from './runtime/transaction-proxy.js';
 import type { PrismaAuditExtensionOptions } from './types.js';
 import { type ClientShape, injectAuditedSelection, projectToRequestedShape } from './utils/audited-selection.js';
@@ -63,7 +65,8 @@ const createPipelineDependencies = (audit: AuditOptions): AuditPipelineDependenc
 };
 
 /**
- * What the client proxy needs to open the interactive transaction of an operation whose audit is
+ * What the client proxy needs to make the client's operations into recipes and, with
+ * `write.implicitTransaction`, to open the interactive transaction of an operation whose audit is
  * awaited. Whether one is opened is decided from the arguments the call was made with; the hook
  * decides whether the operation is audited, or rejected, from the arguments that reach it.
  */
@@ -79,12 +82,14 @@ const recipeConfigOf = (audit: AuditOptions): RecipeConfig => {
   return {
     modelOfAccessor: new Map(modelNames.map((modelName) => [getModelAccessor(modelName), modelName])),
     relatedModel: (modelName, field) => relatedModels.get(modelName)?.get(field),
-    decideWritePolicy: (modelName, action, args) =>
-      audit.provider.getContext() !== undefined &&
-      isAuditableAction(action) &&
-      audit.auditedModelsOf(modelName, args).length > 0
-        ? policy(modelName, policyConfig)
-        : undefined,
+    decideWritePolicy: audit.implicitTransaction
+      ? (modelName, action, args) =>
+          audit.provider.getContext() !== undefined &&
+          isAuditableAction(action) &&
+          audit.auditedModelsOf(modelName, args).length > 0
+            ? policy(modelName, policyConfig)
+            : undefined
+      : undefined,
   };
 };
 
@@ -100,7 +105,7 @@ const recipeConfigOf = (audit: AuditOptions): RecipeConfig => {
 export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) => {
   const audit = normalizeAuditOptions(options);
 
-  const recipeConfig = audit.implicitTransaction ? recipeConfigOf(audit) : undefined;
+  const recipeConfig = recipeConfigOf(audit);
   const deps = createPipelineDependencies(audit);
   const shape: ClientShape = { schemaMetadata: audit.schemaMetadata, queryOmitSupported: audit.queryOmitSupported };
 
@@ -116,6 +121,10 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     }
     if (gate.kind === 'skip') {
       return query(args);
+    }
+    const binding = operationBinding();
+    if (binding === undefined) {
+      throw new AuditUnboundWriteError({ modelName: model, operation });
     }
     const auditContext = gate.context;
     const writePolicy = decidedWritePolicyFor(model, operation) ?? policy(model, audit.policyConfig);
@@ -140,6 +149,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
           auditContext,
           baseClient,
           atomic: writePolicy.atomic,
+          transaction: binding.transaction,
         },
         deps,
       ),

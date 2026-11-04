@@ -45,6 +45,7 @@ export {
 // ============================================================================
 export type { PrismaClientWithAudit } from './client-factory.js';
 export { createAuditClient, defineConfig } from './client-factory.js';
+export { AuditRollbackError, AuditUnboundWriteError } from './errors.js';
 export type { PrismaModelType } from './prisma-types.js';
 export { flushAllPendingWrites, getPendingWriteCount } from './runtime/pending-writes.js';
 export type { AuditSchema } from './schema/audit-schema.js';

@@ -1,16 +1,17 @@
 /**
  * Runtime scope
  *
- * The library-owned state of the async flow an audited operation runs in: the transaction it is
- * inside, with the client of that transaction and the writes queued until it commits, the batch
- * `$transaction([...])` Prisma runs that it is part of, with the writes queued until that batch
- * commits, and the re-entrancy guard raised while the audit's own queries run. The state lives on
- * its own async-local store, apart from the app-owned audit context, so re-attributing the actor
- * mid-flow cannot drop it. This module is the only reader and writer of that store.
+ * The library-owned state of the async flow an audited operation runs in: the binding the client
+ * the operation was issued on gives it, which names the interactive transaction of that client if
+ * it is one, with the client of that transaction, the writes queued until it commits and the audit
+ * failures that must keep it from committing, and the re-entrancy guard raised while the audit's own
+ * queries run. The state lives on its own async-local store, apart from the app-owned audit
+ * context, so re-attributing the actor mid-flow cannot drop it. This module is the only reader and
+ * writer of that store.
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
-import type { AuditContext, AuditContextProvider, WritePolicy } from '@kuruwic/db-audit-core';
+import type { WritePolicy } from '@kuruwic/db-audit-core';
 import { getGlobalSingleton } from '@kuruwic/db-audit-core';
 import type { PrismaHandle } from '../internal-types.js';
 import { trackPendingWrite } from './pending-writes.js';
@@ -20,29 +21,26 @@ export interface ActiveTransaction {
   readonly client: PrismaHandle;
   /** Writes the owner of the transaction starts on the base client once it has committed */
   readonly deferredWrites: Array<() => Promise<void>>;
+  /**
+   * Audit failures that failed an operation of the transaction once its write had run: the owner
+   * of the transaction rolls it back when its callback resolves all the same
+   */
+  readonly auditFailures: Error[];
 }
 
-/**
- * A batch `$transaction([...])` Prisma runs itself. Its operations reach the hook as parts of one
- * request that no audit query can join, and Prisma hands each its result once the database has run
- * the whole batch, the result of an operation that ran included when the batch then rolls back
- * (Prisma 7). Their audit writes therefore wait for the owner of the batch, which starts them on the
- * base client once the batch has committed and discards them unrun when it rejects.
- */
-export interface ActivePrismaBatch {
-  /** Writes the caller of the batch waits for once it has committed */
-  readonly awaitedWrites: Array<() => Promise<void>>;
-  /** Writes started once the batch has committed, as pending writes no caller awaits */
-  readonly deferredWrites: Array<() => Promise<void>>;
+/** What the client an operation was issued on tells the audit about it */
+export interface OperationBinding {
+  /** The interactive transaction whose client the operation was issued on; undefined for a client outside any */
+  readonly transaction: ActiveTransaction | undefined;
 }
 
 export interface RuntimeScope {
-  readonly transaction?: ActiveTransaction;
   /**
-   * Present while Prisma runs a batch `$transaction([...])` itself, for the operations it runs as
-   * parts of the batch; absent again for a query issued while one of them continues
+   * Set by the audited client an operation was issued on, around the start of that operation;
+   * absent for an operation Prisma starts as part of its own batch `$transaction([...])`, which no
+   * audit query can join
    */
-  readonly prismaBatch?: ActivePrismaBatch | undefined;
+  readonly binding?: OperationBinding | undefined;
   /**
    * The write policy decided at the client boundary for the operation this scope runs, set only
    * around that operation, so a nested operation's scope replaces it
@@ -56,8 +54,6 @@ export interface RuntimeScope {
   readonly isProcessingAuditLog?: boolean;
 }
 
-type ContextRunner = Pick<AuditContextProvider, 'runAsync'>;
-
 /** Process-wide, so that every copy of this package loaded in the process shares one scope */
 const storage = getGlobalSingleton('runtime-scope', () => new AsyncLocalStorage<RuntimeScope>());
 
@@ -69,22 +65,7 @@ export const withScope = <T>(patch: RuntimeScope, fn: () => T): T =>
 
 export const isProcessingAuditLog = (): boolean => currentScope()?.isProcessingAuditLog === true;
 
-/**
- * Runs `fn` inside `transaction`, re-establishing the audit context alongside it when there is
- * one: a `$transaction` callback may start on a different microtask than its caller, and both
- * stores must be present when it does. Without one the transaction is entered all the same, so an
- * audit context set later inside `fn` finds it. `fn`'s result is awaited inside the scope, so a
- * lazy operation it returns without awaiting it starts there too.
- */
-export const enterTransaction = <T>(
-  provider: ContextRunner,
-  auditContext: AuditContext | undefined,
-  transaction: ActiveTransaction,
-  fn: () => Promise<T>,
-): Promise<T> => {
-  const inScope = () => withScope({ transaction }, async () => await fn());
-  return auditContext ? provider.runAsync(auditContext, inScope) : inScope();
-};
+export const operationBinding = (): OperationBinding | undefined => currentScope()?.binding;
 
 export interface WritePolicyDecision {
   readonly model: string;
@@ -109,14 +90,4 @@ export const drainAfterCommit = (deferredWrites: ReadonlyArray<() => Promise<voi
   for (const deferredWrite of deferredWrites) {
     trackPendingWrite(deferredWrite);
   }
-};
-
-/**
- * Starts the writes queued on a committed Prisma batch on the base client, and resolves once its
- * awaited writes have finished. A queued write reports its own failure and does not reject.
- */
-export const drainBatchAfterCommit = async (batch: ActivePrismaBatch): Promise<void> => {
-  const awaited = batch.awaitedWrites.map((write) => write());
-  drainAfterCommit(batch.deferredWrites);
-  await Promise.all(awaited);
 };

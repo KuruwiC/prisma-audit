@@ -469,7 +469,7 @@ describe('CRUD Operations Integration', () => {
       );
     });
 
-    it('records no create of a row a later operation of the same batch $transaction deleted', async () => {
+    it('records the create of a row a later operation of the same batch $transaction deletes, and its delete', async () => {
       await context.provider.runAsync(testActor, async () =>
         context.prisma.$transaction([
           context.prisma.user.createMany({
@@ -483,9 +483,14 @@ describe('CRUD Operations Integration', () => {
       );
 
       const logs = await context.basePrisma.auditLog.findMany({
-        where: { entityType: 'User', aggregateType: 'User', action: 'create' },
+        where: { entityType: 'User', aggregateType: 'User' },
+        orderBy: [{ action: 'asc' }, { entityId: 'asc' }],
       });
-      expect(logs.map((log) => log.entityId)).toEqual(['batch-many-1']);
+      expect(logs.map((log) => `${log.action} ${log.entityId}`)).toEqual([
+        'create batch-many-1',
+        'create batch-many-2',
+        'delete batch-many-2',
+      ]);
     });
 
     it('should create audit log for createManyAndReturn with single object data', async () => {

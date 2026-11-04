@@ -6,14 +6,15 @@
  * rows the operation wrote. Inside an interactive transaction a round that writes fewer rows than
  * it read, because another writer changed some of them in between, is topped up with rows read
  * the same way, a bounded number of times, so the count matches a plain operation with the same
- * limit. Outside any transaction the operation is one narrowed statement. Inside a batch
- * `$transaction([...])` that Prisma runs, and for a limit that is not a positive integer, the
- * caller's operation continues unchanged.
+ * limit. Outside any transaction the operation is one narrowed statement. A batch
+ * `$transaction([...])` holding it runs as an interactive transaction, so its rows are read after
+ * the batch's earlier operations have run. For a limit that is not a positive integer, the caller's
+ * operation continues unchanged.
  */
 
 import type { AuditContext, AuditErrorContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
-import { createAuditClient, defineEntity, flushAllPendingWrites } from '@kuruwic/prisma-audit';
+import { AuditRollbackError, createAuditClient, defineEntity, flushAllPendingWrites } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -206,6 +207,35 @@ describe('updateMany and deleteMany with a limit', () => {
     expect(await auditedIds()).toEqual(updated);
   });
 
+  it('rolls the transaction back with AuditRollbackError when a top-up round fails after an earlier round wrote and the callback catches it', async () => {
+    await seedQueued(4);
+    takeFirstNarrowedRow();
+    const takeRow = beforeWrite;
+    const roundFailure = new Error('the top-up round failed');
+    beforeWrite = async (args) => {
+      if (seen.length > 1) {
+        throw roundFailure;
+      }
+      await takeRow?.(args);
+    };
+    let caught: unknown;
+
+    const outcome = provider.runAsync(testActor, () =>
+      audited.$transaction(async (tx) => {
+        await tx.user.updateMany({ where: queued, data: { password: 'rotated' }, limit: 3 }).catch((error: unknown) => {
+          caught = error;
+        });
+      }),
+    );
+
+    await expect(outcome).rejects.toBeInstanceOf(AuditRollbackError);
+    await expect(outcome).rejects.toMatchObject({ cause: roundFailure });
+    expect(caught).toBe(roundFailure);
+    expect(seen.map((call) => call.operation)).toEqual(['updateMany', 'updateMany']);
+    expect(await rotatedIds()).toEqual([]);
+    expect(await auditedIds()).toEqual([]);
+  });
+
   it('writes one narrowed statement outside any transaction, without topping up a round another writer left short', async () => {
     await seedQueued(4);
     const taken = takeFirstNarrowedRow();
@@ -240,7 +270,7 @@ describe('updateMany and deleteMany with a limit', () => {
     );
   });
 
-  it("continues the caller's updateMany unchanged inside a batch Prisma runs, and reports its rows as row-identification", async () => {
+  it("narrows the caller's updateMany inside a batch $transaction to the rows it reads after the batch's earlier operations, and audits them", async () => {
     await seedQueued(1);
     const [, plainResult] = await plain.$transaction([
       plain.user.create({ data: { email: 'plain-later@example.com', name: 'Queued later' } }),
@@ -258,11 +288,11 @@ describe('updateMany and deleteMany with a limit', () => {
 
     expect(result).toEqual(plainResult);
     expect(result).toEqual({ count: 2 });
-    expect(seen[0]?.args.limit).toBe(5);
-    expect(await auditedIds()).toEqual([]);
-    expect(observer).toHaveBeenCalledWith(
-      expect.objectContaining({ phase: 'row-identification', operation: 'updateMany', params: { unidentified: 2 } }),
-    );
+    expect(seen[0]?.args.limit).toBeUndefined();
+    expect(narrowedIds(seen[0]?.args ?? {})).toHaveLength(2);
+    expect(await rotatedIds()).toHaveLength(2);
+    expect(await auditedIds()).toEqual(await rotatedIds());
+    expect(observer).not.toHaveBeenCalled();
   });
 
   it.each([0, -1])('passes a limit of %d to Prisma unchanged, settling as a plain updateMany does', async (limit) => {
@@ -345,7 +375,7 @@ describe('updateMany and deleteMany with a limit', () => {
     expect(await deletedAuditIds()).toHaveLength(ids.length);
   });
 
-  it("continues the caller's deleteMany unchanged inside a batch Prisma runs, and reports its rows as row-identification", async () => {
+  it("narrows the caller's deleteMany inside a batch $transaction to the rows it reads after the batch's earlier operations, and audits them", async () => {
     await seedQueued(1);
     const [, plainResult] = await plain.$transaction([
       plain.user.create({ data: { email: 'plain-later@example.com', name: 'Queued later' } }),
@@ -363,12 +393,11 @@ describe('updateMany and deleteMany with a limit', () => {
 
     expect(result).toEqual(plainResult);
     expect(result).toEqual({ count: 2 });
-    expect(seen[0]?.args.limit).toBe(5);
+    expect(seen[0]?.args.limit).toBeUndefined();
+    expect(narrowedIds(seen[0]?.args ?? {})).toHaveLength(2);
     expect(await remainingIds()).toEqual([]);
-    expect(await deletedAuditIds()).toEqual([]);
-    expect(observer).toHaveBeenCalledWith(
-      expect.objectContaining({ phase: 'row-identification', operation: 'deleteMany', params: { unidentified: 2 } }),
-    );
+    expect(await deletedAuditIds()).toHaveLength(2);
+    expect(observer).not.toHaveBeenCalled();
   });
 
   it.each([0, -1])('passes a limit of %d to Prisma unchanged, settling as a plain deleteMany does', async (limit) => {

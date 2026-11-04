@@ -339,3 +339,120 @@ describe('Batch $transaction under the audit extension', () => {
     });
   });
 });
+
+describe('Batch $transaction holding a write, on any audited client', () => {
+  const context = setupTestContext();
+
+  /** Rewrites the data of each `post.create` to create its author along with it, a nested write of User */
+  const nestedAuthorCreator = Prisma.defineExtension({
+    name: 'nested-author-creator',
+    query: {
+      post: {
+        async create({ args, query }) {
+          return query({
+            ...args,
+            data: {
+              title: args.data.title,
+              author: { create: { email: 'nested-author@example.com', name: 'Nested' } },
+            },
+          });
+        },
+      },
+    },
+  });
+
+  const auditLogs = async () => {
+    await flushAllPendingWrites();
+    return context.basePrisma.auditLog.findMany({
+      select: { entityType: true, action: true, before: true, after: true },
+      orderBy: { id: 'asc' },
+    });
+  };
+
+  it.each([{ implicitTransaction: false }, { implicitTransaction: true }])(
+    'runs a batch whose only write is on a model the audit does not record in an interactive transaction, and audits the nested write of an audited model an extension applied before the audit adds (implicitTransaction: $implicitTransaction)',
+    async ({ implicitTransaction }) => {
+      const raw = createBasePrisma();
+      const writes: boolean[] = [];
+      const provider = createAsyncLocalStorageProvider();
+      const prisma = createAuditClient(raw.$extends(nestedAuthorCreator), {
+        Prisma,
+        schema: auditSchema,
+        contextProvider: provider,
+        entities: { User: testEntities.User },
+        write: {
+          awaited: true,
+          implicitTransaction,
+          writer: async (records, { inTransaction, defaultWrite }) => {
+            writes.push(inTransaction);
+            await defaultWrite(records);
+          },
+        },
+      });
+      try {
+        const owner = await context.basePrisma.user.create({ data: { email: 'owner@example.com', name: 'Owner' } });
+
+        const created = await provider.runAsync(actor, () =>
+          prisma.$transaction([prisma.post.create({ data: { title: 'With author', authorId: owner.id } })]),
+        );
+        expect(created).toHaveLength(1);
+        expect(writes).toEqual([true]);
+        expect((await auditLogs()).map((log) => `${log.entityType}.${log.action}`)).toEqual(['User.create']);
+
+        await cleanDatabase(context.basePrisma);
+        const failing = provider.runAsync(actor, () =>
+          prisma.$transaction([
+            prisma.post.create({ data: { title: 'Rolled back', authorId: owner.id } }),
+            prisma.user.create({ data: { email: 'nested-author@example.com', name: 'Duplicate' } }),
+          ]),
+        );
+        await expect(failing).rejects.toMatchObject({ code: 'P2002' });
+        expect(await context.basePrisma.post.count()).toBe(0);
+        expect(await auditLogs()).toEqual([]);
+      } finally {
+        await prisma.$disconnect();
+        await raw.$disconnect();
+      }
+    },
+  );
+
+  it.each([{ implicitTransaction: false }, { implicitTransaction: true }])(
+    "reads the before state of an audited write of a batch after the batch's earlier operations have run (implicitTransaction: $implicitTransaction)",
+    async ({ implicitTransaction }) => {
+      const raw = createBasePrisma();
+      const provider = createAsyncLocalStorageProvider();
+      const prisma = createAuditClient(raw, {
+        Prisma,
+        schema: auditSchema,
+        contextProvider: provider,
+        entities: { User: testEntities.User },
+        write: { awaited: true, implicitTransaction },
+        fetchBefore: { update: true },
+      });
+      try {
+        const user = await context.basePrisma.user.create({ data: { email: 'twice@example.com', name: 'Original' } });
+
+        await provider.runAsync(actor, () =>
+          prisma.$transaction([
+            prisma.user.update({ where: { id: user.id }, data: { name: 'First' } }),
+            prisma.user.update({ where: { id: user.id }, data: { name: 'Second' } }),
+          ]),
+        );
+
+        const names = (await auditLogs())
+          .map((log) => ({
+            before: (log.before as { name?: string } | null)?.name,
+            after: (log.after as { name?: string } | null)?.name,
+          }))
+          .sort((a, b) => String(a.after).localeCompare(String(b.after)));
+        expect(names).toEqual([
+          { before: 'Original', after: 'First' },
+          { before: 'First', after: 'Second' },
+        ]);
+      } finally {
+        await prisma.$disconnect();
+        await raw.$disconnect();
+      }
+    },
+  );
+});

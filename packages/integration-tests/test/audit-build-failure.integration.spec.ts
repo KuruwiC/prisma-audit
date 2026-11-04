@@ -4,8 +4,8 @@
  * result, the observer hears `diff-generation` once and the operation keeps no audit rows. Inside
  * a transaction, the caller's own or the one `implicitTransaction` opens for an awaited audit,
  * the write can still be rolled back, so the operation fails with the original error and keeps no
- * audit rows. With `implicitTransaction`, a batch `$transaction([...])` with an awaited audit
- * runs as one interactive transaction, so every operation of the batch rolls back.
+ * audit rows. A batch `$transaction([...])` holding a write runs as one interactive transaction, so
+ * every operation of the batch rolls back.
  *
  * Without an observer the dropped rows of a committed write are reported as a console line; with
  * one, only the observer receives them.
@@ -272,31 +272,6 @@ describe('A failed audit build after the write', () => {
         await scenario.dispose();
       }
     });
-
-    it('a failed re-read inside a batch transaction, which Prisma commits before its operations return', async () => {
-      const scenario = createScenario({
-        awaited: false,
-        fault: { model: 'user', seesWrite: renamed },
-      });
-      try {
-        const user = await seedUser('batch-transaction@example.com');
-        const auditRowsBefore = await auditRowCount();
-
-        await expect(
-          scenario.provider.runAsync(actor, () =>
-            scenario.prisma.$transaction([
-              scenario.prisma.user.updateMany({ where: { id: user.id }, data: { name: 'Renamed' } }),
-            ]),
-          ),
-        ).resolves.toEqual([{ count: 1 }]);
-
-        expect((await context.basePrisma.user.findUnique({ where: { id: user.id } }))?.name).toBe('Renamed');
-        expect(await auditRowCount()).toBe(auditRowsBefore);
-        expectOneDiffGenerationFailure(scenario, 'User', 'updateMany');
-      } finally {
-        await scenario.dispose();
-      }
-    });
   });
 
   describe('reports the dropped audit rows of a committed write to the console only without an observer', () => {
@@ -376,6 +351,31 @@ describe('A failed audit build after the write', () => {
         expect((await context.basePrisma.post.findUnique({ where: { id: post.id } }))?.title).toBe('Original');
         expect(await auditRowCount()).toBe(auditRowsBefore);
         expectOneDiffGenerationFailure(scenario, 'User', 'update');
+      } finally {
+        await scenario.dispose();
+      }
+    });
+
+    it('inside a batch transaction, which runs as an interactive transaction: a failed re-read of the rows a batch update wrote', async () => {
+      const scenario = createScenario({
+        awaited: false,
+        fault: { model: 'user', seesWrite: renamed },
+      });
+      try {
+        const user = await seedUser('batch-transaction@example.com');
+        const auditRowsBefore = await auditRowCount();
+
+        await expect(
+          scenario.provider.runAsync(actor, () =>
+            scenario.prisma.$transaction([
+              scenario.prisma.user.updateMany({ where: { id: user.id }, data: { name: 'Renamed' } }),
+            ]),
+          ),
+        ).rejects.toBe(scenario.error);
+
+        expect((await context.basePrisma.user.findUnique({ where: { id: user.id } }))?.name).toBe('Owner');
+        expect(await auditRowCount()).toBe(auditRowsBefore);
+        expectOneDiffGenerationFailure(scenario, 'User', 'updateMany');
       } finally {
         await scenario.dispose();
       }

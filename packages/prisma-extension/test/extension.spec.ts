@@ -11,11 +11,13 @@ import {
   defineEntity,
 } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
+import { AuditUnboundWriteError } from '../src/errors.js';
 import { createAuditLogExtension } from '../src/extension.js';
 import type { ExtensionParams, PrismaBaseClient } from '../src/internal-types.js';
 import { withScope } from '../src/runtime/scope.js';
 import type { PrismaAuditExtensionOptions } from '../src/types.js';
 import { auditSchema, column, model, relation } from './support/audit-schema.js';
+import { lazyOperation } from './support/lazy-operation.js';
 
 const context: AuditContext = { actor: { category: 'model', type: 'User', id: 'actor-1' } };
 
@@ -42,14 +44,19 @@ interface AuditedClient {
     readonly create: (args: unknown) => PromiseLike<unknown>;
     readonly findMany: (args: unknown) => PromiseLike<unknown>;
   };
+  readonly post: {
+    /** A read Prisma would hand the hook as a `user.create`: an audited write inside Prisma's own batch */
+    readonly findMany: (args: unknown) => PromiseLike<unknown>;
+  };
 }
 
 type Options = Partial<Omit<PrismaAuditExtensionOptions, 'Prisma' | 'schema' | 'contextProvider'>>;
 
 /**
  * A client the audit extension extends, as `createAuditClient` does: `user.create`, `user.findMany`
- * and `$queryRaw` run through the extension's hook, whose `query` returns `result`, and an
- * interactive `$transaction` calls its callback with the client. Audit rows go to `writer`.
+ * and `$queryRaw` are lazy operations that run through the extension's hook once awaited, whose
+ * `query` returns `result`; an interactive `$transaction` calls its callback with the client, and a
+ * batch one awaits its operations. Audit rows go to `writer`.
  */
 const auditedClient = (options: Options, result: unknown = { id: 'u1' }) => {
   const provider = createAsyncLocalStorageProvider();
@@ -64,15 +71,22 @@ const auditedClient = (options: Options, result: unknown = { id: 'u1' }) => {
       const { $allOperations } = (
         extension as { query: { $allOperations: (params: ExtensionParams) => Promise<unknown> } }
       ).query;
+      const hook = (params: ExtensionParams) => lazyOperation(() => $allOperations(params));
       const client: AuditedClient = {
         $transaction: async (first) => {
+          if (Array.isArray(first)) {
+            return Promise.all(first);
+          }
           transaction();
           return (first as (tx: AuditedClient) => Promise<unknown>)(client);
         },
-        $queryRaw: (args) => $allOperations({ model: undefined, operation: '$queryRaw', args, query }),
+        $queryRaw: (args) => hook({ model: undefined, operation: '$queryRaw', args, query }),
         user: {
-          create: (args) => $allOperations({ model: 'User', operation: 'create', args, query }),
-          findMany: (args) => $allOperations({ model: 'User', operation: 'findMany', args, query }),
+          create: (args) => hook({ model: 'User', operation: 'create', args, query }),
+          findMany: (args) => hook({ model: 'User', operation: 'findMany', args, query }),
+        },
+        post: {
+          findMany: (args) => hook({ model: 'User', operation: 'create', args, query }),
         },
       };
       return client;
@@ -206,6 +220,17 @@ describe('the audit gate of the extension hook', () => {
     expect(records.map(({ entityType, entityId, action }) => ({ entityType, entityId, action }))).toEqual([
       { entityType: 'Post', entityId: 'p1', action: 'create' },
     ]);
+  });
+
+  it('rejects an audited write that reaches the hook as part of a batch Prisma runs, before it runs', async () => {
+    const { client, provider, query, writer } = auditedClient({});
+
+    const batch = provider.runAsync(context, () => client.$transaction([client.post.findMany({ data: { id: 'u1' } })]));
+
+    await expect(batch).rejects.toBeInstanceOf(AuditUnboundWriteError);
+    await expect(batch).rejects.toMatchObject({ modelName: 'User', operation: 'create' });
+    expect(query).not.toHaveBeenCalled();
+    expect(writer).not.toHaveBeenCalled();
   });
 
   describe('with write.implicitTransaction', () => {

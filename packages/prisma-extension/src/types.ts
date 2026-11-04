@@ -69,13 +69,14 @@ export interface WriteConfig<TClient = unknown> {
    */
   awaited?: boolean | ((modelName: string) => boolean);
   /**
-   * Whether the audited client opens an interactive transaction for an operation whose audit is
-   * awaited and that runs outside your own interactive `$transaction`: around a single write, and
-   * around a batch `$transaction([...])` of the client's operations that holds such a write.
-   * The operation and its audit rows then commit or roll back together. Default: `false`: the
-   * audit of such an operation is written once the operation has committed, and its failure is
-   * reported without failing the operation. `true` with `awaited: false` is a configuration error,
-   * since no operation would be awaited.
+   * Whether the audited client opens an interactive transaction around a write whose audit is
+   * awaited and that is issued on a client outside any transaction (the audited client, also inside
+   * a callback of your interactive `$transaction`, rather than the client the callback receives).
+   * The operation and its audit rows then commit or roll back together. A batch
+   * `$transaction([...])` holding a write runs as one interactive transaction either way.
+   * Default: `false`: the audit of such an operation is written once the operation has committed,
+   * and its failure is reported without failing the operation. `true` with `awaited: false` is a
+   * configuration error, since no operation would be awaited.
    *
    * It gives atomicity only. The transaction runs at the client's default isolation level, so a
    * write another transaction commits between the audit's read of the before state and the
@@ -87,12 +88,8 @@ export interface WriteConfig<TClient = unknown> {
    * extension applied before the audit adds a nested write of an audited model to them, none
    * opens, and an awaited audit is written once the operation has committed.
    *
-   * With `true`, a call on a model delegate or a raw-query method returns a lazy operation of the
-   * library's own, which runs when it is awaited or given to a batch `$transaction` of the same
-   * client, and Prisma's `$transaction` of another client rejects it. A batch accepts only
-   * operations of the client it is called on that have not run; one holding a write whose audit
-   * is awaited runs as one interactive transaction, bound by the client's interactive transaction
-   * limits. See the README.
+   * The transaction it opens is bound by the client's interactive transaction limits. See the
+   * README.
    */
   implicitTransaction?: boolean;
   /**
@@ -286,11 +283,11 @@ export interface PrismaAuditExtensionOptions<TModelName extends string = string,
    *   pre-fetched row, its WHERE or the operation data (`params` is `{ entityId, keyFields }`); or
    *   a nested write wrote rows whose key after the write the audit cannot follow or tell apart
    *   from another row's (`params` is `{ path, unidentified }`); or an `updateMany` or `deleteMany` with a
-   *   `limit` wrote rows it cannot tell apart from rows another writer changed, or ran inside a
-   *   batch `$transaction([...])` Prisma runs; or an `updateMany` or `updateManyAndReturn` wrote
-   *   rows it cannot pair by row key with the rows read before it, because its data changes their
-   *   key in a way the audit cannot follow (an operator such as `increment`) or another writer
-   *   changed their key in between (`params` is `{ unidentified }`, their number). The caller's
+   *   `limit` wrote rows it cannot tell apart from rows another writer changed; or an
+   *   `updateMany` or `updateManyAndReturn` wrote rows it cannot pair by row key with the rows
+   *   read before it, because its data changes their key in a way the audit cannot follow (an
+   *   operator such as `increment`) or another writer changed their key in between (`params` is
+   *   `{ unidentified }`, their number). The caller's
    *   operation continues; those audit log entries are skipped, except that the rows an
    *   `updateManyAndReturn` returned are recorded without a before state.
    * - `id-resolver-call`: an id resolver (the entity's `idResolver` or a `to()` resolver) threw,

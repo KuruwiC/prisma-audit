@@ -1,17 +1,20 @@
 /**
- * Tests for operation recipes: when a recipe runs, on which client and in which transaction, and
- * how a batch takes it.
+ * Tests for operation recipes: when a recipe runs, on which client, which transaction it is bound
+ * to, and how a batch takes it.
  */
 
 import type { WritePolicy } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
-import type { PrismaHandle } from '../../src/internal-types.js';
+import type { OpenTransaction } from '../../src/runtime/interactive-transaction.js';
 import { createRecipeClient, type RecipeConfig, takeBatchRecipes } from '../../src/runtime/operation-recipe.js';
 import { currentScope, decidedWritePolicyFor, withScope } from '../../src/runtime/scope.js';
+import { activeTransactionOf } from '../support/active-transaction.js';
 import { lazyOperation } from '../support/lazy-operation.js';
 
 interface Ran {
   readonly client: string;
+  /** Whether the client the call was made on bound the operation when it started */
+  readonly bound: boolean;
   readonly transactionClient: unknown;
   /** The write policy the hook would take for the operation */
   readonly decided: WritePolicy | undefined;
@@ -19,9 +22,8 @@ interface Ran {
 
 /**
  * An audited client (`receiver`) and the client behind it (`target`), whose `user.create` records
- * the client it ran on and the transaction client the runtime scope held then. The receiver's
- * `$transaction` runs its callback on `tx` inside the scope of that transaction, as the client
- * proxy's does.
+ * the client it ran on and the binding the runtime scope held then. `openTransaction` runs its
+ * body in a transaction whose client is `tx`.
  */
 const createClients = () => {
   const ran: Ran[] = [];
@@ -29,9 +31,11 @@ const createClients = () => {
     user: {
       create: (args: unknown) =>
         lazyOperation(() => {
+          const binding = currentScope()?.binding;
           ran.push({
             client: name,
-            transactionClient: currentScope()?.transaction?.client,
+            bound: binding !== undefined,
+            transactionClient: binding?.transaction?.client,
             decided: decidedWritePolicyFor('User', 'create'),
           });
           return { created: args };
@@ -39,12 +43,10 @@ const createClients = () => {
     },
   });
   const tx = clientNamed('transaction');
-  const $transaction = vi.fn(async (callback: (client: object) => Promise<unknown>) =>
-    withScope({ transaction: { client: tx, deferredWrites: [] } }, () => callback(tx)),
-  );
-  const receiver = { $transaction };
+  const openTransaction = vi.fn<OpenTransaction>(async (_client, _options, body) => body(activeTransactionOf(tx)));
+  const receiver = {};
   const target = clientNamed('client');
-  return { receiver, target, tx, ran, $transaction };
+  return { receiver, target, tx, ran, openTransaction };
 };
 
 const configAwaiting = (atomic: boolean): RecipeConfig => ({
@@ -53,27 +55,75 @@ const configAwaiting = (atomic: boolean): RecipeConfig => ({
   decideWritePolicy: vi.fn(() => ({ sampled: true as const, atomic })),
 });
 
+/** Without `write.implicitTransaction`: no write policy is decided at the client boundary */
+const configDecidingNothing: RecipeConfig = {
+  modelOfAccessor: new Map([['user', 'User']]),
+  relatedModel: () => undefined,
+};
+
+type UserDelegate = { create: (args: unknown) => PromiseLike<unknown> };
+
 /** `receiver.user.create(args)` as the client proxy returns it */
 const createUserOn = (config: RecipeConfig, clients: ReturnType<typeof createClients>, args: unknown) => {
-  const delegate = createRecipeClient(config).propertyOf(clients.receiver, clients.target, 'user')?.value as {
-    create: (args: unknown) => PromiseLike<unknown>;
-  };
+  const delegate = createRecipeClient(config, clients.openTransaction).propertyOf(
+    clients.receiver,
+    clients.target,
+    'user',
+  )?.value as UserDelegate;
   return delegate.create(args);
 };
 
 describe('operation recipes', () => {
-  it('runs a write whose audit is awaited in a transaction of its own, even inside a transaction of the caller', async () => {
+  it('runs a write whose audit is awaited in a transaction of its own, opened on the client it was made on, even inside a transaction of the caller', async () => {
     const clients = createClients();
-    const callerTransaction: PrismaHandle = { _caller: true };
+    const callerTransaction = activeTransactionOf({ _caller: true });
 
-    await withScope({ transaction: { client: callerTransaction, deferredWrites: [] } }, async () => {
+    await withScope({ binding: { transaction: callerTransaction } }, async () => {
       await createUserOn(configAwaiting(true), clients, { email: 'a' });
     });
 
-    expect(clients.$transaction).toHaveBeenCalledTimes(1);
+    expect(clients.openTransaction).toHaveBeenCalledTimes(1);
+    expect(clients.openTransaction.mock.calls[0]?.[0]).toBe(clients.target);
     expect(clients.ran).toEqual([
-      { client: 'transaction', transactionClient: clients.tx, decided: { sampled: true, atomic: true } },
+      { client: 'transaction', bound: true, transactionClient: clients.tx, decided: { sampled: true, atomic: true } },
     ]);
+  });
+
+  it('binds an operation of a client outside any transaction to no transaction, whatever transaction it is awaited in', async () => {
+    const clients = createClients();
+    const callerTransaction = activeTransactionOf({ _caller: true });
+
+    await withScope({ binding: { transaction: callerTransaction } }, async () => {
+      await createUserOn(configDecidingNothing, clients, { email: 'a' });
+    });
+
+    expect(clients.openTransaction).not.toHaveBeenCalled();
+    expect(clients.ran).toEqual([{ client: 'client', bound: true, transactionClient: undefined, decided: undefined }]);
+  });
+
+  describe('the client a $transaction callback receives', () => {
+    it('binds its operations to the transaction, and opens none for a write whose audit is awaited', async () => {
+      const clients = createClients();
+      const transaction = activeTransactionOf(clients.tx);
+      const bound = createRecipeClient(configAwaiting(true), clients.openTransaction).boundClient(transaction);
+
+      await (bound.user as UserDelegate).create({ email: 'a' });
+
+      expect(clients.openTransaction).not.toHaveBeenCalled();
+      expect(clients.ran).toEqual([
+        { client: 'transaction', bound: true, transactionClient: clients.tx, decided: { sampled: true, atomic: true } },
+      ]);
+    });
+
+    it("returns every other property as the transaction's client holds it", () => {
+      const clients = createClients();
+      const marker = { marker: true };
+      const transaction = activeTransactionOf({ ...clients.tx, $other: marker });
+      const bound = createRecipeClient(configDecidingNothing, clients.openTransaction).boundClient(transaction);
+
+      expect(bound.$other).toBe(marker);
+      expect(bound.user).toBe(bound.user);
+    });
   });
 
   it('decides the write policy of its call once and carries it to the hook', async () => {
@@ -85,7 +135,7 @@ describe('operation recipes', () => {
     expect(config.decideWritePolicy).toHaveBeenCalledTimes(1);
     expect(config.decideWritePolicy).toHaveBeenCalledWith('User', 'create', { email: 'a' });
     expect(clients.ran).toEqual([
-      { client: 'client', transactionClient: undefined, decided: { sampled: true, atomic: false } },
+      { client: 'client', bound: true, transactionClient: undefined, decided: { sampled: true, atomic: false } },
     ]);
   });
 
@@ -96,8 +146,8 @@ describe('operation recipes', () => {
       await createUserOn(configAwaiting(true), clients, { email: 'a' });
     });
 
-    expect(clients.$transaction).not.toHaveBeenCalled();
-    expect(clients.ran).toEqual([{ client: 'client', transactionClient: undefined, decided: undefined }]);
+    expect(clients.openTransaction).not.toHaveBeenCalled();
+    expect(clients.ran).toEqual([{ client: 'client', bound: true, transactionClient: undefined, decided: undefined }]);
   });
 
   it('runs once when awaited twice, both awaits receiving the one result', async () => {
@@ -131,7 +181,7 @@ describe('operation recipes', () => {
       ...configAwaiting(false),
       relatedModel: (model, field) => (model === 'User' && field === 'posts' ? 'Post' : undefined),
     };
-    const delegate = createRecipeClient(config).propertyOf({ $transaction: vi.fn() }, target, 'user')?.value as {
+    const delegate = createRecipeClient(config, vi.fn<OpenTransaction>()).propertyOf({}, target, 'user')?.value as {
       update: (args: unknown) => { posts: (args: unknown) => PromiseLike<unknown> };
     };
 
@@ -194,10 +244,14 @@ describe('operation recipes', () => {
     const rawClient = () => {
       const queryRaw = vi.fn((...args: unknown[]) => lazyOperation(() => ({ rows: args })));
       const runCommandRaw = vi.fn((...args: unknown[]) => lazyOperation(() => ({ command: args })));
-      return { receiver: { $transaction: vi.fn() }, target: { $queryRaw: queryRaw, $runCommandRaw: runCommandRaw } };
+      return {
+        receiver: {},
+        target: { $queryRaw: queryRaw, $runCommandRaw: runCommandRaw },
+        openTransaction: vi.fn<OpenTransaction>(),
+      };
     };
     const rawMethodOf = (clients: ReturnType<typeof rawClient>, name: string, config = configAwaiting(true)) =>
-      createRecipeClient(config).propertyOf(clients.receiver, clients.target, name)?.value as
+      createRecipeClient(config, clients.openTransaction).propertyOf(clients.receiver, clients.target, name)?.value as
         | ((...args: unknown[]) => PromiseLike<unknown> & object)
         | undefined;
 
@@ -209,7 +263,7 @@ describe('operation recipes', () => {
       expect(clients.target.$queryRaw).not.toHaveBeenCalled();
       await expect(recipe).resolves.toEqual({ rows: [['SELECT 1'], 7] });
       expect(clients.target.$queryRaw).toHaveBeenCalledTimes(1);
-      expect(clients.receiver.$transaction).not.toHaveBeenCalled();
+      expect(clients.openTransaction).not.toHaveBeenCalled();
     });
 
     it('is a recipe no fluent relation follows and no write policy is decided for', async () => {
@@ -230,14 +284,14 @@ describe('operation recipes', () => {
 
       const batch = takeBatchRecipes([recipe], clients.receiver, config);
 
-      expect(batch.awaitsAudit).toBe(false);
+      expect(batch.holdsModelWrite).toBe(false);
       await expect(Promise.all(batch.operationsOn(other))).resolves.toEqual([{ other: ['SELECT 2'] }]);
       expect(clients.target.$queryRaw).not.toHaveBeenCalled();
     });
 
     it('is not wrapped when the client behind it has no such method, nor are other client methods', () => {
       const clients = rawClient();
-      const recipeClient = createRecipeClient(configAwaiting(true));
+      const recipeClient = createRecipeClient(configAwaiting(true), clients.openTransaction);
 
       expect(recipeClient.propertyOf(clients.receiver, clients.target, '$executeRaw')).toBeUndefined();
       expect(recipeClient.propertyOf(clients.receiver, clients.target, '$connect')).toBeUndefined();
@@ -246,7 +300,7 @@ describe('operation recipes', () => {
   });
 
   describe('the operations a batch takes', () => {
-    /** Deciding by action: creates await their audit, updates do not, deletes are not audited */
+    /** Deciding by action: creates await their audit, updates do not, deletes and reads are not audited */
     const decidingConfig = (): RecipeConfig => ({
       modelOfAccessor: new Map([['user', 'User']]),
       relatedModel: () => undefined,
@@ -257,55 +311,91 @@ describe('operation recipes', () => {
         return action === 'update' ? { sampled: true, atomic: false } : undefined;
       },
     });
-    const userClient = (seen: Array<{ action: string; decided: WritePolicy | undefined }>) => {
+    interface Seen {
+      readonly action: string;
+      readonly bound: boolean;
+      readonly transactionClient: unknown;
+      readonly decided: WritePolicy | undefined;
+    }
+    const userClient = (seen: Seen[]) => {
       const action = (name: string) => () =>
         lazyOperation(() => {
-          seen.push({ action: name, decided: decidedWritePolicyFor('User', name) });
+          const binding = currentScope()?.binding;
+          seen.push({
+            action: name,
+            bound: binding !== undefined,
+            transactionClient: binding?.transaction?.client,
+            decided: decidedWritePolicyFor('User', name),
+          });
           return name;
         });
-      return { user: { create: action('create'), update: action('update'), delete: action('delete') } };
+      return {
+        user: {
+          create: action('create'),
+          update: action('update'),
+          delete: action('delete'),
+          findMany: action('findMany'),
+          count: action('count'),
+        },
+      };
     };
     const recipesOn = (receiver: object, target: object, config: RecipeConfig, actions: string[]) => {
-      const user = createRecipeClient(config).propertyOf(receiver, target, 'user')?.value as Record<
-        string,
-        () => PromiseLike<unknown>
-      >;
+      const user = createRecipeClient(config, vi.fn<OpenTransaction>()).propertyOf(receiver, target, 'user')
+        ?.value as Record<string, () => PromiseLike<unknown>>;
       return actions.map((name) => user[name]?.() as PromiseLike<unknown>);
     };
 
-    it('await an audit when one of them is an audited write whose audit is awaited', () => {
+    it('hold a write when one of them is a model write, whether or not the audit records it', () => {
       const receiver = {};
       const config = decidingConfig();
-      const items = recipesOn(receiver, userClient([]), config, ['update', 'delete', 'create']);
+      const items = recipesOn(receiver, userClient([]), config, ['findMany', 'delete']);
 
-      expect(takeBatchRecipes(items, receiver, config).awaitsAudit).toBe(true);
+      expect(takeBatchRecipes(items, receiver, config).holdsModelWrite).toBe(true);
     });
 
-    it('do not await an audit when each is unaudited or its audit is not awaited', () => {
+    it('hold no write when each of them is a read', () => {
       const receiver = {};
       const config = decidingConfig();
-      const items = recipesOn(receiver, userClient([]), config, ['update', 'delete']);
+      const items = recipesOn(receiver, userClient([]), config, ['findMany', 'count']);
 
-      expect(takeBatchRecipes(items, receiver, config).awaitsAudit).toBe(false);
+      expect(takeBatchRecipes(items, receiver, config).holdsModelWrite).toBe(false);
     });
 
-    it('do not await an audit for an empty batch', () => {
-      expect(takeBatchRecipes([], {}, decidingConfig()).awaitsAudit).toBe(false);
+    it('hold no write for an empty batch', () => {
+      expect(takeBatchRecipes([], {}, decidingConfig()).holdsModelWrite).toBe(false);
     });
 
-    it('start on the client given, each in the scope of the decision made for its own call', async () => {
+    it("start on the client given for Prisma's own batch, each without a binding or a decision", async () => {
+      const receiver = {};
+      const config = decidingConfig();
+      const items = recipesOn(receiver, userClient([]), config, ['findMany', 'count']);
+      const seen: Seen[] = [];
+
+      const operations = takeBatchRecipes(items, receiver, config).operationsOn(userClient(seen));
+      await withScope({ binding: { transaction: activeTransactionOf({ _caller: true }) } }, () =>
+        Promise.all(operations as PromiseLike<unknown>[]),
+      );
+
+      expect(seen).toEqual([
+        { action: 'findMany', bound: false, transactionClient: undefined, decided: undefined },
+        { action: 'count', bound: false, transactionClient: undefined, decided: undefined },
+      ]);
+    });
+
+    it("run one after another on the transaction's client, each bound to it and under the decision made for its own call", async () => {
       const receiver = {};
       const config = decidingConfig();
       const items = recipesOn(receiver, userClient([]), config, ['create', 'update', 'delete']);
-      const seen: Array<{ action: string; decided: WritePolicy | undefined }> = [];
+      const seen: Seen[] = [];
+      const txClient = userClient(seen);
 
-      const operations = takeBatchRecipes(items, receiver, config).operationsOn(userClient(seen));
-      await expect(Promise.all(operations as PromiseLike<unknown>[])).resolves.toEqual(['create', 'update', 'delete']);
+      const results = await takeBatchRecipes(items, receiver, config).runIn(activeTransactionOf(txClient));
 
+      expect(results).toEqual(['create', 'update', 'delete']);
       expect(seen).toEqual([
-        { action: 'create', decided: { sampled: true, atomic: true } },
-        { action: 'update', decided: { sampled: true, atomic: false } },
-        { action: 'delete', decided: undefined },
+        { action: 'create', bound: true, transactionClient: txClient, decided: { sampled: true, atomic: true } },
+        { action: 'update', bound: true, transactionClient: txClient, decided: { sampled: true, atomic: false } },
+        { action: 'delete', bound: true, transactionClient: txClient, decided: undefined },
       ]);
     });
   });

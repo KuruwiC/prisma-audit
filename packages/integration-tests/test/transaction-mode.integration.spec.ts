@@ -1,14 +1,15 @@
 /**
  * Integration Tests: where an awaited audit runs, with and without `implicitTransaction`
  *
- * By default the audit extension never opens a transaction: the caller's operation continues
- * through Prisma's `query` down the extension chain once, an awaited audit outside the caller's
- * own interactive `$transaction` is written once the operation has committed, and a batch
- * `$transaction([...])` is Prisma's own. With `implicitTransaction` the audited client opens
- * the transaction at its boundary, before the call enters the extension chain: a write whose
- * audit is awaited runs in an interactive transaction of the client it was called on, and a batch
- * of that client's operations runs as one. Either way the caller's mutation passes every query
- * extension once; the audit's own reads and writes are separate queries.
+ * By default the audit extension opens no transaction around a single operation: the caller's
+ * operation continues through Prisma's `query` down the extension chain once, and an awaited audit
+ * outside the caller's own interactive `$transaction` is written once the operation has committed.
+ * With `implicitTransaction` the audited client opens the transaction at its boundary, before the
+ * call enters the extension chain: a write whose audit is awaited runs in an interactive
+ * transaction of the client it was called on. Either way a batch `$transaction([...])` holding a
+ * write runs as one interactive transaction of the client, and a batch of reads and raw queries
+ * only as Prisma's own. The caller's mutation passes every query extension once; the audit's own
+ * reads and writes are separate queries.
  */
 
 import type { AuditContext, AuditErrorContext, AuditRecord } from '@kuruwic/db-audit-core';
@@ -318,6 +319,157 @@ describe('implicitTransaction', () => {
       expect(await raw.user.count()).toBe(3);
       expect(await auditRows()).toEqual(['User.create', 'User.create', 'User.create']);
     });
+
+    it("rolls back every operation of a batch when one operation's audit build fails", async () => {
+      const user = await seedUser();
+      const clients = createClients({ implicitTransaction, failingEnricher: true });
+
+      await expect(
+        clients.run(() =>
+          clients.client.$transaction([
+            clients.client.user.create({ data: { email: 'a@example.com', name: 'A' } }),
+            clients.client.user.update({ where: { id: user.id }, data: { name: 'Lost' } }),
+          ]),
+        ),
+      ).rejects.toThrow('actor enricher is broken');
+
+      expect(await raw.user.count()).toBe(1);
+      expect(await nameOf(user.id)).toBe('Before');
+    });
+
+    it("runs a read-only batch as Prisma's own batch, without an interactive transaction of its own", async () => {
+      const { result, transactions } = runBatch({ implicitTransaction });
+
+      await expect(result).resolves.toHaveLength(1);
+      expect(transactions).toEqual(['batch']);
+    });
+
+    it("runs Prisma's own batch at the caller's isolation level", async () => {
+      const clients = createClients({ implicitTransaction });
+
+      const [, isolation] = await clients.run(() =>
+        clients.client.$transaction(
+          [clients.client.user.count(), clients.client.$queryRaw`SHOW transaction_isolation`],
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+        ),
+      );
+
+      expect(isolation).toEqual([{ transaction_isolation: 'serializable' }]);
+    });
+
+    it('runs a batch that writes only a model the audit does not record as an interactive transaction', async () => {
+      const { result, transactions } = runBatch({ implicitTransaction, audited: 'Post', writes: true });
+
+      await expect(result).resolves.toHaveLength(2);
+      expect(transactions).toEqual(['interactive']);
+    });
+
+    it('runs a batch holding a write without an audit context as an interactive transaction', async () => {
+      const { result, transactions } = runBatch({ implicitTransaction, writes: true, withContext: false });
+
+      await expect(result).resolves.toHaveLength(2);
+      expect(transactions).toEqual(['interactive']);
+    });
+
+    it('runs a batch whose write does not await its audit as an interactive transaction', async () => {
+      const { result, transactions } = runBatch({
+        implicitTransaction,
+        awaited: false,
+        awaitedModel: 'Post',
+        writes: true,
+      });
+
+      await expect(result).resolves.toHaveLength(2);
+      expect(transactions).toEqual(['interactive']);
+    });
+
+    it("runs a batch holding a write as an interactive transaction, bound by the client's limits", async () => {
+      const { result, transactions } = runBatch({ implicitTransaction, writes: true, slow: true });
+
+      await expect(result).rejects.toMatchObject({ code: 'P2028' });
+      expect(transactions).toEqual(['interactive']);
+      expect(await raw.user.count()).toBe(0);
+      expect(await auditRows()).toEqual([]);
+    });
+
+    it("writes the audit of a batch operation that does not await it once the batch's transaction has committed", async () => {
+      const user = await seedUser();
+      const clients = createClients({
+        implicitTransaction,
+        awaited: (modelName) => modelName === 'Post',
+      });
+
+      await clients.run(() =>
+        clients.client.$transaction([
+          clients.client.post.create({ data: { title: 'Awaited', authorId: user.id } }),
+          clients.client.user.create({ data: { email: 'detached@example.com', name: 'Detached' } }),
+        ]),
+      );
+
+      expect((await auditRows()).sort()).toEqual(['Post.create', 'User.create']);
+    });
+
+    describe('rejects a batch before anything runs', () => {
+      it('when an operation was created by a client that is not audited', async () => {
+        const clients = createClients({ implicitTransaction });
+
+        await expect(
+          clients.run(() =>
+            clients.client.$transaction([
+              clients.client.user.create({ data: { email: 'a@example.com', name: 'A' } }),
+              raw.user.create({ data: { email: 'b@example.com', name: 'B' } }),
+            ]),
+          ),
+        ).rejects.toThrow('index 1');
+
+        expect(await raw.user.count()).toBe(0);
+      });
+
+      it('when an operation was created by another client derived from the audited client', async () => {
+        const clients = createClients({ implicitTransaction });
+        const other = clients.audited.$extends({ name: 'other' });
+
+        await expect(
+          clients.run(() =>
+            clients.client.$transaction([
+              clients.client.user.create({ data: { email: 'a@example.com', name: 'A' } }),
+              other.user.create({ data: { email: 'b@example.com', name: 'B' } }),
+            ]),
+          ),
+        ).rejects.toThrow('index 1');
+
+        expect(await raw.user.count()).toBe(0);
+      });
+
+      it('when an operation has already run', async () => {
+        const clients = createClients({ implicitTransaction });
+
+        await expect(
+          clients.run(async () => {
+            const created = clients.client.user.create({ data: { email: 'a@example.com', name: 'A' } });
+            await created;
+            return clients.client.$transaction([
+              clients.client.user.create({ data: { email: 'b@example.com', name: 'B' } }),
+              created,
+            ]);
+          }),
+        ).rejects.toThrow('index 1');
+
+        expect((await raw.user.findMany({ select: { email: true } })).map((row) => row.email)).toEqual([
+          'a@example.com',
+        ]);
+      });
+    });
+
+    it("rejects an operation of the audited client given to another client's batch", async () => {
+      const clients = createClients({ implicitTransaction });
+
+      await expect(
+        clients.run(() => raw.$transaction([clients.client.user.create({ data: { email: 'a@example.com' } })])),
+      ).rejects.toThrow('All elements of the array need to be Prisma Client promises');
+
+      expect(await raw.user.count()).toBe(0);
+    });
   });
 
   describe('by default', () => {
@@ -345,83 +497,9 @@ describe('implicitTransaction', () => {
       expect(clients.observer).toHaveBeenCalledWith(expect.objectContaining({ phase: 'diff-generation' }));
       expect(await auditRows()).toEqual([]);
     });
-
-    it("commits Prisma's own batch when an operation's audit build fails, and reports the dropped records", async () => {
-      const user = await seedUser();
-      const clients = createClients({ implicitTransaction: false, failingEnricher: true });
-
-      await clients.run(() =>
-        clients.client.$transaction([clients.client.user.update({ where: { id: user.id }, data: { name: 'Kept' } })]),
-      );
-
-      expect(await nameOf(user.id)).toBe('Kept!?');
-      expect(clients.observer).toHaveBeenCalledWith(expect.objectContaining({ phase: 'diff-generation' }));
-    });
-
-    it("runs a read-only batch as Prisma's own batch, without an interactive transaction of its own", async () => {
-      const { result, transactions } = runBatch({ implicitTransaction: false });
-
-      await expect(result).resolves.toHaveLength(1);
-      expect(transactions).toEqual(['batch']);
-    });
   });
 
   describe('with implicitTransaction', () => {
-    it("runs a read-only batch as Prisma's own batch, without an interactive transaction of its own", async () => {
-      const { result, transactions } = runBatch({ implicitTransaction: true });
-
-      await expect(result).resolves.toHaveLength(1);
-      expect(transactions).toEqual(['batch']);
-    });
-
-    it("runs a batch that writes only a model the audit does not record as Prisma's own batch", async () => {
-      const { result, transactions } = runBatch({ implicitTransaction: true, audited: 'Post', writes: true });
-
-      await expect(result).resolves.toHaveLength(2);
-      expect(transactions).toEqual(['batch']);
-    });
-
-    it("runs a batch without an audit context as Prisma's own batch", async () => {
-      const { result, transactions } = runBatch({ implicitTransaction: true, writes: true, withContext: false });
-
-      await expect(result).resolves.toHaveLength(2);
-      expect(transactions).toEqual(['batch']);
-    });
-
-    it("runs Prisma's own batch at the caller's isolation level", async () => {
-      const clients = createClients({ implicitTransaction: true });
-
-      const [, isolation] = await clients.run(() =>
-        clients.client.$transaction(
-          [clients.client.user.count(), clients.client.$queryRaw`SHOW transaction_isolation`],
-          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-        ),
-      );
-
-      expect(isolation).toEqual([{ transaction_isolation: 'serializable' }]);
-    });
-
-    it("runs a batch whose write does not await its audit as Prisma's own batch", async () => {
-      const { result, transactions } = runBatch({
-        implicitTransaction: true,
-        awaited: false,
-        awaitedModel: 'Post',
-        writes: true,
-      });
-
-      await expect(result).resolves.toHaveLength(2);
-      expect(transactions).toEqual(['batch']);
-    });
-
-    it("runs a batch holding a write whose audit is awaited as an interactive transaction, bound by the client's limits", async () => {
-      const { result, transactions } = runBatch({ implicitTransaction: true, writes: true, slow: true });
-
-      await expect(result).rejects.toMatchObject({ code: 'P2028' });
-      expect(transactions).toEqual(['interactive']);
-      expect(await raw.user.count()).toBe(0);
-      expect(await auditRows()).toEqual([]);
-    });
-
     it('runs a write through the audited client inside a callback of your transaction in a transaction of its own, together with its audit', async () => {
       const clients = createClients({ implicitTransaction: true });
 
@@ -454,8 +532,8 @@ describe('implicitTransaction', () => {
       });
 
       it.each([
-        { batch: 'that runs as an interactive transaction', awaited: true },
-        { batch: 'that Prisma runs', awaited: false },
+        { batch: 'whose writes await their audit', awaited: true },
+        { batch: 'whose writes do not await their audit', awaited: false },
       ])('for each write of a batch $batch', async ({ awaited }) => {
         const awaitedByModel = vi.fn((_modelName: string) => awaited);
         const clients = createClients({ implicitTransaction: true, awaited: awaitedByModel });
@@ -483,8 +561,8 @@ describe('implicitTransaction', () => {
         });
 
         it.each([
-          { batch: 'that runs as an interactive transaction', awaited: true },
-          { batch: 'that Prisma runs', awaited: false },
+          { batch: 'whose writes await their audit', awaited: true },
+          { batch: 'whose writes do not await their audit', awaited: false },
         ])('for each write of a batch $batch', async ({ awaited }) => {
           const awaitedByModel = vi.fn((_modelName: string) => awaited);
           const clients = createClients({ implicitTransaction: true, awaited: awaitedByModel, companionCreate: true });
@@ -543,23 +621,6 @@ describe('implicitTransaction', () => {
       expect(await nameOf(user.id)).toBe('Before');
     });
 
-    it("rolls back every operation of a batch when one operation's audit build fails", async () => {
-      const user = await seedUser();
-      const clients = createClients({ implicitTransaction: true, failingEnricher: true });
-
-      await expect(
-        clients.run(() =>
-          clients.client.$transaction([
-            clients.client.user.create({ data: { email: 'a@example.com', name: 'A' } }),
-            clients.client.user.update({ where: { id: user.id }, data: { name: 'Lost' } }),
-          ]),
-        ),
-      ).rejects.toThrow('actor enricher is broken');
-
-      expect(await raw.user.count()).toBe(1);
-      expect(await nameOf(user.id)).toBe('Before');
-    });
-
     it('runs each client derived from the audited client through its own extensions only', async () => {
       const user = await seedUser();
       const clients = createClients({ implicitTransaction: true });
@@ -576,85 +637,6 @@ describe('implicitTransaction', () => {
       expect(first.updates).toBe(1);
       expect(second.updates).toBe(1);
       expect(clients.before.updates).toBe(2);
-    });
-
-    it("writes the audit of a batch operation that does not await it once the batch's transaction has committed", async () => {
-      const user = await seedUser();
-      const clients = createClients({
-        implicitTransaction: true,
-        awaited: (modelName) => modelName === 'Post',
-      });
-
-      await clients.run(() =>
-        clients.client.$transaction([
-          clients.client.post.create({ data: { title: 'Awaited', authorId: user.id } }),
-          clients.client.user.create({ data: { email: 'detached@example.com', name: 'Detached' } }),
-        ]),
-      );
-
-      expect((await auditRows()).sort()).toEqual(['Post.create', 'User.create']);
-    });
-
-    describe('rejects a batch before anything runs', () => {
-      it('when an operation was created by a client that is not audited', async () => {
-        const clients = createClients({ implicitTransaction: true });
-
-        await expect(
-          clients.run(() =>
-            clients.client.$transaction([
-              clients.client.user.create({ data: { email: 'a@example.com', name: 'A' } }),
-              raw.user.create({ data: { email: 'b@example.com', name: 'B' } }),
-            ]),
-          ),
-        ).rejects.toThrow('index 1');
-
-        expect(await raw.user.count()).toBe(0);
-      });
-
-      it('when an operation was created by another client derived from the audited client', async () => {
-        const clients = createClients({ implicitTransaction: true });
-        const other = clients.audited.$extends({ name: 'other' });
-
-        await expect(
-          clients.run(() =>
-            clients.client.$transaction([
-              clients.client.user.create({ data: { email: 'a@example.com', name: 'A' } }),
-              other.user.create({ data: { email: 'b@example.com', name: 'B' } }),
-            ]),
-          ),
-        ).rejects.toThrow('index 1');
-
-        expect(await raw.user.count()).toBe(0);
-      });
-
-      it('when an operation has already run', async () => {
-        const clients = createClients({ implicitTransaction: true });
-
-        await expect(
-          clients.run(async () => {
-            const created = clients.client.user.create({ data: { email: 'a@example.com', name: 'A' } });
-            await created;
-            return clients.client.$transaction([
-              clients.client.user.create({ data: { email: 'b@example.com', name: 'B' } }),
-              created,
-            ]);
-          }),
-        ).rejects.toThrow('index 1');
-
-        expect((await raw.user.findMany({ select: { email: true } })).map((row) => row.email)).toEqual([
-          'a@example.com',
-        ]);
-      });
-    });
-
-    it("rejects an operation of the audited client given to another client's batch", async () => {
-      const clients = createClients({ implicitTransaction: true });
-
-      await expect(
-        clients.run(() => raw.$transaction([clients.client.user.create({ data: { email: 'a@example.com' } })])),
-      ).rejects.toThrow('All elements of the array need to be Prisma Client promises');
-
-      expect(await raw.user.count()).toBe(0);
     });
   });
 });

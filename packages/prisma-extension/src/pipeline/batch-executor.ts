@@ -87,11 +87,8 @@ export type BatchPrepared =
       readonly rounds: number;
       readonly keyWrite: DerivableRowKeyWrite;
     }
-  /**
-   * updateMany or deleteMany with a `limit`, run as given: inside a batch `$transaction([...])`
-   * Prisma runs (`reportsUnidentified`), or with a limit Prisma rejects
-   */
-  | { readonly kind: 'limited-as-given'; readonly reportsUnidentified: boolean }
+  /** updateMany or deleteMany with a `limit` Prisma rejects, run as given */
+  | { readonly kind: 'limited-as-given' }
   | { readonly kind: 'delete'; readonly beforeRows: Row[] };
 
 export interface BatchExecuted {
@@ -200,10 +197,7 @@ const prepareLimited = (
   rowKeyFields: () => string[],
 ): BatchPrepared => {
   if (typeof limit !== 'number' || !Number.isInteger(limit) || limit <= 0) {
-    return { kind: 'limited-as-given', reportsUnidentified: false };
-  }
-  if (scope.prismaBatch) {
-    return { kind: 'limited-as-given', reportsUnidentified: true };
+    return { kind: 'limited-as-given' };
   }
   const rounds = scope.transaction ? LIMITED_WRITE_ROUNDS : 1;
   return { kind: 'limited', limit, keyFields: rowKeyFields(), rounds, keyWrite };
@@ -213,12 +207,11 @@ const prepareLimited = (
  * An `updateManyAndReturn` is audited from the rows it returns, so the after rows are not read
  * again. An `updateMany` or `deleteMany` with a `limit` reads its rows as it runs (see
  * `runLimitedWrite`): in rounds inside an interactive transaction, in one narrowed statement
- * outside any. Inside a batch `$transaction([...])` Prisma runs, a read before the write cannot see
- * what the batch's earlier operations wrote, so the operation runs as given. An update whose data
- * changes the key in a way its arguments do not tell runs as given too: no row it writes could be
- * found or paired by key, so none is read. An update whose data writes no field changes no row:
- * Prisma runs no `UPDATE` for it, and the count it returns does not count rows written (0 on
- * SQLite, the rows the `where` matches on PostgreSQL), so it runs as given and reads none either.
+ * outside any. An update whose data changes the key in a way its arguments do not tell runs as
+ * given: no row it writes could be found or paired by key, so none is read. An update whose data
+ * writes no field changes no row: Prisma runs no `UPDATE` for it, and the count it returns does not
+ * count rows written (0 on SQLite, the rows the `where` matches on PostgreSQL), so it runs as given
+ * and reads none either.
  */
 /** Whether `data` gives no field a value: every field it names is `undefined` or `Prisma.skip` */
 const writesNoField = (data: unknown, skip: unknown): boolean =>
@@ -652,14 +645,10 @@ export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationE
           prepared.keyWrite,
           failureSink,
         );
-      case 'limited-as-given':
-        if (prepared.reportsUnidentified) {
-          await reportUnidentified(operation, countOf(executed.result), failureSink, limitedRowsOfOtherWriters);
-        }
-        return { rows: [] };
       case 'key-not-followed':
         return keyNotFollowedRows(operation, executed, failureSink);
       case 'writes-no-field':
+      case 'limited-as-given':
         return { rows: [] };
       case 'limited':
         return limitedWriteRows(operation, delegateOf(scope, operation.model), prepared, executed, failureSink);
