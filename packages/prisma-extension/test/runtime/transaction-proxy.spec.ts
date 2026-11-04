@@ -26,6 +26,7 @@ import {
   type AuditContext,
   type AuditObserver,
   type AuditRecord,
+  AuditRollbackError,
   createActorId,
   createAggregateId,
   createAsyncLocalStorageProvider,
@@ -35,7 +36,6 @@ import {
   type WriteMode,
 } from '@kuruwic/db-audit-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { AuditRollbackError } from '../../src/errors.js';
 import type { PrismaBaseClient, PrismaHandle } from '../../src/internal-types.js';
 import type { OperationExecutor } from '../../src/pipeline/executor.js';
 import { type AuditPipelineDependencies, runAuditedOperation } from '../../src/pipeline/run-audited-operation.js';

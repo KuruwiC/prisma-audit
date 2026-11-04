@@ -2,6 +2,7 @@ import type { AuditActor, AuditObserver, AuditRecord, WriteMode } from '@kuruwic
 import {
   AuditContextMissingError,
   AuditIncompleteError,
+  AuditRollbackError,
   createAsyncLocalStorageProvider,
   defineEntities,
   defineEntity,
@@ -437,6 +438,78 @@ describe('transaction membership', () => {
 
     expect(handles[0]).not.toBe(adapter.store);
     expect(handles[1]).toBe(adapter.store);
+  });
+
+  describe('a transaction an operation of which its audit failed never commits', () => {
+    const brokenPostAdapter = () =>
+      createAdapter({
+        entities: defineMapping({
+          User: defineEntity<UserRow, Db>({ type: 'User' }),
+          Post: defineEntity<PostRow, Db>({
+            type: 'Post',
+            idResolver: async (post) => {
+              if (post.title === 'broken') throw new Error('entity id resolver is broken');
+              return post.id;
+            },
+          }),
+        }),
+      });
+
+    it('rejects with AuditRollbackError, whose cause is the AuditIncompleteError the callback caught, and rolls every write of it back', async () => {
+      const adapter = brokenPostAdapter();
+
+      const committed = withContext(() =>
+        adapter.transaction(async () => {
+          await adapter.create('User', { id: 'u1', name: 'Alice' });
+          await adapter.create('Post', { id: 'p1', authorId: 'u1', title: 'broken' }).catch(() => undefined);
+        }),
+      );
+
+      await expect(committed).rejects.toBeInstanceOf(AuditRollbackError);
+      await expect(committed).rejects.toMatchObject({ cause: expect.any(AuditIncompleteError) });
+      expect(adapter.store.find('User', 'u1')).toBeUndefined();
+      expect(adapter.store.find('Post', 'p1')).toBeUndefined();
+      expect(adapter.store.auditLogs()).toEqual([]);
+    });
+
+    it('rejects with AuditRollbackError when the callback caught the failure of an immediate audit write', async () => {
+      const adapter = createAdapter({ write: { mode: 'awaited' } });
+      const failure = new Error('audit-log store unavailable');
+      const write = vi.spyOn(memoryWriteExecutor, 'write').mockRejectedValueOnce(failure);
+
+      try {
+        const committed = withContext(() =>
+          adapter.transaction(async () => {
+            await adapter.create('User', { id: 'u1', name: 'Alice' }).catch(() => undefined);
+          }),
+        );
+        await expect(committed).rejects.toBeInstanceOf(AuditRollbackError);
+        await expect(committed).rejects.toMatchObject({ cause: failure });
+      } finally {
+        write.mockRestore();
+      }
+
+      expect(adapter.store.find('User', 'u1')).toBeUndefined();
+    });
+
+    it('rolls a nested one back alone: the outer one, which catches its rejection, commits without its writes', async () => {
+      const adapter = brokenPostAdapter();
+
+      await withContext(() =>
+        adapter.transaction(async () => {
+          await adapter.create('User', { id: 'u1', name: 'Alice' });
+          await expect(
+            adapter.transaction(async () => {
+              await adapter.create('Post', { id: 'p1', authorId: 'u1', title: 'broken' }).catch(() => undefined);
+            }),
+          ).rejects.toBeInstanceOf(AuditRollbackError);
+        }),
+      );
+
+      expect(adapter.store.find('User', 'u1')).toEqual({ id: 'u1', name: 'Alice' });
+      expect(adapter.store.find('Post', 'p1')).toBeUndefined();
+      expect(adapter.store.auditLogs().map((log) => log.entityId)).toEqual(['u1']);
+    });
   });
 
   describe('a transaction opened inside another joins it', () => {

@@ -64,7 +64,7 @@ export type {
   TransactionOutcomes,
   UnrecordedWrite,
 } from './outcome/index.js';
-export { AuditIncompleteError, createOperationOutcome, createTransactionOutcomes } from './outcome/index.js';
+export { AuditIncompleteError, createOperationOutcome } from './outcome/index.js';
 export type { AuditGate, AuditGateConfig, RejectedWrite } from './policy/audit-gate.js';
 export { AuditContextMissingError, auditGate } from './policy/audit-gate.js';
 export type { PolicyConfig, WriteMode } from './policy/index.js';
@@ -77,6 +77,8 @@ export type {
   ResolverFailure,
 } from './resolve/index.js';
 export { resolve } from './resolve/index.js';
+export type { TransactionAudit } from './transaction/index.js';
+export { AuditRollbackError, assertRecordsComplete, createTransactionAudit } from './transaction/index.js';
 export type { AuditActor, AuditContext, AuditContextProvider } from './types.js';
 export type { ErrorStrategy } from './utils/error-handler.js';
 export type { ValueSerializer } from './utils/serialization.js';

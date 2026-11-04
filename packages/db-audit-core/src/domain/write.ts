@@ -6,6 +6,7 @@
  * the writer hook a user may configure to run in place of the default write.
  */
 
+import type { TransactionAudit } from '../transaction/index.js';
 import type { AuditContext } from '../types.js';
 import type { AuditRecord } from './mutation-event.js';
 
@@ -42,10 +43,11 @@ export interface TransactionRuntime<TDbHandle = unknown> {
     /** The transaction's handle: an immediate write runs on it and commits or rolls back with the operation */
     readonly handle: TDbHandle;
     /**
-     * Registers work to start once the transaction has committed (for a nested transaction, the
-     * outermost one). Work registered in a transaction that rolls back never starts.
+     * The audit of the transaction: work queued on it starts once the transaction has committed
+     * (for a nested transaction, the outermost one), and an audit failure recorded on it keeps the
+     * transaction from committing
      */
-    readonly afterCommit: (work: () => Promise<void>) => void;
+    readonly audit: TransactionAudit;
   };
   /** Starts work no caller awaits and keeps track of it until it settles, so the adapter can wait for it */
   readonly detach: (work: () => Promise<void>) => void;

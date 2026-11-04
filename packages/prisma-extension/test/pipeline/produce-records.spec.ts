@@ -5,7 +5,7 @@
  */
 
 import type { MutationEvent } from '@kuruwic/db-audit-core';
-import { createEntityConfigLookup, defineEntity } from '@kuruwic/db-audit-core';
+import { createEntityConfigLookup, createTransactionAudit, defineEntity } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
 import type { PrismaBaseClient, PrismaHandle } from '../../src/internal-types.js';
 import type { ExecutionScope, OperationFailureSink } from '../../src/pipeline/execution-scope.js';
@@ -26,7 +26,7 @@ const scopeOn = (
   auditContext,
   handle,
   baseClient,
-  transaction: handle === baseClient ? undefined : { deferredWrites: [], recordAuditFailure: () => {} },
+  transaction: handle === baseClient ? undefined : createTransactionAudit(),
   failureSink,
 });
 

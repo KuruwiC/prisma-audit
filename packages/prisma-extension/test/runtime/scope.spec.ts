@@ -133,10 +133,10 @@ describe('runtime scope', () => {
         const transaction = currentScope()?.binding?.transaction;
         if (!transaction) throw new Error('expected a transaction scope');
 
-        transaction.deferredWrites.push(async () => {});
+        transaction.audit.afterCommit(async () => {});
 
         withScope({ isProcessingAuditLog: true }, () => {
-          expect(currentScope()?.binding?.transaction?.deferredWrites).toHaveLength(1);
+          expect(currentScope()?.binding?.transaction?.audit.queued).toHaveLength(1);
         });
       });
     });

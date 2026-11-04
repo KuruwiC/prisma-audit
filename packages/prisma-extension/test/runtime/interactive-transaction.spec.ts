@@ -9,9 +9,13 @@
  * `settledIn` settles the outcome of one operation, in a transaction or outside any.
  */
 
-import { type AuditContext, createAsyncLocalStorageProvider, createTransactionOutcomes } from '@kuruwic/db-audit-core';
+import {
+  type AuditContext,
+  AuditRollbackError,
+  createAsyncLocalStorageProvider,
+  createTransactionAudit,
+} from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
-import { AuditRollbackError } from '../../src/errors.js';
 import type { PrismaHandle } from '../../src/internal-types.js';
 import { createOpenTransaction, settledIn } from '../../src/runtime/interactive-transaction.js';
 import { flushAllPendingWrites, getPendingWriteCount } from '../../src/runtime/pending-writes.js';
@@ -57,8 +61,8 @@ describe('createOpenTransaction', () => {
     expect($transaction).toHaveBeenCalledTimes(1);
     expect($transaction.mock.instances[0]).toBe(client);
     expect(seen?.client).toBe(txClient);
-    expect(seen?.deferredWrites).toEqual([]);
-    expect(seen?.auditFailures).toEqual([]);
+    expect(seen?.audit.queued).toEqual([]);
+    expect(seen?.audit.failures).toEqual([]);
   });
 
   it('fails when the client has no $transaction', async () => {
@@ -141,7 +145,8 @@ describe('createOpenTransaction', () => {
       const second = new Error('second audit failure');
 
       const opened = createOpenTransaction(createAsyncLocalStorageProvider())(client, [], async (transaction) => {
-        transaction.auditFailures.push(first, second);
+        transaction.audit.poison(first);
+        transaction.audit.poison(second);
         return 'resolved all the same';
       });
 
@@ -155,7 +160,7 @@ describe('createOpenTransaction', () => {
 
       await expect(
         createOpenTransaction(createAsyncLocalStorageProvider())(client, [], async (transaction) => {
-          transaction.auditFailures.push(new Error('audit failure'));
+          transaction.audit.poison(new Error('audit failure'));
           throw bodyError;
         }),
       ).rejects.toBe(bodyError);
@@ -167,7 +172,7 @@ describe('createOpenTransaction', () => {
     const queueingBody = (events: string[], ...names: string[]) => {
       return async (transaction: ActiveTransaction) => {
         for (const name of names) {
-          transaction.deferredWrites.push(async () => {
+          transaction.audit.afterCommit(async () => {
             events.push(`started ${name}`);
           });
         }
@@ -186,7 +191,7 @@ describe('createOpenTransaction', () => {
       const open = createOpenTransaction(createAsyncLocalStorageProvider());
 
       const result = await open(client, [], async (transaction) => {
-        transaction.deferredWrites.push(
+        transaction.audit.afterCommit(
           () =>
             new Promise<void>((resolve) => {
               events.push('started');
@@ -243,7 +248,7 @@ describe('createOpenTransaction', () => {
       await expect(
         createOpenTransaction(createAsyncLocalStorageProvider())(client, [], async (transaction) => {
           await queue(transaction);
-          transaction.auditFailures.push(new Error('audit failure'));
+          transaction.audit.poison(new Error('audit failure'));
         }),
       ).rejects.toBeInstanceOf(AuditRollbackError);
       await flushAllPendingWrites();
@@ -273,7 +278,7 @@ describe('createOpenTransaction', () => {
     const settlingBody =
       (events: string[], name: string, fails?: Error) =>
       async (transaction: ActiveTransaction): Promise<void> => {
-        await transaction.outcomes.add(loggedOutcome(events, name), true);
+        await transaction.audit.outcomes.add(loggedOutcome(events, name), true);
         if (fails) throw fails;
       };
 
@@ -288,7 +293,7 @@ describe('createOpenTransaction', () => {
       });
 
       await createOpenTransaction(createAsyncLocalStorageProvider())(client, [], async (transaction) => {
-        transaction.deferredWrites.push(async () => {
+        transaction.audit.afterCommit(async () => {
           events.push('queued write started');
         });
         await settlingBody(events, 'first')(transaction);
@@ -319,7 +324,7 @@ describe('createOpenTransaction', () => {
       await expect(
         createOpenTransaction(createAsyncLocalStorageProvider())(client, [], async (transaction) => {
           await settlingBody(events, 'first')(transaction);
-          transaction.auditFailures.push(new Error('audit write failed'));
+          transaction.audit.poison(new Error('audit write failed'));
         }),
       ).rejects.toBeInstanceOf(AuditRollbackError);
 
@@ -351,7 +356,7 @@ describe('createOpenTransaction', () => {
 
       await expect(
         createOpenTransaction(createAsyncLocalStorageProvider())(client, [], async (transaction) => {
-          addLate = () => transaction.outcomes.add(loggedOutcome(events, 'straggler'), true);
+          addLate = () => transaction.audit.outcomes.add(loggedOutcome(events, 'straggler'), true);
           throw bodyError;
         }),
       ).rejects.toBe(bodyError);
@@ -374,16 +379,16 @@ describe('createOpenTransaction', () => {
       await createOpenTransaction(createAsyncLocalStorageProvider())(client, [], async (transaction) => {
         run += 1;
         seenOnEntry.push({
-          deferredWrites: transaction.deferredWrites.length,
-          auditFailures: transaction.auditFailures.length,
+          deferredWrites: transaction.audit.queued.length,
+          auditFailures: transaction.audit.failures.length,
         });
         const name = `run ${run}`;
-        await transaction.outcomes.add(loggedOutcome(events, `settled ${name}`), true);
-        transaction.deferredWrites.push(async () => {
+        await transaction.audit.outcomes.add(loggedOutcome(events, `settled ${name}`), true);
+        transaction.audit.afterCommit(async () => {
           events.push(`started ${name}`);
         });
         if (run === 1) {
-          transaction.auditFailures.push(new Error('audit failure of the first run'));
+          transaction.audit.poison(new Error('audit failure of the first run'));
         }
       });
       await flushAllPendingWrites();
@@ -433,12 +438,7 @@ describe('settledIn', () => {
   });
 
   describe('inside a transaction', () => {
-    const transactionOf = (): ActiveTransaction => ({
-      client: txClient,
-      deferredWrites: [],
-      auditFailures: [],
-      outcomes: createTransactionOutcomes(),
-    });
+    const transactionOf = (): ActiveTransaction => ({ client: txClient, audit: createTransactionAudit() });
 
     it.each([
       { succeeded: true, committed: true, fate: 'committed' },
@@ -456,7 +456,7 @@ describe('settledIn', () => {
         }).catch(() => undefined);
         expect(events).toEqual([]);
 
-        await transaction.outcomes.settle(committed ? 'committed' : 'not-committed');
+        await transaction.audit.outcomes.settle(committed ? 'committed' : 'not-committed');
         expect(events).toEqual([fate]);
       },
     );

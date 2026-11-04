@@ -7,17 +7,10 @@
  * also the transaction runtime core's `dispatch` writes the audit records with.
  */
 
-import type { AuditContext, OperationOutcome, TransactionRuntime } from '@kuruwic/db-audit-core';
+import type { AuditContext, OperationOutcome, TransactionAudit, TransactionRuntime } from '@kuruwic/db-audit-core';
 import type { PrismaBaseClient, PrismaHandle } from '../internal-types.js';
 import { trackPendingWrite } from '../runtime/pending-writes.js';
 import type { ActiveTransaction } from '../runtime/scope.js';
-
-export interface TransactionScope {
-  /** Writes queued here run on the base client once the transaction has committed */
-  readonly deferredWrites: Array<() => Promise<void>>;
-  /** Keeps the transaction from committing: an audit failure failed the operation once its write had run */
-  readonly recordAuditFailure: (error: Error) => void;
-}
 
 /**
  * Where one operation reports the audit failures the pipeline detects itself, and the writes the
@@ -34,7 +27,8 @@ export interface ExecutionScope {
    */
   readonly handle: PrismaHandle;
   readonly baseClient: PrismaBaseClient;
-  readonly transaction?: TransactionScope;
+  /** The audit of the transaction the operation runs in, if any */
+  readonly transaction?: TransactionAudit;
   readonly failureSink: OperationFailureSink;
 }
 
@@ -53,12 +47,7 @@ export const executionScopeOf = (input: ExecutionScopeInput): ExecutionScope => 
     auditContext,
     handle: transaction?.client ?? baseClient,
     baseClient,
-    transaction: transaction && {
-      deferredWrites: transaction.deferredWrites,
-      recordAuditFailure: (error) => {
-        transaction.auditFailures.push(error);
-      },
-    },
+    transaction: transaction?.audit,
     failureSink,
   };
 };
@@ -68,12 +57,7 @@ export const transactionRuntimeOf = (scope: ExecutionScope): TransactionRuntime<
   const { transaction } = scope;
   return {
     baseHandle: scope.baseClient,
-    transaction: transaction && {
-      handle: scope.handle,
-      afterCommit: (work) => {
-        transaction.deferredWrites.push(work);
-      },
-    },
+    transaction: transaction && { handle: scope.handle, audit: transaction },
     detach: trackPendingWrite,
   };
 };

@@ -5,6 +5,7 @@
  * return-value contract.
  */
 
+import { createTransactionAudit } from '@kuruwic/db-audit-core';
 import { Decimal } from '@prisma/client/runtime/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PrismaBaseClient, PrismaNamespace } from '../../src/internal-types.js';
@@ -60,7 +61,7 @@ const schemaMetadata = schemaMetadataOf(
 /** The scope of an operation inside an interactive transaction whose client is `client` */
 const transactionScopeOn = (client: PrismaBaseClient, failureSink: OperationFailureSink): ExecutionScope => ({
   ...scopeOn(client, failureSink),
-  transaction: { deferredWrites: [], recordAuditFailure: () => {} },
+  transaction: createTransactionAudit(),
 });
 
 /** An executor on a client that takes a query omit (Prisma 6.2 and later) when `queryOmitSupported` */

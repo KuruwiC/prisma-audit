@@ -14,6 +14,7 @@ import { createActorId, createAggregateId, createEntityId } from '../src/domain/
 import type { AuditRecord, WritePlanKind } from '../src/domain/mutation-event.js';
 import type { TransactionRuntime, WriteContext, WriteExecutor, WriteFn } from '../src/domain/write.js';
 import type { AuditFailure, OperationOutcome } from '../src/outcome/index.js';
+import { createTransactionAudit } from '../src/transaction/index.js';
 import type { AuditContext } from '../src/types.js';
 import { deferred } from './support/deferred.js';
 
@@ -52,20 +53,18 @@ type Work = () => Promise<void>;
 
 /** A runtime that keeps the work handed to it instead of starting it */
 const createRuntime = (inTransaction: boolean) => {
-  const afterCommitted: Work[] = [];
+  const audit = createTransactionAudit();
+  const afterCommit = vi.spyOn(audit, 'afterCommit');
   const detached: Work[] = [];
-  const afterCommit = vi.fn((work: Work) => {
-    afterCommitted.push(work);
-  });
   const detach = vi.fn((work: Work) => {
     detached.push(work);
   });
   const runtime: TransactionRuntime<Handle> = {
     baseHandle,
-    transaction: inTransaction ? { handle: transactionHandle, afterCommit } : undefined,
+    transaction: inTransaction ? { handle: transactionHandle, audit } : undefined,
     detach,
   };
-  return { runtime, afterCommit, detach, afterCommitted, detached };
+  return { runtime, audit, afterCommit, detach, afterCommitted: audit.queued, detached };
 };
 
 const createConfig = (options: { write?: WriteExecutor<Handle>['write']; writer?: WriteFn<Handle> } = {}) => {
@@ -186,6 +185,15 @@ describe('dispatch', () => {
       expect(failures[0]?.phase === 'log-write' && failures[0].records).toBe(records);
       expect(finished).toEqual([]);
       expect(consoleError).not.toHaveBeenCalled();
+    });
+
+    it('records the failed write on the transaction, which must then not commit', async () => {
+      const { config } = createConfig({ write: failingWrite });
+      const { runtime, audit } = createRuntime(true);
+
+      await expect(dispatch(audited('immediate'), config, runtime)).rejects.toBe(writeError);
+
+      expect(audit.failures).toEqual([writeError]);
     });
   });
 
@@ -430,10 +438,11 @@ describe('dispatch', () => {
       async ({ plan }) => {
         const { outcome, failures, finished } = createOutcome();
         const { config, writeExecutor } = createConfig();
-        const { runtime, afterCommit, detach } = createRuntime(true);
+        const { runtime, audit, afterCommit, detach } = createRuntime(true);
 
         await expect(dispatch(audited(plan, outcome, failingBuild), config, runtime)).rejects.toBe(buildError);
 
+        expect(audit.failures).toEqual([buildError]);
         expect(failures).toEqual([buildFailure]);
         expect(finished).toEqual([]);
         expect(writeExecutor.write).not.toHaveBeenCalled();

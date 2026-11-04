@@ -11,7 +11,7 @@
  */
 
 import type { AuditContext, DispatchConfig, OperationOutcome, WriteMode, WritePlanKind } from '@kuruwic/db-audit-core';
-import { AuditIncompleteError, dispatch } from '@kuruwic/db-audit-core';
+import { assertRecordsComplete, dispatch } from '@kuruwic/db-audit-core';
 import type { AuditAction } from '../grammar/operations.js';
 import type { PrismaBaseClient, PrismaHandle } from '../internal-types.js';
 import { type ActiveTransaction, withScope } from '../runtime/scope.js';
@@ -98,14 +98,14 @@ const runExecutor = async (
     const callerFailure = callerMutationFailureOf(caughtError);
     if (callerFailure) {
       if (hasWritten()) {
-        scope.transaction?.recordAuditFailure(toError(callerFailure.thrown));
+        scope.transaction?.poison(toError(callerFailure.thrown));
       }
       throw callerFailure.thrown;
     }
     const error = toError(caughtError);
     scope.failureSink.fail({ phase: 'diff-generation', error });
     if (hasWritten()) {
-      scope.transaction?.recordAuditFailure(error);
+      scope.transaction?.poison(error);
     }
     throw error;
   }
@@ -117,8 +117,9 @@ const runExecutor = async (
  * the write plan whether either fails the caller, which it does only inside a transaction, once the
  * operation's write has run. An atomic operation some of whose records were dropped (a write the
  * event collection reported as unrecorded, or a `row-identification` or `id-resolver-call` failure)
- * fails with `AuditIncompleteError` once `dispatch` has resolved (see `OperationOutcome.droppedRecords`). Such a failure is recorded on the
- * transaction, which then does not commit even when the caller catches it.
+ * fails with `AuditIncompleteError` once `dispatch` has resolved (`assertRecordsComplete`). Either
+ * records its failure on the transaction's audit, so the transaction does not commit even when
+ * the caller catches the error.
  */
 export const runAuditedOperation = async (
   input: AuditedOperationInput,
@@ -134,19 +135,11 @@ export const runAuditedOperation = async (
   const operation: AuditedOperation = { model, action, args, widened, execute };
   const executor = isBatchOperation(action) ? deps.batchExecutor : deps.singleExecutor;
   const executed = await runExecutor(executor, operation, scope, deps, () => written);
-  try {
-    await dispatch(
-      { buildRecords: executed.buildRecords, plan, auditContext: scope.auditContext, outcome },
-      deps.dispatchConfig,
-      transactionRuntimeOf(scope),
-    );
-    const dropped = mode === 'atomic' ? outcome.droppedRecords() : undefined;
-    if (dropped) {
-      throw new AuditIncompleteError({ modelName: model, operation: action, ...dropped });
-    }
-  } catch (caughtError) {
-    scope.transaction?.recordAuditFailure(toError(caughtError));
-    throw caughtError;
-  }
+  await dispatch(
+    { buildRecords: executed.buildRecords, plan, auditContext: scope.auditContext, outcome },
+    deps.dispatchConfig,
+    transactionRuntimeOf(scope),
+  );
+  assertRecordsComplete({ modelName: model, operation: action, mode }, outcome, scope.transaction);
   return executed.result;
 };

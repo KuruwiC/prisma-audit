@@ -37,7 +37,7 @@ const planOf = <TDbHandle>(
       }
       return kind === 'immediate'
         ? { kind, handle: transaction.handle }
-        : { kind, handOver: (work) => transaction.afterCommit(work) };
+        : { kind, handOver: (work) => transaction.audit.afterCommit(work) };
     case 'awaited-after-commit':
       return { kind };
     case 'detached':
@@ -64,8 +64,9 @@ const planOf = <TDbHandle>(
  * `log-write`; once the write has finished, the outcome is told how many records a writer took,
  * none when there were none or they were dropped. `dispatch` rejects only while the operation's
  * write is inside a transaction that has not committed: with the error of a failed build or of a
- * failed immediate write. The transaction may not survive a failed statement, so its records and
- * the operation's write commit together or not at all. Outside any transaction the operation's
+ * failed immediate write, recorded on the transaction's audit first, so that the transaction does
+ * not commit even when the error is caught. The transaction may not survive a failed statement, so
+ * its records and the operation's write commit together or not at all. Outside any transaction the operation's
  * write has committed, and reporting it as failed would invite a retry that writes it twice: a
  * failed build drops the records and a failed write is reported without failing the operation.
  *
@@ -95,6 +96,7 @@ export const dispatch = async <TDbHandle>(
     const error = toError(caught);
     outcome.fail({ phase: 'diff-generation', error });
     if (transaction) {
+      transaction.audit.poison(error);
       throw error;
     }
     await outcome.writeFinished(0);
@@ -123,6 +125,7 @@ export const dispatch = async <TDbHandle>(
         const error = toError(caught);
         outcome.fail({ phase: 'log-write', records, error });
         if (plan.kind === 'immediate') {
+          transaction?.audit.poison(error);
           throw error;
         }
         await outcome.writeFinished(0);

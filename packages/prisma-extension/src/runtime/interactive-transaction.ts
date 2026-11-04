@@ -5,12 +5,12 @@
  * caller opens with `$transaction(callback)`, the one a batch `$transaction([...])` holding a write
  * runs as, and the one the client opens around an atomic write issued outside any. The body
  * receives the transaction as an `ActiveTransaction`, which the operations bound to it carry to the
- * audit. The writes the audit queues until the commit are started strictly after `$transaction`
- * resolves, and discarded unrun on rejection. When an audit failure failed an operation of the
- * transaction and the body resolved all the same, the transaction is rolled back with
- * `AuditRollbackError`. The outcomes of the transaction's operations are settled once
- * `$transaction` has resolved, as committed, or rejected, as not committed; an operation bound to
- * no transaction settles its own (`settledIn`).
+ * audit. Each run of the body has a core `TransactionAudit` of its own: the writes it queues until
+ * the commit are started strictly after `$transaction` resolves, and discarded unrun on rejection.
+ * When an audit failure failed an operation of the transaction and the body resolved all the same,
+ * the transaction is rolled back with core's `AuditRollbackError`. The outcomes of the
+ * transaction's operations are settled once `$transaction` has resolved, as committed, or
+ * rejected, as not committed; an operation bound to no transaction settles its own (`settledIn`).
  *
  * @module runtime/interactive-transaction
  */
@@ -18,12 +18,12 @@
 import {
   type AuditContext,
   type AuditContextProvider,
-  createTransactionOutcomes,
+  createTransactionAudit,
   type OperationOutcome,
 } from '@kuruwic/db-audit-core';
-import { AuditRollbackError } from '../errors.js';
 import type { PrismaHandle } from '../internal-types.js';
-import { type ActiveTransaction, drainAfterCommit } from './scope.js';
+import { trackPendingWrite } from './pending-writes.js';
+import type { ActiveTransaction } from './scope.js';
 
 /** Runs `body` in an interactive transaction of `client`, opened with `options` */
 export type OpenTransaction = (
@@ -47,34 +47,24 @@ const withAuditContext = <T>(
 
 /**
  * The `OpenTransaction` of the clients whose audit context `provider` holds. The audit context set
- * when the transaction is opened is the one its body runs with. The transaction's queues are
- * emptied each time Prisma runs the callback, and drained once `$transaction` has resolved, after
- * the commit, so an audit log never persists for a transaction whose commit fails. Each run of the
- * callback has outcomes of its own: those of an earlier run, which Prisma rolled back, are settled
- * as not committed when it runs the callback again. The outcomes of the last run are settled after
- * the queued writes have started, and `$transaction` returns or rejects once each outcome whose
- * audit write has finished has been reported.
+ * when the transaction is opened is the one its body runs with. Each time Prisma runs the
+ * callback, the audit of an earlier run, which Prisma rolled back, is rolled back and a new one
+ * begins. The audit of the last run is committed once `$transaction` has resolved, after the
+ * commit, so an audit log never persists for a transaction whose commit fails: its queued writes
+ * start on the base client, then its outcomes are settled, and `$transaction` returns or rejects
+ * once each outcome whose audit write has finished has been reported.
  */
 export const createOpenTransaction =
   (provider: ContextRunner): OpenTransaction =>
   async (client, options, body) => {
     const auditContext = provider.getContext();
-    const deferredWrites: Array<() => Promise<void>> = [];
-    const auditFailures: Error[] = [];
-    let outcomes = createTransactionOutcomes();
+    let audit = createTransactionAudit();
     const callback = async (txClient: PrismaHandle) => {
-      deferredWrites.length = 0;
-      auditFailures.length = 0;
-      await outcomes.settle('not-committed');
-      outcomes = createTransactionOutcomes();
-      const runOutcomes = outcomes;
-      const result = await withAuditContext(provider, auditContext, () =>
-        body({ client: txClient, deferredWrites, auditFailures, outcomes: runOutcomes }),
-      );
-      const [auditFailure] = auditFailures;
-      if (auditFailure) {
-        throw new AuditRollbackError(auditFailure);
-      }
+      await audit.rollBack();
+      audit = createTransactionAudit();
+      const runAudit = audit;
+      const result = await withAuditContext(provider, auditContext, () => body({ client: txClient, audit: runAudit }));
+      runAudit.assertCommittable();
       return result;
     };
     const transaction: unknown = Reflect.get(client, '$transaction');
@@ -85,11 +75,10 @@ export const createOpenTransaction =
     try {
       result = await Reflect.apply(transaction, client, [callback, ...options]);
     } catch (error) {
-      await outcomes.settle('not-committed');
+      await audit.rollBack();
       throw error;
     }
-    drainAfterCommit(deferredWrites);
-    await outcomes.settle('committed');
+    await audit.commit(trackPendingWrite);
     return result;
   };
 
@@ -105,7 +94,7 @@ export const settledIn = async <T>(
 ): Promise<T> => {
   const settle = (succeeded: boolean): Promise<void> =>
     transaction
-      ? transaction.outcomes.add(outcome, succeeded)
+      ? transaction.audit.outcomes.add(outcome, succeeded)
       : outcome.settle(succeeded ? 'committed' : 'not-committed');
   let result: T;
   try {
