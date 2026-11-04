@@ -41,7 +41,7 @@ const createAuditedClientWithAuditLogRowCounter = (
     entities: testEntities,
     diffExcludeFields: ['createdAt'],
     write: {
-      awaited: true,
+      mode: 'awaited',
       writer: async (records, { defaultWrite }) => {
         auditLogRowCount.value += records.length;
         await defaultWrite(records);
@@ -66,7 +66,7 @@ const createAuditedClientFetchingBeforeState = (
     entities: testEntities,
     diffExcludeFields: ['createdAt'],
     write: {
-      awaited: true,
+      mode: 'awaited',
       writer: async (records, { defaultWrite }) => {
         auditLogRowCount.value += records.length;
         await defaultWrite(records);

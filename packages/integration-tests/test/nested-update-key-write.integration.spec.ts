@@ -58,7 +58,7 @@ describe('a nested update that writes the row key of the row it updates', () => 
         Post: defineEntity({ type: 'Post', idResolver: self() }),
       },
       fetchBefore: { update: fetchBeforeUpdate },
-      write: { awaited: true },
+      write: { mode: 'awaited' },
       errorObserver: observer,
     });
     disconnects.push(async () => {

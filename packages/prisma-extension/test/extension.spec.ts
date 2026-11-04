@@ -4,6 +4,7 @@
  */
 
 import {
+  AuditAtomicityError,
   type AuditContext,
   AuditContextMissingError,
   type AuditRecord,
@@ -45,7 +46,10 @@ interface AuditedClient {
     readonly findMany: (args: unknown) => PromiseLike<unknown>;
   };
   readonly post: {
-    /** A read Prisma would hand the hook as a `user.create`: an audited write inside Prisma's own batch */
+    /**
+     * A read the hook receives as a `user.create`, as Prisma hands it an audited write inside its own
+     * batch, or an extension applied before the audit turns a read into one
+     */
     readonly findMany: (args: unknown) => PromiseLike<unknown>;
   };
 }
@@ -142,13 +146,6 @@ describe('the audit gate of the extension hook', () => {
     expect(query).not.toHaveBeenCalled();
   });
 
-  it('rejects a write without an audit context at a samplingRate of 0', async () => {
-    const { client, query } = auditedClient({ requireContext: true, samplingRate: 0 });
-
-    await expect(client.user.create({ data: { id: 'u1' } })).rejects.toBeInstanceOf(AuditContextMissingError);
-    expect(query).not.toHaveBeenCalled();
-  });
-
   it('runs a write without an audit context unaudited by default', async () => {
     const { client, query, writer } = auditedClient({});
 
@@ -233,11 +230,33 @@ describe('the audit gate of the extension hook', () => {
     expect(writer).not.toHaveBeenCalled();
   });
 
-  describe('with write.implicitTransaction', () => {
-    const implicit = { write: { implicitTransaction: true } };
+  it('rejects an atomic write that reaches the hook bound to no transaction, before it runs', async () => {
+    const { client, provider, query, transaction, writer } = auditedClient({});
 
+    const created = provider.runAsync(context, async () => await client.post.findMany({ data: { id: 'u1' } }));
+
+    await expect(created).rejects.toBeInstanceOf(AuditAtomicityError);
+    await expect(created).rejects.toMatchObject({ modelName: 'User', operation: 'create' });
+    expect(transaction).not.toHaveBeenCalled();
+    expect(query).not.toHaveBeenCalled();
+    expect(writer).not.toHaveBeenCalled();
+  });
+
+  it('opens no transaction, with a context, for an awaited write', async () => {
+    const { client, provider, query, transaction, writer } = auditedClient({ write: { mode: 'awaited' } });
+
+    await provider.runAsync(context, async () => {
+      await client.user.create({ data: { id: 'u1' } });
+    });
+
+    expect(transaction).not.toHaveBeenCalled();
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(writer).toHaveBeenCalledTimes(1);
+  });
+
+  describe('with the default atomic write mode', () => {
     it('opens no transaction for a write without an audit context, and rejects it when it requires one', async () => {
-      const { client, query, transaction } = auditedClient({ ...implicit, requireContext: true });
+      const { client, query, transaction } = auditedClient({ requireContext: true });
 
       await expect(client.user.create({ data: { id: 'u1' } })).rejects.toBeInstanceOf(AuditContextMissingError);
       expect(transaction).not.toHaveBeenCalled();
@@ -245,7 +264,7 @@ describe('the audit gate of the extension hook', () => {
     });
 
     it('rejects, when it is awaited, a write made with an audit context that is awaited without one', async () => {
-      const { client, provider, query, transaction } = auditedClient({ ...implicit, requireContext: true });
+      const { client, provider, query, transaction } = auditedClient({ requireContext: true });
 
       const created = provider.run(context, () => client.user.create({ data: { id: 'u1' } }));
 
@@ -256,7 +275,7 @@ describe('the audit gate of the extension hook', () => {
 
     it('opens a transaction, with a context, for a write on a model that is not audited whose nested write writes an audited one', async () => {
       const { client, provider, transaction, writer } = auditedClient(
-        { ...implicit, entities: { Post: defineEntity({ type: 'Post' }) } },
+        { entities: { Post: defineEntity({ type: 'Post' }) } },
         { id: 'u1', posts: [{ id: 'p1', authorId: 'u1' }] },
       );
 
@@ -270,7 +289,6 @@ describe('the audit gate of the extension hook', () => {
 
     it('opens no transaction, with a context, for a write that writes no audited model', async () => {
       const { client, provider, query, transaction } = auditedClient({
-        ...implicit,
         entities: { Post: defineEntity({ type: 'Post' }) },
       });
 

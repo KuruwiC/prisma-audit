@@ -39,7 +39,7 @@ describe('an audit failure the $transaction callback catches', () => {
     const prisma = createAuditClient(basePrisma, {
       ...options,
       write: {
-        awaited: true,
+        mode: 'awaited',
         ...(writerError
           ? {
               writer: async () => {

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createActorId, createAggregateId, createEntityId } from '../src/domain/branded-types.js';
 import type { AuditRecord, MutationEvent, WritePlan } from '../src/domain/mutation-event.js';
-import { type AuditErrorContext, createFailureSink } from '../src/failure/index.js';
+import { type AuditErrorContext, AuditIncompleteError, createFailureSink } from '../src/failure/index.js';
 import type { ResolverFailure } from '../src/resolve/index.js';
 
 const record: AuditRecord = {
@@ -321,5 +321,30 @@ describe('createFailureSink', () => {
         ],
       ]);
     });
+  });
+});
+
+describe('AuditIncompleteError', () => {
+  it('names the operation and carries the failures that dropped its records as its cause', () => {
+    const failures: AuditErrorContext[] = [
+      {
+        phase: 'row-identification',
+        modelName: 'Post',
+        operation: 'updateMany',
+        params: { unidentified: 2 },
+        error: new Error('2 rows not identified'),
+      },
+    ];
+
+    const error = new AuditIncompleteError({ modelName: 'Post', operation: 'updateMany', failures });
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error.name).toBe('AuditIncompleteError');
+    expect(error.modelName).toBe('Post');
+    expect(error.operation).toBe('updateMany');
+    expect(error.failures).toEqual(failures);
+    expect(error.cause).toBe(failures);
+    expect(error.message).toContain('updateMany on Post');
+    expect(error.message).toContain('row-identification');
   });
 });

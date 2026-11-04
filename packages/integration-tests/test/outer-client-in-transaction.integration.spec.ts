@@ -22,71 +22,71 @@ const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'outer-client-in-transaction-actor' },
 };
 
-describe.each([
-  { mode: 'without implicitTransaction', implicitTransaction: false },
-  { mode: 'with implicitTransaction', implicitTransaction: true },
-])('a write inside an interactive transaction callback, $mode', ({ implicitTransaction }) => {
-  let basePrisma: PrismaClient;
-  let provider: ReturnType<typeof createAsyncLocalStorageProvider>;
-  let prisma: ReturnType<typeof createAuditClient>;
+describe.each([{ mode: 'awaited' }, { mode: 'atomic' }] as const)(
+  'a write inside an interactive transaction callback, under the $mode write mode',
+  ({ mode }) => {
+    let basePrisma: PrismaClient;
+    let provider: ReturnType<typeof createAsyncLocalStorageProvider>;
+    let prisma: ReturnType<typeof createAuditClient>;
 
-  beforeAll(() => {
-    basePrisma = createBasePrisma();
-    provider = createAsyncLocalStorageProvider();
-    prisma = createAuditClient(basePrisma, {
-      ...testAuditOptions(provider, { Prisma, schema: auditSchema }),
-      write: { awaited: true, implicitTransaction },
+    beforeAll(() => {
+      basePrisma = createBasePrisma();
+      provider = createAsyncLocalStorageProvider();
+      prisma = createAuditClient(basePrisma, {
+        ...testAuditOptions(provider, { Prisma, schema: auditSchema }),
+        write: { mode },
+      });
     });
-  });
 
-  afterAll(async () => {
-    await prisma.$disconnect();
-    await basePrisma.$disconnect();
-  });
+    afterAll(async () => {
+      await prisma.$disconnect();
+      await basePrisma.$disconnect();
+    });
 
-  beforeEach(async () => {
-    await cleanDatabase(basePrisma);
-  });
+    beforeEach(async () => {
+      await cleanDatabase(basePrisma);
+    });
 
-  const userCreateLogs = async () => {
-    await flushAllPendingWrites();
-    return basePrisma.auditLog.findMany({ where: { entityType: 'User', action: 'create' } });
-  };
+    const userCreateLogs = async () => {
+      await flushAllPendingWrites();
+      return basePrisma.auditLog.findMany({ where: { entityType: 'User', action: 'create' } });
+    };
 
-  it('keeps the audit row of a write on the outer client, which commits on its own, when the callback throws', async () => {
-    const rollback = new Error('callback rolls back');
+    it('keeps the audit row of a write on the outer client, which commits on its own, when the callback throws', async () => {
+      const rollback = new Error('callback rolls back');
 
-    await expect(
-      provider.runAsync(testActor, () =>
-        prisma.$transaction(async () => {
-          await prisma.user.create({
-            data: { email: 'outer-client@example.com', name: 'Outer', password: 'secret123' },
-          });
-          throw rollback;
-        }),
-      ),
-    ).rejects.toBe(rollback);
+      await expect(
+        provider.runAsync(testActor, () =>
+          prisma.$transaction(async () => {
+            await prisma.user.create({
+              data: { email: 'outer-client@example.com', name: 'Outer', password: 'secret123' },
+            });
+            throw rollback;
+          }),
+        ),
+      ).rejects.toBe(rollback);
 
-    const user = await basePrisma.user.findUniqueOrThrow({ where: { email: 'outer-client@example.com' } });
-    expect((await userCreateLogs()).map((log) => log.entityId)).toEqual([user.id]);
-  });
+      const user = await basePrisma.user.findUniqueOrThrow({ where: { email: 'outer-client@example.com' } });
+      expect((await userCreateLogs()).map((log) => log.entityId)).toEqual([user.id]);
+    });
 
-  it('audits a write on the client the callback receives in that transaction, and rolls its audit row back with it', async () => {
-    const rollback = new Error('callback rolls back');
-    let auditRowsInTransaction: number | undefined;
+    it('audits a write on the client the callback receives in that transaction, and rolls its audit row back with it', async () => {
+      const rollback = new Error('callback rolls back');
+      let auditRowsInTransaction: number | undefined;
 
-    await expect(
-      provider.runAsync(testActor, () =>
-        prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-          await tx.user.create({ data: { email: 'tx-client@example.com', name: 'Inner', password: 'secret123' } });
-          auditRowsInTransaction = await tx.auditLog.count({ where: { entityType: 'User', action: 'create' } });
-          throw rollback;
-        }),
-      ),
-    ).rejects.toBe(rollback);
+      await expect(
+        provider.runAsync(testActor, () =>
+          prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+            await tx.user.create({ data: { email: 'tx-client@example.com', name: 'Inner', password: 'secret123' } });
+            auditRowsInTransaction = await tx.auditLog.count({ where: { entityType: 'User', action: 'create' } });
+            throw rollback;
+          }),
+        ),
+      ).rejects.toBe(rollback);
 
-    expect(auditRowsInTransaction).toBe(1);
-    expect(await basePrisma.user.count()).toBe(0);
-    expect(await userCreateLogs()).toEqual([]);
-  });
-});
+      expect(auditRowsInTransaction).toBe(1);
+      expect(await basePrisma.user.count()).toBe(0);
+      expect(await userCreateLogs()).toEqual([]);
+    });
+  },
+);

@@ -28,21 +28,18 @@ export interface ExecutionScope {
   readonly handle: PrismaHandle;
   readonly baseClient: PrismaBaseClient;
   readonly transaction?: TransactionScope;
-  /** The audit rows are written before the operation returns: in its transaction inside one */
-  readonly atomic: boolean;
 }
 
 export interface ExecutionScopeInput {
   readonly auditContext: AuditContext;
   readonly baseClient: PrismaBaseClient;
-  readonly atomic: boolean;
   /** The transaction the operation's binding names: that of the client it was issued on */
   readonly transaction: ActiveTransaction | undefined;
 }
 
 /** The scope of an operation that runs now, inside the transaction its binding names, if any */
 export const executionScopeOf = (input: ExecutionScopeInput): ExecutionScope => {
-  const { auditContext, baseClient, atomic, transaction } = input;
+  const { auditContext, baseClient, transaction } = input;
   return {
     auditContext,
     handle: transaction?.client ?? baseClient,
@@ -53,7 +50,6 @@ export const executionScopeOf = (input: ExecutionScopeInput): ExecutionScope => 
         transaction.auditFailures.push(error);
       },
     },
-    atomic,
   };
 };
 

@@ -37,7 +37,7 @@ describe('nested to-many pre-fetch — parent row scope', () => {
       contextProvider: provider,
       entities: testEntities,
       diffExcludeFields: ['createdAt'],
-      write: { awaited: true },
+      write: { mode: 'awaited' },
       fetchBefore: {
         update: true,
         delete: true,

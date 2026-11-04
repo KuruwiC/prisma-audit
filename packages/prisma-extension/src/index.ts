@@ -22,10 +22,13 @@ export type {
   Result,
   ValidationError,
   WriteContext,
+  WriteMode,
 } from '@kuruwic/db-audit-core';
 
 export {
+  AuditAtomicityError,
   AuditContextMissingError,
+  AuditIncompleteError,
   createActorId,
   createAggregateId,
   createAsyncLocalStorageProvider,

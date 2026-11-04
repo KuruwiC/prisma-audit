@@ -61,7 +61,7 @@ describe('Named Composite Primary Key (PostBookmark)', () => {
         ? testEntities
         : withFetchBefore(testEntities, { PostBookmark: { delete: false } }),
       diffExcludeFields: ['createdAt'],
-      write: { awaited: true },
+      write: { mode: 'awaited' },
       errorObserver: observer,
     });
     const scenario = { basePrisma, prisma, provider, observer };

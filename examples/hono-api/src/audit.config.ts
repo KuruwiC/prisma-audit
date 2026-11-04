@@ -151,7 +151,7 @@ export default defineConfig<PrismaClient>()({
   diffExcludeFields: ['updatedAt', 'createdAt'],
 
   write: {
-    awaited: true,
+    mode: 'atomic',
   },
 
   actorContext: {

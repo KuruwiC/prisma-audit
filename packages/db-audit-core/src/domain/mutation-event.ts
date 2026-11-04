@@ -120,3 +120,6 @@ export type WritePlan =
   | { readonly kind: 'awaited-after-commit'; readonly records: readonly AuditRecord[] }
   | { readonly kind: 'after-commit'; readonly records: readonly AuditRecord[] }
   | { readonly kind: 'detached'; readonly records: readonly AuditRecord[] };
+
+/** The kind of a {@link WritePlan}, decided before the operation runs (see `planFor`) */
+export type WritePlanKind = WritePlan['kind'];

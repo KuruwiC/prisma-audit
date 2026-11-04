@@ -53,7 +53,7 @@ describe('configSections over the demo audit config', () => {
       'actorContext',
     ]);
     expect(text('diffExcludeFields')).toBe("  diffExcludeFields: ['updatedAt', 'createdAt'],");
-    expect(text('write')).toContain('awaited: true');
+    expect(text('write')).toContain("mode: 'atomic'");
     expect(text('actorContext')).toMatch(/fallback: null,\n {2}\},$/);
   });
 });

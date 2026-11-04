@@ -1,40 +1,87 @@
 /**
  * Write policy
  *
- * Decides, before the caller's operation executes, whether the operation is audited at all
- * (sampling) and, when it is, whether its audit rows are atomic: written, awaited, inside the
- * operation's transaction when it runs in one and once it has committed otherwise. It is known
- * before execution so that an adapter may open a transaction around an atomic operation when none
- * is active; the core itself opens none.
+ * Decides, before the caller's operation executes, how its audit rows are written relative to the
+ * operation: the write mode of the operation, from the mode of each audited model it writes, and
+ * the write plan that mode takes in or outside a transaction the adapter owns. It is known before
+ * execution so that an adapter may open a transaction around an atomic operation when none is
+ * active, and reject one it cannot; the core itself opens none.
  */
+
+import type { WritePlanKind } from '../domain/mutation-event.js';
+
+/**
+ * How an operation's audit rows are written relative to the operation
+ *
+ * - `atomic`: the operation commits only together with every record it should produce, in a
+ *   transaction the adapter owns; an operation that cannot is rejected before it runs, and one
+ *   whose records some failure dropped fails
+ * - `awaited`: the records are written before the operation returns, in its transaction inside
+ *   one and once it has committed outside any; a failure that drops records is only reported
+ * - `deferred`: the records are written after the operation, once its transaction has committed
+ *   inside one and detached outside any; a failure that drops records is only reported
+ */
+export type WriteMode = 'atomic' | 'awaited' | 'deferred';
 
 export interface PolicyConfig {
-  /**
-   * Whether audit rows are written in the caller's transaction: a value for every operation, or a
-   * function of the operation's top-level model name
-   */
-  readonly awaited: boolean | ((modelName: string) => boolean);
-  /**
-   * Share of operations audited, from 0 (none) to 1 (every one): a value for every operation, or a
-   * function of the operation's top-level model name
-   */
-  readonly samplingRate: number | ((modelName: string) => number);
+  /** The write mode of an audited model: a value for every model, or a function of the model name */
+  readonly mode: WriteMode | ((modelName: string) => WriteMode);
 }
 
-/**
- * The policy of one operation: sampled out, so it writes no audit rows, or sampled in, with
- * whether its audit rows are written in the same transaction as the operation
- */
-export type WritePolicy = { readonly sampled: false } | { readonly sampled: true; readonly atomic: boolean };
+const STRENGTH: Readonly<Record<WriteMode, number>> = { deferred: 0, awaited: 1, atomic: 2 };
 
 /**
- * Called once per audited operation, with the name of its top-level model. `samplingRate` gives the
- * rate an operation is sampled in with; `awaited` is consulted only for a sampled-in operation.
+ * The write mode of an operation: the strongest (atomic, then awaited, then deferred) of the modes
+ * of the audited models it writes rows of, its nested writes included. A mode function is called
+ * once per model. Of no model, it is `deferred`.
+ *
+ * @param auditedModels - The audited models the operation writes rows of, as the audit gate takes them
  */
-export const policy = (modelName: string, config: PolicyConfig): WritePolicy => {
-  const rate = typeof config.samplingRate === 'function' ? config.samplingRate(modelName) : config.samplingRate;
-  if (!(Math.random() < rate)) {
-    return { sampled: false };
-  }
-  return { sampled: true, atomic: typeof config.awaited === 'function' ? config.awaited(modelName) : config.awaited };
+export const policy = (auditedModels: readonly string[], config: PolicyConfig): WriteMode => {
+  const { mode } = config;
+  return auditedModels.reduce<WriteMode>((strongest, modelName) => {
+    const modelMode = typeof mode === 'function' ? mode(modelName) : mode;
+    return STRENGTH[modelMode] > STRENGTH[strongest] ? modelMode : strongest;
+  }, 'deferred');
 };
+
+/**
+ * The write plan of an operation of `mode`, decided before it runs, or `reject` for an atomic
+ * operation outside a transaction the adapter owns, which cannot commit with its records
+ *
+ * @param inOwnedTransaction - Whether the operation runs inside a transaction the adapter owns,
+ *   whose commit it controls
+ */
+export const planFor = (mode: WriteMode, inOwnedTransaction: boolean): WritePlanKind | 'reject' => {
+  switch (mode) {
+    case 'atomic':
+      return inOwnedTransaction ? 'immediate' : 'reject';
+    case 'awaited':
+      return inOwnedTransaction ? 'immediate' : 'awaited-after-commit';
+    case 'deferred':
+      return inOwnedTransaction ? 'after-commit' : 'detached';
+    default: {
+      const exhaustiveCheck: never = mode;
+      throw new Error(`[db-audit-core] Unhandled write mode: ${JSON.stringify(exhaustiveCheck)}`);
+    }
+  }
+};
+
+/**
+ * Thrown by an adapter, before the write runs, for an atomic operation whose write plan is
+ * `reject`: it would run outside any transaction the adapter owns, so it could commit without its
+ * audit rows
+ */
+export class AuditAtomicityError extends Error {
+  readonly modelName: string;
+  readonly operation: string;
+
+  constructor({ modelName, operation }: { readonly modelName: string; readonly operation: string }) {
+    super(
+      `An atomic ${operation} on ${modelName} was rejected: it would run outside any transaction the audit owns, so it could commit without its audit rows`,
+    );
+    this.name = 'AuditAtomicityError';
+    this.modelName = modelName;
+    this.operation = operation;
+  }
+}

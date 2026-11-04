@@ -65,6 +65,8 @@ describe('nested upsert and connectOrCreate whose target could not be read', () 
       entities: testEntities,
       diffExcludeFields: ['createdAt', 'updatedAt'],
       errorObserver: observer,
+      // Under the awaited mode a dropped entry is only reported; an atomic write would fail instead
+      write: { mode: 'awaited' },
     });
 
     return { rawBasePrisma, basePrisma, provider, prisma, observer, armed };

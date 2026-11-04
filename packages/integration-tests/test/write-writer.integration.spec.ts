@@ -1,6 +1,6 @@
 import type { AuditContext, AuditContextProvider } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
-import type { AuditLogData, EntityMap } from '@kuruwic/prisma-audit';
+import type { AuditLogData, EntityMap, WriteMode } from '@kuruwic/prisma-audit';
 import { createAuditClient, defineEntity, flushAllPendingWrites, foreignKey, to } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
@@ -23,7 +23,7 @@ const createAuditedClientWithWriterSpy = (
   provider: AuditContextProvider,
   writerSpy: { callCount: number; calls: Array<{ logCount: number; contextId: string }> },
   config: {
-    awaited?: boolean;
+    mode?: WriteMode;
     fetchBefore?: boolean;
   } = {},
 ) => {
@@ -34,7 +34,7 @@ const createAuditedClientWithWriterSpy = (
     entities: testEntities,
     diffExcludeFields: ['createdAt'],
     write: {
-      awaited: config.awaited ?? true,
+      mode: config.mode ?? 'awaited',
       writer: async (records: AuditLogData[], { auditContext, defaultWrite }) => {
         writerSpy.callCount++;
         writerSpy.calls.push({
@@ -91,7 +91,7 @@ describe('write.writer Coverage', () => {
     },
   };
 
-  describe('Synchronous Write Path (awaited: true)', () => {
+  describe("Synchronous Write Path (mode: 'awaited')", () => {
     it('should call write.writer for top-level create', async () => {
       await context.provider.runAsync(testActor, async () => {
         await context.prisma.user.create({
@@ -252,7 +252,7 @@ describe('write.writer Coverage', () => {
     });
   });
 
-  describe('Asynchronous Write Path (awaited: false)', () => {
+  describe("Asynchronous Write Path (mode: 'deferred')", () => {
     let asyncContext: TestContext & {
       writerSpy: { callCount: number; calls: Array<{ logCount: number; contextId: string }> };
     };
@@ -267,7 +267,7 @@ describe('write.writer Coverage', () => {
       };
 
       const prisma = createAuditedClientWithWriterSpy(basePrisma, provider, writerSpy, {
-        awaited: false, // Async writes
+        mode: 'deferred', // Async writes
       });
 
       asyncContext = {
@@ -389,7 +389,7 @@ describe('write.writer Coverage', () => {
      * An audited client whose writer creates, through the handle it receives, one Tag named after
      * each audited user's email, then writes the audit logs with the default write
      */
-    const createClient = (awaited: boolean) => {
+    const createClient = (mode: WriteMode) => {
       const basePrisma = createBasePrisma();
       const handles: unknown[] = [];
       const prisma = createAuditClient(basePrisma, {
@@ -398,7 +398,7 @@ describe('write.writer Coverage', () => {
         contextProvider: context.provider,
         entities: testEntities,
         write: {
-          awaited: awaited,
+          mode,
           writer: async (records, { handle, defaultWrite }) => {
             handles.push(handle);
             for (const record of records) {
@@ -422,7 +422,7 @@ describe('write.writer Coverage', () => {
       (await context.basePrisma.tag.findMany({ orderBy: { name: 'asc' } })).map((tag) => tag.name);
 
     it('is the transaction client for an awaited write: what the writer writes through it commits and rolls back with the operation', async () => {
-      const { prisma } = createClient(true);
+      const { prisma } = createClient('awaited');
 
       await context.provider.runAsync(testActor, () =>
         prisma.$transaction(async (tx) => {
@@ -441,7 +441,7 @@ describe('write.writer Coverage', () => {
     });
 
     it('is the base client for a detached write', async () => {
-      const { basePrisma, prisma, handles } = createClient(false);
+      const { basePrisma, prisma, handles } = createClient('deferred');
 
       await context.provider.runAsync(testActor, () => createUser(prisma, 'detached@example.com'));
       await flushAllPendingWrites();
@@ -453,7 +453,7 @@ describe('write.writer Coverage', () => {
     });
 
     it('is the base client for a write queued until the transaction commits', async () => {
-      const { basePrisma, prisma, handles } = createClient(false);
+      const { basePrisma, prisma, handles } = createClient('deferred');
 
       await context.provider.runAsync(testActor, () =>
         prisma.$transaction(async (tx) => {
@@ -478,7 +478,7 @@ describe('write.writer Coverage', () => {
       }
     });
 
-    const createClient = (awaited: boolean, implicitTransaction = false) => {
+    const createClient = (mode: WriteMode) => {
       const basePrisma = createBasePrisma();
       const flags: boolean[] = [];
       const prisma = createAuditClient(basePrisma, {
@@ -487,8 +487,7 @@ describe('write.writer Coverage', () => {
         contextProvider: context.provider,
         entities: testEntities,
         write: {
-          awaited: awaited,
-          implicitTransaction: implicitTransaction,
+          mode,
           writer: async (records, { inTransaction, defaultWrite }) => {
             flags.push(inTransaction);
             await defaultWrite(records);
@@ -503,7 +502,7 @@ describe('write.writer Coverage', () => {
       client.user.create({ data: { email, name: 'User', password: 'secret123' } });
 
     it("is true for an awaited write in the caller's transaction", async () => {
-      const { prisma, flags } = createClient(true);
+      const { prisma, flags } = createClient('awaited');
 
       await context.provider.runAsync(testActor, () =>
         prisma.$transaction(async (tx) => {
@@ -514,16 +513,16 @@ describe('write.writer Coverage', () => {
       expect(flags).toEqual([true]);
     });
 
-    it('is true for an awaited write in the transaction the client opens around the operation with implicitTransaction', async () => {
-      const { prisma, flags } = createClient(true, true);
+    it('is true for an atomic write in the transaction the client opens around the operation', async () => {
+      const { prisma, flags } = createClient('atomic');
 
-      await context.provider.runAsync(testActor, () => createUser(prisma, 'implicit-transaction@example.com'));
+      await context.provider.runAsync(testActor, () => createUser(prisma, 'client-transaction@example.com'));
 
       expect(flags).toEqual([true]);
     });
 
     it('is false for an awaited write outside any transaction, written once the operation has committed', async () => {
-      const { prisma, flags } = createClient(true);
+      const { prisma, flags } = createClient('awaited');
 
       await context.provider.runAsync(testActor, () => createUser(prisma, 'after-commit@example.com'));
 
@@ -531,7 +530,7 @@ describe('write.writer Coverage', () => {
     });
 
     it('is false for a detached write', async () => {
-      const { prisma, flags } = createClient(false);
+      const { prisma, flags } = createClient('deferred');
 
       await context.provider.runAsync(testActor, () => createUser(prisma, 'detached@example.com'));
       await flushAllPendingWrites();
@@ -540,7 +539,7 @@ describe('write.writer Coverage', () => {
     });
 
     it('is false for a write queued until the transaction commits', async () => {
-      const { prisma, flags } = createClient(false);
+      const { prisma, flags } = createClient('deferred');
 
       await context.provider.runAsync(testActor, () =>
         prisma.$transaction(async (tx) => {

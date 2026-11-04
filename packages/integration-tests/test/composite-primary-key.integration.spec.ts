@@ -412,7 +412,7 @@ describe('Composite Primary Key (PostLike)', () => {
         contextProvider: provider,
         entities: withFetchBefore(testEntities, { PostLike: { delete: false } }),
         diffExcludeFields: ['createdAt'],
-        write: { awaited: true },
+        write: { mode: 'awaited' },
         errorObserver: observer,
       });
       scenario = { basePrisma, prisma };

@@ -52,7 +52,7 @@ describe('nested writes to models identified by a unique constraint instead of a
           idResolver: self(sensorId),
         }),
       },
-      write: { awaited: true },
+      write: { mode: 'awaited' },
       errorObserver: observer,
     });
     disconnects.push(async () => {

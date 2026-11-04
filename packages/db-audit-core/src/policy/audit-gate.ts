@@ -3,9 +3,9 @@
  *
  * Decides whether a write goes through the audit at all: whether it writes rows of an audited
  * model, and, when it does, whether it may run without an audit context. It is the coverage
- * decision, apart from the write policy (`policy()`), which decides how much of what goes through
- * the audit is recorded and how. The gate runs before the write policy and is not affected by it:
- * a write the gate rejects is rejected at any sampling rate.
+ * decision, apart from the write policy (`policy()`), which decides how what goes through the
+ * audit is written. The gate runs before the write policy and is not affected by it: a write the
+ * gate rejects is rejected whatever its write mode.
  */
 
 import type { AuditContext } from '../types.js';
@@ -19,8 +19,8 @@ export interface AuditGateConfig {
 }
 
 /**
- * - `audit`: the write goes through the audit under `context`, its write policy deciding what is
- *   recorded
+ * - `audit`: the write goes through the audit under `context`, its write policy deciding how its
+ *   records are written
  * - `skip`: the write runs unaudited
  * - `reject`: the write must not run; `modelName` is the audited model it writes that requires an
  *   audit context
@@ -31,7 +31,7 @@ export type AuditGate =
   | { readonly kind: 'reject'; readonly modelName: string };
 
 /**
- * Decides whether a write goes through the audit, before any sampling. A write that writes rows
+ * Decides whether a write goes through the audit, before its write policy. A write that writes rows
  * of no audited model is skipped. Otherwise it is audited when an audit context is set; without
  * one it is rejected when one of those models requires a context, and runs unaudited otherwise.
  *

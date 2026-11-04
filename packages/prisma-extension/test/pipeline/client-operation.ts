@@ -24,7 +24,6 @@ export const scopeOn = (client: PrismaBaseClient): ExecutionScope => ({
   auditContext,
   handle: client,
   baseClient: client,
-  atomic: true,
 });
 
 /** The continuation the pipeline would build for `client`: the action of its `user` delegate */

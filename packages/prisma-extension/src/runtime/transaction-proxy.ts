@@ -31,7 +31,6 @@ export interface TransactionProxyConfig {
 type RecipeClient = ReturnType<typeof createRecipeClient>;
 
 interface TransactionProxyDependencies {
-  readonly recipeConfig: RecipeConfig;
   readonly recipeClient: RecipeClient;
   readonly openTransaction: OpenTransaction;
   readonly originalTransaction: TransactionMethod;
@@ -50,10 +49,10 @@ const isolationLevelOptionOf = (options: unknown): Array<{ readonly isolationLev
 const createTransactionProxyHandler = (
   deps: TransactionProxyDependencies,
 ): ((...args: unknown[]) => Promise<unknown>) => {
-  const { recipeConfig, recipeClient, openTransaction, originalTransaction, target, receiver } = deps;
+  const { recipeClient, openTransaction, originalTransaction, target, receiver } = deps;
 
   const runBatch = async (items: readonly unknown[], options: unknown): Promise<unknown> => {
-    const batch = takeBatchRecipes(items, receiver, recipeConfig);
+    const batch = takeBatchRecipes(items, receiver);
     if (!batch.holdsModelWrite) {
       const operations = batch.operationsOn(target);
       return originalTransaction.apply(target, options === undefined ? [operations] : [operations, options]);
@@ -92,7 +91,6 @@ export const createTransactionProxy = <TClient extends object>(
         if (prop === '$transaction') {
           const originalTransaction = Reflect.get(target, prop) as TransactionMethod;
           return createTransactionProxyHandler({
-            recipeConfig: config.recipeConfig,
             recipeClient,
             openTransaction,
             originalTransaction,

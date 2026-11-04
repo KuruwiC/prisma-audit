@@ -99,6 +99,39 @@ export interface FailureSink {
   readonly reportWriteFailure: (plan: WritePlan, error: Error) => Promise<void>;
 }
 
+/**
+ * Thrown by an adapter for an atomic operation whose records some failure dropped (a row it could
+ * not identify, an id resolver that failed, a record the adapter skipped because a read it depends
+ * on failed), once the operation's write has run inside the transaction the adapter owns: the
+ * transaction must not commit without them. `failures` are those failures, as the observer
+ * received them, and are also its `cause`. A record whose before state could not be read is not
+ * dropped, so it does not count.
+ */
+export class AuditIncompleteError extends Error {
+  readonly modelName: string;
+  readonly operation: string;
+  readonly failures: readonly AuditErrorContext[];
+
+  constructor({
+    modelName,
+    operation,
+    failures,
+  }: {
+    readonly modelName: string;
+    readonly operation: string;
+    readonly failures: readonly AuditErrorContext[];
+  }) {
+    super(
+      `An atomic ${operation} on ${modelName} failed: ${failures.length} audit ${failures.length === 1 ? 'failure' : 'failures'} dropped some of its records (${failures.map(({ phase, error }) => `${phase}: ${error.message}`).join('; ')})`,
+      { cause: failures },
+    );
+    this.name = 'AuditIncompleteError';
+    this.modelName = modelName;
+    this.operation = operation;
+    this.failures = failures;
+  }
+}
+
 const COMMITTED_WRITE_LABELS: Readonly<Record<Exclude<WritePlan['kind'], 'immediate'>, string>> = {
   'awaited-after-commit': 'audit log write after commit',
   'after-commit': 'deferred audit log write',

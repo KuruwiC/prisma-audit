@@ -38,7 +38,7 @@ const createClients = (fetchBefore: FetchBeforeConfig) => {
     contextProvider: provider,
     entities: testEntities,
     diffExcludeFields: ['createdAt'],
-    write: { awaited: true },
+    write: { mode: 'awaited' },
     fetchBefore,
     errorObserver: observer,
   });

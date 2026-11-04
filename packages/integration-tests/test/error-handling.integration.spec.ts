@@ -1,6 +1,6 @@
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
-import type { AuditErrorObserver } from '@kuruwic/prisma-audit';
+import type { AuditErrorObserver, WriteMode } from '@kuruwic/prisma-audit';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
@@ -13,10 +13,11 @@ const AUDIT_WRITE_FAILURE_MESSAGE = 'simulated audit log write failure';
 interface FailingWriterClientOptions {
   errorObserver?: AuditErrorObserver;
   /**
-   * Whether every write runs in the transaction the client opens around it, so its awaited audit
-   * write is written before commit (the default), or outside any transaction, once it has committed
+   * The write mode: `atomic` (the default) runs every write in the transaction the client opens
+   * around it, so its audit is written before commit; `awaited` writes the audit outside any
+   * transaction, once the write has committed
    */
-  implicitTransaction?: boolean;
+  mode?: WriteMode;
 }
 
 /**
@@ -36,8 +37,7 @@ const createFailingWriterClient = (options: FailingWriterClientOptions) => {
     entities: testEntities,
     diffExcludeFields: ['createdAt'],
     write: {
-      awaited: true,
-      implicitTransaction: options.implicitTransaction ?? true,
+      mode: options.mode ?? 'atomic',
       writer: async () => {
         throw new Error(AUDIT_WRITE_FAILURE_MESSAGE);
       },
@@ -80,7 +80,7 @@ describe('Error Handling Integration', () => {
     // then observes whether the caller's own `user.create` succeeds or fails, whether
     // anything is logged to the console, and whether the observer was notified.
 
-    it("an awaited write inside the transaction the client opens fails the caller's operation with the original error and rolls back the row", async () => {
+    it("an atomic write inside the transaction the client opens fails the caller's operation with the original error and rolls back the row", async () => {
       const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       const observer = vi.fn();
       const scenario = createFailingWriterClient({ errorObserver: observer });
@@ -109,7 +109,7 @@ describe('Error Handling Integration', () => {
       }
     });
 
-    it("an awaited write inside the transaction the client opens fails the caller's operation without an observer, and logs nothing", async () => {
+    it("an atomic write inside the transaction the client opens fails the caller's operation without an observer, and logs nothing", async () => {
       const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       const scenario = createFailingWriterClient({});
 
@@ -176,7 +176,7 @@ describe('Error Handling Integration', () => {
     it("an awaited write outside any transaction keeps the caller's committed row and leaves the failure to the observer", async () => {
       const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       const observer = vi.fn();
-      const scenario = createFailingWriterClient({ errorObserver: observer, implicitTransaction: false });
+      const scenario = createFailingWriterClient({ errorObserver: observer, mode: 'awaited' });
 
       try {
         const user = await scenario.provider.runAsync(testActor, async () =>
@@ -203,7 +203,7 @@ describe('Error Handling Integration', () => {
 
     it("an awaited write outside any transaction keeps the caller's committed row and logs the failure to the console without an observer", async () => {
       const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-      const scenario = createFailingWriterClient({ implicitTransaction: false });
+      const scenario = createFailingWriterClient({ mode: 'awaited' });
 
       try {
         const user = await scenario.provider.runAsync(testActor, async () =>
@@ -310,7 +310,7 @@ describe('Error Handling Integration', () => {
     it("a batch operation (updateMany) outside any transaction keeps the caller's committed rows and leaves the failure to the observer", async () => {
       const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       const observer = vi.fn();
-      const scenario = createFailingWriterClient({ errorObserver: observer, implicitTransaction: false });
+      const scenario = createFailingWriterClient({ errorObserver: observer, mode: 'awaited' });
 
       try {
         // Seeded through the raw base client: the audited client's writer always fails.
@@ -349,7 +349,7 @@ describe('Error Handling Integration', () => {
 
     it("a batch operation (updateMany) outside any transaction keeps the caller's committed rows and logs the failed write to the console without an observer", async () => {
       const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-      const scenario = createFailingWriterClient({ implicitTransaction: false });
+      const scenario = createFailingWriterClient({ mode: 'awaited' });
 
       try {
         // Seeded through the raw base client: the audited client's writer always fails.
@@ -405,10 +405,6 @@ describe('Error Handling Integration', () => {
         contextProvider: provider,
         entities: testEntities,
         errorObserver: observer,
-        write: {
-          awaited: true,
-          implicitTransaction: true,
-        },
         actorContext: {
           enricher: async () => {
             throw enricherError;
@@ -490,10 +486,6 @@ describe('Error Handling Integration', () => {
         contextProvider: provider,
         entities: testEntities,
         errorObserver: observer,
-        write: {
-          awaited: true,
-          implicitTransaction: true,
-        },
         fetchBefore: { update: true },
       }).$extends(faultInjection);
 
@@ -542,7 +534,7 @@ describe('Error Handling Integration', () => {
       // write is attempted.
       const SNAPSHOT_FAILURE_MESSAGE = 'simulated to-many snapshot failure';
 
-      const runWithFailingSnapshot = async (awaited: boolean) => {
+      const runWithFailingSnapshot = async (mode: WriteMode) => {
         const snapshotError = new Error(SNAPSHOT_FAILURE_MESSAGE);
         const rawBasePrisma = createBasePrisma();
         let snapshotArmed = false;
@@ -568,9 +560,7 @@ describe('Error Handling Integration', () => {
           contextProvider: provider,
           entities: testEntities,
           errorObserver: observer,
-          write: {
-            awaited: awaited,
-          },
+          write: { mode },
         });
 
         try {
@@ -613,13 +603,13 @@ describe('Error Handling Integration', () => {
       };
 
       it('propagates the original error and leaves neither the created row nor audit rows', async () => {
-        await runWithFailingSnapshot(true);
+        await runWithFailingSnapshot('awaited');
       });
 
       it('fails before the caller write runs: without a transaction around the operation, no created row remains either', async () => {
-        // With `awaited: false` no transaction wraps the operation, so a write that had run
+        // Under `mode: 'deferred'` no transaction wraps the operation, so a write that had run
         // would stay committed; the absent row shows the write was never attempted.
-        await runWithFailingSnapshot(false);
+        await runWithFailingSnapshot('deferred');
       });
     });
   });
@@ -636,7 +626,7 @@ describe('Error Handling Integration', () => {
         entities: testEntities,
         errorObserver: observer,
         write: {
-          awaited: true,
+          mode: 'awaited',
         },
       });
 
@@ -683,7 +673,7 @@ describe('Error Handling Integration', () => {
         entities: testEntities,
         errorObserver: observer,
         write: {
-          awaited: true,
+          mode: 'awaited',
         },
       });
 
@@ -745,7 +735,7 @@ describe('Error Handling Integration', () => {
         entities: testEntities,
         errorObserver: observer,
         write: {
-          awaited: true,
+          mode: 'awaited',
         },
       });
 

@@ -2,10 +2,10 @@
  * Write dispatch
  *
  * Builds one operation's audit records once its write has run and writes them relative to that
- * write and its commit, from the write policy and the transaction runtime the adapter supplies.
+ * write and its commit, by the write plan and with the transaction runtime the adapter supplies.
  */
 
-import type { AuditRecord } from '../domain/mutation-event.js';
+import type { AuditRecord, WritePlanKind } from '../domain/mutation-event.js';
 import type { TransactionRuntime, WriteExecutor, WriteFn } from '../domain/write.js';
 import type { FailureSink } from '../failure/index.js';
 import type { AuditContext } from '../types.js';
@@ -20,31 +20,48 @@ export interface DispatchConfig<TDbHandle = unknown> {
 type Work = () => Promise<void>;
 
 const planOf = <TDbHandle>(
-  atomic: boolean,
+  kind: WritePlanKind,
   runtime: TransactionRuntime<TDbHandle>,
 ):
   | { readonly kind: 'immediate'; readonly handle: TDbHandle }
   | { readonly kind: 'awaited-after-commit' }
   | { readonly kind: 'after-commit' | 'detached'; readonly handOver: (work: Work) => void } => {
   const { transaction } = runtime;
-  if (atomic) {
-    return transaction ? { kind: 'immediate', handle: transaction.handle } : { kind: 'awaited-after-commit' };
+  switch (kind) {
+    case 'immediate':
+    case 'after-commit':
+      if (!transaction) {
+        throw new Error(
+          `[db-audit-core] The ${kind} write plan needs the operation's transaction, and the operation runs outside any`,
+        );
+      }
+      return kind === 'immediate'
+        ? { kind, handle: transaction.handle }
+        : { kind, handOver: (work) => transaction.afterCommit(work) };
+    case 'awaited-after-commit':
+      return { kind };
+    case 'detached':
+      return { kind, handOver: (work) => runtime.detach(work) };
+    default: {
+      const exhaustiveCheck: never = kind;
+      throw new Error(`[db-audit-core] Unhandled write plan: ${JSON.stringify(exhaustiveCheck)}`);
+    }
   }
-  if (transaction) {
-    return { kind: 'after-commit', handOver: (work) => transaction.afterCommit(work) };
-  }
-  return { kind: 'detached', handOver: (work) => runtime.detach(work) };
 };
 
 /**
- * Builds the records of an operation whose write has run, then writes them:
- * - atomic inside a transaction: immediately, on the transaction's handle, awaited;
- * - atomic outside any transaction: on the base handle, awaited, the operation having committed;
- * - not atomic inside a transaction: after the transaction commits, on the base handle;
- * - otherwise: detached, on the base handle.
+ * Builds the records of an operation whose write has run, then writes them by the write plan the
+ * adapter decided before the write (see `planFor`):
+ * - `immediate`: on the transaction's handle, awaited;
+ * - `awaited-after-commit`: on the base handle, awaited, the operation having committed outside any
+ *   transaction;
+ * - `after-commit`: after the transaction commits, on the base handle;
+ * - `detached`: detached, on the base handle.
  *
- * The build runs before `dispatch` resolves, whatever the write plan. `dispatch` rejects only
- * while the operation's write is inside a transaction that has not committed: with the error of a
+ * An `immediate` or `after-commit` plan needs the runtime's transaction: without one `dispatch`
+ * rejects before building anything. The build runs before `dispatch` resolves, whatever the write
+ * plan. `dispatch` rejects only while the operation's write is inside a transaction that has not
+ * committed: with the error of a
  * failed build, after notifying the observer under `diff-generation` with the operation's
  * `modelName`, `operation` and `params`, and with the error of a failed immediate write, after
  * notifying it under `log-write`. The transaction may not survive a failed statement, so its
@@ -63,16 +80,16 @@ export const dispatch = async <TDbHandle>(
     readonly modelName: string;
     readonly operation: string;
     readonly params: unknown;
-    /** The write policy's decision: the records are written in the operation's transaction */
-    readonly atomic: boolean;
+    /** How and when the records are written, decided before the operation's write */
+    readonly plan: WritePlanKind;
     readonly auditContext: AuditContext;
   },
   config: DispatchConfig<TDbHandle>,
   runtime: TransactionRuntime<TDbHandle>,
 ): Promise<void> => {
-  const { buildRecords, modelName, operation, params, atomic, auditContext } = audited;
+  const { buildRecords, modelName, operation, params, auditContext } = audited;
   const { transaction, baseHandle } = runtime;
-  const plan = planOf(atomic, runtime);
+  const plan = planOf(audited.plan, runtime);
 
   let records: readonly AuditRecord[];
   try {

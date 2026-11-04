@@ -5,21 +5,21 @@
  * base client before the audit extension sees every audited operation on its way in, and one
  * applied to the audited client after it sees the operation once the audit extension continues
  * it through `query`. This file checks that the extension applied before the audit extension sees
- * the caller's update once outside a transaction with `awaited: false` and inside an explicit
+ * the caller's update once outside a transaction under `mode: 'deferred'` and inside an explicit
  * `$transaction`; the audit's own reads and writes are separate queries, and the counts are of the
  * caller's update only. A change that moves a count must update the number and its comment, never
- * loosen the assertion instead. The counts for the awaited audit and for `implicitTransaction`,
- * where the transaction is opened before the operation enters the chain, are in
+ * loosen the assertion instead. The counts for the awaited mode and for the atomic mode, whose
+ * transaction is opened before the operation enters the chain, are in
  * `transaction-mode.integration.spec.ts`.
  *
  * A write an extension applied after the audit extension issues of its own is audited when it
- * issues it while continuing the caller's operation (awaited, and in the transaction
- * `implicitTransaction` opens), and not when it issues it while handling the audit's own read.
+ * issues it while continuing the caller's operation (awaited, and in the transaction the client
+ * opens for an atomic write), and not when it issues it while handling the audit's own read.
  */
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
-import { createAuditClient, defineEntity, flushAllPendingWrites } from '@kuruwic/prisma-audit';
+import { createAuditClient, defineEntity, flushAllPendingWrites, type WriteMode } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -38,7 +38,7 @@ interface SeenOperation {
  * Builds an audited client whose base client carries a query extension that records every
  * operation it sees, applied before the audit extension.
  */
-const createClients = (awaited: boolean, implicitTransaction = false) => {
+const createClients = (mode: WriteMode) => {
   const rawBasePrisma = createBasePrisma();
   const seen: SeenOperation[] = [];
 
@@ -60,10 +60,7 @@ const createClients = (awaited: boolean, implicitTransaction = false) => {
     schema: auditSchema,
     contextProvider: provider,
     entities: { User: defineEntity({ type: 'User' }) },
-    write: {
-      awaited,
-      implicitTransaction,
-    },
+    write: { mode },
   });
 
   const userUpdatesSeen = () => seen.filter((call) => call.model === 'User' && call.operation === 'update');
@@ -76,16 +73,16 @@ type Clients = ReturnType<typeof createClients>;
 describe('Extension Chain Guard', () => {
   let awaited: Clients;
   let detached: Clients;
-  let opening: Clients;
+  let atomic: Clients;
 
   beforeAll(async () => {
-    awaited = createClients(true);
-    detached = createClients(false);
-    opening = createClients(true, true);
+    awaited = createClients('awaited');
+    detached = createClients('deferred');
+    atomic = createClients('atomic');
   });
 
   afterAll(async () => {
-    for (const clients of [awaited, detached, opening]) {
+    for (const clients of [awaited, detached, atomic]) {
       await clients.prisma.$disconnect();
       await clients.rawBasePrisma.$disconnect();
     }
@@ -93,7 +90,7 @@ describe('Extension Chain Guard', () => {
 
   beforeEach(async () => {
     await cleanDatabase(awaited.rawBasePrisma);
-    for (const clients of [awaited, detached, opening]) {
+    for (const clients of [awaited, detached, atomic]) {
       clients.seen.length = 0;
     }
   });
@@ -108,7 +105,7 @@ describe('Extension Chain Guard', () => {
 
   describe.each([
     { scope: 'outside any transaction, written once the update has committed', clients: () => awaited },
-    { scope: 'in the transaction implicitTransaction opens around it', clients: () => opening },
+    { scope: 'in the transaction the client opens around it for an atomic write', clients: () => atomic },
   ])('an update whose audit is awaited, $scope', ({ clients: clientsOf }) => {
     it("audits a write an extension applied after the audit extension issues while it continues the caller's operation", async () => {
       const clients = clientsOf();
@@ -136,7 +133,7 @@ describe('Extension Chain Guard', () => {
   });
 
   it.each([
-    { scope: 'with implicitTransaction', clients: () => opening, explicitTransaction: false },
+    { scope: 'under the atomic write mode', clients: () => atomic, explicitTransaction: false },
     { scope: 'inside an explicit $transaction', clients: () => awaited, explicitTransaction: true },
   ])(
     "does not audit a write an extension applied after the audit extension issues while it handles the audit's own read, $scope",
@@ -174,7 +171,7 @@ describe('Extension Chain Guard', () => {
     },
   );
 
-  it('an update outside any transaction with awaited: false reaches the extension once', async () => {
+  it("an update outside any transaction with mode: 'deferred' reaches the extension once", async () => {
     const user = await createUser(detached, 'detached-write@example.com');
     detached.seen.length = 0;
 

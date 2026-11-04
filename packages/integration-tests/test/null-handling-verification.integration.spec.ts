@@ -199,7 +199,7 @@ describe('NULL Handling Verification', () => {
         schema: auditSchema,
         contextProvider: context.provider,
         entities: testEntities,
-        write: { awaited: true },
+        write: { mode: 'awaited' },
         fetchBefore: { update: false },
       });
       const user = await context.basePrisma.user.create({ data: { email: 'test@example.com', name: 'John Doe' } });

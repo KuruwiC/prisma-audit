@@ -16,11 +16,7 @@ import type {
 } from '@kuruwic/db-audit-core';
 import { createEntityConfigLookup } from '@kuruwic/db-audit-core';
 import { createShouldFetchBefore } from './config/helpers.js';
-import {
-  validateFieldConflicts,
-  validateImplicitTransaction,
-  validateRecordOmittedFields,
-} from './config/validation.js';
+import { validateFieldConflicts, validateRecordOmittedFields } from './config/validation.js';
 import type { ShouldFetchBefore } from './grammar/pre-fetch-selection.js';
 import type { PrismaNamespace } from './internal-types.js';
 import { loadSchemaMetadata } from './schema/schema-metadata.js';
@@ -54,9 +50,8 @@ export interface AuditOptions {
   readonly auditLogAccessor: string;
   /** Whether a write runs without an audit context, from `requireContext` */
   readonly gateConfig: AuditGateConfig;
+  /** The write mode of each audited model, from `write.mode` */
   readonly policyConfig: PolicyConfig;
-  /** Whether the client proxy opens an interactive transaction for an operation whose audit is awaited */
-  readonly implicitTransaction: boolean;
   readonly resolveConfig: ResolveConfig;
   readonly composeConfig: ComposeConfig;
   readonly writer: WriteFn | undefined;
@@ -64,8 +59,8 @@ export interface AuditOptions {
   readonly shouldFetchBefore: ShouldFetchBefore;
   /**
    * The audited models an operation on `modelName` with `args` writes rows of, its nested writes
-   * included: the input of the audit gate. A model is audited when it is in the entity map and is
-   * not the audit-log model. Sampling is decided by `policyConfig`.
+   * included: the input of the audit gate and the write policy. A model is audited when it is in
+   * the entity map and is not the audit-log model.
    */
   readonly auditedModelsOf: (modelName: string, args: unknown) => string[];
 }
@@ -75,9 +70,8 @@ const RELATION_COUNT_FIELD = '_count';
 
 /**
  * @throws {Error} If the `schema` option is missing or of another format version, the entity
- *   map is invalid, `diffExcludeFields` and `redactFields` name the same field, an entity's
- *   `recordOmittedFields` names a field the audit cannot read, or `write.implicitTransaction` is
- *   set with `write.awaited: false`
+ *   map is invalid, `diffExcludeFields` and `redactFields` name the same field, or an entity's
+ *   `recordOmittedFields` names a field the audit cannot read
  */
 export const normalizeAuditOptions = (options: PrismaAuditExtensionOptions): AuditOptions => {
   const { contextProvider, entities, write, actorContext, errorObserver } = options;
@@ -89,7 +83,6 @@ export const normalizeAuditOptions = (options: PrismaAuditExtensionOptions): Aud
 
   const entityConfigs = createEntityConfigLookup(entities);
   validateFieldConflicts(diffExcludeFields, redactFields, entities);
-  validateImplicitTransaction(write);
   const queryOmitSupported = supportsQueryOmit(Prisma.prismaVersion?.client);
   validateRecordOmittedFields(entities, schemaMetadata, schemaMetadata.getModelNames(), queryOmitSupported);
 
@@ -116,12 +109,8 @@ export const normalizeAuditOptions = (options: PrismaAuditExtensionOptions): Aud
     auditedOmittedFields,
     auditedOmittedFieldsWithRowKey: withRowKeyFields(auditedOmittedFields, schemaMetadata, queryOmitSupported),
     auditLogAccessor,
-    implicitTransaction: write?.implicitTransaction ?? false,
     gateConfig: { requireContext: options.requireContext ?? false },
-    policyConfig: {
-      awaited: write?.awaited ?? true,
-      samplingRate: options.samplingRate ?? 1,
-    },
+    policyConfig: { mode: write?.mode ?? 'atomic' },
     resolveConfig: {
       entity: entityConfigs.byModel,
       rootEntity: entityConfigs.byCategoryAndType,

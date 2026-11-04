@@ -30,11 +30,11 @@ describe('audit-log insert failing in the database inside a PostgreSQL transacti
   });
 
   it.each([
-    { scope: 'inside an explicit $transaction', implicitTransaction: false },
-    { scope: 'in the transaction implicitTransaction opens', implicitTransaction: true },
+    { scope: 'inside an explicit $transaction', clientOpensTransaction: false },
+    { scope: 'in the transaction the client opens for an atomic write', clientOpensTransaction: true },
   ])(
     "fails the caller's update when its audit-log insert fails in the database, and rolls it back, $scope",
-    async ({ implicitTransaction }) => {
+    async ({ clientOpensTransaction }) => {
       const raw = createBasePrisma();
       rawBasePrisma = raw;
       const observer = vi.fn<AuditErrorObserver>();
@@ -46,7 +46,6 @@ describe('audit-log insert failing in the database inside a PostgreSQL transacti
         entities: testEntities,
         errorObserver: observer,
         write: {
-          implicitTransaction,
           writer: (records, { defaultWrite }) =>
             defaultWrite(records.map((record) => ({ ...record, entityType: 'nul\u0000byte' }))),
         },
@@ -61,7 +60,7 @@ describe('audit-log insert failing in the database inside a PostgreSQL transacti
       const update = { where: { id: post.id }, data: { title: 'Updated' } };
 
       const outcome = provider.runAsync(testActor, () =>
-        implicitTransaction ? prisma.post.update(update) : prisma.$transaction((tx) => tx.post.update(update)),
+        clientOpensTransaction ? prisma.post.update(update) : prisma.$transaction((tx) => tx.post.update(update)),
       );
 
       await expect(outcome).rejects.toThrow('invalid byte sequence');

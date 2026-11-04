@@ -4,12 +4,13 @@
  * Audited create, update and delete on an in-memory store. Each operation runs the core
  * pipeline: the audit gate decides whether it is audited, runs unaudited or is rejected, from the
  * audit context and whether its model is in the entity map; for an audited one the write policy
- * decides whether the operation is sampled in and whether its audit rows join the operation's
- * transaction, an implicit transaction opens when they do and none is
- * active, and the mutation is applied on the scope's handle and collected as one mutation event.
- * Core's `dispatch` then builds the records, resolving the event with the id resolvers and
- * enrichers reading through the scope's handle and composing it, and writes them with the scope as
- * the transaction runtime.
+ * decides its write mode, an implicit transaction opens for an atomic one when none is active, the
+ * write plan follows from the mode and the transaction, and the mutation is applied on the scope's
+ * handle and collected as one mutation event. Core's `dispatch` then builds the records, resolving
+ * the event with the id resolvers and enrichers reading through the scope's handle and composing
+ * it, and writes them by the plan with the scope as the transaction runtime. An atomic operation
+ * whose record an id resolver dropped fails with `AuditIncompleteError`, which rolls its transaction
+ * back.
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -29,14 +30,18 @@ import type {
   ResolveConfig,
   TransactionRuntime,
   ValueSerializer,
+  WriteMode,
 } from '@kuruwic/db-audit-core';
 import {
+  AuditAtomicityError,
   AuditContextMissingError,
+  AuditIncompleteError,
   auditGate,
   compose,
   createEntityConfigLookup,
   createFailureSink,
   dispatch,
+  planFor,
   policy,
   resolve,
 } from '@kuruwic/db-audit-core';
@@ -51,20 +56,15 @@ export interface MemoryAuditOptions<TModelName extends string> {
   /**
    * Whether a write to a model in `entities` fails with `AuditContextMissingError` when no audit
    * context is set, before it is applied, instead of running unaudited (the default, `false`): a
-   * value, or a function called with the model's name. Sampling does not affect it.
+   * value, or a function called with the model's name. The write mode does not affect it.
    */
   readonly requireContext?: AuditGateConfig['requireContext'];
-  /**
-   * Share of operations audited, from 0 (none) to 1 (every one; the default): a value, or a
-   * function called once per operation with its model's name
-   */
-  readonly samplingRate?: PolicyConfig['samplingRate'];
   readonly write?: {
     /**
-     * Whether audit rows are written in the operation's transaction (default: true): a value, or
-     * a function called once per sampled-in operation with its model's name
+     * The write mode of an audited operation (default: `'atomic'`): a value, or a function called
+     * once per audited operation with its model's name
      */
-    readonly awaited?: PolicyConfig['awaited'];
+    readonly mode?: PolicyConfig['mode'];
   };
   /** Fields left out of an update's change set, for every entity without its own `diffExcludeFields` */
   readonly diffExcludeFields?: readonly string[];
@@ -115,10 +115,7 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
   const store = createMemoryStore<TModelName>();
   const entityConfigs = createEntityConfigLookup(options.entities);
   const gateConfig: AuditGateConfig = { requireContext: options.requireContext ?? false };
-  const policyConfig: PolicyConfig = {
-    awaited: options.write?.awaited ?? true,
-    samplingRate: options.samplingRate ?? 1,
-  };
+  const policyConfig: PolicyConfig = { mode: options.write?.mode ?? 'atomic' };
   const resolveConfig: ResolveConfig<TModelName, MemoryHandle<TModelName>> = {
     entity: entityConfigs.byModel,
     rootEntity: entityConfigs.byCategoryAndType,
@@ -141,16 +138,15 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
   const writeFailures: AuditErrorContext[] = [];
   const resolverFailures: AuditErrorContext[] = [];
   const userObserver = options.errorObserver;
-  const failureSink = createFailureSink({
-    observer: async (context) => {
-      if (context.phase === 'log-write') {
-        writeFailures.push(context);
-      } else if (context.phase === 'id-resolver-call') {
-        resolverFailures.push(context);
-      }
-      await userObserver?.(context);
-    },
-  });
+  const observe = async (context: AuditErrorContext): Promise<void> => {
+    if (context.phase === 'log-write') {
+      writeFailures.push(context);
+    } else if (context.phase === 'id-resolver-call') {
+      resolverFailures.push(context);
+    }
+    await userObserver?.(context);
+  };
+  const failureSink = createFailureSink({ observer: observe });
 
   /** A write no caller awaits, tracked until it settles; it reports its own failure and never rejects */
   const startDetached = (write: () => Promise<void>): void => {
@@ -178,13 +174,13 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
     return result;
   };
 
-  /** Runs `run` in the active transaction, in an implicit one when the policy is atomic and none is active, else on the store */
+  /** Runs `run` in the active transaction, in an implicit one when the mode is atomic and none is active, else on the store */
   const inScope = <T>(
-    atomic: boolean,
+    mode: WriteMode,
     run: (scope: TransactionScope<TModelName> | undefined) => Promise<T>,
   ): Promise<T> => {
     const active = activeScope.getStore();
-    if (active !== undefined || !atomic) {
+    if (active !== undefined || mode !== 'atomic') {
       return run(active);
     }
     return transaction(() => run(activeScope.getStore()));
@@ -220,14 +216,13 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
       return;
     }
     const auditContext = gate.context;
-    const writePolicy = policy(model, policyConfig);
-    if (!writePolicy.sampled) {
-      mutate(currentHandle());
-      return;
-    }
-    const { atomic } = writePolicy;
+    const mode = policy([model], policyConfig);
 
-    await inScope(atomic, async (scope) => {
+    await inScope(mode, async (scope) => {
+      const plan = planFor(mode, scope !== undefined);
+      if (plan === 'reject') {
+        throw new AuditAtomicityError({ modelName: model, operation: op });
+      }
       const mutation = mutate(scope?.handle ?? store);
       const event: MutationEvent<TModelName> = {
         model,
@@ -237,9 +232,17 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
         after: mutation.after,
         origin: { path: '', op },
       };
+      // Every resolver failure drops a record: the operation's are kept to fail an atomic one.
+      const droppingFailures: AuditErrorContext[] = [];
+      const operationSink = createFailureSink({
+        observer: async (context) => {
+          droppingFailures.push(context);
+          await observe(context);
+        },
+      });
       const buildRecords = async () => {
         const { resolved, failures } = await resolve([event], auditContext, resolveConfig, currentHandle);
-        await failureSink.reportResolverFailures(failures);
+        await operationSink.reportResolverFailures(failures);
         return compose(resolved, { auditContext, config: composeConfig }, new Date());
       };
       await dispatch(
@@ -248,12 +251,15 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
           modelName: model,
           operation: op,
           params: { identity: mutation.identity },
-          atomic,
+          plan,
           auditContext,
         },
         dispatchConfig,
         runtimeOf(scope),
       );
+      if (mode === 'atomic' && droppingFailures.length > 0) {
+        throw new AuditIncompleteError({ modelName: model, operation: op, failures: droppingFailures });
+      }
     });
   };
 

@@ -23,7 +23,6 @@ const scopeOn = (handle: ExecutionScope['handle']): ExecutionScope => ({
   handle,
   baseClient,
   transaction: handle === baseClient ? undefined : { deferredWrites: [], recordAuditFailure: () => {} },
-  atomic: true,
 });
 
 const event: MutationEvent = {

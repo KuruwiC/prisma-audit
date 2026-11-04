@@ -3,11 +3,11 @@
  * semantics, and its independence from the app-owned audit context.
  */
 
-import type { AuditContext } from '@kuruwic/db-audit-core';
+import type { AuditContext, AuditErrorContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { describe, expect, it } from 'vitest';
 import type { PrismaHandle } from '../../src/internal-types.js';
-import { currentScope, decidedWritePolicyFor, operationBinding, withScope } from '../../src/runtime/scope.js';
+import { currentScope, keepOperationFailure, operationBinding, withScope } from '../../src/runtime/scope.js';
 import { activeTransactionOf } from '../support/active-transaction.js';
 
 const client = (id: string): PrismaHandle => ({ id });
@@ -62,24 +62,31 @@ describe('runtime scope', () => {
     });
   });
 
-  describe('decidedWritePolicyFor', () => {
-    const policy = { sampled: true, atomic: false } as const;
+  describe('keepOperationFailure', () => {
+    const failure: AuditErrorContext = {
+      phase: 'row-identification',
+      modelName: 'User',
+      operation: 'updateMany',
+      params: { unidentified: 1 },
+      error: new Error('unidentified rows'),
+    };
 
-    it("returns the decided policy for the operation's own model and action", () => {
-      withScope({ writePolicyDecision: { model: 'User', action: 'update', policy } }, () => {
-        expect(decidedWritePolicyFor('User', 'update')).toBe(policy);
-      });
-    });
+    it('keeps a failure among those of the innermost scope that collects them, and nowhere without one', () => {
+      const outer: AuditErrorContext[] = [];
+      const inner: AuditErrorContext[] = [];
 
-    it('returns undefined for another model or action, or without a decision', () => {
-      withScope({ writePolicyDecision: { model: 'User', action: 'update', policy } }, () => {
-        expect(decidedWritePolicyFor('Post', 'update')).toBeUndefined();
-        expect(decidedWritePolicyFor('User', 'delete')).toBeUndefined();
+      keepOperationFailure(failure);
+      withScope({ operationFailures: outer }, () => {
+        withScope({ isProcessingAuditLog: true }, () => {
+          keepOperationFailure(failure);
+        });
+        withScope({ operationFailures: inner }, () => {
+          keepOperationFailure(failure);
+        });
       });
-      withScope({ isProcessingAuditLog: false }, () => {
-        expect(decidedWritePolicyFor('User', 'update')).toBeUndefined();
-      });
-      expect(decidedWritePolicyFor('User', 'update')).toBeUndefined();
+
+      expect(outer).toEqual([failure]);
+      expect(inner).toEqual([failure]);
     });
   });
 

@@ -33,7 +33,7 @@ describe('id-resolver-call failures', () => {
       schema: auditSchema,
       contextProvider: provider,
       entities: { ...testEntities, Post: post },
-      write: { awaited: true },
+      write: { mode: 'awaited' },
       errorObserver: observer,
     });
     return { basePrisma, provider, prisma };
@@ -289,7 +289,7 @@ describe('id-resolver-call failures', () => {
           ...testEntities,
           Label: defineEntity({ type: 'Label', aggregates: [to('Post', foreignKey('postId'))] }),
         },
-        write: { awaited: true },
+        write: { mode: 'awaited' },
         fetchBefore: { update: true, delete: fetchBeforeDelete },
         errorObserver: observer,
       });

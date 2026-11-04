@@ -2,13 +2,13 @@
  * Interactive transactions the audited client wraps
  *
  * Every interactive transaction an audited operation can run in goes through here: the one the
- * caller opens with `$transaction(callback)`, the one a batch `$transaction([...])` holding a
- * write runs as, and the one `write.implicitTransaction` opens around a write whose audit is
- * awaited. The body receives the transaction as an `ActiveTransaction`, which the operations bound
- * to it carry to the audit. The writes the audit queues until the commit are started strictly after
- * `$transaction` resolves, and discarded unrun on rejection. When an audit failure failed an
- * operation of the transaction and the body resolved all the same, the transaction is rolled back
- * with `AuditRollbackError`.
+ * caller opens with `$transaction(callback)`, the one a batch `$transaction([...])` holding a write
+ * runs as, and the one the client opens around an atomic write issued outside any. The body
+ * receives the transaction as an `ActiveTransaction`, which the operations bound to it carry to the
+ * audit. The writes the audit queues until the commit are started strictly after `$transaction`
+ * resolves, and discarded unrun on rejection. When an audit failure failed an operation of the
+ * transaction and the body resolved all the same, the transaction is rolled back with
+ * `AuditRollbackError`.
  *
  * @module runtime/interactive-transaction
  */

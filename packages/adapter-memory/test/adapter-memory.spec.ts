@@ -1,6 +1,7 @@
-import type { AuditActor, AuditErrorObserver, AuditRecord } from '@kuruwic/db-audit-core';
+import type { AuditActor, AuditErrorObserver, AuditRecord, WriteMode } from '@kuruwic/db-audit-core';
 import {
   AuditContextMissingError,
+  AuditIncompleteError,
   createAsyncLocalStorageProvider,
   defineEntities,
   defineEntity,
@@ -157,10 +158,11 @@ describe('aggregate resolution and enrichment', () => {
     ]);
   });
 
-  it('an idResolver that throws: its row gets no record and is listed in resolverFailures, the write and the other rows are recorded', async () => {
+  it('an idResolver that throws, awaited: its row gets no record and is listed in resolverFailures, the write and the other rows are recorded', async () => {
     const resolverError = new Error('entity id resolver is broken');
     const observer = vi.fn<AuditErrorObserver>();
     const adapter = createAdapter({
+      write: { mode: 'awaited' },
       errorObserver: observer,
       entities: defineMapping({
         User: defineEntity<UserRow, Db>({ type: 'User' }),
@@ -195,6 +197,63 @@ describe('aggregate resolution and enrichment', () => {
       'Post:p2',
     ]);
     expect(adapter.writeFailures).toEqual([]);
+  });
+
+  it('an idResolver that throws, atomic: the write fails with AuditIncompleteError and rolls back, the other rows are recorded', async () => {
+    const resolverError = new Error('entity id resolver is broken');
+    const adapter = createAdapter({
+      entities: defineMapping({
+        User: defineEntity<UserRow, Db>({ type: 'User' }),
+        Post: defineEntity<PostRow, Db>({
+          type: 'Post',
+          idResolver: async (post) => {
+            if (post.title === 'broken') throw resolverError;
+            return post.id;
+          },
+        }),
+      }),
+    });
+
+    await withContext(async () => {
+      await adapter.create('User', { id: 'u1', name: 'Alice' });
+      const failed = adapter.create('Post', { id: 'p1', authorId: 'u1', title: 'broken' });
+      await expect(failed).rejects.toBeInstanceOf(AuditIncompleteError);
+      await expect(failed).rejects.toMatchObject({
+        modelName: 'Post',
+        operation: 'create',
+        failures: [{ phase: 'id-resolver-call', modelName: 'Post', error: resolverError }],
+      });
+      await adapter.create('Post', { id: 'p2', authorId: 'u1', title: 'Hello' });
+    });
+
+    expect(adapter.store.find('Post', 'p1')).toBeUndefined();
+    expect(adapter.store.auditLogs().map(({ entityType, entityId }) => `${entityType}:${entityId}`)).toEqual([
+      'User:u1',
+      'Post:p2',
+    ]);
+  });
+
+  it('awaited outside a transaction: the record is written on the store once the write has committed, before the call resolves', async () => {
+    const handles: unknown[] = [];
+    const adapter = createAdapter({
+      write: { mode: 'awaited' },
+      entities: defineMapping({
+        User: defineEntity<UserRow, Db>({
+          type: 'User',
+          entityContext: {
+            enricher: async (users, db) => {
+              handles.push(db);
+              return users.map(() => null);
+            },
+          },
+        }),
+      }),
+    });
+
+    await withContext(() => adapter.create('User', { id: 'u1', name: 'Alice' }));
+
+    expect(adapter.store.auditLogs().map((log) => log.entityId)).toEqual(['u1']);
+    expect(handles).toEqual([adapter.store]);
   });
 
   it('entity enricher: reads another table through the database handle into entityContext', async () => {
@@ -316,7 +375,7 @@ describe('transaction membership', () => {
   });
 
   it('rollback: discards the data, the immediate audit rows and the after-commit plans', async () => {
-    const adapter = createAdapter({ write: { awaited: (model) => model === 'User' } });
+    const adapter = createAdapter({ write: { mode: (model) => (model === 'User' ? 'atomic' : 'deferred') } });
 
     await withContext(async () => {
       await adapter.create('User', { id: 'u0', name: 'Existing' });
@@ -338,10 +397,10 @@ describe('transaction membership', () => {
     expect(adapter.store.auditLogs().map((log) => log.entityId)).toEqual(['u0']);
   });
 
-  it('awaited false: inside a transaction the record lands after commit, outside after flush', async () => {
+  it('deferred: inside a transaction the record lands after commit, outside after flush', async () => {
     const handles: unknown[] = [];
     const adapter = createAdapter({
-      write: { awaited: false },
+      write: { mode: 'deferred' },
       entities: defineMapping({
         User: defineEntity<UserRow, Db>({
           type: 'User',
@@ -437,8 +496,8 @@ describe('transaction membership', () => {
       expect(adapter.store.auditLogs().map((log) => log.entityId)).toEqual(['u1']);
     });
 
-    it('awaited false: the inner after-commit records start once the outer commits and are dropped when the outer throws', async () => {
-      const adapter = createAdapter({ write: { awaited: false } });
+    it('deferred: the inner after-commit records start once the outer commits and are dropped when the outer throws', async () => {
+      const adapter = createAdapter({ write: { mode: 'deferred' } });
 
       await withContext(async () => {
         await adapter.transaction(async () => {
@@ -468,7 +527,7 @@ describe('transaction membership', () => {
   });
 
   it('a detached write that fails is recorded in writeFailures and flush resolves', async () => {
-    const adapter = createAdapter({ write: { awaited: false } });
+    const adapter = createAdapter({ write: { mode: 'deferred' } });
     const failure = new Error('audit-log store unavailable');
     vi.spyOn(adapter.store, 'appendAuditLogs').mockImplementation(() => {
       throw failure;
@@ -484,7 +543,7 @@ describe('transaction membership', () => {
   });
 
   it('a write after commit that fails is recorded in writeFailures, the transaction stays committed and flush resolves', async () => {
-    const adapter = createAdapter({ write: { awaited: false } });
+    const adapter = createAdapter({ write: { mode: 'deferred' } });
     const failure = new Error('audit-log store unavailable');
     const write = vi.spyOn(memoryWriteExecutor, 'write').mockRejectedValue(failure);
 
@@ -523,10 +582,10 @@ describe('transaction membership', () => {
 
   describe('a record build that fails after the write', () => {
     const failure = new Error('actor enricher is broken');
-    const adapterWithFailingEnricher = (awaited: boolean) => {
+    const adapterWithFailingEnricher = (mode: WriteMode) => {
       const observer = vi.fn<AuditErrorObserver>();
       const adapter = createAdapter({
-        write: { awaited },
+        write: { mode },
         errorObserver: observer,
         actorContext: {
           enricher: async () => {
@@ -544,9 +603,9 @@ describe('transaction membership', () => {
       error: failure,
     };
 
-    it('awaited false outside a transaction: keeps the write, notifies diff-generation once, leaves the drop to the observer and writes no record', async () => {
+    it('deferred outside a transaction: keeps the write, notifies diff-generation once, leaves the drop to the observer and writes no record', async () => {
       const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
-      const { adapter, observer } = adapterWithFailingEnricher(false);
+      const { adapter, observer } = adapterWithFailingEnricher('deferred');
 
       try {
         await expect(withContext(() => adapter.create('User', { id: 'u1', name: 'Alice' }))).resolves.toBeUndefined();
@@ -562,7 +621,7 @@ describe('transaction membership', () => {
     });
 
     it('atomic: rejects with the error, rolls the write back, notifies diff-generation once and writes no record', async () => {
-      const { adapter, observer } = adapterWithFailingEnricher(true);
+      const { adapter, observer } = adapterWithFailingEnricher('atomic');
 
       await expect(withContext(() => adapter.create('User', { id: 'u1', name: 'Alice' }))).rejects.toBe(failure);
 
@@ -572,10 +631,10 @@ describe('transaction membership', () => {
     });
   });
 
-  it('awaited as a function: a model it returns true for writes atomically in an implicit transaction, another detached', async () => {
+  it('mode as a function: a model it returns atomic for writes atomically in an implicit transaction, one it returns deferred detached', async () => {
     const handles = new Map<string, unknown>();
     const adapter = createAdapter({
-      write: { awaited: (model) => model === 'User' },
+      write: { mode: (model) => (model === 'User' ? 'atomic' : 'deferred') },
       entities: defineMapping({
         User: defineEntity<UserRow, Db>({
           type: 'User',
@@ -608,51 +667,6 @@ describe('transaction membership', () => {
     expect(adapter.store.auditLogs().map((log) => log.entityType)).toEqual(['User', 'Post']);
     expect(handles.get('User')).not.toBe(adapter.store);
     expect(handles.get('Post')).toBe(adapter.store);
-  });
-});
-
-describe('samplingRate', () => {
-  it('samplingRate 0: the row is written and no record is', async () => {
-    const adapter = createAdapter({ samplingRate: 0 });
-
-    await withContext(() => adapter.create('User', { id: 'u1', name: 'Alice' }));
-
-    expect(adapter.store.find('User', 'u1')).toEqual({ id: 'u1', name: 'Alice' });
-    expect(adapter.store.auditLogs()).toEqual([]);
-  });
-
-  it('samplingRate 0 inside a transaction: the row is written on the transaction handle and commits or rolls back with it', async () => {
-    const adapter = createAdapter({ samplingRate: 0 });
-
-    await withContext(async () => {
-      await adapter.transaction(async (db) => {
-        await adapter.create('User', { id: 'u1', name: 'Alice' });
-        expect(db.find('User', 'u1')).toEqual({ id: 'u1', name: 'Alice' });
-        expect(adapter.store.find('User', 'u1')).toBeUndefined();
-      });
-      await expect(
-        adapter.transaction(async () => {
-          await adapter.create('User', { id: 'u2', name: 'Bob' });
-          throw new Error('abort');
-        }),
-      ).rejects.toThrow('abort');
-    });
-
-    expect(adapter.store.find('User', 'u1')).toEqual({ id: 'u1', name: 'Alice' });
-    expect(adapter.store.find('User', 'u2')).toBeUndefined();
-    expect(adapter.store.auditLogs()).toEqual([]);
-  });
-
-  it('samplingRate as a function: a model it returns 1 for is audited, one it returns 0 for is not', async () => {
-    const adapter = createAdapter({ samplingRate: (model) => (model === 'User' ? 1 : 0) });
-
-    await withContext(async () => {
-      await adapter.create('User', { id: 'u1', name: 'Alice' });
-      await adapter.create('Post', { id: 'p1', authorId: 'u1', title: 'Hello' });
-    });
-
-    expect(adapter.store.find('Post', 'p1')).toEqual({ id: 'p1', authorId: 'u1', title: 'Hello' });
-    expect(adapter.store.auditLogs().map((log) => log.entityType)).toEqual(['User']);
   });
 });
 
@@ -700,13 +714,6 @@ describe('the audit gate', () => {
     expect(adapter.store.auditLogs()).toEqual([]);
   });
 
-  it('rejects a write without an audit context at a samplingRate of 0', async () => {
-    const adapter = createAdapter({ requireContext: true, samplingRate: 0 });
-
-    await expect(adapter.create('User', { id: 'u1', name: 'Alice' })).rejects.toBeInstanceOf(AuditContextMissingError);
-    expect(adapter.store.find('User', 'u1')).toBeUndefined();
-  });
-
   it('runs without an audit context a write of a model that is not in entities, even with requireContext: true', async () => {
     const adapter = createAdapter({ entities: userOnly, requireContext: true });
 
@@ -717,13 +724,11 @@ describe('the audit gate', () => {
   });
 
   it('writes, with an audit context, a model that is not in entities without a record, calling no policy function or actor enricher', async () => {
-    const samplingRate = vi.fn(() => 1);
-    const awaited = vi.fn(() => true);
+    const mode = vi.fn((): WriteMode => 'atomic');
     const enricher = vi.fn(async () => ({}));
     const adapter = createAdapter({
       entities: userOnly,
-      samplingRate,
-      write: { awaited },
+      write: { mode },
       actorContext: { enricher },
     });
 
@@ -732,8 +737,7 @@ describe('the audit gate', () => {
 
     expect(adapter.store.find('Post', 'p1')).toEqual({ id: 'p1', authorId: 'u1', title: 'Hello' });
     expect(adapter.store.auditLogs()).toEqual([]);
-    expect(samplingRate).not.toHaveBeenCalled();
-    expect(awaited).not.toHaveBeenCalled();
+    expect(mode).not.toHaveBeenCalled();
     expect(enricher).not.toHaveBeenCalled();
   });
 });

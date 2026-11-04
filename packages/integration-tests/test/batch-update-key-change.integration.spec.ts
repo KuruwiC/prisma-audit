@@ -40,7 +40,7 @@ describe('a batch update whose data changes the key of its rows by an operator',
       schema: auditSchema,
       contextProvider: provider,
       entities: { AutoIncItem: defineEntity({ type: 'AutoIncItem' }) },
-      write: { awaited: true },
+      write: { mode: 'awaited' },
       errorObserver: observer,
     });
     disconnects.push(async () => {

@@ -84,7 +84,7 @@ describe('Normalized Writer Helpers', () => {
         contextProvider: provider,
         entities: testEntities,
         write: {
-          awaited: false,
+          mode: 'deferred',
           writer: createEntityNormalizedWriter(entitySchema),
         },
       });
@@ -105,7 +105,7 @@ describe('Normalized Writer Helpers', () => {
         contextProvider: provider,
         entities: testEntities,
         write: {
-          awaited: false,
+          mode: 'deferred',
           writer: createSharedChangeWriter(sharedChangeSchema),
         },
       });
@@ -128,7 +128,7 @@ describe('Normalized Writer Helpers', () => {
         contextProvider: provider,
         entities: testEntities,
         write: {
-          awaited: true,
+          mode: 'awaited',
           writer: createEntityNormalizedWriter(entitySchema),
         },
       });
@@ -152,7 +152,7 @@ describe('Normalized Writer Helpers', () => {
         contextProvider: provider,
         entities: testEntities,
         write: {
-          awaited: true,
+          mode: 'awaited',
           writer: createSharedChangeWriter(sharedChangeSchema),
         },
       });
@@ -178,7 +178,7 @@ describe('Normalized Writer Helpers', () => {
         contextProvider: provider,
         entities: testEntities,
         write: {
-          awaited: true,
+          mode: 'awaited',
           writer: createEntityNormalizedWriter({
             actorModel: 'Actor',
             entityModel: 'Entity',
@@ -238,7 +238,7 @@ describe('Normalized Writer Helpers', () => {
         contextProvider: provider,
         entities: testEntities,
         write: {
-          awaited: true,
+          mode: 'awaited',
           writer: createEntityNormalizedWriter({
             actorModel: 'Actor',
             entityModel: 'Entity',
@@ -278,7 +278,7 @@ describe('Normalized Writer Helpers', () => {
         contextProvider: provider,
         entities: testEntities,
         write: {
-          awaited: true,
+          mode: 'awaited',
           writer: createEntityNormalizedWriter({
             actorModel: 'Actor',
             entityModel: 'Entity',
@@ -334,7 +334,7 @@ describe('Normalized Writer Helpers', () => {
         contextProvider: provider,
         entities: testEntities,
         write: {
-          awaited: true,
+          mode: 'awaited',
           writer: createEntityNormalizedWriter({
             actorModel: 'actor',
             entityModel: 'entity',
@@ -363,7 +363,7 @@ describe('Normalized Writer Helpers', () => {
         contextProvider: provider,
         entities: testEntities,
         write: {
-          awaited: true,
+          mode: 'awaited',
           writer: createSharedChangeWriter({
             changeModel: 'AuditChange',
             aggregateModel: 'AuditAggregate',
@@ -411,7 +411,7 @@ describe('Normalized Writer Helpers', () => {
         contextProvider: provider,
         entities: testEntities,
         write: {
-          awaited: true,
+          mode: 'awaited',
           writer: createSharedChangeWriter({
             changeModel: 'AuditChange',
             aggregateModel: 'AuditAggregate',
@@ -469,7 +469,7 @@ describe('Normalized Writer Helpers', () => {
         contextProvider: provider,
         entities: testEntities,
         write: {
-          awaited: true,
+          mode: 'awaited',
           writer: createSharedChangeWriter({
             changeModel: 'AuditChange',
             aggregateModel: 'AuditAggregate',
@@ -524,7 +524,7 @@ describe('Normalized Writer Helpers', () => {
         contextProvider: provider,
         entities: testEntities,
         write: {
-          awaited: true,
+          mode: 'awaited',
           writer: createSharedChangeWriter({
             changeModel: 'auditChange',
             aggregateModel: 'auditAggregate',
@@ -562,7 +562,7 @@ describe('Normalized Writer Helpers', () => {
         contextProvider: provider,
         entities: testEntities,
         write: {
-          awaited: true,
+          mode: 'awaited',
           writer,
         },
       });

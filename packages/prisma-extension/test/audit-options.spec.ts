@@ -1,9 +1,10 @@
 /**
  * Options checked once when they are normalized: the `schema` option, the audit schema the
- * extension reads every model's structure from, the `write` and `samplingRate` options, and the
+ * extension reads every model's structure from, the `write` option, and the
  * diff-exclusion and redaction options, and the entity map keys of `recordOmittedFields`
  */
 
+import type { WriteMode } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider, defineEntity } from '@kuruwic/db-audit-core';
 import { describe, expect, it } from 'vitest';
 import { normalizeAuditOptions } from '../src/audit-options.js';
@@ -76,50 +77,21 @@ describe('the schema option', () => {
   });
 });
 
-const IMPLICIT_TRANSACTION_WITHOUT_AWAITED_MESSAGE =
-  "Configuration error: 'write.implicitTransaction' opens a transaction only around an operation whose audit is " +
-  "awaited, and 'write.awaited' is false, so no operation would get one. Remove 'write.implicitTransaction', or " +
-  "set 'write.awaited' to true or to a function.";
-
-describe('the write and samplingRate options', () => {
+describe('the write option', () => {
   const withWrite = (write: PrismaAuditExtensionOptions['write']): PrismaAuditExtensionOptions => ({
     ...optionsWith(userSchema),
     write,
   });
 
-  it('rejects implicitTransaction with awaited false', () => {
-    expect(() => normalizeAuditOptions(withWrite({ implicitTransaction: true, awaited: false }))).toThrow(
-      IMPLICIT_TRANSACTION_WITHOUT_AWAITED_MESSAGE,
-    );
+  it('defaults to the atomic write mode for every model', () => {
+    expect(normalizeAuditOptions(withWrite(undefined)).policyConfig).toEqual({ mode: 'atomic' });
   });
 
-  it.each([
-    ['true', true],
-    ['omitted', undefined],
-    ['a function', () => false],
-  ])('accepts implicitTransaction with awaited %s', (_label, awaited) => {
-    expect(normalizeAuditOptions(withWrite({ implicitTransaction: true, awaited })).implicitTransaction).toBe(true);
-  });
+  it('passes the value or function forms of mode to the write policy unchanged', () => {
+    const mode = (modelName: string): WriteMode => (modelName === 'User' ? 'atomic' : 'deferred');
 
-  it('defaults to awaited writes of every operation, without an implicit transaction', () => {
-    const audit = normalizeAuditOptions(withWrite(undefined));
-
-    expect(audit.policyConfig).toEqual({ awaited: true, samplingRate: 1 });
-    expect(audit.implicitTransaction).toBe(false);
-  });
-
-  it('passes the value or function forms of awaited and samplingRate to the write policy unchanged', () => {
-    const awaited = (modelName: string) => modelName === 'User';
-    const samplingRate = (modelName: string) => (modelName === 'User' ? 1 : 0.1);
-
-    expect(normalizeAuditOptions(withWrite({ awaited: false })).policyConfig.awaited).toBe(false);
-    expect(normalizeAuditOptions(withWrite({ awaited })).policyConfig.awaited).toBe(awaited);
-    expect(normalizeAuditOptions({ ...optionsWith(userSchema), samplingRate: 0.5 }).policyConfig.samplingRate).toBe(
-      0.5,
-    );
-    expect(normalizeAuditOptions({ ...optionsWith(userSchema), samplingRate }).policyConfig.samplingRate).toBe(
-      samplingRate,
-    );
+    expect(normalizeAuditOptions(withWrite({ mode: 'deferred' })).policyConfig.mode).toBe('deferred');
+    expect(normalizeAuditOptions(withWrite({ mode })).policyConfig.mode).toBe(mode);
   });
 });
 

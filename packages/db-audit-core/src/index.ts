@@ -42,6 +42,7 @@ export type {
   MutationOrigin,
   ResolvedEvent,
   WritePlan,
+  WritePlanKind,
 } from './domain/mutation-event.js';
 export type { Result, ValidationError } from './domain/smart-constructors.js';
 export { createAuditLogData } from './domain/smart-constructors.js';
@@ -54,14 +55,14 @@ export type {
   FailureSink,
   FailureSinkConfig,
 } from './failure/index.js';
-export { createFailureSink } from './failure/index.js';
+export { AuditIncompleteError, createFailureSink } from './failure/index.js';
 // Exported because the adapter package imports it across the package boundary;
 // end users are not meant to call it directly.
 export { getGlobalSingleton } from './global-singleton.js';
 export type { AuditGate, AuditGateConfig, RejectedWrite } from './policy/audit-gate.js';
 export { AuditContextMissingError, auditGate } from './policy/audit-gate.js';
-export type { PolicyConfig, WritePolicy } from './policy/index.js';
-export { policy } from './policy/index.js';
+export type { PolicyConfig, WriteMode } from './policy/index.js';
+export { AuditAtomicityError, planFor, policy } from './policy/index.js';
 export type {
   EntityResolveConfig,
   FailedResolver,

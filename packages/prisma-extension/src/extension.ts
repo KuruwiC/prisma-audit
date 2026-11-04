@@ -2,21 +2,29 @@
  * Prisma Audit Extension
  *
  * The `$allOperations` hook: decides whether an intercepted operation is audited (its kind, then
- * the audit gate, from the audit context and the audited models the operation's arguments write,
- * then the write policy's sampling), rejects it before it runs when the gate does or when it
- * reached the hook without the binding the client it was issued on gives it, selects the relations
- * its nested writes touch, runs it through the audited-operation pipeline in the transaction that
- * binding names, and returns the result in the shape the caller requested. The hook continues the
- * caller's operation through `query` unless it rejects it; the client proxy binds the operation,
- * and with `write.implicitTransaction` opens the interactive transaction, before the operation
- * enters the extension chain.
+ * the audit gate, from the audit context and the audited models the operation's arguments write),
+ * decides its write mode from those models and its write plan from the mode and the transaction
+ * the operation's binding names, rejects it before it runs when the gate does, when it reached the
+ * hook without the binding the client it was issued on gives it, or when it is atomic outside any
+ * transaction the client owns, selects the relations its nested writes touch, runs it through the
+ * audited-operation pipeline in that transaction, and returns the result in the shape the caller
+ * requested. The hook continues the caller's operation through `query` unless it rejects it; the
+ * client proxy binds the operation, and for an atomic write opens the interactive transaction,
+ * before the operation enters the extension chain.
  *
  * @module extension
  * @see {@link createAuditLogExtension}
  * @see {@link PrismaAuditExtensionOptions}
  */
 
-import { AuditContextMissingError, auditGate, createFailureSink, policy } from '@kuruwic/db-audit-core';
+import {
+  AuditAtomicityError,
+  AuditContextMissingError,
+  auditGate,
+  createFailureSink,
+  planFor,
+  policy,
+} from '@kuruwic/db-audit-core';
 import { createPrismaWriteExecutor, declaresBeforeUnavailableColumn } from './adapters/write-executor.js';
 import { type AuditOptions, normalizeAuditOptions } from './audit-options.js';
 import { AuditUnboundWriteError } from './errors.js';
@@ -26,7 +34,7 @@ import { createRecordProducer } from './pipeline/produce-records.js';
 import { type AuditPipelineDependencies, runAuditedOperation } from './pipeline/run-audited-operation.js';
 import { createSingleExecutor } from './pipeline/single-executor.js';
 import type { RecipeConfig } from './runtime/operation-recipe.js';
-import { decidedWritePolicyFor, isProcessingAuditLog, operationBinding, withScope } from './runtime/scope.js';
+import { isProcessingAuditLog, keepOperationFailure, operationBinding, withScope } from './runtime/scope.js';
 import { createTransactionProxy } from './runtime/transaction-proxy.js';
 import type { PrismaAuditExtensionOptions } from './types.js';
 import { type ClientShape, injectAuditedSelection, projectToRequestedShape } from './utils/audited-selection.js';
@@ -35,7 +43,16 @@ import { getModelAccessor } from './utils/model-accessor.js';
 
 const createPipelineDependencies = (audit: AuditOptions): AuditPipelineDependencies => {
   const { Prisma, schemaMetadata, shouldFetchBefore, auditedOmittedFields, auditedOmittedFieldsWithRowKey } = audit;
-  const failureSink = createFailureSink(audit.failureSinkConfig);
+  const { observer } = audit.failureSinkConfig;
+  // The failures the pipeline detects itself are kept on the operation they were reported for, so
+  // that an atomic one fails when some dropped its records. `dispatch` reports through a sink of
+  // the observer alone, which logs a failure the caller cannot see when no observer is configured.
+  const failureSink = createFailureSink({
+    observer: async (context) => {
+      keepOperationFailure(context);
+      await observer?.(context);
+    },
+  });
 
   return {
     singleExecutor: createSingleExecutor({
@@ -58,17 +75,17 @@ const createPipelineDependencies = (audit: AuditOptions): AuditPipelineDependenc
         storesBeforeUnavailable: declaresBeforeUnavailableColumn(schemaMetadata, audit.auditLogAccessor),
       }),
       writer: audit.writer,
-      failureSink,
+      failureSink: createFailureSink(audit.failureSinkConfig),
     },
     failureSink,
   };
 };
 
 /**
- * What the client proxy needs to make the client's operations into recipes and, with
- * `write.implicitTransaction`, to open the interactive transaction of an operation whose audit is
- * awaited. Whether one is opened is decided from the arguments the call was made with; the hook
- * decides whether the operation is audited, or rejected, from the arguments that reach it.
+ * What the client proxy needs to make the client's operations into recipes and to open the
+ * interactive transaction of an atomic write. Whether one is opened is decided from the arguments
+ * the call was made with; the hook decides whether the operation is audited, its write mode, or
+ * whether it is rejected, from the arguments that reach it.
  */
 const recipeConfigOf = (audit: AuditOptions): RecipeConfig => {
   const { policyConfig, schemaMetadata } = audit;
@@ -82,14 +99,10 @@ const recipeConfigOf = (audit: AuditOptions): RecipeConfig => {
   return {
     modelOfAccessor: new Map(modelNames.map((modelName) => [getModelAccessor(modelName), modelName])),
     relatedModel: (modelName, field) => relatedModels.get(modelName)?.get(field),
-    decideWritePolicy: audit.implicitTransaction
-      ? (modelName, action, args) =>
-          audit.provider.getContext() !== undefined &&
-          isAuditableAction(action) &&
-          audit.auditedModelsOf(modelName, args).length > 0
-            ? policy(modelName, policyConfig)
-            : undefined
-      : undefined,
+    isAtomicWrite: (modelName, action, args) =>
+      audit.provider.getContext() !== undefined &&
+      isAuditableAction(action) &&
+      policy(audit.auditedModelsOf(modelName, args), policyConfig) === 'atomic',
   };
 };
 
@@ -115,7 +128,8 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
       return query(args);
     }
 
-    const gate = auditGate(audit.provider.getContext(), audit.auditedModelsOf(model, args), audit.gateConfig);
+    const auditedModels = audit.auditedModelsOf(model, args);
+    const gate = auditGate(audit.provider.getContext(), auditedModels, audit.gateConfig);
     if (gate.kind === 'reject') {
       throw new AuditContextMissingError({ modelName: gate.modelName, operationModelName: model, operation });
     }
@@ -126,11 +140,12 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     if (binding === undefined) {
       throw new AuditUnboundWriteError({ modelName: model, operation });
     }
-    const auditContext = gate.context;
-    const writePolicy = decidedWritePolicyFor(model, operation) ?? policy(model, audit.policyConfig);
-    if (!writePolicy.sampled) {
-      return query(args);
+    const mode = policy(auditedModels, audit.policyConfig);
+    const plan = planFor(mode, binding.transaction !== undefined);
+    if (plan === 'reject') {
+      throw new AuditAtomicityError({ modelName: model, operation });
     }
+    const auditContext = gate.context;
 
     const injection = injectAuditedSelection(shape, model, operation, args);
 
@@ -148,7 +163,8 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
           },
           auditContext,
           baseClient,
-          atomic: writePolicy.atomic,
+          mode,
+          plan,
           transaction: binding.transaction,
         },
         deps,

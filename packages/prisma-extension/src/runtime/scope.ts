@@ -4,14 +4,14 @@
  * The library-owned state of the async flow an audited operation runs in: the binding the client
  * the operation was issued on gives it, which names the interactive transaction of that client if
  * it is one, with the client of that transaction, the writes queued until it commits and the audit
- * failures that must keep it from committing, and the re-entrancy guard raised while the audit's own
- * queries run. The state lives on its own async-local store, apart from the app-owned audit
- * context, so re-attributing the actor mid-flow cannot drop it. This module is the only reader and
- * writer of that store.
+ * failures that must keep it from committing, the audit failures reported for the operation the
+ * flow runs, and the re-entrancy guard raised while the audit's own queries run. The state lives on
+ * its own async-local store, apart from the app-owned audit context, so re-attributing the actor
+ * mid-flow cannot drop it. This module is the only reader and writer of that store.
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
-import type { WritePolicy } from '@kuruwic/db-audit-core';
+import type { AuditErrorContext } from '@kuruwic/db-audit-core';
 import { getGlobalSingleton } from '@kuruwic/db-audit-core';
 import type { PrismaHandle } from '../internal-types.js';
 import { trackPendingWrite } from './pending-writes.js';
@@ -42,10 +42,10 @@ export interface RuntimeScope {
    */
   readonly binding?: OperationBinding | undefined;
   /**
-   * The write policy decided at the client boundary for the operation this scope runs, set only
-   * around that operation, so a nested operation's scope replaces it
+   * The observer-only failures reported for the audited operation this scope runs, set only around
+   * that operation, so a nested audited operation's scope replaces it
    */
-  readonly writePolicyDecision?: WritePolicyDecision | undefined;
+  readonly operationFailures?: AuditErrorContext[] | undefined;
   /**
    * Raised while the audit's own queries run (the reads before and after the write, the audit-log
    * insert), so that they are not audited; lowered while the caller's operation continues through
@@ -67,22 +67,9 @@ export const isProcessingAuditLog = (): boolean => currentScope()?.isProcessingA
 
 export const operationBinding = (): OperationBinding | undefined => currentScope()?.binding;
 
-export interface WritePolicyDecision {
-  readonly model: string;
-  readonly action: string;
-  readonly policy: WritePolicy;
-}
-
-/**
- * The write policy decided at the client boundary for the operation the current scope runs, when
- * `model` and `action` are that operation's. Every query the operation runs through the audit
- * extension takes it, a query an extension applied before the audit issues through `query`
- * included: Prisma runs those as part of the operation, and they reach the hook with its model and
- * action.
- */
-export const decidedWritePolicyFor = (model: string, action: string): WritePolicy | undefined => {
-  const decision = currentScope()?.writePolicyDecision;
-  return decision?.model === model && decision.action === action ? decision.policy : undefined;
+/** Keeps `context` among the failures of the audited operation the current scope runs, if any */
+export const keepOperationFailure = (context: AuditErrorContext): void => {
+  currentScope()?.operationFailures?.push(context);
 };
 
 /** Starts the writes queued on a committed transaction on the base client, as pending writes no caller awaits */

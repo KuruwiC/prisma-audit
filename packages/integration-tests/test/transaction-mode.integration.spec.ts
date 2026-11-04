@@ -1,12 +1,12 @@
 /**
- * Integration Tests: where an awaited audit runs, with and without `implicitTransaction`
+ * Integration Tests: where the audit of an operation runs, under the awaited and the atomic write mode
  *
- * By default the audit extension opens no transaction around a single operation: the caller's
- * operation continues through Prisma's `query` down the extension chain once, and an awaited audit
- * outside the caller's own interactive `$transaction` is written once the operation has committed.
- * With `implicitTransaction` the audited client opens the transaction at its boundary, before the
- * call enters the extension chain: a write whose audit is awaited runs in an interactive
- * transaction of the client it was called on. Either way a batch `$transaction([...])` holding a
+ * Under `awaited` the audit extension opens no transaction around a single operation: the caller's
+ * operation continues through Prisma's `query` down the extension chain once, and its audit outside
+ * the caller's own interactive `$transaction` is written once the operation has committed. Under
+ * `atomic` (the default) the audited client opens the transaction at its boundary, before the call
+ * enters the extension chain: an atomic write runs in an interactive transaction of the client it
+ * was called on. Either way a batch `$transaction([...])` holding a
  * write runs as one interactive transaction of the client, and a batch of reads and raw queries
  * only as Prisma's own. The caller's mutation passes every query extension once; the audit's own
  * reads and writes are separate queries.
@@ -14,7 +14,7 @@
 
 import type { AuditContext, AuditErrorContext, AuditRecord } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
-import { createAuditClient, defineEntity, flushAllPendingWrites } from '@kuruwic/prisma-audit';
+import { createAuditClient, defineEntity, flushAllPendingWrites, type WriteMode } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -25,9 +25,7 @@ const testActor: AuditContext = {
 };
 
 interface ClientOptions {
-  readonly implicitTransaction: boolean;
-  readonly awaited?: boolean | ((modelName: string) => boolean);
-  readonly samplingRate?: number | ((modelName: string) => number);
+  readonly mode: WriteMode | ((modelName: string) => WriteMode);
   readonly writer?: (records: AuditRecord[]) => Promise<void>;
   readonly failingEnricher?: boolean;
   /** Applies, before the audit extension, one that writes a companion user through `query` ahead of each user create */
@@ -81,7 +79,7 @@ const companionCreator = Prisma.defineExtension({
   },
 });
 
-describe('implicitTransaction', () => {
+describe('write mode', () => {
   const disposers: Array<() => Promise<void>> = [];
   let raw: PrismaClient;
 
@@ -117,11 +115,9 @@ describe('implicitTransaction', () => {
       schema: auditSchema,
       contextProvider: provider,
       entities: { User: defineEntity({ type: 'User' }), Post: defineEntity({ type: 'Post' }) },
-      samplingRate: options.samplingRate,
       errorObserver: observer,
       write: {
-        awaited: options.awaited ?? true,
-        implicitTransaction: options.implicitTransaction,
+        mode: options.mode,
         ...(options.writer ? { writer: options.writer } : {}),
       },
       ...(options.failingEnricher
@@ -155,10 +151,7 @@ describe('implicitTransaction', () => {
   };
 
   interface BatchOptions {
-    readonly implicitTransaction: boolean;
-    readonly awaited?: boolean;
-    /** The one model whose audit is awaited, through `awaitedByModel` */
-    readonly awaitedModel?: string;
+    readonly mode: WriteMode | ((modelName: string) => WriteMode);
     /** The model the audit records; the batch writes a User */
     readonly audited?: 'User' | 'Post';
     /** Whether the batch writes a User before its read */
@@ -206,12 +199,7 @@ describe('implicitTransaction', () => {
         options.audited === 'Post'
           ? { Post: defineEntity({ type: 'Post' }) }
           : { User: defineEntity({ type: 'User' }) },
-      write: {
-        awaited: options.awaitedModel
-          ? (modelName: string) => modelName === options.awaitedModel
-          : (options.awaited ?? true),
-        implicitTransaction: options.implicitTransaction,
-      },
+      write: { mode: options.mode },
     });
     const read = options.slow
       ? audited.$queryRaw`SELECT 1 AS slept FROM pg_sleep(0.5)`
@@ -227,13 +215,10 @@ describe('implicitTransaction', () => {
     return { result, transactions };
   };
 
-  describe.each([
-    { mode: 'by default', implicitTransaction: false },
-    { mode: 'with implicitTransaction', implicitTransaction: true },
-  ])('$mode', ({ implicitTransaction }) => {
+  describe.each([{ mode: 'awaited' }, { mode: 'atomic' }] as const)('under the $mode write mode', ({ mode }) => {
     it('passes the caller update through an extension applied before the audit and one applied after it once each', async () => {
       const user = await seedUser();
-      const clients = createClients({ implicitTransaction });
+      const clients = createClients({ mode });
 
       await clients.run(() => clients.client.user.update({ where: { id: user.id }, data: { name: 'Single' } }));
 
@@ -247,7 +232,7 @@ describe('implicitTransaction', () => {
 
     it('passes each update of a batch through both extensions once', async () => {
       const user = await seedUser();
-      const clients = createClients({ implicitTransaction });
+      const clients = createClients({ mode });
 
       await clients.run(() =>
         clients.client.$transaction([clients.client.user.update({ where: { id: user.id }, data: { name: 'Batch' } })]),
@@ -262,7 +247,7 @@ describe('implicitTransaction', () => {
     it('returns the relation of a fluent call', async () => {
       const user = await seedUser();
       await raw.post.create({ data: { title: 'Kept', authorId: user.id } });
-      const clients = createClients({ implicitTransaction });
+      const clients = createClients({ mode });
 
       const posts = await clients.run(() =>
         clients.client.user.update({ where: { id: user.id }, data: { name: 'Fluent' } }).posts(),
@@ -272,7 +257,7 @@ describe('implicitTransaction', () => {
     });
 
     it('runs every operation of a batch together with an operation the audit does not record and a raw statement', async () => {
-      const clients = createClients({ implicitTransaction });
+      const clients = createClients({ mode });
 
       const results = await clients.run(() =>
         clients.client.$transaction([
@@ -288,7 +273,7 @@ describe('implicitTransaction', () => {
 
     it('keeps a batch all-or-nothing when one of its writes fails', async () => {
       await seedUser('taken@example.com');
-      const clients = createClients({ implicitTransaction });
+      const clients = createClients({ mode });
 
       await expect(
         clients.run(() =>
@@ -306,7 +291,7 @@ describe('implicitTransaction', () => {
     });
 
     it('runs operations awaited one by one and together', async () => {
-      const clients = createClients({ implicitTransaction });
+      const clients = createClients({ mode });
 
       await clients.run(async () => {
         await clients.client.user.create({ data: { email: 'one@example.com', name: 'One' } });
@@ -322,7 +307,7 @@ describe('implicitTransaction', () => {
 
     it("rolls back every operation of a batch when one operation's audit build fails", async () => {
       const user = await seedUser();
-      const clients = createClients({ implicitTransaction, failingEnricher: true });
+      const clients = createClients({ mode, failingEnricher: true });
 
       await expect(
         clients.run(() =>
@@ -338,14 +323,14 @@ describe('implicitTransaction', () => {
     });
 
     it("runs a read-only batch as Prisma's own batch, without an interactive transaction of its own", async () => {
-      const { result, transactions } = runBatch({ implicitTransaction });
+      const { result, transactions } = runBatch({ mode });
 
       await expect(result).resolves.toHaveLength(1);
       expect(transactions).toEqual(['batch']);
     });
 
     it("runs Prisma's own batch at the caller's isolation level", async () => {
-      const clients = createClients({ implicitTransaction });
+      const clients = createClients({ mode });
 
       const [, isolation] = await clients.run(() =>
         clients.client.$transaction(
@@ -358,24 +343,22 @@ describe('implicitTransaction', () => {
     });
 
     it('runs a batch that writes only a model the audit does not record as an interactive transaction', async () => {
-      const { result, transactions } = runBatch({ implicitTransaction, audited: 'Post', writes: true });
+      const { result, transactions } = runBatch({ mode, audited: 'Post', writes: true });
 
       await expect(result).resolves.toHaveLength(2);
       expect(transactions).toEqual(['interactive']);
     });
 
     it('runs a batch holding a write without an audit context as an interactive transaction', async () => {
-      const { result, transactions } = runBatch({ implicitTransaction, writes: true, withContext: false });
+      const { result, transactions } = runBatch({ mode, writes: true, withContext: false });
 
       await expect(result).resolves.toHaveLength(2);
       expect(transactions).toEqual(['interactive']);
     });
 
-    it('runs a batch whose write does not await its audit as an interactive transaction', async () => {
+    it('runs a batch whose write is deferred as an interactive transaction', async () => {
       const { result, transactions } = runBatch({
-        implicitTransaction,
-        awaited: false,
-        awaitedModel: 'Post',
+        mode: (modelName) => (modelName === 'Post' ? mode : 'deferred'),
         writes: true,
       });
 
@@ -384,7 +367,7 @@ describe('implicitTransaction', () => {
     });
 
     it("runs a batch holding a write as an interactive transaction, bound by the client's limits", async () => {
-      const { result, transactions } = runBatch({ implicitTransaction, writes: true, slow: true });
+      const { result, transactions } = runBatch({ mode, writes: true, slow: true });
 
       await expect(result).rejects.toMatchObject({ code: 'P2028' });
       expect(transactions).toEqual(['interactive']);
@@ -392,11 +375,10 @@ describe('implicitTransaction', () => {
       expect(await auditRows()).toEqual([]);
     });
 
-    it("writes the audit of a batch operation that does not await it once the batch's transaction has committed", async () => {
+    it("writes the audit of a deferred batch operation once the batch's transaction has committed", async () => {
       const user = await seedUser();
       const clients = createClients({
-        implicitTransaction,
-        awaited: (modelName) => modelName === 'Post',
+        mode: (modelName) => (modelName === 'Post' ? mode : 'deferred'),
       });
 
       await clients.run(() =>
@@ -411,7 +393,7 @@ describe('implicitTransaction', () => {
 
     describe('rejects a batch before anything runs', () => {
       it('when an operation was created by a client that is not audited', async () => {
-        const clients = createClients({ implicitTransaction });
+        const clients = createClients({ mode });
 
         await expect(
           clients.run(() =>
@@ -426,7 +408,7 @@ describe('implicitTransaction', () => {
       });
 
       it('when an operation was created by another client derived from the audited client', async () => {
-        const clients = createClients({ implicitTransaction });
+        const clients = createClients({ mode });
         const other = clients.audited.$extends({ name: 'other' });
 
         await expect(
@@ -442,7 +424,7 @@ describe('implicitTransaction', () => {
       });
 
       it('when an operation has already run', async () => {
-        const clients = createClients({ implicitTransaction });
+        const clients = createClients({ mode });
 
         await expect(
           clients.run(async () => {
@@ -462,7 +444,7 @@ describe('implicitTransaction', () => {
     });
 
     it("rejects an operation of the audited client given to another client's batch", async () => {
-      const clients = createClients({ implicitTransaction });
+      const clients = createClients({ mode });
 
       await expect(
         clients.run(() => raw.$transaction([clients.client.user.create({ data: { email: 'a@example.com' } })])),
@@ -472,10 +454,10 @@ describe('implicitTransaction', () => {
     });
   });
 
-  describe('by default', () => {
+  describe('only under the awaited write mode', () => {
     it('keeps a committed write whose awaited audit write failed, and reports the failure', async () => {
       const user = await seedUser();
-      const clients = createClients({ implicitTransaction: false, writer: failingWriter });
+      const clients = createClients({ mode: 'awaited', writer: failingWriter });
 
       await expect(
         clients.run(() => clients.client.user.update({ where: { id: user.id }, data: { name: 'Kept' } })),
@@ -487,7 +469,7 @@ describe('implicitTransaction', () => {
 
     it('keeps a committed write whose awaited audit build failed, and reports the dropped records', async () => {
       const user = await seedUser();
-      const clients = createClients({ implicitTransaction: false, failingEnricher: true });
+      const clients = createClients({ mode: 'awaited', failingEnricher: true });
 
       await expect(
         clients.run(() => clients.client.user.update({ where: { id: user.id }, data: { name: 'Kept' } })),
@@ -499,9 +481,9 @@ describe('implicitTransaction', () => {
     });
   });
 
-  describe('with implicitTransaction', () => {
+  describe('only under the atomic write mode', () => {
     it('runs a write through the audited client inside a callback of your transaction in a transaction of its own, together with its audit', async () => {
-      const clients = createClients({ implicitTransaction: true });
+      const clients = createClients({ mode: 'atomic' });
 
       await expect(
         clients.run(() =>
@@ -516,27 +498,27 @@ describe('implicitTransaction', () => {
       expect(await auditRows()).toEqual(['User.create']);
     });
 
-    describe('decides the write policy of a call once', () => {
-      const userCalls = (awaitedByModel: ReturnType<typeof vi.fn>) =>
-        awaitedByModel.mock.calls.filter(([modelName]) => modelName === 'User');
+    describe('calls the mode function for the call and for each operation that reaches the audit', () => {
+      const userCalls = (modeByModel: ReturnType<typeof vi.fn>) =>
+        modeByModel.mock.calls.filter(([modelName]) => modelName === 'User');
 
-      it('for a single write', async () => {
+      it('for a single write: once for the call, which opens the transaction, and once in the audit', async () => {
         const user = await seedUser();
-        const awaitedByModel = vi.fn((_modelName: string) => true);
-        const clients = createClients({ implicitTransaction: true, awaited: awaitedByModel });
+        const modeByModel = vi.fn((_modelName: string): WriteMode => 'atomic');
+        const clients = createClients({ mode: modeByModel });
 
         await clients.run(() => clients.client.user.update({ where: { id: user.id }, data: { name: 'Once' } }));
 
-        expect(userCalls(awaitedByModel)).toHaveLength(1);
+        expect(userCalls(modeByModel)).toHaveLength(2);
         expect(await auditRows()).toEqual(['User.update']);
       });
 
       it.each([
-        { batch: 'whose writes await their audit', awaited: true },
-        { batch: 'whose writes do not await their audit', awaited: false },
-      ])('for each write of a batch $batch', async ({ awaited }) => {
-        const awaitedByModel = vi.fn((_modelName: string) => awaited);
-        const clients = createClients({ implicitTransaction: true, awaited: awaitedByModel });
+        { batch: 'whose writes are atomic', mode: 'atomic' },
+        { batch: 'whose writes are deferred', mode: 'deferred' },
+      ] as const)('for each write of a batch $batch, once in the audit', async ({ mode }) => {
+        const modeByModel = vi.fn((_modelName: string): WriteMode => mode);
+        const clients = createClients({ mode: modeByModel });
 
         await clients.run(() =>
           clients.client.$transaction([
@@ -545,27 +527,27 @@ describe('implicitTransaction', () => {
           ]),
         );
 
-        expect(userCalls(awaitedByModel)).toHaveLength(2);
+        expect(userCalls(modeByModel)).toHaveLength(2);
         expect(await auditRows()).toEqual(['User.create', 'User.create']);
       });
 
-      describe('and applies it to a query an extension applied before the audit issues through `query` for the same call', () => {
+      describe('and for a query an extension applied before the audit issues through `query` for the same call', () => {
         it('for a single write', async () => {
-          const awaitedByModel = vi.fn((_modelName: string) => true);
-          const clients = createClients({ implicitTransaction: true, awaited: awaitedByModel, companionCreate: true });
+          const modeByModel = vi.fn((_modelName: string): WriteMode => 'atomic');
+          const clients = createClients({ mode: modeByModel, companionCreate: true });
 
           await clients.run(() => clients.client.user.create({ data: { email: 'a@example.com', name: 'A' } }));
 
-          expect(userCalls(awaitedByModel)).toHaveLength(1);
+          expect(userCalls(modeByModel)).toHaveLength(3);
           expect(await auditRows()).toEqual(['User.create', 'User.create']);
         });
 
         it.each([
-          { batch: 'whose writes await their audit', awaited: true },
-          { batch: 'whose writes do not await their audit', awaited: false },
-        ])('for each write of a batch $batch', async ({ awaited }) => {
-          const awaitedByModel = vi.fn((_modelName: string) => awaited);
-          const clients = createClients({ implicitTransaction: true, awaited: awaitedByModel, companionCreate: true });
+          { batch: 'whose writes are atomic', mode: 'atomic' },
+          { batch: 'whose writes are deferred', mode: 'deferred' },
+        ] as const)('for each write of a batch $batch', async ({ mode }) => {
+          const modeByModel = vi.fn((_modelName: string): WriteMode => mode);
+          const clients = createClients({ mode: modeByModel, companionCreate: true });
 
           await clients.run(() =>
             clients.client.$transaction([
@@ -574,45 +556,15 @@ describe('implicitTransaction', () => {
             ]),
           );
 
-          expect(userCalls(awaitedByModel)).toHaveLength(2);
+          expect(userCalls(modeByModel)).toHaveLength(4);
           expect(await auditRows()).toEqual(['User.create', 'User.create', 'User.create', 'User.create']);
         });
-
-        it('and leaves both queries out when sampling leaves the call out', async () => {
-          let rate = 0;
-          const samplingByModel = vi.fn((_modelName: string) => {
-            const current = rate;
-            rate = 1;
-            return current;
-          });
-          const clients = createClients({
-            implicitTransaction: true,
-            samplingRate: samplingByModel,
-            companionCreate: true,
-          });
-
-          await clients.run(() => clients.client.user.create({ data: { email: 'a@example.com', name: 'A' } }));
-
-          expect(samplingByModel).toHaveBeenCalledTimes(1);
-          expect(await auditRows()).toEqual([]);
-        });
-      });
-
-      it('and not at all for a write sampling leaves out', async () => {
-        const user = await seedUser();
-        const awaitedByModel = vi.fn((_modelName: string) => true);
-        const clients = createClients({ implicitTransaction: true, awaited: awaitedByModel, samplingRate: 0 });
-
-        await clients.run(() => clients.client.user.update({ where: { id: user.id }, data: { name: 'Unsampled' } }));
-
-        expect(userCalls(awaitedByModel)).toHaveLength(0);
-        expect(await auditRows()).toEqual([]);
       });
     });
 
-    it('rolls a write back when its awaited audit write fails', async () => {
+    it('rolls a write back when its atomic audit write fails', async () => {
       const user = await seedUser();
-      const clients = createClients({ implicitTransaction: true, writer: failingWriter });
+      const clients = createClients({ mode: 'atomic', writer: failingWriter });
 
       await expect(
         clients.run(() => clients.client.user.update({ where: { id: user.id }, data: { name: 'Lost' } })),
@@ -623,7 +575,7 @@ describe('implicitTransaction', () => {
 
     it('runs each client derived from the audited client through its own extensions only', async () => {
       const user = await seedUser();
-      const clients = createClients({ implicitTransaction: true });
+      const clients = createClients({ mode: 'atomic' });
       const first: Seen = { updates: 0, others: 0 };
       const second: Seen = { updates: 0, others: 0 };
       const firstClient = clients.audited.$extends(recorder('first', first, '1'));

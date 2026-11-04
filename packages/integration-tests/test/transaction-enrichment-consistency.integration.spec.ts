@@ -41,7 +41,7 @@ describe('Transaction Enrichment Consistency', () => {
           }),
         },
         write: {
-          awaited: true,
+          mode: 'awaited',
         },
       });
 
@@ -102,7 +102,7 @@ describe('Transaction Enrichment Consistency', () => {
           User: defineEntity({ type: 'User' }),
         },
         write: {
-          awaited: true,
+          mode: 'awaited',
         },
       });
 
@@ -213,7 +213,7 @@ describe('Transaction Enrichment Consistency', () => {
           User: defineEntity({ type: 'User' }),
         },
         write: {
-          awaited: true,
+          mode: 'awaited',
         },
       });
 
@@ -301,7 +301,7 @@ describe('Transaction Enrichment Consistency', () => {
           fallback: null,
         },
         write: {
-          awaited: true,
+          mode: 'awaited',
         },
       });
 
@@ -368,7 +368,7 @@ describe('Transaction Enrichment Consistency', () => {
           }),
         },
         write: {
-          awaited: true,
+          mode: 'awaited',
         },
       });
 

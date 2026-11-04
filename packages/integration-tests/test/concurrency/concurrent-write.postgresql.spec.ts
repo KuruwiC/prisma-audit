@@ -54,10 +54,7 @@ describe('concurrent writes on PostgreSQL: a commit between the audit read and t
   const base = rawBase.$extends({ name: 'read-barrier', query: barrier.query });
   const auditOptions = { ...testAuditOptions(provider, { Prisma, schema: auditSchema }), errorObserver: observer };
   const prisma = createAuditClient(base, auditOptions);
-  const implicitPrisma = createAuditClient(base, {
-    ...auditOptions,
-    write: { awaited: true, implicitTransaction: true },
-  });
+  const atomicPrisma = createAuditClient(base, { ...auditOptions, write: { mode: 'atomic' } });
   type Transaction = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
   /** The other writer: a client without the audit */
   const other = createBasePrisma();
@@ -96,7 +93,7 @@ describe('concurrent writes on PostgreSQL: a commit between the audit read and t
 
   afterAll(async () => {
     await prisma.$disconnect();
-    await implicitPrisma.$disconnect();
+    await atomicPrisma.$disconnect();
     await rawBase.$disconnect();
     await other.$disconnect();
   });
@@ -149,11 +146,11 @@ describe('concurrent writes on PostgreSQL: a commit between the audit read and t
       ]);
     });
 
-    it('records the before state read ahead of a commit that lands between the read and the update in the transaction write.implicitTransaction opens', async () => {
+    it('records the before state read ahead of a commit that lands between the read and the update in the transaction the client opens for an atomic write', async () => {
       await seedPost(POST_ID);
 
       const outcome = await interleave(barrier, postFindUnique, {
-        operation: () => asActor(() => implicitPrisma.post.update({ where: { id: POST_ID }, data: { title: '120' } })),
+        operation: () => asActor(() => atomicPrisma.post.update({ where: { id: POST_ID }, data: { title: '120' } })),
         interleaved: () => other.post.update({ where: { id: POST_ID }, data: { title: '110' } }),
       });
 

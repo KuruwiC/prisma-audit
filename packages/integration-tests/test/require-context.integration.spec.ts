@@ -10,7 +10,7 @@
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
-import type { EntityMap, PrismaAuditExtensionOptions } from '@kuruwic/prisma-audit';
+import type { EntityMap, PrismaAuditExtensionOptions, WriteMode } from '@kuruwic/prisma-audit';
 import { AuditContextMissingError, createAuditClient, defineEntity, foreignKey, to } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
@@ -43,8 +43,8 @@ const addsNestedPost = (name: string) =>
 interface ClientOptions {
   readonly entities: EntityMap;
   readonly requireContext?: PrismaAuditExtensionOptions['requireContext'];
-  readonly samplingRate?: number;
-  readonly implicitTransaction?: boolean;
+  /** @default 'awaited' */
+  readonly mode?: WriteMode;
   /** Where an extension that adds a nested Post create to every `user.update` sits */
   readonly addsNestedPost?: 'before the audit' | 'after the audit';
 }
@@ -80,8 +80,7 @@ describe('audit coverage by the audited models a write writes', () => {
         contextProvider: provider,
         entities: options.entities,
         requireContext: options.requireContext,
-        samplingRate: options.samplingRate,
-        write: { awaited: true, implicitTransaction: options.implicitTransaction ?? false },
+        write: { mode: options.mode ?? 'awaited' },
       },
     );
     const client = options.addsNestedPost === 'after the audit' ? audited.$extends(addsNestedPost('after')) : audited;
@@ -324,12 +323,12 @@ describe('audit coverage by the audited models a write writes', () => {
       );
     });
 
-    it('rejects without an audit context, with implicitTransaction, a user.update to which an extension applied before the audit adds a nested Post create, requireContext holding for Post', async () => {
+    it('rejects without an audit context, under the atomic write mode, a user.update to which an extension applied before the audit adds a nested Post create, requireContext holding for Post', async () => {
       const user = await seedUser();
       const { client } = createClient({
         entities: userAndPost,
         requireContext: (modelName) => modelName === 'Post',
-        implicitTransaction: true,
+        mode: 'atomic',
         addsNestedPost: 'before the audit',
       });
 
@@ -345,20 +344,20 @@ describe('audit coverage by the audited models a write writes', () => {
       expect(await raw.auditLog.count()).toBe(0);
     });
 
-    it('rejects without an audit context, with implicitTransaction, a create of a model it holds for, leaving the database unchanged', async () => {
-      const { client } = createClient({ entities: userAndPost, requireContext: true, implicitTransaction: true });
+    it('rejects without an audit context, under the atomic write mode, a create of a model it holds for, leaving the database unchanged', async () => {
+      const { client } = createClient({ entities: userAndPost, requireContext: true, mode: 'atomic' });
 
       await rejectsUnchanged(() => client.user.create({ data: { email: 'new@example.com' } }), 'User');
     });
 
-    it.each([true, false])(
-      'rejects without an audit context a batch $transaction([...]) whose second operation writes a model it holds for, leaving the database unchanged (implicitTransaction: %s)',
-      async (implicitTransaction) => {
+    it.each(['atomic', 'awaited'] as const)(
+      'rejects without an audit context a batch $transaction([...]) whose second operation writes a model it holds for, leaving the database unchanged (write mode: %s)',
+      async (mode) => {
         const user = await seedUser();
         const { client } = createClient({
           entities: userAndPost,
           requireContext: (modelName) => modelName === 'Post',
-          implicitTransaction,
+          mode,
         });
         const before = await databaseState();
 
@@ -371,12 +370,6 @@ describe('audit coverage by the audited models a write writes', () => {
         expect(await databaseState()).toEqual(before);
       },
     );
-
-    it('rejects without an audit context a write of a model it holds for at a samplingRate of 0', async () => {
-      const { client } = createClient({ entities: userAndPost, requireContext: true, samplingRate: 0 });
-
-      await rejectsUnchanged(() => client.user.create({ data: { email: 'new@example.com' } }), 'User');
-    });
 
     it('runs a write without an audit context unaudited when requireContext is not set', async () => {
       const { client } = createClient({ entities: userAndPost });

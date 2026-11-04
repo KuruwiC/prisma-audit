@@ -293,7 +293,7 @@ describe('createMany with skipDuplicates and rows whose data gives their primary
       schema: auditSchema,
       contextProvider: provider,
       entities: testEntities,
-      write: { awaited: true },
+      write: { mode: 'awaited' },
       errorObserver: observer,
     });
     disconnects.push(async () => {

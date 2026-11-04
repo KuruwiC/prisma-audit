@@ -72,6 +72,8 @@ describe('nested rows attributed through their parent row', () => {
       diffExcludeFields: ['createdAt', 'updatedAt'],
       fetchBefore: { update: options.fetchBeforeUpdate ?? true },
       errorObserver: observer,
+      // Under the awaited mode a dropped entry is only reported; an atomic write would fail instead
+      write: { mode: 'awaited' },
     });
     disconnects.push(async () => {
       await prisma.$disconnect();

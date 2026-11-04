@@ -53,7 +53,7 @@ describe('Context Enrichment Integration', () => {
       Prisma,
       schema: auditSchema,
       contextProvider: provider,
-      write: { awaited: true },
+      write: { mode: 'awaited' },
       ...options,
     });
     return { basePrisma, prisma, provider };

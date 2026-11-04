@@ -34,7 +34,7 @@ describe('Custom Audit Log Table', () => {
       contextProvider: provider,
       entities: testEntities,
       write: {
-        awaited: true,
+        mode: 'awaited',
       },
     });
 
@@ -46,7 +46,7 @@ describe('Custom Audit Log Table', () => {
       entities: testEntities,
       write: {
         model: 'Activity',
-        awaited: true,
+        mode: 'awaited',
       },
     });
 

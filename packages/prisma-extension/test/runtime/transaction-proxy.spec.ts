@@ -31,6 +31,8 @@ import {
   createEntityId,
   createFailureSink,
   type FailureSink,
+  planFor,
+  type WriteMode,
 } from '@kuruwic/db-audit-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuditRollbackError } from '../../src/errors.js';
@@ -104,7 +106,10 @@ const auditWriteOf = (deps: AuditPipelineDependencies) => vi.mocked(deps.dispatc
 const writtenIds = (deps: AuditPipelineDependencies): string[] =>
   auditWriteOf(deps).mock.calls.flatMap(([, records]) => records.map((written) => String(written.entityId)));
 
-/** The arguments of a create of the row `id` on the audited client: its audit is awaited when `atomic`, and its own write fails when `fails` */
+/**
+ * The arguments of a create of the row `id` on the audited client: its write mode is atomic when
+ * `atomic` and deferred otherwise, and its own write fails when `fails`
+ */
 interface CreateArgs {
   readonly id: string;
   readonly atomic: boolean;
@@ -119,8 +124,14 @@ interface CreateArgs {
 const auditedClientOf = (deps: AuditPipelineDependencies) => ({
   user: {
     create: (args: CreateArgs) =>
-      lazyOperation(() =>
-        runAuditedOperation(
+      lazyOperation(() => {
+        const mode: WriteMode = args.atomic ? 'atomic' : 'deferred';
+        const transaction = operationBinding()?.transaction;
+        const plan = planFor(mode, transaction !== undefined);
+        if (plan === 'reject') {
+          throw new Error('an atomic create reached the audit outside any transaction');
+        }
+        return runAuditedOperation(
           {
             operation: {
               model: 'User',
@@ -134,12 +145,13 @@ const auditedClientOf = (deps: AuditPipelineDependencies) => ({
             },
             auditContext: baseContext,
             baseClient,
-            atomic: args.atomic,
-            transaction: operationBinding()?.transaction,
+            mode,
+            plan,
+            transaction,
           },
           deps,
-        ),
-      ),
+        );
+      }),
   },
 });
 
@@ -188,16 +200,14 @@ const transactionOf = <TTx extends object>(
     ): Promise<unknown> => (typeof first === 'function' ? settle(async () => first(txClient)) : Promise.all(first)),
   );
 
-const recipeConfig: RecipeConfig = {
+/** A recipe config by which every call is an atomic write when `atomic`, and none otherwise */
+const recipeConfigAtomic = (atomic: boolean): RecipeConfig => ({
   modelOfAccessor: new Map([['user', 'User']]),
   relatedModel: () => undefined,
-};
-
-/** The recipe config with `write.implicitTransaction`: every write is sampled in, its audit awaited or not */
-const recipeConfigAwaiting = (awaitsAudit: boolean): RecipeConfig => ({
-  ...recipeConfig,
-  decideWritePolicy: () => ({ sampled: true, atomic: awaitsAudit }),
+  isAtomicWrite: () => atomic,
 });
+
+const recipeConfig = recipeConfigAtomic(false);
 
 describe('createTransactionProxy (property access)', () => {
   /** A client with methods on its prototype, as a Prisma client has */
@@ -215,7 +225,11 @@ describe('createTransactionProxy (property access)', () => {
     }
   }
 
-  const noModels: RecipeConfig = { modelOfAccessor: new Map(), relatedModel: () => undefined };
+  const noModels: RecipeConfig = {
+    modelOfAccessor: new Map(),
+    relatedModel: () => undefined,
+    isAtomicWrite: () => false,
+  };
 
   it('returns every property other than $transaction, $extends and the wrapped operations as the client holds it', () => {
     const target = new FakeClient();
@@ -485,14 +499,14 @@ describe('createTransactionProxy (operation recipes)', () => {
   };
 
   it('returns the same delegate and the same action for a property read twice', () => {
-    const { proxy } = createRecipeProxy(recipeConfigAwaiting(true));
+    const { proxy } = createRecipeProxy(recipeConfigAtomic(true));
 
     expect(proxy.user).toBe(proxy.user);
     expect(proxy.user.create).toBe(proxy.user.create);
   });
 
-  it('runs nothing until a call is awaited, then runs a write whose audit is awaited in an interactive transaction of the client', async () => {
-    const { provider, proxy, tx, ran, $transaction } = createRecipeProxy(recipeConfigAwaiting(true));
+  it('runs nothing until a call is awaited, then runs an atomic write in an interactive transaction of the client', async () => {
+    const { provider, proxy, tx, ran, $transaction } = createRecipeProxy(recipeConfigAtomic(true));
 
     const created = proxy.user.create({ email: 'a' });
     expect(ran).toEqual([]);
@@ -505,8 +519,8 @@ describe('createTransactionProxy (operation recipes)', () => {
     expect(ran.map(transactionClientOf)).toEqual([tx]);
   });
 
-  it('runs a call whose audit is not awaited on the client itself, bound to no transaction', async () => {
-    const { provider, proxy, ran, $transaction } = createRecipeProxy(recipeConfigAwaiting(false));
+  it('runs a call that is not an atomic write on the client itself, bound to no transaction', async () => {
+    const { provider, proxy, ran, $transaction } = createRecipeProxy(recipeConfigAtomic(false));
 
     await provider.runAsync(baseContext, async () => await proxy.user.create({ email: 'a' }));
 
@@ -517,11 +531,10 @@ describe('createTransactionProxy (operation recipes)', () => {
 
   describe('a batch $transaction holding a write', () => {
     it.each([
-      { audit: 'awaited', config: recipeConfigAwaiting(true) },
-      { audit: 'not awaited', config: recipeConfigAwaiting(false) },
-      { audit: 'not decided', config: recipeConfig },
+      { write: 'an atomic write', config: recipeConfigAtomic(true) },
+      { write: 'not an atomic write', config: recipeConfigAtomic(false) },
     ])(
-      'runs as one interactive transaction of the client, its operations in order and bound to it, whose audit is $audit, at the isolation level of the caller',
+      'runs as one interactive transaction of the client, its operations in order and bound to it, when its write is $write, at the isolation level of the caller',
       async ({ config }) => {
         const { provider, proxy, tx, ran, $transaction } = createRecipeProxy(config);
 
@@ -545,7 +558,7 @@ describe('createTransactionProxy (operation recipes)', () => {
     );
 
     it('is given only the isolation level of the options of the batch, and none when there is none', async () => {
-      const { provider, proxy, $transaction } = createRecipeProxy(recipeConfigAwaiting(true));
+      const { provider, proxy, $transaction } = createRecipeProxy(recipeConfigAtomic(true));
 
       await provider.runAsync(baseContext, async () => {
         await proxy.$transaction([proxy.user.create({ email: 'a' })], { isolationLevel: 'Serializable', maxWait: 1 });
@@ -561,7 +574,7 @@ describe('createTransactionProxy (operation recipes)', () => {
     });
 
     it('rejects a batch holding an operation that is not a call of the client before running anything', async () => {
-      const { provider, proxy, ran, $transaction } = createRecipeProxy(recipeConfigAwaiting(true));
+      const { provider, proxy, ran, $transaction } = createRecipeProxy(recipeConfigAtomic(true));
       const foreign = vi.fn(() => 'foreign');
 
       await expect(
@@ -578,10 +591,9 @@ describe('createTransactionProxy (operation recipes)', () => {
 
   describe("a batch $transaction of reads and raw queries only, which is Prisma's own batch", () => {
     it.each([
-      { audit: 'awaited', config: recipeConfigAwaiting(true) },
-      { audit: 'not awaited', config: recipeConfigAwaiting(false) },
-      { audit: 'not decided', config: recipeConfig },
-    ])('passes its operations and its options to Prisma, whose audit is $audit', async ({ config }) => {
+      { write: 'an atomic write', config: recipeConfigAtomic(true) },
+      { write: 'not an atomic write', config: recipeConfigAtomic(false) },
+    ])('passes its operations and its options to Prisma, when a write is $write', async ({ config }) => {
       const { provider, proxy, ran, $transaction } = createRecipeProxy(config);
       const options = { isolationLevel: 'Serializable', maxWait: 1 };
 
@@ -598,7 +610,7 @@ describe('createTransactionProxy (operation recipes)', () => {
     });
 
     it('starts its operations without a binding, so that a write reaching the audit from one is unbound', async () => {
-      const { provider, proxy, ran } = createRecipeProxy(recipeConfigAwaiting(true));
+      const { provider, proxy, ran } = createRecipeProxy(recipeConfigAtomic(true));
 
       await provider.runAsync(baseContext, () => proxy.$transaction([proxy.user.findMany(), proxy.$queryRaw()]));
 
@@ -616,7 +628,7 @@ describe('createTransactionProxy (operation recipes)', () => {
   });
 
   it("passes an empty batch to Prisma's own batch, which has nothing to run", async () => {
-    const { provider, proxy, ran, $transaction } = createRecipeProxy(recipeConfigAwaiting(true));
+    const { provider, proxy, ran, $transaction } = createRecipeProxy(recipeConfigAtomic(true));
 
     await expect(provider.runAsync(baseContext, () => proxy.$transaction([]))).resolves.toEqual([]);
 

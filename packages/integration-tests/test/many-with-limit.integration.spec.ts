@@ -73,7 +73,7 @@ describe('updateMany and deleteMany with a limit', () => {
         schema: auditSchema,
         contextProvider: provider,
         entities: { User: defineEntity({ type: 'User' }) },
-        write: { awaited: false },
+        write: { mode: 'deferred' },
         errorObserver: observer,
       },
     ).$extends({

@@ -94,6 +94,8 @@ describe('fields a client-level omit hides', () => {
       contextProvider: provider,
       entities: testEntities,
       diffExcludeFields: ['createdAt', 'updatedAt'],
+      // Under the awaited mode a dropped entry is only reported; an atomic write would fail instead
+      write: { mode: 'awaited' },
       ...options,
     });
     disconnects.push(() => prisma.$disconnect());

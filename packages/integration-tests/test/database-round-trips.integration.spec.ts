@@ -9,7 +9,7 @@
  * `$on('query', ...)`), so such a regression shows up here.
  *
  * Each test pins the exact statement sequence the implementation issues for that scenario
- * with the default settings, under which the audit extension opens no transaction around the
+ * under `write.mode: 'awaited'`, under which the audit extension opens no transaction around the
  * operation, as the verb and table of every statement; the numbered comments say why each
  * statement is there. A change that moves the sequence must update the list and its comments
  * to describe the new sequence — never loosen the assertion instead.
@@ -78,6 +78,7 @@ const createAuditedClientWithQueryLog = (
     schema: auditSchema,
     contextProvider: provider,
     entities: testEntities,
+    write: { mode: 'awaited' },
   });
 
   return { basePrisma, provider, prisma };
@@ -551,6 +552,7 @@ describe('Database Round-Trip Guard: fields an entity lists in recordOmittedFiel
           recordOmittedFields: ['content'],
         }),
       },
+      write: { mode: 'awaited' },
     });
   });
 

@@ -1,60 +1,64 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { policy } from '../src/policy/index.js';
+import { describe, expect, it, vi } from 'vitest';
+import { AuditAtomicityError, planFor, policy, type WriteMode } from '../src/policy/index.js';
 
 describe('policy', () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
+  it.each(['atomic', 'awaited', 'deferred'] as const)('is %s for every model when the mode is that value', (mode) => {
+    expect(policy(['User', 'Post'], { mode })).toBe(mode);
   });
 
-  it.each([true, false])('is atomic exactly when awaited is %s', (awaited) => {
-    expect(policy('User', { awaited, samplingRate: 1 })).toEqual({ sampled: true, atomic: awaited });
+  it('calls the mode function once per audited model, with its name', () => {
+    const mode = vi.fn((): WriteMode => 'awaited');
+
+    policy(['User', 'Payment'], { mode });
+
+    expect(mode).toHaveBeenCalledTimes(2);
+    expect(mode).toHaveBeenNthCalledWith(1, 'User');
+    expect(mode).toHaveBeenNthCalledWith(2, 'Payment');
   });
 
-  it.each([true, false])('is atomic exactly when the awaited function returns %s', (awaited) => {
-    expect(policy('User', { awaited: () => awaited, samplingRate: 1 })).toEqual({ sampled: true, atomic: awaited });
+  it.each([
+    { modes: { User: 'deferred', Payment: 'atomic' }, strongest: 'atomic' },
+    { modes: { User: 'awaited', Payment: 'deferred' }, strongest: 'awaited' },
+    { modes: { User: 'atomic', Payment: 'awaited' }, strongest: 'atomic' },
+    { modes: { User: 'deferred', Payment: 'deferred' }, strongest: 'deferred' },
+  ] as const)('takes the strongest mode of the audited models ($strongest)', ({ modes, strongest }) => {
+    expect(policy(['User', 'Payment'], { mode: (modelName) => modes[modelName as keyof typeof modes] })).toBe(
+      strongest,
+    );
   });
 
-  it('calls the awaited function once with the model name', () => {
-    const awaited = vi.fn(() => true);
+  it('is deferred, the weakest mode, for no audited model, without calling the mode function', () => {
+    const mode = vi.fn((): WriteMode => 'atomic');
 
-    policy('Payment', { awaited, samplingRate: 1 });
-
-    expect(awaited).toHaveBeenCalledTimes(1);
-    expect(awaited).toHaveBeenCalledWith('Payment');
+    expect(policy([], { mode })).toBe('deferred');
+    expect(mode).not.toHaveBeenCalled();
   });
+});
 
-  it('decides per model with the awaited function', () => {
-    const config = { awaited: (modelName: string) => modelName === 'Payment', samplingRate: 1 };
+describe('planFor', () => {
+  it.each([
+    { mode: 'atomic', inOwnedTransaction: true, plan: 'immediate' },
+    { mode: 'atomic', inOwnedTransaction: false, plan: 'reject' },
+    { mode: 'awaited', inOwnedTransaction: true, plan: 'immediate' },
+    { mode: 'awaited', inOwnedTransaction: false, plan: 'awaited-after-commit' },
+    { mode: 'deferred', inOwnedTransaction: true, plan: 'after-commit' },
+    { mode: 'deferred', inOwnedTransaction: false, plan: 'detached' },
+  ] as const)(
+    'plans $plan for $mode, inOwnedTransaction: $inOwnedTransaction',
+    ({ mode, inOwnedTransaction, plan }) => {
+      expect(planFor(mode, inOwnedTransaction)).toBe(plan);
+    },
+  );
+});
 
-    expect(policy('Payment', config)).toEqual({ sampled: true, atomic: true });
-    expect(policy('Comment', config)).toEqual({ sampled: true, atomic: false });
-  });
+describe('AuditAtomicityError', () => {
+  it('names the operation it rejects', () => {
+    const error = new AuditAtomicityError({ modelName: 'Payment', operation: 'create' });
 
-  describe('samplingRate', () => {
-    it('samples out every operation at a rate of 0 and never calls the awaited function for it', () => {
-      const awaited = vi.fn(() => true);
-
-      expect(policy('User', { awaited, samplingRate: 0 })).toEqual({ sampled: false });
-      expect(awaited).not.toHaveBeenCalled();
-    });
-
-    it('samples in an operation whose random draw is below the rate, and out one at the rate', () => {
-      const random = vi.spyOn(Math, 'random');
-
-      random.mockReturnValueOnce(0.49);
-      expect(policy('User', { awaited: true, samplingRate: 0.5 })).toEqual({ sampled: true, atomic: true });
-      random.mockReturnValueOnce(0.5);
-      expect(policy('User', { awaited: true, samplingRate: 0.5 })).toEqual({ sampled: false });
-    });
-
-    it('takes the rate from the samplingRate function, called once with the model name', () => {
-      const samplingRate = vi.fn((modelName: string) => (modelName === 'Payment' ? 1 : 0));
-
-      expect(policy('Payment', { awaited: false, samplingRate })).toEqual({ sampled: true, atomic: false });
-      expect(policy('Comment', { awaited: false, samplingRate })).toEqual({ sampled: false });
-      expect(samplingRate).toHaveBeenCalledTimes(2);
-      expect(samplingRate).toHaveBeenNthCalledWith(1, 'Payment');
-      expect(samplingRate).toHaveBeenNthCalledWith(2, 'Comment');
-    });
+    expect(error).toBeInstanceOf(Error);
+    expect(error.name).toBe('AuditAtomicityError');
+    expect(error.modelName).toBe('Payment');
+    expect(error.operation).toBe('create');
+    expect(error.message).toContain('create on Payment');
   });
 });

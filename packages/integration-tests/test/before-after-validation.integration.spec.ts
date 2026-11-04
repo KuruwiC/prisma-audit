@@ -74,13 +74,13 @@ describe('Before/After Field Validation', () => {
       expect(updated.updatedAt).toBeInstanceOf(Date);
     });
 
-    it('returns Date instances from a create with awaited: false', async () => {
+    it("returns Date instances from a create with mode: 'deferred'", async () => {
       const prisma = createAuditClient(context.basePrisma, {
         Prisma,
         schema: auditSchema,
         contextProvider: context.provider,
         entities: testEntities,
-        write: { awaited: false },
+        write: { mode: 'deferred' },
       });
 
       const user = await context.provider.runAsync(testActor, () =>

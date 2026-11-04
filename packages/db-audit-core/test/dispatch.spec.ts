@@ -1,6 +1,6 @@
 /**
- * Tests for dispatch: the records are built before it resolves, each policy and transaction state
- * writes them on the right handle at the right time (immediately and awaited, after commit, or
+ * Tests for dispatch: the records are built before it resolves, each write plan writes them on
+ * the right handle at the right time (immediately and awaited, after commit, or
  * detached), the writer hook receives where the write runs, a failed write reaches the failure sink
  * with the write plan it belongs to, and a failed build is reported as diff-generation and fails
  * the caller unless the write would be detached, where the dropped records are reported without
@@ -10,7 +10,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { type DispatchConfig, dispatch } from '../src/dispatch/index.js';
 import { createActorId, createAggregateId, createEntityId } from '../src/domain/branded-types.js';
-import type { AuditRecord } from '../src/domain/mutation-event.js';
+import type { AuditRecord, WritePlanKind } from '../src/domain/mutation-event.js';
 import type { TransactionRuntime, WriteContext, WriteExecutor, WriteFn } from '../src/domain/write.js';
 import { type AuditErrorContext, createFailureSink, type FailureSink } from '../src/failure/index.js';
 import type { AuditContext } from '../src/types.js';
@@ -115,10 +115,10 @@ const logWriteContext: AuditErrorContext = {
 /** How a failure report names the dispatched operation */
 const operationFacts = { modelName: 'Post', operation: 'create', params: { id: 'post-1' } };
 
-const audited = (atomic: boolean, buildRecords: () => Promise<readonly AuditRecord[]> = async () => records) => ({
+const audited = (plan: WritePlanKind, buildRecords: () => Promise<readonly AuditRecord[]> = async () => records) => ({
   buildRecords,
   ...operationFacts,
-  atomic,
+  plan,
   auditContext,
 });
 
@@ -146,7 +146,7 @@ describe('dispatch', () => {
     vi.useRealTimers();
   });
 
-  describe('immediately, for an atomic policy', () => {
+  describe('immediately, for an immediate plan', () => {
     it('writes the records on the transaction handle and resolves only once the write has finished', async () => {
       vi.useFakeTimers();
       const writeReleased = deferred();
@@ -159,7 +159,7 @@ describe('dispatch', () => {
       });
       const { runtime, afterCommit, detach } = createRuntime(true);
 
-      const dispatched = dispatch(audited(true), config, runtime).then(() => {
+      const dispatched = dispatch(audited('immediate'), config, runtime).then(() => {
         events.push('dispatch resolved');
       });
       await runPendingContinuations();
@@ -176,7 +176,7 @@ describe('dispatch', () => {
     it('reports a failed write with its immediate plan, which carries the records by reference', async () => {
       const { config, failureSink } = createConfig({ write: failingWrite });
 
-      await dispatch(audited(true), config, createRuntime(true).runtime);
+      await dispatch(audited('immediate'), config, createRuntime(true).runtime);
 
       expect(failureSink.reportWriteFailure).toHaveBeenCalledWith({ kind: 'immediate', records }, writeError);
       expect(vi.mocked(failureSink.reportWriteFailure).mock.calls[0]?.[0].records).toBe(records);
@@ -186,24 +186,24 @@ describe('dispatch', () => {
       const { failureSink, observed } = observingSink();
       const { config } = createConfig({ write: failingWrite, failureSink });
 
-      await expect(dispatch(audited(true), config, createRuntime(true).runtime)).rejects.toBe(writeError);
+      await expect(dispatch(audited('immediate'), config, createRuntime(true).runtime)).rejects.toBe(writeError);
       expect(observed).toEqual([logWriteContext]);
     });
 
     it('rejects with the original error without an observer, logging nothing', async () => {
       const { config } = createConfig({ write: failingWrite, failureSink: createFailureSink({}) });
 
-      await expect(dispatch(audited(true), config, createRuntime(true).runtime)).rejects.toBe(writeError);
+      await expect(dispatch(audited('immediate'), config, createRuntime(true).runtime)).rejects.toBe(writeError);
       expect(consoleError).not.toHaveBeenCalled();
     });
   });
 
-  describe('after commit, for a non-atomic policy inside a transaction', () => {
+  describe('after commit, for an after-commit plan inside a transaction', () => {
     it('registers one work with the transaction and writes nothing until it runs, then writes on the base handle', async () => {
       const { config, writeExecutor } = createConfig();
       const { runtime, afterCommit, detach, afterCommitted } = createRuntime(true);
 
-      await dispatch(audited(false), config, runtime);
+      await dispatch(audited('after-commit'), config, runtime);
 
       expect(afterCommit).toHaveBeenCalledTimes(1);
       expect(detach).not.toHaveBeenCalled();
@@ -218,7 +218,7 @@ describe('dispatch', () => {
       const { config, failureSink } = createConfig({ write: failingWrite });
       const { runtime, afterCommitted } = createRuntime(true);
 
-      await dispatch(audited(false), config, runtime);
+      await dispatch(audited('after-commit'), config, runtime);
       expect(failureSink.reportWriteFailure).not.toHaveBeenCalled();
       await runAll(afterCommitted);
 
@@ -230,19 +230,19 @@ describe('dispatch', () => {
       const { config } = createConfig({ write: failingWrite, failureSink });
       const { runtime, afterCommitted } = createRuntime(true);
 
-      await dispatch(audited(false), config, runtime);
+      await dispatch(audited('after-commit'), config, runtime);
 
       await expect(afterCommitted[0]?.()).resolves.toBeUndefined();
       expect(observed).toEqual([logWriteContext]);
     });
   });
 
-  describe('detached, for a non-atomic policy outside any transaction', () => {
+  describe('detached, for a detached plan outside any transaction', () => {
     it('hands one work to detach and writes nothing until it runs, then writes on the base handle', async () => {
       const { config, writeExecutor } = createConfig();
       const { runtime, detach, detached } = createRuntime(false);
 
-      await dispatch(audited(false), config, runtime);
+      await dispatch(audited('detached'), config, runtime);
 
       expect(detach).toHaveBeenCalledTimes(1);
       expect(writeExecutor.write).not.toHaveBeenCalled();
@@ -256,7 +256,7 @@ describe('dispatch', () => {
       const { config, failureSink } = createConfig({ write: () => Promise.reject('insert failed') });
       const { runtime, detached } = createRuntime(false);
 
-      await dispatch(audited(false), config, runtime);
+      await dispatch(audited('detached'), config, runtime);
       await runAll(detached);
 
       expect(failureSink.reportWriteFailure).toHaveBeenCalledWith({ kind: 'detached', records }, expect.any(Error));
@@ -268,7 +268,7 @@ describe('dispatch', () => {
       const { config } = createConfig({ write: failingWrite, failureSink });
       const { runtime, detached } = createRuntime(false);
 
-      await dispatch(audited(false), config, runtime);
+      await dispatch(audited('detached'), config, runtime);
 
       await expect(detached[0]?.()).resolves.toBeUndefined();
       expect(observed).toEqual([logWriteContext]);
@@ -277,26 +277,26 @@ describe('dispatch', () => {
 
   describe('the writer hook', () => {
     it.each([
-      { plan: 'immediate inside a transaction', atomic: true, inTransaction: true, handle: transactionHandle },
-      { plan: 'immediate outside any transaction', atomic: true, inTransaction: false, handle: baseHandle },
-      { plan: 'after commit', atomic: false, inTransaction: true, handle: baseHandle },
-      { plan: 'detached', atomic: false, inTransaction: false, handle: baseHandle },
-    ])(
+      { plan: 'immediate', inTransaction: true, handle: transactionHandle },
+      { plan: 'awaited-after-commit', inTransaction: false, handle: baseHandle },
+      { plan: 'after-commit', inTransaction: true, handle: baseHandle },
+      { plan: 'detached', inTransaction: false, handle: baseHandle },
+    ] as const)(
       'receives the audit context, the handle the write runs on, whether it is the transaction handle and a default write on it ($plan)',
-      async ({ atomic, inTransaction, handle }) => {
+      async ({ plan, inTransaction, handle }) => {
         const writer = vi.fn(async (written: AuditRecord[], { defaultWrite }: WriteContext<Handle>) =>
           defaultWrite(written),
         );
         const { config, writeExecutor } = createConfig({ writer });
         const { runtime, afterCommitted, detached } = createRuntime(inTransaction);
 
-        await dispatch(audited(atomic), config, runtime);
+        await dispatch(audited(plan), config, runtime);
         await runAll([...afterCommitted, ...detached]);
 
         expect(writer).toHaveBeenCalledWith([record], {
           auditContext,
           handle,
-          inTransaction: atomic && inTransaction,
+          inTransaction: plan === 'immediate',
           defaultWrite: expect.any(Function),
         });
         expect(writeExecutor.write).toHaveBeenCalledWith(handle, [record]);
@@ -310,7 +310,7 @@ describe('dispatch', () => {
       );
       const { config, writeExecutor } = createConfig({ writer });
 
-      await dispatch(audited(true), config, createRuntime(true).runtime);
+      await dispatch(audited('immediate'), config, createRuntime(true).runtime);
 
       expect(writeExecutor.write).toHaveBeenCalledTimes(1);
       expect(writeExecutor.write).toHaveBeenCalledWith(transactionHandle, [changed]);
@@ -320,12 +320,26 @@ describe('dispatch', () => {
       const writer = vi.fn(failingWrite);
       const { config, writeExecutor, failureSink } = createConfig({ writer });
 
-      await dispatch(audited(true), config, createRuntime(true).runtime);
+      await dispatch(audited('immediate'), config, createRuntime(true).runtime);
 
       expect(writeExecutor.write).not.toHaveBeenCalled();
       expect(failureSink.reportWriteFailure).toHaveBeenCalledWith({ kind: 'immediate', records }, writeError);
     });
   });
+
+  it.each(['immediate', 'after-commit'] as const)(
+    'rejects a %s plan outside any transaction before building or writing anything',
+    async (plan) => {
+      const buildRecords = vi.fn(async () => records);
+      const { config, writeExecutor } = createConfig();
+
+      await expect(dispatch(audited(plan, buildRecords), config, createRuntime(false).runtime)).rejects.toThrow(
+        `The ${plan} write plan needs the operation's transaction, and the operation runs outside any`,
+      );
+      expect(buildRecords).not.toHaveBeenCalled();
+      expect(writeExecutor.write).not.toHaveBeenCalled();
+    },
+  );
 
   it('reports every record of a failed write even when the writer emptied the array it was given', async () => {
     const built = [record];
@@ -336,7 +350,7 @@ describe('dispatch', () => {
     const { config, failureSink } = createConfig({ writer });
 
     await dispatch(
-      audited(true, async () => built),
+      audited('immediate', async () => built),
       config,
       createRuntime(true).runtime,
     );
@@ -348,15 +362,15 @@ describe('dispatch', () => {
   });
 
   it.each([
-    { plan: 'immediate', atomic: true, inTransaction: true },
-    { plan: 'after commit', atomic: false, inTransaction: true },
-    { plan: 'detached', atomic: false, inTransaction: false },
-  ])('writes, registers and detaches nothing without records ($plan)', async ({ atomic, inTransaction }) => {
+    { plan: 'immediate', inTransaction: true },
+    { plan: 'after-commit', inTransaction: true },
+    { plan: 'detached', inTransaction: false },
+  ] as const)('writes, registers and detaches nothing without records ($plan)', async ({ plan, inTransaction }) => {
     const { config, writeExecutor } = createConfig();
     const { runtime, afterCommit, detach } = createRuntime(inTransaction);
 
     await dispatch(
-      audited(atomic, async () => []),
+      audited(plan, async () => []),
       config,
       runtime,
     );
@@ -365,7 +379,7 @@ describe('dispatch', () => {
     expect(afterCommit).not.toHaveBeenCalled();
     expect(detach).not.toHaveBeenCalled();
   });
-  describe('after the write has committed and awaited, for an atomic policy outside any transaction', () => {
+  describe('after the write has committed and awaited, for an awaited-after-commit plan outside any transaction', () => {
     it('writes on the base handle, outside any transaction, and resolves only once the write has finished', async () => {
       vi.useFakeTimers();
       const writeReleased = deferred();
@@ -381,7 +395,7 @@ describe('dispatch', () => {
       });
       const { runtime, detach } = createRuntime(false);
 
-      const dispatched = dispatch(audited(true), config, runtime).then(() => {
+      const dispatched = dispatch(audited('awaited-after-commit'), config, runtime).then(() => {
         events.push('dispatch resolved');
       });
       await runPendingContinuations();
@@ -397,7 +411,7 @@ describe('dispatch', () => {
     it('reports a failed write with its awaited-after-commit plan', async () => {
       const { config, failureSink } = createConfig({ write: failingWrite });
 
-      await dispatch(audited(true), config, createRuntime(false).runtime);
+      await dispatch(audited('awaited-after-commit'), config, createRuntime(false).runtime);
 
       expect(failureSink.reportWriteFailure).toHaveBeenCalledWith(
         { kind: 'awaited-after-commit', records },
@@ -409,7 +423,9 @@ describe('dispatch', () => {
       const { failureSink, observed } = observingSink();
       const { config } = createConfig({ write: failingWrite, failureSink });
 
-      await expect(dispatch(audited(true), config, createRuntime(false).runtime)).resolves.toBeUndefined();
+      await expect(
+        dispatch(audited('awaited-after-commit'), config, createRuntime(false).runtime),
+      ).resolves.toBeUndefined();
       expect(observed).toEqual([logWriteContext]);
       expect(consoleError).not.toHaveBeenCalled();
     });
@@ -417,7 +433,9 @@ describe('dispatch', () => {
     it("resolves and logs the failure without an observer, since the operation's write has committed", async () => {
       const { config } = createConfig({ write: failingWrite, failureSink: createFailureSink({}) });
 
-      await expect(dispatch(audited(true), config, createRuntime(false).runtime)).resolves.toBeUndefined();
+      await expect(
+        dispatch(audited('awaited-after-commit'), config, createRuntime(false).runtime),
+      ).resolves.toBeUndefined();
       expect(consoleError).toHaveBeenCalledWith(
         '[db-audit-core] Error in audit log write after commit:',
         writeError.message,
@@ -426,16 +444,13 @@ describe('dispatch', () => {
   });
 
   describe('a record build that fails', () => {
-    it.each([
-      { plan: 'immediate inside a transaction', atomic: true },
-      { plan: 'after commit inside a transaction', atomic: false },
-    ])(
+    it.each([{ plan: 'immediate' }, { plan: 'after-commit' }] as const)(
       'notifies diff-generation once, rejects with its error, reports no dropped build and writes and registers nothing ($plan)',
-      async ({ atomic }) => {
+      async ({ plan }) => {
         const { config, writeExecutor, failureSink } = createConfig();
         const { runtime, afterCommit, detach } = createRuntime(true);
 
-        await expect(dispatch(audited(atomic, failingBuild), config, runtime)).rejects.toBe(buildError);
+        await expect(dispatch(audited(plan, failingBuild), config, runtime)).rejects.toBe(buildError);
 
         expect(failureSink.notify).toHaveBeenCalledTimes(1);
         expect(failureSink.notify).toHaveBeenCalledWith(buildFailureContext);
@@ -447,16 +462,13 @@ describe('dispatch', () => {
       },
     );
 
-    it.each([
-      { plan: 'detached', atomic: false },
-      { plan: 'awaited after commit', atomic: true },
-    ])(
+    it.each([{ plan: 'detached' }, { plan: 'awaited-after-commit' }] as const)(
       'reports the dropped build once and resolves, writing and detaching nothing, outside any transaction, whose operation has committed ($plan)',
-      async ({ atomic }) => {
+      async ({ plan }) => {
         const { config, writeExecutor, failureSink } = createConfig();
         const { runtime, detach } = createRuntime(false);
 
-        await expect(dispatch(audited(atomic, failingBuild), config, runtime)).resolves.toBeUndefined();
+        await expect(dispatch(audited(plan, failingBuild), config, runtime)).resolves.toBeUndefined();
 
         expect(failureSink.reportDroppedBuild).toHaveBeenCalledTimes(1);
         expect(failureSink.reportDroppedBuild).toHaveBeenCalledWith(buildFailureContext);
@@ -471,7 +483,7 @@ describe('dispatch', () => {
       const { config, failureSink } = createConfig();
 
       await dispatch(
-        audited(false, () => Promise.reject('read failed')),
+        audited('detached', () => Promise.reject('read failed')),
         config,
         createRuntime(false).runtime,
       );
@@ -482,17 +494,17 @@ describe('dispatch', () => {
   });
 
   it.each([
-    { plan: 'immediate', atomic: true, inTransaction: true },
-    { plan: 'after commit', atomic: false, inTransaction: true },
-    { plan: 'detached', atomic: false, inTransaction: false },
-  ])(
+    { plan: 'immediate', inTransaction: true },
+    { plan: 'after-commit', inTransaction: true },
+    { plan: 'detached', inTransaction: false },
+  ] as const)(
     'builds the records once before it resolves, ahead of any work it hands over ($plan)',
-    async ({ atomic, inTransaction }) => {
+    async ({ plan, inTransaction }) => {
       const buildRecords = vi.fn(async () => records);
       const { config } = createConfig();
       const { runtime, afterCommit, detach } = createRuntime(inTransaction);
 
-      await dispatch(audited(atomic, buildRecords), config, runtime);
+      await dispatch(audited(plan, buildRecords), config, runtime);
 
       expect(buildRecords).toHaveBeenCalledTimes(1);
       for (const handOver of [afterCommit, detach]) {

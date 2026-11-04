@@ -84,9 +84,9 @@ const findExistingRow = async (
  * proceeds, and event collection decides what the missing before state means for it.
  *
  * The read and the write are separate statements, so another transaction can commit between
- * them. They share a transaction only inside the caller's interactive transaction or the one
- * `write.implicitTransaction` opens, and even then READ COMMITTED and InnoDB's REPEATABLE READ let
- * the write apply a commit the read did not see: the before state can be stale, and an upsert's
+ * them. They share a transaction only inside the caller's interactive transaction or the one the
+ * client opens around an atomic write, and even then READ COMMITTED and InnoDB's REPEATABLE READ
+ * let the write apply a commit the read did not see: the before state can be stale, and an upsert's
  * resolved branch can differ from the branch Prisma ran. Under a stronger isolation level the
  * interleaving write either waits and is serialized or one of the transactions is aborted,
  * depending on the database. The audit takes no row lock; locking and isolation are the caller's.

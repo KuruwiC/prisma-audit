@@ -357,7 +357,7 @@ describe('Nested Delete Operations', () => {
         schema: auditSchema,
         contextProvider: provider,
         entities: withFetchBefore(testEntities, entityFetchBefore),
-        write: { awaited: true },
+        write: { mode: 'awaited' },
         fetchBefore,
       });
 
@@ -485,7 +485,7 @@ describe('Nested Delete Operations', () => {
         schema: auditSchema,
         contextProvider: provider,
         entities: testEntities,
-        write: { awaited: true },
+        write: { mode: 'awaited' },
         fetchBefore: { delete: false },
       });
 
@@ -540,7 +540,7 @@ describe('Nested Delete Operations', () => {
           ...testEntities,
           Subscription: defineEntity({ type: 'Subscription', aggregates: [to('User', foreignKey('userEmail'))] }),
         },
-        write: { awaited: true },
+        write: { mode: 'awaited' },
         fetchBefore,
       });
 
@@ -590,7 +590,7 @@ describe('Nested Delete Operations', () => {
         schema: auditSchema,
         contextProvider: provider,
         entities: testEntities,
-        write: { awaited: true },
+        write: { mode: 'awaited' },
         // Without the read ahead of the write, a to-one delete (`delete: true`) names no row
         fetchBefore: { delete: false },
         errorObserver: observer,
@@ -639,7 +639,7 @@ describe('Nested Delete Operations', () => {
         schema: auditSchema,
         contextProvider: provider,
         entities: testEntities,
-        write: { awaited: true },
+        write: { mode: 'awaited' },
         // Without the read ahead of the write, a delete named by a compound unique names no primary key
         fetchBefore: { delete: false },
         errorObserver: observer,

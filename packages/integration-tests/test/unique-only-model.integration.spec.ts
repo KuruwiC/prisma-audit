@@ -38,7 +38,7 @@ describe('a model identified by a unique field instead of a primary key', () => 
       schema: auditSchema,
       contextProvider: provider,
       entities: { Device: defineEntity({ type: 'Device', idResolver }) },
-      write: { awaited: true },
+      write: { mode: 'awaited' },
       ...(observer ? { errorObserver: observer } : {}),
     });
     disconnects.push(async () => {

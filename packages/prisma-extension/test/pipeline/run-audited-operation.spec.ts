@@ -1,14 +1,15 @@
 /**
- * Tests for the audited-operation pipeline: the write policy decides the scope, the executor
- * runs inside it through the continuation the scope calls for, its records are dispatched with
- * the scope as the transaction runtime, and each kind of failure reaches the caller and the
- * failure sink the way its origin requires. The transaction an operation runs in is the one its
- * input names; a failure of the audit after the caller's write has run is recorded on that
- * transaction, which keeps it from committing.
+ * Tests for the audited-operation pipeline: the transaction its input names decides the scope, the
+ * executor runs inside it through the continuation the scope calls for, its records are dispatched
+ * by the write plan its input names with the scope as the transaction runtime, an atomic operation
+ * some of whose records a reported failure dropped fails, and each kind of failure reaches the
+ * caller and the failure sink the way its origin requires. The transaction an operation runs in is
+ * the one its input names; a failure of the audit after the caller's write has run is recorded on
+ * that transaction, which keeps it from committing.
  */
 
-import type { AuditContext, AuditRecord } from '@kuruwic/db-audit-core';
-import { createActorId, createAggregateId, createEntityId } from '@kuruwic/db-audit-core';
+import type { AuditContext, AuditErrorContext, AuditRecord, WriteMode, WritePlanKind } from '@kuruwic/db-audit-core';
+import { AuditIncompleteError, createActorId, createAggregateId, createEntityId } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
 import type { PrismaBaseClient, PrismaHandle } from '../../src/internal-types.js';
 import type { ExecutionScope } from '../../src/pipeline/execution-scope.js';
@@ -19,7 +20,12 @@ import {
   runAuditedOperation,
 } from '../../src/pipeline/run-audited-operation.js';
 import { flushAllPendingWrites, getPendingWriteCount } from '../../src/runtime/pending-writes.js';
-import { type ActiveTransaction, isProcessingAuditLog, withScope } from '../../src/runtime/scope.js';
+import {
+  type ActiveTransaction,
+  isProcessingAuditLog,
+  keepOperationFailure,
+  withScope,
+} from '../../src/runtime/scope.js';
 import type { AuditLogData } from '../../src/types.js';
 import { activeTransactionOf } from '../support/active-transaction.js';
 import { stubFailureSink } from '../support/failure-sink.js';
@@ -114,13 +120,20 @@ const scopeSeenBy = (executor: OperationExecutor): ExecutionScope => {
 const auditWriteOf = (deps: AuditPipelineDependencies) => vi.mocked(deps.dispatchConfig.writeExecutor.write);
 
 describe('runAuditedOperation', () => {
-  describe('policy and scope', () => {
-    it('runs on the base client without opening a transaction when the policy is atomic outside any, and awaits the write', async () => {
+  describe('write plan and scope', () => {
+    it('runs on the base client without opening a transaction when the mode is awaited outside any transaction, and awaits the write', async () => {
       const baseClient = createBaseClient();
       const deps = createDeps();
 
       await runAuditedOperation(
-        { operation: interceptedOf(), auditContext, baseClient, atomic: true, transaction: undefined },
+        {
+          operation: interceptedOf(),
+          auditContext,
+          baseClient,
+          mode: 'awaited',
+          plan: 'awaited-after-commit',
+          transaction: undefined,
+        },
         deps,
       );
 
@@ -129,18 +142,17 @@ describe('runAuditedOperation', () => {
       expect(scope.handle).toBe(baseClient);
       expect(scope.baseClient).toBe(baseClient);
       expect(scope.transaction).toBeUndefined();
-      expect(scope.atomic).toBe(true);
       expect(getPendingWriteCount()).toBe(0);
       expect(auditWriteOf(deps)).toHaveBeenCalledWith(baseClient, [record]);
     });
 
-    it('runs on the transaction client and writes immediately in it when the policy is atomic inside a transaction', async () => {
+    it('runs on the transaction client and writes immediately in it when the mode is atomic inside a transaction', async () => {
       const baseClient = createBaseClient();
       const deps = createDeps();
       const transaction = activeTransactionOf(transactionClient);
 
       await runAuditedOperation(
-        { operation: interceptedOf(), auditContext, baseClient, atomic: true, transaction },
+        { operation: interceptedOf(), auditContext, baseClient, mode: 'atomic', plan: 'immediate', transaction },
         deps,
       );
 
@@ -149,7 +161,7 @@ describe('runAuditedOperation', () => {
       expect(auditWriteOf(deps)).toHaveBeenCalledWith(transactionClient, [record]);
     });
 
-    it('runs on the base client without a transaction when the policy is not atomic, and detaches the write', async () => {
+    it('runs on the base client without a transaction when the mode is deferred, and detaches the write', async () => {
       const baseClient = createBaseClient();
       let finishWrite: () => void = () => {};
       const write = vi.fn(
@@ -162,7 +174,14 @@ describe('runAuditedOperation', () => {
       const dispatchConfig = { ...deps.dispatchConfig, writeExecutor: { write } };
 
       await runAuditedOperation(
-        { operation: interceptedOf(), auditContext, baseClient, atomic: false, transaction: undefined },
+        {
+          operation: interceptedOf(),
+          auditContext,
+          baseClient,
+          mode: 'deferred',
+          plan: 'detached',
+          transaction: undefined,
+        },
         { ...deps, dispatchConfig },
       );
 
@@ -170,21 +189,20 @@ describe('runAuditedOperation', () => {
       const scope = scopeSeenBy(deps.singleExecutor);
       expect(scope.handle).toBe(baseClient);
       expect(scope.transaction).toBeUndefined();
-      expect(scope.atomic).toBe(false);
       expect(getPendingWriteCount()).toBe(1);
       finishWrite();
       await flushAllPendingWrites();
       expect(write).toHaveBeenCalledWith(baseClient, [record]);
     });
 
-    it('runs on the transaction client and writes after commit when the policy is not atomic inside a transaction', async () => {
+    it('runs on the transaction client and writes after commit when the mode is deferred inside a transaction', async () => {
       const baseClient = createBaseClient();
       const deps = createDeps();
       const transaction = activeTransactionOf(transactionClient);
       const { deferredWrites } = transaction;
 
       await runAuditedOperation(
-        { operation: interceptedOf(), auditContext, baseClient, atomic: false, transaction },
+        { operation: interceptedOf(), auditContext, baseClient, mode: 'deferred', plan: 'after-commit', transaction },
         deps,
       );
 
@@ -199,18 +217,18 @@ describe('runAuditedOperation', () => {
     });
 
     it.each([
-      { policy: 'atomic', atomic: true },
-      { policy: 'not atomic', atomic: false },
-    ])(
-      'runs an operation whose input names no transaction outside any, whatever transaction the surrounding scope is bound to, when the policy is $policy',
-      async ({ atomic }) => {
+      { mode: 'awaited', plan: 'awaited-after-commit' },
+      { mode: 'deferred', plan: 'detached' },
+    ] as const)(
+      'runs an operation whose input names no transaction outside any, whatever transaction the surrounding scope is bound to, when the mode is $mode',
+      async ({ mode, plan }) => {
         const baseClient = createBaseClient();
         const deps = createDeps();
         const surrounding = activeTransactionOf(transactionClientWith());
 
         await withScope({ binding: { transaction: surrounding } }, () =>
           runAuditedOperation(
-            { operation: interceptedOf(), auditContext, baseClient, atomic, transaction: undefined },
+            { operation: interceptedOf(), auditContext, baseClient, mode, plan, transaction: undefined },
             deps,
           ),
         );
@@ -232,7 +250,14 @@ describe('runAuditedOperation', () => {
 
       await withScope({ binding: { transaction: surrounding } }, () =>
         runAuditedOperation(
-          { operation: interceptedOf(), auditContext, baseClient, atomic: true, transaction: named },
+          {
+            operation: interceptedOf(),
+            auditContext,
+            baseClient,
+            mode: 'atomic',
+            plan: 'immediate',
+            transaction: named,
+          },
           deps,
         ),
       );
@@ -251,11 +276,11 @@ describe('runAuditedOperation', () => {
       const { deferredWrites } = transaction;
 
       await runAuditedOperation(
-        { operation: interceptedOf(), auditContext, baseClient, atomic: false, transaction },
+        { operation: interceptedOf(), auditContext, baseClient, mode: 'deferred', plan: 'after-commit', transaction },
         deps,
       );
       await runAuditedOperation(
-        { operation: interceptedOf(), auditContext, baseClient, atomic: false, transaction },
+        { operation: interceptedOf(), auditContext, baseClient, mode: 'deferred', plan: 'after-commit', transaction },
         deps,
       );
 
@@ -280,30 +305,35 @@ describe('runAuditedOperation', () => {
       start: (baseClient: PrismaBaseClient, transaction: ActiveTransaction | undefined) => Promise<unknown>,
     ) => Promise<unknown>;
 
-    it.each<{ path: string; atomic: boolean; run: Run }>([
+    it.each<{ path: string; mode: WriteMode; plan: WritePlanKind; run: Run }>([
       {
         path: "inside the caller's own transaction",
-        atomic: true,
+        mode: 'atomic',
+        plan: 'immediate',
         run: (update, start) =>
           start(createBaseClient(), activeTransactionOf(transactionClientWith({ user: { update } }))),
       },
       {
-        path: 'when the policy is not atomic',
-        atomic: false,
+        path: 'when the mode is deferred',
+        mode: 'deferred',
+        plan: 'detached',
         run: (update, start) => start(createBaseClient(transactionClient, { user: { update } }), undefined),
       },
-    ])('continues the operation through query, never through the client delegate, $path', async ({ atomic, run }) => {
-      const update = vi.fn();
-      const deps = createDeps({ singleExecutor: runningTheOperation() });
-      const operation = interceptedOf();
+    ])(
+      'continues the operation through query, never through the client delegate, $path',
+      async ({ mode, plan, run }) => {
+        const update = vi.fn();
+        const deps = createDeps({ singleExecutor: runningTheOperation() });
+        const operation = interceptedOf();
 
-      await run(update, (baseClient, transaction) =>
-        runAuditedOperation({ operation, auditContext, baseClient, atomic, transaction }, deps),
-      );
+        await run(update, (baseClient, transaction) =>
+          runAuditedOperation({ operation, auditContext, baseClient, mode, plan, transaction }, deps),
+        );
 
-      expect(operation.query).toHaveBeenCalledWith(args);
-      expect(update).not.toHaveBeenCalled();
-    });
+        expect(operation.query).toHaveBeenCalledWith(args);
+        expect(update).not.toHaveBeenCalled();
+      },
+    );
 
     it("runs the caller's operation with the processing flag lowered and the audit's own work with it raised", async () => {
       const flagSeen: Array<[string, boolean]> = [];
@@ -323,7 +353,14 @@ describe('runAuditedOperation', () => {
 
       await withScope({ isProcessingAuditLog: true }, () =>
         runAuditedOperation(
-          { operation, auditContext, baseClient: createBaseClient(), atomic: true, transaction: undefined },
+          {
+            operation,
+            auditContext,
+            baseClient: createBaseClient(),
+            mode: 'awaited',
+            plan: 'awaited-after-commit',
+            transaction: undefined,
+          },
           deps,
         ),
       );
@@ -336,29 +373,32 @@ describe('runAuditedOperation', () => {
     });
 
     it.each([
-      { path: 'outside any transaction', atomic: false },
-      { path: 'with an atomic policy', atomic: true },
-    ])("propagates the caller's own mutation error thrown through query $path as it is", async ({ atomic }) => {
-      const callerError = new Error('Unique constraint failed on the fields: (`email`)');
-      const operation = interceptedOf(
-        'update',
-        vi.fn(async () => {
-          throw callerError;
-        }),
-      );
-      const deps = createDeps({ singleExecutor: runningTheOperation() });
+      { path: 'when the mode is deferred', mode: 'deferred', plan: 'detached' },
+      { path: 'when the mode is awaited', mode: 'awaited', plan: 'awaited-after-commit' },
+    ] as const)(
+      "propagates the caller's own mutation error thrown through query $path as it is",
+      async ({ mode, plan }) => {
+        const callerError = new Error('Unique constraint failed on the fields: (`email`)');
+        const operation = interceptedOf(
+          'update',
+          vi.fn(async () => {
+            throw callerError;
+          }),
+        );
+        const deps = createDeps({ singleExecutor: runningTheOperation() });
 
-      await expect(
-        runAuditedOperation(
-          { operation, auditContext, baseClient: createBaseClient(), atomic, transaction: undefined },
-          deps,
-        ),
-      ).rejects.toBe(callerError);
+        await expect(
+          runAuditedOperation(
+            { operation, auditContext, baseClient: createBaseClient(), mode, plan, transaction: undefined },
+            deps,
+          ),
+        ).rejects.toBe(callerError);
 
-      expect(Object.getOwnPropertySymbols(callerError)).toEqual([]);
-      expect(deps.failureSink.notify).not.toHaveBeenCalled();
-      expect(auditWriteOf(deps)).not.toHaveBeenCalled();
-    });
+        expect(Object.getOwnPropertySymbols(callerError)).toEqual([]);
+        expect(deps.failureSink.notify).not.toHaveBeenCalled();
+        expect(auditWriteOf(deps)).not.toHaveBeenCalled();
+      },
+    );
 
     it.each([
       { thrown: 'a frozen Error', value: Object.freeze(new Error('denied')) },
@@ -375,7 +415,14 @@ describe('runAuditedOperation', () => {
 
       await expect(
         runAuditedOperation(
-          { operation, auditContext, baseClient: createBaseClient(), atomic: false, transaction: undefined },
+          {
+            operation,
+            auditContext,
+            baseClient: createBaseClient(),
+            mode: 'deferred',
+            plan: 'detached',
+            transaction: undefined,
+          },
           deps,
         ),
       ).rejects.toBe(value);
@@ -391,11 +438,25 @@ describe('runAuditedOperation', () => {
       const baseClient = createBaseClient();
 
       await runAuditedOperation(
-        { operation: interceptedOf('updateMany'), auditContext, baseClient, atomic: true, transaction: undefined },
+        {
+          operation: interceptedOf('updateMany'),
+          auditContext,
+          baseClient,
+          mode: 'awaited',
+          plan: 'awaited-after-commit',
+          transaction: undefined,
+        },
         deps,
       );
       await runAuditedOperation(
-        { operation: interceptedOf('upsert'), auditContext, baseClient, atomic: true, transaction: undefined },
+        {
+          operation: interceptedOf('upsert'),
+          auditContext,
+          baseClient,
+          mode: 'awaited',
+          plan: 'awaited-after-commit',
+          transaction: undefined,
+        },
         deps,
       );
 
@@ -421,7 +482,8 @@ describe('runAuditedOperation', () => {
           operation: interceptedOf(),
           auditContext,
           baseClient: createBaseClient(),
-          atomic: true,
+          mode: 'awaited',
+          plan: 'awaited-after-commit',
           transaction: undefined,
         },
         deps,
@@ -448,7 +510,14 @@ describe('runAuditedOperation', () => {
 
         await expect(
           runAuditedOperation(
-            { operation, auditContext, baseClient: createBaseClient(), atomic: true, transaction: undefined },
+            {
+              operation,
+              auditContext,
+              baseClient: createBaseClient(),
+              mode: 'awaited',
+              plan: 'awaited-after-commit',
+              transaction: undefined,
+            },
             deps,
           ),
         ).rejects.toBe(auditError);
@@ -483,23 +552,23 @@ describe('runAuditedOperation', () => {
       };
 
       it.each([
-        { policy: 'atomic', atomic: true },
-        { policy: 'not atomic', atomic: false },
-      ])(
-        'rejects with the original error, queues nothing and records the failure on the transaction when the policy is $policy inside a transaction',
-        async ({ atomic }) => {
+        { mode: 'atomic', plan: 'immediate' },
+        { mode: 'deferred', plan: 'after-commit' },
+      ] as const)(
+        'rejects with the original error, queues nothing and records the failure on the transaction when the mode is $mode inside a transaction',
+        async ({ mode, plan }) => {
           const deps = createDeps({ singleExecutor: failingBuildExecutor() });
           const transaction = activeTransactionOf(transactionClient);
 
           await expect(
             runAuditedOperation(
-              { operation: interceptedOf(), auditContext, baseClient: createBaseClient(), atomic, transaction },
+              { operation: interceptedOf(), auditContext, baseClient: createBaseClient(), mode, plan, transaction },
               deps,
             ),
           ).rejects.toBe(buildError);
 
           expect(deps.failureSink.notify).toHaveBeenCalledTimes(1);
-          if (atomic) {
+          if (mode === 'atomic') {
             expect(deps.failureSink.notify).toHaveBeenCalledWith(buildFailure);
           }
           expect(transaction.deferredWrites).toHaveLength(0);
@@ -509,11 +578,11 @@ describe('runAuditedOperation', () => {
       );
 
       it.each([
-        { policy: 'atomic', atomic: true },
-        { policy: 'not atomic', atomic: false },
-      ])(
-        'returns the result, reports the dropped records and writes nothing when the policy is $policy outside any transaction',
-        async ({ atomic }) => {
+        { mode: 'awaited', plan: 'awaited-after-commit' },
+        { mode: 'deferred', plan: 'detached' },
+      ] as const)(
+        'returns the result, reports the dropped records and writes nothing when the mode is $mode outside any transaction',
+        async ({ mode, plan }) => {
           const deps = createDeps({ singleExecutor: failingBuildExecutor() });
           const surrounding = activeTransactionOf(transactionClientWith());
 
@@ -524,7 +593,8 @@ describe('runAuditedOperation', () => {
                   operation: interceptedOf(),
                   auditContext,
                   baseClient: createBaseClient(),
-                  atomic,
+                  mode,
+                  plan,
                   transaction: undefined,
                 },
                 deps,
@@ -566,7 +636,14 @@ describe('runAuditedOperation', () => {
 
         await expect(
           runAuditedOperation(
-            { operation: interceptedOf(), auditContext, baseClient: createBaseClient(), atomic: true, transaction },
+            {
+              operation: interceptedOf(),
+              auditContext,
+              baseClient: createBaseClient(),
+              mode: 'atomic',
+              plan: 'immediate',
+              transaction,
+            },
             deps,
           ),
         ).rejects.toBe(writeError);
@@ -591,7 +668,8 @@ describe('runAuditedOperation', () => {
                 operation: interceptedOf(),
                 auditContext,
                 baseClient: createBaseClient(),
-                atomic: true,
+                mode: 'awaited',
+                plan: 'awaited-after-commit',
                 transaction: undefined,
               },
               deps,
@@ -629,7 +707,8 @@ describe('runAuditedOperation', () => {
               operation: interceptedOf('update', failingQuery()),
               auditContext,
               baseClient: createBaseClient(),
-              atomic: true,
+              mode: 'atomic',
+              plan: 'immediate',
               transaction,
             },
             deps,
@@ -658,7 +737,8 @@ describe('runAuditedOperation', () => {
               operation: interceptedOf('updateMany', query),
               auditContext,
               baseClient: createBaseClient(),
-              atomic: true,
+              mode: 'atomic',
+              plan: 'immediate',
               transaction,
             },
             deps,
@@ -684,7 +764,8 @@ describe('runAuditedOperation', () => {
               operation: interceptedOf('update', query),
               auditContext,
               baseClient: createBaseClient(),
-              atomic: true,
+              mode: 'atomic',
+              plan: 'immediate',
               transaction,
             },
             deps,
@@ -710,7 +791,8 @@ describe('runAuditedOperation', () => {
               operation: interceptedOf('update', query),
               auditContext,
               baseClient: createBaseClient(),
-              atomic: true,
+              mode: 'atomic',
+              plan: 'immediate',
               transaction,
             },
             deps,
@@ -742,7 +824,8 @@ describe('runAuditedOperation', () => {
                 ),
                 auditContext,
                 baseClient: createBaseClient(),
-                atomic: true,
+                mode: 'awaited',
+                plan: 'awaited-after-commit',
                 transaction: undefined,
               },
               deps,
@@ -751,6 +834,98 @@ describe('runAuditedOperation', () => {
         ).rejects.toBe(executorError);
 
         expect(surrounding.auditFailures).toEqual([]);
+      });
+    });
+
+    describe('a failure kept for the operation', () => {
+      const failureOf = (phase: AuditErrorContext['phase'], operation: string): AuditErrorContext => ({
+        phase,
+        modelName: 'User',
+        operation,
+        params: args,
+        error: new Error(`${phase} failed`),
+      });
+      const keepingExecutor = (failure: AuditErrorContext) =>
+        stubExecutor(async (operation) => {
+          await operation.execute(operation.args);
+          keepOperationFailure(failure);
+          return outcome;
+        });
+
+      it('rejects an atomic operation a row-identification failure dropped a record of, once its records are written, and records the rejection on the transaction', async () => {
+        const failure = failureOf('row-identification', 'updateMany');
+        const deps = createDeps({ batchExecutor: keepingExecutor(failure) });
+        const transaction = activeTransactionOf(transactionClient);
+
+        const run = runAuditedOperation(
+          {
+            operation: interceptedOf(
+              'updateMany',
+              vi.fn(async () => 'written'),
+            ),
+            auditContext,
+            baseClient: createBaseClient(),
+            mode: 'atomic',
+            plan: 'immediate',
+            transaction,
+          },
+          deps,
+        );
+
+        await expect(run).rejects.toBeInstanceOf(AuditIncompleteError);
+        const rejection = await run.catch((error: unknown) => error);
+        expect(rejection).toMatchObject({ modelName: 'User', operation: 'updateMany', failures: [failure] });
+        expect((rejection as Error).cause).toEqual([failure]);
+        expect(auditWriteOf(deps)).toHaveBeenCalledExactlyOnceWith(transactionClient, [record]);
+        expect(transaction.auditFailures).toEqual([rejection]);
+      });
+
+      it('resolves an awaited operation a row-identification failure dropped a record of', async () => {
+        const deps = createDeps({ batchExecutor: keepingExecutor(failureOf('row-identification', 'updateMany')) });
+        const transaction = activeTransactionOf(transactionClient);
+
+        await expect(
+          runAuditedOperation(
+            {
+              operation: interceptedOf(
+                'updateMany',
+                vi.fn(async () => 'written'),
+              ),
+              auditContext,
+              baseClient: createBaseClient(),
+              mode: 'awaited',
+              plan: 'immediate',
+              transaction,
+            },
+            deps,
+          ),
+        ).resolves.toBe(outcome.result);
+
+        expect(transaction.auditFailures).toEqual([]);
+      });
+
+      it('resolves an atomic operation whose update entry a pre-fetch failure left without its before state', async () => {
+        const deps = createDeps({ singleExecutor: keepingExecutor(failureOf('pre-fetch', 'update')) });
+        const transaction = activeTransactionOf(transactionClient);
+
+        await expect(
+          runAuditedOperation(
+            {
+              operation: interceptedOf(
+                'update',
+                vi.fn(async () => 'written'),
+              ),
+              auditContext,
+              baseClient: createBaseClient(),
+              mode: 'atomic',
+              plan: 'immediate',
+              transaction,
+            },
+            deps,
+          ),
+        ).resolves.toBe(outcome.result);
+
+        expect(transaction.auditFailures).toEqual([]);
       });
     });
   });

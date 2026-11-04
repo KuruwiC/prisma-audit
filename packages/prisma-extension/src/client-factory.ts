@@ -73,7 +73,7 @@ export type PrismaClientLike = {
  *   diffExcludeFields: ['updatedAt', 'createdAt'],
  *   redactFields: ['phoneNumber'],
  *   write: {
- *     awaited: true,
+ *     mode: 'atomic',
  *     writer: async (records, { defaultWrite }) => {
  *       await Promise.all([
  *         defaultWrite(records),

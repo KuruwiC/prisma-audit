@@ -142,7 +142,7 @@ export const testAuditOptions = <TPrisma, TSchema>(
   entities: testEntities,
   diffExcludeFields: ['createdAt'],
   write: {
-    awaited: true,
+    mode: 'awaited' as const,
   },
   fetchBefore: {
     update: true,
