@@ -7,9 +7,8 @@
  * also the transaction runtime core's `dispatch` writes the audit records with.
  */
 
-import type { AuditContext, FailureSink, TransactionRuntime } from '@kuruwic/db-audit-core';
+import type { AuditContext, OperationOutcome, TransactionRuntime } from '@kuruwic/db-audit-core';
 import type { PrismaBaseClient, PrismaHandle } from '../internal-types.js';
-import type { UnrecordedWriteReporter } from '../nested/events/unrecorded-write.js';
 import { trackPendingWrite } from '../runtime/pending-writes.js';
 import type { ActiveTransaction } from '../runtime/scope.js';
 
@@ -21,13 +20,11 @@ export interface TransactionScope {
 }
 
 /**
- * Where one operation reports the audit failures the pipeline detects itself: each notifies the
- * observer and is kept for the operation, and a write the event collection leaves rows of without
- * a record marks the operation, so that an atomic operation fails when it dropped a record
+ * Where one operation reports the audit failures the pipeline detects itself, and the writes the
+ * event collection leaves rows of without a record: its outcome, which keeps them for the
+ * observer and tells whether an atomic operation dropped a record
  */
-export interface OperationFailureSink extends Pick<FailureSink, 'notify' | 'reportResolverFailures'> {
-  readonly reportUnrecordedWrite: UnrecordedWriteReporter;
-}
+export type OperationFailureSink = Pick<OperationOutcome, 'fail' | 'reportResolverFailures' | 'reportUnrecordedWrite'>;
 
 export interface ExecutionScope {
   readonly auditContext: AuditContext;

@@ -21,13 +21,16 @@ export interface AuditGateConfig {
 /**
  * - `audit`: the write goes through the audit under `context`, its write policy deciding how its
  *   records are written
- * - `skip`: the write runs unaudited
+ * - `skip`: the write writes rows of no audited model, and runs outside the audit
+ * - `unaudited`: the write writes rows of audited models and runs unaudited, for `reason`:
+ *   `no-context`, no audit context is set and none of those models requires one
  * - `reject`: the write must not run; `modelName` is the audited model it writes that requires an
  *   audit context
  */
 export type AuditGate =
   | { readonly kind: 'audit'; readonly context: AuditContext }
   | { readonly kind: 'skip' }
+  | { readonly kind: 'unaudited'; readonly reason: 'no-context' }
   | { readonly kind: 'reject'; readonly modelName: string };
 
 /**
@@ -54,7 +57,7 @@ export const auditGate = (
   const required = auditedModels.find((modelName) =>
     typeof requireContext === 'function' ? requireContext(modelName) : requireContext,
   );
-  return required === undefined ? { kind: 'skip' } : { kind: 'reject', modelName: required };
+  return required === undefined ? { kind: 'unaudited', reason: 'no-context' } : { kind: 'reject', modelName: required };
 };
 
 /** The write that an `AuditGate` of kind `reject` stopped */

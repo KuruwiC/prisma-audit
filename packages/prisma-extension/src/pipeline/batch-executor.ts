@@ -387,11 +387,11 @@ const reportUnidentified = async (
   if (unidentified <= 0) {
     return;
   }
-  await failureSink.notify({
+  failureSink.fail({
     phase: 'row-identification',
     modelName: operation.model,
     operation: operation.action,
-    params: { unidentified },
+    unidentified,
     error: new Error(reason(operation, unidentified)),
   });
 };

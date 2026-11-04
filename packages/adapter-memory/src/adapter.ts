@@ -10,7 +10,9 @@
  * the event with the id resolvers and enrichers reading through the scope's handle and composing
  * it, and writes them by the plan with the scope as the transaction runtime. An atomic operation
  * whose record an id resolver dropped fails with `AuditIncompleteError`, which rolls its transaction
- * back.
+ * back. Every write of a model in the entity map, audited, run unaudited or rejected, has an outcome,
+ * settled once the outermost transaction it runs in commits or rolls back, or, outside any, once the
+ * write returns or throws.
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -18,16 +20,18 @@ import type {
   ActorContextConfig,
   AuditActor,
   AuditContextProvider,
-  AuditErrorContext,
-  AuditErrorObserver,
+  AuditFailure,
   AuditGateConfig,
+  AuditObserver,
   ComposeConfig,
   DispatchConfig,
   EntityMap,
   MutationAction,
   MutationEvent,
+  OperationOutcome,
   PolicyConfig,
   ResolveConfig,
+  TransactionOutcomes,
   TransactionRuntime,
   ValueSerializer,
   WriteMode,
@@ -39,7 +43,8 @@ import {
   auditGate,
   compose,
   createEntityConfigLookup,
-  createFailureSink,
+  createOperationOutcome,
+  createTransactionOutcomes,
   dispatch,
   planFor,
   policy,
@@ -73,7 +78,8 @@ export interface MemoryAuditOptions<TModelName extends string> {
   /** Serializers applied before the built-in conversions (BigInt, Date) */
   readonly serializers?: readonly ValueSerializer[];
   readonly actorContext?: ActorContextConfig<AuditActor, unknown, MemoryHandle<TModelName>>;
-  readonly errorObserver?: AuditErrorObserver;
+  /** Called with the outcome of every write of a model in `entities`, once it is settled */
+  readonly observer?: AuditObserver;
 }
 
 export interface MemoryAuditAdapter<TModelName extends string> {
@@ -88,16 +94,20 @@ export interface MemoryAuditAdapter<TModelName extends string> {
   transaction<T>(fn: (db: MemoryHandle<TModelName>) => Promise<T>): Promise<T>;
   /** Waits for every audit write no caller awaited that is pending at the time of the call */
   flush(): Promise<void>;
-  /** Every audit write that failed (phase `log-write`), awaited or not; `flush` resolves regardless */
-  readonly writeFailures: readonly AuditErrorContext[];
-  /** Every row an id resolver failed for (phase `id-resolver-call`); the records that resolver gates are not written */
-  readonly resolverFailures: readonly AuditErrorContext[];
+  /** Every audit write that failed (phase `log-write`), awaited or not, once its outcome is settled; `flush` resolves regardless */
+  readonly writeFailures: readonly AuditFailure[];
+  /** Every row an id resolver failed for (phase `id-resolver-call`), once its outcome is settled; the records that resolver gates are not written */
+  readonly resolverFailures: readonly AuditFailure[];
 }
 
-/** The transaction the current async flow is inside: its handle and the writes queued until it commits */
+/**
+ * The transaction the current async flow is inside: its handle, the writes queued until it commits,
+ * and the outcomes of its writes
+ */
 interface TransactionScope<TModelName extends string> {
   readonly handle: MemoryStore<TModelName>;
   readonly deferredWrites: Array<() => Promise<void>>;
+  readonly outcomes: TransactionOutcomes;
 }
 
 /** A mutation as applied on a handle: the identity of the row and the row before and after */
@@ -107,6 +117,19 @@ interface AppliedMutation {
   readonly before?: MemoryRow;
   readonly after?: MemoryRow;
 }
+
+const eventOf = <TModelName extends string>(
+  model: TModelName,
+  op: string,
+  mutation: AppliedMutation,
+): MutationEvent<TModelName> => ({
+  model,
+  identity: mutation.identity,
+  action: mutation.action,
+  before: mutation.before ? { kind: 'captured', row: mutation.before } : { kind: 'none' },
+  after: mutation.after,
+  origin: { path: '', op },
+});
 
 export const createMemoryAuditAdapter = <TModelName extends string>(
   options: MemoryAuditOptions<TModelName>,
@@ -135,18 +158,19 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
   /** The handle of the transaction the current flow is inside, else the store; read at each call */
   const currentHandle = (): MemoryHandle<TModelName> => activeScope.getStore()?.handle ?? store;
 
-  const writeFailures: AuditErrorContext[] = [];
-  const resolverFailures: AuditErrorContext[] = [];
-  const userObserver = options.errorObserver;
-  const observe = async (context: AuditErrorContext): Promise<void> => {
-    if (context.phase === 'log-write') {
-      writeFailures.push(context);
-    } else if (context.phase === 'id-resolver-call') {
-      resolverFailures.push(context);
+  const writeFailures: AuditFailure[] = [];
+  const resolverFailures: AuditFailure[] = [];
+  const userObserver = options.observer;
+  const observe: AuditObserver = async (outcome) => {
+    for (const failure of outcome.failures) {
+      if (failure.phase === 'log-write') {
+        writeFailures.push(failure);
+      } else if (failure.phase === 'id-resolver-call') {
+        resolverFailures.push(failure);
+      }
     }
-    await userObserver?.(context);
+    await userObserver?.(outcome);
   };
-  const failureSink = createFailureSink({ observer: observe });
 
   /** A write no caller awaits, tracked until it settles; it reports its own failure and never rejects */
   const startDetached = (write: () => Promise<void>): void => {
@@ -161,17 +185,46 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
   const transaction = async <T>(fn: (db: MemoryHandle<TModelName>) => Promise<T>): Promise<T> => {
     const parent = activeScope.getStore();
     const deferredWrites: Array<() => Promise<void>> = [];
-    const result = await (parent?.handle ?? store).transaction((tx) =>
-      activeScope.run({ handle: tx, deferredWrites }, () => fn(tx)),
-    );
+    const outcomes = createTransactionOutcomes();
+    let result: T;
+    try {
+      result = await (parent?.handle ?? store).transaction((tx) =>
+        activeScope.run({ handle: tx, deferredWrites, outcomes }, () => fn(tx)),
+      );
+    } catch (error) {
+      await (parent ? parent.outcomes.add(outcomes, false) : outcomes.settle('not-committed'));
+      throw error;
+    }
     if (parent === undefined) {
       for (const write of deferredWrites) {
         startDetached(write);
       }
+      await outcomes.settle('committed');
     } else {
       parent.deferredWrites.push(...deferredWrites);
+      await parent.outcomes.add(outcomes, true);
     }
     return result;
+  };
+
+  /**
+   * Runs a write, then settles its outcome with whether it succeeded: with the outcomes of the
+   * transaction of `scope`, inside one, and before returning outside any
+   */
+  const settledIn = async (
+    scope: TransactionScope<TModelName> | undefined,
+    outcome: OperationOutcome,
+    run: () => Promise<void>,
+  ): Promise<void> => {
+    const settle = (succeeded: boolean): Promise<void> =>
+      scope ? scope.outcomes.add(outcome, succeeded) : outcome.settle(succeeded ? 'committed' : 'not-committed');
+    try {
+      await run();
+    } catch (error) {
+      await settle(false);
+      throw error;
+    }
+    await settle(true);
   };
 
   /** Runs `run` in the active transaction, in an implicit one when the mode is atomic and none is active, else on the store */
@@ -186,7 +239,7 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
     return transaction(() => run(activeScope.getStore()));
   };
 
-  const dispatchConfig: DispatchConfig<MemoryHandle<TModelName>> = { writeExecutor: memoryWriteExecutor, failureSink };
+  const dispatchConfig: DispatchConfig<MemoryHandle<TModelName>> = { writeExecutor: memoryWriteExecutor };
 
   /** Writes after commit queue on the transaction; detached ones start on the store, tracked for `flush` */
   const runtimeOf = (
@@ -208,59 +261,45 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
     mutate: (handle: MemoryHandle<TModelName>) => AppliedMutation,
   ): Promise<void> => {
     const gate = auditGate(contextProvider.getContext(), entityConfigs.isLoggable(model) ? [model] : [], gateConfig);
-    if (gate.kind === 'reject') {
-      throw new AuditContextMissingError({ modelName: gate.modelName, operationModelName: model, operation: op });
-    }
     if (gate.kind === 'skip') {
       mutate(currentHandle());
+      return;
+    }
+    const outcome = createOperationOutcome(
+      { model, operation: op, ...(gate.kind === 'unaudited' ? { unaudited: gate.reason } : {}) },
+      { observer: observe },
+    );
+    if (gate.kind !== 'audit') {
+      await settledIn(activeScope.getStore(), outcome, async () => {
+        if (gate.kind === 'reject') {
+          throw new AuditContextMissingError({ modelName: gate.modelName, operationModelName: model, operation: op });
+        }
+        mutate(currentHandle());
+      });
       return;
     }
     const auditContext = gate.context;
     const mode = policy([model], policyConfig);
 
-    await inScope(mode, async (scope) => {
-      const plan = planFor(mode, scope !== undefined);
-      if (plan === 'reject') {
-        throw new AuditAtomicityError({ modelName: model, operation: op });
-      }
-      const mutation = mutate(scope?.handle ?? store);
-      const event: MutationEvent<TModelName> = {
-        model,
-        identity: mutation.identity,
-        action: mutation.action,
-        before: mutation.before ? { kind: 'captured', row: mutation.before } : { kind: 'none' },
-        after: mutation.after,
-        origin: { path: '', op },
-      };
-      // Every resolver failure drops a record: the operation's are kept to fail an atomic one.
-      const droppingFailures: AuditErrorContext[] = [];
-      const operationSink = createFailureSink({
-        observer: async (context) => {
-          droppingFailures.push(context);
-          await observe(context);
-        },
-      });
-      const buildRecords = async () => {
-        const { resolved, failures } = await resolve([event], auditContext, resolveConfig, currentHandle);
-        await operationSink.reportResolverFailures(failures);
-        return compose(resolved, { auditContext, config: composeConfig }, new Date());
-      };
-      await dispatch(
-        {
-          buildRecords,
-          modelName: model,
-          operation: op,
-          params: { identity: mutation.identity },
-          plan,
-          auditContext,
-        },
-        dispatchConfig,
-        runtimeOf(scope),
-      );
-      if (mode === 'atomic' && droppingFailures.length > 0) {
-        throw new AuditIncompleteError({ modelName: model, operation: op, failures: droppingFailures });
-      }
-    });
+    await inScope(mode, (scope) =>
+      settledIn(scope, outcome, async () => {
+        const plan = planFor(mode, scope !== undefined);
+        if (plan === 'reject') {
+          throw new AuditAtomicityError({ modelName: model, operation: op });
+        }
+        const event = eventOf(model, op, mutate(scope?.handle ?? store));
+        const buildRecords = async () => {
+          const { resolved, failures } = await resolve([event], auditContext, resolveConfig, currentHandle);
+          outcome.reportResolverFailures(failures);
+          return compose(resolved, { auditContext, config: composeConfig }, new Date());
+        };
+        await dispatch({ buildRecords, plan, auditContext, outcome }, dispatchConfig, runtimeOf(scope));
+        const dropped = mode === 'atomic' ? outcome.droppedRecords() : undefined;
+        if (dropped) {
+          throw new AuditIncompleteError({ modelName: model, operation: op, ...dropped });
+        }
+      }),
+    );
   };
 
   const requireRow = (handle: MemoryHandle<TModelName>, model: TModelName, identity: string): MemoryRow => {

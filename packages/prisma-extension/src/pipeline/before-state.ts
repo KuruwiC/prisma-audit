@@ -8,7 +8,7 @@
  * omit hides, so the row is identified by it even when the row the write returns lacks it.
  */
 
-import type { BeforeState, FailureSink } from '@kuruwic/db-audit-core';
+import type { BeforeState, OperationOutcome } from '@kuruwic/db-audit-core';
 import type { UpsertBranch } from '../grammar/nested-operations.js';
 import { upsertBranchOf } from '../grammar/nested-state.js';
 import { AUDIT_ACTION, type AuditAction } from '../grammar/operations.js';
@@ -47,7 +47,7 @@ export interface BeforeStateDependencies {
   readonly shouldFetchBefore: ShouldFetchBefore;
   readonly auditedOmittedFieldsWithRowKey: AuditedOmittedFields;
   /** Receives a failed fetch under the `pre-fetch` phase; the caller's operation continues */
-  readonly onFetchFailure: FailureSink['notify'];
+  readonly onFetchFailure: OperationOutcome['fail'];
 }
 
 type FindUniqueDelegate = { findUnique: (args: { where: unknown }) => Promise<unknown> };
@@ -105,7 +105,7 @@ export const fetchBeforeState = async (
     return await findExistingRow(handle, modelName, args.where, deps.auditedOmittedFieldsWithRowKey);
   } catch (caughtError) {
     const error = toError(caughtError);
-    await deps.onFetchFailure({ phase: 'pre-fetch', modelName, operation: action, params: args, error });
+    deps.onFetchFailure({ phase: 'pre-fetch', modelName, operation: action, error });
     return UNAVAILABLE_BEFORE_STATE;
   }
 };

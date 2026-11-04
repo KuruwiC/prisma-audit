@@ -8,7 +8,7 @@ import type {
   ActorContextConfig,
   AuditActor,
   AuditContextProvider,
-  AuditErrorObserver,
+  AuditObserver,
   AuditRecord,
   AuditLogData as CoreAuditLogData,
   AuditLogInput as CoreAuditLogInput,
@@ -71,7 +71,7 @@ export interface WriteConfig<TClient = unknown> {
    *   the audited client opens an interactive transaction around the operation. A failure that
    *   drops a row (`row-identification`, `id-resolver-call`, a `pre-fetch` failure that leaves an
    *   upsert or connectOrCreate row, or a row a detaching nested link write unlinked without naming
-   *   it, unrecorded) fails the operation with `AuditIncompleteError` and rolls its transaction
+   *   it, unrecorded; only rows of an audited model count) fails the operation with `AuditIncompleteError` and rolls its transaction
    *   back, even when your callback catches the error. A row recorded with
    *   `beforeUnavailable: true` is not dropped. An operation that reaches the audit outside any
    *   transaction the audited client owns (an extension applied before the audit gave an operation
@@ -120,8 +120,15 @@ export interface WriteConfig<TClient = unknown> {
   writer?(records: AuditRecord[], context: WriteContext<TClient>): Promise<void>;
 }
 
-/** Audit-failure observation types, defined by `@kuruwic/db-audit-core` and re-exported */
-export type { AuditErrorContext, AuditErrorObserver, AuditErrorPhase } from '@kuruwic/db-audit-core';
+/** Audit-outcome observation types, defined by `@kuruwic/db-audit-core` and re-exported */
+export type {
+  AuditFailure,
+  AuditFailurePhase,
+  AuditObserver,
+  AuditOutcome,
+  AuditOutcomeStatus,
+  UnrecordedWrite,
+} from '@kuruwic/db-audit-core';
 
 /**
  * Prisma Extension configuration options
@@ -233,15 +240,25 @@ export interface PrismaAuditExtensionOptions<TModelName extends string = string,
    */
   actorContext?: ActorContextConfig<AuditActor, unknown, TClient>;
   /**
-   * Observer notified of every audit-pipeline failure. See {@link AuditErrorObserver}. Without
-   * one, a failure the caller cannot see (a failed write, or a dropped entry, of an operation that
-   * has committed) is logged to the console; with one, only the observer receives it. A failure
-   * that drops an entry (`row-identification`, `id-resolver-call`, and a `pre-fetch` failure that
-   * leaves an `upsert` or `connectOrCreate` entry, or a row a detaching nested link write unlinked
-   * without naming it, unrecorded) fails an `atomic` operation with
-   * `AuditIncompleteError` (see `write.mode`) after notifying the observer; under `awaited` and
-   * `deferred` the caller's operation continues without the entry. What each phase means for a
-   * Prisma operation:
+   * Observer called with the outcome of every operation that writes rows of an audited model, its
+   * nested writes included, once it is settled. See {@link AuditObserver}. Outside any
+   * transaction an operation is settled when it returns or throws, and its outcome is reported
+   * before it returns, or, for a `deferred` write, once its audit write has run. Inside an
+   * interactive `$transaction` the outcomes of its operations are reported once it has committed,
+   * before `$transaction` returns (a `deferred` one once its queued audit write has run), or, as
+   * `not-committed`, once it has rolled back. An operation rejected before it runs
+   * (`AuditContextMissingError`, `AuditAtomicityError`, `AuditUnboundWriteError`) is
+   * `not-committed`. Without an observer, the failures of an `incomplete` outcome, whose entries
+   * were lost, are logged to the console. A write the observer makes through the audited client is
+   * not audited and has no outcome, like one an id resolver or an enricher makes.
+   *
+   * A failure that drops an entry (`row-identification`, `id-resolver-call`, and a `pre-fetch`
+   * failure that leaves an `upsert` or `connectOrCreate` entry, or a row of an audited model a
+   * detaching nested link write unlinked without naming it, unrecorded, which the outcome's
+   * `unrecordedWrites` name)
+   * fails an `atomic` operation with `AuditIncompleteError` (see `write.mode`); under `awaited`
+   * and `deferred` the caller's operation continues without the entry, and its outcome is
+   * `incomplete`. What each failure phase means for a Prisma operation:
    *
    * - `pre-fetch`: fetching the before-state (for update / delete / upsert), or reading the rows a
    *   nested `connect`, `set` or `disconnect` may re-link, failed. An `update` or `delete` entry, top-level or nested, is recorded with
@@ -264,7 +281,8 @@ export interface PrismaAuditExtensionOptions<TModelName extends string = string,
    *   (under `atomic`, or under `awaited` inside your `$transaction`) fails the caller's operation
    *   with the write's original error and the transaction rolls back: the entry and the caller's
    *   write commit together or not at all. Once the operation has committed (an `awaited` write
-   *   outside any transaction, or a `deferred` one) the caller's operation succeeds.
+   *   outside any transaction, or a `deferred` one) the caller's operation succeeds. The failure
+   *   carries the `records` the write was given, to keep elsewhere.
    * - `diff-generation`: other audit-support work around the caller's operation failed —
    *   building the entry (enrichment, redaction), reading the row keys a to-many relation
    *   holds before a nested create under an existing row or the rows a nested `updateMany` /
@@ -276,22 +294,22 @@ export interface PrismaAuditExtensionOptions<TModelName extends string = string,
    *   outside any transaction a failure after the write drops the entry and the caller's
    *   operation succeeds.
    * - `row-identification`: a nested delete's row key could not be resolved, from the
-   *   pre-fetched row, its WHERE or the operation data (`params` is `{ entityId, keyFields }`); or
+   *   pre-fetched row, its WHERE or the operation data (the error names the key fields); or
    *   a nested write wrote rows whose key after the write the audit cannot follow or tell apart
-   *   from another row's (`params` is `{ path, unidentified }`); or an `updateMany` or `deleteMany` with a
+   *   from another row's (the error names the write's path); or an `updateMany` or `deleteMany` with a
    *   `limit` wrote rows it cannot tell apart from rows another writer changed; or an
    *   `updateMany` or `updateManyAndReturn` wrote rows it cannot pair by row key with the rows
    *   read before it, because its data changes their key in a way the audit cannot follow (an
-   *   operator such as `increment`) or another writer changed their key in between (`params` is
-   *   `{ unidentified }`, their number). Those audit log entries are skipped, except that the rows
+   *   operator such as `increment`) or another writer changed their key in between.
+   *   `unidentified` is the number of rows. Those audit log entries are skipped, except that the rows
    *   an `updateManyAndReturn` returned are recorded without a before state.
    * - `id-resolver-call`: an id resolver (the entity's `idResolver` or a `to()` resolver) threw,
    *   returned an id that cannot be normalized to a string, or, for a `batchLookup` resolver,
    *   returned a different number of ids than rows. A `foreignKey` resolver throws for a row that
    *   lacks its column, such as one a client-level `omit` hides that the entity does not list in
-   *   `recordOmittedFields`. `params` is `{ identity, resolver }` with the row's serialized row key
-   *   and the failed resolver.
+   *   `recordOmittedFields`. `identity` is the row's serialized row key and `resolver` the failed
+   *   resolver.
    *   A failed `batchLookup` resolver is reported once for every row of its call.
    */
-  errorObserver?: AuditErrorObserver;
+  observer?: AuditObserver;
 }

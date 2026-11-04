@@ -9,11 +9,12 @@
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
-import type { AuditErrorObserver } from '@kuruwic/prisma-audit';
+import type { AuditObserver } from '@kuruwic/prisma-audit';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { type AuditModelName, auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { failuresOf } from './helpers/audit-failures.js';
 import { cleanDatabase, createBasePrisma, testEntities } from './helpers/setup.js';
 
 const testActor: AuditContext = {
@@ -24,13 +25,13 @@ describe('nested to-many pre-fetch — parent row scope', () => {
   let basePrisma: PrismaClient;
   let prisma: ReturnType<typeof createAuditClient<PrismaClient, AuditModelName>>;
   let provider: ReturnType<typeof createAsyncLocalStorageProvider>;
-  let observer: ReturnType<typeof vi.fn<AuditErrorObserver>>;
+  let observer: ReturnType<typeof vi.fn<AuditObserver>>;
 
   beforeEach(async () => {
     basePrisma = createBasePrisma();
     await cleanDatabase(basePrisma);
     provider = createAsyncLocalStorageProvider();
-    observer = vi.fn<AuditErrorObserver>();
+    observer = vi.fn<AuditObserver>();
     prisma = createAuditClient(basePrisma, {
       Prisma,
       schema: auditSchema,
@@ -42,7 +43,7 @@ describe('nested to-many pre-fetch — parent row scope', () => {
         update: true,
         delete: true,
       },
-      errorObserver: observer,
+      observer,
     });
   });
 
@@ -117,7 +118,7 @@ describe('nested to-many pre-fetch — parent row scope', () => {
 
     await expectCreateLogsForNewPostAndComment(userA.id, [postB.id]);
     expect((await basePrisma.post.findUnique({ where: { id: postB.id } }))?.title).toBe('B post');
-    expect(observer).not.toHaveBeenCalled();
+    expect(failuresOf(observer)).toEqual([]);
   });
 
   it('an upsert whose WHERE names no row creates a new row and audits the writes nested in its create branch', async () => {
@@ -126,7 +127,7 @@ describe('nested to-many pre-fetch — parent row scope', () => {
     await upsertPostWithCommentUnder(userA.id, 'missing-post-id');
 
     await expectCreateLogsForNewPostAndComment(userA.id, []);
-    expect(observer).not.toHaveBeenCalled();
+    expect(failuresOf(observer)).toEqual([]);
   });
 
   it("an update whose WHERE names another parent's row is rejected by Prisma and writes no audit log", async () => {
@@ -144,6 +145,6 @@ describe('nested to-many pre-fetch — parent row scope', () => {
     expect((await basePrisma.post.findUnique({ where: { id: postB.id } }))?.title).toBe('B post');
     expect(await logsFor('Post', [postB.id])).toEqual([]);
     expect(await basePrisma.auditLog.count({ where: { entityType: 'User', entityId: userA.id } })).toBe(0);
-    expect(observer).not.toHaveBeenCalled();
+    expect(failuresOf(observer)).toEqual([]);
   });
 });

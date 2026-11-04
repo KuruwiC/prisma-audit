@@ -10,12 +10,13 @@
  * audited, so every audit log a test reads is the held operation's.
  */
 
-import type { AuditContext, AuditErrorContext } from '@kuruwic/db-audit-core';
+import type { AuditContext, AuditObserver } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { failuresOf } from '../helpers/audit-failures.js';
 import { carriedDatabaseCode, databaseCodeOf } from '../helpers/database-error-code.js';
 import {
   type BarrierTarget,
@@ -43,7 +44,7 @@ const errorCodesOf = (settled: Settled<unknown>) => {
 
 describe('concurrent writes on PostgreSQL: a commit between the audit read and the write', () => {
   const queries: string[] = [];
-  const observer = vi.fn<(context: AuditErrorContext) => void>();
+  const observer = vi.fn<AuditObserver>();
   const barrier = createReadBarrier();
   const provider = createAsyncLocalStorageProvider();
 
@@ -52,7 +53,7 @@ describe('concurrent writes on PostgreSQL: a commit between the audit read and t
     queries.push(event.query);
   });
   const base = rawBase.$extends({ name: 'read-barrier', query: barrier.query });
-  const auditOptions = { ...testAuditOptions(provider, { Prisma, schema: auditSchema }), errorObserver: observer };
+  const auditOptions = { ...testAuditOptions(provider, { Prisma, schema: auditSchema }), observer };
   const prisma = createAuditClient(base, auditOptions);
   const atomicPrisma = createAuditClient(base, { ...auditOptions, write: { mode: 'atomic' } });
   type Transaction = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
@@ -261,7 +262,7 @@ describe('concurrent writes on PostgreSQL: a commit between the audit read and t
         expect(await postOf('moved-out')).toMatchObject({ title: '100', published: true });
         expect(await postRecords('moved-out')).toEqual([]);
         expect(await postRecords('stays')).toEqual([]);
-        expect(observer).not.toHaveBeenCalled();
+        expect(failuresOf(observer)).toEqual([]);
       },
     );
 
@@ -283,7 +284,7 @@ describe('concurrent writes on PostgreSQL: a commit between the audit read and t
         expect(await postOf('deleted-by-many')).not.toBeNull();
         expect(await postRecords('deleted-first')).toEqual([]);
         expect(await postRecords('deleted-by-many')).toEqual([]);
-        expect(observer).not.toHaveBeenCalled();
+        expect(failuresOf(observer)).toEqual([]);
       },
     );
 
@@ -310,7 +311,7 @@ describe('concurrent writes on PostgreSQL: a commit between the audit read and t
             }),
           ]);
         }
-        expect(observer).not.toHaveBeenCalled();
+        expect(failuresOf(observer)).toEqual([]);
       },
     );
   });
@@ -405,14 +406,14 @@ describe('concurrent writes on PostgreSQL: a commit between the audit read and t
       for (const id of ['read-1', 'read-2']) {
         expect(await postRecords(id)).toEqual([expect.objectContaining({ action: 'update' })]);
       }
-      expect(observer).toHaveBeenCalledExactlyOnceWith(
+      expect(failuresOf(observer)).toEqual([
         expect.objectContaining({
           phase: 'row-identification',
           modelName: 'Post',
           operation: 'updateMany',
-          params: { unidentified: 1 },
+          unidentified: 1,
         }),
-      );
+      ]);
     });
 
     it('records a row another transaction moves out of the where of an updateMany between the read and the update as updated, misses the row it moves in, and reports nothing when the count does not change', async () => {
@@ -440,7 +441,7 @@ describe('concurrent writes on PostgreSQL: a commit between the audit read and t
       ]);
       expect(await postRecords('moved-in')).toEqual([]);
       expect(await postRecords('stays')).toEqual([expect.objectContaining({ action: 'update' })]);
-      expect(observer).not.toHaveBeenCalled();
+      expect(failuresOf(observer)).toEqual([]);
     });
 
     it('records a row another transaction moves out of the where of an updateMany between the read and the update as updated, and reports as row-identification that the updateMany updated fewer rows than it found again', async () => {
@@ -462,14 +463,14 @@ describe('concurrent writes on PostgreSQL: a commit between the audit read and t
         }),
       ]);
       expect(await postRecords('stays')).toEqual([expect.objectContaining({ action: 'update' })]);
-      expect(observer).toHaveBeenCalledExactlyOnceWith(
+      expect(failuresOf(observer)).toEqual([
         expect.objectContaining({
           phase: 'row-identification',
           modelName: 'Post',
           operation: 'updateMany',
-          params: { unidentified: 1 },
+          unidentified: 1,
         }),
-      );
+      ]);
     });
 
     it('records the delete of a row another transaction deletes between the read and a deleteMany, and reports as row-identification that the deleteMany deleted fewer rows than it read', async () => {
@@ -487,14 +488,14 @@ describe('concurrent writes on PostgreSQL: a commit between the audit read and t
           expect.objectContaining({ action: 'delete', before: expect.objectContaining({ id }) }),
         ]);
       }
-      expect(observer).toHaveBeenCalledExactlyOnceWith(
+      expect(failuresOf(observer)).toEqual([
         expect.objectContaining({
           phase: 'row-identification',
           modelName: 'Post',
           operation: 'deleteMany',
-          params: { unidentified: 1 },
+          unidentified: 1,
         }),
-      );
+      ]);
     });
 
     it('reports as row-identification, and does not record, a row another transaction inserts into the where of a deleteMany between the read and the delete, which deletes it', async () => {
@@ -509,14 +510,14 @@ describe('concurrent writes on PostgreSQL: a commit between the audit read and t
       expect(await postOf('inserted')).toBeNull();
       expect(await postRecords('inserted')).toEqual([]);
       expect(await postRecords('read-1')).toEqual([expect.objectContaining({ action: 'delete' })]);
-      expect(observer).toHaveBeenCalledExactlyOnceWith(
+      expect(failuresOf(observer)).toEqual([
         expect.objectContaining({
           phase: 'row-identification',
           modelName: 'Post',
           operation: 'deleteMany',
-          params: { unidentified: 1 },
+          unidentified: 1,
         }),
-      );
+      ]);
     });
   });
 

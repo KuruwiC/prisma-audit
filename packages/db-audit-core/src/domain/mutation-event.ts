@@ -4,7 +4,7 @@
  * An adapter collects one {@link MutationEvent} per written row; resolution adds the entity id,
  * aggregate roots and contexts to make a {@link ResolvedEvent}; `compose` turns resolved events
  * into {@link AuditRecord}s; `dispatch` runs that build once the operation's write has run and
- * writes the records by a {@link WritePlan}.
+ * writes the records by a write plan ({@link WritePlanKind}).
  */
 
 import type { ResolvedId } from '../aggregate/types.js';
@@ -107,7 +107,8 @@ export interface AuditRecord {
 }
 
 /**
- * How and when `dispatch` writes a set of records
+ * The write plan of an operation: how and when `dispatch` writes its records, decided before the
+ * operation runs (see `planFor`)
  *
  * - `immediate`: written on the transaction's handle before the transaction commits; the caller awaits it
  * - `awaited-after-commit`: written on the base handle once the operation, which runs outside any
@@ -115,11 +116,4 @@ export interface AuditRecord {
  * - `after-commit`: registered with the enclosing transaction; run on the base handle after commit
  * - `detached`: started on the base handle, never awaited by the caller
  */
-export type WritePlan =
-  | { readonly kind: 'immediate'; readonly records: readonly AuditRecord[] }
-  | { readonly kind: 'awaited-after-commit'; readonly records: readonly AuditRecord[] }
-  | { readonly kind: 'after-commit'; readonly records: readonly AuditRecord[] }
-  | { readonly kind: 'detached'; readonly records: readonly AuditRecord[] };
-
-/** The kind of a {@link WritePlan}, decided before the operation runs (see `planFor`) */
-export type WritePlanKind = WritePlan['kind'];
+export type WritePlanKind = 'immediate' | 'awaited-after-commit' | 'after-commit' | 'detached';

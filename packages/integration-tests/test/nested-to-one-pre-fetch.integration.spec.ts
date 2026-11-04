@@ -7,18 +7,19 @@
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
-import type { AuditErrorObserver } from '@kuruwic/prisma-audit';
+import type { AuditObserver } from '@kuruwic/prisma-audit';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { failuresOf } from './helpers/audit-failures.js';
 import { cleanDatabase, createBasePrisma, testEntities } from './helpers/setup.js';
 
 const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'nested-to-one-actor' },
 };
 
-const createClients = (observer: AuditErrorObserver) => {
+const createClients = (observer: AuditObserver) => {
   const basePrisma = createBasePrisma();
   const provider = createAsyncLocalStorageProvider();
   const prisma = createAuditClient(basePrisma, {
@@ -31,19 +32,19 @@ const createClients = (observer: AuditErrorObserver) => {
       update: true,
       delete: true,
     },
-    errorObserver: observer,
+    observer,
   });
   return { basePrisma, provider, prisma };
 };
 
 describe('nested to-one pre-fetch', () => {
-  let observer: ReturnType<typeof vi.fn<AuditErrorObserver>>;
+  let observer: ReturnType<typeof vi.fn<AuditObserver>>;
   let clients: ReturnType<typeof createClients>;
 
   const asActor = <T>(fn: () => Promise<T>): Promise<T> => clients.provider.runAsync(testActor, fn);
 
   beforeEach(async () => {
-    observer = vi.fn<AuditErrorObserver>();
+    observer = vi.fn<AuditObserver>();
     clients = createClients(observer);
     await cleanDatabase(clients.basePrisma);
   });
@@ -90,7 +91,7 @@ describe('nested to-one pre-fetch', () => {
         expect((log.before as Record<string, unknown> | null)?.name).toBe('Before');
         expect((log.after as Record<string, unknown> | null)?.name).toBe('After');
       }
-      expect(observer).not.toHaveBeenCalled();
+      expect(failuresOf(observer)).toEqual([]);
     });
 
     it('logs an upsert on an existing related row as an update', async () => {
@@ -119,7 +120,7 @@ describe('nested to-one pre-fetch', () => {
         expect(log.action).toBe('update');
         expect((log.before as Record<string, unknown> | null)?.name).toBe('Before');
       }
-      expect(observer).not.toHaveBeenCalled();
+      expect(failuresOf(observer)).toEqual([]);
     });
 
     it('captures the before-state of a related row referenced by a composite foreign key', async () => {
@@ -140,7 +141,7 @@ describe('nested to-one pre-fetch', () => {
         expect(log.action).toBe('update');
         expect((log.before as Record<string, unknown> | null)?.label).toBe('Before');
       }
-      expect(observer).not.toHaveBeenCalled();
+      expect(failuresOf(observer)).toEqual([]);
     });
   });
 
@@ -168,7 +169,7 @@ describe('nested to-one pre-fetch', () => {
       for (const log of profileLogs) {
         expect(log.action).toBe('create');
       }
-      expect(observer).not.toHaveBeenCalled();
+      expect(failuresOf(observer)).toEqual([]);
     });
 
     it('captures the before-state of a to-one delete whose back-relation spans a composite key', async () => {
@@ -188,7 +189,7 @@ describe('nested to-one pre-fetch', () => {
         expect(log.action).toBe('delete');
         expect((log.before as Record<string, unknown> | null)?.body).toBe('Note body');
       }
-      expect(observer).not.toHaveBeenCalled();
+      expect(failuresOf(observer)).toEqual([]);
     });
 
     it('captures the before-state of a to-one update whose back-relation spans a composite key', async () => {
@@ -209,7 +210,7 @@ describe('nested to-one pre-fetch', () => {
         expect(log.action).toBe('update');
         expect((log.before as Record<string, unknown> | null)?.body).toBe('Before');
       }
-      expect(observer).not.toHaveBeenCalled();
+      expect(failuresOf(observer)).toEqual([]);
     });
   });
 
@@ -235,7 +236,7 @@ describe('nested to-one pre-fetch', () => {
 
       const bookmarkLogs = await clients.basePrisma.auditLog.findMany({ where: { entityType: 'PostBookmark' } });
       expect(bookmarkLogs).toHaveLength(0);
-      expect(observer).not.toHaveBeenCalled();
+      expect(failuresOf(observer)).toEqual([]);
     });
 
     it('writes a create log keyed by the composite identity when the related row is new', async () => {
@@ -263,7 +264,7 @@ describe('nested to-one pre-fetch', () => {
         expect(log.entityId).toBe(JSON.stringify([post.id, user.id]));
         expect(log.action).toBe('create');
       }
-      expect(observer).not.toHaveBeenCalled();
+      expect(failuresOf(observer)).toEqual([]);
     });
   });
 });

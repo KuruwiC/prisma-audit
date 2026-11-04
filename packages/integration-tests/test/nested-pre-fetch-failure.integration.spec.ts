@@ -2,7 +2,7 @@
  * Integration Test: a failed nested pre-fetch read
  *
  * Before a nested `update` or `delete` writes, the audit reads the row it targets. When that read
- * fails, the caller's operation still runs, the observer hears about the failure under
+ * fails, the caller's operation still runs, its outcome lists the failure under
  * `phase: 'pre-fetch'`, and the row is recorded with `before: null`, `changes: null` and
  * `beforeUnavailable: true`. The rows of a nested delete array are read one by one, so a failed
  * read leaves only its own item without a before state.
@@ -15,11 +15,12 @@
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
-import type { AuditErrorObserver } from '@kuruwic/prisma-audit';
+import type { AuditObserver } from '@kuruwic/prisma-audit';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { describe, expect, it, vi } from 'vitest';
+import { failuresOf } from './helpers/audit-failures.js';
 import { cleanDatabase, createBasePrisma, testEntities } from './helpers/setup.js';
 
 const testActor: AuditContext = {
@@ -37,7 +38,7 @@ describe('nested pre-fetch failures — observer notification', () => {
    * `armFault` resets the call counter to zero, so the call number a predicate sees
    * counts only the `comment.findUnique` reads issued after arming.
    */
-  const createClient = (observer: AuditErrorObserver) => {
+  const createClient = (observer: AuditObserver) => {
     const rawBasePrisma = createBasePrisma();
 
     let callCount = 0;
@@ -66,7 +67,7 @@ describe('nested pre-fetch failures — observer notification', () => {
       contextProvider: provider,
       entities: testEntities,
       diffExcludeFields: ['createdAt'],
-      errorObserver: observer,
+      observer,
     });
 
     const armFault = (predicate: FaultPredicate, message: string): void => {
@@ -78,9 +79,9 @@ describe('nested pre-fetch failures — observer notification', () => {
     return { rawBasePrisma, basePrisma, provider, prisma, armFault };
   };
 
-  it('a nested update whose pre-fetch fails still runs, notifies the observer once under pre-fetch, and is recorded with beforeUnavailable, a null before and no changes', async () => {
+  it('a nested update whose pre-fetch fails still runs, reports one pre-fetch failure in its outcome, and is recorded with beforeUnavailable, a null before and no changes', async () => {
     const FAILURE_MESSAGE = 'simulated nested pre-fetch failure (update)';
-    const observer = vi.fn<AuditErrorObserver>();
+    const observer = vi.fn<AuditObserver>();
     const { rawBasePrisma, basePrisma, provider, prisma, armFault } = createClient(observer);
 
     try {
@@ -119,15 +120,14 @@ describe('nested pre-fetch failures — observer notification', () => {
       const persistedComment = await basePrisma.comment.findUnique({ where: { id: comment.id } });
       expect(persistedComment?.content).toBe('Updated Comment');
 
-      expect(observer).toHaveBeenCalledTimes(1);
-      expect(observer).toHaveBeenCalledWith(
+      expect(failuresOf(observer)).toEqual([
         expect.objectContaining({
           phase: 'pre-fetch',
           modelName: 'Comment',
           operation: 'update',
           error: expect.objectContaining({ message: FAILURE_MESSAGE }),
         }),
-      );
+      ]);
 
       const rows = await basePrisma.auditLog.findMany({
         where: { entityType: 'Comment', entityId: comment.id, action: 'update' },
@@ -144,7 +144,7 @@ describe('nested pre-fetch failures — observer notification', () => {
 
   it('a nested delete array whose read of one item fails records that item as unavailable and the items around it with their before state, and reports that item', async () => {
     const FAILURE_MESSAGE = 'simulated nested pre-fetch failure (delete #2)';
-    const observer = vi.fn<AuditErrorObserver>();
+    const observer = vi.fn<AuditObserver>();
     const { rawBasePrisma, basePrisma, provider, prisma, armFault } = createClient(observer);
 
     try {
@@ -189,16 +189,13 @@ describe('nested pre-fetch failures — observer notification', () => {
       const remaining = await basePrisma.comment.count({ where: { postId: post.id } });
       expect(remaining).toBe(0);
 
-      expect(observer.mock.calls).toEqual([
-        [
-          {
-            phase: 'pre-fetch',
-            modelName: 'Comment',
-            operation: 'delete',
-            params: { id: c2.id },
-            error: expect.objectContaining({ message: FAILURE_MESSAGE }),
-          },
-        ],
+      expect(failuresOf(observer)).toEqual([
+        {
+          phase: 'pre-fetch',
+          modelName: 'Comment',
+          operation: 'delete',
+          error: expect.objectContaining({ message: FAILURE_MESSAGE }),
+        },
       ]);
 
       const rows = await basePrisma.auditLog.findMany({

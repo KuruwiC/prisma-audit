@@ -10,11 +10,12 @@
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
-import type { AuditErrorObserver } from '@kuruwic/prisma-audit';
+import type { AuditObserver } from '@kuruwic/prisma-audit';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { failuresOf } from './helpers/audit-failures.js';
 import { createBasePrisma, testEntities } from './helpers/setup.js';
 
 const testActor: AuditContext = {
@@ -37,14 +38,14 @@ describe('audit-log insert failing in the database inside a PostgreSQL transacti
     async ({ clientOpensTransaction }) => {
       const raw = createBasePrisma();
       rawBasePrisma = raw;
-      const observer = vi.fn<AuditErrorObserver>();
+      const observer = vi.fn<AuditObserver>();
       const provider = createAsyncLocalStorageProvider();
       const prisma = createAuditClient(raw, {
         Prisma,
         schema: auditSchema,
         contextProvider: provider,
         entities: testEntities,
-        errorObserver: observer,
+        observer,
         write: {
           writer: (records, { defaultWrite }) =>
             defaultWrite(records.map((record) => ({ ...record, entityType: 'nul\u0000byte' }))),
@@ -59,15 +60,23 @@ describe('audit-log insert failing in the database inside a PostgreSQL transacti
       const post = await raw.post.create({ data: { title: 'Original', content: 'original', authorId: user.id } });
       const update = { where: { id: post.id }, data: { title: 'Updated' } };
 
-      const outcome = provider.runAsync(testActor, () =>
+      const updated = provider.runAsync(testActor, () =>
         clientOpensTransaction ? prisma.post.update(update) : prisma.$transaction((tx) => tx.post.update(update)),
       );
 
-      await expect(outcome).rejects.toThrow('invalid byte sequence');
-      expect(observer).toHaveBeenCalledTimes(1);
-      const [context] = observer.mock.calls[0] ?? [];
-      expect(context).toEqual(expect.objectContaining({ phase: 'log-write', modelName: 'Post' }));
-      await expect(outcome).rejects.toBe(context?.error);
+      await expect(updated).rejects.toThrow('invalid byte sequence');
+      expect(observer.mock.calls).toEqual([
+        [
+          expect.objectContaining({
+            model: 'Post',
+            operation: 'update',
+            status: 'not-committed',
+            failures: [expect.objectContaining({ phase: 'log-write' })],
+          }),
+        ],
+      ]);
+      const [logWriteFailure] = failuresOf(observer);
+      await expect(updated).rejects.toBe(logWriteFailure?.error);
       expect((await raw.post.findUniqueOrThrow({ where: { id: post.id } })).title).toBe('Original');
       expect(await raw.auditLog.count()).toBe(0);
     },

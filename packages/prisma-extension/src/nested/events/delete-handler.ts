@@ -30,7 +30,7 @@ import type { NestedWriteTarget } from './write-set.js';
 /**
  * A nested delete skipped because its row key could not be resolved. `entityId` is the
  * raw serialized key, or `undefined` when no identity was ever determined.
- * `pipeline/single-executor.ts` maps these fields into a `row-identification` observer context.
+ * `pipeline/single-executor.ts` reports it as a `row-identification` failure of one row.
  */
 export interface UnresolvedDeleteEntityId {
   relatedModel: string;
@@ -39,24 +39,20 @@ export interface UnresolvedDeleteEntityId {
   error: Error;
 }
 
-export type UnresolvedDeleteEntityIdReporter = (info: UnresolvedDeleteEntityId) => Promise<void>;
+export type UnresolvedDeleteEntityIdReporter = (info: UnresolvedDeleteEntityId) => void;
 
-/**
- * Notify `onUnresolvedDeleteEntityId` (if provided) that an entityId could not be
- * resolved. Awaited by every caller, so the reporter (which in practice forwards to the
- * async error-handling observer) is never lost in a short-lived runtime.
- */
-const reportUnresolvedEntityId = async (
+/** Notify `onUnresolvedDeleteEntityId` (if provided) that an entityId could not be resolved */
+const reportUnresolvedEntityId = (
   relatedModel: string,
   entityId: EntityIdentityKey,
   keyFields: string[],
   onUnresolvedDeleteEntityId: UnresolvedDeleteEntityIdReporter | undefined,
-): Promise<void> => {
+): void => {
   if (!onUnresolvedDeleteEntityId) return;
 
   const rawEntityId = entityId === UNRESOLVED_ENTITY_ID ? undefined : entityId;
   const renderedEntityId = rawEntityId === undefined ? 'unresolved' : `"${rawEntityId}"`;
-  await onUnresolvedDeleteEntityId({
+  onUnresolvedDeleteEntityId({
     relatedModel,
     entityId: rawEntityId,
     keyFields,
@@ -114,7 +110,7 @@ export const collectToOneDeleteRecords = async (
 
   if (nestedPreFetchResults?.get(nestedOp.path)?.unread) {
     nestedLog('the deleted row at path=%s could not be read; skipping delete audit entry', nestedOp.path);
-    await reportUnresolvedEntityId(nestedOp.relatedModel, UNRESOLVED_ENTITY_ID, keyFields, onUnresolvedDeleteEntityId);
+    reportUnresolvedEntityId(nestedOp.relatedModel, UNRESOLVED_ENTITY_ID, keyFields, onUnresolvedDeleteEntityId);
     return [];
   }
 
@@ -125,7 +121,7 @@ export const collectToOneDeleteRecords = async (
     nestedLog('could not extract entity ID from delete operation data');
     // No raw entityId exists here; report the identity as never determined so the observer
     // can tell this apart from a malformed composite key, which is reported with its raw value.
-    await reportUnresolvedEntityId(nestedOp.relatedModel, UNRESOLVED_ENTITY_ID, keyFields, onUnresolvedDeleteEntityId);
+    reportUnresolvedEntityId(nestedOp.relatedModel, UNRESOLVED_ENTITY_ID, keyFields, onUnresolvedDeleteEntityId);
     return [];
   }
 
@@ -136,7 +132,7 @@ export const collectToOneDeleteRecords = async (
       entityId,
       nestedOp.path,
     );
-    await reportUnresolvedEntityId(nestedOp.relatedModel, entityId, keyFields, onUnresolvedDeleteEntityId);
+    reportUnresolvedEntityId(nestedOp.relatedModel, entityId, keyFields, onUnresolvedDeleteEntityId);
     return [];
   }
 
@@ -218,7 +214,7 @@ export const collectToManyDeleteRecords = async (
     const entity = deletedEntityOf(target, before, keyConstraint);
     if (entity === null) {
       nestedLog('cannot resolve row key of a delete target (path=%s); skipping delete audit entry', nestedOp.path);
-      await reportUnresolvedEntityId(
+      reportUnresolvedEntityId(
         nestedOp.relatedModel,
         UNRESOLVED_ENTITY_ID,
         keyConstraint.fields,

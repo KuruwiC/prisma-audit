@@ -1,10 +1,11 @@
 import type { AuditContext, FetchBeforeConfig } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
-import type { AuditErrorObserver } from '@kuruwic/prisma-audit';
+import type { AuditObserver } from '@kuruwic/prisma-audit';
 import { createAuditClient, defineEntity, foreignKey, to } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { describe, expect, it, vi } from 'vitest';
+import { failuresOf } from './helpers/audit-failures.js';
 import { createBasePrisma, setupTestContext, testEntities, withFetchBefore } from './helpers/setup.js';
 
 describe('Nested Delete Operations', () => {
@@ -412,7 +413,7 @@ describe('Nested Delete Operations', () => {
     });
   });
 
-  // NOTE: Audit-pipeline failures reach errorObserver; nested pre-fetch failures are covered
+  // NOTE: Audit-pipeline failures reach the observer; nested pre-fetch failures are covered
   // by nested-pre-fetch-failure.integration.spec.ts.
   describe('a nested delete next to other operations at the same path', () => {
     // Every operation at a path reads its targets ahead of the write into the same place; a
@@ -577,14 +578,14 @@ describe('Nested Delete Operations', () => {
   });
 
   describe('a nested delete whose row cannot be identified', () => {
-    it('notifies the observer under row-identification, records nothing for it and keeps the write', async () => {
+    it('reports a row-identification failure in its outcome, records nothing for it and keeps the write', async () => {
       const user = await context.basePrisma.user.create({
         data: { email: 'unidentified-delete@example.com', name: 'Author', password: 'secret123' },
       });
       await context.basePrisma.profile.create({ data: { id: 'unidentified-profile', userId: user.id, bio: 'bio' } });
       const basePrisma = createBasePrisma();
       const provider = createAsyncLocalStorageProvider();
-      const observer = vi.fn<AuditErrorObserver>();
+      const observer = vi.fn<AuditObserver>();
       const prisma = createAuditClient(basePrisma, {
         Prisma,
         schema: auditSchema,
@@ -593,7 +594,7 @@ describe('Nested Delete Operations', () => {
         write: { mode: 'awaited' },
         // Without the read ahead of the write, a to-one delete (`delete: true`) names no row
         fetchBefore: { delete: false },
-        errorObserver: observer,
+        observer,
       });
 
       try {
@@ -606,21 +607,20 @@ describe('Nested Delete Operations', () => {
         await basePrisma.$disconnect();
       }
 
-      expect(observer).toHaveBeenCalledTimes(1);
-      expect(observer).toHaveBeenCalledWith(
+      expect(failuresOf(observer)).toEqual([
         expect.objectContaining({
           phase: 'row-identification',
           modelName: 'Profile',
           operation: 'delete',
-          params: { entityId: undefined, keyFields: ['id'] },
-          error: expect.any(Error),
+          unidentified: 1,
+          error: expect.objectContaining({ message: expect.stringContaining('keyFields=[id]') }),
         }),
-      );
+      ]);
       expect(await context.basePrisma.profile.findUnique({ where: { id: 'unidentified-profile' } })).toBeNull();
       expect(await context.basePrisma.auditLog.findMany({ where: { entityType: 'Profile' } })).toEqual([]);
     });
 
-    it('notifies the observer under row-identification for a to-many delete named by a compound unique, records nothing for it and keeps the write', async () => {
+    it('reports a row-identification failure in its outcome for a to-many delete named by a compound unique, records nothing for it and keeps the write', async () => {
       const user = await context.basePrisma.user.create({
         data: { email: 'unidentified-to-many@example.com', name: 'Author', password: 'secret123' },
       });
@@ -633,7 +633,7 @@ describe('Nested Delete Operations', () => {
       });
       const basePrisma = createBasePrisma();
       const provider = createAsyncLocalStorageProvider();
-      const observer = vi.fn<AuditErrorObserver>();
+      const observer = vi.fn<AuditObserver>();
       const prisma = createAuditClient(basePrisma, {
         Prisma,
         schema: auditSchema,
@@ -642,7 +642,7 @@ describe('Nested Delete Operations', () => {
         write: { mode: 'awaited' },
         // Without the read ahead of the write, a delete named by a compound unique names no primary key
         fetchBefore: { delete: false },
-        errorObserver: observer,
+        observer,
       });
 
       try {
@@ -658,16 +658,15 @@ describe('Nested Delete Operations', () => {
         await basePrisma.$disconnect();
       }
 
-      expect(observer).toHaveBeenCalledTimes(1);
-      expect(observer).toHaveBeenCalledWith(
+      expect(failuresOf(observer)).toEqual([
         expect.objectContaining({
           phase: 'row-identification',
           modelName: 'PostTag',
           operation: 'delete',
-          params: { entityId: undefined, keyFields: ['id'] },
-          error: expect.any(Error),
+          unidentified: 1,
+          error: expect.objectContaining({ message: expect.stringContaining('keyFields=[id]') }),
         }),
-      );
+      ]);
       expect(await context.basePrisma.postTag.findUnique({ where: { id: 'unidentified-post-tag' } })).toBeNull();
       expect(await context.basePrisma.auditLog.findMany({ where: { entityType: 'PostTag' } })).toEqual([]);
     });

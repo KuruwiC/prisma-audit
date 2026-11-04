@@ -19,11 +19,12 @@
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
-import type { AuditErrorObserver, WriteMode } from '@kuruwic/prisma-audit';
+import type { AuditObserver, WriteMode } from '@kuruwic/prisma-audit';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { failureSummariesOf } from './helpers/audit-failures.js';
 import { cleanDatabase, createBasePrisma, testEntities } from './helpers/setup.js';
 
 const testActor: AuditContext = {
@@ -63,7 +64,7 @@ describe('nested pre-fetch failures — affected rows', () => {
       },
     });
 
-    const observer = vi.fn<AuditErrorObserver>();
+    const observer = vi.fn<AuditObserver>();
     const provider = createAsyncLocalStorageProvider();
     const prisma = createAuditClient(basePrisma, {
       Prisma,
@@ -72,7 +73,7 @@ describe('nested pre-fetch failures — affected rows', () => {
       entities: testEntities,
       diffExcludeFields: ['createdAt', 'updatedAt'],
       write: { mode },
-      errorObserver: observer,
+      observer,
     });
     disconnects.push(async () => {
       await prisma.$disconnect();
@@ -102,7 +103,7 @@ describe('nested pre-fetch failures — affected rows', () => {
         where: { entityType },
         select: { entityId: true, action: true, before: true, beforeUnavailable: true },
       });
-    const phases = () => observer.mock.calls.map(([context]) => [context.phase, context.modelName, context.operation]);
+    const phases = () => failureSummariesOf(observer);
 
     return { rawBasePrisma, prisma, user, post, c1, c2, arm, run, logsOf, phases };
   };
@@ -217,10 +218,7 @@ describe('nested pre-fetch failures — affected rows', () => {
     ).rejects.toThrow('Cannot snapshot the rows at nested path "author.comments"');
 
     expect(await rawBasePrisma.comment.count()).toBe(2);
-    expect(phases()).toEqual([
-      ['pre-fetch', 'User', 'update'],
-      ['diff-generation', 'Post', 'update'],
-    ]);
+    expect(phases()).toEqual([['pre-fetch', 'User', 'update'], ['diff-generation']]);
   });
 
   it('records a create nested below a row that cannot be identified by the key the extension gives the created row', async () => {
@@ -299,7 +297,7 @@ describe('nested pre-fetch failures — affected rows', () => {
 
     const comments = await rawBasePrisma.comment.findMany({ where: { postId: post.id } });
     expect(comments.map((comment) => comment.content).sort()).toEqual(['one', 'two']);
-    expect(phases()).toEqual([['diff-generation', 'Post', 'update']]);
+    expect(phases()).toEqual([['diff-generation']]);
     expect(await logsOf('Comment')).toEqual([]);
   });
 });

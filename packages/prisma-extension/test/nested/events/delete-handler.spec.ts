@@ -133,28 +133,19 @@ describe('collectToOneDeleteRecords — unresolved identity', () => {
     );
   });
 
-  it('awaits the reporter callback before returning, rather than firing it and forgetting it', async () => {
-    vi.useFakeTimers();
+  it('calls the reporter before returning', async () => {
     const events: string[] = [];
-    // A report that settles only once the clock has passed its delay, after every pending microtask has run
-    const onUnresolvedDeleteEntityId = vi.fn(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      events.push('reporter settled');
+    const onUnresolvedDeleteEntityId = vi.fn(() => {
+      events.push('reported');
     });
 
-    const collecting = collectToOneDeleteRecords(
-      commentsOp,
-      TOP_LEVEL_ROW,
-      unread(),
-      idPrimaryKey,
-      onUnresolvedDeleteEntityId,
-    ).then(() => {
-      events.push('collection returned');
-    });
-    await vi.runAllTimersAsync();
-    await collecting;
+    await collectToOneDeleteRecords(commentsOp, TOP_LEVEL_ROW, unread(), idPrimaryKey, onUnresolvedDeleteEntityId).then(
+      () => {
+        events.push('collection returned');
+      },
+    );
 
-    expect(events).toEqual(['reporter settled', 'collection returned']);
+    expect(events).toEqual(['reported', 'collection returned']);
   });
 });
 

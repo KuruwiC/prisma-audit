@@ -9,7 +9,7 @@
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
-import type { AuditErrorObserver } from '@kuruwic/prisma-audit';
+import type { AuditObserver } from '@kuruwic/prisma-audit';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
@@ -44,14 +44,14 @@ describe('before-state read failing in the database inside a PostgreSQL transact
         },
       },
     });
-    const observer = vi.fn<AuditErrorObserver>();
+    const observer = vi.fn<AuditObserver>();
     const provider = createAsyncLocalStorageProvider();
     const prisma = createAuditClient(basePrisma, {
       Prisma,
       schema: auditSchema,
       contextProvider: provider,
       entities: testEntities,
-      errorObserver: observer,
+      observer,
     });
     await raw.auditLog.deleteMany();
     await raw.post.deleteMany();
@@ -69,10 +69,16 @@ describe('before-state read failing in the database inside a PostgreSQL transact
     ).rejects.toThrow('current transaction is aborted');
 
     expect((await raw.post.findUniqueOrThrow({ where: { id: post.id } })).title).toBe('Original');
-    expect(observer).toHaveBeenCalledTimes(1);
-    expect(observer).toHaveBeenCalledWith(
-      expect.objectContaining({ phase: 'pre-fetch', modelName: 'Post', operation: 'update' }),
-    );
+    expect(observer.mock.calls).toEqual([
+      [
+        expect.objectContaining({
+          model: 'Post',
+          operation: 'update',
+          status: 'not-committed',
+          failures: [expect.objectContaining({ phase: 'pre-fetch', modelName: 'Post', operation: 'update' })],
+        }),
+      ],
+    ]);
     expect(await raw.auditLog.count()).toBe(0);
   });
 });

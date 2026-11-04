@@ -165,4 +165,11 @@ export default defineConfig<PrismaClient>()({
     onError: 'log',
     fallback: null,
   },
+
+  // Committed writes whose audit logs were lost
+  observer: (outcome) => {
+    if (outcome.status === 'incomplete') {
+      console.error(`[audit] ${outcome.operation} on ${outcome.model} lost audit logs`, outcome.failures);
+    }
+  },
 });

@@ -244,7 +244,7 @@ describe('createBatchExecutor', () => {
         expect.anything(),
         new Map(),
       );
-      expect(failureSink.notify).not.toHaveBeenCalled();
+      expect(failureSink.fail).not.toHaveBeenCalled();
     });
 
     it('audits the row of a composite BigInt key that data gives as numbers, under the key as read', async () => {
@@ -311,11 +311,11 @@ describe('createBatchExecutor', () => {
       );
 
       expect(outcome.result).toEqual({ count: 3 });
-      expect(failureSink.notify).toHaveBeenCalledExactlyOnceWith({
+      expect(failureSink.fail).toHaveBeenCalledExactlyOnceWith({
         phase: 'row-identification',
         modelName: 'User',
         operation: 'createMany',
-        params: { unidentified: 1 },
+        unidentified: 1,
         error: new Error('1 of the rows a createMany created was not found when read back by key'),
       });
       expect(produceRecords).toHaveBeenCalledWith(
@@ -345,7 +345,7 @@ describe('createBatchExecutor', () => {
 
       expect(findMany).toHaveBeenCalledTimes(4);
       expect(produceRecords.mock.calls[0]?.[0].map((event) => event.identity)).toEqual(ids.slice(0, 1000));
-      expect(failureSink.notify).not.toHaveBeenCalled();
+      expect(failureSink.fail).not.toHaveBeenCalled();
     });
 
     it('reads back the rows of a model without a primary key by its first unique field on required columns, generating it when data leaves it out', async () => {
@@ -509,7 +509,7 @@ describe('createBatchExecutor', () => {
           expect.anything(),
           new Map(),
         );
-        expect(failureSink.notify).not.toHaveBeenCalled();
+        expect(failureSink.fail).not.toHaveBeenCalled();
       });
 
       it('audits no row for a key data gives that a row held before the write, telling it by the key the read returns, not the key data gives', async () => {
@@ -526,7 +526,7 @@ describe('createBatchExecutor', () => {
 
         expect(outcome.result).toEqual({ count: 0 });
         expect(produceRecords).toHaveBeenCalledWith([], expect.anything(), new Map());
-        expect(failureSink.notify).not.toHaveBeenCalled();
+        expect(failureSink.fail).not.toHaveBeenCalled();
       });
 
       it('audits only the rows of generated keys, and reports the others it created, when the rows found under the keys data gives do not match the count', async () => {
@@ -551,11 +551,11 @@ describe('createBatchExecutor', () => {
           expect.anything(),
           new Map(),
         );
-        expect(failureSink.notify).toHaveBeenCalledExactlyOnceWith({
+        expect(failureSink.fail).toHaveBeenCalledExactlyOnceWith({
           phase: 'row-identification',
           modelName: 'User',
           operation: 'createMany',
-          params: { unidentified: 2 },
+          unidentified: 2,
           error: new Error(
             '2 of the rows a createMany with skipDuplicates created are not audited: the rows read back under the keys its data gives, less those that held them before it, do not match its count, so which of them it inserted cannot be told',
           ),
@@ -589,7 +589,7 @@ describe('createBatchExecutor', () => {
           expect.anything(),
           new Map(),
         );
-        expect(failureSink.notify).not.toHaveBeenCalled();
+        expect(failureSink.fail).not.toHaveBeenCalled();
       });
 
       it('records as created a row that held a generated key before the write: a generated key is not read before it (known limit)', async () => {
@@ -618,7 +618,7 @@ describe('createBatchExecutor', () => {
           expect.anything(),
           new Map(),
         );
-        expect(failureSink.notify).not.toHaveBeenCalled();
+        expect(failureSink.fail).not.toHaveBeenCalled();
       });
     });
 
@@ -802,12 +802,12 @@ describe('createBatchExecutor', () => {
         expect(outcome.result).toEqual({ count: 1 });
         expect(updateMany).toHaveBeenCalledTimes(1);
         expect(findMany.mock.calls).toEqual([[{ where, take: 2 }], [{ where: narrowedTo(['a', 'b']) }]]);
-        expect(failureSink.notify).toHaveBeenCalledTimes(1);
-        expect(failureSink.notify).toHaveBeenCalledWith({
+        expect(failureSink.fail).toHaveBeenCalledTimes(1);
+        expect(failureSink.fail).toHaveBeenCalledWith({
           phase: 'row-identification',
           modelName: 'User',
           operation: 'updateMany',
-          params: { unidentified: 1 },
+          unidentified: 1,
           error: new Error(unidentifiedMessage('updateMany', 1)),
         });
         expect(produceRecords).toHaveBeenCalledWith([], expect.anything(), new Map());
@@ -829,7 +829,7 @@ describe('createBatchExecutor', () => {
         expect(outcome.result).toEqual({ count: 0 });
         expect(findMany.mock.calls).toEqual([[{ where, take: 2 }]]);
         expect(updateMany).not.toHaveBeenCalled();
-        expect(failureSink.notify).not.toHaveBeenCalled();
+        expect(failureSink.fail).not.toHaveBeenCalled();
         expect(produceRecords).toHaveBeenCalledWith([], expect.anything(), new Map());
       });
 
@@ -868,7 +868,7 @@ describe('createBatchExecutor', () => {
         expect(findMany).not.toHaveBeenCalled();
         expect(outcome.result).toEqual({ count: 2 });
         expect(produceRecords).toHaveBeenCalledWith([], expect.anything(), new Map());
-        expect(failureSink.notify).not.toHaveBeenCalled();
+        expect(failureSink.fail).not.toHaveBeenCalled();
       });
     });
 
@@ -1050,12 +1050,12 @@ describe('createBatchExecutor', () => {
         );
 
         expect(outcome.result).toEqual({ count: 1 });
-        expect(failureSink.notify).toHaveBeenCalledTimes(1);
-        expect(failureSink.notify).toHaveBeenCalledWith({
+        expect(failureSink.fail).toHaveBeenCalledTimes(1);
+        expect(failureSink.fail).toHaveBeenCalledWith({
           phase: 'row-identification',
           modelName: 'User',
           operation: 'deleteMany',
-          params: { unidentified: 1 },
+          unidentified: 1,
           error: new Error(unidentifiedMessage('deleteMany', 1)),
         });
         expect(produceRecords).toHaveBeenCalledWith([], expect.anything(), new Map());
@@ -1206,7 +1206,7 @@ describe('createBatchExecutor', () => {
       phase: 'row-identification',
       modelName: 'User',
       operation: action,
-      params: { unidentified: count },
+      unidentified: count,
       error: new Error(message),
     });
     const notFoundReport = (action: string, count: number) =>
@@ -1244,7 +1244,7 @@ describe('createBatchExecutor', () => {
       );
 
       expect(outcome.result).toEqual({ count: 3 });
-      expect(failureSink.notify).toHaveBeenCalledExactlyOnceWith(notFoundReport('updateMany', 1));
+      expect(failureSink.fail).toHaveBeenCalledExactlyOnceWith(notFoundReport('updateMany', 1));
       expect(produceRecords).toHaveBeenCalledWith(
         [updateEvent(b1, b2, 'updateMany'), updateEvent(c1, c2, 'updateMany')],
         expect.anything(),
@@ -1265,7 +1265,7 @@ describe('createBatchExecutor', () => {
         produceRecords,
       );
 
-      expect(failureSink.notify).toHaveBeenCalledExactlyOnceWith(notFoundReport('updateMany', 2));
+      expect(failureSink.fail).toHaveBeenCalledExactlyOnceWith(notFoundReport('updateMany', 2));
       expect(produceRecords).toHaveBeenCalledWith([], expect.anything(), new Map());
     });
 
@@ -1284,7 +1284,7 @@ describe('createBatchExecutor', () => {
       );
 
       expect(outcome.result).toEqual([inserted, b2]);
-      expect(failureSink.notify).toHaveBeenCalledExactlyOnceWith(withoutBeforeReport('updateManyAndReturn', 1));
+      expect(failureSink.fail).toHaveBeenCalledExactlyOnceWith(withoutBeforeReport('updateManyAndReturn', 1));
       expect(produceRecords).toHaveBeenCalledWith(
         [
           eventOf({
@@ -1314,7 +1314,7 @@ describe('createBatchExecutor', () => {
         produceRecords,
       );
 
-      expect(failureSink.notify).toHaveBeenCalledExactlyOnceWith(notFoundReport('updateMany', 1));
+      expect(failureSink.fail).toHaveBeenCalledExactlyOnceWith(notFoundReport('updateMany', 1));
       expect(produceRecords).toHaveBeenCalledWith([updateEvent(b1, b2, 'updateMany')], expect.anything(), new Map());
     });
   });
@@ -1328,7 +1328,7 @@ describe('createBatchExecutor', () => {
       phase: 'row-identification',
       modelName: 'Counter',
       operation: action,
-      params: { unidentified: count },
+      unidentified: count,
       error: new Error(message),
     });
     const notFollowedReport = (action: string, count: number) =>
@@ -1353,7 +1353,7 @@ describe('createBatchExecutor', () => {
       expect(outcome.result).toEqual({ count: 2 });
       expect(updateMany).toHaveBeenCalledExactlyOnceWith({ where: {}, data });
       expect(findMany).not.toHaveBeenCalled();
-      expect(failureSink.notify).toHaveBeenCalledExactlyOnceWith(notFollowedReport('updateMany', 2));
+      expect(failureSink.fail).toHaveBeenCalledExactlyOnceWith(notFollowedReport('updateMany', 2));
       expect(produceRecords).toHaveBeenCalledWith([], expect.anything(), new Map());
     });
 
@@ -1372,7 +1372,7 @@ describe('createBatchExecutor', () => {
 
       expect(outcome.result).toEqual([shifted(two), shifted(one)]);
       expect(findMany).not.toHaveBeenCalled();
-      expect(failureSink.notify).toHaveBeenCalledExactlyOnceWith(
+      expect(failureSink.fail).toHaveBeenCalledExactlyOnceWith(
         report(
           'updateManyAndReturn',
           2,
@@ -1417,7 +1417,7 @@ describe('createBatchExecutor', () => {
         expect(outcome.result).toEqual({ count: 2 });
         expect(updateMany).toHaveBeenCalledExactlyOnceWith(args);
         expect(findMany).not.toHaveBeenCalled();
-        expect(failureSink.notify).toHaveBeenCalledExactlyOnceWith(notFollowedReport('updateMany', 2));
+        expect(failureSink.fail).toHaveBeenCalledExactlyOnceWith(notFollowedReport('updateMany', 2));
         expect(produceRecords).toHaveBeenCalledWith([], expect.anything(), new Map());
       },
     );
@@ -1448,7 +1448,7 @@ describe('createBatchExecutor', () => {
       await runWithRecords(executor, operation, scopeOn(client, failureSink), produceRecords);
 
       expect(findMany.mock.calls).toEqual([[{ where: { serial: 's1' } }], [{ where: { serial: { in: ['s9'] } } }]]);
-      expect(failureSink.notify).not.toHaveBeenCalled();
+      expect(failureSink.fail).not.toHaveBeenCalled();
       expect(produceRecords).toHaveBeenCalledWith([deviceUpdate(d1, d9, 'updateMany')], expect.anything(), new Map());
     });
 
@@ -1466,7 +1466,7 @@ describe('createBatchExecutor', () => {
       await runWithRecords(executor, operation, scopeOn(client, failureSink), produceRecords);
 
       expect(findMany.mock.calls).toEqual([[{ where: { serial: 's1' } }]]);
-      expect(failureSink.notify).not.toHaveBeenCalled();
+      expect(failureSink.fail).not.toHaveBeenCalled();
       expect(produceRecords).toHaveBeenCalledWith(
         [deviceUpdate(d1, d9, 'updateManyAndReturn')],
         expect.anything(),
@@ -1488,7 +1488,7 @@ describe('createBatchExecutor', () => {
       );
 
       expect(findMany.mock.calls).toEqual([[{ where: { id: 'a' } }], [{ where: { id: { in: ['a'] } } }]]);
-      expect(failureSink.notify).not.toHaveBeenCalled();
+      expect(failureSink.fail).not.toHaveBeenCalled();
       expect(produceRecords).toHaveBeenCalledWith(
         [eventOf({ identity: 'a', before: { kind: 'captured', row: a1 }, after: a2 })],
         expect.anything(),
@@ -1543,7 +1543,7 @@ describe('createBatchExecutor', () => {
       expect(vi.mocked(operation.execute).mock.calls).toEqual([
         [{ where: { AND: [where, keys([1n, 1n], [1n, 2n])] }, data }],
       ]);
-      expect(failureSink.notify).not.toHaveBeenCalled();
+      expect(failureSink.fail).not.toHaveBeenCalled();
       expect(produceRecords).toHaveBeenCalledWith(
         [
           expect.objectContaining({
@@ -1577,7 +1577,7 @@ describe('createBatchExecutor', () => {
       await runWithRecords(executor, operation, scopeOn(client, failureSink), produceRecords);
 
       expect(findMany.mock.calls[1]).toEqual([{ where: { OR: [{ room: 'r1', at: s1.at }] } }]);
-      expect(failureSink.notify).not.toHaveBeenCalled();
+      expect(failureSink.fail).not.toHaveBeenCalled();
       expect(produceRecords).toHaveBeenCalledWith([updateOf('Slot', s0, s1)], expect.anything(), new Map());
     });
 
@@ -1602,7 +1602,7 @@ describe('createBatchExecutor', () => {
 
       expect(outcome.result).toEqual({ count: 1 });
       expect(findMany.mock.calls[1]).toEqual([{ where: { OR: [{ orgId: 9n, userId: 1n }] } }]);
-      expect(failureSink.notify).not.toHaveBeenCalled();
+      expect(failureSink.fail).not.toHaveBeenCalled();
       expect(produceRecords).toHaveBeenCalledWith([updateOf('Membership', m11, m91)], expect.anything(), new Map());
     });
 
@@ -1619,7 +1619,7 @@ describe('createBatchExecutor', () => {
 
       await runWithRecords(executor, operation, scopeOn(client, failureSink), produceRecords);
 
-      expect(failureSink.notify).not.toHaveBeenCalled();
+      expect(failureSink.fail).not.toHaveBeenCalled();
       expect(produceRecords).toHaveBeenCalledWith([updateOf('Rate', r0, r1)], expect.anything(), new Map());
     });
   });
@@ -1787,7 +1787,7 @@ describe('createBatchExecutor', () => {
         expect.anything(),
         new Map(),
       );
-      expect(failureSink.notify).not.toHaveBeenCalled();
+      expect(failureSink.fail).not.toHaveBeenCalled();
     });
 
     it('audits both rows a createMany inserted under keys that differ by one millisecond', async () => {
@@ -1818,7 +1818,7 @@ describe('createBatchExecutor', () => {
         expect.anything(),
         new Map(),
       );
-      expect(failureSink.notify).not.toHaveBeenCalled();
+      expect(failureSink.fail).not.toHaveBeenCalled();
     });
   });
 
@@ -1858,7 +1858,7 @@ describe('createBatchExecutor', () => {
         expect(outcome.result).toEqual(returned);
         expect(write).toHaveBeenCalledWith(args);
         expect(findMany).not.toHaveBeenCalled();
-        expect(failureSink.notify).not.toHaveBeenCalled();
+        expect(failureSink.fail).not.toHaveBeenCalled();
         expect(produceRecords).toHaveBeenCalledWith([], expect.anything(), new Map());
       },
     );
@@ -1870,7 +1870,7 @@ describe('createBatchExecutor', () => {
       phase: 'row-identification',
       modelName: 'User',
       operation: action,
-      params: { unidentified: count },
+      unidentified: count,
       error: new Error(message),
     });
     const notReadReport = (count: number) =>
@@ -1906,7 +1906,7 @@ describe('createBatchExecutor', () => {
       );
 
       expect(outcome.result).toEqual({ count: 3 });
-      expect(failureSink.notify).toHaveBeenCalledExactlyOnceWith(notReadReport(2));
+      expect(failureSink.fail).toHaveBeenCalledExactlyOnceWith(notReadReport(2));
       expect(produceRecords).toHaveBeenCalledWith(
         [eventOf({ identity: 'a', action: 'update', before: { kind: 'captured', row: a1 }, after: a2 })],
         expect.anything(),
@@ -1927,7 +1927,7 @@ describe('createBatchExecutor', () => {
         produceRecords,
       );
 
-      expect(failureSink.notify).toHaveBeenCalledExactlyOnceWith(notReadReport(1));
+      expect(failureSink.fail).toHaveBeenCalledExactlyOnceWith(notReadReport(1));
       expect(findMany).toHaveBeenCalledTimes(1);
       expect(produceRecords).toHaveBeenCalledWith([], expect.anything(), new Map());
     });
@@ -1943,7 +1943,7 @@ describe('createBatchExecutor', () => {
         produce(),
       );
 
-      expect(failureSink.notify).not.toHaveBeenCalled();
+      expect(failureSink.fail).not.toHaveBeenCalled();
     });
 
     it('reports the rows an updateMany found again after the write beyond the rows it updated, and still audits every row found as updated', async () => {
@@ -1960,7 +1960,7 @@ describe('createBatchExecutor', () => {
       );
 
       expect(outcome.result).toEqual({ count: 1 });
-      expect(failureSink.notify).toHaveBeenCalledExactlyOnceWith(notUpdatedReport(1));
+      expect(failureSink.fail).toHaveBeenCalledExactlyOnceWith(notUpdatedReport(1));
       expect(produceRecords).toHaveBeenCalledWith(
         [
           eventOf({ identity: 'a', action: 'update', before: { kind: 'captured', row: a1 }, after: a2 }),
@@ -1983,7 +1983,7 @@ describe('createBatchExecutor', () => {
         produce(),
       );
 
-      expect(vi.mocked(failureSink.notify).mock.calls).toEqual([
+      expect(vi.mocked(failureSink.fail).mock.calls).toEqual([
         [
           report(
             'updateMany',
@@ -2009,7 +2009,7 @@ describe('createBatchExecutor', () => {
       );
 
       expect(outcome.result).toEqual({ count: 1 });
-      expect(failureSink.notify).toHaveBeenCalledExactlyOnceWith(notDeletedReport(1));
+      expect(failureSink.fail).toHaveBeenCalledExactlyOnceWith(notDeletedReport(1));
       expect(produceRecords).toHaveBeenCalledWith(
         [
           eventOf({ identity: 'a', action: 'delete', before: { kind: 'captured', row: a1 } }),
@@ -2032,7 +2032,7 @@ describe('createBatchExecutor', () => {
         produceRecords,
       );
 
-      expect(failureSink.notify).toHaveBeenCalledExactlyOnceWith(
+      expect(failureSink.fail).toHaveBeenCalledExactlyOnceWith(
         report(
           'deleteMany',
           2,
@@ -2057,7 +2057,7 @@ describe('createBatchExecutor', () => {
         produce(),
       );
 
-      expect(failureSink.notify).not.toHaveBeenCalled();
+      expect(failureSink.fail).not.toHaveBeenCalled();
     });
   });
 
@@ -2095,7 +2095,7 @@ describe('createBatchExecutor', () => {
         ),
       ).rejects.toBe(callerError);
 
-      expect(failureSink.notify).not.toHaveBeenCalled();
+      expect(failureSink.fail).not.toHaveBeenCalled();
     });
   });
 });

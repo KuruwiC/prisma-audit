@@ -1,6 +1,6 @@
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
-import type { AuditErrorObserver, WriteMode } from '@kuruwic/prisma-audit';
+import type { AuditObserver, AuditOutcomeStatus, WriteMode } from '@kuruwic/prisma-audit';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
@@ -11,7 +11,7 @@ import { createBasePrisma, setupTestContext, testEntities } from './helpers/setu
 const AUDIT_WRITE_FAILURE_MESSAGE = 'simulated audit log write failure';
 
 interface FailingWriterClientOptions {
-  errorObserver?: AuditErrorObserver;
+  observer?: AuditObserver;
   /**
    * The write mode: `atomic` (the default) runs every write in the transaction the client opens
    * around it, so its audit is written before commit; `awaited` writes the audit outside any
@@ -23,7 +23,7 @@ interface FailingWriterClientOptions {
 /**
  * Builds an audited client whose `write.writer` always throws, so every audit-log
  * write fails on purpose (see write-writer.integration.spec.ts for the base pattern).
- * Each scenario gets its own Prisma client so the `errorObserver` under test
+ * Each scenario gets its own Prisma client so the `observer` under test
  * cannot leak into other scenarios.
  */
 const createFailingWriterClient = (options: FailingWriterClientOptions) => {
@@ -42,7 +42,7 @@ const createFailingWriterClient = (options: FailingWriterClientOptions) => {
         throw new Error(AUDIT_WRITE_FAILURE_MESSAGE);
       },
     },
-    ...(options.errorObserver ? { errorObserver: options.errorObserver } : {}),
+    ...(options.observer ? { observer: options.observer } : {}),
   });
 
   return { basePrisma, provider, prisma };
@@ -58,9 +58,13 @@ const disconnectScenario = async (scenario: {
 
 const logWriteFailure = expect.objectContaining({
   phase: 'log-write',
-  modelName: 'User',
+  records: expect.arrayContaining([expect.objectContaining({ entityType: 'User' })]),
   error: expect.objectContaining({ message: AUDIT_WRITE_FAILURE_MESSAGE }),
 });
+
+/** The outcome of one `operation` on `User` whose only failure is the failed write of its records */
+const logWriteOutcome = (status: AuditOutcomeStatus, operation: string) =>
+  expect.objectContaining({ model: 'User', operation, status, failures: [logWriteFailure] });
 
 describe('Error Handling Integration', () => {
   const context = setupTestContext();
@@ -78,12 +82,12 @@ describe('Error Handling Integration', () => {
     // Every scenario below drives a real audit-log write failure via a `write.writer`
     // that always throws (see write-writer.integration.spec.ts for the base pattern),
     // then observes whether the caller's own `user.create` succeeds or fails, whether
-    // anything is logged to the console, and whether the observer was notified.
+    // anything is logged to the console, and the outcome the observer receives.
 
     it("an atomic write inside the transaction the client opens fails the caller's operation with the original error and rolls back the row", async () => {
       const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-      const observer = vi.fn();
-      const scenario = createFailingWriterClient({ errorObserver: observer });
+      const observer = vi.fn<AuditObserver>();
+      const scenario = createFailingWriterClient({ observer });
 
       try {
         await expect(
@@ -99,8 +103,7 @@ describe('Error Handling Integration', () => {
         });
         expect(persisted).toBeNull();
 
-        expect(observer).toHaveBeenCalledTimes(1);
-        expect(observer).toHaveBeenCalledWith(logWriteFailure);
+        expect(observer.mock.calls).toEqual([[logWriteOutcome('not-committed', 'create')]]);
         // The thrown error is the report: nothing goes to the console.
         expect(consoleErrorSpy).not.toHaveBeenCalled();
       } finally {
@@ -139,10 +142,10 @@ describe('Error Handling Integration', () => {
       // own try/catch, so a broken observer callback cannot change what the caller sees.
       const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       const OBSERVER_FAILURE_MESSAGE = 'observer callback is broken';
-      const observer = vi.fn(() => {
+      const observer = vi.fn<AuditObserver>(() => {
         throw new Error(OBSERVER_FAILURE_MESSAGE);
       });
-      const scenario = createFailingWriterClient({ errorObserver: observer });
+      const scenario = createFailingWriterClient({ observer });
 
       try {
         await expect(
@@ -158,13 +161,13 @@ describe('Error Handling Integration', () => {
         });
         expect(persisted).toBeNull();
 
-        expect(observer).toHaveBeenCalledWith(logWriteFailure);
+        expect(observer.mock.calls).toEqual([[logWriteOutcome('not-committed', 'create')]]);
 
         expect(consoleErrorSpy.mock.calls).toEqual([
           [
-            '[db-audit-core] Error in errorObserver:',
+            '[db-audit-core] Error in the audit observer:',
             OBSERVER_FAILURE_MESSAGE,
-            `(while reporting a log-write failure: ${AUDIT_WRITE_FAILURE_MESSAGE})`,
+            '(while reporting the not-committed outcome of create on User)',
           ],
         ]);
       } finally {
@@ -175,8 +178,8 @@ describe('Error Handling Integration', () => {
 
     it("an awaited write outside any transaction keeps the caller's committed row and leaves the failure to the observer", async () => {
       const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-      const observer = vi.fn();
-      const scenario = createFailingWriterClient({ errorObserver: observer, mode: 'awaited' });
+      const observer = vi.fn<AuditObserver>();
+      const scenario = createFailingWriterClient({ observer, mode: 'awaited' });
 
       try {
         const user = await scenario.provider.runAsync(testActor, async () =>
@@ -192,8 +195,7 @@ describe('Error Handling Integration', () => {
         });
         expect(persisted).not.toBeNull();
 
-        expect(observer).toHaveBeenCalledTimes(1);
-        expect(observer).toHaveBeenCalledWith(logWriteFailure);
+        expect(observer.mock.calls).toEqual([[logWriteOutcome('incomplete', 'create')]]);
         expect(consoleErrorSpy).not.toHaveBeenCalled();
       } finally {
         consoleErrorSpy.mockRestore();
@@ -220,7 +222,7 @@ describe('Error Handling Integration', () => {
         expect(persisted).not.toBeNull();
 
         expect(consoleErrorSpy).toHaveBeenCalledWith(
-          '[db-audit-core] Error in audit log write after commit:',
+          '[db-audit-core] create on User committed without some of its audit records; log-write failure:',
           AUDIT_WRITE_FAILURE_MESSAGE,
         );
       } finally {
@@ -231,16 +233,16 @@ describe('Error Handling Integration', () => {
   });
 
   describe('Batch operations — audit-log write failures', () => {
-    // A batch operation's own `log-write` failure notifies the observer exactly
-    // once, with `phase: 'log-write'`, through the same audited-operation pipeline
-    // as a single operation. Inside a transaction that failure fails the caller's
-    // operation and rolls its rows back with it; the once-only guarantee has to hold
-    // end to end — the failure must propagate back to the caller without being
+    // A batch operation's own `log-write` failure reaches the observer exactly
+    // once, as a `log-write` failure of the operation's single outcome, through the same
+    // audited-operation pipeline as a single operation. Inside a transaction that failure
+    // fails the caller's operation and rolls its rows back with it; the once-only guarantee
+    // has to hold end to end — the failure must propagate back to the caller without being
     // reported a second time along the way.
 
-    it("a failing write.writer on a batch operation (createMany) notifies the observer exactly once, with phase: 'log-write'", async () => {
-      const observer = vi.fn();
-      const scenario = createFailingWriterClient({ errorObserver: observer });
+    it("a failing write.writer on a batch operation (createMany) reports the failure exactly once in its outcome, with phase: 'log-write'", async () => {
+      const observer = vi.fn<AuditObserver>();
+      const scenario = createFailingWriterClient({ observer });
 
       try {
         await expect(
@@ -260,16 +262,15 @@ describe('Error Handling Integration', () => {
         });
         expect(persisted).toHaveLength(0);
 
-        expect(observer).toHaveBeenCalledTimes(1);
-        expect(observer).toHaveBeenCalledWith(logWriteFailure);
+        expect(observer.mock.calls).toEqual([[logWriteOutcome('not-committed', 'createMany')]]);
       } finally {
         await disconnectScenario(scenario);
       }
     });
 
-    it("a failing write.writer on a batch operation (updateMany) notifies the observer exactly once, with phase: 'log-write'", async () => {
-      const observer = vi.fn();
-      const scenario = createFailingWriterClient({ errorObserver: observer });
+    it("a failing write.writer on a batch operation (updateMany) reports the failure exactly once in its outcome, with phase: 'log-write'", async () => {
+      const observer = vi.fn<AuditObserver>();
+      const scenario = createFailingWriterClient({ observer });
 
       try {
         // Seed directly through the raw (non-audited) base client — the audited client's
@@ -300,8 +301,7 @@ describe('Error Handling Integration', () => {
         });
         expect(stillOriginal.map((u) => u.name).sort()).toEqual(['A', 'B']);
 
-        expect(observer).toHaveBeenCalledTimes(1);
-        expect(observer).toHaveBeenCalledWith(logWriteFailure);
+        expect(observer.mock.calls).toEqual([[logWriteOutcome('not-committed', 'updateMany')]]);
       } finally {
         await disconnectScenario(scenario);
       }
@@ -309,8 +309,8 @@ describe('Error Handling Integration', () => {
 
     it("a batch operation (updateMany) outside any transaction keeps the caller's committed rows and leaves the failure to the observer", async () => {
       const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-      const observer = vi.fn();
-      const scenario = createFailingWriterClient({ errorObserver: observer, mode: 'awaited' });
+      const observer = vi.fn<AuditObserver>();
+      const scenario = createFailingWriterClient({ observer, mode: 'awaited' });
 
       try {
         // Seeded through the raw base client: the audited client's writer always fails.
@@ -338,8 +338,7 @@ describe('Error Handling Integration', () => {
         });
         expect(updated.map((u) => u.name)).toEqual(['Batch Ignore Updated', 'Batch Ignore Updated']);
 
-        expect(observer).toHaveBeenCalledTimes(1);
-        expect(observer).toHaveBeenCalledWith(logWriteFailure);
+        expect(observer.mock.calls).toEqual([[logWriteOutcome('incomplete', 'updateMany')]]);
         expect(consoleErrorSpy).not.toHaveBeenCalled();
       } finally {
         consoleErrorSpy.mockRestore();
@@ -379,7 +378,7 @@ describe('Error Handling Integration', () => {
 
         // The message line, then the error's stack
         expect(consoleErrorSpy.mock.calls.map(([line]) => String(line).split('\n')[0])).toEqual([
-          '[db-audit-core] Error in audit log write after commit:',
+          '[db-audit-core] updateMany on User committed without some of its audit records; log-write failure:',
           `Error: ${AUDIT_WRITE_FAILURE_MESSAGE}`,
         ]);
       } finally {
@@ -390,21 +389,21 @@ describe('Error Handling Integration', () => {
   });
 
   describe('Single operations — diff-generation failures', () => {
-    // A `diff-generation` phase failure reaches the caller as the original error, the observer
-    // is notified once.
+    // A `diff-generation` phase failure reaches the caller as the original error, and the
+    // operation's outcome lists it once.
 
     it('a diff-generation failure on the single-operation path inside the transaction the client opens propagates the original error to the caller', async () => {
       const ENRICHER_FAILURE_MESSAGE = 'actor enricher is broken';
       const enricherError = new Error(ENRICHER_FAILURE_MESSAGE);
       const basePrisma = createBasePrisma();
       const provider = createAsyncLocalStorageProvider();
-      const observer = vi.fn();
+      const observer = vi.fn<AuditObserver>();
       const prisma = createAuditClient(basePrisma, {
         Prisma,
         schema: auditSchema,
         contextProvider: provider,
         entities: testEntities,
-        errorObserver: observer,
+        observer,
         actorContext: {
           enricher: async () => {
             throw enricherError;
@@ -434,10 +433,16 @@ describe('Error Handling Integration', () => {
         const persisted = await context.basePrisma.user.findUnique({ where: { id: user.id } });
         expect(persisted?.name).toBe('Diff Gen User');
 
-        expect(observer).toHaveBeenCalledTimes(1);
-        expect(observer).toHaveBeenCalledWith(
-          expect.objectContaining({ phase: 'diff-generation', modelName: 'User', error: enricherError }),
-        );
+        expect(observer.mock.calls).toEqual([
+          [
+            expect.objectContaining({
+              model: 'User',
+              operation: 'update',
+              status: 'not-committed',
+              failures: [{ phase: 'diff-generation', error: enricherError }],
+            }),
+          ],
+        ]);
       } finally {
         await prisma.$disconnect();
         await basePrisma.$disconnect();
@@ -479,13 +484,13 @@ describe('Error Handling Integration', () => {
         },
       });
       const provider = createAsyncLocalStorageProvider();
-      const observer = vi.fn();
+      const observer = vi.fn<AuditObserver>();
       const prisma = createAuditClient(rawBasePrisma, {
         Prisma,
         schema: auditSchema,
         contextProvider: provider,
         entities: testEntities,
-        errorObserver: observer,
+        observer,
         fetchBefore: { update: true },
       }).$extends(faultInjection);
 
@@ -516,10 +521,16 @@ describe('Error Handling Integration', () => {
         expect(persisted?.title).toBe('Original');
         expect(await context.basePrisma.auditLog.count()).toBe(auditRowsBefore);
 
-        expect(observer).toHaveBeenCalledTimes(1);
-        expect(observer).toHaveBeenCalledWith(
-          expect.objectContaining({ phase: 'diff-generation', modelName: 'User', error: rereadError }),
-        );
+        expect(observer.mock.calls).toEqual([
+          [
+            expect.objectContaining({
+              model: 'User',
+              operation: 'update',
+              status: 'not-committed',
+              failures: [{ phase: 'diff-generation', error: rereadError }],
+            }),
+          ],
+        ]);
       } finally {
         await prisma.$disconnect();
         await rawBasePrisma.$disconnect();
@@ -553,13 +564,13 @@ describe('Error Handling Integration', () => {
           },
         });
         const provider = createAsyncLocalStorageProvider();
-        const observer = vi.fn();
+        const observer = vi.fn<AuditObserver>();
         const prisma = createAuditClient(basePrisma, {
           Prisma,
           schema: auditSchema,
           contextProvider: provider,
           entities: testEntities,
-          errorObserver: observer,
+          observer,
           write: { mode },
         });
 
@@ -592,10 +603,16 @@ describe('Error Handling Integration', () => {
             await context.basePrisma.post.findMany({ where: { authorId: user.id }, select: { title: true } }),
           ).toEqual([{ title: 'Existing' }]);
           expect(await context.basePrisma.auditLog.count()).toBe(auditRowsBefore);
-          expect(observer).toHaveBeenCalledTimes(1);
-          expect(observer).toHaveBeenCalledWith(
-            expect.objectContaining({ phase: 'diff-generation', modelName: 'User', error: snapshotError }),
-          );
+          expect(observer.mock.calls).toEqual([
+            [
+              expect.objectContaining({
+                model: 'User',
+                operation: 'update',
+                status: 'not-committed',
+                failures: [{ phase: 'diff-generation', error: snapshotError }],
+              }),
+            ],
+          ]);
         } finally {
           await prisma.$disconnect();
           await rawBasePrisma.$disconnect();
@@ -618,13 +635,13 @@ describe('Error Handling Integration', () => {
     it('a foreign key violation on a single-record create propagates raw as P2003, leaving no row and no audit log and without reaching the audit observer', async () => {
       const basePrisma = createBasePrisma();
       const provider = createAsyncLocalStorageProvider();
-      const observer = vi.fn();
+      const observer = vi.fn<AuditObserver>();
       const prisma = createAuditClient(basePrisma, {
         Prisma,
         schema: auditSchema,
         contextProvider: provider,
         entities: testEntities,
-        errorObserver: observer,
+        observer,
         write: {
           mode: 'awaited',
         },
@@ -649,7 +666,9 @@ describe('Error Handling Integration', () => {
 
         expect(await context.basePrisma.post.count()).toBe(0);
         expect(await context.basePrisma.auditLog.count({ where: { entityType: 'Post' } })).toBe(0);
-        expect(observer).not.toHaveBeenCalled();
+        expect(observer.mock.calls).toEqual([
+          [expect.objectContaining({ model: 'Post', operation: 'create', status: 'not-committed', failures: [] })],
+        ]);
       } finally {
         await prisma.$disconnect();
         await basePrisma.$disconnect();
@@ -660,18 +679,18 @@ describe('Error Handling Integration', () => {
       // The batch executor calls the caller's own `updateMany` in the middle of
       // audit-support work (before-fetch, after-refetch, record production). Only the
       // audit-support work is an audit failure — the caller's own database error must
-      // never be reported to `observer`. Uses a normal
-      // (non-failing) writer so the only failure in play is the caller's own — the setup
-      // creates below must not themselves trip the observer.
+      // never be reported to `observer` as a failure: its outcome is `not-committed`, with no
+      // failures. Uses a normal (non-failing) writer so the only failure in play is the
+      // caller's own.
       const basePrisma = createBasePrisma();
       const provider = createAsyncLocalStorageProvider();
-      const observer = vi.fn();
+      const observer = vi.fn<AuditObserver>();
       const prisma = createAuditClient(basePrisma, {
         Prisma,
         schema: auditSchema,
         contextProvider: provider,
         entities: testEntities,
-        errorObserver: observer,
+        observer,
         write: {
           mode: 'awaited',
         },
@@ -686,7 +705,7 @@ describe('Error Handling Integration', () => {
             data: { email: 'batch-collision-b@example.com', name: 'Batch B', password: 'secret123' },
           }),
         ]);
-        // The setup creates above must not themselves trip the observer.
+        // The outcomes of the setup creates above are not the ones under test.
         observer.mockClear();
 
         const collidingUpdate = provider.runAsync(testActor, async () =>
@@ -711,7 +730,9 @@ describe('Error Handling Integration', () => {
           ['batch-collision-a@example.com', 'batch-collision-b@example.com'].sort(),
         );
 
-        expect(observer).not.toHaveBeenCalled();
+        expect(observer.mock.calls).toEqual([
+          [expect.objectContaining({ model: 'User', operation: 'updateMany', status: 'not-committed', failures: [] })],
+        ]);
       } finally {
         await prisma.$disconnect();
         await basePrisma.$disconnect();
@@ -722,18 +743,18 @@ describe('Error Handling Integration', () => {
       // The single-operation executor runs the caller's own `create` alongside audit-support
       // work (before-state fetch, enrichment, record building). Only the audit-support work
       // is an audit failure — the caller's own database error (a unique constraint violation
-      // here) must never reach `observer`, and must reach the caller exactly as
+      // here) must never reach `observer` as a failure, and must reach the caller exactly as
       // Prisma threw it. Uses a normal (non-failing) writer so the only failure in play is
       // the caller's own.
       const basePrisma = createBasePrisma();
       const provider = createAsyncLocalStorageProvider();
-      const observer = vi.fn();
+      const observer = vi.fn<AuditObserver>();
       const prisma = createAuditClient(basePrisma, {
         Prisma,
         schema: auditSchema,
         contextProvider: provider,
         entities: testEntities,
-        errorObserver: observer,
+        observer,
         write: {
           mode: 'awaited',
         },
@@ -746,7 +767,7 @@ describe('Error Handling Integration', () => {
             data: { email, name: 'First User', password: 'secret123' },
           }),
         );
-        // The setup create above must not itself trip the observer.
+        // The outcome of the setup create above is not the one under test.
         observer.mockClear();
         const auditLogCount = await context.basePrisma.auditLog.count();
 
@@ -767,7 +788,9 @@ describe('Error Handling Integration', () => {
         expect(users[0]?.name).toBe('First User');
         expect(await context.basePrisma.auditLog.count()).toBe(auditLogCount);
 
-        expect(observer).not.toHaveBeenCalled();
+        expect(observer.mock.calls).toEqual([
+          [expect.objectContaining({ model: 'User', operation: 'create', status: 'not-committed', failures: [] })],
+        ]);
       } finally {
         await prisma.$disconnect();
         await basePrisma.$disconnect();

@@ -86,7 +86,7 @@ describe('Batch $transaction under the audit extension', () => {
         ...(options.writer ? { writer: options.writer } : {}),
       },
       fetchBefore: { update: true },
-      errorObserver: observer,
+      observer,
     });
     const dispose = async () => {
       await prisma.$disconnect();

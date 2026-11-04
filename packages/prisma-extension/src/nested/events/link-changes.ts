@@ -29,7 +29,7 @@ import { attachedFilter, type LinkPathRead, type LinkReads, type LinkWrite } fro
 import { getPreFetchListClient } from '../pre-fetch/model-client.js';
 import { preFetchedStateNamedBy } from '../pre-fetch/pre-fetch-result-store.js';
 import type { CollectedNestedRecord } from './collected-record.js';
-import type { UnrecordedWriteReporter } from './unrecorded-write.js';
+import type { AuditedModelsOf, UnrecordedWriteReporter } from './unrecorded-write.js';
 
 type Row = Record<string, unknown>;
 
@@ -179,10 +179,14 @@ const recordOf = (
     : undefined;
 };
 
-const reportUndeterminedDetaches = (path: string, read: LinkPathRead, report: UnrecordedWriteReporter): void => {
+/** Reports the detaching writes that unlinked rows of an audited model the read could not tell */
+const reportUndeterminedDetaches = (path: string, read: LinkPathRead, input: LinkChangesInput): void => {
+  if (input.auditedModelsOf(read.relatedModel, undefined).length === 0) {
+    return;
+  }
   for (const { operation } of read.writes) {
     if (read.undeterminedDetaches.has(operation)) {
-      report({ modelName: read.relatedModel, operation: operation.operation, path });
+      input.onUnrecordedWrite({ modelName: read.relatedModel, operation: operation.operation, path });
     }
   }
 };
@@ -199,6 +203,7 @@ export interface LinkChangesInput {
   readonly whereAfterWrite: (operation: NestedOperationInfo, where: Row) => Row;
   readonly fieldNamesOf: (modelName: string) => ReadonlySet<string>;
   readonly onUnrecordedWrite: UnrecordedWriteReporter;
+  readonly auditedModelsOf: AuditedModelsOf;
 }
 
 /**
@@ -210,7 +215,7 @@ export const collectLinkChanges = async (
 ): Promise<Map<NestedOperationInfo, CollectedNestedRecord[]>> => {
   const records = new Map<NestedOperationInfo, CollectedNestedRecord[]>();
   for (const [path, read] of input.linkReads) {
-    reportUndeterminedDetaches(path, read, input.onUnrecordedWrite);
+    reportUndeterminedDetaches(path, read, input);
     const audited = input.auditedAt(path);
     const candidates = candidatesAt(read, input.nestedPreFetchResults, audited, input.whereAfterWrite);
     if (candidates.length === 0) {

@@ -70,6 +70,7 @@ const executorWith = (options: ExecutorOptions = {}) => {
       schemaMetadata,
       options.queryOmitSupported ?? false,
     ),
+    auditedModelsOf: (modelName) => [modelName],
   });
   const produceRecords = vi.fn<RecordProducer>(async () => []);
   return { executor, produceRecords, shouldFetchBefore, failureSink };
@@ -190,11 +191,10 @@ describe('createSingleExecutor', () => {
 
       const outcome = await runWithRecords(executor, operation, scopeOn(client, failureSink), produceRecords);
 
-      expect(failureSink.notify).toHaveBeenCalledWith({
+      expect(failureSink.fail).toHaveBeenCalledWith({
         phase: 'pre-fetch',
         modelName: 'User',
         operation: 'update',
-        params: operation.args,
         error: fetchError,
       });
       expect(update).toHaveBeenCalledWith(updateArgs);
@@ -224,7 +224,7 @@ describe('createSingleExecutor', () => {
         produceRecords,
       );
 
-      expect(failureSink.notify).toHaveBeenCalledWith(expect.objectContaining({ phase: 'pre-fetch' }));
+      expect(failureSink.fail).toHaveBeenCalledWith(expect.objectContaining({ phase: 'pre-fetch' }));
       expect(produceRecords).toHaveBeenCalledWith([], expect.anything(), new Map());
     });
   });
@@ -351,7 +351,7 @@ describe('createSingleExecutor', () => {
         produceRecords,
       );
 
-      expect(failureSink.notify).toHaveBeenCalledWith(
+      expect(failureSink.fail).toHaveBeenCalledWith(
         expect.objectContaining({
           phase: 'pre-fetch',
           modelName: 'Profile',
@@ -413,7 +413,7 @@ describe('createSingleExecutor', () => {
   });
 
   describe('a nested delete whose row cannot be identified', () => {
-    it('is skipped and reported as row-identification, with no entity id in the reported params', async () => {
+    it('is skipped and reported as row-identification of one row, the error naming its key fields', async () => {
       const args = { where: { id: 'u1' }, data: { profile: { delete: true } } };
       const client = clientWith({
         user: { findUnique: vi.fn(async () => user), update: vi.fn(async () => ({ ...user, profile: null })) },
@@ -423,14 +423,16 @@ describe('createSingleExecutor', () => {
 
       await runWithRecords(executor, operationOn(client, 'update', args), scopeOn(client, failureSink), produceRecords);
 
-      expect(failureSink.notify).toHaveBeenCalledTimes(1);
-      expect(failureSink.notify).toHaveBeenCalledWith({
+      expect(failureSink.fail).toHaveBeenCalledTimes(1);
+      expect(failureSink.fail).toHaveBeenCalledWith({
         phase: 'row-identification',
         modelName: 'Profile',
         operation: 'delete',
-        params: { entityId: undefined, keyFields: ['id'] },
+        unidentified: 1,
         error: expect.objectContaining({
-          message: expect.stringContaining('Cannot resolve the row key of a deleted Profile record'),
+          message: expect.stringContaining(
+            'Cannot resolve the row key of a deleted Profile record (entityId=unresolved, keyFields=[id])',
+          ),
         }),
       });
       expect(produceRecords).toHaveBeenCalledWith(
@@ -510,7 +512,7 @@ describe('createSingleExecutor', () => {
       ).rejects.toBe(snapshotError);
 
       expect(update).not.toHaveBeenCalled();
-      expect(failureSink.notify).not.toHaveBeenCalled();
+      expect(failureSink.fail).not.toHaveBeenCalled();
     });
 
     it('fills in a key the data of a nested create leaves out, reads no row before the write, and audits only the row with that key', async () => {
@@ -785,7 +787,7 @@ describe('createSingleExecutor', () => {
       );
 
       await expect(run).rejects.toBe(callerError);
-      expect(failureSink.notify).not.toHaveBeenCalled();
+      expect(failureSink.fail).not.toHaveBeenCalled();
     });
   });
 });

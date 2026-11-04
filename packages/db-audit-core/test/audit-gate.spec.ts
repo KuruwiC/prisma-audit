@@ -31,8 +31,11 @@ describe('auditGate', () => {
     });
   });
 
-  it('skips a write without an audit context when requireContext is false', () => {
-    expect(auditGate(undefined, ['User', 'Post'], { requireContext: false })).toEqual({ kind: 'skip' });
+  it('runs a write without an audit context unaudited when requireContext is false', () => {
+    expect(auditGate(undefined, ['User', 'Post'], { requireContext: false })).toEqual({
+      kind: 'unaudited',
+      reason: 'no-context',
+    });
   });
 
   it('rejects a write without an audit context naming the first model the requireContext function is true for', () => {
@@ -45,10 +48,13 @@ describe('auditGate', () => {
     expect(requireContext.mock.calls).toEqual([['User'], ['Post']]);
   });
 
-  it('skips a write without an audit context when the requireContext function is false for every model', () => {
+  it('runs a write without an audit context unaudited when the requireContext function is false for every model', () => {
     const requireContext = vi.fn(() => false);
 
-    expect(auditGate(undefined, ['User', 'Post'], { requireContext })).toEqual({ kind: 'skip' });
+    expect(auditGate(undefined, ['User', 'Post'], { requireContext })).toEqual({
+      kind: 'unaudited',
+      reason: 'no-context',
+    });
     expect(requireContext.mock.calls).toEqual([['User'], ['Post']]);
   });
 });

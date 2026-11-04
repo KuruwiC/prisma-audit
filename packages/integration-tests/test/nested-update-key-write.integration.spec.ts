@@ -12,12 +12,13 @@
  * moved in by a `connect`, or re-keyed by `ON UPDATE CASCADE` when the device gets a new code.
  */
 
-import type { AuditContext, AuditErrorObserver } from '@kuruwic/db-audit-core';
+import type { AuditContext, AuditObserver } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider, self } from '@kuruwic/db-audit-core';
 import { createAuditClient, defineEntity } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { failuresOf } from './helpers/audit-failures.js';
 import { cleanDatabase, createBasePrisma } from './helpers/setup.js';
 
 const testActor: AuditContext = {
@@ -42,7 +43,7 @@ describe('a nested update that writes the row key of the row it updates', () => 
   });
 
   const setup = async ({ fetchBeforeUpdate = true } = {}) => {
-    const observer = vi.fn<AuditErrorObserver>();
+    const observer = vi.fn<AuditObserver>();
     const basePrisma = createBasePrisma();
     const provider = createAsyncLocalStorageProvider();
     const prisma = createAuditClient(basePrisma, {
@@ -59,7 +60,7 @@ describe('a nested update that writes the row key of the row it updates', () => 
       },
       fetchBefore: { update: fetchBeforeUpdate },
       write: { mode: 'awaited' },
-      errorObserver: observer,
+      observer,
     });
     disconnects.push(async () => {
       await prisma.$disconnect();
@@ -107,7 +108,7 @@ describe('a nested update that writes the row key of the row it updates', () => 
       expect(await logsOf('Device')).toEqual([
         { ...recoded, before: expect.objectContaining({ code: 'd-1', label: 'label of d-1' }) },
       ]);
-      expect(observer).not.toHaveBeenCalled();
+      expect(failuresOf(observer)).toEqual([]);
     });
 
     it('records the device a nested update gives a new code when the result selects none of the relation', async () => {
@@ -123,7 +124,7 @@ describe('a nested update that writes the row key of the row it updates', () => 
       );
 
       expect(await logsOf('Device')).toEqual([expect.objectContaining(recoded)]);
-      expect(observer).not.toHaveBeenCalled();
+      expect(failuresOf(observer)).toEqual([]);
     });
 
     it('records the device a nested update gives a new code, named by its code, when the before state is not read', async () => {
@@ -140,7 +141,7 @@ describe('a nested update that writes the row key of the row it updates', () => 
       expect(await logsOf('Device')).toEqual([
         expect.objectContaining({ entityId: 'd-9', action: 'update', before: null }),
       ]);
-      expect(observer).not.toHaveBeenCalled();
+      expect(failuresOf(observer)).toEqual([]);
     });
 
     it('records the device the update branch of a nested upsert gives a new code under that code', async () => {
@@ -163,7 +164,7 @@ describe('a nested update that writes the row key of the row it updates', () => 
       );
 
       expect(await logsOf('Device')).toEqual([expect.objectContaining(recoded)]);
-      expect(observer).not.toHaveBeenCalled();
+      expect(failuresOf(observer)).toEqual([]);
     });
 
     it('records the device a nested updateMany gives a new code under that code', async () => {
@@ -179,7 +180,7 @@ describe('a nested update that writes the row key of the row it updates', () => 
       );
 
       expect(await logsOf('Device')).toEqual([expect.objectContaining(recoded)]);
-      expect(observer).not.toHaveBeenCalled();
+      expect(failuresOf(observer)).toEqual([]);
     });
   });
 
@@ -205,7 +206,7 @@ describe('a nested update that writes the row key of the row it updates', () => 
           }),
         }),
       ]);
-      expect(observer).not.toHaveBeenCalled();
+      expect(failuresOf(observer)).toEqual([]);
     });
   });
 
@@ -230,19 +231,18 @@ describe('a nested update that writes the row key of the row it updates', () => 
         { deviceCode: 'd-1', slot: 11 },
       ]);
       expect(await logsOf('DeviceSensor')).toEqual([]);
-      expect(observer).toHaveBeenCalledTimes(1);
-      expect(observer).toHaveBeenCalledWith(
+      expect(failuresOf(observer)).toEqual([
         expect.objectContaining({
           phase: 'row-identification',
           modelName: 'DeviceSensor',
           operation: 'update',
-          params: { path: 'sensors', unidentified: 1 },
+          unidentified: 1,
           error: expect.objectContaining({
             message:
               '1 of the rows a nested update at sensors wrote are not audited: its data changes their key in a way the audit cannot follow',
           }),
         }),
-      );
+      ]);
     });
 
     it('does not record a sensor an operator re-keys as created next to a nested create, and reports the sensor the create inserts', async () => {
@@ -269,27 +269,25 @@ describe('a nested update that writes the row key of the row it updates', () => 
         { deviceCode: 'd-1', slot: 11 },
       ]);
       expect(await logsOf('DeviceSensor')).toEqual([]);
-      expect(observer).toHaveBeenCalledTimes(2);
-      expect(observer).toHaveBeenCalledWith(
+      expect(failuresOf(observer)).toEqual([
         expect.objectContaining({
           phase: 'row-identification',
           modelName: 'DeviceSensor',
           operation: 'update',
-          params: { path: 'sensors', unidentified: 1 },
+          unidentified: 1,
+          error: expect.objectContaining({ message: expect.stringContaining('a nested update at sensors') }),
         }),
-      );
-      expect(observer).toHaveBeenCalledWith(
         expect.objectContaining({
           phase: 'row-identification',
           modelName: 'DeviceSensor',
           operation: 'create',
-          params: { path: 'sensors', unidentified: 1 },
+          unidentified: 1,
           error: expect.objectContaining({
             message:
               '1 of the rows a nested create at sensors wrote are not audited: they cannot be told apart from a row whose key the write changed in a way the audit cannot follow',
           }),
         }),
-      );
+      ]);
     });
   });
 
@@ -322,15 +320,15 @@ describe('a nested update that writes the row key of the row it updates', () => 
         { slot: 4, reading: 'reading 1' },
       ]);
       expect(await logsOf('DeviceSensor')).toEqual([]);
-      expect(observer).toHaveBeenCalledTimes(1);
-      expect(observer).toHaveBeenCalledWith(
+      expect(failuresOf(observer)).toEqual([
         expect.objectContaining({
           phase: 'row-identification',
           modelName: 'DeviceSensor',
           operation: 'update',
-          params: { path: 'sensors', unidentified: 3 },
+          unidentified: 3,
+          error: expect.objectContaining({ message: expect.stringContaining('at sensors') }),
         }),
-      );
+      ]);
     });
 
     it('records the device a nested create inserts with a generated code next to updates that move devices onto the codes of one another', async () => {
@@ -356,15 +354,15 @@ describe('a nested update that writes the row key of the row it updates', () => 
 
       const created = updated.devices.find((device) => device.label === 'created');
       expect(await logsOf('Device')).toEqual([expect.objectContaining({ entityId: created?.code, action: 'create' })]);
-      expect(observer).toHaveBeenCalledTimes(1);
-      expect(observer).toHaveBeenCalledWith(
+      expect(failuresOf(observer)).toEqual([
         expect.objectContaining({
           phase: 'row-identification',
           modelName: 'Device',
           operation: 'update',
-          params: { path: 'devices', unidentified: 2 },
+          unidentified: 2,
+          error: expect.objectContaining({ message: expect.stringContaining('at devices') }),
         }),
-      );
+      ]);
     });
   });
 
@@ -390,7 +388,7 @@ describe('a nested update that writes the row key of the row it updates', () => 
       );
 
       expect(await logsOf('DeviceSensor')).toEqual([moved]);
-      expect(observer).not.toHaveBeenCalled();
+      expect(failuresOf(observer)).toEqual([]);
     });
 
     it('records a sensor a nested connect moves in next to a nested create, and the created sensor, each under the key it has after the write', async () => {
@@ -415,7 +413,7 @@ describe('a nested update that writes the row key of the row it updates', () => 
         moved,
         expect.objectContaining({ entityId: 'd-2#2', action: 'create' }),
       ]);
-      expect(observer).not.toHaveBeenCalled();
+      expect(failuresOf(observer)).toEqual([]);
     });
 
     const cascaded = {
@@ -438,7 +436,7 @@ describe('a nested update that writes the row key of the row it updates', () => 
       );
 
       expect(await logsOf('DeviceSensor')).toEqual([cascaded]);
-      expect(observer).not.toHaveBeenCalled();
+      expect(failuresOf(observer)).toEqual([]);
     });
 
     it('records a sensor a nested updateMany writes below a device given a new code when the result selects none of the relation', async () => {
@@ -455,7 +453,7 @@ describe('a nested update that writes the row key of the row it updates', () => 
       );
 
       expect(await logsOf('DeviceSensor')).toEqual([cascaded]);
-      expect(observer).not.toHaveBeenCalled();
+      expect(failuresOf(observer)).toEqual([]);
     });
 
     it('records a sensor a nested updateMany writes below a device a nested update gives a new code', async () => {
@@ -478,7 +476,7 @@ describe('a nested update that writes the row key of the row it updates', () => 
       );
 
       expect(await logsOf('DeviceSensor')).toEqual([cascaded]);
-      expect(observer).not.toHaveBeenCalled();
+      expect(failuresOf(observer)).toEqual([]);
     });
 
     it('records a sensor a nested update names by the new code of its device, with the before state it had under the old code', async () => {
@@ -499,7 +497,7 @@ describe('a nested update that writes the row key of the row it updates', () => 
       );
 
       expect(await logsOf('DeviceSensor')).toEqual([cascaded]);
-      expect(observer).not.toHaveBeenCalled();
+      expect(failuresOf(observer)).toEqual([]);
     });
 
     it('records a sensor a nested update names by the new code a nested update gives its device, with the before state it had under the old code', async () => {
@@ -530,7 +528,7 @@ describe('a nested update that writes the row key of the row it updates', () => 
       );
 
       expect(await logsOf('DeviceSensor')).toEqual([cascaded]);
-      expect(observer).not.toHaveBeenCalled();
+      expect(failuresOf(observer)).toEqual([]);
     });
 
     it('records the update branch of a nested upsert that names a sensor by the new code of its device, with the before state it had under the old code', async () => {
@@ -558,7 +556,7 @@ describe('a nested update that writes the row key of the row it updates', () => 
         await basePrisma.deviceSensor.findMany({ select: { deviceCode: true, slot: true, reading: true } }),
       ).toEqual([{ deviceCode: 'd-9', slot: 1, reading: 'changed' }]);
       expect(await logsOf('DeviceSensor')).toEqual([cascaded]);
-      expect(observer).not.toHaveBeenCalled();
+      expect(failuresOf(observer)).toEqual([]);
     });
 
     it('does not record a sensor the new code of its device re-keys as created next to a nested create', async () => {
@@ -574,7 +572,7 @@ describe('a nested update that writes the row key of the row it updates', () => 
       );
 
       expect(await logsOf('DeviceSensor')).toEqual([expect.objectContaining({ entityId: 'd-9#2', action: 'create' })]);
-      expect(observer).not.toHaveBeenCalled();
+      expect(failuresOf(observer)).toEqual([]);
     });
   });
 });

@@ -79,7 +79,7 @@ import { identityOf } from './event-fields.js';
 import { collectLinkChanges } from './link-changes.js';
 import { type ParentAtPath, readRowsNotInResult } from './rows-not-in-result.js';
 import { hasUndecidedAction, resolveNestedRowState } from './state-resolver.js';
-import type { UnrecordedWriteReporter } from './unrecorded-write.js';
+import type { AuditedModelsOf, UnrecordedWriteReporter } from './unrecorded-write.js';
 import {
   EMPTY_WRITE_SET,
   insertsRows,
@@ -111,8 +111,9 @@ export interface NestedEventCollectorDependencies {
    * recorded, just not reported.
    */
   onUnfollowedRowKeys?: UnfollowedRowKeysReporter;
-  /** Notified of each write the collection leaves rows of without a record (see `unrecorded-write.ts`) */
+  /** Notified of each write the collection leaves rows of an audited model of without a record (see `unrecorded-write.ts`) */
   onUnrecordedWrite: UnrecordedWriteReporter;
+  auditedModelsOf: AuditedModelsOf;
 }
 
 /**
@@ -133,12 +134,9 @@ export interface UnfollowedRowKeys {
   reason: UnfollowedRowKeysReason;
 }
 
-export type UnfollowedRowKeysReporter = (info: UnfollowedRowKeys) => Promise<void>;
+export type UnfollowedRowKeysReporter = (info: UnfollowedRowKeys) => void;
 
-const reportUnfollowedRowKeys = async (
-  writeSets: NestedWriteSets,
-  report: UnfollowedRowKeysReporter | undefined,
-): Promise<void> => {
+const reportUnfollowedRowKeys = (writeSets: NestedWriteSets, report: UnfollowedRowKeysReporter | undefined): void => {
   if (!report) {
     return;
   }
@@ -150,10 +148,10 @@ const reportUnfollowedRowKeys = async (
       }
     }
     for (const [{ relatedModel, operation }, unidentified] of unfollowed) {
-      await report({ relatedModel, operation, path, unidentified, reason: 'key-not-followed' });
+      report({ relatedModel, operation, path, unidentified, reason: 'key-not-followed' });
     }
     for (const [{ relatedModel, operation }, unidentified] of writeSet.unidentifiedInserts) {
-      await report({ relatedModel, operation, path, unidentified, reason: 'not-told-apart' });
+      report({ relatedModel, operation, path, unidentified, reason: 'not-told-apart' });
     }
   }
 };
@@ -269,10 +267,19 @@ const isNestedUnder = (nestedOp: NestedOperationInfo, attribution: RowAttributio
   );
 };
 
+/**
+ * Whether an upsert or connectOrCreate whose branch is unknown leaves rows of an audited model: its
+ * own, or those the nested writes of either branch of one of its elements write
+ */
+const leavesAuditedRows = (nestedOp: NestedOperationInfo, auditedModelsOf: AuditedModelsOf): boolean =>
+  (Array.isArray(nestedOp.data) ? nestedOp.data : [nestedOp.data]).some(
+    (element) => auditedModelsOf(nestedOp.relatedModel, element).length > 0,
+  );
+
 const record = (walk: CollectionWalk, nestedOp: NestedOperationInfo, row: Row, before: BeforeState): void => {
   const resolved = resolveNestedRowState(nestedOp, before, walk.deps.shouldFetchBefore);
   if (resolved === undefined) {
-    if (hasUndecidedAction(nestedOp, before)) {
+    if (hasUndecidedAction(nestedOp, before) && leavesAuditedRows(nestedOp, walk.deps.auditedModelsOf)) {
       walk.deps.onUnrecordedWrite({
         modelName: nestedOp.relatedModel,
         operation: nestedOp.operation,
@@ -946,7 +953,7 @@ export const collectNestedEvents = async (
   if (nestedOperations.length === 0) {
     return [];
   }
-  await reportUnfollowedRowKeys(input.writeSets, deps.onUnfollowedRowKeys);
+  reportUnfollowedRowKeys(input.writeSets, deps.onUnfollowedRowKeys);
 
   const keyConstraints = new Map(
     nestedOperations.map((op) => [op.path, getRowKeyConstraint(schemaMetadata, op.relatedModel)]),
@@ -974,6 +981,7 @@ export const collectNestedEvents = async (
       relinked(where, walk.linkValuesAfter.get(operation), keyConstraints.get(operation.path)),
     fieldNamesOf: (model) => new Set(schemaMetadata.getAllFields(model).map((field) => field.name)),
     onUnrecordedWrite: deps.onUnrecordedWrite,
+    auditedModelsOf: deps.auditedModelsOf,
   });
 
   const events: MutationEvent[] = [];

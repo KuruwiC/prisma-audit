@@ -15,11 +15,12 @@
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
-import type { AuditErrorObserver } from '@kuruwic/prisma-audit';
+import type { AuditObserver } from '@kuruwic/prisma-audit';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { failuresOf } from './helpers/audit-failures.js';
 import { cleanDatabase, createBasePrisma, setupTestContext, testEntities } from './helpers/setup.js';
 
 describe('createManyAndReturn relies on Prisma-generated IDs', () => {
@@ -286,7 +287,7 @@ describe('createMany with skipDuplicates and rows whose data gives their primary
         },
       },
     });
-    const observer = vi.fn<AuditErrorObserver>();
+    const observer = vi.fn<AuditObserver>();
     const provider = createAsyncLocalStorageProvider();
     const prisma = createAuditClient(basePrisma, {
       Prisma,
@@ -294,7 +295,7 @@ describe('createMany with skipDuplicates and rows whose data gives their primary
       contextProvider: provider,
       entities: testEntities,
       write: { mode: 'awaited' },
-      errorObserver: observer,
+      observer,
     });
     disconnects.push(async () => {
       await prisma.$disconnect();
@@ -332,7 +333,7 @@ describe('createMany with skipDuplicates and rows whose data gives their primary
 
     expect(result).toEqual({ count: 1 });
     expect(await createdUsers()).toEqual([[await userIdOf('generated@example.com'), 'generated@example.com']]);
-    expect(observer).not.toHaveBeenCalled();
+    expect(failuresOf(observer)).toEqual([]);
   });
 
   it('records the rows it inserted under the keys their data gives, and none for the row that held one before', async () => {
@@ -356,7 +357,7 @@ describe('createMany with skipDuplicates and rows whose data gives their primary
         ['u-new', 'new@example.com'],
       ].sort(),
     );
-    expect(observer).not.toHaveBeenCalled();
+    expect(failuresOf(observer)).toEqual([]);
   });
 
   it('records only the row of a generated key, and reports the row it inserted under the key its data gives, when the read after the write misses that row', async () => {
@@ -375,17 +376,17 @@ describe('createMany with skipDuplicates and rows whose data gives their primary
     expect(result).toEqual({ count: 2 });
     expect(await userIdOf('hidden@example.com')).toBe('u-hidden');
     expect(await createdUsers()).toEqual([[await userIdOf('generated@example.com'), 'generated@example.com']]);
-    expect(observer).toHaveBeenCalledExactlyOnceWith(
+    expect(failuresOf(observer)).toEqual([
       expect.objectContaining({
         phase: 'row-identification',
         modelName: 'User',
         operation: 'createMany',
-        params: { unidentified: 1 },
+        unidentified: 1,
         error: expect.objectContaining({
           message:
             '1 of the rows a createMany with skipDuplicates created is not audited: the rows read back under the keys its data gives, less those that held them before it, do not match its count, so which of them it inserted cannot be told',
         }),
       }),
-    );
+    ]);
   });
 });

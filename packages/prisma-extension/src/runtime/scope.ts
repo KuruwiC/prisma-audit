@@ -3,15 +3,16 @@
  *
  * The library-owned state of the async flow an audited operation runs in: the binding the client
  * the operation was issued on gives it, which names the interactive transaction of that client if
- * it is one, with the client of that transaction, the writes queued until it commits and the audit
- * failures that must keep it from committing, and the re-entrancy guard raised while the audit's
+ * it is one, with the client of that transaction, the writes queued until it commits, the audit
+ * failures that must keep it from committing and the outcomes of its operations, settled once it
+ * commits or rolls back, and the re-entrancy guard raised while the audit's
  * own queries run. The state lives on its own async-local store, apart from the app-owned audit
  * context, so re-attributing the actor mid-flow cannot drop it. This module is the only reader and
  * writer of that store.
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { getGlobalSingleton } from '@kuruwic/db-audit-core';
+import { getGlobalSingleton, type TransactionOutcomes } from '@kuruwic/db-audit-core';
 import type { PrismaHandle } from '../internal-types.js';
 import { trackPendingWrite } from './pending-writes.js';
 
@@ -25,6 +26,8 @@ export interface ActiveTransaction {
    * of the transaction rolls it back when its callback resolves all the same
    */
   readonly auditFailures: Error[];
+  /** The outcomes of the operations of the transaction, which its owner settles once it has committed or rolled back */
+  readonly outcomes: TransactionOutcomes;
 }
 
 /** What the client an operation was issued on tells the audit about it */

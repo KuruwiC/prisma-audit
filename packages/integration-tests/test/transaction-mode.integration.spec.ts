@@ -12,12 +12,13 @@
  * reads and writes are separate queries.
  */
 
-import type { AuditContext, AuditErrorContext, AuditRecord } from '@kuruwic/db-audit-core';
+import type { AuditContext, AuditObserver, AuditRecord } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { createAuditClient, defineEntity, flushAllPendingWrites, type WriteMode } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { failuresOf } from './helpers/audit-failures.js';
 import { cleanDatabase, createBasePrisma } from './helpers/setup.js';
 
 const testActor: AuditContext = {
@@ -108,14 +109,14 @@ describe('write mode', () => {
     const before: Seen = { updates: 0, others: 0 };
     const after: Seen = { updates: 0, others: 0 };
     const provider = createAsyncLocalStorageProvider();
-    const observer = vi.fn<(context: AuditErrorContext) => void>();
+    const observer = vi.fn<AuditObserver>();
     const recorded = base.$extends(recorder('before', before, '!'));
     const audited = createAuditClient(options.companionCreate ? recorded.$extends(companionCreator) : recorded, {
       Prisma,
       schema: auditSchema,
       contextProvider: provider,
       entities: { User: defineEntity({ type: 'User' }), Post: defineEntity({ type: 'Post' }) },
-      errorObserver: observer,
+      observer,
       write: {
         mode: options.mode,
         ...(options.writer ? { writer: options.writer } : {}),
@@ -165,14 +166,16 @@ describe('write mode', () => {
   /**
    * Records every `$transaction` call the audit hands to Prisma on `client`'s behalf as `batch` (an
    * array of operations) or `interactive` (a callback). The caller's own `$transaction` call goes to
-   * the audited client and is not recorded.
+   * the audited client and is not recorded. A client `client.$extends` derives finds the recorder
+   * through its prototype and calls it on itself: the call runs on that client, so the transaction
+   * client it gives the callback carries its extensions, the audit's among them.
    */
   const recordTransactions = (client: PrismaClient, calls: string[]): void => {
-    const transaction = client.$transaction.bind(client) as (...args: unknown[]) => unknown;
+    const transaction = client.$transaction;
     Object.defineProperty(client, '$transaction', {
-      value: (...args: unknown[]) => {
+      value(this: unknown, ...args: unknown[]) {
         calls.push(typeof args[0] === 'function' ? 'interactive' : 'batch');
-        return transaction(...args);
+        return Reflect.apply(transaction, this, args);
       },
     });
   };
@@ -342,6 +345,14 @@ describe('write mode', () => {
       expect(isolation).toEqual([{ transaction_isolation: 'serializable' }]);
     });
 
+    it('runs a batch holding a write as an interactive transaction, auditing the write in it', async () => {
+      const { result, transactions } = runBatch({ mode, writes: true });
+
+      await expect(result).resolves.toHaveLength(2);
+      expect(transactions).toEqual(['interactive']);
+      expect(await auditRows()).toEqual(['User.create']);
+    });
+
     it('runs a batch that writes only a model the audit does not record as an interactive transaction', async () => {
       const { result, transactions } = runBatch({ mode, audited: 'Post', writes: true });
 
@@ -364,6 +375,7 @@ describe('write mode', () => {
 
       await expect(result).resolves.toHaveLength(2);
       expect(transactions).toEqual(['interactive']);
+      expect(await auditRows()).toEqual(['User.create']);
     });
 
     it("runs a batch holding a write as an interactive transaction, bound by the client's limits", async () => {
@@ -464,7 +476,7 @@ describe('write mode', () => {
       ).resolves.toMatchObject({ name: 'Kept!?' });
 
       expect(await nameOf(user.id)).toBe('Kept!?');
-      expect(clients.observer).toHaveBeenCalledWith(expect.objectContaining({ phase: 'log-write' }));
+      expect(failuresOf(clients.observer)).toContainEqual(expect.objectContaining({ phase: 'log-write' }));
     });
 
     it('keeps a committed write whose awaited audit build failed, and reports the dropped records', async () => {
@@ -476,7 +488,7 @@ describe('write mode', () => {
       ).resolves.toMatchObject({ name: 'Kept!?' });
 
       expect(await nameOf(user.id)).toBe('Kept!?');
-      expect(clients.observer).toHaveBeenCalledWith(expect.objectContaining({ phase: 'diff-generation' }));
+      expect(failuresOf(clients.observer)).toContainEqual(expect.objectContaining({ phase: 'diff-generation' }));
       expect(await auditRows()).toEqual([]);
     });
   });

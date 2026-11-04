@@ -2,19 +2,19 @@
  * Write dispatch
  *
  * Builds one operation's audit records once its write has run and writes them relative to that
- * write and its commit, by the write plan and with the transaction runtime the adapter supplies.
+ * write and its commit, by the write plan and with the transaction runtime the adapter supplies,
+ * and reports both to the operation's outcome.
  */
 
 import type { AuditRecord, WritePlanKind } from '../domain/mutation-event.js';
 import type { TransactionRuntime, WriteExecutor, WriteFn } from '../domain/write.js';
-import type { FailureSink } from '../failure/index.js';
+import type { OperationOutcome } from '../outcome/index.js';
 import type { AuditContext } from '../types.js';
 import { toError } from '../utils/to-error.js';
 
 export interface DispatchConfig<TDbHandle = unknown> {
   readonly writeExecutor: WriteExecutor<TDbHandle>;
   readonly writer?: WriteFn<TDbHandle>;
-  readonly failureSink: FailureSink;
 }
 
 type Work = () => Promise<void>;
@@ -60,15 +60,14 @@ const planOf = <TDbHandle>(
  *
  * An `immediate` or `after-commit` plan needs the runtime's transaction: without one `dispatch`
  * rejects before building anything. The build runs before `dispatch` resolves, whatever the write
- * plan. `dispatch` rejects only while the operation's write is inside a transaction that has not
- * committed: with the error of a
- * failed build, after notifying the observer under `diff-generation` with the operation's
- * `modelName`, `operation` and `params`, and with the error of a failed immediate write, after
- * notifying it under `log-write`. The transaction may not survive a failed statement, so its
- * records and the operation's write commit together or not at all. Outside any transaction the
- * operation's write has committed, and reporting it as failed would invite a retry that writes it
- * twice: a failed build drops the records (reported through {@link FailureSink.reportDroppedBuild})
- * and a failed write is reported without failing the operation.
+ * plan. A failed build is reported to the outcome under `diff-generation` and a failed write under
+ * `log-write`; once the write has finished, the outcome is told how many records a writer took,
+ * none when there were none or they were dropped. `dispatch` rejects only while the operation's
+ * write is inside a transaction that has not committed: with the error of a failed build or of a
+ * failed immediate write. The transaction may not survive a failed statement, so its records and
+ * the operation's write commit together or not at all. Outside any transaction the operation's
+ * write has committed, and reporting it as failed would invite a retry that writes it twice: a
+ * failed build drops the records and a failed write is reported without failing the operation.
  *
  * Resolves once an awaited write has finished, or once the write is handed to the runtime; the
  * work handed to `afterCommit` or `detach` reports its own failure and never rejects.
@@ -77,17 +76,15 @@ export const dispatch = async <TDbHandle>(
   audited: {
     /** Builds the operation's audit records from what its write left behind */
     readonly buildRecords: () => Promise<readonly AuditRecord[]>;
-    readonly modelName: string;
-    readonly operation: string;
-    readonly params: unknown;
     /** How and when the records are written, decided before the operation's write */
     readonly plan: WritePlanKind;
     readonly auditContext: AuditContext;
+    readonly outcome: Pick<OperationOutcome, 'fail' | 'writeFinished'>;
   },
   config: DispatchConfig<TDbHandle>,
   runtime: TransactionRuntime<TDbHandle>,
 ): Promise<void> => {
-  const { buildRecords, modelName, operation, params, auditContext } = audited;
+  const { buildRecords, auditContext, outcome } = audited;
   const { transaction, baseHandle } = runtime;
   const plan = planOf(audited.plan, runtime);
 
@@ -96,15 +93,15 @@ export const dispatch = async <TDbHandle>(
     records = await buildRecords();
   } catch (caught) {
     const error = toError(caught);
-    const failure = { phase: 'diff-generation', modelName, operation, params, error } as const;
-    if (!transaction) {
-      await config.failureSink.reportDroppedBuild(failure);
-      return;
+    outcome.fail({ phase: 'diff-generation', error });
+    if (transaction) {
+      throw error;
     }
-    await config.failureSink.notify(failure);
-    throw error;
+    await outcome.writeFinished(0);
+    return;
   }
   if (records.length === 0) {
+    await outcome.writeFinished(0);
     return;
   }
 
@@ -123,8 +120,15 @@ export const dispatch = async <TDbHandle>(
       try {
         await writeOn(handle, inTransaction);
       } catch (caught) {
-        await config.failureSink.reportWriteFailure({ kind: plan.kind, records }, toError(caught));
+        const error = toError(caught);
+        outcome.fail({ phase: 'log-write', records, error });
+        if (plan.kind === 'immediate') {
+          throw error;
+        }
+        await outcome.writeFinished(0);
+        return;
       }
+      await outcome.writeFinished(records.length);
     };
 
   if (plan.kind === 'immediate') {

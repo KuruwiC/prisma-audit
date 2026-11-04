@@ -8,12 +8,13 @@
  * row it writes, under the row's key, with the changes it made.
  */
 
-import type { AuditContext, AuditErrorObserver } from '@kuruwic/db-audit-core';
+import type { AuditContext, AuditObserver } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider, self } from '@kuruwic/db-audit-core';
 import { createAuditClient, defineEntity } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { failuresOf } from './helpers/audit-failures.js';
 import { cleanDatabase, createBasePrisma } from './helpers/setup.js';
 
 const testActor: AuditContext = {
@@ -38,7 +39,7 @@ describe('nested writes to models identified by a unique constraint instead of a
   });
 
   const setup = async () => {
-    const observer = vi.fn<AuditErrorObserver>();
+    const observer = vi.fn<AuditObserver>();
     const basePrisma = createBasePrisma();
     const provider = createAsyncLocalStorageProvider();
     const prisma = createAuditClient(basePrisma, {
@@ -53,7 +54,7 @@ describe('nested writes to models identified by a unique constraint instead of a
         }),
       },
       write: { mode: 'awaited' },
-      errorObserver: observer,
+      observer,
     });
     disconnects.push(async () => {
       await prisma.$disconnect();
@@ -107,7 +108,7 @@ describe('nested writes to models identified by a unique constraint instead of a
           ['Device', generated.code, 'create'],
         ].sort(),
       );
-      expect(observer).not.toHaveBeenCalled();
+      expect(failuresOf(observer)).toEqual([]);
     });
 
     it('records a create log per device a nested createMany inserts under an existing row', async () => {
@@ -133,7 +134,7 @@ describe('nested writes to models identified by a unique constraint instead of a
         ['Device', 'd-1', 'create'],
         ['Device', 'd-2', 'create'],
       ]);
-      expect(observer).not.toHaveBeenCalled();
+      expect(failuresOf(observer)).toEqual([]);
     });
 
     it('records a create log per device a nested create inserts under a row the operation creates', async () => {
@@ -146,7 +147,7 @@ describe('nested writes to models identified by a unique constraint instead of a
       );
 
       expect(await actionsOf()).toEqual([['Device', 'd-1', 'create']]);
-      expect(observer).not.toHaveBeenCalled();
+      expect(failuresOf(observer)).toEqual([]);
     });
 
     it('records an update log, with its before state, for the device a nested update names by its code', async () => {
@@ -171,7 +172,7 @@ describe('nested writes to models identified by a unique constraint instead of a
           after: expect.objectContaining({ code: 'd-1', label: 'relabelled' }),
         }),
       ]);
-      expect(observer).not.toHaveBeenCalled();
+      expect(failuresOf(observer)).toEqual([]);
     });
 
     it('records the update of a device a nested update writes when the result selects none of the relation', async () => {
@@ -193,7 +194,7 @@ describe('nested writes to models identified by a unique constraint instead of a
           changes: { label: { old: 'label of d-1', new: 'relabelled' } },
         }),
       ]);
-      expect(observer).not.toHaveBeenCalled();
+      expect(failuresOf(observer)).toEqual([]);
     });
 
     it('records an upsert as an update of the device its code names, and as a create when there is none', async () => {
@@ -226,7 +227,7 @@ describe('nested writes to models identified by a unique constraint instead of a
           after: expect.objectContaining({ code: 'd-2', label: 'created' }),
         }),
       ]);
-      expect(observer).not.toHaveBeenCalled();
+      expect(failuresOf(observer)).toEqual([]);
     });
 
     it('records a delete log, with its before state, for the device a nested delete names by its code', async () => {
@@ -244,7 +245,7 @@ describe('nested writes to models identified by a unique constraint instead of a
           before: expect.objectContaining({ code: 'd-1', label: 'label of d-1' }),
         }),
       ]);
-      expect(observer).not.toHaveBeenCalled();
+      expect(failuresOf(observer)).toEqual([]);
     });
 
     it('records one log per device a nested updateMany and deleteMany write', async () => {
@@ -279,7 +280,7 @@ describe('nested writes to models identified by a unique constraint instead of a
         }),
         expect.objectContaining({ entityId: 'd-3', action: 'delete' }),
       ]);
-      expect(observer).not.toHaveBeenCalled();
+      expect(failuresOf(observer)).toEqual([]);
     });
 
     it('records the foreign-key change of each device a connect, disconnect and set re-link', async () => {
@@ -315,7 +316,7 @@ describe('nested writes to models identified by a unique constraint instead of a
         ['d-loose', 'update', { ownerId: { old: other.id, new: null } }],
         ['d-moved', 'update', { ownerId: { old: other.id, new: owner.id } }],
       ]);
-      expect(observer).not.toHaveBeenCalled();
+      expect(failuresOf(observer)).toEqual([]);
     });
 
     it('records a connectOrCreate as the link change of the device its code names, and as a create when there is none', async () => {
@@ -348,7 +349,7 @@ describe('nested writes to models identified by a unique constraint instead of a
           after: expect.objectContaining({ code: 'd-2', label: 'created', ownerId: owner.id }),
         }),
       ]);
-      expect(observer).not.toHaveBeenCalled();
+      expect(failuresOf(observer)).toEqual([]);
     });
   });
 
@@ -387,7 +388,7 @@ describe('nested writes to models identified by a unique constraint instead of a
         }),
         expect.objectContaining({ entityType: 'DeviceSensor', entityId: 'd-1#3', action: 'create' }),
       ]);
-      expect(observer).not.toHaveBeenCalled();
+      expect(failuresOf(observer)).toEqual([]);
     });
 
     it('records the writes two levels down, below a device a nested update names by its code', async () => {
@@ -437,7 +438,7 @@ describe('nested writes to models identified by a unique constraint instead of a
           after: expect.objectContaining({ deviceCode: 'd-1', slot: 2, reading: 'reading 2' }),
         }),
       ]);
-      expect(observer).not.toHaveBeenCalled();
+      expect(failuresOf(observer)).toEqual([]);
     });
   });
 });

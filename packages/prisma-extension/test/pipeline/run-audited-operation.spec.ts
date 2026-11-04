@@ -3,23 +3,28 @@
  * executor runs inside it through the continuation the scope calls for, its records are dispatched
  * by the write plan its input names with the scope as the transaction runtime, an atomic operation
  * some of whose records a reported failure dropped fails, and each kind of failure reaches the
- * caller and the failure sink the way its origin requires. The transaction an operation runs in is
+ * caller and the operation's outcome the way its origin requires. The transaction an operation runs in is
  * the one its input names; a failure of the audit after the caller's write has run is recorded on
  * that transaction, which keeps it from committing.
  */
 
 import type {
   AuditContext,
-  AuditErrorContext,
-  AuditErrorObserver,
+  AuditFailure,
   AuditRecord,
+  UnrecordedWrite,
   WriteMode,
   WritePlanKind,
 } from '@kuruwic/db-audit-core';
-import { AuditIncompleteError, createActorId, createAggregateId, createEntityId } from '@kuruwic/db-audit-core';
+import {
+  AuditIncompleteError,
+  createActorId,
+  createAggregateId,
+  createEntityId,
+  createOperationOutcome,
+} from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
 import type { PrismaBaseClient, PrismaHandle } from '../../src/internal-types.js';
-import type { UnrecordedWrite } from '../../src/nested/events/unrecorded-write.js';
 import type { ExecutionScope } from '../../src/pipeline/execution-scope.js';
 import type { ExecutedOperation, OperationExecutor } from '../../src/pipeline/executor.js';
 import {
@@ -32,7 +37,6 @@ import { flushAllPendingWrites, getPendingWriteCount } from '../../src/runtime/p
 import { type ActiveTransaction, isProcessingAuditLog, withScope } from '../../src/runtime/scope.js';
 import type { AuditLogData } from '../../src/types.js';
 import { activeTransactionOf } from '../support/active-transaction.js';
-import { stubFailureSink } from '../support/failure-sink.js';
 
 const auditContext: AuditContext = { actor: { category: 'model', type: 'User', id: 'user-1' } };
 
@@ -96,28 +100,52 @@ const executedWith = (records: AuditRecord[]): ExecutedOperation => ({
   buildRecords: async () => records,
 });
 
-const outcome = executedWith([record]);
+const executedUpdate = executedWith([record]);
 
 const stubExecutor = (run: OperationExecutor['run']): OperationExecutor => ({ run: vi.fn(run) });
 
-const succeedingExecutor = () => stubExecutor(async () => outcome);
+const succeedingExecutor = () => stubExecutor(async () => executedUpdate);
 
 const createDeps = (overrides: Partial<AuditPipelineDependencies> = {}) => {
   const deps: AuditPipelineDependencies = {
     singleExecutor: succeedingExecutor(),
     batchExecutor: succeedingExecutor(),
     produceRecords: vi.fn(async () => [record]),
-    dispatchConfig: { writeExecutor: { write: vi.fn(async () => {}) }, failureSink: stubFailureSink() },
-    failureSinkConfig: { observer: vi.fn<AuditErrorObserver>() },
+    dispatchConfig: { writeExecutor: { write: vi.fn(async () => {}) } },
     ...overrides,
   };
   return deps;
 };
 
-const observerOf = (deps: AuditPipelineDependencies) => {
-  const { observer } = deps.failureSinkConfig;
-  if (!observer) throw new Error('no observer');
-  return vi.mocked(observer);
+/** The failures the outcomes of the operations run with each `deps` kept */
+const keptFailures = new WeakMap<AuditPipelineDependencies, AuditFailure[]>();
+
+const failuresOf = (deps: AuditPipelineDependencies): AuditFailure[] => {
+  let failures = keptFailures.get(deps);
+  if (!failures) {
+    failures = [];
+    keptFailures.set(deps, failures);
+  }
+  return failures;
+};
+
+/** Runs the operation with an outcome of its own, whose failures `failuresOf(deps)` lists */
+const runOperation = (input: Omit<AuditedOperationInput, 'outcome'>, deps: AuditPipelineDependencies) => {
+  const outcome = createOperationOutcome({ model: input.operation.model, operation: input.operation.action }, {});
+  const failures = failuresOf(deps);
+  return runAuditedOperation(
+    {
+      ...input,
+      outcome: {
+        ...outcome,
+        fail: (failure) => {
+          failures.push(failure);
+          outcome.fail(failure);
+        },
+      },
+    },
+    deps,
+  );
 };
 
 const scopeSeenBy = (executor: OperationExecutor): ExecutionScope => {
@@ -125,6 +153,8 @@ const scopeSeenBy = (executor: OperationExecutor): ExecutionScope => {
   if (!call) throw new Error('executor did not run');
   return call[1];
 };
+
+type KeptFailure = Extract<AuditFailure, { readonly phase: 'pre-fetch' | 'row-identification' }>;
 
 const auditWriteOf = (deps: AuditPipelineDependencies) => vi.mocked(deps.dispatchConfig.writeExecutor.write);
 
@@ -134,7 +164,7 @@ describe('runAuditedOperation', () => {
       const baseClient = createBaseClient();
       const deps = createDeps();
 
-      await runAuditedOperation(
+      await runOperation(
         {
           operation: interceptedOf(),
           auditContext,
@@ -160,7 +190,7 @@ describe('runAuditedOperation', () => {
       const deps = createDeps();
       const transaction = activeTransactionOf(transactionClient);
 
-      await runAuditedOperation(
+      await runOperation(
         { operation: interceptedOf(), auditContext, baseClient, mode: 'atomic', plan: 'immediate', transaction },
         deps,
       );
@@ -182,7 +212,7 @@ describe('runAuditedOperation', () => {
       const deps = createDeps();
       const dispatchConfig = { ...deps.dispatchConfig, writeExecutor: { write } };
 
-      await runAuditedOperation(
+      await runOperation(
         {
           operation: interceptedOf(),
           auditContext,
@@ -210,7 +240,7 @@ describe('runAuditedOperation', () => {
       const transaction = activeTransactionOf(transactionClient);
       const { deferredWrites } = transaction;
 
-      await runAuditedOperation(
+      await runOperation(
         { operation: interceptedOf(), auditContext, baseClient, mode: 'deferred', plan: 'after-commit', transaction },
         deps,
       );
@@ -236,7 +266,7 @@ describe('runAuditedOperation', () => {
         const surrounding = activeTransactionOf(transactionClientWith());
 
         await withScope({ binding: { transaction: surrounding } }, () =>
-          runAuditedOperation(
+          runOperation(
             { operation: interceptedOf(), auditContext, baseClient, mode, plan, transaction: undefined },
             deps,
           ),
@@ -258,7 +288,7 @@ describe('runAuditedOperation', () => {
       const surrounding = activeTransactionOf(transactionClientWith());
 
       await withScope({ binding: { transaction: surrounding } }, () =>
-        runAuditedOperation(
+        runOperation(
           {
             operation: interceptedOf(),
             auditContext,
@@ -278,17 +308,17 @@ describe('runAuditedOperation', () => {
 
     it('queues the writes after commit of several operations in one transaction in order', async () => {
       const second: AuditLogData = { ...record, entityId: createEntityId('u2') };
-      const outcomes = [outcome, executedWith([second])];
-      const deps = createDeps({ singleExecutor: stubExecutor(async () => outcomes.shift() ?? outcome) });
+      const outcomes = [executedUpdate, executedWith([second])];
+      const deps = createDeps({ singleExecutor: stubExecutor(async () => outcomes.shift() ?? executedUpdate) });
       const baseClient = createBaseClient();
       const transaction = activeTransactionOf(transactionClient);
       const { deferredWrites } = transaction;
 
-      await runAuditedOperation(
+      await runOperation(
         { operation: interceptedOf(), auditContext, baseClient, mode: 'deferred', plan: 'after-commit', transaction },
         deps,
       );
-      await runAuditedOperation(
+      await runOperation(
         { operation: interceptedOf(), auditContext, baseClient, mode: 'deferred', plan: 'after-commit', transaction },
         deps,
       );
@@ -306,7 +336,7 @@ describe('runAuditedOperation', () => {
     const runningTheOperation = () =>
       stubExecutor(async (operation) => {
         await operation.execute(operation.args);
-        return outcome;
+        return executedUpdate;
       });
 
     type Run = (
@@ -336,7 +366,7 @@ describe('runAuditedOperation', () => {
         const operation = interceptedOf();
 
         await run(update, (baseClient, transaction) =>
-          runAuditedOperation({ operation, auditContext, baseClient, mode, plan, transaction }, deps),
+          runOperation({ operation, auditContext, baseClient, mode, plan, transaction }, deps),
         );
 
         expect(operation.query).toHaveBeenCalledWith(args);
@@ -356,12 +386,12 @@ describe('runAuditedOperation', () => {
         flagSeen.push(['read before', isProcessingAuditLog()]);
         await executed.execute(executed.args);
         flagSeen.push(['read after', isProcessingAuditLog()]);
-        return outcome;
+        return executedUpdate;
       });
       const deps = createDeps({ singleExecutor: executor });
 
       await withScope({ isProcessingAuditLog: true }, () =>
-        runAuditedOperation(
+        runOperation(
           {
             operation,
             auditContext,
@@ -397,14 +427,14 @@ describe('runAuditedOperation', () => {
         const deps = createDeps({ singleExecutor: runningTheOperation() });
 
         await expect(
-          runAuditedOperation(
+          runOperation(
             { operation, auditContext, baseClient: createBaseClient(), mode, plan, transaction: undefined },
             deps,
           ),
         ).rejects.toBe(callerError);
 
         expect(Object.getOwnPropertySymbols(callerError)).toEqual([]);
-        expect(observerOf(deps)).not.toHaveBeenCalled();
+        expect(failuresOf(deps)).toEqual([]);
         expect(auditWriteOf(deps)).not.toHaveBeenCalled();
       },
     );
@@ -423,7 +453,7 @@ describe('runAuditedOperation', () => {
       const deps = createDeps({ singleExecutor: runningTheOperation() });
 
       await expect(
-        runAuditedOperation(
+        runOperation(
           {
             operation,
             auditContext,
@@ -436,7 +466,7 @@ describe('runAuditedOperation', () => {
         ),
       ).rejects.toBe(value);
 
-      expect(observerOf(deps)).not.toHaveBeenCalled();
+      expect(failuresOf(deps)).toEqual([]);
       expect(auditWriteOf(deps)).not.toHaveBeenCalled();
     });
   });
@@ -446,7 +476,7 @@ describe('runAuditedOperation', () => {
       const deps = createDeps();
       const baseClient = createBaseClient();
 
-      await runAuditedOperation(
+      await runOperation(
         {
           operation: interceptedOf('updateMany'),
           auditContext,
@@ -457,7 +487,7 @@ describe('runAuditedOperation', () => {
         },
         deps,
       );
-      await runAuditedOperation(
+      await runOperation(
         {
           operation: interceptedOf('upsert'),
           auditContext,
@@ -486,7 +516,7 @@ describe('runAuditedOperation', () => {
     it('returns the executor result to the caller', async () => {
       const deps = createDeps();
 
-      const result = await runAuditedOperation(
+      const result = await runOperation(
         {
           operation: interceptedOf(),
           auditContext,
@@ -498,8 +528,8 @@ describe('runAuditedOperation', () => {
         deps,
       );
 
-      expect(result).toBe(outcome.result);
-      expect(observerOf(deps)).not.toHaveBeenCalled();
+      expect(result).toBe(executedUpdate.result);
+      expect(failuresOf(deps)).toEqual([]);
     });
   });
 
@@ -518,7 +548,7 @@ describe('runAuditedOperation', () => {
         const operation = interceptedOf(action);
 
         await expect(
-          runAuditedOperation(
+          runOperation(
             {
               operation,
               auditContext,
@@ -531,14 +561,7 @@ describe('runAuditedOperation', () => {
           ),
         ).rejects.toBe(auditError);
 
-        expect(observerOf(deps)).toHaveBeenCalledTimes(1);
-        expect(observerOf(deps)).toHaveBeenCalledWith({
-          phase: 'diff-generation',
-          modelName: 'User',
-          operation: action,
-          params: operation.args,
-          error: auditError,
-        });
+        expect(failuresOf(deps)).toEqual([{ phase: 'diff-generation', error: auditError }]);
         expect(auditWriteOf(deps)).not.toHaveBeenCalled();
       },
     );
@@ -547,18 +570,12 @@ describe('runAuditedOperation', () => {
       const buildError = new Error('read after the write failed');
       const failingBuildExecutor = () =>
         stubExecutor(async () => ({
-          result: outcome.result,
+          result: executedUpdate.result,
           buildRecords: async () => {
             throw buildError;
           },
         }));
-      const buildFailure = {
-        phase: 'diff-generation',
-        modelName: 'User',
-        operation: 'update',
-        params: args,
-        error: buildError,
-      };
+      const buildFailure: AuditFailure = { phase: 'diff-generation', error: buildError };
 
       it.each([
         { mode: 'atomic', plan: 'immediate' },
@@ -570,16 +587,13 @@ describe('runAuditedOperation', () => {
           const transaction = activeTransactionOf(transactionClient);
 
           await expect(
-            runAuditedOperation(
+            runOperation(
               { operation: interceptedOf(), auditContext, baseClient: createBaseClient(), mode, plan, transaction },
               deps,
             ),
           ).rejects.toBe(buildError);
 
-          expect(deps.dispatchConfig.failureSink.notify).toHaveBeenCalledTimes(1);
-          if (mode === 'atomic') {
-            expect(deps.dispatchConfig.failureSink.notify).toHaveBeenCalledWith(buildFailure);
-          }
+          expect(failuresOf(deps)).toEqual([buildFailure]);
           expect(transaction.deferredWrites).toHaveLength(0);
           expect(transaction.auditFailures).toEqual([buildError]);
           expect(auditWriteOf(deps)).not.toHaveBeenCalled();
@@ -597,7 +611,7 @@ describe('runAuditedOperation', () => {
 
           await expect(
             withScope({ binding: { transaction: surrounding } }, () =>
-              runAuditedOperation(
+              runOperation(
                 {
                   operation: interceptedOf(),
                   auditContext,
@@ -609,10 +623,9 @@ describe('runAuditedOperation', () => {
                 deps,
               ),
             ),
-          ).resolves.toBe(outcome.result);
+          ).resolves.toBe(executedUpdate.result);
 
-          expect(deps.dispatchConfig.failureSink.reportDroppedBuild).toHaveBeenCalledExactlyOnceWith(buildFailure);
-          expect(deps.dispatchConfig.failureSink.notify).not.toHaveBeenCalled();
+          expect(failuresOf(deps)).toEqual([buildFailure]);
           expect(surrounding.auditFailures).toEqual([]);
           expect(getPendingWriteCount()).toBe(0);
           expect(auditWriteOf(deps)).not.toHaveBeenCalled();
@@ -622,7 +635,7 @@ describe('runAuditedOperation', () => {
 
     describe('a failed write of the records', () => {
       const writeError = new Error('DB write failed');
-      const failingWriteDeps = (failureSink = stubFailureSink()) =>
+      const failingWriteDeps = () =>
         createDeps({
           dispatchConfig: {
             writeExecutor: {
@@ -630,20 +643,15 @@ describe('runAuditedOperation', () => {
                 throw writeError;
               }),
             },
-            failureSink,
           },
         });
 
       it('lets a write failure inside a transaction propagate without reporting it as diff-generation, and records it on the transaction', async () => {
-        const failureSink = stubFailureSink();
-        vi.mocked(failureSink.reportWriteFailure).mockImplementation(async (_plan, error) => {
-          throw error;
-        });
-        const deps = failingWriteDeps(failureSink);
+        const deps = failingWriteDeps();
         const transaction = activeTransactionOf(transactionClient);
 
         await expect(
-          runAuditedOperation(
+          runOperation(
             {
               operation: interceptedOf(),
               auditContext,
@@ -656,22 +664,17 @@ describe('runAuditedOperation', () => {
           ),
         ).rejects.toBe(writeError);
 
-        expect(failureSink.reportWriteFailure).toHaveBeenCalledWith(
-          expect.objectContaining({ kind: 'immediate' }),
-          writeError,
-        );
-        expect(failureSink.notify).not.toHaveBeenCalledWith(expect.objectContaining({ phase: 'diff-generation' }));
+        expect(failuresOf(deps)).toEqual([{ phase: 'log-write', records: [record], error: writeError }]);
         expect(transaction.auditFailures).toEqual([writeError]);
       });
 
       it('returns the result and records nothing when the write fails outside any transaction', async () => {
-        const failureSink = stubFailureSink();
-        const deps = failingWriteDeps(failureSink);
+        const deps = failingWriteDeps();
         const surrounding = activeTransactionOf(transactionClientWith());
 
         await expect(
           withScope({ binding: { transaction: surrounding } }, () =>
-            runAuditedOperation(
+            runOperation(
               {
                 operation: interceptedOf(),
                 auditContext,
@@ -683,12 +686,9 @@ describe('runAuditedOperation', () => {
               deps,
             ),
           ),
-        ).resolves.toBe(outcome.result);
+        ).resolves.toBe(executedUpdate.result);
 
-        expect(failureSink.reportWriteFailure).toHaveBeenCalledWith(
-          expect.objectContaining({ kind: 'awaited-after-commit' }),
-          writeError,
-        );
+        expect(failuresOf(deps)).toEqual([{ phase: 'log-write', records: [record], error: writeError }]);
         expect(surrounding.auditFailures).toEqual([]);
       });
     });
@@ -704,13 +704,13 @@ describe('runAuditedOperation', () => {
       it("does not record the caller's own mutation failure on the transaction", async () => {
         const executor = stubExecutor(async (operation) => {
           await operation.execute(operation.args);
-          return outcome;
+          return executedUpdate;
         });
         const deps = createDeps({ singleExecutor: executor });
         const transaction = activeTransactionOf(transactionClient);
 
         await expect(
-          runAuditedOperation(
+          runOperation(
             {
               operation: interceptedOf('update', failingQuery()),
               auditContext,
@@ -730,7 +730,7 @@ describe('runAuditedOperation', () => {
         const executor = stubExecutor(async (operation) => {
           await operation.execute(operation.args);
           await operation.execute(operation.args);
-          return outcome;
+          return executedUpdate;
         });
         const query = vi
           .fn(async (): Promise<unknown> => 'written')
@@ -740,7 +740,7 @@ describe('runAuditedOperation', () => {
         const transaction = activeTransactionOf(transactionClient);
 
         await expect(
-          runAuditedOperation(
+          runOperation(
             {
               operation: interceptedOf('updateMany', query),
               auditContext,
@@ -754,7 +754,7 @@ describe('runAuditedOperation', () => {
         ).rejects.toBe(mutationError);
 
         expect(query).toHaveBeenCalledTimes(2);
-        expect(observerOf(deps)).not.toHaveBeenCalled();
+        expect(failuresOf(deps)).toEqual([]);
         expect(transaction.auditFailures).toEqual([mutationError]);
       });
 
@@ -767,7 +767,7 @@ describe('runAuditedOperation', () => {
         const transaction = activeTransactionOf(transactionClient);
 
         await expect(
-          runAuditedOperation(
+          runOperation(
             {
               operation: interceptedOf('update', query),
               auditContext,
@@ -794,7 +794,7 @@ describe('runAuditedOperation', () => {
         const transaction = activeTransactionOf(transactionClient);
 
         await expect(
-          runAuditedOperation(
+          runOperation(
             {
               operation: interceptedOf('update', query),
               auditContext,
@@ -808,9 +808,7 @@ describe('runAuditedOperation', () => {
         ).rejects.toBe(executorError);
 
         expect(query).toHaveBeenCalledTimes(1);
-        expect(observerOf(deps)).toHaveBeenCalledWith(
-          expect.objectContaining({ phase: 'diff-generation', error: executorError }),
-        );
+        expect(failuresOf(deps)).toEqual([{ phase: 'diff-generation', error: executorError }]);
         expect(transaction.auditFailures).toEqual([executorError]);
       });
 
@@ -824,7 +822,7 @@ describe('runAuditedOperation', () => {
 
         await expect(
           withScope({ binding: { transaction: surrounding } }, () =>
-            runAuditedOperation(
+            runOperation(
               {
                 operation: interceptedOf(
                   'update',
@@ -846,28 +844,19 @@ describe('runAuditedOperation', () => {
     });
 
     describe('a failure kept for the operation', () => {
-      const failureOf = (
-        phase: 'pre-fetch' | 'row-identification',
-        operation: string,
-      ): AuditErrorContext & { readonly phase: 'pre-fetch' | 'row-identification' } => ({
-        phase,
-        modelName: 'User',
-        operation,
-        params: args,
-        error: new Error(`${phase} failed`),
-      });
+      const failureOf = (phase: 'pre-fetch' | 'row-identification', operation: string): KeptFailure =>
+        phase === 'pre-fetch'
+          ? { phase, modelName: 'User', operation, error: new Error(`${phase} failed`) }
+          : { phase, modelName: 'User', operation, unidentified: 1, error: new Error(`${phase} failed`) };
       /** An executor that runs the write, then reports `failure` and the `unrecorded` writes to the scope's failure sink */
-      const keepingExecutor = (
-        failure: AuditErrorContext & { readonly phase: 'pre-fetch' | 'row-identification' },
-        unrecorded: readonly UnrecordedWrite[] = [],
-      ) =>
+      const keepingExecutor = (failure: KeptFailure, unrecorded: readonly UnrecordedWrite[] = []) =>
         stubExecutor(async (operation, scope) => {
           await operation.execute(operation.args);
-          await scope.failureSink.notify(failure);
+          scope.failureSink.fail(failure);
           for (const write of unrecorded) {
             scope.failureSink.reportUnrecordedWrite(write);
           }
-          return outcome;
+          return executedUpdate;
         });
 
       it('rejects an atomic operation a row-identification failure dropped a record of, once its records are written, and records the rejection on the transaction', async () => {
@@ -875,7 +864,7 @@ describe('runAuditedOperation', () => {
         const deps = createDeps({ batchExecutor: keepingExecutor(failure) });
         const transaction = activeTransactionOf(transactionClient);
 
-        const run = runAuditedOperation(
+        const run = runOperation(
           {
             operation: interceptedOf(
               'updateMany',
@@ -892,7 +881,12 @@ describe('runAuditedOperation', () => {
 
         await expect(run).rejects.toBeInstanceOf(AuditIncompleteError);
         const rejection = await run.catch((error: unknown) => error);
-        expect(rejection).toMatchObject({ modelName: 'User', operation: 'updateMany', failures: [failure] });
+        expect(rejection).toMatchObject({
+          modelName: 'User',
+          operation: 'updateMany',
+          failures: [failure],
+          unrecordedWrites: [],
+        });
         expect((rejection as Error).cause).toEqual([failure]);
         expect(auditWriteOf(deps)).toHaveBeenCalledExactlyOnceWith(transactionClient, [record]);
         expect(transaction.auditFailures).toEqual([rejection]);
@@ -903,7 +897,7 @@ describe('runAuditedOperation', () => {
         const transaction = activeTransactionOf(transactionClient);
 
         await expect(
-          runAuditedOperation(
+          runOperation(
             {
               operation: interceptedOf(
                 'updateMany',
@@ -917,12 +911,12 @@ describe('runAuditedOperation', () => {
             },
             deps,
           ),
-        ).resolves.toBe(outcome.result);
+        ).resolves.toBe(executedUpdate.result);
 
         expect(transaction.auditFailures).toEqual([]);
       });
 
-      const atomicUpdateIn = (transaction: ActiveTransaction): AuditedOperationInput => ({
+      const atomicUpdateIn = (transaction: ActiveTransaction): Omit<AuditedOperationInput, 'outcome'> => ({
         operation: interceptedOf(
           'update',
           vi.fn(async () => 'written'),
@@ -940,12 +934,17 @@ describe('runAuditedOperation', () => {
         const deps = createDeps({ singleExecutor: keepingExecutor(failure, [unrecordedUpsert]) });
         const transaction = activeTransactionOf(transactionClient);
 
-        const run = runAuditedOperation(atomicUpdateIn(transaction), deps);
+        const run = runOperation(atomicUpdateIn(transaction), deps);
 
         await expect(run).rejects.toBeInstanceOf(AuditIncompleteError);
         const rejection = await run.catch((error: unknown) => error);
-        expect(rejection).toMatchObject({ modelName: 'User', operation: 'update', failures: [failure] });
-        expect(observerOf(deps)).toHaveBeenCalledExactlyOnceWith(failure);
+        expect(rejection).toMatchObject({
+          modelName: 'User',
+          operation: 'update',
+          failures: [failure],
+          unrecordedWrites: [unrecordedUpsert],
+        });
+        expect(failuresOf(deps)).toEqual([failure]);
         expect(transaction.auditFailures).toEqual([rejection]);
       });
 
@@ -955,8 +954,8 @@ describe('runAuditedOperation', () => {
         });
         const transaction = activeTransactionOf(transactionClient);
 
-        await expect(runAuditedOperation({ ...atomicUpdateIn(transaction), mode: 'awaited' }, deps)).resolves.toBe(
-          outcome.result,
+        await expect(runOperation({ ...atomicUpdateIn(transaction), mode: 'awaited' }, deps)).resolves.toBe(
+          executedUpdate.result,
         );
 
         expect(transaction.auditFailures).toEqual([]);
@@ -966,7 +965,7 @@ describe('runAuditedOperation', () => {
         const deps = createDeps({ singleExecutor: keepingExecutor(failureOf('pre-fetch', 'upsert')) });
         const transaction = activeTransactionOf(transactionClient);
 
-        await expect(runAuditedOperation(atomicUpdateIn(transaction), deps)).resolves.toBe(outcome.result);
+        await expect(runOperation(atomicUpdateIn(transaction), deps)).resolves.toBe(executedUpdate.result);
 
         expect(transaction.auditFailures).toEqual([]);
       });
@@ -977,20 +976,20 @@ describe('runAuditedOperation', () => {
         });
         const innerTransaction = activeTransactionOf(transactionClient);
         const outerQuery = vi.fn(async () => {
-          await runAuditedOperation({ ...atomicUpdateIn(innerTransaction), mode: 'awaited' }, inner);
+          await runOperation({ ...atomicUpdateIn(innerTransaction), mode: 'awaited' }, inner);
           return 'written';
         });
         const deps = createDeps({
           singleExecutor: stubExecutor(async (operation) => {
             await operation.execute(operation.args);
-            return outcome;
+            return executedUpdate;
           }),
         });
         const transaction = activeTransactionOf(transactionClient);
 
         await expect(
-          runAuditedOperation({ ...atomicUpdateIn(transaction), operation: interceptedOf('update', outerQuery) }, deps),
-        ).resolves.toBe(outcome.result);
+          runOperation({ ...atomicUpdateIn(transaction), operation: interceptedOf('update', outerQuery) }, deps),
+        ).resolves.toBe(executedUpdate.result);
 
         expect(outerQuery).toHaveBeenCalledTimes(1);
         expect(transaction.auditFailures).toEqual([]);
@@ -1001,7 +1000,7 @@ describe('runAuditedOperation', () => {
         const transaction = activeTransactionOf(transactionClient);
 
         await expect(
-          runAuditedOperation(
+          runOperation(
             {
               operation: interceptedOf(
                 'update',
@@ -1015,7 +1014,7 @@ describe('runAuditedOperation', () => {
             },
             deps,
           ),
-        ).resolves.toBe(outcome.result);
+        ).resolves.toBe(executedUpdate.result);
 
         expect(transaction.auditFailures).toEqual([]);
       });

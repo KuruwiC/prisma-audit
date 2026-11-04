@@ -457,6 +457,6 @@ describe('Nested Upsert Operations', () => {
   // one is covered by nested-delete.integration.spec.ts (delete) and
   // nested-parent-attribution.integration.spec.ts (update).
 
-  // NOTE: Audit-pipeline failures reach errorObserver; nested pre-fetch failures are covered
+  // NOTE: Audit-pipeline failures reach the observer; nested pre-fetch failures are covered
   // by nested-pre-fetch-failure.integration.spec.ts.
 });

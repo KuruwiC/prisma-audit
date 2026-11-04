@@ -12,12 +12,13 @@
  * operation continues unchanged.
  */
 
-import type { AuditContext, AuditErrorContext } from '@kuruwic/db-audit-core';
+import type { AuditContext, AuditObserver } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { AuditRollbackError, createAuditClient, defineEntity, flushAllPendingWrites } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { failuresOf } from './helpers/audit-failures.js';
 import { cleanDatabase, createBasePrisma } from './helpers/setup.js';
 
 const testActor: AuditContext = {
@@ -51,7 +52,7 @@ describe('updateMany and deleteMany with a limit', () => {
   let beforeWrite: ((args: Record<string, unknown>) => Promise<void>) | undefined;
   /** Makes the audit's reads of users fail once set */
   let failReads = false;
-  const observer = vi.fn<(context: AuditErrorContext) => void>();
+  const observer = vi.fn<AuditObserver>();
 
   const createAudited = () =>
     createAuditClient(
@@ -74,7 +75,7 @@ describe('updateMany and deleteMany with a limit', () => {
         contextProvider: provider,
         entities: { User: defineEntity({ type: 'User' }) },
         write: { mode: 'deferred' },
-        errorObserver: observer,
+        observer,
       },
     ).$extends({
       name: 'update-recorder',
@@ -265,9 +266,16 @@ describe('updateMany and deleteMany with a limit', () => {
     expect(taken.id).toBeDefined();
     expect(await rotatedIds()).toHaveLength(2);
     expect(await auditedIds()).toEqual([]);
-    expect(observer).toHaveBeenCalledWith(
-      expect.objectContaining({ phase: 'diff-generation', operation: 'updateMany' }),
-    );
+    expect(observer.mock.calls).toEqual([
+      [
+        expect.objectContaining({
+          model: 'User',
+          operation: 'updateMany',
+          status: 'incomplete',
+          failures: [expect.objectContaining({ phase: 'diff-generation' })],
+        }),
+      ],
+    ]);
   });
 
   it("narrows the caller's updateMany inside a batch $transaction to the rows it reads after the batch's earlier operations, and audits them", async () => {
@@ -292,7 +300,7 @@ describe('updateMany and deleteMany with a limit', () => {
     expect(narrowedIds(seen[0]?.args ?? {})).toHaveLength(2);
     expect(await rotatedIds()).toHaveLength(2);
     expect(await auditedIds()).toEqual(await rotatedIds());
-    expect(observer).not.toHaveBeenCalled();
+    expect(failuresOf(observer)).toEqual([]);
   });
 
   it.each([0, -1])('passes a limit of %d to Prisma unchanged, settling as a plain updateMany does', async (limit) => {
@@ -397,7 +405,7 @@ describe('updateMany and deleteMany with a limit', () => {
     expect(narrowedIds(seen[0]?.args ?? {})).toHaveLength(2);
     expect(await remainingIds()).toEqual([]);
     expect(await deletedAuditIds()).toHaveLength(2);
-    expect(observer).not.toHaveBeenCalled();
+    expect(failuresOf(observer)).toEqual([]);
   });
 
   it.each([0, -1])('passes a limit of %d to Prisma unchanged, settling as a plain deleteMany does', async (limit) => {

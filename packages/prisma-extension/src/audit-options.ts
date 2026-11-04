@@ -9,7 +9,7 @@ import type {
   AuditContextProvider,
   AuditGateConfig,
   ComposeConfig,
-  FailureSinkConfig,
+  OutcomeConfig,
   PolicyConfig,
   ResolveConfig,
   WriteFn,
@@ -55,7 +55,7 @@ export interface AuditOptions {
   readonly resolveConfig: ResolveConfig;
   readonly composeConfig: ComposeConfig;
   readonly writer: WriteFn | undefined;
-  readonly failureSinkConfig: FailureSinkConfig;
+  readonly outcomeConfig: OutcomeConfig;
   readonly shouldFetchBefore: ShouldFetchBefore;
   /**
    * The audited models an operation on `modelName` with `args` writes rows of, its nested writes
@@ -74,7 +74,7 @@ const RELATION_COUNT_FIELD = '_count';
  *   `recordOmittedFields` names a field the audit cannot read
  */
 export const normalizeAuditOptions = (options: PrismaAuditExtensionOptions): AuditOptions => {
-  const { contextProvider, entities, write, actorContext, errorObserver } = options;
+  const { contextProvider, entities, write, actorContext, observer } = options;
 
   const schemaMetadata = loadSchemaMetadata(options.schema);
   const Prisma = options.Prisma as PrismaNamespace;
@@ -124,7 +124,7 @@ export const normalizeAuditOptions = (options: PrismaAuditExtensionOptions): Aud
       relationFieldNames,
     },
     writer: write?.writer,
-    failureSinkConfig: { observer: errorObserver },
+    outcomeConfig: { observer },
     shouldFetchBefore: createShouldFetchBefore(entityConfigs.byModel, options.fetchBefore),
     auditedModelsOf: (modelName, args) =>
       auditedModelsWrittenBy(

@@ -7,12 +7,13 @@
  * affected row, under the row's `code`, with the changes the operation made.
  */
 
-import type { AuditContext, AuditErrorObserver } from '@kuruwic/db-audit-core';
+import type { AuditContext, AuditObserver } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider, self } from '@kuruwic/db-audit-core';
 import { createAuditClient, defineEntity } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { failuresOf } from './helpers/audit-failures.js';
 import { cleanDatabase, createBasePrisma } from './helpers/setup.js';
 
 const testActor: AuditContext = {
@@ -30,7 +31,7 @@ describe('a model identified by a unique field instead of a primary key', () => 
     }
   });
 
-  const setup = async (observer?: AuditErrorObserver, idResolver: IdResolver = self('code')) => {
+  const setup = async (observer?: AuditObserver, idResolver: IdResolver = self('code')) => {
     const basePrisma = createBasePrisma();
     const provider = createAsyncLocalStorageProvider();
     const prisma = createAuditClient(basePrisma, {
@@ -39,7 +40,7 @@ describe('a model identified by a unique field instead of a primary key', () => 
       contextProvider: provider,
       entities: { Device: defineEntity({ type: 'Device', idResolver }) },
       write: { mode: 'awaited' },
-      ...(observer ? { errorObserver: observer } : {}),
+      ...(observer ? { observer } : {}),
     });
     disconnects.push(async () => {
       await prisma.$disconnect();
@@ -188,7 +189,7 @@ describe('a model identified by a unique field instead of a primary key', () => 
       });
 
     it('records the row an updateMany gave another code under that code, with the change from the code it had', async () => {
-      const observer = vi.fn<AuditErrorObserver>();
+      const observer = vi.fn<AuditObserver>();
       const { prisma, run, seed, logsOf, labels } = await setup(observer);
       await seed('d-1', 'd-2');
 
@@ -196,12 +197,12 @@ describe('a model identified by a unique field instead of a primary key', () => 
 
       expect(result).toEqual({ count: 1 });
       expect(Object.keys(await labels()).sort()).toEqual(['d-2', 'd-9']);
-      expect(observer).not.toHaveBeenCalled();
+      expect(failuresOf(observer)).toEqual([]);
       expect(await logsOf()).toEqual([recoded('d-1', 'd-9')]);
     });
 
     it('records the row an updateManyAndReturn gave another code with its before state, and returns it', async () => {
-      const observer = vi.fn<AuditErrorObserver>();
+      const observer = vi.fn<AuditObserver>();
       const { prisma, run, seed, logsOf } = await setup(observer);
       await seed('d-1', 'd-2');
 
@@ -210,7 +211,7 @@ describe('a model identified by a unique field instead of a primary key', () => 
       );
 
       expect(rows.map((row) => row.code)).toEqual(['d-9']);
-      expect(observer).not.toHaveBeenCalled();
+      expect(failuresOf(observer)).toEqual([]);
       expect(await logsOf()).toEqual([recoded('d-1', 'd-9')]);
     });
 
@@ -218,7 +219,7 @@ describe('a model identified by a unique field instead of a primary key', () => 
       ['outside a transaction', false],
       ['inside an interactive transaction', true],
     ])('records the row an updateMany with a limit gave another code, %s', async (_label, interactive) => {
-      const observer = vi.fn<AuditErrorObserver>();
+      const observer = vi.fn<AuditObserver>();
       const { prisma, run, seed, logsOf, labels } = await setup(observer);
       await seed('d-1', 'd-2');
 
@@ -230,12 +231,12 @@ describe('a model identified by a unique field instead of a primary key', () => 
 
       expect(result).toEqual({ count: 1 });
       expect(Object.keys(await labels()).sort()).toEqual(['d-2', 'd-9']);
-      expect(observer).not.toHaveBeenCalled();
+      expect(failuresOf(observer)).toEqual([]);
       expect(await logsOf()).toEqual([recoded('d-1', 'd-9')]);
     });
 
     it('audits an updateMany and an updateManyAndReturn that leave the code as it is, and reports nothing', async () => {
-      const observer = vi.fn<AuditErrorObserver>();
+      const observer = vi.fn<AuditObserver>();
       const { prisma, run, seed, logsOf } = await setup(observer);
       await seed('d-1', 'd-2', 'd-3');
 
@@ -244,7 +245,7 @@ describe('a model identified by a unique field instead of a primary key', () => 
         await prisma.device.updateManyAndReturn({ where: { code: 'd-2' }, data: { label: 'relabelled' } });
       });
 
-      expect(observer).not.toHaveBeenCalled();
+      expect(failuresOf(observer)).toEqual([]);
       expect(await logsOf()).toEqual([matching('d-1', relabelled('d-1')), matching('d-2', relabelled('d-2'))]);
     });
   });
@@ -261,34 +262,35 @@ describe('a model identified by a unique field instead of a primary key', () => 
       phase: 'id-resolver-call',
       modelName: 'Device',
       operation,
-      params: { identity, resolver: { kind: 'entity' } },
+      identity,
+      resolver: { kind: 'entity' },
       error: resolverError,
     });
 
     it('reports a create under the code of the row', async () => {
-      const observer = vi.fn<AuditErrorObserver>();
+      const observer = vi.fn<AuditObserver>();
       const { prisma, run, logsOf, labels } = await setup(observer, brokenIdResolver);
 
       await run(() => prisma.device.create({ data: { code: BROKEN_CODE, label: 'one' } }));
 
       expect(await labels()).toEqual({ [BROKEN_CODE]: 'one' });
       expect(await logsOf()).toEqual([]);
-      expect(observer).toHaveBeenCalledExactlyOnceWith(failureOf('create', BROKEN_CODE));
+      expect(failuresOf(observer)).toEqual([failureOf('create', BROKEN_CODE)]);
     });
 
     it('reports an update under the code of the row', async () => {
-      const observer = vi.fn<AuditErrorObserver>();
+      const observer = vi.fn<AuditObserver>();
       const { prisma, run, seed, logsOf } = await setup(observer, brokenIdResolver);
       await seed(BROKEN_CODE, 'd-1');
 
       await run(() => prisma.device.update({ where: { code: BROKEN_CODE }, data: { label: 'relabelled' } }));
 
       expect(await logsOf()).toEqual([]);
-      expect(observer).toHaveBeenCalledExactlyOnceWith(failureOf('update', BROKEN_CODE));
+      expect(failuresOf(observer)).toEqual([failureOf('update', BROKEN_CODE)]);
     });
 
     it('reports the row of a createMany that fails, under its code, and records the others', async () => {
-      const observer = vi.fn<AuditErrorObserver>();
+      const observer = vi.fn<AuditObserver>();
       const { prisma, run, logsOf } = await setup(observer, brokenIdResolver);
 
       await run(() =>
@@ -301,18 +303,18 @@ describe('a model identified by a unique field instead of a primary key', () => 
       );
 
       expect((await logsOf()).map((log) => log.entityId)).toEqual(['d-1']);
-      expect(observer).toHaveBeenCalledExactlyOnceWith(failureOf('createMany', BROKEN_CODE));
+      expect(failuresOf(observer)).toEqual([failureOf('createMany', BROKEN_CODE)]);
     });
 
     it('reports the row of an updateMany that fails, under its code, and records the others', async () => {
-      const observer = vi.fn<AuditErrorObserver>();
+      const observer = vi.fn<AuditObserver>();
       const { prisma, run, seed, logsOf } = await setup(observer, brokenIdResolver);
       await seed('d-1', BROKEN_CODE);
 
       await run(() => prisma.device.updateMany({ data: { label: 'relabelled' } }));
 
       expect(await logsOf()).toEqual([matching('d-1', relabelled('d-1'))]);
-      expect(observer).toHaveBeenCalledExactlyOnceWith(failureOf('updateMany', BROKEN_CODE));
+      expect(failuresOf(observer)).toEqual([failureOf('updateMany', BROKEN_CODE)]);
     });
   });
 });

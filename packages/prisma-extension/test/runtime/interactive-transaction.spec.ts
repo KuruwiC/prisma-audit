@@ -4,15 +4,16 @@
  * `createOpenTransaction` opens the interactive transaction every audited operation can run in.
  * The specs drive it against a fake client whose `$transaction` runs the callback the way Prisma
  * does (once, again when it retries, with the commit settling after the callback) and check what
- * the body receives, the audit context it runs under, how the transaction ends, and when the
- * writes the audit queued until the commit start.
+ * the body receives, the audit context it runs under, how the transaction ends, when the writes
+ * the audit queued until the commit start, and how the outcomes of its operations are settled.
+ * `settledIn` settles the outcome of one operation, in a transaction or outside any.
  */
 
-import { type AuditContext, createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
+import { type AuditContext, createAsyncLocalStorageProvider, createTransactionOutcomes } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
 import { AuditRollbackError } from '../../src/errors.js';
 import type { PrismaHandle } from '../../src/internal-types.js';
-import { createOpenTransaction } from '../../src/runtime/interactive-transaction.js';
+import { createOpenTransaction, settledIn } from '../../src/runtime/interactive-transaction.js';
 import { flushAllPendingWrites, getPendingWriteCount } from '../../src/runtime/pending-writes.js';
 import type { ActiveTransaction } from '../../src/runtime/scope.js';
 
@@ -35,6 +36,13 @@ const clientWith = (
 };
 
 const txClient: PrismaHandle = { _isTx: true };
+
+/** The outcome of an operation named `name`, which logs how it is settled */
+const loggedOutcome = (events: string[], name: string) => ({
+  settle: async (fate: 'committed' | 'not-committed') => {
+    events.push(`${name} ${fate === 'committed' ? 'committed' : 'not committed'}`);
+  },
+});
 
 describe('createOpenTransaction', () => {
   it("runs the body with a transaction whose client is Prisma's transaction client and whose queues are empty", async () => {
@@ -260,8 +268,101 @@ describe('createOpenTransaction', () => {
     });
   });
 
+  describe('the outcomes of its operations', () => {
+    /** A body that adds the outcome of a succeeded operation to the transaction */
+    const settlingBody =
+      (events: string[], name: string, fails?: Error) =>
+      async (transaction: ActiveTransaction): Promise<void> => {
+        await transaction.outcomes.add(loggedOutcome(events, name), true);
+        if (fails) throw fails;
+      };
+
+    it('settles them in order as committed once $transaction has resolved, after the queued writes started, before returning', async () => {
+      const events: string[] = [];
+      let commitSettled = false;
+      const { client } = clientWith(txClient, async (callback) => {
+        const result = await callback(txClient);
+        events.push('committed');
+        commitSettled = true;
+        return result;
+      });
+
+      await createOpenTransaction(createAsyncLocalStorageProvider())(client, [], async (transaction) => {
+        transaction.deferredWrites.push(async () => {
+          events.push('queued write started');
+        });
+        await settlingBody(events, 'first')(transaction);
+        await settlingBody(events, 'second')(transaction);
+        expect(events).toEqual([]);
+      });
+
+      expect(commitSettled).toBe(true);
+      expect(events).toEqual(['committed', 'queued write started', 'first committed', 'second committed']);
+    });
+
+    it('settles them as not committed when the body rejects, before rejecting', async () => {
+      const events: string[] = [];
+      const bodyError = new Error('callback failed');
+      const { client } = clientWith(txClient);
+
+      await expect(
+        createOpenTransaction(createAsyncLocalStorageProvider())(client, [], settlingBody(events, 'first', bodyError)),
+      ).rejects.toBe(bodyError);
+
+      expect(events).toEqual(['first not committed']);
+    });
+
+    it('settles them as not committed when the transaction is rolled back for an audit failure', async () => {
+      const events: string[] = [];
+      const { client } = clientWith(txClient);
+
+      await expect(
+        createOpenTransaction(createAsyncLocalStorageProvider())(client, [], async (transaction) => {
+          await settlingBody(events, 'first')(transaction);
+          transaction.auditFailures.push(new Error('audit write failed'));
+        }),
+      ).rejects.toBeInstanceOf(AuditRollbackError);
+
+      expect(events).toEqual(['first not committed']);
+    });
+
+    it('settles them as not committed when $transaction rejects after the callback resolved (commit failure)', async () => {
+      const events: string[] = [];
+      const commitError = new Error('commit failed');
+      const { client } = clientWith(txClient, async (callback) => {
+        await callback(txClient);
+        throw commitError;
+      });
+
+      await expect(
+        createOpenTransaction(createAsyncLocalStorageProvider())(client, [], settlingBody(events, 'first')),
+      ).rejects.toBe(commitError);
+
+      expect(events).toEqual(['first not committed']);
+    });
+  });
+
+  describe('an operation that settles after its transaction has', () => {
+    it('is settled at once as not committed when the transaction rolled back before it finished', async () => {
+      const events: string[] = [];
+      const bodyError = new Error('a sibling operation failed');
+      const { client } = clientWith(txClient);
+      let addLate: (() => Promise<void>) | undefined;
+
+      await expect(
+        createOpenTransaction(createAsyncLocalStorageProvider())(client, [], async (transaction) => {
+          addLate = () => transaction.outcomes.add(loggedOutcome(events, 'straggler'), true);
+          throw bodyError;
+        }),
+      ).rejects.toBe(bodyError);
+      await addLate?.();
+
+      expect(events).toEqual(['straggler not committed']);
+    });
+  });
+
   describe('when Prisma runs the callback again', () => {
-    it('empties the queues first, so that only what the last run queued is started and the transaction is not rolled back for an earlier run', async () => {
+    it('empties the queues first, so that only what the last run queued is started, the transaction is not rolled back for an earlier run and the outcomes of an earlier run are settled as not committed', async () => {
       const events: string[] = [];
       const { client, $transaction } = clientWith(txClient, async (callback) => {
         await callback(txClient).catch(() => undefined);
@@ -277,6 +378,7 @@ describe('createOpenTransaction', () => {
           auditFailures: transaction.auditFailures.length,
         });
         const name = `run ${run}`;
+        await transaction.outcomes.add(loggedOutcome(events, `settled ${name}`), true);
         transaction.deferredWrites.push(async () => {
           events.push(`started ${name}`);
         });
@@ -291,7 +393,72 @@ describe('createOpenTransaction', () => {
         { deferredWrites: 0, auditFailures: 0 },
         { deferredWrites: 0, auditFailures: 0 },
       ]);
-      expect(events).toEqual(['started run 2']);
+      expect(events).toEqual(['settled run 1 not committed', 'started run 2', 'settled run 2 committed']);
     });
+  });
+});
+
+describe('settledIn', () => {
+  const outcomeLog = (events: string[]) => ({
+    settle: vi.fn(async (fate: 'committed' | 'not-committed') => {
+      events.push(fate);
+    }),
+  });
+
+  describe('outside any transaction', () => {
+    it('settles the outcome as committed before returning the result of an operation that succeeded', async () => {
+      const events: string[] = [];
+
+      const result = await settledIn(undefined, outcomeLog(events), async () => {
+        events.push('ran');
+        return 'result';
+      });
+
+      expect(result).toBe('result');
+      expect(events).toEqual(['ran', 'committed']);
+    });
+
+    it('settles the outcome as not committed before rethrowing the error of an operation that failed', async () => {
+      const events: string[] = [];
+      const operationError = new Error('unique constraint failed');
+
+      await expect(
+        settledIn(undefined, outcomeLog(events), async () => {
+          throw operationError;
+        }),
+      ).rejects.toBe(operationError);
+
+      expect(events).toEqual(['not-committed']);
+    });
+  });
+
+  describe('inside a transaction', () => {
+    const transactionOf = (): ActiveTransaction => ({
+      client: txClient,
+      deferredWrites: [],
+      auditFailures: [],
+      outcomes: createTransactionOutcomes(),
+    });
+
+    it.each([
+      { succeeded: true, committed: true, fate: 'committed' },
+      { succeeded: true, committed: false, fate: 'not-committed' },
+      { succeeded: false, committed: true, fate: 'not-committed' },
+      { succeeded: false, committed: false, fate: 'not-committed' },
+    ])(
+      'queues the settlement on the transaction, as $fate once it settles for an operation that succeeded $succeeded in a transaction that committed $committed',
+      async ({ succeeded, committed, fate }) => {
+        const events: string[] = [];
+        const transaction = transactionOf();
+
+        await settledIn(transaction, outcomeLog(events), async () => {
+          if (!succeeded) throw new Error('operation failed');
+        }).catch(() => undefined);
+        expect(events).toEqual([]);
+
+        await transaction.outcomes.settle(committed ? 'committed' : 'not-committed');
+        expect(events).toEqual([fate]);
+      },
+    );
   });
 });

@@ -1,4 +1,4 @@
-import type { AuditActor, AuditErrorObserver, AuditRecord, WriteMode } from '@kuruwic/db-audit-core';
+import type { AuditActor, AuditObserver, AuditRecord, WriteMode } from '@kuruwic/db-audit-core';
 import {
   AuditContextMissingError,
   AuditIncompleteError,
@@ -160,10 +160,10 @@ describe('aggregate resolution and enrichment', () => {
 
   it('an idResolver that throws, awaited: its row gets no record and is listed in resolverFailures, the write and the other rows are recorded', async () => {
     const resolverError = new Error('entity id resolver is broken');
-    const observer = vi.fn<AuditErrorObserver>();
+    const observer = vi.fn<AuditObserver>();
     const adapter = createAdapter({
       write: { mode: 'awaited' },
-      errorObserver: observer,
+      observer,
       entities: defineMapping({
         User: defineEntity<UserRow, Db>({ type: 'User' }),
         Post: defineEntity<PostRow, Db>({
@@ -186,11 +186,18 @@ describe('aggregate resolution and enrichment', () => {
       phase: 'id-resolver-call',
       modelName: 'Post',
       operation: 'create',
-      params: { identity: 'p1', resolver: { kind: 'entity' } },
+      identity: 'p1',
+      resolver: { kind: 'entity' },
       error: resolverError,
     };
     expect(adapter.resolverFailures).toEqual([failure]);
-    expect(observer).toHaveBeenCalledExactlyOnceWith(failure);
+    expect(
+      observer.mock.calls.map(([{ model, status, records, failures }]) => ({ model, status, records, failures })),
+    ).toEqual([
+      { model: 'User', status: 'complete', records: 1, failures: [] },
+      { model: 'Post', status: 'incomplete', records: 0, failures: [failure] },
+      { model: 'Post', status: 'complete', records: 1, failures: [] },
+    ]);
     expect(adapter.store.find('Post', 'p1')).toEqual({ id: 'p1', authorId: 'u1', title: 'broken' });
     expect(adapter.store.auditLogs().map(({ entityType, entityId }) => `${entityType}:${entityId}`)).toEqual([
       'User:u1',
@@ -537,7 +544,7 @@ describe('transaction membership', () => {
     await expect(adapter.flush()).resolves.toBeUndefined();
 
     expect(adapter.writeFailures).toEqual([
-      { phase: 'log-write', modelName: 'User', operation: 'write', params: [expect.any(Object)], error: failure },
+      { phase: 'log-write', records: [expect.objectContaining({ entityId: 'u1' })], error: failure },
     ]);
     expect(adapter.store.find('User', 'u1')).toEqual({ id: 'u1', name: 'Alice' });
   });
@@ -559,7 +566,7 @@ describe('transaction membership', () => {
     }
 
     expect(adapter.writeFailures).toEqual([
-      { phase: 'log-write', modelName: 'User', operation: 'write', params: [expect.any(Object)], error: failure },
+      { phase: 'log-write', records: [expect.objectContaining({ entityId: 'u1' })], error: failure },
     ]);
     expect(adapter.store.find('User', 'u1')).toEqual({ id: 'u1', name: 'Alice' });
     expect(adapter.store.auditLogs()).toEqual([]);
@@ -583,10 +590,10 @@ describe('transaction membership', () => {
   describe('a record build that fails after the write', () => {
     const failure = new Error('actor enricher is broken');
     const adapterWithFailingEnricher = (mode: WriteMode) => {
-      const observer = vi.fn<AuditErrorObserver>();
+      const observer = vi.fn<AuditObserver>();
       const adapter = createAdapter({
         write: { mode },
-        errorObserver: observer,
+        observer,
         actorContext: {
           enricher: async () => {
             throw failure;
@@ -595,15 +602,16 @@ describe('transaction membership', () => {
       });
       return { adapter, observer };
     };
-    const diffGeneration = {
-      phase: 'diff-generation',
-      modelName: 'User',
+    const outcomeWith = (status: 'incomplete' | 'not-committed') => ({
+      model: 'User',
       operation: 'create',
-      params: { identity: 'u1' },
-      error: failure,
-    };
+      status,
+      records: 0,
+      failures: [{ phase: 'diff-generation', error: failure }],
+      unrecordedWrites: [],
+    });
 
-    it('deferred outside a transaction: keeps the write, notifies diff-generation once, leaves the drop to the observer and writes no record', async () => {
+    it('deferred outside a transaction: keeps the write, reports it incomplete with the diff-generation failure to the observer, which takes the log, and writes no record', async () => {
       const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
       const { adapter, observer } = adapterWithFailingEnricher('deferred');
 
@@ -611,7 +619,7 @@ describe('transaction membership', () => {
         await expect(withContext(() => adapter.create('User', { id: 'u1', name: 'Alice' }))).resolves.toBeUndefined();
         await adapter.flush();
 
-        expect(observer.mock.calls).toEqual([[diffGeneration]]);
+        expect(observer.mock.calls).toEqual([[outcomeWith('incomplete')]]);
         expect(consoleError).not.toHaveBeenCalled();
       } finally {
         consoleError.mockRestore();
@@ -620,12 +628,12 @@ describe('transaction membership', () => {
       expect(adapter.store.auditLogs()).toEqual([]);
     });
 
-    it('atomic: rejects with the error, rolls the write back, notifies diff-generation once and writes no record', async () => {
+    it('atomic: rejects with the error, rolls the write back, reports it not committed with the diff-generation failure and writes no record', async () => {
       const { adapter, observer } = adapterWithFailingEnricher('atomic');
 
       await expect(withContext(() => adapter.create('User', { id: 'u1', name: 'Alice' }))).rejects.toBe(failure);
 
-      expect(observer.mock.calls).toEqual([[diffGeneration]]);
+      expect(observer.mock.calls).toEqual([[outcomeWith('not-committed')]]);
       expect(adapter.store.find('User', 'u1')).toBeUndefined();
       expect(adapter.store.auditLogs()).toEqual([]);
     });
@@ -739,6 +747,119 @@ describe('the audit gate', () => {
     expect(adapter.store.auditLogs()).toEqual([]);
     expect(mode).not.toHaveBeenCalled();
     expect(enricher).not.toHaveBeenCalled();
+  });
+});
+
+describe('the outcome of each write', () => {
+  const statusesOf = (observer: ReturnType<typeof vi.fn<AuditObserver>>) =>
+    observer.mock.calls.map(([{ model, status, records }]) => ({ model, status, records }));
+
+  it('is complete for an atomic write once its implicit transaction has committed', async () => {
+    const observer = vi.fn<AuditObserver>();
+    const adapter = createAdapter({ observer });
+
+    await withContext(() => adapter.create('User', { id: 'u1', name: 'Alice' }));
+
+    expect(observer.mock.calls).toEqual([
+      [{ model: 'User', operation: 'create', status: 'complete', records: 1, failures: [], unrecordedWrites: [] }],
+    ]);
+  });
+
+  it('is reported for each write of a transaction once the outermost one has committed, a nested one included', async () => {
+    const observer = vi.fn<AuditObserver>();
+    const adapter = createAdapter({ observer });
+    const reportedInside: number[] = [];
+
+    await withContext(() =>
+      adapter.transaction(async () => {
+        await adapter.create('User', { id: 'u1', name: 'Alice' });
+        await adapter.transaction(async () => {
+          await adapter.create('User', { id: 'u2', name: 'Bob' });
+        });
+        reportedInside.push(observer.mock.calls.length);
+      }),
+    );
+
+    expect(reportedInside).toEqual([0]);
+    expect(statusesOf(observer)).toEqual([
+      { model: 'User', status: 'complete', records: 1 },
+      { model: 'User', status: 'complete', records: 1 },
+    ]);
+  });
+
+  it('is not-committed, and never complete, for the writes of a transaction that throws after they succeeded', async () => {
+    const observer = vi.fn<AuditObserver>();
+    const adapter = createAdapter({ observer });
+
+    await expect(
+      withContext(() =>
+        adapter.transaction(async () => {
+          await adapter.create('User', { id: 'u1', name: 'Alice' });
+          await adapter.create('User', { id: 'u2', name: 'Bob' });
+          throw new Error('callback failed');
+        }),
+      ),
+    ).rejects.toThrow('callback failed');
+
+    expect(statusesOf(observer)).toEqual([
+      { model: 'User', status: 'not-committed', records: 1 },
+      { model: 'User', status: 'not-committed', records: 1 },
+    ]);
+  });
+
+  it('is not-committed for a write of a nested transaction that rolled back, reported once the outermost one settles', async () => {
+    const observer = vi.fn<AuditObserver>();
+    const adapter = createAdapter({ observer });
+    const reportedInside: number[] = [];
+
+    await withContext(() =>
+      adapter.transaction(async () => {
+        await adapter
+          .transaction(async () => {
+            await adapter.create('User', { id: 'u1', name: 'Alice' });
+            throw new Error('nested callback failed');
+          })
+          .catch(() => undefined);
+        reportedInside.push(observer.mock.calls.length);
+        await adapter.create('User', { id: 'u2', name: 'Bob' });
+      }),
+    );
+
+    expect(reportedInside).toEqual([0]);
+    expect(statusesOf(observer)).toEqual([
+      { model: 'User', status: 'not-committed', records: 1 },
+      { model: 'User', status: 'complete', records: 1 },
+    ]);
+  });
+
+  it('is unaudited, for no-context, for a write run without an audit context', async () => {
+    const observer = vi.fn<AuditObserver>();
+    const adapter = createAdapter({ observer });
+
+    await adapter.create('User', { id: 'u1', name: 'Alice' });
+
+    expect(observer.mock.calls).toEqual([
+      [
+        {
+          model: 'User',
+          operation: 'create',
+          status: 'unaudited',
+          unauditedReason: 'no-context',
+          records: 0,
+          failures: [],
+          unrecordedWrites: [],
+        },
+      ],
+    ]);
+  });
+
+  it('is not-committed for a write the audit gate rejected', async () => {
+    const observer = vi.fn<AuditObserver>();
+    const adapter = createAdapter({ observer, requireContext: true });
+
+    await expect(adapter.create('User', { id: 'u1', name: 'Alice' })).rejects.toBeInstanceOf(AuditContextMissingError);
+
+    expect(statusesOf(observer)).toEqual([{ model: 'User', status: 'not-committed', records: 0 }]);
   });
 });
 

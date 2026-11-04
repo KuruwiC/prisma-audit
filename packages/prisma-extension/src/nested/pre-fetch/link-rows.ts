@@ -19,7 +19,7 @@
  * @module nested/pre-fetch/link-rows
  */
 
-import type { BeforeState, FailureSink } from '@kuruwic/db-audit-core';
+import type { BeforeState, OperationOutcome } from '@kuruwic/db-audit-core';
 import {
   getRowKeyConstraint,
   type NestedOperationInfo,
@@ -116,6 +116,8 @@ export interface ReadLinkRowsInput {
   readonly prismaClient: PrismaHandle;
   readonly modelName: string;
   readonly topLevelWhere: unknown;
+  /** Whether the top-level row exists before the write: not the row a create, or an upsert that finds none, inserts */
+  readonly topLevelRowExists: boolean;
   /** The nested operations the operation executes */
   readonly nestedOperations: readonly NestedOperationInfo[];
   readonly nestedPreFetchResults: NestedPreFetchResults;
@@ -125,7 +127,7 @@ export interface ReadLinkRowsDependencies {
   readonly schemaMetadata: SchemaMetadata;
   readonly shouldFetchBefore: ShouldFetchBefore;
   readonly auditedOmittedFields: AuditedOmittedFields;
-  readonly onPreFetchFailure?: FailureSink['notify'];
+  readonly onPreFetchFailure?: OperationOutcome['fail'];
 }
 
 interface PathWrites {
@@ -221,8 +223,8 @@ const mayExistBefore = (operation: NestedOperationInfo, before: BeforeState): bo
 
 /**
  * The detaching writes among `writes` whose parent row may have held rows the read did not find:
- * after a failed read, every one whose parent row may exist (not the top-level row of a create,
- * see {@link mayExistBefore} for a nested one); else those whose parent row's read failed, which
+ * after a failed read, every one whose parent row may exist (not a top-level row the operation
+ * inserts, see {@link mayExistBefore} for a nested one); else those whose parent row's read failed, which
  * left its key unknown
  */
 const undeterminedDetachesOf = (
@@ -236,7 +238,7 @@ const undeterminedDetachesOf = (
     }
     const { parent } = write.operation;
     if (!parent) {
-      return failed && input.topLevelWhere !== undefined;
+      return failed && input.topLevelRowExists;
     }
     const before = parentBeforeStateOf(parent, input.nestedPreFetchResults, deps.schemaMetadata);
     return failed ? mayExistBefore(parent.operation, before) : before.kind === 'unavailable';
@@ -282,11 +284,10 @@ const readPath = async (
     return { ...base, rows, parentKeys, failed: false, undeterminedDetaches };
   } catch (error) {
     preFetchLog('link rows read failed: path=%s error=%o', path, error);
-    await deps.onPreFetchFailure?.({
+    deps.onPreFetchFailure?.({
       phase: 'pre-fetch',
       modelName: relatedModel,
       operation: first.operation.operation,
-      params: first.operation.data,
       error: toError(error),
     });
     const parentKeys = new Map<NestedOperationInfo, Row>();

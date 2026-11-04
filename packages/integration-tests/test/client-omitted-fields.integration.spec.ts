@@ -11,7 +11,7 @@
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider, self } from '@kuruwic/db-audit-core';
 import {
-  type AuditErrorObserver,
+  type AuditObserver,
   createAuditClient,
   defineEntity,
   type EntityMap,
@@ -21,6 +21,7 @@ import {
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { failuresOf } from './helpers/audit-failures.js';
 import { aggregatesOf, cleanDatabase, createBasePrisma, testEntities } from './helpers/setup.js';
 
 const testActor: AuditContext = {
@@ -61,7 +62,7 @@ const auditingOmittedFields: EntityMap = {
 
 interface Options {
   readonly Prisma?: typeof Prisma;
-  readonly errorObserver?: AuditErrorObserver;
+  readonly observer?: AuditObserver;
   readonly entities?: EntityMap;
   readonly redactFields?: string[];
   readonly fetchBefore?: { readonly update?: boolean; readonly delete?: boolean };
@@ -240,32 +241,30 @@ describe('fields a client-level omit hides', () => {
     });
 
     it('fails a foreignKey root on a hidden column the entity does not list, naming the option, and records the row under its own root', async () => {
-      const observer = vi.fn<AuditErrorObserver>();
-      const { basePrisma, prisma, run } = await setup({ errorObserver: observer });
+      const observer = vi.fn<AuditObserver>();
+      const { basePrisma, prisma, run } = await setup({ observer });
 
       await run(() => prisma.post.update({ where: { id: 'p1' }, data: { title: 'T1b' } }));
 
       expect(await aggregatesOf(basePrisma, 'Post')).toEqual(['p1:Post:p1']);
-      expect(observer).toHaveBeenCalledTimes(1);
-      expect(observer).toHaveBeenCalledWith(
+      expect(failuresOf(observer)).toEqual([
         expect.objectContaining({
           phase: 'id-resolver-call',
           modelName: 'Post',
-          params: expect.objectContaining({ resolver: expect.objectContaining({ aggregateType: 'User' }) }),
+          resolver: expect.objectContaining({ aggregateType: 'User' }),
           error: expect.objectContaining({ message: expect.stringContaining('recordOmittedFields') }),
         }),
-      );
+      ]);
     });
 
     it('fails a foreignKey root on a hidden column of a nested deleted row the same way, recording it under its own root only', async () => {
-      const observer = vi.fn<AuditErrorObserver>();
-      const { basePrisma, prisma, run } = await setup({ errorObserver: observer });
+      const observer = vi.fn<AuditObserver>();
+      const { basePrisma, prisma, run } = await setup({ observer });
 
       await run(() => prisma.user.update({ where: { id: 'u1' }, data: { posts: { delete: { id: 'p1' } } } }));
 
       expect(await aggregatesOf(basePrisma, 'Post')).toEqual(['p1:Post:p1']);
-      expect(observer).toHaveBeenCalledTimes(1);
-      expect(observer).toHaveBeenCalledWith(expect.objectContaining({ phase: 'id-resolver-call', modelName: 'Post' }));
+      expect(failuresOf(observer)).toEqual([expect.objectContaining({ phase: 'id-resolver-call', modelName: 'Post' })]);
     });
   });
 
@@ -512,10 +511,10 @@ describe('fields a client-level omit hides', () => {
       });
 
       it('reports nothing for a row whose nullable foreign key holds null', async () => {
-        const observer = vi.fn<AuditErrorObserver>();
+        const observer = vi.fn<AuditObserver>();
         const { basePrisma, prisma, run } = await setup(
           {
-            errorObserver: observer,
+            observer,
             entities: {
               ...testEntities,
               Label: defineEntity({
@@ -532,7 +531,7 @@ describe('fields a client-level omit hides', () => {
         await run(() => prisma.label.update({ where: { id: 'l1' }, data: { name: 'Still loose' } }));
         await run(() => prisma.label.create({ data: { id: 'l2', name: 'Tied', postId: 'p1' } }));
 
-        expect(observer).not.toHaveBeenCalled();
+        expect(failuresOf(observer)).toEqual([]);
         expect(await aggregatesOf(basePrisma, 'Label')).toEqual([
           'l1:Label:l1',
           'l1:Label:l1',
@@ -773,8 +772,8 @@ describe('fields a client-level omit hides', () => {
     });
 
     it('records none of the rows an updateManyAndReturn without a select returns in the shape that hides the key, and reports them all', async () => {
-      const observer = vi.fn<AuditErrorObserver>();
-      const { inScope, members, recordsOf } = await withHiddenKey({ errorObserver: observer });
+      const observer = vi.fn<AuditObserver>();
+      const { inScope, members, recordsOf } = await withHiddenKey({ observer });
 
       const result = await inScope((client) =>
         client.user.updateManyAndReturn({ where: OF_MEMBERS, data: { name: 'renamed' } }),
@@ -785,15 +784,14 @@ describe('fields a client-level omit hides', () => {
       );
       expect(Object.values(await members())).toEqual(['renamed', 'renamed', 'renamed', 'renamed']);
       expect(await logsOf(recordsOf)).toEqual([]);
-      expect(observer).toHaveBeenCalledTimes(1);
-      expect(observer).toHaveBeenCalledWith(
+      expect(failuresOf(observer)).toEqual([
         expect.objectContaining({
           phase: 'row-identification',
           modelName: 'User',
           operation: 'updateManyAndReturn',
-          params: { unidentified: 4 },
+          unidentified: 4,
         }),
-      );
+      ]);
     });
   });
 
@@ -905,8 +903,8 @@ describe('fields a client-level omit hides', () => {
     });
 
     it('returns exactly the selection of each row updateManyAndReturn updates and records each with its before state and change', async () => {
-      const observer = vi.fn<AuditErrorObserver>();
-      const { prisma, run, recordsOf } = await setup({ errorObserver: observer }, HIDDEN_ID);
+      const observer = vi.fn<AuditObserver>();
+      const { prisma, run, recordsOf } = await setup({ observer }, HIDDEN_ID);
 
       const result = await run(() =>
         prisma.user.updateManyAndReturn({
@@ -924,7 +922,7 @@ describe('fields a client-level omit hides', () => {
       ]);
       const records = await recordsOf('User');
       expect(records.map((record) => keysOf(record.before))).toEqual([USER_COLUMNS, USER_COLUMNS]);
-      expect(observer).not.toHaveBeenCalled();
+      expect(failuresOf(observer)).toEqual([]);
     });
 
     it.each([
@@ -1002,22 +1000,19 @@ describe('fields a client-level omit hides', () => {
     });
 
     it('records no update whose before read is off, reporting nothing', async () => {
-      const observer = vi.fn<AuditErrorObserver>();
-      const { prisma, run, recordsOf } = await setup(
-        { errorObserver: observer, fetchBefore: { update: false } },
-        HIDDEN_ID,
-      );
+      const observer = vi.fn<AuditObserver>();
+      const { prisma, run, recordsOf } = await setup({ observer, fetchBefore: { update: false } }, HIDDEN_ID);
 
       const result = await run(() => prisma.user.update({ where: { id: 'u1' }, data: { name: 'Bea' } }));
 
       expect(keysOf(result)).toEqual(WITHOUT_ID);
       expect(await recordsOf('User')).toEqual([]);
-      expect(observer).not.toHaveBeenCalled();
+      expect(failuresOf(observer)).toEqual([]);
     });
 
     it('records no upsert that created its row, reporting nothing', async () => {
-      const observer = vi.fn<AuditErrorObserver>();
-      const { prisma, run, recordsOf } = await setup({ errorObserver: observer }, HIDDEN_ID);
+      const observer = vi.fn<AuditObserver>();
+      const { prisma, run, recordsOf } = await setup({ observer }, HIDDEN_ID);
 
       const result = await run(() =>
         prisma.user.upsert({ where: { id: 'u3' }, update: {}, create: { id: 'u3', email: 'u3@example.com' } }),
@@ -1025,7 +1020,7 @@ describe('fields a client-level omit hides', () => {
 
       expect(keysOf(result)).toEqual(WITHOUT_ID);
       expect(await recordsOf('User')).toEqual([]);
-      expect(observer).not.toHaveBeenCalled();
+      expect(failuresOf(observer)).toEqual([]);
     });
 
     it('records an update of a model without a primary key under the unique field its before state holds', async () => {
@@ -1050,8 +1045,8 @@ describe('fields a client-level omit hides', () => {
     });
 
     it('records an update that gives the row another id under that id, with the change from the id its before state holds', async () => {
-      const observer = vi.fn<AuditErrorObserver>();
-      const { prisma, run, recordsOf } = await setup({ errorObserver: observer }, HIDDEN_ID);
+      const observer = vi.fn<AuditObserver>();
+      const { prisma, run, recordsOf } = await setup({ observer }, HIDDEN_ID);
 
       const result = await run(() => prisma.user.update({ where: { id: 'u1' }, data: { id: 'u9', name: 'Bea' } }));
 
@@ -1064,7 +1059,7 @@ describe('fields a client-level omit hides', () => {
           changes: { id: { old: 'u1', new: 'u9' }, name: { old: 'Ada', new: 'Bea' } },
         },
       ]);
-      expect(observer).not.toHaveBeenCalled();
+      expect(failuresOf(observer)).toEqual([]);
     });
   });
 

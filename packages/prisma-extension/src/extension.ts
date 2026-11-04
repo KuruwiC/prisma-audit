@@ -8,7 +8,9 @@
  * hook without the binding the client it was issued on gives it, or when it is atomic outside any
  * transaction the client owns, selects the relations its nested writes touch, runs it through the
  * audited-operation pipeline in that transaction, and returns the result in the shape the caller
- * requested. The hook continues the caller's operation through `query` unless it rejects it; the
+ * requested. Every operation that writes rows of an audited model, audited, run unaudited or
+ * rejected, has an outcome, settled once the transaction its binding names commits or rolls back,
+ * or, outside any, once the operation returns or throws. The hook continues the caller's operation through `query` unless it rejects it; the
  * client proxy binds the operation, and for an atomic write opens the interactive transaction,
  * before the operation enters the extension chain.
  *
@@ -17,22 +19,25 @@
  * @see {@link PrismaAuditExtensionOptions}
  */
 
+import type { AuditContext, OperationOutcome, OutcomeConfig } from '@kuruwic/db-audit-core';
 import {
   AuditAtomicityError,
   AuditContextMissingError,
   auditGate,
-  createFailureSink,
+  createOperationOutcome,
   planFor,
   policy,
 } from '@kuruwic/db-audit-core';
 import { createPrismaWriteExecutor, declaresBeforeUnavailableColumn } from './adapters/write-executor.js';
 import { type AuditOptions, normalizeAuditOptions } from './audit-options.js';
 import { AuditUnboundWriteError } from './errors.js';
+import type { AuditAction } from './grammar/operations.js';
 import type { ExtensionParams, PrismaBaseClient } from './internal-types.js';
 import { createBatchExecutor } from './pipeline/batch-executor.js';
 import { createRecordProducer } from './pipeline/produce-records.js';
 import { type AuditPipelineDependencies, runAuditedOperation } from './pipeline/run-audited-operation.js';
 import { createSingleExecutor } from './pipeline/single-executor.js';
+import { settledIn } from './runtime/interactive-transaction.js';
 import type { RecipeConfig } from './runtime/operation-recipe.js';
 import { isProcessingAuditLog, operationBinding, withScope } from './runtime/scope.js';
 import { createTransactionProxy } from './runtime/transaction-proxy.js';
@@ -51,6 +56,7 @@ const createPipelineDependencies = (audit: AuditOptions): AuditPipelineDependenc
       shouldFetchBefore,
       auditedOmittedFields,
       auditedOmittedFieldsWithRowKey,
+      auditedModelsOf: audit.auditedModelsOf,
     }),
     batchExecutor: createBatchExecutor({ Prisma, schemaMetadata, auditedOmittedFieldsWithRowKey }),
     produceRecords: createRecordProducer({ ...audit, omittedFieldReads: { schemaMetadata, auditedOmittedFields } }),
@@ -60,11 +66,7 @@ const createPipelineDependencies = (audit: AuditOptions): AuditPipelineDependenc
         storesBeforeUnavailable: declaresBeforeUnavailableColumn(schemaMetadata, audit.auditLogAccessor),
       }),
       writer: audit.writer,
-      // Its own sink of the observer, which logs a failed write the caller cannot see when no
-      // observer is configured; each operation reports the failures it detects to a sink of its own
-      failureSink: createFailureSink(audit.failureSinkConfig),
     },
-    failureSinkConfig: audit.failureSinkConfig,
   };
 };
 
@@ -93,6 +95,20 @@ const recipeConfigOf = (audit: AuditOptions): RecipeConfig => {
   };
 };
 
+interface AuditedCall {
+  readonly model: string;
+  readonly operation: AuditAction;
+  readonly args: ExtensionParams['args'];
+  readonly query: ExtensionParams['query'];
+}
+
+/**
+ * The observer, run with the re-entrancy guard raised like the other user callbacks: a write it
+ * makes through the audited client is neither audited nor reported, so it cannot recurse
+ */
+const guardedOutcomeConfig = ({ observer }: OutcomeConfig): OutcomeConfig =>
+  observer ? { observer: (outcome) => withScope({ isProcessingAuditLog: true }, () => observer(outcome)) } : {};
+
 /**
  * Creates the Prisma Client Extension for automatic audit logging
  *
@@ -108,21 +124,15 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
   const recipeConfig = recipeConfigOf(audit);
   const deps = createPipelineDependencies(audit);
   const shape: ClientShape = { schemaMetadata: audit.schemaMetadata, queryOmitSupported: audit.queryOmitSupported };
+  const outcomeConfig = guardedOutcomeConfig(audit.outcomeConfig);
 
-  const auditOperation = async (params: ExtensionParams, baseClient: PrismaBaseClient) => {
-    const { operation, model, args, query } = params;
-    if (isProcessingAuditLog() || !model || !isAuditableAction(operation)) {
-      return query(args);
-    }
-
-    const auditedModels = audit.auditedModelsOf(model, args);
-    const gate = auditGate(audit.provider.getContext(), auditedModels, audit.gateConfig);
-    if (gate.kind === 'reject') {
-      throw new AuditContextMissingError({ modelName: gate.modelName, operationModelName: model, operation });
-    }
-    if (gate.kind === 'skip') {
-      return query(args);
-    }
+  const runAudited = async (
+    { model, operation, args, query }: AuditedCall,
+    baseClient: PrismaBaseClient,
+    auditedModels: readonly string[],
+    auditContext: AuditContext,
+    outcome: OperationOutcome,
+  ) => {
     const binding = operationBinding();
     if (binding === undefined) {
       throw new AuditUnboundWriteError({ modelName: model, operation });
@@ -132,7 +142,6 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     if (plan === 'reject') {
       throw new AuditAtomicityError({ modelName: model, operation });
     }
-    const auditContext = gate.context;
 
     const injection = injectAuditedSelection(shape, model, operation, args);
 
@@ -153,6 +162,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
           mode,
           plan,
           transaction: binding.transaction,
+          outcome,
         },
         deps,
       ),
@@ -160,6 +170,37 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
 
     // The audit logs were built from the full result; the caller receives the shape it requested.
     return projectToRequestedShape(result, injection.injected);
+  };
+
+  const auditOperation = async (params: ExtensionParams, baseClient: PrismaBaseClient) => {
+    const { operation, model, args, query } = params;
+    if (isProcessingAuditLog() || !model || !isAuditableAction(operation)) {
+      return query(args);
+    }
+
+    const auditedModels = audit.auditedModelsOf(model, args);
+    const gate = auditGate(audit.provider.getContext(), auditedModels, audit.gateConfig);
+    if (gate.kind === 'skip') {
+      return query(args);
+    }
+    const outcome = createOperationOutcome(
+      { model, operation, ...(gate.kind === 'unaudited' ? { unaudited: gate.reason } : {}) },
+      outcomeConfig,
+    );
+    return settledIn(operationBinding()?.transaction, outcome, () => {
+      switch (gate.kind) {
+        case 'reject':
+          throw new AuditContextMissingError({ modelName: gate.modelName, operationModelName: model, operation });
+        case 'unaudited':
+          return query(args);
+        case 'audit':
+          return runAudited({ model, operation, args, query }, baseClient, auditedModels, gate.context, outcome);
+        default: {
+          const exhaustiveCheck: never = gate;
+          throw new Error(`[@prisma-audit] Unhandled audit gate: ${JSON.stringify(exhaustiveCheck)}`);
+        }
+      }
+    });
   };
 
   const extensionDefinition = (baseClient: PrismaBaseClient) => {

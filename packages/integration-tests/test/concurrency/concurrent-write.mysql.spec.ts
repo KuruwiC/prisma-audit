@@ -7,13 +7,14 @@
  * while another client without the audit commits a write.
  */
 
-import type { AuditContext, AuditContextProvider, AuditErrorContext } from '@kuruwic/db-audit-core';
+import type { AuditContext, AuditContextProvider, AuditObserver } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { PrismaMariaDb } from '@prisma/adapter-mariadb';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { auditSchema } from '../../generated/mysql-audit/index.js';
 import { Prisma, PrismaClient } from '../../generated/mysql-client/client';
+import { failuresOf } from '../helpers/audit-failures.js';
 import { carriedDatabaseCode, databaseCodeOf } from '../helpers/database-error-code.js';
 import {
   type BarrierTarget,
@@ -49,7 +50,7 @@ const createClients = (
   barrier: ReturnType<typeof createReadBarrier>,
   queries: string[],
   provider: AuditContextProvider,
-  observer: (context: AuditErrorContext) => void,
+  observer: AuditObserver,
 ) => {
   const rawBase = new PrismaClient({
     adapter: new PrismaMariaDb(databaseUrl),
@@ -61,7 +62,7 @@ const createClients = (
   const base = rawBase.$extends({ name: 'read-barrier', query: barrier.query });
   const prisma = createAuditClient(base, {
     ...testAuditOptions(provider, { Prisma, schema: auditSchema }),
-    errorObserver: observer,
+    observer,
   });
   const other = new PrismaClient({ adapter: new PrismaMariaDb(databaseUrl) });
   return { rawBase, prisma, other };
@@ -70,7 +71,7 @@ const createClients = (
 describe('concurrent writes on MySQL under REPEATABLE READ: a commit between the audit read and the write', () => {
   const barrier = createReadBarrier();
   const queries: string[] = [];
-  const observer = vi.fn<(context: AuditErrorContext) => void>();
+  const observer = vi.fn<AuditObserver>();
   const provider = createAsyncLocalStorageProvider();
 
   let database: MySQLTestContext | undefined;
@@ -165,7 +166,7 @@ describe('concurrent writes on MySQL under REPEATABLE READ: a commit between the
     );
 
     expect(outcome).toEqual({ count: 2 });
-    expect(observer).not.toHaveBeenCalled();
+    expect(failuresOf(observer)).toEqual([]);
   });
 
   it('reports as row-identification that an updateMany updated fewer rows than it found again when another transaction moves a read row out of its where between the read and the update, and records no change of that row', async () => {
@@ -184,14 +185,14 @@ describe('concurrent writes on MySQL under REPEATABLE READ: a commit between the
     expect(await postOf('moved-out')).toMatchObject({ title: '100', published: true });
     expect(await postRecords('moved-out')).toEqual([]);
     expect(await postRecords('stays')).toEqual([expect.objectContaining({ action: 'update' })]);
-    expect(observer).toHaveBeenCalledExactlyOnceWith(
+    expect(failuresOf(observer)).toEqual([
       expect.objectContaining({
         phase: 'row-identification',
         modelName: 'Post',
         operation: 'updateMany',
-        params: { unidentified: 1 },
+        unidentified: 1,
       }),
-    );
+    ]);
   });
 
   it('rejects an upsert, which Prisma emulates on MySQL, with a unique constraint violation when another transaction inserts its row between the read and the upsert, recording nothing', async () => {

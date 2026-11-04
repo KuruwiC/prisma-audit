@@ -6,11 +6,12 @@
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
-import type { AuditErrorObserver } from '@kuruwic/prisma-audit';
+import type { AuditObserver } from '@kuruwic/prisma-audit';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { failuresOf } from './helpers/audit-failures.js';
 import { cleanDatabase, createBasePrisma, testEntities, withFetchBefore } from './helpers/setup.js';
 
 const testActor: AuditContext = {
@@ -23,7 +24,7 @@ type Scenario = {
   basePrisma: PrismaClient;
   prisma: ReturnType<typeof createAuditClient>;
   provider: ReturnType<typeof createAsyncLocalStorageProvider>;
-  observer: ReturnType<typeof vi.fn<AuditErrorObserver>>;
+  observer: ReturnType<typeof vi.fn<AuditObserver>>;
 };
 
 describe('Named Composite Primary Key (PostBookmark)', () => {
@@ -52,7 +53,7 @@ describe('Named Composite Primary Key (PostBookmark)', () => {
   const createScenario = (options: { fetchBeforeDelete: boolean }): Scenario => {
     const basePrisma = createBasePrisma();
     const provider = createAsyncLocalStorageProvider();
-    const observer = vi.fn<AuditErrorObserver>();
+    const observer = vi.fn<AuditObserver>();
     const prisma = createAuditClient(basePrisma, {
       Prisma,
       schema: auditSchema,
@@ -62,7 +63,7 @@ describe('Named Composite Primary Key (PostBookmark)', () => {
         : withFetchBefore(testEntities, { PostBookmark: { delete: false } }),
       diffExcludeFields: ['createdAt'],
       write: { mode: 'awaited' },
-      errorObserver: observer,
+      observer,
     });
     const scenario = { basePrisma, prisma, provider, observer };
     openScenarios.push(scenario);
@@ -108,7 +109,7 @@ describe('Named Composite Primary Key (PostBookmark)', () => {
         expect(log.before).toMatchObject({ postId: post.id, userId: user.id, label: 'to-delete' });
         expect(log.after).toBeNull();
       }
-      expect(observer).not.toHaveBeenCalled();
+      expect(failuresOf(observer)).toEqual([]);
     });
 
     it('records the real composite entityId from the WHERE clause alone when fetchBefore.delete is false', async () => {
@@ -139,7 +140,7 @@ describe('Named Composite Primary Key (PostBookmark)', () => {
         expect(log.before).toBeNull();
         expect(log.after).toBeNull();
       }
-      expect(observer).not.toHaveBeenCalled();
+      expect(failuresOf(observer)).toEqual([]);
     });
   });
 
@@ -171,7 +172,7 @@ describe('Named Composite Primary Key (PostBookmark)', () => {
         expect(log.before).toBeNull();
         expect(log.after).toBeNull();
       }
-      expect(observer).not.toHaveBeenCalled();
+      expect(failuresOf(observer)).toEqual([]);
     });
   });
 
@@ -202,7 +203,7 @@ describe('Named Composite Primary Key (PostBookmark)', () => {
           [compositeEntityId(post.id, secondUser.id), 'second'],
         ].sort(),
       );
-      expect(observer).not.toHaveBeenCalled();
+      expect(failuresOf(observer)).toEqual([]);
     });
   });
 
@@ -235,7 +236,7 @@ describe('Named Composite Primary Key (PostBookmark)', () => {
         expect(log.before).toBeNull();
         expect(log.after).toMatchObject({ postId: post.id, userId: user.id, label: 'connect-or-create-new' });
       }
-      expect(observer).not.toHaveBeenCalled();
+      expect(failuresOf(observer)).toEqual([]);
     });
 
     it('connects an existing row without creating a duplicate or recording a create', async () => {
@@ -265,7 +266,7 @@ describe('Named Composite Primary Key (PostBookmark)', () => {
         where: { entityType: 'PostBookmark', action: 'create' },
       });
       expect(createLogs).toHaveLength(0);
-      expect(observer).not.toHaveBeenCalled();
+      expect(failuresOf(observer)).toEqual([]);
     });
   });
 });

@@ -354,6 +354,6 @@ describe('Nested Update Operations', () => {
   // global one is covered by nested-parent-attribution.integration.spec.ts and
   // nested-link-changes.integration.spec.ts.
 
-  // NOTE: Audit-pipeline failures reach errorObserver; nested pre-fetch failures are covered
+  // NOTE: Audit-pipeline failures reach the observer; nested pre-fetch failures are covered
   // by nested-pre-fetch-failure.integration.spec.ts.
 });

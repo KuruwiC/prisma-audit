@@ -8,11 +8,12 @@
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
-import type { AuditErrorObserver, PrismaAuditExtensionOptions } from '@kuruwic/prisma-audit';
+import type { AuditObserver, PrismaAuditExtensionOptions } from '@kuruwic/prisma-audit';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { failuresOf } from './helpers/audit-failures.js';
 import { createPostReadFault } from './helpers/post-read-fault.js';
 import { cleanDatabase, createBasePrisma, testEntities } from './helpers/setup.js';
 
@@ -30,7 +31,7 @@ const createClients = (fetchBefore: FetchBeforeConfig) => {
   const { findUnique, armFindUniqueFailure } = createPostReadFault(FAILURE_MESSAGE);
   const basePrisma = rawBasePrisma.$extends({ name: 'fault-injection', query: { post: { findUnique } } });
 
-  const observer = vi.fn<AuditErrorObserver>();
+  const observer = vi.fn<AuditObserver>();
   const provider = createAsyncLocalStorageProvider();
   const prisma = createAuditClient(basePrisma, {
     Prisma,
@@ -40,7 +41,7 @@ const createClients = (fetchBefore: FetchBeforeConfig) => {
     diffExcludeFields: ['createdAt'],
     write: { mode: 'awaited' },
     fetchBefore,
-    errorObserver: observer,
+    observer,
   });
 
   return {
@@ -184,7 +185,7 @@ describe('top-level upsert nested audit entries', () => {
     expect(upserted.title).toBe('Updated Through Upsert');
     expect(await basePrisma.post.count({ where: { authorId: author.id } })).toBe(1);
     expect(upserted.postTags).toHaveLength(1);
-    expect(observer).toHaveBeenCalledWith(
+    expect(failuresOf(observer)).toContainEqual(
       expect.objectContaining({
         phase: 'pre-fetch',
         modelName: 'Post',

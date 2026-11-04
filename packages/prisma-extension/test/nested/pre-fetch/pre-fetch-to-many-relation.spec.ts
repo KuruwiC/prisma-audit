@@ -628,7 +628,7 @@ describe('a failed read of one element of a nested list', () => {
     { keyword: 'delete', data: ids.map((id) => ({ id })) },
     { keyword: 'connectOrCreate', data: ids.map((id) => ({ where: { id }, create: { name: 'new' } })) },
   ])(
-    'a $keyword list records only the elements whose read failed as unavailable, and reports each failed read with its element',
+    'a $keyword list records only the elements whose read failed as unavailable, and reports each failed read once',
     async ({ keyword, data }) => {
       const { client, delegates } = createClient({ member: members });
       const findUnique = delegates.member?.findUnique;
@@ -651,7 +651,6 @@ describe('a failed read of one element of a nested list', () => {
             phase: 'pre-fetch',
             modelName: 'Member',
             operation: keyword,
-            params: data[0],
             error: new Error('read 1 failed'),
           },
         ],
@@ -660,7 +659,6 @@ describe('a failed read of one element of a nested list', () => {
             phase: 'pre-fetch',
             modelName: 'Member',
             operation: keyword,
-            params: data[2],
             error: new Error('read 3 failed'),
           },
         ],
@@ -668,7 +666,7 @@ describe('a failed read of one element of a nested list', () => {
     },
   );
 
-  it('identifies the elements of an update list without a before state around the one whose key-column read failed, and reports that element', async () => {
+  it('identifies the elements of an update list without a before state around the one whose key-column read failed, and reports that read', async () => {
     const { client, delegates } = createClient({ member: members });
     const findUnique = delegates.member?.findUnique;
     if (!findUnique) throw new Error('member delegate missing');
@@ -702,7 +700,6 @@ describe('a failed read of one element of a nested list', () => {
           phase: 'pre-fetch',
           modelName: 'Member',
           operation: 'update',
-          params: update[0],
           error: new Error('read 1 failed'),
         },
       ],

@@ -39,11 +39,12 @@
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
-import type { AuditErrorObserver } from '@kuruwic/prisma-audit';
+import type { AuditObserver } from '@kuruwic/prisma-audit';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, describe, expect, it, vi } from 'vitest';
+import { failuresOf } from './helpers/audit-failures.js';
 import { createBasePrisma, setupTestContext, testEntities, withFetchBefore } from './helpers/setup.js';
 
 const testActor: AuditContext = {
@@ -405,7 +406,7 @@ describe('Composite Primary Key (PostLike)', () => {
     it('records the real composite entityId from the WHERE clause alone, and does not report it as unresolved', async () => {
       const basePrisma = createBasePrisma();
       const provider = createAsyncLocalStorageProvider();
-      const observer = vi.fn<AuditErrorObserver>();
+      const observer = vi.fn<AuditObserver>();
       const prisma = createAuditClient(basePrisma, {
         Prisma,
         schema: auditSchema,
@@ -413,7 +414,7 @@ describe('Composite Primary Key (PostLike)', () => {
         entities: withFetchBefore(testEntities, { PostLike: { delete: false } }),
         diffExcludeFields: ['createdAt'],
         write: { mode: 'awaited' },
-        errorObserver: observer,
+        observer,
       });
       scenario = { basePrisma, prisma };
 
@@ -470,8 +471,8 @@ describe('Composite Primary Key (PostLike)', () => {
 
       // No fabricated identity, but also no false "unresolved" report: the entityId was
       // genuinely resolved from the WHERE clause, so `onUnresolvedDeleteEntityId` (and by
-      // extension `errorObserver`) is never reached for this delete.
-      expect(observer).not.toHaveBeenCalled();
+      // extension a reported failure) is never reached for this delete.
+      expect(failuresOf(observer)).toEqual([]);
     });
   });
 });

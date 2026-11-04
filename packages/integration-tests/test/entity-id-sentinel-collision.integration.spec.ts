@@ -13,11 +13,12 @@
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
-import type { AuditErrorObserver } from '@kuruwic/prisma-audit';
+import type { AuditObserver } from '@kuruwic/prisma-audit';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { failuresOf } from './helpers/audit-failures.js';
 import { setupTestContext, testEntities } from './helpers/setup.js';
 
 type FetchBeforeConfig = Parameters<typeof createAuditClient>[1]['fetchBefore'];
@@ -30,10 +31,10 @@ const COLLIDING_ID = '__default__';
 
 describe('nested delete of a row whose primary key is "__default__"', () => {
   const context = setupTestContext();
-  let observer: ReturnType<typeof vi.fn<AuditErrorObserver>>;
+  let observer: ReturnType<typeof vi.fn<AuditObserver>>;
 
   beforeEach(() => {
-    observer = vi.fn<AuditErrorObserver>();
+    observer = vi.fn<AuditObserver>();
   });
 
   const createClient = (fetchBefore: FetchBeforeConfig | undefined) => {
@@ -45,7 +46,7 @@ describe('nested delete of a row whose primary key is "__default__"', () => {
       entities: testEntities,
       diffExcludeFields: ['createdAt'],
       fetchBefore,
-      errorObserver: observer,
+      observer,
     });
     return { provider, prisma };
   };
@@ -99,7 +100,7 @@ describe('nested delete of a row whose primary key is "__default__"', () => {
       ['Post', colliding.seed.post.id],
       ['PostTag', COLLIDING_ID],
     ]);
-    expect(observer).not.toHaveBeenCalled();
+    expect(failuresOf(observer)).toEqual([]);
   });
 
   it('logs the delete with the default configuration', async () => {
@@ -114,6 +115,6 @@ describe('nested delete of a row whose primary key is "__default__"', () => {
         ['Tag', seed.tag.id],
       ].sort(),
     );
-    expect(observer).not.toHaveBeenCalled();
+    expect(failuresOf(observer)).toEqual([]);
   });
 });

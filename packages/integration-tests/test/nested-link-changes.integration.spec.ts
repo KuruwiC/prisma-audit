@@ -11,11 +11,12 @@
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
-import type { AuditErrorObserver, EntityMap } from '@kuruwic/prisma-audit';
+import type { AuditObserver, EntityMap } from '@kuruwic/prisma-audit';
 import { createAuditClient, defineEntity } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { failureSummariesOf } from './helpers/audit-failures.js';
 import { cleanDatabase, createBasePrisma, testEntities, withFetchBefore } from './helpers/setup.js';
 
 const testActor: AuditContext = {
@@ -55,7 +56,7 @@ describe('foreign-key changes of related rows', () => {
         },
       },
     });
-    const observer = vi.fn<AuditErrorObserver>();
+    const observer = vi.fn<AuditObserver>();
     const provider = createAsyncLocalStorageProvider();
     const prisma = createAuditClient(faultyPrisma, {
       Prisma,
@@ -67,7 +68,7 @@ describe('foreign-key changes of related rows', () => {
       ),
       diffExcludeFields: ['createdAt', 'updatedAt'],
       fetchBefore: { update: true, delete: true },
-      errorObserver: observer,
+      observer,
     });
     disconnects.push(async () => {
       await prisma.$disconnect();
@@ -79,7 +80,7 @@ describe('foreign-key changes of related rows', () => {
     const arm = () => {
       armed = true;
     };
-    const phases = () => observer.mock.calls.map(([context]) => [context.phase, context.modelName, context.operation]);
+    const phases = () => failureSummariesOf(observer);
     /** The records of `entityType` (its own aggregate row), sorted by entity id */
     const recordsOf = async (entityType: string) =>
       (

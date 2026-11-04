@@ -7,23 +7,24 @@
  * nothing.
  */
 
-import type { AuditContext, AuditErrorContext } from '@kuruwic/db-audit-core';
+import type { AuditContext, AuditObserver } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { failuresOf } from './helpers/audit-failures.js';
 import { cleanDatabase, createBasePrisma, testAuditOptions } from './helpers/setup.js';
 
 const actor: AuditContext = { actor: { category: 'model', type: 'User', id: 'writes-no-field-actor' } };
 
 describe('an updateMany whose data writes no field', () => {
-  const observer = vi.fn<(context: AuditErrorContext) => void>();
+  const observer = vi.fn<AuditObserver>();
   const provider = createAsyncLocalStorageProvider();
   const base = createBasePrisma();
   const prisma = createAuditClient(base, {
     ...testAuditOptions(provider, { Prisma, schema: auditSchema }),
-    errorObserver: observer,
+    observer,
   });
 
   afterAll(async () => {
@@ -49,7 +50,7 @@ describe('an updateMany whose data writes no field', () => {
 
       expect(await base.post.findUniqueOrThrow({ where: { id: post.id } })).toEqual(post);
       expect(await base.auditLog.count()).toBe(0);
-      expect(observer).not.toHaveBeenCalled();
+      expect(failuresOf(observer)).toEqual([]);
     },
   );
 });

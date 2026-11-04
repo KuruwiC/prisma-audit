@@ -3,7 +3,7 @@
  *
  * Whether a nested upsert updated or created its row, and whether a connectOrCreate connected or
  * created it, is what the pre-fetch of its target tells. When that read fails, the caller's write
- * still succeeds and the failure reaches the observer under `pre-fetch`, but the row gets no
+ * still succeeds and the failure reaches the observer as a `pre-fetch` failure, but the row gets no
  * audit entry, as for a top-level upsert whose before-state read failed: recording it would mean
  * guessing its action.
  *
@@ -14,11 +14,12 @@
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
-import type { AuditErrorObserver } from '@kuruwic/prisma-audit';
+import type { AuditObserver } from '@kuruwic/prisma-audit';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { failuresOf } from './helpers/audit-failures.js';
 import { cleanDatabase, createBasePrisma, testEntities } from './helpers/setup.js';
 
 const testActor: AuditContext = {
@@ -56,7 +57,7 @@ describe('nested upsert and connectOrCreate whose target could not be read', () 
       },
     });
 
-    const observer = vi.fn<AuditErrorObserver>();
+    const observer = vi.fn<AuditObserver>();
     const provider = createAsyncLocalStorageProvider();
     const prisma = createAuditClient(basePrisma, {
       Prisma,
@@ -64,7 +65,7 @@ describe('nested upsert and connectOrCreate whose target could not be read', () 
       contextProvider: provider,
       entities: testEntities,
       diffExcludeFields: ['createdAt', 'updatedAt'],
-      errorObserver: observer,
+      observer,
       // Under the awaited mode a dropped entry is only reported; an atomic write would fail instead
       write: { mode: 'awaited' },
     });
@@ -94,8 +95,8 @@ describe('nested upsert and connectOrCreate whose target could not be read', () 
     scenario = undefined;
   });
 
-  const expectPreFetchFailureReported = (observer: ReturnType<typeof vi.fn<AuditErrorObserver>>) => {
-    expect(observer).toHaveBeenCalledWith(
+  const expectPreFetchFailureReported = (observer: ReturnType<typeof vi.fn<AuditObserver>>) => {
+    expect(failuresOf(observer)).toContainEqual(
       expect.objectContaining({ phase: 'pre-fetch', error: expect.objectContaining({ message: FAILURE_MESSAGE }) }),
     );
   };

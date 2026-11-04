@@ -10,12 +10,13 @@
  * alone, is audited as usual.
  */
 
-import type { AuditContext, AuditErrorObserver } from '@kuruwic/db-audit-core';
+import type { AuditContext, AuditObserver } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { createAuditClient, defineEntity } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { failuresOf } from './helpers/audit-failures.js';
 import { cleanDatabase, createBasePrisma } from './helpers/setup.js';
 
 const testActor: AuditContext = {
@@ -32,7 +33,7 @@ describe('a batch update whose data changes the key of its rows by an operator',
   });
 
   const setup = async () => {
-    const observer = vi.fn<AuditErrorObserver>();
+    const observer = vi.fn<AuditObserver>();
     const basePrisma = createBasePrisma();
     const provider = createAsyncLocalStorageProvider();
     const prisma = createAuditClient(basePrisma, {
@@ -41,7 +42,7 @@ describe('a batch update whose data changes the key of its rows by an operator',
       contextProvider: provider,
       entities: { AutoIncItem: defineEntity({ type: 'AutoIncItem' }) },
       write: { mode: 'awaited' },
-      errorObserver: observer,
+      observer,
     });
     disconnects.push(async () => {
       await prisma.$disconnect();
@@ -78,7 +79,7 @@ describe('a batch update whose data changes the key of its rows by an operator',
       phase: 'row-identification',
       modelName: 'AutoIncItem',
       operation,
-      params: { unidentified: count },
+      unidentified: count,
     });
   const shifted = [
     [101, 'one'],
@@ -92,7 +93,7 @@ describe('a batch update whose data changes the key of its rows by an operator',
 
     expect(result).toEqual({ count: 2 });
     expect(await items()).toEqual(shifted);
-    expect(observer).toHaveBeenCalledExactlyOnceWith(unidentified('updateMany', 2));
+    expect(failuresOf(observer)).toEqual([unidentified('updateMany', 2)]);
     expect(await logsOf()).toEqual([]);
   });
 
@@ -102,7 +103,7 @@ describe('a batch update whose data changes the key of its rows by an operator',
     const rows = await run(() => prisma.autoIncItem.updateManyAndReturn({ data: { id: { increment: 100 } } }));
 
     expect(rows.map((row) => [row.id, row.label]).sort()).toEqual(shifted);
-    expect(observer).toHaveBeenCalledExactlyOnceWith(unidentified('updateManyAndReturn', 2));
+    expect(failuresOf(observer)).toEqual([unidentified('updateManyAndReturn', 2)]);
     const withoutBefore = (id: number, label: string) => ({
       action: 'update',
       entityId: String(id),
@@ -132,7 +133,7 @@ describe('a batch update whose data changes the key of its rows by an operator',
       const after = await items();
       expect(after).toHaveLength(2);
       expect(after.filter(([id]) => (id as number) > 100)).toHaveLength(1);
-      expect(observer).toHaveBeenCalledExactlyOnceWith(unidentified('updateMany', 1));
+      expect(failuresOf(observer)).toEqual([unidentified('updateMany', 1)]);
       expect(await logsOf()).toEqual([]);
     },
   );
@@ -142,7 +143,7 @@ describe('a batch update whose data changes the key of its rows by an operator',
 
     await run(() => prisma.autoIncItem.updateMany({ where: { id: 1 }, data: { id: 1, label: 'relabelled' } }));
 
-    expect(observer).not.toHaveBeenCalled();
+    expect(failuresOf(observer)).toEqual([]);
     expect((await logsOf()).map((log) => [log.action, log.entityId, log.changes])).toEqual([
       ['update', '1', { label: { old: 'one', new: 'relabelled' } }],
     ]);
@@ -153,7 +154,7 @@ describe('a batch update whose data changes the key of its rows by an operator',
 
     await run(() => prisma.autoIncItem.updateMany({ data: { label: 'relabelled' } }));
 
-    expect(observer).not.toHaveBeenCalled();
+    expect(failuresOf(observer)).toEqual([]);
     expect((await logsOf()).map((log) => [log.action, log.entityId, log.changes])).toEqual([
       ['update', '1', { label: { old: 'one', new: 'relabelled' } }],
       ['update', '2', { label: { old: 'two', new: 'relabelled' } }],

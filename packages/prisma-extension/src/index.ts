@@ -53,13 +53,16 @@ export type { PrismaModelType } from './prisma-types.js';
 export { flushAllPendingWrites, getPendingWriteCount } from './runtime/pending-writes.js';
 export type { AuditSchema } from './schema/audit-schema.js';
 export type {
-  AuditErrorContext,
-  AuditErrorObserver,
-  AuditErrorPhase,
+  AuditFailure,
+  AuditFailurePhase,
   AuditLogData,
   AuditLogInput,
   AuditLogWriter,
+  AuditObserver,
+  AuditOutcome,
+  AuditOutcomeStatus,
   PrismaAuditExtensionOptions,
+  UnrecordedWrite,
   WriteConfig,
 } from './types.js';
 

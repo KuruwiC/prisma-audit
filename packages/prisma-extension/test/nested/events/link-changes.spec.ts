@@ -61,6 +61,7 @@ const inputOf = (
   fieldNamesOf: () => new Set(['id', 'name', 'postId']),
   whereAfterWrite: (_operation, where) => where,
   onUnrecordedWrite,
+  auditedModelsOf: (modelName) => [modelName],
 });
 
 /** The records of a link write at `labels`, with `after` the rows the read after the write returns */

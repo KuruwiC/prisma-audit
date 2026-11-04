@@ -71,6 +71,7 @@ const deps: EventCollectorDependencies = {
   shouldFetchBefore: () => true,
   auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS,
   onUnrecordedWrite: () => {},
+  auditedModelsOf: (modelName) => [modelName],
 };
 
 const reportingDeps = () => ({ ...deps, onUnrecordedWrite: vi.fn<EventCollectorDependencies['onUnrecordedWrite']>() });

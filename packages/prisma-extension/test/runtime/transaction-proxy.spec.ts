@@ -24,13 +24,13 @@
 import {
   type AuditActor,
   type AuditContext,
+  type AuditObserver,
   type AuditRecord,
   createActorId,
   createAggregateId,
   createAsyncLocalStorageProvider,
   createEntityId,
-  createFailureSink,
-  type FailureSink,
+  createOperationOutcome,
   planFor,
   type WriteMode,
 } from '@kuruwic/db-audit-core';
@@ -39,12 +39,12 @@ import { AuditRollbackError } from '../../src/errors.js';
 import type { PrismaBaseClient, PrismaHandle } from '../../src/internal-types.js';
 import type { OperationExecutor } from '../../src/pipeline/executor.js';
 import { type AuditPipelineDependencies, runAuditedOperation } from '../../src/pipeline/run-audited-operation.js';
+import { settledIn } from '../../src/runtime/interactive-transaction.js';
 import type { RecipeConfig } from '../../src/runtime/operation-recipe.js';
 import { flushAllPendingWrites, getPendingWriteCount } from '../../src/runtime/pending-writes.js';
 import { currentScope, operationBinding, type RuntimeScope } from '../../src/runtime/scope.js';
 import { createTransactionProxy } from '../../src/runtime/transaction-proxy.js';
 import type { AuditLogData } from '../../src/types.js';
-import { stubFailureSink } from '../support/failure-sink.js';
 import { lazyOperation } from '../support/lazy-operation.js';
 
 const actor1: AuditActor = { category: 'model', type: 'User', id: 'user-1' };
@@ -93,13 +93,21 @@ const creatingExecutor: OperationExecutor = {
 
 type AuditWrite = (handle: PrismaHandle, records: AuditRecord[]) => Promise<void>;
 
-const createDeps = (write: AuditWrite, failureSink: FailureSink = stubFailureSink()): AuditPipelineDependencies => ({
-  singleExecutor: creatingExecutor,
-  batchExecutor: creatingExecutor,
-  produceRecords: vi.fn(async () => []),
-  dispatchConfig: { writeExecutor: { write: vi.fn(write) }, failureSink },
-  failureSinkConfig: {},
-});
+/** The observer the outcomes of the operations run with each `deps` are reported to */
+const observers = new WeakMap<AuditPipelineDependencies, AuditObserver>();
+
+const createDeps = (write: AuditWrite, observer?: AuditObserver): AuditPipelineDependencies => {
+  const deps: AuditPipelineDependencies = {
+    singleExecutor: creatingExecutor,
+    batchExecutor: creatingExecutor,
+    produceRecords: vi.fn(async () => []),
+    dispatchConfig: { writeExecutor: { write: vi.fn(write) } },
+  };
+  if (observer) {
+    observers.set(deps, observer);
+  }
+  return deps;
+};
 
 const auditWriteOf = (deps: AuditPipelineDependencies) => vi.mocked(deps.dispatchConfig.writeExecutor.write);
 
@@ -118,8 +126,8 @@ interface CreateArgs {
 
 /**
  * A client whose `user.create` runs the audited pipeline as the audit extension's hook does: the
- * transaction the operation runs in is the one its binding names, and `query` continues the
- * operation
+ * transaction the operation runs in is the one its binding names, `query` continues the operation,
+ * and its outcome is settled with that transaction
  */
 const auditedClientOf = (deps: AuditPipelineDependencies) => ({
   user: {
@@ -131,25 +139,32 @@ const auditedClientOf = (deps: AuditPipelineDependencies) => ({
         if (plan === 'reject') {
           throw new Error('an atomic create reached the audit outside any transaction');
         }
-        return runAuditedOperation(
-          {
-            operation: {
-              model: 'User',
-              action: 'create',
-              args: { id: args.id },
-              query: async () => {
-                if (args.fails) throw new Error(`Unique constraint failed: ${args.id}`);
-                return args;
+        const outcome = createOperationOutcome(
+          { model: 'User', operation: 'create' },
+          { observer: observers.get(deps) },
+        );
+        return settledIn(transaction, outcome, () =>
+          runAuditedOperation(
+            {
+              operation: {
+                model: 'User',
+                action: 'create',
+                args: { id: args.id },
+                query: async () => {
+                  if (args.fails) throw new Error(`Unique constraint failed: ${args.id}`);
+                  return args;
+                },
+                widened: new Map(),
               },
-              widened: new Map(),
+              auditContext: baseContext,
+              baseClient,
+              mode,
+              plan,
+              transaction,
+              outcome,
             },
-            auditContext: baseContext,
-            baseClient,
-            mode,
-            plan,
-            transaction,
-          },
-          deps,
+            deps,
+          ),
         );
       }),
   },
@@ -767,11 +782,10 @@ describe('createTransactionProxy (audit writes queued until the commit)', () => 
 describe('createTransactionProxy (audit failures recorded on the transaction)', () => {
   const writeError = new Error('audit table unavailable');
 
-  /** An audit write that fails for the row `bad`, reported by a failure sink that fails the caller of an immediate write */
   const depsFailingFor = (bad: string) =>
     createDeps(async (_handle, records) => {
       if (records.some((written) => written.entityId === bad)) throw writeError;
-    }, createFailureSink({}));
+    });
 
   const auditedProxy = (deps: AuditPipelineDependencies) => {
     const tx = auditedClientOf(deps);
@@ -1002,7 +1016,7 @@ describe('createTransactionProxy (audit of a batch holding a write)', () => {
     const events: string[] = [];
     const writeError = new Error('audit table unavailable');
     const observer = vi.fn();
-    const deps = createDeps(loggingWrite(events, writeError), createFailureSink({ observer }));
+    const deps = createDeps(loggingWrite(events, writeError), observer);
     const { provider, proxy } = batchProxy(events, deps);
 
     const outcome = await settled(
@@ -1011,7 +1025,12 @@ describe('createTransactionProxy (audit of a batch holding a write)', () => {
 
     expect(outcome).toBe('rejected');
     expect(events).toEqual(['started u1']);
-    expect(observer).toHaveBeenCalledWith(expect.objectContaining({ phase: 'log-write', error: writeError }));
+    expect(observer).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        status: 'not-committed',
+        failures: [expect.objectContaining({ phase: 'log-write', error: writeError })],
+      }),
+    );
   });
 
   it("resolves the caller's committed batch when an audit write it does not await fails", async () => {
@@ -1019,7 +1038,7 @@ describe('createTransactionProxy (audit of a batch holding a write)', () => {
     const events: string[] = [];
     const writeError = new Error('audit table unavailable');
     const observer = vi.fn();
-    const deps = createDeps(loggingWrite(events, writeError), createFailureSink({ observer }));
+    const deps = createDeps(loggingWrite(events, writeError), observer);
     const { provider, proxy } = batchProxy(events, deps);
 
     try {
@@ -1029,7 +1048,13 @@ describe('createTransactionProxy (audit of a batch holding a write)', () => {
 
       expect(outcome).toBe('resolved');
       expect(events).toEqual(['committed', 'started u1']);
-      expect(observer).toHaveBeenCalledWith(expect.objectContaining({ phase: 'log-write', error: writeError }));
+      await flushAllPendingWrites();
+      expect(observer).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          status: 'incomplete',
+          failures: [expect.objectContaining({ phase: 'log-write', error: writeError })],
+        }),
+      );
     } finally {
       consoleError.mockRestore();
     }

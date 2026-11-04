@@ -13,11 +13,12 @@
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
-import type { AuditErrorObserver, AuditLogData } from '@kuruwic/prisma-audit';
+import type { AuditLogData, AuditObserver } from '@kuruwic/prisma-audit';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { failuresOf } from './helpers/audit-failures.js';
 import { createPostReadFault } from './helpers/post-read-fault.js';
 import { createBasePrisma, testEntities } from './helpers/setup.js';
 
@@ -36,7 +37,7 @@ describe('before state requested but unreadable', () => {
     const { findUnique, armFindUniqueFailure } = createPostReadFault(FAILURE_MESSAGE);
     const basePrisma = rawBasePrisma.$extends({ name: 'fault-injection', query: { post: { findUnique } } });
 
-    const observer = vi.fn<AuditErrorObserver>();
+    const observer = vi.fn<AuditObserver>();
     const written: AuditLogData[] = [];
     const provider = createAsyncLocalStorageProvider();
     const prisma = createAuditClient(basePrisma, {
@@ -45,7 +46,7 @@ describe('before state requested but unreadable', () => {
       contextProvider: provider,
       entities: testEntities,
       diffExcludeFields: ['createdAt'],
-      errorObserver: observer,
+      observer,
       ...options,
       write: {
         writer: async (records, { defaultWrite }) => {
@@ -92,15 +93,23 @@ describe('before state requested but unreadable', () => {
     );
 
     expect((await basePrisma.post.findUnique({ where: { id: post.id } }))?.title).toBe('Updated');
-    expect(observer).toHaveBeenCalledTimes(1);
-    expect(observer).toHaveBeenCalledWith(
-      expect.objectContaining({
-        phase: 'pre-fetch',
-        modelName: 'Post',
-        operation: 'update',
-        error: expect.objectContaining({ message: FAILURE_MESSAGE }),
-      }),
-    );
+    expect(observer.mock.calls).toEqual([
+      [
+        expect.objectContaining({
+          model: 'Post',
+          operation: 'update',
+          status: 'complete',
+          failures: [
+            expect.objectContaining({
+              phase: 'pre-fetch',
+              modelName: 'Post',
+              operation: 'update',
+              error: expect.objectContaining({ message: FAILURE_MESSAGE }),
+            }),
+          ],
+        }),
+      ],
+    ]);
     const updates = postRecords().filter((log) => log.action === 'update');
     expect(updates).toHaveLength(2);
     for (const log of updates) {
@@ -129,7 +138,16 @@ describe('before state requested but unreadable', () => {
     await provider.runAsync(testActor, () => prisma.post.delete({ where: { id: post.id } }));
 
     expect(await basePrisma.post.findUnique({ where: { id: post.id } })).toBeNull();
-    expect(observer).toHaveBeenCalledTimes(1);
+    expect(observer.mock.calls).toEqual([
+      [
+        expect.objectContaining({
+          model: 'Post',
+          operation: 'delete',
+          status: 'complete',
+          failures: [expect.objectContaining({ phase: 'pre-fetch', modelName: 'Post', operation: 'delete' })],
+        }),
+      ],
+    ]);
     const deletes = postRecords().filter((log) => log.action === 'delete');
     expect(deletes).toHaveLength(2);
     for (const log of deletes) {
@@ -146,7 +164,7 @@ describe('before state requested but unreadable', () => {
       prisma.post.update({ where: { id: post.id }, data: { title: 'Updated' } }),
     );
 
-    expect(observer).not.toHaveBeenCalled();
+    expect(failuresOf(observer)).toEqual([]);
     const updates = postRecords().filter((log) => log.action === 'update');
     expect(updates).toHaveLength(2);
     for (const log of updates) {

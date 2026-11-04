@@ -13,6 +13,7 @@ import type { NestedOperationInfo, NestedPreFetchResults } from '../grammar/nest
 import type { ShouldFetchBefore } from '../grammar/pre-fetch-selection.js';
 import type { PrismaNamespace } from '../internal-types.js';
 import type { UnfollowedRowKeysReason } from '../nested/events/collect-nested-events.js';
+import type { AuditedModelsOf } from '../nested/events/unrecorded-write.js';
 import {
   buildNestedWriteSets,
   detectResolvedNestedOperations,
@@ -35,6 +36,7 @@ export interface SingleExecutorDependencies {
   readonly shouldFetchBefore: ShouldFetchBefore;
   readonly auditedOmittedFields: AuditedOmittedFields;
   readonly auditedOmittedFieldsWithRowKey: AuditedOmittedFields;
+  readonly auditedModelsOf: AuditedModelsOf;
 }
 
 export interface SinglePrepared {
@@ -56,13 +58,14 @@ const UNFOLLOWED_ROW_KEYS_CAUSE: Readonly<Record<UnfollowedRowKeysReason, string
 
 export const createSingleExecutor = (deps: SingleExecutorDependencies): OperationExecutor => {
   const { Prisma, schemaMetadata, shouldFetchBefore, auditedOmittedFields, auditedOmittedFieldsWithRowKey } = deps;
+  const { auditedModelsOf } = deps;
 
   const prepare = async (operation: AuditedOperation, scope: ExecutionScope): Promise<SinglePrepared> => {
     const { model: modelName, action, args } = operation;
     const { failureSink } = scope;
     const beforeState = await fetchBeforeState(
       { handle: scope.handle, modelName, action, args },
-      { shouldFetchBefore, auditedOmittedFieldsWithRowKey, onFetchFailure: failureSink.notify },
+      { shouldFetchBefore, auditedOmittedFieldsWithRowKey, onFetchFailure: failureSink.fail },
     );
     const topLevelUpsertBranch = resolvedUpsertBranch(action, beforeState);
     const { results: nestedPreFetchResults, batchTargets } = await preFetchNestedRecordsBeforeOperation(
@@ -74,7 +77,7 @@ export const createSingleExecutor = (deps: SingleExecutorDependencies): Operatio
         schemaMetadata,
         shouldFetchBefore,
         auditedOmittedFields,
-        onPreFetchFailure: failureSink.notify,
+        onPreFetchFailure: failureSink.fail,
       },
       topLevelUpsertBranch,
     );
@@ -121,10 +124,11 @@ export const createSingleExecutor = (deps: SingleExecutorDependencies): Operatio
         prismaClient: scope.handle,
         modelName,
         topLevelWhere: args.where,
+        topLevelRowExists: rowExists,
         nestedOperations,
         nestedPreFetchResults,
       },
-      { schemaMetadata, shouldFetchBefore, auditedOmittedFields, onPreFetchFailure: failureSink.notify },
+      { schemaMetadata, shouldFetchBefore, auditedOmittedFields, onPreFetchFailure: failureSink.fail },
     );
     return {
       args: writtenArgs,
@@ -166,26 +170,27 @@ export const createSingleExecutor = (deps: SingleExecutorDependencies): Operatio
         shouldFetchBefore,
         auditedOmittedFields,
         // Reported under its own phase: the record's identity is what failed, not a pre-fetch or diff generation.
-        onUnresolvedDeleteEntityId: ({ relatedModel, entityId, keyFields, error }) =>
-          failureSink.notify({
+        onUnresolvedDeleteEntityId: ({ relatedModel, error }) =>
+          failureSink.fail({
             phase: 'row-identification',
             modelName: relatedModel,
             operation: 'delete',
-            params: { entityId, keyFields },
+            unidentified: 1,
             error,
           }),
         onUnfollowedRowKeys: ({ relatedModel, operation, path, unidentified, reason }) =>
-          failureSink.notify({
+          failureSink.fail({
             phase: 'row-identification',
             modelName: relatedModel,
             operation,
-            params: { path, unidentified },
+            unidentified,
             error: new Error(
               `${unidentified} of the rows a nested ${operation} at ${path} wrote are not audited: ` +
                 UNFOLLOWED_ROW_KEYS_CAUSE[reason],
             ),
           }),
         onUnrecordedWrite: failureSink.reportUnrecordedWrite,
+        auditedModelsOf,
       },
     );
 

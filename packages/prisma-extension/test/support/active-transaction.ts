@@ -1,3 +1,4 @@
+import { createTransactionOutcomes } from '@kuruwic/db-audit-core';
 import type { PrismaHandle } from '../../src/internal-types.js';
 import type { ActiveTransaction } from '../../src/runtime/scope.js';
 
@@ -6,4 +7,5 @@ export const activeTransactionOf = (client: PrismaHandle): ActiveTransaction => 
   client,
   deferredWrites: [],
   auditFailures: [],
+  outcomes: createTransactionOutcomes(),
 });

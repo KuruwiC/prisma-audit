@@ -9,11 +9,12 @@
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
-import type { AuditErrorObserver } from '@kuruwic/prisma-audit';
+import type { AuditObserver } from '@kuruwic/prisma-audit';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { failureSummariesOf } from './helpers/audit-failures.js';
 import { cleanDatabase, createBasePrisma, testEntities, withFetchBefore } from './helpers/setup.js';
 
 const testActor: AuditContext = {
@@ -59,7 +60,7 @@ describe('nested rows attributed through their parent row', () => {
         },
       },
     });
-    const observer = vi.fn<AuditErrorObserver>();
+    const observer = vi.fn<AuditObserver>();
     const provider = createAsyncLocalStorageProvider();
     const prisma = createAuditClient(faultyPrisma, {
       Prisma,
@@ -71,7 +72,7 @@ describe('nested rows attributed through their parent row', () => {
       ),
       diffExcludeFields: ['createdAt', 'updatedAt'],
       fetchBefore: { update: options.fetchBeforeUpdate ?? true },
-      errorObserver: observer,
+      observer,
       // Under the awaited mode a dropped entry is only reported; an atomic write would fail instead
       write: { mode: 'awaited' },
     });
@@ -85,7 +86,7 @@ describe('nested rows attributed through their parent row', () => {
     const arm = () => {
       armed = true;
     };
-    const phases = () => observer.mock.calls.map(([context]) => [context.phase, context.modelName, context.operation]);
+    const phases = () => failureSummariesOf(observer);
     /** One `entityId:action` per record of `entityType` (its own aggregate row), sorted */
     const recordsOf = async (entityType: string) =>
       (

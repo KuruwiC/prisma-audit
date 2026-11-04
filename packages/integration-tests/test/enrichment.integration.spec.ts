@@ -1,6 +1,6 @@
 import type { AuditActor, AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
-import type { EntityMap } from '@kuruwic/prisma-audit';
+import type { AuditObserver, EntityMap } from '@kuruwic/prisma-audit';
 import { createAuditClient, defineEntity, foreignKey, to } from '@kuruwic/prisma-audit';
 import { type AuditModelName, auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
@@ -819,14 +819,14 @@ describe('Context Enrichment Integration', () => {
 
       it('keeps the committed row and drops its audit rows outside a transaction, reporting diff-generation once', async () => {
         const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
-        const observer = vi.fn();
+        const observer = vi.fn<AuditObserver>();
         const {
           basePrisma,
           prisma: customPrisma,
           provider,
         } = openClient({
           entities: failingEntityMapping,
-          errorObserver: observer,
+          observer,
         });
 
         try {
@@ -838,24 +838,30 @@ describe('Context Enrichment Integration', () => {
 
           expect(await basePrisma.user.findUnique({ where: { id: user.id } })).not.toBeNull();
           expect(await basePrisma.auditLog.count()).toBe(0);
-          expect(observer).toHaveBeenCalledTimes(1);
-          expect(observer).toHaveBeenCalledWith(
-            expect.objectContaining({ phase: 'diff-generation', modelName: 'User', error: enricherError }),
-          );
+          expect(observer.mock.calls).toEqual([
+            [
+              expect.objectContaining({
+                model: 'User',
+                operation: 'create',
+                status: 'incomplete',
+                failures: [{ phase: 'diff-generation', error: enricherError }],
+              }),
+            ],
+          ]);
         } finally {
           consoleError.mockRestore();
         }
       });
 
       it('rolls the write back with its audit rows inside an interactive transaction', async () => {
-        const observer = vi.fn();
+        const observer = vi.fn<AuditObserver>();
         const {
           basePrisma,
           prisma: customPrisma,
           provider,
         } = openClient({
           entities: failingEntityMapping,
-          errorObserver: observer,
+          observer,
         });
 
         await expect(
@@ -870,10 +876,16 @@ describe('Context Enrichment Integration', () => {
 
         expect(await basePrisma.user.count()).toBe(0);
         expect(await basePrisma.auditLog.count()).toBe(0);
-        expect(observer).toHaveBeenCalledTimes(1);
-        expect(observer).toHaveBeenCalledWith(
-          expect.objectContaining({ phase: 'diff-generation', modelName: 'User', error: enricherError }),
-        );
+        expect(observer.mock.calls).toEqual([
+          [
+            expect.objectContaining({
+              model: 'User',
+              operation: 'create',
+              status: 'not-committed',
+              failures: [{ phase: 'diff-generation', error: enricherError }],
+            }),
+          ],
+        ]);
       });
     });
   });

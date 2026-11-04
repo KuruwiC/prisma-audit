@@ -35,7 +35,7 @@ export const createRecordProducer = (config: RecordProducerConfig): RecordProduc
   return async (events, scope, widened) => {
     const written = await readOmittedFieldsAfterWrite(events, scope.handle, config.omittedFieldReads);
     const { resolved, failures } = await resolve(written, scope.auditContext, config.resolveConfig, () => scope.handle);
-    await scope.failureSink.reportResolverFailures(failures);
+    scope.failureSink.reportResolverFailures(failures);
     const stored = resolved.map((event) => keepAuditedColumns(event, widened));
     return compose(stored, { auditContext: scope.auditContext, config: config.composeConfig }, new Date());
   };
