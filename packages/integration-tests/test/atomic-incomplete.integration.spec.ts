@@ -210,7 +210,7 @@ describe('an atomic operation whose records a failure dropped', () => {
 
   describe('a nested write whose read failed', () => {
     type FaultTarget = {
-      readonly model: 'User' | 'Comment' | 'Label' | 'Badge';
+      readonly model: 'User' | 'Post' | 'Comment' | 'Label' | 'Badge';
       readonly operation: 'findUnique' | 'findFirst' | 'findMany';
     };
 
@@ -343,6 +343,81 @@ describe('an atomic operation whose records a failure dropped', () => {
       expect(await rawBasePrisma.comment.findUniqueOrThrow({ where: { id: c1.id } })).toMatchObject({ content: 'one' });
       expect((await rawBasePrisma.post.findUniqueOrThrow({ where: { id: post.id } })).title).toBe('Post');
       expect(await rawBasePrisma.auditLog.count()).toBe(0);
+    });
+
+    it.each([
+      [
+        'a to-many upsert',
+        {
+          upsert: {
+            where: { id: 'missing' },
+            create: { id: 'c-new', content: 'created', authorId: 'u1' },
+            update: { content: 'updated' },
+          },
+        },
+        'upsert',
+      ],
+      [
+        'a connectOrCreate',
+        { connectOrCreate: { where: { id: 'missing' }, create: { id: 'c-new', content: 'created', authorId: 'u1' } } },
+        'connectOrCreate',
+      ],
+    ] as const)(
+      'fails %s whose target it could not read that creates a row under another key than its WHERE names, and rolls it back',
+      async (_, comments, keyword) => {
+        const { rawBasePrisma, prisma, post, arm, run } = await setup({ model: 'Comment', operation: 'findUnique' });
+
+        arm();
+        const updated = run(() => prisma.post.update({ where: { id: post.id }, data: { title: 'Renamed', comments } }));
+
+        await expect(updated).rejects.toBeInstanceOf(AuditIncompleteError);
+        await expect(updated).rejects.toMatchObject({
+          failures: [expect.objectContaining({ phase: 'pre-fetch', modelName: 'Comment', operation: keyword })],
+          unrecordedWrites: [{ modelName: 'Comment', operation: keyword, path: 'comments' }],
+        });
+        expect(await rawBasePrisma.comment.findUnique({ where: { id: 'c-new' } })).toBeNull();
+        expect((await rawBasePrisma.post.findUniqueOrThrow({ where: { id: post.id } })).title).toBe('Post');
+        expect(await rawBasePrisma.auditLog.count()).toBe(0);
+      },
+    );
+
+    it('commits an upsert of a model that is not audited whose branch it could not read when only another element of it writes an audited model', async () => {
+      const { Post: _unaudited, ...entities } = testEntities;
+      const { rawBasePrisma, prisma, post, arm, run, phases, recordsOf } = await setup(
+        { model: 'Post', operation: 'findUnique' },
+        'atomic',
+        entities,
+      );
+      await rawBasePrisma.post.create({ data: { id: 'p2', title: 'Second', authorId: 'u1' } });
+
+      arm();
+      await run(() =>
+        prisma.user.update({
+          where: { id: 'u1' },
+          data: {
+            posts: {
+              upsert: [
+                {
+                  where: { id: post.id },
+                  create: { title: 'Created' },
+                  update: { title: 'Renamed' },
+                },
+                {
+                  where: { id: 'p2' },
+                  create: { title: 'Created' },
+                  update: { comments: { create: { id: 'c3', content: 'three', authorId: 'u1' } } },
+                },
+              ],
+            },
+          },
+        }),
+      );
+
+      expect(phases()).toEqual([['pre-fetch', 'Post', 'upsert']]);
+      expect((await rawBasePrisma.post.findUniqueOrThrow({ where: { id: post.id } })).title).toBe('Renamed');
+      expect(
+        (await recordsOf('Comment')).filter(({ entityId }) => entityId === 'c3').map(({ action }) => action),
+      ).toEqual(['create']);
     });
 
     describe('a set whose read of the rows it may re-link fails, while the parent row holds a row the set does not name', () => {

@@ -54,6 +54,8 @@ export interface SinglePrepared {
 const UNFOLLOWED_ROW_KEYS_CAUSE: Readonly<Record<UnfollowedRowKeysReason, string>> = {
   'key-not-followed': 'its data changes their key in a way the audit cannot follow',
   'not-told-apart': 'they cannot be told apart from a row whose key the write changed in a way the audit cannot follow',
+  'new-rows-exceed-inserts':
+    'more rows are new under their parent row than the write inserted there, another writer having inserted some, and they cannot be told apart from those',
 };
 
 export const createSingleExecutor = (deps: SingleExecutorDependencies): OperationExecutor => {

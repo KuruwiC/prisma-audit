@@ -186,6 +186,8 @@ describe('buildNestedWriteSets', () => {
       generatedKeys: new Set(),
       anyNewRowIsInserted: false,
       unidentifiedInserts: new Map(),
+      insertCounts: new Map(),
+      knownInserts: new Map(),
       readsPreExisting: false,
     });
   });
@@ -238,11 +240,15 @@ describe('buildNestedWriteSets', () => {
   ])(
     'marks a path with a nested %s whose data gives no key as inserting rows the snapshot tells apart',
     (_keyword, data) => {
-      expect(writeSetsOf(data).writeSets.get('posts')).toEqual({
+      const { operations, writeSets } = writeSetsOf(data);
+
+      expect(writeSets.get('posts')).toEqual({
         targets: [],
         generatedKeys: new Set(),
         anyNewRowIsInserted: true,
         unidentifiedInserts: new Map(),
+        insertCounts: new Map([[operations[0], 1]]),
+        knownInserts: new Map(),
         readsPreExisting: true,
       });
     },
@@ -276,11 +282,18 @@ describe('buildNestedWriteSets', () => {
   ])(
     'holds the keys the extension generated for the rows a nested %s inserts, and reads no row before the write',
     (_keyword, data) => {
-      expect(writeSetsOf(data, new Map(), new Map(), true).writeSets.get('posts')).toEqual({
+      const { operations, writeSets } = writeSetsOf(data, new Map(), new Map(), true);
+
+      expect(writeSets.get('posts')).toEqual({
         targets: [],
         generatedKeys: new Set(['p8', 'p9']),
         anyNewRowIsInserted: false,
         unidentifiedInserts: new Map(),
+        insertCounts: new Map([[operations[0], 2]]),
+        knownInserts: new Map([
+          ['p8', operations[0]],
+          ['p9', operations[0]],
+        ]),
         readsPreExisting: false,
       });
     },
@@ -288,12 +301,15 @@ describe('buildNestedWriteSets', () => {
 
   it('treats a key the caller gives as unknown, which the database may store otherwise or a later write may change, and reads the rows held before the write', () => {
     const data = { posts: { create: [{ id: 'p9', title: 'A' }] } };
+    const { operations, writeSets } = writeSetsOf(data);
 
-    expect(writeSetsOf(data).writeSets.get('posts')).toEqual({
+    expect(writeSets.get('posts')).toEqual({
       targets: [],
       generatedKeys: new Set(),
       anyNewRowIsInserted: true,
       unidentifiedInserts: new Map(),
+      insertCounts: new Map([[operations[0], 1]]),
+      knownInserts: new Map([['p9', operations[0]]]),
       readsPreExisting: true,
     });
   });
@@ -316,14 +332,36 @@ describe('buildNestedWriteSets', () => {
 
   it('reads the rows held before the write for a createMany with skipDuplicates, which may skip a row whose key it gives', () => {
     const data = { posts: { createMany: { data: [{ id: 'p9', title: 'A' }], skipDuplicates: true } } };
+    const { operations, writeSets } = writeSetsOf(data, new Map(), new Map(), true);
 
-    expect(writeSetsOf(data, new Map(), new Map(), true).writeSets.get('posts')).toEqual({
+    expect(writeSets.get('posts')).toEqual({
       targets: [],
       generatedKeys: new Set(['p9']),
       anyNewRowIsInserted: false,
       unidentifiedInserts: new Map(),
+      insertCounts: new Map([[operations[0], 1]]),
+      knownInserts: new Map([['p9', operations[0]]]),
       readsPreExisting: true,
     });
+  });
+
+  it.each([
+    [
+      'a createMany with skipDuplicates, which may skip the row',
+      { createMany: { data: [{ id: 'p9' }], skipDuplicates: true } },
+    ],
+    [
+      'a create next to a write of a key field, which may give another row that key',
+      { create: { id: 'p9' }, update: { where: { id: 'p1' }, data: { id: 'p2' } } },
+    ],
+    [
+      'an upsert, whose update branch may run on a row another writer inserted',
+      { upsert: { where: { id: 'p9' }, create: { id: 'p9' }, update: {} } },
+    ],
+  ])('holds no key the caller gives whole as the key of an inserted row for %s', (_case, posts) => {
+    const { writeSets } = writeSetsOf({ posts }, preFetched([['posts', 'p9', null]]));
+
+    expect(writeSets.get('posts')?.knownInserts).toEqual(new Map());
   });
 
   it.each(['upsert', 'connectOrCreate'] as const)(
@@ -388,6 +426,8 @@ describe('buildNestedWriteSets', () => {
         generatedKeys: new Set(),
         anyNewRowIsInserted: false,
         unidentifiedInserts: new Map(),
+        insertCounts: new Map(),
+        knownInserts: new Map(),
         readsPreExisting: false,
       });
     },
@@ -399,6 +439,8 @@ describe('buildNestedWriteSets', () => {
       generatedKeys: new Set(),
       anyNewRowIsInserted: false,
       unidentifiedInserts: new Map(),
+      insertCounts: new Map(),
+      knownInserts: new Map(),
       readsPreExisting: false,
     });
   });
@@ -406,6 +448,7 @@ describe('buildNestedWriteSets', () => {
   it('names the rows a nested connect links, so they are not read as inserted', () => {
     const { operations, writeSets } = writeSetsOf({ posts: { connect: [{ id: 'p1' }], create: { title: 'A' } } });
     const connect = operations.find((op) => op.operation === 'connect');
+    const create = operations.find((op) => op.operation === 'create');
 
     expect(writeSets.get('posts')).toEqual({
       targets: [
@@ -419,6 +462,8 @@ describe('buildNestedWriteSets', () => {
       generatedKeys: new Set(),
       anyNewRowIsInserted: true,
       unidentifiedInserts: new Map(),
+      insertCounts: new Map([[create, 1]]),
+      knownInserts: new Map(),
       readsPreExisting: true,
     });
   });
@@ -426,6 +471,7 @@ describe('buildNestedWriteSets', () => {
   it('names the rows a nested set links, so they are not read as inserted', () => {
     const { operations, writeSets } = writeSetsOf({ posts: { set: [{ id: 'p1' }], create: { title: 'A' } } });
     const set = operations.find((op) => op.operation === 'set');
+    const create = operations.find((op) => op.operation === 'create');
 
     expect(writeSets.get('posts')).toEqual({
       targets: [
@@ -434,6 +480,8 @@ describe('buildNestedWriteSets', () => {
       generatedKeys: new Set(),
       anyNewRowIsInserted: true,
       unidentifiedInserts: new Map(),
+      insertCounts: new Map([[create, 1]]),
+      knownInserts: new Map(),
       readsPreExisting: true,
     });
   });

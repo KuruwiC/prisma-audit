@@ -11,14 +11,17 @@
  * A to-many relation is returned whole, so a row there is an operation's only when the write set
  * says so: a row a target locates belongs to that operation (by the row key of the row read
  * ahead of the operation, or else by its unique WHERE; see `NestedRowLocator`), and a row several
- * targets locate is recorded once, for the first whose write is audited from the row; a row that
- * matches no target and did not exist before the operation was inserted: it is recorded for the first
- * operation nested under its parent that inserts rows, and attributed to every such operation,
- * since which of them inserted it cannot be told; any other row is a sibling and yields nothing. A
- * row key that holds the foreign key to the parent row is compared with those fields taken from
- * the parent row as the walk reaches it, after the write, and with the parent row as it was before
- * the write against the rows the relation held before it (`nested/key-link`). The
- * rows the operation wrote at a path that the result does not hold are read once for the path (see
+ * targets locate is recorded once, for the first whose write is audited from the row, and the
+ * writes nested in each of them are candidates below it; a row that matches no target and did not
+ * exist before the operation was inserted: it is recorded for the operation that inserts the row
+ * under its key when the key tells it (`knownInserts`), else for the first operation nested under
+ * its parent that inserts rows, and attributed to every such operation, since which of them
+ * inserted it cannot be told, while the parent holds no more such rows than those operations
+ * insert (see `insertedRowsUnder`); any other row is a sibling and yields nothing. A row key that
+ * holds the foreign key to the parent row is compared with those fields taken from the parent row
+ * as the walk reaches it, after the write, and with the parent row as it was before the write
+ * against the rows the relation held before it (`nested/key-link`). The rows the operation wrote
+ * at a path that the result does not hold are read once for the path (see
  * `rows-not-in-result.ts`). A `deleteMany` yields one delete event per row its filter matched in the
  * read ahead of the operation. A to-one relation holds one related row under its parent row: the
  * row of the operation nested there that names it by unique WHERE, else of the one that writes the
@@ -121,9 +124,12 @@ export interface NestedEventCollectorDependencies {
  * - `key-not-followed`: the operation's write changes their key in a way the audit cannot follow
  *   (its data, or another target at the path the key cannot tell apart from it);
  * - `not-told-apart`: the operation inserted them without a key the extension generated, next to
- *   a row of the first kind, which they cannot be told apart from
+ *   a row of the first kind, which they cannot be told apart from;
+ * - `new-rows-exceed-inserts`: the operation inserted them without a key that finds them, and more
+ *   rows the relation did not hold before are under their parent row than the operation inserts
+ *   there (another writer inserted some), so which of those are its own cannot be told
  */
-export type UnfollowedRowKeysReason = 'key-not-followed' | 'not-told-apart';
+export type UnfollowedRowKeysReason = 'key-not-followed' | 'not-told-apart' | 'new-rows-exceed-inserts';
 
 /** The rows a nested `operation` at `path` wrote that are not audited, their key after the write being unknown */
 export interface UnfollowedRowKeys {
@@ -173,18 +179,23 @@ export interface NestedEventCollectionInput {
   linkReads: LinkReads;
 }
 
-/**
- * The operations that may have written a returned row and the element of their data that wrote
- * it. A row a write names has one operation and the element that names it. A row inserted
- * without a name cannot be told from the rows the other inserting operations under its parent
- * wrote (the elements of a list create, the elements under every element of one), so it carries
- * all of them, with `element` undefined: the operations nested under any element of any of them
- * are candidates below it.
- */
-interface RowAttribution {
-  readonly operations: readonly NestedOperationInfo[];
+/** An operation that may have written a returned row, and the element of its data that wrote it */
+interface RowWriter {
+  readonly operation: NestedOperationInfo;
+  /** Undefined when any element of the operation may have written the row */
   readonly element: number | undefined;
+  /** The row is one the operation inserted without a target naming it, which any of its writers may have written */
+  readonly inserted?: boolean;
 }
+
+/**
+ * The writes that may have written a returned row; the operations nested in each are candidates
+ * below it. A row the writes name carries every target that locates it: several elements can name
+ * one row (two `update` elements with the same WHERE), and the writes nested in each apply to it.
+ * A row inserted without a name carries every inserting operation under its parent, which it cannot
+ * be told apart from, each with `element` undefined and marked `inserted`.
+ */
+type RowAttribution = readonly RowWriter[];
 
 /**
  * A row of the walk: the operations it was attributed to (none for the top-level row), and the
@@ -215,6 +226,8 @@ interface CollectionWalk {
   readonly claimed: Map<string, Set<Row>>;
   /** The to-one operations already attributed a row */
   readonly assigned: Set<NestedOperationInfo>;
+  /** The elements of each to-many operation whose target a row the walk reached is recorded for */
+  readonly recordedElements: Map<NestedOperationInfo, Set<number | undefined>>;
   /**
    * The values the parent row of each to-many operation gives its key link after the write, as the
    * walk reached that row; undefined for an operation reached under several parent rows
@@ -262,25 +275,45 @@ const isNestedUnder = (nestedOp: NestedOperationInfo, attribution: RowAttributio
   const { parent } = nestedOp;
   return (
     parent !== undefined &&
-    attribution.operations.includes(parent.operation) &&
-    (attribution.element === undefined || parent.element === attribution.element)
+    attribution.some(
+      ({ operation, element }) =>
+        operation === parent.operation && (element === undefined || parent.element === element),
+    )
   );
 };
 
-const leavesAuditedRows = (nestedOp: NestedOperationInfo, auditedModelsOf: AuditedModelsOf): boolean =>
-  (Array.isArray(nestedOp.data) ? nestedOp.data : [nestedOp.data]).some(
-    (element) => auditedModelsOf(nestedOp.relatedModel, element).length > 0,
-  );
+/**
+ * Reports the element `element` of an upsert or connectOrCreate whose branch is unknown when it
+ * leaves rows of an audited model: its own row, or the rows the nested writes of either branch
+ * write. Every element is taken when `element` is undefined.
+ */
+const reportUndecidedElement = (
+  walk: CollectionWalk,
+  nestedOp: NestedOperationInfo,
+  element: number | undefined,
+): void => {
+  const elements = Array.isArray(nestedOp.data) ? nestedOp.data : [nestedOp.data];
+  const written = element === undefined ? elements : elements.slice(element, element + 1);
+  if (written.some((data) => walk.deps.auditedModelsOf(nestedOp.relatedModel, data).length > 0)) {
+    walk.deps.onUnrecordedWrite({
+      modelName: nestedOp.relatedModel,
+      operation: nestedOp.operation,
+      path: nestedOp.path,
+    });
+  }
+};
 
-const record = (walk: CollectionWalk, nestedOp: NestedOperationInfo, row: Row, before: BeforeState): void => {
+const record = (
+  walk: CollectionWalk,
+  nestedOp: NestedOperationInfo,
+  element: number | undefined,
+  row: Row,
+  before: BeforeState,
+): void => {
   const resolved = resolveNestedRowState(nestedOp, before, walk.deps.shouldFetchBefore);
   if (resolved === undefined) {
-    if (hasUndecidedAction(nestedOp, before) && leavesAuditedRows(nestedOp, walk.deps.auditedModelsOf)) {
-      walk.deps.onUnrecordedWrite({
-        modelName: nestedOp.relatedModel,
-        operation: nestedOp.operation,
-        path: nestedOp.path,
-      });
+    if (hasUndecidedAction(nestedOp, before)) {
+      reportUndecidedElement(walk, nestedOp, element);
     }
     nestedLog(
       'no audit log for the %s row at path=%s (connected, or its target could not be read)',
@@ -297,6 +330,29 @@ const record = (walk: CollectionWalk, nestedOp: NestedOperationInfo, row: Row, b
     beforeState: resolved.beforeState,
     relatedModel: nestedOp.relatedModel,
   });
+};
+
+const noteRecorded = (walk: CollectionWalk, { operation, element }: NestedWriteTarget): void => {
+  const elements = walk.recordedElements.get(operation) ?? new Set<number | undefined>();
+  walk.recordedElements.set(operation, elements);
+  elements.add(element);
+};
+
+/**
+ * Reports each upsert or connectOrCreate element whose branch is unknown and for whose target no
+ * row the walk reached is recorded: the row it wrote is not the one its WHERE names (it created a
+ * row under another key), the walk never reached it, or the row is recorded for another target
+ * naming it (an `update` next to it), so no record carries what its unknown branch wrote. An
+ * element a row is recorded for is reported where that row is recorded.
+ */
+const reportUnrecordedUndecidedElements = (walk: CollectionWalk): void => {
+  for (const { targets } of walk.input.writeSets.values()) {
+    for (const { operation, element, before } of targets) {
+      if (hasUndecidedAction(operation, before) && !walk.recordedElements.get(operation)?.has(element)) {
+        reportUndecidedElement(walk, operation, element);
+      }
+    }
+  }
 };
 
 const claimedAt = (walk: CollectionWalk, path: string): Set<Row> => {
@@ -334,18 +390,13 @@ const targetOf = (row: Row, targets: readonly NestedWriteTarget[]): NestedWriteT
  */
 const recordedTargetOf = (
   walk: CollectionWalk,
-  row: Row,
-  targets: readonly NestedWriteTarget[],
-): NestedWriteTarget | undefined => {
-  const locating = targets.filter((target) => isLocatedBy(row, target));
-  return (
-    locating.find(
-      (target) => resolveNestedRowState(target.operation, target.before, walk.deps.shouldFetchBefore) !== undefined,
-    ) ??
-    locating.find((target) => hasUndecidedAction(target.operation, target.before)) ??
-    locating[0]
-  );
-};
+  locating: readonly NestedWriteTarget[],
+): NestedWriteTarget | undefined =>
+  locating.find(
+    (target) => resolveNestedRowState(target.operation, target.before, walk.deps.shouldFetchBefore) !== undefined,
+  ) ??
+  locating.find((target) => hasUndecidedAction(target.operation, target.before)) ??
+  locating[0];
 
 /**
  * The before state of a row a target locates: what the target's own read found, else, when that
@@ -408,6 +459,86 @@ const noteLinkValues = (walk: CollectionWalk, relation: CandidateRelation, linkV
   }
 };
 
+/**
+ * The most rows `operation` can have inserted under one parent row that no target there locates:
+ * the rows it inserts, less the rows its `upsert` or `connectOrCreate` elements whose target the
+ * read did not find locate under the parent, which take the row that element inserts
+ */
+const insertBudgetOf = (
+  writeSet: NestedWriteSet,
+  operation: NestedOperationInfo,
+  ownTargets: readonly NestedWriteTarget[],
+  rows: readonly SourcedRow[],
+): number => {
+  const locatedInserts = ownTargets.filter(
+    (target) =>
+      target.operation === operation &&
+      target.before.kind === 'none' &&
+      rows.some(({ row }) => isLocatedBy(row, target)),
+  );
+  return (writeSet.insertCounts.get(operation) ?? 0) - locatedInserts.length;
+};
+
+const knownInserterAt = (walk: CollectionWalk, relation: CandidateRelation) => {
+  const { path, keyFields, candidates } = relation;
+  const { knownInserts } = writeSetAt(walk, path);
+  const origin = { model: candidates[0]?.relatedModel ?? '', path };
+  return (row: Row): NestedOperationInfo | undefined => knownInserts.get(identityOf(row, keyFields, origin));
+};
+
+/**
+ * The rows an inserting operation is recorded for under one parent row: every row no target
+ * locates that the relation did not hold before the operation (`insertedUnder`), while there are
+ * no more of them than the operations nested under the parent insert. Beyond that, another writer
+ * inserted rows under the parent between the read of the rows it held and the write, so only the
+ * rows under a key known to be an operation's (`knownInserts`) are taken, and the inserts each
+ * operation is left without a record for are reported under it (`new-rows-exceed-inserts`).
+ */
+const insertedRowsUnder = (
+  walk: CollectionWalk,
+  relation: CandidateRelation,
+  newRows: readonly SourcedRow[],
+  inserting: readonly NestedOperationInfo[],
+  budgetOf: (operation: NestedOperationInfo) => number,
+  insertedBy: (row: Row) => NestedOperationInfo | undefined,
+): readonly SourcedRow[] => {
+  if (newRows.length <= inserting.reduce((sum, operation) => sum + budgetOf(operation), 0)) {
+    return newRows;
+  }
+  const { path } = relation;
+  const knownInserter = knownInserterAt(walk, relation);
+  const known = newRows.filter(({ row }) => knownInserter(row) !== undefined);
+  for (const operation of inserting) {
+    const unidentified = budgetOf(operation) - known.filter(({ row }) => insertedBy(row) === operation).length;
+    if (unidentified > 0) {
+      walk.deps.onUnfollowedRowKeys?.({
+        relatedModel: operation.relatedModel,
+        operation: operation.operation,
+        path,
+        unidentified,
+        reason: 'new-rows-exceed-inserts',
+      });
+    }
+  }
+  return known;
+};
+
+/**
+ * The operation among `inserting` that inserted a row, when its key is known to be that
+ * operation's (`knownInserts`); otherwise which of them inserted it cannot be told
+ */
+const insertingOperationOf = (
+  walk: CollectionWalk,
+  relation: CandidateRelation,
+  inserting: readonly NestedOperationInfo[],
+) => {
+  const knownInserter = knownInserterAt(walk, relation);
+  return (row: Row): NestedOperationInfo | undefined => {
+    const operation = knownInserter(row);
+    return operation && inserting.includes(operation) ? operation : undefined;
+  };
+};
+
 const attributeToManyRows = (
   walk: CollectionWalk,
   relation: CandidateRelation,
@@ -422,11 +553,17 @@ const attributeToManyRows = (
   const attributed: AttributedRow[] = [];
 
   for (const { row, selection } of rows) {
-    const target = recordedTargetOf(walk, row, ownTargets);
+    const locating = ownTargets.filter((target) => isLocatedBy(row, target));
+    const target = recordedTargetOf(walk, locating);
     if (target) {
+      noteRecorded(walk, target);
       claimed.add(row);
-      record(walk, target.operation, row, locatedBeforeState(walk, path, row, target.before));
-      attributed.push({ row, selection, attribution: { operations: [target.operation], element: target.element } });
+      record(walk, target.operation, target.element, row, locatedBeforeState(walk, path, row, target.before));
+      attributed.push({
+        row,
+        selection,
+        attribution: locating.map(({ operation, element }) => ({ operation, element })),
+      });
     }
   }
 
@@ -436,13 +573,15 @@ const attributeToManyRows = (
     return attributed;
   }
   const inserted = insertedUnder(walk, relation, linkValues);
-  for (const { row, selection } of rows) {
-    if (claimed.has(row) || targetOf(row, targets.all) || !inserted(row)) {
-      continue;
-    }
+  const newRows = rows.filter(({ row }) => !claimed.has(row) && !targetOf(row, targets.all) && inserted(row));
+  const writeSet = writeSetAt(walk, path);
+  const budgetOf = (operation: NestedOperationInfo) => insertBudgetOf(writeSet, operation, ownTargets, rows);
+  const insertedBy = insertingOperationOf(walk, relation, inserting);
+  const attribution = inserting.map((operation) => ({ operation, element: undefined, inserted: true }));
+  for (const { row, selection } of insertedRowsUnder(walk, relation, newRows, inserting, budgetOf, insertedBy)) {
     claimed.add(row);
-    record(walk, recorded, row, NO_BEFORE_STATE);
-    attributed.push({ row, selection, attribution: { operations: inserting, element: undefined } });
+    record(walk, insertedBy(row) ?? recorded, undefined, row, NO_BEFORE_STATE);
+    attributed.push({ row, selection, attribution });
   }
   return attributed;
 };
@@ -509,11 +648,11 @@ const toOneWriterOf = (
           resolveNestedRowState(candidate, toOneBeforeState(walk, candidate), walk.deps.shouldFetchBefore) !==
           undefined,
       ) ?? named;
-    return { recorded, attribution: { operations: writing, element: 0 } };
+    return { recorded, attribution: writing.map((operation) => ({ operation, element: 0 })) };
   }
   const writers = candidates.filter((candidate) => writesUnnamedRow(walk, candidate));
   const recorded = writers.find((candidate) => !walk.assigned.has(candidate)) ?? writers[0];
-  return recorded && { recorded, attribution: { operations: writers, element: 0 } };
+  return recorded && { recorded, attribution: writers.map((operation) => ({ operation, element: 0 })) };
 };
 
 /**
@@ -540,7 +679,7 @@ const attributeToOneRow = (walk: CollectionWalk, relation: CandidateRelation, re
     return [];
   }
   walk.assigned.add(writer.recorded);
-  record(walk, writer.recorded, related.row, toOneBeforeState(walk, writer.recorded));
+  record(walk, writer.recorded, undefined, related.row, toOneBeforeState(walk, writer.recorded));
   return [{ ...related, attribution: writer.attribution }];
 };
 
@@ -628,7 +767,7 @@ const updatesExistingRow = (target: NestedWriteTarget): boolean => {
 const keyLinkValuesUnder = (walk: CollectionWalk, { parent, relation }: RelationBelow): KeyLinkValues => {
   const { keyLink, candidates } = relation;
   const [operation] = candidates;
-  if (!keyLink || !operation || (parent.attribution && parent.attribution.element === undefined)) {
+  if (!keyLink || !operation || parent.attribution?.some(({ inserted }) => inserted)) {
     return NO_KEY_LINK_VALUES;
   }
   const parentKey = knownParentKey(operation, walk.input, walk.deps, keyLink.parentModel, keyLink.references);
@@ -768,8 +907,9 @@ const topLevelKeyBeforeWrite = (input: NestedEventCollectionInput, fields: reado
 
 /**
  * The values of `fields` on the parent row of `nestedOp` before the write: for the top-level row,
- * see {@link topLevelKeyBeforeWrite}; for a nested parent, from the row key its identity
- * encodes when `fields` are among that key's fields. Undefined when neither covers them.
+ * see {@link topLevelKeyBeforeWrite}; for a nested parent, from the parent row as read ahead of
+ * the write, else from the row key its identity encodes when `fields` are among that key's fields.
+ * Undefined when none of those covers them.
  */
 const knownParentKey = (
   nestedOp: NestedOperationInfo,
@@ -781,6 +921,13 @@ const knownParentKey = (
   const identity = parentRowIdentityOf(nestedOp.parent, input.nestedPreFetchResults, deps.schemaMetadata);
   if (identity === TOP_LEVEL_ROW) {
     return topLevelKeyBeforeWrite(input, fields);
+  }
+  const parentRow = nestedOp.parent
+    ? parentRowAsStoredOf(nestedOp.parent, input.nestedPreFetchResults, deps.schemaMetadata)
+    : undefined;
+  const readKey = parentRow ? parentKeyOf(parentRow, fields) : undefined;
+  if (readKey) {
+    return readKey;
   }
   const keyFields = getRowKeyConstraint(deps.schemaMetadata, parentModel)?.fields;
   if (identity === undefined || !keyFields || !fields.every((field) => keyFields.includes(field))) {
@@ -961,11 +1108,13 @@ export const collectNestedEvents = async (
     records: new Map(),
     claimed: new Map(),
     assigned: new Set(),
+    recordedElements: new Map(),
     linkValuesAfter: new Map(),
   };
   if (isRow(result)) {
     await walkLevels(walk, [{ row: result, attribution: undefined, selection: input.args }]);
   }
+  reportUnrecordedUndecidedElements(walk);
 
   const linkRecords = await collectLinkChanges({
     client: input.client,

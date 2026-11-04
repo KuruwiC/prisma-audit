@@ -22,7 +22,9 @@ import {
   type EventCollectorDependencies,
   type SingleOperationOutcome,
 } from '../../src/pipeline/collect-events.js';
+import { auditedModelsWrittenBy } from '../../src/utils/audited-models.js';
 import { NO_AUDITED_OMITTED_FIELDS } from '../../src/utils/audited-omitted-fields.js';
+import { extractEntityIdentity } from '../../src/utils/id-generation.js';
 import { column, model, relation, schemaMetadataOf } from '../support/audit-schema.js';
 
 /** Pre-fetch results in which `path` is unread: a read for rows it could not name failed */
@@ -40,12 +42,20 @@ const schemaMetadata = schemaMetadataOf(
     column('id', { isId: true }),
     column('name'),
     relation('posts', 'Post', 'UserPosts', { isList: true }),
+    relation('hubs', 'Hub', 'UserHubs', { isList: true }),
   ]),
   model('Post', [
     column('id', { isId: true }),
     column('title'),
     column('authorId'),
     relation('author', 'User', 'UserPosts', { foreignKeyFields: ['authorId'], referencedFields: ['id'] }),
+    relation('comments', 'Comment', 'PostComments', { isList: true }),
+  ]),
+  model('Comment', [
+    column('id', { isId: true }),
+    column('body'),
+    column('postId'),
+    relation('post', 'Post', 'PostComments', { foreignKeyFields: ['postId'], referencedFields: ['id'] }),
   ]),
   model('Legacy', [column('code')]),
   model('Device', [column('code', { isUnique: true, isRequired: true }), column('label', { isRequired: true })]),
@@ -63,6 +73,22 @@ const schemaMetadata = schemaMetadataOf(
     relation('owner', 'User', 'UserBadge', { foreignKeyFields: ['ownerId'], referencedFields: ['id'] }),
   ]),
   model('Tag', [column('alias', { isUnique: true }), column('code', { isUnique: true, isRequired: true })]),
+  model('Hub', [
+    column('id', { isId: true }),
+    column('code', { isUnique: true, isRequired: true }),
+    column('ownerId'),
+    relation('owner', 'User', 'UserHubs', { foreignKeyFields: ['ownerId'], referencedFields: ['id'] }),
+    relation('sensors', 'HubSensor', 'HubSensors', { isList: true }),
+  ]),
+  model(
+    'HubSensor',
+    [
+      column('hubCode', { isRequired: true }),
+      column('slot', { type: 'Int', isRequired: true }),
+      relation('hub', 'Hub', 'HubSensors', { foreignKeyFields: ['hubCode'], referencedFields: ['code'] }),
+    ],
+    { primaryKey: { name: null, fields: ['hubCode', 'slot'] } },
+  ),
 );
 
 const deps: EventCollectorDependencies = {
@@ -81,12 +107,19 @@ type SingleCase = Partial<
   Omit<SingleOperationOutcome, 'nestedOperations' | 'writeSets'> & {
     args: Record<string, unknown>;
     batchTargets: NestedBatchTargets;
+    /** The data of each row the nested creates insert whose key the extension generated */
+    rowsWithGeneratedKeys: ReadonlySet<object>;
   }
 >;
 
 /** An outcome whose nested operations and write sets are resolved from `args`, as the executor does */
 const single = (overrides: SingleCase = {}): SingleOperationOutcome => {
-  const { args = { data: { name: 'Ann' } }, batchTargets = new Map(), ...outcome } = overrides;
+  const {
+    args = { data: { name: 'Ann' } },
+    batchTargets = new Map(),
+    rowsWithGeneratedKeys = new Set(),
+    ...outcome
+  } = overrides;
   const base = {
     modelName: 'User',
     action: 'create' as const,
@@ -113,7 +146,7 @@ const single = (overrides: SingleCase = {}): SingleOperationOutcome => {
       schemaMetadata,
       base.modelName,
       nestedOperations,
-      new Set(),
+      rowsWithGeneratedKeys,
       base.nestedPreFetchResults,
       batchTargets,
       Prisma,
@@ -682,6 +715,89 @@ describe('collectSingleOperationEvents', () => {
       });
     });
 
+    it('reports a nested upsert whose target could not be read when an update next to it names the same row', async () => {
+      const reporting = reportingDeps();
+
+      await postEvents(
+        {
+          update: { where: { id: 'p1' }, data: { title: 'A' } },
+          upsert: {
+            where: { id: 'p1' },
+            create: { title: 'C' },
+            update: { comments: { create: { body: 'new' } } },
+          },
+        },
+        [p1, p2],
+        { nestedPreFetchResults: unreadAt('posts') },
+        reporting,
+      );
+
+      expect(reporting.onUnrecordedWrite).toHaveBeenCalledExactlyOnceWith({
+        modelName: 'Post',
+        operation: 'upsert',
+        path: 'posts',
+      });
+    });
+
+    it.each([
+      ['upsert', { upsert: { where: { id: 'missing' }, create: { id: 'p3', title: 'C' }, update: {} } }],
+      ['connectOrCreate', { connectOrCreate: { where: { id: 'missing' }, create: { id: 'p3', title: 'C' } } }],
+    ])(
+      'reports a nested %s whose target could not be read when no returned row is the row its WHERE names',
+      async (keyword, posts) => {
+        const reporting = reportingDeps();
+
+        const events = await postEvents(
+          posts,
+          [p1, p3],
+          { nestedPreFetchResults: unreadAt('posts'), preExistingRows: new Map([['posts', new Set(['p1'])]]) },
+          reporting,
+        );
+
+        expect(events).toEqual([]);
+        expect(reporting.onUnrecordedWrite).toHaveBeenCalledExactlyOnceWith({
+          modelName: 'Post',
+          operation: keyword,
+          path: 'posts',
+        });
+      },
+    );
+
+    it('reports no write left without a record for a nested upsert element whose target could not be read when only another element writes an audited model', async () => {
+      const reporting = {
+        ...reportingDeps(),
+        auditedModelsOf: (modelName: string, args: unknown) =>
+          auditedModelsWrittenBy(schemaMetadata, (written) => written !== 'Post', modelName, args),
+      };
+      const nestedPreFetchResults: NestedPreFetchResults = new Map();
+      storePreFetchResult(nestedPreFetchResults, 'posts', {
+        before: { kind: 'unavailable' },
+        identity: 'p1',
+        name: { by: 'uniqueWhere', where: { id: 'p1' } },
+      });
+      storePreFetchResult(nestedPreFetchResults, 'posts', {
+        before: { kind: 'captured', row: p2Before },
+        identity: 'p2',
+        name: { by: 'uniqueWhere', where: { id: 'p2' } },
+      });
+      const c1 = { id: 'c1', body: 'new', postId: 'p2' };
+
+      const events = await postEvents(
+        {
+          upsert: [
+            { where: { id: 'p1' }, create: { title: 'C' }, update: { title: 'A' } },
+            { where: { id: 'p2' }, create: { title: 'D' }, update: { title: 'B', comments: { create: c1 } } },
+          ],
+        },
+        [p1, { ...p2, comments: [c1] }],
+        { nestedPreFetchResults },
+        reporting,
+      );
+
+      expect(events).toEqual([expect.objectContaining({ identity: 'p2', action: 'update' })]);
+      expect(reporting.onUnrecordedWrite).not.toHaveBeenCalled();
+    });
+
     it.each([
       [
         'an update whose target could not be read',
@@ -808,8 +924,168 @@ describe('collectSingleOperationEvents', () => {
       ]);
     });
 
+    describe('more rows the relation did not hold before than the operation inserts under the parent', () => {
+      // Another transaction can insert a row under the same parent between the read of the rows the
+      // relation held and the read back after the write (READ COMMITTED).
+
+      const reportingUnfollowed = () => ({
+        ...deps,
+        onUnfollowedRowKeys: vi.fn<NonNullable<EventCollectorDependencies['onUnfollowedRowKeys']>>(),
+      });
+
+      it('records none of them for a create whose row has no key it can be found by, and reports its row as not audited', async () => {
+        const reporting = reportingUnfollowed();
+
+        const events = await postEvents(
+          { create: { title: 'C' } },
+          [p1, p2, p3],
+          { preExistingRows: new Map([['posts', new Set(['p1'])]]) },
+          reporting,
+        );
+
+        expect(events).toEqual([]);
+        expect(reporting.onUnfollowedRowKeys).toHaveBeenCalledExactlyOnceWith({
+          relatedModel: 'Post',
+          operation: 'create',
+          path: 'posts',
+          unidentified: 1,
+          reason: 'new-rows-exceed-inserts',
+        });
+      });
+
+      it('records the row found under the whole key a create gives it, and reports nothing when that is every row it inserts', async () => {
+        const reporting = reportingUnfollowed();
+        const given = { id: 'given', title: 'G', authorId: 'u1' };
+
+        const events = await postEvents(
+          { create: { id: 'given', title: 'G' } },
+          [p1, given, p2],
+          { preExistingRows: new Map([['posts', new Set(['p1'])]]) },
+          reporting,
+        );
+
+        expect(events).toEqual([expect.objectContaining({ identity: 'given', action: 'create' })]);
+        expect(reporting.onUnfollowedRowKeys).not.toHaveBeenCalled();
+      });
+
+      it('records the row of the key the extension generated, and reports the rows inserted without one as not audited', async () => {
+        const reporting = reportingUnfollowed();
+        const generated = { id: 'generated', title: 'G' };
+
+        const events = await postEvents(
+          { create: [generated, { title: 'C' }] },
+          [p1, { ...generated, authorId: 'u1' }, p2, p3],
+          { preExistingRows: new Map([['posts', new Set(['p1'])]]), rowsWithGeneratedKeys: new Set([generated]) },
+          reporting,
+        );
+
+        expect(events).toEqual([expect.objectContaining({ identity: 'generated', action: 'create' })]);
+        expect(reporting.onUnfollowedRowKeys).toHaveBeenCalledExactlyOnceWith({
+          relatedModel: 'Post',
+          operation: 'create',
+          path: 'posts',
+          unidentified: 1,
+          reason: 'new-rows-exceed-inserts',
+        });
+      });
+
+      it('reports the rows each inserting operation leaves without a record under that operation', async () => {
+        const reporting = reportingUnfollowed();
+        const p4 = { id: 'p4', title: 'D', authorId: 'u1' };
+
+        const events = await postEvents(
+          { create: { title: 'C' }, upsert: { where: { id: 'missing' }, create: { title: 'D' }, update: {} } },
+          [p1, p2, p3, p4],
+          {
+            nestedPreFetchResults: preFetched([['missing', null]]),
+            preExistingRows: new Map([['posts', new Set(['p1'])]]),
+          },
+          reporting,
+        );
+
+        expect(events).toEqual([]);
+        expect(reporting.onUnfollowedRowKeys.mock.calls).toEqual([
+          [
+            {
+              relatedModel: 'Post',
+              operation: 'create',
+              path: 'posts',
+              unidentified: 1,
+              reason: 'new-rows-exceed-inserts',
+            },
+          ],
+          [
+            {
+              relatedModel: 'Post',
+              operation: 'upsert',
+              path: 'posts',
+              unidentified: 1,
+              reason: 'new-rows-exceed-inserts',
+            },
+          ],
+        ]);
+      });
+    });
+
+    it('records the rows the creates nested under every element that names the parent row insert, and reports nothing', async () => {
+      const reporting = { ...deps, onUnfollowedRowKeys: vi.fn() };
+      const comments = [
+        { id: 'c0', body: 'held', postId: 'p1' },
+        { id: 'c1', body: 'A', postId: 'p1' },
+        { id: 'c2', body: 'B', postId: 'p1' },
+      ];
+
+      const events = await collectSingleOperationEvents(
+        single({
+          action: 'update',
+          args: {
+            where: { id: 'u1' },
+            data: {
+              posts: {
+                update: [
+                  { where: { id: 'p1' }, data: { comments: { create: { body: 'A' } } } },
+                  { where: { id: 'p1' }, data: { comments: { create: { body: 'B' } } } },
+                ],
+              },
+            },
+          },
+          result: { id: 'u1', name: 'Ann', posts: [{ ...p1, comments }] },
+          beforeState: { kind: 'captured', row: userBefore },
+          nestedPreFetchResults: preFetched([['p1', p1Before]]),
+          preExistingRows: new Map([['posts.comments', new Set(['c0'])]]),
+        }),
+        reporting,
+      );
+
+      expect(
+        events
+          .filter((event) => event.model === 'Comment')
+          .map((event) => [event.identity, event.action, event.origin]),
+      ).toEqual([
+        ['c1', 'create', { path: 'posts.comments', op: 'create' }],
+        ['c2', 'create', { path: 'posts.comments', op: 'create' }],
+      ]);
+      expect(reporting.onUnfollowedRowKeys).not.toHaveBeenCalled();
+    });
+
+    it('records an inserted row for the operation that inserts it under the key the extension generated', async () => {
+      const created = { id: 'a', title: 'A' };
+      const upserted = { id: 'b', title: 'B' };
+
+      const events = await postEvents(
+        { create: created, upsert: { where: { id: 'missing' }, create: upserted, update: {} } },
+        [p1, { ...created, authorId: 'u1' }, { ...upserted, authorId: 'u1' }],
+        { nestedPreFetchResults: preFetched([['missing', null]]), rowsWithGeneratedKeys: new Set([created, upserted]) },
+      );
+
+      expect(events.map((event) => [event.identity, event.origin.op])).toEqual([
+        ['a', 'create'],
+        ['b', 'upsert'],
+      ]);
+    });
+
     it('audits every returned row not named by an operation as created when the parent has no snapshot', async () => {
-      const events = await postEvents({ create: { title: 'C' } }, [p1, p2]);
+      const events = await postEvents({ create: [{ title: 'C' }, { title: 'D' }] }, [p1, p2]);
 
       expect(events.map((event) => [event.identity, event.action])).toEqual([
         ['p1', 'create'],
@@ -1103,6 +1379,106 @@ describe('collectSingleOperationEvents — an upsert of a to-one relation', () =
     );
 
     expect(events.filter((event) => event.model === 'User')).toEqual([]);
+  });
+});
+
+describe('collectSingleOperationEvents — a row key that holds the foreign key to a unique field of the parent row', () => {
+  // HubSensor's row key holds hubCode, the foreign key to Hub.code, a unique field that is not
+  // Hub's row key: a write of Hub.code gives the sensors under the hub a new key by ON UPDATE CASCADE.
+  const sensorKey = (hubCode: string, slot: number) => extractEntityIdentity({ hubCode, slot }, ['hubCode', 'slot']);
+
+  it('records the sensor a create inserts below a hub a nested update gives a new code, and not the sensor the hub held', async () => {
+    const reporting = { ...deps, onUnfollowedRowKeys: vi.fn() };
+    const nestedPreFetchResults: NestedPreFetchResults = new Map();
+    storePreFetchResult(nestedPreFetchResults, 'hubs', {
+      before: { kind: 'captured', row: { id: 'h1', code: 'old', ownerId: 'u1' } },
+      identity: 'h1',
+      name: { by: 'uniqueWhere', where: { id: 'h1' } },
+    });
+
+    const events = await collectSingleOperationEvents(
+      single({
+        action: 'update',
+        args: {
+          where: { id: 'u1' },
+          data: { hubs: { update: { where: { id: 'h1' }, data: { code: 'new', sensors: { create: { slot: 2 } } } } } },
+        },
+        result: {
+          id: 'u1',
+          name: 'Ann',
+          hubs: [
+            {
+              id: 'h1',
+              code: 'new',
+              ownerId: 'u1',
+              sensors: [
+                { hubCode: 'new', slot: 1 },
+                { hubCode: 'new', slot: 2 },
+              ],
+            },
+          ],
+        },
+        beforeState: { kind: 'captured', row: { id: 'u1', name: 'Ann' } },
+        nestedPreFetchResults,
+        preExistingRows: new Map([['hubs.sensors', new Set([sensorKey('old', 1)])]]),
+      }),
+      reporting,
+    );
+
+    expect(
+      events.filter((event) => event.model === 'HubSensor').map((event) => [event.identity, event.action]),
+    ).toEqual([[sensorKey('new', 2), 'create']]);
+    expect(reporting.onUnfollowedRowKeys).not.toHaveBeenCalled();
+  });
+
+  it('records the sensor a create inserts below a hub an updateMany next to the update naming it gives a new code, and reports nothing', async () => {
+    const reporting = { ...deps, onUnfollowedRowKeys: vi.fn() };
+    const nestedPreFetchResults: NestedPreFetchResults = new Map();
+    storePreFetchResult(nestedPreFetchResults, 'hubs', {
+      before: { kind: 'captured', row: { id: 'h1', code: 'old', ownerId: 'u1' } },
+      identity: 'h1',
+      name: { by: 'uniqueWhere', where: { id: 'h1' } },
+    });
+
+    const events = await collectSingleOperationEvents(
+      single({
+        action: 'update',
+        args: {
+          where: { id: 'u1' },
+          data: {
+            hubs: {
+              updateMany: { where: {}, data: { code: 'new' } },
+              update: { where: { id: 'h1' }, data: { sensors: { create: { slot: 2 } } } },
+            },
+          },
+        },
+        result: {
+          id: 'u1',
+          name: 'Ann',
+          hubs: [
+            {
+              id: 'h1',
+              code: 'new',
+              ownerId: 'u1',
+              sensors: [
+                { hubCode: 'new', slot: 1 },
+                { hubCode: 'new', slot: 2 },
+              ],
+            },
+          ],
+        },
+        beforeState: { kind: 'captured', row: { id: 'u1', name: 'Ann' } },
+        nestedPreFetchResults,
+        batchTargets: new Map([['hubs', new Map([['updateMany', new Map([['h1', { id: 'h1' }]])]])]]),
+        preExistingRows: new Map([['hubs.sensors', new Set([sensorKey('old', 1)])]]),
+      }),
+      reporting,
+    );
+
+    expect(
+      events.filter((event) => event.model === 'HubSensor').map((event) => [event.identity, event.action]),
+    ).toEqual([[sensorKey('new', 2), 'create']]);
+    expect(reporting.onUnfollowedRowKeys).not.toHaveBeenCalled();
   });
 });
 

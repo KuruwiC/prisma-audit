@@ -42,7 +42,7 @@ describe('a nested update that writes the row key of the row it updates', () => 
     }
   });
 
-  const setup = async ({ fetchBeforeUpdate = true } = {}) => {
+  const setup = async ({ fetchBeforeUpdate = true, mode = 'awaited' as 'awaited' | 'atomic' } = {}) => {
     const observer = vi.fn<AuditObserver>();
     const basePrisma = createBasePrisma();
     const provider = createAsyncLocalStorageProvider();
@@ -59,7 +59,7 @@ describe('a nested update that writes the row key of the row it updates', () => 
         Post: defineEntity({ type: 'Post', idResolver: self() }),
       },
       fetchBefore: { update: fetchBeforeUpdate },
-      write: { mode: 'awaited' },
+      write: { mode },
       observer,
     });
     disconnects.push(async () => {
@@ -574,5 +574,38 @@ describe('a nested update that writes the row key of the row it updates', () => 
       expect(await logsOf('DeviceSensor')).toEqual([expect.objectContaining({ entityId: 'd-9#2', action: 'create' })]);
       expect(failuresOf(observer)).toEqual([]);
     });
+  });
+
+  describe('nested updates that name the same parent row, each inserting below it', () => {
+    it.each(['awaited', 'atomic'] as const)(
+      'records the sensor each of two nested updates naming the same device creates, under %s, and reports nothing',
+      async (mode) => {
+        const { prisma, basePrisma, run, observer, owner, seedDevice, logsOf } = await setup({ mode });
+        await seedDevice('d-1');
+        await basePrisma.deviceSensor.create({ data: { deviceCode: 'd-1', slot: 1, reading: 'reading 1' } });
+
+        await run(() =>
+          prisma.user.update({
+            where: { id: owner.id },
+            data: {
+              devices: {
+                update: [
+                  { where: { code: 'd-1' }, data: { sensors: { create: { slot: 2, reading: 'reading 2' } } } },
+                  { where: { code: 'd-1' }, data: { sensors: { create: { slot: 3, reading: 'reading 3' } } } },
+                ],
+              },
+            },
+          }),
+        );
+
+        expect(
+          (await logsOf('DeviceSensor')).map(({ entityId, action, before }) => ({ entityId, action, before })),
+        ).toEqual([
+          { entityId: 'd-1#2', action: 'create', before: null },
+          { entityId: 'd-1#3', action: 'create', before: null },
+        ]);
+        expect(failuresOf(observer)).toEqual([]);
+      },
+    );
   });
 });

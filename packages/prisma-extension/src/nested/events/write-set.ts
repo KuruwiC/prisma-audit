@@ -110,6 +110,19 @@ export interface NestedWriteSet {
    */
   readonly unidentifiedInserts: ReadonlyMap<NestedOperationInfo, number>;
   /**
+   * The most rows each inserting operation at the path inserts: every row of a `create` or
+   * `createMany` (`skipDuplicates` can skip some), and one per `upsert` or `connectOrCreate` element
+   * whose target the read ahead of the operation did not find
+   */
+  readonly insertCounts: ReadonlyMap<NestedOperationInfo, number>;
+  /**
+   * The operation that inserts the row under each key known to be that row's: a key the extension
+   * generated, and a key a `create`, or a `createMany` without `skipDuplicates`, gives whole to a
+   * row, which the operation fails to insert when a row holds it already. Keys a create gives are
+   * left out when a write at the path gives a row another key.
+   */
+  readonly knownInserts: ReadonlyMap<EntityIdentityKey, NestedOperationInfo>;
+  /**
    * The rows the relation holds before the operation are read to tell the inserted rows apart: an
    * operation inserts a row whose key the extension did not generate, a `createMany` with
    * `skipDuplicates` may skip a row whose key was generated, or a write at the path gives a row
@@ -123,6 +136,8 @@ export const EMPTY_WRITE_SET: NestedWriteSet = {
   generatedKeys: new Set(),
   anyNewRowIsInserted: false,
   unidentifiedInserts: new Map(),
+  insertCounts: new Map(),
+  knownInserts: new Map(),
   readsPreExisting: false,
 };
 
@@ -378,8 +393,10 @@ const rowsInsertedBy = (operation: NestedOperationInfo, targets: readonly Nested
 
 interface WriteSetDraft {
   readonly keyed: KeyedTarget[];
-  readonly generatedKeys: Set<EntityIdentityKey>;
+  readonly generatedKeys: Map<EntityIdentityKey, NestedOperationInfo>;
   readonly withoutGeneratedKey: Map<NestedOperationInfo, number>;
+  readonly insertCounts: Map<NestedOperationInfo, number>;
+  readonly givenKeys: Map<EntityIdentityKey, NestedOperationInfo>;
   /** A write at the path gives a row another key than the one the extension generated for it */
   writesKey: boolean;
   readsPreExisting: boolean;
@@ -394,7 +411,15 @@ const writesKeyField = (operation: NestedOperationInfo, keyFields: readonly stri
   keyFields !== undefined &&
   updateDataOf(operation).some((data) => isRecord(data) && keyFields.some((field) => data[field] !== undefined));
 
-/** Records in `writeSet` the key of each row `operation` inserts that the extension generated, else that the operation inserts a row without one */
+const completeIdentityOf = (row: Row, keyFields: readonly string[] | undefined): EntityIdentityKey | undefined => {
+  const key = completeRowKeyOf(row, keyFields);
+  return key && keyFields ? extractEntityIdentity(key, keyFields) : undefined;
+};
+
+/**
+ * Records in `writeSet` how many rows `operation` inserts and the key of each that the extension
+ * generated, else that the operation inserts a row without one, with the key its data gives whole
+ */
 const addInsertedRows = (
   writeSet: WriteSetDraft,
   operation: NestedOperationInfo,
@@ -402,12 +427,20 @@ const addInsertedRows = (
   rowsWithGeneratedKeys: ReadonlySet<object>,
   keyFields: readonly string[] | undefined,
 ): void => {
+  if (inserted.length > 0) {
+    writeSet.insertCounts.set(operation, inserted.length);
+  }
+  const givesKeys = INSERTING_KEYWORDS.has(operation.operation) && !skipsDuplicates(operation);
   for (const row of inserted) {
-    const key = rowsWithGeneratedKeys.has(row) ? completeRowKeyOf(row, keyFields) : undefined;
-    if (key && keyFields) {
-      writeSet.generatedKeys.add(extractEntityIdentity(key, keyFields));
-    } else {
-      writeSet.withoutGeneratedKey.set(operation, (writeSet.withoutGeneratedKey.get(operation) ?? 0) + 1);
+    const generated = rowsWithGeneratedKeys.has(row) ? completeIdentityOf(row, keyFields) : undefined;
+    if (generated !== undefined) {
+      writeSet.generatedKeys.set(generated, operation);
+      continue;
+    }
+    writeSet.withoutGeneratedKey.set(operation, (writeSet.withoutGeneratedKey.get(operation) ?? 0) + 1);
+    const given = givesKeys ? completeIdentityOf(row, keyFields) : undefined;
+    if (given !== undefined) {
+      writeSet.givenKeys.set(given, operation);
     }
   }
   writeSet.readsPreExisting =
@@ -426,9 +459,11 @@ const finishedWriteSet = (draft: WriteSetDraft): NestedWriteSet => {
   const followsEveryTarget = targets.every(isLocated);
   return {
     targets,
-    generatedKeys: draft.generatedKeys,
+    generatedKeys: new Set(draft.generatedKeys.keys()),
     anyNewRowIsInserted: followsEveryTarget && (draft.withoutGeneratedKey.size > 0 || draft.writesKey),
     unidentifiedInserts: followsEveryTarget ? new Map() : draft.withoutGeneratedKey,
+    insertCounts: draft.insertCounts,
+    knownInserts: new Map([...draft.generatedKeys, ...(draft.writesKey ? [] : draft.givenKeys)]),
     readsPreExisting: draft.readsPreExisting,
   };
 };
@@ -458,8 +493,10 @@ export const buildNestedWriteSets = (
     const keyConstraint = getRowKeyConstraint(schemaMetadata, operation.relatedModel);
     const writeSet: WriteSetDraft = writeSets.get(operation.path) ?? {
       keyed: [],
-      generatedKeys: new Set(),
+      generatedKeys: new Map(),
       withoutGeneratedKey: new Map(),
+      insertCounts: new Map(),
+      givenKeys: new Map(),
       writesKey: false,
       readsPreExisting: false,
       comparison: keyConstraint && {

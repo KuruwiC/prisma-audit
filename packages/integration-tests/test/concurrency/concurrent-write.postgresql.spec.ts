@@ -12,7 +12,7 @@
 
 import type { AuditContext, AuditObserver } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
-import { createAuditClient } from '@kuruwic/prisma-audit';
+import { AuditIncompleteError, createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -34,6 +34,7 @@ const POST_ID = 'contended-post';
 const postFindUnique: BarrierTarget = { model: 'Post', read: 'findUnique' };
 const userFindUnique: BarrierTarget = { model: 'User', read: 'findUnique' };
 const postFindMany: BarrierTarget = { model: 'Post', read: 'findMany' };
+const autoIncChildFindMany: BarrierTarget = { model: 'AutoIncChild', read: 'findMany' };
 
 const errorCodesOf = (settled: Settled<unknown>) => {
   if (settled.status !== 'rejected' || !(settled.reason instanceof Prisma.PrismaClientKnownRequestError)) {
@@ -540,5 +541,47 @@ describe('concurrent writes on PostgreSQL: a commit between the audit read and t
     const insert = queries.findIndex((query) => /^INSERT INTO "public"\."posts"/.test(query));
     expect(insert).toBeGreaterThan(-1);
     expect(queries.slice(0, insert).some((query) => /FROM "public"\."posts"/.test(query))).toBe(false);
+  });
+
+  describe('a nested to-many create whose row the extension gives no key, told apart by the children the parent held before the write', () => {
+    const createChild = () => ({ where: { id: authorId }, data: { autoIncChildren: { create: {} } } });
+    const insertForeignChild = () => other.autoIncChild.create({ data: { parentId: authorId } });
+    const childIds = async () =>
+      (await other.autoIncChild.findMany({ where: { parentId: authorId }, orderBy: { id: 'asc' } })).map(
+        ({ id }) => id,
+      );
+    const childRecords = () => other.auditLog.findMany({ where: { entityType: 'AutoIncChild' } });
+
+    it('records no child as created, and reports its own child as row-identification, when another transaction inserts a child under the parent between the read of its children and the write', async () => {
+      const outcome = await interleave(barrier, autoIncChildFindMany, {
+        operation: () => readCommitted((tx) => tx.user.update(createChild())),
+        interleaved: insertForeignChild,
+      });
+
+      expect(outcome.operation.status).toBe('fulfilled');
+      expect(await childIds()).toHaveLength(2);
+      expect(await childRecords()).toEqual([]);
+      expect(failuresOf(observer)).toEqual([
+        expect.objectContaining({
+          phase: 'row-identification',
+          modelName: 'AutoIncChild',
+          operation: 'create',
+          unidentified: 1,
+        }),
+      ]);
+    });
+
+    it('fails with AuditIncompleteError and rolls the write back under an atomic write when another transaction inserts a child under the parent between the read of its children and the write', async () => {
+      const outcome = await interleave(barrier, autoIncChildFindMany, {
+        operation: () => asActor(() => atomicPrisma.user.update(createChild())),
+        interleaved: insertForeignChild,
+      });
+
+      expect(outcome.operation).toEqual({ status: 'rejected', reason: expect.any(AuditIncompleteError) });
+      const [foreign] = await childIds();
+      expect(await childIds()).toEqual([foreign]);
+      expect(await childRecords()).toEqual([]);
+      expect(await other.auditLog.count()).toBe(0);
+    });
   });
 });

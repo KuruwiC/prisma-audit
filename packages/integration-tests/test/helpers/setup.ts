@@ -1,4 +1,4 @@
-import type { AuditContextProvider, FetchBeforeConfig } from '@kuruwic/db-audit-core';
+import type { AuditContextProvider, EntityConfig, FetchBeforeConfig } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import type { EntityMap, WriteMode } from '@kuruwic/prisma-audit';
 import { createAuditClient, defineEntity, foreignKey, to } from '@kuruwic/prisma-audit';
@@ -102,16 +102,11 @@ export const testEntities: EntityMap = {
   }),
 };
 
-type EntityConfigOf = NonNullable<EntityMap[string]>;
-
-/**
- * `entities` with `field` of each entity `values` names set to its value. A name with no entity
- * throws: the setting would apply to nothing, and a test relying on it would pass vacuously.
- */
-const withEntitySetting = <TField extends keyof EntityConfigOf>(
+/** Throws for a name in `values` with no entity: a test relying on that setting would pass vacuously */
+const withEntitySetting = <TField extends keyof EntityConfig>(
   entities: EntityMap,
   field: TField,
-  values: Readonly<Record<string, EntityConfigOf[TField]>>,
+  values: Readonly<Record<string, EntityConfig[TField]>>,
 ): EntityMap => {
   const unknown = Object.keys(values).filter((model) => !entities[model]);
   if (unknown.length > 0) {
