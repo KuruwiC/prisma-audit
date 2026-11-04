@@ -18,7 +18,7 @@ import { createAuditClient, flushAllPendingWrites, type WriteMode } from '@kuruw
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { describe, expect, it, vi } from 'vitest';
-import { cleanDatabase, createBasePrisma, setupTestContext, testEntities } from './helpers/setup.js';
+import { cleanDatabase, createBasePrisma, setupTestContext, testEntities, withWriteModes } from './helpers/setup.js';
 
 const actor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'batch-transaction-actor', name: 'Batch Actor' },
@@ -63,7 +63,8 @@ interface Seeded {
 type BatchOf = (client: PrismaClient, seeded: Seeded) => Prisma.PrismaPromise<unknown>[];
 
 interface AuditedClientOptions {
-  readonly mode?: WriteMode | ((modelName: string) => WriteMode);
+  readonly mode?: WriteMode;
+  readonly writeModes?: Readonly<Record<string, WriteMode>>;
   readonly writer?: (records: AuditRecord[], context: WriteContext<PrismaClient>) => Promise<void>;
 }
 
@@ -80,7 +81,7 @@ describe('Batch $transaction under the audit extension', () => {
       Prisma,
       schema: auditSchema,
       contextProvider: provider,
-      entities: testEntities,
+      entities: withWriteModes(testEntities, options.writeModes ?? {}),
       write: {
         mode: options.mode,
         ...(options.writer ? { writer: options.writer } : {}),
@@ -261,7 +262,8 @@ describe('Batch $transaction under the audit extension', () => {
 
     it('rolls back every operation of the batch when only some of its models are atomic', async () => {
       const audited = createAudited({
-        mode: (modelName) => (modelName === 'Post' ? 'atomic' : 'deferred'),
+        mode: 'deferred',
+        writeModes: { Post: 'atomic' },
       });
       try {
         const result = await expectSameAsPlain(audited, (client, { ownerId }) => [

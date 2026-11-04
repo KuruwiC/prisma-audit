@@ -10,6 +10,7 @@
 import type { FetchBeforeConfig } from '../config.types.js';
 import type { AggregateRootContextConfig, EntityContextConfig, ProjectionContextConfig } from '../enrichment/types.js';
 import { getGlobalSingleton } from '../global-singleton.js';
+import type { WriteMode } from '../policy/index.js';
 import type {
   AggregateProjection,
   BatchIdResolver,
@@ -494,6 +495,12 @@ export type DefineEntityOptions<
    * write; see {@link FetchBeforeConfig}.
    */
   fetchBefore?: FetchBeforeConfig;
+  /**
+   * The write mode of this entity's writes in place of the adapter's default (`atomic` without
+   * one): an operation that writes rows of several audited models takes the strongest of their
+   * modes (see `policy`)
+   */
+  writeMode?: WriteMode;
 
   /** Entity-log context enrichment, stored in AuditLog.entityContext */
   entityContext?: EntityContextConfig<TDbHandle, TEntity>;
@@ -557,6 +564,7 @@ export const defineEntity = <TEntity extends Record<string, unknown> = Record<st
     diffExcludeFields,
     recordOmittedFields,
     fetchBefore,
+    writeMode,
     entityContext,
     aggregateContext,
   } = options;
@@ -570,6 +578,7 @@ export const defineEntity = <TEntity extends Record<string, unknown> = Record<st
     diffExcludeFields,
     recordOmittedFields,
     fetchBefore,
+    writeMode,
     entityContext,
     aggregateContext,
   };

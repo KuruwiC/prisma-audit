@@ -66,11 +66,8 @@ export interface MemoryAuditOptions<TModelName extends string> {
    */
   readonly requireContext?: AuditGateConfig['requireContext'];
   readonly write?: {
-    /**
-     * The write mode of an audited operation (default: `'atomic'`): a value, or a function called
-     * once per audited operation with its model's name
-     */
-    readonly mode?: PolicyConfig['mode'];
+    /** The write mode of an audited operation whose entity sets no `writeMode` (default: `'atomic'`) */
+    readonly mode?: WriteMode;
   };
   /** Fields left out of an update's change set, for every entity without its own `diffExcludeFields` */
   readonly diffExcludeFields?: readonly string[];
@@ -135,7 +132,7 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
   const store = createMemoryStore<TModelName>();
   const entityConfigs = createEntityConfigLookup(options.entities);
   const gateConfig: AuditGateConfig = { requireContext: options.requireContext ?? false };
-  const policyConfig: PolicyConfig = { mode: options.write?.mode ?? 'atomic' };
+  const policyConfig: PolicyConfig = { mode: options.write?.mode, entity: entityConfigs.byModel };
   const resolveConfig: ResolveConfig<TModelName, MemoryHandle<TModelName>> = {
     entity: entityConfigs.byModel,
     rootEntity: entityConfigs.byCategoryAndType,

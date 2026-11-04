@@ -179,7 +179,6 @@ const recordOf = (
     : undefined;
 };
 
-/** Reports the detaching writes that unlinked rows of an audited model the read could not tell */
 const reportUndeterminedDetaches = (path: string, read: LinkPathRead, input: LinkChangesInput): void => {
   if (input.auditedModelsOf(read.relatedModel, undefined).length === 0) {
     return;

@@ -4,8 +4,7 @@
  * diff-exclusion and redaction options, and the entity map keys of `recordOmittedFields`
  */
 
-import type { WriteMode } from '@kuruwic/db-audit-core';
-import { createAsyncLocalStorageProvider, defineEntity } from '@kuruwic/db-audit-core';
+import { createAsyncLocalStorageProvider, defineEntity, policy } from '@kuruwic/db-audit-core';
 import { describe, expect, it } from 'vitest';
 import { normalizeAuditOptions } from '../src/audit-options.js';
 import type { PrismaAuditExtensionOptions } from '../src/types.js';
@@ -84,14 +83,17 @@ describe('the write option', () => {
   });
 
   it('defaults to the atomic write mode for every model', () => {
-    expect(normalizeAuditOptions(withWrite(undefined)).policyConfig).toEqual({ mode: 'atomic' });
+    expect(policy(['User'], normalizeAuditOptions(withWrite(undefined)).policyConfig)).toBe('atomic');
   });
 
-  it('passes the value or function forms of mode to the write policy unchanged', () => {
-    const mode = (modelName: string): WriteMode => (modelName === 'User' ? 'atomic' : 'deferred');
+  it("writes a model by its entity's writeMode, and one whose entity sets none by mode", () => {
+    const { policyConfig } = normalizeAuditOptions({
+      ...withWrite({ mode: 'awaited' }),
+      entities: { User: defineEntity({ type: 'User', writeMode: 'deferred' }), Post: defineEntity({ type: 'Post' }) },
+    });
 
-    expect(normalizeAuditOptions(withWrite({ mode: 'deferred' })).policyConfig.mode).toBe('deferred');
-    expect(normalizeAuditOptions(withWrite({ mode })).policyConfig.mode).toBe(mode);
+    expect(policy(['User'], policyConfig)).toBe('deferred');
+    expect(policy(['Post'], policyConfig)).toBe('awaited');
   });
 });
 

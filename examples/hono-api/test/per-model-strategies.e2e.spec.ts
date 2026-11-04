@@ -1,5 +1,5 @@
 /**
- * Per-model write strategies E2E tests: `write.mode` as a function of the audited model name
+ * Per-model write strategies E2E tests: the `writeMode` of each audited model's entity
  */
 
 import {
@@ -11,15 +11,11 @@ import {
   foreignKey,
   getPendingWriteCount,
   to,
-  type WriteMode,
 } from '@kuruwic/prisma-audit';
 import { type AuditModelName, auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-/** Models whose audit is written awaited */
-const criticalModels = new Set(['User']);
 
 describe('Per-model Strategies E2E', () => {
   let basePrisma: PrismaClient;
@@ -34,25 +30,19 @@ describe('Per-model Strategies E2E', () => {
     await basePrisma.$disconnect();
   });
 
-  describe('write.mode as a function with database operations', () => {
-    it('should write audit log awaited for a model the mode function maps to awaited', async () => {
+  describe("an entity's writeMode with database operations", () => {
+    it('should write audit log awaited for a model whose entity is awaited', async () => {
       const entities = defineEntities<AuditModelName, PrismaClient>()({
         User: defineEntity({
           type: 'User',
+          writeMode: 'awaited',
           diffExcludeFields: ['updatedAt'],
         }),
       });
 
-      const modeSpy = vi.fn(
-        (modelName: string) => (criticalModels.has(modelName) ? 'awaited' : 'deferred') as WriteMode,
-      );
-
       const prisma = createAuditClient(basePrisma, {
         contextProvider: auditProvider,
         entities,
-        write: {
-          mode: modeSpy,
-        },
         Prisma,
         schema: auditSchema,
       });
@@ -78,27 +68,20 @@ describe('Per-model Strategies E2E', () => {
       expect(auditLogs).toHaveLength(1);
       expect(auditLogs[0]?.action).toBe('create');
       expect(auditLogs[0]?.entityCategory).toBe('model');
-      expect(modeSpy).toHaveBeenCalledWith('User');
     });
 
-    it('should write audit log deferred for a model the mode function maps to deferred', async () => {
+    it('should write audit log deferred for a model whose entity is deferred', async () => {
       const entities = defineEntities<AuditModelName, PrismaClient>()({
         Post: defineEntity({
           type: 'Post',
+          writeMode: 'deferred',
           aggregates: [to('User', foreignKey('authorId'))],
         }),
       });
 
-      const modeSpy = vi.fn(
-        (modelName: string) => (criticalModels.has(modelName) ? 'awaited' : 'deferred') as WriteMode,
-      );
-
       const prisma = createAuditClient(basePrisma, {
         contextProvider: auditProvider,
         entities,
-        write: {
-          mode: modeSpy,
-        },
         Prisma,
         schema: auditSchema,
       });
@@ -134,7 +117,6 @@ describe('Per-model Strategies E2E', () => {
       });
 
       expect(auditLogs.map((log) => log.aggregateType).sort()).toEqual(['Post', 'User']);
-      expect(modeSpy).toHaveBeenCalledWith('Post');
     });
   });
 
@@ -143,24 +125,19 @@ describe('Per-model Strategies E2E', () => {
       const entities = defineEntities<AuditModelName, PrismaClient>()({
         User: defineEntity({
           type: 'User',
+          writeMode: 'awaited',
           diffExcludeFields: ['updatedAt'],
         }),
         Post: defineEntity({
           type: 'Post',
+          writeMode: 'deferred',
           aggregates: [to('User', foreignKey('authorId'))],
         }),
       });
 
-      const modeSpy = vi.fn(
-        (modelName: string) => (criticalModels.has(modelName) ? 'awaited' : 'deferred') as WriteMode,
-      );
-
       const prisma = createAuditClient(basePrisma, {
         contextProvider: auditProvider,
         entities,
-        write: {
-          mode: modeSpy,
-        },
         Prisma,
         schema: auditSchema,
       });
@@ -205,9 +182,6 @@ describe('Per-model Strategies E2E', () => {
         orderBy: { aggregateType: 'asc' },
       });
       expect(postAuditLogs.map((log) => log.aggregateType)).toEqual(['Post', 'User']);
-
-      expect(modeSpy).toHaveBeenCalledWith('User');
-      expect(modeSpy).toHaveBeenCalledWith('Post');
     });
   });
 });

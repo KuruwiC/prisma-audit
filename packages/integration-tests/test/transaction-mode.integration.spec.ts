@@ -19,14 +19,15 @@ import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { failuresOf } from './helpers/audit-failures.js';
-import { cleanDatabase, createBasePrisma } from './helpers/setup.js';
+import { cleanDatabase, createBasePrisma, withWriteModes } from './helpers/setup.js';
 
 const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'transaction-mode-actor' },
 };
 
 interface ClientOptions {
-  readonly mode: WriteMode | ((modelName: string) => WriteMode);
+  readonly mode: WriteMode;
+  readonly writeModes?: Readonly<Record<string, WriteMode>>;
   readonly writer?: (records: AuditRecord[]) => Promise<void>;
   readonly failingEnricher?: boolean;
   /** Applies, before the audit extension, one that writes a companion user through `query` ahead of each user create */
@@ -115,7 +116,10 @@ describe('write mode', () => {
       Prisma,
       schema: auditSchema,
       contextProvider: provider,
-      entities: { User: defineEntity({ type: 'User' }), Post: defineEntity({ type: 'Post' }) },
+      entities: withWriteModes(
+        { User: defineEntity({ type: 'User' }), Post: defineEntity({ type: 'Post' }) },
+        options.writeModes ?? {},
+      ),
       observer,
       write: {
         mode: options.mode,
@@ -152,7 +156,7 @@ describe('write mode', () => {
   };
 
   interface BatchOptions {
-    readonly mode: WriteMode | ((modelName: string) => WriteMode);
+    readonly mode: WriteMode;
     /** The model the audit records; the batch writes a User */
     readonly audited?: 'User' | 'Post';
     /** Whether the batch writes a User before its read */
@@ -368,10 +372,7 @@ describe('write mode', () => {
     });
 
     it('runs a batch whose write is deferred as an interactive transaction', async () => {
-      const { result, transactions } = runBatch({
-        mode: (modelName) => (modelName === 'Post' ? mode : 'deferred'),
-        writes: true,
-      });
+      const { result, transactions } = runBatch({ mode: 'deferred', writes: true });
 
       await expect(result).resolves.toHaveLength(2);
       expect(transactions).toEqual(['interactive']);
@@ -389,9 +390,7 @@ describe('write mode', () => {
 
     it("writes the audit of a deferred batch operation once the batch's transaction has committed", async () => {
       const user = await seedUser();
-      const clients = createClients({
-        mode: (modelName) => (modelName === 'Post' ? mode : 'deferred'),
-      });
+      const clients = createClients({ mode: 'deferred', writeModes: { Post: mode } });
 
       await clients.run(() =>
         clients.client.$transaction([
@@ -510,27 +509,20 @@ describe('write mode', () => {
       expect(await auditRows()).toEqual(['User.create']);
     });
 
-    describe('calls the mode function for the call and for each operation that reaches the audit', () => {
-      const userCalls = (modeByModel: ReturnType<typeof vi.fn>) =>
-        modeByModel.mock.calls.filter(([modelName]) => modelName === 'User');
+    describe('audits each query an extension applied before the audit issues through `query` for the same call', () => {
+      it('for a single write', async () => {
+        const clients = createClients({ mode: 'atomic', companionCreate: true });
 
-      it('for a single write: once for the call, which opens the transaction, and once in the audit', async () => {
-        const user = await seedUser();
-        const modeByModel = vi.fn((_modelName: string): WriteMode => 'atomic');
-        const clients = createClients({ mode: modeByModel });
+        await clients.run(() => clients.client.user.create({ data: { email: 'a@example.com', name: 'A' } }));
 
-        await clients.run(() => clients.client.user.update({ where: { id: user.id }, data: { name: 'Once' } }));
-
-        expect(userCalls(modeByModel)).toHaveLength(2);
-        expect(await auditRows()).toEqual(['User.update']);
+        expect(await auditRows()).toEqual(['User.create', 'User.create']);
       });
 
       it.each([
         { batch: 'whose writes are atomic', mode: 'atomic' },
         { batch: 'whose writes are deferred', mode: 'deferred' },
-      ] as const)('for each write of a batch $batch, once in the audit', async ({ mode }) => {
-        const modeByModel = vi.fn((_modelName: string): WriteMode => mode);
-        const clients = createClients({ mode: modeByModel });
+      ] as const)('for each write of a batch $batch', async ({ mode }) => {
+        const clients = createClients({ mode, companionCreate: true });
 
         await clients.run(() =>
           clients.client.$transaction([
@@ -539,38 +531,7 @@ describe('write mode', () => {
           ]),
         );
 
-        expect(userCalls(modeByModel)).toHaveLength(2);
-        expect(await auditRows()).toEqual(['User.create', 'User.create']);
-      });
-
-      describe('and for a query an extension applied before the audit issues through `query` for the same call', () => {
-        it('for a single write', async () => {
-          const modeByModel = vi.fn((_modelName: string): WriteMode => 'atomic');
-          const clients = createClients({ mode: modeByModel, companionCreate: true });
-
-          await clients.run(() => clients.client.user.create({ data: { email: 'a@example.com', name: 'A' } }));
-
-          expect(userCalls(modeByModel)).toHaveLength(3);
-          expect(await auditRows()).toEqual(['User.create', 'User.create']);
-        });
-
-        it.each([
-          { batch: 'whose writes are atomic', mode: 'atomic' },
-          { batch: 'whose writes are deferred', mode: 'deferred' },
-        ] as const)('for each write of a batch $batch', async ({ mode }) => {
-          const modeByModel = vi.fn((_modelName: string): WriteMode => mode);
-          const clients = createClients({ mode: modeByModel, companionCreate: true });
-
-          await clients.run(() =>
-            clients.client.$transaction([
-              clients.client.user.create({ data: { email: 'a@example.com', name: 'A' } }),
-              clients.client.user.create({ data: { email: 'b@example.com', name: 'B' } }),
-            ]),
-          );
-
-          expect(userCalls(modeByModel)).toHaveLength(4);
-          expect(await auditRows()).toEqual(['User.create', 'User.create', 'User.create', 'User.create']);
-        });
+        expect(await auditRows()).toEqual(['User.create', 'User.create', 'User.create', 'User.create']);
       });
     });
 

@@ -42,6 +42,15 @@ const baseMapping = defineMapping({
   Post: defineEntity<PostRow, Db>({ type: 'Post', aggregates: [to('User', foreignKey('authorId'))] }),
 });
 
+const deferredPostMapping = defineMapping({
+  User: defineEntity<UserRow, Db>({ type: 'User' }),
+  Post: defineEntity<PostRow, Db>({
+    type: 'Post',
+    aggregates: [to('User', foreignKey('authorId'))],
+    writeMode: 'deferred',
+  }),
+});
+
 const createAdapter = (overrides: Partial<MemoryAuditOptions<ModelName>> = {}) =>
   createMemoryAuditAdapter<ModelName>({ schema, contextProvider: provider, entities: baseMapping, ...overrides });
 
@@ -383,7 +392,7 @@ describe('transaction membership', () => {
   });
 
   it('rollback: discards the data, the immediate audit rows and the after-commit plans', async () => {
-    const adapter = createAdapter({ write: { mode: (model) => (model === 'User' ? 'atomic' : 'deferred') } });
+    const adapter = createAdapter({ entities: deferredPostMapping });
 
     await withContext(async () => {
       await adapter.create('User', { id: 'u0', name: 'Existing' });
@@ -712,10 +721,9 @@ describe('transaction membership', () => {
     });
   });
 
-  it('mode as a function: a model it returns atomic for writes atomically in an implicit transaction, one it returns deferred detached', async () => {
+  it("an entity's writeMode: a model without one writes atomically in an implicit transaction, one whose entity sets deferred detached", async () => {
     const handles = new Map<string, unknown>();
     const adapter = createAdapter({
-      write: { mode: (model) => (model === 'User' ? 'atomic' : 'deferred') },
       entities: defineMapping({
         User: defineEntity<UserRow, Db>({
           type: 'User',
@@ -728,6 +736,7 @@ describe('transaction membership', () => {
         }),
         Post: defineEntity<PostRow, Db>({
           type: 'Post',
+          writeMode: 'deferred',
           entityContext: {
             enricher: async (posts, db) => {
               handles.set('Post', db);
@@ -804,12 +813,10 @@ describe('the audit gate', () => {
     expect(adapter.store.auditLogs()).toEqual([]);
   });
 
-  it('writes, with an audit context, a model that is not in entities without a record, calling no policy function or actor enricher', async () => {
-    const mode = vi.fn((): WriteMode => 'atomic');
+  it('writes, with an audit context, a model that is not in entities without a record, calling no actor enricher', async () => {
     const enricher = vi.fn(async () => ({}));
     const adapter = createAdapter({
       entities: userOnly,
-      write: { mode },
       actorContext: { enricher },
     });
 
@@ -818,7 +825,6 @@ describe('the audit gate', () => {
 
     expect(adapter.store.find('Post', 'p1')).toEqual({ id: 'p1', authorId: 'u1', title: 'Hello' });
     expect(adapter.store.auditLogs()).toEqual([]);
-    expect(mode).not.toHaveBeenCalled();
     expect(enricher).not.toHaveBeenCalled();
   });
 });

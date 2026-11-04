@@ -58,13 +58,10 @@ export interface WriteConfig<TClient = unknown> {
    */
   model?: string;
   /**
-   * How the audit rows of an operation are written relative to it: a mode for every model, or a
-   * function called with a model name. The function is called with each audited model (one in
-   * `entities`) the operation writes rows of, its nested writes included, and the strongest mode
-   * (`atomic`, then `awaited`, then `deferred`) applies to the whole operation. It is called when
-   * the call is made, from its arguments, to decide whether the client opens a transaction, and
-   * again for every query of the operation that reaches the audit, from the arguments it reaches
-   * it with, so it should depend on the model name alone.
+   * How the audit rows of an operation are written relative to it, for every audited model whose
+   * entity sets no `writeMode` of its own (`defineEntity({ ..., writeMode })`). The mode of an
+   * operation is the strongest (`atomic`, then `awaited`, then `deferred`) of the modes of the
+   * audited models (those in `entities`) it writes rows of, its nested writes included.
    *
    * - `atomic`: the operation commits only together with every audit row it should produce. Inside
    *   your `$transaction` the rows are written in its transaction before it commits; outside any,
@@ -93,7 +90,7 @@ export interface WriteConfig<TClient = unknown> {
    *
    * @default 'atomic'
    */
-  mode?: WriteMode | ((modelName: string) => WriteMode);
+  mode?: WriteMode;
   /**
    * Custom audit log writer, replacing the default persistence step. It receives the records
    * and a context with the audit context, the client the write runs on (`handle`) and

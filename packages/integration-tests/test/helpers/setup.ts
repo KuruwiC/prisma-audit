@@ -1,6 +1,6 @@
 import type { AuditContextProvider, FetchBeforeConfig } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
-import type { EntityMap } from '@kuruwic/prisma-audit';
+import type { EntityMap, WriteMode } from '@kuruwic/prisma-audit';
 import { createAuditClient, defineEntity, foreignKey, to } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
@@ -102,22 +102,38 @@ export const testEntities: EntityMap = {
   }),
 };
 
-/** `entities` with the `fetchBefore` of each entity named in `fetchBefore` replaced */
-export const withFetchBefore = (
+type EntityConfigOf = NonNullable<EntityMap[string]>;
+
+/**
+ * `entities` with `field` of each entity `values` names set to its value. A name with no entity
+ * throws: the setting would apply to nothing, and a test relying on it would pass vacuously.
+ */
+const withEntitySetting = <TField extends keyof EntityConfigOf>(
   entities: EntityMap,
-  fetchBefore: Readonly<Record<string, FetchBeforeConfig>>,
+  field: TField,
+  values: Readonly<Record<string, EntityConfigOf[TField]>>,
 ): EntityMap => {
-  const unknown = Object.keys(fetchBefore).filter((model) => !entities[model]);
+  const unknown = Object.keys(values).filter((model) => !entities[model]);
   if (unknown.length > 0) {
-    throw new Error(`withFetchBefore: no entity for `);
+    throw new Error(`No entity for ${unknown.join(', ')} to set ${String(field)} on`);
   }
   return Object.fromEntries(
     Object.entries(entities).map(([model, entity]) => [
       model,
-      entity && model in fetchBefore ? { ...entity, fetchBefore: fetchBefore[model] } : entity,
+      entity && model in values ? { ...entity, [field]: values[model] } : entity,
     ]),
   );
 };
+
+/** `entities` with the `fetchBefore` of each entity named in `fetchBefore` replaced */
+export const withFetchBefore = (
+  entities: EntityMap,
+  fetchBefore: Readonly<Record<string, FetchBeforeConfig>>,
+): EntityMap => withEntitySetting(entities, 'fetchBefore', fetchBefore);
+
+/** `entities` with the `writeMode` of each entity named in `writeModes` set */
+export const withWriteModes = (entities: EntityMap, writeModes: Readonly<Record<string, WriteMode>>): EntityMap =>
+  withEntitySetting(entities, 'writeMode', writeModes);
 
 export interface TestContext {
   prisma: ReturnType<typeof createAuditClient>;

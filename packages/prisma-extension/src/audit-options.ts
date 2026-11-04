@@ -50,7 +50,7 @@ export interface AuditOptions {
   readonly auditLogAccessor: string;
   /** Whether a write runs without an audit context, from `requireContext` */
   readonly gateConfig: AuditGateConfig;
-  /** The write mode of each audited model, from `write.mode` */
+  /** The write mode of each audited model: its entity's `writeMode`, else `write.mode` */
   readonly policyConfig: PolicyConfig;
   readonly resolveConfig: ResolveConfig;
   readonly composeConfig: ComposeConfig;
@@ -110,7 +110,7 @@ export const normalizeAuditOptions = (options: PrismaAuditExtensionOptions): Aud
     auditedOmittedFieldsWithRowKey: withRowKeyFields(auditedOmittedFields, schemaMetadata, queryOmitSupported),
     auditLogAccessor,
     gateConfig: { requireContext: options.requireContext ?? false },
-    policyConfig: { mode: write?.mode ?? 'atomic' },
+    policyConfig: { mode: write?.mode, entity: entityConfigs.byModel },
     resolveConfig: {
       entity: entityConfigs.byModel,
       rootEntity: entityConfigs.byCategoryAndType,

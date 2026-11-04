@@ -14,6 +14,7 @@
 
 import type { FetchBeforeConfig } from '../config.types.js';
 import type { AggregateRootContextConfig, EntityContextConfig, ProjectionContextConfig } from '../enrichment/types.js';
+import type { WriteMode } from '../policy/index.js';
 
 // ============================================================================
 // Core Types - Aggregate Resolution
@@ -172,6 +173,12 @@ export interface EntityConfig<TDbHandle = unknown, TEntity extends Record<string
    * write; see {@link FetchBeforeConfig}.
    */
   fetchBefore?: FetchBeforeConfig;
+  /**
+   * The write mode of this entity's writes in place of the adapter's default (`atomic` without
+   * one): an operation that writes rows of several audited models takes the strongest of their
+   * modes (see `policy`)
+   */
+  writeMode?: WriteMode;
 
   /**
    * Entity-log context enrichment, stored in AuditLog.entityContext

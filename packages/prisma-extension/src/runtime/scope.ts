@@ -18,11 +18,7 @@ import type { PrismaHandle } from '../internal-types.js';
 export interface ActiveTransaction {
   /** The client of the interactive transaction the operation runs in */
   readonly client: PrismaHandle;
-  /**
-   * The audit of the transaction: the writes its owner starts on the base client once it has
-   * committed, the outcomes it settles then or once it has rolled back, and the audit failures
-   * that keep it from committing
-   */
+  /** The core audit of the transaction, which its owner ends with it */
   readonly audit: TransactionAudit;
 }
 

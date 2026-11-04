@@ -1,19 +1,37 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
+import { createEntityConfigLookup } from '../src/aggregate/entity-config-lookup.js';
+import { defineEntity } from '../src/aggregate/helpers.js';
 import { AuditAtomicityError, planFor, policy, type WriteMode } from '../src/policy/index.js';
 
+/** The entity lookup of an entity map declaring each model with its `writeMode`, or without one */
+const entitiesWith = (writeModes: Readonly<Record<string, WriteMode | undefined>>) =>
+  createEntityConfigLookup(
+    Object.fromEntries(
+      Object.entries(writeModes).map(([modelName, writeMode]) => [
+        modelName,
+        defineEntity({ type: modelName, writeMode }),
+      ]),
+    ),
+  ).byModel;
+
 describe('policy', () => {
-  it.each(['atomic', 'awaited', 'deferred'] as const)('is %s for every model when the mode is that value', (mode) => {
-    expect(policy(['User', 'Post'], { mode })).toBe(mode);
+  it('is atomic for a model whose entity sets no write mode, without a default mode', () => {
+    expect(policy(['User'], { entity: entitiesWith({ User: undefined }) })).toBe('atomic');
   });
 
-  it('calls the mode function once per audited model, with its name', () => {
-    const mode = vi.fn((): WriteMode => 'awaited');
+  it.each(['atomic', 'awaited', 'deferred'] as const)(
+    'is the default mode, %s, for every model whose entity sets none',
+    (mode) => {
+      expect(policy(['User', 'Post'], { mode, entity: entitiesWith({ User: undefined, Post: undefined }) })).toBe(mode);
+    },
+  );
 
-    policy(['User', 'Payment'], { mode });
+  it("takes an entity's write mode in place of the default", () => {
+    expect(policy(['Post'], { mode: 'atomic', entity: entitiesWith({ Post: 'deferred' }) })).toBe('deferred');
+  });
 
-    expect(mode).toHaveBeenCalledTimes(2);
-    expect(mode).toHaveBeenNthCalledWith(1, 'User');
-    expect(mode).toHaveBeenNthCalledWith(2, 'Payment');
+  it('finds the entity of a model whatever the case of its first letter', () => {
+    expect(policy(['auditEvent'], { mode: 'atomic', entity: entitiesWith({ AuditEvent: 'awaited' }) })).toBe('awaited');
   });
 
   it.each([
@@ -22,16 +40,11 @@ describe('policy', () => {
     { modes: { User: 'atomic', Payment: 'awaited' }, strongest: 'atomic' },
     { modes: { User: 'deferred', Payment: 'deferred' }, strongest: 'deferred' },
   ] as const)('takes the strongest mode of the audited models ($strongest)', ({ modes, strongest }) => {
-    expect(policy(['User', 'Payment'], { mode: (modelName) => modes[modelName as keyof typeof modes] })).toBe(
-      strongest,
-    );
+    expect(policy(['User', 'Payment'], { entity: entitiesWith(modes) })).toBe(strongest);
   });
 
-  it('is deferred, the weakest mode, for no audited model, without calling the mode function', () => {
-    const mode = vi.fn((): WriteMode => 'atomic');
-
-    expect(policy([], { mode })).toBe('deferred');
-    expect(mode).not.toHaveBeenCalled();
+  it('is deferred, the weakest mode, for no audited model', () => {
+    expect(policy([], { mode: 'atomic', entity: entitiesWith({}) })).toBe('deferred');
   });
 });
 

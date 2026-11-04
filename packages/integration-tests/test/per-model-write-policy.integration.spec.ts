@@ -1,7 +1,7 @@
 /**
- * `write.mode` as a function of the model name: it is called once per audited model the final
- * arguments of an operation write rows of, nested writes included, and the strongest mode (atomic,
- * then awaited, then deferred) applies to the whole operation.
+ * The write mode of each model, an entity's `writeMode` in place of `write.mode`: the strongest mode
+ * (atomic, then awaited, then deferred) of the audited models an operation writes rows of, nested
+ * writes included, applies to the whole operation.
  */
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
@@ -11,7 +11,7 @@ import { AuditAtomicityError, createAuditClient, defineEntity, flushAllPendingWr
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { describe, expect, it, vi } from 'vitest';
-import { createBasePrisma, setupTestContext, testEntities } from './helpers/setup.js';
+import { createBasePrisma, setupTestContext, testEntities, withWriteModes } from './helpers/setup.js';
 
 const AUDIT_WRITE_FAILURE_MESSAGE = 'simulated audit log write failure';
 
@@ -26,7 +26,7 @@ interface WriterCall {
 }
 
 /** A client whose writer records each call and throws, so where the audit is written shows in what commits */
-const createScenario = (mode: (modelName: string) => WriteMode) => {
+const createScenario = (mode: WriteMode, writeModes: Readonly<Record<string, WriteMode>> = {}) => {
   const writerCalls: WriterCall[] = [];
   const basePrisma = createBasePrisma();
   const provider = createAsyncLocalStorageProvider();
@@ -34,7 +34,7 @@ const createScenario = (mode: (modelName: string) => WriteMode) => {
     Prisma,
     schema: auditSchema,
     contextProvider: provider,
-    entities: testEntities,
+    entities: withWriteModes(testEntities, writeModes),
     write: {
       mode,
       writer: async (records, { inTransaction }) => {
@@ -70,9 +70,8 @@ const userWithPost = (email: string) => ({
 describe('Per-model write mode', () => {
   const context = setupTestContext();
 
-  it('is called once per audited model the operation writes, and a nested atomic model makes a deferred top-level operation atomic', async () => {
-    const mode = vi.fn((modelName: string): WriteMode => (modelName === 'Post' ? 'atomic' : 'deferred'));
-    const scenario = createScenario(mode);
+  it('makes a deferred top-level operation atomic with a nested write of an atomic model', async () => {
+    const scenario = createScenario('deferred', { Post: 'atomic' });
 
     try {
       await withSilencedConsoleError(async () => {
@@ -81,7 +80,6 @@ describe('Per-model write mode', () => {
         ).rejects.toThrow(AUDIT_WRITE_FAILURE_MESSAGE);
       });
 
-      expect(mode.mock.calls.map(([modelName]) => modelName).sort()).toEqual(['Post', 'Post', 'User', 'User']);
       expect(scenario.writerCalls).toEqual([
         { inTransaction: true, entityTypes: expect.arrayContaining(['User', 'Post']) },
       ]);
@@ -92,8 +90,7 @@ describe('Per-model write mode', () => {
   });
 
   it('writes an operation every model of which is deferred after it, so the writer failure does not fail it', async () => {
-    const mode = vi.fn((): WriteMode => 'deferred');
-    const scenario = createScenario(mode);
+    const scenario = createScenario('deferred');
 
     try {
       await withSilencedConsoleError(async () => {
@@ -112,7 +109,7 @@ describe('Per-model write mode', () => {
   });
 
   it('writes an awaited operation outside any transaction once it has committed, so the writer failure does not fail it', async () => {
-    const scenario = createScenario((modelName) => (modelName === 'Tag' ? 'awaited' : 'deferred'));
+    const scenario = createScenario('deferred', { Tag: 'awaited' });
 
     try {
       await withSilencedConsoleError(async () => {
@@ -129,7 +126,7 @@ describe('Per-model write mode', () => {
   });
 
   it("fails an awaited operation inside an interactive transaction with the writer's error and rolls it back", async () => {
-    const scenario = createScenario(() => 'awaited');
+    const scenario = createScenario('awaited');
 
     try {
       await withSilencedConsoleError(async () => {
@@ -142,21 +139,6 @@ describe('Per-model write mode', () => {
 
       expect(scenario.writerCalls).toEqual([{ inTransaction: true, entityTypes: ['Tag'] }]);
       expect(await context.basePrisma.tag.count({ where: { name: 'awaited-in-transaction' } })).toBe(0);
-    } finally {
-      await scenario.dispose();
-    }
-  });
-
-  it('is not called for a read operation', async () => {
-    const mode = vi.fn((): WriteMode => 'atomic');
-    const scenario = createScenario(mode);
-
-    try {
-      await scenario.run(async () => {
-        await scenario.prisma.tag.findMany();
-      });
-
-      expect(mode).not.toHaveBeenCalled();
     } finally {
       await scenario.dispose();
     }

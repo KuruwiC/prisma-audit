@@ -267,10 +267,6 @@ const isNestedUnder = (nestedOp: NestedOperationInfo, attribution: RowAttributio
   );
 };
 
-/**
- * Whether an upsert or connectOrCreate whose branch is unknown leaves rows of an audited model: its
- * own, or those the nested writes of either branch of one of its elements write
- */
 const leavesAuditedRows = (nestedOp: NestedOperationInfo, auditedModelsOf: AuditedModelsOf): boolean =>
   (Array.isArray(nestedOp.data) ? nestedOp.data : [nestedOp.data]).some(
     (element) => auditedModelsOf(nestedOp.relatedModel, element).length > 0,

@@ -23,7 +23,6 @@ type Work = () => Promise<void>;
 export interface TransactionAudit {
   /** Queues work to start once the transaction has committed; a transaction that rolls back drops it */
   readonly afterCommit: (work: Work) => void;
-  /** The work queued, in order */
   readonly queued: readonly Work[];
   /** The outcomes of the transaction's operations, settled when the audit ends */
   readonly outcomes: TransactionOutcomes;
@@ -32,7 +31,6 @@ export interface TransactionAudit {
    * the transaction must not commit without the records
    */
   readonly poison: (error: Error) => void;
-  /** The audit failures recorded, in order */
   readonly failures: readonly Error[];
   /** @throws {AuditRollbackError} Once an audit failure was recorded; its `cause` is the first */
   readonly assertCommittable: () => void;

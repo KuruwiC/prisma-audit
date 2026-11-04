@@ -8,6 +8,7 @@
  * active, and reject one it cannot; the core itself opens none.
  */
 
+import type { EntityConfig } from '../aggregate/types.js';
 import type { WritePlanKind } from '../domain/mutation-event.js';
 
 /**
@@ -24,23 +25,25 @@ import type { WritePlanKind } from '../domain/mutation-event.js';
 export type WriteMode = 'atomic' | 'awaited' | 'deferred';
 
 export interface PolicyConfig {
-  /** The write mode of an audited model: a value for every model, or a function of the model name */
-  readonly mode: WriteMode | ((modelName: string) => WriteMode);
+  /** The write mode of an audited model whose entity sets none (default: `atomic`) */
+  readonly mode?: WriteMode;
+  /** The entity of a model, whose `writeMode` takes the place of `mode` (the entity lookup's `byModel`) */
+  readonly entity: (modelName: string) => Pick<EntityConfig, 'writeMode'> | undefined;
 }
 
 const STRENGTH: Readonly<Record<WriteMode, number>> = { deferred: 0, awaited: 1, atomic: 2 };
 
 /**
  * The write mode of an operation: the strongest (atomic, then awaited, then deferred) of the modes
- * of the audited models it writes rows of, its nested writes included. A mode function is called
- * once per model. Of no model, it is `deferred`.
+ * of the audited models it writes rows of, its nested writes included, each the `writeMode` of the
+ * model's entity, else the default mode. Of no model, it is `deferred`.
  *
  * @param auditedModels - The audited models the operation writes rows of, as the audit gate takes them
  */
 export const policy = (auditedModels: readonly string[], config: PolicyConfig): WriteMode => {
-  const { mode } = config;
+  const defaultMode = config.mode ?? 'atomic';
   return auditedModels.reduce<WriteMode>((strongest, modelName) => {
-    const modelMode = typeof mode === 'function' ? mode(modelName) : mode;
+    const modelMode = config.entity(modelName)?.writeMode ?? defaultMode;
     return STRENGTH[modelMode] > STRENGTH[strongest] ? modelMode : strongest;
   }, 'deferred');
 };
