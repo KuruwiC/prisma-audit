@@ -80,3 +80,10 @@ export const resolveNestedRowState = (
       return { action: resolveCreateState().action, beforeState: NO_BEFORE_STATE };
   }
 };
+
+/**
+ * Whether the action of a row `nestedOp` wrote is undecided: an upsert or connectOrCreate whose row
+ * could not be read, which cannot tell whether it created the row, so the row is not audited
+ */
+export const hasUndecidedAction = (nestedOp: NestedOperationInfo, before: BeforeState): boolean =>
+  before.kind === 'unavailable' && (nestedOp.operation === 'upsert' || nestedOp.operation === 'connectOrCreate');

@@ -19,7 +19,7 @@
  * records (`withRowKeyFields`).
  */
 
-import type { FailureSink, MutationEvent } from '@kuruwic/db-audit-core';
+import type { MutationEvent } from '@kuruwic/db-audit-core';
 import { AUDIT_ACTION } from '../grammar/operations.js';
 import type { PrismaNamespace } from '../internal-types.js';
 import type { SchemaMetadata } from '../schema/types.js';
@@ -39,7 +39,7 @@ import { getModelDelegate, hasOperation } from '../utils/model-accessor.js';
 import { requiresBeforeState } from '../utils/operation-classifier.js';
 import { type DerivableRowKeyWrite, NO_ROW_KEY_WRITE, rowKeyWriteOf, withWrittenKey } from '../utils/row-key-write.js';
 import { collectBatchOperationEvents } from './collect-events.js';
-import type { ExecutionScope } from './execution-scope.js';
+import type { ExecutionScope, OperationFailureSink } from './execution-scope.js';
 import { type AuditedOperation, createExecutor, type OperationExecutor } from './executor.js';
 
 type Row = Record<string, unknown>;
@@ -52,7 +52,6 @@ export interface BatchExecutorDependencies {
   readonly Prisma: PrismaNamespace;
   readonly schemaMetadata: SchemaMetadata;
   readonly auditedOmittedFieldsWithRowKey: AuditedOmittedFields;
-  readonly failureSink: FailureSink;
 }
 
 export type BatchPrepared =
@@ -382,7 +381,7 @@ const readRowsNotDeleted: UnidentifiedReason = (operation, unidentified) =>
 const reportUnidentified = async (
   operation: AuditedOperation,
   unidentified: number,
-  failureSink: FailureSink,
+  failureSink: OperationFailureSink,
   reason: UnidentifiedReason,
 ): Promise<void> => {
   if (unidentified <= 0) {
@@ -416,7 +415,7 @@ const rowsInsertedSkippingDuplicates = async (
     readonly existingKeys: ReadonlySet<EntityIdentityKey>;
   },
   executed: BatchExecuted,
-  failureSink: FailureSink,
+  failureSink: OperationFailureSink,
 ): Promise<WrittenRows> => {
   const { keyFields, generatedKeys, existingKeys } = prepared;
   const found = (await createdRows(delegate, prepared.rows, keyFields)).filter(
@@ -444,7 +443,7 @@ const pairReReadRows = async (
   readRows: Row[],
   keyFields: string[],
   keyWrite: DerivableRowKeyWrite,
-  failureSink: FailureSink,
+  failureSink: OperationFailureSink,
 ): Promise<WrittenRows> => {
   await reportUnidentified(operation, readRows.length - afterRows.length, failureSink, rowsNotFoundAfterWrite);
   return pairByRowKey(afterRows, readRows, keyFields, keyWrite);
@@ -463,7 +462,7 @@ const pairReturnedRows = async (
   beforeRows: Row[],
   keyFields: string[],
   keyWrite: DerivableRowKeyWrite,
-  failureSink: FailureSink,
+  failureSink: OperationFailureSink,
 ): Promise<WrittenRows> => {
   const paired = pairByRowKey(returnedRows, beforeRows, keyFields, keyWrite);
   const unavailableBefore = new Set<number>();
@@ -484,7 +483,7 @@ const pairReturnedRows = async (
 const keyNotFollowedRows = async (
   operation: AuditedOperation,
   executed: BatchExecuted,
-  failureSink: FailureSink,
+  failureSink: OperationFailureSink,
 ): Promise<WrittenRows> => {
   const returnedRows = executed.returnedRows;
   if (!returnedRows) {
@@ -569,7 +568,7 @@ const limitedWrittenRows = async (
   operation: AuditedOperation,
   delegate: BatchDelegate,
   rounds: readonly LimitedRound[],
-  failureSink: FailureSink,
+  failureSink: OperationFailureSink,
 ): Promise<Row[]> => {
   const writtenRowsOfShortRound =
     operation.action === AUDIT_ACTION.DELETE_MANY ? deletedRowsOfShortRound : updatedRowsOfShortRound;
@@ -595,7 +594,7 @@ const limitedWriteRows = async (
   delegate: BatchDelegate,
   prepared: { readonly keyFields: string[]; readonly keyWrite: DerivableRowKeyWrite },
   executed: BatchExecuted,
-  failureSink: FailureSink,
+  failureSink: OperationFailureSink,
 ): Promise<WrittenRows> => {
   const written = await limitedWrittenRows(operation, delegate, executed.limitedRounds ?? [], failureSink);
   if (operation.action === AUDIT_ACTION.DELETE_MANY) {
@@ -615,7 +614,7 @@ const reportRowsWrittenBeyondRead = (
   operation: AuditedOperation,
   readRows: readonly Row[],
   executed: BatchExecuted,
-  failureSink: FailureSink,
+  failureSink: OperationFailureSink,
 ): Promise<void> =>
   reportUnidentified(operation, countOf(executed.result) - readRows.length, failureSink, writtenRowsNotRead);
 
@@ -627,7 +626,7 @@ const reportRowsFoundBeyondUpdated = (
   operation: AuditedOperation,
   written: WrittenRows,
   executed: BatchExecuted,
-  failureSink: FailureSink,
+  failureSink: OperationFailureSink,
 ): Promise<void> =>
   reportUnidentified(operation, written.rows.length - countOf(executed.result), failureSink, readRowsNotUpdated);
 
@@ -640,7 +639,7 @@ const reportDeletedCountMismatch = async (
   operation: AuditedOperation,
   readRows: readonly Row[],
   executed: BatchExecuted,
-  failureSink: FailureSink,
+  failureSink: OperationFailureSink,
 ): Promise<void> => {
   const deletedCount = countOf(executed.result);
   await reportUnidentified(operation, readRows.length - deletedCount, failureSink, readRowsNotDeleted);
@@ -648,7 +647,7 @@ const reportDeletedCountMismatch = async (
 };
 
 export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationExecutor => {
-  const { schemaMetadata, auditedOmittedFieldsWithRowKey, failureSink } = deps;
+  const { schemaMetadata, auditedOmittedFieldsWithRowKey } = deps;
 
   const delegateOf = (scope: ExecutionScope, modelName: string): BatchDelegate =>
     batchDelegate(scope, modelName, auditedOmittedFieldsWithRowKey);
@@ -701,6 +700,7 @@ export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationE
     prepared: BatchPrepared,
     executed: BatchExecuted,
   ): Promise<WrittenRows> => {
+    const { failureSink } = scope;
     switch (prepared.kind) {
       case 'create-returning':
         return { rows: executed.returnedRows ?? [] };

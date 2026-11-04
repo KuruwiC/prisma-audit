@@ -1,8 +1,9 @@
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { vi } from 'vitest';
 import type { PrismaBaseClient } from '../../src/internal-types.js';
-import type { ExecutionScope } from '../../src/pipeline/execution-scope.js';
+import type { ExecutionScope, OperationFailureSink } from '../../src/pipeline/execution-scope.js';
 import type { AuditedOperation } from '../../src/pipeline/executor.js';
+import { stubOperationFailureSink } from '../support/failure-sink.js';
 
 type Row = Record<string, unknown>;
 
@@ -19,11 +20,15 @@ export const clientWith = (delegates: Record<string, Record<string, unknown>>): 
   ...delegates,
 });
 
-/** The scope of an operation on `client` outside any transaction, its audit awaited */
-export const scopeOn = (client: PrismaBaseClient): ExecutionScope => ({
+/** The scope of an operation on `client` outside any transaction, its audit awaited, reporting to `failureSink` */
+export const scopeOn = (
+  client: PrismaBaseClient,
+  failureSink: OperationFailureSink = stubOperationFailureSink(),
+): ExecutionScope => ({
   auditContext,
   handle: client,
   baseClient: client,
+  failureSink,
 });
 
 /** The continuation the pipeline would build for `client`: the action of its `user` delegate */

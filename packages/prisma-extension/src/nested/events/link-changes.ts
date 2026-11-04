@@ -10,7 +10,8 @@
  * `disconnect` of a row attached elsewhere) yields nothing. When the read before the write failed,
  * a row a write names is read by its unique WHERE and audited with an unavailable before state (a
  * `disconnect` only when it left the row detached); a row detached without being named cannot be
- * told and is not audited.
+ * told and is not audited; its write, like each detaching write whose parent row's read failed, is
+ * reported as a write left without a record.
  */
 
 import type { BeforeState } from '@kuruwic/db-audit-core';
@@ -28,6 +29,7 @@ import { attachedFilter, type LinkPathRead, type LinkReads, type LinkWrite } fro
 import { getPreFetchListClient } from '../pre-fetch/model-client.js';
 import { preFetchedStateNamedBy } from '../pre-fetch/pre-fetch-result-store.js';
 import type { CollectedNestedRecord } from './collected-record.js';
+import type { UnrecordedWriteReporter } from './unrecorded-write.js';
 
 type Row = Record<string, unknown>;
 
@@ -177,6 +179,14 @@ const recordOf = (
     : undefined;
 };
 
+const reportUndeterminedDetaches = (path: string, read: LinkPathRead, report: UnrecordedWriteReporter): void => {
+  for (const { operation } of read.writes) {
+    if (read.undeterminedDetaches.has(operation)) {
+      report({ modelName: read.relatedModel, operation: operation.operation, path });
+    }
+  }
+};
+
 export interface LinkChangesInput {
   /** Client the operation ran on */
   readonly client: PrismaHandle;
@@ -188,6 +198,7 @@ export interface LinkChangesInput {
   /** The WHERE that names after the write the row `where` names for the link write `operation` before it */
   readonly whereAfterWrite: (operation: NestedOperationInfo, where: Row) => Row;
   readonly fieldNamesOf: (modelName: string) => ReadonlySet<string>;
+  readonly onUnrecordedWrite: UnrecordedWriteReporter;
 }
 
 /**
@@ -199,6 +210,7 @@ export const collectLinkChanges = async (
 ): Promise<Map<NestedOperationInfo, CollectedNestedRecord[]>> => {
   const records = new Map<NestedOperationInfo, CollectedNestedRecord[]>();
   for (const [path, read] of input.linkReads) {
+    reportUndeterminedDetaches(path, read, input.onUnrecordedWrite);
     const audited = input.auditedAt(path);
     const candidates = candidatesAt(read, input.nestedPreFetchResults, audited, input.whereAfterWrite);
     if (candidates.length === 0) {

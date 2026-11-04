@@ -5,18 +5,21 @@
  * interactive transaction the operation's binding names, if any, the executor runs the reads
  * before the write and the write, core's `dispatch` builds the records and writes them by the
  * write plan decided before the write with the scope as the transaction runtime, an atomic
- * operation some of whose records a failure dropped fails, and the caller receives the result.
+ * operation some of whose records were dropped fails, and the caller receives the result. The
+ * failures the pipeline detects itself are reported to the scope's failure sink, built for the
+ * operation, which keeps them and the writes left without a record for it.
  */
 
 import type {
   AuditContext,
   AuditErrorContext,
+  AuditErrorPhase,
   DispatchConfig,
-  FailureSink,
+  FailureSinkConfig,
   WriteMode,
   WritePlanKind,
 } from '@kuruwic/db-audit-core';
-import { AuditIncompleteError, dispatch } from '@kuruwic/db-audit-core';
+import { AuditIncompleteError, createFailureSink, dispatch } from '@kuruwic/db-audit-core';
 import type { AuditAction } from '../grammar/operations.js';
 import type { PrismaBaseClient, PrismaHandle } from '../internal-types.js';
 import { type ActiveTransaction, withScope } from '../runtime/scope.js';
@@ -24,7 +27,12 @@ import type { WidenedColumns } from '../utils/audited-selection.js';
 import { callerMutationFailureOf, runCallerMutation } from '../utils/caller-mutation-failure.js';
 import { isBatchOperation } from '../utils/operation-classifier.js';
 import { toError } from '../utils/to-error.js';
-import { type ExecutionScope, executionScopeOf, transactionRuntimeOf } from './execution-scope.js';
+import {
+  type ExecutionScope,
+  executionScopeOf,
+  type OperationFailureSink,
+  transactionRuntimeOf,
+} from './execution-scope.js';
 import type { AuditedOperation, ExecutedOperation, OperationExecutor } from './executor.js';
 import type { RecordProducer } from './produce-records.js';
 
@@ -57,11 +65,8 @@ export interface AuditPipelineDependencies {
   readonly batchExecutor: OperationExecutor;
   readonly produceRecords: RecordProducer;
   readonly dispatchConfig: DispatchConfig<PrismaHandle>;
-  /**
-   * Reports the failures the pipeline detects itself; a failure it reports while the operation
-   * runs is kept among the operation's failures (see `keepOperationFailure`)
-   */
-  readonly failureSink: FailureSink;
+  /** The observer the failure sink of each operation notifies (see `operationFailuresOf`) */
+  readonly failureSinkConfig: FailureSinkConfig;
 }
 
 /**
@@ -111,7 +116,7 @@ const runExecutor = async (
       throw callerFailure.thrown;
     }
     const error = toError(caughtError);
-    await deps.failureSink.notify({
+    await scope.failureSink.notify({
       phase: 'diff-generation',
       modelName: operation.model,
       operation: operation.action,
@@ -125,36 +130,59 @@ const runExecutor = async (
   }
 };
 
-const ACTIONS_DECIDED_BY_BEFORE_STATE: ReadonlySet<string> = new Set(['upsert', 'connectOrCreate']);
+/** The phases reported where a row's record is skipped: each such failure dropped a record */
+const RECORD_DROPPING_PHASES: ReadonlySet<AuditErrorPhase> = new Set(['row-identification', 'id-resolver-call']);
 
 /**
- * Whether a failure the pipeline reported dropped a record: a row it could not identify, a failed
- * id resolver, or an upsert or connectOrCreate skipped because the read that decides its action
- * failed. Another `pre-fetch` failure leaves its record without the before state, which is not a
- * dropped record.
+ * The observer-only phases of the failures that leave an operation's records incomplete: those
+ * that drop a record by their phase, and `pre-fetch`, whose failed read drops the records of the
+ * writes the event collection reports as unrecorded
  */
-const dropsRecord = (failure: AuditErrorContext): boolean => {
-  switch (failure.phase) {
-    case 'row-identification':
-    case 'id-resolver-call':
-      return true;
-    case 'pre-fetch':
-      return ACTIONS_DECIDED_BY_BEFORE_STATE.has(failure.operation);
-    case 'diff-generation':
-    case 'log-write':
-      return false;
-    default: {
-      const exhaustiveCheck: never = failure.phase;
-      throw new Error(`[@prisma-audit] Unhandled audit failure phase: ${JSON.stringify(exhaustiveCheck)}`);
-    }
-  }
+const INCOMPLETENESS_CAUSE_PHASES: ReadonlySet<AuditErrorPhase> = new Set([...RECORD_DROPPING_PHASES, 'pre-fetch']);
+
+interface OperationFailures {
+  readonly sink: OperationFailureSink;
+  /**
+   * Once its records are built, the failures of the phases that can leave them incomplete
+   * reported for the operation; undefined when no record was dropped
+   */
+  readonly incompletenessCauses: () => readonly AuditErrorContext[] | undefined;
+}
+
+/**
+ * The failure sink of one operation. A `pre-fetch` failure that only left a record without its
+ * before state dropped nothing, so on its own it leaves the records complete.
+ */
+const operationFailuresOf = (config: FailureSinkConfig): OperationFailures => {
+  const kept: AuditErrorContext[] = [];
+  let unrecordedWrite = false;
+  const { notify, reportResolverFailures } = createFailureSink({
+    observer: async (context) => {
+      kept.push(context);
+      await config.observer?.(context);
+    },
+  });
+  return {
+    sink: {
+      notify,
+      reportResolverFailures,
+      reportUnrecordedWrite: () => {
+        unrecordedWrite = true;
+      },
+    },
+    incompletenessCauses: () =>
+      unrecordedWrite || kept.some(({ phase }) => RECORD_DROPPING_PHASES.has(phase))
+        ? kept.filter(({ phase }) => INCOMPLETENESS_CAUSE_PHASES.has(phase))
+        : undefined,
+  };
 };
 
 /**
  * The build of the records and their write stay outside `runExecutor`'s try/catch: `dispatch`
  * reports a failed build as `diff-generation` and a failed write as `log-write`, and decides from
  * the write plan whether either fails the caller, which it does only inside a transaction, once the
- * operation's write has run. An atomic operation some of whose records a reported failure dropped
+ * operation's write has run. An atomic operation some of whose records were dropped (a write the
+ * event collection reported as unrecorded, or a `row-identification` or `id-resolver-call` failure)
  * fails with `AuditIncompleteError` once `dispatch` has resolved. Such a failure is recorded on the
  * transaction, which then does not commit even when the caller catches it.
  */
@@ -163,38 +191,36 @@ export const runAuditedOperation = async (
   deps: AuditPipelineDependencies,
 ): Promise<unknown> => {
   const { operation: intercepted, auditContext, baseClient, mode, plan, transaction } = input;
-  const scope = executionScopeOf({ auditContext, baseClient, transaction });
+  const failures = operationFailuresOf(deps.failureSinkConfig);
+  const scope = executionScopeOf({ auditContext, baseClient, transaction, failureSink: failures.sink });
   const { model, action, args, widened } = intercepted;
-  const failures: AuditErrorContext[] = [];
-  return withScope({ operationFailures: failures }, async () => {
-    let written = false;
-    const execute = operationContinuation(intercepted, () => {
-      written = true;
-    });
-    const operation: AuditedOperation = { model, action, args, widened, execute };
-    const executor = isBatchOperation(action) ? deps.batchExecutor : deps.singleExecutor;
-    const executed = await runExecutor(executor, operation, scope, deps, () => written);
-    try {
-      await dispatch(
-        {
-          buildRecords: executed.buildRecords,
-          modelName: model,
-          operation: action,
-          params: args,
-          plan,
-          auditContext: scope.auditContext,
-        },
-        deps.dispatchConfig,
-        transactionRuntimeOf(scope),
-      );
-      const dropping = failures.filter(dropsRecord);
-      if (mode === 'atomic' && dropping.length > 0) {
-        throw new AuditIncompleteError({ modelName: model, operation: action, failures: dropping });
-      }
-    } catch (caughtError) {
-      scope.transaction?.recordAuditFailure(toError(caughtError));
-      throw caughtError;
-    }
-    return executed.result;
+  let written = false;
+  const execute = operationContinuation(intercepted, () => {
+    written = true;
   });
+  const operation: AuditedOperation = { model, action, args, widened, execute };
+  const executor = isBatchOperation(action) ? deps.batchExecutor : deps.singleExecutor;
+  const executed = await runExecutor(executor, operation, scope, deps, () => written);
+  try {
+    await dispatch(
+      {
+        buildRecords: executed.buildRecords,
+        modelName: model,
+        operation: action,
+        params: args,
+        plan,
+        auditContext: scope.auditContext,
+      },
+      deps.dispatchConfig,
+      transactionRuntimeOf(scope),
+    );
+    const causes = mode === 'atomic' ? failures.incompletenessCauses() : undefined;
+    if (causes) {
+      throw new AuditIncompleteError({ modelName: model, operation: action, failures: causes });
+    }
+  } catch (caughtError) {
+    scope.transaction?.recordAuditFailure(toError(caughtError));
+    throw caughtError;
+  }
+  return executed.result;
 };

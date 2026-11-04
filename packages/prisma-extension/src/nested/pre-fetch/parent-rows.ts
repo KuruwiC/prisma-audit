@@ -8,6 +8,7 @@
  * @module nested/pre-fetch/parent-rows
  */
 
+import type { BeforeState } from '@kuruwic/db-audit-core';
 import {
   getRowKeyConstraint,
   type NestedOperationInfo,
@@ -18,6 +19,7 @@ import {
 } from '../../grammar/nested-operations.js';
 import { type NestedPreFetchResult, type ParentRowIdentity, TOP_LEVEL_ROW } from '../../grammar/nested-state.js';
 import type { SchemaMetadata, UniqueConstraint } from '../../schema/types.js';
+import { NO_BEFORE_STATE } from '../../utils/before-state.js';
 import { unwrapCompoundWhere } from '../../utils/compound-where.js';
 import { preFetchLog } from '../../utils/debug.js';
 import { extractEntityIdentity } from '../../utils/id-generation.js';
@@ -28,6 +30,8 @@ import {
   extractEntityIdOrUnresolved,
   preFetchedResultNamedBy,
   preFetchedResultUnder,
+  preFetchedStateNamedBy,
+  preFetchedStateUnder,
   rowKeyNamedBy,
 } from './pre-fetch-result-store.js';
 
@@ -263,4 +267,22 @@ export const parentRowAsStoredOf = (
 ): PreFetchRecord | undefined => {
   const before = parentReadResultOf(parent, preFetchResults, schemaMetadata)?.before;
   return before?.kind === 'captured' ? before.row : undefined;
+};
+
+/**
+ * The before state of the row the element `parent` names, as the reads ahead of the operation left
+ * it: unavailable when its read failed, none when no read found it or none read its before state
+ */
+export const parentBeforeStateOf = (
+  parent: NestedOperationParent,
+  preFetchResults: NestedPreFetchResults,
+  schemaMetadata: SchemaMetadata,
+): BeforeState => {
+  const { operation } = parent;
+  if (!targetsNamedByWhere(operation)) {
+    const grandparent = parentRowIdentityOf(operation.parent, preFetchResults, schemaMetadata);
+    return preFetchedStateUnder(preFetchResults, operation.path, grandparent);
+  }
+  const where = parentWhereOf(parent);
+  return where ? preFetchedStateNamedBy(preFetchResults, operation.path, where) : NO_BEFORE_STATE;
 };

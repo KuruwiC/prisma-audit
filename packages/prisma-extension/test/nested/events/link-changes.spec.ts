@@ -41,6 +41,7 @@ const readOf = (overrides: Partial<LinkPathRead> = {}): LinkPathRead => ({
   rows: [{ id: 'l1', name: 'before', postId: 'p2' }],
   parentKeys: new Map([[connect, { id: 'p1' }]]),
   failed: false,
+  undeterminedDetaches: new Set(),
   ...overrides,
 });
 
@@ -50,6 +51,7 @@ const inputOf = (
   client: LinkChangesInput['client'],
   audited: readonly string[] = [],
   nestedPreFetchResults: NestedPreFetchResults = new Map(),
+  onUnrecordedWrite: LinkChangesInput['onUnrecordedWrite'] = () => {},
 ): LinkChangesInput => ({
   client,
   linkReads: new Map([['labels', read]]),
@@ -58,6 +60,7 @@ const inputOf = (
   auditedAt: () => new Set(audited.map((id) => extractEntityIdentity({ id }, ['id']))),
   fieldNamesOf: () => new Set(['id', 'name', 'postId']),
   whereAfterWrite: (_operation, where) => where,
+  onUnrecordedWrite,
 });
 
 /** The records of a link write at `labels`, with `after` the rows the read after the write returns */
@@ -68,8 +71,9 @@ const collect = async (
   nestedPreFetchResults: NestedPreFetchResults = new Map(),
 ) => {
   const findMany = vi.fn(async () => after);
-  const input = inputOf(read, { label: { findMany } }, audited, nestedPreFetchResults);
-  return { records: await collectLinkChanges(input), findMany };
+  const onUnrecordedWrite = vi.fn<LinkChangesInput['onUnrecordedWrite']>();
+  const input = inputOf(read, { label: { findMany } }, audited, nestedPreFetchResults, onUnrecordedWrite);
+  return { records: await collectLinkChanges(input), findMany, onUnrecordedWrite };
 };
 
 describe('collectLinkChanges', () => {
@@ -273,6 +277,43 @@ describe('collectLinkChanges', () => {
       expect(records.get(disconnect.operation)).toEqual([
         { entity: detached, action: 'update', beforeState: { kind: 'unavailable' }, relatedModel: 'Label' },
       ]);
+    });
+  });
+
+  describe('a detaching write whose detached rows cannot be told', () => {
+    const set: NestedOperationInfo = { ...connect, operation: 'set', data: [{ id: 'l2' }] };
+    const setWrite: LinkWrite = { operation: set, named: [{ id: 'l2' }], detaches: true };
+
+    it('is reported as a write left without a record, and its named row is still recorded without a before state', async () => {
+      const after = { id: 'l2', name: 'l2', postId: 'p1' };
+      const { records, onUnrecordedWrite } = await collect(
+        readOf({
+          writes: [setWrite],
+          rows: [],
+          parentKeys: new Map(),
+          failed: true,
+          undeterminedDetaches: new Set([set]),
+        }),
+        [after],
+      );
+
+      expect(onUnrecordedWrite).toHaveBeenCalledExactlyOnceWith({
+        modelName: 'Label',
+        operation: 'set',
+        path: 'labels',
+      });
+      expect(records.get(set)).toEqual([
+        { entity: after, action: 'update', beforeState: { kind: 'unavailable' }, relatedModel: 'Label' },
+      ]);
+    });
+
+    it('is not reported when its detached rows were read', async () => {
+      const { onUnrecordedWrite } = await collect(
+        readOf({ writes: [setWrite], rows: [], parentKeys: new Map([[set, { id: 'p1' }]]) }),
+        [],
+      );
+
+      expect(onUnrecordedWrite).not.toHaveBeenCalled();
     });
   });
 });

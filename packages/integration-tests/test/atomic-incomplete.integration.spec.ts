@@ -2,11 +2,12 @@
  * Integration Test: an atomic operation commits only with every record it should produce
  *
  * A failure that drops a record of an atomic operation (`row-identification`, `id-resolver-call`,
- * an upsert skipped because its before-state read failed) fails the operation with
- * `AuditIncompleteError`, whose `failures` are those failures, and rolls back the transaction the
- * operation runs in, even when the caller catches the error inside its `$transaction` callback. A
- * record without its before state is not dropped and does not fail it. Under `awaited` the same
- * failures are only reported and the operation commits.
+ * a `pre-fetch` failure that leaves an upsert or connectOrCreate row, or a row a detaching nested
+ * link write unlinked without naming it, unrecorded) fails the operation with
+ * `AuditIncompleteError`, whose `failures` are the failures reported for it, and rolls back the
+ * transaction the operation runs in, even when the caller catches the error inside its
+ * `$transaction` callback. A record without its before state is not dropped and does not fail it.
+ * Under `awaited` the same failures are only reported and the operation commits.
  */
 
 import type { AuditContext, AuditErrorObserver } from '@kuruwic/db-audit-core';
@@ -177,6 +178,240 @@ describe('an atomic operation whose records a failure dropped', () => {
           select: { action: true, beforeUnavailable: true },
         }),
       ).toEqual([{ action: 'update', beforeUnavailable: true }]);
+    });
+  });
+
+  describe('a nested write whose read failed', () => {
+    type FaultTarget = {
+      readonly model: 'User' | 'Comment' | 'Label';
+      readonly operation: 'findUnique' | 'findFirst' | 'findMany';
+    };
+
+    /** An audited client whose next `fault.operation` call on `fault.model` after `arm()` throws once */
+    const setup = async (fault: FaultTarget, mode: WriteMode = 'atomic') => {
+      const rawBasePrisma = createBasePrisma();
+      let armed = false;
+      const basePrisma = rawBasePrisma.$extends({
+        name: 'fault-injection',
+        query: {
+          $allModels: {
+            async $allOperations({ model, operation, args, query }) {
+              if (armed && model === fault.model && operation === fault.operation) {
+                armed = false;
+                throw new Error(`simulated ${fault.model}.${fault.operation} failure`);
+              }
+              return query(args);
+            },
+          },
+        },
+      });
+      const observer = vi.fn<AuditErrorObserver>();
+      const provider = createAsyncLocalStorageProvider();
+      const prisma = createAuditClient(basePrisma, {
+        Prisma,
+        schema: auditSchema,
+        contextProvider: provider,
+        entities: testEntities,
+        diffExcludeFields: ['createdAt', 'updatedAt'],
+        fetchBefore: { update: true, delete: true },
+        write: { mode },
+        errorObserver: observer,
+      });
+      disconnects.push(async () => {
+        await prisma.$disconnect();
+        await rawBasePrisma.$disconnect();
+      });
+      await cleanDatabase(rawBasePrisma);
+
+      const user = await rawBasePrisma.user.create({
+        data: { id: 'u1', email: 'atomic-nested@example.com', name: 'Owner' },
+      });
+      const post = await rawBasePrisma.post.create({ data: { id: 'p1', title: 'Post', authorId: user.id } });
+      const c1 = await rawBasePrisma.comment.create({
+        data: { id: 'c1', content: 'one', postId: post.id, authorId: user.id },
+      });
+      const c2 = await rawBasePrisma.comment.create({
+        data: { id: 'c2', content: 'two', postId: post.id, authorId: user.id },
+      });
+      await rawBasePrisma.label.create({ data: { id: 'l1', name: 'l1', postId: post.id } });
+      await rawBasePrisma.label.create({ data: { id: 'l2', name: 'l2' } });
+      await rawBasePrisma.badge.create({ data: { id: 'b1', name: 'b1', userId: user.id } });
+
+      const arm = () => {
+        armed = true;
+      };
+      const run = <T>(operation: () => Promise<T>) => provider.runAsync(testActor, operation);
+      const phases = () =>
+        observer.mock.calls.map(([context]) => [context.phase, context.modelName, context.operation]);
+      const recordsOf = (entityType: string) =>
+        rawBasePrisma.auditLog.findMany({
+          where: { entityType, aggregateType: entityType },
+          select: { entityId: true, action: true, beforeUnavailable: true },
+          orderBy: { entityId: 'asc' },
+        });
+      return { rawBasePrisma, prisma, post, c1, c2, arm, run, phases, recordsOf };
+    };
+
+    it('fails a nested upsert below a row that cannot be identified, which is left without a record, and rolls it back', async () => {
+      const { rawBasePrisma, prisma, post, c1, c2, arm, run } = await setup({ model: 'User', operation: 'findFirst' });
+
+      arm();
+      const updated = run(() =>
+        prisma.post.update({
+          where: { id: post.id },
+          data: {
+            author: {
+              update: {
+                name: 'Owner updated',
+                comments: {
+                  update: { where: { id: c1.id }, data: { content: 'one updated' } },
+                  upsert: {
+                    where: { id: c2.id },
+                    create: { content: 'created', post: { connect: { id: post.id } } },
+                    update: { content: 'two updated' },
+                  },
+                },
+              },
+            },
+          },
+        }),
+      );
+
+      await expect(updated).rejects.toBeInstanceOf(AuditIncompleteError);
+      await expect(updated).rejects.toMatchObject({
+        modelName: 'Post',
+        operation: 'update',
+        failures: [expect.objectContaining({ phase: 'pre-fetch', modelName: 'User', operation: 'update' })],
+      });
+      expect((await rawBasePrisma.comment.findUniqueOrThrow({ where: { id: c2.id } })).content).toBe('two');
+      expect(await rawBasePrisma.auditLog.count()).toBe(0);
+    });
+
+    it.each([
+      [
+        'a to-many upsert that updates a row it could not read',
+        {
+          upsert: {
+            where: { id: 'c1' },
+            create: { content: 'created', authorId: 'u1' },
+            update: { content: 'one updated' },
+          },
+        },
+        'upsert',
+      ],
+      [
+        'a connectOrCreate that connects a row it could not read',
+        { connectOrCreate: { where: { id: 'c1' }, create: { content: 'created', authorId: 'u1' } } },
+        'connectOrCreate',
+      ],
+    ] as const)('fails %s and rolls it back', async (_, comments, keyword) => {
+      const { rawBasePrisma, prisma, post, c1, arm, run } = await setup({ model: 'Comment', operation: 'findUnique' });
+
+      arm();
+      const updated = run(() => prisma.post.update({ where: { id: post.id }, data: { title: 'Renamed', comments } }));
+
+      await expect(updated).rejects.toBeInstanceOf(AuditIncompleteError);
+      await expect(updated).rejects.toMatchObject({
+        failures: [expect.objectContaining({ phase: 'pre-fetch', modelName: 'Comment', operation: keyword })],
+      });
+      expect(await rawBasePrisma.comment.findUniqueOrThrow({ where: { id: c1.id } })).toMatchObject({ content: 'one' });
+      expect((await rawBasePrisma.post.findUniqueOrThrow({ where: { id: post.id } })).title).toBe('Post');
+      expect(await rawBasePrisma.auditLog.count()).toBe(0);
+    });
+
+    describe('a set whose read of the rows it may re-link fails, while the parent row holds a row the set does not name', () => {
+      const setLabels = { labels: { set: [{ id: 'l2' }] } };
+
+      it('fails with AuditIncompleteError and rolls it back, the unnamed row being left without a record', async () => {
+        const { rawBasePrisma, prisma, post, arm, run } = await setup({ model: 'Label', operation: 'findMany' });
+
+        arm();
+        const updated = run(() => prisma.post.update({ where: { id: post.id }, data: setLabels }));
+
+        await expect(updated).rejects.toBeInstanceOf(AuditIncompleteError);
+        await expect(updated).rejects.toMatchObject({
+          failures: [expect.objectContaining({ phase: 'pre-fetch', modelName: 'Label', operation: 'set' })],
+        });
+        const labels = await rawBasePrisma.label.findMany({
+          orderBy: { id: 'asc' },
+          select: { id: true, postId: true },
+        });
+        expect(labels).toEqual([
+          { id: 'l1', postId: post.id },
+          { id: 'l2', postId: null },
+        ]);
+        expect(await rawBasePrisma.auditLog.count()).toBe(0);
+      });
+
+      it('commits under awaited, recording the named row without its before state and reporting the read', async () => {
+        const { rawBasePrisma, prisma, post, arm, run, phases, recordsOf } = await setup(
+          { model: 'Label', operation: 'findMany' },
+          'awaited',
+        );
+
+        arm();
+        await run(() => prisma.post.update({ where: { id: post.id }, data: setLabels }));
+
+        const labels = await rawBasePrisma.label.findMany({
+          orderBy: { id: 'asc' },
+          select: { id: true, postId: true },
+        });
+        expect(labels).toEqual([
+          { id: 'l1', postId: null },
+          { id: 'l2', postId: post.id },
+        ]);
+        expect(phases()).toEqual([['pre-fetch', 'Label', 'set']]);
+        expect(await recordsOf('Label')).toEqual([{ entityId: 'l2', action: 'update', beforeUnavailable: true }]);
+      });
+    });
+
+    it('commits a disconnect whose read failed, every row it unlinks being named, recording the row without its before state', async () => {
+      const { prisma, post, arm, run, phases, recordsOf } = await setup({ model: 'Label', operation: 'findMany' });
+
+      arm();
+      await run(() => prisma.post.update({ where: { id: post.id }, data: { labels: { disconnect: { id: 'l1' } } } }));
+
+      expect(phases()).toEqual([['pre-fetch', 'Label', 'disconnect']]);
+      expect(await recordsOf('Label')).toEqual([{ entityId: 'l1', action: 'update', beforeUnavailable: true }]);
+    });
+
+    it('fails a to-one disconnect below a row that cannot be identified, the row it unlinks being left without a record, and rolls it back', async () => {
+      const { rawBasePrisma, prisma, post, arm, run } = await setup({ model: 'User', operation: 'findFirst' });
+
+      arm();
+      const updated = run(() =>
+        prisma.post.update({
+          where: { id: post.id },
+          data: { author: { update: { name: 'Owner updated', badge: { disconnect: true } } } },
+        }),
+      );
+
+      await expect(updated).rejects.toBeInstanceOf(AuditIncompleteError);
+      await expect(updated).rejects.toMatchObject({
+        failures: [expect.objectContaining({ phase: 'pre-fetch', modelName: 'User', operation: 'update' })],
+      });
+      expect(await rawBasePrisma.badge.findUniqueOrThrow({ where: { id: 'b1' } })).toMatchObject({ userId: 'u1' });
+      expect(await rawBasePrisma.auditLog.count()).toBe(0);
+    });
+
+    it('commits a to-one create below a row the operation creates, which holds no row to unlink', async () => {
+      const { rawBasePrisma, prisma, run, phases, recordsOf } = await setup({ model: 'User', operation: 'findFirst' });
+
+      await run(() =>
+        prisma.post.create({
+          data: {
+            id: 'p2',
+            title: 'New',
+            author: {
+              create: { id: 'u2', email: 'atomic-new@example.com', badge: { create: { id: 'b2', name: 'b2' } } },
+            },
+          },
+        }),
+      );
+
+      expect(phases()).toEqual([]);
+      expect(await rawBasePrisma.badge.findUniqueOrThrow({ where: { id: 'b2' } })).toMatchObject({ userId: 'u2' });
+      expect((await recordsOf('Badge')).map(({ entityId, action }) => [entityId, action])).toEqual([['b2', 'create']]);
     });
   });
 

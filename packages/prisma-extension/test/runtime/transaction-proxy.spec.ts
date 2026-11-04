@@ -98,7 +98,7 @@ const createDeps = (write: AuditWrite, failureSink: FailureSink = stubFailureSin
   batchExecutor: creatingExecutor,
   produceRecords: vi.fn(async () => []),
   dispatchConfig: { writeExecutor: { write: vi.fn(write) }, failureSink },
-  failureSink,
+  failureSinkConfig: {},
 });
 
 const auditWriteOf = (deps: AuditPipelineDependencies) => vi.mocked(deps.dispatchConfig.writeExecutor.write);

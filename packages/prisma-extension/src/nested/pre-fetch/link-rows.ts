@@ -12,12 +12,14 @@
  *
  * The read runs only when `fetchBefore` reads the before state of updates of the related model:
  * the record exists to tell the old foreign key, which nothing else holds. A failed read is
- * reported like any nested pre-fetch failure and leaves the caller's operation running.
+ * reported like any nested pre-fetch failure and leaves the caller's operation running; the writes
+ * whose detached rows it, or the failed read of their parent row, leaves unknown are named so that
+ * the collection reports them as left without a record.
  *
  * @module nested/pre-fetch/link-rows
  */
 
-import type { FailureSink } from '@kuruwic/db-audit-core';
+import type { BeforeState, FailureSink } from '@kuruwic/db-audit-core';
 import {
   getRowKeyConstraint,
   type NestedOperationInfo,
@@ -33,6 +35,7 @@ import { preFetchLog } from '../../utils/debug.js';
 import { toError } from '../../utils/to-error.js';
 import { getPreFetchListClient, getPreFetchModelClient } from './model-client.js';
 import {
+  parentBeforeStateOf,
   parentKeyOf,
   parentKeysFromOperationWheres,
   parentPathOf,
@@ -70,6 +73,12 @@ export interface LinkPathRead {
   readonly parentKeys: ReadonlyMap<NestedOperationInfo, Row>;
   /** The read failed: the named rows are audited without a before state, the detached rows cannot be told */
   readonly failed: boolean;
+  /**
+   * The detaching writes whose parent row held rows before the write that cannot be told: the read
+   * failed, or the parent row's own read did, so its key is unknown. Not a write whose parent row
+   * the operation creates, which held none.
+   */
+  readonly undeterminedDetaches: ReadonlySet<NestedOperationInfo>;
 }
 
 /** The link reads of an operation, keyed by path */
@@ -193,6 +202,48 @@ const assertReferencesComplete = (link: RelatedSideLink): void => {
   }
 };
 
+/**
+ * Whether the row a nested operation writes may exist before the write, given its before state:
+ * not the row a create inserts, nor the row an upsert or connectOrCreate, whose row is always
+ * read, found absent. The row an update writes exists, whether or not its before state is read.
+ */
+const mayExistBefore = (operation: NestedOperationInfo, before: BeforeState): boolean => {
+  switch (operation.operation) {
+    case 'create':
+      return false;
+    case 'upsert':
+    case 'connectOrCreate':
+      return before.kind !== 'none';
+    default:
+      return true;
+  }
+};
+
+/**
+ * The detaching writes among `writes` whose parent row may have held rows the read did not find:
+ * after a failed read, every one whose parent row may exist (not the top-level row of a create,
+ * see {@link mayExistBefore} for a nested one); else those whose parent row's read failed, which
+ * left its key unknown
+ */
+const undeterminedDetachesOf = (
+  input: ReadLinkRowsInput,
+  deps: ReadLinkRowsDependencies,
+  { writes, parentKeys, failed }: Pick<LinkPathRead, 'writes' | 'parentKeys' | 'failed'>,
+): Set<NestedOperationInfo> => {
+  const undetermined = (write: LinkWrite): boolean => {
+    if (!write.detaches || parentKeys.has(write.operation)) {
+      return false;
+    }
+    const { parent } = write.operation;
+    if (!parent) {
+      return failed && input.topLevelWhere !== undefined;
+    }
+    const before = parentBeforeStateOf(parent, input.nestedPreFetchResults, deps.schemaMetadata);
+    return failed ? mayExistBefore(parent.operation, before) : before.kind === 'unavailable';
+  };
+  return new Set(writes.filter(undetermined).map((write) => write.operation));
+};
+
 /** The foreign key of the link holding `parentKey`, as a filter on the related model */
 export const attachedFilter = (link: RelatedSideLink, parentKey: Row): Row =>
   Object.fromEntries(link.fields.map((field, index) => [field, parentKey[link.references[index] ?? '']]));
@@ -227,7 +278,8 @@ const readPath = async (
     });
     const rows = filters.length > 0 ? await client.findMany({ where: { OR: filters } }) : [];
     preFetchLog('link rows read: path=%s rows=%d', path, rows.length);
-    return { ...base, rows, parentKeys, failed: false };
+    const undeterminedDetaches = undeterminedDetachesOf(input, deps, { writes, parentKeys, failed: false });
+    return { ...base, rows, parentKeys, failed: false, undeterminedDetaches };
   } catch (error) {
     preFetchLog('link rows read failed: path=%s error=%o', path, error);
     await deps.onPreFetchFailure?.({
@@ -237,7 +289,9 @@ const readPath = async (
       params: first.operation.data,
       error: toError(error),
     });
-    return { ...base, rows: [], parentKeys: new Map(), failed: true };
+    const parentKeys = new Map<NestedOperationInfo, Row>();
+    const undeterminedDetaches = undeterminedDetachesOf(input, deps, { writes, parentKeys, failed: true });
+    return { ...base, rows: [], parentKeys, failed: true, undeterminedDetaches };
   }
 };
 

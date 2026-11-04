@@ -19,6 +19,7 @@ import {
   type BatchOperationOutcome,
   collectBatchOperationEvents,
   collectSingleOperationEvents,
+  type EventCollectorDependencies,
   type SingleOperationOutcome,
 } from '../../src/pipeline/collect-events.js';
 import { NO_AUDITED_OMITTED_FIELDS } from '../../src/utils/audited-omitted-fields.js';
@@ -64,7 +65,15 @@ const schemaMetadata = schemaMetadataOf(
   model('Tag', [column('alias', { isUnique: true }), column('code', { isUnique: true, isRequired: true })]),
 );
 
-const deps = { Prisma, schemaMetadata, shouldFetchBefore: () => true, auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS };
+const deps: EventCollectorDependencies = {
+  Prisma,
+  schemaMetadata,
+  shouldFetchBefore: () => true,
+  auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS,
+  onUnrecordedWrite: () => {},
+};
+
+const reportingDeps = () => ({ ...deps, onUnrecordedWrite: vi.fn<EventCollectorDependencies['onUnrecordedWrite']>() });
 const client: PrismaBaseClient = Object.create(null);
 
 type SingleCase = Partial<
@@ -234,6 +243,37 @@ describe('collectSingleOperationEvents', () => {
     const events = await collectSingleOperationEvents(outcome, deps);
 
     expect(events).toEqual([]);
+  });
+
+  it('reports an upsert whose before-state fetch failed as a write left without a record', async () => {
+    const reporting = reportingDeps();
+    const outcome = single({
+      action: 'upsert',
+      args: { where: { id: 'u1' }, create: { name: 'Ann' }, update: { name: 'Ann' } },
+      beforeState: { kind: 'unavailable' },
+    });
+
+    await collectSingleOperationEvents(outcome, reporting);
+
+    expect(reporting.onUnrecordedWrite).toHaveBeenCalledExactlyOnceWith({
+      modelName: 'User',
+      operation: 'upsert',
+      path: '',
+    });
+  });
+
+  it('reports no write left without a record for an update whose before-state fetch failed', async () => {
+    const reporting = reportingDeps();
+    const outcome = single({
+      action: 'update',
+      args: { where: { id: 'u1' }, data: { name: 'Ann' } },
+      beforeState: { kind: 'unavailable' },
+    });
+
+    const events = await collectSingleOperationEvents(outcome, reporting);
+
+    expect(events).toEqual([expect.objectContaining({ action: 'update', before: { kind: 'unavailable' } })]);
+    expect(reporting.onUnrecordedWrite).not.toHaveBeenCalled();
   });
 
   it('gives a row that lacks its primary key an empty identity', async () => {
@@ -525,6 +565,7 @@ describe('collectSingleOperationEvents', () => {
       posts: Record<string, unknown>,
       rows: Record<string, unknown>[],
       overrides: SingleCase = {},
+      collectorDeps: EventCollectorDependencies = deps,
     ) => {
       const events = await collectSingleOperationEvents(
         single({
@@ -534,7 +575,7 @@ describe('collectSingleOperationEvents', () => {
           beforeState: { kind: 'captured', row: userBefore },
           ...overrides,
         }),
-        deps,
+        collectorDeps,
       );
       return events.filter((event) => event.model === 'Post');
     };
@@ -600,6 +641,63 @@ describe('collectSingleOperationEvents', () => {
       });
 
       expect(events).toEqual([]);
+    });
+
+    it.each([
+      ['upsert', { upsert: { where: { id: 'p1' }, create: { title: 'C' }, update: { title: 'A' } } }],
+      ['connectOrCreate', { connectOrCreate: { where: { id: 'p1' }, create: { title: 'C' } } }],
+    ])(
+      'reports a nested %s whose target could not be read as a write left without a record',
+      async (keyword, posts) => {
+        const reporting = reportingDeps();
+
+        await postEvents(posts, [p1, p2], { nestedPreFetchResults: unreadAt('posts') }, reporting);
+
+        expect(reporting.onUnrecordedWrite).toHaveBeenCalledExactlyOnceWith({
+          modelName: 'Post',
+          operation: keyword,
+          path: 'posts',
+        });
+      },
+    );
+
+    it('reports a nested upsert whose target could not be read when a connect next to it names the same row', async () => {
+      const reporting = reportingDeps();
+
+      await postEvents(
+        {
+          connect: { id: 'p1' },
+          upsert: { where: { id: 'p1' }, create: { title: 'C' }, update: { title: 'A' } },
+        },
+        [p1, p2],
+        { nestedPreFetchResults: unreadAt('posts') },
+        reporting,
+      );
+
+      expect(reporting.onUnrecordedWrite).toHaveBeenCalledExactlyOnceWith({
+        modelName: 'Post',
+        operation: 'upsert',
+        path: 'posts',
+      });
+    });
+
+    it.each([
+      [
+        'an update whose target could not be read',
+        { update: { where: { id: 'p1' }, data: { title: 'A' } } },
+        unreadAt('posts'),
+      ],
+      [
+        'a connectOrCreate that connected the row it read',
+        { connectOrCreate: { where: { id: 'p1' }, create: { title: 'C' } } },
+        undefined,
+      ],
+    ])('reports no write left without a record for %s', async (_, posts, unread) => {
+      const reporting = reportingDeps();
+
+      await postEvents(posts, [p1, p2], { nestedPreFetchResults: unread ?? preFetched([['p1', p1Before]]) }, reporting);
+
+      expect(reporting.onUnrecordedWrite).not.toHaveBeenCalled();
     });
 
     it('attributes an upsert whose target existed that row as an update', async () => {

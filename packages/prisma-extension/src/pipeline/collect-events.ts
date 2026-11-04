@@ -108,9 +108,10 @@ const withKeyFromBefore = (row: Row, keyFields: readonly string[], write: TopLev
 
 /**
  * The top-level row carries the before state as read: captured, none, or unavailable when the
- * read failed. An upsert whose read failed yields no event at all: a failed read cannot tell an
- * absent row from an existing one, so neither the top-level action nor the nested writes of the
- * resolved branch can be told (the read already reported its failure).
+ * read failed. An upsert whose read failed yields no event at all, and is reported as a write left
+ * without a record: a failed read cannot tell an absent row from an existing one, so neither the
+ * top-level action nor the nested writes of the resolved branch can be told (the read already
+ * reported its failure).
  */
 export const collectSingleOperationEvents = async (
   outcome: SingleOperationOutcome,
@@ -120,6 +121,7 @@ export const collectSingleOperationEvents = async (
   const { nestedPreFetchResults, nestedOperations, writeSets, preExistingRows, linkReads } = outcome;
 
   if (action === AUDIT_ACTION.UPSERT && resolvedUpsertBranch(action, beforeState) === undefined) {
+    deps.onUnrecordedWrite({ modelName, operation: action, path: '' });
     return [];
   }
 

@@ -3,11 +3,11 @@
  * semantics, and its independence from the app-owned audit context.
  */
 
-import type { AuditContext, AuditErrorContext } from '@kuruwic/db-audit-core';
+import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { describe, expect, it } from 'vitest';
 import type { PrismaHandle } from '../../src/internal-types.js';
-import { currentScope, keepOperationFailure, operationBinding, withScope } from '../../src/runtime/scope.js';
+import { currentScope, operationBinding, withScope } from '../../src/runtime/scope.js';
 import { activeTransactionOf } from '../support/active-transaction.js';
 
 const client = (id: string): PrismaHandle => ({ id });
@@ -59,34 +59,6 @@ describe('runtime scope', () => {
           expect(operationBinding()).toBeUndefined();
         });
       });
-    });
-  });
-
-  describe('keepOperationFailure', () => {
-    const failure: AuditErrorContext = {
-      phase: 'row-identification',
-      modelName: 'User',
-      operation: 'updateMany',
-      params: { unidentified: 1 },
-      error: new Error('unidentified rows'),
-    };
-
-    it('keeps a failure among those of the innermost scope that collects them, and nowhere without one', () => {
-      const outer: AuditErrorContext[] = [];
-      const inner: AuditErrorContext[] = [];
-
-      keepOperationFailure(failure);
-      withScope({ operationFailures: outer }, () => {
-        withScope({ isProcessingAuditLog: true }, () => {
-          keepOperationFailure(failure);
-        });
-        withScope({ operationFailures: inner }, () => {
-          keepOperationFailure(failure);
-        });
-      });
-
-      expect(outer).toEqual([failure]);
-      expect(inner).toEqual([failure]);
     });
   });
 

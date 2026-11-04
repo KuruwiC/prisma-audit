@@ -4,14 +4,14 @@
  * collects, and the error each kind of failure surfaces as.
  */
 
-import type { FailureSink } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
 import type { PrismaNamespace } from '../../src/internal-types.js';
+import type { OperationFailureSink } from '../../src/pipeline/execution-scope.js';
 import type { RecordProducer } from '../../src/pipeline/produce-records.js';
 import { createSingleExecutor } from '../../src/pipeline/single-executor.js';
 import { NO_AUDITED_OMITTED_FIELDS, withRowKeyFields } from '../../src/utils/audited-omitted-fields.js';
 import { column, model, relation, schemaMetadataOf } from '../support/audit-schema.js';
-import { stubFailureSink } from '../support/failure-sink.js';
+import { stubOperationFailureSink } from '../support/failure-sink.js';
 import { clientWith, operationOn, scopeOn } from './client-operation.js';
 import { runWithRecords } from './run-with-records.js';
 
@@ -52,14 +52,14 @@ const updateArgs = { where: { id: 'u1' }, data: { name: 'Anne' } };
 
 interface ExecutorOptions {
   fetchBefore?: boolean;
-  failureSink?: FailureSink;
+  failureSink?: OperationFailureSink;
   /** Whether the client takes a query `omit` (Prisma 6.2 and later); false by default */
   queryOmitSupported?: boolean;
 }
 
 const executorWith = (options: ExecutorOptions = {}) => {
   const shouldFetchBefore = vi.fn(() => options.fetchBefore ?? true);
-  const failureSink = options.failureSink ?? stubFailureSink();
+  const failureSink = options.failureSink ?? stubOperationFailureSink();
   const executor = createSingleExecutor({
     Prisma,
     schemaMetadata,
@@ -70,7 +70,6 @@ const executorWith = (options: ExecutorOptions = {}) => {
       schemaMetadata,
       options.queryOmitSupported ?? false,
     ),
-    failureSink,
   });
   const produceRecords = vi.fn<RecordProducer>(async () => []);
   return { executor, produceRecords, shouldFetchBefore, failureSink };
@@ -189,7 +188,7 @@ describe('createSingleExecutor', () => {
       const { executor, produceRecords, failureSink } = executorWith();
       const operation = operationOn(client, 'update', updateArgs);
 
-      const outcome = await runWithRecords(executor, operation, scopeOn(client), produceRecords);
+      const outcome = await runWithRecords(executor, operation, scopeOn(client, failureSink), produceRecords);
 
       expect(failureSink.notify).toHaveBeenCalledWith({
         phase: 'pre-fetch',
@@ -221,7 +220,7 @@ describe('createSingleExecutor', () => {
       await runWithRecords(
         executor,
         operationOn(client, 'upsert', { where: { id: 'u1' }, create: { name: 'Ann' }, update: {} }),
-        scopeOn(client),
+        scopeOn(client, failureSink),
         produceRecords,
       );
 
@@ -345,7 +344,12 @@ describe('createSingleExecutor', () => {
       });
       const { executor, produceRecords, failureSink } = executorWith({ fetchBefore: true });
 
-      await runWithRecords(executor, operationOn(client, 'update', nestedUpdateArgs), scopeOn(client), produceRecords);
+      await runWithRecords(
+        executor,
+        operationOn(client, 'update', nestedUpdateArgs),
+        scopeOn(client, failureSink),
+        produceRecords,
+      );
 
       expect(failureSink.notify).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -417,7 +421,7 @@ describe('createSingleExecutor', () => {
       });
       const { executor, produceRecords, failureSink } = executorWith({ fetchBefore: false });
 
-      await runWithRecords(executor, operationOn(client, 'update', args), scopeOn(client), produceRecords);
+      await runWithRecords(executor, operationOn(client, 'update', args), scopeOn(client, failureSink), produceRecords);
 
       expect(failureSink.notify).toHaveBeenCalledTimes(1);
       expect(failureSink.notify).toHaveBeenCalledWith({
@@ -500,7 +504,7 @@ describe('createSingleExecutor', () => {
         runWithRecords(
           executor,
           operationOn(client, 'update', { where: { id: 'u1' }, data: { posts: { create: { title: 'B' } } } }),
-          scopeOn(client),
+          scopeOn(client, failureSink),
           produceRecords,
         ),
       ).rejects.toBe(snapshotError);
@@ -776,7 +780,7 @@ describe('createSingleExecutor', () => {
       const run = runWithRecords(
         executor,
         operationOn(client, 'create', { data: { name: 'Ann' } }),
-        scopeOn(client),
+        scopeOn(client, failureSink),
         produceRecords,
       );
 

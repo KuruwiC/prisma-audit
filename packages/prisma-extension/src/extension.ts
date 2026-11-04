@@ -34,7 +34,7 @@ import { createRecordProducer } from './pipeline/produce-records.js';
 import { type AuditPipelineDependencies, runAuditedOperation } from './pipeline/run-audited-operation.js';
 import { createSingleExecutor } from './pipeline/single-executor.js';
 import type { RecipeConfig } from './runtime/operation-recipe.js';
-import { isProcessingAuditLog, keepOperationFailure, operationBinding, withScope } from './runtime/scope.js';
+import { isProcessingAuditLog, operationBinding, withScope } from './runtime/scope.js';
 import { createTransactionProxy } from './runtime/transaction-proxy.js';
 import type { PrismaAuditExtensionOptions } from './types.js';
 import { type ClientShape, injectAuditedSelection, projectToRequestedShape } from './utils/audited-selection.js';
@@ -43,16 +43,6 @@ import { getModelAccessor } from './utils/model-accessor.js';
 
 const createPipelineDependencies = (audit: AuditOptions): AuditPipelineDependencies => {
   const { Prisma, schemaMetadata, shouldFetchBefore, auditedOmittedFields, auditedOmittedFieldsWithRowKey } = audit;
-  const { observer } = audit.failureSinkConfig;
-  // The failures the pipeline detects itself are kept on the operation they were reported for, so
-  // that an atomic one fails when some dropped its records. `dispatch` reports through a sink of
-  // the observer alone, which logs a failure the caller cannot see when no observer is configured.
-  const failureSink = createFailureSink({
-    observer: async (context) => {
-      keepOperationFailure(context);
-      await observer?.(context);
-    },
-  });
 
   return {
     singleExecutor: createSingleExecutor({
@@ -61,23 +51,20 @@ const createPipelineDependencies = (audit: AuditOptions): AuditPipelineDependenc
       shouldFetchBefore,
       auditedOmittedFields,
       auditedOmittedFieldsWithRowKey,
-      failureSink,
     }),
-    batchExecutor: createBatchExecutor({ Prisma, schemaMetadata, auditedOmittedFieldsWithRowKey, failureSink }),
-    produceRecords: createRecordProducer({
-      ...audit,
-      omittedFieldReads: { schemaMetadata, auditedOmittedFields },
-      failureSink,
-    }),
+    batchExecutor: createBatchExecutor({ Prisma, schemaMetadata, auditedOmittedFieldsWithRowKey }),
+    produceRecords: createRecordProducer({ ...audit, omittedFieldReads: { schemaMetadata, auditedOmittedFields } }),
     dispatchConfig: {
       writeExecutor: createPrismaWriteExecutor(Prisma.DbNull, {
         auditLogAccessor: audit.auditLogAccessor,
         storesBeforeUnavailable: declaresBeforeUnavailableColumn(schemaMetadata, audit.auditLogAccessor),
       }),
       writer: audit.writer,
+      // Its own sink of the observer, which logs a failed write the caller cannot see when no
+      // observer is configured; each operation reports the failures it detects to a sink of its own
       failureSink: createFailureSink(audit.failureSinkConfig),
     },
-    failureSink,
+    failureSinkConfig: audit.failureSinkConfig,
   };
 };
 

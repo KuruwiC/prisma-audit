@@ -4,25 +4,30 @@
  * in when there is one.
  */
 
-import type { FailureSink, MutationEvent } from '@kuruwic/db-audit-core';
+import type { MutationEvent } from '@kuruwic/db-audit-core';
 import { createEntityConfigLookup, defineEntity } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
 import type { PrismaBaseClient, PrismaHandle } from '../../src/internal-types.js';
-import type { ExecutionScope } from '../../src/pipeline/execution-scope.js';
+import type { ExecutionScope, OperationFailureSink } from '../../src/pipeline/execution-scope.js';
 import type { OmittedFieldReadDependencies } from '../../src/pipeline/omitted-fields-after-write.js';
 import { createRecordProducer } from '../../src/pipeline/produce-records.js';
 import { createAuditedOmittedFields, NO_AUDITED_OMITTED_FIELDS } from '../../src/utils/audited-omitted-fields.js';
 import { column, model, schemaMetadataOf } from '../support/audit-schema.js';
+import { stubOperationFailureSink } from '../support/failure-sink.js';
 
 const baseClient: PrismaBaseClient = Object.assign(Object.create(null), { name: 'base' });
 const transactionClient: PrismaHandle = Object.assign(Object.create(null), { name: 'transaction' });
 const auditContext = { actor: { category: 'model', type: 'User', id: 'user-1' } };
 
-const scopeOn = (handle: ExecutionScope['handle']): ExecutionScope => ({
+const scopeOn = (
+  handle: ExecutionScope['handle'],
+  failureSink: OperationFailureSink = stubOperationFailureSink(),
+): ExecutionScope => ({
   auditContext,
   handle,
   baseClient,
   transaction: handle === baseClient ? undefined : { deferredWrites: [], recordAuditFailure: () => {} },
+  failureSink,
 });
 
 const event: MutationEvent = {
@@ -40,7 +45,6 @@ const postSchemaMetadata = schemaMetadataOf(
 
 const producerWith = (
   idResolver: (row: Record<string, unknown>, db: unknown) => Promise<string | null>,
-  failureSink: Pick<FailureSink, 'reportResolverFailures'> = { reportResolverFailures: vi.fn(async () => {}) },
   omittedFieldReads: OmittedFieldReadDependencies = {
     schemaMetadata: schemaMetadataOf(),
     auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS,
@@ -56,7 +60,6 @@ const producerWith = (
       relationFieldNames: () => undefined,
     },
     omittedFieldReads,
-    failureSink,
   });
 };
 
@@ -80,28 +83,27 @@ describe('createRecordProducer', () => {
     });
   });
 
-  it('reports the row whose id resolver throws to the failure sink and composes the other rows', async () => {
+  it("reports the row whose id resolver throws to the scope's failure sink and composes the other rows", async () => {
     const error = new Error('resolver broken');
-    const reportResolverFailures = vi.fn(async () => {});
+    const failureSink = stubOperationFailureSink();
     const failing: MutationEvent = {
       ...event,
       identity: 'p2',
       after: { id: 'p2', title: 'new' },
       origin: { path: 'posts', op: 'create' },
     };
-    const produce = producerWith(
-      async (row) => {
-        if (row.id === 'p2') throw error;
-        return row.id as string;
-      },
-      { reportResolverFailures },
-    );
+    const produce = producerWith(async (row) => {
+      if (row.id === 'p2') throw error;
+      return row.id as string;
+    });
 
-    const records = await produce([event, failing], scopeOn(baseClient), new Map());
+    const records = await produce([event, failing], scopeOn(baseClient, failureSink), new Map());
 
     expect(records.map((record) => record.entityId)).toEqual(['p1']);
-    expect(reportResolverFailures).toHaveBeenCalledTimes(1);
-    expect(reportResolverFailures).toHaveBeenCalledWith([{ event: failing, resolver: { kind: 'entity' }, error }]);
+    expect(failureSink.reportResolverFailures).toHaveBeenCalledTimes(1);
+    expect(failureSink.reportResolverFailures).toHaveBeenCalledWith([
+      { event: failing, resolver: { kind: 'entity' }, error },
+    ]);
   });
 
   it('hands the callbacks the base client when the operation runs outside a transaction', async () => {
@@ -148,17 +150,13 @@ describe('createRecordProducer', () => {
     const transaction: PrismaHandle = Object.assign(Object.create(null), {
       post: { findMany: transactionFindMany },
     });
-    const produce = producerWith(
-      async (row) => row.id as string,
-      { reportResolverFailures: vi.fn(async () => {}) },
-      {
-        schemaMetadata: postSchemaMetadata,
-        auditedOmittedFields: createAuditedOmittedFields(
-          (model) => (model === 'Post' ? { recordOmittedFields: ['memo'] } : undefined),
-          [],
-        ),
-      },
-    );
+    const produce = producerWith(async (row) => row.id as string, {
+      schemaMetadata: postSchemaMetadata,
+      auditedOmittedFields: createAuditedOmittedFields(
+        (model) => (model === 'Post' ? { recordOmittedFields: ['memo'] } : undefined),
+        [],
+      ),
+    });
 
     const written: MutationEvent = {
       ...event,

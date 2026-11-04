@@ -103,9 +103,10 @@ export interface FailureSink {
  * Thrown by an adapter for an atomic operation whose records some failure dropped (a row it could
  * not identify, an id resolver that failed, a record the adapter skipped because a read it depends
  * on failed), once the operation's write has run inside the transaction the adapter owns: the
- * transaction must not commit without them. `failures` are those failures, as the observer
+ * transaction must not commit without them. `failures` are the observer-only failures the adapter
+ * reported for the operation, the ones that dropped its records among them, as the observer
  * received them, and are also its `cause`. A record whose before state could not be read is not
- * dropped, so it does not count.
+ * dropped: on its own, that failure does not fail the operation.
  */
 export class AuditIncompleteError extends Error {
   readonly modelName: string;

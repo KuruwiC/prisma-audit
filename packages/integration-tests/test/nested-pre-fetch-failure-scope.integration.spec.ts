@@ -6,8 +6,9 @@
  * - rows nested below a row whose read failed are read under that row's key when its WHERE names
  *   its primary key, so their before states and upsert branches stay exact;
  * - below a row that cannot be identified (a to-one relation's row), a nested update is recorded
- *   with `beforeUnavailable`, a nested upsert is not recorded, and a create's pre-existing
- *   siblings cannot be told apart, so the operation fails;
+ *   with `beforeUnavailable`, a nested upsert is not recorded (which fails an atomic operation, see
+ *   `atomic-incomplete.integration.spec.ts`), and a create's pre-existing siblings cannot be told
+ *   apart, so the operation fails;
  * - another operation at the same path keeps the result of its own read;
  * - a nested `updateMany` / `deleteMany` whose filter read fails fails the operation, since that
  *   read is what identifies the rows it writes.
@@ -18,7 +19,7 @@
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
-import type { AuditErrorObserver } from '@kuruwic/prisma-audit';
+import type { AuditErrorObserver, WriteMode } from '@kuruwic/prisma-audit';
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
@@ -44,7 +45,7 @@ describe('nested pre-fetch failures — affected rows', () => {
   });
 
   /** An audited client whose next `fault.operation` call on `fault.model` after `arm()` throws once */
-  const setup = async (fault: FaultTarget) => {
+  const setup = async (fault: FaultTarget, mode: WriteMode = 'atomic') => {
     const rawBasePrisma = createBasePrisma();
     let armed = false;
     const basePrisma = rawBasePrisma.$extends({
@@ -70,6 +71,7 @@ describe('nested pre-fetch failures — affected rows', () => {
       contextProvider: provider,
       entities: testEntities,
       diffExcludeFields: ['createdAt', 'updatedAt'],
+      write: { mode },
       errorObserver: observer,
     });
     disconnects.push(async () => {
@@ -156,10 +158,11 @@ describe('nested pre-fetch failures — affected rows', () => {
   });
 
   it('records a nested update below a row that cannot be identified as unavailable and skips a nested upsert there', async () => {
-    const { rawBasePrisma, prisma, post, c1, c2, arm, run, logsOf, phases } = await setup({
-      model: 'User',
-      operation: 'findFirst',
-    });
+    // Under the awaited mode the skipped upsert is only reported; an atomic write fails instead
+    const { rawBasePrisma, prisma, post, c1, c2, arm, run, logsOf, phases } = await setup(
+      { model: 'User', operation: 'findFirst' },
+      'awaited',
+    );
 
     arm();
     await run(() =>

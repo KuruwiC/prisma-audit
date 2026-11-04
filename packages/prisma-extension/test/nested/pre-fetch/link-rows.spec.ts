@@ -330,6 +330,99 @@ describe('readLinkRows', () => {
     );
   });
 
+  it('names no detaching write as undetermined when the keys of their parent rows were read', async () => {
+    const reads = await readWith(vi.fn(async () => []));
+
+    expect(reads.get('posts.labels')?.undeterminedDetaches).toEqual(new Set());
+  });
+
+  it('names every detaching write as undetermined when the read failed, and not a write that detaches nothing', async () => {
+    const reads = await readWith(
+      vi.fn(async () => {
+        throw new Error('findMany failed');
+      }),
+    );
+
+    const read = reads.get('posts.labels');
+    expect([...(read?.undeterminedDetaches ?? [])].map(({ operation }) => operation)).toEqual(['set']);
+  });
+
+  it('names a detaching write as undetermined when the read of its parent row failed and left its key unknown', async () => {
+    const setArgs = {
+      where: { id: 'u1' },
+      data: { posts: { update: { where: { slug: 's1' }, data: { labels: { set: [{ id: 'la' }] } } } } },
+    };
+    const nestedPreFetchResults: NestedPreFetchResults = new Map();
+    storeReadResult(
+      nestedPreFetchResults,
+      'posts',
+      { slug: 's1' },
+      null,
+      { type: 'primaryKey', fields: ['id'] },
+      false,
+    );
+    const nestedOperations = detectResolvedNestedOperations(
+      schemaMetadata,
+      'User',
+      setArgs,
+      undefined,
+      nestedPreFetchResults,
+    );
+    const findMany = vi.fn(async () => [{ id: 'la', postId: null }]);
+
+    const reads = await readLinkRows(
+      {
+        prismaClient: { label: { findMany } },
+        modelName: 'User',
+        topLevelWhere: setArgs.where,
+        nestedOperations,
+        nestedPreFetchResults,
+      },
+      { schemaMetadata, auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS, shouldFetchBefore: () => true },
+    );
+
+    const read = reads.get('posts.labels');
+    expect(read).toMatchObject({ failed: false, rows: [{ id: 'la', postId: null }] });
+    expect([...(read?.undeterminedDetaches ?? [])].map(({ operation }) => operation)).toEqual(['set']);
+  });
+
+  it('names a detaching write as undetermined when the read failed below a parent row whose before state is not read', async () => {
+    const setArgs = {
+      where: { id: 'u1' },
+      data: { posts: { update: { where: { id: 'p1' }, data: { labels: { set: [{ id: 'la' }] } } } } },
+    };
+    const nestedPreFetchResults: NestedPreFetchResults = new Map();
+    const nestedOperations = detectResolvedNestedOperations(
+      schemaMetadata,
+      'User',
+      setArgs,
+      undefined,
+      nestedPreFetchResults,
+    );
+    const findMany = vi.fn(async () => {
+      throw new Error('findMany failed');
+    });
+
+    const reads = await readLinkRows(
+      {
+        prismaClient: { label: { findMany } },
+        modelName: 'User',
+        topLevelWhere: setArgs.where,
+        nestedOperations,
+        nestedPreFetchResults,
+      },
+      {
+        schemaMetadata,
+        auditedOmittedFields: NO_AUDITED_OMITTED_FIELDS,
+        shouldFetchBefore: (modelName) => modelName === 'Label',
+      },
+    );
+
+    const read = reads.get('posts.labels');
+    expect(read?.failed).toBe(true);
+    expect([...(read?.undeterminedDetaches ?? [])].map(({ operation }) => operation)).toEqual(['set']);
+  });
+
   it('reports a failed read and marks the path', async () => {
     const error = new Error('findMany failed');
     const onPreFetchFailure = vi.fn(async () => undefined);

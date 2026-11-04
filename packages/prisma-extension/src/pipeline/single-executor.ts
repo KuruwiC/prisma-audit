@@ -8,7 +8,7 @@
  * then runs the operation with them and collects the top-level row and the nested rows it wrote.
  */
 
-import type { BeforeState, FailureSink, MutationEvent } from '@kuruwic/db-audit-core';
+import type { BeforeState, MutationEvent } from '@kuruwic/db-audit-core';
 import type { NestedOperationInfo, NestedPreFetchResults } from '../grammar/nested-operations.js';
 import type { ShouldFetchBefore } from '../grammar/pre-fetch-selection.js';
 import type { PrismaNamespace } from '../internal-types.js';
@@ -35,7 +35,6 @@ export interface SingleExecutorDependencies {
   readonly shouldFetchBefore: ShouldFetchBefore;
   readonly auditedOmittedFields: AuditedOmittedFields;
   readonly auditedOmittedFieldsWithRowKey: AuditedOmittedFields;
-  readonly failureSink: FailureSink;
 }
 
 export interface SinglePrepared {
@@ -56,17 +55,11 @@ const UNFOLLOWED_ROW_KEYS_CAUSE: Readonly<Record<UnfollowedRowKeysReason, string
 };
 
 export const createSingleExecutor = (deps: SingleExecutorDependencies): OperationExecutor => {
-  const {
-    Prisma,
-    schemaMetadata,
-    shouldFetchBefore,
-    auditedOmittedFields,
-    auditedOmittedFieldsWithRowKey,
-    failureSink,
-  } = deps;
+  const { Prisma, schemaMetadata, shouldFetchBefore, auditedOmittedFields, auditedOmittedFieldsWithRowKey } = deps;
 
   const prepare = async (operation: AuditedOperation, scope: ExecutionScope): Promise<SinglePrepared> => {
     const { model: modelName, action, args } = operation;
+    const { failureSink } = scope;
     const beforeState = await fetchBeforeState(
       { handle: scope.handle, modelName, action, args },
       { shouldFetchBefore, auditedOmittedFieldsWithRowKey, onFetchFailure: failureSink.notify },
@@ -149,7 +142,7 @@ export const createSingleExecutor = (deps: SingleExecutorDependencies): Operatio
 
   const collect = (
     operation: AuditedOperation,
-    scope: ExecutionScope,
+    { handle, failureSink }: ExecutionScope,
     prepared: SinglePrepared,
     executed: unknown,
   ): Promise<MutationEvent[]> =>
@@ -165,7 +158,7 @@ export const createSingleExecutor = (deps: SingleExecutorDependencies): Operatio
         writeSets: prepared.writeSets,
         preExistingRows: prepared.preExistingRows,
         linkReads: prepared.linkReads,
-        client: scope.handle,
+        client: handle,
       },
       {
         Prisma,
@@ -192,6 +185,7 @@ export const createSingleExecutor = (deps: SingleExecutorDependencies): Operatio
                 UNFOLLOWED_ROW_KEYS_CAUSE[reason],
             ),
           }),
+        onUnrecordedWrite: failureSink.reportUnrecordedWrite,
       },
     );
 

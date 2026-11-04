@@ -8,24 +8,28 @@
  * that transaction, which keeps it from committing.
  */
 
-import type { AuditContext, AuditErrorContext, AuditRecord, WriteMode, WritePlanKind } from '@kuruwic/db-audit-core';
+import type {
+  AuditContext,
+  AuditErrorContext,
+  AuditErrorObserver,
+  AuditRecord,
+  WriteMode,
+  WritePlanKind,
+} from '@kuruwic/db-audit-core';
 import { AuditIncompleteError, createActorId, createAggregateId, createEntityId } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
 import type { PrismaBaseClient, PrismaHandle } from '../../src/internal-types.js';
+import type { UnrecordedWrite } from '../../src/nested/events/unrecorded-write.js';
 import type { ExecutionScope } from '../../src/pipeline/execution-scope.js';
 import type { ExecutedOperation, OperationExecutor } from '../../src/pipeline/executor.js';
 import {
+  type AuditedOperationInput,
   type AuditPipelineDependencies,
   type InterceptedOperation,
   runAuditedOperation,
 } from '../../src/pipeline/run-audited-operation.js';
 import { flushAllPendingWrites, getPendingWriteCount } from '../../src/runtime/pending-writes.js';
-import {
-  type ActiveTransaction,
-  isProcessingAuditLog,
-  keepOperationFailure,
-  withScope,
-} from '../../src/runtime/scope.js';
+import { type ActiveTransaction, isProcessingAuditLog, withScope } from '../../src/runtime/scope.js';
 import type { AuditLogData } from '../../src/types.js';
 import { activeTransactionOf } from '../support/active-transaction.js';
 import { stubFailureSink } from '../support/failure-sink.js';
@@ -99,16 +103,21 @@ const stubExecutor = (run: OperationExecutor['run']): OperationExecutor => ({ ru
 const succeedingExecutor = () => stubExecutor(async () => outcome);
 
 const createDeps = (overrides: Partial<AuditPipelineDependencies> = {}) => {
-  const failureSink = stubFailureSink();
   const deps: AuditPipelineDependencies = {
     singleExecutor: succeedingExecutor(),
     batchExecutor: succeedingExecutor(),
     produceRecords: vi.fn(async () => [record]),
-    dispatchConfig: { writeExecutor: { write: vi.fn(async () => {}) }, failureSink },
-    failureSink,
+    dispatchConfig: { writeExecutor: { write: vi.fn(async () => {}) }, failureSink: stubFailureSink() },
+    failureSinkConfig: { observer: vi.fn<AuditErrorObserver>() },
     ...overrides,
   };
   return deps;
+};
+
+const observerOf = (deps: AuditPipelineDependencies) => {
+  const { observer } = deps.failureSinkConfig;
+  if (!observer) throw new Error('no observer');
+  return vi.mocked(observer);
 };
 
 const scopeSeenBy = (executor: OperationExecutor): ExecutionScope => {
@@ -395,7 +404,7 @@ describe('runAuditedOperation', () => {
         ).rejects.toBe(callerError);
 
         expect(Object.getOwnPropertySymbols(callerError)).toEqual([]);
-        expect(deps.failureSink.notify).not.toHaveBeenCalled();
+        expect(observerOf(deps)).not.toHaveBeenCalled();
         expect(auditWriteOf(deps)).not.toHaveBeenCalled();
       },
     );
@@ -427,7 +436,7 @@ describe('runAuditedOperation', () => {
         ),
       ).rejects.toBe(value);
 
-      expect(deps.failureSink.notify).not.toHaveBeenCalled();
+      expect(observerOf(deps)).not.toHaveBeenCalled();
       expect(auditWriteOf(deps)).not.toHaveBeenCalled();
     });
   });
@@ -490,7 +499,7 @@ describe('runAuditedOperation', () => {
       );
 
       expect(result).toBe(outcome.result);
-      expect(deps.failureSink.notify).not.toHaveBeenCalled();
+      expect(observerOf(deps)).not.toHaveBeenCalled();
     });
   });
 
@@ -522,8 +531,8 @@ describe('runAuditedOperation', () => {
           ),
         ).rejects.toBe(auditError);
 
-        expect(deps.failureSink.notify).toHaveBeenCalledTimes(1);
-        expect(deps.failureSink.notify).toHaveBeenCalledWith({
+        expect(observerOf(deps)).toHaveBeenCalledTimes(1);
+        expect(observerOf(deps)).toHaveBeenCalledWith({
           phase: 'diff-generation',
           modelName: 'User',
           operation: action,
@@ -567,9 +576,9 @@ describe('runAuditedOperation', () => {
             ),
           ).rejects.toBe(buildError);
 
-          expect(deps.failureSink.notify).toHaveBeenCalledTimes(1);
+          expect(deps.dispatchConfig.failureSink.notify).toHaveBeenCalledTimes(1);
           if (mode === 'atomic') {
-            expect(deps.failureSink.notify).toHaveBeenCalledWith(buildFailure);
+            expect(deps.dispatchConfig.failureSink.notify).toHaveBeenCalledWith(buildFailure);
           }
           expect(transaction.deferredWrites).toHaveLength(0);
           expect(transaction.auditFailures).toEqual([buildError]);
@@ -602,8 +611,8 @@ describe('runAuditedOperation', () => {
             ),
           ).resolves.toBe(outcome.result);
 
-          expect(deps.failureSink.reportDroppedBuild).toHaveBeenCalledExactlyOnceWith(buildFailure);
-          expect(deps.failureSink.notify).not.toHaveBeenCalled();
+          expect(deps.dispatchConfig.failureSink.reportDroppedBuild).toHaveBeenCalledExactlyOnceWith(buildFailure);
+          expect(deps.dispatchConfig.failureSink.notify).not.toHaveBeenCalled();
           expect(surrounding.auditFailures).toEqual([]);
           expect(getPendingWriteCount()).toBe(0);
           expect(auditWriteOf(deps)).not.toHaveBeenCalled();
@@ -623,7 +632,6 @@ describe('runAuditedOperation', () => {
             },
             failureSink,
           },
-          failureSink,
         });
 
       it('lets a write failure inside a transaction propagate without reporting it as diff-generation, and records it on the transaction', async () => {
@@ -746,7 +754,7 @@ describe('runAuditedOperation', () => {
         ).rejects.toBe(mutationError);
 
         expect(query).toHaveBeenCalledTimes(2);
-        expect(deps.failureSink.notify).not.toHaveBeenCalled();
+        expect(observerOf(deps)).not.toHaveBeenCalled();
         expect(transaction.auditFailures).toEqual([mutationError]);
       });
 
@@ -800,7 +808,7 @@ describe('runAuditedOperation', () => {
         ).rejects.toBe(executorError);
 
         expect(query).toHaveBeenCalledTimes(1);
-        expect(deps.failureSink.notify).toHaveBeenCalledWith(
+        expect(observerOf(deps)).toHaveBeenCalledWith(
           expect.objectContaining({ phase: 'diff-generation', error: executorError }),
         );
         expect(transaction.auditFailures).toEqual([executorError]);
@@ -838,17 +846,27 @@ describe('runAuditedOperation', () => {
     });
 
     describe('a failure kept for the operation', () => {
-      const failureOf = (phase: AuditErrorContext['phase'], operation: string): AuditErrorContext => ({
+      const failureOf = (
+        phase: 'pre-fetch' | 'row-identification',
+        operation: string,
+      ): AuditErrorContext & { readonly phase: 'pre-fetch' | 'row-identification' } => ({
         phase,
         modelName: 'User',
         operation,
         params: args,
         error: new Error(`${phase} failed`),
       });
-      const keepingExecutor = (failure: AuditErrorContext) =>
-        stubExecutor(async (operation) => {
+      /** An executor that runs the write, then reports `failure` and the `unrecorded` writes to the scope's failure sink */
+      const keepingExecutor = (
+        failure: AuditErrorContext & { readonly phase: 'pre-fetch' | 'row-identification' },
+        unrecorded: readonly UnrecordedWrite[] = [],
+      ) =>
+        stubExecutor(async (operation, scope) => {
           await operation.execute(operation.args);
-          keepOperationFailure(failure);
+          await scope.failureSink.notify(failure);
+          for (const write of unrecorded) {
+            scope.failureSink.reportUnrecordedWrite(write);
+          }
           return outcome;
         });
 
@@ -901,6 +919,80 @@ describe('runAuditedOperation', () => {
           ),
         ).resolves.toBe(outcome.result);
 
+        expect(transaction.auditFailures).toEqual([]);
+      });
+
+      const atomicUpdateIn = (transaction: ActiveTransaction): AuditedOperationInput => ({
+        operation: interceptedOf(
+          'update',
+          vi.fn(async () => 'written'),
+        ),
+        auditContext,
+        baseClient: createBaseClient(),
+        mode: 'atomic',
+        plan: 'immediate',
+        transaction,
+      });
+      const unrecordedUpsert: UnrecordedWrite = { modelName: 'Comment', operation: 'upsert', path: 'comments' };
+
+      it('rejects an atomic operation the event collection left a write of without a record, with the pre-fetch failure kept for it as the cause', async () => {
+        const failure = failureOf('pre-fetch', 'upsert');
+        const deps = createDeps({ singleExecutor: keepingExecutor(failure, [unrecordedUpsert]) });
+        const transaction = activeTransactionOf(transactionClient);
+
+        const run = runAuditedOperation(atomicUpdateIn(transaction), deps);
+
+        await expect(run).rejects.toBeInstanceOf(AuditIncompleteError);
+        const rejection = await run.catch((error: unknown) => error);
+        expect(rejection).toMatchObject({ modelName: 'User', operation: 'update', failures: [failure] });
+        expect(observerOf(deps)).toHaveBeenCalledExactlyOnceWith(failure);
+        expect(transaction.auditFailures).toEqual([rejection]);
+      });
+
+      it('resolves an awaited operation the event collection left a write of without a record', async () => {
+        const deps = createDeps({
+          singleExecutor: keepingExecutor(failureOf('pre-fetch', 'upsert'), [unrecordedUpsert]),
+        });
+        const transaction = activeTransactionOf(transactionClient);
+
+        await expect(runAuditedOperation({ ...atomicUpdateIn(transaction), mode: 'awaited' }, deps)).resolves.toBe(
+          outcome.result,
+        );
+
+        expect(transaction.auditFailures).toEqual([]);
+      });
+
+      it('resolves an atomic operation an upsert pre-fetch failure was kept for when the event collection left no write without a record', async () => {
+        const deps = createDeps({ singleExecutor: keepingExecutor(failureOf('pre-fetch', 'upsert')) });
+        const transaction = activeTransactionOf(transactionClient);
+
+        await expect(runAuditedOperation(atomicUpdateIn(transaction), deps)).resolves.toBe(outcome.result);
+
+        expect(transaction.auditFailures).toEqual([]);
+      });
+
+      it('keeps the failures of each operation apart from those of another it runs while continuing', async () => {
+        const inner = createDeps({
+          singleExecutor: keepingExecutor(failureOf('row-identification', 'update')),
+        });
+        const innerTransaction = activeTransactionOf(transactionClient);
+        const outerQuery = vi.fn(async () => {
+          await runAuditedOperation({ ...atomicUpdateIn(innerTransaction), mode: 'awaited' }, inner);
+          return 'written';
+        });
+        const deps = createDeps({
+          singleExecutor: stubExecutor(async (operation) => {
+            await operation.execute(operation.args);
+            return outcome;
+          }),
+        });
+        const transaction = activeTransactionOf(transactionClient);
+
+        await expect(
+          runAuditedOperation({ ...atomicUpdateIn(transaction), operation: interceptedOf('update', outerQuery) }, deps),
+        ).resolves.toBe(outcome.result);
+
+        expect(outerQuery).toHaveBeenCalledTimes(1);
         expect(transaction.auditFailures).toEqual([]);
       });
 

@@ -78,7 +78,8 @@ import {
 import { identityOf } from './event-fields.js';
 import { collectLinkChanges } from './link-changes.js';
 import { type ParentAtPath, readRowsNotInResult } from './rows-not-in-result.js';
-import { resolveNestedRowState } from './state-resolver.js';
+import { hasUndecidedAction, resolveNestedRowState } from './state-resolver.js';
+import type { UnrecordedWriteReporter } from './unrecorded-write.js';
 import {
   EMPTY_WRITE_SET,
   insertsRows,
@@ -110,6 +111,8 @@ export interface NestedEventCollectorDependencies {
    * recorded, just not reported.
    */
   onUnfollowedRowKeys?: UnfollowedRowKeysReporter;
+  /** Notified of each write the collection leaves rows of without a record (see `unrecorded-write.ts`) */
+  onUnrecordedWrite: UnrecordedWriteReporter;
 }
 
 /**
@@ -269,6 +272,13 @@ const isNestedUnder = (nestedOp: NestedOperationInfo, attribution: RowAttributio
 const record = (walk: CollectionWalk, nestedOp: NestedOperationInfo, row: Row, before: BeforeState): void => {
   const resolved = resolveNestedRowState(nestedOp, before, walk.deps.shouldFetchBefore);
   if (resolved === undefined) {
+    if (hasUndecidedAction(nestedOp, before)) {
+      walk.deps.onUnrecordedWrite({
+        modelName: nestedOp.relatedModel,
+        operation: nestedOp.operation,
+        path: nestedOp.path,
+      });
+    }
     nestedLog(
       'no audit log for the %s row at path=%s (connected, or its target could not be read)',
       nestedOp.operation,
@@ -315,7 +325,9 @@ const targetOf = (row: Row, targets: readonly NestedWriteTarget[]): NestedWriteT
  * The target a row is recorded for. Several writes at a path can name one row (a `connect` next
  * to an `update` of it); the row is recorded once, for the first of them whose write is audited
  * from the row's before state and its state after the write, so that one record carries every
- * change the writes made. A row only linking writes name yields no record here.
+ * change the writes made. When none is, an upsert or connectOrCreate whose row could not be read is
+ * taken, so that the row left without a record is reported. A row only linking writes name yields
+ * no record here.
  */
 const recordedTargetOf = (
   walk: CollectionWalk,
@@ -326,7 +338,9 @@ const recordedTargetOf = (
   return (
     locating.find(
       (target) => resolveNestedRowState(target.operation, target.before, walk.deps.shouldFetchBefore) !== undefined,
-    ) ?? locating[0]
+    ) ??
+    locating.find((target) => hasUndecidedAction(target.operation, target.before)) ??
+    locating[0]
   );
 };
 
@@ -959,6 +973,7 @@ export const collectNestedEvents = async (
     whereAfterWrite: (operation, where) =>
       relinked(where, walk.linkValuesAfter.get(operation), keyConstraints.get(operation.path)),
     fieldNamesOf: (model) => new Set(schemaMetadata.getAllFields(model).map((field) => field.name)),
+    onUnrecordedWrite: deps.onUnrecordedWrite,
   });
 
   const events: MutationEvent[] = [];

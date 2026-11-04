@@ -5,18 +5,17 @@
  * return-value contract.
  */
 
-import type { FailureSink } from '@kuruwic/db-audit-core';
 import { Decimal } from '@prisma/client/runtime/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PrismaBaseClient, PrismaNamespace } from '../../src/internal-types.js';
 import { createBatchExecutor } from '../../src/pipeline/batch-executor.js';
-import type { ExecutionScope } from '../../src/pipeline/execution-scope.js';
+import type { ExecutionScope, OperationFailureSink } from '../../src/pipeline/execution-scope.js';
 import type { AuditedOperation } from '../../src/pipeline/executor.js';
 import type { RecordProducer } from '../../src/pipeline/produce-records.js';
 import { NO_AUDITED_OMITTED_FIELDS, withRowKeyFields } from '../../src/utils/audited-omitted-fields.js';
 import { ID_GENERATOR_FACTORIES } from '../../src/utils/id-generation.js';
 import { column, model, schemaMetadataOf } from '../support/audit-schema.js';
-import { stubFailureSink } from '../support/failure-sink.js';
+import { stubOperationFailureSink } from '../support/failure-sink.js';
 import { clientWith, operationOn, scopeOn } from './client-operation.js';
 import { runWithRecords } from './run-with-records.js';
 
@@ -59,18 +58,17 @@ const schemaMetadata = schemaMetadataOf(
 );
 
 /** The scope of an operation inside an interactive transaction whose client is `client` */
-const transactionScopeOn = (client: PrismaBaseClient): ExecutionScope => ({
-  ...scopeOn(client),
+const transactionScopeOn = (client: PrismaBaseClient, failureSink: OperationFailureSink): ExecutionScope => ({
+  ...scopeOn(client, failureSink),
   transaction: { deferredWrites: [], recordAuditFailure: () => {} },
 });
 
 /** An executor on a client that takes a query omit (Prisma 6.2 and later) when `queryOmitSupported` */
-const createExecutor = (failureSink: FailureSink, queryOmitSupported = false) =>
+const createExecutor = (queryOmitSupported = false) =>
   createBatchExecutor({
     Prisma,
     schemaMetadata,
     auditedOmittedFieldsWithRowKey: withRowKeyFields(NO_AUDITED_OMITTED_FIELDS, schemaMetadata, queryOmitSupported),
-    failureSink,
   });
 const produce = () => vi.fn<RecordProducer>(async () => []);
 const eventOf = (fields: Row) => expect.objectContaining({ model: 'User', ...fields });
@@ -131,12 +129,12 @@ const b1: Row = { id: 'b', email: 'b@1' };
 const b2: Row = { id: 'b', email: 'b@2' };
 
 describe('createBatchExecutor', () => {
-  let failureSink: FailureSink;
+  let failureSink: OperationFailureSink;
   let executor: ReturnType<typeof createExecutor>;
 
   beforeEach(() => {
-    failureSink = stubFailureSink();
-    executor = createExecutor(failureSink);
+    failureSink = stubOperationFailureSink();
+    executor = createExecutor();
   });
 
   describe('createMany', () => {
@@ -150,7 +148,7 @@ describe('createBatchExecutor', () => {
       const outcome = await runWithRecords(
         executor,
         operationOn(client, 'createMany', args),
-        scopeOn(client),
+        scopeOn(client, failureSink),
         produceRecords,
       );
 
@@ -199,7 +197,7 @@ describe('createBatchExecutor', () => {
           ],
           skipDuplicates: true,
         }),
-        scopeOn(client),
+        scopeOn(client, failureSink),
         produceRecords,
       );
 
@@ -234,7 +232,7 @@ describe('createBatchExecutor', () => {
             { id: 'b', email: 'b@1' },
           ],
         }),
-        scopeOn(client),
+        scopeOn(client, failureSink),
         produceRecords,
       );
 
@@ -261,7 +259,7 @@ describe('createBatchExecutor', () => {
       );
       const produceRecords = produce();
 
-      await runWithRecords(executor, operation, scopeOn(client), produceRecords);
+      await runWithRecords(executor, operation, scopeOn(client, failureSink), produceRecords);
 
       expect(findMany.mock.calls).toEqual([[{ where: { OR: [{ orgId: 1, userId: 2 }] } }]]);
       expect(produceRecords).toHaveBeenCalledWith(
@@ -285,9 +283,9 @@ describe('createBatchExecutor', () => {
       const produceRecords = produce();
 
       await runWithRecords(
-        createExecutor(failureSink, true),
+        createExecutor(true),
         operationOn(client, 'createMany', { data: [{ id: 'a', email: 'a@1' }] }),
-        scopeOn(client),
+        scopeOn(client, failureSink),
         produceRecords,
       );
 
@@ -308,7 +306,7 @@ describe('createBatchExecutor', () => {
       const outcome = await runWithRecords(
         executor,
         operationOn(client, 'createMany', { data: [a1, b1, { id: 'c', email: 'c@1' }] }),
-        scopeOn(client),
+        scopeOn(client, failureSink),
         produceRecords,
       );
 
@@ -341,7 +339,7 @@ describe('createBatchExecutor', () => {
       await runWithRecords(
         executor,
         operationOn(client, 'createMany', { data: ids.map((id) => ({ id })), skipDuplicates: true }),
-        scopeOn(client),
+        scopeOn(client, failureSink),
         produceRecords,
       );
 
@@ -358,7 +356,7 @@ describe('createBatchExecutor', () => {
       const { client, operation } = createManyOn('Device', { createMany, findMany }, { data: [{ name: 'd1' }] });
       const produceRecords = produce();
 
-      await runWithRecords(executor, operation, scopeOn(client), produceRecords);
+      await runWithRecords(executor, operation, scopeOn(client, failureSink), produceRecords);
 
       const serial = createMany.mock.calls[0]?.[0].data[0]?.serial;
       expect(createMany).toHaveBeenCalledWith({
@@ -384,7 +382,9 @@ describe('createBatchExecutor', () => {
       const findMany = vi.fn(async () => []);
       const { client, operation } = createManyOn('Note', { createMany, findMany }, { data: [{ text: 't' }] });
 
-      await expect(runWithRecords(executor, operation, scopeOn(client), produce())).rejects.toThrow(NO_ROW_KEY_MESSAGE);
+      await expect(runWithRecords(executor, operation, scopeOn(client, failureSink), produce())).rejects.toThrow(
+        NO_ROW_KEY_MESSAGE,
+      );
       expect(createMany).not.toHaveBeenCalled();
     });
 
@@ -397,7 +397,7 @@ describe('createBatchExecutor', () => {
       await runWithRecords(
         executor,
         operationOn(transactionClient, 'createMany', { data: [{ id: 'a', email: 'a@1' }] }),
-        { ...transactionScopeOn(transactionClient), baseClient: clientWith({ user: {} }) },
+        { ...transactionScopeOn(transactionClient, failureSink), baseClient: clientWith({ user: {} }) },
         produceRecords,
       );
 
@@ -418,7 +418,7 @@ describe('createBatchExecutor', () => {
       await runWithRecords(
         executor,
         operationOn(client, 'createMany', { data: { email: 'a@1' } }),
-        scopeOn(client),
+        scopeOn(client, failureSink),
         produceRecords,
       );
 
@@ -469,7 +469,7 @@ describe('createBatchExecutor', () => {
         await runWithRecords(
           executor,
           operationOn(client, 'createMany', { data: [{ email: 'a@1' }, { email: 'b@1' }], skipDuplicates: true }),
-          scopeOn(client),
+          scopeOn(client, failureSink),
           produceRecords,
         );
 
@@ -490,7 +490,7 @@ describe('createBatchExecutor', () => {
             data: [{ id: 'a', email: 'a@1' }, { email: 'g@1' }, { id: 'b', email: 'b@1' }],
             skipDuplicates: true,
           }),
-          scopeOn(client),
+          scopeOn(client, failureSink),
           produceRecords,
         );
 
@@ -520,7 +520,7 @@ describe('createBatchExecutor', () => {
         const outcome = await runWithRecords(
           executor,
           operationOn(client, 'createMany', { data: [{ id: 'A', email: 'a@1' }], skipDuplicates: true }),
-          scopeOn(client),
+          scopeOn(client, failureSink),
           produceRecords,
         );
 
@@ -540,7 +540,7 @@ describe('createBatchExecutor', () => {
             data: [{ email: 'g@1' }, { id: 'b', email: 'b@1' }, { id: 'c', email: 'c@1' }],
             skipDuplicates: true,
           }),
-          scopeOn(client),
+          scopeOn(client, failureSink),
           produceRecords,
         );
 
@@ -578,7 +578,7 @@ describe('createBatchExecutor', () => {
             data: [{ email: 'g@1' }, { id: 'b', email: 'b@1' }],
             skipDuplicates: true,
           }),
-          scopeOn(client),
+          scopeOn(client, failureSink),
           produceRecords,
         );
 
@@ -607,7 +607,7 @@ describe('createBatchExecutor', () => {
             data: [{ email: 'g@1' }, { id: 's', email: 's@1' }],
             skipDuplicates: true,
           }),
-          scopeOn(client),
+          scopeOn(client, failureSink),
           produceRecords,
         );
 
@@ -631,7 +631,7 @@ describe('createBatchExecutor', () => {
       const outcome = await runWithRecords(
         executor,
         operationOn(client, 'createManyAndReturn', args),
-        scopeOn(client),
+        scopeOn(client, failureSink),
         produceRecords,
       );
 
@@ -659,7 +659,7 @@ describe('createBatchExecutor', () => {
       const outcome = await runWithRecords(
         executor,
         operationOn(client, 'updateMany', args),
-        scopeOn(client),
+        scopeOn(client, failureSink),
         produceRecords,
       );
 
@@ -696,7 +696,7 @@ describe('createBatchExecutor', () => {
       await runWithRecords(
         executor,
         operationOn(client, 'updateMany', { where: {}, data: { email: 'x' } }),
-        scopeOn(client),
+        scopeOn(client, failureSink),
         produceRecords,
       );
 
@@ -711,7 +711,7 @@ describe('createBatchExecutor', () => {
       await runWithRecords(
         executor,
         operationOn(client, 'updateMany', { data: { email: 'x' } }),
-        scopeOn(client),
+        scopeOn(client, failureSink),
         produce(),
       );
 
@@ -738,7 +738,7 @@ describe('createBatchExecutor', () => {
         const produceRecords = produce();
         const operation = operationOn(client, 'updateMany', { where, data, limit: 2 });
 
-        const outcome = await runWithRecords(executor, operation, scopeOn(client), produceRecords);
+        const outcome = await runWithRecords(executor, operation, scopeOn(client, failureSink), produceRecords);
 
         expect(findMany.mock.calls).toEqual([[{ where, take: 2 }], [{ where: { id: { in: ['a', 'b'] } } }]]);
         expect(operation.execute).toHaveBeenCalledTimes(1);
@@ -761,7 +761,12 @@ describe('createBatchExecutor', () => {
         const produceRecords = produce();
         const operation = operationOn(client, 'updateMany', { where, data, limit: 2 });
 
-        const outcome = await runWithRecords(executor, operation, transactionScopeOn(client), produceRecords);
+        const outcome = await runWithRecords(
+          executor,
+          operation,
+          transactionScopeOn(client, failureSink),
+          produceRecords,
+        );
 
         expect(findMany.mock.calls).toEqual([
           [{ where, take: 2 }],
@@ -790,7 +795,7 @@ describe('createBatchExecutor', () => {
         const outcome = await runWithRecords(
           executor,
           operationOn(client, 'updateMany', { where, data, limit: 2 }),
-          scopeOn(client),
+          scopeOn(client, failureSink),
           produceRecords,
         );
 
@@ -817,7 +822,7 @@ describe('createBatchExecutor', () => {
         const outcome = await runWithRecords(
           executor,
           operationOn(client, 'updateMany', { where, data, limit: 2 }),
-          transactionScopeOn(client),
+          transactionScopeOn(client, failureSink),
           produceRecords,
         );
 
@@ -836,7 +841,7 @@ describe('createBatchExecutor', () => {
         const outcome = await runWithRecords(
           executor,
           operationOn(client, 'updateMany', { where, data, limit: 1 }),
-          transactionScopeOn(client),
+          transactionScopeOn(client, failureSink),
           produce(),
         );
 
@@ -855,7 +860,7 @@ describe('createBatchExecutor', () => {
         const outcome = await runWithRecords(
           executor,
           operationOn(client, 'updateMany', args),
-          scopeOn(client),
+          scopeOn(client, failureSink),
           produceRecords,
         );
 
@@ -877,7 +882,7 @@ describe('createBatchExecutor', () => {
       const outcome = await runWithRecords(
         executor,
         operationOn(client, 'updateManyAndReturn', args),
-        scopeOn(client),
+        scopeOn(client, failureSink),
         produceRecords,
       );
 
@@ -914,7 +919,7 @@ describe('createBatchExecutor', () => {
       const args = { where: {}, data: { email: 'x' }, limit: 1 };
       const operation = operationOn(client, 'updateManyAndReturn', args);
 
-      const outcome = await runWithRecords(executor, operation, scopeOn(client), produceRecords);
+      const outcome = await runWithRecords(executor, operation, scopeOn(client, failureSink), produceRecords);
 
       expect(findMany.mock.calls).toEqual([[{ where: {} }]]);
       expect(operation.execute).toHaveBeenCalledTimes(1);
@@ -947,7 +952,7 @@ describe('createBatchExecutor', () => {
       const outcome = await runWithRecords(
         executor,
         operationOn(client, 'deleteMany', args),
-        scopeOn(client),
+        scopeOn(client, failureSink),
         produceRecords,
       );
 
@@ -994,7 +999,7 @@ describe('createBatchExecutor', () => {
         const produceRecords = produce();
         const operation = operationOn(client, 'deleteMany', { where, limit: 2 });
 
-        const outcome = await runWithRecords(executor, operation, scopeOn(client), produceRecords);
+        const outcome = await runWithRecords(executor, operation, scopeOn(client, failureSink), produceRecords);
 
         expect(findMany.mock.calls).toEqual([[{ where, take: 2 }]]);
         expect(operation.execute).toHaveBeenCalledWith({ where: narrowedTo(['a', 'b']) });
@@ -1011,7 +1016,12 @@ describe('createBatchExecutor', () => {
         const produceRecords = produce();
         const operation = operationOn(client, 'deleteMany', { where, limit: 2 });
 
-        const outcome = await runWithRecords(executor, operation, transactionScopeOn(client), produceRecords);
+        const outcome = await runWithRecords(
+          executor,
+          operation,
+          transactionScopeOn(client, failureSink),
+          produceRecords,
+        );
 
         expect(findMany.mock.calls).toEqual([
           [{ where, take: 2 }],
@@ -1035,7 +1045,7 @@ describe('createBatchExecutor', () => {
         const outcome = await runWithRecords(
           executor,
           operationOn(client, 'deleteMany', { where, limit: 2 }),
-          scopeOn(client),
+          scopeOn(client, failureSink),
           produceRecords,
         );
 
@@ -1082,7 +1092,7 @@ describe('createBatchExecutor', () => {
       const { client, operation } = operationOnModel('Device', { findMany, updateMany }, 'updateMany', { where, data });
       const produceRecords = produce();
 
-      await runWithRecords(executor, operation, scopeOn(client), produceRecords);
+      await runWithRecords(executor, operation, scopeOn(client, failureSink), produceRecords);
 
       expect(findMany.mock.calls).toEqual([[{ where }], [{ where: bySerials('s1', 's2') }]]);
       expect(produceRecords).toHaveBeenCalledWith(
@@ -1106,7 +1116,7 @@ describe('createBatchExecutor', () => {
       );
       const produceRecords = produce();
 
-      await runWithRecords(executor, operation, scopeOn(client), produceRecords);
+      await runWithRecords(executor, operation, scopeOn(client, failureSink), produceRecords);
 
       expect(findMany.mock.calls).toEqual([[{ where }]]);
       expect(produceRecords).toHaveBeenCalledWith(
@@ -1126,7 +1136,7 @@ describe('createBatchExecutor', () => {
       });
       const produceRecords = produce();
 
-      await runWithRecords(executor, operation, scopeOn(client), produceRecords);
+      await runWithRecords(executor, operation, scopeOn(client, failureSink), produceRecords);
 
       expect(findMany.mock.calls).toEqual([[{ where, take: 2 }], [{ where: bySerials('s1', 's2') }]]);
       expect(operation.execute).toHaveBeenCalledWith({ where: { AND: [where, bySerials('s1', 's2')] }, data });
@@ -1146,7 +1156,7 @@ describe('createBatchExecutor', () => {
       });
       const produceRecords = produce();
 
-      await runWithRecords(executor, operation, scopeOn(client), produceRecords);
+      await runWithRecords(executor, operation, scopeOn(client, failureSink), produceRecords);
 
       expect(operation.execute).toHaveBeenCalledWith({ where: { AND: [where, bySerials('s1', 's2')] } });
       expect(produceRecords).toHaveBeenCalledWith([deleteEvent(d1), deleteEvent(d2)], expect.anything(), new Map());
@@ -1163,7 +1173,7 @@ describe('createBatchExecutor', () => {
         const mutation = vi.fn(async () => ({ count: 0 }));
         const { client, operation } = operationOnModel('Note', { findMany, [action]: mutation }, action, args);
 
-        await expect(runWithRecords(executor, operation, scopeOn(client), produce())).rejects.toThrow(
+        await expect(runWithRecords(executor, operation, scopeOn(client, failureSink), produce())).rejects.toThrow(
           NO_ROW_KEY_MESSAGE,
         );
         expect(mutation).not.toHaveBeenCalled();
@@ -1177,7 +1187,7 @@ describe('createBatchExecutor', () => {
       const { client, operation } = operationOnModel('Note', { findMany, deleteMany }, 'deleteMany', { where });
       const produceRecords = produce();
 
-      await runWithRecords(executor, operation, scopeOn(client), produceRecords);
+      await runWithRecords(executor, operation, scopeOn(client, failureSink), produceRecords);
 
       expect(deleteMany).toHaveBeenCalledWith({ where });
       expect(produceRecords).toHaveBeenCalledWith(
@@ -1229,7 +1239,7 @@ describe('createBatchExecutor', () => {
       const outcome = await runWithRecords(
         executor,
         operationOn(client, 'updateMany', { where: {}, data }),
-        scopeOn(client),
+        scopeOn(client, failureSink),
         produceRecords,
       );
 
@@ -1251,7 +1261,7 @@ describe('createBatchExecutor', () => {
       await runWithRecords(
         executor,
         operationOn(client, 'updateMany', { where: {}, data }),
-        scopeOn(client),
+        scopeOn(client, failureSink),
         produceRecords,
       );
 
@@ -1269,7 +1279,7 @@ describe('createBatchExecutor', () => {
       const outcome = await runWithRecords(
         executor,
         operationOn(client, 'updateManyAndReturn', { where: {}, data }),
-        scopeOn(client),
+        scopeOn(client, failureSink),
         produceRecords,
       );
 
@@ -1300,7 +1310,7 @@ describe('createBatchExecutor', () => {
       await runWithRecords(
         executor,
         operationOn(client, 'updateMany', { where: {}, data, limit: 2 }),
-        scopeOn(client),
+        scopeOn(client, failureSink),
         produceRecords,
       );
 
@@ -1338,7 +1348,7 @@ describe('createBatchExecutor', () => {
       });
       const produceRecords = produce();
 
-      const outcome = await runWithRecords(executor, operation, scopeOn(client), produceRecords);
+      const outcome = await runWithRecords(executor, operation, scopeOn(client, failureSink), produceRecords);
 
       expect(outcome.result).toEqual({ count: 2 });
       expect(updateMany).toHaveBeenCalledExactlyOnceWith({ where: {}, data });
@@ -1358,7 +1368,7 @@ describe('createBatchExecutor', () => {
       );
       const produceRecords = produce();
 
-      const outcome = await runWithRecords(executor, operation, scopeOn(client), produceRecords);
+      const outcome = await runWithRecords(executor, operation, scopeOn(client, failureSink), produceRecords);
 
       expect(outcome.result).toEqual([shifted(two), shifted(one)]);
       expect(findMany).not.toHaveBeenCalled();
@@ -1400,7 +1410,7 @@ describe('createBatchExecutor', () => {
         const outcome = await runWithRecords(
           executor,
           operation,
-          interactive ? transactionScopeOn(client) : scopeOn(client),
+          interactive ? transactionScopeOn(client, failureSink) : scopeOn(client, failureSink),
           produceRecords,
         );
 
@@ -1435,7 +1445,7 @@ describe('createBatchExecutor', () => {
       });
       const produceRecords = produce();
 
-      await runWithRecords(executor, operation, scopeOn(client), produceRecords);
+      await runWithRecords(executor, operation, scopeOn(client, failureSink), produceRecords);
 
       expect(findMany.mock.calls).toEqual([[{ where: { serial: 's1' } }], [{ where: { serial: { in: ['s9'] } } }]]);
       expect(failureSink.notify).not.toHaveBeenCalled();
@@ -1453,7 +1463,7 @@ describe('createBatchExecutor', () => {
       );
       const produceRecords = produce();
 
-      await runWithRecords(executor, operation, scopeOn(client), produceRecords);
+      await runWithRecords(executor, operation, scopeOn(client, failureSink), produceRecords);
 
       expect(findMany.mock.calls).toEqual([[{ where: { serial: 's1' } }]]);
       expect(failureSink.notify).not.toHaveBeenCalled();
@@ -1473,7 +1483,7 @@ describe('createBatchExecutor', () => {
       await runWithRecords(
         executor,
         operationOn(client, 'updateMany', { where: { id: 'a' }, data: { id: 'a', email: 'a@2' } }),
-        scopeOn(client),
+        scopeOn(client, failureSink),
         produceRecords,
       );
 
@@ -1504,7 +1514,12 @@ describe('createBatchExecutor', () => {
         OR: pairs.map(([orgId, userId]) => ({ orgId, userId })),
       });
 
-      const outcome = await runWithRecords(executor, operation, transactionScopeOn(client), produceRecords);
+      const outcome = await runWithRecords(
+        executor,
+        operation,
+        transactionScopeOn(client, failureSink),
+        produceRecords,
+      );
 
       expect(outcome.result).toEqual({ count: 1 });
       expect(findMany.mock.calls).toEqual([
@@ -1559,7 +1574,7 @@ describe('createBatchExecutor', () => {
       });
       const produceRecords = produce();
 
-      await runWithRecords(executor, operation, scopeOn(client), produceRecords);
+      await runWithRecords(executor, operation, scopeOn(client, failureSink), produceRecords);
 
       expect(findMany.mock.calls[1]).toEqual([{ where: { OR: [{ room: 'r1', at: s1.at }] } }]);
       expect(failureSink.notify).not.toHaveBeenCalled();
@@ -1578,7 +1593,12 @@ describe('createBatchExecutor', () => {
       });
       const produceRecords = produce();
 
-      const outcome = await runWithRecords(executor, operation, transactionScopeOn(client), produceRecords);
+      const outcome = await runWithRecords(
+        executor,
+        operation,
+        transactionScopeOn(client, failureSink),
+        produceRecords,
+      );
 
       expect(outcome.result).toEqual({ count: 1 });
       expect(findMany.mock.calls[1]).toEqual([{ where: { OR: [{ orgId: 9n, userId: 1n }] } }]);
@@ -1597,7 +1617,7 @@ describe('createBatchExecutor', () => {
       });
       const produceRecords = produce();
 
-      await runWithRecords(executor, operation, scopeOn(client), produceRecords);
+      await runWithRecords(executor, operation, scopeOn(client, failureSink), produceRecords);
 
       expect(failureSink.notify).not.toHaveBeenCalled();
       expect(produceRecords).toHaveBeenCalledWith([updateOf('Rate', r0, r1)], expect.anything(), new Map());
@@ -1612,14 +1632,19 @@ describe('createBatchExecutor', () => {
     const c2: Row = { id: 'c', email: 'c@2' };
 
     beforeEach(() => {
-      executor = createExecutor(failureSink, true);
+      executor = createExecutor(true);
     });
 
     it('reads the primary key in the read before an updateMany and in the read after it', async () => {
       const findMany = findManyReturning([a1, b1], [a2, b2]);
       const client = clientWith({ user: { findMany, updateMany: vi.fn(async () => ({ count: 2 })) } });
 
-      await runWithRecords(executor, operationOn(client, 'updateMany', { where, data }), scopeOn(client), produce());
+      await runWithRecords(
+        executor,
+        operationOn(client, 'updateMany', { where, data }),
+        scopeOn(client, failureSink),
+        produce(),
+      );
 
       expect(findMany.mock.calls).toEqual([
         [{ where, ...READS_ID }],
@@ -1635,7 +1660,7 @@ describe('createBatchExecutor', () => {
       await runWithRecords(
         executor,
         operationOn(client, 'updateManyAndReturn', { where, data }),
-        scopeOn(client),
+        scopeOn(client, failureSink),
         produce(),
       );
 
@@ -1646,7 +1671,12 @@ describe('createBatchExecutor', () => {
       const findMany = findManyReturning([a1]);
       const client = clientWith({ user: { findMany, deleteMany: vi.fn(async () => ({ count: 1 })) } });
 
-      await runWithRecords(executor, operationOn(client, 'deleteMany', { where }), scopeOn(client), produce());
+      await runWithRecords(
+        executor,
+        operationOn(client, 'deleteMany', { where }),
+        scopeOn(client, failureSink),
+        produce(),
+      );
 
       expect(findMany.mock.calls).toEqual([[{ where, ...READS_ID }]]);
     });
@@ -1660,7 +1690,7 @@ describe('createBatchExecutor', () => {
       await runWithRecords(
         executor,
         operationOn(client, 'updateMany', { where, data, limit: 2 }),
-        transactionScopeOn(client),
+        transactionScopeOn(client, failureSink),
         produce(),
       );
 
@@ -1681,7 +1711,7 @@ describe('createBatchExecutor', () => {
       await runWithRecords(
         executor,
         operationOn(client, 'deleteMany', { where, limit: 2 }),
-        transactionScopeOn(client),
+        transactionScopeOn(client, failureSink),
         produce(),
       );
 
@@ -1708,8 +1738,8 @@ describe('createBatchExecutor', () => {
         { where },
       );
 
-      await runWithRecords(executor, device.operation, scopeOn(device.client), produce());
-      await runWithRecords(executor, note.operation, scopeOn(note.client), produce());
+      await runWithRecords(executor, device.operation, scopeOn(device.client, failureSink), produce());
+      await runWithRecords(executor, note.operation, scopeOn(note.client, failureSink), produce());
 
       expect(deviceFindMany.mock.calls).toEqual([[{ where, omit: { serial: false } }]]);
       expect(noteFindMany.mock.calls).toEqual([[{ where }]]);
@@ -1739,7 +1769,7 @@ describe('createBatchExecutor', () => {
       });
       const produceRecords = produce();
 
-      await runWithRecords(executor, operation, scopeOn(client), produceRecords);
+      await runWithRecords(executor, operation, scopeOn(client, failureSink), produceRecords);
 
       expect(produceRecords).toHaveBeenCalledWith(
         [
@@ -1778,7 +1808,7 @@ describe('createBatchExecutor', () => {
       );
       const produceRecords = produce();
 
-      await runWithRecords(executor, operation, scopeOn(client), produceRecords);
+      await runWithRecords(executor, operation, scopeOn(client, failureSink), produceRecords);
 
       expect(produceRecords).toHaveBeenCalledWith(
         [
@@ -1799,7 +1829,6 @@ describe('createBatchExecutor', () => {
         Prisma: { ...Prisma, skip },
         schemaMetadata,
         auditedOmittedFieldsWithRowKey: withRowKeyFields(NO_AUDITED_OMITTED_FIELDS, schemaMetadata, false),
-        failureSink,
       });
 
     const returnedRows = [{ id: 'u1', email: 'a@example.com', name: 'A' }];
@@ -1822,7 +1851,7 @@ describe('createBatchExecutor', () => {
         const outcome = await runWithRecords(
           executorWithSkip(),
           operationOn(client, action, args),
-          scopeOn(client),
+          scopeOn(client, failureSink),
           produceRecords,
         );
 
@@ -1872,7 +1901,7 @@ describe('createBatchExecutor', () => {
       const outcome = await runWithRecords(
         executor,
         operationOn(client, 'updateMany', { where, data: { email: 'x' } }),
-        scopeOn(client),
+        scopeOn(client, failureSink),
         produceRecords,
       );
 
@@ -1894,7 +1923,7 @@ describe('createBatchExecutor', () => {
       await runWithRecords(
         executor,
         operationOn(client, 'updateMany', { where, data: { email: 'x' } }),
-        scopeOn(client),
+        scopeOn(client, failureSink),
         produceRecords,
       );
 
@@ -1910,7 +1939,7 @@ describe('createBatchExecutor', () => {
       await runWithRecords(
         executor,
         operationOn(client, 'updateMany', { where, data: { email: 'x' } }),
-        scopeOn(client),
+        scopeOn(client, failureSink),
         produce(),
       );
 
@@ -1926,7 +1955,7 @@ describe('createBatchExecutor', () => {
       const outcome = await runWithRecords(
         executor,
         operationOn(client, 'updateMany', { where, data: { email: 'x' } }),
-        scopeOn(client),
+        scopeOn(client, failureSink),
         produceRecords,
       );
 
@@ -1950,7 +1979,7 @@ describe('createBatchExecutor', () => {
       await runWithRecords(
         executor,
         operationOn(client, 'updateMany', { where, data: { email: 'x' } }),
-        scopeOn(client),
+        scopeOn(client, failureSink),
         produce(),
       );
 
@@ -1975,7 +2004,7 @@ describe('createBatchExecutor', () => {
       const outcome = await runWithRecords(
         executor,
         operationOn(client, 'deleteMany', { where }),
-        scopeOn(client),
+        scopeOn(client, failureSink),
         produceRecords,
       );
 
@@ -1996,7 +2025,12 @@ describe('createBatchExecutor', () => {
       const client = clientWith({ user: { findMany, deleteMany: vi.fn(async () => ({ count: 3 })) } });
       const produceRecords = produce();
 
-      await runWithRecords(executor, operationOn(client, 'deleteMany', { where }), scopeOn(client), produceRecords);
+      await runWithRecords(
+        executor,
+        operationOn(client, 'deleteMany', { where }),
+        scopeOn(client, failureSink),
+        produceRecords,
+      );
 
       expect(failureSink.notify).toHaveBeenCalledExactlyOnceWith(
         report(
@@ -2016,7 +2050,12 @@ describe('createBatchExecutor', () => {
       const findMany = vi.fn(async () => [a1, b1]);
       const client = clientWith({ user: { findMany, deleteMany: vi.fn(async () => ({ count: 2 })) } });
 
-      await runWithRecords(executor, operationOn(client, 'deleteMany', { where }), scopeOn(client), produce());
+      await runWithRecords(
+        executor,
+        operationOn(client, 'deleteMany', { where }),
+        scopeOn(client, failureSink),
+        produce(),
+      );
 
       expect(failureSink.notify).not.toHaveBeenCalled();
     });
@@ -2030,7 +2069,7 @@ describe('createBatchExecutor', () => {
         runWithRecords(
           executor,
           operationOn(client, 'updateMany', { where: {}, data: { email: 'x' } }),
-          scopeOn(client),
+          scopeOn(client, failureSink),
           produce(),
         ),
       ).rejects.toThrow('Model User does not have findMany operation');
@@ -2051,7 +2090,7 @@ describe('createBatchExecutor', () => {
         runWithRecords(
           executor,
           operationOn(client, 'createMany', { data: [{ email: 'a@1' }] }),
-          scopeOn(client),
+          scopeOn(client, failureSink),
           produceRecords,
         ),
       ).rejects.toBe(callerError);

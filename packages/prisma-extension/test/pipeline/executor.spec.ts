@@ -10,6 +10,7 @@ import type { PrismaBaseClient, PrismaHandle } from '../../src/internal-types.js
 import type { ExecutionScope } from '../../src/pipeline/execution-scope.js';
 import { type AuditedOperation, createExecutor } from '../../src/pipeline/executor.js';
 import type { AuditLogData } from '../../src/types.js';
+import { stubOperationFailureSink } from '../support/failure-sink.js';
 
 const record: AuditLogData = {
   actorCategory: 'model',
@@ -47,6 +48,7 @@ const scope: ExecutionScope = {
   auditContext: { actor: { category: 'model', type: 'User', id: 'user-1' } },
   handle: transactionClient,
   baseClient,
+  failureSink: stubOperationFailureSink(),
 };
 
 const operationOf = (): AuditedOperation => ({

@@ -69,9 +69,10 @@ export interface WriteConfig<TClient = unknown> {
    * - `atomic`: the operation commits only together with every audit row it should produce. Inside
    *   your `$transaction` the rows are written in its transaction before it commits; outside any,
    *   the audited client opens an interactive transaction around the operation. A failure that
-   *   drops a row (`row-identification`, `id-resolver-call`, an upsert skipped because its
-   *   before-state read failed) fails the operation with `AuditIncompleteError` and rolls its
-   *   transaction back, even when your callback catches the error. A row recorded with
+   *   drops a row (`row-identification`, `id-resolver-call`, a `pre-fetch` failure that leaves an
+   *   upsert or connectOrCreate row, or a row a detaching nested link write unlinked without naming
+   *   it, unrecorded) fails the operation with `AuditIncompleteError` and rolls its transaction
+   *   back, even when your callback catches the error. A row recorded with
    *   `beforeUnavailable: true` is not dropped. An operation that reaches the audit outside any
    *   transaction the audited client owns (an extension applied before the audit gave an operation
    *   the client did not open one for a nested write of an atomic model) is rejected with
@@ -236,7 +237,8 @@ export interface PrismaAuditExtensionOptions<TModelName extends string = string,
    * one, a failure the caller cannot see (a failed write, or a dropped entry, of an operation that
    * has committed) is logged to the console; with one, only the observer receives it. A failure
    * that drops an entry (`row-identification`, `id-resolver-call`, and a `pre-fetch` failure that
-   * skips an `upsert` or `connectOrCreate` entry) fails an `atomic` operation with
+   * leaves an `upsert` or `connectOrCreate` entry, or a row a detaching nested link write unlinked
+   * without naming it, unrecorded) fails an `atomic` operation with
    * `AuditIncompleteError` (see `write.mode`) after notifying the observer; under `awaited` and
    * `deferred` the caller's operation continues without the entry. What each phase means for a
    * Prisma operation:
@@ -256,7 +258,8 @@ export interface PrismaAuditExtensionOptions<TModelName extends string = string,
    *   fails the operation under `diff-generation`, since the rows it writes cannot be identified.
    *   When the read of the re-linked rows fails, a row the write names is still recorded, with
    *   `beforeUnavailable: true` (a `disconnect` only when it left the row unlinked); a row unlinked
-   *   without being named is not recorded.
+   *   without being named is not recorded, nor is one a write unlinks below a row that cannot be
+   *   identified.
    * - `log-write`: persisting the audit log entry itself failed. A write inside a transaction
    *   (under `atomic`, or under `awaited` inside your `$transaction`) fails the caller's operation
    *   with the write's original error and the transaction rolls back: the entry and the caller's
