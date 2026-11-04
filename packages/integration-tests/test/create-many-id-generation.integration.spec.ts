@@ -9,12 +9,18 @@
  * the rows are read whole and handed back in the shape the caller asked for.
  *
  * createMany (count-only result) requires client-side ID injection, and audits
- * the rows it reads back by those primary keys after the write.
+ * the rows it reads back by those primary keys after the write. Under skipDuplicates it reads,
+ * before the write, the rows that hold the keys its data gives, and audits none of them.
  */
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
-import { describe, expect, it } from 'vitest';
-import { setupTestContext } from './helpers/setup.js';
+import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
+import type { AuditErrorObserver } from '@kuruwic/prisma-audit';
+import { createAuditClient } from '@kuruwic/prisma-audit';
+import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
+import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { cleanDatabase, createBasePrisma, setupTestContext, testEntities } from './helpers/setup.js';
 
 describe('createManyAndReturn relies on Prisma-generated IDs', () => {
   const context = setupTestContext();
@@ -214,7 +220,7 @@ describe('createMany audits the rows it reads back by primary key', () => {
     expect(logs[0]?.after).toMatchObject({ email: 'fresh-many@example.com', name: 'Created' });
   });
 
-  it('records a row skipDuplicates skipped because its primary key already exists with the existing row', async () => {
+  it('records no create for a row skipDuplicates skipped because its primary key already exists', async () => {
     await context.basePrisma.user.create({
       data: { id: 'u-existing', email: 'existing@example.com', name: 'Existing' },
     });
@@ -227,9 +233,7 @@ describe('createMany audits the rows it reads back by primary key', () => {
     });
 
     expect(result).toEqual({ count: 0 });
-    const logs = await createLogsOf('User');
-    expect(logs.map((log) => log.entityId)).toEqual(['u-existing']);
-    expect(logs[0]?.after).toMatchObject({ email: 'existing@example.com', name: 'Existing' });
+    expect(await createLogsOf('User')).toEqual([]);
   });
 
   it('audits an autoincrement model whose data supplies every id', async () => {
@@ -248,5 +252,140 @@ describe('createMany audits the rows it reads back by primary key', () => {
       ['9001', 'supplied-1'],
       ['9002', 'supplied-2'],
     ]);
+  });
+});
+
+describe('createMany with skipDuplicates and rows whose data gives their primary key', () => {
+  const testActor: AuditContext = {
+    actor: { category: 'model', type: 'User', id: 'test-user-1', name: 'Test User' },
+  };
+
+  const disconnects: Array<() => Promise<void>> = [];
+
+  afterEach(async () => {
+    for (const disconnect of disconnects.splice(0)) {
+      await disconnect();
+    }
+  });
+
+  /**
+   * An audited client whose `user.findMany` leaves out the users of `hiddenIds`, applied before the
+   * audit so that only the audit's reads miss them, as a read by a key the database stores in
+   * another form would
+   */
+  const setup = async ({ hiddenIds = [] as string[] } = {}) => {
+    const rawBasePrisma = createBasePrisma();
+    const basePrisma = rawBasePrisma.$extends({
+      name: 'hide-users-from-reads',
+      query: {
+        user: {
+          async findMany({ args, query }) {
+            const rows = await query(args);
+            return rows.filter((row) => !hiddenIds.includes(String(Reflect.get(row, 'id'))));
+          },
+        },
+      },
+    });
+    const observer = vi.fn<AuditErrorObserver>();
+    const provider = createAsyncLocalStorageProvider();
+    const prisma = createAuditClient(basePrisma, {
+      Prisma,
+      schema: auditSchema,
+      contextProvider: provider,
+      entities: testEntities,
+      write: { awaited: true },
+      errorObserver: observer,
+    });
+    disconnects.push(async () => {
+      await prisma.$disconnect();
+      await rawBasePrisma.$disconnect();
+    });
+    await cleanDatabase(rawBasePrisma);
+    await rawBasePrisma.user.create({ data: { id: 'u-existing', email: 'existing@example.com', name: 'Existing' } });
+
+    const run = <T>(operation: () => Promise<T>) => provider.runAsync(testActor, operation);
+    const createdUsers = async () =>
+      (
+        await rawBasePrisma.auditLog.findMany({
+          where: { entityType: 'User', aggregateType: 'User', action: 'create' },
+        })
+      )
+        .map((log) => [log.entityId, (log.after as Record<string, unknown>).email])
+        .sort();
+    const userIdOf = async (email: string) => (await rawBasePrisma.user.findUniqueOrThrow({ where: { email } })).id;
+
+    return { prisma, observer, run, createdUsers, userIdOf };
+  };
+
+  it('records only the row of a generated key when every row whose data gives its key is skipped', async () => {
+    const { prisma, observer, run, createdUsers, userIdOf } = await setup();
+
+    const result = await run(() =>
+      prisma.user.createMany({
+        data: [
+          { id: 'u-existing', email: 'skipped@example.com', name: 'Skipped' },
+          { email: 'generated@example.com', name: 'Generated' },
+        ],
+        skipDuplicates: true,
+      }),
+    );
+
+    expect(result).toEqual({ count: 1 });
+    expect(await createdUsers()).toEqual([[await userIdOf('generated@example.com'), 'generated@example.com']]);
+    expect(observer).not.toHaveBeenCalled();
+  });
+
+  it('records the rows it inserted under the keys their data gives, and none for the row that held one before', async () => {
+    const { prisma, observer, run, createdUsers, userIdOf } = await setup();
+
+    const result = await run(() =>
+      prisma.user.createMany({
+        data: [
+          { id: 'u-existing', email: 'skipped@example.com', name: 'Skipped' },
+          { id: 'u-new', email: 'new@example.com', name: 'New' },
+          { email: 'generated@example.com', name: 'Generated' },
+        ],
+        skipDuplicates: true,
+      }),
+    );
+
+    expect(result).toEqual({ count: 2 });
+    expect(await createdUsers()).toEqual(
+      [
+        [await userIdOf('generated@example.com'), 'generated@example.com'],
+        ['u-new', 'new@example.com'],
+      ].sort(),
+    );
+    expect(observer).not.toHaveBeenCalled();
+  });
+
+  it('records only the row of a generated key, and reports the row it inserted under the key its data gives, when the read after the write misses that row', async () => {
+    const { prisma, observer, run, createdUsers, userIdOf } = await setup({ hiddenIds: ['u-hidden'] });
+
+    const result = await run(() =>
+      prisma.user.createMany({
+        data: [
+          { id: 'u-hidden', email: 'hidden@example.com', name: 'Hidden' },
+          { email: 'generated@example.com', name: 'Generated' },
+        ],
+        skipDuplicates: true,
+      }),
+    );
+
+    expect(result).toEqual({ count: 2 });
+    expect(await userIdOf('hidden@example.com')).toBe('u-hidden');
+    expect(await createdUsers()).toEqual([[await userIdOf('generated@example.com'), 'generated@example.com']]);
+    expect(observer).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        phase: 'row-identification',
+        modelName: 'User',
+        operation: 'createMany',
+        params: { unidentified: 1 },
+        error: expect.objectContaining({
+          message:
+            '1 of the rows a createMany with skipDuplicates created is not audited: the rows read back under the keys its data gives, less those that held them before it, do not match its count, so which of them it inserted cannot be told',
+        }),
+      }),
+    );
   });
 });

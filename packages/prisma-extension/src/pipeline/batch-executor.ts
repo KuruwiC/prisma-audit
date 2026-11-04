@@ -2,8 +2,9 @@
  * Batch-operation executor
  *
  * createMany, createManyAndReturn, updateMany, updateManyAndReturn and deleteMany: reads the rows
- * an update or a delete will touch with `findMany`, runs the operation, reads back the rows a
- * createMany wrote by the keys of its data and the rows an updateMany wrote by row key, and
+ * an update or a delete will touch with `findMany`, and the rows holding the keys the data of a
+ * createMany with skipDuplicates gives, runs the operation, reads back the rows a createMany wrote
+ * by the keys of its data and the rows an updateMany wrote by row key, and
  * collects one event per written row, paired with its before row by row key. A row's key is the
  * model's primary key, or its first unique constraint on required fields when it has no primary key
  * (`rowKeyFieldsOf`). An update's rows are read again and paired by the key the write gives them
@@ -59,6 +60,18 @@ export type BatchPrepared =
   | { readonly kind: 'create-returning' }
   /** createMany: the rows to insert, with client-generated key values, and the fields of that key */
   | { readonly kind: 'create'; readonly rows: Row[]; readonly keyFields: string[] }
+  /**
+   * createMany with skipDuplicates whose data gives a key field of some rows: the rows to insert,
+   * the keys of the rows whose every key field the extension generated, and the keys of the rows
+   * that held the keys the other rows give before the write, as the read returned them
+   */
+  | {
+      readonly kind: 'create-skipping-duplicates';
+      readonly rows: Row[];
+      readonly keyFields: string[];
+      readonly generatedKeys: ReadonlySet<EntityIdentityKey>;
+      readonly existingKeys: ReadonlySet<EntityIdentityKey>;
+    }
   /** updateManyAndReturn: its returned rows are exactly the updated ones */
   | {
       readonly kind: 'update-returning';
@@ -151,30 +164,58 @@ const pairByRowKey = (
  * `createMany` returns only `{ count }`, which leaves `data` as the only way to know the keys of the
  * rows it inserts: the model's row key (`getRowKeyFields`). `ensureIds` fills in client-side the key
  * fields `data` leaves out, and the rows it audits are the ones read back by those keys after the
- * write (`createdRows`).
+ * write (`createdRows`). Under `skipDuplicates` a row whose key a row already holds is skipped, and
+ * reads back as that row: when some rows of `data` give a key field themselves, the rows holding
+ * their keys are read before the write, on the same delegate, so that they are told apart after it
+ * (`rowsInsertedSkippingDuplicates`). A key the extension generates is taken to be held by no row
+ * before the write, and is not read.
  * `createManyAndReturn` relies on Prisma's own id generation and audits the rows it actually
  * created, read whole whatever the caller selects (see `injectAuditedSelection`), which supports
  * database-generated defaults (autoincrement, dbgenerated) and stays correct under skipDuplicates.
  */
-const prepareCreate = (operation: AuditedOperation, deps: BatchExecutorDependencies): BatchPrepared => {
+const prepareCreate = async (
+  operation: AuditedOperation,
+  scope: ExecutionScope,
+  deps: BatchExecutorDependencies,
+): Promise<BatchPrepared> => {
   if (operation.action === AUDIT_ACTION.CREATE_MANY_AND_RETURN) {
     return { kind: 'create-returning' };
   }
-  const { data } = operation.args;
+  const { data, skipDuplicates } = operation.args;
   // Single-object data is normalized to an array so `data: {...}` is logged like `data: [...]`
-  const rows = Array.isArray(data) ? (data as Row[]) : [data as Row];
+  const given = Array.isArray(data) ? (data as Row[]) : [data as Row];
   const keyFields = getRowKeyFields(deps.schemaMetadata, operation.model);
-  return { kind: 'create', rows: ensureIds(deps.schemaMetadata, operation.model, rows, keyFields), keyFields };
+  const rows = ensureIds(deps.schemaMetadata, operation.model, given, keyFields);
+  const givesKey = given.map((row) => keyFields.some((field) => row[field] !== undefined));
+  if (skipDuplicates !== true || !givesKey.includes(true)) {
+    return { kind: 'create', rows, keyFields };
+  }
+  const delegate = batchDelegate(scope, operation.model, deps.auditedOmittedFieldsWithRowKey);
+  const existing = await findManyByKeys(
+    delegate,
+    keyFields,
+    rows.filter((_, index) => givesKey[index]),
+  );
+  return {
+    kind: 'create-skipping-duplicates',
+    rows,
+    keyFields,
+    generatedKeys: new Set(
+      rows.filter((_, index) => !givesKey[index]).map((row) => extractEntityIdentity(row, keyFields)),
+    ),
+    existingKeys: new Set(existing.map((row) => extractEntityIdentity(row, keyFields))),
+  };
 };
 
 /**
- * The rows a `createMany` inserted, as the client reads them by the keys of `data`: every row the
- * read returns, once per key as read. The database compares the keys, so a row whose key it stores
- * or returns otherwise than `data` gave it (a case-insensitive collation, a BigInt given as a
- * number, a truncated DateTime) is found all the same; `data` only orders the rows, those whose key
- * reads as `data` gave it first, in `data` order, then the others in read order. A row of `data`
- * the read does not find was not created (skipped under `skipDuplicates`) or is not visible to the
- * read. A row skipped because a row with its key already exists reads as that row.
+ * The rows the client reads after a `createMany` by the keys of `data`: every row the read returns,
+ * once per key as read. The database compares the keys, so a row whose key it stores or returns
+ * otherwise than `data` gave it (a case-insensitive collation, a BigInt given as a number, a
+ * truncated DateTime) is found all the same; `data` only orders the rows, those whose key reads as
+ * `data` gave it first, in `data` order, then the others in read order. A row of `data` the read
+ * does not find was not created (skipped under `skipDuplicates`) or is not visible to the read. A
+ * row skipped because a row with its key already exists reads as that row, which
+ * `rowsInsertedSkippingDuplicates` leaves out.
  */
 const createdRows = async (delegate: BatchDelegate, rows: readonly Row[], keyFields: string[]): Promise<Row[]> => {
   const read = buildEntityMap(await findManyByKeys(delegate, keyFields, rows), keyFields);
@@ -311,6 +352,9 @@ const limitedRowsOfOtherWriters: UnidentifiedReason = (operation, unidentified) 
 const createdRowsNotReadBack: UnidentifiedReason = (operation, unidentified) =>
   `${unidentified} of the rows a ${operation.action} created ${unidentified === 1 ? 'was' : 'were'} not found when read back by key`;
 
+const createdRowsNotTold: UnidentifiedReason = (operation, unidentified) =>
+  `${unidentified} of the rows a ${operation.action} with skipDuplicates created ${unidentified === 1 ? 'is' : 'are'} not audited: the rows read back under the keys its data gives, less those that held them before it, do not match its count, so which of them it inserted cannot be told`;
+
 const rowsNotFoundAfterWrite: UnidentifiedReason = (operation, unidentified) =>
   `${unidentified} of the rows read before an ${operation.action} are not found by key after it, so they are not audited: another writer changed their key or deleted them`;
 
@@ -351,6 +395,40 @@ const reportUnidentified = async (
     params: { unidentified },
     error: new Error(reason(operation, unidentified)),
   });
+};
+
+/**
+ * The rows a `createMany` with `skipDuplicates` inserted: the rows read back after the write, less
+ * those under a key a row held before it, which it skipped. They are audited when they match its
+ * count. Otherwise some of them are not its own (another writer inserted them between the read
+ * before the write and the write) or some rows it inserted are not found (the read back misses a
+ * key the database stores in another form), and which of the rows under the keys `data` gives it inserted cannot be told: only
+ * the rows of generated keys are audited, and the rows it created beyond them are reported as
+ * `row-identification`.
+ */
+const rowsInsertedSkippingDuplicates = async (
+  operation: AuditedOperation,
+  delegate: BatchDelegate,
+  prepared: {
+    readonly rows: Row[];
+    readonly keyFields: string[];
+    readonly generatedKeys: ReadonlySet<EntityIdentityKey>;
+    readonly existingKeys: ReadonlySet<EntityIdentityKey>;
+  },
+  executed: BatchExecuted,
+  failureSink: FailureSink,
+): Promise<WrittenRows> => {
+  const { keyFields, generatedKeys, existingKeys } = prepared;
+  const found = (await createdRows(delegate, prepared.rows, keyFields)).filter(
+    (row) => !existingKeys.has(extractEntityIdentity(row, keyFields)),
+  );
+  const count = countOf(executed.result);
+  if (found.length === count) {
+    return { rows: found };
+  }
+  const generated = found.filter((row) => generatedKeys.has(extractEntityIdentity(row, keyFields)));
+  await reportUnidentified(operation, count - generated.length, failureSink, createdRowsNotTold);
+  return { rows: generated };
 };
 
 /**
@@ -578,7 +656,7 @@ export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationE
   const prepare = (operation: AuditedOperation, scope: ExecutionScope): Promise<BatchPrepared> =>
     requiresBeforeState(operation.action)
       ? prepareUpdateOrDelete(operation, scope, deps)
-      : Promise.resolve(prepareCreate(operation, deps));
+      : prepareCreate(operation, scope, deps);
 
   const execute = async (
     operation: AuditedOperation,
@@ -588,6 +666,7 @@ export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationE
     const { args } = operation;
     switch (prepared.kind) {
       case 'create':
+      case 'create-skipping-duplicates':
         return { result: await operation.execute({ ...args, data: prepared.rows }), returnedRows: undefined };
       case 'create-returning': {
         const result = await operation.execute(args);
@@ -636,6 +715,14 @@ export const createBatchExecutor = (deps: BatchExecutorDependencies): OperationE
         );
         return { rows };
       }
+      case 'create-skipping-duplicates':
+        return rowsInsertedSkippingDuplicates(
+          operation,
+          delegateOf(scope, operation.model),
+          prepared,
+          executed,
+          failureSink,
+        );
       case 'update-returning':
         return pairReturnedRows(
           operation,

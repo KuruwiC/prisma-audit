@@ -28,4 +28,29 @@ describeCrudSmoke({ name: 'MySQL', setup: setupMySQLDatabase, teardown: teardown
       ]);
     });
   });
+
+  describe('createMany with skipDuplicates', () => {
+    it('records no create for a row it skipped because a row held its primary key, given in another case, before the write', async () => {
+      await context.prisma.user.create({ data: { id: 'case-user', email: 'case@example.com', name: 'Case' } });
+      await context.prisma.auditLog.deleteMany();
+
+      // MySQL's default collation compares strings case-insensitively, so 'CASE-USER' is the key of the
+      // row stored as 'case-user', and the row of data that gives it is skipped
+      const result = await context.provider.runAsync(smokeActor, () =>
+        context.prisma.user.createMany({
+          data: [
+            { id: 'CASE-USER', email: 'skipped@example.com', name: 'Skipped' },
+            { id: 'fresh-user', email: 'fresh@example.com', name: 'Fresh' },
+          ],
+          skipDuplicates: true,
+        }),
+      );
+
+      expect(result).toEqual({ count: 1 });
+      const auditLogs = await context.prisma.auditLog.findMany({ where: { entityType: 'User', action: 'create' } });
+      expect(auditLogs.map((log: Prisma.AuditLogGetPayload<object>) => [log.entityId, log.aggregateId])).toEqual([
+        ['fresh-user', 'fresh-user'],
+      ]);
+    });
+  });
 });

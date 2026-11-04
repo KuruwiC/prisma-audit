@@ -7,13 +7,14 @@
 
 import type { FailureSink } from '@kuruwic/db-audit-core';
 import { Decimal } from '@prisma/client/runtime/client';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PrismaBaseClient, PrismaNamespace } from '../../src/internal-types.js';
 import { createBatchExecutor } from '../../src/pipeline/batch-executor.js';
 import type { ExecutionScope } from '../../src/pipeline/execution-scope.js';
 import type { AuditedOperation } from '../../src/pipeline/executor.js';
 import type { RecordProducer } from '../../src/pipeline/produce-records.js';
 import { NO_AUDITED_OMITTED_FIELDS, withRowKeyFields } from '../../src/utils/audited-omitted-fields.js';
+import { ID_GENERATOR_FACTORIES } from '../../src/utils/id-generation.js';
 import { column, model, schemaMetadataOf } from '../support/audit-schema.js';
 import { stubFailureSink } from '../support/failure-sink.js';
 import { clientWith, operationOn, scopeOn } from './client-operation.js';
@@ -177,10 +178,13 @@ describe('createBatchExecutor', () => {
 
     it('audits the rows read back once per primary key in data order, and none for a row the read does not find', async () => {
       const createMany = vi.fn(async () => ({ count: 2 }));
-      const findMany = findManyReturning([
-        { id: 'c', email: 'c@read' },
-        { id: 'a', email: 'a@read' },
-      ]);
+      const findMany = findManyReturning(
+        [],
+        [
+          { id: 'c', email: 'c@read' },
+          { id: 'a', email: 'a@read' },
+        ],
+      );
       const client = clientWith({ user: { createMany, findMany } });
       const produceRecords = produce();
 
@@ -199,7 +203,10 @@ describe('createBatchExecutor', () => {
         produceRecords,
       );
 
-      expect(findMany.mock.calls).toEqual([[{ where: { id: { in: ['a', 'b', 'c', 'a'] } } }]]);
+      expect(findMany.mock.calls).toEqual([
+        [{ where: { id: { in: ['a', 'b', 'c', 'a'] } } }],
+        [{ where: { id: { in: ['a', 'b', 'c', 'a'] } } }],
+      ]);
       expect(produceRecords).toHaveBeenCalledWith(
         [
           eventOf({ identity: 'a', action: 'create', after: { id: 'a', email: 'a@read' } }),
@@ -324,7 +331,9 @@ describe('createBatchExecutor', () => {
       const ids = [...Array.from({ length: 1000 }, (_, index) => `r${index}`), 'R0'];
       const createMany = vi.fn(async () => ({ count: 1000 }));
       const findMany = vi.fn(async ({ where }: { where: Row }) =>
-        Array.from(new Set((where.id as { in: string[] }).in.map((id) => id.toLowerCase())), (id) => ({ id })),
+        createMany.mock.calls.length === 0
+          ? []
+          : Array.from(new Set((where.id as { in: string[] }).in.map((id) => id.toLowerCase())), (id) => ({ id })),
       );
       const client = clientWith({ user: { createMany, findMany } });
       const produceRecords = produce();
@@ -336,7 +345,7 @@ describe('createBatchExecutor', () => {
         produceRecords,
       );
 
-      expect(findMany).toHaveBeenCalledTimes(2);
+      expect(findMany).toHaveBeenCalledTimes(4);
       expect(produceRecords.mock.calls[0]?.[0].map((event) => event.identity)).toEqual(ids.slice(0, 1000));
       expect(failureSink.notify).not.toHaveBeenCalled();
     });
@@ -415,6 +424,202 @@ describe('createBatchExecutor', () => {
 
       expect(createMany).toHaveBeenCalledWith({ data: [{ email: 'a@1', id: expect.any(String) }] });
       expect(produceRecords).toHaveBeenCalledWith([eventOf({ action: 'create' })], expect.anything(), new Map());
+    });
+
+    describe('with skipDuplicates', () => {
+      /**
+       * A `user` table holding `existing`, the key of each row as `stored` stores it: `createMany`
+       * inserts the rows of data whose stored key it does not hold and skips the others, and
+       * `findMany` reads by `id: { in }`, leaving out the rows of `hidden` as a read that misses them
+       */
+      const userTable = (existing: Row[], { stored = (id: string) => id, hidden = [] as string[] } = {}) => {
+        const rows = new Map(existing.map((row) => [stored(row.id as string), row]));
+        const insert = (row: Row) => {
+          const id = stored(row.id as string);
+          if (rows.has(id)) {
+            return 0;
+          }
+          rows.set(id, { ...row, id });
+          return 1;
+        };
+        const createMany = vi.fn(async ({ data }: { data: Row[] }) => ({
+          count: data.reduce((count, row) => count + insert(row), 0),
+        }));
+        const findMany = vi.fn(async ({ where }: { where: Row }) =>
+          Array.from(new Set((where.id as { in: string[] }).in.map(stored))).flatMap((id) => {
+            const row = rows.get(id);
+            return row && !hidden.includes(id) ? [row] : [];
+          }),
+        );
+        return { createMany, findMany, insert };
+      };
+
+      const generatedIdOf = (createMany: ReturnType<typeof userTable>['createMany'], index: number) =>
+        createMany.mock.calls[0]?.[0].data[index]?.id;
+
+      afterEach(() => {
+        vi.restoreAllMocks();
+      });
+
+      it('reads no row before the write when every row of data leaves its key to the extension', async () => {
+        const { createMany, findMany } = userTable([]);
+        const client = clientWith({ user: { createMany, findMany } });
+        const produceRecords = produce();
+
+        await runWithRecords(
+          executor,
+          operationOn(client, 'createMany', { data: [{ email: 'a@1' }, { email: 'b@1' }], skipDuplicates: true }),
+          scopeOn(client),
+          produceRecords,
+        );
+
+        expect(findMany).toHaveBeenCalledTimes(1);
+        expect(findMany.mock.invocationCallOrder[0]).toBeGreaterThan(createMany.mock.invocationCallOrder[0] ?? 0);
+        expect(produceRecords.mock.calls[0]?.[0]).toHaveLength(2);
+      });
+
+      it('reads before the write, by the keys data gives, the rows that hold them, and audits the rows it inserted and none of those', async () => {
+        const existing = { id: 'a', email: 'a@0' };
+        const { createMany, findMany } = userTable([existing]);
+        const client = clientWith({ user: { createMany, findMany } });
+        const produceRecords = produce();
+
+        const outcome = await runWithRecords(
+          executor,
+          operationOn(client, 'createMany', {
+            data: [{ id: 'a', email: 'a@1' }, { email: 'g@1' }, { id: 'b', email: 'b@1' }],
+            skipDuplicates: true,
+          }),
+          scopeOn(client),
+          produceRecords,
+        );
+
+        const generated = generatedIdOf(createMany, 1);
+        expect(outcome.result).toEqual({ count: 2 });
+        expect(findMany.mock.calls).toEqual([
+          [{ where: { id: { in: ['a', 'b'] } } }],
+          [{ where: { id: { in: ['a', generated, 'b'] } } }],
+        ]);
+        expect(findMany.mock.invocationCallOrder[0]).toBeLessThan(createMany.mock.invocationCallOrder[0] ?? 0);
+        expect(produceRecords).toHaveBeenCalledWith(
+          [
+            eventOf({ identity: generated, action: 'create', after: { id: generated, email: 'g@1' } }),
+            eventOf({ identity: 'b', action: 'create', after: { id: 'b', email: 'b@1' } }),
+          ],
+          expect.anything(),
+          new Map(),
+        );
+        expect(failureSink.notify).not.toHaveBeenCalled();
+      });
+
+      it('audits no row for a key data gives that a row held before the write, telling it by the key the read returns, not the key data gives', async () => {
+        const { createMany, findMany } = userTable([{ id: 'a', email: 'a@0' }], { stored: (id) => id.toLowerCase() });
+        const client = clientWith({ user: { createMany, findMany } });
+        const produceRecords = produce();
+
+        const outcome = await runWithRecords(
+          executor,
+          operationOn(client, 'createMany', { data: [{ id: 'A', email: 'a@1' }], skipDuplicates: true }),
+          scopeOn(client),
+          produceRecords,
+        );
+
+        expect(outcome.result).toEqual({ count: 0 });
+        expect(produceRecords).toHaveBeenCalledWith([], expect.anything(), new Map());
+        expect(failureSink.notify).not.toHaveBeenCalled();
+      });
+
+      it('audits only the rows of generated keys, and reports the others it created, when the rows found under the keys data gives do not match the count', async () => {
+        const { createMany, findMany } = userTable([], { hidden: ['b'] });
+        const client = clientWith({ user: { createMany, findMany } });
+        const produceRecords = produce();
+
+        const outcome = await runWithRecords(
+          executor,
+          operationOn(client, 'createMany', {
+            data: [{ email: 'g@1' }, { id: 'b', email: 'b@1' }, { id: 'c', email: 'c@1' }],
+            skipDuplicates: true,
+          }),
+          scopeOn(client),
+          produceRecords,
+        );
+
+        const generated = generatedIdOf(createMany, 0);
+        expect(outcome.result).toEqual({ count: 3 });
+        expect(produceRecords).toHaveBeenCalledWith(
+          [eventOf({ identity: generated, action: 'create', after: { id: generated, email: 'g@1' } })],
+          expect.anything(),
+          new Map(),
+        );
+        expect(failureSink.notify).toHaveBeenCalledExactlyOnceWith({
+          phase: 'row-identification',
+          modelName: 'User',
+          operation: 'createMany',
+          params: { unidentified: 2 },
+          error: new Error(
+            '2 of the rows a createMany with skipDuplicates created are not audited: the rows read back under the keys its data gives, less those that held them before it, do not match its count, so which of them it inserted cannot be told',
+          ),
+        });
+      });
+
+      it('audits only the rows of generated keys, reporting nothing, when the count leaves no row for the keys data gives', async () => {
+        const table = userTable([]);
+        // Another writer inserts the row of key b between the read before the write and the write
+        const createMany = vi.fn(async (args: { data: Row[] }) => {
+          table.insert({ id: 'b', email: 'b@other' });
+          return table.createMany(args);
+        });
+        const client = clientWith({ user: { createMany, findMany: table.findMany } });
+        const produceRecords = produce();
+
+        const outcome = await runWithRecords(
+          executor,
+          operationOn(client, 'createMany', {
+            data: [{ email: 'g@1' }, { id: 'b', email: 'b@1' }],
+            skipDuplicates: true,
+          }),
+          scopeOn(client),
+          produceRecords,
+        );
+
+        const generated = createMany.mock.calls[0]?.[0].data[0]?.id;
+        expect(outcome.result).toEqual({ count: 1 });
+        expect(produceRecords).toHaveBeenCalledWith(
+          [eventOf({ identity: generated, action: 'create', after: { id: generated, email: 'g@1' } })],
+          expect.anything(),
+          new Map(),
+        );
+        expect(failureSink.notify).not.toHaveBeenCalled();
+      });
+
+      it('records as created a row that held a generated key before the write: a generated key is not read before it (known limit)', async () => {
+        vi.spyOn(ID_GENERATOR_FACTORIES, 'cuid').mockReturnValue(() => 'a');
+        const { createMany, findMany } = userTable([
+          { id: 'a', email: 'a@0' },
+          { id: 's', email: 's@0' },
+        ]);
+        const client = clientWith({ user: { createMany, findMany } });
+        const produceRecords = produce();
+
+        const outcome = await runWithRecords(
+          executor,
+          operationOn(client, 'createMany', {
+            data: [{ email: 'g@1' }, { id: 's', email: 's@1' }],
+            skipDuplicates: true,
+          }),
+          scopeOn(client),
+          produceRecords,
+        );
+
+        expect(outcome.result).toEqual({ count: 0 });
+        expect(findMany.mock.calls[0]).toEqual([{ where: { id: { in: ['s'] } } }]);
+        expect(produceRecords).toHaveBeenCalledWith(
+          [eventOf({ identity: 'a', action: 'create', after: { id: 'a', email: 'a@0' } })],
+          expect.anything(),
+          new Map(),
+        );
+        expect(failureSink.notify).not.toHaveBeenCalled();
+      });
     });
 
     it('audits the rows createManyAndReturn returned when no select or omit narrows them', async () => {
