@@ -10,17 +10,13 @@
  * When an audit failure failed an operation of the transaction and the body resolved all the same,
  * the transaction is rolled back with core's `AuditRollbackError`. The outcomes of the
  * transaction's operations are settled once `$transaction` has resolved, as committed, or
- * rejected, as not committed; an operation bound to no transaction settles its own (`settledIn`).
+ * rejected, as not committed; an operation bound to no transaction settles its own (core's
+ * `settledIn`).
  *
  * @module runtime/interactive-transaction
  */
 
-import {
-  type AuditContext,
-  type AuditContextProvider,
-  createTransactionAudit,
-  type OperationOutcome,
-} from '@kuruwic/db-audit-core';
+import { type AuditContext, type AuditContextProvider, createTransactionAudit } from '@kuruwic/db-audit-core';
 import type { PrismaHandle } from '../internal-types.js';
 import { trackPendingWrite } from './pending-writes.js';
 import type { ActiveTransaction } from './scope.js';
@@ -81,28 +77,3 @@ export const createOpenTransaction =
     await audit.commit(trackPendingWrite);
     return result;
   };
-
-/**
- * Runs an operation bound to `transaction`, or to none, then settles its outcome with whether it
- * succeeded: inside a transaction with the transaction's outcomes, as committed only when the
- * operation succeeded too; outside any before the operation returns or throws
- */
-export const settledIn = async <T>(
-  transaction: ActiveTransaction | undefined,
-  outcome: Pick<OperationOutcome, 'settle'>,
-  run: () => Promise<T>,
-): Promise<T> => {
-  const settle = (succeeded: boolean): Promise<void> =>
-    transaction
-      ? transaction.audit.outcomes.add(outcome, succeeded)
-      : outcome.settle(succeeded ? 'committed' : 'not-committed');
-  let result: T;
-  try {
-    result = await run();
-  } catch (error) {
-    await settle(false);
-    throw error;
-  }
-  await settle(true);
-  return result;
-};

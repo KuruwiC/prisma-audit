@@ -78,7 +78,7 @@ export type {
 } from './resolve/index.js';
 export { resolve } from './resolve/index.js';
 export type { TransactionAudit } from './transaction/index.js';
-export { AuditRollbackError, assertRecordsComplete, createTransactionAudit } from './transaction/index.js';
+export { AuditRollbackError, assertRecordsComplete, createTransactionAudit, settledIn } from './transaction/index.js';
 export type { AuditActor, AuditContext, AuditContextProvider } from './types.js';
 export type { ErrorStrategy } from './utils/error-handler.js';
 export type { ValueSerializer } from './utils/serialization.js';

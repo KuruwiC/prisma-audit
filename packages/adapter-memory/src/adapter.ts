@@ -29,7 +29,6 @@ import type {
   EntityMap,
   MutationAction,
   MutationEvent,
-  OperationOutcome,
   PolicyConfig,
   ResolveConfig,
   TransactionAudit,
@@ -50,6 +49,7 @@ import {
   planFor,
   policy,
   resolve,
+  settledIn,
 } from '@kuruwic/db-audit-core';
 import { identityOf, type MemorySchema } from './schema.js';
 import { createMemoryStore, type MemoryHandle, type MemoryRow, type MemoryStore } from './store.js';
@@ -202,26 +202,6 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
     return result;
   };
 
-  /**
-   * Runs a write, then settles its outcome with whether it succeeded: with the outcomes of the
-   * transaction of `scope`, inside one, and before returning outside any
-   */
-  const settledIn = async (
-    scope: TransactionScope<TModelName> | undefined,
-    outcome: OperationOutcome,
-    run: () => Promise<void>,
-  ): Promise<void> => {
-    const settle = (succeeded: boolean): Promise<void> =>
-      scope ? scope.audit.outcomes.add(outcome, succeeded) : outcome.settle(succeeded ? 'committed' : 'not-committed');
-    try {
-      await run();
-    } catch (error) {
-      await settle(false);
-      throw error;
-    }
-    await settle(true);
-  };
-
   /** Runs `run` in the active transaction, in an implicit one when the mode is atomic and none is active, else on the store */
   const inScope = <T>(
     mode: WriteMode,
@@ -260,7 +240,7 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
       { observer: observe },
     );
     if (gate.kind !== 'audit') {
-      await settledIn(activeScope.getStore(), outcome, async () => {
+      await settledIn(activeScope.getStore()?.audit, outcome, async () => {
         if (gate.kind === 'reject') {
           throw new AuditContextMissingError({ modelName: gate.modelName, operationModelName: model, operation: op });
         }
@@ -272,7 +252,7 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
     const mode = policy([model], policyConfig);
 
     await inScope(mode, (scope) =>
-      settledIn(scope, outcome, async () => {
+      settledIn(scope?.audit, outcome, async () => {
         const plan = planFor(mode, scope !== undefined);
         if (plan === 'reject') {
           throw new AuditAtomicityError({ modelName: model, operation: op });

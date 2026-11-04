@@ -33,13 +33,13 @@ import {
   createEntityId,
   createOperationOutcome,
   planFor,
+  settledIn,
   type WriteMode,
 } from '@kuruwic/db-audit-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PrismaBaseClient, PrismaHandle } from '../../src/internal-types.js';
 import type { OperationExecutor } from '../../src/pipeline/executor.js';
 import { type AuditPipelineDependencies, runAuditedOperation } from '../../src/pipeline/run-audited-operation.js';
-import { settledIn } from '../../src/runtime/interactive-transaction.js';
 import type { RecipeConfig } from '../../src/runtime/operation-recipe.js';
 import { flushAllPendingWrites, getPendingWriteCount } from '../../src/runtime/pending-writes.js';
 import { currentScope, operationBinding, type RuntimeScope } from '../../src/runtime/scope.js';
@@ -143,7 +143,7 @@ const auditedClientOf = (deps: AuditPipelineDependencies) => ({
           { model: 'User', operation: 'create' },
           { observer: observers.get(deps) },
         );
-        return settledIn(transaction, outcome, () =>
+        return settledIn(transaction?.audit, outcome, () =>
           runAuditedOperation(
             {
               operation: {

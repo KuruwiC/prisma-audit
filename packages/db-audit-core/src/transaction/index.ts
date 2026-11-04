@@ -88,6 +88,31 @@ export const createTransactionAudit = (): TransactionAudit => {
 };
 
 /**
+ * Runs an operation, then settles its outcome with whether it succeeded: inside a transaction, on
+ * the transaction's audit, as committed only when the transaction commits too; outside any, before
+ * the operation returns or throws
+ */
+export const settledIn = async <T>(
+  transaction: Pick<TransactionAudit, 'outcomes'> | undefined,
+  outcome: Pick<OperationOutcome, 'settle'>,
+  run: () => Promise<T>,
+): Promise<T> => {
+  const settle = (succeeded: boolean): Promise<void> =>
+    transaction
+      ? transaction.outcomes.add(outcome, succeeded)
+      : outcome.settle(succeeded ? 'committed' : 'not-committed');
+  let result: T;
+  try {
+    result = await run();
+  } catch (error) {
+    await settle(false);
+    throw error;
+  }
+  await settle(true);
+  return result;
+};
+
+/**
  * Once `dispatch` has resolved, fails an atomic operation some of whose records were dropped with
  * `AuditIncompleteError`, recorded on the transaction the operation runs in: the transaction must
  * not commit without them. An awaited or deferred operation commits; the outcome reports the

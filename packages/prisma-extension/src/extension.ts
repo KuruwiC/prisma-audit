@@ -27,6 +27,7 @@ import {
   createOperationOutcome,
   planFor,
   policy,
+  settledIn,
 } from '@kuruwic/db-audit-core';
 import { createPrismaWriteExecutor, declaresBeforeUnavailableColumn } from './adapters/write-executor.js';
 import { type AuditOptions, normalizeAuditOptions } from './audit-options.js';
@@ -37,7 +38,6 @@ import { createBatchExecutor } from './pipeline/batch-executor.js';
 import { createRecordProducer } from './pipeline/produce-records.js';
 import { type AuditPipelineDependencies, runAuditedOperation } from './pipeline/run-audited-operation.js';
 import { createSingleExecutor } from './pipeline/single-executor.js';
-import { settledIn } from './runtime/interactive-transaction.js';
 import type { RecipeConfig } from './runtime/operation-recipe.js';
 import { isProcessingAuditLog, operationBinding, withScope } from './runtime/scope.js';
 import { createTransactionProxy } from './runtime/transaction-proxy.js';
@@ -187,7 +187,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
       { model, operation, ...(gate.kind === 'unaudited' ? { unaudited: gate.reason } : {}) },
       outcomeConfig,
     );
-    return settledIn(operationBinding()?.transaction, outcome, () => {
+    return settledIn(operationBinding()?.transaction?.audit, outcome, () => {
       switch (gate.kind) {
         case 'reject':
           throw new AuditContextMissingError({ modelName: gate.modelName, operationModelName: model, operation });

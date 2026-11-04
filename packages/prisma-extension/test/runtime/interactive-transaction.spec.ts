@@ -6,18 +6,12 @@
  * does (once, again when it retries, with the commit settling after the callback) and check what
  * the body receives, the audit context it runs under, how the transaction ends, when the writes
  * the audit queued until the commit start, and how the outcomes of its operations are settled.
- * `settledIn` settles the outcome of one operation, in a transaction or outside any.
  */
 
-import {
-  type AuditContext,
-  AuditRollbackError,
-  createAsyncLocalStorageProvider,
-  createTransactionAudit,
-} from '@kuruwic/db-audit-core';
+import { type AuditContext, AuditRollbackError, createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
 import type { PrismaHandle } from '../../src/internal-types.js';
-import { createOpenTransaction, settledIn } from '../../src/runtime/interactive-transaction.js';
+import { createOpenTransaction } from '../../src/runtime/interactive-transaction.js';
 import { flushAllPendingWrites, getPendingWriteCount } from '../../src/runtime/pending-writes.js';
 import type { ActiveTransaction } from '../../src/runtime/scope.js';
 
@@ -400,65 +394,5 @@ describe('createOpenTransaction', () => {
       ]);
       expect(events).toEqual(['settled run 1 not committed', 'started run 2', 'settled run 2 committed']);
     });
-  });
-});
-
-describe('settledIn', () => {
-  const outcomeLog = (events: string[]) => ({
-    settle: vi.fn(async (fate: 'committed' | 'not-committed') => {
-      events.push(fate);
-    }),
-  });
-
-  describe('outside any transaction', () => {
-    it('settles the outcome as committed before returning the result of an operation that succeeded', async () => {
-      const events: string[] = [];
-
-      const result = await settledIn(undefined, outcomeLog(events), async () => {
-        events.push('ran');
-        return 'result';
-      });
-
-      expect(result).toBe('result');
-      expect(events).toEqual(['ran', 'committed']);
-    });
-
-    it('settles the outcome as not committed before rethrowing the error of an operation that failed', async () => {
-      const events: string[] = [];
-      const operationError = new Error('unique constraint failed');
-
-      await expect(
-        settledIn(undefined, outcomeLog(events), async () => {
-          throw operationError;
-        }),
-      ).rejects.toBe(operationError);
-
-      expect(events).toEqual(['not-committed']);
-    });
-  });
-
-  describe('inside a transaction', () => {
-    const transactionOf = (): ActiveTransaction => ({ client: txClient, audit: createTransactionAudit() });
-
-    it.each([
-      { succeeded: true, committed: true, fate: 'committed' },
-      { succeeded: true, committed: false, fate: 'not-committed' },
-      { succeeded: false, committed: true, fate: 'not-committed' },
-      { succeeded: false, committed: false, fate: 'not-committed' },
-    ])(
-      'queues the settlement on the transaction, as $fate once it settles for an operation that succeeded $succeeded in a transaction that committed $committed',
-      async ({ succeeded, committed, fate }) => {
-        const events: string[] = [];
-        const transaction = transactionOf();
-
-        await settledIn(transaction, outcomeLog(events), async () => {
-          if (!succeeded) throw new Error('operation failed');
-        }).catch(() => undefined);
-        expect(events).toEqual([]);
-
-        await transaction.audit.outcomes.settle(committed ? 'committed' : 'not-committed');
-        expect(events).toEqual([fate]);
-      },
-    );
   });
 });
