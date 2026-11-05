@@ -1,9 +1,9 @@
 /**
  * A batch `$transaction([...])` stays all-or-nothing for the caller, as on a client without the
  * audit extension. A batch holding a write runs as one interactive transaction on the client it
- * was called on: its operations run in order, atomic and awaited audit rows are written in it, and
- * a failure of any operation, of the build of any operation's audit rows, or of an audit write the
- * transaction waits for rolls back every operation of the batch together with its audit rows.
+ * was called on: its operations run in order, their audit rows are written in it under every mode,
+ * and a failure of any operation, of the build of any operation's audit rows, or of an audit write
+ * rolls back every operation of the batch together with its audit rows.
  * Prisma runs a batch of reads and raw queries only itself.
  *
  * Each case runs the same batch on a plain `PrismaClient` first, from the same seeded rows, and
@@ -324,7 +324,7 @@ describe('Batch $transaction under the audit extension', () => {
     });
   });
 
-  describe('when no audit is awaited', () => {
+  describe('under deferred', () => {
     it("rolls back every operation of the batch when one operation's write fails, and records nothing", async () => {
       const audited = createAudited({ mode: 'deferred' });
       try {

@@ -14,12 +14,17 @@ import type { AuditContext, DispatchConfig, OperationOutcome, WriteMode, WritePl
 import { assertRecordsComplete, dispatch } from '@kuruwic/db-audit-core';
 import type { AuditAction } from '../grammar/operations.js';
 import type { PrismaBaseClient, PrismaHandle } from '../internal-types.js';
-import { type ActiveTransaction, withScope } from '../runtime/scope.js';
+import { withScope } from '../runtime/scope.js';
 import type { WidenedColumns } from '../utils/audited-selection.js';
 import { callerMutationFailureOf, runCallerMutation } from '../utils/caller-mutation-failure.js';
 import { isBatchOperation } from '../utils/operation-classifier.js';
 import { toError } from '../utils/to-error.js';
-import { type ExecutionScope, executionScopeOf, transactionRuntimeOf } from './execution-scope.js';
+import {
+  type ExecutionScope,
+  executionScopeOf,
+  type OperationTransaction,
+  transactionRuntimeOf,
+} from './execution-scope.js';
 import type { AuditedOperation, ExecutedOperation, OperationExecutor } from './executor.js';
 import type { RecordProducer } from './produce-records.js';
 
@@ -44,7 +49,7 @@ export interface AuditedOperationInput {
   /** How and when its records are written: `planFor` of the mode, which did not reject it */
   readonly plan: WritePlanKind;
   /** The interactive transaction of the client the operation was issued on; undefined for a client outside any */
-  readonly transaction: ActiveTransaction | undefined;
+  readonly transaction: OperationTransaction | undefined;
   /** The operation's outcome, which the caller of `runAuditedOperation` settles */
   readonly outcome: OperationOutcome;
 }

@@ -9,7 +9,6 @@
  */
 
 import type { EntityConfig } from '../aggregate/types.js';
-import type { WritePlanKind } from '../domain/mutation-event.js';
 
 /**
  * How an operation's audit rows are written relative to the operation
@@ -19,8 +18,12 @@ import type { WritePlanKind } from '../domain/mutation-event.js';
  *   whose records some failure dropped fails
  * - `awaited`: the records are written before the operation returns, in its transaction inside
  *   one and once it has committed outside any; a failure that drops records is only reported
- * - `deferred`: the records are written after the operation, once its transaction has committed
- *   inside one and detached outside any; a failure that drops records is only reported
+ * - `deferred`: inside a transaction, as `awaited`; outside any, the records are written
+ *   detached, after the operation has returned; a failure that drops records is only reported
+ *
+ * Inside a transaction every mode writes the records in it, so they commit and roll back with the
+ * rows they record, and a failed audit write fails the operation and keeps the transaction from
+ * committing.
  */
 export type WriteMode = 'atomic' | 'awaited' | 'deferred';
 
@@ -49,8 +52,21 @@ export const policy = (auditedModels: readonly string[], config: PolicyConfig): 
 };
 
 /**
+ * The write plan of an operation: how and when `dispatch` writes its records, decided before the
+ * operation runs (see `planFor`)
+ *
+ * - `immediate`: written on the transaction's handle before the transaction commits; the caller awaits it
+ * - `awaited-after-commit`: written on the base handle once the operation, which runs outside any
+ *   transaction, has committed; the caller awaits it
+ * - `detached`: started on the base handle once the operation, which runs outside any transaction,
+ *   has committed, never awaited by the caller
+ */
+export type WritePlanKind = 'immediate' | 'awaited-after-commit' | 'detached';
+
+/**
  * The write plan of an operation of `mode`, decided before it runs, or `reject` for an atomic
- * operation outside a transaction the adapter owns, which cannot commit with its records
+ * operation outside a transaction the adapter owns, which cannot commit with its records. Inside
+ * such a transaction it is `immediate` whatever the mode.
  *
  * @param inOwnedTransaction - Whether the operation runs inside a transaction the adapter owns,
  *   whose commit it controls
@@ -62,7 +78,7 @@ export const planFor = (mode: WriteMode, inOwnedTransaction: boolean): WritePlan
     case 'awaited':
       return inOwnedTransaction ? 'immediate' : 'awaited-after-commit';
     case 'deferred':
-      return inOwnedTransaction ? 'after-commit' : 'detached';
+      return inOwnedTransaction ? 'immediate' : 'detached';
     default: {
       const exhaustiveCheck: never = mode;
       throw new Error(`[db-audit-core] Unhandled write mode: ${JSON.stringify(exhaustiveCheck)}`);

@@ -52,11 +52,17 @@ const configAtomic = (atomic: boolean): RecipeConfig => ({
   isAtomicWrite: vi.fn(() => atomic),
 });
 
+/** Leaves a client the delegates' `$parent` names as it is: these tests never read it */
+const unwrapped = (client: object): object => client;
+
+/** Leaves the `$transaction` of a client as it is: these tests never call it */
+const ownTransaction = (_issuer: unknown, original: (...args: unknown[]) => unknown) => original;
+
 type UserDelegate = { create: (args: unknown) => PromiseLike<unknown> };
 
 /** `receiver.user.create(args)` as the client proxy returns it */
 const createUserOn = (config: RecipeConfig, clients: ReturnType<typeof createClients>, args: unknown) => {
-  const delegate = createRecipeClient(config, clients.openTransaction).propertyOf(
+  const delegate = createRecipeClient(config, clients.openTransaction, unwrapped, ownTransaction).propertyOf(
     clients.receiver,
     clients.target,
     'user',
@@ -94,7 +100,12 @@ describe('operation recipes', () => {
     it('binds its operations to the transaction, and opens none for an atomic write', async () => {
       const clients = createClients();
       const transaction = activeTransactionOf(clients.tx);
-      const bound = createRecipeClient(configAtomic(true), clients.openTransaction).boundClient(transaction);
+      const bound = createRecipeClient(
+        configAtomic(true),
+        clients.openTransaction,
+        unwrapped,
+        ownTransaction,
+      ).boundClient(transaction);
 
       await (bound.user as UserDelegate).create({ email: 'a' });
 
@@ -106,7 +117,12 @@ describe('operation recipes', () => {
       const clients = createClients();
       const marker = { marker: true };
       const transaction = activeTransactionOf({ ...clients.tx, $other: marker });
-      const bound = createRecipeClient(configAtomic(false), clients.openTransaction).boundClient(transaction);
+      const bound = createRecipeClient(
+        configAtomic(false),
+        clients.openTransaction,
+        unwrapped,
+        ownTransaction,
+      ).boundClient(transaction);
 
       expect(bound.$other).toBe(marker);
       expect(bound.user).toBe(bound.user);
@@ -167,7 +183,11 @@ describe('operation recipes', () => {
       ...configAtomic(false),
       relatedModel: (model, field) => (model === 'User' && field === 'posts' ? 'Post' : undefined),
     };
-    const delegate = createRecipeClient(config, vi.fn<OpenTransaction>()).propertyOf({}, target, 'user')?.value as {
+    const delegate = createRecipeClient(config, vi.fn<OpenTransaction>(), unwrapped, ownTransaction).propertyOf(
+      {},
+      target,
+      'user',
+    )?.value as {
       update: (args: unknown) => { posts: (args: unknown) => PromiseLike<unknown> };
     };
 
@@ -237,9 +257,11 @@ describe('operation recipes', () => {
       };
     };
     const rawMethodOf = (clients: ReturnType<typeof rawClient>, name: string, config = configAtomic(true)) =>
-      createRecipeClient(config, clients.openTransaction).propertyOf(clients.receiver, clients.target, name)?.value as
-        | ((...args: unknown[]) => PromiseLike<unknown> & object)
-        | undefined;
+      createRecipeClient(config, clients.openTransaction, unwrapped, ownTransaction).propertyOf(
+        clients.receiver,
+        clients.target,
+        name,
+      )?.value as ((...args: unknown[]) => PromiseLike<unknown> & object) | undefined;
 
     it('returns a recipe that calls the method on the client behind it, with the arguments, when awaited', async () => {
       const clients = rawClient();
@@ -278,7 +300,7 @@ describe('operation recipes', () => {
 
     it('is not wrapped when the client behind it has no such method, nor are other client methods', () => {
       const clients = rawClient();
-      const recipeClient = createRecipeClient(configAtomic(true), clients.openTransaction);
+      const recipeClient = createRecipeClient(configAtomic(true), clients.openTransaction, unwrapped, ownTransaction);
 
       expect(recipeClient.propertyOf(clients.receiver, clients.target, '$executeRaw')).toBeUndefined();
       expect(recipeClient.propertyOf(clients.receiver, clients.target, '$connect')).toBeUndefined();
@@ -320,8 +342,11 @@ describe('operation recipes', () => {
       };
     };
     const recipesOn = (receiver: object, target: object, config: RecipeConfig, actions: string[]) => {
-      const user = createRecipeClient(config, vi.fn<OpenTransaction>()).propertyOf(receiver, target, 'user')
-        ?.value as Record<string, () => PromiseLike<unknown>>;
+      const user = createRecipeClient(config, vi.fn<OpenTransaction>(), unwrapped, ownTransaction).propertyOf(
+        receiver,
+        target,
+        'user',
+      )?.value as Record<string, () => PromiseLike<unknown>>;
       return actions.map((name) => user[name]?.() as PromiseLike<unknown>);
     };
 

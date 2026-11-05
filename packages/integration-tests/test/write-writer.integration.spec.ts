@@ -288,7 +288,7 @@ describe('write.writer Coverage', () => {
       asyncContext.writerSpy.calls = [];
     });
 
-    it('should not call write.writer or persist audit logs when a deferred write is queued inside a transaction that then throws', async () => {
+    it('should call write.writer in the transaction and persist no audit log when a deferred write runs inside a transaction that then throws', async () => {
       const transactionPromise = asyncContext.provider.runAsync(testActor, async () => {
         return asyncContext.prisma.$transaction(async (tx: typeof asyncContext.prisma) => {
           await tx.user.create({
@@ -304,11 +304,9 @@ describe('write.writer Coverage', () => {
       });
 
       await expect(transactionPromise).rejects.toThrow('Rollback test');
-
-      // Give any deferred write a chance to run before asserting it did not.
       await flushAllPendingWrites();
 
-      expect(asyncContext.writerSpy.callCount).toBe(0);
+      expect(asyncContext.writerSpy.callCount).toBe(1);
 
       const auditLogs = await asyncContext.prisma.auditLog.findMany();
       expect(auditLogs).toHaveLength(0);
@@ -452,20 +450,87 @@ describe('write.writer Coverage', () => {
       expect(await tagNames()).toEqual(['writer:detached@example.com']);
     });
 
-    it('is the base client for a write queued until the transaction commits', async () => {
+    it('is the transaction client for a deferred write inside a transaction: what the writer writes through it commits and rolls back with the operation', async () => {
       const { basePrisma, prisma, handles } = createClient('deferred');
 
       await context.provider.runAsync(testActor, () =>
         prisma.$transaction(async (tx) => {
-          await createUser(tx, 'after-commit@example.com');
+          await createUser(tx, 'kept@example.com');
         }),
+      );
+      const rolledBack = context.provider.runAsync(testActor, () =>
+        prisma.$transaction(async (tx) => {
+          await createUser(tx, 'undone@example.com');
+          throw new Error('Rollback test');
+        }),
+      );
+
+      await expect(rolledBack).rejects.toThrow('Rollback test');
+      await flushAllPendingWrites();
+      expect(handles).toHaveLength(2);
+      // Compared by identity: a client does not print as a diff.
+      expect(handles.some((handle) => handle === basePrisma)).toBe(false);
+      expect(await tagNames()).toEqual(['writer:kept@example.com']);
+    });
+  });
+
+  describe('a write the writer makes through the audited client', () => {
+    const openClients: Array<{ $disconnect: () => Promise<void> }> = [];
+
+    afterEach(async () => {
+      for (const client of openClients.splice(0)) {
+        await client.$disconnect();
+      }
+    });
+
+    /**
+     * An audited client whose writer creates, through that client, one User named after each user
+     * it writes the records of
+     */
+    const createClient = (mode: WriteMode) => {
+      const basePrisma = createBasePrisma();
+      const prisma = createAuditClient(basePrisma, {
+        Prisma,
+        schema: auditSchema,
+        contextProvider: context.provider,
+        entities: testEntities,
+        write: {
+          mode,
+          writer: async (records, { defaultWrite }) => {
+            for (const record of records) {
+              const { email } = record.after as { email: string };
+              if (record.entityType === 'User' && !email.startsWith('writer:')) {
+                await prisma.user.create({ data: { email: `writer:${email}`, name: 'Writer', password: 'secret123' } });
+              }
+            }
+            await defaultWrite(records);
+          },
+        },
+      });
+      openClients.push(prisma, basePrisma);
+      return prisma;
+    };
+
+    it.each([
+      { plan: 'an awaited write outside any transaction', mode: 'awaited', inTransaction: false },
+      { plan: 'an awaited write inside a transaction', mode: 'awaited', inTransaction: true },
+      { plan: 'an atomic write', mode: 'atomic', inTransaction: false },
+      { plan: 'a detached write', mode: 'deferred', inTransaction: false },
+      { plan: 'a deferred write inside a transaction', mode: 'deferred', inTransaction: true },
+    ] as const)('is not audited, for $plan', async ({ mode, inTransaction }) => {
+      const prisma = createClient(mode);
+      const data = { email: 'audited@example.com', name: 'User', password: 'secret123' };
+
+      await context.provider.runAsync(testActor, () =>
+        inTransaction ? prisma.$transaction((tx) => tx.user.create({ data })) : prisma.user.create({ data }),
       );
       await flushAllPendingWrites();
 
-      expect(handles).toHaveLength(1);
-      // Compared by identity: a client does not print as a diff.
-      expect(handles[0] === basePrisma).toBe(true);
-      expect(await tagNames()).toEqual(['writer:after-commit@example.com']);
+      expect((await context.basePrisma.user.findMany({ orderBy: { email: 'asc' } })).map((user) => user.email)).toEqual(
+        ['audited@example.com', 'writer:audited@example.com'],
+      );
+      const logs = await context.basePrisma.auditLog.findMany({ where: { entityType: 'User' } });
+      expect(logs.map((log) => (log.after as { email: string }).email)).toEqual(['audited@example.com']);
     });
   });
 
@@ -538,17 +603,16 @@ describe('write.writer Coverage', () => {
       expect(flags).toEqual([false]);
     });
 
-    it('is false for a write queued until the transaction commits', async () => {
+    it("is true for a deferred write in the caller's transaction", async () => {
       const { prisma, flags } = createClient('deferred');
 
       await context.provider.runAsync(testActor, () =>
         prisma.$transaction(async (tx) => {
-          await createUser(tx, 'after-commit@example.com');
+          await createUser(tx, 'in-transaction@example.com');
         }),
       );
-      await flushAllPendingWrites();
 
-      expect(flags).toEqual([false]);
+      expect(flags).toEqual([true]);
     });
   });
 });

@@ -36,16 +36,15 @@ export interface WriteExecutor<TDbHandle = unknown> {
  * @template TDbHandle - Database handle type the adapter writes on
  */
 export interface TransactionRuntime<TDbHandle = unknown> {
-  /** A handle outside any transaction: writes after commit and detached writes run on it */
+  /** A handle outside any transaction: the writes of an operation outside one run on it */
   readonly baseHandle: TDbHandle;
   /** The transaction the operation runs in; present exactly when the operation runs inside one */
   readonly transaction?: {
-    /** The transaction's handle: an immediate write runs on it and commits or rolls back with the operation */
+    /** The transaction's handle: the write runs on it and commits or rolls back with the operation */
     readonly handle: TDbHandle;
     /**
-     * The audit of the transaction: work queued on it starts once the transaction has committed
-     * (for a nested transaction, the outermost one), and an audit failure recorded on it keeps the
-     * transaction from committing
+     * The audit of the transaction: the operation's outcome settles with it, and an audit failure
+     * recorded on it keeps the transaction from committing
      */
     readonly audit: TransactionAudit;
   };
@@ -62,17 +61,17 @@ export interface WriteContext<TDbHandle = unknown> {
   /** Audit context of the operation the records belong to */
   readonly auditContext: AuditContext;
   /**
-   * Database handle the write runs on: the handle of the operation's transaction for an
-   * immediate write inside one, the {@link TransactionRuntime.baseHandle} otherwise
+   * Database handle the write runs on: the handle of the operation's transaction when the
+   * operation runs in one, the {@link TransactionRuntime.baseHandle} otherwise
    */
   readonly handle: TDbHandle;
   /**
    * Whether `handle` belongs to the audited operation's transaction, so that what the writer
-   * writes through it commits and rolls back with the operation: true for an immediate write,
-   * which runs inside a transaction; false for a write after commit, awaited or queued, and a
-   * detached one. `dispatch` derives it from the adapter's {@link TransactionRuntime}.
-   * A writer that needs several statements to be atomic opens a transaction of its own exactly
-   * when this is false.
+   * writes through it or `defaultWrite`, and only that, commits and rolls back with the operation:
+   * true whenever the operation runs in a transaction, whatever its write mode; false outside any,
+   * where the records are written once the operation has committed, awaited or detached.
+   * `dispatch` derives it from the adapter's {@link TransactionRuntime}. A writer that needs
+   * several statements to be atomic opens a transaction of its own exactly when this is false.
    */
   readonly inTransaction: boolean;
   /** Writes records on `handle` with the adapter's {@link WriteExecutor} */

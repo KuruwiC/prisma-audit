@@ -1,9 +1,8 @@
 /**
  * Pending writes
  *
- * Registry of the audit writes no caller awaits: detached writes, and the writes a transaction
- * queued and started once it committed. `flushAllPendingWrites` lets tests and shutdown hooks
- * wait for them.
+ * Registry of the audit writes no caller awaits: the detached writes of deferred operations run
+ * outside any transaction. `flushAllPendingWrites` lets tests and shutdown hooks wait for them.
  */
 
 import { getGlobalSingleton } from '@kuruwic/db-audit-core';

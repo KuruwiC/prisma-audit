@@ -391,7 +391,7 @@ describe('transaction membership', () => {
     expect(adapter.store.auditLogs()[1]?.entityContext).toEqual({ name: 'Bob' });
   });
 
-  it('rollback: discards the data, the immediate audit rows and the after-commit plans', async () => {
+  it('rollback: discards the data and the audit rows written in the transaction, a deferred model included', async () => {
     const adapter = createAdapter({ entities: deferredPostMapping });
 
     await withContext(async () => {
@@ -402,7 +402,7 @@ describe('transaction membership', () => {
           await adapter.create('Post', { id: 'p1', authorId: 'u1', title: 'Hello' });
           expect(db.find('User', 'u1')).toBeDefined();
           expect(db.find('Post', 'p1')).toBeDefined();
-          expect(db.auditLogs().map((log) => log.entityId)).toEqual(['u0', 'u1']);
+          expect(db.auditLogs().map((log) => log.entityId)).toEqual(['u0', 'u1', 'p1', 'p1']);
           throw new Error('abort');
         }),
       ).rejects.toThrow('abort');
@@ -414,7 +414,7 @@ describe('transaction membership', () => {
     expect(adapter.store.auditLogs().map((log) => log.entityId)).toEqual(['u0']);
   });
 
-  it('deferred: inside a transaction the record lands after commit, outside after flush', async () => {
+  it('deferred: inside a transaction the record is written in it before the operation returns, outside after flush', async () => {
     const handles: unknown[] = [];
     const adapter = createAdapter({
       write: { mode: 'deferred' },
@@ -434,10 +434,9 @@ describe('transaction membership', () => {
     await withContext(async () => {
       await adapter.transaction(async (db) => {
         await adapter.create('User', { id: 'u1', name: 'Alice' });
-        expect(db.auditLogs()).toHaveLength(0);
+        expect(db.auditLogs().map((log) => log.entityId)).toEqual(['u1']);
         expect(adapter.store.auditLogs()).toHaveLength(0);
       });
-      await adapter.flush();
       expect(adapter.store.auditLogs().map((log) => log.entityId)).toEqual(['u1']);
 
       await adapter.create('User', { id: 'u2', name: 'Bob' });
@@ -585,18 +584,17 @@ describe('transaction membership', () => {
       expect(adapter.store.auditLogs().map((log) => log.entityId)).toEqual(['u1']);
     });
 
-    it('deferred: the inner after-commit records start once the outer commits and are dropped when the outer throws', async () => {
+    it('deferred: the inner records are written in the inner transaction, commit with the outer and are dropped when the outer throws', async () => {
       const adapter = createAdapter({ write: { mode: 'deferred' } });
 
       await withContext(async () => {
-        await adapter.transaction(async () => {
+        await adapter.transaction(async (outer) => {
           await adapter.transaction(async () => {
             await adapter.create('User', { id: 'u1', name: 'Alice' });
           });
-          await adapter.flush();
+          expect(outer.auditLogs().map((log) => log.entityId)).toEqual(['u1']);
           expect(adapter.store.auditLogs()).toEqual([]);
         });
-        await adapter.flush();
         expect(adapter.store.auditLogs().map((log) => log.entityId)).toEqual(['u1']);
 
         await expect(
@@ -631,18 +629,19 @@ describe('transaction membership', () => {
     expect(adapter.store.find('User', 'u1')).toEqual({ id: 'u1', name: 'Alice' });
   });
 
-  it('a write after commit that fails is recorded in writeFailures, the transaction stays committed and flush resolves', async () => {
+  it('deferred inside a transaction: a write that fails rejects the operation, rolls the transaction back even when the callback catches it, and is recorded in writeFailures', async () => {
     const adapter = createAdapter({ write: { mode: 'deferred' } });
     const failure = new Error('audit-log store unavailable');
     const write = vi.spyOn(memoryWriteExecutor, 'write').mockRejectedValue(failure);
 
     try {
-      await withContext(() =>
-        adapter.transaction(async () => {
-          await adapter.create('User', { id: 'u1', name: 'Alice' });
-        }),
-      );
-      await expect(adapter.flush()).resolves.toBeUndefined();
+      await expect(
+        withContext(() =>
+          adapter.transaction(async () => {
+            await expect(adapter.create('User', { id: 'u1', name: 'Alice' })).rejects.toBe(failure);
+          }),
+        ),
+      ).rejects.toThrow(expect.objectContaining({ name: 'AuditRollbackError', cause: failure }));
     } finally {
       write.mockRestore();
     }
@@ -650,7 +649,7 @@ describe('transaction membership', () => {
     expect(adapter.writeFailures).toEqual([
       { phase: 'log-write', records: [expect.objectContaining({ entityId: 'u1' })], error: failure },
     ]);
-    expect(adapter.store.find('User', 'u1')).toEqual({ id: 'u1', name: 'Alice' });
+    expect(adapter.store.find('User', 'u1')).toBeUndefined();
     expect(adapter.store.auditLogs()).toEqual([]);
   });
 

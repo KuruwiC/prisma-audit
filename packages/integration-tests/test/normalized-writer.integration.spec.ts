@@ -98,7 +98,7 @@ describe('Normalized Writer Helpers', () => {
       expect(await basePrisma.actor.count()).toBe(1);
     });
 
-    it('writes a write queued until the transaction commits, once it has committed', async () => {
+    it("writes a deferred write in the operation's transaction, so it commits with it and a rollback undoes it", async () => {
       const prisma = createAuditClient(basePrisma, {
         Prisma,
         schema: auditSchema,
@@ -112,11 +112,18 @@ describe('Normalized Writer Helpers', () => {
 
       await provider.runAsync(testActor, () =>
         prisma.$transaction(async (tx) => {
-          await tx.user.create({ data: { email: 'after-commit@example.com', name: 'After Commit' } });
+          await tx.user.create({ data: { email: 'kept@example.com', name: 'Kept' } });
         }),
       );
-      await flushAllPendingWrites();
+      const rolledBack = provider.runAsync(testActor, () =>
+        prisma.$transaction(async (tx) => {
+          await tx.user.create({ data: { email: 'undone@example.com', name: 'Undone' } });
+          throw new Error('Rollback test');
+        }),
+      );
 
+      await expect(rolledBack).rejects.toThrow('Rollback test');
+      await flushAllPendingWrites();
       expect(await basePrisma.auditChange.count()).toBe(1);
       expect(await basePrisma.auditAggregate.count()).toBe(1);
     });

@@ -25,10 +25,22 @@ describe('a model method an extension applied to the audited client adds', () =>
 
   const createClient = (base: PrismaClient) =>
     createAuditClient(base, testAuditOptions(provider, { Prisma, schema: auditSchema })).$extends({
+      client: {
+        async signUpThroughClientParent(email: string) {
+          return Prisma.getExtensionContext(this).$parent.user.create({
+            data: { email, name: 'Signed up', password: 'secret123' },
+          });
+        },
+      },
       model: {
         user: {
           async signUp(email: string) {
             return Prisma.getExtensionContext(this).create({
+              data: { email, name: 'Signed up', password: 'secret123' },
+            });
+          },
+          async signUpThroughParent(email: string) {
+            return Prisma.getExtensionContext(this).$parent.user.create({
               data: { email, name: 'Signed up', password: 'secret123' },
             });
           },
@@ -71,6 +83,39 @@ describe('a model method an extension applied to the audited client adds', () =>
       provider.runAsync(testActor, () =>
         prisma.$transaction(async (tx) => {
           await tx.user.signUp('inside@example.com');
+          auditRowsInTransaction = await tx.auditLog.count({ where: { entityType: 'User', action: 'create' } });
+          throw rollback;
+        }),
+      ),
+    ).rejects.toBe(rollback);
+
+    expect(auditRowsInTransaction).toBe(1);
+    expect(await basePrisma.user.count()).toBe(0);
+    expect(await userCreateLogs()).toEqual([]);
+  });
+
+  it("audits the write a model method makes through the extension context's $parent, outside any transaction", async () => {
+    const user = await provider.runAsync(testActor, () => prisma.user.signUpThroughParent('parent@example.com'));
+
+    expect((await userCreateLogs()).map((log) => log.entityId)).toEqual([user.id]);
+  });
+
+  it("audits the write a client method makes through the extension context's $parent, outside any transaction", async () => {
+    const user = await provider.runAsync(testActor, () =>
+      prisma.signUpThroughClientParent('client-parent@example.com'),
+    );
+
+    expect((await userCreateLogs()).map((log) => log.entityId)).toEqual([user.id]);
+  });
+
+  it("audits the write a model method makes through the extension context's $parent in the transaction of the client a $transaction callback receives, and rolls it back with it", async () => {
+    const rollback = new Error('callback rolls back');
+    let auditRowsInTransaction: number | undefined;
+
+    await expect(
+      provider.runAsync(testActor, () =>
+        prisma.$transaction(async (tx) => {
+          await tx.user.signUpThroughParent('parent-inside@example.com');
           auditRowsInTransaction = await tx.auditLog.count({ where: { entityType: 'User', action: 'create' } });
           throw rollback;
         }),

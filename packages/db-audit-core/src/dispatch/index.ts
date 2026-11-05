@@ -6,9 +6,10 @@
  * and reports both to the operation's outcome.
  */
 
-import type { AuditRecord, WritePlanKind } from '../domain/mutation-event.js';
+import type { AuditRecord } from '../domain/mutation-event.js';
 import type { TransactionRuntime, WriteExecutor, WriteFn } from '../domain/write.js';
 import type { OperationOutcome } from '../outcome/index.js';
+import type { WritePlanKind } from '../policy/index.js';
 import type { AuditContext } from '../types.js';
 import { toError } from '../utils/to-error.js';
 
@@ -25,19 +26,16 @@ const planOf = <TDbHandle>(
 ):
   | { readonly kind: 'immediate'; readonly handle: TDbHandle }
   | { readonly kind: 'awaited-after-commit' }
-  | { readonly kind: 'after-commit' | 'detached'; readonly handOver: (work: Work) => void } => {
+  | { readonly kind: 'detached'; readonly handOver: (work: Work) => void } => {
   const { transaction } = runtime;
   switch (kind) {
     case 'immediate':
-    case 'after-commit':
       if (!transaction) {
         throw new Error(
           `[db-audit-core] The ${kind} write plan needs the operation's transaction, and the operation runs outside any`,
         );
       }
-      return kind === 'immediate'
-        ? { kind, handle: transaction.handle }
-        : { kind, handOver: (work) => transaction.audit.afterCommit(work) };
+      return { kind, handle: transaction.handle };
     case 'awaited-after-commit':
       return { kind };
     case 'detached':
@@ -55,13 +53,12 @@ const planOf = <TDbHandle>(
  * - `immediate`: on the transaction's handle, awaited;
  * - `awaited-after-commit`: on the base handle, awaited, the operation having committed outside any
  *   transaction;
- * - `after-commit`: after the transaction commits, on the base handle;
  * - `detached`: detached, on the base handle.
  *
- * An `immediate` or `after-commit` plan needs the runtime's transaction: without one `dispatch`
- * rejects before building anything. The build runs before `dispatch` resolves, whatever the write
- * plan. A failed build is reported to the outcome under `diff-generation` and a failed write under
- * `log-write`; once the write has finished, the outcome is told how many records a writer took,
+ * An `immediate` plan needs the runtime's transaction: without one `dispatch` rejects before
+ * building anything. The build runs before `dispatch` resolves, whatever the write plan. A failed
+ * build is reported to the outcome under `diff-generation` and a failed write under `log-write`;
+ * once the write has finished, the outcome is told how many records a writer took,
  * none when there were none or they were dropped. `dispatch` rejects only while the operation's
  * write is inside a transaction that has not committed: with the error of a failed build or of a
  * failed immediate write, recorded on the transaction's audit first, so that the transaction does
@@ -71,7 +68,7 @@ const planOf = <TDbHandle>(
  * failed build drops the records and a failed write is reported without failing the operation.
  *
  * Resolves once an awaited write has finished, or once the write is handed to the runtime; the
- * work handed to `afterCommit` or `detach` reports its own failure and never rejects.
+ * work handed to `detach` reports its own failure and never rejects.
  */
 export const dispatch = async <TDbHandle>(
   audited: {

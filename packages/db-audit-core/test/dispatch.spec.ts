@@ -1,7 +1,8 @@
 /**
  * Tests for dispatch: the records are built before it resolves, each write plan writes them on
- * the right handle at the right time (immediately and awaited, after commit, or
- * detached), the writer hook receives where the write runs, the operation's outcome learns how
+ * the right handle at the right time (immediately and awaited in the transaction, awaited after
+ * the commit outside any, or detached), every write mode inside a transaction writing
+ * immediately, the writer hook receives where the write runs, the operation's outcome learns how
  * many records a writer took or why none were, a failed write reaches it as log-write and fails the
  * caller inside a transaction only, and a failed build is reported as diff-generation and fails the
  * caller inside a transaction only, the dropped records being reported without failing it outside
@@ -11,12 +12,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { type DispatchConfig, dispatch } from '../src/dispatch/index.js';
 import { createActorId, createAggregateId, createEntityId } from '../src/domain/branded-types.js';
-import type { AuditRecord, WritePlanKind } from '../src/domain/mutation-event.js';
+import type { AuditRecord } from '../src/domain/mutation-event.js';
 import type { TransactionRuntime, WriteContext, WriteExecutor, WriteFn } from '../src/domain/write.js';
 import type { AuditFailure, OperationOutcome } from '../src/outcome/index.js';
-import { createTransactionAudit } from '../src/transaction/index.js';
+import { planFor, type WritePlanKind } from '../src/policy/index.js';
 import type { AuditContext } from '../src/types.js';
 import { deferred } from './support/deferred.js';
+import { spiedTransactionAudit } from './support/spied-transaction-audit.js';
 
 interface Handle {
   readonly name: string;
@@ -53,8 +55,7 @@ type Work = () => Promise<void>;
 
 /** A runtime that keeps the work handed to it instead of starting it */
 const createRuntime = (inTransaction: boolean) => {
-  const audit = createTransactionAudit();
-  const afterCommit = vi.spyOn(audit, 'afterCommit');
+  const { audit, poison } = spiedTransactionAudit();
   const detached: Work[] = [];
   const detach = vi.fn((work: Work) => {
     detached.push(work);
@@ -64,7 +65,7 @@ const createRuntime = (inTransaction: boolean) => {
     transaction: inTransaction ? { handle: transactionHandle, audit } : undefined,
     detach,
   };
-  return { runtime, audit, afterCommit, detach, afterCommitted: audit.queued, detached };
+  return { runtime, poison, detach, detached };
 };
 
 const createConfig = (options: { write?: WriteExecutor<Handle>['write']; writer?: WriteFn<Handle> } = {}) => {
@@ -147,7 +148,7 @@ describe('dispatch', () => {
           events.push('write finished');
         },
       });
-      const { runtime, afterCommit, detach } = createRuntime(true);
+      const { runtime, detach } = createRuntime(true);
 
       const dispatched = dispatch(audited('immediate'), config, runtime).then(() => {
         events.push('dispatch resolved');
@@ -159,7 +160,6 @@ describe('dispatch', () => {
       writeReleased.resolve();
       await dispatched;
       expect(events).toEqual(['write finished', 'dispatch resolved']);
-      expect(afterCommit).not.toHaveBeenCalled();
       expect(detach).not.toHaveBeenCalled();
     });
 
@@ -189,55 +189,32 @@ describe('dispatch', () => {
 
     it('records the failed write on the transaction, which must then not commit', async () => {
       const { config } = createConfig({ write: failingWrite });
-      const { runtime, audit } = createRuntime(true);
+      const { runtime, poison } = createRuntime(true);
 
       await expect(dispatch(audited('immediate'), config, runtime)).rejects.toBe(writeError);
 
-      expect(audit.failures).toEqual([writeError]);
+      expect(poison.mock.calls).toEqual([[writeError]]);
     });
   });
 
-  describe('after commit, for an after-commit plan inside a transaction', () => {
-    it('registers one work with the transaction and writes nothing until it runs, then writes on the base handle', async () => {
-      const { config, writeExecutor } = createConfig();
-      const { runtime, afterCommit, detach, afterCommitted } = createRuntime(true);
-
-      await dispatch(audited('after-commit'), config, runtime);
-
-      expect(afterCommit).toHaveBeenCalledTimes(1);
-      expect(detach).not.toHaveBeenCalled();
-      expect(writeExecutor.write).not.toHaveBeenCalled();
-
-      await runAll(afterCommitted);
-
-      expect(writeExecutor.write).toHaveBeenCalledWith(baseHandle, [record]);
-    });
-
-    it('tells the outcome the number of records the writer took from the registered work, once it runs', async () => {
+  it.each(['atomic', 'awaited', 'deferred'] as const)(
+    'writes the records of a %s operation inside a transaction on the transaction handle, awaited',
+    async (mode) => {
       const { outcome, finished } = createOutcome();
-      const { config } = createConfig();
-      const { runtime, afterCommitted } = createRuntime(true);
+      const { config, writeExecutor } = createConfig();
+      const { runtime, detach } = createRuntime(true);
+      const plan = planFor(mode, true);
+      if (plan === 'reject') {
+        throw new Error(`a ${mode} operation inside a transaction is not rejected`);
+      }
 
-      await dispatch(audited('after-commit', outcome), config, runtime);
-      expect(finished).toEqual([]);
-      await runAll(afterCommitted);
+      await dispatch(audited(plan, outcome), config, runtime);
 
+      expect(writeExecutor.write).toHaveBeenCalledWith(transactionHandle, [record]);
       expect(finished).toEqual([1]);
-    });
-
-    it('reports a failure of the registered work as log-write once it runs, and never rejects from it', async () => {
-      const { outcome, failures, finished } = createOutcome();
-      const { config } = createConfig({ write: failingWrite });
-      const { runtime, afterCommitted } = createRuntime(true);
-
-      await dispatch(audited('after-commit', outcome), config, runtime);
-      expect(failures).toEqual([]);
-
-      await expect(afterCommitted[0]?.()).resolves.toBeUndefined();
-      expect(failures).toEqual([logWriteFailure]);
-      expect(finished).toEqual([0]);
-    });
-  });
+      expect(detach).not.toHaveBeenCalled();
+    },
+  );
 
   describe('detached, for a detached plan outside any transaction', () => {
     it('hands one work to detach and writes nothing until it runs, then writes on the base handle', async () => {
@@ -283,7 +260,6 @@ describe('dispatch', () => {
     it.each([
       { plan: 'immediate', inTransaction: true, handle: transactionHandle },
       { plan: 'awaited-after-commit', inTransaction: false, handle: baseHandle },
-      { plan: 'after-commit', inTransaction: true, handle: baseHandle },
       { plan: 'detached', inTransaction: false, handle: baseHandle },
     ] as const)(
       'receives the audit context, the handle the write runs on, whether it is the transaction handle and a default write on it ($plan)',
@@ -292,15 +268,15 @@ describe('dispatch', () => {
           defaultWrite(written),
         );
         const { config, writeExecutor } = createConfig({ writer });
-        const { runtime, afterCommitted, detached } = createRuntime(inTransaction);
+        const { runtime, detached } = createRuntime(inTransaction);
 
         await dispatch(audited(plan), config, runtime);
-        await runAll([...afterCommitted, ...detached]);
+        await runAll(detached);
 
         expect(writer).toHaveBeenCalledWith([record], {
           auditContext,
           handle,
-          inTransaction: plan === 'immediate',
+          inTransaction,
           defaultWrite: expect.any(Function),
         });
         expect(writeExecutor.write).toHaveBeenCalledWith(handle, [record]);
@@ -332,19 +308,16 @@ describe('dispatch', () => {
     });
   });
 
-  it.each(['immediate', 'after-commit'] as const)(
-    'rejects a %s plan outside any transaction before building or writing anything',
-    async (plan) => {
-      const buildRecords = vi.fn(async () => records);
-      const { config, writeExecutor } = createConfig();
+  it('rejects an immediate plan outside any transaction before building or writing anything', async () => {
+    const buildRecords = vi.fn(async () => records);
+    const { config, writeExecutor } = createConfig();
 
-      await expect(
-        dispatch(audited(plan, createOutcome().outcome, buildRecords), config, createRuntime(false).runtime),
-      ).rejects.toThrow(`The ${plan} write plan needs the operation's transaction, and the operation runs outside any`);
-      expect(buildRecords).not.toHaveBeenCalled();
-      expect(writeExecutor.write).not.toHaveBeenCalled();
-    },
-  );
+    await expect(
+      dispatch(audited('immediate', createOutcome().outcome, buildRecords), config, createRuntime(false).runtime),
+    ).rejects.toThrow("The immediate write plan needs the operation's transaction, and the operation runs outside any");
+    expect(buildRecords).not.toHaveBeenCalled();
+    expect(writeExecutor.write).not.toHaveBeenCalled();
+  });
 
   it('reports every record of a failed write even when the writer emptied the array it was given', async () => {
     const built = [record];
@@ -368,14 +341,13 @@ describe('dispatch', () => {
 
   it.each([
     { plan: 'immediate', inTransaction: true },
-    { plan: 'after-commit', inTransaction: true },
     { plan: 'detached', inTransaction: false },
   ] as const)(
-    'writes, registers and detaches nothing without records, telling the outcome so ($plan)',
+    'writes and detaches nothing without records, telling the outcome so ($plan)',
     async ({ plan, inTransaction }) => {
       const { outcome, finished } = createOutcome();
       const { config, writeExecutor } = createConfig();
-      const { runtime, afterCommit, detach } = createRuntime(inTransaction);
+      const { runtime, detach } = createRuntime(inTransaction);
 
       await dispatch(
         audited(plan, outcome, async () => []),
@@ -385,7 +357,6 @@ describe('dispatch', () => {
 
       expect(finished).toEqual([0]);
       expect(writeExecutor.write).not.toHaveBeenCalled();
-      expect(afterCommit).not.toHaveBeenCalled();
       expect(detach).not.toHaveBeenCalled();
     },
   );
@@ -433,23 +404,19 @@ describe('dispatch', () => {
   });
 
   describe('a record build that fails', () => {
-    it.each([{ plan: 'immediate' }, { plan: 'after-commit' }] as const)(
-      'reports diff-generation once and rejects with its error, writing and registering nothing ($plan)',
-      async ({ plan }) => {
-        const { outcome, failures, finished } = createOutcome();
-        const { config, writeExecutor } = createConfig();
-        const { runtime, audit, afterCommit, detach } = createRuntime(true);
+    it('reports diff-generation once and rejects with its error, writing nothing (immediate)', async () => {
+      const { outcome, failures, finished } = createOutcome();
+      const { config, writeExecutor } = createConfig();
+      const { runtime, poison, detach } = createRuntime(true);
 
-        await expect(dispatch(audited(plan, outcome, failingBuild), config, runtime)).rejects.toBe(buildError);
+      await expect(dispatch(audited('immediate', outcome, failingBuild), config, runtime)).rejects.toBe(buildError);
 
-        expect(audit.failures).toEqual([buildError]);
-        expect(failures).toEqual([buildFailure]);
-        expect(finished).toEqual([]);
-        expect(writeExecutor.write).not.toHaveBeenCalled();
-        expect(afterCommit).not.toHaveBeenCalled();
-        expect(detach).not.toHaveBeenCalled();
-      },
-    );
+      expect(poison.mock.calls).toEqual([[buildError]]);
+      expect(failures).toEqual([buildFailure]);
+      expect(finished).toEqual([]);
+      expect(writeExecutor.write).not.toHaveBeenCalled();
+      expect(detach).not.toHaveBeenCalled();
+    });
 
     it.each([{ plan: 'detached' }, { plan: 'awaited-after-commit' }] as const)(
       'reports diff-generation once and resolves, dropping the records, outside any transaction, whose operation has committed ($plan)',
@@ -484,22 +451,19 @@ describe('dispatch', () => {
 
   it.each([
     { plan: 'immediate', inTransaction: true },
-    { plan: 'after-commit', inTransaction: true },
     { plan: 'detached', inTransaction: false },
   ] as const)(
     'builds the records once before it resolves, ahead of any work it hands over ($plan)',
     async ({ plan, inTransaction }) => {
       const buildRecords = vi.fn(async () => records);
       const { config } = createConfig();
-      const { runtime, afterCommit, detach } = createRuntime(inTransaction);
+      const { runtime, detach } = createRuntime(inTransaction);
 
       await dispatch(audited(plan, createOutcome().outcome, buildRecords), config, runtime);
 
       expect(buildRecords).toHaveBeenCalledTimes(1);
-      for (const handOver of [afterCommit, detach]) {
-        for (const order of handOver.mock.invocationCallOrder) {
-          expect(order).toBeGreaterThan(buildRecords.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY);
-        }
+      for (const order of detach.mock.invocationCallOrder) {
+        expect(order).toBeGreaterThan(buildRecords.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY);
       }
     },
   );

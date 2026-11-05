@@ -36,7 +36,7 @@ import {
 import { flushAllPendingWrites, getPendingWriteCount } from '../../src/runtime/pending-writes.js';
 import { type ActiveTransaction, isProcessingAuditLog, withScope } from '../../src/runtime/scope.js';
 import type { AuditLogData } from '../../src/types.js';
-import { activeTransactionOf } from '../support/active-transaction.js';
+import { activeTransactionOf, recordedFailuresOf } from '../support/active-transaction.js';
 
 const auditContext: AuditContext = { actor: { category: 'model', type: 'User', id: 'user-1' } };
 
@@ -196,7 +196,6 @@ describe('runAuditedOperation', () => {
       );
 
       expect(scopeSeenBy(deps.singleExecutor).handle).toBe(transactionClient);
-      expect(transaction.audit.queued).toHaveLength(0);
       expect(auditWriteOf(deps)).toHaveBeenCalledWith(transactionClient, [record]);
     });
 
@@ -234,25 +233,22 @@ describe('runAuditedOperation', () => {
       expect(write).toHaveBeenCalledWith(baseClient, [record]);
     });
 
-    it('runs on the transaction client and writes after commit when the mode is deferred inside a transaction', async () => {
+    it('runs on the transaction client and writes immediately in it when the mode is deferred inside a transaction', async () => {
       const baseClient = createBaseClient();
       const deps = createDeps();
       const transaction = activeTransactionOf(transactionClient);
-      const deferredWrites = transaction.audit.queued;
 
       await runOperation(
-        { operation: interceptedOf(), auditContext, baseClient, mode: 'deferred', plan: 'after-commit', transaction },
+        { operation: interceptedOf(), auditContext, baseClient, mode: 'deferred', plan: 'immediate', transaction },
         deps,
       );
 
       expect(baseClient.transactionsOpened.count).toBe(0);
       const scope = scopeSeenBy(deps.singleExecutor);
       expect(scope.handle).toBe(transactionClient);
-      expect(scope.transaction?.queued).toBe(deferredWrites);
-      expect(deferredWrites).toHaveLength(1);
-      expect(auditWriteOf(deps)).not.toHaveBeenCalled();
-      await deferredWrites[0]?.();
-      expect(auditWriteOf(deps)).toHaveBeenCalledWith(baseClient, [record]);
+      expect(scope.transaction).toBe(transaction.audit);
+      expect(getPendingWriteCount()).toBe(0);
+      expect(auditWriteOf(deps)).toHaveBeenCalledExactlyOnceWith(transactionClient, [record]);
     });
 
     it.each([
@@ -276,7 +272,6 @@ describe('runAuditedOperation', () => {
         const scope = scopeSeenBy(deps.singleExecutor);
         expect(scope.handle).toBe(baseClient);
         expect(scope.transaction).toBeUndefined();
-        expect(surrounding.audit.queued).toHaveLength(0);
         expect(auditWriteOf(deps)).toHaveBeenCalledExactlyOnceWith(baseClient, [record]);
       },
     );
@@ -303,32 +298,28 @@ describe('runAuditedOperation', () => {
 
       expect(scopeSeenBy(deps.singleExecutor).handle).toBe(named.client);
       expect(auditWriteOf(deps)).toHaveBeenCalledExactlyOnceWith(named.client, [record]);
-      expect(surrounding.audit.queued).toHaveLength(0);
     });
 
-    it('queues the writes after commit of several operations in one transaction in order', async () => {
+    it('writes the records of several deferred operations in one transaction in it, in order', async () => {
       const second: AuditLogData = { ...record, entityId: createEntityId('u2') };
       const outcomes = [executedUpdate, executedWith([second])];
       const deps = createDeps({ singleExecutor: stubExecutor(async () => outcomes.shift() ?? executedUpdate) });
       const baseClient = createBaseClient();
       const transaction = activeTransactionOf(transactionClient);
-      const deferredWrites = transaction.audit.queued;
 
       await runOperation(
-        { operation: interceptedOf(), auditContext, baseClient, mode: 'deferred', plan: 'after-commit', transaction },
+        { operation: interceptedOf(), auditContext, baseClient, mode: 'deferred', plan: 'immediate', transaction },
         deps,
       );
       await runOperation(
-        { operation: interceptedOf(), auditContext, baseClient, mode: 'deferred', plan: 'after-commit', transaction },
+        { operation: interceptedOf(), auditContext, baseClient, mode: 'deferred', plan: 'immediate', transaction },
         deps,
       );
 
-      expect(deferredWrites).toHaveLength(2);
-      expect(auditWriteOf(deps)).not.toHaveBeenCalled();
-      for (const deferredWrite of deferredWrites) {
-        await deferredWrite();
-      }
-      expect(auditWriteOf(deps).mock.calls.map(([, written]) => written)).toEqual([[record], [second]]);
+      expect(auditWriteOf(deps).mock.calls).toEqual([
+        [transactionClient, [record]],
+        [transactionClient, [second]],
+      ]);
     });
   });
 
@@ -579,9 +570,10 @@ describe('runAuditedOperation', () => {
 
       it.each([
         { mode: 'atomic', plan: 'immediate' },
-        { mode: 'deferred', plan: 'after-commit' },
+        { mode: 'awaited', plan: 'immediate' },
+        { mode: 'deferred', plan: 'immediate' },
       ] as const)(
-        'rejects with the original error, queues nothing and records the failure on the transaction when the mode is $mode inside a transaction',
+        'rejects with the original error and records the failure on the transaction when the mode is $mode inside a transaction',
         async ({ mode, plan }) => {
           const deps = createDeps({ singleExecutor: failingBuildExecutor() });
           const transaction = activeTransactionOf(transactionClient);
@@ -594,8 +586,7 @@ describe('runAuditedOperation', () => {
           ).rejects.toBe(buildError);
 
           expect(failuresOf(deps)).toEqual([buildFailure]);
-          expect(transaction.audit.queued).toHaveLength(0);
-          expect(transaction.audit.failures).toEqual([buildError]);
+          expect(recordedFailuresOf(transaction.audit)).toEqual([buildError]);
           expect(auditWriteOf(deps)).not.toHaveBeenCalled();
         },
       );
@@ -626,7 +617,7 @@ describe('runAuditedOperation', () => {
           ).resolves.toBe(executedUpdate.result);
 
           expect(failuresOf(deps)).toEqual([buildFailure]);
-          expect(surrounding.audit.failures).toEqual([]);
+          expect(recordedFailuresOf(surrounding.audit)).toEqual([]);
           expect(getPendingWriteCount()).toBe(0);
           expect(auditWriteOf(deps)).not.toHaveBeenCalled();
         },
@@ -665,7 +656,7 @@ describe('runAuditedOperation', () => {
         ).rejects.toBe(writeError);
 
         expect(failuresOf(deps)).toEqual([{ phase: 'log-write', records: [record], error: writeError }]);
-        expect(transaction.audit.failures).toEqual([writeError]);
+        expect(recordedFailuresOf(transaction.audit)).toEqual([writeError]);
       });
 
       it('returns the result and records nothing when the write fails outside any transaction', async () => {
@@ -689,7 +680,7 @@ describe('runAuditedOperation', () => {
         ).resolves.toBe(executedUpdate.result);
 
         expect(failuresOf(deps)).toEqual([{ phase: 'log-write', records: [record], error: writeError }]);
-        expect(surrounding.audit.failures).toEqual([]);
+        expect(recordedFailuresOf(surrounding.audit)).toEqual([]);
       });
     });
 
@@ -723,7 +714,7 @@ describe('runAuditedOperation', () => {
           ),
         ).rejects.toBe(mutationError);
 
-        expect(transaction.audit.failures).toEqual([]);
+        expect(recordedFailuresOf(transaction.audit)).toEqual([]);
       });
 
       it("records the caller's own mutation failure on the transaction when an earlier round of the operation wrote, and rethrows it untouched", async () => {
@@ -755,7 +746,7 @@ describe('runAuditedOperation', () => {
 
         expect(query).toHaveBeenCalledTimes(2);
         expect(failuresOf(deps)).toEqual([]);
-        expect(transaction.audit.failures).toEqual([mutationError]);
+        expect(recordedFailuresOf(transaction.audit)).toEqual([mutationError]);
       });
 
       it('does not record a failure before the write on the transaction', async () => {
@@ -781,7 +772,7 @@ describe('runAuditedOperation', () => {
         ).rejects.toBe(executorError);
 
         expect(query).not.toHaveBeenCalled();
-        expect(transaction.audit.failures).toEqual([]);
+        expect(recordedFailuresOf(transaction.audit)).toEqual([]);
       });
 
       it("records a failure after the caller's mutation succeeded on the transaction, and rethrows it", async () => {
@@ -809,7 +800,7 @@ describe('runAuditedOperation', () => {
 
         expect(query).toHaveBeenCalledTimes(1);
         expect(failuresOf(deps)).toEqual([{ phase: 'diff-generation', error: executorError }]);
-        expect(transaction.audit.failures).toEqual([executorError]);
+        expect(recordedFailuresOf(transaction.audit)).toEqual([executorError]);
       });
 
       it('records nothing on a transaction when the operation is bound to none, whatever the executor fails with after the write', async () => {
@@ -839,7 +830,7 @@ describe('runAuditedOperation', () => {
           ),
         ).rejects.toBe(executorError);
 
-        expect(surrounding.audit.failures).toEqual([]);
+        expect(recordedFailuresOf(surrounding.audit)).toEqual([]);
       });
     });
 
@@ -889,7 +880,7 @@ describe('runAuditedOperation', () => {
         });
         expect((rejection as Error).cause).toEqual([failure]);
         expect(auditWriteOf(deps)).toHaveBeenCalledExactlyOnceWith(transactionClient, [record]);
-        expect(transaction.audit.failures).toEqual([rejection]);
+        expect(recordedFailuresOf(transaction.audit)).toEqual([rejection]);
       });
 
       it('resolves an awaited operation a row-identification failure dropped a record of', async () => {
@@ -913,7 +904,7 @@ describe('runAuditedOperation', () => {
           ),
         ).resolves.toBe(executedUpdate.result);
 
-        expect(transaction.audit.failures).toEqual([]);
+        expect(recordedFailuresOf(transaction.audit)).toEqual([]);
       });
 
       const atomicUpdateIn = (transaction: ActiveTransaction): Omit<AuditedOperationInput, 'outcome'> => ({
@@ -945,7 +936,7 @@ describe('runAuditedOperation', () => {
           unrecordedWrites: [unrecordedUpsert],
         });
         expect(failuresOf(deps)).toEqual([failure]);
-        expect(transaction.audit.failures).toEqual([rejection]);
+        expect(recordedFailuresOf(transaction.audit)).toEqual([rejection]);
       });
 
       it('resolves an awaited operation the event collection left a write of without a record', async () => {
@@ -958,7 +949,7 @@ describe('runAuditedOperation', () => {
           executedUpdate.result,
         );
 
-        expect(transaction.audit.failures).toEqual([]);
+        expect(recordedFailuresOf(transaction.audit)).toEqual([]);
       });
 
       it('resolves an atomic operation an upsert pre-fetch failure was kept for when the event collection left no write without a record', async () => {
@@ -967,7 +958,7 @@ describe('runAuditedOperation', () => {
 
         await expect(runOperation(atomicUpdateIn(transaction), deps)).resolves.toBe(executedUpdate.result);
 
-        expect(transaction.audit.failures).toEqual([]);
+        expect(recordedFailuresOf(transaction.audit)).toEqual([]);
       });
 
       it('keeps the failures of each operation apart from those of another it runs while continuing', async () => {
@@ -992,7 +983,7 @@ describe('runAuditedOperation', () => {
         ).resolves.toBe(executedUpdate.result);
 
         expect(outerQuery).toHaveBeenCalledTimes(1);
-        expect(transaction.audit.failures).toEqual([]);
+        expect(recordedFailuresOf(transaction.audit)).toEqual([]);
       });
 
       it('resolves an atomic operation whose update entry a pre-fetch failure left without its before state', async () => {
@@ -1016,7 +1007,7 @@ describe('runAuditedOperation', () => {
           ),
         ).resolves.toBe(executedUpdate.result);
 
-        expect(transaction.audit.failures).toEqual([]);
+        expect(recordedFailuresOf(transaction.audit)).toEqual([]);
       });
     });
   });

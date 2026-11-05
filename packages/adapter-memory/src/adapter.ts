@@ -86,8 +86,8 @@ export interface MemoryAuditAdapter<TModelName extends string> {
   update(model: TModelName, identity: string, data: MemoryRow): Promise<void>;
   delete(model: TModelName, identity: string): Promise<void>;
   /**
-   * Runs `fn` in a transaction of the store, or nested inside the active transaction when called within one; audit
-   * writes queued for after commit start once the outermost transaction has committed
+   * Runs `fn` in a transaction of the store, or nested inside the active transaction when called within one; the
+   * audit rows of every operation it runs, whatever its write mode, are written in it and commit or roll back with it
    */
   transaction<T>(fn: (db: MemoryHandle<TModelName>) => Promise<T>): Promise<T>;
   /** Waits for every audit write no caller awaited that is pending at the time of the call */
@@ -179,12 +179,8 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
   const transaction = async <T>(fn: (db: MemoryHandle<TModelName>) => Promise<T>): Promise<T> => {
     const parent = activeScope.getStore();
     const audit = createTransactionAudit();
-    const end = (committed: boolean): Promise<void> => {
-      if (parent) {
-        return audit.mergeInto(parent.audit, committed);
-      }
-      return committed ? audit.commit(startDetached) : audit.rollBack();
-    };
+    const end = (committed: boolean): Promise<void> =>
+      parent ? audit.mergeInto(parent.audit, committed) : audit.end(committed);
     let result: T;
     try {
       result = await (parent?.handle ?? store).transaction((tx) =>
@@ -216,7 +212,7 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
 
   const dispatchConfig: DispatchConfig<MemoryHandle<TModelName>> = { writeExecutor: memoryWriteExecutor };
 
-  /** Writes after commit queue on the transaction; detached ones start on the store, tracked for `flush` */
+  /** Detached writes start on the store, tracked for `flush` */
   const runtimeOf = (
     scope: TransactionScope<TModelName> | undefined,
   ): TransactionRuntime<MemoryHandle<TModelName>> => ({

@@ -7,8 +7,8 @@ import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { describe, expect, it } from 'vitest';
 import type { PrismaHandle } from '../../src/internal-types.js';
-import { currentScope, operationBinding, withScope } from '../../src/runtime/scope.js';
-import { activeTransactionOf } from '../support/active-transaction.js';
+import { currentOperations, currentScope, operationBinding, withScope } from '../../src/runtime/scope.js';
+import { activeTransactionOf, recordedFailuresOf } from '../support/active-transaction.js';
 
 const client = (id: string): PrismaHandle => ({ id });
 
@@ -127,16 +127,34 @@ describe('runtime scope', () => {
     });
   });
 
-  describe('queue mutation', () => {
-    it('lets callers mutate the current frame queue and see it via currentScope', () => {
+  describe('transaction audit', () => {
+    it("lets callers record on the current frame's transaction audit and see it via currentScope", () => {
       withScope({ binding: { transaction: activeTransactionOf(client('tx')) } }, () => {
         const transaction = currentScope()?.binding?.transaction;
         if (!transaction) throw new Error('expected a transaction scope');
+        const failure = new Error('audit failure');
 
-        transaction.audit.afterCommit(async () => {});
+        transaction.audit.poison(failure);
 
         withScope({ isProcessingAuditLog: true }, () => {
-          expect(currentScope()?.binding?.transaction?.audit.queued).toHaveLength(1);
+          expect(currentScope()?.binding?.transaction).toBe(transaction);
+          expect(recordedFailuresOf(transaction.audit)).toEqual([failure]);
+        });
+      });
+    });
+  });
+
+  describe('currentOperations', () => {
+    it('is empty outside the flow of any audited operation', () => {
+      expect(currentOperations()).toEqual([]);
+    });
+
+    it('keeps the operations of the outer frame when a patch does not set them', () => {
+      const operation = Promise.resolve();
+
+      withScope({ operations: [operation] }, () => {
+        withScope({ isProcessingAuditLog: true }, () => {
+          expect(currentOperations()).toEqual([operation]);
         });
       });
     });

@@ -78,8 +78,17 @@ export interface WriteConfig<TClient = unknown> {
    *   commits; outside any they are written, awaited, once the operation has committed, and their
    *   failure is reported without failing the operation. A failure that drops a row is reported
    *   only.
-   * - `deferred`: the rows are written after the operation returns, inside your `$transaction`
-   *   once it has committed. A failure that drops a row is reported only.
+   * - `deferred`: inside your `$transaction`, as `awaited`. Outside any, the rows are written
+   *   detached, after the operation returns (`flushAllPendingWrites` waits for them), and their
+   *   failure is reported without failing the operation. A failure that drops a row is reported
+   *   only.
+   *
+   * Inside a transaction every mode writes the rows in it, before the operation returns, so they
+   * commit and roll back with the rows they record, and a failed audit write fails the operation
+   * and rolls the transaction back, even when your callback catches the error. Do not issue
+   * transaction-control SQL through raw queries (`SAVEPOINT`, `RELEASE`, `ROLLBACK TO`, `COMMIT`,
+   * `ROLLBACK`) while an audited operation of the same transaction is still running; awaiting the
+   * operation is enough, since it resolves once its audit rows are written.
    *
    * Atomicity only: the transaction runs at the client's default isolation level, so a write
    * another transaction commits between the audit's read of the before state and the operation can
@@ -96,20 +105,20 @@ export interface WriteConfig<TClient = unknown> {
    * and a context with the audit context, the client the write runs on (`handle`) and
    * `defaultWrite`, the default persistence on that client.
    *
-   * Under `atomic` (the default) and `awaited`, inside a transaction (the caller's `$transaction`,
-   * or the one the client opens for an atomic operation) `handle` is the client of that
-   * transaction and the writer runs before commit, so a later rollback undoes rows it wrote
-   * through `handle` or `defaultWrite`; under `awaited` outside any transaction `handle` is the
-   * base client and the writer runs, awaited, once the operation has committed. Under `deferred`,
-   * `handle` is the base client: the write starts after the operation, and inside `$transaction`
-   * only once `$transaction` has resolved; a transaction that throws discards the queued write
-   * unrun, so the writer never runs for it. For a write inside a transaction the handle is typed
-   * as the client although it is a transaction's client.
+   * Inside a transaction (the caller's `$transaction`, or the one the client opens for an atomic
+   * operation), under every mode, `handle` is the client of that transaction, `inTransaction` is
+   * true and the writer runs before the operation returns, so a later rollback undoes rows it
+   * wrote through `handle` or `defaultWrite`. Outside any transaction `handle` is the base client
+   * and `inTransaction` is false: under `awaited` the writer runs, awaited, once the operation has
+   * committed, and under `deferred` it runs detached after the operation returns. For a write
+   * inside a transaction the handle is typed as the client although it is a transaction's client.
    *
    * Either way, side effects the writer performs outside the database transaction (an HTTP
-   * call, a queue publish) are never rolled back — they have already happened by the time a
-   * rollback occurs. Use `mode: 'deferred'` (for every model or, as a function, for some) to defer
-   * such delivery until after commit.
+   * call, a queue publish, a write through another client) are never rolled back — they have
+   * already happened by the time a rollback occurs. Deliver such side effects from the
+   * `observer` instead, acting only on an outcome whose `status` is `complete` or `incomplete`
+   * (the operation committed): it is also called, with `not-committed`, once a transaction rolls
+   * back.
    *
    * A method signature: its parameters are bivariant, so a writer typed for the client is
    * assignable where the handle is erased to `unknown`.
@@ -242,11 +251,10 @@ export interface PrismaAuditExtensionOptions<TModelName extends string = string,
    * transaction an operation is settled when it returns or throws, and its outcome is reported
    * before it returns, or, for a `deferred` write, once its audit write has run. Inside an
    * interactive `$transaction` the outcomes of its operations are reported once it has committed,
-   * before `$transaction` returns (a `deferred` one once its queued audit write has run), or, as
-   * `not-committed`, once it has rolled back. An operation rejected before it runs
-   * (`AuditContextMissingError`, `AuditAtomicityError`, `AuditUnboundWriteError`) is
-   * `not-committed`. Without an observer, the failures of an `incomplete` outcome, whose entries
-   * were lost, are logged to the console. A write the observer makes through the audited client is
+   * before `$transaction` returns, or, as `not-committed`, once it has rolled back. An operation
+   * rejected before it runs (`AuditContextMissingError`, `AuditAtomicityError`,
+   * `AuditUnboundWriteError`) is `not-committed`. Without an observer, the failures of an
+   * `incomplete` outcome, whose entries were lost, are logged to the console. A write the observer makes through the audited client is
    * not audited and has no outcome, like one an id resolver or an enricher makes.
    *
    * A failure that drops an entry (`row-identification`, `id-resolver-call`, and a `pre-fetch`
@@ -274,11 +282,11 @@ export interface PrismaAuditExtensionOptions<TModelName extends string = string,
    *   `beforeUnavailable: true` (a `disconnect` only when it left the row unlinked); a row unlinked
    *   without being named is not recorded, nor is one a write unlinks below a row that cannot be
    *   identified.
-   * - `log-write`: persisting the audit log entry itself failed. A write inside a transaction
-   *   (under `atomic`, or under `awaited` inside your `$transaction`) fails the caller's operation
-   *   with the write's original error and the transaction rolls back: the entry and the caller's
-   *   write commit together or not at all. Once the operation has committed (an `awaited` write
-   *   outside any transaction, or a `deferred` one) the caller's operation succeeds. The failure
+   * - `log-write`: persisting the audit log entry itself failed. A write inside a transaction,
+   *   under every mode, fails the caller's operation with the write's original error and the
+   *   transaction rolls back: the entry and the caller's write commit together or not at all.
+   *   Outside any transaction, where the operation has committed before its entry is written
+   *   (under `awaited` or `deferred`), the caller's operation succeeds. The failure
    *   carries the `records` the write was given, to keep elsewhere.
    * - `diff-generation`: other audit-support work around the caller's operation failed —
    *   building the entry (enrichment, redaction), reading the row keys a to-many relation

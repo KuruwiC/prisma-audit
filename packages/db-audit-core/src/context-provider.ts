@@ -56,7 +56,7 @@ export const createAsyncLocalStorageProvider = (): AuditContextProvider => {
      * Re-attribute the current flow to a different actor while preserving the
      * rest of the app context (request metadata). The adapter keeps its transaction
      * state in a separate store, so this is safe inside a transaction callback: the
-     * transaction handle and deferred-write queue are untouched.
+     * transaction handle and audit are untouched.
      *
      * @example
      * ```typescript

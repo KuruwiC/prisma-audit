@@ -5,7 +5,7 @@
  * keeps the library-injected transactional client, so writes referencing
  * uncommitted parent rows via FK succeed.
  *
- * The transaction scope (client + deferred-write queue) lives in a separate
+ * The transaction scope (client + transaction audit) lives in a separate
  * library-owned AsyncLocalStorage, so app-level actor overrides cannot clobber
  * transaction state.
  *

@@ -1,13 +1,14 @@
 /**
  * The audit of a transaction an adapter owns
  *
- * What the audit keeps for one transaction whose commit the adapter controls: the work queued
- * until it commits, the outcomes of its operations, and the audit failures that failed one of them
- * once its write had run. A transaction holding such a failure never commits, even when the code
- * that ran the operation caught its error: the adapter calls `assertCommittable` once the
- * transaction's body has resolved and before the commit, and rolls the transaction back with the
- * `AuditRollbackError` it throws. Then, the adapter ends the audit with the transaction:
- * `commit`, `rollBack`, or, for a transaction nested in another, `mergeInto` its parent.
+ * What the audit keeps for one transaction whose commit the adapter controls: the outcomes of its
+ * operations, and the audit failures that failed one of them once its write had run. Every audit
+ * row of the transaction's operations is written in the transaction itself, so it commits and
+ * rolls back with the rows it records. A transaction holding such a failure never commits, even
+ * when the code that ran the operation caught its error: the adapter calls `assertCommittable`
+ * once the transaction's body has resolved and before the commit, and rolls the transaction back
+ * with the `AuditRollbackError` it throws. Then, the adapter ends the audit with the transaction:
+ * `end`, or, for a transaction nested in another, `mergeInto` its parent.
  */
 
 import {
@@ -18,12 +19,7 @@ import {
 } from '../outcome/index.js';
 import type { WriteMode } from '../policy/index.js';
 
-type Work = () => Promise<void>;
-
 export interface TransactionAudit {
-  /** Queues work to start once the transaction has committed; a transaction that rolls back drops it */
-  readonly afterCommit: (work: Work) => void;
-  readonly queued: readonly Work[];
   /** The outcomes of the transaction's operations, settled when the audit ends */
   readonly outcomes: TransactionOutcomes;
   /**
@@ -31,59 +27,34 @@ export interface TransactionAudit {
    * the transaction must not commit without the records
    */
   readonly poison: (error: Error) => void;
-  readonly failures: readonly Error[];
   /** @throws {AuditRollbackError} Once an audit failure was recorded; its `cause` is the first */
   readonly assertCommittable: () => void;
-  /** The transaction committed: starts the queued work with `start`, in order, then settles the outcomes */
-  readonly commit: (start: (work: Work) => void) => Promise<void>;
-  /** The transaction rolled back: settles the outcomes as not committed; the queued work never starts */
-  readonly rollBack: () => Promise<void>;
+  /** The transaction ended, `committed` or rolled back: settles the outcomes accordingly */
+  readonly end: (committed: boolean) => Promise<void>;
   /**
-   * A transaction nested in `parent` ended: committed into it, its queued work becomes the
-   * parent's; either way its outcomes settle with the parent's. Its audit failures stay its own:
-   * a nested transaction that held one rolled back, and the rows it left without records with it.
+   * A transaction nested in `parent` ended, `committed` into it or rolled back: its outcomes
+   * settle with the parent's. Its audit failures stay its own: a nested transaction that held one
+   * rolled back, and the rows it left without records with it.
    */
   readonly mergeInto: (parent: TransactionAudit, committed: boolean) => Promise<void>;
 }
 
 export const createTransactionAudit = (): TransactionAudit => {
-  const queued: Work[] = [];
   const failures: Error[] = [];
   const outcomes = createTransactionOutcomes();
   return {
-    afterCommit: (work) => {
-      queued.push(work);
-    },
-    queued,
     outcomes,
     poison: (error) => {
       failures.push(error);
     },
-    failures,
     assertCommittable: () => {
       const [first] = failures;
       if (first) {
         throw new AuditRollbackError(first);
       }
     },
-    commit: async (start) => {
-      for (const work of queued.splice(0)) {
-        start(work);
-      }
-      await outcomes.settle('committed');
-    },
-    rollBack: async () => {
-      queued.length = 0;
-      await outcomes.settle('not-committed');
-    },
-    mergeInto: async (parent, committed) => {
-      for (const work of queued.splice(0)) {
-        if (committed) {
-          parent.afterCommit(work);
-        }
-      }
-      await parent.outcomes.add(outcomes, committed);
-    },
+    end: (committed) => outcomes.settle(committed ? 'committed' : 'not-committed'),
+    mergeInto: (parent, committed) => parent.outcomes.add(outcomes, committed),
   };
 };
 

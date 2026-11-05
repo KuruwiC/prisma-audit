@@ -12,8 +12,8 @@
  * - a batch `$transaction([...])` holding a write runs as one interactive transaction, its
  *   operations in order; a batch of reads and raw queries only is Prisma's own batch, whose
  *   operations start without a binding;
- * - the queued audit writes start strictly AFTER commit, so an audit log never persists for a
- *   transaction whose commit subsequently fails, and are discarded unrun otherwise;
+ * - the audit writes of an operation inside a transaction, deferred ones included, run in the
+ *   transaction before the operation returns, so they commit and roll back with it;
  * - a callback that resolves after an audit failure failed one of its operations is rolled back.
  *
  * The specs observe the runtime as an audited operation does: an operation run through the
@@ -38,6 +38,7 @@ import {
 } from '@kuruwic/db-audit-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PrismaBaseClient, PrismaHandle } from '../../src/internal-types.js';
+import type { OperationTransaction } from '../../src/pipeline/execution-scope.js';
 import type { OperationExecutor } from '../../src/pipeline/executor.js';
 import { type AuditPipelineDependencies, runAuditedOperation } from '../../src/pipeline/run-audited-operation.js';
 import type { RecipeConfig } from '../../src/runtime/operation-recipe.js';
@@ -126,8 +127,8 @@ interface CreateArgs {
 
 /**
  * A client whose `user.create` runs the audited pipeline as the audit extension's hook does: the
- * transaction the operation runs in is the one its binding names, `query` continues the operation,
- * and its outcome is settled with that transaction
+ * transaction the operation runs in is the one its binding names, on the level open when it
+ * starts, `query` continues the operation, and its outcome is settled with that level
  */
 const auditedClientOf = (deps: AuditPipelineDependencies) => ({
   user: {
@@ -143,29 +144,33 @@ const auditedClientOf = (deps: AuditPipelineDependencies) => ({
           { model: 'User', operation: 'create' },
           { observer: observers.get(deps) },
         );
-        return settledIn(transaction?.audit, outcome, () =>
-          runAuditedOperation(
-            {
-              operation: {
-                model: 'User',
-                action: 'create',
-                args: { id: args.id },
-                query: async () => {
-                  if (args.fails) throw new Error(`Unique constraint failed: ${args.id}`);
-                  return args;
+        const run = (inTransaction: OperationTransaction | undefined) =>
+          settledIn(inTransaction?.audit, outcome, () =>
+            runAuditedOperation(
+              {
+                operation: {
+                  model: 'User',
+                  action: 'create',
+                  args: { id: args.id },
+                  query: async () => {
+                    if (args.fails) throw new Error(`Unique constraint failed: ${args.id}`);
+                    return args;
+                  },
+                  widened: new Map(),
                 },
-                widened: new Map(),
+                auditContext: baseContext,
+                baseClient,
+                mode,
+                plan,
+                transaction: inTransaction,
+                outcome,
               },
-              auditContext: baseContext,
-              baseClient,
-              mode,
-              plan,
-              transaction,
-              outcome,
-            },
-            deps,
-          ),
-        );
+              deps,
+            ),
+          );
+        return transaction
+          ? transaction.runOperation((audit) => run({ client: transaction.client, audit }))
+          : run(undefined);
       }),
   },
 });
@@ -496,6 +501,100 @@ describe('createTransactionProxy (interactive $transaction)', () => {
   });
 });
 
+describe('createTransactionProxy (a transaction nested in the one a callback runs in)', () => {
+  /** A client whose transaction client opens, by its own `$transaction`, a nested one on `nestedTx` */
+  const nestingProxy = () => {
+    const ran: Probed[] = [];
+    const provider = createAsyncLocalStorageProvider();
+    const nestedTx = probeClientNamed('nested transaction', ran);
+    const tx = { ...probeClientNamed('transaction', ran), $transaction: transactionOf<ProbeClient>(nestedTx) };
+    const target = { ...probeClientNamed('client', ran), $transaction: transactionOf(tx) };
+    return { provider, proxy: createTransactionProxy(target, { provider, recipeConfig }), tx, nestedTx, ran };
+  };
+
+  it('opens it on the transaction client and hands its callback a client bound to it', async () => {
+    const { provider, proxy, tx, nestedTx, ran } = nestingProxy();
+    let auditsWhileNested: unknown[] = [];
+
+    await provider.runAsync(baseContext, () =>
+      proxy.$transaction(async (bound) => {
+        await bound.$transaction(async (nested) => {
+          await nested.user.create({ email: 'a' });
+          await bound.user.findMany();
+          auditsWhileNested = ran.map((probed) => bindingOf(probed)?.transaction?.audit);
+        });
+      }),
+    );
+
+    expect(tx.$transaction).toHaveBeenCalledTimes(1);
+    expect(ran.map(({ action, client }) => ({ action, client }))).toEqual([
+      { action: 'create', client: 'nested transaction' },
+      { action: 'findMany', client: 'transaction' },
+    ]);
+    expect(transactionClientOf(ran[0])).toBe(nestedTx);
+    expect(new Set(auditsWhileNested).size).toBe(1);
+  });
+
+  it('runs a batch $transaction of the bound client as a nested transaction, its operations in order', async () => {
+    const { provider, proxy, tx, nestedTx, ran } = nestingProxy();
+
+    await provider.runAsync(baseContext, () =>
+      proxy.$transaction(async (bound) => {
+        await bound.$transaction([bound.user.findMany(), bound.user.create({ email: 'a' })]);
+      }),
+    );
+
+    expect(tx.$transaction).toHaveBeenCalledTimes(1);
+    expect(ran.map(({ action, client }) => ({ action, client }))).toEqual([
+      { action: 'findMany', client: 'nested transaction' },
+      { action: 'create', client: 'nested transaction' },
+    ]);
+    expect(ran.map(transactionClientOf)).toEqual([nestedTx, nestedTx]);
+  });
+
+  it('leaves the $transaction of a transaction client that has none, as before Prisma 7.5, as the client holds it', async () => {
+    const ran: Probed[] = [];
+    const provider = createAsyncLocalStorageProvider();
+    const tx = probeClientNamed('transaction', ran);
+    const proxy = createTransactionProxy(
+      { ...probeClientNamed('client', ran), $transaction: transactionOf<ProbeClient>(tx) },
+      { provider, recipeConfig },
+    );
+    let nestedTransaction: unknown = 'unread';
+
+    await proxy.$transaction(async (bound) => {
+      nestedTransaction = Reflect.get(bound, '$transaction');
+    });
+
+    expect(nestedTransaction).toBeUndefined();
+  });
+});
+
+describe('createTransactionProxy ($extends with an extension function)', () => {
+  it('hands the function the audited client, so that an operation the extension issues on it is bound', async () => {
+    const ran: Probed[] = [];
+    const provider = createAsyncLocalStorageProvider();
+    const target = {
+      ...probeClientNamed('client', ran),
+      $transaction: transactionOf<ProbeClient>(probeClientNamed('transaction', ran)),
+      $extends: (extension: unknown) => (typeof extension === 'function' ? extension(target) : target),
+    };
+    const proxy = createTransactionProxy(target, { provider, recipeConfig });
+    let received: unknown;
+
+    proxy.$extends((client: ProbeClient) => {
+      received = client;
+      return client;
+    });
+    await provider.runAsync(baseContext, async () => {
+      await (received as ProbeClient).user.create({});
+    });
+
+    expect(received).toBe(proxy);
+    expect(bindingOf(ran[0])).toEqual({ transaction: undefined });
+  });
+});
+
 describe('createTransactionProxy (operation recipes)', () => {
   /** A client whose `user` operations record the client they ran on and whether Prisma's own batch ran them */
   const createRecipeProxy = (recipe: RecipeConfig) => {
@@ -675,7 +774,7 @@ describe('createTransactionProxy (operation recipes)', () => {
   });
 });
 
-describe('createTransactionProxy (audit writes queued until the commit)', () => {
+describe('createTransactionProxy (deferred audit writes inside a transaction)', () => {
   /** A proxy over a client whose operations run the audited pipeline, and whose interactive transactions are settled by `settle` */
   const auditedProxy = (deps: AuditPipelineDependencies, settle?: Parameters<typeof transactionOf>[1]) => {
     const tx = auditedClientOf(deps);
@@ -684,98 +783,79 @@ describe('createTransactionProxy (audit writes queued until the commit)', () => 
     return { provider, proxy: createTransactionProxy(target, { provider, recipeConfig }), tx };
   };
 
-  it('starts the audit write of an operation run under an actor override once the transaction has committed, as a pending write', async () => {
-    let finishWrite: () => void = () => {};
-    const deps = createDeps(
-      () =>
-        new Promise<void>((resolve) => {
-          finishWrite = resolve;
-        }),
-    );
-    const { provider, proxy } = auditedProxy(deps);
+  it('writes the audit of a deferred operation run under an actor override in the transaction, before the operation returns', async () => {
+    const deps = createDeps(async () => {});
+    const { provider, proxy, tx } = auditedProxy(deps);
     let writesInsideTransaction = -1;
 
-    // An audit whose write is not awaited, run under an actor override, queues its write until the commit
     const result = await provider.runAsync(baseContext, () =>
-      proxy.$transaction(async (tx) => {
-        await provider.withActor(actor2, () => tx.user.create({ id: 'u1', atomic: false }));
+      proxy.$transaction(async (bound) => {
+        await provider.withActor(actor2, () => bound.user.create({ id: 'u1', atomic: false }));
         writesInsideTransaction = auditWriteOf(deps).mock.calls.length;
         return 'committed';
       }),
     );
-    const writesAfterCommit = auditWriteOf(deps).mock.calls.length;
-    const pendingAfterCommit = getPendingWriteCount();
-    finishWrite();
-    await flushAllPendingWrites();
 
     expect(result).toBe('committed');
-    expect(writesInsideTransaction).toBe(0);
-    expect(writesAfterCommit).toBe(1);
-    expect(pendingAfterCommit).toBe(1);
+    expect(writesInsideTransaction).toBe(1);
     expect(getPendingWriteCount()).toBe(0);
-    expect(auditWriteOf(deps)).toHaveBeenCalledExactlyOnceWith(baseClient, [recordOf('u1')]);
+    expect(auditWriteOf(deps)).toHaveBeenCalledExactlyOnceWith(tx, [recordOf('u1')]);
   });
 
-  it("does not start the queued audit writes until the client's $transaction resolves", async () => {
-    // Proves the writes start strictly AFTER commit, not inside the user callback.
+  it("writes the audit of a deferred operation before the client's $transaction commits", async () => {
     const deps = createDeps(async () => {});
     let writesAtCommitTime = -1;
-    const { provider, proxy } = auditedProxy(deps, async (runCallback) => {
+    const { provider, proxy, tx } = auditedProxy(deps, async (runCallback) => {
       const result = await runCallback();
-      // Observe at "commit time": the callback has resolved but the writes have not been started yet.
       writesAtCommitTime = auditWriteOf(deps).mock.calls.length;
       return result;
     });
 
     await provider.runAsync(baseContext, () =>
-      proxy.$transaction(async (tx) => {
-        await tx.user.create({ id: 'u1', atomic: false });
+      proxy.$transaction(async (bound) => {
+        await bound.user.create({ id: 'u1', atomic: false });
       }),
     );
-    await flushAllPendingWrites();
 
-    // The audit write had NOT started while the transaction was still settling the commit.
-    expect(writesAtCommitTime).toBe(0);
-    expect(auditWriteOf(deps)).toHaveBeenCalledExactlyOnceWith(baseClient, [recordOf('u1')]);
+    expect(writesAtCommitTime).toBe(1);
+    expect(auditWriteOf(deps)).toHaveBeenCalledExactlyOnceWith(tx, [recordOf('u1')]);
   });
 
-  it('discards the queued audit writes when the transaction callback throws (rollback)', async () => {
+  it('writes the audit of a deferred operation only in the transaction, which rolls it back when the callback throws', async () => {
     const deps = createDeps(async () => {});
-    const { provider, proxy } = auditedProxy(deps);
+    const { provider, proxy, tx } = auditedProxy(deps);
 
     await expect(
       provider.runAsync(baseContext, () =>
-        proxy.$transaction(async (tx) => {
-          await provider.runAsync({ actor: actor2 }, async () => await tx.user.create({ id: 'u1', atomic: false }));
+        proxy.$transaction(async (bound) => {
+          await provider.runAsync({ actor: actor2 }, async () => await bound.user.create({ id: 'u1', atomic: false }));
           throw new Error('rolled back');
         }),
       ),
     ).rejects.toThrow('rolled back');
     await flushAllPendingWrites();
 
-    expect(auditWriteOf(deps)).not.toHaveBeenCalled();
+    expect(auditWriteOf(deps)).toHaveBeenCalledExactlyOnceWith(tx, [recordOf('u1')]);
   });
 
-  it('discards the queued audit writes when the transaction rejects after the callback succeeded (commit failure)', async () => {
-    // The user callback runs to completion and queues an audit write, but the commit itself
-    // fails. The proxy must NOT start it: no audit log for a rolled-back transaction.
+  it('writes the audit of a deferred operation only in the transaction, which rolls it back when the commit fails', async () => {
     const deps = createDeps(async () => {});
-    const { provider, proxy } = auditedProxy(deps, async (runCallback) => {
+    const { provider, proxy, tx } = auditedProxy(deps, async (runCallback) => {
       await runCallback();
       throw new Error('commit failed');
     });
 
     await expect(
       provider.runAsync(baseContext, () =>
-        proxy.$transaction(async (tx) => {
-          await tx.user.create({ id: 'u1', atomic: false });
+        proxy.$transaction(async (bound) => {
+          await bound.user.create({ id: 'u1', atomic: false });
           return 'callback-ok';
         }),
       ),
     ).rejects.toThrow('commit failed');
     await flushAllPendingWrites();
 
-    expect(auditWriteOf(deps)).not.toHaveBeenCalled();
+    expect(auditWriteOf(deps)).toHaveBeenCalledExactlyOnceWith(tx, [recordOf('u1')]);
   });
 });
 
@@ -794,7 +874,7 @@ describe('createTransactionProxy (audit failures recorded on the transaction)', 
     return { provider, proxy: createTransactionProxy(target, { provider, recipeConfig }), tx };
   };
 
-  it('rejects $transaction with an AuditRollbackError, discarding the queued writes, when the callback resolves after an operation failed on its audit', async () => {
+  it('rejects $transaction with an AuditRollbackError when the callback resolves after an operation failed on its audit', async () => {
     const deps = depsFailingFor('bad');
     const { provider, proxy, tx } = auditedProxy(deps);
 
@@ -809,12 +889,13 @@ describe('createTransactionProxy (audit failures recorded on the transaction)', 
 
     await expect(running).rejects.toBeInstanceOf(AuditRollbackError);
     await expect(running).rejects.toHaveProperty('cause', writeError);
-    await flushAllPendingWrites();
-    expect(writtenIds(deps)).toEqual(['bad']);
-    expect(auditWriteOf(deps)).toHaveBeenCalledExactlyOnceWith(tx, [recordOf('bad')]);
+    expect(auditWriteOf(deps).mock.calls).toEqual([
+      [tx, [recordOf('u1')]],
+      [tx, [recordOf('bad')]],
+    ]);
   });
 
-  it('resolves normally, and starts the queued writes, when no audit failure was recorded on the transaction', async () => {
+  it('resolves normally when no audit failure was recorded on the transaction', async () => {
     const deps = depsFailingFor('bad');
     const { provider, proxy } = auditedProxy(deps);
 
@@ -825,10 +906,9 @@ describe('createTransactionProxy (audit failures recorded on the transaction)', 
         return 'committed';
       }),
     );
-    await flushAllPendingWrites();
 
     expect(result).toBe('committed');
-    expect(writtenIds(deps)).toEqual(['u2', 'u1']);
+    expect(writtenIds(deps)).toEqual(['u1', 'u2']);
   });
 
   it("does not record the caller's own mutation failure, which the callback may catch", async () => {
@@ -919,54 +999,39 @@ describe('createTransactionProxy (audit of a batch holding a write)', () => {
     return result;
   };
 
-  it('writes the audit of an awaited operation by the transaction, one operation after another, and resolves the batch once they have finished', async () => {
-    const events: string[] = [];
-    const deps = createDeps(loggingWrite(events));
-    const { provider, proxy, tx } = batchProxy(events, deps);
+  it.each([
+    { mode: 'atomic', atomic: true },
+    { mode: 'deferred', atomic: false },
+  ])(
+    'writes the audit of a $mode operation by the transaction, one operation after another, and resolves the batch once they have finished',
+    async ({ atomic }) => {
+      const events: string[] = [];
+      const deps = createDeps(loggingWrite(events));
+      const { provider, proxy, tx } = batchProxy(events, deps);
 
-    const outcome = await settled(
-      provider
-        .runAsync(baseContext, () =>
-          proxy.$transaction([proxy.user.create(create('u1', true)), proxy.user.create(create('u2', true))]),
-        )
-        .then((result) => {
-          events.push('resolved');
-          return result;
-        }),
-    );
+      const outcome = await settled(
+        provider
+          .runAsync(baseContext, () =>
+            proxy.$transaction([proxy.user.create(create('u1', atomic)), proxy.user.create(create('u2', atomic))]),
+          )
+          .then((result) => {
+            events.push('resolved');
+            return result;
+          }),
+      );
 
-    expect(outcome).toBe('resolved');
-    expect(events).toEqual(['started u1', 'written u1', 'started u2', 'written u2', 'committed', 'resolved']);
-    expect(auditWriteOf(deps).mock.calls.map(([handle]) => handle)).toEqual([tx, tx]);
-  });
-
-  it("starts the audit writes of operations it does not await only once the batch has committed, and resolves the caller's batch without waiting for them", async () => {
-    const events: string[] = [];
-    const deps = createDeps(loggingWrite(events));
-    const { provider, proxy } = batchProxy(events, deps);
-
-    const outcome = await settled(
-      provider
-        .runAsync(baseContext, () =>
-          proxy.$transaction([proxy.user.create(create('u1', false)), proxy.user.create(create('u2', false))]),
-        )
-        .then((result) => {
-          events.push('resolved');
-          return result;
-        }),
-    );
-
-    expect(outcome).toBe('resolved');
-    expect(events).toEqual(['committed', 'started u1', 'started u2', 'resolved', 'written u1', 'written u2']);
-    expect(auditWriteOf(deps).mock.calls.map(([handle]) => handle)).toEqual([baseClient, baseClient]);
-  });
+      expect(outcome).toBe('resolved');
+      expect(events).toEqual(['started u1', 'written u1', 'started u2', 'written u2', 'committed', 'resolved']);
+      expect(auditWriteOf(deps).mock.calls.map(([handle]) => handle)).toEqual([tx, tx]);
+    },
+  );
 
   it.each([
-    { awaited: 'awaited', atomic: true, written: ['u1'], handle: 'the transaction client' },
-    { awaited: 'not awaited', atomic: false, written: [], handle: 'nothing' },
+    { mode: 'atomic', atomic: true },
+    { mode: 'deferred', atomic: false },
   ])(
-    'leaves the audit of an operation whose audit is $awaited to the transaction when a later operation of the batch fails and the batch rolls back: it writes $handle',
-    async ({ atomic, written }) => {
+    'leaves the audit of a $mode operation to the transaction when a later operation of the batch fails and the batch rolls back: it was written on the transaction client',
+    async ({ atomic }) => {
       const events: string[] = [];
       const deps = createDeps(loggingWrite(events));
       const { provider, proxy, tx } = batchProxy(events, deps);
@@ -982,16 +1047,17 @@ describe('createTransactionProxy (audit of a batch holding a write)', () => {
 
       expect(outcome).toBe('rejected');
       expect(events).not.toContain('committed');
-      expect(writtenIds(deps)).toEqual(written);
+      expect(writtenIds(deps)).toEqual(['u1']);
       for (const [handle] of auditWriteOf(deps).mock.calls) {
         expect(handle).toBe(tx);
       }
     },
   );
 
-  it('keeps the audit writes of two batches running at once apart', async () => {
+  it('keeps the audits of two batches running at once apart: the outcomes of the one that rolls back are not committed', async () => {
     const events: string[] = [];
-    const deps = createDeps(loggingWrite(events));
+    const observer = vi.fn<AuditObserver>();
+    const deps = createDeps(loggingWrite(events), observer);
     const { provider, proxy } = batchProxy(events, deps);
 
     const batches = provider.runAsync(baseContext, () =>
@@ -1009,54 +1075,39 @@ describe('createTransactionProxy (audit of a batch holding a write)', () => {
 
     expect(rolledBack?.status).toBe('rejected');
     expect(committed?.status).toBe('fulfilled');
-    expect(writtenIds(deps)).toEqual(['u3', 'u4']);
+    expect(writtenIds(deps).sort()).toEqual(['u1', 'u3', 'u4']);
+    expect(observer.mock.calls.map(([outcome]) => outcome.status).sort()).toEqual([
+      'complete',
+      'complete',
+      'not-committed',
+      'not-committed',
+    ]);
   });
 
-  it('rejects the batch and rolls its transaction back when an awaited audit write of its operations fails', async () => {
-    const events: string[] = [];
-    const writeError = new Error('audit table unavailable');
-    const observer = vi.fn();
-    const deps = createDeps(loggingWrite(events, writeError), observer);
-    const { provider, proxy } = batchProxy(events, deps);
+  it.each([
+    { mode: 'atomic', atomic: true },
+    { mode: 'deferred', atomic: false },
+  ])(
+    'rejects the batch and rolls its transaction back when the audit write of a $mode operation fails',
+    async ({ atomic }) => {
+      const events: string[] = [];
+      const writeError = new Error('audit table unavailable');
+      const observer = vi.fn();
+      const deps = createDeps(loggingWrite(events, writeError), observer);
+      const { provider, proxy } = batchProxy(events, deps);
 
-    const outcome = await settled(
-      provider.runAsync(baseContext, () => proxy.$transaction([proxy.user.create(create('u1', true))])),
-    );
-
-    expect(outcome).toBe('rejected');
-    expect(events).toEqual(['started u1']);
-    expect(observer).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({
-        status: 'not-committed',
-        failures: [expect.objectContaining({ phase: 'log-write', error: writeError })],
-      }),
-    );
-  });
-
-  it("resolves the caller's committed batch when an audit write it does not await fails", async () => {
-    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const events: string[] = [];
-    const writeError = new Error('audit table unavailable');
-    const observer = vi.fn();
-    const deps = createDeps(loggingWrite(events, writeError), observer);
-    const { provider, proxy } = batchProxy(events, deps);
-
-    try {
       const outcome = await settled(
-        provider.runAsync(baseContext, () => proxy.$transaction([proxy.user.create(create('u1', false))])),
+        provider.runAsync(baseContext, () => proxy.$transaction([proxy.user.create(create('u1', atomic))])),
       );
 
-      expect(outcome).toBe('resolved');
-      expect(events).toEqual(['committed', 'started u1']);
-      await flushAllPendingWrites();
+      expect(outcome).toBe('rejected');
+      expect(events).toEqual(['started u1']);
       expect(observer).toHaveBeenCalledExactlyOnceWith(
         expect.objectContaining({
-          status: 'incomplete',
+          status: 'not-committed',
           failures: [expect.objectContaining({ phase: 'log-write', error: writeError })],
         }),
       );
-    } finally {
-      consoleError.mockRestore();
-    }
-  });
+    },
+  );
 });

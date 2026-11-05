@@ -10,7 +10,15 @@
 import type { AuditContext, OperationOutcome, TransactionAudit, TransactionRuntime } from '@kuruwic/db-audit-core';
 import type { PrismaBaseClient, PrismaHandle } from '../internal-types.js';
 import { trackPendingWrite } from '../runtime/pending-writes.js';
-import type { ActiveTransaction } from '../runtime/scope.js';
+
+/**
+ * The interactive transaction an audited operation runs in, with the audit of the level open on
+ * its connection when the operation started, which the operation keeps (`ActiveTransaction.runOperation`)
+ */
+export interface OperationTransaction {
+  readonly client: PrismaHandle;
+  readonly audit: TransactionAudit;
+}
 
 /**
  * Where one operation reports the audit failures the pipeline detects itself, and the writes the
@@ -27,7 +35,7 @@ export interface ExecutionScope {
    */
   readonly handle: PrismaHandle;
   readonly baseClient: PrismaBaseClient;
-  /** The audit of the transaction the operation runs in, if any */
+  /** The audit of the transaction level the operation runs on, if any */
   readonly transaction?: TransactionAudit;
   readonly failureSink: OperationFailureSink;
 }
@@ -35,8 +43,8 @@ export interface ExecutionScope {
 export interface ExecutionScopeInput {
   readonly auditContext: AuditContext;
   readonly baseClient: PrismaBaseClient;
-  /** The transaction the operation's binding names: that of the client it was issued on */
-  readonly transaction: ActiveTransaction | undefined;
+  /** The transaction the operation's binding names, that of the client it was issued on, if any */
+  readonly transaction: OperationTransaction | undefined;
   readonly failureSink: OperationFailureSink;
 }
 

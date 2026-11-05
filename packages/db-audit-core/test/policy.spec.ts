@@ -54,7 +54,7 @@ describe('planFor', () => {
     { mode: 'atomic', inOwnedTransaction: false, plan: 'reject' },
     { mode: 'awaited', inOwnedTransaction: true, plan: 'immediate' },
     { mode: 'awaited', inOwnedTransaction: false, plan: 'awaited-after-commit' },
-    { mode: 'deferred', inOwnedTransaction: true, plan: 'after-commit' },
+    { mode: 'deferred', inOwnedTransaction: true, plan: 'immediate' },
     { mode: 'deferred', inOwnedTransaction: false, plan: 'detached' },
   ] as const)(
     'plans $plan for $mode, inOwnedTransaction: $inOwnedTransaction',

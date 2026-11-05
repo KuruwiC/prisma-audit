@@ -41,7 +41,6 @@ export type {
   MutationEvent,
   MutationOrigin,
   ResolvedEvent,
-  WritePlanKind,
 } from './domain/mutation-event.js';
 export type { Result, ValidationError } from './domain/smart-constructors.js';
 export { createAuditLogData } from './domain/smart-constructors.js';
@@ -67,7 +66,7 @@ export type {
 export { AuditIncompleteError, createOperationOutcome } from './outcome/index.js';
 export type { AuditGate, AuditGateConfig, RejectedWrite } from './policy/audit-gate.js';
 export { AuditContextMissingError, auditGate } from './policy/audit-gate.js';
-export type { PolicyConfig, WriteMode } from './policy/index.js';
+export type { PolicyConfig, WriteMode, WritePlanKind } from './policy/index.js';
 export { AuditAtomicityError, planFor, policy } from './policy/index.js';
 export type {
   EntityResolveConfig,

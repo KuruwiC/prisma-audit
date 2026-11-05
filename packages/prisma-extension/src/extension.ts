@@ -7,12 +7,13 @@
  * the operation's binding names, rejects it before it runs when the gate does, when it reached the
  * hook without the binding the client it was issued on gives it, or when it is atomic outside any
  * transaction the client owns, selects the relations its nested writes touch, runs it through the
- * audited-operation pipeline in that transaction, and returns the result in the shape the caller
- * requested. Every operation that writes rows of an audited model, audited, run unaudited or
- * rejected, has an outcome, settled once the transaction its binding names commits or rolls back,
- * or, outside any, once the operation returns or throws. The hook continues the caller's operation through `query` unless it rejects it; the
- * client proxy binds the operation, and for an atomic write opens the interactive transaction,
- * before the operation enters the extension chain.
+ * audited-operation pipeline in that transaction, on the level open on the transaction's
+ * connection when it starts, and returns the result in the shape the caller requested. Every
+ * operation that writes rows of an audited model, audited, run unaudited or rejected, has an
+ * outcome, settled once the transaction its binding names commits or rolls back, or, outside any,
+ * once the operation returns or throws. The hook continues the caller's operation through `query`
+ * unless it rejects it; the client proxy binds the operation, and for an atomic write opens the
+ * interactive transaction, before the operation enters the extension chain.
  *
  * @module extension
  * @see {@link createAuditLogExtension}
@@ -35,6 +36,7 @@ import { AuditUnboundWriteError } from './errors.js';
 import type { AuditAction } from './grammar/operations.js';
 import type { ExtensionParams, PrismaBaseClient } from './internal-types.js';
 import { createBatchExecutor } from './pipeline/batch-executor.js';
+import type { OperationTransaction } from './pipeline/execution-scope.js';
 import { createRecordProducer } from './pipeline/produce-records.js';
 import { type AuditPipelineDependencies, runAuditedOperation } from './pipeline/run-audited-operation.js';
 import { createSingleExecutor } from './pipeline/single-executor.js';
@@ -126,19 +128,20 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
   const shape: ClientShape = { schemaMetadata: audit.schemaMetadata, queryOmitSupported: audit.queryOmitSupported };
   const outcomeConfig = guardedOutcomeConfig(audit.outcomeConfig);
 
+  /** `transaction` keeps the audit of the level the operation started on; the binding's follows the innermost level */
   const runAudited = async (
     { model, operation, args, query }: AuditedCall,
     baseClient: PrismaBaseClient,
     auditedModels: readonly string[],
     auditContext: AuditContext,
     outcome: OperationOutcome,
+    transaction: OperationTransaction | undefined,
   ) => {
-    const binding = operationBinding();
-    if (binding === undefined) {
+    if (operationBinding() === undefined) {
       throw new AuditUnboundWriteError({ modelName: model, operation });
     }
     const mode = policy(auditedModels, audit.policyConfig);
-    const plan = planFor(mode, binding.transaction !== undefined);
+    const plan = planFor(mode, transaction !== undefined);
     if (plan === 'reject') {
       throw new AuditAtomicityError({ modelName: model, operation });
     }
@@ -161,7 +164,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
           baseClient,
           mode,
           plan,
-          transaction: binding.transaction,
+          transaction,
           outcome,
         },
         deps,
@@ -187,27 +190,57 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
       { model, operation, ...(gate.kind === 'unaudited' ? { unaudited: gate.reason } : {}) },
       outcomeConfig,
     );
-    return settledIn(operationBinding()?.transaction?.audit, outcome, () => {
-      switch (gate.kind) {
-        case 'reject':
+    const transaction = operationBinding()?.transaction;
+    switch (gate.kind) {
+      case 'reject':
+        return settledIn(transaction?.audit, outcome, () => {
           throw new AuditContextMissingError({ modelName: gate.modelName, operationModelName: model, operation });
-        case 'unaudited':
-          return query(args);
-        case 'audit':
-          return runAudited({ model, operation, args, query }, baseClient, auditedModels, gate.context, outcome);
-        default: {
-          const exhaustiveCheck: never = gate;
-          throw new Error(`[@prisma-audit] Unhandled audit gate: ${JSON.stringify(exhaustiveCheck)}`);
-        }
+        });
+      case 'unaudited':
+        return settledIn(transaction?.audit, outcome, () => query(args));
+      case 'audit': {
+        const run = (operationTransaction: OperationTransaction | undefined) =>
+          settledIn(operationTransaction?.audit, outcome, () =>
+            runAudited(
+              { model, operation, args, query },
+              baseClient,
+              auditedModels,
+              gate.context,
+              outcome,
+              operationTransaction,
+            ),
+          );
+        return transaction
+          ? transaction.runOperation((transactionAudit) => run({ client: transaction.client, audit: transactionAudit }))
+          : run(undefined);
       }
-    });
+      default: {
+        const exhaustiveCheck: never = gate;
+        throw new Error(`[@prisma-audit] Unhandled audit gate: ${JSON.stringify(exhaustiveCheck)}`);
+      }
+    }
+  };
+
+  /**
+   * Every operation that reaches the extension, audited or not, the audit's own queries included.
+   * The failure of one bound to a transaction is recorded on the transaction: the database may
+   * have aborted the transaction on it, even when the caller catches the error.
+   */
+  const interceptOperation = async (params: ExtensionParams, baseClient: PrismaBaseClient) => {
+    const transaction = operationBinding()?.transaction;
+    try {
+      return await auditOperation(params, baseClient);
+    } catch (error) {
+      transaction?.noteStatementFailed();
+      throw error;
+    }
   };
 
   const extensionDefinition = (baseClient: PrismaBaseClient) => {
     const extendedClient = baseClient.$extends({
       name: 'prisma-audit',
       query: {
-        $allOperations: (params: ExtensionParams) => auditOperation(params, baseClient),
+        $allOperations: (params: ExtensionParams) => interceptOperation(params, baseClient),
       },
     });
 

@@ -261,7 +261,7 @@ describe('the outcome of an audited write', () => {
       expect(await basePrisma.user.count()).toBe(0);
     });
 
-    it('is reported once the deferred audit write queued on the committed transaction has run', async () => {
+    it('is reported for a deferred write once the transaction has committed', async () => {
       const { prisma, observer, run } = await setup({ mode: 'deferred' });
 
       await run(() => prisma.$transaction(async (tx) => tx.user.create({ data: { email: 'queued@example.com' } })));
@@ -272,8 +272,8 @@ describe('the outcome of an audited write', () => {
       ]);
     });
 
-    it('is not-committed for a deferred write whose queued audit write the rolled-back transaction discarded', async () => {
-      const { prisma, observer, run } = await setup({ mode: 'deferred' });
+    it('is not-committed for a deferred write of a transaction that rolled back, its audit row with it', async () => {
+      const { basePrisma, prisma, observer, run } = await setup({ mode: 'deferred' });
 
       await expect(
         run(() =>
@@ -286,8 +286,9 @@ describe('the outcome of an audited write', () => {
       await flushAllPendingWrites();
 
       expect(observer.mock.calls).toEqual([
-        [{ model: 'User', operation: 'create', status: 'not-committed', records: 0, ...noFailure }],
+        [{ model: 'User', operation: 'create', status: 'not-committed', records: 1, ...noFailure }],
       ]);
+      expect(await basePrisma.auditLog.count()).toBe(0);
     });
 
     it('is not-committed for an unaudited write of a transaction that rolled back', async () => {

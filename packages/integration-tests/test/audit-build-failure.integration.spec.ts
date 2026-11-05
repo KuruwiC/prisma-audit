@@ -337,7 +337,7 @@ describe('A failed audit build after the write', () => {
   });
 
   describe('rejects the operation and rolls its write back', () => {
-    it('inside a transaction, with an audit written after commit: a failed re-read of a nested row', async () => {
+    it('inside a transaction, under deferred: a failed re-read of a nested row', async () => {
       const scenario = createScenario({
         mode: 'deferred',
         fault: { model: 'post', seesWrite: retitled },
