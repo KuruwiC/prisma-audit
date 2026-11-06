@@ -126,6 +126,8 @@ export const collectToOneDeleteRecords = async (
   }
 
   const entity = deserializeEntityId(entityId, keyFields);
+  // extractDeleteOperationEntityId only returns a complete identity, which always deserializes, so this
+  // is not reached today; it stops a partial key from being recorded if that extraction ever returns one
   if (entity === null) {
     nestedLog(
       'cannot reconstruct composite row key for entityId=%s (path=%s); skipping delete audit entry',
@@ -162,6 +164,8 @@ const deleteTargetBeforeState = (
   if (target.before.kind !== 'none') {
     return target.before;
   }
+  // A delete writes no row key, so its targets are never given the 'unknown' locator (set only for a key
+  // write that cannot be derived); the guard keeps such a target from reading `where` if that changes
   const linked = target.locator.by === 'unknown' ? undefined : linkedRowNamedBy?.(target.locator.where);
   return linked ? { kind: 'captured', row: linked } : target.before;
 };
@@ -178,6 +182,8 @@ const deletedEntityOf = (
   if (before.kind === 'captured') {
     return before.row;
   }
+  // Not reached today for the same reason as in deleteTargetBeforeState; a target with no known row key
+  // is reported as unresolved rather than guessed from `where`
   if (target.locator.by === 'unknown') {
     return null;
   }
