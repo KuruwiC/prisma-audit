@@ -1,12 +1,10 @@
 # @kuruwic/prisma-audit
 
-Audit logging for Prisma. Tracks who changed what and when.
+Prisma Client extension that records who changed what and when. This is the reference for its options and behaviour; the [main README](../../README.md) has the overview, and [docs/guarantees.md](../../docs/guarantees.md) states what each operation guarantees and cites the tests that check each statement.
 
 ## Installation
 
-> **Note**: This package is not yet published to npm. Install it from the tarballs attached to a [GitHub Release](https://github.com/KuruwiC/prisma-audit/releases).
-
-A release attaches one tarball per package; `@kuruwic/prisma-audit` depends on `@kuruwic/db-audit-core`, so install both together, replacing `<version>` with the release's version:
+The package is not published to npm. Install it and `@kuruwic/db-audit-core`, which it depends on, from the tarballs of the same [GitHub Release](https://github.com/KuruwiC/prisma-audit/releases), replacing `<version>`:
 
 ```bash
 pnpm add \
@@ -16,9 +14,9 @@ pnpm add -D \
   https://github.com/KuruwiC/prisma-audit/releases/download/v<version>/kuruwic-prisma-audit-generator-<version>.tgz
 ```
 
-Install Prisma with an explicit major, such as `prisma@^7` and `@prisma/client@^7` (or `^6.16`): `prisma@latest` on npm is a Prisma 8 release candidate, which is not supported.
+Install Prisma with an explicit major, such as `prisma@^7` and `@prisma/client@^7` (or `^6.16`): `prisma@latest` is a Prisma 8 release candidate, which is not supported.
 
-The extension reads your models' keys and relations from a file that `prisma generate` writes. Add the generator, `@kuruwic/prisma-audit-generator`, to `schema.prisma`:
+Add the generator to `schema.prisma`, run `prisma generate`, and pass the `auditSchema` it writes as the `schema` option:
 
 ```prisma
 generator audit {
@@ -27,34 +25,28 @@ generator audit {
 }
 ```
 
-Run `prisma generate`, then pass the `auditSchema` it writes to `createAuditClient` or `defineConfig` as `schema: auditSchema`.
-
-## Requirements
+### Requirements
 
 - Prisma 6.16 or later, including 7.x (`@prisma/client >=6.16.0 <8.0.0`)
-- Node.js `^20.19 || ^22.12 || >=24.0` (AsyncLocalStorage)
-- A [driver adapter](https://www.prisma.io/docs/orm/overview/databases/database-drivers): Prisma 7 requires one (`@prisma/adapter-pg`, `@prisma/adapter-better-sqlite3` or `@prisma/adapter-mariadb`) unless you connect through Prisma Accelerate (`accelerateUrl`). With Prisma 7, `datasource.url` is set in `prisma.config.ts` and the schema's `datasource` block has no `url`.
-- The `PrismaClient` and the `Prisma` namespace come from your own generator's `output` (for the `prisma-client` generator, `<output>/client`, e.g. `./generated/prisma/client.js`). prisma-audit takes both by injection and does not care where they come from.
-- `generator audit` and `schema: auditSchema` are the same on Prisma 6 and 7.
+- Node.js `^20.19 || ^22.12 || >=24.0`
+- On Prisma 7, a [driver adapter](https://www.prisma.io/docs/orm/overview/databases/database-drivers) (`@prisma/adapter-pg`, `@prisma/adapter-better-sqlite3`, `@prisma/adapter-mariadb`) or Prisma Accelerate (`accelerateUrl`), with `datasource.url` in `prisma.config.ts`
+- `PrismaClient` and the `Prisma` namespace from your client generator's output (for the `prisma-client` generator, `<output>/client`)
+- Both packages are ES modules; on the Node.js versions above, `require` loads them too
 
-## Quick Start
-
-### 1. Create Configuration File
-
-Create `src/audit.config.ts` (or at your project root):
+## Quick start
 
 ```typescript
 // src/audit.config.ts
 import {
+  createAsyncLocalStorageProvider,
   defineConfig,
   defineEntities,
   defineEntity,
-  to,
   foreignKey,
+  to,
 } from '@kuruwic/prisma-audit';
-import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
-import { Prisma, PrismaClient } from '../generated/prisma/client.js'; // your client generator's output
-import { type AuditModelName, auditSchema } from '../generated/audit/index.js'; // the generator's output
+import { Prisma, PrismaClient } from '../generated/prisma/client.js';
+import { type AuditModelName, auditSchema } from '../generated/audit/index.js';
 
 export const auditProvider = createAsyncLocalStorageProvider();
 
@@ -73,1528 +65,619 @@ export default defineConfig<PrismaClient>()({
 });
 ```
 
-### 2. Create Audited Client
-
 ```typescript
 // src/db.ts
 import { createAuditClient } from '@kuruwic/prisma-audit';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '../generated/prisma/client.js';
-import auditConfig, { auditProvider } from './audit.config.js';
+import auditConfig from './audit.config.js';
 
 const basePrisma = new PrismaClient({
   adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }),
 });
 export const prisma = createAuditClient(basePrisma, auditConfig);
-
-// Re-export provider for middleware use
-export { auditProvider };
 ```
-
-### 3. Use in Your Application
 
 ```typescript
-import { prisma, auditProvider } from './db.js';
+import { auditProvider } from './audit.config.js';
+import { prisma } from './db.js';
 
-// Set audit context
-await auditProvider.runAsync(
-  {
-    actor: { category: 'user', type: 'User', id: 'user-123' },
-  },
-  async () => {
-    await prisma.user.create({
-      data: { email: 'test@example.com', name: 'Test' },
-    });
-    // Audit log created automatically
-  }
-);
+await auditProvider.runAsync({ actor: { category: 'user', type: 'User', id: 'user-123' } }, async () => {
+  await prisma.user.create({ data: { email: 'test@example.com', name: 'Test' } });
+});
 ```
 
-## Configuration Options
+`createAuditClient` returns the type of the client it extends. Audited operations run on the client you pass in, and the audit logs are written with it, outside the audit extension. `defineConfig<PrismaClient>()` only types a configuration object for use in another module.
 
-### Required Options
+## Options
 
-#### `contextProvider`
-**Type:** `AuditContextProvider`
+| Option | Default | Summary |
+| --- | --- | --- |
+| [`Prisma`, `schema`](#prisma-and-schema) | required | The `Prisma` namespace and the generated `auditSchema` |
+| [`contextProvider`](#contextprovider) | required | Carries the actor and request context |
+| [`entities`](#entities) | required | The audited models and their aggregates |
+| [`write`](#write) | `{ mode: 'atomic', model: 'AuditLog' }` | Write mode, audit-log model, custom writer |
+| [`observer`](#audit-outcomes) | console for lost logs | Receives the outcome of every audited write |
+| [`requireContext`](#requirecontext) | `false` | Reject a write without an audit context |
+| [`diffExcludeFields`](#diffexcludefields) | `[]` | Fields left out of an update's `changes` |
+| [`redactFields`](#redactfields) | `[]` | Fields masked on top of the built-in sensitive fields |
+| [`serializers`](#serializers) | none | Conversions for values JSON cannot hold |
+| [`fetchBefore`](#fetchbefore) | `{ update: true, delete: true }` | Whether updates and deletes read the before state |
+| [`actorContext`](#context-enrichment) | none | Enriches the actor |
 
-Context provider for managing audit context across async operations.
+### `Prisma` and `schema`
 
-```typescript
-import { createAsyncLocalStorageProvider } from '@kuruwic/prisma-audit';
+`Prisma` is the namespace exported by the generated client your `PrismaClient` comes from; the extension reads `Prisma.DbNull`, `Prisma.defineExtension` and the client version `Prisma.prismaVersion` from it. `schema` is the `auditSchema` the generator writes, from which the extension reads the models' keys and relations.
 
-const provider = createAsyncLocalStorageProvider();
-```
+### `contextProvider`
 
-The `AuditContextProvider` interface exposes the following methods:
+`createAsyncLocalStorageProvider()` returns an `AuditContextProvider`. An audit context is `{ actor: { category, type, id, name? }, request?: Record<string, unknown> }`; `request` is stored as `requestContext`.
 
 | Method | Description |
-|---|---|
-| `getContext()` | Returns the current `AuditContext`, or `undefined` if not set |
-| `useContext()` | Returns the current `AuditContext`, throws if not set |
-| `run(context, fn)` | Runs `fn` synchronously under the given context |
-| `runAsync(context, fn)` | Runs `fn` asynchronously under the given context |
-| `withActor(actor, fn)` | Runs `fn` with only the actor overridden (see below) |
+| --- | --- |
+| `runAsync(context, fn)` | Runs async `fn` under `context` |
+| `run(context, fn)` | Runs sync `fn` under `context`. Do not return a Prisma query from `fn`: it runs when awaited, after the scope has exited |
+| `withActor(actor, fn)` | Runs `fn` with only the actor replaced, keeping the request context and the transaction |
+| `getContext()` | The current context, or `undefined` |
+| `useContext()` | The current context; throws when none is set |
 
-##### Actor Override (`withActor`)
+The library keeps its transaction state in its own `AsyncLocalStorage`, so `run`, `runAsync` and `withActor` inside a `$transaction` callback never detach writes from the transaction.
 
-Use `provider.withActor` to re-attribute writes to a different actor mid-flow while keeping the current request metadata and all library-internal transaction state intact.
+### `entities`
 
-```typescript
-await prisma.$transaction(async (tx) => {
-  // Create the admin user — attributed to the system actor from the outer context.
-  const adminUser = await tx.adminUser.create({
-    data: { email: 'admin@example.com', role: 'admin' },
-  });
+`defineEntities<AuditModelName, PrismaClient>()({ ... })` maps model names, as `schema.prisma` spells them, to `defineEntity` configs. A model not in the map is not audited.
 
-  // The next write is attributed to the newly created admin user.
-  // Request metadata (ipAddress, etc.) from the outer context is preserved.
-  // The write still runs inside the same transaction and can reference
-  // the uncommitted adminUser row without FK violations.
-  // A plain arrow returning the Prisma promise directly is fine.
-  await provider.withActor(
-    { category: 'user', type: 'AdminUser', id: adminUser.id },
-    () => tx.adminProfile.create({
-      data: { adminUserId: adminUser.id, bio: 'Initial profile' },
-    }),
-  );
-});
-```
-
-`withActor` is safe to call inside `$transaction` callbacks — it only swaps the `actor` field in the app context store. The library's internal transaction scope (deferred-write queue, transactional client) is stored separately and is never affected. Replacing the full app context via `runAsync` inside a `$transaction` callback does not detach writes from the transaction either, because the transaction scope is always library-owned.
-
-Common use cases: pre-auth login flows, impersonation, system→user handoff.
-
-#### `entities`
-**Type:** `EntityMap<AuditModelName, PrismaClient>`
-
-Defines how entities relate to aggregate roots for audit log organization. Its keys are typed by the model names of `schema`, spelled as `schema.prisma` declares them (`AuditModelName` from the generator's output).
+| `defineEntity` field | Default | Description |
+| --- | --- | --- |
+| `type` | required | Stored as `entityType` (and `aggregateType` of the self aggregate) |
+| `category` | `'model'` | Stored as `entityCategory` |
+| `idResolver` | `self('id')` | Resolves the entity id from the written row |
+| `aggregates` | `[]` | `to(type, resolver, options?)` projections onto aggregate roots |
+| `selfAggregate` | enabled | `false` records no log under the entity itself (join tables); `{ aggregateContext }` enriches that log |
+| `writeMode` | `write.mode` | The model's own [write mode](#write-modes) |
+| `diffExcludeFields` | top-level list | Replaces the top-level [`diffExcludeFields`](#diffexcludefields) for this model |
+| `recordOmittedFields` | none | See [`recordOmittedFields`](#recordomittedfields) |
+| `fetchBefore` | top-level setting | Overrides [`fetchBefore`](#fetchbefore) per operation |
+| `entityContext` | none | See [Context enrichment](#context-enrichment) |
+| `aggregateContext` | none | Context of every log projected onto this model as a root |
 
 ```typescript
 const entities = defineEntities<AuditModelName, PrismaClient>()({
-  User: defineEntity({ type: 'User' }),
-  Post: defineEntity({
-    type: 'Post',
-    aggregates: [to('User', foreignKey('authorId'))],
-  }),
+  User: defineEntity({ type: 'UserAccount', category: 'identity' }),
   Comment: defineEntity({
     type: 'Comment',
-    aggregates: [
-      to('Post', foreignKey('postId')),
-      to('User', foreignKey('authorId')),
-    ],
-  }),
-});
-```
-
-**Custom entity types and categories:**
-
-```typescript
-import { defineEntity, to, foreignKey } from '@kuruwic/prisma-audit';
-
-const entities = defineEntities<AuditModelName, PrismaClient>()({
-  User: defineEntity({
-    type: 'UserAccount',     // Custom entityType (stored in AuditLog.entityType)
-    category: 'identity',    // Custom entityCategory (stored in AuditLog.entityCategory)
-  }),
-  AuditLog: defineEntity({
-    type: 'AuditEvent',      // Custom entityType
-    category: 'system',      // Custom category
-    selfAggregate: false,    // Don't create self aggregate
+    aggregates: [to('Post', foreignKey('postId')), to('User', foreignKey('authorId'))],
   }),
   PostTag: defineEntity({
     type: 'PostTag',
-    selfAggregate: false,    // Join table - only log aggregates
-    aggregates: [
-      to('Post', foreignKey('postId')),
-      to('Tag', foreignKey('tagId')),
-    ],
+    selfAggregate: false,
+    aggregates: [to('Post', foreignKey('postId')), to('Tag', foreignKey('tagId'))],
   }),
 });
 ```
 
-`foreignKey('authorId')` reads the column of the row: a row whose `authorId` is `null` has no parent and gets no audit log under `User`, with nothing reported. A row that lacks the column fails the resolver, reported as `id-resolver-call` (see "Error Handling"); the row keeps its other audit logs. The rows the extension hands a resolver carry every column the client reads by default and the fields the entity lists in [`recordOmittedFields`](#recordomittedfields), except a row a nested `delete` removes without reading it (see [`fetchBefore`](#before-state-reads-fetchbefore)), which is never reported for a column it lacks. A delete whose row the audit read before the write hands its resolvers and enrichers that read row, which holds no relation your `include` asks for; a top-level delete whose row was not read hands them the row the operation returned, and a nested one the key and link columns described there.
+Resolvers: `foreignKey(field)` reads a column of the row, `lookup((row, prisma) => id)` reads the database per row, and `batchLookup((rows, prisma) => ids)` (from `@kuruwic/db-audit-core`) reads it once for all rows and must return one id per row. A row whose `foreignKey` column is `null` gets no log under that aggregate, without a failure. A row that lacks the column fails the resolver, reported as `id-resolver-call`; the row keeps its other logs.
 
-An update that changes a row's parent (a changed `authorId`, or a nested `connect`, `set` or `disconnect`) is recorded under the parent it left as well as the one it joined: each `to()` resolver runs on the row after the write and on the row read before it (`fetchBefore.update`, on by default). A `lookup()` or `batchLookup()` resolver runs for the row before the write too, and reads the database as it is after the write. The same holds for a row a nested `connect` or `set` links to a parent and a nested `delete` or `deleteMany` under that parent then removes in the same write (for a `deleteMany`, a `connectOrCreate` too): it is recorded under the parent it left and the one it was deleted from, its resolvers running on the row read before the write and on that row holding the key of the parent it was deleted from as the database stores it (from that parent row's own read before the write, or, for the top-level row, the operation's result). This needs the row read before the write: `fetchBefore.delete`, and for a to-many `delete` `fetchBefore.update` too, which reads the rows a `connect` or `set` links; without that read, only the parent it was deleted from is known, and without a read of the parent row, only the parent it left. A nested delete of a row no keyword before it linked is recorded from the row read before the write alone.
+The rows a resolver receives hold every column the client reads by default, plus the entity's `recordOmittedFields`. A deleted row is the row read before the write; a nested delete with `fetchBefore.delete` off has only its key and the foreign key of the relation it was deleted through.
 
-This allows you to:
-- Use custom names in `entityType`/`aggregateType` fields (e.g., `"UserAccount"` instead of `"User"`)
-- Categorize entities with custom `category` values (e.g., `"identity"`, `"system"`, `"business"`)
-- Control which entities create self aggregates with `selfAggregate: false`
+**Rows that change parent.** An update that changes a row's parent (a changed `authorId`, or a nested `connect`, `set` or `disconnect`) is recorded under the parent it left and the one it joined: each `to()` resolver runs on the row after the write and on the row read before it. `lookup` and `batchLookup` run for the row before the write too, and read the database as it is after the write. A row a nested `connect` or `set` links to a parent and a nested `delete` or `deleteMany` of the same write removes is recorded under the parent it left and the one it was deleted from. Both need the row read before the write: `fetchBefore.update` for updates; `fetchBefore.delete`, and for a to-many `delete` also `fetchBefore.update`, for deletes.
 
-#### `Prisma`
-**Type:** Prisma namespace
+### `write`
 
-The `Prisma` namespace exported by the generated client your `PrismaClient` comes from. The extension reads `Prisma.DbNull` and `Prisma.defineExtension` from it; a client instance does not expose its namespace, so it is passed explicitly. The models' keys and relations come from the `schema` option (see [Installation](#installation)).
+#### `write.mode`
+
+`'atomic' | 'awaited' | 'deferred'` (`WriteMode`), default `'atomic'`: the mode of every model whose entity sets no `writeMode`. See [Write modes](#write-modes).
 
 ```typescript
-import { PrismaPg } from '@prisma/adapter-pg';
-import { Prisma, PrismaClient } from '../generated/prisma/client.js'; // your client generator's output
-import { auditSchema } from '../generated/audit/index.js';
-
-const basePrisma = new PrismaClient({
-  adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }),
-});
-const prisma = createAuditClient(basePrisma, { Prisma, schema: auditSchema, contextProvider: provider, entities });
+{
+  write: { mode: 'awaited' },
+  entities: defineEntities<AuditModelName, PrismaClient>()({
+    Payment: defineEntity({ type: 'Payment', writeMode: 'atomic' }),
+    Session: defineEntity({ type: 'Session', writeMode: 'deferred' }),
+  }),
+}
 ```
-
-The Prisma client itself is the first argument of `createAuditClient`. Audited operations run on it, and audit logs are written with it, bypassing the audit extension.
-
-### Transaction Behavior and Recursion Safety
-
-**Transaction behavior:**
-- **Sync mode** (`write.awaited: true`, default): the operation returns once its audit logs are written.
-  - Inside your interactive `$transaction`: written with the transaction client (`tx`) before it commits, so the operation and its audit logs commit or roll back together. A failed audit-log write fails the operation with its original error, and with it the transaction
-  - Outside one: written with the client passed to `createAuditClient` once the operation has committed. A failure to build or write the audit logs is reported (to `errorObserver`, or to the console without one) and never fails the operation: its write has committed, and reporting it as failed would invite a retry that writes it twice
-  - With [`write.implicitTransaction`](#writeimplicittransaction), the audited client opens the interactive transaction itself for such an operation, so it commits or rolls back together with its audit logs without a `$transaction` of yours
-  - **Default behavior**: Ensures complete audit trails with all changes tracked
-- **Async mode** (`write.awaited: false`):
-  - Audit logs written using the client passed to `createAuditClient` **after** the operation: once an interactive `$transaction` has committed (or a batch `$transaction([...])` that runs as one with `write.implicitTransaction`); without waiting outside one
-  - No atomicity guarantee
-  - **Performance optimization**: Use when high-throughput is more important than completeness
-
-**Which transactions the audit sees:**
-An interactive `$transaction(async (tx) => ...)` started on the audited client, or on a client derived from it by `$extends`, is the transaction of every audited operation inside its callback, whether or not an audit context is set when `$transaction` is called: an audit context set inside the callback (for example with `provider.runAsync`) writes its audit rows in that transaction, or after it commits. Start transactions on the audited client or a client derived from it. A `$transaction` started on another client object, such as `Prisma.getExtensionContext(this).$parent` inside a model extension, is invisible to the audit: an audited operation inside its callback runs as if no transaction were active, so an awaited audit is written outside your transaction once the operation has returned, and an audit that is not awaited is written before yours commits. Inside a callback, write through the transaction's client (`tx`), as Prisma's documentation advises: a write through the audited client itself (`prisma.user.update(...)` inside `prisma.$transaction(async (tx) => ...)`) does not run in your transaction, while the runtime scope still names your transaction, so its audit is written in your transaction and rolls back with it although the write has committed. With [`write.implicitTransaction`](#writeimplicittransaction) such a write whose audit is awaited runs in an interactive transaction of its own, together with its audit, outside yours.
-
-**Batch transactions:**
-A batch `$transaction([...])` is all-or-nothing, as on a client without the audit extension. By default Prisma runs it itself: each operation's audit is written once Prisma has committed the batch, awaited or not, and a failure to build or write an audit after that commit is reported (to `errorObserver`, or to the console without one) without failing the batch. With [`write.implicitTransaction`](#writeimplicittransaction), the operations of the list must be created from the client `$transaction` is called on and passed to it before they are awaited: a batch holding an operation of another client (the client passed to `createAuditClient`, another client derived from the audited client) or one that has already run is rejected before any of its operations runs. When the batch holds a write whose audit is awaited (a write of an audited model, with an audit context set and `write.awaited: true`, the default, or `write.awaited` returning `true` for that model), it then runs as one interactive transaction on that client: its operations run one after another, in the order of the list, an awaited audit is written in that transaction and an audit that is not awaited once it has committed, and a failure of any operation, of the build of any operation's audit records (awaited or not, since every operation runs inside the transaction), or of an awaited audit write rolls back every operation of the batch and its audit rows. The results are those Prisma's own batch returns for the same operations, fluent calls included. Being an interactive transaction, it is bound by the client's interactive transaction limits: the `transactionOptions` (`maxWait`, `timeout`) given to the client passed to `createAuditClient`, Prisma's defaults otherwise; the batch's own `isolationLevel` applies. A batch without such a write (one that only reads, writes only models the audit does not record, or writes only models whose audit is not awaited) runs as Prisma's own batch of the same operations, and each audit is written once Prisma has committed it.
-
-**Other query extensions:**
-The audit extension continues the caller's operation through Prisma's `query`, so a query extension applied before it (to the client passed to `createAuditClient`) and one applied after it (to the audited client, `createAuditClient(...).$extends(...)`) each see the caller's operation once, in every execution scope: outside any transaction, inside your interactive `$transaction`, in a batch `$transaction([...])`, and with `write.implicitTransaction`, whose transaction is opened before the operation enters the extension chain. An `updateMany` or `deleteMany` with a `limit` reaches the extensions applied after the audit extension narrowed, without its `limit`, once per round it runs (see "Batch Operations"). A client derived from the audited client runs its own extensions only. The audit's own queries (the reads before and after the write, the audit-log insert) are separate queries on the client the operation runs on: they pass through the extensions of that client as well, so an extension that counts or rewrites every query sees them too. A query an extension issues of its own through an audited client is audited as a call of its own, whichever side of the audit extension it was applied on, unless it issues it while handling one of the audit's own queries. `packages/integration-tests/test/extension-chain.integration.spec.ts` ("Extension Chain Guard") pins these counts.
-
-**Fluent API calls:**
-A fluent call (`prisma.user.update(...).posts()`, `prisma.user.findUnique(...).posts()`) returns the relation: the audit extension continues it through `query`, and with `write.implicitTransaction` the client replays the whole chain on its interactive transaction.
-
-**Infinite recursion prevention:**
-The extension prevents infinite recursion through:
-- An internal processing flag that skips the audit's own queries
-- Skipping audit logging for the `auditLog` model itself
-- Using non-extended client for deferred writes
-
-### Optional Configuration
 
 #### `write.model`
-**Type:** `string`
-**Default:** `'AuditLog'`
 
-Customize the Prisma model name used for storing audit logs. Use the **PascalCase model name** as defined in your schema.
+The PascalCase name of the audit-log model, default `'AuditLog'`. It needs the columns of the `AuditLog` model in the [main README](../../README.md#1-add-an-auditlog-model). An optional `beforeUnavailable Boolean @default(false)` field stores whether the before state was requested and could not be read; a field of that name that is not a single `Boolean` makes `createAuditClient` throw.
+
+#### `write.writer`
 
 ```typescript
-// schema.prisma
-model Activity {
-  id                String   @id @default(cuid())
-  // ... (same fields as AuditLog)
-  @@map("activities")
-}
-
-// Configuration
-createAuditClient(basePrisma, {
-  contextProvider: provider,
-  entities,
-  Prisma,
-  schema: auditSchema,
-  write: {
-    model: 'Activity',  // Use 'Activity' instead of 'AuditLog'
-  },
-});
+writer?(records: AuditRecord[], context: WriteContext<TClient>): Promise<void>
+// WriteContext: { auditContext, handle, inTransaction, defaultWrite }
 ```
 
-**Optional `beforeUnavailable` column:**
+Replaces the default write. `defaultWrite(records)` is the default write on `handle`.
 
-An audit-log model may declare `beforeUnavailable Boolean @default(false)`. When it does, the default write stores each record's `beforeUnavailable` there (see [Before state that could not be read](#before-state-that-could-not-be-read)); when it does not, the default write leaves the field out. The column is looked up by that exact field name in the model `write.model` names, and a field of that name that is not a single `Boolean` makes `createAuditClient` throw.
-
-**Custom schema with different field names:**
-
-If your audit log table has a different schema (e.g., different field names), use `write.writer` to transform the audit log data:
+- Inside a transaction (yours, a batch's, or the one the client opens for an atomic write), under every mode, `handle` is the transaction's client (typed as the client), `inTransaction` is `true`, and the writer runs before the operation returns. A rollback undoes what the writer wrote through `handle` or `defaultWrite`, and nothing else.
+- Outside any transaction, `handle` is the client passed to `createAuditClient` and `inTransaction` is `false`. Under `awaited` the writer runs after the operation has committed; under `deferred` it runs detached. A writer that needs several statements to be atomic wraps them in `handle.$transaction(...)` exactly when `inTransaction` is `false`.
+- An atomic operation commits once the writer resolves; a writer that resolves without persisting the records is not detected.
+- Side effects outside the database (an HTTP call, a queue publish, a write through another client) are never rolled back. Send them from [`observer`](#audit-outcomes) on an outcome whose `status` is `complete` or `incomplete`, which means the operation committed.
+- A write the writer makes through the audited client is not audited and is not part of `handle`'s transaction.
 
 ```typescript
-// schema.prisma
-model CustomAuditLog {
-  id           String   @id @default(cuid())
-  userId       String   @map("user_id")
-  action       String
-  entityName   String   @map("entity_name")
-  entityId     String   @map("entity_id")
-  beforeData   Json?    @map("before_data")
-  afterData    Json?    @map("after_data")
-  createdAt    DateTime @default(now()) @map("created_at")
-  @@map("custom_audit_logs")
-}
+// An audit-log table with its own column names
+const json = (value: unknown) => (value === null ? Prisma.DbNull : (value as Prisma.InputJsonValue));
 
-// Configuration
-createAuditClient(basePrisma, {
-  contextProvider: provider,
-  entities,
-  Prisma,
-  schema: auditSchema,
+export const prisma = createAuditClient(basePrisma, {
+  ...auditConfig,
   write: {
     model: 'CustomAuditLog',
     writer: async (records, { handle }) => {
-      // Transform to custom schema
-      const transformedLogs = records.map(log => ({
-        userId: log.actorId,
-        action: log.action,
-        entityName: log.entityType,
-        entityId: log.entityId,
-        beforeData: log.before,
-        afterData: log.after,
-        createdAt: log.createdAt,
-      }));
-
-      // Write through the handle: the operation's transaction client for an awaited write,
-      // the base client otherwise (never the extended client)
       await handle.customAuditLog.createMany({
-        data: transformedLogs,
+        data: records.map((r) => ({
+          userId: r.actorId,
+          action: r.action,
+          entityName: r.entityType,
+          entityId: r.entityId,
+          beforeData: json(r.before),
+          afterData: json(r.after),
+          createdAt: r.createdAt,
+        })),
       });
     },
   },
 });
 ```
 
-#### Using Normalized Schemas
+#### Normalized writers
 
-For better query performance and data integrity, you can use normalized schemas. There are two normalization patterns available:
+Two built-in writers store records in normalized tables. Each writes in the operation's transaction when `inTransaction` is `true` and in a transaction of its own otherwise. `beforeUnavailableField` optionally names a `Boolean` field that stores `beforeUnavailable`.
 
-##### Pattern 1: Entity Normalization
+`createEntityNormalizedWriter` stores actors, entities and aggregates once each, and one event per record that references them:
 
-Normalizes actor/entity/aggregate metadata into separate tables to avoid duplication.
-
-**When to use entity normalization:**
-- ✅ Same actors/entities appear frequently (>10 logs per actor/entity)
-- ✅ You need complex analytics queries (joins, aggregations)
-- ✅ Storage cost is a concern
-- ✅ You want to avoid duplication of actor/entity/aggregate data
-
-**When to use flat schema (default):**
-- ✅ Simple setup with minimal configuration
-- ✅ Fast writes (single insert per log)
-- ✅ Easy to query individual logs without joins
-- ✅ Lower query complexity for basic use cases
-
-**Schema Design Comparison:**
-
-| Aspect | Flat Schema (Default) | Normalized Schema |
-|--------|----------------------|-------------------|
-| **Setup** | ✅ Simple (1 table) | ⚠️ Complex (4+ tables) |
-| **Write Speed** | ✅ Fast (single insert) | ⚠️ Slower (multiple upserts) |
-| **Storage** | ⚠️ Duplicates actor/entity data | ✅ No duplication |
-| **Query Complexity** | ✅ Simple (no joins) | ⚠️ Requires joins |
-| **Analytics** | ⚠️ Limited | ✅ Powerful (relational queries) |
-
-**Prisma Schema Example:**
+```typescript
+write: {
+  writer: createEntityNormalizedWriter({
+    actorModel: 'Actor',
+    entityModel: 'Entity',
+    aggregateModel: 'Aggregate',
+    eventModel: 'AuditEvent',
+  }),
+},
+```
 
 ```prisma
-// schema.prisma
-
 model Actor {
-  id              String       @id @default(cuid())
-  category        String
-  type            String
-  externalId      String
-  context         Json?
-
-  events          AuditEvent[]
+  id         String       @id @default(cuid())
+  category   String
+  type       String
+  externalId String
+  context    Json?
+  events     AuditEvent[]
 
   @@unique([category, type, externalId])
-  @@index([category, type])
   @@map("actors")
 }
 
-model Entity {
-  id              String       @id @default(cuid())
-  category        String
-  type            String
-  externalId      String
-  context         Json?
-
-  events          AuditEvent[]
-
-  @@unique([category, type, externalId])
-  @@index([category, type])
-  @@map("entities")
-}
-
-model Aggregate {
-  id              String       @id @default(cuid())
-  category        String
-  type            String
-  externalId      String
-  context         Json?
-
-  events          AuditEvent[]
-
-  @@unique([category, type, externalId])
-  @@index([category, type])
-  @@map("aggregates")
-}
+// Entity and Aggregate: the same fields as Actor, @@map("entities") / @@map("aggregates")
 
 model AuditEvent {
-  id              String       @id @default(cuid())
+  id                String    @id @default(cuid())
+  actorId           String
+  entityId          String
+  aggregateId       String
+  action            String
+  before            Json?
+  after             Json?
+  changes           Json?
+  beforeUnavailable Boolean   @default(false) // optional: name it as beforeUnavailableField
+  requestContext    Json?
+  createdAt         DateTime  @default(now()) @map("created_at")
+  actor             Actor     @relation(fields: [actorId], references: [id])
+  entity            Entity    @relation(fields: [entityId], references: [id])
+  aggregate         Aggregate @relation(fields: [aggregateId], references: [id])
 
-  // Foreign keys to normalized tables
-  actorId         String
-  entityId        String
-  aggregateId     String
-
-  // Event details
-  action          String
-  before          Json?
-  after           Json?
-  changes         Json?
-  beforeUnavailable Boolean    @default(false) // optional: name it as `beforeUnavailableField`
-
-  requestContext  Json?
-  createdAt       DateTime     @default(now()) @map("created_at")
-
-  // Relations
-  actor           Actor        @relation(fields: [actorId], references: [id])
-  entity          Entity       @relation(fields: [entityId], references: [id])
-  aggregate       Aggregate    @relation(fields: [aggregateId], references: [id])
-
-  @@index([actorId])
-  @@index([entityId])
   @@index([aggregateId])
   @@index([createdAt])
   @@map("audit_events")
 }
 ```
 
-**Configuration with Built-in Helper:**
-
-The helper writes on the client each write runs on: in the operation's transaction when `inTransaction` is true (an awaited write), in a transaction of its own otherwise.
-
-`beforeUnavailableField` is optional: name a Boolean field of `AuditEvent` and the helper stores `beforeUnavailable` (the before state was requested and could not be read) in it; without it the marker is not stored and the model needs no such field.
+`createSharedChangeWriter` stores the change of an entity once and one row per aggregate it is recorded under, for entities that belong to several aggregates:
 
 ```typescript
-// src/audit.config.ts
-import {
-  defineConfig,
-  defineEntities,
-  defineEntity,
-  to,
-  foreignKey,
-  createEntityNormalizedWriter,
-} from '@kuruwic/prisma-audit';
-import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
-import { Prisma, type PrismaClient } from '../generated/prisma/client.js'; // your client generator's output
-import { type AuditModelName, auditSchema } from '../generated/audit/index.js';
-
-export const auditProvider = createAsyncLocalStorageProvider();
-
-export default defineConfig<PrismaClient>()({
-  Prisma,
-  schema: auditSchema,
-  contextProvider: auditProvider,
-  entities: defineEntities<AuditModelName, PrismaClient>()({
-    User: defineEntity({ type: 'User' }),
-    Post: defineEntity({
-      type: 'Post',
-      aggregates: [to('User', foreignKey('authorId'))],
-    }),
+write: {
+  writer: createSharedChangeWriter({
+    changeModel: 'AuditChange',
+    aggregateModel: 'AuditAggregate',
   }),
-  write: {
-    writer: createEntityNormalizedWriter({
-      actorModel: 'Actor',
-      entityModel: 'Entity',
-      aggregateModel: 'Aggregate',
-      eventModel: 'AuditEvent',
-    }),
-  },
-});
+},
 ```
-
-```typescript
-// src/db.ts
-import { createAuditClient } from '@kuruwic/prisma-audit';
-import { PrismaPg } from '@prisma/adapter-pg';
-import { PrismaClient } from '../generated/prisma/client.js';
-import auditConfig, { auditProvider } from './audit.config.js';
-
-export const prisma = createAuditClient(
-  new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }) }),
-  auditConfig,
-);
-export { auditProvider };
-```
-
-##### Pattern 2: Shared Change Normalization
-
-Deduplicates change data when an entity belongs to multiple aggregate roots.
-
-**Use case example:**
-
-```typescript
-// Comment belongs to both Post and User aggregates
-await prisma.comment.create({
-  data: { text: 'Hello', postId: 'post-1', authorId: 'user-1' }
-});
-
-// Without shared change normalization (default):
-// - 2 AuditLog records with identical before/after/changes
-//   1. aggregateType=Post, aggregateId=post-1, entityType=Comment, before/after/changes
-//   2. aggregateType=User, aggregateId=user-1, entityType=Comment, before/after/changes (duplicated)
-
-// With shared change normalization:
-// - 1 AuditChange record: stores Comment's before/after/changes
-// - 2 AuditAggregate records: links to Post and User aggregates
-```
-
-**When to use shared change normalization:**
-- ✅ Entities frequently belong to multiple aggregates (e.g., Comment → Post + User)
-- ✅ Change data (before/after) is large (reduces storage significantly)
-- ✅ You need to query "all aggregates affected by this change"
-
-**Prisma Schema Example:**
 
 ```prisma
-// schema.prisma
-
 model AuditChange {
-  id              String            @id @default(cuid())
-
-  // Entity information
-  entityCategory  String
-  entityType      String
-  entityId        String
-
-  // Change data (stored once)
-  action          String
-  before          Json?
-  after           Json?
-  changes         Json?
-  beforeUnavailable Boolean         @default(false) // optional: name it as `beforeUnavailableField`
-
-  createdAt       DateTime          @default(now()) @map("created_at")
-
-  // Relations to aggregates
-  aggregates      AuditAggregate[]
+  id                String           @id @default(cuid())
+  entityCategory    String
+  entityType        String
+  entityId          String
+  action            String
+  before            Json?
+  after             Json?
+  changes           Json?
+  beforeUnavailable Boolean          @default(false) // optional: name it as beforeUnavailableField
+  createdAt         DateTime         @default(now()) @map("created_at")
+  aggregates        AuditAggregate[]
 
   @@index([entityType, entityId])
-  @@index([createdAt])
   @@map("audit_changes")
 }
 
 model AuditAggregate {
-  id                String       @id @default(cuid())
-
-  // Reference to shared change
+  id                String      @id @default(cuid())
   changeId          String
-
-  // Actor information
   actorCategory     String
   actorType         String
   actorId           String
   actorContext      Json?
-
-  // Aggregate root information
   aggregateCategory String
   aggregateType     String
   aggregateId       String
   aggregateContext  Json?
-
-  // Additional context
   entityContext     Json?
   requestContext    Json?
-
-  // Relations
-  change            AuditChange  @relation(fields: [changeId], references: [id])
+  change            AuditChange @relation(fields: [changeId], references: [id])
 
   @@index([changeId])
   @@index([aggregateType, aggregateId])
-  @@index([actorType, actorId])
   @@map("audit_aggregates")
 }
 ```
 
-**Configuration with Built-in Helper:**
+### `requireContext`
 
-The helper writes on the client each write runs on: in the operation's transaction when `inTransaction` is true (an awaited write), in a transaction of its own otherwise.
-
-`beforeUnavailableField` is optional: name a Boolean field of `AuditChange` and the helper stores `beforeUnavailable` (the before state was requested and could not be read) in it; without it the marker is not stored and the model needs no such field.
+`boolean | ((modelName: string) => boolean)`, default `false`. A write without an audit context is rejected with `AuditContextMissingError` before Prisma runs any of it when `requireContext` holds for one of the audited models it writes rows of, nested writes included (a `connect`, `set` or `disconnect` writes the related rows when they hold the foreign key). Otherwise it runs unaudited, and its outcome is `unaudited`. It does not reach writes the audit extension does not see: raw queries, writes on a client without the extension, and writes an extension applied after the audit adds to an operation's arguments.
 
 ```typescript
-// src/audit.config.ts
-import {
-  defineConfig,
-  defineEntities,
-  defineEntity,
-  to,
-  foreignKey,
-  createSharedChangeWriter,
-} from '@kuruwic/prisma-audit';
-import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
-import { Prisma, type PrismaClient } from '../generated/prisma/client.js'; // your client generator's output
-import { type AuditModelName, auditSchema } from '../generated/audit/index.js';
-
-export const auditProvider = createAsyncLocalStorageProvider();
-
-export default defineConfig<PrismaClient>()({
-  Prisma,
-  schema: auditSchema,
-  contextProvider: auditProvider,
-  entities: defineEntities<AuditModelName, PrismaClient>()({
-    User: defineEntity({ type: 'User' }),
-    Post: defineEntity({
-      type: 'Post',
-      aggregates: [to('User', foreignKey('authorId'))],
-    }),
-    Comment: defineEntity({
-      type: 'Comment',
-      aggregates: [
-        to('Post', foreignKey('postId')),
-        to('User', foreignKey('authorId')),  // Comment belongs to both Post and User
-      ],
-    }),
-  }),
-  write: {
-    writer: createSharedChangeWriter({
-      changeModel: 'AuditChange',
-      aggregateModel: 'AuditAggregate',
-    }),
-  },
-});
+requireContext: (modelName) => modelName === 'Order',
 ```
 
-```typescript
-// src/db.ts
-import { createAuditClient } from '@kuruwic/prisma-audit';
-import { PrismaPg } from '@prisma/adapter-pg';
-import { PrismaClient } from '../generated/prisma/client.js';
-import auditConfig, { auditProvider } from './audit.config.js';
+### `diffExcludeFields`
 
-export const prisma = createAuditClient(
-  new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }) }),
-  auditConfig,
-);
-export { auditProvider };
-```
+Fields left out of an update's `changes`; an update whose only changes are in excluded fields gets no log. Excluded fields stay in `before` and `after`. An entity's own list replaces the top-level one (`[]` tracks every field). Prisma sets `@updatedAt` on every update, so without excluding it an update that stores the values the row already holds is logged with `updatedAt` as its only change.
 
-**Benefits:**
+An update's `changes` compares the columns of the row in the client's default shape, whatever the query's `select` or `omit`; relation fields and `_count` are not compared. An update whose columns did not change, such as one that writes only nested relations, gets no log.
 
-- ✅ Eliminates duplication of change data (before/after/changes)
-- ✅ Significant storage savings when entities have multiple aggregates
-- ✅ Simpler queries for "what changed?" (single AuditChange record)
-- ✅ Easy to query "all aggregates affected by this change"
+When the Prisma version cannot be determined, the audit reads a query's `select` by listing every column and records a column it added that way only when the row's before state holds it, so a row created under a `select` is recorded with the selected columns only. The audit then adds the row key to none of its reads either, so under a client-level `omit` that hides the key only a row returned with a `select` is identified.
 
-**Performance Considerations:**
+### `redactFields`
 
-- **Write Performance**: Slightly slower than flat schema (1 change insert + N aggregate inserts)
-  - Flat schema: N inserts (one per aggregate)
-  - Shared change: 1 change insert + N aggregate inserts
-  - Net effect: Similar performance, but less total data written
+Fields masked on top of the built-in sensitive fields (`password`, `passwordHash`, `hashedPassword`, `salt`, `token`, `accessToken`, `refreshToken`, `apiKey`, `secret`, `secretKey`, `privateKey`, `ssn`, `socialSecurityNumber`, `creditCard`, `cardNumber`, `cvv`, `pin`). A field matches by exact, case-sensitive name at any depth of `before`, `after` and `changes`, after the serializers ran. A field cannot be in both `redactFields` and `diffExcludeFields`. The enriched contexts and the request context are not redacted.
 
-- **Storage Savings**: Dramatic reduction when:
-  - Entities belong to 2+ aggregates on average
-  - Change data (before/after) is large (e.g., 1KB+ per change)
-  - Example: 1000 comments (2 aggregates each) → Saves ~1000 duplicated change records
-
-**Recommendation:**
-
-Use shared change normalization if:
-- Your entities frequently belong to 2+ aggregate roots
-- Change data size is significant (>500 bytes on average)
-- You prioritize storage efficiency over write speed
-- You need to query "what aggregates were affected by this change?"
-
-### Change Tracking
-
-Control how changes are tracked and recorded.
-
-An update's `changes` compares the columns of the row. The audited row is read with every column of the client's default shape whatever the query's `select` or `omit` (the value returned keeps the shape the query requested), so a column the query does not read is still compared and a change to it is recorded; a column the client omits for every query is left out, unless the entity lists it in [`recordOmittedFields`](#recordomittedfields); the relation fields and relation counts (`_count`) read with the row are neither compared nor stored. An update whose columns did not change, such as one that writes only nested relations, gets no audit log.
-
-#### `diffExcludeFields`
-**Type:** `string[]` (top-level, and per model on `defineEntity`)
-**Default:** `[]`
-
-Fields left out of an update's `changes`. An update whose only changes are in excluded fields gets no audit log. An excluded field stays in the stored `before` and `after`; to mask its value, use [`redactFields`](#redactfields) instead (a field cannot be in both). Prisma sets an `@updatedAt` column on every update, so an update or upsert that stores the values the row already holds is logged with `updatedAt` as its only change unless that column is excluded.
-
-```typescript
-{
-  diffExcludeFields: ['updatedAt', 'createdAt', 'lastModifiedAt'],
-}
-```
-
-An entity's own `diffExcludeFields` replaces the top-level list for that entity: list the top-level fields again to keep them excluded, and `[]` tracks every field. Without one, the entity uses the top-level list.
-```typescript
-const entities = defineEntities<AuditModelName, PrismaClient>()({
-  User: defineEntity({
-    type: 'User',
-    diffExcludeFields: ['updatedAt', 'createdAt', 'lastLoginAt'],
-  }),
-});
-```
-
-#### `recordOmittedFields`
-**Type:** `string[]` (per model, on `defineEntity`)
-**Default:** none
-
-The fields a client-level `omit` hides (`new PrismaClient({ omit })`) that the audit reads anyway, though the client omits them, and records masked. The audit reads them in its own queries only, the read before the write and one read by [row key](#batch-operations-updatemany--deletemany) per listed model after it, one extra statement for a single write (none for `createMany`, `updateMany` and `deleteMany`, whose own reads of the rows hold them); the query you run and the value it returns are never widened with them. With `fetchBefore.delete` off, a deleted row's listed fields are not recorded.
-
-Their values are masked in before, after and `changes`, and there is no option to record them unmasked: a changed field shows as `{ old: { redacted: true, hadValue: true }, new: { redacted: true, hadValue: true, isDifferent: true } }` (a side is `null` when the value was or became null), and an unchanged one has no entry in `changes`. A field that is also a built-in sensitive field or in `redactFields` is masked once, in the same shape, and a listed field the client does not hide is masked all the same.
-
-A field the entity's `diffExcludeFields` (or, without one, the top-level `diffExcludeFields`) names is not read, even when listed. A foreign key the client hides and a `foreignKey(...)` root names must be listed: otherwise the row lacks the column, every write of it reports `id-resolver-call`, and the row is not recorded under that aggregate. A listed foreign key that holds `null` reports nothing.
-
-Creating the audited client throws when the Prisma version cannot be determined, because the audit needs to know that queries take an `omit`. It also throws for a name that is not a scalar or enum field of the model, and for a mapping key that matches no model.
-
-```typescript
-User: defineEntity({
-  type: 'User',
-  recordOmittedFields: ['password'],
-}),
-```
-
-### Redaction
-
-#### `redactFields`
-**Type:** `string[]` (top-level only)
-**Default:** `[]`
-
-Fields to redact in audit logs on top of the 17 built-in sensitive fields, which are always redacted. A field is redacted when its name matches an entry exactly (case-sensitive), at any depth of the before / after / changes data as stored, after the custom serializers ran: a value a serializer turns into a string is redacted by its own field name only. Redaction covers the stored before, after and `changes` only: the enriched contexts (`actorContext`, `entityContext`, `aggregateContext`) and the request context are stored as the enrichers and the context provider return them.
-
-The audit cannot tell which columns a client-level `omit` hides (`new PrismaClient({ omit })`) and reads a row in the client's default shape, so those columns are left out of the audit logs unless the entity lists them in [`recordOmittedFields`](#recordomittedfields), which records them masked. Two exceptions record a hidden column other than the row key without the entity listing it. A hidden column the query names itself (`select: { password: true }` or `omit: { password: false }`) reaches its result as usual, and the record of a row without a captured before state (a create, an upsert that created, an update whose before read is off or failed) holds it as the query read it, in clear unless it is a built-in sensitive field or listed in `redactFields`; the record of a row whose before state the audit read (an update or delete with `fetchBefore` on, an upsert that updated) keeps only the columns that read holds, so the column is not recorded there. When the Prisma version cannot be determined, a query's `select` is read by listing every column; a column the audit added that way is recorded only when the row's before state holds it, so a row created under a `select` is recorded with the selected columns only, on any client, whether or not it hides fields.
-
-The [row key](#batch-operations-updatemany--deletemany) follows its own rule. The audit reads it whatever a client-level `omit` hides, in its own reads and under a query's `select`, and records it in the row's states; the value returned keeps the shape the query requested. Under a client-level `omit` that hides the key, a row a write returns without a `select` lacks it, and takes it from the row read before the write (an `update` or `delete` with `fetchBefore` on, an `upsert` that updated). When there is no such read or the write changes the key, the row cannot be identified, gets no audit log and is not reported as `row-identification`: the row of a `create`, of an `upsert` that created, of an `update` or `delete` whose before read is off or failed, of an `update` or `upsert` whose arguments change the key other than by giving a key field a literal value, and each row `createManyAndReturn` returns. Each row `updateManyAndReturn` returns without a `select` gets no audit log either, but their number is reported as `row-identification`. When the Prisma version cannot be determined, the audit adds the key to none of its reads, so under a client-level `omit` that hides it only a row returned with a `select` is identified.
-
-```typescript
-{
-  redactFields: ['phoneNumber', 'bankAccount', 'dateOfBirth'],
-}
-```
-
-**Built-in sensitive fields** (`DEFAULT_SENSITIVE_FIELDS` in `@kuruwic/db-audit-core`'s `src/utils/redaction.ts`):
-```
-password, passwordHash, hashedPassword, salt, token, accessToken,
-refreshToken, apiKey, secret, secretKey, privateKey, ssn,
-socialSecurityNumber, creditCard, cardNumber, cvv, pin
-```
-
-**Redaction format:**
 ```json
-{
-  "password": {
-    "redacted": true,
-    "hadValue": true,
-    "isDifferent": true
-  }
-}
+{ "password": { "redacted": true, "hadValue": true } }
 ```
 
-### Serialization
+A field that had no value is stored as `null`. In `changes`, a redacted field is `{ old, new }` with the same shape and `isDifferent` on `new`.
 
-#### `serializers`
-**Type:** `ValueSerializer[]` from `@kuruwic/db-audit-core` (top-level only)
-**Default:** none
+A column a client-level `omit` hides is recorded in clear in two cases, unless it is a sensitive or redacted field: when the query names it (`select: { password: true }`, `omit: { password: false }`) and the record has no captured before state (a create, an upsert that created, an update whose before read is off or failed). List such columns in `redactFields` or `recordOmittedFields`.
 
-Conversions for values JSON cannot hold, applied to the stored before, after and `changes` and to the stored contexts (`actorContext`, `entityContext`, `aggregateContext` and the request context). Every value, at any depth and containers included, goes through the serializers in order before the built-in conversions (a BigInt to its string, a value with a `toJSON` method, such as a Date, a decimal.js `Decimal` or a Buffer, to what its `toJSON` returns). The first serializer that returns something other than `UNHANDLED` decides the value, which is stored as returned and so must be JSON-safe; a value every serializer passes on with `UNHANDLED` gets the built-in conversion. A serializer can therefore replace a built-in conversion, as the example below does for Buffer.
+### `recordOmittedFields`
 
-Serializers run before redaction, so a value a serializer turns into a string is redacted by its own field name only (see [`redactFields`](#redactfields)).
+Per entity. Fields a client-level `omit` (`new PrismaClient({ omit })`) hides that the audit reads anyway and records masked. Without it, those fields are left out of the audit logs.
+
+```typescript
+User: defineEntity({ type: 'User', recordOmittedFields: ['password'] }),
+```
+
+- The audit reads them in its own queries only: the read before the write, and one read by [row key](#row-key) per listed model after it (none for `createMany`, `updateMany` and `deleteMany`, whose own reads hold them). Your query and its result are never widened.
+- Values are masked in `before`, `after` and `changes`; there is no option to record them unmasked. A changed field shows as `{ old: { redacted: true, hadValue: true }, new: { redacted: true, hadValue: true, isDifferent: true } }`.
+- A field in the entity's `diffExcludeFields` is not read. A foreign key the client hides that a `foreignKey(...)` root names must be listed, or every write of the row reports `id-resolver-call`.
+- With `fetchBefore.delete` off, a deleted row's listed fields are not recorded.
+- `createAuditClient` throws when the Prisma version cannot be determined, for a name that is not a scalar or enum field of the model, and for a key that matches no model.
+
+### `serializers`
+
+`ValueSerializer[]` from `@kuruwic/db-audit-core`, applied in order to every value, containers included, of `before`, `after`, `changes` and the stored contexts. The first serializer that returns something other than `UNHANDLED` decides the value, which must be JSON-safe. Otherwise the built-in conversions apply: a BigInt to its string, a value with `toJSON` (Date, decimal.js `Decimal`, Buffer) to what `toJSON` returns. Serializers run before redaction.
 
 ```typescript
 import { UNHANDLED } from '@kuruwic/db-audit-core';
 
-{
-  serializers: [
-    (value) => (value instanceof Buffer ? value.toString('base64') : UNHANDLED),
-  ],
-}
+serializers: [(value) => (value instanceof Buffer ? value.toString('base64') : UNHANDLED)],
 ```
 
-### Sampling (`samplingRate`)
-**Type:** `number | ((modelName: string) => number)` (0.0 - 1.0)
-**Default:** `1.0` (100%)
+### `fetchBefore`
 
-Sample rate for audit logging (0.0 = 0%, 1.0 = 100%): a value for every operation, or a function of the model name.
+`{ update?: boolean; delete?: boolean }`, both `true` by default; an entity's own `fetchBefore` wins for its model. Applies to top-level and nested writes.
+
+- `update`: reads the row before an update, giving its log a `before` and `changes`, and the parent it leaves when its foreign key changes. The `update` setting of a related model also decides whether a nested `connect`, `set` or `disconnect` changing its foreign key is audited: with it off they are not read and not audited.
+- `delete`: reads the row before a delete. Off, a row a nested delete removes is known by its key and the foreign key of its relation only, so its log has no `before` and a `to()` root on another column is left out. A delete that names no full row key (a to-one `delete: true`) then gets no log and reports `row-identification`.
+
+With `update` off, a nested `update` still has its key columns read when a write nested below it is identified through its row. Its own log still has no before state.
 
 ```typescript
-{
-  samplingRate: 0.1,  // Log 10% of operations
-}
+fetchBefore: { update: false },
+entities: defineEntities<AuditModelName, PrismaClient>()({
+  Post: defineEntity({ type: 'Post', fetchBefore: { update: true } }),
+}),
 ```
 
-As a function, it gives the rate per operation. It is called once per audited operation (with `write.implicitTransaction` once per call, which the client decides before the call runs), with the name of its top-level model; its return value applies to the whole operation, its nested writes included.
+### Context enrichment
+
+Enrichers fill `actorContext`, `entityContext` and `aggregateContext`. Each takes `enricher`, `onError` and `fallback`. `onError` decides what an error or timeout becomes: `'throw'` (default) rethrows, `'log'` warns and stores `fallback ?? null`, `'ignore'` stores `fallback ?? null` silently; a function receives the error and returns one of those, and anything else is handled as `'log'`. The `actorContext` enricher times out after 500 ms, entity and aggregate enrichers after 2,000 ms; the limits are fixed. Enrichers and resolvers receive the client of the scope they run in, so inside a transaction they read its writes.
 
 ```typescript
-{
-  samplingRate: (modelName) => {
-    if (modelName === 'Session') return 0.01;  // 1% sampling
-    if (modelName === 'PageView') return 0.5;  // 50% sampling
-    return 1.0;  // 100% for others
-  },
-}
-```
-
-### Required Audit Context (`requireContext`)
-**Type:** `boolean | ((modelName: string) => boolean)`
-**Default:** `false`
-
-Whether a write fails when no audit context is set, instead of running unaudited: a value for every model, or a function of the model name. A write is audited when it writes rows of a model in `entities`, its own or one its nested writes write (a `connect`, `set` or `disconnect` writes the related rows when they hold the foreign key). Without an audit context, it is rejected with `AuditContextMissingError` (exported by the package) when `requireContext` holds for one of those models, before Prisma runs any of it, and runs unaudited otherwise.
-
-```typescript
-{
-  requireContext: true,  // Every audited write needs an audit context
-}
-```
-
-```typescript
-{
-  // Only writes of Order rows, top-level or nested, need one
-  requireContext: (modelName) => modelName === 'Order',
-}
-```
-
-- It applies to the models of nested writes too, below a model that is not in `entities` included
-- Sampling does not affect it: a write is rejected at a `samplingRate` of 0 as well
-- A model that is not in `entities` is not audited, so it has no effect on it
-- It does not reach the writes the audit extension does not see: raw queries, a write on a client without the audit extension, and a write an extension applied after the audit adds to an operation's arguments (see [Coverage of Prisma writes](../../docs/guarantees.md#coverage-of-prisma-writes))
-
-### Write Options (`write`)
-
-Where, when and how the audit logs are written, and what a failed write does to your operation. `write` and each of its keys are optional. [`write.model`](#writemodel) is described above, [`write.writer`](#custom-writer-writewriter) below, and what a failed write does in [Error Handling](#error-handling-errorobserver).
-
-#### `write.awaited`
-**Type:** `boolean | ((modelName: string) => boolean)`
-**Default:** `true`
-
-Controls whether audit log writes are synchronous or asynchronous: a value for every operation, or a function of the model name.
-
-```typescript
-{
-  write: {
-    awaited: true,  // Synchronous (default) - written in the operation's transaction
-  }
-}
-```
-
-**Options:**
-- `true` (default): Synchronous writes, in the operation's transaction inside one and once it has committed outside any
-  - ✅ Atomicity inside a transaction, yours or the one [`write.implicitTransaction`](#writeimplicittransaction) opens: a failed audit write fails the operation, and both roll back
-  - ✅ Every audit record of the operation is written before the operation returns
-  - ✅ Suitable for compliance-sensitive operations
-  - ⚠️ Slightly slower for high-throughput scenarios
-- `false`: Fire-and-forget async writes
-  - ✅ Better performance for high-throughput operations
-  - ⚠️ Audit logs may be lost if process crashes
-  - ⚠️ No atomicity guarantee
-
-As a function, it controls the write strategy per operation. It is called once per operation the audit records, once sampling has kept it (with `write.implicitTransaction` once per call, which the client decides before the call runs; see [`write.implicitTransaction`](#writeimplicittransaction)), with the name of its top-level model; its return value applies to the whole operation, the audit rows of its nested writes to other models included. It is a client-level option rather than an entity setting for that reason: one operation gets one decision.
-
-```typescript
-{
-  write: {
-    // Sync writes for critical models, async for others
-    awaited: (modelName) => modelName === 'Payment',
-  }
-}
-```
-
-#### `write.implicitTransaction`
-**Type:** `boolean`
-**Default:** `false`
-
-Makes the audited client open the interactive transaction an awaited audit needs when you have not opened one, so that an operation and its audit logs commit or roll back together without changes at the call sites. Combining it with `write.awaited: false` throws a configuration error at `createAuditClient`, since no operation would be awaited; a function `write.awaited` is accepted.
-
-```typescript
-{
-  write: {
-    awaited: true,
-    implicitTransaction: true,
-  }
-}
-```
-
-With it, a call on a model delegate (`prisma.user.update(...)`) or a raw-query method (`prisma.$queryRaw`, `$executeRaw` and their `Unsafe` variants) of the audited client, or of a client derived from it by `$extends`, returns a lazy operation of the library's own, which runs when it is awaited (`await`, `.then`, `Promise.all`):
-
-- A write whose audit is awaited (an audited model, an audit context set, kept by sampling, `write.awaited` that is or returns `true`) runs in an interactive transaction of the client it was called on, opened before the call enters the extension chain, also inside a callback of your interactive `$transaction`, which a call on the audited client rather than `tx` is not part of: every query extension sees the call once, and a fluent call returns the relation. Any other call runs as it would without the option.
-- The client decides sampling and `write.awaited` for the call once, before it runs, and the decision covers every query the call runs through the audit extension: a query an extension applied before the audit issues through `query` for the call (a companion row of the same model) is audited with the call's decision and does not call the functions again.
-- A batch `$transaction([...])` of the client's operations that holds such a write runs as one interactive transaction of that client (see "Batch transactions" under [Transaction Behavior and Recursion Safety](#transaction-behavior-and-recursion-safety)).
-
-Constraints:
-
-- The operations are not PrismaPromises. A batch accepts only operations of the client `$transaction` is called on that have not run, and rejects anything else before running any of them; Prisma's own `$transaction` of another client, such as the one passed to `createAuditClient`, rejects them.
-- An operation offers `then`, `catch`, `finally` and the fluent relation calls of its model, and `Object.prototype.toString` names it `PrismaAuditOperation`. A method a client extension adds to the promise Prisma returns is not available on it.
-- An interactive transaction holds a connection for its whole duration and is bound by the client's interactive transaction limits (`transactionOptions.maxWait` / `timeout`). A batch that runs as one runs its operations one after another.
-- Interactive transactions are required: a driver adapter without them, such as the one for Cloudflare's database, cannot use the option.
-- The audit's own reads and writes run in that transaction, as separate queries, through the extensions of the client.
-
-### Write Strategies
-
-The extension uses three different write strategies for audit logs, selected automatically based on configuration and transaction context.
-
-> The `createAuditClient` calls below show only the option under discussion. In your code, combine it with the full configuration shown in [Quick Start](#2-create-audited-client) (`Prisma`, `contextProvider`, `entities`, and so on).
-
-#### 1. Synchronous Strategy (`write.awaited: true`)
-
-Waits for audit log write to complete before returning from the operation. **This is the default strategy** and is optimized for correctness and atomicity.
-
-**Use cases:**
-- Default strategy for all applications
-- Critical operations requiring guaranteed audit logs
-- Compliance-sensitive actions
-- Operations where audit log failure should fail the transaction (inside one)
-- Scenarios where complete audit trails with change tracking are essential
-
-**Configuration:**
-```typescript
-createAuditClient(prisma, {
-  write: {
-    awaited: true, // Global setting (default)
-  },
-});
-```
-
-**Behavior:**
-- Inside a transaction (yours, or the one [`write.implicitTransaction`](#writeimplicittransaction) opens): written in it, before it commits. A failed audit log write fails the operation with its original error and rolls it back, so the operation and its audit logs are atomic — see "Error Handling (`errorObserver`)" below
-- Outside any transaction: written once the operation has committed, before it returns; a failure of the audit is reported and never fails the operation
-- Every audit record of the operation is written before it returns
-
-#### 2. Deferred Strategy (`write.awaited: false` inside transactions)
-
-When the write is not awaited (`write.awaited` that is or returns `false` for the model) and the operation runs inside an interactive `$transaction`, or in a batch `$transaction([...])` that runs as one, the audit log write is queued and runs after the transaction commits successfully. With the default `write.awaited: true`, an operation inside an interactive `$transaction`, or in a batch that runs as one, uses the synchronous strategy on the transaction client instead.
-
-**Use cases:**
-- Operations inside an interactive `$transaction` (or a batch `$transaction([...])` that runs as one) that should not wait for the audit write
-- Avoids "transaction already closed" errors
-
-**Behavior:**
-- Writes queued on the library-owned transaction scope (not on the app context)
-- Executed after successful transaction commit using the client passed to `createAuditClient`
-- Discarded if transaction rolls back
-
-**Example:**
-```typescript
-const prisma = createAuditClient(basePrisma, {
-  write: { awaited: false },
-  // ...
-});
-
-await prisma.$transaction(async (tx) => {
-  await tx.user.create({ data: { email: 'test@example.com' } });
-  // Audit log queued in the library-owned transaction scope
-  // Not written yet - transaction still open
-});
-// Transaction committed successfully
-// Audit logs written now using the client passed to createAuditClient
-```
-
-#### 3. Fire-and-Forget Strategy (`write.awaited: false` outside transactions)
-
-Writes audit logs asynchronously without blocking the main operation. **Opt into this strategy to prioritize performance over completeness.**
-
-**Use cases:**
-- High-throughput operations where performance is critical
-- Non-critical audit logging scenarios
-- Applications that can tolerate occasional audit log loss
-- Situations where audit logs are not compliance-critical
-
-**Behavior:**
-- Returns immediately without waiting for write to complete
-- Writes execute in background
-- The caller's operation has already returned by the time a write failure is known, so the failure never fails it: it is reported to `errorObserver`, or to the console without one. See "Error Handling (`errorObserver`)" below.
-
-**Example:**
-```typescript
-createAuditClient(prisma, {
-  write: {
-    awaited: false, // Opt into performance optimization
-  },
-  errorObserver: (context) => {
-    console.error(`Audit log error in ${context.phase}:`, context.error);
-    // Send to monitoring service
-  },
-});
-```
-
-**⚠️ Trade-offs:**
-- ✅ Improved performance for high-throughput scenarios
-- ⚠️ Audit logs may be lost if process crashes before writes complete
-- ⚠️ No atomicity guarantee between operation and audit log
-
-#### Per-model Conditional Writing
-
-Pass `write.awaited` a function of the model name to choose the strategy per model. It is called once per operation sampling keeps, with its top-level model, and the decision covers the operation's nested writes too.
-
-**Configuration:**
-```typescript
-const highThroughputModels = new Set(['Session']);
-
-createAuditClient(prisma, {
-  write: {
-    // Fire-and-forget for high-throughput models, sync (the default) for the others
-    awaited: (modelName) => !highThroughputModels.has(modelName),
+const config = {
+  // Once per operation
+  actorContext: {
+    enricher: async (actor, prisma) =>
+      actor.type === 'User'
+        ? prisma.user.findUnique({ where: { id: actor.id }, select: { email: true, role: true } })
+        : null,
+    onError: 'log',
   },
   entities: defineEntities<AuditModelName, PrismaClient>()({
-    Payment: defineEntity({ type: 'Payment' }), // synchronous strategy
-    Post: defineEntity({ type: 'Post' }), // synchronous strategy
-    Session: defineEntity({ type: 'Session' }), // fire-and-forget strategy
+    User: defineEntity({
+      type: 'User',
+      // Root side: every log projected onto a User; receives the unique aggregate ids
+      aggregateContext: {
+        enricher: async (userIds, prisma) => {
+          const users = await prisma.user.findMany({ where: { id: { in: userIds } } });
+          const byId = new Map(users.map((u) => [u.id, u]));
+          return userIds.map((id) => ({ userName: byId.get(id)?.name ?? null }));
+        },
+      },
+    }),
+    Post: defineEntity({
+      type: 'Post',
+      // Receives the written rows; returns one context per row, in order
+      entityContext: { enricher: async (posts) => posts.map((p) => ({ title: p.title })) },
+      aggregates: [
+        // Projection side: receives the written rows; meta.aggregateIds[i] is row i's aggregate id
+        to('User', foreignKey('authorId'), {
+          aggregateContext: { enricher: async (posts, prisma, meta) => posts.map((p) => ({ postTitle: p.title })) },
+        }),
+      ],
+    }),
   }),
-});
+};
 ```
 
-#### Internal Architecture
+The stored `aggregateContext` is the shallow merge of the root-side and projection-side results; projection keys win. For a parent a row left, the projection enricher receives the row as it was before the write.
 
-Before the operation runs, core's `policy` decides from `write.awaited` whether the model's audit rows are written atomically with it: `write.awaited(modelName)` when it is a function, otherwise its value. The extension opens no transaction itself: with `write.implicitTransaction`, the client proxy (`src/runtime/transaction-proxy.ts`, `src/runtime/operation-recipe.ts`) opens an interactive transaction before an atomic write enters the extension chain, and runs a batch `$transaction([...])` of the client's operations that holds such a write as one, which is then the transaction of each of its operations. Once the operation has run, core's `dispatch` builds the records and writes them by a `WritePlan`, with the operation's execution scope as its transaction runtime (`transactionRuntimeOf` in `src/pipeline/execution-scope.ts`):
+## Write modes
 
-| `WritePlan` kind | Selected when                                                  | Strategy        | Write                                                                                                        |
-| ---------------- | -------------------------------------------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------ |
-| `immediate`      | atomic (`write.awaited` is or returns `true`), inside a transaction | Synchronous     | On the transaction's client, awaited before the operation returns; rolls back with it, and a failure fails the operation |
-| `awaited-after-commit` | atomic, outside any transaction                       | Synchronous     | On the client passed to `createAuditClient` once the operation has committed, awaited before it returns; a failure never fails the operation |
-| `after-commit`   | not atomic, inside a transaction                               | Deferred        | Queued on the transaction; run on the client passed to `createAuditClient` after it commits, dropped on rollback |
-| `detached`       | not atomic, outside any transaction                            | Fire-and-Forget | Started on the client passed to `createAuditClient`; the operation returns without waiting                    |
+An operation takes the strongest mode (`atomic`, then `awaited`, then `deferred`) of the audited models it writes rows of, nested writes included: a nested write of an atomic model makes an operation on a deferred model atomic. The audited client decides the mode before the call runs, to know whether to open a transaction, and the extension decides it again from the arguments that reach it.
 
-**Source Files:**
-- `policy/index.ts`, `dispatch/index.ts`, `domain/mutation-event.ts` (`WritePlan`), `domain/write.ts` (`TransactionRuntime`) in `@kuruwic/db-audit-core`
-- [pipeline/run-audited-operation.ts](./src/pipeline/run-audited-operation.ts) - Runs the operation in its scope and hands core's `dispatch` the build of its records
-- [pipeline/execution-scope.ts](./src/pipeline/execution-scope.ts) - The transaction runtime `dispatch` writes with: the base client, the transaction's client and its after-commit queue
-- [runtime/pending-writes.ts](./src/runtime/pending-writes.ts) - Tracks the writes no caller awaits
+| Mode | Inside a transaction | Outside any transaction | A failure that drops an audit log |
+| --- | --- | --- | --- |
+| `atomic` (default) | In it, before it commits | In an interactive transaction the client opens around the operation | Fails the operation (`AuditIncompleteError`, or the writer's error for a failed audit-log write); its transaction rolls back |
+| `awaited` | In it, before it commits | After the operation commits, before it returns | Reported only |
+| `deferred` | In it, before it commits | Detached; the operation returns without waiting | Reported only |
 
-### Custom Writer (`write.writer`)
+"A transaction" is your interactive `$transaction` (for operations on the client its callback receives), a batch `$transaction([...])` holding a write, or the transaction the client opens for an atomic write. Inside one, a failed audit-log write or a failed build of the records fails the operation and rolls the transaction back under every mode.
 
-**Type:** `(records: AuditRecord[], context: WriteContext<TClient>) => Promise<void>`, where `WriteContext<TClient>` is `{ auditContext: AuditContext; handle: TClient; inTransaction: boolean; defaultWrite: (records: AuditRecord[]) => Promise<void> }`; both types are exported by the package
-**Default:** Uses `defaultWrite`
+### `atomic`
 
-Customize how audit logs are written. `handle` is the client the write runs on, `inTransaction` says whether that client belongs to a transaction the write is part of, and `defaultWrite` is the default persistence on that client.
+The operation commits only together with every audit log it should produce, meaning every record was passed to a writer that resolved.
 
-**Contract:** with `write.awaited: true` (the default), inside a transaction (the caller's `$transaction`, or the one the client opens with `write.implicitTransaction`) `handle` is the client of that transaction and the writer runs before commit, so a later rollback undoes rows the writer wrote through `handle` or `defaultWrite`; outside any transaction `handle` is the base client passed to `createAuditClient` and the writer runs, awaited, once the operation has committed. With `write.awaited: false`, `handle` is the base client passed to `createAuditClient`: the write starts after the operation, and inside an interactive `$transaction`, or a batch that runs as one, only once `$transaction` has resolved; a transaction that throws discards the queued write, so the writer never runs for it. `inTransaction` is `true` for an awaited write inside a transaction and `false` for a write after commit, awaited or queued, or a detached one, so a writer that needs several statements to be atomic wraps them in `handle.$transaction(...)` exactly when it is `false`; `createEntityNormalizedWriter` and `createSharedChangeWriter` do this. For an awaited write inside a transaction, `handle` is typed as the client although it is a transaction's client. Either way, side effects the writer performs outside the database transaction — an HTTP call, a queue publish — are never rolled back, because they have already happened by the time a rollback occurs. Use `write.awaited: false` (for every model, or as a function for some) to defer that kind of delivery until after commit instead.
+- Outside any transaction, the call opens an interactive transaction of the client it was called on, before it enters the extension chain, at the client's default isolation level. This also applies to a call on the audited client (not `tx`) inside your `$transaction` callback, which is not part of your transaction.
+- `AuditIncompleteError` (`modelName`, `operation`, `failures`, also its `cause`, and `unrecordedWrites`) fails the operation when a failure drops an entry of an audited model: `row-identification`, `id-resolver-call`, or a `pre-fetch` failure that leaves an `upsert` or `connectOrCreate` entry, or a row a nested link write unlinks without naming it, unrecorded. An entry recorded with `beforeUnavailable: true` is not dropped.
+- `AuditAtomicityError` rejects an atomic operation that reaches the audit outside any transaction the client owns. This happens when an extension applied before the audit adds a nested write of an atomic model to a call that is not atomic itself; run such a call inside your `$transaction`.
+- Cost: every audited write outside your transaction runs in a transaction of its own, with its `BEGIN` and `COMMIT` round trips, a connection held from the audit's first read to the commit, and the `transactionOptions` (`maxWait`, `timeout`) of the client passed to `createAuditClient`. A driver adapter without interactive transactions, such as Cloudflare D1's, cannot open it: use `awaited` or `deferred` there.
+- Under concurrent writes, some operations that commit with a missing audit log under `awaited` fail under `atomic` and can be retried: an `updateMany` or `deleteMany` whose `where` another writer changed between the audit's read and the write at READ COMMITTED, a `createMany` with `skipDuplicates` whose count check does not match, and a nested to-many create below a parent another writer inserted a child under.
+- Atomic mode does not make the record accurate: a write another transaction commits between the before-state read and the operation can still make the recorded before state or upsert action wrong at READ COMMITTED and InnoDB's REPEATABLE READ. For a stronger level, run the operation in `$transaction(fn, { isolationLevel })` and retry conflicts yourself; see [Accuracy of Prisma operations under concurrent writes](../../docs/guarantees.md#accuracy-of-prisma-operations-under-concurrent-writes).
+
+### `awaited`
+
+For models whose writes must not fail because of their audit logs, and writes outside a transaction that should not pay for one of their own. Outside a transaction the audit logs are written after the operation commits, before it returns; their failure is reported in an `incomplete` outcome and never fails the operation, since the write has committed and a retry would write it twice.
+
+### `deferred`
+
+For high-throughput writes that can tolerate losing audit logs. Outside a transaction the write of the audit logs starts in the background and the operation returns without waiting. Logs not yet written are lost if the process exits; `await flushAllPendingWrites()` waits for them (in tests and on shutdown), and `getPendingWriteCount()` returns how many are running. A failure is reported once the write has run.
+
+## Transactions
+
+### Which transaction an operation belongs to
+
+Every call on the audited client, on a client derived from it by `$extends`, or on the client a `$transaction` callback receives (`tx`), is bound to the client it was issued on. The audit takes the operation's transaction from that binding.
+
+- A call on `tx` inside `prisma.$transaction(async (tx) => ...)` is part of that transaction, whether the audit context was set before `$transaction` or inside the callback.
+- A call on the audited client itself inside the callback (`prisma.user.update(...)`) is not part of your transaction, as on a client without the extension: it commits on its own, with its audit written as for a write outside any transaction. Write through `tx`.
+- `Prisma.getExtensionContext(this).$parent` in a method an extension adds is bound the same way: to the audited client outside a transaction, and to the transaction on `tx`.
+- `$extends` with an extension function (`Prisma.defineExtension((client) => ...)`) calls the function with the audited client.
+- A `$transaction` started on a client the audit does not wrap (such as the base client) is invisible to it: an atomic operation inside its callback opens a transaction of its own, an awaited audit is written outside your transaction, and a deferred one detached. Start transactions on the audited client.
+
+### Audit failures inside a transaction
+
+An audit failure that fails an operation after its write ran (a failed audit write, a failed build of the records, under `atomic` a dropped audit log) also fails the transaction. When the callback catches the error and resolves anyway, `$transaction` rejects with `AuditRollbackError`, whose `cause` is the audit error, and the transaction rolls back. A failure of the operation's own write (a unique constraint, say) is yours to catch.
+
+PostgreSQL aborts a transaction on any failed statement and answers its commit with a rollback. So once any operation of the transaction has failed (audited or not, a raw query, or one of the audit's reads) and the callback has resolved, the client runs `SELECT 1` in the transaction before committing. On an aborted transaction, `$transaction` rejects with PostgreSQL's error (`current transaction is aborted, commands ignored until end of transaction block`), its operations are reported `not-committed`, and its audit logs roll back. To continue after a failure you catch, roll back to a savepoint (`SAVEPOINT` and `ROLLBACK TO SAVEPOINT` through `$executeRaw`). A transaction where nothing failed runs no extra query.
+
+### Audit rows follow the transaction
+
+Whatever undoes a write inside a transaction undoes its audit logs: a rollback, a nested transaction rolling back to its savepoint, PostgreSQL aborting the transaction, or a raw `ROLLBACK TO SAVEPOINT`.
+
+- The outcome of a write undone by a raw `ROLLBACK TO SAVEPOINT` stays `complete`: the audit does not see it.
+- Do not issue transaction-control SQL through raw queries (`SAVEPOINT`, `RELEASE`, `ROLLBACK TO`, `COMMIT`, `ROLLBACK`) while an audited operation of the same transaction is running. An audited operation resolves once its audit logs are written, so awaiting it is enough.
+- Once your callback has resolved or thrown, the transaction waits for the audited operations it started without awaiting before it commits or rolls back. The wait counts against its `timeout`.
+
+### Nested transactions
+
+A `$transaction` opened on `tx` (Prisma 7.5 and later) runs as a savepoint in your transaction. Its callback receives a client bound to it, and a batch `tx.$transaction([...])` runs as one. Only one can be open at a time on a transaction client (Prisma rejects a second: "Concurrent nested transactions are not supported").
+
+- A write made while it is open, through its client or through `tx`, commits with your transaction. When the nested transaction rolls back to its savepoint, the write is reported `not-committed` and leaves no audit row.
+- It opens once the audited operations of the enclosing transaction still running have settled, except the one it is opened from. An audited operation started on `tx` while it opens runs inside it; one started while it is being released or rolled back runs after it, in your transaction.
+
+### Batch transactions
+
+A batch `$transaction([...])` takes only operations created from the client it is called on that have not run; anything else (an operation of the base client or of another derived client, or one already awaited) is rejected before any of them runs.
+
+A batch holding a write (`create`, `createMany`, `createManyAndReturn`, `update`, `updateMany`, `updateManyAndReturn`, `upsert`, `delete`, `deleteMany`, of any model) runs as one interactive transaction at the batch's `isolationLevel`, its operations one after another in list order, so each operation's audit reads see what earlier ones wrote. Every operation's audit is written in that transaction, and any failure rolls back the whole batch with its audit rows. The results are those Prisma's own batch returns. It holds a connection for its duration and is bound by the client's `transactionOptions`; a driver adapter without interactive transactions cannot run it. A batch of reads and raw queries only runs as Prisma's own batch.
+
+An audited write that reaches the audit from inside a batch Prisma runs itself, where no audit query can join it, is rejected with `AuditUnboundWriteError` before it runs.
+
+### Lazy operations
+
+A model-delegate call (`prisma.user.update(...)`) or raw-query method (`$queryRaw`, `$executeRaw` and their `Unsafe` variants) of the audited client, a derived client or `tx` returns a lazy operation of the library, which runs when awaited (`await`, `.then`, `Promise.all`). It offers `then`, `catch`, `finally` and the fluent relation calls of its model (`prisma.user.update(...).posts()`), and `Object.prototype.toString` names it `PrismaAuditOperation`. It is not a PrismaPromise: Prisma's own `$transaction` of another client rejects it, and a method a client extension adds to Prisma's promise is not available on it.
+
+### Other query extensions
+
+The extension continues an operation through Prisma's `query`, so a query extension applied before it (on the client passed to `createAuditClient`) and one applied after it (`createAuditClient(...).$extends(...)`) each see the caller's operation once, in every execution scope. An `updateMany` or `deleteMany` with a `limit` reaches the later extensions narrowed and without its `limit`, once per round (see [`updateMany` and `deleteMany`](#updatemany-and-deletemany)). The audit's own queries (the reads before and after the write, the audit-log insert) run on the operation's client and pass through its extensions too. A query an extension issues of its own through an audited client is audited as a call of its own, unless it issues it while handling one of the audit's queries. `packages/integration-tests/test/extension-chain.integration.spec.ts` checks these counts.
+
+The audit's own queries, writes to the audit-log model, and writes made through the audited client by the writer, the observer, resolvers or enrichers are never audited.
+
+## Audit outcomes
+
+`observer` is called once for every operation that writes rows of a model in `entities`, nested writes included, once the operation has settled:
 
 ```typescript
 {
-  write: {
-    writer: async (records, { defaultWrite }) => {
-      // Write to database
-      await defaultWrite(records);
+  model: 'User',              // the model the operation was issued on
+  operation: 'update',
+  status: 'complete',         // 'complete' | 'incomplete' | 'not-committed' | 'unaudited'
+  // unauditedReason: 'no-context', only with status 'unaudited'
+  records: 1,                 // audit logs passed to a writer that resolved
+  failures: [],               // AuditFailure[], typed by phase
+  unrecordedWrites: [],       // { modelName, operation, path }: writes left without an audit log
+}
+```
 
-      // This call is not part of the database transaction, so it is not undone if the
-      // transaction later rolls back. For delivery that only happens after commit, use
-      // `write.awaited: false` instead.
-      await fetch('https://audit-service.example.com/logs', {
-        method: 'POST',
-        body: JSON.stringify(records),
-      });
-    },
+| `status` | Meaning |
+| --- | --- |
+| `complete` | Committed, and every audit log was passed to a writer that resolved. A committed atomic operation is always `complete`. A `pre-fetch` failure that only left an entry with `beforeUnavailable: true` may be listed |
+| `incomplete` | Committed without some of its audit logs (`awaited`, `deferred`). After a failed audit write outside a transaction, how many logs the writer persisted is unknown |
+| `not-committed` | The operation failed (including with an audit error), or its transaction rolled back or failed to commit |
+| `unaudited` | Committed without an audit context (`unauditedReason: 'no-context'`) |
+
+Failure phases: `pre-fetch` (`modelName`, `operation`, `error`), `row-identification` (`modelName`, `operation`, `unidentified` row count, `error`), `id-resolver-call` (`modelName`, `operation`, `identity`, `resolver`, `error`), `diff-generation` (`error`) and `log-write` (`records`, `error`). A failure's `modelName` and `operation` name the rows it concerns, which for a nested write can differ from the operation's.
+
+Timing: outside any transaction, before the operation returns or throws, or under `deferred` once the detached write has run. Inside a transaction, once it commits, before `$transaction` returns, or as `not-committed` once it rolls back; an operation in a transaction that rolls back is never reported `complete`.
+
+The observer runs inside a try/catch: a handler that throws is logged and ignored, and it never affects the operation. Without an observer, the failures of an `incomplete` outcome are logged to the console; no other outcome is.
+
+```typescript
+observer: (outcome) => {
+  metrics.increment(`audit.${outcome.status}`, { model: outcome.model });
+  for (const failure of outcome.status === 'incomplete' ? outcome.failures : []) {
+    Sentry.captureException(failure.error, { extra: { ...outcome, phase: failure.phase } });
+    if (failure.phase === 'log-write') deadLetter.push(failure.records);
   }
-}
+},
 ```
 
-**⚠️ Important:** Write through `defaultWrite` or `handle`. Never use the extended client inside the writer hook: its writes go through the audit extension again.
+### What a failure does to the operation
 
-### Error Handling (`errorObserver`)
+| Failure | Inside a transaction | Outside any transaction (`awaited`, `deferred`) |
+| --- | --- | --- |
+| `log-write` | Fails the operation with the write's error and rolls the transaction back | Reported; the committed operation succeeds |
+| `diff-generation` before the write (reading the rows a batch filter matches, or the keys a relation holds before a nested create) | Fails the operation; the write is not attempted | Same |
+| `diff-generation` after the write (enrichment, redaction, a read after the write) | Fails the operation and rolls back | Reported; the operation gets no audit log |
+| `row-identification`, `id-resolver-call`, dropping `pre-fetch` | `atomic`: `AuditIncompleteError`. Otherwise reported | Reported |
+| `pre-fetch` of an update or delete | Recorded with `beforeUnavailable: true`; on PostgreSQL a database error aborts the transaction | Recorded with `beforeUnavailable: true` |
 
-**`errorObserver`** is notified of every audit-pipeline failure (`pre-fetch`, `log-write`, `diff-generation`, `row-identification`, `id-resolver-call`) with a structured context (`{ phase, modelName, operation, params, error }`). Read-only: it is always invoked inside a try/catch, so a handler that itself throws is logged to the console, with the message of the failure it was given, and otherwise ignored. It can never affect whether the caller's own database operation succeeds.
+A failed audit write inside a transaction always fails the operation, because the library cannot tell whether the transaction survives a failed statement (PostgreSQL aborts it; InnoDB rolls back on a deadlock). Without an observer, a failure after a committed write logs a console line naming the operation and model (`[db-audit-core] update on User committed without some of its audit records; diff-generation failure:` followed by the error message and stack, never record values).
 
-```typescript
-{
-  errorObserver: (context) => {
-    console.error(`Audit error in ${context.phase}:`, context.error);
-    Sentry.captureException(context.error, { extra: context });
-  },
-}
-```
+Other degradations, all reported: a row whose `idResolver` throws gets no log; a row whose `to()` resolver throws, or returns an id that cannot be normalized, gets no log under that aggregate; a `batchLookup` that returns a different number of ids than rows is reported as `id-resolver-call` for each row.
 
-Without an observer, the failures the caller cannot see are logged to the console: a failed audit-log write of an operation that has committed, and an entry dropped for a committed write (below). With an observer, only the observer receives them.
+### Before state that could not be read
 
-**A failed audit-log write (`log-write`).** What it does to your operation depends only on whether the operation has committed:
+When the before-state read of an `update` or `delete`, top-level or nested, fails, the operation still runs, its outcome lists a `pre-fetch` failure, and the entry is recorded with `before: null`, `changes: null` and `beforeUnavailable: true`. Such an update is recorded only under the aggregates its row names after the write.
 
-- Awaited inside a transaction (`write.awaited: true`, the default, inside your `$transaction` or the one `write.implicitTransaction` opens): the operation fails with the write's original error, and the transaction rolls back. The operation and its audit logs commit together or not at all. The library cannot let the operation continue: it cannot tell whether a transaction survives a failed statement (PostgreSQL aborts the transaction on any failed statement, and InnoDB rolls a whole transaction back on a deadlock), so a caller told that its write succeeded could lose it silently at commit. No console line is written; the thrown error is the report. Use `write.awaited: false` for a model whose writes should succeed when their audit write fails.
-- Awaited outside any transaction, queued until a transaction commits, or detached (`write.awaited: false`): the operation's write has committed, and the caller has its result or is about to. The failure never fails the operation; reporting a committed write as failed would invite a retry that writes it twice.
+- An `upsert` or nested `connectOrCreate` whose read failed is not recorded, nor are the writes nested in its branches: the read decides whether it created. Under `atomic` this fails the operation.
+- A failed read of a nested row leaves only that row unknown. When the row cannot be identified by its row key, the entries below it are treated as failed reads too, and a nested create, `updateMany` or `deleteMany` below it fails the operation under `diff-generation`.
+- A nested `updateMany` or `deleteMany` always reads the rows its filter matches, whatever `fetchBefore` says; when that read fails, the operation fails before the write.
+- When the read of the rows a nested `connect`, `set` or `disconnect` may re-link fails, a row the write names is recorded with `beforeUnavailable: true`; a row it unlinks without naming (by a `set`, or a to-one write replacing the parent's row) is not recorded, and under `atomic` the operation fails.
+- On PostgreSQL, a read that fails in the database inside a transaction aborts the transaction, so the write fails and rolls back too.
 
-**What each phase does to your operation.** `pre-fetch`, `row-identification` and `id-resolver-call` failures never fail the caller's operation (except a `pre-fetch` read that aborts a PostgreSQL transaction, see "Before state that could not be read") — they degrade gracefully instead (e.g. an update or delete whose before-state fetch failed is recorded with `beforeUnavailable: true`, and an upsert whose before-state fetch failed skips its log entry rather than mislabeling it `create`; a record a nested `connect`, `set` or `disconnect` names whose read of the records it may re-link failed is recorded with `beforeUnavailable: true` too; a nested delete whose row key cannot be determined from the fetched row, its WHERE or the operation data gets no log entry and is reported as `row-identification`, and so are the rows a nested write wrote whose key after the write the audit cannot follow or tell apart (see "Nested Operations"), the rows an `updateMany` or `deleteMany` with a `limit` cannot tell apart from rows another writer changed, the rows of one that runs in a batch `$transaction([...])` Prisma runs itself (see "Batch Operations"), the rows of an `updateMany` or `updateManyAndReturn` whose `data` changes the key in a way the audit cannot follow, the rows of an `updateMany` that another writer deletes or gives another key before the read after the write, the rows an `updateManyAndReturn` returned that pair with no row read before by their key (recorded with an unavailable before state; see "Batch Operations"), and the rows a `createMany` created that its read back by key does not find (see "Batch Creates"); a row whose `idResolver` throws gets no log entry, and a row whose `to()` resolver throws (a `foreignKey(field)` resolver does for a row that lacks the field) gets no entry under that aggregate, each reported once per row as `id-resolver-call` with the row's `identity` and the failed resolver in `params` — likewise for a resolver that returns an id that cannot be normalized to a string, or a `batchLookup` resolver that returns a different number of ids than rows). A `diff-generation` failure can fail the caller's operation. A failure before the caller's write — reading the row keys a to-many relation holds before a nested create under an existing row, or, for batch operations and nested `updateMany` / `deleteMany`, fetching the rows the filter matches — always propagates to the caller as a thrown error, and the write is not attempted. A failure after the caller's write — enrichment, redaction, reading again a row a nested write updated or inserted that the caller's own `include` / `select` left out of the result, reading again the records a nested `connect`, `set` or `disconnect` re-linked, or, for `updateMany`, reading again the rows it updated — propagates as well when the operation runs inside a transaction: your interactive `$transaction`, or the one the client opens with `write.implicitTransaction` (around the operation, or around a batch `$transaction([...])`, where every operation of the batch rolls back with the one whose audit failed, together with the audit logs already written), so the write rolls back with it. Outside any transaction, awaited or not (including a sequential `$transaction([...])` that Prisma runs itself, whose operations return once the database has run the whole batch), the write has already committed by then: the operation succeeds with its result, the observer hears `diff-generation` once, and that operation gets no audit log entry. Reporting the committed write as failed would invite a retry that writes it twice. The dropped entry is reported like a failed detached write: the observer hears `diff-generation`, with the operation's `modelName`, `operation` and `params`. Without an observer, a console line names the model and the operation (`Error in build of the audit records of User.update; the committed write's records are dropped:` followed by the error's message and stack, never the record values).
+Every record carries `beforeUnavailable`. The default write stores it when the audit-log model has a `beforeUnavailable Boolean` column, the normalized writers when `beforeUnavailableField` names one; a custom writer can store it however it likes.
 
-#### Before state that could not be read
+## Errors
 
-An `update` or `delete`, top-level or nested, reads its target row before the write when its `fetchBefore` setting is on. When that read fails, the caller's operation still runs, the observer hears about it under `pre-fetch`, and the entry is recorded with `before: null`, `changes: null` and `beforeUnavailable: true`, so it cannot be mistaken for an entry whose before state was never requested (`beforeUnavailable: false`). Such an update is recorded under the aggregates its row names after the write only: a parent the row was moved away from cannot be told. On PostgreSQL, a read that fails in the database inside a transaction (yours, or the one `write.implicitTransaction` opens) aborts that transaction: the caller's write fails as well and rolls back. An `upsert`, top-level or nested, whose read failed is not recorded, and neither are the nested writes of its branches: the before state is what tells whether it created or updated its row. A nested `connectOrCreate` whose read failed is not recorded either, since it cannot tell a connect from a create. A failed read of a nested row leaves unknown only that row: another nested operation keeps what its own read found, and the rows nested below the row are still read under the row key its WHERE names. When the row cannot be identified that way (a to-one relation's row, or one named by another unique field), the entries nested below it are treated as if their own read had failed, and a nested create or `updateMany` / `deleteMany` below it fails the operation under `diff-generation`, since the rows it writes cannot be told apart from the rows that were already there. A nested `updateMany` / `deleteMany` reads the rows its filter matches before the write whatever `fetchBefore` says, because that read is what identifies the rows it writes: when it fails, the operation fails under `diff-generation` before the write is attempted, like a top-level `updateMany` / `deleteMany`. For the same reason, a nested to-one `update` whose `fetchBefore` setting is off still has the key columns of its row read under its parent row when a write nested below it is identified through that row (a nested create into a to-many relation, an `upsert`, `updateMany` or `deleteMany`, an `update` / `delete` whose own `fetchBefore` setting is on, or a write that unlinks the records linked to it, such as a `set`): one read per parent row, of the row key and the columns its relations link by. The same goes for the row each element of a to-many `update` whose `fetchBefore` setting is off names, when its `where` names the row by a unique field other than the row key or a to-one relation below it links by another column of that row: one read per element. Its own entry still carries no before state; when the read fails, it is recorded with `beforeUnavailable: true` and the writes below it are treated as above. When the read of the records a nested `connect`, `set` or `disconnect` may re-link fails, a record the write names is still recorded, with `beforeUnavailable: true` and its new foreign key in `after` (a `disconnect` only when it left the record unlinked); a record unlinked without being named (by a `set`, or a to-one write replacing the parent's record) cannot be identified and is not recorded.
+| Error | Thrown when |
+| --- | --- |
+| `AuditContextMissingError` | A write without an audit context that `requireContext` requires (`modelName`, `operationModelName`, `operation`) |
+| `AuditIncompleteError` | An atomic operation lost audit logs (`modelName`, `operation`, `failures`, `unrecordedWrites`) |
+| `AuditAtomicityError` | An atomic operation reached the audit outside any transaction the client owns (`modelName`, `operation`) |
+| `AuditRollbackError` | A `$transaction` callback resolved after an audit failure failed one of its operations (`cause`) |
+| `AuditUnboundWriteError` | An audited write reached the audit without the binding of its client, as inside Prisma's own batch (`modelName`, `operation`) |
+| `IdValidationError` | A branded id constructor received an invalid id |
 
-Every record carries `beforeUnavailable`. The default write stores it when the audit-log model declares a `beforeUnavailable Boolean` column and leaves it out otherwise, so no column is required; a `write.writer` sees it on each record and can store it however it likes. The normalized writers (`createEntityNormalizedWriter`, `createSharedChangeWriter`) store it the same way, in the field their schema config names as `beforeUnavailableField`, and leave it out when the config names none.
+## Operations
 
-### Concurrency
+### Row key
 
-The audit reads the before state of a write, and the rows a batch operation touches, ahead of the write with separate statements, and takes no lock. What a write another transaction commits in between does to the records, at each isolation level, and what you can add against it, is described in [Accuracy of Prisma operations under concurrent writes](../../docs/guarantees.md#accuracy-of-prisma-operations-under-concurrent-writes).
+Batch and nested operations read and pair rows by the model's primary key (`@id`, or each field of `@@id`); a model without one is keyed by its first `@unique` field, else `@@unique`, whose fields must all be required. `createMany`, `updateMany`, `updateManyAndReturn`, and `updateMany` / `deleteMany` with a `limit` throw before the write for a model with neither. The row key is also the `identity` of an `id-resolver-call` failure: the value of a single key field, or the JSON array of a composite key's values.
 
-### Batch Operations (updateMany / deleteMany)
+The audit reads the row key whatever a client-level `omit` hides, and records it. When a client-level `omit` hides the key, a row a write returns without a `select` takes it from the row read before the write; without that read (a `create`, an `upsert` that created, an update or delete whose before read is off or failed, `createManyAndReturn`), the row gets no log and is not reported. Rows `updateManyAndReturn` returns without a `select` get no log either, and their number is reported as `row-identification`.
 
-**Row key.** Batch and nested operations read and pair rows by the model's primary key (the `@id` field, or each field of an `@@id`); a model without one is keyed by its first `@unique` field, else `@@unique`, whose fields are all required, since a nullable unique column can hold null in any number of rows. `createMany`, `updateMany`, `updateManyAndReturn` and an `updateMany` or `deleteMany` with a `limit` throw before the write for a model with neither, naming the model; a `limit` the extension passes to Prisma unchanged (see below) needs no key. Nested writes identify their rows by the same row key: where the descriptions of nested operations say primary key, a model without one is keyed by this unique constraint. The row key is also the `identity` a failure report names a row by (`params.identity` of an `id-resolver-call`): the value of a single key field, or the JSON array of a composite key's values.
+A write whose `data` gives key fields literal values (`data: { code: 'd-9' }`, or `{ set: value }`) is followed to the new key, each value converted to the column's type, and the log records the change of key. A row whose column stores the value differently (rounded to the column's precision) is not found and is reported as `row-identification`. When `data` gives a key field an operator (`{ increment: 1 }`), the new key is unknown: an `updateMany` runs as given and its rows are reported as `row-identification`, and each row an `updateManyAndReturn` returns is recorded with an unavailable before state.
 
-A write whose `data` writes a key field can give each row a key other than the one it was read under, even the key another row had before the write. When the key fields it writes are given literal values (`data: { code: 'd-9' }` on a model keyed by `code`, or `{ set: value }`), the key each row has after the write is the key it had with those fields replaced, each value converted to the column's type (a `DateTime` given as a string is a `Date`, a `BigInt` given as a number a `bigint`, a `Decimal` given as a string a `Prisma.Decimal`): the extension reads the rows again by those keys and pairs each with the row it was, so the audit log records the change of key under the new key. A row whose column stores the value differently (rounded to the column's precision) is not found by the derived key and is reported as `row-identification`. When `data` gives a key field an operator (`data: { id: { increment: 1 } }`), the key after the write cannot be told from the arguments, so the extension runs the caller's operation as given, with its `limit`, and reads no row: an `updateMany` gets no audit log for its rows, and the number it wrote is reported as `row-identification` (`params` is `{ unidentified }`); each row an `updateManyAndReturn` returns is recorded as an update with an unavailable before state (`before: null`, `changes: null`, `beforeUnavailable: true`), and their number is reported the same way.
+### `updateMany` and `deleteMany`
 
-**`updateMany` and `deleteMany` with a `limit`.** A `limit` that is not a positive integer is passed to Prisma unchanged, which rejects it. Otherwise the extension first reads the rows the limit selects (the caller's `where`, with the limit as `take`), then continues the caller's own `updateMany` or `deleteMany` without the limit and with its `where` narrowed to their row keys (`{ AND: [where, { id: { in: [...] } }] }` for a single-field key `id`), so the rows it audits are the rows the operation wrote. Another writer may change some of the read rows before the narrowed write runs, which then writes fewer rows than it read. Inside an interactive transaction (yours, or the one `write.implicitTransaction` opens) the extension then reads further rows that match the caller's `where` and were not read yet and writes them the same way, three rounds at most, so the count is the one a plain operation with the same limit returns, `min(limit, matching rows)`, except under contention that lasts past the third round. Outside any transaction the operation is one narrowed statement and is not topped up, since a later round could fail after the first has committed: under contention its count may be lower than a plain operation's. When a round wrote fewer rows than it read, the extension tells the written rows apart when it builds the records: an update wrote the read rows that still match the caller's `where`, and a delete deleted the read rows that are gone when exactly as many are gone as it deleted; a written row the update made stop matching, or a deleted row next to one another writer deleted, cannot be told apart, so such rows are not audited and their number is reported as `row-identification`. That read follows the rule of every read after the write: outside any transaction its failure drops the operation's records and is reported (to `errorObserver`, or to the console without one) without failing the operation. A deleted row is audited with the state read before the delete. Inside a batch `$transaction([...])` that Prisma runs itself, the extension continues the caller's operation unchanged, with its `limit` (see [Exceptions](../../docs/guarantees.md#exceptions)). Query extensions applied after the audit extension see the narrowed operation without the `limit`, once per round.
+The audit reads every row the `where` matches before the write, so the cost grows with the matching rows.
 
-### Batch Creates (createMany / createManyAndReturn)
+With a positive integer `limit`, the extension reads the rows the limit selects (`where`, with `take: limit`), then runs your operation without the `limit` and with `where` narrowed to their keys (`{ AND: [where, { id: { in: [...] } }] }`). A `limit` that is not a positive integer is passed to Prisma unchanged. On a composite key the narrowed `where` holds one `OR` branch per row.
 
-`createManyAndReturn` delegates ID generation entirely to Prisma: audit logs are built from the rows Prisma actually created, read with every column of the client's default shape whatever the query's `select` or `omit`, and the fields the entity lists in `recordOmittedFields` read by row key after the write. Any `@default` works — including database-generated ones like `autoincrement()` — and under `skipDuplicates` only the rows Prisma inserted are logged (skipped rows produce no logs).
+- Another writer may change some read rows before the narrowed write. Inside a transaction the extension then reads and writes further matching rows, up to three rounds, so the count equals a plain operation's `min(limit, matching rows)` unless contention outlasts the third round. Outside a transaction the operation is one narrowed statement, and its count may be lower under contention.
+- When a round wrote fewer rows than it read, an update is taken to have written the read rows that still match `where`, and a delete the read rows that are gone when exactly as many are gone as it deleted. Rows that cannot be told apart this way are not audited and are reported as `row-identification`.
+- A deleted row is recorded with the state read before the delete.
 
-`createMany` only returns `{ count }`, so the extension pre-generates client-side every key field that a row of `data` leaves out, and injects it into `data`, matching the format the schema declares. The key is the [row key](#batch-operations-updatemany--deletemany), and `createMany` throws for a model without one:
+### `createMany` and `createManyAndReturn`
 
-| Schema default | Injected format |
+`createManyAndReturn` records the rows Prisma created, in the client's default shape whatever the query's `select` or `omit`; any `@default`, `autoincrement()` included, works, and under `skipDuplicates` only inserted rows are recorded.
+
+`createMany` returns only `{ count }`, so the extension generates every key field a row of `data` leaves out, in the format the schema declares, and reads the created rows back by those keys (one query per 1,000 rows):
+
+| Schema default | Generated |
 | --- | --- |
 | `cuid()` / `cuid(1)` | CUID v1 |
 | `cuid(2)` | CUID v2 |
 | `uuid()` / `uuid(4)` | UUID v4 |
 | `uuid(7)` | UUID v7 |
 
-After the write, the extension reads the created rows back by those keys (one query per 1,000 rows) and audits every row the read returns, in the client's default shape plus the fields the entity lists in `recordOmittedFields`: columns the database fills (`@default`, `@updatedAt`) are recorded, and a column a client-level `omit` hides is not, even when `data` writes it, except the key fields, which the read always reads to tell the rows apart. The database compares the keys, so a row whose key it stores or returns otherwise than `data` gave it (another case under a case-insensitive collation, a `BigInt` given as a number, a `DateTime` the column truncates) is recorded with the key as read. The read is a separate statement after the write, like the read after an `updateMany` (see [Table A](../../docs/guarantees.md#table-a-by-operation)). When the read returns fewer rows than the count `createMany` returns (a row another writer or a later operation of that batch deleted, a read replica that lags behind the write), the rows it misses get no audit log, and their number is reported as `row-identification`.
+- A row of `data` that leaves out a key field with a database-generated default (`autoincrement()`, `dbgenerated()`) or no default makes `createMany` throw; use `createManyAndReturn` or `create`. A key field every row supplies needs no default.
+- The read back records the columns the database fills (`@default`, `@updatedAt`), and leaves out columns a client-level `omit` hides, except the key. A row whose key the database stores otherwise than `data` gave it (another case under a case-insensitive collation, a `DateTime` the column truncates) is recorded with the key as read. Rows the read back misses (deleted by another writer, a lagging read replica) get no log and are reported as `row-identification`.
+- With `skipDuplicates`, a skipped row gets no log. When rows of `data` give key fields themselves, the extension first reads the rows holding those keys, in the operation's transaction, and records none of the rows read back under them. The other rows are recorded when their number matches the returned count; otherwise only rows with generated keys are recorded and the rest are reported as `row-identification`. Generated keys are taken to be held by no row before the write.
 
-Database-generated defaults (`autoincrement()`, `dbgenerated()`) cannot be pre-generated, so `createMany` throws when a row of its `data` leaves out a key field that has such a default, or no default at all. A key field every row supplies needs no default. Use `createManyAndReturn` or individual `create` calls instead.
+### Nested writes
 
-With `skipDuplicates`, a row the database skipped gets no audit log, except a row skipped because a row with its key already exists, as the database compares keys: that row is read back and recorded as a create of the existing row. To avoid this, leave the key out of `data`, so the extension generates it, or use `createManyAndReturn`, which audits only the rows it created.
+| Keyword | Recorded |
+| --- | --- |
+| `create`, `createMany` | `create` per row, `before: null` |
+| `update`, `updateMany` | `update` per row, with `before` when `fetchBefore.update` is on |
+| `delete`, `deleteMany` | `delete` per row, with `before` when `fetchBefore.delete` is on |
+| `upsert` | `create` or `update`, decided by a read before the write |
+| `connectOrCreate` | A `create` when it creates; otherwise as `connect` |
+| `connect` | An `update` of each related row whose foreign key it changed (`authorId: u2 → u1`); a row already linked gets none. When the parent holds the foreign key (`post.author`), the parent's own `update` carries the change. A to-one `connect` on an optional foreign key also records the row it unlinks (`→ null`) |
+| `set` | An `update` of each row it links and each it unlinks (`→ null`); rows it keeps get none |
+| `disconnect` | An `update` of each unlinked row (`→ null`); a row linked to another parent gets none |
 
-### Context Enrichment
+- A join-table row (`PostTag`) a write creates is recorded when its model is in `entities`. A row whose link lives elsewhere (a `Tag` linked through `PostTag`) gets no log for the link.
+- A to-one `update`, `upsert` or `delete` next to a `connect` applies to the row the `connect` names, which Prisma links first; it is read by the `connect`'s `where` and gets one log carrying both changes.
+- Prisma sets `@updatedAt` on every connected row, so with the foreign key in `diffExcludeFields` such a row is still logged, with `updatedAt` as its only change.
+- With `fetchBefore.update` off for the related model, `connect`, `set` and `disconnect` are not audited.
 
-Add additional metadata to audit logs via database queries. Each key is named after the `AuditLog` column it fills: `actorContext`, `entityContext` and `aggregateContext`.
+**Extra reads.** The relations a nested write touches are added to the query's `include` (a `select` is read in the client's default shape with its relations), and the result is returned in the shape you requested. Further reads, on the operation's client:
 
-Every enricher config takes `enricher`, `onError` and `fallback`. `onError` decides what a failure (an error or a timeout) becomes: `'throw'` (the default) rethrows it, `'log'` warns and stores `fallback ?? null`, and `'ignore'` stores `fallback ?? null` silently. A function receives the error and returns one of those strategies, sync or async; when it throws or returns anything else, the failure is logged and handled as `'log'`.
+- The rows linked at a relation path where a `connect`, `set` or `disconnect` may re-link rows, once before and once after the write.
+- Rows a nested write wrote that your own `where`, `take`, `skip`, `cursor` or `distinct` on the relation leaves out of the result, once per relation path after the write (plus a key-only query of the relation to find inserted rows).
+- Under an existing row, a nested to-many `create`, `createMany`, or `upsert` / `connectOrCreate` that creates: when a row's data leaves out every key field and each has a `cuid()` or `uuid()` default, the extension generates them, as for `createMany`, so created rows are told apart from existing ones. For keys it does not generate (given by the caller, `autoincrement()`, holding the parent's foreign key) or a `createMany` with `skipDuplicates`, it reads the keys the relation already holds before the write, one query per parent row. Rows another writer inserts below the parent in between are counted against the operation's inserts; when there are more, only rows whose key is known to be the operation's are recorded and the rest are reported as `row-identification` (see [Nested to-many creates whose keys are not known before the write](../../docs/guarantees.md#nested-to-many-creates-whose-keys-are-not-known-before-the-write)). A failed read fails the operation before the write.
 
-#### `actorContext`
-**Type:** `ActorContextConfig` from `@kuruwic/db-audit-core`: `enricher(actor, prisma)`, `onError`, `fallback`
+### Nested write limitations
 
-Enrich actor information with database data. The enricher runs once per operation.
+- A nested `update`, `upsert` update branch or `updateMany` that changes key columns is followed to its new key only when the key fields get literal values. With an operator, a foreign key that is part of the key, or a nested `updateMany` with several elements of which one writes the key, the row is not audited and is reported as `row-identification`. With `fetchBefore.update` off or a failed read, a `where` naming the whole row key stands in for the read; one naming another unique field the update changes leaves the row unaudited.
+- A row key that holds the parent's foreign key takes the parent's referenced columns as they are after the write. A nested `updateMany` or `deleteMany` filter is read before the write as given, so one naming the parent's new value matches no row and records nothing.
+- Writes at one relation path whose keys after the write cannot be told apart (targets that end up with the same key, or a target naming the key another target's write gives a row) are reported as `row-identification`. At such a path, rows a nested create inserts without a generated key are not audited either.
+- Prisma runs the keywords of one relation field in the order the data lists them. A nested `updateMany` / `deleteMany` matches its filter against the rows as they were before the write, adjusted for the `connect`, `connectOrCreate`, `set`, `disconnect` and `delete` listed before it. So a row a `create` listed before it inserts, or whose filtered columns an earlier `update` changes, is not identified as one it writes, and a row an `updateMany` brings into a later `deleteMany`'s filter is updated and deleted with no record.
+- A row a nested `connectOrCreate` finds and a nested `delete` of the same write removes is recorded only under the parent it is deleted from, without its before state.
 
-```typescript
-{
-  actorContext: {
-    enricher: async (actor, prisma) => {
-      if (actor.category !== 'user' || actor.type !== 'User') {
-        return null;
-      }
+[Coverage of Prisma writes](../../docs/guarantees.md#coverage-of-prisma-writes) lists the writes the audit does not see, such as rows a referential action changes and implicit many-to-many join tables.
 
-      const user = await prisma.user.findUnique({
-        where: { id: actor.id },
-        select: { email: true, role: true, department: true },
-      });
+## Branded ids
 
-      return {
-        email: user?.email,
-        role: user?.role,
-        department: user?.department,
-      };
-    },
-    onError: 'log',
-  }
-}
-```
-
-**Result in audit log:**
-```json
-{
-  "actorCategory": "user",
-  "actorType": "User",
-  "actorId": "user-123",
-  "actorContext": {
-    "email": "user@example.com",
-    "role": "admin",
-    "department": "Engineering"
-  }
-}
-```
-
-#### Entity / aggregate context
-
-Entity and aggregate contexts are configured per entity in `entities`, using three orthogonal batch-first enrichers:
+`ActorId`, `EntityId` and `AggregateId` are branded strings. `createActorId`, `createEntityId` and `createAggregateId` validate and brand a string (an empty or whitespace-only one throws `IdValidationError`), and `unwrapId` returns the plain string. `createAuditLogData(input: AuditLogInput)` validates a whole audit-log row and returns a `Result<AuditLogData>`: `{ success: true, value }` or `{ success: false, errors }`.
 
 ```typescript
-const entities = defineEntities<AuditModelName, PrismaClient>()({
-  User: defineEntity({
-    type: 'User',
-    // Root-side: applied whenever ANY log projects onto a User aggregate.
-    // Receives the unique aggregate IDs involved in the operation.
-    aggregateContext: {
-      enricher: async (userIds, prisma) => {
-        const users = await prisma.user.findMany({
-          where: { id: { in: userIds } },
-          select: { id: true, name: true },
-        });
-        const byId = new Map(users.map((u) => [u.id, u]));
-        return userIds.map((id) => ({ userName: byId.get(id)?.name ?? null }));
-      },
-    },
-  }),
-  Post: defineEntity({
-    type: 'Post',
-    // Entity-log context: stored in AuditLog.entityContext.
-    entityContext: {
-      enricher: async (posts, prisma) =>
-        posts.map((post) => ({ title: post.title })),
-    },
-    aggregates: [
-      // Projection-side: context specific to "Post projected onto User".
-      // The enricher receives the WRITTEN rows (posts), and meta.aggregateIds[i]
-      // is the aggregate ID resolved for row i.
-      to('User', foreignKey('authorId'), {
-        aggregateContext: {
-          enricher: async (posts, prisma, meta) =>
-            posts.map((post) => ({ postTitle: post.title })),
-        },
-      }),
-    ],
-  }),
-});
-```
-
-The stored `aggregateContext` is the shallow merge of the root-side and projection-side results (projection keys win). The self aggregate log can be enriched via `selfAggregate: { aggregateContext: { ... } }`.
-
-**⚠️ Performance Note:** Enrichers execute database queries per operation (batched, N+1 free). Root-side enrichers run once per aggregate type with unique IDs.
-
-### Before-State Reads (`fetchBefore`)
-
-Control whether `update` and `delete` operations read the affected row's before state.
-
-#### `update` / `delete`
-**Type:** `boolean`
-**Default:** `true`
-
-Controls whether an `update` or `delete` operation, top-level or nested, fetches the affected row's before-state ahead of the operation. Pre-fetching is what lets an `update`'s audit log carry a `before` value and lets a nested `delete` resolve an identity it could not otherwise recover from the operation's own arguments. It is also what tells the aggregates a row leaves: an update that changes a foreign key a `to()` resolver reads is recorded under the aggregate the row left as well as the one it joined. With `update` off, or when the read fails, only the aggregate it joined gets an audit log. A nested to-one `update` or `upsert` given next to a `connect` (`author: { connect: { id }, update: { name } }`) writes the record the `connect` links, so its before state is read from that record, by the `connect`'s `where`; it gets one audit log carrying both the link change and the update. The same goes for a `connectOrCreate` next to it: the record its `where` names is read, and when there is none the write creates it and it is recorded as created. The `update` setting of a related model also decides whether a nested `connect`, `set` or `disconnect` that changes that model's foreign key is audited: the audit log exists to tell the old foreign key, so with `update` off those writes are not read and not audited. With `delete` off, a row a nested `delete` or `deleteMany` removes is known by its row key (the one a `delete` names, or the one the read of a `deleteMany`'s filter ahead of the write finds) and by the foreign key of the relation it was deleted through, taken from the parent row as it was before the write (`user.update({ data: { posts: { delete: { id } } } })` knows the post's `authorId`): its audit log carries no `before`, and a `to()` root that needs another column of the row is left out, without being reported. A `delete` that names no full row key, such as a to-one `delete: true`, leaves its row unknown: the row gets no audit log, and the observer hears `row-identification`. A top-level parent gives that foreign key from its `where`, from its before state, or from the operation's result when the operation leaves the referenced columns as they were; when none of those gives it, a `to()` root on it is left out the same way. Keys taken from a `where` are recorded as written, so where the database compares keys case-insensitively (MySQL's default collation, PostgreSQL `citext`), pass them in their stored case or keep `delete` on.
-
-With `update` off, a nested `update` still has the key columns of its row read when a write nested below it is identified through that row (a nested create into a to-many relation, an `upsert`, `updateMany` or `deleteMany`, an `update` / `delete` whose own setting is on, or a write that unlinks the records linked to the row): a to-one `update`'s row under its parent row, and the row each element of a to-many `update` names, when its `where` names the row by a unique field other than the row key or a to-one relation below it links by another column of that row. For example, `comments: { update: { where: { id }, data: { author: { upsert } } } }` reads the comment's `id` and `authorId`, one read per element, so the `upsert` takes its branch from the author the comment links to. A `where` that names the row key needs no read for a relation that links by it. The `update`'s own audit log still carries no before state. When the read fails, the observer hears about it under `pre-fetch`, the `update` is recorded with `beforeUnavailable: true`, and the writes nested below that row are treated as if their own read had failed.
-
-```typescript
-{
-  fetchBefore: {
-    update: false,  // Skip the before-state read of updates
-    delete: true,   // Read the before state of deletes (default)
-  }
-}
-```
-
-#### Per-entity `fetchBefore`
-**Type:** `{ update?: boolean; delete?: boolean }` (on `defineEntity`)
-
-An entity's own setting for the operations it names. For each operation of a written model, top-level or nested, the setting of its entity wins, then the top-level setting, then the default.
-
-```typescript
-{
-  fetchBefore: { update: false },  // Every entity
-  entities: defineEntities<AuditModelName, PrismaClient>()({
-    Post: defineEntity({ type: 'Post', fetchBefore: { update: true } }),       // Post updates still read the before state
-    PostTag: defineEntity({ type: 'PostTag', fetchBefore: { delete: false } }), // PostTag deletes skip it
-  }),
-}
-```
-
-### Nested Operations
-
-#### Nested Operation Support
-
-Supports the following operations, including deep nesting:
-
-**Write Operations:**
-- `create` - Creates audit log with `action=create`, `before=null`
-- `createMany` - Creates audit log for each created record
-- `update` - Creates audit log with `before` state (requires `fetchBefore.update`)
-- `updateMany` - Creates audit log for each updated record
-- `delete` - Creates audit log with `before` state, `after=null`
-- `deleteMany` - Creates audit log for each deleted record
-- `upsert` - Creates audit log as either `create` or `update`
-- `connect` - Links existing records
-  - When the related record holds the foreign key (e.g., `user.posts`, `post.labels`, `user.profile`): creates an `update` audit log for each connected record whose foreign key changed, with the foreign key's old and new value in `changes` (`authorId: u2 → u1`); a record already linked to the parent gets none
-  - On a to-one relation whose optional foreign key is on the related record, the record the parent held before is unlinked: it gets an `update` audit log too (foreign key `→ null`), and so does the record a to-one `create` or `connectOrCreate` replaces
-  - When the parent holds the foreign key (e.g., `post.author`): the parent's own `update` audit log carries the change
-  - A to-one `update`, `upsert` or `delete` next to a `connect` applies to the record the `connect` names, which Prisma links first: that record gets the `update` or `delete` audit log, with its state before the operation
-  - Creates audit logs for join table entities (e.g., PostTag) if defined in `entities`
-- `set` - Replaces the records linked through an optional foreign key: an `update` audit log for each record it moves in and for each record it unlinks (foreign key `→ null`); the records it keeps get none
-- `disconnect` - Unlinks records through an optional foreign key (the named records of a to-many relation, the parent's record of a to-one relation): an `update` audit log for each unlinked record (foreign key `→ null`); a record linked to another parent is left as it was and gets none
-- `connectOrCreate` - Connects to existing record or creates new one
-  - If record exists: Same as `connect`
-  - If record doesn't exist: Creates audit log for the new entity with `action=create`, `before=null`
-
-#### Deep Nesting
-
-Handles deeply nested operations:
-
-```typescript
-await prisma.post.update({
-  where: { id: postId },
-  data: {
-    postTags: {
-      create: {
-        tag: {
-          connectOrCreate: {  // ← Deep nested operation
-            where: { name: 'typescript' },
-            create: { name: 'typescript' },
-          },
-        },
-      },
-    },
-  },
-});
-```
-
-#### Important Notes
-
-1. **No `include` needed**: The relations a nested write touches are added to the query's `include` so their rows can be audited; a `select` on the audited record or on a written relation is read as the client's default shape with the relations it selects included, and the fields an `omit` there leaves out are read, so the records are audited with every column the client reads by default (and the fields the entity lists in `recordOmittedFields`, read by [row key](#batch-operations-updatemany--deletemany) after the write), and the rows written below a returned record are found by its keys when the result leaves them out. The value returned to the caller keeps the shape the query requested.
-2. **`connect`, `set` and `disconnect` behavior**:
-   - A foreign key on the related record is that record's column: each record whose foreign key the write changed gets an `update` audit log, `changes` holding the old and new value. The records the writes at one relation path name, and the records linked to their parent rows when a write unlinks those (a `set`, or a to-one `connect`, `create`, `connectOrCreate` or `disconnect` on an optional foreign key), are read once before the write (whole rows, when `fetchBefore.update` is on for the related model) and once after it by row key; a record whose foreign key did not change (already linked, kept by a `set`, linked to another parent) gets no audit log. Prisma also sets an `@updatedAt` column on every connected record, so with the foreign key in `diffExcludeFields` such a record is still logged, with `updatedAt` as its only change
-   - Creates join table records (e.g., PostTag) for many-to-many relations
-   - Creates audit logs for join table entities if defined in `entities`
-   - Does not create audit logs for a record whose link lives elsewhere (e.g., Tag, linked through PostTag's foreign key)
-3. **`connectOrCreate` behavior**:
-   - Uses pre-fetch to check record existence
-   - If exists: Same as `connect`
-   - If not exists: Creates audit log for the new entity
-   - Pre-fetch is enabled by default to tell a create from a connect
-4. **Performance**: Each nested operation may require additional database queries for pre-fetching
-   - **Default behavior** (`fetchBefore` `update` / `delete`: `true`): Pre-fetches data to record before states and every nested change
-   - **Optimization** (`fetchBefore` `update` / `delete`: `false`): Skips pre-fetching for improved performance (trade-off: may miss some nested operation details)
-5. **Keys of the rows nested creates insert under an existing row**: when the audited row exists before the operation (an `update`, or an `upsert` that takes its update branch) and a to-many relation under it receives a nested `create` or `createMany` — or an `upsert` / `connectOrCreate` whose pre-fetch found no target — the relation is read back whole after the write, and the rows created are told apart from their existing siblings by the keys the extension generates for them. Before the write, when the data of such a row leaves out every primary-key field and each has a `cuid()`, `cuid(2)`, `uuid()`, `uuid(4)` or `uuid(7)` default, the extension fills them in with the same generator, as it does for a top-level `createMany`; query extensions applied after the audit extension, and the value Prisma returns, see that key. A child another writer inserts under the same parent has another key, so it is not taken for a created row. For a row whose key the extension does not generate (one the caller gives, which the database may store in another form, such as a `uuid` column in lower case, or a later write of the same operation may change; an `autoincrement()` key; a key field the row holds as a foreign key, which the relation fills from the parent row), or a `createMany` with `skipDuplicates`, which may skip a row whose key was generated, the extension reads instead, before the write, the row keys of the rows that relation already holds: one `findMany` on the related model per parent row of that relation, selecting the primary-key fields only, whose rows grow linearly with the number of children the parent already has. A parent row the same operation creates has no rows yet and issues no read. A failed read fails the operation before the caller's write runs: the observer hears it under `diff-generation` and the original error is rethrown, since without it existing rows could not be told apart from created ones.
-6. **Rows the result leaves out**: the caller's own `where`, `take`, `skip`, `cursor` or `distinct` on a written relation keeps its effect on the value returned, so a row the operation wrote there may be missing from the result. Such rows are read once per relation path after the write, with the relations written below them: an updated row by the row key read ahead of it (or its `where`), and, under a parent row whose relation the caller restricted and an operation nested there inserts into, the rows that were not there before. Finding those costs one primary-key-only query of the relation under those parent rows per path (its rows are compared with the snapshot above), and a second query reads the rows the result left out, when there are any. A relation the caller does not restrict issues neither query.
-
-#### Limitations
-
-- A nested `update` that changes a column its own `where` names is found again after the write by the key the write gives it: the row key read ahead of it, with the key fields its data gives literal values (a value, or `{ set: value }`) replaced. The same goes for the update branch of a nested `upsert` and the rows of a nested `updateMany`. With `fetchBefore.update: false`, or when that read failed, a `where` that names the whole row key stands for it; one that names the row by another unique field the update changes leaves the row unaudited. When the data changes the key in a way its arguments do not tell (an operator such as `increment` on a key field, a relation whose foreign key is part of the key, or a nested `updateMany` with several elements of which one writes the key), the row is not audited and the observer hears `row-identification`, with the path and the number of rows in `params`.
-- A row key that holds the foreign key to the parent row (`@@unique([deviceCode, slot])` on a child whose `deviceCode` references its parent) holds, after the write, the parent's referenced columns as the parent has them after the write. A row a nested `connect` moves in from another parent is recorded as the change of its foreign key under the key it has under the new parent, and a row a nested write updates below a parent whose referenced column the same operation changes (reaching the row by `ON UPDATE CASCADE`) is recorded under its new key, the foreign-key change included in its `changes`. Prisma writes the parent row before the writes nested in it, so a nested `update` or `upsert` below such a parent names its row by the new key; the read ahead of the write names it by the columns the parent holds before the write, so the row is recorded with its before state. When the parent's data writes those columns in a way its arguments do not tell (an operator), that before state is unavailable. The filter of a nested `updateMany` or `deleteMany` is read ahead of the write as given, so one that names the parent's new value matches no row then and its rows are not recorded.
-- Writes at one relation path that their keys after the write cannot tell apart are not audited: targets that name different rows but end up with the same key (the elements of one `update` list that move rows onto keys another element frees), and a target that names the key another target's write gives a row. Their rows are reported as `row-identification`, like a key the arguments do not tell. Two writes of the same row, such as an `update` next to a `connect` of it, are not affected.
-- At a path holding a row whose key after the write is unknown, a row the relation did not hold before the write may be that row under its new key, so the rows a nested `create`, `createMany`, `upsert` or `connectOrCreate` inserts there without a key the extension generated (item 5 under Nested Operations: a `cuid()` or `uuid()` default it fills in) are not audited either: the observer hears `row-identification` once per inserting operation, with the number of those rows and a message saying they cannot be told apart from a row whose key the write changed in a way the audit cannot follow. Rows with a key the extension generated are still recorded.
-- With `fetchBefore.update` off for the related model, `connect`, `set` and `disconnect` are not audited: the old foreign key is not read, so a record could not tell where the row was linked, and a `connect` of a record already linked (which Prisma still writes) could not be told from a move.
-- Prisma runs the keywords of one relation field in the order the data lists them. A nested `updateMany` / `deleteMany` is audited for the rows related to its parent when it runs: those related before the write, with the rows a `connect`, `connectOrCreate` or `set` listed before it links added and those a `disconnect`, `delete` or `set` listed before it unlinks removed. Its filter is matched against the rows as they were before the write, so a row a `create` listed before it inserts, or a row whose filtered columns an `update` or `updateMany` listed before it changes, is not identified as one it writes. A row a nested `updateMany` listed before a `deleteMany` brings into the `deleteMany`'s filter (it sets a column the filter names) is updated and deleted with no record at all, neither of the update nor of the delete.
-- A row a nested `connectOrCreate` finds and a nested `delete` of the same write then removes is recorded only under the parent it is deleted from, without its before state.
-
-The writes the audit does not see at all, such as the rows a database referential action changes and the rows of an implicit many-to-many join table, are listed under [Coverage of Prisma writes](../../docs/guarantees.md#coverage-of-prisma-writes).
-
-## Complete Example
-
-```typescript
-// src/audit.config.ts
-import {
-  defineConfig,
-  defineEntities,
-  defineEntity,
-  to,
-  foreignKey,
-} from '@kuruwic/prisma-audit';
-import { createAsyncLocalStorageProvider, UNHANDLED } from '@kuruwic/db-audit-core';
-import { Prisma, type PrismaClient } from '../generated/prisma/client.js'; // your client generator's output
-import { type AuditModelName, auditSchema } from '../generated/audit/index.js';
-
-export const auditProvider = createAsyncLocalStorageProvider();
-
-export default defineConfig<PrismaClient>()({
-  Prisma,
-  schema: auditSchema,
-  contextProvider: auditProvider,
-  entities: defineEntities<AuditModelName, PrismaClient>()({
-    User: defineEntity({
-      type: 'User',
-      diffExcludeFields: ['updatedAt', 'createdAt', 'lastLoginAt'],
-    }),
-    Post: defineEntity({
-      type: 'Post',
-      aggregates: [to('User', foreignKey('authorId'))],
-    }),
-    Comment: defineEntity({
-      type: 'Comment',
-      aggregates: [
-        to('Post', foreignKey('postId')),
-        to('User', foreignKey('authorId')),
-      ],
-      diffExcludeFields: ['updatedAt', 'createdAt', 'editCount'],
-    }),
-  }),
-
-  // Change tracking (an entity's own diffExcludeFields replaces this list)
-  diffExcludeFields: ['updatedAt', 'createdAt'],
-
-  // Redaction, on top of the built-in sensitive fields
-  redactFields: ['phoneNumber'],
-
-  // Custom serialization, before the built-in BigInt and toJSON conversions: store a Buffer as
-  // base64 instead of { type, data }
-  serializers: [
-    (value) => (value instanceof Buffer ? value.toString('base64') : UNHANDLED),
-  ],
-
-  // Sampling (default: log all operations)
-  samplingRate: 1.0,
-
-  // Writing (defaults optimize for correctness and atomicity)
-  write: {
-    awaited: true,       // Default: synchronous writes for guaranteed audit trails
-    writer: async (records, { defaultWrite }) => {
-      await defaultWrite(records);
-      await sendToExternalService(records);
-    },
-  },
-
-  // Error observation
-  errorObserver: (context) => {
-    console.error(`Audit error in ${context.phase}:`, context.error);
-  },
-
-  // Actor context enrichment
-  actorContext: {
-    enricher: async (actor, prisma) => {
-      if (actor.type === 'User') {
-        const user = await prisma.user.findUnique({
-          where: { id: actor.id },
-          select: { email: true, role: true },
-        });
-        return { email: user?.email, role: user?.role };
-      }
-      return null;
-    },
-  },
-
-  // Before-state reads (defaults shown)
-  fetchBefore: {
-    update: true,
-    delete: true,
-  },
-});
-```
-
-```typescript
-// src/db.ts
-import { createAuditClient } from '@kuruwic/prisma-audit';
-import { PrismaPg } from '@prisma/adapter-pg';
-import { PrismaClient } from '../generated/prisma/client.js';
-import auditConfig, { auditProvider } from './audit.config.js';
-
-const basePrisma = new PrismaClient({
-  adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }),
-});
-export const prisma = createAuditClient(basePrisma, auditConfig);
-export { auditProvider };
-```
-
-## Audit Pipeline
-
-This section is for readers of the source. None of the modules below is public API; only the exports of `src/index.ts` are.
-
-Every audited write, single or batch, goes through `runAuditedOperation` (`src/pipeline/run-audited-operation.ts`). Once the operation has run, `@kuruwic/db-audit-core`'s `dispatch` runs the extension's build of its records (collecting what the operation wrote as mutation events, then resolving them and composing the audit records) and writes them by a write plan, through the Prisma write executor and the transaction runtime the extension supplies.
-
-```
-$allOperations (src/extension.ts)
-  └─ runAuditedOperation
-       ├─ policy        core: atomic or not, from write.awaited
-       ├─ scope         the interactive transaction the operation runs in, if any
-       ├─ prepare       before states, nested pre-fetches, id injection
-       ├─ execute       the caller's own mutation
-       └─ dispatch      core: build the records, then write them in the transaction, after commit or detached
-            ├─ collect  one mutation event per written row
-            └─ records  core resolve, then compose
-```
-
-- `src/extension.ts`: the `$allOperations` hook. Decides whether an operation is audited (its model, its kind, then the core write policy, which also samples), adds the relations its nested writes touch to the operation's selection, runs it through the pipeline, and returns the result in the shape the caller requested.
-- `src/audit-options.ts`: validates the extension options once and normalizes them into the write policy, the resolve and compose configs, the schema metadata, the audit-log model accessor, the writer and the failure-handling settings.
-- `src/pipeline/run-audited-operation.ts`: the pipeline above. A failure of the caller's own mutation propagates untouched; any other failure before the write is reported as `diff-generation` and rethrown. The build of the records runs inside core's `dispatch`, which reports its failure as `diff-generation` and rethrows it only while the write is inside a transaction that has not committed (see [Error Handling](#error-handling-errorobserver)).
-- `src/pipeline/execution-scope.ts`: the client the operation and every audit read and write share (the transaction's client inside a transaction, else the base client) and the transaction it belongs to; `transactionRuntimeOf` hands it to core's `dispatch` as the transaction runtime (see [Write Strategies](#write-strategies)).
-- `src/pipeline/single-executor.ts`, `src/pipeline/batch-executor.ts`: the prepare, execute and collect steps of a single operation (create, update, upsert, delete, with nested writes) and of a batch operation (createMany, updateMany, deleteMany and their returning variants). `src/pipeline/executor.ts` runs prepare and execute, and hands back the build of the records, which collects and produces them.
-- `src/grammar/`: the Prisma nested-write grammar. `nested-operations.ts` detects the nested operations in an operation's args, names the rows each one targets by unique WHERE or batch filter, and reads the rows a relation holds in an operation result; `pre-fetch-selection.ts` selects the operations whose before state is read ahead of the write; `nested-state.ts` defines what a pre-fetch learned of a row and resolves a nested row's action from that before state; `operations.ts` is the top-level operation vocabulary.
-- `src/nested/pre-fetch/`: the reads made ahead of an operation. The coordinator runs the to-one, to-many and batch fetchers parents first, each scoped to the parent rows its operation is nested under (`parent-rows.ts`), and stores each row's before state by path under the name the read used for it, its unique WHERE or its parent row (`pre-fetch-result-store.ts`); `pre-existing-rows.ts` snapshots the row keys a to-many relation holds before a nested create whose data does not key every row it inserts; `link-rows.ts` reads the rows a nested `connect`, `set`, `disconnect`, `connectOrCreate` or to-one `create` may re-link, on a relation whose foreign key `relation-link.ts` places on the related model.
-- `src/nested/inserted-row-keys.ts`: generates, before the write, the keys the rows a nested to-many create inserts leave out, where the schema can generate them, so the created rows are told apart by those keys.
-- `src/nested/events/`: the mutation events of the nested rows an operation wrote. `write-set.ts` names the rows each nested operation targets; `collect-nested-events.ts` walks the result one level at a time, attributes the rows each relation holds to the operations nested under their parent row's operation, and yields one event per row, with `rows-not-in-result.ts` reading the written rows the result does not hold, `link-changes.ts` recording a re-linked row's foreign-key change as an update of that row, `delete-handler.ts` for deletes and `event-fields.ts` for the identity and action shared with the top-level collectors.
-- `src/pipeline/produce-records.ts`: core `resolve` then `compose`. Id resolvers and enrichers receive the scope's client when each one runs, so inside a transaction they read its writes.
-- `src/runtime/scope.ts`: the library-owned async-local state of an audited flow: the active transaction with its client and the writes queued until it commits, and the re-entrancy guard that keeps the audit's own queries from being audited. It is kept apart from the app-owned audit context.
-- `src/runtime/pending-writes.ts`: the writes no caller awaits; `flushAllPendingWrites` waits for them.
-- `src/runtime/transaction-proxy.ts`: wraps interactive `$transaction` so the operations in its callback share the transaction's client and the queued writes run after it commits, on the audited client and on every client derived from it by `$extends`. With `write.implicitTransaction` it also wraps the client's model delegates and raw-query methods with `src/runtime/operation-recipe.ts`, whose lazy operations open an interactive transaction of the client for a write whose audit is awaited, and run a batch `$transaction([...])` of the client's operations that holds such a write as one.
-- Failures are reported through the core's `createFailureSink`, built in `src/extension.ts` from `errorObserver`: every phase notifies `errorObserver`; without one, a failed write of a committed operation and the `diff-generation` of an entry `dispatch` dropped for a committed write are logged to the console. A failed write inside a transaction that has not committed fails the operation.
-
-## Type Safety with Branded Types
-
-The library uses **Branded Types** to provide type-safe IDs and prevent accidental mixing of different identifier types.
-
-### Branded ID Types
-
-```typescript
-import type { ActorId, EntityId, AggregateId } from '@kuruwic/prisma-audit';
-```
-
-- **`ActorId`**: Type-safe identifier for actors (users, systems, etc.)
-- **`EntityId`**: Type-safe identifier for entities being audited
-- **`AggregateId`**: Type-safe identifier for aggregate roots
-
-### Creating Branded IDs
-
-Use the provided smart constructors to create validated branded IDs:
-
-```typescript
-import { createActorId, createEntityId, createAggregateId } from '@kuruwic/prisma-audit';
-
-// Create branded IDs with validation
-const actorId = createActorId('user-123');    // ActorId
-const entityId = createEntityId('post-456');  // EntityId
-const aggregateId = createAggregateId('order-789'); // AggregateId
-
-// ✅ Type-safe: Cannot accidentally mix different ID types
-const validateActor = (id: ActorId) => { /* ... */ };
-validateActor(actorId); // OK
-// validateActor(entityId); // ❌ TypeScript error!
-
-// Validation errors throw IdValidationError
-try {
-  createActorId(''); // Throws: Actor ID cannot be empty
-} catch (error) {
-  console.error(error.message);
-}
-```
-
-### Unwrapping Branded IDs
-
-Convert branded IDs back to plain strings when needed:
-
-```typescript
-import { unwrapId } from '@kuruwic/prisma-audit';
+import { createActorId, createEntityId, unwrapId } from '@kuruwic/prisma-audit';
 
 const actorId = createActorId('user-123');
-const plainString: string = unwrapId(actorId); // 'user-123'
+const check = (id: typeof actorId) => unwrapId(id);
+check(actorId);
+// check(createEntityId('post-456')); // type error
 ```
-
-### Smart Constructors with Result Pattern
-
-For complex validation scenarios, use `createAuditLogData` with the Result pattern:
-
-```typescript
-import { createAuditLogData, type Result, type AuditLogInput } from '@kuruwic/prisma-audit';
-
-const input: AuditLogInput = {
-  actorCategory: 'model',
-  actorType: 'User',
-  actorId: 'user-123',
-  actorContext: null,
-  entityCategory: 'model',
-  entityType: 'Post',
-  entityId: 'post-456',
-  entityContext: null,
-  aggregateCategory: 'model',
-  aggregateType: 'Post',
-  aggregateId: 'post-456',
-  aggregateContext: null,
-  action: 'create',
-  before: null,
-  after: { id: 'post-456', title: 'Hello' },
-  changes: null,
-  requestContext: null,
-  createdAt: new Date(),
-};
-
-const result: Result<AuditLogData> = createAuditLogData(input);
-
-if (result.success) {
-  const auditLog = result.value;
-  // auditLog.actorId has type ActorId
-  // auditLog.entityId has type EntityId
-  // auditLog.aggregateId has type AggregateId
-} else {
-  console.error('Validation failed:', result.errors);
-  // result.errors: ValidationError[]
-}
-```
-
-### Benefits of Branded Types
-
-1. **Type Safety**: Prevents accidental mixing of different ID types at compile time
-2. **Runtime Validation**: IDs are validated when created, ensuring they're never empty
-3. **Self-Documenting**: Function signatures clearly indicate what type of ID is expected
-4. **Refactoring Safety**: Changing ID types is caught by TypeScript, not runtime errors
-
-### Internal Architecture
-
-**Source Files:**
-- `domain/branded-types.ts` (in `@kuruwic/db-audit-core`) - Branded type definitions and constructors
-- `domain/smart-constructors.ts` (in `@kuruwic/db-audit-core`) - Smart constructors with Result pattern
-
-## Documentation
-
-See the [main README](../../README.md) for:
-- [Aggregate mapping patterns](../../README.md#aggregate-mapping)
-- [Framework integration](../../README.md#framework-integration) (Hono, Express)
-- [Limitations](../../README.md#limitations)
-- [Guarantees](../../README.md#guarantees), and [docs/guarantees.md](../../docs/guarantees.md) for what each operation and execution context guarantees
 
 ## License
 

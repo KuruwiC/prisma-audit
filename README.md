@@ -2,87 +2,60 @@
 
 [![Prisma Compatibility](https://github.com/KuruwiC/prisma-audit/actions/workflows/prisma-compatibility.yml/badge.svg)](https://github.com/KuruwiC/prisma-audit/actions/workflows/prisma-compatibility.yml)
 
-**Zero-intrusion audit logging for Prisma.** Tracks who changed what and when — without modifying a single line of your application code.
+Audit logging for Prisma. A Prisma Client extension records who changed what and when for every write to the models you list, without changes to your queries.
 
 <p align="center">
   <img src="https://github.com/user-attachments/assets/6c941e3e-a4a4-4936-94b1-5fbcdb3bdbdd" alt="A Prisma update recorded with its field diff, a comment recorded under its post and its author, a redacted password change, a rolled-back transaction that leaves no audit rows, and the same rows read back as an activity feed" width="100%" />
 </p>
 
-## How It Works
-
-prisma-audit uses [Prisma Client Extensions](https://www.prisma.io/docs/orm/prisma-client/client-extensions) to transparently intercept all write operations. Your existing `prisma.user.update(...)` calls continue to work exactly as before — audit logs are created automatically behind the scenes.
-
 ```typescript
-// Your code — unchanged
 await prisma.post.update({
   where: { id: "post-1" },
   data: { title: "Updated Title", published: true },
 });
 ```
 
-**Automatically generates:**
+records:
 
-| Field         | Value                                                           |
-| ------------- | --------------------------------------------------------------- |
-| **Actor**     | John Doe (user-123)                                             |
-| **Action**    | UPDATE                                                          |
-| **Entity**    | Post (post-1)                                                   |
-| **Changes**   | `title`: "Hello" → "Updated Title"<br>`published`: false → true |
-| **Aggregate** | User (user-123)                                                 |
-| **Timestamp** | 2025-01-14 10:30:45                                             |
-
-## Why prisma-audit
-
-### Zero Intrusion
-
-No decorators, no wrapper functions, no code changes. Attach the extension once and every Prisma write operation is automatically audited. Remove it, and your app works exactly as before.
-
-### Guarantees
-
-- **Atomicity**: inside a transaction, yours or the one `write.implicitTransaction` opens, an awaited audit log is written in it, so the data and its audit logs commit or roll back together: a failed audit write fails the operation and rolls its data back. Outside one, it is written once the operation has committed, and its failure never fails the committed operation.
-- **Accuracy under concurrent writes**: a transaction alone does not give it. The audit reads the before state ahead of the write, and whether a write another transaction commits in between is recorded wrongly or rejected depends on the database and the isolation level.
-- **Coverage**: a write that writes rows of a model in `entities` is audited when an audit context is set. Without one it runs unaudited, or is rejected with `requireContext`. Sampling, raw queries and the database's own writes are not recorded.
-
-[docs/guarantees.md](docs/guarantees.md) states what each operation and each execution context guarantees, and cites the tests that pin it down.
-
-App context (actor, request metadata) and library transaction state (transactional client, deferred-write queue) live in separate AsyncLocalStorage stores. Establishing a fresh context via `runAsync` or `run` inside a `$transaction` callback never detaches writes from the transaction.
-
-### DDD Aggregate Tracking
-
-Model your domain with aggregate roots. When a child entity (e.g., OrderItem) changes, the log automatically references its parent aggregate (Order), enabling queries like "show all changes related to Order #123".
-
-### Production-Ready Performance
-
-Choose your trade-off per model: synchronous writes for compliance-critical tables, fire-and-forget for high-throughput ones. Probabilistic sampling lets you log 100% of financial transactions while sampling 5% of analytics events; a write sampling leaves out is a declared gap in [coverage](docs/guarantees.md#coverage).
-
-### Type Safety
-
-Branded types (`ActorId`, `EntityId`, `AggregateId`) prevent ID mix-ups at compile time. Result types and algebraic data types ensure exhaustive handling of all write outcomes.
+| Field     | Value                                                           |
+| --------- | --------------------------------------------------------------- |
+| Actor     | John Doe (user-123)                                             |
+| Action    | update                                                          |
+| Entity    | Post (post-1)                                                   |
+| Changes   | `title`: "Hello" → "Updated Title"<br>`published`: false → true |
+| Aggregate | User (user-123)                                                 |
+| Timestamp | 2025-01-14 10:30:45                                             |
 
 ## Features
 
-| Category          | Features                                                                                                                       |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| **Core**          | Automatic create/update/delete logging, field-level diff tracking, before/after state capture                                  |
-| **Operations**    | Batch operations (createMany, updateMany, deleteMany, createManyAndReturn, updateManyAndReturn), nested operations at all depths (including nested createMany), smart upsert/connectOrCreate detection |
-| **Architecture**  | DDD aggregate root mapping, AsyncLocalStorage context propagation, one audit pipeline for single and batch writes              |
-| **Performance**   | 3 write strategies (sync/deferred/fire-and-forget), probabilistic sampling, batch context enrichment (N+1 free)                |
-| **Security**      | PII redaction of built-in sensitive fields (passwords, tokens, SSN, etc.) plus `redactFields`, masking of the fields a client-level `omit` hides that an entity lists in `recordOmittedFields` |
-| **Extensibility** | Custom writer, custom serializers, error observer, framework-agnostic core                                                     |
+- Create, update and delete logging with before and after states and a field-level diff
+- Batch operations (`createMany`, `createManyAndReturn`, `updateMany`, `updateManyAndReturn`, `deleteMany`) and nested writes at any depth, including `upsert`, `connectOrCreate`, `connect`, `set` and `disconnect`
+- Aggregate roots: a child's change is also recorded under its parent (an `OrderItem` change under its `Order`)
+- Three write modes per model: `atomic` (the default), `awaited` and `deferred`
+- Batched context enrichers for the actor, the entity and the aggregate, without N+1 queries
+- Redaction of built-in sensitive fields and of the fields you list
+- An `observer` that receives the outcome of every audited write
+- Custom writers, including normalized schemas, and custom value serializers
+
+## Guarantees
+
+- **Atomicity**: under `write.mode: 'atomic'`, the default, a write commits only together with every audit log it should produce. Inside a transaction, every mode writes the audit logs in it, so they commit and roll back with the rows they record. Outside one, `awaited` writes them after the write commits and `deferred` writes them in the background; their failure never fails the committed write.
+- **Accuracy under concurrent writes**: the audit reads the before state ahead of the write, without a lock. Whether a write another transaction commits in between is recorded wrongly or rejected depends on the database and the isolation level.
+- **Coverage**: a write of a model in `entities` is audited when an audit context is set. Without one it runs unaudited, or is rejected under `requireContext`. Raw queries and the rows the database's referential actions change are not recorded.
+
+[docs/guarantees.md](docs/guarantees.md) states what each operation and execution context guarantees and cites the tests that check each statement.
 
 ## Installation
 
-> **Note**: These packages are not yet published to npm. Install them from the tarballs attached to a [GitHub Release](https://github.com/KuruwiC/prisma-audit/releases).
+The packages are not published to npm. Install them from the tarballs attached to a [GitHub Release](https://github.com/KuruwiC/prisma-audit/releases).
 
-### Packages
+| Package                           | Role                                                                                          | Install as     |
+| --------------------------------- | --------------------------------------------------------------------------------------------- | -------------- |
+| `@kuruwic/db-audit-core`          | ORM-independent core: turns the rows an adapter reports into audit records and writes them    | dependency     |
+| `@kuruwic/prisma-audit`           | Prisma Client extension, built on `@kuruwic/db-audit-core`                                    | dependency     |
+| `@kuruwic/prisma-audit-generator` | `prisma generate` step that writes the schema file (`auditSchema`) the extension reads        | dev dependency |
 
-| Package                           | Role                                                                                                        | Install as     |
-| --------------------------------- | ----------------------------------------------------------------------------------------------------------- | -------------- |
-| `@kuruwic/db-audit-core`          | ORM-independent core: turns the rows an adapter reports into audit records and decides how they are written | dependency     |
-| `@kuruwic/prisma-audit`           | Prisma 6/7 Client Extension; depends on `@kuruwic/db-audit-core`                                            | dependency     |
-| `@kuruwic/prisma-audit-generator` | `prisma generate` step that writes the schema file (`auditSchema`) the extension reads at runtime           | dev dependency |
-
-A release attaches one tarball per package (`v0.1.6` and earlier attach a single `@kuruwic/prisma-audit` tarball; moving from it to `v0.2.0` is described in the [v0.2.0 migration guide](https://github.com/KuruwiC/prisma-audit/blob/v0.2.0/docs/migration-guide.md)). Install the core and the extension tarballs of the same release in one command (the core is not on npm, so the extension tarball alone does not resolve), replacing `<version>` with the release's version:
+Install the core and the extension from the same release in one command, since the core is not on npm. Replace `<version>` with the release's version:
 
 ```bash
 pnpm add \
@@ -92,27 +65,31 @@ pnpm add -D \
   https://github.com/KuruwiC/prisma-audit/releases/download/v<version>/kuruwic-prisma-audit-generator-<version>.tgz
 ```
 
-Install Prisma with an explicit major, such as `prisma@^7` and `@prisma/client@^7` (or `^6.16`): `prisma@latest` on npm is a Prisma 8 release candidate, which is not supported (see [Prisma 8](#prisma-8)).
+`v0.1.6` and earlier attach a single `@kuruwic/prisma-audit` tarball; the [v0.2.0 migration guide](https://github.com/KuruwiC/prisma-audit/blob/v0.2.0/docs/migration-guide.md) describes the move to separate packages.
+
+Install Prisma with an explicit major, such as `prisma@^7` and `@prisma/client@^7` (or `^6.16`). `prisma@latest` on npm is a Prisma 8 release candidate, which is not supported (see [Prisma 8](#prisma-8)).
 
 ### Requirements
 
 - Prisma 6.16 or later, including 7.x (`@prisma/client >=6.16.0 <8.0.0`)
-- Node.js `^20.19 || ^22.12 || >=24.0` (AsyncLocalStorage)
-- A [driver adapter](https://www.prisma.io/docs/orm/overview/databases/database-drivers): Prisma 7 requires one (`@prisma/adapter-pg`, `@prisma/adapter-better-sqlite3` or `@prisma/adapter-mariadb`) unless you connect through Prisma Accelerate (`accelerateUrl`). With Prisma 7, `datasource.url` is set in `prisma.config.ts` and the schema's `datasource` block has no `url`.
-- The `PrismaClient` and the `Prisma` namespace come from your own generator's `output` (for the `prisma-client` generator, `<output>/client`, e.g. `./generated/prisma/client.js`). prisma-audit takes both by injection and does not care where they come from.
-- `generator audit` and `schema: auditSchema` are the same on Prisma 6 and 7.
+- Node.js `^20.19 || ^22.12 || >=24.0`
+- On Prisma 7, a [driver adapter](https://www.prisma.io/docs/orm/overview/databases/database-drivers) (`@prisma/adapter-pg`, `@prisma/adapter-better-sqlite3` or `@prisma/adapter-mariadb`), or Prisma Accelerate (`accelerateUrl`). `datasource.url` is set in `prisma.config.ts`, and the schema's `datasource` block has no `url`:
 
-```typescript
-// prisma.config.ts (Prisma 7)
-import "dotenv/config";
-import { defineConfig } from "prisma/config";
+  ```typescript
+  // prisma.config.ts (Prisma 7)
+  import "dotenv/config";
+  import { defineConfig } from "prisma/config";
 
-export default defineConfig({
-  datasource: { url: process.env.DATABASE_URL ?? "" },
-});
-```
+  export default defineConfig({
+    datasource: { url: process.env.DATABASE_URL ?? "" },
+  });
+  ```
 
-The extension reads your models' keys and relations from a file that `prisma generate` writes. Add the generator, `@kuruwic/prisma-audit-generator`, to `schema.prisma`:
+The extension takes `PrismaClient` and the `Prisma` namespace by injection, from wherever your client generator writes them (for the `prisma-client` generator, `<output>/client`).
+
+### Generator
+
+The extension reads your models' keys and relations from a file `prisma generate` writes. Add the generator to `schema.prisma` (the same on Prisma 6 and 7):
 
 ```prisma
 generator audit {
@@ -121,44 +98,43 @@ generator audit {
 }
 ```
 
-Run `prisma generate`, then pass the `auditSchema` it writes to `createAuditClient` as `schema: auditSchema`.
+Run `prisma generate`, then pass the `auditSchema` it writes to `createAuditClient` as `schema`.
 
-## Quick Start
+## Quick start
 
-### 1. Add AuditLog model to your schema
+### 1. Add an AuditLog model
 
 ```prisma
 model AuditLog {
-  id                   String   @id @default(cuid())
+  id                String   @id @default(cuid())
 
   // Who
-  actorCategory        String
-  actorType            String
-  actorId              String
-  actorContext         Json?
+  actorCategory     String
+  actorType         String
+  actorId           String
+  actorContext      Json?
 
   // What
-  entityCategory       String
-  entityType           String
-  entityId             String
-  entityContext        Json?
+  entityCategory    String
+  entityType        String
+  entityId          String
+  entityContext     Json?
 
-  // Business context (aggregate root)
-  aggregateCategory    String
-  aggregateType        String
-  aggregateId          String
-  aggregateContext     Json?
+  // Aggregate root
+  aggregateCategory String
+  aggregateType     String
+  aggregateId       String
+  aggregateContext  Json?
 
-  // Changes
-  action               String
-  before               Json?
-  after                Json?
-  changes              Json?
-  beforeUnavailable    Boolean  @default(false) // Optional: the before state was requested and could not be read
+  // Change
+  action            String
+  before            Json?
+  after             Json?
+  changes           Json?
+  beforeUnavailable Boolean  @default(false) // optional: the before state was requested and could not be read
 
-  // Request info
-  requestContext       Json?
-  createdAt            DateTime @default(now()) @map("created_at")
+  requestContext    Json?
+  createdAt         DateTime @default(now()) @map("created_at")
 
   @@index([aggregateType, aggregateId])
   @@index([entityType, entityId])
@@ -168,7 +144,7 @@ model AuditLog {
 }
 ```
 
-### 2. Create audited client
+### 2. Create the audited client
 
 ```typescript
 import {
@@ -176,15 +152,15 @@ import {
   createAuditClient,
   defineEntities,
   defineEntity,
-  to,
   foreignKey,
+  to,
 } from "@kuruwic/prisma-audit";
-import { UNHANDLED } from "@kuruwic/db-audit-core";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Prisma, PrismaClient } from "../generated/prisma/client.js"; // your client generator's output
-import { type AuditModelName, auditSchema } from "../generated/audit/index.js"; // the generator's output
+import { type AuditModelName, auditSchema } from "../generated/audit/index.js"; // the audit generator's output
 
-const auditProvider = createAsyncLocalStorageProvider();
+export const auditProvider = createAsyncLocalStorageProvider();
+
 const basePrisma = new PrismaClient({
   adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }),
 });
@@ -197,143 +173,88 @@ const entities = defineEntities<AuditModelName, PrismaClient>()({
   }),
 });
 
-const prisma = createAuditClient(basePrisma, {
+export const prisma = createAuditClient(basePrisma, {
   Prisma,
   schema: auditSchema,
   contextProvider: auditProvider,
   entities,
 });
-
-export { prisma, auditProvider };
 ```
 
-### 3. Set context and use
+### 3. Set the audit context
 
 ```typescript
-import { prisma, auditProvider } from "./prisma";
-
-// Wrap your request handler with audit context
 await auditProvider.runAsync(
-  {
-    actor: {
-      category: "user",
-      type: "User",
-      id: "user-123",
-      name: "John",
-    },
-  },
+  { actor: { category: "user", type: "User", id: "user-123", name: "John" } },
   async () => {
-    // Every Prisma write inside this scope is automatically audited
-    await prisma.user.create({
-      data: { email: "john@example.com", name: "John" },
-    });
+    // Every write of an audited model in this scope is recorded
+    await prisma.user.create({ data: { email: "john@example.com", name: "John" } });
   },
 );
 ```
 
-## Architecture
+## Write modes
 
-### Audit Pipeline
+`write.mode` sets the default mode, and an entity's `writeMode` overrides it for its model. An operation takes the strongest mode (`atomic`, then `awaited`, then `deferred`) of the audited models it writes rows of, nested writes included.
 
-Every intercepted write operation, single or batch, passes through one pipeline:
+| Mode                 | Inside a transaction    | Outside a transaction                                         | A failure that drops an audit log           |
+| -------------------- | ----------------------- | ------------------------------------------------------------- | ------------------------------------------- |
+| `atomic` (default)   | In it, before it commits | In an interactive transaction the client opens around the write | Fails the operation and rolls it back |
+| `awaited`            | In it, before it commits | After the write commits, before it returns                    | Reported to `observer` (default: `console.error`) |
+| `deferred`           | In it, before it commits | In the background; the write returns without waiting          | Reported to `observer` (default: `console.error`) |
 
-```
-Operation arrives
-  │
-  ├─ 1. Write Policy ───────── Decide whether the operation is sampled in (samplingRate) and its audit
-  │                            rows awaited (write.awaited); with write.implicitTransaction the client
-  │                            opens a transaction for them
-  ├─ 2. Read Before State ──── Capture the target row (UPDATE/DELETE/UPSERT) and the nested rows the write touches
-  ├─ 3. Execute Operation ──── Run the original Prisma operation
-  ├─ 4. Collect Events ─────── One mutation event per row written, top-level, nested or batch
-  ├─ 5. Resolve & Compose ──── Resolve entity ids and aggregates, enrich contexts (batch, N+1 free), diff, redact
-  ├─ 6. Dispatch ───────────── Choose the write plan from the policy and the transaction context
-  └─ 7. Write Logs ─────────── In the transaction, after commit (awaited or queued), or detached
-```
+"A transaction" is your interactive `$transaction` (for operations on the client its callback receives) or a batch `$transaction([...])` holding a write, which runs as one. Inside a transaction a failed audit-log write fails the operation and rolls the transaction back under every mode.
 
-### Write Strategies
+An `atomic` write outside your transaction pays for its own transaction: the `BEGIN` and `COMMIT` round trips, a connection held from the audit's first read to the commit, and the client's `transactionOptions` limits. A driver adapter without interactive transactions, such as Cloudflare D1's, needs `awaited` or `deferred`.
 
-The library automatically selects the optimal write strategy based on your configuration and runtime context:
-
-```
-                  write.awaited: true?
-                  ┌─── Yes ──→  In transaction?
-                  │             ┌─── Yes ──→  Synchronous     (same transaction, blocks until written)
-                  │             └─── No ───→  Synchronous     (after commit, blocks until written)
-                  │
-                  └─── No ───→  In transaction?
-                                ┌─── Yes ──→  Deferred        (queued, executes after TX commit)
-                                └─── No ───→  Fire & Forget   (background, zero latency impact)
-```
-
-"In transaction" means your interactive `$transaction`, or, with `write.implicitTransaction`, the interactive transaction the audited client opens around a write whose audit is awaited and around a batch `$transaction([...])` of its operations that holds such a write.
-
-| Strategy          | Atomicity      | Latency Impact | Use Case                                          |
-| ----------------- | -------------- | -------------- | ------------------------------------------------- |
-| **Synchronous**   | Full inside a transaction (same TX); none after commit | Blocks         | Compliance-critical data                          |
-| **Deferred**      | None (post-TX) | Minimal        | Operations inside an interactive `$transaction()` |
-| **Fire & Forget** | None           | Zero           | High-throughput, non-critical                     |
-
-An atomic write strategy does not make the audit log accurate under concurrent writes: see [docs/guarantees.md](docs/guarantees.md#accuracy-under-concurrent-writes).
+Atomicity does not make the record accurate under concurrent writes; see [Accuracy under concurrent writes](docs/guarantees.md#accuracy-under-concurrent-writes). Details: [Write modes](packages/prisma-extension/README.md#write-modes) and [Transactions](packages/prisma-extension/README.md#transactions).
 
 ## Configuration
 
 ```typescript
+import { UNHANDLED } from "@kuruwic/db-audit-core";
+
 createAuditClient(basePrisma, {
   Prisma,
   schema: auditSchema,
   contextProvider: auditProvider,
   entities,
 
-  // Exclude noisy fields from change tracking; an entity's own diffExcludeFields replaces this list
+  // Left out of an update's changes; an entity's own diffExcludeFields replaces this list
   diffExcludeFields: ["updatedAt", "createdAt"],
 
-  // PII redaction: these fields on top of the built-in sensitive fields, which are always redacted
+  // Redacted on top of the built-in sensitive fields
   redactFields: ["phoneNumber", "dateOfBirth"],
 
-  // Per-operation sampling: a rate, or a function of the operation's top-level model
-  samplingRate: (model) => {
-    if (model === "Order") return 1.0;
-    if (model === "PageView") return 0.05;
-    return 0.1;
-  },
-
-  // Reject a write without an audit context instead of running it unaudited: a value for every
-  // model, or a function of the model name; it applies to the models of nested writes too
+  // Reject a write without an audit context instead of running it unaudited
   requireContext: (model) => model === "Order",
 
-  // Write strategy control
   write: {
-    // Synchronous by default; as a function of the operation's top-level model,
-    // sync only for critical models
-    awaited: (model) => model === "Order",
-    // Custom writer
+    // Default mode; critical models set defineEntity({ ..., writeMode: "atomic" })
+    mode: "deferred",
     writer: async (records, { defaultWrite }) => {
       await defaultWrite(records);
-      await sendToExternalService(records);
     },
   },
 
-  // Custom serialization. BigInt and values with a toJSON method (Date, Decimal, Buffer) are
-  // handled by default; this serializer stores a Buffer as base64 instead of { type, data }
-  serializers: [
-    (value) => {
-      if (value instanceof Buffer) return value.toString("base64");
-      return UNHANDLED;
-    },
-  ],
-
-  // Before-state reads (defaults shown); an entity's own fetchBefore overrides them per operation
-  fetchBefore: {
-    update: true,
-    delete: true,
+  // Called once per audited write with its outcome
+  observer: (outcome) => {
+    if (outcome.status === "incomplete") console.error("audit logs lost", outcome.failures);
   },
+
+  // Store a Buffer as base64; BigInt and values with toJSON (Date, Decimal) are handled by default
+  serializers: [(value) => (value instanceof Buffer ? value.toString("base64") : UNHANDLED)],
+
+  // Before-state reads (defaults shown); an entity's own fetchBefore overrides them
+  fetchBefore: { update: true, delete: true },
 });
 ```
 
-## Framework Integration
+Every option is described in the [package README](packages/prisma-extension/README.md#options).
 
-Wrap your request handler to set the audit context. The context propagates automatically through AsyncLocalStorage.
+## Framework integration
+
+Set the audit context once per request. It propagates through `AsyncLocalStorage`.
 
 ### Hono
 
@@ -344,8 +265,8 @@ app.use("*", async (c, next) => {
     {
       actor: { category: "user", type: "User", id: user.id, name: user.name },
       request: {
-        ipAddress: c.req.header("X-Forwarded-For") || "unknown",
-        userAgent: c.req.header("User-Agent") || "unknown",
+        ipAddress: c.req.header("X-Forwarded-For") ?? "unknown",
+        userAgent: c.req.header("User-Agent") ?? "unknown",
         path: c.req.path,
         method: c.req.method,
       },
@@ -359,7 +280,7 @@ app.use("*", async (c, next) => {
 
 ```typescript
 app.use((req, res, next) => {
-  auditProvider.runAsync(
+  auditProvider.run(
     {
       actor: { category: "user", type: "User", id: req.user.id, name: req.user.name },
       request: { ipAddress: req.ip, userAgent: req.get("User-Agent"), path: req.path, method: req.method },
@@ -369,146 +290,31 @@ app.use((req, res, next) => {
 });
 ```
 
-## Actor Override
+## Actor override
 
-Use `provider.withActor` to re-attribute writes to a different actor mid-flow while keeping the current request metadata and transaction state intact. This is the official API for scenarios such as pre-auth login flows, impersonation, or any system→user handoff.
+`withActor` attributes the writes in its callback to another actor and keeps the request context and the transaction. Use it for login flows, impersonation and system-to-user handoffs.
 
 ```typescript
 await prisma.$transaction(async (tx) => {
-  // Create the admin user — attributed to the system actor from the outer context
+  // Attributed to the actor of the outer context
   const adminUser = await tx.adminUser.create({
     data: { email: "admin@example.com", role: "admin" },
   });
 
-  // The next write is attributed to the newly created admin user.
-  // Request metadata (ipAddress, etc.) from the outer context is preserved.
-  // The write still runs inside the same transaction and can reference
-  // the uncommitted adminUser row without FK violations.
-  // A plain arrow returning the Prisma promise directly is fine: withActor
-  // settles the return value inside the overridden scope.
-  await provider.withActor(
-    { category: "user", type: "AdminUser", id: adminUser.id },
-    () =>
-      tx.adminProfile.create({
-        data: { adminUserId: adminUser.id, bio: "Initial profile" },
-      }),
+  // Attributed to the new admin user, in the same transaction
+  await auditProvider.withActor({ category: "user", type: "AdminUser", id: adminUser.id }, () =>
+    tx.adminProfile.create({ data: { adminUserId: adminUser.id, bio: "Initial profile" } }),
   );
 });
 ```
 
-`withActor` is safe to call inside `$transaction` callbacks — it only swaps the `actor` field in the app context store; the library's internal transaction state is stored separately and is never affected.
+The audit context and the library's transaction state live in separate `AsyncLocalStorage` stores, so `withActor`, `run` or `runAsync` inside a `$transaction` callback never detaches writes from the transaction.
 
-## Context Enrichment
-
-Context enrichers add metadata to audit logs by querying additional data. The API is **batch-first** (inspired by DataLoader) to prevent N+1 queries. Each key is named after the `AuditLog` column it fills: `actorContext`, `entityContext` and `aggregateContext`.
-
-Every enricher takes `onError`, which decides what a failure (an error or a timeout) becomes: `'throw'` (the default) rethrows it, `'log'` warns and stores `fallback ?? null`, and `'ignore'` stores `fallback ?? null` silently. A function receives the error and returns one of those strategies; when it throws or returns anything else, the failure is logged and handled as `'log'`.
-
-### Actor Context
-
-Called once per operation, cached for reuse across all logs in that operation:
-
-```typescript
-actorContext: {
-  enricher: async (actor, prisma) => {
-    if (actor.type !== "User") return null;
-    const user = await prisma.user.findUnique({
-      where: { id: actor.id },
-      select: { email: true, role: true },
-    });
-    return { email: user?.email, role: user?.role };
-  },
-  onError: "log",    // 'throw' (default) | 'log' | 'ignore' | (error) => strategy
-  fallback: null,
-},
-```
-
-### Entity Context
-
-The `entityContext` enricher receives the written rows in batch and must return contexts in the same order and length. The result is stored in the log's `entityContext`:
-
-```typescript
-Post: defineEntity({
-  type: "Post",
-  aggregates: [to("User", foreignKey("authorId"))],
-  entityContext: {
-    enricher: async (posts, prisma) => {
-      const authorIds = posts.map((p) => p.authorId).filter(Boolean);
-      const authors = await prisma.user.findMany({
-        where: { id: { in: authorIds } },
-        select: { id: true, name: true },
-      });
-      const authorMap = new Map(authors.map((a) => [a.id, a]));
-      // Must return same length & order as input
-      return posts.map((post) => ({
-        authorName: authorMap.get(post.authorId)?.name ?? null,
-      }));
-    },
-    onError: "log",
-    fallback: { authorName: null },
-  },
-}),
-```
-
-### Aggregate Context
-
-The log's `aggregateContext` is composed from two layers, merged per log entry (projection keys win):
-
-**Root-side — `aggregateContext` on the root entity.** Defined once, applied whenever _any_ entity (the root itself or a child) projects onto this root. The enricher receives the unique aggregate IDs involved in the operation:
-
-```typescript
-User: defineEntity({
-  type: "User",
-  aggregateContext: {
-    enricher: async (userIds, prisma) => {
-      const users = await prisma.user.findMany({
-        where: { id: { in: userIds } },
-        select: { id: true, name: true },
-      });
-      const byId = new Map(users.map((u) => [u.id, u]));
-      return userIds.map((id) => ({ userName: byId.get(id)?.name ?? null }));
-    },
-  },
-}),
-```
-
-**Projection-side — `aggregateContext` on the `to()` declaration.** Specific to one projection; the enricher receives the _written_ rows (not the root rows), with `meta.aggregateIds[i]` holding the aggregate ID resolved for row `i` (for the aggregate a row left in an update, row `i` is the row as it was before the write):
-
-```typescript
-PostTag: defineEntity({
-  type: "PostTag",
-  selfAggregate: false, // join table — no self aggregate log
-  aggregates: [
-    to("Post", foreignKey("postId"), {
-      aggregateContext: {
-        enricher: async (postTags, prisma, meta) =>
-          postTags.map((pt) => ({ tagId: pt.tagId })), // Post-perspective context
-      },
-    }),
-    to("Tag", foreignKey("tagId"), {
-      aggregateContext: {
-        enricher: async (postTags, prisma, meta) =>
-          postTags.map((pt) => ({ postId: pt.postId })), // Tag-perspective context
-      },
-    }),
-  ],
-}),
-```
-
-The self aggregate log (enabled by default) can be enriched the same way via `selfAggregate: { aggregateContext: { ... } }`.
-
-## Aggregate Mapping
-
-Define domain relationships so child entity changes reference their parent aggregate:
+## Aggregates
 
 ```typescript
 const entities = defineEntities<AuditModelName, PrismaClient>()({
-  // Aggregate root
-  Order: defineEntity({
-    type: "Order",
-  }),
-
-  // Child entities reference their aggregate root
+  Order: defineEntity({ type: "Order" }),
   OrderItem: defineEntity({
     type: "OrderItem",
     aggregates: [to("Order", foreignKey("orderId"))],
@@ -520,75 +326,80 @@ const entities = defineEntities<AuditModelName, PrismaClient>()({
 });
 ```
 
-When an OrderItem is updated, the audit log records both:
+An `OrderItem` update is recorded under the item itself and under its `Order`, so one query on `aggregateType` and `aggregateId` returns every change to the order and its items. An update that moves a row to another parent is recorded under both the parent it left and the one it joined; this needs the before-state read (`fetchBefore.update`, on by default).
 
-- **Entity**: OrderItem (item-456) — what was changed
-- **Aggregate**: Order (order-123) — the business context it belongs to
+## Context enrichment
 
-This enables queries like "show me all changes related to Order #123" across OrderItem, Payment, and Order itself.
-
-When an update moves a row to another parent (an OrderItem whose `orderId` changes), the log is recorded under both the Order it left and the Order it joined, from the row read before the write (`fetchBefore.update`, on by default). With that read off, or when it fails, only the Order it joined gets the log.
-
-## PII Redaction
-
-Redaction always applies to the stored before, after and `changes`. The built-in sensitive fields are: `password`, `passwordHash`, `hashedPassword`, `salt`, `token`, `accessToken`, `refreshToken`, `apiKey`, `secret`, `secretKey`, `privateKey`, `ssn`, `socialSecurityNumber`, `creditCard`, `cardNumber`, `cvv`, `pin`.
+Enrichers add data to the `actorContext`, `entityContext` and `aggregateContext` columns. They are batched: one call per operation, not per row.
 
 ```typescript
-// Before redaction
-{ password: "secret123", email: "user@example.com" }
+// Top-level option: once per operation
+actorContext: {
+  enricher: async (actor, prisma) => {
+    if (actor.type !== "User") return null;
+    const user = await prisma.user.findUnique({ where: { id: actor.id }, select: { email: true, role: true } });
+    return { email: user?.email, role: user?.role };
+  },
+  onError: "log", // 'throw' (default) | 'log' | 'ignore' | (error) => strategy
+  fallback: null,
+},
+```
 
-// After redaction (stored in audit log)
+```typescript
+Post: defineEntity({
+  type: "Post",
+  aggregates: [to("User", foreignKey("authorId"))],
+  // Receives the written rows; returns one context per row, in the same order
+  entityContext: {
+    enricher: async (posts, prisma) => posts.map((post) => ({ title: post.title })),
+  },
+}),
+```
+
+`aggregateContext` is set on the root entity (it receives the aggregate ids) or on a `to()` projection (it receives the written rows); see [Context enrichment](packages/prisma-extension/README.md#context-enrichment).
+
+## Redaction
+
+The stored `before`, `after` and `changes` always redact these fields: `password`, `passwordHash`, `hashedPassword`, `salt`, `token`, `accessToken`, `refreshToken`, `apiKey`, `secret`, `secretKey`, `privateKey`, `ssn`, `socialSecurityNumber`, `creditCard`, `cardNumber`, `cvv`, `pin`. Add others with `redactFields`.
+
+```typescript
+// Stored
 { password: { redacted: true, hadValue: true }, email: "user@example.com" }
 ```
 
-Add fields via the top-level `redactFields`. The enriched contexts (`actorContext`, `entityContext`, `aggregateContext`) and the request context are not redacted: they are stored as your enrichers and context provider return them.
+The enriched contexts and the request context are stored as your enrichers and context provider return them, without redaction.
 
-### Fields a client-level `omit` hides
+A field a client-level `omit` hides (`new PrismaClient({ omit: { user: { password: true } } })`) is left out of the audit logs. To record it masked, list it on the entity: `defineEntity({ type: "User", recordOmittedFields: ["password"] })`. See [`recordOmittedFields`](packages/prisma-extension/README.md#recordomittedfields).
 
-The audit records a row in the client's default shape, so a field the Prisma client omits for every query (`new PrismaClient({ omit: { user: { password: true } } })`) is left out of the audit logs, except where your own query names it or your `createMany` data writes it. To audit such a field with its value masked, list it on its entity:
+## Nested writes
 
-```typescript
-User: defineEntity({ type: 'User', recordOmittedFields: ['password'] }),
-```
+- `create`: recorded with `before: null`
+- `update` / `delete`: recorded with the before state when `fetchBefore.update` / `fetchBefore.delete` is on (the default)
+- `upsert` and `connectOrCreate`: recorded as a create or an update, from a read before the write
+- `connect` / `set` / `disconnect`: an `update` log of each related row whose foreign key the write changed, with the old and new value in `changes`, plus a log of the join-table row when its model is in `entities`
 
-The reads a listed field adds, and how it combines with `diffExcludeFields`, `redactFields` and `foreignKey(...)` roots, are described under [`recordOmittedFields`](packages/prisma-extension/README.md#recordomittedfields); when a hidden field is recorded in clear, under [`redactFields`](packages/prisma-extension/README.md#redactfields).
-
-## Nested Operations
-
-Nested creates, updates, and deletes are automatically tracked at all depths:
-
-- **create**: Always logged (before = null)
-- **update / delete**: Before state captured when `fetchBefore.update` / `fetchBefore.delete` is `true` (default)
-- **upsert**: Automatically detects create vs update path
-- **connectOrCreate**: Smart detection — logs a create when creating a new record, and connects like `connect` otherwise
-- **connect / set / disconnect**: an `update` log of each related record whose foreign key the write changed, with the old and new value in `changes` (join table log if defined in `entities`)
-
-Nested rows are audited from the operation's own result: the relations a nested write touches are added to its `include` (or `select`) and removed again before the result is returned. A nested row is read again after the write in two cases, on the same client as the operation: your own `include` / `select` on the written relation leaves out a row a nested write updated or inserted (one read per relation path, preceded by a primary-key-only read of the relation when an inserted row may be hidden by a filter on it, so up to two), and a `connect`, `set` or `disconnect` may have re-linked rows (one read per relation path, after a read of the same rows before the write; both only when `fetchBefore.update` is on for the related model).
+The relations a nested write touches are added to the query's `include` and removed from the result again. See [Nested writes](packages/prisma-extension/README.md#nested-writes) for the extra reads and the limits.
 
 ## Compatibility
 
-|             | Supported                               | Tested in CI                  |
-| ----------- | --------------------------------------- | ----------------------------- |
-| **Prisma**  | 6.16 — 7.x (`>=6.16.0 <8.0.0`)          | 6.16.0, 6.19.3, 7.0.0, 7.10.0 |
-| **Node.js** | 20.19+, 22.12+, 24+ (AsyncLocalStorage) | 20, 22, 24                    |
-| **Runtime** | Node.js ✅, Bun ⚠️ Experimental, Edge ❌  | Node.js                       |
+|             | Supported                              | Tested in CI                  |
+| ----------- | -------------------------------------- | ----------------------------- |
+| **Prisma**  | 6.16 — 7.x                             | 6.16.0, 6.19.3, 7.0.0, 7.10.0 |
+| **Node.js** | 20.19+, 22.12+, 24+                    | 20, 22, 24                    |
+| **Runtime** | Node.js; Bun experimental; no Edge runtimes | Node.js                  |
 
-The [compatibility workflow](.github/workflows/prisma-compatibility.yml) runs the integration tests against PostgreSQL, and the CRUD smoke tests against SQLite and MySQL together with the MySQL concurrency tests, for each tested Prisma version on two Node.js majors, skipping the pairs for which `better-sqlite3` ships no Linux x64 prebuild. It runs on pushes to `main` and `draft`, on pull requests to `main`, and weekly.
+The [compatibility workflow](.github/workflows/prisma-compatibility.yml) runs the integration tests against PostgreSQL, and the CRUD smoke tests against SQLite and MySQL with the MySQL concurrency tests, for each tested Prisma version on two Node.js majors (skipping pairs for which `better-sqlite3` ships no Linux x64 prebuild). It runs on pushes to `main` and `draft`, on pull requests to `main`, and weekly.
 
 ## Prisma 8
 
-Prisma 8 is not supported. As of 2026-10, Prisma ORM 8 is a release candidate (`prisma@latest` is `8.0.0-rc.22`; see Prisma's [release status](https://www.prisma.io/docs/orm/release-status)). It has no `PrismaClient` and no `$extends`: middleware replaces query extensions. Supporting it means a new adapter on `@kuruwic/db-audit-core`, not a port of this extension. That work starts once Prisma 8.0.0 is generally available and supports MySQL and SQLite; Prisma lists MySQL as coming soon and SQLite as experimental ([supported databases](https://www.prisma.io/docs/orm/supported-databases)).
+Prisma 8 is not supported. It is a release candidate (`prisma@latest` was `8.0.0-rc.30` on 2026-11-06; see Prisma's [release status](https://www.prisma.io/docs/orm/release-status)). It has no `PrismaClient` and no `$extends`, and middleware replaces query extensions, so supporting it means a new adapter on `@kuruwic/db-audit-core` rather than a port of this extension. That work starts once Prisma 8.0.0 is generally available and supports MySQL and SQLite ([supported databases](https://www.prisma.io/docs/orm/supported-databases)).
 
 ## Limitations
 
-What the audit does not record, and where a concurrent write makes a record inaccurate, is described in [docs/guarantees.md](docs/guarantees.md): raw queries, the database's referential actions, and the reads after a write outside a transaction among them.
-
-- **Edge runtimes**: No AsyncLocalStorage support (Vercel Edge, Cloudflare Workers)
-- **Many-to-many with multiple aggregates**: Not currently supported
-- **Client-level `omit`**: The fields a client-level `omit` hides are not recorded unless an entity lists them in `recordOmittedFields`, which masks them; one your query names or your `createMany` data writes can be recorded in clear. When the Prisma version cannot be determined, a row created under a `select` is recorded with the selected columns only (see [Fields a client-level `omit` hides](#fields-a-client-level-omit-hides))
-- **Composite keys in `updateMany` / `deleteMany` with `limit`**: The audit narrows the write to the rows it read, with an `OR` of one condition per row over the primary key fields (Prisma has no tuple `IN`), so that `where` clause grows with `limit`. When a transaction tops up a short round, the exclusion of rows already read grows the same way. The number of queries does not change with `limit`
-- **`updateMany` / `deleteMany` without `limit`**: The audit reads every matching row before the write to record the before states, so the cost grows with the number of rows the `where` matches
-- **Nested writes**: The order of the nested keywords of one relation field, and a row a `connectOrCreate` finds and a `delete` of the same write removes, limit what a nested write records (see [Nested Operations limitations](packages/prisma-extension/README.md#limitations))
+- Raw queries, the database's referential actions and implicit many-to-many join tables are not recorded; [Coverage of Prisma writes](docs/guarantees.md#coverage-of-prisma-writes) lists every case.
+- Edge runtimes (Vercel Edge, Cloudflare Workers) are not supported.
+- `updateMany` and `deleteMany` read every matching row before the write, so their cost grows with the rows the `where` matches. With a `limit` on a composite key, the narrowed `where` holds one `OR` branch per row.
+- Some nested writes are recorded partially, depending on the order of the keywords of one relation field; see [Nested write limitations](packages/prisma-extension/README.md#nested-write-limitations).
 
 ## Development
 
@@ -598,9 +409,13 @@ pnpm build
 pnpm test
 ```
 
+`pnpm test` runs the integration tests and the demo API's tests in Testcontainers containers, so it needs a running Docker daemon.
+
 ### Demo app
 
-[`examples/`](examples) holds Commons, a small social feed whose handlers are plain Prisma calls. Beside the feed, an audit trail shows each row the extension writes, grouped by request and by the aggregates a write was recorded under. A history view per post and person reads the same rows as an activity feed, and an audit log page shows them raw. A Config page shows the API's `audit.config.ts` itself, and each recorded write links to the entry that mapped it. There is no sign-in: pick who you act as in the header.
+[`examples/`](examples) holds Commons, a small social feed whose handlers are plain Prisma calls. Beside the feed, an audit trail shows each row the extension writes, grouped by request and by aggregate; a history view per post and person reads the same rows as an activity feed, and an audit log page shows them raw. A Config page shows the API's `audit.config.ts`, linked from each recorded write. There is no sign-in: pick who you act as in the header.
+
+After `pnpm install` and `pnpm build`:
 
 ```bash
 docker compose up -d
@@ -608,7 +423,7 @@ DATABASE_URL=postgresql://prisma:prisma@localhost:5432/prisma_audit_dev pnpm db:
 pnpm dev
 ```
 
-The API (`examples/hono-api`) seeds an empty database on start; open http://localhost:5173. The design tokens and components are described in [`examples/web-client/DESIGN.md`](examples/web-client/DESIGN.md).
+The API (`examples/hono-api`) seeds an empty database on start; open http://localhost:5173. [`examples/web-client/DESIGN.md`](examples/web-client/DESIGN.md) describes the design tokens and components.
 
 ## License
 
