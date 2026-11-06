@@ -20,60 +20,6 @@ describe('Nested Delete Operations', () => {
     },
   };
 
-  describe('with fetchBefore.delete: true (test setup)', () => {
-    it('should create audit log with before state for nested delete', async () => {
-      const user = await context.provider.runAsync(testActor, async () => {
-        return await context.prisma.user.create({
-          data: {
-            email: 'author@example.com',
-            name: 'Author',
-            password: 'secret123',
-          },
-        });
-      });
-
-      const post = await context.provider.runAsync(testActor, async () => {
-        return await context.prisma.post.create({
-          data: {
-            title: 'Post to Delete',
-            content: 'Content',
-            authorId: user.id,
-          },
-        });
-      });
-
-      // Clear audit logs from setup
-      await context.prisma.auditLog.deleteMany();
-
-      await context.provider.runAsync(testActor, async () => {
-        await context.prisma.user.update({
-          where: { id: user.id },
-          data: {
-            posts: {
-              delete: {
-                id: post.id,
-              },
-            },
-          },
-          include: { posts: true },
-        });
-      });
-
-      const postLogs = await context.prisma.auditLog.findMany({
-        where: { entityType: 'Post', entityId: post.id, action: 'delete' },
-      });
-
-      expect(postLogs.map((log: { aggregateType: string }) => log.aggregateType).sort()).toEqual(['Post', 'User']);
-      for (const log of postLogs) {
-        expect(log.before).not.toBeNull(); // fetchBefore.delete=true (test setup)
-        expect(log.after).toBeNull(); // Delete always has null 'after'
-      }
-
-      const deletedPost = await context.prisma.post.findUnique({ where: { id: post.id } });
-      expect(deletedPost).toBeNull();
-    });
-  });
-
   // NOTE: Unless a test builds its own client, it uses the setup.ts configuration (fetchBefore.delete: true).
   // The paths where the before state of a nested delete is not read are covered below by
   // 'before-state read configured per entity' and 'a nested delete next to other operations at the same path'.

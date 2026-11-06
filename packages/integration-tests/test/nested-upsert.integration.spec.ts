@@ -118,62 +118,6 @@ describe('Nested Upsert Operations', () => {
             profile: {
               create: {
                 bio: 'Original bio',
-              },
-            },
-          },
-          include: { profile: true },
-        });
-      });
-
-      await context.prisma.auditLog.deleteMany();
-
-      await context.provider.runAsync(testActor, async () => {
-        await context.prisma.user.update({
-          where: { id: user.id },
-          data: {
-            profile: {
-              upsert: {
-                create: {
-                  bio: 'Should not be used',
-                },
-                update: {
-                  bio: 'Updated bio',
-                },
-              },
-            },
-          },
-          include: { profile: true },
-        });
-      });
-
-      const profile = await context.prisma.profile.findUnique({ where: { userId: user.id } });
-      expect(profile?.bio).toBe('Updated bio');
-
-      const profileLogs = await context.prisma.auditLog.findMany({
-        where: { entityType: 'Profile', entityId: profile?.id, action: 'update' },
-      });
-
-      // Profile has 2 logs: Profile aggregate + User aggregate
-      expect(profileLogs).toHaveLength(2);
-      for (const log of profileLogs) {
-        expect(log.action).toBe('update');
-        // Upsert always pre-fetches to pick its branch, so before holds the original row
-        expect(log.before).not.toBeNull();
-        const before = log.before as { bio?: string };
-        expect(before.bio).toBe('Original bio');
-      }
-    });
-
-    it('should handle nested upsert update with partial fields', async () => {
-      const user = await context.provider.runAsync(testActor, async () => {
-        return await context.prisma.user.create({
-          data: {
-            email: 'user@example.com',
-            name: 'User',
-            password: 'secret123',
-            profile: {
-              create: {
-                bio: 'Original bio',
                 website: 'https://original.com',
               },
             },
@@ -208,13 +152,17 @@ describe('Nested Upsert Operations', () => {
       expect(profile?.website).toBe('https://original.com');
 
       const profileLogs = await context.prisma.auditLog.findMany({
-        where: { entityType: 'Profile', entityId: profile?.id },
+        where: { entityType: 'Profile', entityId: profile?.id, action: 'update' },
       });
 
       // Profile has 2 logs: Profile aggregate + User aggregate
       expect(profileLogs).toHaveLength(2);
       for (const log of profileLogs) {
         expect(log.action).toBe('update');
+        // Upsert always pre-fetches to pick its branch, so before holds the original row
+        expect(log.before).not.toBeNull();
+        const before = log.before as { bio?: string };
+        expect(before.bio).toBe('Original bio');
         // The untouched website is not a change; updatedAt moves with every write
         const changes = log.changes as Record<string, unknown>;
         expect(Object.keys(changes).sort()).toEqual(['bio', 'updatedAt']);

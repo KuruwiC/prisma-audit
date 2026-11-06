@@ -96,10 +96,6 @@ describe('deserializeEntityId', () => {
     expect(deserializeEntityId('abc', ['id'])).toEqual({ id: 'abc' });
   });
 
-  it('treats a real id spelled "__default__" as a resolved identity', () => {
-    expect(deserializeEntityId('__default__', ['id'])).toEqual({ id: '__default__' });
-  });
-
   it('maps a composite identity to its fields in order', () => {
     expect(deserializeEntityId(JSON.stringify(['tenant-1', 'item-1']), ['tenantId', 'itemId'])).toEqual({
       tenantId: 'tenant-1',

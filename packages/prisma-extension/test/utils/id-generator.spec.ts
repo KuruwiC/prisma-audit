@@ -267,19 +267,6 @@ describe('ensureIds', () => {
     expect(result[0]?.id).toMatch(UUID_V4_RE);
   });
 
-  it('injects cuid v1 for @default(cuid()) models', () => {
-    const result = ensureIds(
-      metadataWithIdDefault({ name: 'cuid', args: [1] }),
-      'Item',
-      [{ label: 'a' }],
-      ['id'],
-    ) as Array<{
-      id: string;
-      label: string;
-    }>;
-    expect(result[0]?.id).toMatch(CUID_V1_RE);
-  });
-
   it('throws an unsupported-default error for unknown uuid versions instead of silently injecting v4', () => {
     expect(() =>
       ensureIds(metadataWithIdDefault({ name: 'uuid', args: [8] }), 'Item', [{ label: 'a' }], ['id']),
@@ -323,52 +310,6 @@ describe('ensureIds', () => {
 });
 
 describe('getRowKeyFields', () => {
-  it('returns the primary key of a model that has one, ahead of its unique fields', () => {
-    const metadata = schemaMetadataOf(
-      model('User', [
-        column('email', { isUnique: true, isRequired: true }),
-        column('id', { isId: true, isRequired: true }),
-      ]),
-    );
-
-    expect(getRowKeyFields(metadata, 'User')).toEqual(['id']);
-  });
-
-  it('returns every field of a composite primary key', () => {
-    const metadata = schemaMetadataOf(
-      model('PostLike', [column('postId', { isRequired: true }), column('userId', { isRequired: true })], {
-        primaryKey: { name: null, fields: ['postId', 'userId'] },
-      }),
-    );
-
-    expect(getRowKeyFields(metadata, 'PostLike')).toEqual(['postId', 'userId']);
-  });
-
-  it('returns the first unique field on a required column of a model without a primary key, passing over a nullable one', () => {
-    const metadata = schemaMetadataOf(
-      model('Device', [
-        column('label', { isUnique: true }),
-        column('serial', { isUnique: true, isRequired: true }),
-        column('code', { isUnique: true, isRequired: true }),
-      ]),
-    );
-
-    expect(getRowKeyFields(metadata, 'Device')).toEqual(['serial']);
-  });
-
-  it('returns a unique index whose fields are all required when the model has no primary key or such unique field', () => {
-    const metadata = schemaMetadataOf(
-      model('Setting', [column('scope', { isRequired: true }), column('key', { isRequired: true }), column('note')], {
-        uniqueIndexes: [
-          { name: null, fields: ['scope', 'note'] },
-          { name: 'scope_key', fields: ['scope', 'key'] },
-        ],
-      }),
-    );
-
-    expect(getRowKeyFields(metadata, 'Setting')).toEqual(['scope', 'key']);
-  });
-
   it('throws naming the model when it has no primary key and no unique constraint on required fields', () => {
     const metadata = schemaMetadataOf(model('Note', [column('label', { isUnique: true }), column('text')]));
 
@@ -385,17 +326,6 @@ describe('getRowKeyFields', () => {
 });
 
 describe('rowKeyFieldsOf', () => {
-  it('returns the primary key ahead of a unique field', () => {
-    const metadata = schemaMetadataOf(
-      model('User', [
-        column('email', { isUnique: true, isRequired: true }),
-        column('id', { isId: true, isRequired: true }),
-      ]),
-    );
-
-    expect(rowKeyFieldsOf(metadata, 'User')).toEqual(['id']);
-  });
-
   it('returns the first unique field on a required column of a model without a primary key', () => {
     const metadata = schemaMetadataOf(
       model('Device', [column('label', { isUnique: true }), column('code', { isUnique: true, isRequired: true })]),

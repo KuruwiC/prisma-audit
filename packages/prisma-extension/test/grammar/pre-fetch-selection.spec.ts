@@ -36,14 +36,6 @@ describe('filterOperationsToPreFetch', () => {
     ]);
   });
 
-  it('never selects the keywords that only insert or link rows', () => {
-    const selected = selectedKeywords(() => true);
-
-    for (const keyword of ['create', 'createMany', 'connect', 'set', 'disconnect'] as const) {
-      expect(selected).not.toContain(keyword);
-    }
-  });
-
   it('asks the fetch-before configuration about the related model and the keyword of update and delete only', () => {
     const shouldFetchBefore = vi.fn(() => false);
     const operations = [

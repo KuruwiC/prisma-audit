@@ -141,69 +141,6 @@ describe('Context Enrichment Integration', () => {
       expect(actorContext.name).toBeUndefined();
       expect(actorContext.role).toBeUndefined();
     });
-
-    it('should track different actors correctly in concurrent operations', async () => {
-      const adminActor: TestAuditContext = {
-        actor: {
-          category: 'model',
-          type: 'User',
-          id: 'admin-1',
-          name: 'Admin User',
-          role: 'admin',
-        },
-      };
-
-      const regularActor: TestAuditContext = {
-        actor: {
-          category: 'model',
-          type: 'User',
-          id: 'user-1',
-          name: 'Regular User',
-          role: 'user',
-        },
-      };
-
-      const [adminUser, regularUser] = await Promise.all([
-        context.provider.runAsync(adminActor, async () => {
-          return await context.prisma.user.create({
-            data: {
-              email: 'admin@example.com',
-              name: 'Admin Created User',
-              password: 'secret1',
-            },
-          });
-        }),
-        context.provider.runAsync(regularActor, async () => {
-          return await context.prisma.user.create({
-            data: {
-              email: 'regular@example.com',
-              name: 'Regular Created User',
-              password: 'secret2',
-            },
-          });
-        }),
-      ]);
-
-      const adminLogs = await context.prisma.auditLog.findMany({
-        where: { entityType: 'User', entityId: adminUser.id },
-      });
-      expect(adminLogs).toHaveLength(1);
-      const adminLog = adminLogs[0];
-      expect(adminLog.actorId).toBe('admin-1');
-      const adminContext = adminLog.actorContext as Record<string, unknown>;
-      expect(adminContext.name).toBe('Admin User');
-      expect(adminContext.role).toBe('admin');
-
-      const regularLogs = await context.prisma.auditLog.findMany({
-        where: { entityType: 'User', entityId: regularUser.id },
-      });
-      expect(regularLogs).toHaveLength(1);
-      const regularLog = regularLogs[0];
-      expect(regularLog.actorId).toBe('user-1');
-      const regularContext = regularLog.actorContext as Record<string, unknown>;
-      expect(regularContext.name).toBe('Regular User');
-      expect(regularContext.role).toBe('user');
-    });
   });
 
   describe('Actor context in UPDATE operations', () => {

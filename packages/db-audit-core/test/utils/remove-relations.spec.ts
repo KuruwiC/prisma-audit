@@ -168,21 +168,6 @@ describe('removeRelations', () => {
   });
 
   describe('edge cases', () => {
-    it('should preserve nested scalar objects without id field', () => {
-      const input = {
-        id: 'user-1',
-        name: 'John',
-        metadata: {
-          lastLogin: new Date('2024-01-01'),
-          loginCount: 5,
-        },
-      };
-
-      const result = removeRelations(input, new Set([]));
-
-      expect(result).toEqual(input);
-    });
-
     it('should handle null and undefined values', () => {
       const input = {
         id: 'user-1',

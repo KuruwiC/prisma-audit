@@ -284,18 +284,6 @@ describe('validateEntityMap', () => {
     expect(() => validateEntityMap(mapping)).not.toThrow();
   });
 
-  it('should throw on missing type field', () => {
-    const mapping = {
-      User: {
-        category: 'model',
-        idResolver: self(),
-        aggregates: [],
-      },
-    } as unknown as EntityMap;
-
-    expect(() => validateEntityMap(mapping)).toThrow('type is required');
-  });
-
   it('reports every invalid entity in one error, one line per problem', () => {
     const mapping = {
       User: { category: 'model', idResolver: self() },
@@ -307,18 +295,6 @@ describe('validateEntityMap', () => {
         'Entity "User": type is required\n' +
         'Entity "Post": idResolver is required',
     );
-  });
-
-  it('should throw on missing idResolver field', () => {
-    const mapping = {
-      User: {
-        category: 'model',
-        type: 'User',
-        aggregates: [],
-      },
-    } as unknown as EntityMap;
-
-    expect(() => validateEntityMap(mapping)).toThrow('idResolver is required');
   });
 
   it('should throw when two entities share the same category and type', () => {

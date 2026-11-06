@@ -952,14 +952,17 @@ describe('runAuditedOperation', () => {
         expect(recordedFailuresOf(transaction.audit)).toEqual([]);
       });
 
-      it('resolves an atomic operation an upsert pre-fetch failure was kept for when the event collection left no write without a record', async () => {
-        const deps = createDeps({ singleExecutor: keepingExecutor(failureOf('pre-fetch', 'upsert')) });
-        const transaction = activeTransactionOf(transactionClient);
+      it.each(['upsert', 'update'] as const)(
+        'resolves an atomic operation a %s pre-fetch failure was kept for when the event collection left no write without a record',
+        async (action) => {
+          const deps = createDeps({ singleExecutor: keepingExecutor(failureOf('pre-fetch', action)) });
+          const transaction = activeTransactionOf(transactionClient);
 
-        await expect(runOperation(atomicUpdateIn(transaction), deps)).resolves.toBe(executedUpdate.result);
+          await expect(runOperation(atomicUpdateIn(transaction), deps)).resolves.toBe(executedUpdate.result);
 
-        expect(recordedFailuresOf(transaction.audit)).toEqual([]);
-      });
+          expect(recordedFailuresOf(transaction.audit)).toEqual([]);
+        },
+      );
 
       it('keeps the failures of each operation apart from those of another it runs while continuing', async () => {
         const inner = createDeps({
@@ -983,30 +986,6 @@ describe('runAuditedOperation', () => {
         ).resolves.toBe(executedUpdate.result);
 
         expect(outerQuery).toHaveBeenCalledTimes(1);
-        expect(recordedFailuresOf(transaction.audit)).toEqual([]);
-      });
-
-      it('resolves an atomic operation whose update entry a pre-fetch failure left without its before state', async () => {
-        const deps = createDeps({ singleExecutor: keepingExecutor(failureOf('pre-fetch', 'update')) });
-        const transaction = activeTransactionOf(transactionClient);
-
-        await expect(
-          runOperation(
-            {
-              operation: interceptedOf(
-                'update',
-                vi.fn(async () => 'written'),
-              ),
-              auditContext,
-              baseClient: createBaseClient(),
-              mode: 'atomic',
-              plan: 'immediate',
-              transaction,
-            },
-            deps,
-          ),
-        ).resolves.toBe(executedUpdate.result);
-
         expect(recordedFailuresOf(transaction.audit)).toEqual([]);
       });
     });

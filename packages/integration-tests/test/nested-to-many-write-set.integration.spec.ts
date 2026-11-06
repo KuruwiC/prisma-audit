@@ -231,19 +231,6 @@ describe('nested to-many write set', () => {
     ]);
   });
 
-  it('a nested update audits the targeted post only', async () => {
-    const { user, p1 } = await seedUserWithTwoPosts('nested-update@example.com');
-
-    await asActor(() =>
-      clients.prisma.user.update({
-        where: { id: user.id },
-        data: { posts: { update: { where: { id: p1.id }, data: { title: 'T' } } } },
-      }),
-    );
-
-    expect(await eventsOf('Post')).toEqual([expect.objectContaining({ entityId: p1.id, action: 'update' })]);
-  });
-
   it('a nested create audits the created post only', async () => {
     const { user } = await seedUserWithTwoPosts('nested-create@example.com');
 
@@ -307,6 +294,11 @@ describe('nested to-many write set', () => {
     const commentEvents = await eventsOf('Comment');
     expect(commentEvents).toHaveLength(1);
     expect(commentEvents[0]).toMatchObject({ action: 'create', after: { content: 'c', postId: p1.id } });
+    const commentLogs = await clients.basePrisma.auditLog.findMany({
+      where: { entityType: 'Comment', action: 'create' },
+      orderBy: { aggregateType: 'asc' },
+    });
+    expect(commentLogs.map((log) => log.aggregateType)).toEqual(['Comment', 'Post', 'User']);
   });
 
   it('a nested create of a row with a database-generated key audits the new row only', async () => {

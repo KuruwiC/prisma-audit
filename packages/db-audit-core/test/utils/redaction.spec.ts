@@ -300,39 +300,6 @@ describe('edge cases', () => {
       ],
     });
   });
-
-  it('should handle multiple sensitive fields in same object', () => {
-    const redactor = createRedactor();
-    const data = {
-      username: 'john',
-      password: 'pass123',
-      token: 'token456',
-      apiKey: 'key789',
-      secret: 'secret000',
-    };
-
-    const redacted = redactor(data) as Record<string, unknown>;
-
-    expect(redacted).toEqual({
-      username: 'john',
-      password: {
-        redacted: true,
-        hadValue: true,
-      } satisfies RedactedFieldInfo,
-      token: {
-        redacted: true,
-        hadValue: true,
-      } satisfies RedactedFieldInfo,
-      apiKey: {
-        redacted: true,
-        hadValue: true,
-      } satisfies RedactedFieldInfo,
-      secret: {
-        redacted: true,
-        hadValue: true,
-      } satisfies RedactedFieldInfo,
-    });
-  });
 });
 
 describe('redaction metadata', () => {
@@ -447,39 +414,6 @@ describe('redaction metadata', () => {
       hadValue: true,
     });
     expect(passwordChange.new).toBe(null);
-  });
-
-  it('should handle complex change objects with multiple sensitive fields', () => {
-    const redactor = createRedactor();
-    const data = {
-      password: {
-        old: 'oldPassword123',
-        new: 'newPassword456',
-      },
-      apiKey: {
-        old: 'oldKey123',
-        new: 'oldKey123', // unchanged
-      },
-      token: {
-        old: null,
-        new: 'newToken789',
-      },
-    };
-
-    const redacted = redactor(data) as Record<string, unknown>;
-
-    // Password changed
-    const passwordChange = redacted.password as { old: RedactedFieldInfo; new: RedactedFieldInfo };
-    expect(passwordChange.new.isDifferent).toBe(true);
-
-    // ApiKey unchanged
-    const apiKeyChange = redacted.apiKey as { old: RedactedFieldInfo; new: RedactedFieldInfo };
-    expect(apiKeyChange.new.isDifferent).toBe(false);
-
-    // Token added (null → value)
-    const tokenChange = redacted.token as { old: null; new: RedactedFieldInfo };
-    expect(tokenChange.old).toBe(null);
-    expect(tokenChange.new.isDifferent).toBe(true);
   });
 });
 

@@ -111,7 +111,7 @@ const nestedPostCreate = { data: { id: 'u1', posts: { create: { id: 'p1' } } } }
 
 describe('the audit gate of the extension hook', () => {
   it('rejects a write without an audit context to a model that requires one, before it runs', async () => {
-    const { client, query, writer } = auditedClient({ requireContext: true });
+    const { client, query, transaction, writer } = auditedClient({ requireContext: true });
 
     const rejection = client.user.create({ data: { id: 'u1' } });
 
@@ -121,6 +121,7 @@ describe('the audit gate of the extension hook', () => {
       operationModelName: 'User',
       operation: 'create',
     });
+    expect(transaction).not.toHaveBeenCalled();
     expect(query).not.toHaveBeenCalled();
     expect(writer).not.toHaveBeenCalled();
   });
@@ -255,14 +256,6 @@ describe('the audit gate of the extension hook', () => {
   });
 
   describe('with the default atomic write mode', () => {
-    it('opens no transaction for a write without an audit context, and rejects it when it requires one', async () => {
-      const { client, query, transaction } = auditedClient({ requireContext: true });
-
-      await expect(client.user.create({ data: { id: 'u1' } })).rejects.toBeInstanceOf(AuditContextMissingError);
-      expect(transaction).not.toHaveBeenCalled();
-      expect(query).not.toHaveBeenCalled();
-    });
-
     it('rejects, when it is awaited, a write made with an audit context that is awaited without one', async () => {
       const { client, provider, query, transaction } = auditedClient({ requireContext: true });
 

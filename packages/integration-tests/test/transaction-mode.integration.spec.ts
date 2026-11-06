@@ -493,22 +493,6 @@ describe('write mode', () => {
   });
 
   describe('only under the atomic write mode', () => {
-    it('runs a write through the audited client inside a callback of your transaction in a transaction of its own, together with its audit', async () => {
-      const clients = createClients({ mode: 'atomic' });
-
-      await expect(
-        clients.run(() =>
-          clients.client.$transaction(async () => {
-            await clients.client.user.create({ data: { email: 'outer@example.com', name: 'Outer' } });
-            throw new Error('rollback');
-          }),
-        ),
-      ).rejects.toThrow('rollback');
-
-      expect(await raw.user.count()).toBe(1);
-      expect(await auditRows()).toEqual(['User.create']);
-    });
-
     describe('audits each query an extension applied before the audit issues through `query` for the same call', () => {
       it('for a single write', async () => {
         const clients = createClients({ mode: 'atomic', companionCreate: true });

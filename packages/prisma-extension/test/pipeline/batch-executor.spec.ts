@@ -667,6 +667,7 @@ describe('createBatchExecutor', () => {
       expect(findMany.mock.calls).toEqual([[{ where: args.where }], [{ where: { id: { in: ['a', 'b'] } } }]]);
       expect(updateMany).toHaveBeenCalledWith(args);
       expect(outcome.result).toEqual({ count: 2 });
+      expect(failureSink.fail).not.toHaveBeenCalled();
       expect(produceRecords).toHaveBeenCalledWith(
         [
           eventOf({
@@ -960,6 +961,7 @@ describe('createBatchExecutor', () => {
       expect(findMany).toHaveBeenCalledTimes(1);
       expect(deleteMany).toHaveBeenCalledWith(args);
       expect(outcome.result).toEqual({ count: 2 });
+      expect(failureSink.fail).not.toHaveBeenCalled();
       expect(produceRecords).toHaveBeenCalledWith(
         [
           eventOf({
@@ -1933,20 +1935,6 @@ describe('createBatchExecutor', () => {
       expect(produceRecords).toHaveBeenCalledWith([], expect.anything(), new Map());
     });
 
-    it('reports nothing when an updateMany wrote as many rows as it read', async () => {
-      const findMany = findManyReturning([a1, b1], [a2, b2]);
-      const client = clientWith({ user: { findMany, updateMany: vi.fn(async () => ({ count: 2 })) } });
-
-      await runWithRecords(
-        executor,
-        operationOn(client, 'updateMany', { where, data: { email: 'x' } }),
-        scopeOn(client, failureSink),
-        produce(),
-      );
-
-      expect(failureSink.fail).not.toHaveBeenCalled();
-    });
-
     it('reports the rows an updateMany found again after the write beyond the rows it updated, and still audits every row found as updated', async () => {
       const findMany = findManyReturning([a1, b1], [a2, b2]);
       const updateMany = vi.fn(async () => ({ count: 1 }));
@@ -2045,20 +2033,6 @@ describe('createBatchExecutor', () => {
         expect.anything(),
         new Map(),
       );
-    });
-
-    it('reports nothing when a deleteMany deleted as many rows as it read', async () => {
-      const findMany = vi.fn(async () => [a1, b1]);
-      const client = clientWith({ user: { findMany, deleteMany: vi.fn(async () => ({ count: 2 })) } });
-
-      await runWithRecords(
-        executor,
-        operationOn(client, 'deleteMany', { where }),
-        scopeOn(client, failureSink),
-        produce(),
-      );
-
-      expect(failureSink.fail).not.toHaveBeenCalled();
     });
   });
 

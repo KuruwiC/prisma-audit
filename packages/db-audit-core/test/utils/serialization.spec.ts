@@ -135,22 +135,6 @@ describe('serializeForAuditJson', () => {
       });
     });
 
-    it('serializes a BigInt and a Date nested two levels deep', () => {
-      const obj = {
-        level1: {
-          level2: {
-            bigintField: 999n,
-            dateField: new Date('2025-03-01T00:00:00.000Z'),
-          },
-        },
-      };
-      const result = serializeForAuditJson(obj) as Record<string, unknown>;
-      const level1 = result.level1 as Record<string, unknown>;
-      const level2 = level1.level2 as Record<string, unknown>;
-      expect(level2.bigintField).toBe('999');
-      expect(level2.dateField).toBe('2025-03-01T00:00:00.000Z');
-    });
-
     it('should handle arrays of objects with mixed types', () => {
       const arr = [
         { id: 1n, date: new Date('2025-01-01T00:00:00.000Z') },

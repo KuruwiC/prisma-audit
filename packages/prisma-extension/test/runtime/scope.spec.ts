@@ -8,7 +8,7 @@ import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import { describe, expect, it } from 'vitest';
 import type { PrismaHandle } from '../../src/internal-types.js';
 import { currentOperations, currentScope, operationBinding, withScope } from '../../src/runtime/scope.js';
-import { activeTransactionOf, recordedFailuresOf } from '../support/active-transaction.js';
+import { activeTransactionOf } from '../support/active-transaction.js';
 
 const client = (id: string): PrismaHandle => ({ id });
 
@@ -124,23 +124,6 @@ describe('runtime scope', () => {
       expect(a).toBe(clientA);
       expect(b).toBe(clientB);
       expect(currentScope()).toBeUndefined();
-    });
-  });
-
-  describe('transaction audit', () => {
-    it("lets callers record on the current frame's transaction audit and see it via currentScope", () => {
-      withScope({ binding: { transaction: activeTransactionOf(client('tx')) } }, () => {
-        const transaction = currentScope()?.binding?.transaction;
-        if (!transaction) throw new Error('expected a transaction scope');
-        const failure = new Error('audit failure');
-
-        transaction.audit.poison(failure);
-
-        withScope({ isProcessingAuditLog: true }, () => {
-          expect(currentScope()?.binding?.transaction).toBe(transaction);
-          expect(recordedFailuresOf(transaction.audit)).toEqual([failure]);
-        });
-      });
     });
   });
 

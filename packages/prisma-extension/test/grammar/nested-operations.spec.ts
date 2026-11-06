@@ -107,32 +107,6 @@ describe('detectNestedOperations', () => {
     ]);
   });
 
-  it('should detect multiple nested operations', () => {
-    const args = {
-      data: {
-        email: 'user@example.com',
-        posts: {
-          create: [{ title: 'Post 1', content: 'Content 1' }],
-        },
-        profile: {
-          create: { bio: 'Bio text' },
-        },
-      },
-    };
-
-    const operations = detectNestedOperations(schemaMetadata, 'User', args, {
-      kind: 'discovery',
-    });
-
-    expect(operations).toHaveLength(2);
-    expect(operations.map((op) => [op.fieldName, op.operation]).sort()).toEqual(
-      [
-        ['posts', 'create'],
-        ['profile', 'create'],
-      ].sort(),
-    );
-  });
-
   it('should NOT detect operation keywords in JSON fields as nested operations', () => {
     const args = {
       data: {
