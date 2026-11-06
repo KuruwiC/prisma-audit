@@ -3,8 +3,9 @@
  * is and link a model straight to the lines that decide where its writes are recorded.
  *
  * It reads the file's layout: an entity is `  Name: defineEntity(` up to the next
- * `  }),`, and a client-wide setting inside `defineConfig` is either one `  key: value,` line or
- * `  key: {` up to the next `  },`. Each takes the comment lines written right above it. A test runs
+ * `  }),`, and a client-wide setting inside `defineConfig` is either one `  key: value,` line or a
+ * `  key: ` line ending in an open bracket (`{`, `[`, `(`) up to the next line that closes it at the
+ * same indent (`  },`, `  ],`, `  }),`). Each takes the comment lines written right above it. A test runs
  * this over the real file, so a layout change fails there instead of breaking the links.
  */
 
@@ -23,9 +24,9 @@ export type ConfigSection = {
 
 const MODEL_START = /^ {2}(\w+): defineEntity\b/;
 const MODEL_END = /^ {2}\}\),\s*$/;
-const SETTING_START = /^ {2}(\w+): \{\s*$/;
+const SETTING_START = /^ {2}(\w+): .*[{[(]\s*$/;
 const SETTING_LINE = /^ {2}(\w+): .+,\s*$/;
-const SETTING_END = /^ {2}\},?\s*$/;
+const SETTING_END = /^ {2}[\]})]+,?\s*$/;
 const CONFIG_START = /^export default defineConfig\b/;
 const COMMENT = /^ {2}\/\//;
 const AGGREGATE_DECLARATION = /\bto\('(\w+)'/g;

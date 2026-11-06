@@ -58,7 +58,13 @@ const field = (mutation: Mutation, key: string) => {
 
 const entityField = (mutation: Mutation, key: string) => text(primaryRow(mutation).entityContext?.[key]);
 
-const changedFields = (mutation: Mutation) => Object.keys(primaryRow(mutation).changes ?? {});
+/** The fields an update changed, or null when its changes were not recorded (its before state was not read) */
+const changedFields = (mutation: Mutation) => {
+  const { changes } = primaryRow(mutation);
+  return changes ? Object.keys(changes) : null;
+};
+
+const NOT_RECORDED = 'Changed fields not recorded';
 
 const refKey = (type: string, id: string) => `${type}:${id}`;
 
@@ -150,12 +156,13 @@ const phrasers: Record<string, (mutation: Mutation, context: PhraseContext) => P
             .sort((a, b) => a.name.localeCompare(b.name)),
         };
       case 'update': {
-        const unchanged = changedFields(post).length === 0;
+        const changed = changedFields(post);
+        const unchanged = changed?.length === 0;
         return {
           predicate: `edited ${ref}`,
           quote: excerpt,
           quiet: unchanged,
-          details: unchanged ? ['No field changed'] : [],
+          details: changed === null ? [NOT_RECORDED] : unchanged ? ['No field changed'] : [],
         };
       }
       case 'delete': {
@@ -203,15 +210,19 @@ const phrasers: Record<string, (mutation: Mutation, context: PhraseContext) => P
       };
     }
     if (user.action === 'delete') return { predicate: `deleted the account of ${userName(context, user.entityId)}` };
+    const changed = changedFields(user);
     const aspects = [
-      ...changedFields(user),
+      ...(changed ?? []),
       ...(context.contained.some((mutation) => mutation.entityType === 'Profile') ? ['bio'] : []),
     ];
     const whose = possessive(context, user.entityId);
+    const details = changed === null ? [NOT_RECORDED] : [];
     if (aspects.length === 0)
-      return { predicate: `saved ${whose} account`, quiet: true, details: ['No field changed'] };
+      return changed === null
+        ? { predicate: `updated ${whose} account`, details }
+        : { predicate: `saved ${whose} account`, quiet: true, details: ['No field changed'] };
     if (aspects.length === 1 && aspects[0] === 'password') return { predicate: `changed ${whose} password` };
-    return { predicate: `updated ${whose} ${list.format(aspects)}` };
+    return { predicate: `updated ${whose} ${list.format(aspects)}`, details };
   },
   Profile: (profile, context) => {
     const whose = possessive(context, field(profile, 'userId'));
@@ -248,7 +259,7 @@ export const activityOf = (group: RequestGroup, perspective: Perspective): Activ
   // An update that changed nothing and carries nothing names the operation only when nothing else can
   const hollow = (mutation: Mutation) =>
     mutation.action === 'update' &&
-    changedFields(mutation).length === 0 &&
+    changedFields(mutation)?.length === 0 &&
     !mutations.some((child) => belongsTo(child, mutation));
   const [primary, ...siblings] = [...candidates].sort(
     (a, b) => Number(hollow(a)) - Number(hollow(b)) || rankOf(a) - rankOf(b),

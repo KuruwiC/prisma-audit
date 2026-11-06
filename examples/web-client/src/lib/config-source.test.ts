@@ -57,3 +57,30 @@ describe('configSections over the demo audit config', () => {
     expect(text('actorContext')).toMatch(/fallback: null,\n {2}\},$/);
   });
 });
+
+describe('configSections over a setting whose value spans lines', () => {
+  const source = [
+    'export default defineConfig({',
+    '  // Logs every read',
+    '  onRead: async (event) => {',
+    '    await log(event);',
+    '  },',
+    '  fields: [',
+    "    'a',",
+    '  ],',
+    '  wrapped: wrap({',
+    '    inner: true,',
+    '  }),',
+    '  flag: true,',
+    '});',
+  ].join('\n');
+
+  it('spans each one up to the line that closes it, from the comment written above it', () => {
+    expect(configSections(source).map(({ id, start, end }) => [id, start, end])).toEqual([
+      ['onRead', 1, 4],
+      ['fields', 5, 7],
+      ['wrapped', 8, 10],
+      ['flag', 11, 11],
+    ]);
+  });
+});

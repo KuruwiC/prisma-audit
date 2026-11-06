@@ -332,4 +332,78 @@ describe('toActivities', () => {
     expect(activity.phrase.quiet).toBe(true);
     expect(activity.phrase.details).toEqual(['No field changed']);
   });
+
+  it('does not call an edit whose changes were not recorded unchanged', () => {
+    const rows = write(
+      {
+        ...mina,
+        ...request('unread', 'PATCH', '/api/posts/p1'),
+        action: 'update',
+        entityType: 'Post',
+        entityId: 'p1',
+        changes: null,
+        beforeUnavailable: true,
+        entityContext: { excerpt: 'Hello, audit' },
+      },
+      [
+        ['Post', 'p1', 'Hello, audit'],
+        ['User', 'u_mina', 'Mina Sato'],
+      ],
+    );
+
+    const [activity] = toActivities(rows, everything);
+    expect(sentenceOf(activity.phrase)).toBe('Mina Sato edited “Hello, audit”');
+    expect(activity.phrase.quiet).toBe(false);
+    expect(activity.phrase.details).toEqual(['Changed fields not recorded']);
+  });
+
+  it('does not call an account save whose changes were not recorded unchanged', () => {
+    const rows = write(
+      {
+        ...mina,
+        ...request('unread', 'PATCH', '/api/users/u_mina'),
+        action: 'update',
+        entityType: 'User',
+        entityId: 'u_mina',
+        changes: null,
+        beforeUnavailable: true,
+      },
+      [['User', 'u_mina', 'Mina Sato']],
+    );
+
+    const [activity] = toActivities(rows, everything);
+    expect(sentenceOf(activity.phrase)).toBe('Mina Sato updated their account');
+    expect(activity.phrase.quiet).toBe(false);
+    expect(activity.phrase.details).toEqual(['Changed fields not recorded']);
+  });
+
+  it('names an operation by an edit whose changes were not recorded, not by a sibling it outranks', () => {
+    const base = { ...mina, ...request('unread', 'PATCH', '/api/posts/p1') };
+    const rows = [
+      ...write(
+        {
+          ...base,
+          action: 'update',
+          entityType: 'Post',
+          entityId: 'p1',
+          changes: null,
+          beforeUnavailable: true,
+          entityContext: { excerpt: 'Hello, audit' },
+        },
+        [['Post', 'p1', 'Hello, audit']],
+      ),
+      ...write(
+        {
+          ...base,
+          action: 'update',
+          entityType: 'User',
+          entityId: 'u_mina',
+          changes: { name: { old: 'Mina', new: 'Mina Sato' } },
+        },
+        [['User', 'u_mina', 'Mina Sato']],
+      ),
+    ];
+
+    expect(sentences(toActivities(rows, everything))).toEqual(['Mina Sato edited “Hello, audit”']);
+  });
 });
