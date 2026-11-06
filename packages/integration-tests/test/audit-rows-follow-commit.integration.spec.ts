@@ -4,7 +4,7 @@
  * back, or PostgreSQL aborting the transaction on a statement the callback caught.
  */
 
-import type { AuditContext } from '@kuruwic/db-audit-core';
+import type { AuditContext, AuditContextProvider } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import type { WriteMode } from '@kuruwic/prisma-audit';
 import { AuditRollbackError, createAuditClient, flushAllPendingWrites } from '@kuruwic/prisma-audit';
@@ -12,6 +12,7 @@ import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { afterEach, beforeEach, describe, expect, inject, it } from 'vitest';
+import { afterPendingMicrotasks, createHold } from './helpers/hold.js';
 import { cleanDatabase, createBasePrisma, testAuditOptions } from './helpers/setup.js';
 
 const testActor: AuditContext = {
@@ -19,8 +20,6 @@ const testActor: AuditContext = {
 };
 
 const userData = (email: string) => ({ email, name: email, password: 'secret123' });
-
-const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 type AsyncMethod = (...args: unknown[]) => Promise<unknown>;
 
@@ -48,12 +47,24 @@ const intercepted = <T extends object>(
     },
   });
 
-/**
- * A client without the audit extension whose adapter runs each nested SAVEPOINT `delayMs` late, so
- * that what starts meanwhile on the enclosing transaction reaches the database first
- */
-const createClientWithLateSavepoints = (delayMs: number) =>
-  new PrismaClient({
+interface ConnectionHooks {
+  /** Runs before a nested SAVEPOINT is sent, which waits for it */
+  readonly beforeSavepoint?: () => Promise<void>;
+  readonly afterSavepoint?: () => void;
+  /** Runs after a statement of a transaction has run, before Prisma receives its result, which waits for it */
+  readonly afterStatement?: (query: unknown) => Promise<void> | void;
+}
+
+/** A client without the audit extension whose adapter calls `hooks` around the statements of its transactions */
+const createClientOnWatchedConnection = ({ beforeSavepoint, afterSavepoint, afterStatement }: ConnectionHooks) => {
+  const statement =
+    (run: AsyncMethod): AsyncMethod =>
+    async (...args) => {
+      const result = await run(...args);
+      await afterStatement?.(args[0]);
+      return result;
+    };
+  return new PrismaClient({
     adapter: intercepted(new PrismaPg({ connectionString: inject('databaseUrl') }), {
       connect: (connect) => async () =>
         intercepted(objectOf(await connect()), {
@@ -61,16 +72,39 @@ const createClientWithLateSavepoints = (delayMs: number) =>
             (start) =>
             async (...args) =>
               intercepted(objectOf(await start(...args)), {
+                queryRaw: statement,
+                executeRaw: statement,
                 createSavepoint:
                   (create) =>
                   async (...args) => {
-                    await sleep(delayMs);
-                    return create(...args);
+                    await beforeSavepoint?.();
+                    const result = await create(...args);
+                    afterSavepoint?.();
+                    return result;
                   },
               }),
         }),
     }),
   });
+};
+
+/** What an INSERT of the write of kept@example.com wrote, from the statement the adapter ran */
+const keptWriteInsert = (query: unknown): 'kept row inserted' | 'kept audit row inserted' | undefined => {
+  if (typeof query !== 'object' || query === null || !('sql' in query) || !('args' in query)) {
+    return undefined;
+  }
+  const { sql, args } = query;
+  if (typeof sql !== 'string' || !sql.startsWith('INSERT') || !Array.isArray(args)) {
+    return undefined;
+  }
+  if (!args.some((arg) => typeof arg === 'string' && arg.includes('kept@example.com'))) {
+    return undefined;
+  }
+  if (sql.includes('"users"')) {
+    return 'kept row inserted';
+  }
+  return sql.includes('"audit_logs"') ? 'kept audit row inserted' : undefined;
+};
 
 describe('audit rows follow the commit of the writes they record', () => {
   let basePrisma: PrismaClient;
@@ -84,9 +118,9 @@ describe('audit rows follow the commit of the writes they record', () => {
     await basePrisma.$disconnect();
   });
 
-  const auditedClient = (mode: WriteMode) => {
+  const auditedClient = (mode: WriteMode, base: PrismaClient = basePrisma) => {
     const provider = createAsyncLocalStorageProvider();
-    const prisma = createAuditClient(basePrisma, {
+    const prisma = createAuditClient(base, {
       ...testAuditOptions(provider, { Prisma, schema: auditSchema }),
       write: { mode },
     });
@@ -198,68 +232,148 @@ describe('audit rows follow the commit of the writes they record', () => {
     });
 
     it('leaves an audit row for exactly the committed writes when a write starts while a nested transaction that rolls back is opening', async () => {
-      // The SAVEPOINT runs late and the audit-log insert later still: a write that started while the
-      // nested transaction was opening and ran its own insert on the enclosing transaction would
-      // insert its audit log inside the savepoint, which the nested rollback undoes
-      const latePrisma = createClientWithLateSavepoints(100);
+      // The SAVEPOINT is held until the write has reached the audit: a write that ran its
+      // statements then would insert its row ahead of the savepoint and its audit row inside it,
+      // which the nested rollback undoes
+      const events: string[] = [];
+      const savepoint = createHold('the nested SAVEPOINT');
+      const writeReachedAudit = createHold('the audit of the write');
+      const watchedPrisma = createClientOnWatchedConnection({
+        beforeSavepoint: async () => {
+          events.push('SAVEPOINT requested');
+          await savepoint.hold();
+        },
+        afterSavepoint: () => events.push('SAVEPOINT run'),
+        afterStatement: (query) => {
+          const inserted = keptWriteInsert(query);
+          if (inserted !== undefined) {
+            events.push(inserted);
+          }
+        },
+      });
       try {
         const provider = createAsyncLocalStorageProvider();
-        const prisma = createAuditClient(latePrisma, {
-          ...testAuditOptions(provider, { Prisma, schema: auditSchema }),
-          write: {
-            mode,
-            writer: async (records, { defaultWrite }) => {
-              await sleep(200);
-              await defaultWrite(records);
-            },
+        let onContextRead = () => {};
+        // The audit reads the context of an operation before it runs it
+        const watchedProvider: AuditContextProvider = {
+          ...provider,
+          getContext: () => {
+            onContextRead();
+            return provider.getContext();
           },
+        };
+        const prisma = createAuditClient(watchedPrisma, {
+          ...testAuditOptions(watchedProvider, { Prisma, schema: auditSchema }),
+          write: { mode },
         });
 
-        await provider.runAsync(testActor, () =>
+        await watchedProvider.runAsync(testActor, () =>
           prisma.$transaction(
             async (tx) => {
-              await Promise.all([
-                tx
-                  .$transaction(async (nested) => {
-                    await nested.user.create({ data: userData('undone@example.com') });
-                    throw new Error('the nested callback failed');
-                  })
-                  .catch(() => undefined),
-                tx.user.create({ data: userData('kept@example.com') }),
-              ]);
+              const nested = tx
+                .$transaction(async (nested) => {
+                  await nested.user.create({ data: userData('undone@example.com') });
+                  throw new Error('the nested callback failed');
+                })
+                .catch(() => undefined);
+              try {
+                await savepoint.reached;
+                // Nothing else runs while the SAVEPOINT is held: the next context read is the write's
+                onContextRead = () => {
+                  onContextRead = () => {};
+                  writeReachedAudit.release();
+                  void writeReachedAudit.hold();
+                };
+                const kept = tx.user.create({ data: userData('kept@example.com') }).then(() => undefined);
+                await writeReachedAudit.reached;
+                events.push('kept write reached the audit');
+                await afterPendingMicrotasks();
+                savepoint.release();
+                await Promise.all([nested, kept]);
+              } finally {
+                savepoint.release();
+              }
             },
             { timeout: 10_000 },
           ),
         );
         await flushAllPendingWrites();
 
+        expect(events).toEqual([
+          'SAVEPOINT requested',
+          'kept write reached the audit',
+          'SAVEPOINT run',
+          'kept row inserted',
+          'kept audit row inserted',
+        ]);
         expect(await committedEmails()).not.toContain('undone@example.com');
         expect(await auditedEmails()).toEqual(await committedEmails());
       } finally {
-        await latePrisma.$disconnect();
+        await watchedPrisma.$disconnect();
       }
     });
 
     it('leaves an audit row for exactly the committed writes when a write runs alongside a nested transaction that rolls back', async () => {
-      const { prisma, provider } = auditedClient(mode);
+      // The write is held after its row's insert, before its audit row's, while the nested
+      // transaction starts: a SAVEPOINT run then would put the audit row inside the savepoint,
+      // which the nested rollback undoes, and leave the row outside it
+      const events: string[] = [];
+      const keptRowInserted = createHold('the insert of the row of the write');
+      const watchedPrisma = createClientOnWatchedConnection({
+        beforeSavepoint: async () => {
+          events.push('SAVEPOINT requested');
+        },
+        afterSavepoint: () => events.push('SAVEPOINT run'),
+        afterStatement: async (query) => {
+          const inserted = keptWriteInsert(query);
+          if (inserted !== undefined) {
+            events.push(inserted);
+          }
+          if (inserted === 'kept row inserted') {
+            await keptRowInserted.hold();
+          }
+        },
+      });
+      try {
+        const { prisma, provider } = auditedClient(mode, watchedPrisma);
 
-      await provider.runAsync(testActor, () =>
-        prisma.$transaction(async (tx) => {
-          await Promise.all([
-            tx.user.create({ data: userData('kept@example.com') }),
-            tx
-              .$transaction(async (nested) => {
-                await nested.user.create({ data: userData('undone@example.com') });
-                throw new Error('the nested callback failed');
-              })
-              .catch(() => undefined),
-          ]);
-        }),
-      );
-      await flushAllPendingWrites();
+        await provider.runAsync(testActor, () =>
+          prisma.$transaction(
+            async (tx) => {
+              const kept = tx.user.create({ data: userData('kept@example.com') }).then(() => undefined);
+              try {
+                await keptRowInserted.reached;
+                const nested = tx
+                  .$transaction(async (nested) => {
+                    await nested.user.create({ data: userData('undone@example.com') });
+                    throw new Error('the nested callback failed');
+                  })
+                  .catch(() => undefined);
+                events.push('nested transaction started');
+                await afterPendingMicrotasks();
+                keptRowInserted.release();
+                await Promise.all([kept, nested]);
+              } finally {
+                keptRowInserted.release();
+              }
+            },
+            { timeout: 10_000 },
+          ),
+        );
+        await flushAllPendingWrites();
 
-      expect(await committedEmails()).not.toContain('undone@example.com');
-      expect(await auditedEmails()).toEqual(await committedEmails());
+        expect(events).toEqual([
+          'kept row inserted',
+          'nested transaction started',
+          'kept audit row inserted',
+          'SAVEPOINT requested',
+          'SAVEPOINT run',
+        ]);
+        expect(await committedEmails()).not.toContain('undone@example.com');
+        expect(await auditedEmails()).toEqual(await committedEmails());
+      } finally {
+        await watchedPrisma.$disconnect();
+      }
     });
   });
 });
