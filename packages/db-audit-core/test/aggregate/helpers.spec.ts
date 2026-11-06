@@ -1,4 +1,4 @@
-import { describe, expect, expectTypeOf, it } from 'vitest';
+import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 import type { DefineEntityOptions } from '../../src/aggregate/helpers.js';
 import {
   batchLookup,
@@ -161,6 +161,17 @@ describe('Resolver helper functions', () => {
       const entity = { customId: 'custom-123' };
       const result = await resolver(entity, null);
       expect(result).toBe('custom-123');
+    });
+
+    it('hands the db handle it is given to the callback', async () => {
+      const db = { handle: 'sentinel' };
+      const callback = vi.fn(async (_entity: { id: string }, _db: typeof db) => 'resolved');
+      const resolver = lookup(callback);
+      const entity = { id: 'a' };
+
+      await resolver(entity, db);
+
+      expect(callback).toHaveBeenCalledWith(entity, db);
     });
   });
 
@@ -325,12 +336,13 @@ describe('batchLookup', () => {
     expect(result).toBe('resolved-a');
   });
 
-  it('should propagate batchIdResolver via to()', () => {
+  it('should propagate batchIdResolver via to()', async () => {
     const resolver = batchLookup(async (entities: { id: string }[]) => {
       return entities.map((e) => e.id);
     });
     const root = to('User', resolver);
     expect(root.batchIdResolver).toBeDefined();
+    await expect(root.batchIdResolver?.([{ id: 'a' }, { id: 'b' }], null)).resolves.toEqual(['a', 'b']);
     expect(root.requiresDbAccess).toBeUndefined();
   });
 });

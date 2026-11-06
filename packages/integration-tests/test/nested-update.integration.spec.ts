@@ -60,19 +60,20 @@ describe('Nested Update Operations', () => {
         where: { entityType: 'User', entityId: user.id, action: 'update' },
       });
       expect(userLogs).toHaveLength(1);
-      expect(userLogs[0].before).not.toBeNull(); // fetchBefore.update=true (test setup)
-      expect(userLogs[0].after).not.toBeNull();
+      // fetchBefore.update=true (test setup)
+      expect(userLogs[0].before).toMatchObject({ id: user.id, name: 'Author' });
+      expect(userLogs[0].after).toMatchObject({ id: user.id, name: 'Updated Author' });
+      expect(userLogs[0].changes).toMatchObject({ name: { old: 'Author', new: 'Updated Author' } });
 
       const postLogs = await context.prisma.auditLog.findMany({
         where: { entityType: 'Post', entityId: post.id, action: 'update' },
       });
       expect(postLogs).toHaveLength(2); // One entity log, one aggregate log
       for (const log of postLogs) {
-        expect(log.before).not.toBeNull(); // fetchBefore.update=true (test setup)
-        expect(log.after).not.toBeNull();
-        expect(log.changes).not.toBeNull(); // changes is available with before state
-        const after = log.after as { title?: string };
-        expect(after.title).toBe('Updated Title');
+        // fetchBefore.update=true (test setup)
+        expect(log.before).toMatchObject({ id: post.id, title: 'Original Title' });
+        expect(log.after).toMatchObject({ id: post.id, title: 'Updated Title' });
+        expect(log.changes).toMatchObject({ title: { old: 'Original Title', new: 'Updated Title' } });
       }
     });
   });
@@ -132,7 +133,7 @@ describe('Nested Update Operations', () => {
   });
 
   describe('Empty Results', () => {
-    it('should handle nested update with no matching records', async () => {
+    it('rejects a nested update that names no post with P2025 and writes no audit row', async () => {
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -165,7 +166,7 @@ describe('Nested Update Operations', () => {
 
       await expect(updatePromise).rejects.toMatchObject({ code: 'P2025' });
 
-      // Verify: No audit logs should be created due to transaction rollback
+      // The rejected operation audits nothing
       const auditLogs = await context.prisma.auditLog.findMany();
       expect(auditLogs).toHaveLength(0);
     });

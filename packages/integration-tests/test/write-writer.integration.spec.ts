@@ -252,7 +252,7 @@ describe('write.writer Coverage', () => {
     });
   });
 
-  describe("Asynchronous Write Path (mode: 'deferred')", () => {
+  describe("Deferred write path (mode: 'deferred')", () => {
     let asyncContext: TestContext & {
       writerSpy: { callCount: number; calls: Array<{ logCount: number; contextId: string }> };
     };
@@ -267,7 +267,7 @@ describe('write.writer Coverage', () => {
       };
 
       const prisma = createAuditedClientWithWriterSpy(basePrisma, provider, writerSpy, {
-        mode: 'deferred', // Async writes
+        mode: 'deferred', // Written immediately inside a transaction, on the base client outside one
       });
 
       asyncContext = {

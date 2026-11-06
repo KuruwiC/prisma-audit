@@ -89,7 +89,7 @@ describe('Write Strategy Tests', () => {
       );
     });
 
-    it('should write audit logs asynchronously within explicit transactions', async () => {
+    it('should write the audit logs of a deferred client inside an explicit transaction, before it resolves', async () => {
       const auditProvider = createAsyncLocalStorageProvider();
 
       const prisma = createAuditClient(db, {
@@ -128,7 +128,6 @@ describe('Write Strategy Tests', () => {
           expect(users.length).toBe(1);
           expect(posts.length).toBe(1);
 
-          await flushAllPendingWrites();
           expect(getPendingWriteCount()).toBe(0);
 
           const auditLogs = await db.auditLog.findMany();

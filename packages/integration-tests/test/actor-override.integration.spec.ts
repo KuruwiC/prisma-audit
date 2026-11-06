@@ -14,8 +14,6 @@
  *      parent audit actor = actor1, request metadata preserved on child logs
  *   b. runAsync({ actor: actor2 }) inside $transaction — same FK success
  *   c. Rollback path — no rows and no audit logs after a thrown transaction
- *   d. Audit-log atomicity — audit logs written within the same transaction
- *      (mode: 'awaited') are visible after commit
  */
 
 import type { AuditContext } from '@kuruwic/db-audit-core';

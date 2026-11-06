@@ -632,7 +632,7 @@ describe('Error Handling Integration', () => {
   });
 
   describe('Database constraint violations', () => {
-    it('a foreign key violation on a single-record create propagates raw as P2003, leaving no row and no audit log and without reaching the audit observer', async () => {
+    it('a foreign key violation on a single-record create propagates raw as P2003, leaving no row and no audit log and reported to the audit observer as not-committed with no failures', async () => {
       const basePrisma = createBasePrisma();
       const provider = createAsyncLocalStorageProvider();
       const observer = vi.fn<AuditObserver>();
@@ -675,7 +675,7 @@ describe('Error Handling Integration', () => {
       }
     });
 
-    it('a batch (updateMany) unique constraint violation propagates raw, without reaching the audit observer', async () => {
+    it('a batch (updateMany) unique constraint violation propagates raw, reported to the audit observer as not-committed with no failures', async () => {
       // The batch executor calls the caller's own `updateMany` in the middle of
       // audit-support work (before-fetch, after-refetch, record production). Only the
       // audit-support work is an audit failure — the caller's own database error must
@@ -739,7 +739,7 @@ describe('Error Handling Integration', () => {
       }
     });
 
-    it('a single-record create unique constraint violation propagates raw, without reaching the audit observer', async () => {
+    it('a single-record create unique constraint violation propagates raw, reported to the audit observer as not-committed with no failures', async () => {
       // The single-operation executor runs the caller's own `create` alongside audit-support
       // work (before-state fetch, enrichment, record building). Only the audit-support work
       // is an audit failure — the caller's own database error (a unique constraint violation

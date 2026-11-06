@@ -10,7 +10,7 @@
  * write or from the primary key its locator or WHERE holds.
  */
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { NestedOperationInfo, NestedPreFetchResults } from '../../../src/grammar/nested-operations.js';
 import { TOP_LEVEL_ROW } from '../../../src/grammar/nested-state.js';
 import { collectToManyDeleteRecords, collectToOneDeleteRecords } from '../../../src/nested/events/delete-handler.js';
@@ -99,10 +99,6 @@ describe('collectToOneDeleteRecords — the row read under its parent row', () =
 });
 
 describe('collectToOneDeleteRecords — unresolved identity', () => {
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
   const commentsOp: NestedOperationInfo = { ...nestedOp, relatedModel: 'Comment', path: 'comments' };
   const unread = (): NestedPreFetchResults => {
     const results: NestedPreFetchResults = new Map();

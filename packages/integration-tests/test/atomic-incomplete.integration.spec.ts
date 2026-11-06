@@ -496,8 +496,12 @@ describe('an atomic operation whose records a failure dropped', () => {
     });
 
     it('commits a to-one create below a row the operation creates, which holds no row to unlink', async () => {
-      const { rawBasePrisma, prisma, run, phases, recordsOf } = await setup({ model: 'User', operation: 'findFirst' });
+      const { rawBasePrisma, prisma, run, arm, phases, recordsOf } = await setup({
+        model: 'User',
+        operation: 'findFirst',
+      });
 
+      arm();
       await run(() =>
         prisma.post.create({
           data: {

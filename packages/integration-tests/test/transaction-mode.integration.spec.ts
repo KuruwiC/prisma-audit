@@ -371,14 +371,6 @@ describe('write mode', () => {
       expect(transactions).toEqual(['interactive']);
     });
 
-    it('runs a batch whose write is deferred as an interactive transaction', async () => {
-      const { result, transactions } = runBatch({ mode: 'deferred', writes: true });
-
-      await expect(result).resolves.toHaveLength(2);
-      expect(transactions).toEqual(['interactive']);
-      expect(await auditRows()).toEqual(['User.create']);
-    });
-
     it("runs a batch holding a write as an interactive transaction, bound by the client's limits", async () => {
       const { result, transactions } = runBatch({ mode, writes: true, slow: true });
 
@@ -388,7 +380,7 @@ describe('write mode', () => {
       expect(await auditRows()).toEqual([]);
     });
 
-    it("writes the audit of a deferred batch operation once the batch's transaction has committed", async () => {
+    it("writes the audit of a deferred batch operation in the batch's transaction", async () => {
       const user = await seedUser();
       const clients = createClients({ mode: 'deferred', writeModes: { Post: mode } });
 
@@ -463,6 +455,14 @@ describe('write mode', () => {
 
       expect(await raw.user.count()).toBe(0);
     });
+  });
+
+  it('runs a batch whose write is deferred as an interactive transaction', async () => {
+    const { result, transactions } = runBatch({ mode: 'deferred', writes: true });
+
+    await expect(result).resolves.toHaveLength(2);
+    expect(transactions).toEqual(['interactive']);
+    expect(await auditRows()).toEqual(['User.create']);
   });
 
   describe('only under the awaited write mode', () => {

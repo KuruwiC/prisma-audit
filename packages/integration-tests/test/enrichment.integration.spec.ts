@@ -135,11 +135,8 @@ describe('Context Enrichment Integration', () => {
       expect(log.actorType).toBe('User');
       expect(log.actorId).toBe('user-1');
 
-      // actorContext should exist but with undefined values
-      expect(log.actorContext).toBeDefined();
-      const actorContext = log.actorContext as Record<string, unknown>;
-      expect(actorContext.name).toBeUndefined();
-      expect(actorContext.role).toBeUndefined();
+      // The enricher returns undefined for both fields, which JSON drops
+      expect(log.actorContext).toEqual({});
     });
   });
 
@@ -967,7 +964,7 @@ describe('Context Enrichment Integration', () => {
         });
       });
 
-      // Actor context cache is per-operation, not per-runAsync
+      // The enricher runs once per operation, not once per runAsync
       expect(actorEnricherCallCount).toBe(3);
     });
 

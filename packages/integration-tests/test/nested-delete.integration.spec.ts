@@ -25,7 +25,7 @@ describe('Nested Delete Operations', () => {
   // 'before-state read configured per entity' and 'a nested delete next to other operations at the same path'.
 
   describe('Empty Results', () => {
-    it('should handle nested delete with no matching records', async () => {
+    it('rejects a nested delete that names no post with P2017 and writes no audit row', async () => {
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
           data: {
@@ -55,7 +55,7 @@ describe('Nested Delete Operations', () => {
 
       await expect(deletePromise).rejects.toMatchObject({ code: 'P2017' });
 
-      // Verify: No audit logs should be created due to transaction rollback
+      // The rejected operation audits nothing
       const auditLogs = await context.prisma.auditLog.findMany();
       expect(auditLogs).toHaveLength(0);
     });

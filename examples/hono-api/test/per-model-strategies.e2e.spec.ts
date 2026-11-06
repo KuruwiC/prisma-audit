@@ -121,7 +121,7 @@ describe('Per-model Strategies E2E', () => {
   });
 
   describe('Combined per-model strategies in transactions', () => {
-    it('should apply different strategies to different models in same transaction', async () => {
+    it('should write the audit rows of models with different write modes inside the same transaction', async () => {
       const entities = defineEntities<AuditModelName, PrismaClient>()({
         User: defineEntity({
           type: 'User',
@@ -148,7 +148,6 @@ describe('Per-model Strategies E2E', () => {
         },
         async () => {
           await prisma.$transaction(async (tx) => {
-            // User creation (awaited)
             const user = await tx.user.create({
               data: {
                 email: 'txn-user@example.com',
@@ -156,7 +155,6 @@ describe('Per-model Strategies E2E', () => {
               },
             });
 
-            // Post creation (deferred)
             await tx.post.create({
               data: {
                 title: 'Transaction Post',
@@ -169,14 +167,13 @@ describe('Per-model Strategies E2E', () => {
         },
       );
 
-      // The critical User write is awaited inside the transaction
+      expect(getPendingWriteCount()).toBe(0);
+
       const userAuditLogs = await basePrisma.auditLog.findMany({
         where: { entityType: 'User' },
       });
       expect(userAuditLogs).toHaveLength(1);
 
-      // The Post write is deferred until the transaction commits
-      await flushAllPendingWrites();
       const postAuditLogs = await basePrisma.auditLog.findMany({
         where: { entityType: 'Post' },
         orderBy: { aggregateType: 'asc' },

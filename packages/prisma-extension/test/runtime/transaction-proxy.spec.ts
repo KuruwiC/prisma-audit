@@ -929,20 +929,26 @@ describe('createTransactionProxy (audit failures recorded on the transaction)', 
   it('records the failure on the transaction the failed operation was issued on, not on one around it', async () => {
     const deps = depsFailingFor('bad');
     const { provider, proxy } = auditedProxy(deps);
+    let innerRejection: unknown;
 
     // The inner transaction rolls back for the audit failure; the outer callback catches that
     // rejection, and its own transaction commits.
     const result = await provider.runAsync(baseContext, () =>
       proxy.$transaction(async () => {
-        await proxy
+        innerRejection = await proxy
           .$transaction(async (inner) => {
             await inner.user.create({ id: 'bad', atomic: true }).then(undefined, () => undefined);
           })
-          .then(undefined, () => undefined);
+          .then(
+            () => undefined,
+            (rejection: unknown) => rejection,
+          );
         return 'outer committed';
       }),
     );
 
+    expect(innerRejection).toBeInstanceOf(AuditRollbackError);
+    expect(innerRejection).toHaveProperty('cause', writeError);
     expect(result).toBe('outer committed');
   });
 });

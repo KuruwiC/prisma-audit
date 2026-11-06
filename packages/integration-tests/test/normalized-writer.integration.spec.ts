@@ -77,7 +77,7 @@ describe('Normalized Writer Helpers', () => {
     };
     const sharedChangeSchema = { changeModel: 'AuditChange', aggregateModel: 'AuditAggregate' };
 
-    it('writes a detached write in a transaction of its own on the base client', async () => {
+    it('writes the rows of a deferred write that no transaction surrounds on the base client', async () => {
       const prisma = createAuditClient(basePrisma, {
         Prisma,
         schema: auditSchema,

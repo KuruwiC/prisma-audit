@@ -2,8 +2,8 @@
  * An interactive `$transaction` started on the audited client, or on a client derived from it by
  * `$extends`, is the transaction of every audited operation inside its callback, whether or not an
  * audit context is set when `$transaction` is called. The operations and their audit rows commit
- * and roll back with it: an awaited audit is written in it, an audit that is not awaited is written
- * once it has committed.
+ * and roll back with it: every write mode writes its audit rows in that transaction, a deferred one
+ * immediately there.
  */
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
@@ -49,7 +49,7 @@ describe('Interactive $transaction scope', () => {
 
   describe.each([
     { mode: 'awaited', audit: 'an awaited audit' },
-    { mode: 'deferred', audit: 'an audit written after commit' },
+    { mode: 'deferred', audit: 'a deferred audit' },
   ] as const)('with $audit', ({ mode }) => {
     it('rolls back the write and its audit when the audit context is set inside the callback', async () => {
       const audited = createAudited(mode);
@@ -79,7 +79,6 @@ describe('Interactive $transaction scope', () => {
           await audited.provider.runAsync(actor, () =>
             tx.user.create({ data: { email: 'inside@example.com', name: 'Inside' } }),
           );
-          await flushAllPendingWrites();
           seenBeforeCommit = { users: await context.basePrisma.user.count(), auditRows: await auditRowCount() };
         });
         await flushAllPendingWrites();

@@ -352,7 +352,7 @@ describe('Composite Primary Key (PostLike)', () => {
 
   describe('unresolvable entityId — public client boundary', () => {
     it('deleting a nested composite-key row that does not exist throws and writes no audit log', async () => {
-      // Mirrors nested-delete.integration.spec.ts's "no matching records" case for a
+      // Mirrors nested-delete.integration.spec.ts's "names no post" case for a
       // single-field PK model: Prisma requires the nested delete target to be connected to the
       // parent and throws (P2017) before the write executes, so no audit log — fabricated or
       // otherwise — is ever persisted for it.

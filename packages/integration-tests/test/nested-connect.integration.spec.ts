@@ -304,7 +304,7 @@ describe('Nested Connect Operations', () => {
         });
       });
 
-      // Verify: Should throw error (foreign key constraint)
+      // Verify: Should throw P2025 (the Tag to connect does not exist)
       await expect(connectPromise).rejects.toMatchObject({ code: 'P2025' });
 
       // Verify: No audit log created (operation failed)
