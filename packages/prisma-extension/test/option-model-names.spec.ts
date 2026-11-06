@@ -93,6 +93,12 @@ describe('createAuditClient', () => {
     expectTypeOf(build).returns.toExtend<MockPrismaClient>();
   });
 
+  it('types the audited client as the client it extends, with no property the extension does not add', () => {
+    const build = (prisma: MockPrismaClient) => createAuditClient(prisma, { ...base, entities: {} });
+
+    expectTypeOf(build).returns.toEqualTypeOf<MockPrismaClient>();
+  });
+
   it('rejects an entities key the schema does not declare', () => {
     const build = (prisma: MockPrismaClient) =>
       createAuditClient(prisma, {

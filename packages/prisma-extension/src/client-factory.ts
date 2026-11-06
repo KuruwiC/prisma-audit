@@ -101,9 +101,9 @@ export type PrismaClientLike = {
 export const createAuditClient = <TClient extends PrismaClientLike, TModelName extends string>(
   prisma: TClient,
   options: PrismaAuditExtensionOptions<TModelName, NoInfer<TClient>>,
-): TClient & { $audit: ReturnType<typeof createAuditLogExtension> } => {
+): TClient => {
   const extension = createAuditLogExtension(options);
-  return prisma.$extends(extension) as TClient & { $audit: typeof extension };
+  return prisma.$extends(extension) as TClient;
 };
 
 /**
