@@ -15,6 +15,7 @@ import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { failureSummariesOf } from './helpers/audit-failures.js';
+import { createReadFault } from './helpers/read-fault.js';
 import { cleanDatabase, createBasePrisma, testEntities, withFetchBefore } from './helpers/setup.js';
 
 const testActor: AuditContext = {
@@ -45,21 +46,8 @@ describe('nested rows attributed through their parent row', () => {
     } = {},
   ) => {
     const basePrisma = createBasePrisma();
-    let armed = false;
-    const faultyPrisma = basePrisma.$extends({
-      name: 'fault-injection',
-      query: {
-        $allModels: {
-          async $allOperations({ model, operation, args, query }) {
-            if (armed && model === options.fault?.model && operation === options.fault.operation) {
-              armed = false;
-              throw new Error(`simulated ${model}.${operation} failure`);
-            }
-            return query(args);
-          },
-        },
-      },
-    });
+    const fault = createReadFault();
+    const faultyPrisma = basePrisma.$extends({ name: 'fault-injection', query: fault.query });
     const observer = vi.fn<AuditObserver>();
     const provider = createAsyncLocalStorageProvider();
     const prisma = createAuditClient(faultyPrisma, {
@@ -84,7 +72,9 @@ describe('nested rows attributed through their parent row', () => {
 
     const run = <T>(operation: () => Promise<T>) => provider.runAsync(testActor, operation);
     const arm = () => {
-      armed = true;
+      if (options.fault !== undefined) {
+        fault.arm(options.fault);
+      }
     };
     const phases = () => failureSummariesOf(observer);
     /** One `entityId:action` per record of `entityType` (its own aggregate row), sorted */

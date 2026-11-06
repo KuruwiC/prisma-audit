@@ -21,13 +21,15 @@ import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { describe, expect, it, vi } from 'vitest';
 import { failuresOf } from './helpers/audit-failures.js';
+import { createReadFault } from './helpers/read-fault.js';
 import { cleanDatabase, createBasePrisma, testEntities } from './helpers/setup.js';
 
 const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'nested-pre-fetch-actor' },
 };
 
-type FaultPredicate = (args: { where: { id?: string } }, callNumber: number) => boolean;
+type FaultArgs = { where: { id?: string } };
+type FaultPredicate = (args: FaultArgs, callNumber: number) => boolean;
 
 describe('nested pre-fetch failures — observer notification', () => {
   /**
@@ -41,24 +43,8 @@ describe('nested pre-fetch failures — observer notification', () => {
   const createClient = (observer: AuditObserver) => {
     const rawBasePrisma = createBasePrisma();
 
-    let callCount = 0;
-    let shouldFail: FaultPredicate = () => false;
-    let failureMessage = '';
-
-    const basePrisma = rawBasePrisma.$extends({
-      name: 'fault-injection',
-      query: {
-        comment: {
-          async findUnique({ args, query }) {
-            callCount += 1;
-            if (shouldFail(args, callCount)) {
-              throw new Error(failureMessage);
-            }
-            return query(args);
-          },
-        },
-      },
-    });
+    const fault = createReadFault();
+    const basePrisma = rawBasePrisma.$extends({ name: 'fault-injection', query: fault.query });
 
     const provider = createAsyncLocalStorageProvider();
     const prisma = createAuditClient(basePrisma, {
@@ -71,9 +57,14 @@ describe('nested pre-fetch failures — observer notification', () => {
     });
 
     const armFault = (predicate: FaultPredicate, message: string): void => {
-      callCount = 0;
-      shouldFail = predicate;
-      failureMessage = message;
+      fault.arm(
+        {
+          model: 'Comment',
+          operation: 'findUnique',
+          match: (args, callNumber) => predicate(args as FaultArgs, callNumber),
+        },
+        message,
+      );
     };
 
     return { rawBasePrisma, basePrisma, provider, prisma, armFault };

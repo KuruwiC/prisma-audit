@@ -25,6 +25,7 @@ import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { failureSummariesOf } from './helpers/audit-failures.js';
+import { createReadFault } from './helpers/read-fault.js';
 import { cleanDatabase, createBasePrisma, testEntities } from './helpers/setup.js';
 
 const testActor: AuditContext = {
@@ -48,22 +49,8 @@ describe('nested pre-fetch failures — affected rows', () => {
   /** An audited client whose next `fault.operation` call on `fault.model` after `arm()` throws once */
   const setup = async (fault: FaultTarget, mode: WriteMode = 'atomic') => {
     const rawBasePrisma = createBasePrisma();
-    let armed = false;
-    const basePrisma = rawBasePrisma.$extends({
-      name: 'fault-injection',
-      query: {
-        $allModels: {
-          async $allOperations({ model, operation, args, query }) {
-            if (armed && model === fault.model && operation === fault.operation) {
-              armed = false;
-              throw new Error(`simulated ${fault.model}.${fault.operation} failure`);
-            }
-            return query(args);
-          },
-        },
-      },
-    });
-
+    const readFault = createReadFault();
+    const basePrisma = rawBasePrisma.$extends({ name: 'fault-injection', query: readFault.query });
     const observer = vi.fn<AuditObserver>();
     const provider = createAsyncLocalStorageProvider();
     const prisma = createAuditClient(basePrisma, {
@@ -94,7 +81,7 @@ describe('nested pre-fetch failures — affected rows', () => {
     const c2 = await rawBasePrisma.comment.create({ data: { content: 'two', postId: post.id, authorId: user.id } });
 
     const arm = () => {
-      armed = true;
+      readFault.arm(fault);
       observer.mockClear();
     };
     const run = <T>(operation: () => Promise<T>) => provider.runAsync(testActor, operation);

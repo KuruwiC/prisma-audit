@@ -17,7 +17,7 @@ import {
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { createPostReadFault } from './helpers/post-read-fault.js';
+import { createReadFault } from './helpers/read-fault.js';
 import { cleanDatabase, createBasePrisma } from './helpers/setup.js';
 
 const testEntities: EntityMap = {
@@ -553,8 +553,10 @@ describe('Normalized Writer Helpers', () => {
 
     /** An audited client whose before-state read of a Post update is failed once it is armed */
     const createClientFailingBeforeRead = (writer: AuditLogWriter) => {
-      const { findUnique, armFindUniqueFailure } = createPostReadFault('simulated before-state read failure');
-      const faulty = basePrisma.$extends({ name: 'fault-injection', query: { post: { findUnique } } });
+      const readFault = createReadFault();
+      const armFindUniqueFailure = () =>
+        readFault.arm({ model: 'Post', operation: 'findUnique' }, 'simulated before-state read failure');
+      const faulty = basePrisma.$extends({ name: 'fault-injection', query: readFault.query });
       const prisma = createAuditClient(faulty, {
         Prisma,
         schema: auditSchema,

@@ -20,6 +20,7 @@ import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { failuresOf } from './helpers/audit-failures.js';
+import { createReadFault } from './helpers/read-fault.js';
 import { cleanDatabase, createBasePrisma, testEntities } from './helpers/setup.js';
 
 const testActor: AuditContext = {
@@ -32,30 +33,12 @@ describe('nested upsert and connectOrCreate whose target could not be read', () 
   const createClient = () => {
     const rawBasePrisma = createBasePrisma();
 
-    const armed = { commentFindUnique: false, profileFindFirst: false };
-    const basePrisma = rawBasePrisma.$extends({
-      name: 'fault-injection',
-      query: {
-        comment: {
-          async findUnique({ args, query }) {
-            if (armed.commentFindUnique) {
-              armed.commentFindUnique = false;
-              throw new Error(FAILURE_MESSAGE);
-            }
-            return query(args);
-          },
-        },
-        profile: {
-          async findFirst({ args, query }) {
-            if (armed.profileFindFirst) {
-              armed.profileFindFirst = false;
-              throw new Error(FAILURE_MESSAGE);
-            }
-            return query(args);
-          },
-        },
-      },
-    });
+    const fault = createReadFault();
+    const basePrisma = rawBasePrisma.$extends({ name: 'fault-injection', query: fault.query });
+    const arm = {
+      commentFindUnique: () => fault.arm({ model: 'Comment', operation: 'findUnique' }, FAILURE_MESSAGE),
+      profileFindFirst: () => fault.arm({ model: 'Profile', operation: 'findFirst' }, FAILURE_MESSAGE),
+    };
 
     const observer = vi.fn<AuditObserver>();
     const provider = createAsyncLocalStorageProvider();
@@ -70,7 +53,7 @@ describe('nested upsert and connectOrCreate whose target could not be read', () 
       write: { mode: 'awaited' },
     });
 
-    return { rawBasePrisma, basePrisma, provider, prisma, observer, armed };
+    return { rawBasePrisma, basePrisma, provider, prisma, observer, arm };
   };
 
   let scenario: ReturnType<typeof createClient> | undefined;
@@ -102,9 +85,9 @@ describe('nested upsert and connectOrCreate whose target could not be read', () 
   };
 
   it('records no entry for a to-many upsert that updated a row it could not read', async () => {
-    const { basePrisma, provider, prisma, observer, armed, post, comment } = await setUp();
+    const { basePrisma, provider, prisma, observer, arm, post, comment } = await setUp();
 
-    armed.commentFindUnique = true;
+    arm.commentFindUnique();
     await provider.runAsync(testActor, () =>
       prisma.post.update({
         where: { id: post.id },
@@ -126,10 +109,10 @@ describe('nested upsert and connectOrCreate whose target could not be read', () 
   });
 
   it('records no entry for a connectOrCreate that connected a row it could not read', async () => {
-    const { basePrisma, provider, prisma, observer, armed, user, comment } = await setUp();
+    const { basePrisma, provider, prisma, observer, arm, user, comment } = await setUp();
     const otherPost = await basePrisma.post.create({ data: { title: 'Other', content: 'other', authorId: user.id } });
 
-    armed.commentFindUnique = true;
+    arm.commentFindUnique();
     await provider.runAsync(testActor, () =>
       prisma.post.update({
         where: { id: otherPost.id },
@@ -147,10 +130,10 @@ describe('nested upsert and connectOrCreate whose target could not be read', () 
   });
 
   it('records no entry for a to-one upsert that updated a row it could not read', async () => {
-    const { basePrisma, provider, prisma, observer, armed, user } = await setUp();
+    const { basePrisma, provider, prisma, observer, arm, user } = await setUp();
     await basePrisma.profile.create({ data: { userId: user.id, bio: 'Original' } });
 
-    armed.profileFindFirst = true;
+    arm.profileFindFirst();
     await provider.runAsync(testActor, () =>
       prisma.user.update({
         where: { id: user.id },

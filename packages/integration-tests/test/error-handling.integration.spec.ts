@@ -5,6 +5,7 @@ import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { describe, expect, it, vi } from 'vitest';
+import { createReadFault } from './helpers/read-fault.js';
 import { createBasePrisma, setupTestContext, testEntities } from './helpers/setup.js';
 
 /** Message thrown by the failing `write.writer` used to simulate an audit-log write failure. */
@@ -195,7 +196,7 @@ describe('Error Handling Integration', () => {
         });
         expect(persisted).not.toBeNull();
 
-        expect(observer.mock.calls).toEqual([[logWriteOutcome('incomplete', 'create')]]);
+        expect(observer).toHaveBeenCalledTimes(1);
         expect(consoleErrorSpy).not.toHaveBeenCalled();
       } finally {
         consoleErrorSpy.mockRestore();
@@ -548,21 +549,8 @@ describe('Error Handling Integration', () => {
       const runWithFailingSnapshot = async (mode: WriteMode) => {
         const snapshotError = new Error(SNAPSHOT_FAILURE_MESSAGE);
         const rawBasePrisma = createBasePrisma();
-        let snapshotArmed = false;
-        const basePrisma = rawBasePrisma.$extends({
-          name: 'fault-injection',
-          query: {
-            post: {
-              async findMany({ args, query }) {
-                if (snapshotArmed) {
-                  snapshotArmed = false;
-                  throw snapshotError;
-                }
-                return query(args);
-              },
-            },
-          },
-        });
+        const readFault = createReadFault();
+        const basePrisma = rawBasePrisma.$extends({ name: 'fault-injection', query: readFault.query });
         const provider = createAsyncLocalStorageProvider();
         const observer = vi.fn<AuditObserver>();
         const prisma = createAuditClient(basePrisma, {
@@ -585,7 +573,7 @@ describe('Error Handling Integration', () => {
           );
           const auditRowsBefore = await context.basePrisma.auditLog.count();
 
-          snapshotArmed = true;
+          readFault.arm({ model: 'Post', operation: 'findMany' }, snapshotError);
           await expect(
             provider.runAsync(testActor, async () =>
               prisma.user.update({

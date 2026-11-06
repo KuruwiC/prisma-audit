@@ -14,7 +14,7 @@ import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { failuresOf } from './helpers/audit-failures.js';
-import { createPostReadFault } from './helpers/post-read-fault.js';
+import { createReadFault } from './helpers/read-fault.js';
 import { cleanDatabase, createBasePrisma, testEntities } from './helpers/setup.js';
 
 const testActor: AuditContext = {
@@ -28,8 +28,10 @@ type FetchBeforeConfig = NonNullable<PrismaAuditExtensionOptions['fetchBefore']>
 const createClients = (fetchBefore: FetchBeforeConfig) => {
   const rawBasePrisma = createBasePrisma();
 
-  const { findUnique, armFindUniqueFailure } = createPostReadFault(FAILURE_MESSAGE);
-  const basePrisma = rawBasePrisma.$extends({ name: 'fault-injection', query: { post: { findUnique } } });
+  const readFault = createReadFault();
+
+  const armFindUniqueFailure = () => readFault.arm({ model: 'Post', operation: 'findUnique' }, FAILURE_MESSAGE);
+  const basePrisma = rawBasePrisma.$extends({ name: 'fault-injection', query: readFault.query });
 
   const observer = vi.fn<AuditObserver>();
   const provider = createAsyncLocalStorageProvider();

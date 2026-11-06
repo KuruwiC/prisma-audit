@@ -18,7 +18,7 @@ import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { failureSummariesOf } from './helpers/audit-failures.js';
-import { createPostReadFault } from './helpers/post-read-fault.js';
+import { createReadFault } from './helpers/read-fault.js';
 import { cleanDatabase, createBasePrisma, testEntities } from './helpers/setup.js';
 
 const testActor: AuditContext = {
@@ -146,8 +146,9 @@ describe('an atomic operation whose records a failure dropped', () => {
   describe('the before-state read of a top-level write that fails', () => {
     const setup = async () => {
       const rawBasePrisma = createBasePrisma();
-      const { findUnique, armFindUniqueFailure } = createPostReadFault(FAILURE_MESSAGE);
-      const basePrisma = rawBasePrisma.$extends({ name: 'fault-injection', query: { post: { findUnique } } });
+      const readFault = createReadFault();
+      const basePrisma = rawBasePrisma.$extends({ name: 'fault-injection', query: readFault.query });
+      const armFindUniqueFailure = () => readFault.arm({ model: 'Post', operation: 'findUnique' }, FAILURE_MESSAGE);
       const observer = vi.fn<AuditObserver>();
       const provider = createAsyncLocalStorageProvider();
       const prisma = createAuditClient(basePrisma, {
@@ -235,21 +236,8 @@ describe('an atomic operation whose records a failure dropped', () => {
     /** An audited client whose next `fault.operation` call on `fault.model` after `arm()` throws once */
     const setup = async (fault: FaultTarget, mode: WriteMode = 'atomic', entities: EntityMap = testEntities) => {
       const rawBasePrisma = createBasePrisma();
-      let armed = false;
-      const basePrisma = rawBasePrisma.$extends({
-        name: 'fault-injection',
-        query: {
-          $allModels: {
-            async $allOperations({ model, operation, args, query }) {
-              if (armed && model === fault.model && operation === fault.operation) {
-                armed = false;
-                throw new Error(`simulated ${fault.model}.${fault.operation} failure`);
-              }
-              return query(args);
-            },
-          },
-        },
-      });
+      const readFault = createReadFault();
+      const basePrisma = rawBasePrisma.$extends({ name: 'fault-injection', query: readFault.query });
       const observer = vi.fn<AuditObserver>();
       const provider = createAsyncLocalStorageProvider();
       const prisma = createAuditClient(basePrisma, {
@@ -282,9 +270,7 @@ describe('an atomic operation whose records a failure dropped', () => {
       await rawBasePrisma.label.create({ data: { id: 'l2', name: 'l2' } });
       await rawBasePrisma.badge.create({ data: { id: 'b1', name: 'b1', userId: user.id } });
 
-      const arm = () => {
-        armed = true;
-      };
+      const arm = () => readFault.arm(fault);
       const run = <T>(operation: () => Promise<T>) => provider.runAsync(testActor, operation);
       const phases = () => failureSummariesOf(observer);
       const recordsOf = (entityType: string) =>

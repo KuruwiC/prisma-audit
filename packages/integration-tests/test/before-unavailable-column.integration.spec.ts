@@ -13,7 +13,7 @@ import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createPostReadFault } from './helpers/post-read-fault.js';
+import { createReadFault } from './helpers/read-fault.js';
 import { createBasePrisma, testEntities } from './helpers/setup.js';
 
 const testActor: AuditContext = {
@@ -24,9 +24,12 @@ describe('beforeUnavailable column of the audit-log model', () => {
   const createClient = (model?: 'Activity') => {
     const rawBasePrisma = createBasePrisma();
 
-    const { findUnique, armFindUniqueFailure } = createPostReadFault('simulated before-state read failure');
+    const readFault = createReadFault();
+
+    const armFindUniqueFailure = () =>
+      readFault.arm({ model: 'Post', operation: 'findUnique' }, 'simulated before-state read failure');
     const auditLogWrites: unknown[] = [];
-    const basePrisma = rawBasePrisma.$extends({ name: 'fault-injection', query: { post: { findUnique } } }).$extends({
+    const basePrisma = rawBasePrisma.$extends({ name: 'fault-injection', query: readFault.query }).$extends({
       name: 'audit-log-write-spy',
       query: {
         auditLog: {

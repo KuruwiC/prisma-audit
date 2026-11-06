@@ -17,6 +17,7 @@ import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { failureSummariesOf } from './helpers/audit-failures.js';
+import { createReadFault } from './helpers/read-fault.js';
 import { cleanDatabase, createBasePrisma, testEntities, withFetchBefore } from './helpers/setup.js';
 
 const testActor: AuditContext = {
@@ -41,21 +42,8 @@ describe('foreign-key changes of related rows', () => {
 
   const setup = async (options: SetupOptions = {}) => {
     const basePrisma = createBasePrisma();
-    let armed = false;
-    const faultyPrisma = basePrisma.$extends({
-      name: 'fault-injection',
-      query: {
-        $allModels: {
-          async $allOperations({ model, operation, args, query }) {
-            if (armed && model === options.faultModel && operation === 'findMany') {
-              armed = false;
-              throw new Error(`simulated ${model}.${operation} failure`);
-            }
-            return query(args);
-          },
-        },
-      },
-    });
+    const fault = createReadFault();
+    const faultyPrisma = basePrisma.$extends({ name: 'fault-injection', query: fault.query });
     const observer = vi.fn<AuditObserver>();
     const provider = createAsyncLocalStorageProvider();
     const prisma = createAuditClient(faultyPrisma, {
@@ -78,7 +66,9 @@ describe('foreign-key changes of related rows', () => {
 
     const run = <T>(operation: () => Promise<T>) => provider.runAsync(testActor, operation);
     const arm = () => {
-      armed = true;
+      if (options.faultModel !== undefined) {
+        fault.arm({ model: options.faultModel, operation: 'findMany' });
+      }
     };
     const phases = () => failureSummariesOf(observer);
     /** The records of `entityType` (its own aggregate row), sorted by entity id */
