@@ -3,6 +3,8 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import type { AuditSchema } from '../../src/schema/audit-schema.js';
+import { loadSchemaMetadata } from '../../src/schema/schema-metadata.js';
 import { column, model, relation, schemaMetadataOf } from '../support/audit-schema.js';
 
 const UNKNOWN_MODEL_MESSAGE =
@@ -32,9 +34,17 @@ describe('loadSchemaMetadata', () => {
     });
 
     it('should return the @id field as the primary key, ahead of unique fields', () => {
-      const metadata = schemaMetadataOf(
-        model('User', [column('id', { isId: true }), column('email', { isUnique: true })]),
-      );
+      const metadata = loadSchemaMetadata({
+        formatVersion: 1,
+        models: [
+          {
+            name: 'User',
+            fields: [column('id', { isId: true }), column('email', { isUnique: true })],
+            primaryKey: { fields: ['id'], name: null },
+            uniqueConstraints: [{ type: 'uniqueField', fields: ['email'], name: null }],
+          },
+        ],
+      } satisfies AuditSchema);
 
       expect(metadata.getUniqueConstraints('User')).toEqual([
         { type: 'primaryKey', fields: ['id'], name: null },
@@ -43,11 +53,20 @@ describe('loadSchemaMetadata', () => {
     });
 
     it('should return unique indexes after unique fields', () => {
-      const metadata = schemaMetadataOf(
-        model('Article', [column('tenantId'), column('slug', { isUnique: true })], {
-          uniqueIndexes: [{ name: 'tenant_slug', fields: ['tenantId', 'slug'] }],
-        }),
-      );
+      const metadata = loadSchemaMetadata({
+        formatVersion: 1,
+        models: [
+          {
+            name: 'Article',
+            fields: [column('tenantId'), column('slug', { isUnique: true })],
+            primaryKey: null,
+            uniqueConstraints: [
+              { type: 'uniqueField', fields: ['slug'], name: null },
+              { type: 'uniqueIndex', fields: ['tenantId', 'slug'], name: 'tenant_slug' },
+            ],
+          },
+        ],
+      } satisfies AuditSchema);
 
       expect(metadata.getUniqueConstraints('Article')).toEqual([
         { type: 'uniqueField', fields: ['slug'], name: null },
