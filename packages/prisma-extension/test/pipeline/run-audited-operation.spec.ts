@@ -303,28 +303,6 @@ describe('runAuditedOperation', () => {
       expect(scopeSeenBy(deps.singleExecutor).handle).toBe(named.client);
       expect(auditWriteOf(deps)).toHaveBeenCalledExactlyOnceWith(named.client, [record]);
     });
-
-    it('writes the records of several deferred operations in one transaction in it, in order', async () => {
-      const second: AuditLogData = { ...record, entityId: createEntityId('u2') };
-      const outcomes = [executedUpdate, executedWith([second])];
-      const deps = createDeps({ singleExecutor: stubExecutor(async () => outcomes.shift() ?? executedUpdate) });
-      const baseClient = createBaseClient();
-      const transaction = activeTransactionOf(transactionClient);
-
-      await runOperation(
-        { operation: interceptedOf(), auditContext, baseClient, mode: 'deferred', plan: 'immediate', transaction },
-        deps,
-      );
-      await runOperation(
-        { operation: interceptedOf(), auditContext, baseClient, mode: 'deferred', plan: 'immediate', transaction },
-        deps,
-      );
-
-      expect(auditWriteOf(deps).mock.calls).toEqual([
-        [transactionClient, [record]],
-        [transactionClient, [second]],
-      ]);
-    });
   });
 
   describe('continuation', () => {
@@ -887,30 +865,6 @@ describe('runAuditedOperation', () => {
         expect(recordedFailuresOf(transaction.audit)).toEqual([rejection]);
       });
 
-      it('resolves an awaited operation a row-identification failure dropped a record of', async () => {
-        const deps = createDeps({ batchExecutor: keepingExecutor(failureOf('row-identification', 'updateMany')) });
-        const transaction = activeTransactionOf(transactionClient);
-
-        await expect(
-          runOperation(
-            {
-              operation: interceptedOf(
-                'updateMany',
-                vi.fn(async () => 'written'),
-              ),
-              auditContext,
-              baseClient: createBaseClient(),
-              mode: 'awaited',
-              plan: 'immediate',
-              transaction,
-            },
-            deps,
-          ),
-        ).resolves.toBe(executedUpdate.result);
-
-        expect(recordedFailuresOf(transaction.audit)).toEqual([]);
-      });
-
       const atomicUpdateIn = (transaction: ActiveTransaction): Omit<AuditedOperationInput, 'outcome'> => ({
         operation: interceptedOf(
           'update',
@@ -943,15 +897,34 @@ describe('runAuditedOperation', () => {
         expect(recordedFailuresOf(transaction.audit)).toEqual([rejection]);
       });
 
-      it('resolves an awaited operation the event collection left a write of without a record', async () => {
-        const deps = createDeps({
-          singleExecutor: keepingExecutor(failureOf('pre-fetch', 'upsert'), [unrecordedUpsert]),
-        });
+      it.each([
+        {
+          cause: 'a row-identification failure dropped a record of',
+          operation: 'updateMany',
+          deps: () => createDeps({ batchExecutor: keepingExecutor(failureOf('row-identification', 'updateMany')) }),
+        },
+        {
+          cause: 'the event collection left a write of without a record',
+          operation: 'update',
+          deps: () =>
+            createDeps({ singleExecutor: keepingExecutor(failureOf('pre-fetch', 'upsert'), [unrecordedUpsert]) }),
+        },
+      ] as const)('resolves an awaited operation $cause', async ({ operation, deps }) => {
         const transaction = activeTransactionOf(transactionClient);
 
-        await expect(runOperation({ ...atomicUpdateIn(transaction), mode: 'awaited' }, deps)).resolves.toBe(
-          executedUpdate.result,
-        );
+        await expect(
+          runOperation(
+            {
+              ...atomicUpdateIn(transaction),
+              operation: interceptedOf(
+                operation,
+                vi.fn(async () => 'written'),
+              ),
+              mode: 'awaited',
+            },
+            deps(),
+          ),
+        ).resolves.toBe(executedUpdate.result);
 
         expect(recordedFailuresOf(transaction.audit)).toEqual([]);
       });

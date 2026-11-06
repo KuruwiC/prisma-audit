@@ -6,13 +6,14 @@ import type { EntityMap } from '@kuruwic/prisma-audit';
 import {
   createAsyncLocalStorageProvider,
   createAuditClient,
+  defineEntities,
   defineEntity,
   flushAllPendingWrites,
   foreignKey,
   getPendingWriteCount,
   to,
 } from '@kuruwic/prisma-audit';
-import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
+import { type AuditModelName, auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -88,57 +89,6 @@ describe('Write Strategy Tests', () => {
         },
       );
     });
-
-    it('should write the audit logs of a deferred client inside an explicit transaction, before it resolves', async () => {
-      const auditProvider = createAsyncLocalStorageProvider();
-
-      const prisma = createAuditClient(db, {
-        contextProvider: auditProvider,
-        entities: testEntities,
-        write: { mode: 'deferred' },
-        Prisma,
-        schema: auditSchema,
-      });
-
-      await auditProvider.runAsync(
-        {
-          actor: { category: 'user', type: 'User', id: 'test-user', name: 'Test User' },
-        },
-        async () => {
-          await prisma.$transaction(async (tx) => {
-            const user = await tx.user.create({
-              data: {
-                email: 'test@example.com',
-                name: 'Test User',
-              },
-            });
-
-            await tx.post.create({
-              data: {
-                title: 'Test Post',
-                content: 'Test Content',
-                published: true,
-                authorId: user.id,
-              },
-            });
-          });
-
-          const users = await db.user.findMany();
-          const posts = await db.post.findMany();
-          expect(users.length).toBe(1);
-          expect(posts.length).toBe(1);
-
-          expect(getPendingWriteCount()).toBe(0);
-
-          const auditLogs = await db.auditLog.findMany();
-          expect(auditLogs.map((log) => `${log.entityType}/${log.aggregateType}`).sort()).toEqual([
-            'Post/Post',
-            'Post/User',
-            'User/User',
-          ]);
-        },
-      );
-    });
   });
 
   describe('Transaction Coverage', () => {
@@ -197,63 +147,75 @@ describe('Write Strategy Tests', () => {
       );
     });
 
-    it('should create audit logs for all operations within explicit multi-statement transaction (sync)', async () => {
-      const auditProvider = createAsyncLocalStorageProvider();
+    it.each([
+      { name: "the client's write.mode is deferred", entities: testEntities, write: { mode: 'deferred' } },
+      { name: "the client's write.mode is awaited", entities: testEntities, write: { mode: 'awaited' } },
+      {
+        name: 'the entities of the models set different writeMode values',
+        entities: defineEntities<AuditModelName, PrismaClient>()({
+          User: defineEntity({ type: 'User', writeMode: 'awaited' }),
+          Post: defineEntity({
+            type: 'Post',
+            writeMode: 'deferred',
+            aggregates: [to('User', foreignKey('authorId'))],
+          }),
+        }),
+        write: undefined,
+      },
+    ] as const)(
+      'should write the audit logs of every operation inside an explicit transaction before it resolves when $name',
+      async ({ entities, write }) => {
+        const auditProvider = createAsyncLocalStorageProvider();
 
-      const prisma = createAuditClient(db, {
-        contextProvider: auditProvider,
-        entities: testEntities,
-        write: { mode: 'awaited' },
-        Prisma,
-        schema: auditSchema,
-      });
+        const prisma = createAuditClient(db, {
+          contextProvider: auditProvider,
+          entities,
+          ...(write ? { write } : {}),
+          Prisma,
+          schema: auditSchema,
+        });
 
-      await auditProvider.runAsync(
-        {
-          actor: { category: 'user', type: 'User', id: 'test-user', name: 'Test User' },
-        },
-        async () => {
-          const result = await prisma.$transaction(async (tx) => {
-            const user = await tx.user.create({
-              data: {
-                email: 'test@example.com',
-                name: 'Test User',
-              },
+        await auditProvider.runAsync(
+          {
+            actor: { category: 'user', type: 'User', id: 'test-user', name: 'Test User' },
+          },
+          async () => {
+            const result = await prisma.$transaction(async (tx) => {
+              const user = await tx.user.create({
+                data: {
+                  email: 'test@example.com',
+                  name: 'Test User',
+                },
+              });
+
+              const post = await tx.post.create({
+                data: {
+                  title: 'Test Post',
+                  content: 'Test Content',
+                  published: true,
+                  authorId: user.id,
+                },
+              });
+
+              return { user, post };
             });
 
-            const post = await tx.post.create({
-              data: {
-                title: 'Test Post',
-                content: 'Test Content',
-                published: true,
-                authorId: user.id,
-              },
-            });
+            expect(result.user.email).toBe('test@example.com');
+            expect(result.post.authorId).toBe(result.user.id);
+            expect(await db.user.count()).toBe(1);
+            expect(await db.post.count()).toBe(1);
 
-            return { user, post };
-          });
+            expect(getPendingWriteCount()).toBe(0);
 
-          expect(result.user.email).toBe('test@example.com');
-          expect(result.post.authorId).toBe(result.user.id);
-
-          const userLogs = await db.auditLog.findMany({
-            where: {
-              entityType: 'User',
-              entityId: result.user.id,
-            },
-          });
-
-          const postLogs = await db.auditLog.findMany({
-            where: {
-              entityType: 'Post',
-              entityId: result.post.id,
-            },
-          });
-
-          expect(userLogs).toHaveLength(1);
-          expect(postLogs).toHaveLength(2);
-        },
-      );
-    });
+            const auditLogs = await db.auditLog.findMany();
+            expect(auditLogs.map((log) => `${log.entityType}/${log.aggregateType}`).sort()).toEqual([
+              'Post/Post',
+              'Post/User',
+              'User/User',
+            ]);
+          },
+        );
+      },
+    );
   });
 });

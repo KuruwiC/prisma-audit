@@ -162,7 +162,7 @@ describe('collectToOneDeleteRecords — nothing pre-fetched', () => {
     ]);
   });
 
-  it('treats a real primary key spelled like a placeholder as a resolved identity', async () => {
+  it('takes the identity of a delete from the single-field primary key in the operation data when nothing was pre-fetched', async () => {
     const commentsOp: NestedOperationInfo = {
       ...nestedOp,
       relatedModel: 'Comment',

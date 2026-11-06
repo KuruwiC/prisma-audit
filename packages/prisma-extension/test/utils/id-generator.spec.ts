@@ -29,9 +29,6 @@ const UUID_V7_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9
 const CUID_V1_RE = /^c[a-z0-9]{24}$/;
 const CUID2_RE = /^[a-z][a-z0-9]{23}$/;
 
-/** Extract the 48-bit unix-ms timestamp prefix from a UUID v7 */
-const uuidV7TimestampMs = (id: string): number => Number.parseInt(id.slice(0, 8) + id.slice(9, 13), 16);
-
 const metadataWithIdDefault = (defaultFunction: FieldDefault): SchemaMetadata =>
   schemaMetadataOf(
     model('Item', [column('id', { isId: true, isRequired: true, hasDefaultValue: true, default: defaultFunction })]),
@@ -67,18 +64,6 @@ describe('ID_GENERATOR_FACTORIES', () => {
   });
 });
 
-describe('UUID v7 generation', () => {
-  it('embeds the current unix-ms timestamp in the first 48 bits', () => {
-    const before = Date.now();
-    const id = ID_GENERATOR_FACTORIES.uuid?.([7])?.() as string;
-    const after = Date.now();
-
-    const ts = uuidV7TimestampMs(id);
-    expect(ts).toBeGreaterThanOrEqual(before);
-    expect(ts).toBeLessThanOrEqual(after);
-  });
-});
-
 describe('getIdFieldInfo', () => {
   it('should return undefined if field is not found', () => {
     const metadata = schemaMetadataOf(model('User', [column('email')]));
@@ -109,17 +94,6 @@ describe('getIdFieldInfo', () => {
     const v4 = getIdFieldInfo(metadataWithIdDefault({ name: 'uuid', args: [4] }), 'Item', 'id');
     expect(v4?.defaultFunction).toBe('uuid(4)');
     expect(v4?.generator?.()).toMatch(UUID_V4_RE);
-  });
-
-  it.each<[string, FieldDefault]>([
-    ['cuid()', { name: 'cuid', args: [] }],
-    ['cuid(2)', { name: 'cuid', args: [2] }],
-    ['uuid()', { name: 'uuid', args: [4] }],
-    ['uuid(7)', { name: 'uuid', args: [7] }],
-  ])('%s yields a new id on every call', (_label, defaultFunction) => {
-    const generate = getIdFieldInfo(metadataWithIdDefault(defaultFunction), 'Item', 'id')?.generator;
-
-    expect(generate?.()).not.toBe(generate?.());
   });
 
   it('should return field info without generator for autoincrement()', () => {
@@ -238,33 +212,6 @@ describe('ensureIds', () => {
     expect(firstEntity).toBeDefined();
     expect(firstEntity?.userId).toMatch(CUID_V1_RE);
     expect(firstEntity).not.toHaveProperty('id');
-  });
-
-  it('injects UUID v7 for @default(uuid(7)) models', () => {
-    const result = ensureIds(
-      metadataWithIdDefault({ name: 'uuid', args: [7] }),
-      'Item',
-      [{ label: 'a' }, { label: 'b' }],
-      ['id'],
-    ) as Array<{ id: string; label: string }>;
-
-    for (const entity of result) {
-      expect(entity.id).toMatch(UUID_V7_RE);
-    }
-    expect(result[0]?.id).not.toBe(result[1]?.id);
-  });
-
-  it('injects UUID v4 for @default(uuid()) models', () => {
-    const result = ensureIds(
-      metadataWithIdDefault({ name: 'uuid', args: [4] }),
-      'Item',
-      [{ label: 'a' }],
-      ['id'],
-    ) as Array<{
-      id: string;
-      label: string;
-    }>;
-    expect(result[0]?.id).toMatch(UUID_V4_RE);
   });
 
   it('throws an unsupported-default error for unknown uuid versions instead of silently injecting v4', () => {

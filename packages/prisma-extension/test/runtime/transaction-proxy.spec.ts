@@ -783,9 +783,14 @@ describe('createTransactionProxy (deferred audit writes inside a transaction)', 
     return { provider, proxy: createTransactionProxy(target, { provider, recipeConfig }), tx };
   };
 
-  it('writes the audit of a deferred operation run under an actor override in the transaction, before the operation returns', async () => {
+  it('writes the audit of a deferred operation run under an actor override in the transaction, before the operation returns and before the transaction commits', async () => {
     const deps = createDeps(async () => {});
-    const { provider, proxy, tx } = auditedProxy(deps);
+    let writesAtCommitTime = -1;
+    const { provider, proxy, tx } = auditedProxy(deps, async (runCallback) => {
+      const callbackResult = await runCallback();
+      writesAtCommitTime = auditWriteOf(deps).mock.calls.length;
+      return callbackResult;
+    });
     let writesInsideTransaction = -1;
 
     const result = await provider.runAsync(baseContext, () =>
@@ -798,26 +803,8 @@ describe('createTransactionProxy (deferred audit writes inside a transaction)', 
 
     expect(result).toBe('committed');
     expect(writesInsideTransaction).toBe(1);
-    expect(getPendingWriteCount()).toBe(0);
-    expect(auditWriteOf(deps)).toHaveBeenCalledExactlyOnceWith(tx, [recordOf('u1')]);
-  });
-
-  it("writes the audit of a deferred operation before the client's $transaction commits", async () => {
-    const deps = createDeps(async () => {});
-    let writesAtCommitTime = -1;
-    const { provider, proxy, tx } = auditedProxy(deps, async (runCallback) => {
-      const result = await runCallback();
-      writesAtCommitTime = auditWriteOf(deps).mock.calls.length;
-      return result;
-    });
-
-    await provider.runAsync(baseContext, () =>
-      proxy.$transaction(async (bound) => {
-        await bound.user.create({ id: 'u1', atomic: false });
-      }),
-    );
-
     expect(writesAtCommitTime).toBe(1);
+    expect(getPendingWriteCount()).toBe(0);
     expect(auditWriteOf(deps)).toHaveBeenCalledExactlyOnceWith(tx, [recordOf('u1')]);
   });
 

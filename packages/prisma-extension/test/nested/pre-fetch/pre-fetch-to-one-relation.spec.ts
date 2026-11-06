@@ -330,37 +330,6 @@ describe('nested to-one pre-fetch relation link and parent rows', () => {
       });
     });
 
-    it('reads the related row under a parent row a to-many update names by primary key', async () => {
-      const client = createClient({
-        account: [{ id: 'a1' }],
-        member: [{ id: 'm1', accountId: 'a1', name: 'first' }],
-        badge: [{ id: 'b1', memberId: 'm1', label: 'badge-1' }],
-      });
-
-      const results = await preFetch(
-        client,
-        'Account',
-        {
-          where: { id: 'a1' },
-          data: {
-            members: {
-              update: {
-                where: { id: 'm1' },
-                data: { badge: { upsert: { create: { label: 'new' }, update: { label: 'changed' } } } },
-              },
-            },
-          },
-        },
-        noUpdateReads,
-      );
-
-      expect(results.get('members')).toBeUndefined();
-      expect(preFetchedStateUnder(results, 'members.badge', 'm1')).toMatchObject({
-        kind: 'captured',
-        row: { label: 'badge-1' },
-      });
-    });
-
     it('reads its key columns under its parent row when a write below it detaches the rows attached to the row', async () => {
       const client = createClient({
         account: [{ id: 'a1' }],
@@ -564,7 +533,7 @@ describe('nested to-one pre-fetch relation link and parent rows', () => {
       const member = client.member as ReturnType<typeof createDelegate>;
       const findUnique = vi.spyOn(member, 'findUnique');
 
-      await preFetch(
+      const results = await preFetch(
         client,
         'Account',
         {
@@ -582,6 +551,11 @@ describe('nested to-one pre-fetch relation link and parent rows', () => {
       );
 
       expect(findUnique).not.toHaveBeenCalled();
+      expect(results.get('members')).toBeUndefined();
+      expect(preFetchedStateUnder(results, 'members.badge', 'm1')).toMatchObject({
+        kind: 'captured',
+        row: { label: 'badge-1' },
+      });
     });
   });
 });

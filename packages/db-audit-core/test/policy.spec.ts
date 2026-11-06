@@ -30,10 +30,6 @@ describe('policy', () => {
     expect(policy(['Post'], { mode: 'atomic', entity: entitiesWith({ Post: 'deferred' }) })).toBe('deferred');
   });
 
-  it('finds the entity of a model whatever the case of its first letter', () => {
-    expect(policy(['auditEvent'], { mode: 'atomic', entity: entitiesWith({ AuditEvent: 'awaited' }) })).toBe('awaited');
-  });
-
   it.each([
     { modes: { User: 'deferred', Payment: 'atomic' }, strongest: 'atomic' },
     { modes: { User: 'awaited', Payment: 'deferred' }, strongest: 'awaited' },

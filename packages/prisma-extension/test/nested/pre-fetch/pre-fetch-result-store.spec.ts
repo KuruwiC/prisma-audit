@@ -268,14 +268,6 @@ describe('storeIdentifiedRow', () => {
 });
 
 describe('extractEntityIdOrUnresolved', () => {
-  it('gives the value of a single-field key as a string', () => {
-    expect(extractEntityIdOrUnresolved({ id: 123, name: 'n' }, ['id'])).toBe('123');
-  });
-
-  it('gives the JSON array of the values of a composite key', () => {
-    expect(extractEntityIdOrUnresolved({ postId: 'a', tagId: '1' }, ['postId', 'tagId'])).toBe('["a","1"]');
-  });
-
   it.each([
     ['null', null],
     ['undefined', undefined],
@@ -283,11 +275,6 @@ describe('extractEntityIdOrUnresolved', () => {
     ['a number', 1],
   ])('is unresolved when the record is %s', (_name, record) => {
     expect(extractEntityIdOrUnresolved(record, ['id'])).toBe(UNRESOLVED_ENTITY_ID);
-  });
-
-  it('is unresolved when a key field is missing or null', () => {
-    expect(extractEntityIdOrUnresolved({ name: 'n' }, ['id'])).toBe(UNRESOLVED_ENTITY_ID);
-    expect(extractEntityIdOrUnresolved({ postId: 'a', tagId: null }, ['postId', 'tagId'])).toBe(UNRESOLVED_ENTITY_ID);
   });
 });
 

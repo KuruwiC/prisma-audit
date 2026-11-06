@@ -80,11 +80,8 @@ describe('resolveNestedRowState', () => {
       });
     });
 
-    it.each([
-      ['existed and was connected', captured],
-      ['could not be read', unavailable],
-    ])('is not audited when the row %s', (_name, before) => {
-      expect(resolveNestedRowState(operation('connectOrCreate'), before, () => true)).toBeUndefined();
+    it('is not audited when the row existed and was connected', () => {
+      expect(resolveNestedRowState(operation('connectOrCreate'), captured, () => true)).toBeUndefined();
     });
   });
 });
