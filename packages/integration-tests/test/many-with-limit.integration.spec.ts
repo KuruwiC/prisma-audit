@@ -14,6 +14,7 @@
 
 import type { AuditContext, AuditObserver } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
+import type { WriteMode } from '@kuruwic/prisma-audit';
 import { AuditRollbackError, createAuditClient, defineEntity, flushAllPendingWrites } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
@@ -54,7 +55,7 @@ describe('updateMany and deleteMany with a limit', () => {
   let failReads = false;
   const observer = vi.fn<AuditObserver>();
 
-  const createAudited = () =>
+  const createAudited = (mode: WriteMode = 'deferred') =>
     createAuditClient(
       raw.$extends({
         name: 'read-fault',
@@ -74,7 +75,7 @@ describe('updateMany and deleteMany with a limit', () => {
         schema: auditSchema,
         contextProvider: provider,
         entities: { User: defineEntity({ type: 'User' }) },
-        write: { mode: 'deferred' },
+        write: { mode },
         observer,
       },
     ).$extends({
@@ -198,6 +199,23 @@ describe('updateMany and deleteMany with a limit', () => {
 
     const result = await provider.runAsync(testActor, () =>
       audited.$transaction((tx) => tx.user.updateMany({ where: queued, data: { password: 'rotated' }, limit: 3 })),
+    );
+
+    expect(result).toEqual({ count: 3 });
+    expect(seen.map((call) => call.operation)).toEqual(['updateMany', 'updateMany']);
+    const updated = await rotatedIds();
+    expect(updated).toHaveLength(3);
+    expect(updated).not.toContain(taken.id);
+    expect(await auditedIds()).toEqual(updated);
+  });
+
+  it('tops up a round another writer left short inside the transaction the client opens for an atomic operation, and audits only the rows it updated', async () => {
+    await seedQueued(4);
+    const taken = takeFirstNarrowedRow();
+    const atomic = createAudited('atomic');
+
+    const result = await provider.runAsync(testActor, () =>
+      atomic.user.updateMany({ where: queued, data: { password: 'rotated' }, limit: 3 }),
     );
 
     expect(result).toEqual({ count: 3 });

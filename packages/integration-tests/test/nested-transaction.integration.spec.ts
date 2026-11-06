@@ -8,8 +8,8 @@
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
-import type { AuditObserver, WriteMode } from '@kuruwic/prisma-audit';
-import { createAuditClient, flushAllPendingWrites } from '@kuruwic/prisma-audit';
+import type { AuditLogWriter, AuditObserver, WriteMode } from '@kuruwic/prisma-audit';
+import { AuditRollbackError, createAuditClient, flushAllPendingWrites } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -33,12 +33,12 @@ describe('a transaction nested in a $transaction callback', () => {
     await basePrisma.$disconnect();
   });
 
-  const auditedClient = (mode: WriteMode) => {
+  const auditedClient = (mode: WriteMode, writer?: AuditLogWriter) => {
     const provider = createAsyncLocalStorageProvider();
     const observer = vi.fn<AuditObserver>();
     const prisma = createAuditClient(basePrisma, {
       ...testAuditOptions(provider, { Prisma, schema: auditSchema }),
-      write: { mode },
+      write: { mode, ...(writer ? { writer } : {}) },
       observer,
     });
     return { prisma, provider, observer };
@@ -94,6 +94,39 @@ describe('a transaction nested in a $transaction callback', () => {
         expect(observer.mock.calls.map(([outcome]) => outcome.status).sort()).toEqual(['complete', 'not-committed']);
       },
     );
+
+    it('rolls back only itself with AuditRollbackError when its callback catches a failed audit write, and the enclosing transaction commits', async () => {
+      const writerError = new Error('audit write failed');
+      let failWrites = false;
+      const { prisma, provider } = auditedClient(mode, async (records, { defaultWrite }) => {
+        if (failWrites) {
+          throw writerError;
+        }
+        await defaultWrite(records);
+      });
+      let caught: unknown;
+
+      await provider.runAsync(testActor, () =>
+        prisma.$transaction(async (tx) => {
+          await tx.user.create({ data: userData('outer@example.com') });
+          const nestedOutcome = tx.$transaction(async (nested) => {
+            failWrites = true;
+            await nested.user.create({ data: userData('nested@example.com') }).catch((error: unknown) => {
+              caught = error;
+            });
+            failWrites = false;
+          });
+          await expect(nestedOutcome).rejects.toBeInstanceOf(AuditRollbackError);
+          await expect(nestedOutcome).rejects.toMatchObject({ cause: writerError });
+          await tx.user.create({ data: userData('after@example.com') });
+        }),
+      );
+      await flushAllPendingWrites();
+
+      expect(caught).toBe(writerError);
+      expect(await emails()).toEqual(['after@example.com', 'outer@example.com']);
+      expect(await auditedEmails()).toEqual(['after@example.com', 'outer@example.com']);
+    });
 
     it('runs a batch $transaction of the callback client as a nested transaction, auditing its writes', async () => {
       const { prisma, provider } = auditedClient(mode);

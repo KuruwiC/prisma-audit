@@ -7,7 +7,7 @@
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import type { WriteMode } from '@kuruwic/prisma-audit';
-import { createAuditClient, flushAllPendingWrites } from '@kuruwic/prisma-audit';
+import { AuditRollbackError, createAuditClient, flushAllPendingWrites } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { PrismaPg } from '@prisma/adapter-pg';
@@ -142,6 +142,59 @@ describe('audit rows follow the commit of the writes they record', () => {
 
       expect(await committedEmails()).toEqual(['kept@example.com']);
       expect(await auditedEmails()).toEqual(await committedEmails());
+    });
+
+    it('commits a write the callback started without awaiting, and its audit row, once the write has settled', async () => {
+      const { prisma, provider } = auditedClient(mode);
+      const events: string[] = [];
+
+      await provider.runAsync(testActor, () =>
+        prisma.$transaction(async (tx) => {
+          void tx.user.create({ data: userData('unawaited@example.com') }).then(() => {
+            events.push('write settled');
+          });
+          events.push('callback resolved');
+        }),
+      );
+      events.push('transaction committed');
+      await flushAllPendingWrites();
+
+      expect(events).toEqual(['callback resolved', 'write settled', 'transaction committed']);
+      expect(await committedEmails()).toEqual(['unawaited@example.com']);
+      expect(await auditedEmails()).toEqual(['unawaited@example.com']);
+    });
+
+    it('rolls the transaction back with AuditRollbackError when the audit write of a write the callback started without awaiting fails', async () => {
+      const writerError = new Error('audit write failed');
+      const provider = createAsyncLocalStorageProvider();
+      const prisma = createAuditClient(basePrisma, {
+        ...testAuditOptions(provider, { Prisma, schema: auditSchema }),
+        write: {
+          mode,
+          writer: async () => {
+            throw writerError;
+          },
+        },
+      });
+      const events: string[] = [];
+      let caught: unknown;
+
+      const outcome = provider.runAsync(testActor, () =>
+        prisma.$transaction(async (tx) => {
+          void tx.user.create({ data: userData('unawaited@example.com') }).catch((error: unknown) => {
+            caught = error;
+            events.push('write failed');
+          });
+          events.push('callback resolved');
+        }),
+      );
+
+      await expect(outcome).rejects.toBeInstanceOf(AuditRollbackError);
+      await expect(outcome).rejects.toMatchObject({ cause: writerError });
+      expect(events).toEqual(['callback resolved', 'write failed']);
+      expect(caught).toBe(writerError);
+      expect(await committedEmails()).toEqual([]);
+      expect(await basePrisma.auditLog.count()).toBe(0);
     });
 
     it('leaves an audit row for exactly the committed writes when a write starts while a nested transaction that rolls back is opening', async () => {

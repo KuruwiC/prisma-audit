@@ -489,6 +489,41 @@ describe('createSingleExecutor', () => {
       );
     });
 
+    it('reports the created row as row-identification when more rows are new under the parent than the write inserted, and audits none of them', async () => {
+      const insertedByAnotherWriter: Row = { id: 'p3', title: 'C', authorId: 'u1' };
+      const client = clientWith({
+        user: {
+          findUnique: vi.fn(async () => user),
+          update: vi.fn(async () => ({ ...user, posts: [existingPost, createdPost, insertedByAnotherWriter] })),
+        },
+        post: { findMany: vi.fn(async () => [{ id: 'p1' }]) },
+      });
+      const { executor, produceRecords, failureSink } = executorWith();
+
+      await runWithRecords(
+        executor,
+        operationOn(client, 'update', { where: { id: 'u1' }, data: { posts: { create: { title: 'B' } } } }),
+        scopeOn(client, failureSink),
+        produceRecords,
+      );
+
+      expect(failureSink.fail).toHaveBeenCalledExactlyOnceWith({
+        phase: 'row-identification',
+        modelName: 'Post',
+        operation: 'create',
+        unidentified: 1,
+        error: expect.objectContaining({
+          message:
+            '1 of the rows a nested create at posts wrote are not audited: more rows are new under their parent row than the write inserted there, another writer having inserted some, and they cannot be told apart from those',
+        }),
+      });
+      expect(produceRecords).toHaveBeenCalledWith(
+        [expect.objectContaining({ model: 'User', action: 'update' })],
+        expect.anything(),
+        new Map(),
+      );
+    });
+
     it('fails with the snapshot error before the operation runs when the snapshot query fails', async () => {
       const snapshotError = new Error('connection reset');
       const update = vi.fn(async () => ({ ...user, posts: [existingPost, createdPost] }));
