@@ -310,12 +310,20 @@ describe('nested writes to models identified by a unique constraint instead of a
       );
 
       const logs = await logsOf();
-      expect(logs.map((log) => [log.entityId, log.action, log.changes])).toEqual([
-        ['d-dropped', 'update', { ownerId: { old: owner.id, new: null } }],
-        ['d-loose', 'update', { ownerId: { old: null, new: other.id } }],
-        ['d-loose', 'update', { ownerId: { old: other.id, new: null } }],
-        ['d-moved', 'update', { ownerId: { old: other.id, new: owner.id } }],
-      ]);
+      // The two d-loose rows tie on the ordering of `logsOf`, so both sides are put in one order first
+      type Row = [string, string, { ownerId: { old: string | null; new: string | null } }];
+      const keyOf = ([entityId, , changes]: Row) => `${entityId}|${changes.ownerId.old}|${changes.ownerId.new}`;
+      const byKey = (a: Row, b: Row) => keyOf(a).localeCompare(keyOf(b));
+      expect(logs.map((log) => [log.entityId, log.action, log.changes] as Row).sort(byKey)).toEqual(
+        (
+          [
+            ['d-dropped', 'update', { ownerId: { old: owner.id, new: null } }],
+            ['d-loose', 'update', { ownerId: { old: null, new: other.id } }],
+            ['d-loose', 'update', { ownerId: { old: other.id, new: null } }],
+            ['d-moved', 'update', { ownerId: { old: other.id, new: owner.id } }],
+          ] as Row[]
+        ).sort(byKey),
+      );
       expect(failuresOf(observer)).toEqual([]);
     });
 

@@ -23,7 +23,7 @@ import {
   createEntityId,
   createOperationOutcome,
 } from '@kuruwic/db-audit-core';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PrismaBaseClient, PrismaHandle } from '../../src/internal-types.js';
 import type { ExecutionScope } from '../../src/pipeline/execution-scope.js';
 import type { ExecutedOperation, OperationExecutor } from '../../src/pipeline/executor.js';
@@ -33,7 +33,7 @@ import {
   type InterceptedOperation,
   runAuditedOperation,
 } from '../../src/pipeline/run-audited-operation.js';
-import { flushAllPendingWrites, getPendingWriteCount } from '../../src/runtime/pending-writes.js';
+import { clearPendingWrites, flushAllPendingWrites, getPendingWriteCount } from '../../src/runtime/pending-writes.js';
 import { type ActiveTransaction, isProcessingAuditLog, withScope } from '../../src/runtime/scope.js';
 import type { AuditLogData } from '../../src/types.js';
 import { activeTransactionOf, recordedFailuresOf } from '../support/active-transaction.js';
@@ -159,6 +159,10 @@ type KeptFailure = Extract<AuditFailure, { readonly phase: 'pre-fetch' | 'row-id
 const auditWriteOf = (deps: AuditPipelineDependencies) => vi.mocked(deps.dispatchConfig.writeExecutor.write);
 
 describe('runAuditedOperation', () => {
+  beforeEach(() => {
+    clearPendingWrites();
+  });
+
   describe('write plan and scope', () => {
     it('runs on the base client without opening a transaction when the mode is awaited outside any transaction, and awaits the write', async () => {
       const baseClient = createBaseClient();
