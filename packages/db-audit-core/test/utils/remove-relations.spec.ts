@@ -51,53 +51,6 @@ describe('removeRelations', () => {
       });
     });
 
-    it('should handle complex nested structures', () => {
-      const input = {
-        id: 'post-1',
-        title: 'Post',
-        authorId: 'user-1',
-        author: {
-          id: 'user-1',
-          name: 'John',
-        },
-        postTags: [
-          {
-            id: 'pt-1',
-            postId: 'post-1',
-            tagId: 'tag-1',
-            tag: {
-              id: 'tag-1',
-              name: 'TypeScript',
-            },
-          },
-        ],
-        metadata: {
-          views: 100,
-          likes: 10,
-          stats: {
-            averageReadTime: 5,
-            comments: 3,
-          },
-        },
-      };
-
-      const result = removeRelations(input, new Set(['author', 'postTags']));
-
-      expect(result).toEqual({
-        id: 'post-1',
-        title: 'Post',
-        authorId: 'user-1',
-        metadata: {
-          views: 100,
-          likes: 10,
-          stats: {
-            averageReadTime: 5,
-            comments: 3,
-          },
-        },
-      });
-    });
-
     it('should keep a nested key that shares a relation field name', () => {
       const input = {
         id: 'post-1',

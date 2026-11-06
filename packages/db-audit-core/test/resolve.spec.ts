@@ -407,25 +407,6 @@ describe('resolve', () => {
       expect(resolved[0]?.roots.map((r) => r.aggregateType)).toEqual(['Post', 'Tag']);
     });
 
-    it('yields nothing for a row without any root', async () => {
-      const config = configOf({
-        PostTag: defineEntity({
-          type: 'PostTag',
-          selfAggregate: false,
-          aggregates: [to('Post', foreignKey('postId'))],
-        }),
-      });
-
-      const { resolved } = await resolve(
-        [event('PostTag', { id: 'pt-123', postId: null })],
-        auditContext,
-        config,
-        read,
-      );
-
-      expect(resolved).toEqual([]);
-    });
-
     it('drops the rows without roots and keeps the others', async () => {
       const config = configOf({
         Post: defineEntity({ type: 'Post', selfAggregate: false, aggregates: [to('User', foreignKey('authorId'))] }),

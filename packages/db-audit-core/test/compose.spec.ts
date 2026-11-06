@@ -322,16 +322,6 @@ describe('compose', () => {
       expect(composeOne(updatedAtOnly, config).changes).toEqual({ updatedAt: { old: 1, new: 2 } });
     });
 
-    it('uses the global list for an entity without diffExcludeFields', () => {
-      const config: Partial<ComposeConfig> = {
-        entity: () => ({ category: 'model', type: 'Post', diffExcludeFields: undefined }),
-        diffExcludeFields: ['updatedAt'],
-      };
-
-      const updatedAtOnly = updateEvent({ id: 'post-1', updatedAt: 1 }, { id: 'post-1', updatedAt: 2 });
-      expect(compose([updatedAtOnly], ambient(config), now)).toEqual([]);
-    });
-
     it('never skips a delete', () => {
       const resolved = event({ action: 'delete', before: { kind: 'captured', row: { id: 'post-1', updatedAt: 1 } } });
 

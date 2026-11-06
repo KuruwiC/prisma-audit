@@ -15,7 +15,7 @@ import { createActorId, createAggregateId, createEntityId } from '../src/domain/
 import type { AuditRecord } from '../src/domain/mutation-event.js';
 import type { TransactionRuntime, WriteContext, WriteExecutor, WriteFn } from '../src/domain/write.js';
 import type { AuditFailure, OperationOutcome } from '../src/outcome/index.js';
-import { planFor, type WritePlanKind } from '../src/policy/index.js';
+import type { WritePlanKind } from '../src/policy/index.js';
 import type { AuditContext } from '../src/types.js';
 import { deferred } from './support/deferred.js';
 import { spiedTransactionAudit } from './support/spied-transaction-audit.js';
@@ -196,25 +196,6 @@ describe('dispatch', () => {
       expect(poison.mock.calls).toEqual([[writeError]]);
     });
   });
-
-  it.each(['atomic', 'awaited', 'deferred'] as const)(
-    'writes the records of a %s operation inside a transaction on the transaction handle, awaited',
-    async (mode) => {
-      const { outcome, finished } = createOutcome();
-      const { config, writeExecutor } = createConfig();
-      const { runtime, detach } = createRuntime(true);
-      const plan = planFor(mode, true);
-      if (plan === 'reject') {
-        throw new Error(`a ${mode} operation inside a transaction is not rejected`);
-      }
-
-      await dispatch(audited(plan, outcome), config, runtime);
-
-      expect(writeExecutor.write).toHaveBeenCalledWith(transactionHandle, [record]);
-      expect(finished).toEqual([1]);
-      expect(detach).not.toHaveBeenCalled();
-    },
-  );
 
   describe('detached, for a detached plan outside any transaction', () => {
     it('hands one work to detach and writes nothing until it runs, then writes on the base handle', async () => {

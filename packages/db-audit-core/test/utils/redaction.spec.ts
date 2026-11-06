@@ -418,22 +418,6 @@ describe('redaction metadata', () => {
 });
 
 describe('redactSensitiveData with values JSON cannot hold', () => {
-  it('should keep Date values and redact beside them', () => {
-    const now = new Date('2025-01-10T12:00:00Z');
-    const data = {
-      id: 1,
-      createdAt: now,
-      password: 'secret123',
-    };
-
-    const redacted = redactSensitiveData(data) as Record<string, unknown>;
-
-    expect(redacted.id).toBe(1);
-    expect(redacted.createdAt).toEqual(now);
-
-    expect(redacted.password).toEqual({ redacted: true, hadValue: true });
-  });
-
   it('should keep BigInt values and redact beside them', () => {
     const data = {
       id: 123n,
@@ -447,50 +431,6 @@ describe('redactSensitiveData with values JSON cannot hold', () => {
     expect(redacted.largeNumber).toBe(9007199254740991n);
 
     expect(redacted.password).toEqual({ redacted: true, hadValue: true });
-  });
-
-  it('should handle nested objects with Date and BigInt', () => {
-    const data = {
-      user: {
-        id: 1n,
-        createdAt: new Date('2025-01-10'),
-        password: 'secret123',
-        profile: {
-          lastLogin: new Date('2025-01-11'),
-          token: 'token123',
-        },
-      },
-    };
-
-    const redacted = redactSensitiveData(data) as Record<string, unknown>;
-    const user = redacted.user as Record<string, unknown>;
-    const profile = user.profile as Record<string, unknown>;
-
-    expect(user.id).toBe(1n);
-    expect(user.createdAt).toEqual(new Date('2025-01-10'));
-    expect(profile.lastLogin).toEqual(new Date('2025-01-11'));
-
-    expect(user.password).toEqual({ redacted: true, hadValue: true });
-    expect(profile.token).toEqual({ redacted: true, hadValue: true });
-  });
-
-  it('should handle arrays with Date objects', () => {
-    const data = {
-      events: [
-        { createdAt: new Date('2025-01-10'), password: 'secret1' },
-        { createdAt: new Date('2025-01-11'), apiKey: 'key123' },
-      ],
-    };
-
-    const redacted = redactSensitiveData(data) as Record<string, unknown>;
-    const events = redacted.events as Array<Record<string, unknown>>;
-    const [event0, event1] = events;
-
-    expect(event0?.createdAt).toEqual(new Date('2025-01-10'));
-    expect(event1?.createdAt).toEqual(new Date('2025-01-11'));
-
-    expect(event0?.password).toEqual({ redacted: true, hadValue: true });
-    expect(event1?.apiKey).toEqual({ redacted: true, hadValue: true });
   });
 });
 

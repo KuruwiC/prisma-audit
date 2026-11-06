@@ -15,21 +15,17 @@ describe('Branded Types', () => {
       expect(typeof id).toBe('string');
     });
 
-    it('should throw IdValidationError for empty string', () => {
+    it('should throw IdValidationError, carrying the id type and the value, for empty string', () => {
       expect(() => createActorId('')).toThrow(IdValidationError);
       expect(() => createActorId('')).toThrow(/ActorId cannot be empty/);
+      expect(() => createActorId('')).toThrow(
+        expect.objectContaining({ name: 'IdValidationError', idType: 'ActorId', value: '' }),
+      );
     });
 
     it('should throw IdValidationError for whitespace-only string', () => {
       expect(() => createActorId('   ')).toThrow(IdValidationError);
       expect(() => createActorId('   ')).toThrow(/ActorId cannot be empty/);
-    });
-
-    it('should preserve the error type and fields', () => {
-      expect(() => createActorId('')).toThrow(
-        expect.objectContaining({ name: 'IdValidationError', idType: 'ActorId', value: '' }),
-      );
-      expect(() => createActorId('')).toThrow(IdValidationError);
     });
   });
 

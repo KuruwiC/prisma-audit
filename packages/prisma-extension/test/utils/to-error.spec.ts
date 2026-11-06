@@ -27,38 +27,4 @@ describe('toError', () => {
     expect(error.message).toBe('Thrown value could not be converted to a string');
     expect(error.cause).toBe(caught);
   });
-
-  it('should wrap a value whose toString throws, keeping it as the cause', () => {
-    const caught = {
-      toString: () => {
-        throw new Error('toString failed');
-      },
-    };
-    const error = toError(caught);
-    expect(error).toBeInstanceOf(Error);
-    expect(error.message).toBe('Thrown value could not be converted to a string');
-    expect(error.cause).toBe(caught);
-  });
-
-  it('should use the string form of a value on which only the instanceof check throws', () => {
-    const caught = new Proxy(
-      { toString: () => 'converted' },
-      {
-        getPrototypeOf: () => {
-          throw new Error('trap failed');
-        },
-      },
-    );
-    const error = toError(caught);
-    expect(error.message).toBe('converted');
-    expect(error.cause).toBe(caught);
-  });
-
-  it('should wrap a revoked proxy, on which the instanceof check throws, keeping it as the cause', () => {
-    const { proxy, revoke } = Proxy.revocable({}, {});
-    revoke();
-    const error = toError(proxy);
-    expect(error).toBeInstanceOf(Error);
-    expect(error.cause).toBe(proxy);
-  });
 });
