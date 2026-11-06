@@ -10,7 +10,7 @@ import { createAuditClient } from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createBasePrisma, testEntities } from './helpers/setup.js';
+import { cleanDatabase, createBasePrisma, testEntities } from './helpers/setup.js';
 
 const testActor: AuditContext = {
   actor: { category: 'model', type: 'User', id: 'relation-fields-actor' },
@@ -36,9 +36,7 @@ describe('relation fields in audited entity state', () => {
 
   beforeEach(async () => {
     scenario = createClient();
-    await scenario.basePrisma.auditLog.deleteMany();
-    await scenario.basePrisma.post.deleteMany();
-    await scenario.basePrisma.user.deleteMany();
+    await cleanDatabase(scenario.basePrisma);
   });
 
   afterEach(async () => {

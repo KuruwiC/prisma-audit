@@ -17,7 +17,7 @@ describe('Batch Operations (Behavioral)', () => {
   };
 
   describe('createMany', () => {
-    it('should have correct after state for each row', async () => {
+    it('should have correct after state and actor info for each row', async () => {
       const h = getHarness();
       await h.runWithContext(actor, () =>
         h.createMany('User', [
@@ -29,19 +29,6 @@ describe('Batch Operations (Behavioral)', () => {
       const logs = await h.readAuditLogs({ entityType: 'User', action: 'create' });
       const emails = logs.map((l) => (l.after as Record<string, unknown>)?.email).sort();
       expect(emails).toEqual(['after1@example.com', 'after2@example.com']);
-    });
-
-    it('should have consistent actor info across all logs', async () => {
-      const h = getHarness();
-      await h.runWithContext(actor, () =>
-        h.createMany('User', [
-          { email: 'actor1@example.com', name: 'Actor 1', password: 'secret' },
-          { email: 'actor2@example.com', name: 'Actor 2', password: 'secret' },
-        ]),
-      );
-
-      const logs = await h.readAuditLogs({ entityType: 'User', action: 'create' });
-      expect(logs).toHaveLength(2);
       for (const log of logs) {
         expect(log.actorId).toBe('test-actor-1');
         expect(log.actorType).toBe('User');
@@ -74,22 +61,9 @@ describe('Batch Operations (Behavioral)', () => {
   });
 
   describe('createManyAndReturn', () => {
-    it('should return the created records', async () => {
+    it('should return the created records, with the correct after state and actor info for each row', async () => {
       const h = getHarness();
       const rows = await h.runWithContext(actor, () =>
-        h.createManyAndReturn('User', [
-          { email: 'cmr1@example.com', name: 'CMR 1', password: 'secret' },
-          { email: 'cmr2@example.com', name: 'CMR 2', password: 'secret' },
-        ]),
-      );
-
-      expect(rows.map((row) => row.email).sort()).toEqual(['cmr1@example.com', 'cmr2@example.com']);
-      for (const row of rows) expect(row.id).toBeTruthy();
-    });
-
-    it('should have correct after state for each row', async () => {
-      const h = getHarness();
-      await h.runWithContext(actor, () =>
         h.createManyAndReturn('User', [
           { email: 'cmrafter1@example.com', name: 'CMR After 1', password: 'secret' },
           { email: 'cmrafter2@example.com', name: 'CMR After 2', password: 'secret' },
@@ -99,18 +73,8 @@ describe('Batch Operations (Behavioral)', () => {
       const logs = await h.readAuditLogs({ entityType: 'User', action: 'create' });
       const emails = logs.map((l) => (l.after as Record<string, unknown>)?.email).sort();
       expect(emails).toEqual(['cmrafter1@example.com', 'cmrafter2@example.com']);
-    });
-
-    it('should have consistent actor info across all logs', async () => {
-      const h = getHarness();
-      await h.runWithContext(actor, () =>
-        h.createManyAndReturn('User', [
-          { email: 'cmractor1@example.com', name: 'CMR Actor 1', password: 'secret' },
-          { email: 'cmractor2@example.com', name: 'CMR Actor 2', password: 'secret' },
-        ]),
-      );
-
-      const logs = await h.readAuditLogs({ entityType: 'User', action: 'create' });
+      expect(rows.map((row) => row.email).sort()).toEqual(['cmrafter1@example.com', 'cmrafter2@example.com']);
+      for (const row of rows) expect(row.id).toBeTruthy();
       expect(logs).toHaveLength(2);
       for (const log of logs) {
         expect(log.actorId).toBe('test-actor-1');
@@ -177,24 +141,7 @@ describe('Batch Operations (Behavioral)', () => {
   });
 
   describe('updateManyAndReturn', () => {
-    it('should return the updated records', async () => {
-      const h = getHarness();
-      const user1 = await h.runWithContext(actor, () =>
-        h.createOne('User', { email: 'umr1@example.com', name: 'Before1', password: 'secret' }),
-      );
-      const user2 = await h.runWithContext(actor, () =>
-        h.createOne('User', { email: 'umr2@example.com', name: 'Before2', password: 'secret' }),
-      );
-
-      const rows = await h.runWithContext(actor, () =>
-        h.updateManyAndReturn('User', { id: { in: [user1.id, user2.id] } }, { name: 'After' }),
-      );
-
-      expect(rows.map((row) => row.id).sort()).toEqual([user1.id, user2.id].sort());
-      for (const row of rows) expect(row.name).toBe('After');
-    });
-
-    it('should have correct before/after/changes for each updated record', async () => {
+    it('should return the updated records, with correct before/after/changes and actor info for each', async () => {
       const h = getHarness();
       const user1 = await h.runWithContext(actor, () =>
         h.createOne('User', { email: 'umrba1@example.com', name: 'Before1', password: 'secret' }),
@@ -203,9 +150,12 @@ describe('Batch Operations (Behavioral)', () => {
         h.createOne('User', { email: 'umrba2@example.com', name: 'Before2', password: 'secret' }),
       );
 
-      await h.runWithContext(actor, () =>
+      const rows = await h.runWithContext(actor, () =>
         h.updateManyAndReturn('User', { id: { in: [user1.id, user2.id] } }, { name: 'After' }),
       );
+
+      expect(rows.map((row) => row.id).sort()).toEqual([user1.id, user2.id].sort());
+      for (const row of rows) expect(row.name).toBe('After');
 
       const updateLogs = await h.readAuditLogs({ entityType: 'User', action: 'update' });
       expect(updateLogs).toHaveLength(2);
@@ -221,6 +171,8 @@ describe('Batch Operations (Behavioral)', () => {
       };
 
       for (const log of updateLogs) {
+        expect(log.actorId).toBe('test-actor-1');
+        expect(log.actorType).toBe('User');
         expect(log.before).not.toBeNull();
         expect(log.after).not.toBeNull();
 
@@ -234,27 +186,6 @@ describe('Batch Operations (Behavioral)', () => {
         // The before-state must match THIS record's own original name, not just any of the two.
         expect(changes.name?.old).toBe(expectedOld);
         expect((log.before as Record<string, unknown>).name).toBe(expectedOld);
-      }
-    });
-
-    it('should have consistent actor info across all logs', async () => {
-      const h = getHarness();
-      const user1 = await h.runWithContext(actor, () =>
-        h.createOne('User', { email: 'umractor1@example.com', name: 'Before1', password: 'secret' }),
-      );
-      const user2 = await h.runWithContext(actor, () =>
-        h.createOne('User', { email: 'umractor2@example.com', name: 'Before2', password: 'secret' }),
-      );
-
-      await h.runWithContext(actor, () =>
-        h.updateManyAndReturn('User', { id: { in: [user1.id, user2.id] } }, { name: 'After' }),
-      );
-
-      const updateLogs = await h.readAuditLogs({ entityType: 'User', action: 'update' });
-      expect(updateLogs).toHaveLength(2);
-      for (const log of updateLogs) {
-        expect(log.actorId).toBe('test-actor-1');
-        expect(log.actorType).toBe('User');
       }
     });
   });

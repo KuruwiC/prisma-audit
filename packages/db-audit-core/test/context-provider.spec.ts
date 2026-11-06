@@ -49,6 +49,25 @@ describe('createAsyncLocalStorageProvider', () => {
     expect(provider.getContext()).toBeUndefined();
   });
 
+  it('plain arrow returning a lazy thenable inside runAsync resolves under the overridden context', async () => {
+    const provider = createAsyncLocalStorageProvider();
+    const seen: string[] = [];
+
+    const lazyOp = () => ({
+      then(onFulfilled: (v: unknown) => unknown) {
+        seen.push(provider.getContext()?.actor.id ?? 'none');
+        return Promise.resolve().then(() => onFulfilled(undefined));
+      },
+    });
+
+    const actor2 = { category: 'system' as const, type: 'Admin', id: 'actor-2' };
+    const ctx2: AuditContext = { actor: actor2 };
+
+    await provider.runAsync(ctx2, () => lazyOp() as unknown as Promise<unknown>);
+
+    expect(seen).toEqual(['actor-2']);
+  });
+
   it('should propagate context across nested async calls', async () => {
     const provider = createAsyncLocalStorageProvider();
 
@@ -324,25 +343,6 @@ describe('createAsyncLocalStorageProvider', () => {
         // Plain arrow on purpose — without the async wrapper this would capture 'outer-user'.
         await provider.withActor(actor2, () => lazyOp() as unknown as Promise<unknown>);
       });
-
-      expect(seen).toEqual(['actor-2']);
-    });
-
-    it('plain arrow returning a lazy thenable inside runAsync resolves under the overridden context', async () => {
-      const provider = createAsyncLocalStorageProvider();
-      const seen: string[] = [];
-
-      const lazyOp = () => ({
-        then(onFulfilled: (v: unknown) => unknown) {
-          seen.push(provider.getContext()?.actor.id ?? 'none');
-          return Promise.resolve().then(() => onFulfilled(undefined));
-        },
-      });
-
-      const actor2 = { category: 'system' as const, type: 'Admin', id: 'actor-2' };
-      const ctx2: AuditContext = { actor: actor2 };
-
-      await provider.runAsync(ctx2, () => lazyOp() as unknown as Promise<unknown>);
 
       expect(seen).toEqual(['actor-2']);
     });

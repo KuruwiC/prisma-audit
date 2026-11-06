@@ -48,14 +48,6 @@ describe('Normalized Writer Helpers', () => {
   });
 
   beforeEach(async () => {
-    await basePrisma.auditEvent.deleteMany();
-    await basePrisma.actor.deleteMany();
-    await basePrisma.entity.deleteMany();
-    await basePrisma.aggregate.deleteMany();
-
-    await basePrisma.auditAggregate.deleteMany();
-    await basePrisma.auditChange.deleteMany();
-
     await cleanDatabase(basePrisma);
   });
 

@@ -204,22 +204,6 @@ describe('the audit gate of the extension hook', () => {
     expect(writer).not.toHaveBeenCalled();
   });
 
-  it('audits, with a context, the audited rows a nested write of an operation on a model that is not audited writes', async () => {
-    const { client, provider, writer } = auditedClient(
-      { entities: { Post: defineEntity({ type: 'Post' }) } },
-      { id: 'u1', posts: [{ id: 'p1', authorId: 'u1' }] },
-    );
-
-    await provider.runAsync(context, async () => {
-      await client.user.create(nestedPostCreate);
-    });
-
-    const records = writer.mock.calls.flatMap(([written]) => written);
-    expect(records.map(({ entityType, entityId, action }) => ({ entityType, entityId, action }))).toEqual([
-      { entityType: 'Post', entityId: 'p1', action: 'create' },
-    ]);
-  });
-
   it('rejects an audited write that reaches the hook as part of a batch Prisma runs, before it runs', async () => {
     const { client, provider, query, writer } = auditedClient({});
 
@@ -266,7 +250,7 @@ describe('the audit gate of the extension hook', () => {
       expect(query).not.toHaveBeenCalled();
     });
 
-    it('opens a transaction, with a context, for a write on a model that is not audited whose nested write writes an audited one', async () => {
+    it('audits, in a transaction, with a context, the audited rows a nested write of an operation on a model that is not audited writes', async () => {
       const { client, provider, transaction, writer } = auditedClient(
         { entities: { Post: defineEntity({ type: 'Post' }) } },
         { id: 'u1', posts: [{ id: 'p1', authorId: 'u1' }] },
@@ -277,7 +261,10 @@ describe('the audit gate of the extension hook', () => {
       });
 
       expect(transaction).toHaveBeenCalledTimes(1);
-      expect(writer.mock.calls.flatMap(([written]) => written).map((record) => record.entityType)).toEqual(['Post']);
+      const records = writer.mock.calls.flatMap(([written]) => written);
+      expect(records.map(({ entityType, entityId, action }) => ({ entityType, entityId, action }))).toEqual([
+        { entityType: 'Post', entityId: 'p1', action: 'create' },
+      ]);
     });
 
     it('opens no transaction, with a context, for a write that writes no audited model', async () => {

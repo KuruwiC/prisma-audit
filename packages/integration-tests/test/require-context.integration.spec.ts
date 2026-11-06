@@ -119,17 +119,6 @@ describe('audit coverage by the audited models a write writes', () => {
         { action: 'create', entityId: user.posts[0]?.id },
       ]);
       expect(postLogs[0]?.after).toMatchObject({ title: 'child', authorId: user.id });
-    });
-
-    it('resolves the to() aggregate of a Post a nested write writes below a User that is not audited', async () => {
-      const { client, withContext } = createClient({ entities: postOnly });
-
-      const user = await withContext(() =>
-        client.user.create({
-          data: { email: 'aggregate@example.com', name: 'Parent', posts: { create: { title: 'child' } } },
-          include: { posts: true },
-        }),
-      );
 
       const roots = (await raw.auditLog.findMany({ where: { entityType: 'Post' } })).map(
         ({ aggregateType, aggregateId }) => ({ aggregateType, aggregateId }),

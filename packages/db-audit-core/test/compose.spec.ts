@@ -228,11 +228,12 @@ describe('compose', () => {
       expect(record.changes).toEqual({ title: { old: 'Old', new: 'New' } });
     });
 
-    it('update without a before state: null before, no changes, still recorded', () => {
+    it('update without a before state: null before, no changes, not marked, still recorded', () => {
       const record = composeOne(event({ action: 'update', after: { id: 'post-1', title: 'New' } }));
 
       expect(record.before).toBeNull();
       expect(record.changes).toBeNull();
+      expect(record.beforeUnavailable).toBe(false);
     });
   });
 
@@ -264,13 +265,6 @@ describe('compose', () => {
       );
 
       expect(record.before).toEqual({ id: 'post-1', title: 'Old' });
-      expect(record.beforeUnavailable).toBe(false);
-    });
-
-    it('update that carries no before state: not marked', () => {
-      const record = composeOne(event({ action: 'update', before: { kind: 'none' }, after: { id: 'post-1' } }));
-
-      expect(record.before).toBeNull();
       expect(record.beforeUnavailable).toBe(false);
     });
 

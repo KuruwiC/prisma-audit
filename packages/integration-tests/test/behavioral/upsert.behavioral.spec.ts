@@ -69,30 +69,10 @@ describe('Upsert Operations (Behavioral)', () => {
       const after = updateLog.after as Record<string, unknown>;
       expect(before.name).toBe('Original');
       expect(after.name).toBe('Upsert Updated');
-    });
 
-    it('should include changes for update path', async () => {
-      const h = getHarness();
-      await h.runWithContext(actor, () =>
-        h.createOne('User', { email: 'upsert-changes@example.com', name: 'Before', password: 'secret' }),
-      );
-
-      const user = await h.runWithContext(actor, () =>
-        h.upsertOne(
-          'User',
-          { email: 'upsert-changes@example.com' },
-          { email: 'upsert-changes@example.com', name: 'Not Applied', password: 'secret' },
-          { name: 'After' },
-        ),
-      );
-
-      const logs = await h.readAuditLogs({ entityType: 'User', entityId: user.id as string, action: 'update' });
-      const log = logs[0];
-      if (!log) throw new Error('Expected at least one audit log');
-      const changes = log.changes as Record<string, { old: unknown; new: unknown }>;
-
+      const changes = updateLog.changes as Record<string, { old: unknown; new: unknown }>;
       expect(changes).toHaveProperty('name');
-      expect(changes.name).toEqual({ old: 'Before', new: 'After' });
+      expect(changes.name).toEqual({ old: 'Original', new: 'Upsert Updated' });
     });
   });
 

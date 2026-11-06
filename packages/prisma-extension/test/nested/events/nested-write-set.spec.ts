@@ -445,46 +445,31 @@ describe('buildNestedWriteSets', () => {
     });
   });
 
-  it('names the rows a nested connect links, so they are not read as inserted', () => {
-    const { operations, writeSets } = writeSetsOf({ posts: { connect: [{ id: 'p1' }], create: { title: 'A' } } });
-    const connect = operations.find((op) => op.operation === 'connect');
-    const create = operations.find((op) => op.operation === 'create');
+  it.each(['connect', 'set'] as const)(
+    'names the rows a nested %s links, so they are not read as inserted',
+    (keyword) => {
+      const { operations, writeSets } = writeSetsOf({ posts: { [keyword]: [{ id: 'p1' }], create: { title: 'A' } } });
+      const link = operations.find((op) => op.operation === keyword);
+      const create = operations.find((op) => op.operation === 'create');
 
-    expect(writeSets.get('posts')).toEqual({
-      targets: [
-        {
-          locator: { by: 'uniqueWhere', where: { id: 'p1' } },
-          operation: connect,
-          element: 0,
-          before: { kind: 'none' },
-        },
-      ],
-      generatedKeys: new Set(),
-      anyNewRowIsInserted: true,
-      unidentifiedInserts: new Map(),
-      insertCounts: new Map([[create, 1]]),
-      knownInserts: new Map(),
-      readsPreExisting: true,
-    });
-  });
-
-  it('names the rows a nested set links, so they are not read as inserted', () => {
-    const { operations, writeSets } = writeSetsOf({ posts: { set: [{ id: 'p1' }], create: { title: 'A' } } });
-    const set = operations.find((op) => op.operation === 'set');
-    const create = operations.find((op) => op.operation === 'create');
-
-    expect(writeSets.get('posts')).toEqual({
-      targets: [
-        { locator: { by: 'uniqueWhere', where: { id: 'p1' } }, operation: set, element: 0, before: { kind: 'none' } },
-      ],
-      generatedKeys: new Set(),
-      anyNewRowIsInserted: true,
-      unidentifiedInserts: new Map(),
-      insertCounts: new Map([[create, 1]]),
-      knownInserts: new Map(),
-      readsPreExisting: true,
-    });
-  });
+      expect(writeSets.get('posts')).toEqual({
+        targets: [
+          {
+            locator: { by: 'uniqueWhere', where: { id: 'p1' } },
+            operation: link,
+            element: 0,
+            before: { kind: 'none' },
+          },
+        ],
+        generatedKeys: new Set(),
+        anyNewRowIsInserted: true,
+        unidentifiedInserts: new Map(),
+        insertCounts: new Map([[create, 1]]),
+        knownInserts: new Map(),
+        readsPreExisting: true,
+      });
+    },
+  );
 
   it('keeps the targets of each operation at a path apart', () => {
     const { operations, writeSets } = writeSetsOf({

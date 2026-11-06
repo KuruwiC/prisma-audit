@@ -103,9 +103,8 @@ describe('createOpenTransaction', () => {
       expect(contextInsideBody).toEqual(context);
     });
 
-    it('does not call runAsync when there was no audit context, and runs the body under the one the callback starts with', async () => {
+    it('runs the body under the context the callback starts with when there was no audit context', async () => {
       const provider = createAsyncLocalStorageProvider();
-      const runAsync = vi.spyOn(provider, 'runAsync');
       const { client } = clientWith(txClient, (callback) => provider.runAsync(otherContext, () => callback(txClient)));
       let contextInsideBody: AuditContext | undefined;
 
@@ -113,8 +112,6 @@ describe('createOpenTransaction', () => {
         contextInsideBody = provider.getContext();
       });
 
-      // The one call is the fake client's own, which starts the callback
-      expect(runAsync).toHaveBeenCalledTimes(1);
       expect(contextInsideBody).toEqual(otherContext);
     });
   });

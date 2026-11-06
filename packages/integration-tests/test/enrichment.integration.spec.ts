@@ -64,45 +64,55 @@ describe('Context Enrichment Integration', () => {
   });
 
   describe('Actor context enrichment', () => {
-    it('should enrich actorContext with name and role', async () => {
-      const adminActor: TestAuditContext = {
-        actor: {
-          category: 'model',
-          type: 'User',
-          id: 'admin-1',
-          name: 'Admin User',
-          role: 'admin',
-        },
-      };
-
-      const user = await context.provider.runAsync(adminActor, async () => {
-        return await context.prisma.user.create({
-          data: {
-            email: 'test@example.com',
-            name: 'John Doe',
-            password: 'secret123',
+    it.each(['create', 'update', 'delete'] as const)(
+      'enriches the actorContext of the %s audit log with name and role',
+      async (action) => {
+        const actor: TestAuditContext = {
+          actor: {
+            category: 'model',
+            type: 'User',
+            id: 'admin-1',
+            name: 'Admin User',
+            role: 'admin',
           },
+        };
+
+        const user = await context.provider.runAsync(actor, async () => {
+          return await context.prisma.user.create({
+            data: {
+              email: 'test@example.com',
+              name: 'John Doe',
+              password: 'secret123',
+            },
+          });
         });
-      });
 
-      const auditLogs = await context.prisma.auditLog.findMany({
-        where: { entityType: 'User', entityId: user.id },
-      });
+        if (action === 'update') {
+          await context.provider.runAsync(actor, async () => {
+            await context.prisma.user.update({ where: { id: user.id }, data: { name: 'Updated Name' } });
+          });
+        } else if (action === 'delete') {
+          await context.provider.runAsync(actor, async () => {
+            await context.prisma.user.delete({ where: { id: user.id } });
+          });
+        }
 
-      expect(auditLogs).toHaveLength(1);
-      const log = auditLogs[0];
+        const auditLogs = await context.prisma.auditLog.findMany({
+          where: { entityType: 'User', entityId: user.id, action },
+        });
 
-      // Basic actor fields
-      expect(log.actorCategory).toBe('model');
-      expect(log.actorType).toBe('User');
-      expect(log.actorId).toBe('admin-1');
+        expect(auditLogs).toHaveLength(1);
+        const log = auditLogs[0];
 
-      // Enriched actorContext
-      expect(log.actorContext).toBeDefined();
-      const actorContext = log.actorContext as Record<string, unknown>;
-      expect(actorContext.name).toBe('Admin User');
-      expect(actorContext.role).toBe('admin');
-    });
+        expect(log.actorCategory).toBe('model');
+        expect(log.actorType).toBe('User');
+        expect(log.actorId).toBe('admin-1');
+
+        const actorContext = log.actorContext as Record<string, unknown>;
+        expect(actorContext.name).toBe('Admin User');
+        expect(actorContext.role).toBe('admin');
+      },
+    );
 
     it('should handle actorContext without optional fields', async () => {
       const basicActor: AuditContext = {
@@ -137,93 +147,6 @@ describe('Context Enrichment Integration', () => {
 
       // The enricher returns undefined for both fields, which JSON drops
       expect(log.actorContext).toEqual({});
-    });
-  });
-
-  describe('Actor context in UPDATE operations', () => {
-    it('should include actorContext in update audit logs', async () => {
-      const actor: TestAuditContext = {
-        actor: {
-          category: 'model',
-          type: 'User',
-          id: 'editor-1',
-          name: 'Editor User',
-          role: 'editor',
-        },
-      };
-
-      const user = await context.provider.runAsync(actor, async () => {
-        return await context.prisma.user.create({
-          data: {
-            email: 'edit@example.com',
-            name: 'Original Name',
-            password: 'secret123',
-          },
-        });
-      });
-
-      await context.provider.runAsync(actor, async () => {
-        return await context.prisma.user.update({
-          where: { id: user.id },
-          data: { name: 'Updated Name' },
-        });
-      });
-
-      const updateLogs = await context.prisma.auditLog.findMany({
-        where: { entityType: 'User', entityId: user.id, action: 'update' },
-      });
-
-      expect(updateLogs).toHaveLength(1);
-      const log = updateLogs[0];
-
-      expect(log.actorId).toBe('editor-1');
-      const actorContext = log.actorContext as Record<string, unknown>;
-      expect(actorContext.name).toBe('Editor User');
-      expect(actorContext.role).toBe('editor');
-    });
-  });
-
-  describe('Actor context in DELETE operations', () => {
-    it('should include actorContext in delete audit logs', async () => {
-      const actor: TestAuditContext = {
-        actor: {
-          category: 'model',
-          type: 'User',
-          id: 'deleter-1',
-          name: 'Deleter User',
-          role: 'admin',
-        },
-      };
-
-      const user = await context.provider.runAsync(actor, async () => {
-        return await context.prisma.user.create({
-          data: {
-            email: 'delete@example.com',
-            name: 'To Delete',
-            password: 'secret123',
-          },
-        });
-      });
-
-      const userId = user.id;
-
-      await context.provider.runAsync(actor, async () => {
-        await context.prisma.user.delete({
-          where: { id: userId },
-        });
-      });
-
-      const deleteLogs = await context.prisma.auditLog.findMany({
-        where: { entityType: 'User', entityId: userId, action: 'delete' },
-      });
-
-      expect(deleteLogs).toHaveLength(1);
-      const log = deleteLogs[0];
-
-      expect(log.actorId).toBe('deleter-1');
-      const actorContext = log.actorContext as Record<string, unknown>;
-      expect(actorContext.name).toBe('Deleter User');
-      expect(actorContext.role).toBe('admin');
     });
   });
 
