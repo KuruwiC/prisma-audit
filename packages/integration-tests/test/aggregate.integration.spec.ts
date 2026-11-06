@@ -60,56 +60,6 @@ describe('Aggregate Root Resolution Integration', () => {
   });
 
   describe('Comment aggregate resolution', () => {
-    it('should create audit logs for Comment, Post, and User aggregates', async () => {
-      const user = await context.provider.runAsync(testActor, async () => {
-        return await context.prisma.user.create({
-          data: {
-            email: 'user@example.com',
-            name: 'User',
-            password: 'secret123',
-          },
-        });
-      });
-
-      const post = await context.provider.runAsync(testActor, async () => {
-        return await context.prisma.post.create({
-          data: {
-            title: 'Post',
-            content: 'Content',
-            authorId: user.id,
-          },
-        });
-      });
-
-      const comment = await context.provider.runAsync(testActor, async () => {
-        return await context.prisma.comment.create({
-          data: {
-            content: 'Test comment',
-            postId: post.id,
-            authorId: user.id,
-          },
-        });
-      });
-
-      const commentLogs = await context.prisma.auditLog.findMany({
-        where: { entityType: 'Comment', entityId: comment.id },
-        orderBy: { aggregateType: 'asc' },
-      });
-
-      // One log for each of the Comment, Post and User aggregates
-      expect(
-        commentLogs.map((log: { aggregateType: string; aggregateId: string; action: string }) => [
-          log.aggregateType,
-          log.aggregateId,
-          log.action,
-        ]),
-      ).toEqual([
-        ['Comment', comment.id, 'create'],
-        ['Post', post.id, 'create'],
-        ['User', user.id, 'create'],
-      ]);
-    });
-
     it('should track Comment changes under both Post and User aggregates', async () => {
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
@@ -147,6 +97,22 @@ describe('Aggregate Root Resolution Integration', () => {
           data: { content: 'Updated comment' },
         });
       });
+
+      const commentAggregateLogs = await context.prisma.auditLog.findMany({
+        where: {
+          aggregateType: 'Comment',
+          aggregateId: comment.id,
+          entityType: 'Comment',
+        },
+        orderBy: { action: 'asc' },
+      });
+
+      expect(
+        commentAggregateLogs.map((log: { action: string; entityId: string }) => [log.action, log.entityId]),
+      ).toEqual([
+        ['create', comment.id],
+        ['update', comment.id],
+      ]);
 
       const postAggregateLogs = await context.prisma.auditLog.findMany({
         where: {

@@ -259,7 +259,7 @@ describe('top-level upsert nested audit entries', () => {
     });
 
     it('audits the rows written below the create branch copy of the relation', async () => {
-      const { prisma, asActor, recordsOf } = await seed();
+      const { prisma, basePrisma, asActor, recordsOf } = await seed();
 
       await asActor(() =>
         prisma.user.upsert({
@@ -277,6 +277,15 @@ describe('top-level upsert nested audit entries', () => {
 
       expect(await recordsOf('Post')).toEqual(['p-c:create']);
       expect(await recordsOf('Comment')).toEqual(['k-c:create']);
+      expect(
+        (
+          await basePrisma.auditLog.findMany({
+            where: { entityType: 'Post', entityId: 'p-c' },
+            select: { aggregateType: true },
+            orderBy: { aggregateType: 'asc' },
+          })
+        ).map((log) => log.aggregateType),
+      ).toEqual(['Post', 'User']);
     });
   });
 });

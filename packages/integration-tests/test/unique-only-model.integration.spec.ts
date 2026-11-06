@@ -96,7 +96,8 @@ describe('a model identified by a unique field instead of a primary key', () => 
   });
 
   it('records one update log per row of an updateMany, paired with the row it was before', async () => {
-    const { prisma, run, seed, logsOf, labels } = await setup();
+    const observer = vi.fn<AuditObserver>();
+    const { prisma, run, seed, logsOf, labels } = await setup(observer);
     await seed('d-1', 'd-2', 'd-3');
 
     const result = await run(() =>
@@ -105,11 +106,13 @@ describe('a model identified by a unique field instead of a primary key', () => 
 
     expect(result).toEqual({ count: 2 });
     expect(await labels()).toEqual({ 'd-1': 'relabelled', 'd-2': 'label of d-2', 'd-3': 'relabelled' });
+    expect(failuresOf(observer)).toEqual([]);
     expect(await logsOf()).toEqual([matching('d-1', relabelled('d-1')), matching('d-3', relabelled('d-3'))]);
   });
 
   it('records one update log per row an updateManyAndReturn returns, and returns the rows', async () => {
-    const { prisma, run, seed, logsOf } = await setup();
+    const observer = vi.fn<AuditObserver>();
+    const { prisma, run, seed, logsOf } = await setup(observer);
     await seed('d-1', 'd-2', 'd-3');
 
     const rows = await run(() =>
@@ -120,6 +123,7 @@ describe('a model identified by a unique field instead of a primary key', () => 
       ['d-2', 'relabelled'],
       ['d-3', 'relabelled'],
     ]);
+    expect(failuresOf(observer)).toEqual([]);
     expect(await logsOf()).toEqual([matching('d-2', relabelled('d-2')), matching('d-3', relabelled('d-3'))]);
   });
 
@@ -233,20 +237,6 @@ describe('a model identified by a unique field instead of a primary key', () => 
       expect(Object.keys(await labels()).sort()).toEqual(['d-2', 'd-9']);
       expect(failuresOf(observer)).toEqual([]);
       expect(await logsOf()).toEqual([recoded('d-1', 'd-9')]);
-    });
-
-    it('audits an updateMany and an updateManyAndReturn that leave the code as it is, and reports nothing', async () => {
-      const observer = vi.fn<AuditObserver>();
-      const { prisma, run, seed, logsOf } = await setup(observer);
-      await seed('d-1', 'd-2', 'd-3');
-
-      await run(async () => {
-        await prisma.device.updateMany({ where: { code: 'd-1' }, data: { label: 'relabelled' } });
-        await prisma.device.updateManyAndReturn({ where: { code: 'd-2' }, data: { label: 'relabelled' } });
-      });
-
-      expect(failuresOf(observer)).toEqual([]);
-      expect(await logsOf()).toEqual([matching('d-1', relabelled('d-1')), matching('d-2', relabelled('d-2'))]);
     });
   });
 

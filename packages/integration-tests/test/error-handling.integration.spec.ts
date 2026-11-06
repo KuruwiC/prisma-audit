@@ -632,49 +632,6 @@ describe('Error Handling Integration', () => {
   });
 
   describe('Database constraint violations', () => {
-    it('a foreign key violation on a single-record create propagates raw as P2003, leaving no row and no audit log and reported to the audit observer as not-committed with no failures', async () => {
-      const basePrisma = createBasePrisma();
-      const provider = createAsyncLocalStorageProvider();
-      const observer = vi.fn<AuditObserver>();
-      const prisma = createAuditClient(basePrisma, {
-        Prisma,
-        schema: auditSchema,
-        contextProvider: provider,
-        entities: testEntities,
-        observer,
-        write: {
-          mode: 'awaited',
-        },
-      });
-
-      try {
-        const invalidCreate = provider.runAsync(testActor, async () =>
-          prisma.post.create({
-            data: {
-              title: 'Invalid Post',
-              content: 'Content',
-              authorId: 'non-existent-user-id',
-            },
-          }),
-        );
-
-        await expect(invalidCreate).rejects.toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
-        await expect(invalidCreate).rejects.toMatchObject({
-          code: 'P2003',
-          message: expect.not.stringContaining('[@prisma-audit]'),
-        });
-
-        expect(await context.basePrisma.post.count()).toBe(0);
-        expect(await context.basePrisma.auditLog.count({ where: { entityType: 'Post' } })).toBe(0);
-        expect(observer.mock.calls).toEqual([
-          [expect.objectContaining({ model: 'Post', operation: 'create', status: 'not-committed', failures: [] })],
-        ]);
-      } finally {
-        await prisma.$disconnect();
-        await basePrisma.$disconnect();
-      }
-    });
-
     it('a batch (updateMany) unique constraint violation propagates raw, reported to the audit observer as not-committed with no failures', async () => {
       // The batch executor calls the caller's own `updateMany` in the middle of
       // audit-support work (before-fetch, after-refetch, record production). Only the
@@ -739,62 +696,87 @@ describe('Error Handling Integration', () => {
       }
     });
 
-    it('a single-record create unique constraint violation propagates raw, reported to the audit observer as not-committed with no failures', async () => {
-      // The single-operation executor runs the caller's own `create` alongside audit-support
-      // work (before-state fetch, enrichment, record building). Only the audit-support work
-      // is an audit failure — the caller's own database error (a unique constraint violation
-      // here) must never reach `observer` as a failure, and must reach the caller exactly as
-      // Prisma threw it. Uses a normal (non-failing) writer so the only failure in play is
-      // the caller's own.
-      const basePrisma = createBasePrisma();
-      const provider = createAsyncLocalStorageProvider();
-      const observer = vi.fn<AuditObserver>();
-      const prisma = createAuditClient(basePrisma, {
-        Prisma,
-        schema: auditSchema,
-        contextProvider: provider,
-        entities: testEntities,
-        observer,
-        write: {
-          mode: 'awaited',
+    // The single-operation executor runs the caller's own `create` alongside audit-support work
+    // (before-state fetch, enrichment, record building). Only the audit-support work is an audit
+    // failure: the caller's own database error must never reach `observer` as a failure, and must
+    // reach the caller exactly as Prisma threw it. A normal (non-failing) writer keeps the caller's
+    // error the only failure in play.
+    describe.each([
+      {
+        constraint: 'foreign key',
+        code: 'P2003',
+        model: 'Post',
+        prepare: async (prisma: typeof context.prisma, run: <T>(fn: () => Promise<T>) => Promise<T>) => ({
+          attempt: () =>
+            run(async () =>
+              prisma.post.create({
+                data: { title: 'Invalid Post', content: 'Content', authorId: 'non-existent-user-id' },
+              }),
+            ),
+          verify: async () => {
+            expect(await context.basePrisma.post.count()).toBe(0);
+            expect(await context.basePrisma.auditLog.count({ where: { entityType: 'Post' } })).toBe(0);
+          },
+        }),
+      },
+      {
+        constraint: 'unique',
+        code: 'P2002',
+        model: 'User',
+        prepare: async (prisma: typeof context.prisma, run: <T>(fn: () => Promise<T>) => Promise<T>) => {
+          const email = 'single-collision@example.com';
+          await run(async () => prisma.user.create({ data: { email, name: 'First User', password: 'secret123' } }));
+          const auditLogCount = await context.basePrisma.auditLog.count();
+          return {
+            attempt: () =>
+              run(async () => prisma.user.create({ data: { email, name: 'Duplicate User', password: 'secret456' } })),
+            verify: async () => {
+              const users = await context.basePrisma.user.findMany({ where: { email } });
+              expect(users).toHaveLength(1);
+              expect(users[0]?.name).toBe('First User');
+              expect(await context.basePrisma.auditLog.count()).toBe(auditLogCount);
+            },
+          };
         },
-      });
-
-      try {
-        const email = 'single-collision@example.com';
-        await provider.runAsync(testActor, async () =>
-          prisma.user.create({
-            data: { email, name: 'First User', password: 'secret123' },
-          }),
-        );
-        // The outcome of the setup create above is not the one under test.
-        observer.mockClear();
-        const auditLogCount = await context.basePrisma.auditLog.count();
-
-        const duplicateCreate = provider.runAsync(testActor, async () =>
-          prisma.user.create({
-            data: { email, name: 'Duplicate User', password: 'secret456' },
-          }),
-        );
-
-        await expect(duplicateCreate).rejects.toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
-        await expect(duplicateCreate).rejects.toMatchObject({
-          code: 'P2002',
-          message: expect.not.stringContaining('[@prisma-audit]'),
+      },
+    ])('a $constraint constraint violation on a single-record create', ({ code, model, prepare }) => {
+      it(`propagates raw as ${code}, leaving no row and no audit log and reported to the audit observer as not-committed with no failures`, async () => {
+        const basePrisma = createBasePrisma();
+        const provider = createAsyncLocalStorageProvider();
+        const observer = vi.fn<AuditObserver>();
+        const prisma = createAuditClient(basePrisma, {
+          Prisma,
+          schema: auditSchema,
+          contextProvider: provider,
+          entities: testEntities,
+          observer,
+          write: {
+            mode: 'awaited',
+          },
         });
 
-        const users = await context.basePrisma.user.findMany({ where: { email } });
-        expect(users).toHaveLength(1);
-        expect(users[0]?.name).toBe('First User');
-        expect(await context.basePrisma.auditLog.count()).toBe(auditLogCount);
+        try {
+          const { attempt, verify } = await prepare(prisma, (fn) => provider.runAsync(testActor, fn));
+          // The outcome of any setup write is not the one under test.
+          observer.mockClear();
 
-        expect(observer.mock.calls).toEqual([
-          [expect.objectContaining({ model: 'User', operation: 'create', status: 'not-committed', failures: [] })],
-        ]);
-      } finally {
-        await prisma.$disconnect();
-        await basePrisma.$disconnect();
-      }
+          const failingCreate = attempt();
+
+          await expect(failingCreate).rejects.toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
+          await expect(failingCreate).rejects.toMatchObject({
+            code,
+            message: expect.not.stringContaining('[@prisma-audit]'),
+          });
+
+          await verify();
+          expect(observer.mock.calls).toEqual([
+            [expect.objectContaining({ model, operation: 'create', status: 'not-committed', failures: [] })],
+          ]);
+        } finally {
+          await prisma.$disconnect();
+          await basePrisma.$disconnect();
+        }
+      });
     });
   });
 });

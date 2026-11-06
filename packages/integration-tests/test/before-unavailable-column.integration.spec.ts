@@ -25,7 +25,20 @@ describe('beforeUnavailable column of the audit-log model', () => {
     const rawBasePrisma = createBasePrisma();
 
     const { findUnique, armFindUniqueFailure } = createPostReadFault('simulated before-state read failure');
-    const basePrisma = rawBasePrisma.$extends({ name: 'fault-injection', query: { post: { findUnique } } });
+    const auditLogWrites: unknown[] = [];
+    const basePrisma = rawBasePrisma.$extends({ name: 'fault-injection', query: { post: { findUnique } } }).$extends({
+      name: 'audit-log-write-spy',
+      query: {
+        auditLog: {
+          $allOperations({ operation, args, query }) {
+            if (operation === 'create' || operation === 'createMany') {
+              auditLogWrites.push((args as { data: unknown }).data);
+            }
+            return query(args);
+          },
+        },
+      },
+    });
 
     const provider = createAsyncLocalStorageProvider();
     const prisma = createAuditClient(basePrisma, {
@@ -36,7 +49,7 @@ describe('beforeUnavailable column of the audit-log model', () => {
       ...(model ? { write: { model } } : {}),
     });
 
-    return { rawBasePrisma, basePrisma, provider, prisma, armFindUniqueFailure };
+    return { rawBasePrisma, basePrisma, provider, prisma, armFindUniqueFailure, auditLogWrites };
   };
 
   let scenario: ReturnType<typeof createClient> | undefined;
@@ -78,12 +91,21 @@ describe('beforeUnavailable column of the audit-log model', () => {
     }
   });
 
-  it('leaves the column false for an update whose before state was read', async () => {
-    const { basePrisma, provider, prisma, post } = await setUp();
+  it('writes false to the column of an update whose before state was read', async () => {
+    const { basePrisma, provider, prisma, post, auditLogWrites } = await setUp();
+    auditLogWrites.length = 0;
 
     await provider.runAsync(testActor, () =>
       prisma.post.update({ where: { id: post.id }, data: { title: 'Updated' } }),
     );
+
+    // The column defaults to false, so the stored rows alone cannot tell a written false from a
+    // field left out: the data handed to the write must carry it.
+    const written = auditLogWrites.flatMap((data) => (Array.isArray(data) ? data : [data]));
+    expect(written).toHaveLength(2);
+    for (const data of written) {
+      expect(data).toMatchObject({ entityType: 'Post', action: 'update', beforeUnavailable: false });
+    }
 
     const rows = await basePrisma.auditLog.findMany({ where: { entityType: 'Post', action: 'update' } });
     expect(rows).toHaveLength(2);

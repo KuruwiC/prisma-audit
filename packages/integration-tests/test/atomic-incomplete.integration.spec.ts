@@ -127,7 +127,14 @@ describe('an atomic operation whose records a failure dropped', () => {
             model: 'AutoIncItem',
             operation: 'updateMany',
             status: 'incomplete',
-            failures: [expect.objectContaining({ phase: 'row-identification', unidentified: 2 })],
+            failures: [
+              expect.objectContaining({
+                phase: 'row-identification',
+                modelName: 'AutoIncItem',
+                operation: 'updateMany',
+                unidentified: 2,
+              }),
+            ],
           }),
         ],
       ]);
@@ -195,16 +202,27 @@ describe('an atomic operation whose records a failure dropped', () => {
             model: 'Post',
             operation: 'update',
             status: 'complete',
-            failures: [expect.objectContaining({ phase: 'pre-fetch', operation: 'update' })],
+            failures: [
+              expect.objectContaining({
+                phase: 'pre-fetch',
+                modelName: 'Post',
+                operation: 'update',
+                error: expect.objectContaining({ message: FAILURE_MESSAGE }),
+              }),
+            ],
           }),
         ],
       ]);
       expect(
         await rawBasePrisma.auditLog.findMany({
-          where: { entityType: 'Post', aggregateType: 'Post' },
-          select: { action: true, beforeUnavailable: true },
+          where: { entityType: 'Post', action: 'update' },
+          select: { aggregateType: true, before: true, changes: true, beforeUnavailable: true },
+          orderBy: { aggregateType: 'asc' },
         }),
-      ).toEqual([{ action: 'update', beforeUnavailable: true }]);
+      ).toEqual([
+        { aggregateType: 'Post', before: null, changes: null, beforeUnavailable: true },
+        { aggregateType: 'User', before: null, changes: null, beforeUnavailable: true },
+      ]);
     });
   });
 

@@ -86,17 +86,6 @@ describe('a batch update whose data changes the key of its rows by an operator',
     [102, 'two'],
   ];
 
-  it('records no log for the rows of an updateMany that increments their key, and reports them', async () => {
-    const { prisma, observer, run, logsOf, items } = await setup();
-
-    const result = await run(() => prisma.autoIncItem.updateMany({ data: { id: { increment: 100 } } }));
-
-    expect(result).toEqual({ count: 2 });
-    expect(await items()).toEqual(shifted);
-    expect(failuresOf(observer)).toEqual([unidentified('updateMany', 2)]);
-    expect(await logsOf()).toEqual([]);
-  });
-
   it('records each row an updateManyAndReturn gives an incremented key without a before state, returns them, and reports them', async () => {
     const { prisma, observer, run, logsOf } = await setup();
 

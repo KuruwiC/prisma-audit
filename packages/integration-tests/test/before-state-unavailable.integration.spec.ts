@@ -84,39 +84,6 @@ describe('before state requested but unreadable', () => {
     scenario = undefined;
   });
 
-  it('records an update whose before-state read failed as unavailable, and the write succeeds', async () => {
-    const { basePrisma, provider, prisma, observer, armFindUniqueFailure, postRecords, post } = await setUp();
-
-    armFindUniqueFailure();
-    await provider.runAsync(testActor, () =>
-      prisma.post.update({ where: { id: post.id }, data: { title: 'Updated' } }),
-    );
-
-    expect((await basePrisma.post.findUnique({ where: { id: post.id } }))?.title).toBe('Updated');
-    expect(observer.mock.calls).toEqual([
-      [
-        expect.objectContaining({
-          model: 'Post',
-          operation: 'update',
-          status: 'complete',
-          failures: [
-            expect.objectContaining({
-              phase: 'pre-fetch',
-              modelName: 'Post',
-              operation: 'update',
-              error: expect.objectContaining({ message: FAILURE_MESSAGE }),
-            }),
-          ],
-        }),
-      ],
-    ]);
-    const updates = postRecords().filter((log) => log.action === 'update');
-    expect(updates).toHaveLength(2);
-    for (const log of updates) {
-      expect(log).toMatchObject({ before: null, changes: null, beforeUnavailable: true });
-    }
-  });
-
   it('records an update whose before state was read as not unavailable', async () => {
     const { provider, prisma, postRecords, post } = await setUp();
 

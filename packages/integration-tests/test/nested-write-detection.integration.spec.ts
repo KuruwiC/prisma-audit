@@ -1,7 +1,7 @@
 /**
- * Nested writes are audited wherever they appear in the args (inside a nested `update`, in either
- * branch of a top-level upsert), and the value handed back to the caller has the shape the caller
- * requested, whatever the extension had to read to build the audit entries.
+ * Nested writes are audited wherever they appear in the args (inside a nested `update`), and the
+ * value handed back to the caller has the shape the caller requested, whatever the extension had
+ * to read to build the audit entries.
  *
  * Every parent here starts without children on the relation being written, so each assertion
  * counts exactly the rows the operation wrote.
@@ -77,21 +77,6 @@ describe('nested write detection', () => {
       const avatar = await clients.basePrisma.avatar.findUniqueOrThrow({ where: { profileId: profile.id } });
       expect(aggregateTypes(await createLogs('Avatar', avatar.id))).toEqual(['Avatar', 'Profile']);
     });
-  });
-
-  it('audits a post created in the create branch of a top-level upsert', async () => {
-    const email = 'upsert-created-owner@example.com';
-
-    await asActor(() =>
-      clients.prisma.user.upsert({
-        where: { email },
-        create: { email, password: 'secret123', posts: { create: { title: 'Created through upsert' } } },
-        update: { name: 'Not used' },
-      }),
-    );
-
-    const post = await clients.basePrisma.post.findFirstOrThrow({ where: { author: { email } } });
-    expect(aggregateTypes(await createLogs('Post', post.id))).toEqual(['Post', 'User']);
   });
 
   describe('value returned to the caller', () => {

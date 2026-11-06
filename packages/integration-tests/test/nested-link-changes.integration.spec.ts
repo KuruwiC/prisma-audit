@@ -117,17 +117,6 @@ describe('foreign-key changes of related rows', () => {
       expect(records[0]?.changes).toMatchObject({ authorId: { old: 'u2', new: 'u1' } });
     });
 
-    it('audits a disconnected row with its foreign key set to null', async () => {
-      const { basePrisma, prisma, run, recordsOf } = await setup();
-      await basePrisma.label.create({ data: { id: 'l1', name: 'l1', postId: 'p-live' } });
-
-      await run(() => prisma.post.update({ where: { id: 'p-live' }, data: { labels: { disconnect: { id: 'l1' } } } }));
-
-      expect(await recordsOf('Label')).toEqual([
-        expect.objectContaining({ id: 'l1', action: 'update', changes: { postId: { old: 'p-live', new: null } } }),
-      ]);
-    });
-
     it('audits nothing for a disconnect of a row attached to another parent', async () => {
       const { basePrisma, prisma, run, recordsOf } = await setup();
       await basePrisma.label.create({ data: { id: 'l2', name: 'l2', postId: 'p-u2' } });

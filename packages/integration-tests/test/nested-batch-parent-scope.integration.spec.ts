@@ -115,8 +115,9 @@ describe('nested updateMany / deleteMany parent scope', () => {
     expect(await rowsFor('Post', b1.id)).toEqual([]);
   });
 
-  it('a nested deleteMany audits the matched posts of the parent only, from their before state', async () => {
+  it('a nested deleteMany audits every matched post of the parent once, from their before state', async () => {
     const { userA, a1, a2, b1 } = await seedTwoUsers();
+    const a3 = await clients.basePrisma.post.create({ data: { title: 'A3', published: false, authorId: userA.id } });
 
     await asActor(() =>
       clients.prisma.user.update({
@@ -125,15 +126,27 @@ describe('nested updateMany / deleteMany parent scope', () => {
       }),
     );
 
-    expect(await eventsOf('Post')).toEqual([
-      { entityId: a1.id, action: 'delete', before: expect.objectContaining({ title: 'A1' }), after: null },
-    ]);
+    const events = await eventsOf('Post');
+    expect(events.map((event) => event.entityId).sort()).toEqual([a1.id, a3.id].sort());
+    expect(events).toEqual(
+      expect.arrayContaining([
+        { entityId: a1.id, action: 'delete', before: expect.objectContaining({ title: 'A1' }), after: null },
+        { entityId: a3.id, action: 'delete', before: expect.objectContaining({ title: 'A3' }), after: null },
+      ]),
+    );
     expect(await rowsFor('Post', a1.id)).toEqual([
+      { action: 'delete', aggregateType: 'Post' },
+      { action: 'delete', aggregateType: 'User' },
+    ]);
+    expect(await rowsFor('Post', a3.id)).toEqual([
       { action: 'delete', aggregateType: 'Post' },
       { action: 'delete', aggregateType: 'User' },
     ]);
     expect(await rowsFor('Post', a2.id)).toEqual([]);
     expect(await rowsFor('Post', b1.id)).toEqual([]);
+    expect(await clients.basePrisma.post.findMany({ where: { authorId: userA.id } })).toEqual([
+      expect.objectContaining({ id: a2.id, title: 'A2' }),
+    ]);
     expect(await clients.basePrisma.post.findUnique({ where: { id: b1.id } })).not.toBeNull();
   });
 

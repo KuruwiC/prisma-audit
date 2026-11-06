@@ -15,64 +15,6 @@ describe('Nested ConnectOrCreate Operations', () => {
   };
 
   describe('Create Path (record does not exist)', () => {
-    it('records a create for a Tag created by a connectOrCreate nested under a PostTag create', async () => {
-      const post = await context.provider.runAsync(testActor, async () => {
-        return await context.prisma.post.create({
-          data: {
-            title: 'Test Post',
-            content: 'Test content',
-            author: {
-              create: {
-                email: 'author@example.com',
-                name: 'Author',
-                password: 'secret123',
-              },
-            },
-          },
-        });
-      });
-
-      await context.prisma.auditLog.deleteMany();
-
-      await context.provider.runAsync(testActor, async () => {
-        await context.prisma.post.update({
-          where: { id: post.id },
-          data: {
-            postTags: {
-              create: {
-                tag: {
-                  connectOrCreate: {
-                    where: { name: 'typescript' },
-                    create: { name: 'typescript' },
-                  },
-                },
-              },
-            },
-          },
-          include: {
-            postTags: {
-              include: { tag: true },
-            },
-          },
-        });
-      });
-
-      const tag = await context.prisma.tag.findUnique({ where: { name: 'typescript' } });
-      expect(tag).not.toBeNull();
-
-      const tagLogs = await context.prisma.auditLog.findMany({
-        where: { entityType: 'Tag', entityId: tag?.id },
-      });
-
-      expect(tagLogs).toHaveLength(1);
-      const createLog = tagLogs[0];
-      expect(createLog?.action).toBe('create');
-      expect(createLog?.before).toBeNull(); // Create always has null 'before'
-      expect(createLog?.after).not.toBeNull();
-      const after = createLog?.after as { name?: string };
-      expect(after.name).toBe('typescript');
-    });
-
     it('should create audit log for Profile when connectOrCreate creates new record', async () => {
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
@@ -123,8 +65,8 @@ describe('Nested ConnectOrCreate Operations', () => {
     });
 
     it('should handle multiple connectOrCreate operations with mixed create/connect paths', async () => {
-      await context.provider.runAsync(testActor, async () => {
-        await context.prisma.tag.create({
+      const existingTag = await context.provider.runAsync(testActor, async () => {
+        return await context.prisma.tag.create({
           data: { name: 'javascript' },
         });
       });
@@ -182,7 +124,7 @@ describe('Nested ConnectOrCreate Operations', () => {
 
       const jsTag = await context.prisma.tag.findUnique({ where: { name: 'javascript' } });
       const tsTag = await context.prisma.tag.findUnique({ where: { name: 'typescript' } });
-      expect(jsTag).not.toBeNull();
+      expect(jsTag?.id).toBe(existingTag.id);
       expect(tsTag).not.toBeNull();
 
       // Only the new typescript tag is audited: javascript was connected, not written
@@ -190,72 +132,12 @@ describe('Nested ConnectOrCreate Operations', () => {
       expect(
         tagLogs.map((log: { entityId: string; action: string }) => ({ entityId: log.entityId, action: log.action })),
       ).toEqual([{ entityId: tsTag?.id, action: 'create' }]);
+      expect(tagLogs[0]?.before).toBeNull();
+      expect(tagLogs[0]?.after).toMatchObject({ name: 'typescript' });
     });
   });
 
   describe('Connect Path (record exists)', () => {
-    it('should NOT create audit log when connectOrCreate connects to existing record', async () => {
-      const existingTag = await context.provider.runAsync(testActor, async () => {
-        return await context.prisma.tag.create({
-          data: { name: 'react' },
-        });
-      });
-
-      const post = await context.provider.runAsync(testActor, async () => {
-        return await context.prisma.post.create({
-          data: {
-            title: 'Test Post',
-            content: 'Test content',
-            author: {
-              create: {
-                email: 'author@example.com',
-                name: 'Author',
-                password: 'secret123',
-              },
-            },
-          },
-        });
-      });
-
-      const tagLogsBeforeConnect = await context.prisma.auditLog.count({
-        where: { entityType: 'Tag', entityId: existingTag.id },
-      });
-
-      await context.provider.runAsync(testActor, async () => {
-        await context.prisma.post.update({
-          where: { id: post.id },
-          data: {
-            postTags: {
-              create: {
-                tag: {
-                  connectOrCreate: {
-                    where: { name: 'react' },
-                    create: { name: 'react' },
-                  },
-                },
-              },
-            },
-          },
-          include: {
-            postTags: {
-              include: { tag: true },
-            },
-          },
-        });
-      });
-
-      // Verify: Tag was connected, not created
-      const tag = await context.prisma.tag.findUnique({ where: { name: 'react' } });
-      expect(tag?.id).toBe(existingTag.id);
-
-      const tagLogsAfterConnect = await context.prisma.auditLog.count({
-        where: { entityType: 'Tag', entityId: existingTag.id },
-      });
-
-      // Verify: No new Tag audit logs were created (connectOrCreate connected to existing)
-      expect(tagLogsAfterConnect).toBe(tagLogsBeforeConnect);
-    });
-
     it('should NOT create audit log for Profile when connectOrCreate connects to existing record', async () => {
       const user = await context.provider.runAsync(testActor, async () => {
         return await context.prisma.user.create({
