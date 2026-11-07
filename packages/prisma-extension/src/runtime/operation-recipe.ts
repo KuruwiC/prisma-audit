@@ -166,8 +166,19 @@ const startingIn = (scope: RuntimeScope, operation: unknown): unknown =>
       })
     : operation;
 
-const startOn = async (recipe: Recipe, client: object, transaction: ActiveTransaction | undefined): Promise<unknown> =>
-  await startingIn({ binding: { transaction } }, replay(recipe, client));
+/**
+ * Replays the recipe on `client` and starts the operation, both bound to `transaction`: a method an
+ * extension overrides a built-in action with runs during the replay, and the operation it returns
+ * starts in the flow it was created in
+ */
+const startOn = async (
+  recipe: Recipe,
+  client: object,
+  transaction: ActiveTransaction | undefined,
+): Promise<unknown> => {
+  const scope: RuntimeScope = { binding: { transaction } };
+  return await withScope(scope, () => startingIn(scope, replay(recipe, client)));
+};
 
 const isModelWrite = (recipe: Recipe): recipe is Recipe & { readonly model: string } =>
   recipe.model !== undefined && isAuditableAction(recipe.call.method);

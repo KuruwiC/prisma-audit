@@ -170,6 +170,62 @@ describe('a model method an extension applied to the audited client adds', () =>
   });
 });
 
+describe('a built-in action a model extension applied after the audit overrides with an async method', () => {
+  let basePrisma: PrismaClient;
+  const provider = createAsyncLocalStorageProvider();
+
+  const createClient = (base: PrismaClient, mode: WriteMode, overridden: string[]) =>
+    createAuditClient(base, {
+      ...testAuditOptions(provider, { Prisma, schema: auditSchema }),
+      write: { mode },
+    }).$extends({
+      model: {
+        user: {
+          async create(args: { data: { email: string; name: string; password: string } }) {
+            overridden.push(args.data.email);
+            return Prisma.getExtensionContext(this).$parent.user.create(args);
+          },
+        },
+      },
+    });
+
+  beforeAll(() => {
+    basePrisma = createBasePrisma();
+  });
+
+  afterAll(async () => {
+    await basePrisma.$disconnect();
+  });
+
+  beforeEach(async () => {
+    await cleanDatabase(basePrisma);
+  });
+
+  const scopes = [
+    { scope: 'outside any transaction', inTransaction: false },
+    { scope: 'inside a transaction', inTransaction: true },
+  ] as const;
+
+  describe.each(['awaited', 'atomic'] as const)('under %s', (mode) => {
+    describe.each(scopes)('$scope', ({ inTransaction }) => {
+      it("audits the write the override makes through the extension context's $parent", async () => {
+        const overridden: string[] = [];
+        const prisma = createClient(basePrisma, mode, overridden);
+        const data = { email: 'override@example.com', name: 'Overridden', password: 'secret123' };
+
+        const user = await provider.runAsync(testActor, () =>
+          inTransaction ? prisma.$transaction((tx) => tx.user.create({ data })) : prisma.user.create({ data }),
+        );
+
+        await flushAllPendingWrites();
+        const logs = await basePrisma.auditLog.findMany({ where: { entityType: 'User', action: 'create' } });
+        expect(overridden).toEqual([data.email]);
+        expect(logs.map((log) => log.entityId)).toEqual([user.id]);
+      });
+    });
+  });
+});
+
 describe('a model method an extension applied before the audit adds', () => {
   let basePrisma: PrismaClient;
   const provider = createAsyncLocalStorageProvider();
