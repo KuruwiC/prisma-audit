@@ -14,12 +14,19 @@
  *
  * A write an extension applied after the audit extension issues of its own is audited when it
  * issues it while continuing the caller's operation (awaited, and in the transaction the client
- * opens for an atomic write), and not when it issues it while handling the audit's own read.
+ * opens for an atomic write), and rejected with `AuditReentrantWriteError` when it issues it while
+ * handling the audit's own read, which the audit processes.
  */
 
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
-import { createAuditClient, defineEntity, flushAllPendingWrites, type WriteMode } from '@kuruwic/prisma-audit';
+import {
+  AuditReentrantWriteError,
+  createAuditClient,
+  defineEntity,
+  flushAllPendingWrites,
+  type WriteMode,
+} from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -136,12 +143,13 @@ describe('Extension Chain Guard', () => {
     { scope: 'under the atomic write mode', clients: () => atomic, explicitTransaction: false },
     { scope: 'inside an explicit $transaction', clients: () => awaited, explicitTransaction: true },
   ])(
-    "does not audit a write an extension applied after the audit extension issues while it handles the audit's own read, $scope",
+    "rejects with AuditReentrantWriteError a write an extension applied after the audit extension issues while it handles the audit's own read, $scope",
     async ({ clients: clientsOf, explicitTransaction }) => {
       const clients = clientsOf();
       const user = await createUser(clients, 'read-caller@example.com');
       const companion = await createUser(clients, 'read-companion@example.com');
       const readsHandled: string[] = [];
+      const rejections: unknown[] = [];
       const later = clients.prisma.$extends({
         name: 'later-read-companion-writer',
         query: {
@@ -149,7 +157,11 @@ describe('Extension Chain Guard', () => {
             async $allOperations({ operation, args, query }) {
               if (operation.startsWith('find') && readsHandled.length === 0) {
                 readsHandled.push(operation);
-                await clients.prisma.user.update({ where: { id: companion.id }, data: { name: 'Companion' } });
+                try {
+                  await clients.prisma.user.update({ where: { id: companion.id }, data: { name: 'Companion' } });
+                } catch (error) {
+                  rejections.push(error);
+                }
               }
               return query(args);
             },
@@ -163,8 +175,9 @@ describe('Extension Chain Guard', () => {
       );
 
       expect(readsHandled).toHaveLength(1);
+      expect(rejections).toEqual([expect.any(AuditReentrantWriteError)]);
       expect(await clients.rawBasePrisma.user.findUniqueOrThrow({ where: { id: companion.id } })).toMatchObject({
-        name: 'Companion',
+        name: 'Before',
       });
       const rows = await auditRowsForUpdate(clients);
       expect(rows.map((row) => row.entityId)).toEqual([user.id]);

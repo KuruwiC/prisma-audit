@@ -1,22 +1,44 @@
 /**
  * Enricher runs
  *
- * Runs an enricher under a timeout and handles its failure per the enricher's `onError`.
+ * Runs an enricher under a timeout and handles its failure per the enricher's `onError`. A write the
+ * audit rejected before it ran (a `RejectedWriteError`: as reentrant, or as an adapter rejects one
+ * of its own), from the enricher or from its `onError` function, is a fault of the callback, not a
+ * failed lookup: it fails the enricher whatever `onError` says. One the enricher issues once it has
+ * timed out comes too late to fail it, the timeout having been handled per `onError`, and is logged
+ * to the console instead.
  */
 
 import { ENRICHMENT_TIMEOUTS } from '../constants.js';
+import { RejectedWriteError } from '../policy/audit-gate.js';
 import { type ErrorStrategy, isErrorStrategy } from '../utils/error-handler.js';
 import { toError } from '../utils/to-error.js';
 import type { EnricherConfig, EnricherOnError } from './types.js';
 
-/** Rejects with 'Enricher timeout' when `timeoutMs` elapses first; the timer is cleared either way so a settled call leaves nothing pending. */
+/** The operation's outcome may already be settled, so the console is the only place left to report it */
+const reportLateRejectedWrite = (error: unknown): void => {
+  if (error instanceof RejectedWriteError) {
+    console.error(
+      '[db-audit-core] An enricher that had timed out issued a write the audit rejected; it was not applied:',
+      error,
+    );
+  }
+};
+
+/**
+ * Rejects with 'Enricher timeout' when `timeoutMs` elapses first; the timer is cleared either way so
+ * a settled call leaves nothing pending.
+ */
 const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number): Promise<T> => {
   let timeoutId: NodeJS.Timeout | undefined;
   try {
     return await Promise.race([
       promise,
       new Promise<never>((_, reject) => {
-        timeoutId = setTimeout(() => reject(new Error('Enricher timeout')), timeoutMs);
+        timeoutId = setTimeout(() => {
+          promise.catch(reportLateRejectedWrite);
+          reject(new Error('Enricher timeout'));
+        }, timeoutMs);
       }),
     ]);
   } finally {
@@ -27,13 +49,16 @@ const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number): Promise<T
 /**
  * An `onError` function that throws, or an `onError` that is or returns no valid strategy, falls
  * back to `'log'`: unlike `'throw'` it cannot fail the write, and unlike `'ignore'` it still
- * surfaces the enricher failure.
+ * surfaces the enricher failure. A function that throws a `RejectedWriteError` rethrows it.
  */
 const resolveStrategy = async (onError: EnricherOnError, error: Error): Promise<ErrorStrategy> => {
   let strategy: unknown;
   try {
     strategy = typeof onError === 'function' ? await onError(error) : onError;
   } catch (handlerError) {
+    if (handlerError instanceof RejectedWriteError) {
+      throw handlerError;
+    }
     console.warn("[db-audit-core] Error in enricher onError function; falling back to 'log':", handlerError);
     return 'log';
   }
@@ -45,6 +70,9 @@ const resolveStrategy = async (onError: EnricherOnError, error: Error): Promise<
 };
 
 const handleEnricherError = async (error: Error, onError: EnricherOnError, logMessage: string): Promise<void> => {
+  if (error instanceof RejectedWriteError) {
+    throw error;
+  }
   const strategy = await resolveStrategy(onError, error);
   if (strategy === 'throw') {
     throw error;

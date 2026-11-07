@@ -358,6 +358,8 @@ Post: defineEntity({
 
 `aggregateContext` is set on the root entity (it receives the aggregate ids) or on a `to()` projection (it receives the written rows); see [Context enrichment](packages/prisma-extension/README.md#context-enrichment).
 
+An enricher reads through the client it receives. A write of an audited model from an enricher, a resolver, the writer or the observer is rejected with `AuditReentrantWriteError`: it is not the caller's write and would go unaudited.
+
 ## Redaction
 
 The stored `before`, `after` and `changes` always redact these fields: `password`, `passwordHash`, `hashedPassword`, `salt`, `token`, `accessToken`, `refreshToken`, `apiKey`, `secret`, `secretKey`, `privateKey`, `ssn`, `socialSecurityNumber`, `creditCard`, `cardNumber`, `cvv`, `pin`. Add others with `redactFields`.

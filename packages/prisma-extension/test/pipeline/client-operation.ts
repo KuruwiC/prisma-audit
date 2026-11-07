@@ -27,7 +27,7 @@ export const scopeOn = (
 ): ExecutionScope => ({
   auditContext,
   handle: client,
-  baseClient: client,
+  auditedClient: client,
   failureSink,
 });
 

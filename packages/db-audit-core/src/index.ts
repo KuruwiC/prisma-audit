@@ -63,9 +63,14 @@ export type {
   TransactionOutcomes,
   UnrecordedWrite,
 } from './outcome/index.js';
-export { AuditIncompleteError, createOperationOutcome } from './outcome/index.js';
-export type { AuditGate, AuditGateConfig, RejectedWrite } from './policy/audit-gate.js';
-export { AuditContextMissingError, auditGate } from './policy/audit-gate.js';
+export { AuditIncompleteError, createOperationOutcome, logIncompleteOutcome } from './outcome/index.js';
+export type { AuditGate, AuditGateConfig, AuditGateInput, RejectedWrite } from './policy/audit-gate.js';
+export {
+  AuditContextMissingError,
+  AuditReentrantWriteError,
+  auditGate,
+  RejectedWriteError,
+} from './policy/audit-gate.js';
 export type { PolicyConfig, WriteMode, WritePlanKind } from './policy/index.js';
 export { AuditAtomicityError, planFor, policy } from './policy/index.js';
 export type {

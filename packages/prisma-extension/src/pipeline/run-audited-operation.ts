@@ -13,7 +13,7 @@
 import type { AuditContext, DispatchConfig, OperationOutcome, WriteMode, WritePlanKind } from '@kuruwic/db-audit-core';
 import { assertRecordsComplete, dispatch } from '@kuruwic/db-audit-core';
 import type { AuditAction } from '../grammar/operations.js';
-import type { PrismaBaseClient, PrismaHandle } from '../internal-types.js';
+import type { PrismaHandle } from '../internal-types.js';
 import { withScope } from '../runtime/scope.js';
 import type { WidenedColumns } from '../utils/audited-selection.js';
 import { callerMutationFailureOf, runCallerMutation } from '../utils/caller-mutation-failure.js';
@@ -43,7 +43,8 @@ export interface InterceptedOperation {
 export interface AuditedOperationInput {
   readonly operation: InterceptedOperation;
   readonly auditContext: AuditContext;
-  readonly baseClient: PrismaBaseClient;
+  /** The audited client: the audit and the user callbacks run on it outside any transaction */
+  readonly auditedClient: PrismaHandle;
   /** The operation's write mode, from the audited models its arguments write rows of */
   readonly mode: WriteMode;
   /** How and when its records are written: `planFor` of the mode, which did not reject it */
@@ -67,16 +68,16 @@ export interface AuditPipelineDependencies {
  * the scope's handle, the client of the transaction the operation's binding names, which is that
  * client when the caller writes through the transaction's client inside `$transaction`. It runs
  * through `runCallerMutation`, so a failure of the caller's own write reaches the caller raw. It
- * runs with the re-entrancy guard lowered, so a query an extension applied after this one issues of
- * its own while continuing the operation is audited; only the audit's own queries run with it
- * raised. The query is awaited inside that scope so Prisma's lazy operation starts there.
- * `onWritten` runs each time the caller's mutation has succeeded.
+ * runs with the re-entrancy guard lowered, so a write an extension applied after this one issues of
+ * its own while continuing the operation is audited; the audit's own queries and the callbacks it
+ * runs run with it raised. The query is awaited inside that scope so Prisma's lazy operation starts
+ * there. `onWritten` runs each time the caller's mutation has succeeded.
  */
 const operationContinuation =
   (operation: InterceptedOperation, onWritten: () => void): AuditedOperation['execute'] =>
   async (args) => {
     const result = await runCallerMutation(() =>
-      withScope({ isProcessingAuditLog: false }, async () => await operation.query(args)),
+      withScope({ withinAudit: false }, async () => await operation.query(args)),
     );
     onWritten();
     return result;
@@ -130,8 +131,8 @@ export const runAuditedOperation = async (
   input: AuditedOperationInput,
   deps: AuditPipelineDependencies,
 ): Promise<unknown> => {
-  const { operation: intercepted, auditContext, baseClient, mode, plan, transaction, outcome } = input;
-  const scope = executionScopeOf({ auditContext, baseClient, transaction, failureSink: outcome });
+  const { operation: intercepted, auditContext, auditedClient, mode, plan, transaction, outcome } = input;
+  const scope = executionScopeOf({ auditContext, auditedClient, transaction, failureSink: outcome });
   const { model, action, args, widened } = intercepted;
   let written = false;
   const execute = operationContinuation(intercepted, () => {

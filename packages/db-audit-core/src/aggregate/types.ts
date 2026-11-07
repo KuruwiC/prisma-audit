@@ -120,7 +120,9 @@ export type SelfAggregateConfig<
 /**
  * Entity configuration
  *
- * @template TDbHandle - Database handle type passed to the resolvers and enrichers
+ * @template TDbHandle - Database handle type passed to the resolvers and enrichers: the adapter's
+ *   audited handle, or inside a transaction the transaction's. A write through it to an audited
+ *   model is rejected with `AuditReentrantWriteError`.
  * @template TEntity - Row type of this entity
  *
  * @example

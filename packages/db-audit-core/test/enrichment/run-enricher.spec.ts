@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { ENRICHMENT_TIMEOUTS } from '../../src/constants.js';
 import { runBatchEnricher, runEnricher } from '../../src/enrichment/run-enricher.js';
+import { AuditReentrantWriteError, RejectedWriteError } from '../../src/policy/audit-gate.js';
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -493,5 +495,108 @@ describe('runBatchEnricher', () => {
       expect(result).toEqual([{ enriched: 'a' }]);
       expect(vi.getTimerCount()).toBe(0);
     });
+  });
+});
+
+class AdapterRejectedWriteError extends RejectedWriteError {
+  constructor() {
+    super('rejected by the adapter', { modelName: 'Post', operationModelName: 'Post', operation: 'create' });
+    this.name = 'AdapterRejectedWriteError';
+  }
+}
+
+describe.each([
+  {
+    rejection: 'as reentrant',
+    rejectedWrite: () =>
+      new AuditReentrantWriteError({ modelName: 'Post', operationModelName: 'Post', operation: 'create' }),
+  },
+  { rejection: 'by an adapter of its own', rejectedWrite: () => new AdapterRejectedWriteError() },
+])('a write the audit rejected before it ran, $rejection', ({ rejectedWrite }) => {
+  it.each(['log', 'ignore'] as const)(
+    "passes through onError '%s' when the enricher's write was rejected",
+    async (onError) => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const error = rejectedWrite();
+      const rejected = async (): Promise<never> => {
+        throw error;
+      };
+
+      await expect(
+        runEnricher({ enricher: rejected, onError, fallback: { ctx: 'fallback' } }, {}, null, 5000),
+      ).rejects.toBe(error);
+      await expect(
+        runBatchEnricher({ enricher: rejected, onError, fallback: [{ ctx: 'fallback' }] }, [{}], null, 5000),
+      ).rejects.toBe(error);
+      expect(warnSpy).not.toHaveBeenCalled();
+    },
+  );
+
+  it('passes through an onError function whose own write was rejected, in place of the fallback to log', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const error = rejectedWrite();
+    const onError = async (): Promise<'ignore'> => {
+      throw error;
+    };
+    const failing = async (): Promise<never> => {
+      throw new Error('lookup failed');
+    };
+
+    await expect(
+      runEnricher({ enricher: failing, onError, fallback: { ctx: 'fallback' } }, {}, null, 5000),
+    ).rejects.toBe(error);
+    await expect(runBatchEnricher({ enricher: failing, onError }, [{}], null, 5000)).rejects.toBe(error);
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      enricherKind: 'single-row',
+      timeoutMs: ENRICHMENT_TIMEOUTS.DEFAULT,
+      run: (enricher: () => Promise<never>) => runEnricher({ enricher, onError: 'ignore' }, {}, null),
+      timedOut: null,
+    },
+    {
+      enricherKind: 'batch',
+      timeoutMs: ENRICHMENT_TIMEOUTS.BATCH,
+      run: (enricher: () => Promise<never>) => runBatchEnricher({ enricher, onError: 'ignore' }, [{}], null),
+      timedOut: [null],
+    },
+  ])(
+    "logs to the console the rejection of a write a $enricherKind enricher issues once it has timed out, under onError 'ignore'",
+    async ({ timeoutMs, run, timedOut }) => {
+      vi.useFakeTimers();
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const error = rejectedWrite();
+      const writesAfterTimeout = () =>
+        new Promise<never>((_, reject) => {
+          setTimeout(() => reject(error), timeoutMs + 100);
+        });
+
+      const result = run(writesAfterTimeout);
+      await vi.advanceTimersByTimeAsync(timeoutMs);
+      await expect(result).resolves.toEqual(timedOut);
+      expect(consoleError).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(100);
+      expect(consoleError).toHaveBeenCalledWith(expect.stringContaining('had timed out'), error);
+    },
+  );
+});
+
+describe('an enricher that has timed out', () => {
+  it('does not log another error an enricher rejects with once it has timed out', async () => {
+    vi.useFakeTimers();
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const failsAfterTimeout = () =>
+      new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('lookup failed')), ENRICHMENT_TIMEOUTS.DEFAULT + 100);
+      });
+
+    const result = runEnricher({ enricher: failsAfterTimeout, onError: 'ignore' }, {}, null);
+    await vi.advanceTimersByTimeAsync(ENRICHMENT_TIMEOUTS.DEFAULT + 100);
+
+    await expect(result).resolves.toBeNull();
+    expect(consoleError).not.toHaveBeenCalled();
   });
 });

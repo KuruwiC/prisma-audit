@@ -15,7 +15,7 @@ import { createAuditedOmittedFields, NO_AUDITED_OMITTED_FIELDS } from '../../src
 import { column, model, schemaMetadataOf } from '../support/audit-schema.js';
 import { stubOperationFailureSink } from '../support/failure-sink.js';
 
-const baseClient: PrismaBaseClient = Object.assign(Object.create(null), { name: 'base' });
+const auditedClient: PrismaBaseClient = Object.assign(Object.create(null), { name: 'base' });
 const transactionClient: PrismaHandle = Object.assign(Object.create(null), { name: 'transaction' });
 const auditContext = { actor: { category: 'model', type: 'User', id: 'user-1' } };
 
@@ -25,8 +25,8 @@ const scopeOn = (
 ): ExecutionScope => ({
   auditContext,
   handle,
-  baseClient,
-  transaction: handle === baseClient ? undefined : createTransactionAudit(),
+  auditedClient,
+  transaction: handle === auditedClient ? undefined : createTransactionAudit(),
   failureSink,
 });
 
@@ -67,7 +67,7 @@ describe('createRecordProducer', () => {
   it('composes the records of the resolved events', async () => {
     const produce = producerWith(async (row) => row.id as string);
 
-    const records = await produce([event], scopeOn(baseClient), new Map());
+    const records = await produce([event], scopeOn(auditedClient), new Map());
 
     expect(records).toHaveLength(1);
     expect(records[0]).toMatchObject({
@@ -97,7 +97,7 @@ describe('createRecordProducer', () => {
       return row.id as string;
     });
 
-    const records = await produce([event, failing], scopeOn(baseClient, failureSink), new Map());
+    const records = await produce([event, failing], scopeOn(auditedClient, failureSink), new Map());
 
     expect(records.map((record) => record.entityId)).toEqual(['p1']);
     expect(failureSink.reportResolverFailures).toHaveBeenCalledTimes(1);
@@ -106,12 +106,12 @@ describe('createRecordProducer', () => {
     ]);
   });
 
-  it('hands the callbacks the base client when the operation runs outside a transaction', async () => {
+  it('hands the callbacks the audited client when the operation runs outside a transaction', async () => {
     const idResolver = vi.fn(async (row: Record<string, unknown>) => row.id as string);
 
-    await producerWith(idResolver)([event], scopeOn(baseClient), new Map());
+    await producerWith(idResolver)([event], scopeOn(auditedClient), new Map());
 
-    expect(idResolver).toHaveBeenCalledWith(event.after, baseClient);
+    expect(idResolver).toHaveBeenCalledWith(event.after, auditedClient);
   });
 
   it('hands the callbacks the transaction client when the operation runs in a transaction', async () => {
@@ -120,7 +120,7 @@ describe('createRecordProducer', () => {
     await producerWith(idResolver)([event], scopeOn(transactionClient), new Map());
 
     expect(idResolver).toHaveBeenCalledWith(event.after, transactionClient);
-    expect(idResolver).not.toHaveBeenCalledWith(event.after, baseClient);
+    expect(idResolver).not.toHaveBeenCalledWith(event.after, auditedClient);
   });
 
   it('leaves the widened columns of a created row out of the stored after state', async () => {
@@ -134,8 +134,8 @@ describe('createRecordProducer', () => {
     };
     const produce = producerWith(async (row) => row.id as string);
 
-    const [widenedRecord] = await produce([created], scopeOn(baseClient), new Map([['Post', new Set(['memo'])]]));
-    const [plainRecord] = await produce([created], scopeOn(baseClient), new Map());
+    const [widenedRecord] = await produce([created], scopeOn(auditedClient), new Map([['Post', new Set(['memo'])]]));
+    const [plainRecord] = await produce([created], scopeOn(auditedClient), new Map());
 
     expect(widenedRecord?.after).toEqual({ id: 'p1', title: 'new' });
     expect(plainRecord?.after).toEqual({ id: 'p1', title: 'new', memo: 'hidden' });
@@ -163,7 +163,7 @@ describe('createRecordProducer', () => {
       before: { kind: 'captured', row: { id: 'p1', title: 'old', memo: 'old-memo' } },
     };
 
-    const [record] = await produce([written], { ...scopeOn(transaction), baseClient: base }, new Map());
+    const [record] = await produce([written], { ...scopeOn(transaction), auditedClient: base }, new Map());
 
     expect(transactionFindMany).toHaveBeenCalledWith({
       where: { id: { in: ['p1'] } },

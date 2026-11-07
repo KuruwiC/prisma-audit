@@ -8,13 +8,14 @@ import {
   type AuditContext,
   AuditContextMissingError,
   type AuditRecord,
+  AuditReentrantWriteError,
   createAsyncLocalStorageProvider,
   defineEntity,
 } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
 import { AuditUnboundWriteError } from '../src/errors.js';
 import { createAuditLogExtension } from '../src/extension.js';
-import type { ExtensionParams, PrismaBaseClient } from '../src/internal-types.js';
+import type { ExtensionParams, PrismaBaseClient, PrismaHandle } from '../src/internal-types.js';
 import { withScope } from '../src/runtime/scope.js';
 import type { PrismaAuditExtensionOptions } from '../src/types.js';
 import { auditSchema, column, model, relation } from './support/audit-schema.js';
@@ -38,7 +39,7 @@ const schema = auditSchema(
   ]),
 );
 
-interface AuditedClient {
+interface AuditedClient extends PrismaHandle {
   readonly $transaction: (first: unknown) => Promise<unknown>;
   readonly $queryRaw: (args: unknown) => PromiseLike<unknown>;
   readonly user: {
@@ -173,14 +174,67 @@ describe('the audit gate of the extension hook', () => {
     expect(query).toHaveBeenCalledTimes(1);
   });
 
-  it("runs unaudited a write issued while the audit processes an operation, such as one of a user callback's, without a context", async () => {
-    const { client, query, writer } = auditedClient({ requireContext: true });
+  describe('a write issued while the audit processes an operation, as a user callback issues it', () => {
+    it.each([
+      { scope: 'with', withContext: true },
+      { scope: 'without', withContext: false },
+    ])(
+      'rejects one of an audited model with AuditReentrantWriteError, $scope an audit context, before it runs and without an outcome',
+      async ({ withContext }) => {
+        const observer = vi.fn();
+        const { client, provider, query, transaction, writer } = auditedClient({ requireContext: true, observer });
 
-    await withScope({ isProcessingAuditLog: true }, async () => {
-      await expect(client.user.create({ data: { id: 'u1' } })).resolves.toEqual({ id: 'u1' });
+        const create = async () => await client.user.create({ data: { id: 'u1' } });
+        const rejection = withScope({ withinAudit: true }, () =>
+          withContext ? provider.runAsync(context, create) : create(),
+        );
+
+        await expect(rejection).rejects.toBeInstanceOf(AuditReentrantWriteError);
+        await expect(rejection).rejects.toMatchObject({
+          modelName: 'User',
+          operationModelName: 'User',
+          operation: 'create',
+        });
+        expect(query).not.toHaveBeenCalled();
+        expect(transaction).not.toHaveBeenCalled();
+        expect(writer).not.toHaveBeenCalled();
+        expect(observer).not.toHaveBeenCalled();
+      },
+    );
+
+    it('rejects one whose nested write writes an audited model, the operation model not audited', async () => {
+      const { client, provider, query } = auditedClient({ entities: { Post: defineEntity({ type: 'Post' }) } });
+
+      const rejection = withScope({ withinAudit: true }, () =>
+        provider.runAsync(context, async () => client.user.create(nestedPostCreate)),
+      );
+
+      await expect(rejection).rejects.toBeInstanceOf(AuditReentrantWriteError);
+      await expect(rejection).rejects.toMatchObject({ modelName: 'Post', operationModelName: 'User' });
+      expect(query).not.toHaveBeenCalled();
     });
-    expect(query).toHaveBeenCalledTimes(1);
-    expect(writer).not.toHaveBeenCalled();
+
+    it.each([
+      { scope: 'with', withContext: true },
+      { scope: 'without', withContext: false },
+    ])(
+      'runs one of no audited model untouched, $scope an audit context, even when every model requires one',
+      async ({ withContext }) => {
+        const { client, provider, query, transaction, writer } = auditedClient({
+          entities: { Post: defineEntity({ type: 'Post' }) },
+          requireContext: true,
+        });
+        const args = { data: { id: 'u1' } };
+
+        const create = async () => await client.user.create(args);
+        await expect(
+          withScope({ withinAudit: true }, () => (withContext ? provider.runAsync(context, create) : create())),
+        ).resolves.toEqual({ id: 'u1' });
+        expect(query).toHaveBeenCalledWith(args);
+        expect(transaction).not.toHaveBeenCalled();
+        expect(writer).not.toHaveBeenCalled();
+      },
+    );
   });
 
   it('runs a read and a raw query untouched and unaudited, with or without a context, even when every model requires one', async () => {

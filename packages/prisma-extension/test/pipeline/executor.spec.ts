@@ -35,7 +35,7 @@ const record: AuditLogData = {
 };
 
 const transactionClient: PrismaHandle = Object.assign(Object.create(null), { name: 'transaction' });
-const baseClient: PrismaBaseClient = {
+const auditedClient: PrismaBaseClient = {
   $transaction: async () => {
     throw new Error('not used');
   },
@@ -47,7 +47,7 @@ const baseClient: PrismaBaseClient = {
 const scope: ExecutionScope = {
   auditContext: { actor: { category: 'model', type: 'User', id: 'user-1' } },
   handle: transactionClient,
-  baseClient,
+  auditedClient,
   failureSink: stubOperationFailureSink(),
 };
 

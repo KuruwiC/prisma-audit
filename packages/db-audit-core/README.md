@@ -12,10 +12,10 @@ The package is not published to npm. Each GitHub release attaches its tarball (`
 
 - **Entity map**: `defineEntities`, `defineEntity`, `to`, `self`, `foreignKey`, `lookup`, `batchLookup`, `normalizeId`, `validateEntityMap`, `createEntityConfigLookup`. The database handle is the type parameter `TDbHandle`, supplied by the adapter.
 - **Context provider**: `createAsyncLocalStorageProvider()` returns an `AuditContextProvider` (`run`, `runAsync`, `withActor`, `getContext`, `useContext`) carrying the actor and request context through async calls.
-- **Audit gate**: `auditGate`, `AuditGateConfig` (`requireContext`), `AuditContextMissingError` (`modelName`, `operationModelName`, `operation`).
+- **Audit gate**: `auditGate`, `AuditGateInput`, `AuditGateConfig` (`requireContext`), `AuditGate`, and the errors of a rejected write, `AuditContextMissingError` and `AuditReentrantWriteError` (`modelName`, `operationModelName`, `operation`), both `RejectedWriteError`s.
 - **Write policy**: `policy`, `PolicyConfig` (`mode`, `entity`), `WriteMode`, `planFor`, `WritePlanKind`, `AuditAtomicityError` (`modelName`, `operation`).
 - **Pipeline**: `resolve`, `compose`, `dispatch`, their configs `ResolveConfig`, `ComposeConfig`, `DispatchConfig` and `ActorContextConfig`, and the types `MutationEvent`, `BeforeState`, `AuditRecord`, `TransactionRuntime`, `WriteExecutor`, `WriteFn`, `WriteContext`.
-- **Outcomes**: `createOperationOutcome`, `OutcomeConfig`, `OperationOutcome`, `AuditObserver`, `AuditOutcome`, `AuditOutcomeStatus`, `AuditFailure`, `AuditFailurePhase`, `UnrecordedWrite`, `AuditIncompleteError` (`modelName`, `operation`, `failures`, `unrecordedWrites`).
+- **Outcomes**: `createOperationOutcome`, `logIncompleteOutcome`, `OutcomeConfig`, `OperationOutcome`, `AuditObserver`, `AuditOutcome`, `AuditOutcomeStatus`, `AuditFailure`, `AuditFailurePhase`, `UnrecordedWrite`, `AuditIncompleteError` (`modelName`, `operation`, `failures`, `unrecordedWrites`).
 - **Transactions**: `createTransactionAudit`, `TransactionAudit`, `settledIn`, `assertRecordsComplete`, `AuditRollbackError`.
 - **Utilities**: `createActorId`, `createEntityId`, `createAggregateId`, `unwrapId`, `IdValidationError`, `createAuditLogData`, `UNHANDLED` (for value serializers).
 - **Debug output**: logs through [`debug`](https://www.npmjs.com/package/debug) under the `db-audit-core` namespace (`DEBUG=db-audit-core`).
@@ -24,8 +24,9 @@ The package is not published to npm. Each GitHub release attaches its tarball (`
 
 The adapter owns everything that touches the database: intercepting writes, reading rows, opening transactions and persisting records. The core owns the decisions in between. For each intercepted write the adapter runs these steps in order.
 
-1. **`auditGate(auditContext, auditedModels, gateConfig)`**, before any statement runs, on the arguments the write runs with. `auditedModels` names the audited models the write writes rows of, nested writes included; the adapter derives them, so the core never reads a write's arguments.
+1. **`auditGate({ context, auditedModels, withinAudit }, gateConfig)`**, before any statement runs, on the arguments the write runs with. `context` is the audit context set for the write, if any. `auditedModels` names the audited models the write writes rows of, nested writes included; the adapter derives them, so the core never reads a write's arguments. `withinAudit` is whether the write is issued while the audit processes an operation, from a callback the audit runs (a resolver, an enricher or its `onError`, a serializer, the writer, the observer).
    - `skip`: the write writes no audited model. Run it as without the adapter.
+   - `reentrant`: the write is issued within the audit, whatever the audit context. Throw `AuditReentrantWriteError` without running anything and without an outcome: written unaudited, it would escape the audit.
    - `unaudited` (`reason: 'no-context'`): no audit context. Run it, with an outcome created with `unaudited: 'no-context'`.
    - `reject`: no audit context and `requireContext` (a value, or a function of the model name) holds for one of the models. Throw `AuditContextMissingError` without running anything; the outcome settles as `not-committed`.
    - `audit`: continue under the audit context the gate returns.
@@ -46,7 +47,8 @@ The adapter owns everything that touches the database: intercepting writes, read
 - **A `TransactionRuntime` per dispatch**: `baseHandle` (outside any transaction), `transaction` (`{ handle, audit }`, present exactly when the operation runs in one) and `detach(work)`, which starts work no caller awaits and tracks it so the adapter can wait for it.
 - **A `TransactionAudit` per transaction it owns** (`createTransactionAudit()`). Its `outcomes` collect the outcomes of the transaction's writes, and `poison(error)` records an audit failure that failed a write after the write ran (`dispatch` and `assertRecordsComplete` record their own; the adapter records any other). The adapter calls `assertCommittable()` between the transaction's body and its commit: it throws `AuditRollbackError` (`cause`: the first failure), and the transaction rolls back, even when the body caught the error. On a database that aborts a transaction on a failed statement (PostgreSQL), the adapter also checks before the commit that a transaction with a failed statement is still usable. It then ends the audit: `end(committed)` for an outermost transaction settles the outcomes, and `mergeInto(parent, committed)` for a nested one hands them to the parent. A nested transaction's audit failures stay its own.
 - **The handle thunk** passed to `resolve`, reading the adapter's own record of the active transaction. That record stays out of the `AuditContext`, which carries only the actor and request context.
-- **One `OperationOutcome` per write of an audited model**, from `createOperationOutcome({ model, operation, unaudited? }, { observer })`, including writes the gate let run unaudited or rejected. The adapter reports to it:
+- **The re-entrancy flag** passed to `auditGate` as `withinAudit`, raised in the async flow of `dispatch` and of the observer, so that a write a callback issues through the handle it receives, or through the adapter's own client, reaches the gate as `reentrant`.
+- **One `OperationOutcome` per write of an audited model**, from `createOperationOutcome({ model, operation, unaudited? }, { observer })`, including writes the gate let run unaudited or rejected for a missing context; a write the gate finds `reentrant` has none. The adapter reports to it:
   - `fail(failure)`: `pre-fetch` (a read before the write failed), `diff-generation` (other work building the records failed before the write) and `row-identification` (`unidentified` rows the adapter could not identify). What each does to the operation is the adapter's choice, documented by it. `dispatch` reports a failure of `buildRecords` itself.
   - `reportResolverFailures(failures)`: one `id-resolver-call` failure per `ResolverFailure`.
   - `reportUnrecordedWrite(write)`: a write left without a record because a read it depends on failed.
@@ -59,10 +61,20 @@ The adapter owns everything that touches the database: intercepting writes, read
 `@kuruwic/audit-adapter-memory` (`packages/adapter-memory`) is the smallest complete adapter. Its `runAudited` in `src/adapter.ts` is the whole sequence:
 
 ```typescript
-const gate = auditGate(contextProvider.getContext(), entityConfigs.isLoggable(model) ? [model] : [], gateConfig);
+const gate = auditGate(
+  {
+    context: contextProvider.getContext(),
+    auditedModels: entityConfigs.isLoggable(model) ? [model] : [],
+    withinAudit: withinAudit(),
+  },
+  gateConfig,
+);
 if (gate.kind === 'skip') {
   mutate(currentHandle());
   return;
+}
+if (gate.kind === 'reentrant') {
+  throw new AuditReentrantWriteError({ modelName: gate.modelName, operationModelName: model, operation: op });
 }
 const outcome = createOperationOutcome(
   { model, operation: op, ...(gate.kind === 'unaudited' ? { unaudited: gate.reason } : {}) },
@@ -88,17 +100,19 @@ await inScope(mode, (scope) =>
     }
     const event = eventOf(model, op, mutate(scope?.handle ?? store));
     const buildRecords = async () => {
-      const { resolved, failures } = await resolve([event], auditContext, resolveConfig, currentHandle);
+      const { resolved, failures } = await resolve([event], auditContext, resolveConfig, () => auditedHandle);
       outcome.reportResolverFailures(failures);
       return compose(resolved, { auditContext, config: composeConfig }, new Date());
     };
-    await dispatch({ buildRecords, plan, auditContext, outcome }, dispatchConfig, runtimeOf(scope));
+    await auditing.run(true, () =>
+      dispatch({ buildRecords, plan, auditContext, outcome }, dispatchConfig, runtimeOf(scope)),
+    );
     assertRecordsComplete({ modelName: model, operation: op, mode }, outcome, scope?.audit);
   }),
 );
 ```
 
-Its writes have no nested writes, so the audited models of a write are its own model when the entity map declares it. `inScope` runs the write in the active transaction or opens one for an atomic write, so `planFor` never rejects there. `currentHandle` reads the active transaction from the adapter's own `AsyncLocalStorage`; `runtimeOf(scope)` gives the store as `baseHandle`, the scope's handle and audit as `transaction`, and a `detach` that adds the write to the set `flush()` waits for. `src/write-executor.ts` appends records to the handle's audit-log rows.
+Its writes have no nested writes, so the audited models of a write are its own model when the entity map declares it. `inScope` runs the write in the active transaction or opens one for an atomic write, so `planFor` never rejects there. `currentHandle` reads the active transaction from the adapter's own `AsyncLocalStorage`. The callbacks receive `auditedHandle`, whose reads go to `currentHandle()` and whose writes go through the adapter's own `create`, `update` and `delete`, so they reach the gate. `auditing` is a second `AsyncLocalStorage`, raised around `dispatch` and around the observer, which `withinAudit()` reads; `runtimeOf(scope)` gives the store as `baseHandle`, the scope's handle and audit as `transaction`, and a `detach` that adds the write to the set `flush()` waits for. `src/write-executor.ts` appends records to the handle's audit-log rows.
 
 ### Mapping another ORM: Drizzle
 

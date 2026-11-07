@@ -6,12 +6,18 @@
  * committed without some of them, `not-committed` when it failed or its transaction rolled back,
  * and `unaudited` once it committed without an audit context. Inside a transaction, the outcomes
  * are reported once the transaction has committed or rolled back. A write of no audited model is
- * not reported, and neither is a write the observer makes, which is not audited.
+ * not reported, and neither is a write of an audited model the observer makes, which is rejected
+ * with `AuditReentrantWriteError`.
  */
 
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import type { AuditContext, AuditObserver, WriteMode } from '@kuruwic/prisma-audit';
-import { createAuditClient, defineEntity, flushAllPendingWrites } from '@kuruwic/prisma-audit';
+import {
+  AuditReentrantWriteError,
+  createAuditClient,
+  defineEntity,
+  flushAllPendingWrites,
+} from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -196,14 +202,19 @@ describe('the outcome of an audited write', () => {
     ]);
   });
 
-  it('does not audit a write the observer makes through the audited client, nor report it', async () => {
+  it('rejects a write of an audited model the observer makes through the audited client, and reports nothing for it', async () => {
     const observer = vi.fn<AuditObserver>();
     const basePrisma = createBasePrisma();
     const provider = createAsyncLocalStorageProvider();
     const prisma = createClient(basePrisma, provider, observer, {});
+    const rejections: unknown[] = [];
     observer.mockImplementation(async (outcome) => {
       if (outcome.status === 'complete') {
-        await prisma.user.update({ where: { email: 'observed@example.com' }, data: { name: 'seen by the observer' } });
+        await prisma.user
+          .update({ where: { email: 'observed@example.com' }, data: { name: 'seen by the observer' } })
+          .catch((error: unknown) => {
+            rejections.push(error);
+          });
       }
     });
     disconnects.push(async () => {
@@ -215,8 +226,9 @@ describe('the outcome of an audited write', () => {
     await provider.runAsync(testActor, () => prisma.user.create({ data: { email: 'observed@example.com' } }));
 
     expect(observer).toHaveBeenCalledOnce();
+    expect(rejections).toEqual([expect.any(AuditReentrantWriteError)]);
     expect(await basePrisma.user.findUnique({ where: { email: 'observed@example.com' } })).toMatchObject({
-      name: 'seen by the observer',
+      name: null,
     });
     expect(await basePrisma.auditLog.count()).toBe(1);
   });

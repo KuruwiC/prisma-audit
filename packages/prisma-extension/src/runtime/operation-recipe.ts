@@ -19,7 +19,7 @@ import type { PrismaHandle } from '../internal-types.js';
 import { isAuditableAction } from '../utils/extension-utils.js';
 import { invokeMethod } from '../utils/invoke-method.js';
 import type { OpenTransaction } from './interactive-transaction.js';
-import { type ActiveTransaction, isProcessingAuditLog, type RuntimeScope, withScope } from './scope.js';
+import { type ActiveTransaction, type RuntimeScope, withinAudit, withScope } from './scope.js';
 
 /** The model actions Prisma's delegates expose as lazy operations */
 const MODEL_ACTIONS: ReadonlySet<string> = new Set([
@@ -127,7 +127,7 @@ const replay = (recipe: Recipe, client: object): unknown => {
 
 const isAtomicWriteRecipe = (recipe: Recipe, config: RecipeConfig): boolean =>
   recipe.model !== undefined &&
-  !isProcessingAuditLog() &&
+  !withinAudit() &&
   config.isAtomicWrite(recipe.model, recipe.call.method, recipe.call.args[0]);
 
 /**

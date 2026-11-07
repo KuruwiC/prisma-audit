@@ -144,7 +144,7 @@ describe('operation recipes', () => {
   it('runs a write on the client itself while the audit processes an operation', async () => {
     const clients = createClients();
 
-    await withScope({ isProcessingAuditLog: true }, async () => {
+    await withScope({ withinAudit: true }, async () => {
       await createUserOn(configAtomic(true), clients, { email: 'a' });
     });
 

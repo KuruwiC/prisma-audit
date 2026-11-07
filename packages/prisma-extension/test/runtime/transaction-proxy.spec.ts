@@ -54,7 +54,7 @@ const actor2: AuditActor = { category: 'model', type: 'User', id: 'user-2' };
 const baseContext: AuditContext = { actor: actor1, request: { ipAddress: '10.0.0.1' } };
 
 /** The client the audited pipeline writes on outside any transaction; an audit that opens a transaction fails */
-const baseClient: PrismaBaseClient = {
+const auditedClient: PrismaBaseClient = {
   $transaction: async () => {
     throw new Error('the audit of these operations opens no transaction');
   },
@@ -159,7 +159,7 @@ const auditedClientOf = (deps: AuditPipelineDependencies) => ({
                   widened: new Map(),
                 },
                 auditContext: baseContext,
-                baseClient,
+                auditedClient,
                 mode,
                 plan,
                 transaction: inTransaction,

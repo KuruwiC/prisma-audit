@@ -2,8 +2,8 @@
  * A top-level upsert audits only the nested writes of the branch its before-state fetch identifies
  * (existing row → `update`, missing row → `create`), whether or not nested records were pre-fetched.
  * When that fetch fails the branch is unknown, so the nested entries are skipped with the main entry.
- * The before-state fetch is a `post.findUnique` through the base client, which is how the
- * `fault-injection` query extension fails it.
+ * The before-state fetch is a `post.findUnique` that runs through the extensions of the client
+ * passed to `createAuditClient`, which is how the `fault-injection` query extension fails it.
  */
 
 import type { AuditContext } from '@kuruwic/db-audit-core';

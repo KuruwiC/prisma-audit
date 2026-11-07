@@ -29,10 +29,11 @@ export type PrismaClientLike = {
 /**
  * Creates a Prisma client instance with the audit logging extension applied
  *
- * @template TClient - The client type: the `db` type every resolver and enricher in `options` receives
+ * @template TClient - The client type: the `db` type every resolver and enricher in `options`
+ *   receives, whose value is the audited client, or inside a transaction the transaction's client
  * @template TModelName - Model names of `options.schema`, which key `options.entities`
- * @param prisma - Client to audit. Audited operations run on it, and audit logs are written
- *   with it, bypassing the audit extension.
+ * @param prisma - Client to audit. Audited operations run on it. A write through it bypasses
+ *   the audit extension, so it is the client for a write meant to run unaudited.
  * @param options - Audit configuration, including the `Prisma` namespace of the generated
  *   client `prisma` comes from
  *

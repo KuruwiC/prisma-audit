@@ -29,6 +29,7 @@ export {
   AuditAtomicityError,
   AuditContextMissingError,
   AuditIncompleteError,
+  AuditReentrantWriteError,
   AuditRollbackError,
   createActorId,
   createAggregateId,

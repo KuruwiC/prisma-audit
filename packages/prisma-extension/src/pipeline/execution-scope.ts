@@ -1,14 +1,18 @@
 /**
  * Execution scope
  *
- * What one audited operation runs in: its audit context, the client the operation and every
- * audit read and write share, the interactive transaction the client the operation was issued on
- * is bound to, if any, and the sink the operation's audit failures are reported to. The scope is
- * also the transaction runtime core's `dispatch` writes the audit records with.
+ * What one audited operation runs in: its audit context, the client the operation, every audit
+ * read and write and every user callback share, the interactive transaction the client the
+ * operation was issued on is bound to, if any, and the sink the operation's audit failures are
+ * reported to. The scope is also the transaction runtime core's `dispatch` writes the audit records
+ * with. A write a callback issues through that client
+ * reaches the audit gate, which rejects one of an audited model; the audit's own queries pass, as
+ * its reads are not auditable actions and the models the audit rows are written to are not
+ * audited.
  */
 
 import type { AuditContext, OperationOutcome, TransactionAudit, TransactionRuntime } from '@kuruwic/db-audit-core';
-import type { PrismaBaseClient, PrismaHandle } from '../internal-types.js';
+import type { PrismaHandle } from '../internal-types.js';
 import { trackPendingWrite } from '../runtime/pending-writes.js';
 
 /**
@@ -30,11 +34,12 @@ export type OperationFailureSink = Pick<OperationOutcome, 'fail' | 'reportResolv
 export interface ExecutionScope {
   readonly auditContext: AuditContext;
   /**
-   * Client the operation and every audit read and write run on: the transaction's client
-   * inside a transaction, else the base client.
+   * Client every audit read and write, and every user callback, run on: the transaction's client
+   * inside a transaction, else the audited client.
    */
   readonly handle: PrismaHandle;
-  readonly baseClient: PrismaBaseClient;
+  /** The audited client; the writes after commit run on it */
+  readonly auditedClient: PrismaHandle;
   /** The audit of the transaction level the operation runs on, if any */
   readonly transaction?: TransactionAudit;
   readonly failureSink: OperationFailureSink;
@@ -42,7 +47,7 @@ export interface ExecutionScope {
 
 export interface ExecutionScopeInput {
   readonly auditContext: AuditContext;
-  readonly baseClient: PrismaBaseClient;
+  readonly auditedClient: PrismaHandle;
   /** The transaction the operation's binding names, that of the client it was issued on, if any */
   readonly transaction: OperationTransaction | undefined;
   readonly failureSink: OperationFailureSink;
@@ -50,11 +55,11 @@ export interface ExecutionScopeInput {
 
 /** The scope of an operation that runs now, inside the transaction its binding names, if any */
 export const executionScopeOf = (input: ExecutionScopeInput): ExecutionScope => {
-  const { auditContext, baseClient, transaction, failureSink } = input;
+  const { auditContext, auditedClient, transaction, failureSink } = input;
   return {
     auditContext,
-    handle: transaction?.client ?? baseClient,
-    baseClient,
+    handle: transaction?.client ?? auditedClient,
+    auditedClient,
     transaction: transaction?.audit,
     failureSink,
   };
@@ -64,7 +69,7 @@ export const executionScopeOf = (input: ExecutionScopeInput): ExecutionScope => 
 export const transactionRuntimeOf = (scope: ExecutionScope): TransactionRuntime<PrismaHandle> => {
   const { transaction } = scope;
   return {
-    baseHandle: scope.baseClient,
+    baseHandle: scope.auditedClient,
     transaction: transaction && { handle: scope.handle, audit: transaction },
     detach: trackPendingWrite,
   };

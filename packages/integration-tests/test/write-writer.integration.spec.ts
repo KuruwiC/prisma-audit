@@ -1,7 +1,14 @@
 import type { AuditContext, AuditContextProvider } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import type { AuditLogData, EntityMap, WriteMode } from '@kuruwic/prisma-audit';
-import { createAuditClient, defineEntity, flushAllPendingWrites, foreignKey, to } from '@kuruwic/prisma-audit';
+import {
+  AuditReentrantWriteError,
+  createAuditClient,
+  defineEntity,
+  flushAllPendingWrites,
+  foreignKey,
+  to,
+} from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -267,7 +274,7 @@ describe('write.writer Coverage', () => {
       };
 
       const prisma = createAuditedClientWithWriterSpy(basePrisma, provider, writerSpy, {
-        mode: 'deferred', // Written immediately inside a transaction, on the base client outside one
+        mode: 'deferred', // Written immediately inside a transaction, on the audited client outside one
       });
 
       asyncContext = {
@@ -438,15 +445,15 @@ describe('write.writer Coverage', () => {
       expect(await tagNames()).toEqual(['writer:kept@example.com']);
     });
 
-    it('is the base client for a detached write', async () => {
-      const { basePrisma, prisma, handles } = createClient('deferred');
+    it('is the audited client for a detached write', async () => {
+      const { prisma, handles } = createClient('deferred');
 
       await context.provider.runAsync(testActor, () => createUser(prisma, 'detached@example.com'));
       await flushAllPendingWrites();
 
       expect(handles).toHaveLength(1);
       // Compared by identity: a client does not print as a diff.
-      expect(handles[0] === basePrisma).toBe(true);
+      expect(handles[0] === prisma).toBe(true);
       expect(await tagNames()).toEqual(['writer:detached@example.com']);
     });
 
@@ -484,11 +491,12 @@ describe('write.writer Coverage', () => {
     });
 
     /**
-     * An audited client whose writer creates, through that client, one User named after each user
-     * it writes the records of
+     * An audited client whose writer tries to create, through that client, one User named after
+     * each user it writes the records of
      */
     const createClient = (mode: WriteMode) => {
       const basePrisma = createBasePrisma();
+      const rejections: unknown[] = [];
       const prisma = createAuditClient(basePrisma, {
         Prisma,
         schema: auditSchema,
@@ -500,7 +508,11 @@ describe('write.writer Coverage', () => {
             for (const record of records) {
               const { email } = record.after as { email: string };
               if (record.entityType === 'User' && !email.startsWith('writer:')) {
-                await prisma.user.create({ data: { email: `writer:${email}`, name: 'Writer', password: 'secret123' } });
+                await prisma.user
+                  .create({ data: { email: `writer:${email}`, name: 'Writer', password: 'secret123' } })
+                  .catch((error: unknown) => {
+                    rejections.push(error);
+                  });
               }
             }
             await defaultWrite(records);
@@ -508,7 +520,7 @@ describe('write.writer Coverage', () => {
         },
       });
       openClients.push(prisma, basePrisma);
-      return prisma;
+      return { prisma, rejections };
     };
 
     it.each([
@@ -517,8 +529,8 @@ describe('write.writer Coverage', () => {
       { plan: 'an atomic write', mode: 'atomic', inTransaction: false },
       { plan: 'a detached write', mode: 'deferred', inTransaction: false },
       { plan: 'a deferred write inside a transaction', mode: 'deferred', inTransaction: true },
-    ] as const)('is not audited, for $plan', async ({ mode, inTransaction }) => {
-      const prisma = createClient(mode);
+    ] as const)('is rejected with AuditReentrantWriteError, for $plan', async ({ mode, inTransaction }) => {
+      const { prisma, rejections } = createClient(mode);
       const data = { email: 'audited@example.com', name: 'User', password: 'secret123' };
 
       await context.provider.runAsync(testActor, () =>
@@ -526,9 +538,8 @@ describe('write.writer Coverage', () => {
       );
       await flushAllPendingWrites();
 
-      expect((await context.basePrisma.user.findMany({ orderBy: { email: 'asc' } })).map((user) => user.email)).toEqual(
-        ['audited@example.com', 'writer:audited@example.com'],
-      );
+      expect(rejections).toEqual([expect.any(AuditReentrantWriteError)]);
+      expect((await context.basePrisma.user.findMany()).map((user) => user.email)).toEqual(['audited@example.com']);
       const logs = await context.basePrisma.auditLog.findMany({ where: { entityType: 'User' } });
       expect(logs.map((log) => (log.after as { email: string }).email)).toEqual(['audited@example.com']);
     });

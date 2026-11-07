@@ -57,7 +57,7 @@ export interface PrismaHandle {
  */
 export interface PrismaBaseClient extends PrismaHandle {
   readonly $transaction: <T>(fn: (tx: PrismaHandle) => Promise<T>) => Promise<T>;
-  readonly $extends: (extension: unknown) => object;
+  readonly $extends: (extension: unknown) => PrismaHandle;
 }
 
 // ============================================================================

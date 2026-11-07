@@ -23,8 +23,8 @@ const gate = () => {
 
 describe('runtime scope', () => {
   it('exposes the patched frame inside withScope', () => {
-    withScope({ isProcessingAuditLog: true }, () => {
-      expect(currentScope()).toEqual({ isProcessingAuditLog: true });
+    withScope({ withinAudit: true }, () => {
+      expect(currentScope()).toEqual({ withinAudit: true });
     });
   });
 
@@ -67,10 +67,10 @@ describe('runtime scope', () => {
       const txClient = client('tx');
 
       withScope({ binding: { transaction: activeTransactionOf(txClient) } }, () => {
-        withScope({ isProcessingAuditLog: true }, () => {
+        withScope({ withinAudit: true }, () => {
           const scope = currentScope();
           expect(scope?.binding?.transaction?.client).toBe(txClient);
-          expect(scope?.isProcessingAuditLog).toBe(true);
+          expect(scope?.withinAudit).toBe(true);
         });
       });
     });
@@ -92,13 +92,13 @@ describe('runtime scope', () => {
       const outerClient = client('outer');
 
       withScope({ binding: { transaction: activeTransactionOf(outerClient) } }, () => {
-        withScope({ isProcessingAuditLog: true }, () => {
-          expect(currentScope()?.isProcessingAuditLog).toBe(true);
+        withScope({ withinAudit: true }, () => {
+          expect(currentScope()?.withinAudit).toBe(true);
         });
 
         const scope = currentScope();
         expect(scope?.binding?.transaction?.client).toBe(outerClient);
-        expect(scope?.isProcessingAuditLog).toBeUndefined();
+        expect(scope?.withinAudit).toBeUndefined();
       });
     });
 
@@ -136,7 +136,7 @@ describe('runtime scope', () => {
       const operation = Promise.resolve();
 
       withScope({ operations: [operation] }, () => {
-        withScope({ isProcessingAuditLog: true }, () => {
+        withScope({ withinAudit: true }, () => {
           expect(currentOperations()).toEqual([operation]);
         });
       });

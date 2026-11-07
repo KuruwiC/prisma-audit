@@ -158,6 +158,8 @@ const entities = defineEntities<AuditModelName, PrismaClient>()({
 
 Resolvers: `foreignKey(field)` reads a column of the row, `lookup((row, prisma) => id)` reads the database per row, and `batchLookup((rows, prisma) => ids)` (from `@kuruwic/db-audit-core`) reads it once for all rows and must return one id per row. A row whose `foreignKey` column is `null` gets no log under that aggregate, without a failure. A row that lacks the column fails the resolver, reported as `id-resolver-call`; the row keeps its other logs.
 
+The client a resolver or an enricher receives (`prisma` above) is the audited client, or inside a transaction the transaction's client, typed as the client. It reads as any client does; a write of a model in `entities` through it is rejected with `AuditReentrantWriteError`.
+
 The rows a resolver receives hold every column the client reads by default, plus the entity's `recordOmittedFields`. A deleted row is the row read before the write; a nested delete with `fetchBefore.delete` off has only its key and the foreign key of the relation it was deleted through.
 
 **Rows that change parent.** An update that changes a row's parent (a changed `authorId`, or a nested `connect`, `set` or `disconnect`) is recorded under the parent it left and the one it joined: each `to()` resolver runs on the row after the write and on the row read before it. `lookup` and `batchLookup` run for the row before the write too, and read the database as it is after the write. A row a nested `connect` or `set` links to a parent and a nested `delete` or `deleteMany` of the same write removes is recorded under the parent it left and the one it was deleted from. Both need the row read before the write: `fetchBefore.update` for updates; `fetchBefore.delete`, and for a to-many `delete` also `fetchBefore.update`, for deletes.
@@ -192,10 +194,10 @@ writer?(records: AuditRecord[], context: WriteContext<TClient>): Promise<void>
 Replaces the default write. `defaultWrite(records)` is the default write on `handle`.
 
 - Inside a transaction (yours, a batch's, or the one the client opens for an atomic write), under every mode, `handle` is the transaction's client (typed as the client), `inTransaction` is `true`, and the writer runs before the operation returns. A rollback undoes what the writer wrote through `handle` or `defaultWrite`, and nothing else.
-- Outside any transaction, `handle` is the client passed to `createAuditClient` and `inTransaction` is `false`. Under `awaited` the writer runs after the operation has committed; under `deferred` it runs detached. A writer that needs several statements to be atomic wraps them in `handle.$transaction(...)` exactly when `inTransaction` is `false`.
+- Outside any transaction, `handle` is the audited client and `inTransaction` is `false`. Under `awaited` the writer runs after the operation has committed; under `deferred` it runs detached. A writer that needs several statements to be atomic wraps them in `handle.$transaction(...)` exactly when `inTransaction` is `false`.
 - An atomic operation commits once the writer resolves; a writer that resolves without persisting the records is not detected.
 - Side effects outside the database (an HTTP call, a queue publish, a write through another client) are never rolled back. Send them from [`observer`](#audit-outcomes) on an outcome whose `status` is `complete` or `incomplete`, which means the operation committed.
-- A write the writer makes through the audited client is not audited and is not part of `handle`'s transaction.
+- A write of a model in `entities` the writer makes, through `handle` or the audited client, is rejected with `AuditReentrantWriteError` and fails the write as `log-write` (see [Coverage of Prisma writes](../../docs/guarantees.md#coverage-of-prisma-writes)). A write of another model through the audited client is not part of `handle`'s transaction.
 
 ```typescript
 // An audit-log table with its own column names
@@ -515,9 +517,9 @@ A model-delegate call (`prisma.user.update(...)`) or raw-query method (`$queryRa
 
 ### Other query extensions
 
-The extension continues an operation through Prisma's `query`, so a query extension applied before it (on the client passed to `createAuditClient`) and one applied after it (`createAuditClient(...).$extends(...)`) each see the caller's operation once, in every execution scope. An `updateMany` or `deleteMany` with a `limit` reaches the later extensions narrowed and without its `limit`, once per round (see [`updateMany` and `deleteMany`](#updatemany-and-deletemany)). The audit's own queries (the reads before and after the write, the audit-log insert) run on the operation's client and pass through its extensions too. A query an extension issues of its own through an audited client is audited as a call of its own, unless it issues it while handling one of the audit's queries. `packages/integration-tests/test/extension-chain.integration.spec.ts` checks these counts.
+The extension continues an operation through Prisma's `query`, so a query extension applied before it (on the client passed to `createAuditClient`) and one applied after it (`createAuditClient(...).$extends(...)`) each see the caller's operation once, in every execution scope. An `updateMany` or `deleteMany` with a `limit` reaches the later extensions narrowed and without its `limit`, once per round (see [`updateMany` and `deleteMany`](#updatemany-and-deletemany)). The audit's own queries (the reads before and after the write, the audit-log insert) run on the operation's client and pass through its extensions too. A query an extension issues of its own through an audited client is audited as a call of its own; a write of a model in `entities` it issues while handling one of the audit's queries is rejected with `AuditReentrantWriteError`. `packages/integration-tests/test/extension-chain.integration.spec.ts` checks these counts.
 
-The audit's own queries, writes to the audit-log model, and writes made through the audited client by the writer, the observer, resolvers or enrichers are never audited.
+The audit's own queries and its writes to the audit-log model are not audited. A write of a model in `entities` issued while the audit processes an operation, by the writer, the observer, a resolver, an enricher or its `onError`, or by an extension handling one of the audit's queries, is rejected with `AuditReentrantWriteError` before it runs, and has no outcome. A write meant to run unaudited goes through the client passed to `createAuditClient`.
 
 ## Audit outcomes
 
@@ -590,6 +592,7 @@ Every record carries `beforeUnavailable`. The default write stores it when the a
 | --- | --- |
 | `AuditContextMissingError` | A write without an audit context that `requireContext` requires (`modelName`, `operationModelName`, `operation`) |
 | `AuditIncompleteError` | An atomic operation lost audit logs (`modelName`, `operation`, `failures`, `unrecordedWrites`) |
+| `AuditReentrantWriteError` | A write of a model in `entities` was issued while the audit processed an operation, as by a resolver, an enricher, the writer or the observer (`modelName`, `operationModelName`, `operation`) |
 | `AuditAtomicityError` | An atomic operation reached the audit outside any transaction the client owns (`modelName`, `operation`) |
 | `AuditRollbackError` | A `$transaction` callback resolved after an audit failure failed one of its operations (`cause`) |
 | `AuditUnboundWriteError` | An audited write reached the audit without the binding of its client, as inside Prisma's own batch (`modelName`, `operation`) |

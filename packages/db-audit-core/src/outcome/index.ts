@@ -122,7 +122,7 @@ export type AuditObserver = (outcome: AuditOutcome) => void | Promise<void>;
 export interface OutcomeConfig {
   /**
    * Called with every outcome. Without one, the failures of an `incomplete` outcome, whose
-   * records were lost, are logged to the console.
+   * records were lost, are logged to the console ({@link logIncompleteOutcome}).
    */
   readonly observer?: AuditObserver;
 }
@@ -185,9 +185,29 @@ const WRITE_LOSING_PHASES: ReadonlySet<AuditFailurePhase> = new Set(['diff-gener
 
 const messageOf = (error: unknown): string => toError(error).message;
 
+/**
+ * How an outcome is reported when no observer is given: the failures of an `incomplete` outcome,
+ * whose records were lost, are logged to the console. An adapter that observes the outcomes itself
+ * calls it in place of the user's observer when the user gives none.
+ */
+export const logIncompleteOutcome: AuditObserver = (outcome) => {
+  if (outcome.status !== 'incomplete') {
+    return;
+  }
+  for (const { phase, error } of outcome.failures) {
+    console.error(
+      `[db-audit-core] ${outcome.operation} on ${outcome.model} committed without some of its audit records; ${phase} failure:`,
+      error.message,
+    );
+    if (error.stack) {
+      console.error(error.stack);
+    }
+  }
+};
+
 export const createOperationOutcome = (target: OutcomeTarget, config: OutcomeConfig): OperationOutcome => {
   const { model, operation, unaudited } = target;
-  const { observer } = config;
+  const observer = config.observer ?? logIncompleteOutcome;
   const failures: AuditFailure[] = [];
   const unrecordedWrites: UnrecordedWrite[] = [];
   let written: number | undefined = unaudited ? 0 : undefined;
@@ -215,28 +235,10 @@ export const createOperationOutcome = (target: OutcomeTarget, config: OutcomeCon
     return { ...fields, status: lost ? 'incomplete' : 'complete' };
   };
 
-  const logLost = (outcome: AuditOutcome): void => {
-    for (const { phase, error } of outcome.failures) {
-      console.error(
-        `[db-audit-core] ${operation} on ${model} committed without some of its audit records; ${phase} failure:`,
-        error.message,
-      );
-      if (error.stack) {
-        console.error(error.stack);
-      }
-    }
-  };
-
   const report = async (settled: OperationFate): Promise<void> => {
     if (reported) return;
     reported = true;
     const outcome = outcomeOf(settled);
-    if (!observer) {
-      if (outcome.status === 'incomplete') {
-        logLost(outcome);
-      }
-      return;
-    }
     try {
       await observer(outcome);
     } catch (observerError) {
