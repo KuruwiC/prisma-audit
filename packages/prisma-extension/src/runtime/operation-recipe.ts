@@ -69,8 +69,11 @@ const RAW_METHODS: ReadonlySet<string> = new Set([
 ]);
 
 export interface RecipeConfig {
-  /** The model each model delegate property of the client names */
-  readonly modelOfAccessor: ReadonlyMap<string, string>;
+  /**
+   * The model each model delegate property of the client names: its camelCase accessor and its
+   * schema name, both of which Prisma exposes
+   */
+  readonly modelOfDelegateProperty: ReadonlyMap<string, string>;
   /** The model a relation field of `model` leads to */
   readonly relatedModel: (model: string, field: string) => string | undefined;
   /**
@@ -376,7 +379,7 @@ export const createRecipeClient = (
           }
         : undefined;
     }
-    const model = config.modelOfAccessor.get(prop);
+    const model = config.modelOfDelegateProperty.get(prop);
     if (model !== undefined) {
       return { value: cached(issuer.receiver, prop, () => delegateOf(issuer, prop, model)) };
     }

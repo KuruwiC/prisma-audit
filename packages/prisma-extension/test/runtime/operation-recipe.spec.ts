@@ -52,7 +52,7 @@ const createClients = () => {
 
 /** A config by which every call of `user` is an atomic write when `atomic` */
 const configAtomic = (atomic: boolean): RecipeConfig => ({
-  modelOfAccessor: new Map([['user', 'User']]),
+  modelOfDelegateProperty: new Map([['user', 'User']]),
   relatedModel: () => undefined,
   isAtomicWrite: vi.fn(() => atomic),
 });
@@ -506,7 +506,7 @@ describe('operation recipes', () => {
   describe('the operations a batch takes', () => {
     /** Deciding by action: creates are atomic writes, other calls are not */
     const decidingConfig = (): RecipeConfig => ({
-      modelOfAccessor: new Map([['user', 'User']]),
+      modelOfDelegateProperty: new Map([['user', 'User']]),
       relatedModel: () => undefined,
       isAtomicWrite: (_model, action) => action === 'create',
     });

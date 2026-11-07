@@ -222,7 +222,7 @@ const transactionOf = <TTx extends object>(
 
 /** A recipe config by which every call is an atomic write when `atomic`, and none otherwise */
 const recipeConfigAtomic = (atomic: boolean): RecipeConfig => ({
-  modelOfAccessor: new Map([['user', 'User']]),
+  modelOfDelegateProperty: new Map([['user', 'User']]),
   relatedModel: () => undefined,
   isAtomicWrite: () => atomic,
 });
@@ -246,7 +246,7 @@ describe('createTransactionProxy (property access)', () => {
   }
 
   const noModels: RecipeConfig = {
-    modelOfAccessor: new Map(),
+    modelOfDelegateProperty: new Map(),
     relatedModel: () => undefined,
     isAtomicWrite: () => false,
   };

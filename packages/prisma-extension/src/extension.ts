@@ -77,7 +77,8 @@ const createPipelineDependencies = (audit: AuditOptions): AuditPipelineDependenc
 };
 
 /**
- * What the client proxy needs to make the client's operations into recipes and to open the
+ * What the client proxy needs to make the client's operations into recipes, under each property
+ * Prisma exposes a model delegate by (its camelCase accessor and its schema name), and to open the
  * interactive transaction of an atomic write. Whether one is opened is decided from the arguments
  * the call was made with; the hook decides whether the operation is audited, its write mode, or
  * whether it is rejected, from the arguments that reach it.
@@ -92,7 +93,12 @@ const recipeConfigOf = (audit: AuditOptions): RecipeConfig => {
     ]),
   );
   return {
-    modelOfAccessor: new Map(modelNames.map((modelName) => [getModelAccessor(modelName), modelName])),
+    modelOfDelegateProperty: new Map(
+      modelNames.flatMap((modelName) => [
+        [getModelAccessor(modelName), modelName],
+        [modelName, modelName],
+      ]),
+    ),
     relatedModel: (modelName, field) => relatedModels.get(modelName)?.get(field),
     isAtomicWrite: (modelName, action, args) =>
       audit.provider.getContext() !== undefined &&
