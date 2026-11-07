@@ -68,6 +68,22 @@ describe('createEntityNormalizedWriter', () => {
   });
 });
 
+describe('the models the normalized writers declare they write to', () => {
+  it('are the four models of the entity-normalized schema, and the two of the shared-change schema', () => {
+    expect(
+      createEntityNormalizedWriter({
+        actorModel: 'actor',
+        entityModel: 'entity',
+        aggregateModel: 'aggregate',
+        eventModel: 'auditEvent',
+      }).writesModels,
+    ).toEqual(['actor', 'entity', 'aggregate', 'auditEvent']);
+    expect(
+      createSharedChangeWriter({ changeModel: 'auditChange', aggregateModel: 'auditAggregate' }).writesModels,
+    ).toEqual(['auditChange', 'auditAggregate']);
+  });
+});
+
 describe('createSharedChangeWriter', () => {
   it('writes on models declared with a lowercase first letter', async () => {
     const tx = { auditChange: modelDelegate('change-1'), auditAggregate: modelDelegate('link-1') };

@@ -68,5 +68,5 @@ export type {
   WriteConfig,
 } from './types.js';
 
-export type { NormalizedSchema, SharedChangeSchema } from './utils/normalized-writer.js';
+export type { NormalizedSchema, NormalizedWriter, SharedChangeSchema } from './utils/normalized-writer.js';
 export { createEntityNormalizedWriter, createSharedChangeWriter } from './utils/normalized-writer.js';

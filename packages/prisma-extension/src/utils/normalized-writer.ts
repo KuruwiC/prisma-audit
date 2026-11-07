@@ -51,6 +51,19 @@ export interface SharedChangeSchema {
   beforeUnavailableField?: string;
 }
 
+/**
+ * A writer that declares the models it writes the audit rows to. `createAuditClient` throws when
+ * the entity map lists one of them, as the audit's writes to an audited model are rejected.
+ * `writesModels` holds the names as the schema was given them, accessor-cased or model-cased, and
+ * is matched against the entity map case-insensitively.
+ */
+export type NormalizedWriter = AuditLogWriter & { readonly writesModels: readonly string[] };
+
+const isNormalizedWriter = (writer: AuditLogWriter): writer is NormalizedWriter => 'writesModels' in writer;
+
+export const writesModelsOf = (writer: AuditLogWriter | undefined): readonly string[] =>
+  writer !== undefined && isNormalizedWriter(writer) ? writer.writesModels : [];
+
 interface DeduplicationResult {
   actors: Map<string, ActorData>;
   entities: Map<string, EntityData>;
@@ -344,8 +357,8 @@ const writeInTransaction = (
  * });
  * ```
  */
-export const createEntityNormalizedWriter = (schema: NormalizedSchema): AuditLogWriter => {
-  return async (logs, context) => {
+export const createEntityNormalizedWriter = (schema: NormalizedSchema): NormalizedWriter => {
+  const writer: AuditLogWriter = async (logs, context) => {
     if (logs.length === 0) {
       return;
     }
@@ -362,6 +375,9 @@ export const createEntityNormalizedWriter = (schema: NormalizedSchema): AuditLog
 
     await writeInTransaction(context, writeWithinTransaction);
   };
+  return Object.assign(writer, {
+    writesModels: [schema.actorModel, schema.entityModel, schema.aggregateModel, schema.eventModel],
+  });
 };
 
 const getChangeKey = (log: AuditRecord): string => {
@@ -405,8 +421,8 @@ const groupLogsByChange = (logs: AuditRecord[]): Map<string, AuditRecord[]> => {
  * });
  * ```
  */
-export const createSharedChangeWriter = (schema: SharedChangeSchema): AuditLogWriter => {
-  return async (logs, context) => {
+export const createSharedChangeWriter = (schema: SharedChangeSchema): NormalizedWriter => {
+  const writer: AuditLogWriter = async (logs, context) => {
     if (logs.length === 0) {
       return;
     }
@@ -481,4 +497,5 @@ export const createSharedChangeWriter = (schema: SharedChangeSchema): AuditLogWr
 
     await writeInTransaction(context, writeWithinTransaction);
   };
+  return Object.assign(writer, { writesModels: [schema.changeModel, schema.aggregateModel] });
 };

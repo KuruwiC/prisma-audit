@@ -10,14 +10,9 @@
  * pre-fetched before-state is available.
  */
 
-import { createEntityConfigLookup, defineEntity } from '@kuruwic/db-audit-core';
 import { describe, expect, it } from 'vitest';
 import type { UniqueConstraint } from '../../src/schema/types.js';
-import {
-  extractDeleteOperationEntityId,
-  isAuditableAction,
-  shouldAuditModel,
-} from '../../src/utils/extension-utils.js';
+import { extractDeleteOperationEntityId, isAuditableAction } from '../../src/utils/extension-utils.js';
 
 describe('extractDeleteOperationEntityId', () => {
   describe('single-field primary key (unaffected by the compound-unique unwrap)', () => {
@@ -114,25 +109,4 @@ describe('isAuditableAction', () => {
       expect(isAuditableAction(operation)).toBe(false);
     },
   );
-});
-
-describe('shouldAuditModel', () => {
-  const { isLoggable } = createEntityConfigLookup({
-    User: defineEntity({ type: 'User' }),
-    AuditLog: defineEntity({ type: 'AuditLog' }),
-  });
-
-  it('audits a model the entity map declares', () => {
-    expect(shouldAuditModel({ modelName: 'User', auditLogAccessor: 'AuditLog', isLoggable })).toBe(true);
-  });
-
-  it('skips a model the entity map does not declare', () => {
-    expect(shouldAuditModel({ modelName: 'Session', auditLogAccessor: 'AuditLog', isLoggable })).toBe(false);
-  });
-
-  it('skips the audit-log model whatever the case it is configured in, even when the mapping declares it', () => {
-    expect(shouldAuditModel({ modelName: 'AuditLog', auditLogAccessor: 'AuditLog', isLoggable })).toBe(false);
-    expect(shouldAuditModel({ modelName: 'AuditLog', auditLogAccessor: 'auditLog', isLoggable })).toBe(false);
-    expect(shouldAuditModel({ modelName: 'AuditLog', auditLogAccessor: 'AUDITLOG', isLoggable })).toBe(false);
-  });
 });

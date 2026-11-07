@@ -169,6 +169,38 @@ describe('Normalized Writer Helpers', () => {
     });
   });
 
+  it.each([
+    {
+      writer: 'createEntityNormalizedWriter',
+      create: () =>
+        createEntityNormalizedWriter({
+          actorModel: 'Actor',
+          entityModel: 'Entity',
+          aggregateModel: 'Aggregate',
+          eventModel: 'AuditEvent',
+        }),
+      listed: 'AuditEvent',
+    },
+    {
+      writer: 'createSharedChangeWriter',
+      create: () => createSharedChangeWriter({ changeModel: 'AuditChange', aggregateModel: 'AuditAggregate' }),
+      listed: 'AuditChange',
+    },
+  ])(
+    'rejects, at createAuditClient, an entity map that lists a model $writer writes the audit rows to',
+    ({ create, listed }) => {
+      expect(() =>
+        createAuditClient(basePrisma, {
+          Prisma,
+          schema: auditSchema,
+          contextProvider: provider,
+          entities: { ...testEntities, [listed]: defineEntity({ type: listed }) },
+          write: { writer: create() },
+        }),
+      ).toThrow(`Configuration error: 'entities' lists ${listed}, which the audit rows are written to (write.writer).`);
+    },
+  );
+
   describe('Pattern 1: Entity Normalization (createEntityNormalizedWriter)', () => {
     it('should write audit logs to normalized schema (Actor, Entity, Aggregate, AuditEvent)', async () => {
       const prisma = createAuditClient(basePrisma, {

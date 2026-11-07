@@ -1,13 +1,15 @@
 /**
  * Options checked once when they are normalized: the `schema` option, the audit schema the
- * extension reads every model's structure from, the `write` option, and the
- * diff-exclusion and redaction options, and the entity map keys of `recordOmittedFields`
+ * extension reads every model's structure from, the `write` option and the models the audit rows
+ * are written to, the diff-exclusion and redaction options, and the entity map keys of
+ * `recordOmittedFields`
  */
 
 import { createAsyncLocalStorageProvider, defineEntity, policy } from '@kuruwic/db-audit-core';
 import { describe, expect, it } from 'vitest';
 import { normalizeAuditOptions } from '../src/audit-options.js';
 import type { PrismaAuditExtensionOptions } from '../src/types.js';
+import { createEntityNormalizedWriter, createSharedChangeWriter } from '../src/utils/normalized-writer.js';
 import { auditSchema, column, model } from './support/audit-schema.js';
 
 const Prisma = { defineExtension: (extension: unknown) => extension, DbNull: null };
@@ -94,6 +96,115 @@ describe('the write option', () => {
 
     expect(policy(['User'], policyConfig)).toBe('deferred');
     expect(policy(['Post'], policyConfig)).toBe('awaited');
+  });
+});
+
+describe('the models the audit rows are written to', () => {
+  const withEntities = (
+    entityKeys: readonly string[],
+    write: PrismaAuditExtensionOptions['write'],
+  ): PrismaAuditExtensionOptions => ({
+    ...optionsWith(userSchema),
+    entities: Object.fromEntries(entityKeys.map((key) => [key, defineEntity({ type: key })])),
+    write,
+  });
+  const reentrantDestination = (modelName: string, source: string) =>
+    `Configuration error: 'entities' lists ${modelName}, which the audit rows are written to (${source}). ` +
+    "The audit's own write to it would be rejected as a write issued while the audit processes an operation, " +
+    `losing the records of every audited write. Remove ${modelName} from 'entities'.`;
+
+  it.each([
+    {
+      label: 'the default audit-log model, AuditLog',
+      entityKey: 'AuditLog',
+      write: undefined,
+      modelName: 'AuditLog',
+      source: 'write.model',
+    },
+    {
+      label: 'the write.model model, in another case',
+      entityKey: 'activity',
+      write: { model: 'Activity' },
+      modelName: 'Activity',
+      source: 'write.model',
+    },
+    {
+      label: 'the write.model model next to a custom writer',
+      entityKey: 'Activity',
+      write: { model: 'Activity', writer: async () => {} },
+      modelName: 'Activity',
+      source: 'write.model',
+    },
+  ])('rejects an entity map that lists $label', ({ entityKey, write, modelName, source }) => {
+    expect(() => normalizeAuditOptions(withEntities(['User', entityKey], write))).toThrow(
+      reentrantDestination(modelName, source),
+    );
+  });
+
+  const entityNormalized = createEntityNormalizedWriter({
+    actorModel: 'actor',
+    entityModel: 'entity',
+    aggregateModel: 'aggregate',
+    eventModel: 'auditEvent',
+  });
+  const sharedChange = createSharedChangeWriter({ changeModel: 'auditChange', aggregateModel: 'auditAggregate' });
+
+  it.each([
+    {
+      label: 'the actor model of the entity-normalized writer',
+      writer: entityNormalized,
+      entityKey: 'Actor',
+      modelName: 'actor',
+    },
+    {
+      label: 'the entity model of the entity-normalized writer',
+      writer: entityNormalized,
+      entityKey: 'Entity',
+      modelName: 'entity',
+    },
+    {
+      label: 'the aggregate model of the entity-normalized writer',
+      writer: entityNormalized,
+      entityKey: 'Aggregate',
+      modelName: 'aggregate',
+    },
+    {
+      label: 'the event model of the entity-normalized writer',
+      writer: entityNormalized,
+      entityKey: 'AuditEvent',
+      modelName: 'auditEvent',
+    },
+    {
+      label: 'the change model of the shared-change writer',
+      writer: sharedChange,
+      entityKey: 'AuditChange',
+      modelName: 'auditChange',
+    },
+    {
+      label: 'the aggregate model of the shared-change writer',
+      writer: sharedChange,
+      entityKey: 'AuditAggregate',
+      modelName: 'auditAggregate',
+    },
+  ])('rejects an entity map that lists $label', ({ writer, entityKey, modelName }) => {
+    expect(() => normalizeAuditOptions(withEntities(['User', entityKey], { writer }))).toThrow(
+      reentrantDestination(modelName, 'write.writer'),
+    );
+  });
+
+  it('accepts an entity map that lists AuditLog next to a writer when write.model names no model', () => {
+    const custom: NonNullable<PrismaAuditExtensionOptions['write']>['writer'] = async () => {};
+
+    expect(() => normalizeAuditOptions(withEntities(['User', 'AuditLog'], { writer: custom }))).not.toThrow();
+    expect(() => normalizeAuditOptions(withEntities(['User', 'AuditLog'], { writer: sharedChange }))).not.toThrow();
+  });
+
+  it('accepts a normalized writer and a custom writer next to an entity map of other models', () => {
+    const custom: NonNullable<PrismaAuditExtensionOptions['write']>['writer'] = async () => {};
+
+    expect(() => normalizeAuditOptions(withEntities(['User', 'Post'], { writer: entityNormalized }))).not.toThrow();
+    expect(() => normalizeAuditOptions(withEntities(['User', 'Post'], { writer: sharedChange }))).not.toThrow();
+    expect(() => normalizeAuditOptions(withEntities(['User', 'Post'], { writer: custom }))).not.toThrow();
   });
 });
 

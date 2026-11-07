@@ -182,7 +182,7 @@ The rows a resolver receives hold every column the client reads by default, plus
 
 #### `write.model`
 
-The PascalCase name of the audit-log model, default `'AuditLog'`. It needs the columns of the `AuditLog` model in the [main README](../../README.md#1-add-an-auditlog-model). An optional `beforeUnavailable Boolean @default(false)` field stores whether the before state was requested and could not be read; a field of that name that is not a single `Boolean` makes `createAuditClient` throw.
+The PascalCase name of the audit-log model, default `'AuditLog'`. It cannot be in `entities`: `createAuditClient` throws, since the audit's own writes to an audited model are rejected. It needs the columns of the `AuditLog` model in the [main README](../../README.md#1-add-an-auditlog-model). An optional `beforeUnavailable Boolean @default(false)` field stores whether the before state was requested and could not be read; a field of that name that is not a single `Boolean` makes `createAuditClient` throw.
 
 #### `write.writer`
 
@@ -226,7 +226,7 @@ export const prisma = createAuditClient(basePrisma, {
 
 #### Normalized writers
 
-Two built-in writers store records in normalized tables. Each writes in the operation's transaction when `inTransaction` is `true` and in a transaction of its own otherwise. `beforeUnavailableField` optionally names a `Boolean` field that stores `beforeUnavailable`.
+Two built-in writers store records in normalized tables. Each writes in the operation's transaction when `inTransaction` is `true` and in a transaction of its own otherwise. The models a writer writes to cannot be in `entities`: `createAuditClient` throws. `beforeUnavailableField` optionally names a `Boolean` field that stores `beforeUnavailable`.
 
 `createEntityNormalizedWriter` stores actors, entities and aggregates once each, and one event per record that references them:
 

@@ -47,6 +47,35 @@ export const validateFieldConflicts = (
   }
 };
 
+/** A model the audit rows are written to, and the option that names it */
+export interface AuditRowDestination {
+  readonly modelName: string;
+  readonly source: 'write.model' | 'write.writer';
+}
+
+/**
+ * Validates that the entity map lists no model the audit rows are written to: the audit's own
+ * write to one would be issued while the audit processes an operation, and the audit gate rejects
+ * such a write of an audited model, so every record would be lost, outside a transaction without
+ * failing the write
+ *
+ * @param isAudited - Whether the entity map lists a model (model name case-insensitive)
+ * @throws {Error} If the entity map lists one of `destinations`
+ */
+export const validateAuditRowDestinations = (
+  destinations: readonly AuditRowDestination[],
+  isAudited: (modelName: string) => boolean,
+): void => {
+  const audited = destinations.find(({ modelName }) => isAudited(modelName));
+  if (audited !== undefined) {
+    throw new Error(
+      `Configuration error: 'entities' lists ${audited.modelName}, which the audit rows are written to (${audited.source}). ` +
+        "The audit's own write to it would be rejected as a write issued while the audit processes an operation, " +
+        `losing the records of every audited write. Remove ${audited.modelName} from 'entities'.`,
+    );
+  }
+};
+
 const isColumn = (kind: string | undefined): boolean => kind === 'scalar' || kind === 'enum';
 
 /**

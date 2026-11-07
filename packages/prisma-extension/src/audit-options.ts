@@ -16,7 +16,12 @@ import type {
 } from '@kuruwic/db-audit-core';
 import { createEntityConfigLookup } from '@kuruwic/db-audit-core';
 import { createShouldFetchBefore } from './config/helpers.js';
-import { validateFieldConflicts, validateRecordOmittedFields } from './config/validation.js';
+import {
+  type AuditRowDestination,
+  validateAuditRowDestinations,
+  validateFieldConflicts,
+  validateRecordOmittedFields,
+} from './config/validation.js';
 import type { ShouldFetchBefore } from './grammar/pre-fetch-selection.js';
 import type { PrismaNamespace } from './internal-types.js';
 import { loadSchemaMetadata } from './schema/schema-metadata.js';
@@ -28,8 +33,8 @@ import {
   createAuditedOmittedFields,
   withRowKeyFields,
 } from './utils/audited-omitted-fields.js';
-import { shouldAuditModel } from './utils/extension-utils.js';
 import { getModelAccessor } from './utils/model-accessor.js';
+import { writesModelsOf } from './utils/normalized-writer.js';
 import { supportsQueryOmit } from './utils/prisma-version.js';
 
 export interface AuditOptions {
@@ -60,17 +65,21 @@ export interface AuditOptions {
   /**
    * The audited models an operation on `modelName` with `args` writes rows of, its nested writes
    * included: the input of the audit gate and the write policy. A model is audited when it is in
-   * the entity map and is not the audit-log model.
+   * the entity map, which lists none of the models the audit rows are written to.
    */
   readonly auditedModelsOf: (modelName: string, args: unknown) => string[];
 }
+
+const DEFAULT_AUDIT_LOG_MODEL = 'AuditLog';
 
 /** The relation counts Prisma returns with a row when a query includes or selects `_count` */
 const RELATION_COUNT_FIELD = '_count';
 
 /**
  * @throws {Error} If the `schema` option is missing or of another format version, the entity
- *   map is invalid, `diffExcludeFields` and `redactFields` name the same field, or an entity's
+ *   map is invalid or lists a model the audit rows are written to (the `write.model` model, the
+ *   default one unless a `write.writer` replaces the default write, or one a normalized writer
+ *   declares), `diffExcludeFields` and `redactFields` name the same field, or an entity's
  *   `recordOmittedFields` names a field the audit cannot read
  */
 export const normalizeAuditOptions = (options: PrismaAuditExtensionOptions): AuditOptions => {
@@ -82,6 +91,15 @@ export const normalizeAuditOptions = (options: PrismaAuditExtensionOptions): Aud
   const redactFields = options.redactFields ?? [];
 
   const entityConfigs = createEntityConfigLookup(entities);
+  const auditLogModel = write?.model ?? DEFAULT_AUDIT_LOG_MODEL;
+  const modelDestination: AuditRowDestination = { modelName: auditLogModel, source: 'write.model' };
+  // A custom writer declares where it writes only through `writesModels`, so the default model is
+  // not checked for it; the gate's rejection of its writes to an audited model is the backstop.
+  const auditRowDestinations: AuditRowDestination[] = [
+    ...(write?.model !== undefined || write?.writer === undefined ? [modelDestination] : []),
+    ...writesModelsOf(write?.writer).map((modelName): AuditRowDestination => ({ modelName, source: 'write.writer' })),
+  ];
+  validateAuditRowDestinations(auditRowDestinations, entityConfigs.isLoggable);
   validateFieldConflicts(diffExcludeFields, redactFields, entities);
   const queryOmitSupported = supportsQueryOmit(Prisma.prismaVersion?.client);
   validateRecordOmittedFields(entities, schemaMetadata, schemaMetadata.getModelNames(), queryOmitSupported);
@@ -98,7 +116,7 @@ export const normalizeAuditOptions = (options: PrismaAuditExtensionOptions): Aud
     }
     return names;
   };
-  const auditLogAccessor = write?.model ? getModelAccessor(write.model) : 'auditLog';
+  const auditLogAccessor = getModelAccessor(auditLogModel);
   const auditedOmittedFields = createAuditedOmittedFields(entityConfigs.byModel, diffExcludeFields);
 
   return {
@@ -127,11 +145,6 @@ export const normalizeAuditOptions = (options: PrismaAuditExtensionOptions): Aud
     outcomeConfig: { observer },
     shouldFetchBefore: createShouldFetchBefore(entityConfigs.byModel, options.fetchBefore),
     auditedModelsOf: (modelName, args) =>
-      auditedModelsWrittenBy(
-        schemaMetadata,
-        (written) => shouldAuditModel({ modelName: written, auditLogAccessor, isLoggable: entityConfigs.isLoggable }),
-        modelName,
-        args,
-      ),
+      auditedModelsWrittenBy(schemaMetadata, entityConfigs.isLoggable, modelName, args),
   };
 };

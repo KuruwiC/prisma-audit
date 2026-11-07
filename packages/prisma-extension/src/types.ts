@@ -52,7 +52,8 @@ export type AuditLogWriter<TClient = unknown> = WriteFn<TClient>;
  */
 export interface WriteConfig<TClient = unknown> {
   /**
-   * Prisma model name for storing audit logs (PascalCase).
+   * Prisma model name for storing audit logs (PascalCase). `createAuditClient` throws when
+   * `entities` lists it; with a custom `writer`, only when it is given.
    *
    * @default 'AuditLog'
    */
@@ -103,7 +104,9 @@ export interface WriteConfig<TClient = unknown> {
   /**
    * Custom audit log writer, replacing the default persistence step. It receives the records
    * and a context with the audit context, the client the write runs on (`handle`) and
-   * `defaultWrite`, the default persistence on that client.
+   * `defaultWrite`, the default persistence on that client. `createAuditClient` checks that
+   * `entities` lists none of the models a normalized writer declares (`writesModels`), nor
+   * `model` when it is given; the models any other writer writes to are not known before it runs.
    *
    * Inside a transaction (the caller's `$transaction`, or the one the client opens for an atomic
    * operation), under every mode, `handle` is the client of that transaction, `inTransaction` is

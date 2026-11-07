@@ -2,7 +2,7 @@
  * Utility functions for Prisma Audit Extension
  *
  * Provides helper functions for string transformations, operation validation,
- * entity ID extraction, and the audited-model check.
+ * and entity ID extraction.
  *
  * @module utils/extension-utils
  */
@@ -101,33 +101,4 @@ export const extractDeleteOperationEntityId = (data: unknown, keyConstraint: Uni
   }
 
   return undefined;
-};
-
-/** Case-insensitive: the model name is PascalCase and the accessor camelCase */
-const isAuditLogModel = (modelName: string, auditLogAccessor: string): boolean => {
-  return modelName.toLowerCase() === auditLogAccessor.toLowerCase();
-};
-
-export interface ShouldAuditModelInput {
-  modelName: string;
-  auditLogAccessor: string;
-  isLoggable: (modelName: string) => boolean;
-}
-
-/**
- * Whether operations on a model are audited: neither the audit-log model itself nor a model the
- * entity map does not declare.
- *
- * @example
- * ```typescript
- * const should = shouldAuditModel({
- *   modelName: 'User',
- *   auditLogAccessor: 'auditLog',
- *   isLoggable: entityConfigs.isLoggable,
- * });
- * ```
- */
-export const shouldAuditModel = (input: ShouldAuditModelInput): boolean => {
-  const { modelName, auditLogAccessor, isLoggable } = input;
-  return !isAuditLogModel(modelName, auditLogAccessor) && isLoggable(modelName);
 };
