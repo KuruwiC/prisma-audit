@@ -4,11 +4,12 @@
  * A write of an audited model that a callback the audit runs (an id resolver, an enricher, the
  * `onError` of an enricher whose lookup failed, the writer, the observer) issues, through the
  * client it receives or the audited client, is rejected with `AuditReentrantWriteError` before it
- * runs. Its row is not written, it has no outcome, and an enricher's `onError` cannot turn it
- * into a fallback. The operation it was issued for fails or reports the failure by the rules of
- * the place it was rejected in. A write of a model that is not audited through the client a
- * callback receives runs, and so does a write through the client passed to `createAuditClient`,
- * unaudited.
+ * runs; a write through the `$parent` of either, which lies below the audit, is rejected with
+ * `AuditParentWriteError`, of an audited model or not. Either way its row is not written, it has
+ * no outcome, and an enricher's `onError` cannot turn it into a fallback. The operation it was
+ * issued for fails or reports the failure by the rules of the place it was rejected in. A write of
+ * a model that is not audited through the client a callback receives runs, and so does a write
+ * through the client passed to `createAuditClient`, unaudited.
  */
 
 import type { ErrorStrategy } from '@kuruwic/db-audit-core';
@@ -23,6 +24,7 @@ import type {
 } from '@kuruwic/prisma-audit';
 import {
   AuditIncompleteError,
+  AuditParentWriteError,
   AuditReentrantWriteError,
   createAsyncLocalStorageProvider,
   createAuditClient,
@@ -32,6 +34,7 @@ import {
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { parentOf } from './helpers/parent-client.js';
 import { cleanDatabase, createBasePrisma } from './helpers/setup.js';
 
 type Db = Prisma.TransactionClient;
@@ -151,7 +154,7 @@ describe('a write a user callback issues while the audit processes an operation'
     (db: Db): Promise<void> =>
       keepingRejection(rejections, () => db.tag.create({ data: { name: 'written by a callback' } }));
 
-  type Rejection = typeof AuditReentrantWriteError;
+  type Rejection = typeof AuditReentrantWriteError | typeof AuditParentWriteError;
 
   const expectRejectedTagWrite = async (rejections: readonly unknown[], rejectedWith: Rejection) => {
     expect(rejections).toEqual([expect.any(rejectedWith)]);
@@ -201,12 +204,28 @@ describe('a write a user callback issues while the audit processes an operation'
       callbacksOf: (write) => ({ user: userEnrichedBy(write) }),
     },
     {
+      kind: 'an entity enricher, through the $parent of the client it receives',
+      phase: 'diff-generation',
+      failsInTransaction: true,
+      incompleteWhenAtomic: false,
+      rejectedWith: AuditParentWriteError,
+      callbacksOf: (write) => ({ user: userEnrichedBy((db) => write(parentOf(db))) }),
+    },
+    {
       kind: "an entity enricher whose onError is 'ignore', through the client it receives",
       phase: 'diff-generation',
       failsInTransaction: true,
       incompleteWhenAtomic: false,
       rejectedWith: AuditReentrantWriteError,
       callbacksOf: (write) => ({ user: userEnrichedBy(write, { onError: 'ignore' }) }),
+    },
+    {
+      kind: "an entity enricher whose onError is 'ignore', through the $parent of the client it receives",
+      phase: 'diff-generation',
+      failsInTransaction: true,
+      incompleteWhenAtomic: false,
+      rejectedWith: AuditParentWriteError,
+      callbacksOf: (write) => ({ user: userEnrichedBy((db) => write(parentOf(db)), { onError: 'ignore' }) }),
     },
     {
       kind: "the onError of an entity enricher whose lookup failed, through the audited client, in place of the fallback to 'log'",
@@ -238,6 +257,19 @@ describe('a write a user callback issues while the audit processes an operation'
       callbacksOf: (write) => ({
         writer: async (records, { handle, defaultWrite }) => {
           await write(handle);
+          await defaultWrite(records);
+        },
+      }),
+    },
+    {
+      kind: 'the writer, through the $parent of the handle it receives',
+      phase: 'log-write',
+      failsInTransaction: true,
+      incompleteWhenAtomic: false,
+      rejectedWith: AuditParentWriteError,
+      callbacksOf: (write) => ({
+        writer: async (records, { handle, defaultWrite }) => {
+          await write(parentOf(handle));
           await defaultWrite(records);
         },
       }),
@@ -363,6 +395,33 @@ describe('a write a user callback issues while the audit processes an operation'
         { entityType: 'User', action: 'create' },
       ]);
       expect(outcomes.map(({ model, status }) => `${model}:${status}`)).toEqual(['User:complete']);
+    },
+  );
+
+  it.each(scopes)(
+    'rejects with AuditParentWriteError a write of a model that is not audited through the parent of the client an enricher receives, $scope',
+    async ({ mode, inTransaction, transactional }) => {
+      const rejections: unknown[] = [];
+      const parentLabelWrite = (db: Db): Promise<void> =>
+        keepingRejection(rejections, () => parentOf(db).label.create({ data: { name: 'written by a callback' } }));
+      const { createUser, outcomes } = createClient(mode, parentLabelWrite, (write) => ({
+        user: userEnrichedBy(write, { onError: 'ignore' }),
+      }));
+
+      const created = createUser(inTransaction);
+      if (transactional) {
+        await expect(created).rejects.toBeInstanceOf(AuditParentWriteError);
+      } else {
+        await expect(created).resolves.toBeUndefined();
+      }
+      await flushAllPendingWrites();
+
+      expect(rejections).toEqual([expect.any(AuditParentWriteError)]);
+      expect(rejections[0]).toMatchObject({ modelName: 'Label', operationModelName: 'Label', operation: 'create' });
+      expect(await basePrisma.label.count()).toBe(0);
+      expect(outcomes[0]?.failures).toContainEqual(
+        expect.objectContaining({ phase: 'diff-generation', error: rejections[0] }),
+      );
     },
   );
 

@@ -34,6 +34,9 @@ const clientWith = (
 
 const txClient: PrismaHandle = { _isTx: true };
 
+/** Binds no client of its own to a transaction: these tests never read its `boundClient` */
+const ownClient = (transaction: ActiveTransaction): PrismaHandle => transaction.client;
+
 const deferred = () => {
   let resolve: () => void = () => {};
   const promise = new Promise<void>((settle) => {
@@ -68,7 +71,7 @@ describe('createOpenTransaction', () => {
     const { client, $transaction } = clientWith(txClient);
     let seen: ActiveTransaction | undefined;
 
-    await createOpenTransaction(provider)(client, [], async (transaction) => {
+    await createOpenTransaction(provider)(client, [], ownClient, async (transaction) => {
       seen = transaction;
     });
 
@@ -82,7 +85,7 @@ describe('createOpenTransaction', () => {
     const open = createOpenTransaction(createAsyncLocalStorageProvider());
     const body = vi.fn(async () => {});
 
-    await expect(open({}, [], body)).rejects.toThrow('Client method "$transaction" not found');
+    await expect(open({}, [], ownClient, body)).rejects.toThrow('Client method "$transaction" not found');
 
     expect(body).not.toHaveBeenCalled();
   });
@@ -95,7 +98,7 @@ describe('createOpenTransaction', () => {
       let contextInsideBody: AuditContext | undefined;
 
       await provider.runAsync(context, () =>
-        createOpenTransaction(provider)(client, [], async () => {
+        createOpenTransaction(provider)(client, [], ownClient, async () => {
           contextInsideBody = provider.getContext();
         }),
       );
@@ -108,7 +111,7 @@ describe('createOpenTransaction', () => {
       const { client } = clientWith(txClient, (callback) => provider.runAsync(otherContext, () => callback(txClient)));
       let contextInsideBody: AuditContext | undefined;
 
-      await createOpenTransaction(provider)(client, [], async () => {
+      await createOpenTransaction(provider)(client, [], ownClient, async () => {
         contextInsideBody = provider.getContext();
       });
 
@@ -121,8 +124,8 @@ describe('createOpenTransaction', () => {
     const open = createOpenTransaction(createAsyncLocalStorageProvider());
     const options = { isolationLevel: 'Serializable', maxWait: 5000, timeout: 10000 };
 
-    await open(client, [options], async () => {});
-    await open(client, [], async () => {});
+    await open(client, [options], ownClient, async () => {});
+    await open(client, [], ownClient, async () => {});
 
     expect($transaction.mock.calls[0]).toHaveLength(2);
     expect($transaction.mock.calls[0]?.[1]).toBe(options);
@@ -134,7 +137,7 @@ describe('createOpenTransaction', () => {
       const { client } = clientWith(txClient);
 
       await expect(
-        createOpenTransaction(createAsyncLocalStorageProvider())(client, [], async () => 'committed'),
+        createOpenTransaction(createAsyncLocalStorageProvider())(client, [], ownClient, async () => 'committed'),
       ).resolves.toBe('committed');
     });
 
@@ -143,7 +146,7 @@ describe('createOpenTransaction', () => {
       const bodyError = new Error('the body failed');
 
       await expect(
-        createOpenTransaction(createAsyncLocalStorageProvider())(client, [], async () => {
+        createOpenTransaction(createAsyncLocalStorageProvider())(client, [], ownClient, async () => {
           throw bodyError;
         }),
       ).rejects.toBe(bodyError);
@@ -154,11 +157,16 @@ describe('createOpenTransaction', () => {
       const first = new Error('first audit failure');
       const second = new Error('second audit failure');
 
-      const opened = createOpenTransaction(createAsyncLocalStorageProvider())(client, [], async (transaction) => {
-        transaction.audit.poison(first);
-        transaction.audit.poison(second);
-        return 'resolved all the same';
-      });
+      const opened = createOpenTransaction(createAsyncLocalStorageProvider())(
+        client,
+        [],
+        ownClient,
+        async (transaction) => {
+          transaction.audit.poison(first);
+          transaction.audit.poison(second);
+          return 'resolved all the same';
+        },
+      );
 
       await expect(opened).rejects.toBeInstanceOf(AuditRollbackError);
       await expect(opened).rejects.toHaveProperty('cause', first);
@@ -169,7 +177,7 @@ describe('createOpenTransaction', () => {
       const bodyError = new Error('the body failed');
 
       await expect(
-        createOpenTransaction(createAsyncLocalStorageProvider())(client, [], async (transaction) => {
+        createOpenTransaction(createAsyncLocalStorageProvider())(client, [], ownClient, async (transaction) => {
           transaction.audit.poison(new Error('audit failure'));
           throw bodyError;
         }),
@@ -187,10 +195,15 @@ describe('createOpenTransaction', () => {
       const { txClient: probed, $queryRawUnsafe } = probedClient(async () => [{ '?column?': 1 }]);
       const { client } = clientWith(probed);
 
-      const result = await createOpenTransaction(createAsyncLocalStorageProvider())(client, [], async (transaction) => {
-        transaction.noteStatementFailed();
-        return 'caught';
-      });
+      const result = await createOpenTransaction(createAsyncLocalStorageProvider())(
+        client,
+        [],
+        ownClient,
+        async (transaction) => {
+          transaction.noteStatementFailed();
+          return 'caught';
+        },
+      );
 
       expect(result).toBe('caught');
       expect($queryRawUnsafe.mock.calls).toEqual([['SELECT 1']]);
@@ -204,7 +217,7 @@ describe('createOpenTransaction', () => {
       const { client } = clientWith(probed);
 
       await expect(
-        createOpenTransaction(createAsyncLocalStorageProvider())(client, [], async (transaction) => {
+        createOpenTransaction(createAsyncLocalStorageProvider())(client, [], ownClient, async (transaction) => {
           transaction.noteStatementFailed();
         }),
       ).rejects.toBe(aborted);
@@ -214,7 +227,7 @@ describe('createOpenTransaction', () => {
       const { txClient: probed, $queryRawUnsafe } = probedClient(async () => []);
       const { client } = clientWith(probed);
 
-      await createOpenTransaction(createAsyncLocalStorageProvider())(client, [], async () => 'resolved');
+      await createOpenTransaction(createAsyncLocalStorageProvider())(client, [], ownClient, async () => 'resolved');
 
       expect($queryRawUnsafe).not.toHaveBeenCalled();
     });
@@ -227,7 +240,7 @@ describe('createOpenTransaction', () => {
       });
       let run = 0;
 
-      await createOpenTransaction(createAsyncLocalStorageProvider())(client, [], async (transaction) => {
+      await createOpenTransaction(createAsyncLocalStorageProvider())(client, [], ownClient, async (transaction) => {
         run += 1;
         if (run === 1) {
           transaction.noteStatementFailed();
@@ -258,7 +271,7 @@ describe('createOpenTransaction', () => {
         return result;
       });
 
-      await createOpenTransaction(createAsyncLocalStorageProvider())(client, [], async (transaction) => {
+      await createOpenTransaction(createAsyncLocalStorageProvider())(client, [], ownClient, async (transaction) => {
         await settlingBody(events, 'first')(transaction);
         await settlingBody(events, 'second')(transaction);
         expect(events).toEqual([]);
@@ -274,7 +287,12 @@ describe('createOpenTransaction', () => {
       const { client } = clientWith(txClient);
 
       await expect(
-        createOpenTransaction(createAsyncLocalStorageProvider())(client, [], settlingBody(events, 'first', bodyError)),
+        createOpenTransaction(createAsyncLocalStorageProvider())(
+          client,
+          [],
+          ownClient,
+          settlingBody(events, 'first', bodyError),
+        ),
       ).rejects.toBe(bodyError);
 
       expect(events).toEqual(['first not committed']);
@@ -285,7 +303,7 @@ describe('createOpenTransaction', () => {
       const { client } = clientWith(txClient);
 
       await expect(
-        createOpenTransaction(createAsyncLocalStorageProvider())(client, [], async (transaction) => {
+        createOpenTransaction(createAsyncLocalStorageProvider())(client, [], ownClient, async (transaction) => {
           await settlingBody(events, 'first')(transaction);
           transaction.audit.poison(new Error('audit write failed'));
         }),
@@ -303,7 +321,7 @@ describe('createOpenTransaction', () => {
       });
 
       await expect(
-        createOpenTransaction(createAsyncLocalStorageProvider())(client, [], settlingBody(events, 'first')),
+        createOpenTransaction(createAsyncLocalStorageProvider())(client, [], ownClient, settlingBody(events, 'first')),
       ).rejects.toBe(commitError);
 
       expect(events).toEqual(['first not committed']);
@@ -318,7 +336,7 @@ describe('createOpenTransaction', () => {
       let addLate: (() => Promise<void>) | undefined;
 
       await expect(
-        createOpenTransaction(createAsyncLocalStorageProvider())(client, [], async (transaction) => {
+        createOpenTransaction(createAsyncLocalStorageProvider())(client, [], ownClient, async (transaction) => {
           addLate = () => transaction.audit.outcomes.add(loggedOutcome(events, 'straggler'), true);
           throw bodyError;
         }),
@@ -339,10 +357,11 @@ describe('createOpenTransaction', () => {
       const open = createOpenTransaction(createAsyncLocalStorageProvider());
       const { client } = clientWith(nestingClient(nestedTx));
 
-      await open(client, [], async (outer) => {
+      await open(client, [], ownClient, async (outer) => {
         await open(
           outer.client,
           [],
+          ownClient,
           async (nested) => {
             expect(nested.client).toBe(nestedTx);
             await nested.audit.outcomes.add(loggedOutcome(events, 'nested operation'), true);
@@ -361,11 +380,12 @@ describe('createOpenTransaction', () => {
       const { client } = clientWith(nestingClient({ _isNestedTx: true }));
       const nestedError = new Error('the nested callback failed');
 
-      await open(client, [], async (outer) => {
+      await open(client, [], ownClient, async (outer) => {
         await expect(
           open(
             outer.client,
             [],
+            ownClient,
             async (nested) => {
               await nested.audit.outcomes.add(loggedOutcome(events, 'nested operation'), true);
               throw nestedError;
@@ -385,11 +405,12 @@ describe('createOpenTransaction', () => {
 
       const audits: Record<string, unknown> = {};
 
-      await open(client, [], async (outer) => {
+      await open(client, [], ownClient, async (outer) => {
         audits.enclosingBefore = outer.audit;
         await open(
           outer.client,
           [],
+          ownClient,
           async (nested) => {
             audits.nested = nested.audit;
             audits.enclosingWhileNested = outer.audit;
@@ -418,11 +439,12 @@ describe('createOpenTransaction', () => {
       const outerTx = { ...nestingClient({ $queryRawUnsafe: nestedProbe }), $queryRawUnsafe: enclosingProbe };
       const { client } = clientWith(outerTx);
 
-      const result = await open(client, [], async (outer) => {
+      const result = await open(client, [], ownClient, async (outer) => {
         await expect(
           open(
             outer.client,
             [],
+            ownClient,
             async () => {
               outer.noteStatementFailed();
             },
@@ -451,11 +473,12 @@ describe('createOpenTransaction', () => {
       const { client } = clientWith(outerTx);
       const audits: Record<string, unknown> = {};
 
-      await open(client, [], async (outer) => {
+      await open(client, [], ownClient, async (outer) => {
         audits.outer = outer.audit;
         await open(
           outer.client,
           [],
+          ownClient,
           async (nested) => {
             audits.nested = nested.audit;
             await nested.runOperation(async (audit) => {
@@ -480,7 +503,7 @@ describe('createOpenTransaction', () => {
       const { client } = clientWith(outerTx);
       const released = deferred();
 
-      await open(client, [], async (outer) => {
+      await open(client, [], ownClient, async (outer) => {
         const running = outer.runOperation(async () => {
           await released.promise;
           events.push('operation settled');
@@ -488,6 +511,7 @@ describe('createOpenTransaction', () => {
         const nested = open(
           outer.client,
           [],
+          ownClient,
           async () => {
             events.push('nested body ran');
           },
@@ -507,9 +531,9 @@ describe('createOpenTransaction', () => {
       const { txClient: outerTx, nestedTransaction } = nestingClient({ _isNestedTx: true });
       const { client } = clientWith(outerTx);
 
-      const result = await open(client, [], (outer) =>
+      const result = await open(client, [], ownClient, (outer) =>
         outer.runOperation(() =>
-          outer.runOperation(() => open(outer.client, [], async () => 'nested committed', outer)),
+          outer.runOperation(() => open(outer.client, [], ownClient, async () => 'nested committed', outer)),
         ),
       );
 
@@ -523,17 +547,22 @@ describe('createOpenTransaction', () => {
       const released = deferred();
       const auditFailure = new Error('the audit write failed');
 
-      const opened = createOpenTransaction(createAsyncLocalStorageProvider())(client, [], async (transaction) => {
-        void transaction
-          .runOperation(async (audit) => {
-            await released.promise;
-            await audit.outcomes.add(loggedOutcome(events, 'unawaited operation'), true);
-            audit.poison(auditFailure);
-            throw auditFailure;
-          })
-          .catch(() => undefined);
-        return 'resolved';
-      });
+      const opened = createOpenTransaction(createAsyncLocalStorageProvider())(
+        client,
+        [],
+        ownClient,
+        async (transaction) => {
+          void transaction
+            .runOperation(async (audit) => {
+              await released.promise;
+              await audit.outcomes.add(loggedOutcome(events, 'unawaited operation'), true);
+              audit.poison(auditFailure);
+              throw auditFailure;
+            })
+            .catch(() => undefined);
+          return 'resolved';
+        },
+      );
       await settleMicrotasks();
       expect(events).toEqual([]);
       released.resolve();
@@ -549,16 +578,21 @@ describe('createOpenTransaction', () => {
       const released = deferred();
       const bodyError = new Error('the body failed');
 
-      const opened = createOpenTransaction(createAsyncLocalStorageProvider())(client, [], async (transaction) => {
-        void transaction
-          .runOperation(async () => {
-            await released.promise;
-            events.push('operation settled');
-            throw new Error('the operation failed');
-          })
-          .catch(() => undefined);
-        throw bodyError;
-      });
+      const opened = createOpenTransaction(createAsyncLocalStorageProvider())(
+        client,
+        [],
+        ownClient,
+        async (transaction) => {
+          void transaction
+            .runOperation(async () => {
+              await released.promise;
+              events.push('operation settled');
+              throw new Error('the operation failed');
+            })
+            .catch(() => undefined);
+          throw bodyError;
+        },
+      );
       const rejected = opened.catch((error: unknown) => {
         events.push('transaction rejected');
         return error;
@@ -575,7 +609,7 @@ describe('createOpenTransaction', () => {
       const events: string[] = [];
       const { client } = clientWith(txClient);
 
-      await createOpenTransaction(createAsyncLocalStorageProvider())(client, [], async (transaction) => {
+      await createOpenTransaction(createAsyncLocalStorageProvider())(client, [], ownClient, async (transaction) => {
         void transaction.runOperation(async () => {
           await settleMicrotasks();
           void transaction.runOperation(async () => {
@@ -611,10 +645,11 @@ describe('createOpenTransaction', () => {
         const { client } = clientWith(outerTx);
         const audits: Record<string, unknown> = {};
 
-        await open(client, [], async (outer) => {
+        await open(client, [], ownClient, async (outer) => {
           const nested = open(
             outer.client,
             [],
+            ownClient,
             async (opened) => {
               audits.nested = opened.audit;
               events.push('nested body ran');
@@ -643,9 +678,9 @@ describe('createOpenTransaction', () => {
         const { client } = clientWith(outerTx);
         const audits: Record<string, unknown> = {};
 
-        await open(client, [], async (outer) => {
+        await open(client, [], ownClient, async (outer) => {
           audits.outer = outer.audit;
-          const nested = open(outer.client, [], async () => 'never runs', outer);
+          const nested = open(outer.client, [], ownClient, async () => 'never runs', outer);
           await settleMicrotasks();
           const operation = outer.runOperation(async (audit) => {
             audits.captured = audit;
@@ -665,7 +700,7 @@ describe('createOpenTransaction', () => {
         const released = deferred();
         const audits: Record<string, unknown> = {};
 
-        await open(client, [], async (outer) => {
+        await open(client, [], ownClient, async (outer) => {
           audits.outer = outer.audit;
           const running = outer.runOperation(async () => {
             await released.promise;
@@ -673,7 +708,7 @@ describe('createOpenTransaction', () => {
               audits.captured = audit;
             });
           });
-          const nested = open(outer.client, [], async () => 'nested committed', outer);
+          const nested = open(outer.client, [], ownClient, async () => 'nested committed', outer);
           await settleMicrotasks();
           released.resolve();
           await running;
@@ -741,9 +776,9 @@ describe('createOpenTransaction', () => {
           const operationFailure = new Error('the audit write of the operation failed');
           const audits: Record<string, unknown> = {};
 
-          const opened = open(client, [], async (outer) => {
+          const opened = open(client, [], ownClient, async (outer) => {
             audits.outer = outer.audit;
-            const nested = open(outer.client, [], run, outer).catch(() => undefined);
+            const nested = open(outer.client, [], ownClient, run, outer).catch(() => undefined);
             await settleMicrotasks();
             const operation = outer
               .runOperation(async (audit) => {
@@ -778,13 +813,18 @@ describe('createOpenTransaction', () => {
         });
         const runs: ActiveTransaction[] = [];
 
-        const opened = createOpenTransaction(createAsyncLocalStorageProvider())(client, [], async (transaction) => {
-          runs.push(transaction);
-          if (runs.length === 1) {
-            throw new Error('write conflict');
-          }
-          await settleMicrotasks();
-        });
+        const opened = createOpenTransaction(createAsyncLocalStorageProvider())(
+          client,
+          [],
+          ownClient,
+          async (transaction) => {
+            runs.push(transaction);
+            if (runs.length === 1) {
+              throw new Error('write conflict');
+            }
+            await settleMicrotasks();
+          },
+        );
         await rolledBack.promise;
         const [first] = runs;
         const operation = first?.runOperation(async (audit) => {
@@ -804,7 +844,7 @@ describe('createOpenTransaction', () => {
         const { client } = clientWith(txClient);
         let ended: ActiveTransaction | undefined;
 
-        await createOpenTransaction(createAsyncLocalStorageProvider())(client, [], async (transaction) => {
+        await createOpenTransaction(createAsyncLocalStorageProvider())(client, [], ownClient, async (transaction) => {
           ended = transaction;
         });
 
@@ -826,7 +866,7 @@ describe('createOpenTransaction', () => {
       }> = [];
       let run = 0;
 
-      await createOpenTransaction(createAsyncLocalStorageProvider())(client, [], async (transaction) => {
+      await createOpenTransaction(createAsyncLocalStorageProvider())(client, [], ownClient, async (transaction) => {
         run += 1;
         seenOnEntry.push({
           audit: transaction.audit,

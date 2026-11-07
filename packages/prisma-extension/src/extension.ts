@@ -13,7 +13,8 @@
  * operation that writes rows of an audited model, audited, run unaudited or rejected, has an
  * outcome, settled once the transaction its binding names commits or rolls back, or, outside any,
  * once the operation returns or throws, except one the gate finds reentrant
- * (`AuditReentrantWriteError`). The hook continues the caller's operation through `query`
+ * (`AuditReentrantWriteError`) and one the client rejects below the audit before it reaches the
+ * hook (`AuditParentWriteError`). The hook continues the caller's operation through `query`
  * unless it rejects it; the client proxy binds the operation, and for an atomic write opens the
  * interactive transaction, before the operation enters the extension chain.
  *
@@ -221,7 +222,9 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
             ),
           );
         return transaction
-          ? transaction.runOperation((transactionAudit) => run({ client: transaction.client, audit: transactionAudit }))
+          ? transaction.runOperation((transactionAudit) =>
+              run({ client: transaction.boundClient, audit: transactionAudit }),
+            )
           : run(undefined);
       }
       default: {

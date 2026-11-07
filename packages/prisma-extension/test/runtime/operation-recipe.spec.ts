@@ -1,9 +1,12 @@
 /**
  * Tests for operation recipes: when a recipe runs, on which client, which transaction it is bound
- * to, and how a batch takes it.
+ * to, how a batch takes it, what `$parent` is, and which calls of a client below the audit are
+ * rejected: every model write, decided from the client's outer client and the call's action alone.
  */
 
+import { RejectedWriteError } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
+import { AuditParentWriteError } from '../../src/errors.js';
 import type { OpenTransaction } from '../../src/runtime/interactive-transaction.js';
 import { createRecipeClient, type RecipeConfig, takeBatchRecipes } from '../../src/runtime/operation-recipe.js';
 import { currentScope, withScope } from '../../src/runtime/scope.js';
@@ -39,7 +42,9 @@ const createClients = () => {
     },
   });
   const tx = clientNamed('transaction');
-  const openTransaction = vi.fn<OpenTransaction>(async (_client, _options, body) => body(activeTransactionOf(tx)));
+  const openTransaction = vi.fn<OpenTransaction>(async (_client, _options, bind, body) =>
+    body(activeTransactionOf(tx, bind)),
+  );
   const receiver = {};
   const target = clientNamed('client');
   return { receiver, target, tx, ran, openTransaction };
@@ -55,18 +60,30 @@ const configAtomic = (atomic: boolean): RecipeConfig => ({
 /** Leaves a client the delegates' `$parent` names as it is: these tests never read it */
 const unwrapped = (client: object): object => client;
 
+/** Tells that every client carries the audit hook: these tests issue no call below it */
+const everyAudited = (): boolean => true;
+
+const noneAudited = (): boolean => false;
+
 /** Leaves the `$transaction` of a client as it is: these tests never call it */
 const ownTransaction = (_issuer: unknown, original: (...args: unknown[]) => unknown) => original;
 
 type UserDelegate = { create: (args: unknown) => PromiseLike<unknown> };
 
 /** `receiver.user.create(args)` as the client proxy returns it */
-const createUserOn = (config: RecipeConfig, clients: ReturnType<typeof createClients>, args: unknown) => {
-  const delegate = createRecipeClient(config, clients.openTransaction, unwrapped, ownTransaction).propertyOf(
-    clients.receiver,
-    clients.target,
-    'user',
-  )?.value as UserDelegate;
+const createUserOn = (
+  config: RecipeConfig,
+  clients: ReturnType<typeof createClients>,
+  args: unknown,
+  carriesAudit: (client: object) => boolean = everyAudited,
+) => {
+  const delegate = createRecipeClient(
+    config,
+    clients.openTransaction,
+    unwrapped,
+    carriesAudit,
+    ownTransaction,
+  ).propertyOf(clients.receiver, clients.target, 'user')?.value as UserDelegate;
   return delegate.create(args);
 };
 
@@ -96,36 +113,206 @@ describe('operation recipes', () => {
     expect(clients.ran).toEqual([{ client: 'client', bound: true, transactionClient: undefined }]);
   });
 
-  describe('the client a $transaction callback receives', () => {
+  describe('the client bound to a transaction the client opens', () => {
+    const inTransactionOf = (
+      clients: ReturnType<typeof createClients>,
+      config: RecipeConfig,
+      body: (bound: Record<string, unknown>) => Promise<unknown>,
+    ) =>
+      createRecipeClient(config, clients.openTransaction, unwrapped, everyAudited, ownTransaction).openTransactionOn(
+        {
+          receiver: clients.receiver,
+          target: clients.target,
+          transaction: undefined,
+          outerClient: clients.target,
+          belowAudit: false,
+        },
+        [],
+        (transaction) => body(transaction.boundClient),
+      );
+
     it('binds its operations to the transaction, and opens none for an atomic write', async () => {
       const clients = createClients();
-      const transaction = activeTransactionOf(clients.tx);
-      const bound = createRecipeClient(
-        configAtomic(true),
-        clients.openTransaction,
-        unwrapped,
-        ownTransaction,
-      ).boundClient(transaction);
 
-      await (bound.user as UserDelegate).create({ email: 'a' });
+      await inTransactionOf(clients, configAtomic(true), async (bound) => {
+        await (bound.user as UserDelegate).create({ email: 'a' });
+      });
 
-      expect(clients.openTransaction).not.toHaveBeenCalled();
+      expect(clients.openTransaction).toHaveBeenCalledTimes(1);
+      expect(clients.openTransaction).toHaveBeenCalledWith(
+        clients.target,
+        [],
+        expect.any(Function),
+        expect.any(Function),
+        undefined,
+      );
       expect(clients.ran).toEqual([{ client: 'transaction', bound: true, transactionClient: clients.tx }]);
     });
 
-    it("returns every other property as the transaction's client holds it", () => {
+    it("returns every other property as the transaction's client holds it", async () => {
       const clients = createClients();
       const marker = { marker: true };
-      const transaction = activeTransactionOf({ ...clients.tx, $other: marker });
-      const bound = createRecipeClient(
+      Reflect.set(clients.tx, '$other', marker);
+
+      await inTransactionOf(clients, configAtomic(false), async (bound) => {
+        expect(bound.$other).toBe(marker);
+        expect(bound.user).toBe(bound.user);
+      });
+    });
+  });
+
+  describe('the $parent of a client and of its model delegates', () => {
+    /**
+     * The clients of `createClients`, `target` and its transaction client each with a `$parent`
+     * (`below`, and `belowTransaction`, the transaction client of `below`), and a recipe client by
+     * which `target` carries the audit hook, and `below` does when `belowAudited`
+     */
+    const parentClients = (belowAudited: boolean) => {
+      const clients = createClients();
+      const below = { below: true };
+      const belowTransaction = {
+        user: {
+          create: (args: unknown) =>
+            lazyOperation(() => {
+              clients.ran.push({
+                client: 'transaction below',
+                bound: currentScope()?.binding !== undefined,
+                transactionClient: currentScope()?.binding?.transaction?.client,
+              });
+              return { created: args };
+            }),
+        },
+      };
+      Reflect.set(clients.target, '$parent', below);
+      Reflect.set(clients.target.user, '$parent', below);
+      Reflect.set(clients.tx, '$parent', belowTransaction);
+      Reflect.set(clients.tx.user, '$parent', belowTransaction);
+      const wrappedBelow = { wrapped: true };
+      const clientOf = vi.fn((_client: object): object => wrappedBelow);
+      const recipeClient = createRecipeClient(
         configAtomic(false),
         clients.openTransaction,
-        unwrapped,
+        clientOf,
+        (client) => client === clients.target || (belowAudited && client === below),
         ownTransaction,
-      ).boundClient(transaction);
+      );
+      const parentsOf = (client: object, delegate: unknown) => [
+        Reflect.get(client, '$parent'),
+        Reflect.get(delegate as object, '$parent'),
+      ];
+      const outside = () => {
+        const user = recipeClient.propertyOf(clients.receiver, clients.target, 'user')?.value;
+        return [
+          recipeClient.propertyOf(clients.receiver, clients.target, '$parent')?.value,
+          Reflect.get(user as object, '$parent'),
+        ];
+      };
+      const inTransaction = <T>(body: (bound: Record<string, unknown>) => Promise<T>) =>
+        recipeClient.openTransactionOn(
+          {
+            receiver: clients.receiver,
+            target: clients.target,
+            transaction: undefined,
+            outerClient: clients.target,
+            belowAudit: false,
+          },
+          [],
+          (transaction) => body(transaction.boundClient),
+        );
+      return { clients, below, wrappedBelow, clientOf, outside, inTransaction, parentsOf };
+    };
 
-      expect(bound.$other).toBe(marker);
-      expect(bound.user).toBe(bound.user);
+    it.each([true, false])(
+      'is, outside any transaction, the one wrapper of the client below, read from the client or from one of its model delegates, whether or not that client carries the audit hook (%s)',
+      (belowAudited) => {
+        const { below, wrappedBelow, outside, clientOf } = parentClients(belowAudited);
+
+        const [clientParent, delegateParent] = outside();
+        expect(clientParent).toBe(wrappedBelow);
+        expect(delegateParent).toBe(wrappedBelow);
+        expect(clientOf).toHaveBeenCalledWith(below);
+      },
+    );
+
+    it("is, inside a transaction, the client below's transaction client bound to it, read once per client, and a write through it runs bound when the client below carries the audit hook", async () => {
+      const { clients, inTransaction, parentsOf } = parentClients(true);
+
+      await inTransaction(async (bound) => {
+        const [clientParent, delegateParent] = parentsOf(bound, bound.user);
+        expect(clientParent).not.toBe(bound);
+        expect(Reflect.get(bound, '$parent')).toBe(clientParent);
+        await (delegateParent as { user: UserDelegate }).user.create({ email: 'a' });
+      });
+
+      expect(clients.ran).toEqual([{ client: 'transaction below', bound: true, transactionClient: clients.tx }]);
+    });
+
+    it("rejects, inside a transaction, a write through the client below's transaction client when the client below does not carry the audit hook", async () => {
+      const { clients, inTransaction } = parentClients(false);
+
+      await inTransaction(async (bound) => {
+        const parent = Reflect.get(bound, '$parent') as { user: UserDelegate };
+        await expect(parent.user.create({ email: 'a' })).rejects.toThrow(AuditParentWriteError);
+      });
+
+      expect(clients.ran).toEqual([]);
+    });
+  });
+
+  describe('a call of a client below the audit', () => {
+    it('rejects a model write with AuditParentWriteError before it runs, naming the model and action of the call, opening no transaction for it', async () => {
+      const clients = createClients();
+
+      const created = createUserOn(configAtomic(true), clients, { email: 'a' }, noneAudited);
+
+      await expect(created).rejects.toThrow(AuditParentWriteError);
+      await expect(created).rejects.toBeInstanceOf(RejectedWriteError);
+      await expect(created).rejects.toMatchObject({
+        modelName: 'User',
+        operationModelName: 'User',
+        operation: 'create',
+      });
+      expect(clients.openTransaction).not.toHaveBeenCalled();
+      expect(clients.ran).toEqual([]);
+    });
+
+    it('rejects a model write with AuditParentWriteError while the audit processes an operation', async () => {
+      const clients = createClients();
+
+      await withScope({ withinAudit: true }, async () => {
+        const created = createUserOn(configAtomic(false), clients, { email: 'a' }, noneAudited);
+        await expect(created).rejects.toThrow(AuditParentWriteError);
+      });
+
+      expect(clients.ran).toEqual([]);
+    });
+
+    it('runs a read and a raw query, unbound to any transaction', async () => {
+      const seen: { readonly call: string; readonly transaction: unknown }[] = [];
+      const record = (call: string) => () => seen.push({ call, transaction: currentScope()?.binding?.transaction });
+      const target = {
+        user: { findMany: () => lazyOperation(record('findMany')) },
+        $queryRaw: () => lazyOperation(record('$queryRaw')),
+      };
+      const recipeClient = createRecipeClient(
+        configAtomic(false),
+        vi.fn<OpenTransaction>(),
+        unwrapped,
+        noneAudited,
+        ownTransaction,
+      );
+      const user = recipeClient.propertyOf({}, target, 'user')?.value as { findMany: () => PromiseLike<unknown> };
+      const queryRaw = recipeClient.propertyOf({}, target, '$queryRaw')?.value as () => PromiseLike<unknown>;
+
+      await withScope({ binding: { transaction: activeTransactionOf({ _caller: true }) } }, async () => {
+        await user.findMany();
+        await queryRaw();
+      });
+
+      expect(seen).toEqual([
+        { call: 'findMany', transaction: undefined },
+        { call: '$queryRaw', transaction: undefined },
+      ]);
     });
   });
 
@@ -183,11 +370,13 @@ describe('operation recipes', () => {
       ...configAtomic(false),
       relatedModel: (model, field) => (model === 'User' && field === 'posts' ? 'Post' : undefined),
     };
-    const delegate = createRecipeClient(config, vi.fn<OpenTransaction>(), unwrapped, ownTransaction).propertyOf(
-      {},
-      target,
-      'user',
-    )?.value as {
+    const delegate = createRecipeClient(
+      config,
+      vi.fn<OpenTransaction>(),
+      unwrapped,
+      everyAudited,
+      ownTransaction,
+    ).propertyOf({}, target, 'user')?.value as {
       update: (args: unknown) => { posts: (args: unknown) => PromiseLike<unknown> };
     };
 
@@ -257,7 +446,7 @@ describe('operation recipes', () => {
       };
     };
     const rawMethodOf = (clients: ReturnType<typeof rawClient>, name: string, config = configAtomic(true)) =>
-      createRecipeClient(config, clients.openTransaction, unwrapped, ownTransaction).propertyOf(
+      createRecipeClient(config, clients.openTransaction, unwrapped, everyAudited, ownTransaction).propertyOf(
         clients.receiver,
         clients.target,
         name,
@@ -300,7 +489,13 @@ describe('operation recipes', () => {
 
     it('is not wrapped when the client behind it has no such method, nor are other client methods', () => {
       const clients = rawClient();
-      const recipeClient = createRecipeClient(configAtomic(true), clients.openTransaction, unwrapped, ownTransaction);
+      const recipeClient = createRecipeClient(
+        configAtomic(true),
+        clients.openTransaction,
+        unwrapped,
+        everyAudited,
+        ownTransaction,
+      );
 
       expect(recipeClient.propertyOf(clients.receiver, clients.target, '$executeRaw')).toBeUndefined();
       expect(recipeClient.propertyOf(clients.receiver, clients.target, '$connect')).toBeUndefined();
@@ -341,12 +536,20 @@ describe('operation recipes', () => {
         },
       };
     };
-    const recipesOn = (receiver: object, target: object, config: RecipeConfig, actions: string[]) => {
-      const user = createRecipeClient(config, vi.fn<OpenTransaction>(), unwrapped, ownTransaction).propertyOf(
-        receiver,
-        target,
-        'user',
-      )?.value as Record<string, () => PromiseLike<unknown>>;
+    const recipesOn = (
+      receiver: object,
+      target: object,
+      config: RecipeConfig,
+      actions: string[],
+      carriesAudit: (client: object) => boolean = everyAudited,
+    ) => {
+      const user = createRecipeClient(
+        config,
+        vi.fn<OpenTransaction>(),
+        unwrapped,
+        carriesAudit,
+        ownTransaction,
+      ).propertyOf(receiver, target, 'user')?.value as Record<string, () => PromiseLike<unknown>>;
       return actions.map((name) => user[name]?.() as PromiseLike<unknown>);
     };
 
@@ -364,6 +567,16 @@ describe('operation recipes', () => {
       const items = recipesOn(receiver, userClient([]), config, ['findMany', 'count']);
 
       expect(takeBatchRecipes(items, receiver).holdsModelWrite).toBe(false);
+    });
+
+    it('are rejected, none of them taken, when one of them is a model write a client below the audit made', async () => {
+      const receiver = {};
+      const seen: Seen[] = [];
+      const items = recipesOn(receiver, userClient(seen), decidingConfig(), ['findMany', 'update'], noneAudited);
+
+      expect(() => takeBatchRecipes(items, receiver)).toThrow(AuditParentWriteError);
+      await items[0];
+      expect(seen).toEqual([{ action: 'findMany', bound: true, transactionClient: undefined }]);
     });
 
     it('hold no write for an empty batch', () => {

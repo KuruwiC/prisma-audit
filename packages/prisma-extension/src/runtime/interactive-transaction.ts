@@ -39,11 +39,13 @@ import { type ActiveTransaction, currentOperations, withScope } from './scope.js
 
 /**
  * Runs `body` in an interactive transaction of `client`, opened with `options`: nested in `parent`
- * when `client` is a client of `parent`, as a savepoint of `parent`'s transaction
+ * when `client` is a client of `parent`, as a savepoint of `parent`'s transaction. `bind` makes the
+ * transaction's `boundClient`.
  */
 export type OpenTransaction = (
   client: object,
   options: readonly unknown[],
+  bind: (transaction: ActiveTransaction) => PrismaHandle,
   body: (transaction: ActiveTransaction) => Promise<unknown>,
   parent?: ActiveTransaction,
 ) => Promise<unknown>;
@@ -142,10 +144,20 @@ const levelsOf = new WeakMap<ActiveTransaction, TransactionLevel[]>();
  * after it, unless it starts inside one running on the level, which the opening waits for. On a
  * level that has ended it starts at once, and Prisma rejects its statements.
  */
-const transactionOn = (client: PrismaHandle, own: TransactionLevel, levels: TransactionLevel[]): ActiveTransaction => {
+const transactionOn = (
+  client: PrismaHandle,
+  own: TransactionLevel,
+  levels: TransactionLevel[],
+  bind: (transaction: ActiveTransaction) => PrismaHandle,
+): ActiveTransaction => {
   const innermost = () => levels.at(-1) ?? own;
+  let boundClient: PrismaHandle | undefined;
   const transaction: ActiveTransaction = {
     client,
+    get boundClient() {
+      boundClient ??= bind(transaction);
+      return boundClient;
+    },
     get audit() {
       return innermost().audit;
     },
@@ -190,7 +202,7 @@ const transactionOn = (client: PrismaHandle, own: TransactionLevel, levels: Tran
  */
 export const createOpenTransaction =
   (provider: ContextRunner): OpenTransaction =>
-  async (client, options, body, parent) => {
+  async (client, options, bind, body, parent) => {
     const auditContext = provider.getContext();
     const own = currentOperations();
     const levels = parent === undefined ? [] : levelsOf.get(parent);
@@ -221,7 +233,7 @@ export const createOpenTransaction =
       levels.push(level);
       opened();
       const result = await withAuditContext(provider, auditContext, () =>
-        body(transactionOn(txClient, level, levels)),
+        body(transactionOn(txClient, level, levels, bind)),
       ).finally(async () => {
         await operationsSettled(level, own);
         level.state = 'closing';

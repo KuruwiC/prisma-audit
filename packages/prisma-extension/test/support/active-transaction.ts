@@ -4,10 +4,24 @@ import type { PrismaHandle } from '../../src/internal-types.js';
 import type { ActiveTransaction } from '../../src/runtime/scope.js';
 
 /** The interactive transaction of `client`, of one level, whose audit `recordedFailuresOf` can read */
-export const activeTransactionOf = (client: PrismaHandle): ActiveTransaction => {
+export const activeTransactionOf = (
+  client: PrismaHandle,
+  bind: (transaction: ActiveTransaction) => PrismaHandle = () => client,
+): ActiveTransaction => {
   const audit = createTransactionAudit();
   vi.spyOn(audit, 'poison');
-  return { client, audit, runOperation: (run) => run(audit), noteStatementFailed: () => {} };
+  let boundClient: PrismaHandle | undefined;
+  const transaction: ActiveTransaction = {
+    client,
+    get boundClient() {
+      boundClient ??= bind(transaction);
+      return boundClient;
+    },
+    audit,
+    runOperation: (run) => run(audit),
+    noteStatementFailed: () => {},
+  };
+  return transaction;
 };
 
 const spied = <T extends (...args: never[]) => unknown>(method: T) => {

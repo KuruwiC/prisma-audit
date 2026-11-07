@@ -116,7 +116,10 @@ export interface WriteConfig<TClient = unknown> {
    * committed, and under `deferred` it runs detached after the operation returns. For a write
    * inside a transaction the handle is typed as the client although it is a transaction's client.
    * A write of a model in `entities` the writer makes through `handle` or the audited client is
-   * rejected with `AuditReentrantWriteError`, which fails the audit write as `log-write`.
+   * rejected with `AuditReentrantWriteError`, and every write through a client below the audit with
+   * `AuditParentWriteError`: the audited client's `$parent` is one, and so is `handle`'s, unless
+   * `handle` is the client of a transaction opened on a client `$extends` derives from the audited
+   * client. Either fails the audit write as `log-write`.
    *
    * Either way, side effects the writer performs outside the database transaction (an HTTP
    * call, a queue publish, a write through another client) are never rolled back — they have
@@ -148,7 +151,10 @@ export type {
  *   from `schema` alone and key `entities`; defaults to any string
  * @template TClient - The audited client type, passed to every resolver and enricher as `db`. The
  *   value is the audited client, or, inside a transaction, the transaction's client, typed as the
- *   client. A write of a model in `entities` through it is rejected with `AuditReentrantWriteError`.
+ *   client. A write of a model in `entities` through it is rejected with `AuditReentrantWriteError`,
+ *   and every write through a client below the audit with `AuditParentWriteError`: its `$parent` is
+ *   one, unless it is the client of a transaction opened on a client `$extends` derives from the
+ *   audited client.
  */
 export interface PrismaAuditExtensionOptions<TModelName extends string = string, TClient = unknown> {
   contextProvider: AuditContextProvider;
@@ -264,7 +270,9 @@ export interface PrismaAuditExtensionOptions<TModelName extends string = string,
    * `incomplete` outcome, whose entries were lost, are logged to the console. A write of a model in
    * `entities` the observer makes through the audited client is rejected with
    * `AuditReentrantWriteError` before it runs and has no outcome, like one an id resolver, an
-   * enricher or the writer makes; the observer's error is logged and ignored.
+   * enricher or the writer makes; the observer's error is logged and ignored. Every write through a
+   * client below the audit, such as the audited client's `$parent`, is rejected with
+   * `AuditParentWriteError` before it runs, and has no outcome either.
    *
    * A failure that drops an entry (`row-identification`, `id-resolver-call`, and a `pre-fetch`
    * failure that leaves an `upsert` or `connectOrCreate` entry, or a row of an audited model a

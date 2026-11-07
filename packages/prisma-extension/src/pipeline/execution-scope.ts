@@ -5,10 +5,11 @@
  * read and write and every user callback share, the interactive transaction the client the
  * operation was issued on is bound to, if any, and the sink the operation's audit failures are
  * reported to. The scope is also the transaction runtime core's `dispatch` writes the audit records
- * with. A write a callback issues through that client
+ * with. That client is never a client below the audit, so a write a callback issues through it
  * reaches the audit gate, which rejects one of an audited model; the audit's own queries pass, as
  * its reads are not auditable actions and the models the audit rows are written to are not
- * audited.
+ * audited. A write through its `$parent`, when that lies below the audit, is rejected
+ * (`AuditParentWriteError`).
  */
 
 import type { AuditContext, OperationOutcome, TransactionAudit, TransactionRuntime } from '@kuruwic/db-audit-core';
@@ -34,8 +35,8 @@ export type OperationFailureSink = Pick<OperationOutcome, 'fail' | 'reportResolv
 export interface ExecutionScope {
   readonly auditContext: AuditContext;
   /**
-   * Client every audit read and write, and every user callback, run on: the transaction's client
-   * inside a transaction, else the audited client.
+   * Client every audit read and write, and every user callback, run on: the client bound to the
+   * transaction inside a transaction, else the audited client.
    */
   readonly handle: PrismaHandle;
   /** The audited client; the writes after commit run on it */

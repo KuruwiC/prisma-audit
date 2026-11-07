@@ -33,7 +33,9 @@ export type PrismaClientLike = {
  *   receives, whose value is the audited client, or inside a transaction the transaction's client
  * @template TModelName - Model names of `options.schema`, which key `options.entities`
  * @param prisma - Client to audit. Audited operations run on it. A write through it bypasses
- *   the audit extension, so it is the client for a write meant to run unaudited.
+ *   the audit extension, so it is the client for a write meant to run unaudited. The audited
+ *   client's `$parent` leads to it wrapped below the audit, where every model write is rejected
+ *   (`AuditParentWriteError`).
  * @param options - Audit configuration, including the `Prisma` namespace of the generated
  *   client `prisma` comes from
  *

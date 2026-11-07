@@ -19,6 +19,11 @@ export interface ActiveTransaction {
   /** The client of the interactive transaction the operation runs in */
   readonly client: PrismaHandle;
   /**
+   * `client` wrapped as the audited client that opened the transaction: the client its callback
+   * receives, and the one the audit hands the callbacks it runs in the transaction
+   */
+  readonly boundClient: PrismaHandle;
+  /**
    * The core audit of the innermost level open now on the transaction's connection, the transaction
    * or one nested in it, which its owner ends; an operation that writes no audit rows settles its
    * outcome on it

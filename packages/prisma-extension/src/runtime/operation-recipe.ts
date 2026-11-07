@@ -12,10 +12,12 @@
  * client, so the call enters the client's extension chain once, already inside the transaction. A
  * batch `$transaction([...])` takes the client's recipes and runs them. A recipe is not a
  * PrismaPromise: Prisma's own `$transaction` rejects it. The `$parent` of such a client, and of
- * its model delegates, is wrapped as the client is, so a call on it is bound the same way.
+ * its model delegates, is Prisma's, wrapped as the client is, so a call on it is bound the same
+ * way. Each wrapper stands for a client outside any transaction, its outer client; a model write
+ * of a wrapper whose outer client carries no audit hook is rejected (`AuditParentWriteError`).
  */
 
-import type { PrismaHandle } from '../internal-types.js';
+import { AuditParentWriteError } from '../errors.js';
 import { isAuditableAction } from '../utils/extension-utils.js';
 import { invokeMethod } from '../utils/invoke-method.js';
 import type { OpenTransaction } from './interactive-transaction.js';
@@ -84,13 +86,27 @@ interface RecipeCall {
   readonly args: readonly unknown[];
 }
 
-interface Recipe {
+/** A wrapped client the calls of a recipe are made on */
+export interface IssuingClient {
   /** The audited client the call was made on, the one a batch `$transaction([...])` takes it for */
   readonly receiver: object;
   /** The client behind `receiver`, the one Prisma runs the call on, and opens a transaction on */
   readonly target: object;
   /** The interactive transaction `target` is the client of; undefined for a client outside any */
   readonly transaction: ActiveTransaction | undefined;
+  /**
+   * The client outside any transaction this wrapper stands for: `target` itself, or the client
+   * whose transaction client `target` is
+   */
+  readonly outerClient: object;
+  /**
+   * Whether `outerClient` carries no audit hook, so that a model write of the client is rejected
+   * when it starts
+   */
+  readonly belowAudit: boolean;
+}
+
+interface Recipe extends IssuingClient {
   /** The model delegate property the call was made on; absent for a raw-query method */
   readonly accessor: string | undefined;
   readonly model: string | undefined;
@@ -150,11 +166,34 @@ const startingIn = (scope: RuntimeScope, operation: unknown): unknown =>
 const startOn = async (recipe: Recipe, client: object, transaction: ActiveTransaction | undefined): Promise<unknown> =>
   await startingIn({ binding: { transaction } }, replay(recipe, client));
 
-const createRecipeFactory = (config: RecipeConfig, openTransaction: OpenTransaction) => {
-  const run = async (recipe: Recipe): Promise<unknown> =>
-    recipe.transaction === undefined && isAtomicWriteRecipe(recipe, config)
-      ? await openTransaction(recipe.target, [], (transaction) => startOn(recipe, transaction.client, transaction))
+const isModelWrite = (recipe: Recipe): recipe is Recipe & { readonly model: string } =>
+  recipe.model !== undefined && isAuditableAction(recipe.call.method);
+
+const rejectionOf = (recipe: Recipe): AuditParentWriteError | undefined =>
+  recipe.belowAudit && isModelWrite(recipe)
+    ? new AuditParentWriteError({ modelName: recipe.model, operation: recipe.call.method })
+    : undefined;
+
+/**
+ * Runs `body` in an interactive transaction of `issuer`'s client, nested in `issuer`'s transaction
+ * when it has one, whose `boundClient` is bound to it with `issuer`'s outer client
+ */
+type OpenTransactionOn = (
+  issuer: IssuingClient,
+  options: readonly unknown[],
+  body: (transaction: ActiveTransaction) => Promise<unknown>,
+) => Promise<unknown>;
+
+const createRecipeFactory = (config: RecipeConfig, openTransactionOn: OpenTransactionOn) => {
+  const run = async (recipe: Recipe): Promise<unknown> => {
+    const rejection = rejectionOf(recipe);
+    if (rejection !== undefined) {
+      throw rejection;
+    }
+    return recipe.transaction === undefined && isAtomicWriteRecipe(recipe, config)
+      ? await openTransactionOn(recipe, [], (transaction) => startOn(recipe, transaction.client, transaction))
       : await startOn(recipe, recipe.target, recipe.transaction);
+  };
 
   const start = (recipe: Recipe): Promise<unknown> => {
     switch (recipe.state.kind) {
@@ -228,29 +267,38 @@ const createRecipeFactory = (config: RecipeConfig, openTransaction: OpenTransact
   return { create };
 };
 
-export type IssuingClient = Pick<Recipe, 'receiver' | 'target' | 'transaction'>;
-
 /**
- * Wraps the model delegates, raw-query methods and `$transaction` of the clients `config` is used
- * for, caching each wrapper per client so that a property read twice returns the same value.
- * `openTransaction` opens the interactive transaction a client outside any transaction runs an
- * atomic write in; `auditedClientOf` wraps a client outside any transaction as the audited client
- * is wrapped; `transactionMethodOf` makes the `$transaction` of a client from the client's own.
+ * Wraps the model delegates, raw-query methods, `$parent` and `$transaction` of the clients
+ * `config` is used for, caching each wrapper per client so that a property read twice returns the
+ * same value. `openTransaction` opens every interactive transaction such a client runs in;
+ * `clientOf` returns the one wrapper of a client outside any transaction, wrapped as the audited
+ * client is; `carriesAudit` tells whether a client outside any transaction is one the audit hook
+ * applies to: the client it was applied to, extended with it, or a client derived from that one;
+ * `transactionMethodOf` makes the `$transaction` of a client from the client's own.
  */
 export const createRecipeClient = (
   config: RecipeConfig,
   openTransaction: OpenTransaction,
-  auditedClientOf: (client: object) => object,
+  clientOf: (client: object) => object,
+  carriesAudit: (client: object) => boolean,
   transactionMethodOf: (issuer: IssuingClient, original: (...args: unknown[]) => unknown) => unknown,
 ) => {
-  const factory = createRecipeFactory(config, openTransaction);
-  const wrappers = new WeakMap<object, Map<string, unknown>>();
+  const openTransactionOn: OpenTransactionOn = (issuer, options, body) =>
+    openTransaction(
+      issuer.target,
+      options,
+      (transaction) => boundTo(transaction, transaction.client, issuer.outerClient),
+      body,
+      issuer.transaction,
+    );
+  const factory = createRecipeFactory(config, openTransactionOn);
+  const propertyCache = new WeakMap<object, Map<string, unknown>>();
 
   const cached = (receiver: object, key: string, build: () => unknown): unknown => {
-    let byKey = wrappers.get(receiver);
+    let byKey = propertyCache.get(receiver);
     if (!byKey) {
       byKey = new Map();
-      wrappers.set(receiver, byKey);
+      propertyCache.set(receiver, byKey);
     }
     if (!byKey.has(key)) {
       byKey.set(key, build());
@@ -259,16 +307,21 @@ export const createRecipeClient = (
   };
 
   /**
-   * The client the `$parent` of `issuer` or of one of its model delegates names, the client an
-   * extension was applied to, wrapped as `issuer` is: outside any transaction like the audited
-   * client, and inside one bound to that transaction. A method an extension adds that writes
-   * through `Prisma.getExtensionContext(this).$parent` is thus bound to the client it was called on.
+   * The `$parent` of `issuer`, or of one of its model delegates, from Prisma's own, `parent`: outside
+   * any transaction the one wrapper of `parent`, whichever client or delegate it was read from;
+   * inside one, where Prisma returns a new transaction client on every read, `parent` bound to the
+   * transaction with the client below `issuer`'s outer client as its outer client, or `parent`
+   * itself, which carries no audit hook, when Prisma names none below.
    */
   const parentOf = (issuer: IssuingClient, parent: unknown): unknown => {
     if (!isObject(parent)) {
       return parent;
     }
-    return issuer.transaction === undefined ? auditedClientOf(parent) : boundTo(issuer.transaction, parent);
+    if (issuer.transaction === undefined) {
+      return clientOf(parent);
+    }
+    const outerParent: unknown = Reflect.get(issuer.outerClient, '$parent');
+    return boundTo(issuer.transaction, parent, isObject(outerParent) ? outerParent : parent);
   };
 
   const delegateOf = (issuer: IssuingClient, accessor: string, model: string): unknown => {
@@ -351,28 +404,27 @@ export const createRecipeClient = (
 
   /** The value the audited client `receiver`, outside any transaction, returns for `prop`, when it is wrapped */
   const propertyOf = (receiver: object, target: object, prop: string | symbol) =>
-    wrappedPropertyOf({ receiver, target, transaction: undefined }, prop);
+    wrappedPropertyOf(
+      { receiver, target, transaction: undefined, outerClient: target, belowAudit: !carriesAudit(target) },
+      prop,
+    );
 
-  /** `client`, a client of `transaction`, whose operations are recipes bound to `transaction` */
-  const boundTo = <T extends object>(transaction: ActiveTransaction, client: T): T =>
-    new Proxy(client, {
+  /**
+   * `client`, a client of `transaction` that stands for `outerClient`, whose operations are recipes
+   * bound to `transaction`. Every other property is the transaction client's own.
+   */
+  const boundTo = <T extends object>(transaction: ActiveTransaction, client: T, outerClient: object): T => {
+    const belowAudit = !carriesAudit(outerClient);
+    return new Proxy(client, {
       get(target, prop, receiver: object) {
-        const wrapped = wrappedPropertyOf({ receiver, target, transaction }, prop);
+        const wrapped = wrappedPropertyOf({ receiver, target, transaction, outerClient, belowAudit }, prop);
         return wrapped ? wrapped.value : Reflect.get(target, prop);
       },
     });
+  };
 
-  /**
-   * The client an interactive `$transaction` callback receives: `transaction`'s client, whose
-   * operations are recipes bound to `transaction`. Every other property is the transaction
-   * client's own.
-   */
-  const boundClient = (transaction: ActiveTransaction): PrismaHandle => boundTo(transaction, transaction.client);
-
-  return { propertyOf, boundClient };
+  return { propertyOf, openTransactionOn };
 };
-
-const isModelWrite = (recipe: Recipe): boolean => recipe.model !== undefined && isAuditableAction(recipe.call.method);
 
 export interface BatchRecipes {
   /** Whether some operation of the batch is a model write, of an audited model or not */
@@ -391,7 +443,8 @@ export interface BatchRecipes {
 
 /**
  * The operations of a batch `$transaction([...])` called on `receiver`: every item must be a
- * recipe of `receiver` that has not run, or the batch is rejected before anything runs. The
+ * recipe of `receiver` that has not run, and none may be a model write of a client below the
+ * audit, decided as when a recipe starts, or the batch is rejected before anything runs. The
  * recipes are taken by the batch, so awaiting one of them afterwards fails.
  */
 export const takeBatchRecipes = (items: readonly unknown[], receiver: object): BatchRecipes => {
@@ -412,6 +465,12 @@ export const takeBatchRecipes = (items: readonly unknown[], receiver: object): B
     }
     return recipe;
   });
+  for (const recipe of taken) {
+    const rejection = rejectionOf(recipe);
+    if (rejection !== undefined) {
+      throw rejection;
+    }
+  }
   for (const recipe of taken) {
     recipe.state = { kind: 'taken-by-batch' };
   }

@@ -498,6 +498,7 @@ describe('runBatchEnricher', () => {
   });
 });
 
+/** A rejection an adapter adds of its own, as the Prisma adapter's `AuditParentWriteError` is */
 class AdapterRejectedWriteError extends RejectedWriteError {
   constructor() {
     super('rejected by the adapter', { modelName: 'Post', operationModelName: 'Post', operation: 'create' });

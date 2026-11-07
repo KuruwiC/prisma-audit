@@ -458,15 +458,18 @@ describe('write.writer Coverage', () => {
     });
 
     it('is the transaction client for a deferred write inside a transaction: what the writer writes through it commits and rolls back with the operation', async () => {
-      const { basePrisma, prisma, handles } = createClient('deferred');
+      const { prisma, handles } = createClient('deferred');
+      const transactionClients: unknown[] = [];
 
       await context.provider.runAsync(testActor, () =>
         prisma.$transaction(async (tx) => {
+          transactionClients.push(tx);
           await createUser(tx, 'kept@example.com');
         }),
       );
       const rolledBack = context.provider.runAsync(testActor, () =>
         prisma.$transaction(async (tx) => {
+          transactionClients.push(tx);
           await createUser(tx, 'undone@example.com');
           throw new Error('Rollback test');
         }),
@@ -476,7 +479,7 @@ describe('write.writer Coverage', () => {
       await flushAllPendingWrites();
       expect(handles).toHaveLength(2);
       // Compared by identity: a client does not print as a diff.
-      expect(handles.some((handle) => handle === basePrisma)).toBe(false);
+      expect(handles.map((handle, index) => handle === transactionClients[index])).toEqual([true, true]);
       expect(await tagNames()).toEqual(['writer:kept@example.com']);
     });
   });

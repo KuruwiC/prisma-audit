@@ -12,13 +12,16 @@
  * queries only runs as Prisma's own batch. A `$transaction` on the client a callback receives
  * opens a transaction nested in the callback's, the batch form included. The proxy also wraps
  * every client derived from the client by `$extends`, and hands an extension function the proxy.
+ * Outside any transaction there is one wrapper per client, the one `$parent` names wherever it is
+ * read. The client it wraps and every client `$extends` derives from it carry the audit hook; the
+ * clients below them do not (`AuditParentWriteError`).
  *
  * @module runtime/transaction-proxy
  */
 
 import type { AuditContextProvider } from '@kuruwic/db-audit-core';
 import type { PrismaHandle } from '../internal-types.js';
-import { createOpenTransaction, type OpenTransaction } from './interactive-transaction.js';
+import { createOpenTransaction } from './interactive-transaction.js';
 import { createRecipeClient, type IssuingClient, type RecipeConfig, takeBatchRecipes } from './operation-recipe.js';
 
 type TransactionMethod = (...args: unknown[]) => unknown;
@@ -33,7 +36,6 @@ type RecipeClient = ReturnType<typeof createRecipeClient>;
 
 interface TransactionProxyDependencies {
   readonly recipeClient: RecipeClient;
-  readonly openTransaction: OpenTransaction;
   readonly originalTransaction: TransactionMethod;
   /** The client `$transaction` was read from */
   readonly issuer: IssuingClient;
@@ -49,7 +51,7 @@ const isolationLevelOptionOf = (options: unknown): Array<{ readonly isolationLev
 const createTransactionProxyHandler = (
   deps: TransactionProxyDependencies,
 ): ((...args: unknown[]) => Promise<unknown>) => {
-  const { recipeClient, openTransaction, originalTransaction, issuer } = deps;
+  const { recipeClient, originalTransaction, issuer } = deps;
   const { receiver, target, transaction: parent } = issuer;
 
   const runBatch = async (items: readonly unknown[], options: unknown): Promise<unknown> => {
@@ -58,7 +60,9 @@ const createTransactionProxyHandler = (
       const operations = batch.operationsOn(target);
       return originalTransaction(...(options === undefined ? [operations] : [operations, options]));
     }
-    return openTransaction(target, isolationLevelOptionOf(options), (transaction) => batch.runIn(transaction), parent);
+    return recipeClient.openTransactionOn(issuer, isolationLevelOptionOf(options), (transaction) =>
+      batch.runIn(transaction),
+    );
   };
 
   return async (...args: unknown[]): Promise<unknown> => {
@@ -67,18 +71,16 @@ const createTransactionProxyHandler = (
       return Array.isArray(first) ? runBatch(first, options) : originalTransaction(...args);
     }
     const callback = first as (tx: PrismaHandle) => Promise<unknown>;
-    return openTransaction(
-      target,
-      options ? [options] : [],
-      (transaction) => callback(recipeClient.boundClient(transaction)),
-      parent,
+    return recipeClient.openTransactionOn(issuer, options ? [options] : [], (transaction) =>
+      callback(transaction.boundClient),
     );
   };
 };
 
 /**
- * Creates a Proxy over the extended client that traps `$transaction`, the model delegates and
- * raw-query methods, and `$extends` so that a client derived from it is proxied the same way.
+ * Creates a Proxy over the extended client that traps `$transaction`, `$parent`, the model
+ * delegates and raw-query methods, and `$extends` so that a client derived from it is proxied the
+ * same way.
  *
  * Every other property is returned as the client holds it, so `in` checks and the prototype chain
  * are those of the client itself.
@@ -87,16 +89,23 @@ export const createTransactionProxy = <TClient extends object>(
   extendedClient: TClient,
   config: TransactionProxyConfig,
 ): TClient => {
-  const openTransaction = createOpenTransaction(config.provider);
+  const audited = new WeakSet<object>([extendedClient]);
+  const wrappers = new WeakMap<object, object>();
   const recipeClient: RecipeClient = createRecipeClient(
     config.recipeConfig,
-    openTransaction,
-    (client) => proxy(client),
-    (issuer, originalTransaction) =>
-      createTransactionProxyHandler({ recipeClient, openTransaction, originalTransaction, issuer }),
+    createOpenTransaction(config.provider),
+    (client) => wrappers.get(client) ?? proxy(client),
+    (client) => audited.has(client),
+    (issuer, originalTransaction) => createTransactionProxyHandler({ recipeClient, originalTransaction, issuer }),
   );
-  const proxy = <T extends object>(client: T): T =>
-    new Proxy(client, {
+  const derivedFrom = (client: object, derived: object): object => {
+    if (audited.has(client)) {
+      audited.add(derived);
+    }
+    return proxy(derived);
+  };
+  const proxy = <T extends object>(client: T): T => {
+    const wrapper = new Proxy(client, {
       get(target, prop, receiver: object) {
         if (prop === '$extends') {
           const originalExtends = Reflect.get(target, prop) as (...args: unknown[]) => unknown;
@@ -107,12 +116,15 @@ export const createTransactionProxy = <TClient extends object>(
               return Reflect.apply(extension, undefined, [receiver]);
             }
             const derived = originalExtends.apply(target, args);
-            return typeof derived === 'object' && derived !== null ? proxy(derived) : derived;
+            return typeof derived === 'object' && derived !== null ? derivedFrom(target, derived) : derived;
           };
         }
         const wrapped = recipeClient.propertyOf(receiver, target, prop);
         return wrapped ? wrapped.value : Reflect.get(target, prop);
       },
     });
+    wrappers.set(client, wrapper);
+    return wrapper;
+  };
   return proxy(extendedClient);
 };
