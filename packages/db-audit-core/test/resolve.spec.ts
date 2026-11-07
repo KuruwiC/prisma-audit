@@ -11,7 +11,7 @@ import {
 import type { EntityMap } from '../src/aggregate/types.js';
 import type { MutationEvent } from '../src/domain/mutation-event.js';
 import type { ProjectionEnrichmentMeta } from '../src/enrichment/types.js';
-import { type ResolveConfig, resolve } from '../src/resolve/index.js';
+import { type ResolveConfig, type ResolveFailure, resolve } from '../src/resolve/index.js';
 import type { AuditContext } from '../src/types.js';
 
 const MISSING_AUTHOR_ID =
@@ -39,6 +39,19 @@ const configOf = (entities: EntityMap, actorContext?: ResolveConfig['actorContex
   return { entity: entityConfigs.byModel, rootEntity: entityConfigs.byCategoryAndType, actorContext };
 };
 
+const resolveCollecting = async (
+  events: readonly MutationEvent[],
+  context: AuditContext,
+  config: ResolveConfig,
+  readHandle: () => unknown,
+) => {
+  const failures: ResolveFailure[] = [];
+  const resolved = await resolve(events, context, config, readHandle, (failure) => {
+    failures.push(failure);
+  });
+  return { resolved, failures };
+};
+
 const rowsOf = (model: string, count: number): MutationEvent[] =>
   Array.from({ length: count }, (_, i) => event(model, { id: `${model.toLowerCase()}-${i}`, authorId: `u${i}` }));
 
@@ -55,7 +68,7 @@ describe('resolve', () => {
     it('yields nothing for a model without entity configuration', async () => {
       const config = configOf({ Post: defineEntity({ type: 'Post' }) });
 
-      const { resolved } = await resolve([event('Unknown', { id: 'x-1' })], auditContext, config, read);
+      const { resolved } = await resolveCollecting([event('Unknown', { id: 'x-1' })], auditContext, config, read);
 
       expect(resolved).toEqual([]);
     });
@@ -72,7 +85,7 @@ describe('resolve', () => {
         event('Post', { id: 'p2' }),
       ];
 
-      const { resolved } = await resolve(events, auditContext, config, read);
+      const { resolved } = await resolveCollecting(events, auditContext, config, read);
 
       expect(resolved.map((e) => e.identity)).toEqual(['p1', 'c1', 'p2']);
       for (const [i, resolvedEvent] of resolved.entries()) {
@@ -90,7 +103,7 @@ describe('resolve', () => {
         origin: { path: '', op: 'delete' },
       };
 
-      const { resolved } = await resolve([rowless, event('Post', { id: 'p2' })], auditContext, config, read);
+      const { resolved } = await resolveCollecting([rowless, event('Post', { id: 'p2' })], auditContext, config, read);
 
       expect(resolved.map((e) => e.identity)).toEqual(['p2']);
     });
@@ -105,7 +118,7 @@ describe('resolve', () => {
         origin: { path: '', op: 'delete' },
       };
 
-      const { resolved, failures } = await resolve(
+      const { resolved, failures } = await resolveCollecting(
         [unreadable, event('Post', { id: 'p2' })],
         auditContext,
         config,
@@ -121,7 +134,7 @@ describe('resolve', () => {
       const config = configOf({ Post: defineEntity({ type: 'Post', idResolver }) });
       const before = { id: 'p1', title: 'deleted' };
 
-      const { resolved } = await resolve(
+      const { resolved } = await resolveCollecting(
         [
           {
             model: 'Post',
@@ -146,7 +159,7 @@ describe('resolve', () => {
       const enricher = vi.fn(async (actor: unknown) => ({ role: 'admin', of: actor }));
       const config = configOf({ Post: defineEntity({ type: 'Post' }) }, { enricher });
 
-      const { resolved } = await resolve(rowsOf('Post', 3), auditContext, config, read);
+      const { resolved } = await resolveCollecting(rowsOf('Post', 3), auditContext, config, read);
 
       expect(enricher).toHaveBeenCalledTimes(1);
       expect(enricher.mock.calls[0]?.slice(0, 2)).toEqual([auditContext.actor, handle]);
@@ -156,7 +169,7 @@ describe('resolve', () => {
     it('is null without an actor enricher', async () => {
       const config = configOf({ Post: defineEntity({ type: 'Post' }) });
 
-      const { resolved } = await resolve(rowsOf('Post', 1), auditContext, config, read);
+      const { resolved } = await resolveCollecting(rowsOf('Post', 1), auditContext, config, read);
 
       expect(resolved[0]?.actorContext).toBeNull();
     });
@@ -165,7 +178,7 @@ describe('resolve', () => {
       const enricher = vi.fn(async () => ({ role: 'admin' }));
       const config = configOf({ Post: defineEntity({ type: 'Post' }) }, { enricher });
 
-      await resolve([], auditContext, config, read);
+      await resolveCollecting([], auditContext, config, read);
 
       expect(enricher).toHaveBeenCalledTimes(1);
     });
@@ -192,7 +205,7 @@ describe('resolve', () => {
         event('Post', { id: 'p3', title: 'third', authorId: 'u2' }),
       ];
 
-      const { resolved } = await resolve(events, auditContext, config, read);
+      const { resolved } = await resolveCollecting(events, auditContext, config, read);
 
       expect(postEnricher).toHaveBeenCalledTimes(1);
       expect(postEnricher.mock.calls[0]?.slice(0, 2)).toEqual([
@@ -210,7 +223,7 @@ describe('resolve', () => {
     it('is null without an entity enricher', async () => {
       const config = configOf({ Post: defineEntity({ type: 'Post' }) });
 
-      const { resolved } = await resolve(rowsOf('Post', 1), auditContext, config, read);
+      const { resolved } = await resolveCollecting(rowsOf('Post', 1), auditContext, config, read);
 
       expect(resolved[0]?.entityContext).toBeNull();
     });
@@ -220,7 +233,12 @@ describe('resolve', () => {
     it('resolves the self root by default', async () => {
       const config = configOf({ User: defineEntity({ type: 'User' }) });
 
-      const { resolved } = await resolve([event('User', { id: 'user-123', name: 'John' })], auditContext, config, read);
+      const { resolved } = await resolveCollecting(
+        [event('User', { id: 'user-123', name: 'John' })],
+        auditContext,
+        config,
+        read,
+      );
 
       expect(resolved[0]?.roots).toEqual([
         { aggregateCategory: 'model', aggregateType: 'User', aggregateId: 'user-123' },
@@ -232,7 +250,7 @@ describe('resolve', () => {
         Post: defineEntity({ type: 'Post', aggregates: [to('User', foreignKey('authorId'))] }),
       });
 
-      const { resolved } = await resolve(
+      const { resolved } = await resolveCollecting(
         [event('Post', { id: 'post-456', authorId: 'user-123' })],
         auditContext,
         config,
@@ -250,7 +268,7 @@ describe('resolve', () => {
         Post: defineEntity({ type: 'Post', aggregates: [to('User', foreignKey('authorId'))] }),
       });
 
-      const { resolved } = await resolve(
+      const { resolved } = await resolveCollecting(
         [event('Post', { id: 'post-456', title: 'Test' })],
         auditContext,
         config,
@@ -279,7 +297,7 @@ describe('resolve', () => {
       });
       const events = [event('Post', { id: 'post-456' })];
 
-      const { resolved, failures } = await resolve(events, auditContext, config, read);
+      const { resolved, failures } = await resolveCollecting(events, auditContext, config, read);
 
       expect(resolved[0]?.roots.map((r) => r.aggregateType)).toEqual(['Post']);
       expect(failures).toEqual([
@@ -301,7 +319,7 @@ describe('resolve', () => {
       });
       const events = [event('Post', { id: 'post-456' })];
 
-      const { resolved, failures } = await resolve(events, auditContext, config, read);
+      const { resolved, failures } = await resolveCollecting(events, auditContext, config, read);
 
       expect(resolved[0]?.roots.map((r) => r.aggregateType)).toEqual(['Post']);
       expect(failures).toEqual([
@@ -326,7 +344,7 @@ describe('resolve', () => {
       it('reports a written row that lacks the column, and keeps the roots of its other columns', async () => {
         const events = [event('Comment', { id: 'c1', postId: 'p1' })];
 
-        const { resolved, failures } = await resolve(events, auditContext, commentConfig(), read);
+        const { resolved, failures } = await resolveCollecting(events, auditContext, commentConfig(), read);
 
         expect(resolved[0]?.roots.map((r) => [r.aggregateType, r.aggregateId])).toEqual([
           ['Comment', 'c1'],
@@ -347,7 +365,7 @@ describe('resolve', () => {
           ),
         ];
 
-        const { failures } = await resolve(events, auditContext, commentConfig(), read);
+        const { failures } = await resolveCollecting(events, auditContext, commentConfig(), read);
 
         expect(failures.map((failure) => [failure.resolver, failure.error.message])).toEqual([
           [userRoot, MISSING_AUTHOR_ID],
@@ -355,7 +373,7 @@ describe('resolve', () => {
       });
 
       it('resolves no root and reports nothing for a column that holds null', async () => {
-        const { resolved, failures } = await resolve(
+        const { resolved, failures } = await resolveCollecting(
           [event('Comment', { id: 'c1', postId: 'p1', authorId: null })],
           auditContext,
           commentConfig(),
@@ -372,7 +390,7 @@ describe('resolve', () => {
       ])(
         'resolves no root and reports nothing for a column the row of a delete whose before state is %s lacks',
         async (_, before) => {
-          const { resolved, failures } = await resolve(
+          const { resolved, failures } = await resolveCollecting(
             [event('Comment', { id: 'c1', postId: 'p1' }, { action: 'delete', before })],
             auditContext,
             commentConfig(),
@@ -397,7 +415,7 @@ describe('resolve', () => {
         }),
       });
 
-      const { resolved } = await resolve(
+      const { resolved } = await resolveCollecting(
         [event('PostTag', { id: 'pt-123', postId: 'post-456', tagId: 'tag-789' })],
         auditContext,
         config,
@@ -417,7 +435,7 @@ describe('resolve', () => {
         event('Post', { id: 'p3', authorId: 'u2' }),
       ];
 
-      const { resolved } = await resolve(events, auditContext, config, read);
+      const { resolved } = await resolveCollecting(events, auditContext, config, read);
 
       expect(resolved.map((e) => e.identity)).toEqual(['p1', 'p3']);
     });
@@ -430,7 +448,7 @@ describe('resolve', () => {
         });
         const events = rowsOf('Post', 10);
 
-        const { resolved } = await resolve(events, auditContext, config, read);
+        const { resolved } = await resolveCollecting(events, auditContext, config, read);
 
         expect(batchFn).toHaveBeenCalledTimes(1);
         expect(batchFn).toHaveBeenCalledWith(
@@ -457,7 +475,7 @@ describe('resolve', () => {
         });
         const events = rowsOf('Post', 2);
 
-        const { resolved, failures } = await resolve(events, auditContext, config, read);
+        const { resolved, failures } = await resolveCollecting(events, auditContext, config, read);
 
         expect(resolved.flatMap((e) => e.roots.map((r) => r.aggregateType))).toEqual(['Post', 'Post']);
         const resolver = { kind: 'aggregate', aggregateCategory: 'model', aggregateType: 'User' };
@@ -481,7 +499,7 @@ describe('resolve', () => {
         });
         const events = rowsOf('Post', 2);
 
-        const { resolved, failures } = await resolve(events, auditContext, config, read);
+        const { resolved, failures } = await resolveCollecting(events, auditContext, config, read);
 
         expect(resolved.map((e) => e.roots.map((r) => r.aggregateType))).toEqual([['Post', 'User'], ['Post']]);
         expect(failures).toEqual([
@@ -507,7 +525,7 @@ describe('resolve', () => {
         });
         const events = rowsOf('Post', 3);
 
-        const { resolved, failures } = await resolve(events, auditContext, config, read);
+        const { resolved, failures } = await resolveCollecting(events, auditContext, config, read);
 
         expect(resolved.flatMap((e) => e.roots.map((r) => r.aggregateType))).toEqual(['Post', 'Post', 'Post']);
         expect(failures.map((failure) => [failure.event, failure.resolver.kind, failure.error.message])).toEqual(
@@ -540,7 +558,7 @@ describe('resolve', () => {
         }),
       });
 
-      const { resolved } = await resolve(
+      const { resolved } = await resolveCollecting(
         [
           updated(
             'Comment',
@@ -562,7 +580,7 @@ describe('resolve', () => {
     });
 
     it('keeps one root when the rows before and after the update name the same aggregate', async () => {
-      const { resolved } = await resolve(
+      const { resolved } = await resolveCollecting(
         [updated('Post', { id: 'p1', authorId: 'u1', title: 'old' }, { id: 'p1', authorId: 'u1', title: 'new' })],
         auditContext,
         postOfAuthor(),
@@ -573,7 +591,7 @@ describe('resolve', () => {
     });
 
     it('resolves only the old root of a row whose foreign key the update cleared', async () => {
-      const { resolved } = await resolve(
+      const { resolved } = await resolveCollecting(
         [updated('Post', { id: 'p1', authorId: 'u1' }, { id: 'p1', authorId: null })],
         auditContext,
         postOfAuthor(),
@@ -584,7 +602,7 @@ describe('resolve', () => {
     });
 
     it('resolves only the new root of a row whose foreign key the update set', async () => {
-      const { resolved } = await resolve(
+      const { resolved } = await resolveCollecting(
         [updated('Post', { id: 'p1', authorId: null }, { id: 'p1', authorId: 'u1' })],
         auditContext,
         postOfAuthor(),
@@ -605,7 +623,7 @@ describe('resolve', () => {
         event('Post', before, { action: 'delete', before: { kind: 'captured', row: before }, after: undefined }),
       ];
 
-      const { resolved } = await resolve(events, auditContext, postOfAuthor(lookup(resolver)), read);
+      const { resolved } = await resolveCollecting(events, auditContext, postOfAuthor(lookup(resolver)), read);
 
       expect(resolver.mock.calls.map(([row]) => row)).toEqual([after, after, after, before]);
       expect(resolved.map((e) => e.roots.map((r) => r.aggregateId))).toEqual([
@@ -626,7 +644,7 @@ describe('resolve', () => {
         origin: { path: 'posts', op: 'delete' },
       });
 
-      const { resolved } = await resolve([deleted], auditContext, postOfAuthor(lookup(resolver)), read);
+      const { resolved } = await resolveCollecting([deleted], auditContext, postOfAuthor(lookup(resolver)), read);
 
       expect(resolver.mock.calls.map(([row]) => row)).toEqual([left, before]);
       expect(resolved[0]?.roots).toEqual([root('Post', 'p1'), root('User', 'u-new'), root('User', 'u-old')]);
@@ -639,7 +657,7 @@ describe('resolve', () => {
       });
       const after = { id: 'p1', authorId: 'u-new' };
 
-      await resolve([updated('Post', { id: 'p1', authorId: 'u-old' }, after)], auditContext, config, read);
+      await resolveCollecting([updated('Post', { id: 'p1', authorId: 'u-old' }, after)], auditContext, config, read);
 
       expect(idResolver.mock.calls).toEqual([[after, handle]]);
     });
@@ -649,7 +667,7 @@ describe('resolve', () => {
       const before = { id: 'p1', authorId: 'u-old' };
       const after = { id: 'p1', authorId: 'u-new' };
 
-      const { resolved } = await resolve(
+      const { resolved } = await resolveCollecting(
         [updated('Post', before, after)],
         auditContext,
         postOfAuthor(lookup(resolver)),
@@ -673,7 +691,7 @@ describe('resolve', () => {
       });
       const events = [updated('Post', { id: 'p1', authorId: 'u-old' }, { id: 'p1', authorId: 'u-new' })];
 
-      const { resolved, failures } = await resolve(events, auditContext, postOfAuthor(resolver), read);
+      const { resolved, failures } = await resolveCollecting(events, auditContext, postOfAuthor(resolver), read);
 
       expect(resolved[0]?.roots).toEqual([root('Post', 'p1'), root('User', 'u-new')]);
       expect(failures).toEqual([
@@ -687,7 +705,7 @@ describe('resolve', () => {
       });
       const events = [updated('Post', { id: 'p1', authorId: 'u-old' }, { id: 'p1', authorId: 'u-new' })];
 
-      const { resolved, failures } = await resolve(events, auditContext, postOfAuthor(resolver), read);
+      const { resolved, failures } = await resolveCollecting(events, auditContext, postOfAuthor(resolver), read);
 
       expect(resolved[0]?.roots).toEqual([root('Post', 'p1')]);
       expect(failures.map((failure) => [failure.event, failure.error.message])).toEqual([
@@ -704,7 +722,7 @@ describe('resolve', () => {
       it('calls the batch resolver once with the rows after the updates followed by the rows before them', async () => {
         const batchFn = vi.fn(async (rows: { authorId?: string }[]) => rows.map((row) => row.authorId ?? null));
 
-        const { resolved } = await resolve(moves, auditContext, postOfAuthor(batchLookup(batchFn)), read);
+        const { resolved } = await resolveCollecting(moves, auditContext, postOfAuthor(batchLookup(batchFn)), read);
 
         expect(batchFn).toHaveBeenCalledTimes(1);
         expect(batchFn).toHaveBeenCalledWith(
@@ -728,7 +746,7 @@ describe('resolve', () => {
           throw error;
         });
 
-        const { failures } = await resolve(moves, auditContext, postOfAuthor(resolver), read);
+        const { failures } = await resolveCollecting(moves, auditContext, postOfAuthor(resolver), read);
 
         const failed = { kind: 'aggregate', aggregateCategory: 'model', aggregateType: 'User' };
         expect(failures).toEqual([
@@ -738,7 +756,12 @@ describe('resolve', () => {
       });
 
       it('reports each update once when the batch resolver returns the wrong number of ids', async () => {
-        const { failures } = await resolve(moves, auditContext, postOfAuthor(batchLookup(async () => ['u1'])), read);
+        const { failures } = await resolveCollecting(
+          moves,
+          auditContext,
+          postOfAuthor(batchLookup(async () => ['u1'])),
+          read,
+        );
 
         expect(failures.map((failure) => [failure.event, failure.error.message])).toEqual(
           moves.map((e) => [e, 'The batch resolver of aggregate "User" returned 1 ids for 4 rows']),
@@ -759,7 +782,7 @@ describe('resolve', () => {
       const before = { id: 'p1', authorId: 'u-old', title: 'old' };
       const after = { id: 'p1', authorId: 'u-new', title: 'new' };
 
-      const { resolved } = await resolve([updated('Post', before, after)], auditContext, config, read);
+      const { resolved } = await resolveCollecting([updated('Post', before, after)], auditContext, config, read);
 
       expect(enricher).toHaveBeenCalledTimes(1);
       expect(enricher.mock.calls[0]?.[0]).toEqual([after, before]);
@@ -775,7 +798,7 @@ describe('resolve', () => {
         Post: defineEntity({ type: 'Post', aggregates: [to('User', foreignKey('authorId'))] }),
       });
 
-      const { resolved } = await resolve(
+      const { resolved } = await resolveCollecting(
         [updated('Post', { id: 'p1', authorId: 'u-old' }, { id: 'p1', authorId: 'u-new' })],
         auditContext,
         config,
@@ -805,7 +828,7 @@ describe('resolve', () => {
     it('warns when more rows than the threshold are resolved one by one', async () => {
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-      await resolve(rowsOf('Post', 6), auditContext, postWithResolveId(), read);
+      await resolveCollecting(rowsOf('Post', 6), auditContext, postWithResolveId(), read);
 
       expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Post → aggregate "User"'));
       expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Consider using batchLookup()'));
@@ -814,7 +837,7 @@ describe('resolve', () => {
     it('does not warn at or below the threshold', async () => {
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-      await resolve(rowsOf('Post', 3), auditContext, postWithResolveId(), read);
+      await resolveCollecting(rowsOf('Post', 3), auditContext, postWithResolveId(), read);
 
       expect(warnSpy).not.toHaveBeenCalled();
     });
@@ -823,8 +846,8 @@ describe('resolve', () => {
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const config = postWithResolveId();
 
-      await resolve(rowsOf('Post', 6), auditContext, config, read);
-      await resolve(rowsOf('Post', 6), auditContext, config, read);
+      await resolveCollecting(rowsOf('Post', 6), auditContext, config, read);
+      await resolveCollecting(rowsOf('Post', 6), auditContext, config, read);
 
       expect(warnSpy).toHaveBeenCalledTimes(1);
     });
@@ -843,7 +866,7 @@ describe('resolve', () => {
         }),
       });
 
-      await resolve(rowsOf('Post', 10), auditContext, config, read);
+      await resolveCollecting(rowsOf('Post', 10), auditContext, config, read);
 
       expect(warnSpy).not.toHaveBeenCalled();
     });
@@ -856,7 +879,12 @@ describe('resolve', () => {
         User: defineEntity({ type: 'User' }),
       });
 
-      const { resolved } = await resolve([event('Post', { id: 'p1', authorId: 'u1' })], auditContext, config, read);
+      const { resolved } = await resolveCollecting(
+        [event('Post', { id: 'p1', authorId: 'u1' })],
+        auditContext,
+        config,
+        read,
+      );
 
       expect(resolved[0]?.aggregateContexts).toEqual(
         new Map([
@@ -887,7 +915,7 @@ describe('resolve', () => {
         }),
       });
 
-      const { resolved } = await resolve(
+      const { resolved } = await resolveCollecting(
         [event('Post', { id: 'p1', authorId: 'u1', title: 'T1' })],
         auditContext,
         config,
@@ -920,7 +948,12 @@ describe('resolve', () => {
         }),
       });
 
-      const { resolved } = await resolve([event('Post', { id: 'p1', authorId: 'u1' })], auditContext, config, read);
+      const { resolved } = await resolveCollecting(
+        [event('Post', { id: 'p1', authorId: 'u1' })],
+        auditContext,
+        config,
+        read,
+      );
 
       expect(resolved[0]?.aggregateContexts.get('model:User:u1')).toEqual(expected);
     });
@@ -937,7 +970,7 @@ describe('resolve', () => {
         event('Post', { id: 'p3', authorId: 'u2' }),
       ];
 
-      const { resolved } = await resolve(events, auditContext, config, read);
+      const { resolved } = await resolveCollecting(events, auditContext, config, read);
 
       expect(rootEnricher).toHaveBeenCalledTimes(1);
       expect(rootEnricher.mock.calls[0]?.slice(0, 2)).toEqual([['u1', 'u2'], handle]);
@@ -956,7 +989,7 @@ describe('resolve', () => {
         Post: defineEntity({ type: 'Post', selfAggregate: { aggregateContext: { enricher: selfEnricher } } }),
       });
 
-      const { resolved } = await resolve(
+      const { resolved } = await resolveCollecting(
         [event('Post', { id: 'p1' }), event('Post', { id: 'p2' })],
         auditContext,
         config,
@@ -993,7 +1026,7 @@ describe('resolve', () => {
         }),
       });
 
-      const { resolved } = await resolve(
+      const { resolved } = await resolveCollecting(
         [event('Friendship', { id: 'f1', userAId: 'u1', userBId: 'u2' })],
         auditContext,
         config,
@@ -1026,7 +1059,7 @@ describe('resolve', () => {
         }),
       });
 
-      const { resolved } = await resolve(
+      const { resolved } = await resolveCollecting(
         [event('Friendship', { id: 'f1', userAId: 'u1', userBId: 'u1' })],
         auditContext,
         config,
@@ -1045,7 +1078,12 @@ describe('resolve', () => {
         Post: defineEntity({ type: 'Post', aggregates: [to('Post', foreignKey('threadRootId'))] }),
       });
 
-      const { resolved } = await resolve([event('Post', { id: 'p1', threadRootId: 'p1' })], auditContext, config, read);
+      const { resolved } = await resolveCollecting(
+        [event('Post', { id: 'p1', threadRootId: 'p1' })],
+        auditContext,
+        config,
+        read,
+      );
 
       expect(resolved[0]?.roots).toEqual([{ aggregateCategory: 'model', aggregateType: 'Post', aggregateId: 'p1' }]);
     });
@@ -1062,7 +1100,7 @@ describe('resolve', () => {
         }),
       });
 
-      const { resolved } = await resolve(
+      const { resolved } = await resolveCollecting(
         [event('Friendship', { id: 'f1', userAId: 'u1', userBId: 'u1' })],
         auditContext,
         config,
@@ -1092,7 +1130,7 @@ describe('resolve', () => {
         }),
       });
 
-      const { resolved } = await resolve(
+      const { resolved } = await resolveCollecting(
         [event('Friendship', { id: 'f1', userAId: 'u1', userBId: 'u1' })],
         auditContext,
         config,
@@ -1115,7 +1153,7 @@ describe('resolve', () => {
     it('stores the normalized id from the entity id resolver', async () => {
       const config = configOf({ Post: defineEntity({ type: 'Post', idResolver: async (row) => row.id as string }) });
 
-      const { resolved } = await resolve([event('Post', { id: 42 })], auditContext, config, read);
+      const { resolved } = await resolveCollecting([event('Post', { id: 42 })], auditContext, config, read);
 
       expect(resolved[0]?.entityId).toBe('42');
     });
@@ -1130,7 +1168,12 @@ describe('resolve', () => {
         }),
       });
 
-      const { resolved } = await resolve([event('Post', { id: 'p1', authorId: 'u1' })], auditContext, config, read);
+      const { resolved } = await resolveCollecting(
+        [event('Post', { id: 'p1', authorId: 'u1' })],
+        auditContext,
+        config,
+        read,
+      );
 
       expect(resolved).toEqual([]);
     });
@@ -1142,7 +1185,7 @@ describe('resolve', () => {
       });
       const events = [event('Post', { id: 'p1', authorId: 'u1' }), event('Post', { id: 'p2', authorId: 'u2' })];
 
-      const { resolved, failures } = await resolve(events, auditContext, config, read);
+      const { resolved, failures } = await resolveCollecting(events, auditContext, config, read);
 
       expect(idResolver).toHaveBeenCalledTimes(2);
       expect(resolved.map((e) => [e.entityId, e.roots.map((r) => `${r.aggregateType}:${r.aggregateId}`)])).toEqual([
@@ -1167,7 +1210,7 @@ describe('resolve', () => {
       });
       const events = [event('Post', { id: 'p1', authorId: 'u1' }), event('Post', { id: 'p2', authorId: 'u2' })];
 
-      const { resolved, failures } = await resolve(events, auditContext, config, read);
+      const { resolved, failures } = await resolveCollecting(events, auditContext, config, read);
 
       expect(resolved.map((e) => e.identity)).toEqual(['p2']);
       expect(failures).toEqual([{ event: events[0], resolver: { kind: 'entity' }, error }]);
@@ -1185,7 +1228,7 @@ describe('resolve', () => {
       });
       const events = [event('Post', { id: 'p1' })];
 
-      const { resolved, failures } = await resolve(events, auditContext, config, read);
+      const { resolved, failures } = await resolveCollecting(events, auditContext, config, read);
 
       expect(resolved).toEqual([]);
       expect(failures).toEqual([{ event: events[0], resolver: { kind: 'entity' }, error }]);
@@ -1195,7 +1238,7 @@ describe('resolve', () => {
       const config = configOf({ Post: defineEntity({ type: 'Post', idResolver: async (row) => row.key as string }) });
       const events = [event('Post', { id: 'p1', key: Object.create(null) })];
 
-      const { resolved, failures } = await resolve(events, auditContext, config, read);
+      const { resolved, failures } = await resolveCollecting(events, auditContext, config, read);
 
       expect(resolved).toEqual([]);
       expect(failures.map((failure) => [failure.event, failure.resolver, failure.error.message])).toEqual([
@@ -1219,7 +1262,7 @@ describe('resolve', () => {
       });
       const events = [event('Post', { id: 'p1', authorId: 'u1' }), event('Post', { id: 'p2', authorId: 'u2' })];
 
-      await resolve(events, auditContext, config, read);
+      await resolveCollecting(events, auditContext, config, read);
 
       expect(enricher.mock.calls.map((call) => call[0])).toEqual([[events[1]?.after]]);
       expect(userResolver.mock.calls.map((call) => call[0])).toEqual([events[1]?.after]);
@@ -1252,7 +1295,7 @@ describe('resolve', () => {
         { enricher: record({ actor: true }) },
       );
 
-      await resolve([event('Post', { id: 'p1' })], auditContext, config, perCallRead);
+      await resolveCollecting([event('Post', { id: 'p1' })], auditContext, config, perCallRead);
 
       const handles = perCallRead.mock.results.map((result) => result.value);
       expect(received).toHaveLength(7);
@@ -1276,7 +1319,34 @@ describe('resolve', () => {
         }),
       });
 
-      await expect(resolve(rowsOf('Post', 1), auditContext, config, read)).rejects.toThrow('enricher broken');
+      await expect(resolveCollecting(rowsOf('Post', 1), auditContext, config, read)).rejects.toThrow('enricher broken');
+    });
+
+    it('reports a resolver failure to the sink before an enricher with the default throw strategy throws', async () => {
+      const resolverError = new Error('id resolver broken');
+      const config = configOf({
+        Post: defineEntity({
+          type: 'Post',
+          idResolver: async (row) => {
+            if (row.id === 'post-0') throw resolverError;
+            return String(row.id);
+          },
+          entityContext: {
+            enricher: async () => {
+              throw new Error('enricher broken');
+            },
+          },
+        }),
+      });
+      const events = rowsOf('Post', 2);
+      const failures: ResolveFailure[] = [];
+
+      await expect(
+        resolve(events, auditContext, config, read, (failure) => {
+          failures.push(failure);
+        }),
+      ).rejects.toThrow('enricher broken');
+      expect(failures).toEqual([{ event: events[0], resolver: { kind: 'entity' }, error: resolverError }]);
     });
 
     it('stores the fallback of an enricher with the log strategy', async () => {
@@ -1303,7 +1373,7 @@ describe('resolve', () => {
         },
       );
 
-      const { resolved } = await resolve(rowsOf('Post', 1), auditContext, config, read);
+      const { resolved } = await resolveCollecting(rowsOf('Post', 1), auditContext, config, read);
 
       expect(resolved[0]?.actorContext).toEqual({ role: 'unknown' });
       expect(resolved[0]?.entityContext).toEqual({ title: 'unknown' });

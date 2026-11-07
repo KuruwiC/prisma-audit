@@ -108,6 +108,58 @@ describe('id-resolver-call failures', () => {
     }
   });
 
+  it('an entity idResolver throwing for the first row of a batch, then an entity enricher throwing: the outcome reports both', async () => {
+    const resolverError = new Error('entity id resolver is broken');
+    const enricherError = new Error('entity enricher is broken');
+    const observer = vi.fn<AuditObserver>();
+    const { basePrisma, provider, prisma } = createClient(
+      defineEntity({
+        type: 'Post',
+        idResolver: async (post) => {
+          if (post.title === BROKEN_TITLE) throw resolverError;
+          return post.id as string;
+        },
+        entityContext: {
+          enricher: async () => {
+            throw enricherError;
+          },
+        },
+      }),
+      observer,
+    );
+
+    try {
+      const author = await createAuthor();
+
+      const created = await provider.runAsync(testActor, async () =>
+        prisma.post.createManyAndReturn({
+          data: [
+            { title: BROKEN_TITLE, authorId: author.id },
+            { title: 'ok', authorId: author.id },
+          ],
+        }),
+      );
+
+      const broken = created.find((post) => post.title === BROKEN_TITLE);
+      expect(created).toHaveLength(2);
+      expect(await postLogs()).toEqual([]);
+      expect(failuresOf(observer)).toEqual([
+        {
+          phase: 'id-resolver-call',
+          modelName: 'Post',
+          operation: 'createManyAndReturn',
+          identity: broken?.id,
+          resolver: { kind: 'entity' },
+          error: resolverError,
+        },
+        expect.objectContaining({ phase: 'diff-generation', error: enricherError }),
+      ]);
+    } finally {
+      await prisma.$disconnect();
+      await basePrisma.$disconnect();
+    }
+  });
+
   describe('an entity idResolver throwing in a write of one record', () => {
     const resolverError = new Error('entity id resolver is broken');
 

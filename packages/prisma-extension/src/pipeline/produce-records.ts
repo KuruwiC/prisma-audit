@@ -3,11 +3,11 @@
  *
  * The one path from mutation events to audit records: read the omitted fields the entities audit
  * for the rows the write left (`omitted-fields-after-write.ts`), resolve the events through the
- * user's id resolvers and enrichers, report each row a resolver failed for as `id-resolver-call` to
- * the scope's failure sink, leave each row to the columns a record stores (`audited-columns.ts`),
- * then compose the records. The database handle those callbacks receive is the scope's, looked up
- * when each one runs: the client of the transaction the operation runs in when there is one, else
- * the base client, so a callback inside a transaction reads that transaction's writes. The
+ * user's id resolvers and enrichers, report each row a resolver failed for as `id-resolver-call`
+ * to the scope's failure sink as the resolver fails, leave each row to the columns a record stores
+ * (`audited-columns.ts`), then compose the records. The database handle those callbacks receive
+ * is the scope's: the client bound to the transaction the operation runs in when there is one,
+ * else the audited client, so a callback inside a transaction reads that transaction's writes. The
  * resolvers see the omitted fields an entity records, so a foreign key the client hides resolves
  * once its entity lists it.
  */
@@ -34,8 +34,13 @@ export type RecordProducer = (
 export const createRecordProducer = (config: RecordProducerConfig): RecordProducer => {
   return async (events, scope, widened) => {
     const written = await readOmittedFieldsAfterWrite(events, scope.handle, config.omittedFieldReads);
-    const { resolved, failures } = await resolve(written, scope.auditContext, config.resolveConfig, () => scope.handle);
-    scope.failureSink.reportResolverFailures(failures);
+    const resolved = await resolve(
+      written,
+      scope.auditContext,
+      config.resolveConfig,
+      () => scope.handle,
+      scope.failureSink.reportResolveFailure,
+    );
     const stored = resolved.map((event) => keepAuditedColumns(event, widened));
     return compose(stored, { auditContext: scope.auditContext, config: config.composeConfig }, new Date());
   };

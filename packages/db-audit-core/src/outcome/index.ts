@@ -12,7 +12,7 @@
  */
 
 import type { AuditRecord } from '../domain/mutation-event.js';
-import type { FailedResolver, ResolverFailure } from '../resolve/index.js';
+import type { FailedResolver, ResolveFailureSink } from '../resolve/index.js';
 import { toError } from '../utils/to-error.js';
 
 /**
@@ -152,8 +152,8 @@ export interface DroppedRecords {
 export interface OperationOutcome {
   /** Keeps a failure of the operation's audit; never throws, and calls no observer */
   readonly fail: (failure: Exclude<AuditFailure, { readonly phase: 'id-resolver-call' }>) => void;
-  /** Keeps one `id-resolver-call` failure per failure `resolve` returned */
-  readonly reportResolverFailures: (failures: readonly ResolverFailure[]) => void;
+  /** The sink an adapter passes to `resolve`: keeps an `id-resolver-call` failure per failure */
+  readonly reportResolveFailure: ResolveFailureSink;
   readonly reportUnrecordedWrite: (write: UnrecordedWrite) => void;
   /**
    * The failures that can drop a record and the writes left without one, once a record was
@@ -254,17 +254,15 @@ export const createOperationOutcome = (target: OutcomeTarget, config: OutcomeCon
     fail: (failure) => {
       failures.push(failure);
     },
-    reportResolverFailures: (resolverFailures) => {
-      for (const { event, resolver, error } of resolverFailures) {
-        failures.push({
-          phase: 'id-resolver-call',
-          modelName: event.model,
-          operation: event.origin.op,
-          identity: event.identity,
-          resolver,
-          error,
-        });
-      }
+    reportResolveFailure: ({ event, resolver, error }) => {
+      failures.push({
+        phase: 'id-resolver-call',
+        modelName: event.model,
+        operation: event.origin.op,
+        identity: event.identity,
+        resolver,
+        error,
+      });
     },
     reportUnrecordedWrite: (write) => {
       unrecordedWrites.push(write);

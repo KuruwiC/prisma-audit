@@ -63,7 +63,7 @@ export interface ResolveConfig<TModelName extends string = string, TDbHandle = u
   readonly actorContext?: ActorContextConfig<unknown, unknown, TDbHandle>;
 }
 
-/** The resolver whose failure a {@link ResolverFailure} reports */
+/** The resolver whose failure a {@link ResolveFailure} reports */
 export type FailedResolver =
   | { readonly kind: 'entity' }
   | { readonly kind: 'aggregate'; readonly aggregateCategory: string; readonly aggregateType: string };
@@ -73,18 +73,17 @@ export type FailedResolver =
  * failure leaves the row without records; an `aggregate` failure leaves it without the record
  * under that root.
  */
-export interface ResolverFailure<TModelName extends string = string> {
+export interface ResolveFailure<TModelName extends string = string> {
   readonly event: MutationEvent<TModelName>;
   readonly resolver: FailedResolver;
   readonly error: Error;
 }
 
-export interface Resolution<TModelName extends string = string> {
-  /** The events that resolved at least one root, in event order */
-  readonly resolved: ResolvedEvent<TModelName>[];
-  /** One per row and failed resolver; a failed batch resolver reports every row of its call */
-  readonly failures: ResolverFailure<TModelName>[];
-}
+/**
+ * Where `resolve` reports each resolver failure, as it happens: one per row and failed resolver, a
+ * failed batch resolver reporting every row of its call
+ */
+export type ResolveFailureSink<TModelName extends string = string> = (failure: ResolveFailure<TModelName>) => void;
 
 type Row = Record<string, unknown>;
 type ReadHandle<TDbHandle> = () => TDbHandle;
@@ -187,7 +186,7 @@ const failedAggregateResolver = (aggregate: AggregateProjection): FailedResolver
  */
 const aggregateReporterFor = <TModelName extends string>(
   aggregate: AggregateProjection,
-  failures: ResolverFailure<TModelName>[],
+  sink: ResolveFailureSink<TModelName>,
 ): ((entry: Entry<TModelName>) => ReportFailure) => {
   const resolver = failedAggregateResolver(aggregate);
   const reported = new Set<Entry<TModelName>>();
@@ -196,18 +195,18 @@ const aggregateReporterFor = <TModelName extends string>(
       return;
     }
     reported.add(entry);
-    failures.push({ event: entry.event, resolver, error });
+    sink({ event: entry.event, resolver, error });
   };
 };
 
 const reporterFor =
   <TModelName extends string>(
-    failures: ResolverFailure<TModelName>[],
+    sink: ResolveFailureSink<TModelName>,
     entry: Entry<TModelName>,
     resolver: FailedResolver,
   ): ReportFailure =>
   (error) => {
-    failures.push({ event: entry.event, resolver, error });
+    sink({ event: entry.event, resolver, error });
   };
 
 /** The normalized id, or null for no id; an id `normalizeId` rejects is reported and yields null. */
@@ -240,13 +239,13 @@ const identifyEntries = async <TModelName extends string, TDbHandle>(
   entries: readonly Entry<TModelName>[],
   entity: EntityResolveConfig<TDbHandle>,
   read: ReadHandle<TDbHandle>,
-  failures: ResolverFailure<TModelName>[],
+  sink: ResolveFailureSink<TModelName>,
 ): Promise<IdentifiedEntry<TModelName>[]> => {
   const identified: IdentifiedEntry<TModelName>[] = [];
   for (const entry of entries) {
     const entityId = await callResolver(
       () => entity.idResolver(entry.row, read()),
-      reporterFor(failures, entry, FAILED_ENTITY_RESOLVER),
+      reporterFor(sink, entry, FAILED_ENTITY_RESOLVER),
     );
     if (entityId !== null) {
       identified.push({ ...entry, entityId });
@@ -359,7 +358,7 @@ const resolveSurvivors = async <TModelName extends string, TDbHandle>(
   entries: readonly IdentifiedEntry<TModelName>[],
   entity: EntityResolveConfig<TDbHandle>,
   read: ReadHandle<TDbHandle>,
-  failures: ResolverFailure<TModelName>[],
+  sink: ResolveFailureSink<TModelName>,
 ): Promise<Survivor[]> => {
   const perRowRoots: ResolvedRoot[][] = entries.map((entry) =>
     entity.selfAggregate === false
@@ -377,7 +376,7 @@ const resolveSurvivors = async <TModelName extends string, TDbHandle>(
   const subjects = subjectsOf(entries);
   const perDeclaration: (ResolvedRoot | undefined)[][] = [];
   for (const aggregate of entity.aggregates) {
-    const report = aggregateReporterFor(aggregate, failures);
+    const report = aggregateReporterFor(aggregate, sink);
     perDeclaration.push(
       aggregate.batchIdResolver
         ? await resolveRootsInBatch(subjects, aggregate, aggregate.batchIdResolver, read, report)
@@ -597,9 +596,9 @@ const resolveModelGroup = async <TModelName extends string, TDbHandle>(
   actorContext: unknown,
   config: ResolveConfig<TModelName, TDbHandle>,
   read: ReadHandle<TDbHandle>,
-  failures: ResolverFailure<TModelName>[],
+  sink: ResolveFailureSink<TModelName>,
 ): Promise<{ position: number; event: ResolvedEvent<TModelName> }[]> => {
-  const identified = await identifyEntries(group.entries, entity, read, failures);
+  const identified = await identifyEntries(group.entries, entity, read, sink);
   if (identified.length === 0) {
     return [];
   }
@@ -608,7 +607,7 @@ const resolveModelGroup = async <TModelName extends string, TDbHandle>(
     entity.entityContext,
     read,
   );
-  const survivors = await resolveSurvivors(identified, entity, read, failures);
+  const survivors = await resolveSurvivors(identified, entity, read, sink);
   const aggregateContexts =
     survivors.length > 0 ? await enrichAggregateContexts(survivors, entity, read, config.rootEntity) : new Map();
 
@@ -642,8 +641,8 @@ const resolveModelGroup = async <TModelName extends string, TDbHandle>(
  * entity id resolved; an aggregate resolver also receives the row before the write of each
  * update that carries it. An event yields nothing when its model has no entity configuration,
  * when the entity's id resolver returns no id or fails, or when no aggregate root resolves for
- * its row. A resolver that fails is returned in `failures`, never thrown, once per row and
- * resolver.
+ * its row. A resolver that fails is reported to `sink` as it fails, never thrown: a failure
+ * reported before an enricher throws stays reported.
  *
  * @param read - Returns the database handle for a user callback; evaluated at each call, never ahead of it
  * @throws Whatever an enricher whose `onError` resolves to `'throw'` throws
@@ -653,23 +652,20 @@ export const resolve = async <TModelName extends string, TDbHandle>(
   auditContext: AuditContext,
   config: ResolveConfig<TModelName, TDbHandle>,
   read: ReadHandle<TDbHandle>,
-): Promise<Resolution<TModelName>> => {
+  sink: ResolveFailureSink<TModelName>,
+): Promise<ResolvedEvent<TModelName>[]> => {
   const actorContext = config.actorContext ? await runEnricher(config.actorContext, auditContext.actor, read()) : null;
 
   const resolved: (ResolvedEvent<TModelName> | undefined)[] = events.map(() => undefined);
-  const failures: ResolverFailure<TModelName>[] = [];
   for (const group of groupByModel(events)) {
     const entity = config.entity(group.model);
     if (!entity) {
       continue;
     }
-    for (const { position, event } of await resolveModelGroup(group, entity, actorContext, config, read, failures)) {
+    for (const { position, event } of await resolveModelGroup(group, entity, actorContext, config, read, sink)) {
       resolved[position] = event;
     }
   }
 
-  return {
-    resolved: resolved.filter((event): event is ResolvedEvent<TModelName> => event !== undefined),
-    failures,
-  };
+  return resolved.filter((event): event is ResolvedEvent<TModelName> => event !== undefined);
 };

@@ -10,7 +10,7 @@ import {
   type OperationOutcome,
   type UnrecordedWrite,
 } from '../src/outcome/index.js';
-import type { ResolverFailure } from '../src/resolve/index.js';
+import type { ResolveFailure } from '../src/resolve/index.js';
 import { deferred } from './support/deferred.js';
 
 const record: AuditRecord = {
@@ -157,7 +157,7 @@ describe('createOperationOutcome', () => {
       };
       const entityError = new Error('id resolver failed');
       const aggregateError = new Error('root resolver failed');
-      const failures: ResolverFailure[] = [
+      const failures: ResolveFailure[] = [
         { event, resolver: { kind: 'entity' }, error: entityError },
         {
           event,
@@ -166,7 +166,9 @@ describe('createOperationOutcome', () => {
         },
       ];
 
-      outcome.reportResolverFailures(failures);
+      for (const failure of failures) {
+        outcome.reportResolveFailure(failure);
+      }
       await outcome.writeFinished(0);
       await outcome.settle('committed');
 

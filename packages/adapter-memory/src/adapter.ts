@@ -285,8 +285,13 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
         }
         const event = eventOf(model, op, mutate(scope?.handle ?? store));
         const buildRecords = async () => {
-          const { resolved, failures } = await resolve([event], auditContext, resolveConfig, () => auditedHandle);
-          outcome.reportResolverFailures(failures);
+          const resolved = await resolve(
+            [event],
+            auditContext,
+            resolveConfig,
+            () => auditedHandle,
+            outcome.reportResolveFailure,
+          );
           return compose(resolved, { auditContext, config: composeConfig }, new Date());
         };
         await auditing.run(true, () =>

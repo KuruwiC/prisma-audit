@@ -100,10 +100,12 @@ describe('createRecordProducer', () => {
     const records = await produce([event, failing], scopeOn(auditedClient, failureSink), new Map());
 
     expect(records.map((record) => record.entityId)).toEqual(['p1']);
-    expect(failureSink.reportResolverFailures).toHaveBeenCalledTimes(1);
-    expect(failureSink.reportResolverFailures).toHaveBeenCalledWith([
-      { event: failing, resolver: { kind: 'entity' }, error },
-    ]);
+    expect(failureSink.reportResolveFailure).toHaveBeenCalledTimes(1);
+    expect(failureSink.reportResolveFailure).toHaveBeenCalledWith({
+      event: failing,
+      resolver: { kind: 'entity' },
+      error,
+    });
   });
 
   it('hands the callbacks the audited client when the operation runs outside a transaction', async () => {

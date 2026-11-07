@@ -29,7 +29,7 @@ export interface OperationTransaction {
  * event collection leaves rows of without a record: its outcome, which keeps them for the
  * observer and tells whether an atomic operation dropped a record
  */
-export type OperationFailureSink = Pick<OperationOutcome, 'fail' | 'reportResolverFailures' | 'reportUnrecordedWrite'>;
+export type OperationFailureSink = Pick<OperationOutcome, 'fail' | 'reportResolveFailure' | 'reportUnrecordedWrite'>;
 
 export interface ExecutionScope {
   readonly auditContext: AuditContext;

@@ -76,9 +76,9 @@ export { AuditAtomicityError, planFor, policy } from './policy/index.js';
 export type {
   EntityResolveConfig,
   FailedResolver,
-  Resolution,
   ResolveConfig,
-  ResolverFailure,
+  ResolveFailure,
+  ResolveFailureSink,
 } from './resolve/index.js';
 export { resolve } from './resolve/index.js';
 export type { TransactionAudit } from './transaction/index.js';
