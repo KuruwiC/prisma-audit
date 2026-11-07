@@ -952,8 +952,17 @@ describe('a write a callback issues while the audit processes a write', () => {
 describe('the audit gate', () => {
   const userOnly = defineMapping({ User: defineEntity<UserRow, Db>({ type: 'User' }) });
 
-  it('runs a write without an audit context unaudited by default', async () => {
+  it('rejects a write without an audit context by default, leaving the store unchanged', async () => {
     const adapter = createAdapter();
+
+    await expect(adapter.create('User', { id: 'u1', name: 'Alice' })).rejects.toBeInstanceOf(AuditContextMissingError);
+
+    expect(adapter.store.find('User', 'u1')).toBeUndefined();
+    expect(adapter.store.auditLogs()).toEqual([]);
+  });
+
+  it('runs a write without an audit context unaudited when requireContext is false', async () => {
+    const adapter = createAdapter({ requireContext: false });
 
     await adapter.create('User', { id: 'u1', name: 'Alice' });
 
@@ -1102,7 +1111,7 @@ describe('the outcome of each write', () => {
 
   it('is unaudited, for no-context, for a write run without an audit context', async () => {
     const observer = vi.fn<AuditObserver>();
-    const adapter = createAdapter({ observer });
+    const adapter = createAdapter({ observer, requireContext: false });
 
     await adapter.create('User', { id: 'u1', name: 'Alice' });
 

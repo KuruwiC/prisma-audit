@@ -67,8 +67,8 @@ export interface MemoryAuditOptions<TModelName extends string> {
   readonly contextProvider: AuditContextProvider;
   /**
    * Whether a write to a model in `entities` fails with `AuditContextMissingError` when no audit
-   * context is set, before it is applied, instead of running unaudited (the default, `false`): a
-   * value, or a function called with the model's name. The write mode does not affect it.
+   * context is set, before it is applied, instead of running unaudited: a value, or a function
+   * called with the model's name (default: `true`). The write mode does not affect it.
    */
   readonly requireContext?: AuditGateConfig['requireContext'];
   readonly write?: {
@@ -148,7 +148,7 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
   const { schema, contextProvider } = options;
   const store = createMemoryStore<TModelName>();
   const entityConfigs = createEntityConfigLookup(options.entities);
-  const gateConfig: AuditGateConfig = { requireContext: options.requireContext ?? false };
+  const gateConfig: AuditGateConfig = { requireContext: options.requireContext };
   const policyConfig: PolicyConfig = { mode: options.write?.mode, entity: entityConfigs.byModel };
   const resolveConfig: ResolveConfig<TModelName, MemoryAuditedHandle<TModelName>> = {
     entity: entityConfigs.byModel,

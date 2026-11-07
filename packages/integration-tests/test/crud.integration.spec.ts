@@ -549,27 +549,6 @@ describe('CRUD Operations Integration', () => {
     });
   });
 
-  describe('Without audit context', () => {
-    it('should not create audit log when context is not set', async () => {
-      // Create user WITHOUT audit context
-      const user = await context.prisma.user.create({
-        data: {
-          email: 'noaudit@example.com',
-          name: 'No Audit',
-          password: 'secret123',
-        },
-      });
-
-      expect(user).toBeDefined();
-
-      const auditLogs = await context.prisma.auditLog.findMany({
-        where: { entityType: 'User', entityId: user.id },
-      });
-
-      expect(auditLogs).toHaveLength(0);
-    });
-  });
-
   describe('Nested operations', () => {
     it('should create audit logs for nested created records', async () => {
       const user = await context.provider.runAsync(testActor, async () => {

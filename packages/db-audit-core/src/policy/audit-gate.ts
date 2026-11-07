@@ -15,9 +15,10 @@ import type { AuditContext } from '../types.js';
 export interface AuditGateConfig {
   /**
    * Whether a write to the model fails when no audit context is set, instead of running
-   * unaudited: a value for every model, or a function of the model name
+   * unaudited: a value for every model, or a function of the model name. Unset, every audited model
+   * requires one.
    */
-  readonly requireContext: boolean | ((modelName: string) => boolean);
+  readonly requireContext?: boolean | ((modelName: string) => boolean);
 }
 
 /** The write the audit gate decides on, as the adapter sees it before the write runs */
@@ -76,7 +77,7 @@ export const auditGate = (
   if (context !== undefined) {
     return { kind: 'audit', context };
   }
-  const { requireContext } = config;
+  const { requireContext = true } = config;
   const required = auditedModels.find((modelName) =>
     typeof requireContext === 'function' ? requireContext(modelName) : requireContext,
   );
@@ -118,7 +119,7 @@ export abstract class RejectedWriteError extends Error {
 export class AuditContextMissingError extends RejectedWriteError {
   constructor(write: RejectedWrite) {
     super(
-      `A write to ${write.modelName} was rejected: no audit context is set, and requireContext requires one for ${write.modelName} (operation ${write.operation} on ${write.operationModelName})`,
+      `A write to ${write.modelName} was rejected: no audit context is set, and requireContext requires one for ${write.modelName} (operation ${write.operation} on ${write.operationModelName}). Set an audit context for the write with the context provider's runAsync, with a system actor for a seed, migration or batch job. To run it unaudited on purpose, set requireContext to false, or to a function that returns false for ${write.modelName}.`,
       write,
     );
     this.name = 'AuditContextMissingError';

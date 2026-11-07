@@ -28,7 +28,7 @@ The adapter owns everything that touches the database: intercepting writes, read
    - `skip`: the write writes no audited model. Run it as without the adapter.
    - `reentrant`: the write is issued within the audit, whatever the audit context. Throw `AuditReentrantWriteError` without running anything and without an outcome: written unaudited, it would escape the audit.
    - `unaudited` (`reason: 'no-context'`): no audit context. Run it, with an outcome created with `unaudited: 'no-context'`.
-   - `reject`: no audit context and `requireContext` (a value, or a function of the model name) holds for one of the models. Throw `AuditContextMissingError` without running anything; the outcome settles as `not-committed`.
+   - `reject`: no audit context and `requireContext` (a value, or a function of the model name; unset, it holds for every model) holds for one of the models. Throw `AuditContextMissingError` without running anything; the outcome settles as `not-committed`.
    - `audit`: continue under the audit context the gate returns.
 2. **`policy(auditedModels, policyConfig)`** returns the write's `WriteMode`: the strongest (`atomic`, then `awaited`, then `deferred`) of each model's entity `writeMode`, else `mode` (default `atomic`). It runs before the write so the adapter can open a transaction for an atomic one.
 3. **The scope.** When the mode is `atomic` and no transaction is active, the adapter opens one and runs the write and the steps below on its handle. Otherwise the write runs in the active transaction, or on the base handle.

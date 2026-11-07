@@ -218,8 +218,11 @@ export interface PrismaAuditExtensionOptions<TModelName extends string = string,
    *   audited client, and a write an extension applied after the audit extension (on the audited
    *   client) adds to an operation's arguments. Apply an extension that changes arguments to the
    *   client you pass to `createAuditClient`, before the audit.
+   * - A write that runs without an audit context on purpose, such as a seed, a migration script or
+   *   a batch job, sets a context with a system actor, or is excluded here with `false` or a
+   *   function that returns false for its models.
    *
-   * @default false
+   * @default true
    */
   requireContext?: boolean | ((modelName: string) => boolean);
 

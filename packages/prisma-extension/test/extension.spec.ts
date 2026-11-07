@@ -111,8 +111,11 @@ const auditedClient = (options: Options, result: unknown = { id: 'u1' }) => {
 const nestedPostCreate = { data: { id: 'u1', posts: { create: { id: 'p1' } } } };
 
 describe('the audit gate of the extension hook', () => {
-  it('rejects a write without an audit context to a model that requires one, before it runs', async () => {
-    const { client, query, transaction, writer } = auditedClient({ requireContext: true });
+  it.each([
+    ['true', { requireContext: true }],
+    ['unset', {}],
+  ])('rejects a write without an audit context, requireContext %s, before it runs', async (_setting, options) => {
+    const { client, query, transaction, writer } = auditedClient(options);
 
     const rejection = client.user.create({ data: { id: 'u1' } });
 
@@ -124,6 +127,14 @@ describe('the audit gate of the extension hook', () => {
     });
     expect(transaction).not.toHaveBeenCalled();
     expect(query).not.toHaveBeenCalled();
+    expect(writer).not.toHaveBeenCalled();
+  });
+
+  it('runs unaudited, without a context, a write when requireContext is false', async () => {
+    const { client, query, writer } = auditedClient({ requireContext: false });
+
+    await expect(client.user.create({ data: { id: 'u1' } })).resolves.toEqual({ id: 'u1' });
+    expect(query).toHaveBeenCalledWith({ data: { id: 'u1' } });
     expect(writer).not.toHaveBeenCalled();
   });
 
@@ -146,14 +157,6 @@ describe('the audit gate of the extension hook', () => {
 
     await expect(client.user.create(nestedPostCreate)).rejects.toMatchObject({ modelName: 'Post' });
     expect(query).not.toHaveBeenCalled();
-  });
-
-  it('runs a write without an audit context unaudited by default', async () => {
-    const { client, query, writer } = auditedClient({});
-
-    await expect(client.user.create({ data: { id: 'u1' } })).resolves.toEqual({ id: 'u1' });
-    expect(query).toHaveBeenCalledWith({ data: { id: 'u1' } });
-    expect(writer).not.toHaveBeenCalled();
   });
 
   it('runs unaudited, without a context, a write of a model the requireContext function is false for', async () => {

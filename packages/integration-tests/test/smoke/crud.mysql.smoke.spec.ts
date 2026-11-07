@@ -6,8 +6,10 @@ import { describeCrudSmoke, smokeActor } from './crud-smoke-suite.js';
 describeCrudSmoke({ name: 'MySQL', setup: setupMySQLDatabase, teardown: teardownMySQLDatabase }, (context) => {
   describe('nested delete', () => {
     it('records a nested deleted row under the parent as stored when the where names it in another case', async () => {
-      await context.prisma.user.create({ data: { id: 'case-user', email: 'case@example.com', name: 'Case' } });
-      await context.prisma.post.create({ data: { id: 'p1', title: 'Post', authorId: 'case-user' } });
+      await context.provider.runAsync(smokeActor, async () => {
+        await context.prisma.user.create({ data: { id: 'case-user', email: 'case@example.com', name: 'Case' } });
+        await context.prisma.post.create({ data: { id: 'p1', title: 'Post', authorId: 'case-user' } });
+      });
       await context.prisma.auditLog.deleteMany();
 
       // MySQL's default collation compares strings case-insensitively, so 'CASE-USER' finds the row stored
@@ -31,7 +33,9 @@ describeCrudSmoke({ name: 'MySQL', setup: setupMySQLDatabase, teardown: teardown
 
   describe('createMany with skipDuplicates', () => {
     it('records no create for a row it skipped because a row held its primary key, given in another case, before the write', async () => {
-      await context.prisma.user.create({ data: { id: 'case-user', email: 'case@example.com', name: 'Case' } });
+      await context.provider.runAsync(smokeActor, () =>
+        context.prisma.user.create({ data: { id: 'case-user', email: 'case@example.com', name: 'Case' } }),
+      );
       await context.prisma.auditLog.deleteMany();
 
       // MySQL's default collation compares strings case-insensitively, so 'CASE-USER' is the key of the

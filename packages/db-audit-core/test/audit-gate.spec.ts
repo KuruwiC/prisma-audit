@@ -32,10 +32,11 @@ describe('auditGate', () => {
     expect(requireContext).not.toHaveBeenCalled();
   });
 
-  it('rejects a write without an audit context when requireContext is true, naming the first model', () => {
-    expect(
-      auditGate({ context: undefined, auditedModels: ['User', 'Post'], withinAudit: false }, { requireContext: true }),
-    ).toEqual({
+  it.each([
+    ['true', { requireContext: true }],
+    ['unset', {}],
+  ])('rejects a write without an audit context, requireContext %s, naming the first model', (_setting, config) => {
+    expect(auditGate({ context: undefined, auditedModels: ['User', 'Post'], withinAudit: false }, config)).toEqual({
       kind: 'reject',
       modelName: 'User',
     });
@@ -121,7 +122,7 @@ describe('AuditContextMissingError', () => {
     expect(error.operationModelName).toBe('User');
     expect(error.operation).toBe('create');
     expect(error.message).toBe(
-      'A write to Post was rejected: no audit context is set, and requireContext requires one for Post (operation create on User)',
+      "A write to Post was rejected: no audit context is set, and requireContext requires one for Post (operation create on User). Set an audit context for the write with the context provider's runAsync, with a system actor for a seed, migration or batch job. To run it unaudited on purpose, set requireContext to false, or to a function that returns false for Post.",
     );
   });
 });

@@ -360,8 +360,17 @@ describe('audit coverage by the audited models a write writes', () => {
       },
     );
 
-    it('runs a write without an audit context unaudited when requireContext is not set', async () => {
+    it('rejects a write without an audit context when requireContext is not set, leaving the database unchanged', async () => {
       const { client } = createClient({ entities: userAndPost });
+
+      await rejectsUnchanged(
+        () => client.user.create({ data: { email: 'default@example.com', posts: { create: { title: 'child' } } } }),
+        'User',
+      );
+    });
+
+    it('runs a write without an audit context unaudited when requireContext is false', async () => {
+      const { client } = createClient({ entities: userAndPost, requireContext: false });
 
       await client.user.create({ data: { email: 'default@example.com', posts: { create: { title: 'child' } } } });
 

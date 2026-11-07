@@ -163,6 +163,8 @@ describe('write mode', () => {
     readonly writes?: boolean;
     /** Whether an audit context is set when the batch runs (default: true) */
     readonly withContext?: boolean;
+    /** The audited client's `requireContext`; a batch that runs without an audit context needs `false` */
+    readonly requireContext?: boolean;
     /** Whether the batch read takes 500 ms on a client whose interactive transactions time out after 200 ms */
     readonly slow?: boolean;
   }
@@ -207,6 +209,7 @@ describe('write mode', () => {
           ? { Post: defineEntity({ type: 'Post' }) }
           : { User: defineEntity({ type: 'User' }) },
       write: { mode: options.mode },
+      requireContext: options.requireContext,
     });
     const read = options.slow
       ? audited.$queryRaw`SELECT 1 AS slept FROM pg_sleep(0.5)`
@@ -365,7 +368,7 @@ describe('write mode', () => {
     });
 
     it('runs a batch holding a write without an audit context as an interactive transaction', async () => {
-      const { result, transactions } = runBatch({ mode, writes: true, withContext: false });
+      const { result, transactions } = runBatch({ mode, writes: true, withContext: false, requireContext: false });
 
       await expect(result).resolves.toHaveLength(2);
       expect(transactions).toEqual(['interactive']);

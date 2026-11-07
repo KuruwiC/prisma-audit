@@ -32,6 +32,7 @@ const noFailure = { failures: [], unrecordedWrites: [] };
 interface ClientOptions {
   readonly mode?: WriteMode;
   readonly writer?: () => Promise<void>;
+  readonly requireContext?: boolean;
 }
 
 describe('the outcome of an audited write', () => {
@@ -58,6 +59,7 @@ describe('the outcome of an audited write', () => {
         AutoIncItem: defineEntity({ type: 'AutoIncItem' }),
       },
       write: { mode: options.mode ?? 'atomic', ...(options.writer ? { writer: options.writer } : {}) },
+      requireContext: options.requireContext,
       observer,
     });
 
@@ -165,7 +167,7 @@ describe('the outcome of an audited write', () => {
   });
 
   it('is unaudited, for no-context, for a write run without an audit context', async () => {
-    const { prisma, observer } = await setup();
+    const { prisma, observer } = await setup({ requireContext: false });
 
     await prisma.user.create({ data: { email: 'unaudited@example.com' } });
 
@@ -304,7 +306,7 @@ describe('the outcome of an audited write', () => {
     });
 
     it('is not-committed for an unaudited write of a transaction that rolled back', async () => {
-      const { prisma, observer } = await setup();
+      const { prisma, observer } = await setup({ requireContext: false });
 
       await expect(
         prisma.$transaction(async (tx) => {

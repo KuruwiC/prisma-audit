@@ -21,7 +21,7 @@ const actor: AuditContext = {
 describe('Interactive $transaction scope', () => {
   const context = setupTestContext();
 
-  const createAudited = (mode: WriteMode) => {
+  const createAudited = (mode: WriteMode, requireContext?: boolean) => {
     const raw = createBasePrisma();
     const provider = createAsyncLocalStorageProvider();
     const prisma = createAuditClient(raw, {
@@ -31,6 +31,7 @@ describe('Interactive $transaction scope', () => {
       entities: testEntities,
       write: { mode },
       fetchBefore: { update: true },
+      requireContext,
     });
     const dispose = async () => {
       await prisma.$disconnect();
@@ -114,7 +115,7 @@ describe('Interactive $transaction scope', () => {
   });
 
   it('runs an awaited audit of a row the transaction has locked inside that transaction', async () => {
-    const audited = createAudited('awaited');
+    const audited = createAudited('awaited', false);
     try {
       const user = await context.basePrisma.user.create({ data: { email: 'locked@example.com', name: 'Before' } });
 

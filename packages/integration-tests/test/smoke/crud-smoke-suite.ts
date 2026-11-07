@@ -50,7 +50,7 @@ export const describeCrudSmoke = <TContext extends SmokeContext>(
     });
 
     afterEach(async () => {
-      await deleteAllRows(context.prisma);
+      await context.provider.runAsync(smokeActor, () => deleteAllRows(context.prisma));
     });
 
     describe('CREATE operations', () => {

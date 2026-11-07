@@ -98,7 +98,7 @@ await auditProvider.runAsync({ actor: { category: 'user', type: 'User', id: 'use
 | [`entities`](#entities) | required | The audited models and their aggregates |
 | [`write`](#write) | `{ mode: 'atomic', model: 'AuditLog' }` | Write mode, audit-log model, custom writer |
 | [`observer`](#audit-outcomes) | console for lost logs | Receives the outcome of every audited write |
-| [`requireContext`](#requirecontext) | `false` | Reject a write without an audit context |
+| [`requireContext`](#requirecontext) | `true` | Reject a write without an audit context |
 | [`diffExcludeFields`](#diffexcludefields) | `[]` | Fields left out of an update's `changes` |
 | [`redactFields`](#redactfields) | `[]` | Fields masked on top of the built-in sensitive fields |
 | [`serializers`](#serializers) | none | Conversions for values JSON cannot hold |
@@ -330,10 +330,20 @@ model AuditAggregate {
 
 ### `requireContext`
 
-`boolean | ((modelName: string) => boolean)`, default `false`. A write without an audit context is rejected with `AuditContextMissingError` before Prisma runs any of it when `requireContext` holds for one of the audited models it writes rows of, nested writes included (a `connect`, `set` or `disconnect` writes the related rows when they hold the foreign key). Otherwise it runs unaudited, and its outcome is `unaudited`. It does not reach writes the audit extension does not see: raw queries, writes on a client without the extension, and writes an extension applied after the audit adds to an operation's arguments.
+`boolean | ((modelName: string) => boolean)`, default `true`. A write without an audit context is rejected with `AuditContextMissingError` before Prisma runs any of it when `requireContext` holds for one of the audited models it writes rows of, nested writes included (a `connect`, `set` or `disconnect` writes the related rows when they hold the foreign key). Otherwise it runs unaudited, and its outcome is `unaudited`. It does not reach writes the audit extension does not see: raw queries, writes on a client without the extension, and writes an extension applied after the audit adds to an operation's arguments.
+
+Recommended: leave it unset, and give every write an audit context. A seed, a migration script or a batch job runs under a system actor:
 
 ```typescript
-requireContext: (modelName) => modelName === 'Order',
+const seeder = { category: 'system', type: 'Seeder', id: 'initial-seed' };
+
+await auditProvider.runAsync({ actor: seeder }, () => prisma.user.createMany({ data: users }));
+```
+
+To let writes of some models run unaudited without a context, opt them out with a function, or every model with `false`:
+
+```typescript
+requireContext: (modelName) => modelName !== 'PageView',
 ```
 
 ### `diffExcludeFields`

@@ -41,7 +41,7 @@ records:
 
 - **Atomicity**: under `write.mode: 'atomic'`, the default, a write commits only together with every audit log it should produce. Inside a transaction, every mode writes the audit logs in it, so they commit and roll back with the rows they record. Outside one, `awaited` writes them after the write commits and `deferred` writes them in the background; their failure never fails the committed write.
 - **Accuracy under concurrent writes**: the audit reads the before state ahead of the write, without a lock. Whether a write another transaction commits in between is recorded wrongly or rejected depends on the database and the isolation level.
-- **Coverage**: a write of a model in `entities` is audited when an audit context is set. Without one it runs unaudited, or is rejected under `requireContext`. The audited client and every client `$extends` derives from it write through the audit. `$parent` is Prisma's, and below the audit (the audited client's `$parent`, the client passed to `createAuditClient`) it runs extensions the audit cannot see: it reads and runs raw queries, but every write through it is rejected with `AuditParentWriteError`. To bypass the audit on purpose, write through a client your application holds itself (the one passed to `createAuditClient`, another `PrismaClient`) or raw SQL. A model method overriding a built-in action from an extension applied before the audit is unsupported: its writes through `$parent` run unaudited. The rows the database's referential actions change are not recorded.
+- **Coverage**: a write of a model in `entities` is audited when an audit context is set. Without one it is rejected with `AuditContextMissingError`, unless `requireContext` opts its model out, which runs it unaudited. The audited client and every client `$extends` derives from it write through the audit. `$parent` is Prisma's, and below the audit (the audited client's `$parent`, the client passed to `createAuditClient`) it runs extensions the audit cannot see: it reads and runs raw queries, but every write through it is rejected with `AuditParentWriteError`. To bypass the audit on purpose, write through a client your application holds itself (the one passed to `createAuditClient`, another `PrismaClient`) or raw SQL. A model method overriding a built-in action from an extension applied before the audit is unsupported: its writes through `$parent` run unaudited. The rows the database's referential actions change are not recorded.
 
 [docs/guarantees.md](docs/guarantees.md) states what each operation and execution context guarantees and cites the tests that check each statement.
 
@@ -226,8 +226,8 @@ createAuditClient(basePrisma, {
   // Redacted on top of the built-in sensitive fields
   redactFields: ["phoneNumber", "dateOfBirth"],
 
-  // Reject a write without an audit context instead of running it unaudited
-  requireContext: (model) => model === "Order",
+  // requireContext is left unset: its default, true, rejects a write of an audited model without an
+  // audit context. Seeds and batch jobs run under a system actor with auditProvider.runAsync
 
   write: {
     // Default mode; critical models set defineEntity({ ..., writeMode: "atomic" })

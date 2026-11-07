@@ -249,8 +249,9 @@ export const cleanDatabase = async (
 };
 
 /**
- * Deletes every row, child tables first, through the audited client. The SQLite and MySQL smoke
- * suites clean up this way; PostgreSQL suites use {@link cleanDatabase}.
+ * Deletes every row, child tables first, through the audited client, under the audit context the
+ * caller sets. The SQLite and MySQL smoke suites clean up this way; PostgreSQL suites use
+ * {@link cleanDatabase}.
  */
 export const deleteAllRows = async (prisma: ReturnType<typeof createAuditClient>): Promise<void> => {
   await prisma.commentAttachment.deleteMany();

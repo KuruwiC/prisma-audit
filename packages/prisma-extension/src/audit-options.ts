@@ -127,7 +127,7 @@ export const normalizeAuditOptions = (options: PrismaAuditExtensionOptions): Aud
     auditedOmittedFields,
     auditedOmittedFieldsWithRowKey: withRowKeyFields(auditedOmittedFields, schemaMetadata, queryOmitSupported),
     auditLogAccessor,
-    gateConfig: { requireContext: options.requireContext ?? false },
+    gateConfig: { requireContext: options.requireContext },
     policyConfig: { mode: write?.mode, entity: entityConfigs.byModel },
     resolveConfig: {
       entity: entityConfigs.byModel,
