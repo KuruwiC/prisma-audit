@@ -1,5 +1,68 @@
 # @kuruwic/prisma-audit
 
+## 0.5.0
+
+### Minor Changes
+
+- a6ecfc2: Throw at `createAuditClient` when `entities` lists a model the audit rows are written to, instead of leaving it unaudited.
+  
+  - Breaking: an entity map that lists the `write.model` model (`AuditLog` by default, which is not checked next to a `write.writer` when `write.model` is unset) makes `createAuditClient` throw. Before, the audit silently left that model unaudited, writes of yours to it included.
+  - Breaking: an entity map that lists a model `createEntityNormalizedWriter` or `createSharedChangeWriter` writes to makes `createAuditClient` throw. The writers they return are typed `NormalizedWriter` (new export) and carry those models as `writesModels`. A custom writer declares none: a write of an audited model it makes is rejected with `AuditReentrantWriteError` when it runs, and reported as `log-write`.
+- 994ff5f: Redact the enriched contexts and the request context as the states are, so a secret in a context is no longer stored in clear.
+  
+  - Breaking: `actorContext`, `entityContext`, `aggregateContext` and `requestContext` mask the built-in sensitive fields (`password`, `token`, `apiKey` and the like) and `redactFields` at any depth, after the serializers ran, as `before`, `after` and `changes` do. Before, they were stored as the enrichers and the context provider returned them. A field that a context needs in clear must not share a name with a sensitive field or one in `redactFields`.
+  - Only the keys of the structure the serializers output are masked: a serializer that turns an object into a string hides the keys inside it, which are stored in clear.
+- a2e55c7: Report an enricher that falls back in the write's outcome, so a record stored without its context is no longer reported as if nothing failed.
+  
+  - Breaking: an enricher whose `onError` is, or resolves to, `'log'` or `'ignore'` and that fails (an error, a timeout, or a batch result of the wrong length) is listed in the outcome's `failures` as `{ phase: 'enrichment', enricher: 'actor' | 'entity' | 'aggregate', error }`, once per enricher call. The record is stored with the `fallback` as before, the outcome stays `complete`, and an `atomic` write does not fail. `'ignore'` only keeps the failure off the console. An observer that treats every listed failure as a lost record must look at `status` or the phase instead, and a `switch` over `AuditFailure['phase']` has a new case.
+  - Breaking (core API): the `ResolveFailure` that `resolve` reports to its `ResolveFailureSink` (`OperationOutcome.reportResolveFailure`) is a union keyed by `phase`: `id-resolver-call` or `enrichment`. `FailedEnricher` names the kind of enricher.
+  - Without an observer, the `enrichment` failures of an `incomplete` outcome are not logged to the console, as they lost no record.
+- 1c87805: Report in each write's outcome the transaction its audit reads and its write ran in, so a `complete` outcome is no longer read as a guarantee that its records are accurate under concurrent writes.
+  
+  - Breaking: every `AuditOutcome` carries `isolation` (`AuditIsolation`): `{ kind: 'no-transaction' }` when the reads and the write share no transaction (outside any transaction: an `awaited` or `deferred` write, or one without an audit context), `{ kind: 'undeclared' }` in a transaction opened without an isolation level the audit sees, or `{ kind: 'declared', level }` in one opened at a declared level. `complete` still means every record was passed to a writer that resolved; it does not cover accuracy, whose premise is `isolation`.
+  - Breaking (core API): `OutcomeTarget`, what `createOperationOutcome` takes, requires `isolation`. The core treats the level as an opaque name.
+  - `@kuruwic/prisma-audit`: the declared level is the `isolationLevel` option of the outermost `$transaction` the operation runs in, interactive or batch; a nested `$transaction` does not change it. A level the client's `transactionOptions` set is not seen, and is reported `undeclared`.
+  - `@kuruwic/prisma-audit`: new `write.isolationLevel` opens the transaction the client opens for an `atomic` write outside any transaction at that level, and reports it `declared`; `createAuditClient` throws for a value that is not one of the generated client's `Prisma.TransactionIsolationLevel`. Unset, the transaction runs at the client's default, as before. The library does not retry a transaction that fails with `P2034`.
+- 4728e79: Reject every write through a `$parent` below the audit, instead of running it unaudited.
+  
+  - Breaking: `$parent`, of a client or of a model delegate, and `Prisma.getExtensionContext(this).$parent` keep Prisma's meaning, the client one level below without the extensions applied above it. Below the level the audit was applied to (the audited client's `$parent`, the client passed to `createAuditClient` and the clients under it, inside a transaction their transaction clients) it runs the extensions applied before the audit, which may change a write's arguments where the audit cannot see, so every write through it, of a model in `entities` or not, is rejected with `AuditParentWriteError` (new, with `modelName`, `operationModelName` and `operation`) before Prisma runs any of it. The client decides it when the write starts, from the client's level and the action alone, never from the arguments. So is a write in a batch or interactive `$transaction` opened on such a client, in a transaction nested on it, or through a client `$extends` derives from it. Before, it ran unaudited. Such a client still reads and runs raw queries, and a rejected write has no outcome.
+  - Breaking: in a method of an extension applied before the audit (to the client passed to `createAuditClient`), called on the audited client, a write through `Prisma.getExtensionContext(this).$parent` is rejected that way. Apply an extension that writes to the audited client (`createAuditClient(prisma).$extends(extension)`), or write through `Prisma.getExtensionContext(this)` or the audited client.
+  - Breaking: such a write issued from a callback the audit runs, through the `$parent` of the client it receives (`db`, the writer's `handle`), is rejected with `AuditParentWriteError` too. Inside a transaction those callbacks receive the client bound to it, the one an interactive `$transaction` callback receives, instead of Prisma's transaction client.
+  - Breaking (`@kuruwic/db-audit-core`): `RejectedWriteError`, the base of `AuditContextMissingError` and `AuditReentrantWriteError`, is exported, and `AuditParentWriteError` extends it. An enricher's `onError` cannot turn any `RejectedWriteError` into a fallback, and the rejection of such a write an enricher issues once it has timed out is logged to the console.
+  - A model delegate read by its schema name (`client.User`), which Prisma exposes next to `client.user`, is wrapped the same way on every client: through the audited client a write is audited, and below the audit it is rejected. Before, it reached Prisma's own delegate.
+  - Outside any transaction `$parent` is one client per client below, wherever it is read: the `$parent` of a client `$extends` derives from the audited client is the audited client, so a batch `$transaction([...])` on it takes the audited client's operations.
+  - The `$parent` of a client an extension applied after the audit adds (`createAuditClient(...).$extends(...)`) is still the client below it, with the methods of the extensions between, and a write through it is audited.
+  - Overriding a built-in action (`create`, `update`, ...) with a model extension applied before the audit is unsupported: Prisma calls such a method with its own delegate as `this`, so a write it makes through `Prisma.getExtensionContext(this).$parent` runs unaudited and is not rejected. Change a built-in operation with a query extension instead.
+  - To bypass the audit on purpose, write through a client your application holds itself, the client passed to `createAuditClient` or another `PrismaClient`, or through raw SQL. A write of a model in `entities` without an audit context also runs unaudited when `requireContext` does not hold for it.
+- 5f95fe8: Reject a write of an audited model issued while the audit processes an operation, such as one a user callback makes, instead of running it unaudited.
+  
+  - Breaking: a write of a model in `entities`, nested writes included, that a resolver, an enricher or its `onError`, the writer or the observer issues while the audit processes an operation is rejected with `AuditReentrantWriteError` (new, with `modelName`, `operationModelName` and `operation`, exported by both packages) before Prisma runs any of it, with or without an audit context, and has no outcome. Before, it ran unaudited, and outside any transaction a write through the client a callback received was not even seen by the audit. The callback then fails as on any error of its own: a resolver is reported as `id-resolver-call`, an enricher or its `onError` as `diff-generation`, the writer as `log-write`, and the observer's error is logged and ignored. A write of a model that is not in `entities` still runs. A write meant to run unaudited goes through the client passed to `createAuditClient`.
+  - Breaking: outside any transaction, the `db` a resolver or an enricher receives, and the writer's `handle`, are the audited client instead of the client passed to `createAuditClient`; inside a transaction they are still a client of that transaction. The default write and the audit's own reads run on the same client.
+  - A write of an extension applied after the audit that it issues while handling one of the audit's own queries is rejected the same way.
+  - An enricher's `onError`, whatever it says, rethrows `AuditReentrantWriteError`, from the enricher or from the `onError` function itself. An enricher that has timed out has been handled by `onError` already: a write it issues afterwards is rejected the same way, and the rejection is logged with `console.error`.
+  - Core API: `auditGate({ context, auditedModels, withinAudit }, config)` takes the write as one input (`AuditGateInput`), and returns `reentrant` (with `modelName`) for a write of audited models issued while the audit processes an operation, before it looks at the audit context. An adapter throws `AuditReentrantWriteError` for it and creates no outcome.
+  - Core API: `logIncompleteOutcome`, the reporting of an outcome when no observer is given (the failures of an `incomplete` outcome logged to the console), is exported, for an adapter that observes the outcomes itself to call when the user gives no observer.
+- 7c65bd0: Reject a write of an audited model without an audit context by default, instead of running it unaudited.
+  
+  - Breaking: `requireContext` defaults to `true`. A write without an audit context that writes rows of a model in `entities`, nested writes included, is rejected with `AuditContextMissingError` before Prisma runs any of it. Before, it ran unaudited, and with no `observer` nothing recorded that it did. Run a seed, a migration script or a batch job under an audit context with a system actor (`provider.runAsync({ actor: { category: 'system', type: 'Seeder', id: 'seed' } }, ...)`), or set `requireContext` to `false`, or to a function that returns false for the models whose writes may run unaudited.
+  - `AuditContextMissingError`'s message says how to resolve it: set an audit context with the context provider's `runAsync`, or opt the model out with `requireContext`.
+  - Breaking (core API): `AuditGateConfig.requireContext` is optional, and `auditGate` reads it unset as `true`. An adapter passes the user's value through and does not default it.
+
+### Patch Changes
+
+- e6601d8: Report a resolver failure when it happens, so an enricher that throws later no longer erases it.
+  
+  - Fix: the `id-resolver-call` failures of an operation stay in its outcome when an enricher then throws (reported as `diff-generation`); before, they were lost with the resolution.
+  - Breaking (core API): `resolve(events, auditContext, config, read, sink)` reports each resolver failure to `sink` (`ResolveFailureSink`, taking an `id-resolver-call` `ResolveFailure`) as it fails, and returns the resolved events alone; `Resolution` and `ResolverFailure` are removed. `OperationOutcome.reportResolveFailure` is that sink, in place of `reportResolverFailures`.
+- Updated dependencies [994ff5f]
+- Updated dependencies [a2e55c7]
+- Updated dependencies [1c87805]
+- Updated dependencies [4728e79]
+- Updated dependencies [5f95fe8]
+- Updated dependencies [7c65bd0]
+- Updated dependencies [e6601d8]
+  - @kuruwic/db-audit-core@0.5.0
+
 ## 0.4.0
 
 ### Minor Changes
