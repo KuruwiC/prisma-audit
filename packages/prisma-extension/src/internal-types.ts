@@ -30,6 +30,8 @@ export interface PrismaNamespace {
     value: string | number,
   ) => unknown;
   prismaVersion?: { client: string };
+  /** `Prisma.TransactionIsolationLevel`: the isolation levels the generated client's provider takes */
+  TransactionIsolationLevel?: Readonly<Record<string, string>>;
 }
 
 // ============================================================================

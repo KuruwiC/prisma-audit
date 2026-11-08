@@ -184,6 +184,18 @@ The rows a resolver receives hold every column the client reads by default, plus
 
 The PascalCase name of the audit-log model, default `'AuditLog'`. It cannot be in `entities`: `createAuditClient` throws, since the audit's own writes to an audited model are rejected. It needs the columns of the `AuditLog` model in the [main README](../../README.md#1-add-an-auditlog-model). An optional `beforeUnavailable Boolean @default(false)` field stores whether the before state was requested and could not be read; a field of that name that is not a single `Boolean` makes `createAuditClient` throw.
 
+#### `write.isolationLevel`
+
+A value of the generated client's `Prisma.TransactionIsolationLevel`, unset by default: the isolation level of the interactive transaction the client opens for an [`atomic`](#atomic) write outside any transaction. Unset, that transaction runs at the client's default (`new PrismaClient({ transactionOptions })`, else the database's), which the audit does not see, and the outcome's `isolation` is `undeclared`; set, it is `declared` with this level. It does not apply to your own `$transaction`, whose `isolationLevel` option is the one reported, nor to an `awaited` or `deferred` write outside any transaction. `createAuditClient` throws for a value that is not one of `Prisma.TransactionIsolationLevel`, the levels the generated client's provider takes.
+
+```typescript
+{
+  write: { mode: 'atomic', isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+}
+```
+
+The library does not retry a transaction that fails with `P2034` (a serialization conflict or a deadlock); retry it where running it again is safe.
+
 #### `write.writer`
 
 ```typescript
@@ -465,12 +477,12 @@ An operation takes the strongest mode (`atomic`, then `awaited`, then `deferred`
 
 The operation commits only together with every audit log it should produce, meaning every record was passed to a writer that resolved.
 
-- Outside any transaction, the call opens an interactive transaction of the client it was called on, before it enters the extension chain, at the client's default isolation level. This also applies to a call on the audited client (not `tx`) inside your `$transaction` callback, which is not part of your transaction.
+- Outside any transaction, the call opens an interactive transaction of the client it was called on, before it enters the extension chain, at [`write.isolationLevel`](#writeisolationlevel), else at the client's default isolation level. This also applies to a call on the audited client (not `tx`) inside your `$transaction` callback, which is not part of your transaction.
 - `AuditIncompleteError` (`modelName`, `operation`, `failures`, also its `cause`, and `unrecordedWrites`) fails the operation when a failure drops an entry of an audited model: `row-identification`, `id-resolver-call`, or a `pre-fetch` failure that leaves an `upsert` or `connectOrCreate` entry, or a row a nested link write unlinks without naming it, unrecorded. An entry recorded with `beforeUnavailable: true` is not dropped.
 - `AuditAtomicityError` rejects an atomic operation that reaches the audit outside any transaction the client owns. This happens when an extension applied before the audit adds a nested write of an atomic model to a call that is not atomic itself; run such a call inside your `$transaction`.
 - Cost: every audited write outside your transaction runs in a transaction of its own, with its `BEGIN` and `COMMIT` round trips, a connection held from the audit's first read to the commit, and the `transactionOptions` (`maxWait`, `timeout`) of the client passed to `createAuditClient`. A driver adapter without interactive transactions, such as Cloudflare D1's, cannot open it: use `awaited` or `deferred` there.
 - Under concurrent writes, some operations that commit with a missing audit log under `awaited` fail under `atomic` and can be retried: an `updateMany` or `deleteMany` whose `where` another writer changed between the audit's read and the write at READ COMMITTED, a `createMany` with `skipDuplicates` whose count check does not match, and a nested to-many create below a parent another writer inserted a child under.
-- Atomic mode does not make the record accurate: a write another transaction commits between the before-state read and the operation can still make the recorded before state or upsert action wrong at READ COMMITTED and InnoDB's REPEATABLE READ. For a stronger level, run the operation in `$transaction(fn, { isolationLevel })` and retry conflicts yourself; see [Accuracy of Prisma operations under concurrent writes](../../docs/guarantees.md#accuracy-of-prisma-operations-under-concurrent-writes).
+- Atomic mode does not make the record accurate: a write another transaction commits between the before-state read and the operation can still make the recorded before state or upsert action wrong at READ COMMITTED and InnoDB's REPEATABLE READ. For a stronger level, set `write.isolationLevel` or run the operation in `$transaction(fn, { isolationLevel })`, and retry conflicts yourself; see [Accuracy of Prisma operations under concurrent writes](../../docs/guarantees.md#accuracy-of-prisma-operations-under-concurrent-writes).
 
 ### `awaited`
 
@@ -512,6 +524,7 @@ Whatever undoes a write inside a transaction undoes its audit logs: a rollback, 
 
 A `$transaction` opened on `tx` (Prisma 7.5 and later) runs as a savepoint in your transaction. Its callback receives a client bound to it, and a batch `tx.$transaction([...])` runs as one. Only one can be open at a time on a transaction client (Prisma rejects a second: "Concurrent nested transactions are not supported").
 
+- It runs at the isolation level of your transaction: an `isolationLevel` given to it is not reported in the outcomes of its writes, whose `isolation` is your transaction's.
 - A write made while it is open, through its client or through `tx`, commits with your transaction. When the nested transaction rolls back to its savepoint, the write is reported `not-committed` and leaves no audit row.
 - It opens once the audited operations of the enclosing transaction still running have settled, except the one it is opened from. An audited operation started on `tx` while it opens runs inside it; one started while it is being released or rolled back runs after it, in your transaction.
 
@@ -546,15 +559,24 @@ The audit's own queries and its writes to the audit-log model are not audited. A
   records: 1,                 // audit logs passed to a writer that resolved
   failures: [],               // AuditFailure[], typed by phase
   unrecordedWrites: [],       // { modelName, operation, path }: writes left without an audit log
+  isolation: { kind: 'declared', level: 'RepeatableRead' }, // the transaction its reads and write ran in
 }
 ```
 
 | `status` | Meaning |
 | --- | --- |
-| `complete` | Committed, and every audit log was passed to a writer that resolved. A committed atomic operation is always `complete`. A `pre-fetch` failure that only left an entry with `beforeUnavailable: true`, and an `enrichment` failure, may be listed |
+| `complete` | Committed, and every audit log was passed to a writer that resolved. A committed atomic operation is always `complete`. A `pre-fetch` failure that only left an entry with `beforeUnavailable: true`, and an `enrichment` failure, may be listed. It does not mean the logs are accurate under concurrent writes: `isolation` reports the premise |
 | `incomplete` | Committed without some of its audit logs (`awaited`, `deferred`). After a failed audit write outside a transaction, how many logs the writer persisted is unknown |
 | `not-committed` | The operation failed (including with an audit error), or its transaction rolled back or failed to commit |
 | `unaudited` | Committed without an audit context (`unauditedReason: 'no-context'`) |
+
+`isolation` (`AuditIsolation`) is what the audit knows of the transaction the operation's before-state reads and its write ran in, the premise of [accuracy](../../docs/guarantees.md#accuracy-of-prisma-operations-under-concurrent-writes), whatever the status:
+
+| `isolation.kind` | When |
+| --- | --- |
+| `no-transaction` | Outside any transaction, with none opened for it: an `awaited` or `deferred` operation, and one without an audit context, rejected or run unaudited, under any mode. The reads and the write share none |
+| `undeclared` | In a transaction opened without an isolation level the audit sees: a `$transaction` given no `isolationLevel`, or the transaction of an atomic operation without `write.isolationLevel`, even when the client's `transactionOptions` set one |
+| `declared` | In a transaction opened at `level`: the `isolationLevel` of your outermost `$transaction`, interactive or batch, or `write.isolationLevel` for the transaction of an atomic operation. A nested `$transaction` does not change it |
 
 Failure phases: `pre-fetch` (`modelName`, `operation`, `error`), `row-identification` (`modelName`, `operation`, `unidentified` row count, `error`), `id-resolver-call` (`modelName`, `operation`, `identity`, `resolver`, `error`), `enrichment` (`enricher`: `'actor'`, `'entity'` or `'aggregate'`, `error`), `diff-generation` (`error`) and `log-write` (`records`, `error`). A failure's `modelName` and `operation` name the rows it concerns, which for a nested write can differ from the operation's.
 

@@ -90,6 +90,7 @@ describe('enrichment failures', () => {
                   { phase: 'enrichment', enricher: 'aggregate', error: aggregateError },
                 ],
                 unrecordedWrites: [],
+                isolation: { kind: mode === 'atomic' ? 'undeclared' : 'no-transaction' },
               },
             ],
           ]);

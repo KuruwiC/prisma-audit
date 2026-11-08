@@ -29,6 +29,11 @@ const testActor: AuditContext = {
 
 const noFailure = { failures: [], unrecordedWrites: [] };
 
+/** In the transaction the client opens for an atomic write, or in a `$transaction`, neither of which declares a level */
+const undeclaredIsolation = { isolation: { kind: 'undeclared' } } as const;
+/** Outside any transaction, under `awaited` or `deferred`, or run unaudited */
+const noTransactionIsolation = { isolation: { kind: 'no-transaction' } } as const;
+
 interface ClientOptions {
   readonly mode?: WriteMode;
   readonly writer?: () => Promise<void>;
@@ -83,7 +88,7 @@ describe('the outcome of an audited write', () => {
     await run(() => prisma.user.create({ data: { email: 'complete@example.com' } }));
 
     expect(observer.mock.calls).toEqual([
-      [{ model: 'User', operation: 'create', status: 'complete', records: 1, ...noFailure }],
+      [{ model: 'User', operation: 'create', status: 'complete', records: 1, ...noFailure, ...undeclaredIsolation }],
     ]);
   });
 
@@ -93,7 +98,16 @@ describe('the outcome of an audited write', () => {
     await run(() => prisma.user.updateMany({ where: { email: 'nobody@example.com' }, data: { name: 'none' } }));
 
     expect(observer.mock.calls).toEqual([
-      [{ model: 'User', operation: 'updateMany', status: 'complete', records: 0, ...noFailure }],
+      [
+        {
+          model: 'User',
+          operation: 'updateMany',
+          status: 'complete',
+          records: 0,
+          ...noFailure,
+          ...undeclaredIsolation,
+        },
+      ],
     ]);
   });
 
@@ -121,6 +135,7 @@ describe('the outcome of an audited write', () => {
         },
       ],
       unrecordedWrites: [],
+      ...noTransactionIsolation,
     });
     expect(await basePrisma.user.count()).toBe(1);
   });
@@ -151,6 +166,7 @@ describe('the outcome of an audited write', () => {
         },
       ],
       unrecordedWrites: [],
+      ...noTransactionIsolation,
     });
   });
 
@@ -162,7 +178,16 @@ describe('the outcome of an audited write', () => {
     await expect(run(() => prisma.user.create({ data: { email: 'taken@example.com' } }))).rejects.toThrow();
 
     expect(observer.mock.calls).toEqual([
-      [{ model: 'User', operation: 'create', status: 'not-committed', records: 0, ...noFailure }],
+      [
+        {
+          model: 'User',
+          operation: 'create',
+          status: 'not-committed',
+          records: 0,
+          ...noFailure,
+          ...undeclaredIsolation,
+        },
+      ],
     ]);
   });
 
@@ -180,6 +205,7 @@ describe('the outcome of an audited write', () => {
           unauditedReason: 'no-context',
           records: 0,
           ...noFailure,
+          ...noTransactionIsolation,
         },
       ],
     ]);
@@ -200,7 +226,7 @@ describe('the outcome of an audited write', () => {
     await flushAllPendingWrites();
 
     expect(observer.mock.calls).toEqual([
-      [{ model: 'User', operation: 'create', status: 'complete', records: 1, ...noFailure }],
+      [{ model: 'User', operation: 'create', status: 'complete', records: 1, ...noFailure, ...noTransactionIsolation }],
     ]);
   });
 
@@ -250,8 +276,8 @@ describe('the outcome of an audited write', () => {
 
       expect(reportedInside).toEqual([0]);
       expect(observer.mock.calls).toEqual([
-        [{ model: 'User', operation: 'create', status: 'complete', records: 1, ...noFailure }],
-        [{ model: 'User', operation: 'create', status: 'complete', records: 1, ...noFailure }],
+        [{ model: 'User', operation: 'create', status: 'complete', records: 1, ...noFailure, ...undeclaredIsolation }],
+        [{ model: 'User', operation: 'create', status: 'complete', records: 1, ...noFailure, ...undeclaredIsolation }],
       ]);
     });
 
@@ -269,8 +295,26 @@ describe('the outcome of an audited write', () => {
       ).rejects.toThrow('callback failed');
 
       expect(observer.mock.calls).toEqual([
-        [{ model: 'User', operation: 'create', status: 'not-committed', records: 1, ...noFailure }],
-        [{ model: 'User', operation: 'create', status: 'not-committed', records: 1, ...noFailure }],
+        [
+          {
+            model: 'User',
+            operation: 'create',
+            status: 'not-committed',
+            records: 1,
+            ...noFailure,
+            ...undeclaredIsolation,
+          },
+        ],
+        [
+          {
+            model: 'User',
+            operation: 'create',
+            status: 'not-committed',
+            records: 1,
+            ...noFailure,
+            ...undeclaredIsolation,
+          },
+        ],
       ]);
       expect(await basePrisma.user.count()).toBe(0);
     });
@@ -282,7 +326,7 @@ describe('the outcome of an audited write', () => {
       await flushAllPendingWrites();
 
       expect(observer.mock.calls).toEqual([
-        [{ model: 'User', operation: 'create', status: 'complete', records: 1, ...noFailure }],
+        [{ model: 'User', operation: 'create', status: 'complete', records: 1, ...noFailure, ...undeclaredIsolation }],
       ]);
     });
 
@@ -300,7 +344,16 @@ describe('the outcome of an audited write', () => {
       await flushAllPendingWrites();
 
       expect(observer.mock.calls).toEqual([
-        [{ model: 'User', operation: 'create', status: 'not-committed', records: 1, ...noFailure }],
+        [
+          {
+            model: 'User',
+            operation: 'create',
+            status: 'not-committed',
+            records: 1,
+            ...noFailure,
+            ...undeclaredIsolation,
+          },
+        ],
       ]);
       expect(await basePrisma.auditLog.count()).toBe(0);
     });
@@ -316,7 +369,16 @@ describe('the outcome of an audited write', () => {
       ).rejects.toThrow('callback failed');
 
       expect(observer.mock.calls).toEqual([
-        [{ model: 'User', operation: 'create', status: 'not-committed', records: 0, ...noFailure }],
+        [
+          {
+            model: 'User',
+            operation: 'create',
+            status: 'not-committed',
+            records: 0,
+            ...noFailure,
+            ...undeclaredIsolation,
+          },
+        ],
       ]);
     });
   });

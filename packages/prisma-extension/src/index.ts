@@ -57,6 +57,7 @@ export type { AuditSchema } from './schema/audit-schema.js';
 export type {
   AuditFailure,
   AuditFailurePhase,
+  AuditIsolation,
   AuditLogData,
   AuditLogInput,
   AuditLogWriter,

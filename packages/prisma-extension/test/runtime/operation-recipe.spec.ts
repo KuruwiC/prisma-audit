@@ -55,6 +55,7 @@ const configAtomic = (atomic: boolean): RecipeConfig => ({
   modelOfDelegateProperty: new Map([['user', 'User']]),
   relatedModel: () => undefined,
   isAtomicWrite: vi.fn(() => atomic),
+  atomicIsolationLevel: undefined,
 });
 
 /** Leaves a client the delegates' `$parent` names as it is: these tests never read it */
@@ -509,6 +510,7 @@ describe('operation recipes', () => {
       modelOfDelegateProperty: new Map([['user', 'User']]),
       relatedModel: () => undefined,
       isAtomicWrite: (_model, action) => action === 'create',
+      atomicIsolationLevel: undefined,
     });
     interface Seen {
       readonly action: string;

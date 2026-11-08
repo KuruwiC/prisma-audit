@@ -57,6 +57,10 @@ describe('concurrent writes on PostgreSQL: a commit between the audit read and t
   const auditOptions = { ...testAuditOptions(provider, { Prisma, schema: auditSchema }), observer };
   const prisma = createAuditClient(base, auditOptions);
   const atomicPrisma = createAuditClient(base, { ...auditOptions, write: { mode: 'atomic' } });
+  const repeatableReadAtomicPrisma = createAuditClient(base, {
+    ...auditOptions,
+    write: { mode: 'atomic', isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+  });
   type Transaction = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
   /** The other writer: a client without the audit */
   const other = createBasePrisma();
@@ -96,6 +100,7 @@ describe('concurrent writes on PostgreSQL: a commit between the audit read and t
   afterAll(async () => {
     await prisma.$disconnect();
     await atomicPrisma.$disconnect();
+    await repeatableReadAtomicPrisma.$disconnect();
     await rawBase.$disconnect();
     await other.$disconnect();
   });
@@ -223,6 +228,26 @@ describe('concurrent writes on PostgreSQL: a commit between the audit read and t
         expect(await postRecords(POST_ID)).toEqual([]);
       },
     );
+
+    it('rejects an atomic update outside any transaction with a write conflict when write.isolationLevel declares REPEATABLE READ for the transaction the client opens and another transaction commits a change to its row between the read and the update, recording nothing', async () => {
+      await seedPost(POST_ID);
+
+      const outcome = await interleave(barrier, postFindUnique, {
+        operation: () =>
+          asActor(() => repeatableReadAtomicPrisma.post.update({ where: { id: POST_ID }, data: { title: '120' } })),
+        interleaved: () => other.post.update({ where: { id: POST_ID }, data: { title: '110' } }),
+      });
+
+      expect(errorCodesOf(outcome.operation)).toEqual({
+        code: 'P2034',
+        sqlState: carriedDatabaseCode(Prisma.prismaVersion.client, '40001'),
+      });
+      expect((await postOf(POST_ID))?.title).toBe('110');
+      expect(await postRecords(POST_ID)).toEqual([]);
+      expect(observer.mock.calls.map(([{ status, isolation }]) => ({ status, isolation }))).toEqual([
+        { status: 'not-committed', isolation: { kind: 'declared', level: 'RepeatableRead' } },
+      ]);
+    });
 
     it.each(levels)(
       'rejects a native upsert under %s with a write conflict when another transaction inserts its row between the read and the upsert, recording nothing (ON CONFLICT DO UPDATE against a row the snapshot does not see, which the PostgreSQL documentation does not state)',

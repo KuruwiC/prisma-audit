@@ -90,6 +90,64 @@ describe('createOpenTransaction', () => {
     expect(body).not.toHaveBeenCalled();
   });
 
+  describe('isolation level', () => {
+    const levelSeen = async (options: readonly unknown[]): Promise<string | undefined> => {
+      const { client } = clientWith(txClient);
+      let seen: ActiveTransaction | undefined;
+      await createOpenTransaction(createAsyncLocalStorageProvider())(
+        client,
+        options,
+        ownClient,
+        async (transaction) => {
+          seen = transaction;
+        },
+      );
+      return seen?.isolationLevel;
+    };
+
+    it('is the isolation level the options open the transaction with', async () => {
+      expect(await levelSeen([{ isolationLevel: 'RepeatableRead', timeout: 1000 }])).toBe('RepeatableRead');
+    });
+
+    it.each([{ options: [] }, { options: [{ timeout: 1000 }] }, { options: [{ isolationLevel: null }] }])(
+      'is undefined when the options $options declare none',
+      async ({ options }) => {
+        expect(await levelSeen(options)).toBeUndefined();
+      },
+    );
+
+    it.each([
+      {
+        outer: [{ isolationLevel: 'Serializable' }],
+        nested: [{ isolationLevel: 'ReadCommitted' }],
+        level: 'Serializable',
+      },
+      { outer: [], nested: [{ isolationLevel: 'Serializable' }], level: undefined },
+    ])(
+      'is that of the outermost transaction in a transaction nested in it, whatever the nested one declares ($nested)',
+      async ({ outer, nested, level }) => {
+        const nestedTx: PrismaHandle = clientWith({}).client;
+        const { client } = clientWith(nestedTx);
+        const open = createOpenTransaction(createAsyncLocalStorageProvider());
+        let seen: ActiveTransaction | undefined;
+
+        await open(client, outer, ownClient, (transaction) =>
+          open(
+            transaction.client,
+            nested,
+            ownClient,
+            async (inner) => {
+              seen = inner;
+            },
+            transaction,
+          ),
+        );
+
+        expect(seen?.isolationLevel).toBe(level);
+      },
+    );
+  });
+
   describe('audit context', () => {
     it('runs the body under the audit context that was set when the transaction was opened', async () => {
       const provider = createAsyncLocalStorageProvider();

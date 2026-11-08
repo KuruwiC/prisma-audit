@@ -141,7 +141,7 @@ const auditedClientOf = (deps: AuditPipelineDependencies) => ({
           throw new Error('an atomic create reached the audit outside any transaction');
         }
         const outcome = createOperationOutcome(
-          { model: 'User', operation: 'create' },
+          { model: 'User', operation: 'create', isolation: { kind: 'undeclared' } },
           { observer: observers.get(deps) },
         );
         const run = (inTransaction: OperationTransaction | undefined) =>
@@ -225,6 +225,7 @@ const recipeConfigAtomic = (atomic: boolean): RecipeConfig => ({
   modelOfDelegateProperty: new Map([['user', 'User']]),
   relatedModel: () => undefined,
   isAtomicWrite: () => atomic,
+  atomicIsolationLevel: undefined,
 });
 
 const recipeConfig = recipeConfigAtomic(false);
@@ -249,6 +250,7 @@ describe('createTransactionProxy (property access)', () => {
     modelOfDelegateProperty: new Map(),
     relatedModel: () => undefined,
     isAtomicWrite: () => false,
+    atomicIsolationLevel: undefined,
   };
 
   it('returns every property other than $transaction, $extends and the wrapped operations as the client holds it', () => {
@@ -632,6 +634,24 @@ describe('createTransactionProxy (operation recipes)', () => {
     expect(ran.map(({ client }) => client)).toEqual(['transaction']);
     expect(ran.map(transactionClientOf)).toEqual([tx]);
   });
+
+  it.each([
+    { declared: 'RepeatableRead', options: [{ isolationLevel: 'RepeatableRead' }] },
+    { declared: undefined, options: [] },
+  ])(
+    'opens the transaction of an atomic write at the isolation level the config declares ($declared), which the transaction records',
+    async ({ declared, options }) => {
+      const { provider, proxy, ran, $transaction } = createRecipeProxy({
+        ...recipeConfigAtomic(true),
+        atomicIsolationLevel: declared,
+      });
+
+      await provider.runAsync(baseContext, async () => await proxy.user.create({ email: 'a' }));
+
+      expect($transaction.mock.calls.map((call) => call.slice(1))).toEqual([options]);
+      expect(ran.map((probed) => bindingOf(probed)?.transaction?.isolationLevel)).toEqual([declared]);
+    },
+  );
 
   it('runs a call that is not an atomic write on the client itself, bound to no transaction', async () => {
     const { provider, proxy, ran, $transaction } = createRecipeProxy(recipeConfigAtomic(false));

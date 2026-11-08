@@ -4,6 +4,7 @@ import type { AuditRecord, MutationEvent } from '../src/domain/mutation-event.js
 import {
   type AuditFailure,
   AuditIncompleteError,
+  type AuditIsolation,
   type AuditOutcome,
   createOperationOutcome,
   createTransactionOutcomes,
@@ -35,7 +36,7 @@ const record: AuditRecord = {
   createdAt: new Date('2025-01-01T00:00:00Z'),
 };
 
-const target = { model: 'Post', operation: 'update' } as const;
+const target = { model: 'Post', operation: 'update', isolation: { kind: 'no-transaction' } } as const;
 
 const preFetchFailure: AuditFailure = {
   phase: 'pre-fetch',
@@ -60,6 +61,7 @@ const outcomeOf = (overrides: Partial<AuditOutcome>): AuditOutcome =>
     records: 0,
     failures: [],
     unrecordedWrites: [],
+    isolation: { kind: 'no-transaction' },
     ...overrides,
   }) as AuditOutcome;
 
@@ -254,6 +256,35 @@ describe('createOperationOutcome', () => {
 
       expect(observer.mock.calls).toEqual([[outcomeOf({ status: 'not-committed' })]]);
     });
+  });
+
+  describe('isolation', () => {
+    const isolations: readonly AuditIsolation[] = [
+      { kind: 'no-transaction' },
+      { kind: 'undeclared' },
+      { kind: 'declared', level: 'RepeatableRead' },
+    ];
+
+    it.each(isolations.map((isolation) => [isolation.kind, isolation] as const))(
+      'carries the isolation %s the adapter gave, whatever the status',
+      async (_kind, isolation) => {
+        const observer = vi.fn();
+        const committed = createOperationOutcome({ ...target, isolation }, { observer });
+        const notCommitted = createOperationOutcome({ ...target, isolation }, { observer });
+        const unaudited = createOperationOutcome({ ...target, isolation, unaudited: 'no-context' }, { observer });
+
+        await committed.writeFinished(1);
+        await committed.settle('committed');
+        await notCommitted.settle('not-committed');
+        await unaudited.settle('committed');
+
+        expect(observer.mock.calls).toEqual([
+          [outcomeOf({ status: 'complete', records: 1, isolation })],
+          [outcomeOf({ status: 'not-committed', isolation })],
+          [outcomeOf({ status: 'unaudited', unauditedReason: 'no-context', isolation })],
+        ]);
+      },
+    );
   });
 
   describe('when the observer is called', () => {

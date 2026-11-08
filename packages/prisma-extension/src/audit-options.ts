@@ -20,6 +20,7 @@ import {
   type AuditRowDestination,
   validateAuditRowDestinations,
   validateFieldConflicts,
+  validateIsolationLevel,
   validateRecordOmittedFields,
 } from './config/validation.js';
 import type { ShouldFetchBefore } from './grammar/pre-fetch-selection.js';
@@ -57,6 +58,8 @@ export interface AuditOptions {
   readonly gateConfig: AuditGateConfig;
   /** The write mode of each audited model: its entity's `writeMode`, else `write.mode` */
   readonly policyConfig: PolicyConfig;
+  /** The isolation level the client opens the transaction of an atomic write with, from `write.isolationLevel` */
+  readonly atomicIsolationLevel: string | undefined;
   readonly resolveConfig: ResolveConfig;
   readonly composeConfig: ComposeConfig;
   readonly writer: WriteFn | undefined;
@@ -79,8 +82,9 @@ const RELATION_COUNT_FIELD = '_count';
  * @throws {Error} If the `schema` option is missing or of another format version, the entity
  *   map is invalid or lists a model the audit rows are written to (the `write.model` model, the
  *   default one unless a `write.writer` replaces the default write, or one a normalized writer
- *   declares), `diffExcludeFields` and `redactFields` name the same field, or an entity's
- *   `recordOmittedFields` names a field the audit cannot read
+ *   declares), `diffExcludeFields` and `redactFields` name the same field, `write.isolationLevel`
+ *   is not a level of `Prisma.TransactionIsolationLevel`, or an entity's `recordOmittedFields`
+ *   names a field the audit cannot read
  */
 export const normalizeAuditOptions = (options: PrismaAuditExtensionOptions): AuditOptions => {
   const { contextProvider, entities, write, actorContext, observer } = options;
@@ -101,6 +105,7 @@ export const normalizeAuditOptions = (options: PrismaAuditExtensionOptions): Aud
   ];
   validateAuditRowDestinations(auditRowDestinations, entityConfigs.isLoggable);
   validateFieldConflicts(diffExcludeFields, redactFields, entities);
+  validateIsolationLevel(write?.isolationLevel, Prisma.TransactionIsolationLevel);
   const queryOmitSupported = supportsQueryOmit(Prisma.prismaVersion?.client);
   validateRecordOmittedFields(entities, schemaMetadata, schemaMetadata.getModelNames(), queryOmitSupported);
 
@@ -129,6 +134,7 @@ export const normalizeAuditOptions = (options: PrismaAuditExtensionOptions): Aud
     auditLogAccessor,
     gateConfig: { requireContext: options.requireContext },
     policyConfig: { mode: write?.mode, entity: entityConfigs.byModel },
+    atomicIsolationLevel: write?.isolationLevel,
     resolveConfig: {
       entity: entityConfigs.byModel,
       rootEntity: entityConfigs.byCategoryAndType,

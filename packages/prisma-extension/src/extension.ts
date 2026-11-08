@@ -14,16 +14,18 @@
  * outcome, settled once the transaction its binding names commits or rolls back, or, outside any,
  * once the operation returns or throws, except one the gate finds reentrant
  * (`AuditReentrantWriteError`) and one the client rejects below the audit before it reaches the
- * hook (`AuditParentWriteError`). The hook continues the caller's operation through `query`
- * unless it rejects it; the client proxy binds the operation, and for an atomic write opens the
- * interactive transaction, before the operation enters the extension chain.
+ * hook (`AuditParentWriteError`). The outcome's `isolation` is that of the transaction its
+ * binding names: the level its outermost transaction was declared with, if any. The hook
+ * continues the caller's operation through `query` unless it rejects it; the client proxy binds
+ * the operation, and for an atomic write opens the interactive transaction, before the operation
+ * enters the extension chain.
  *
  * @module extension
  * @see {@link createAuditLogExtension}
  * @see {@link PrismaAuditExtensionOptions}
  */
 
-import type { AuditContext, OperationOutcome, OutcomeConfig } from '@kuruwic/db-audit-core';
+import type { AuditContext, AuditIsolation, OperationOutcome, OutcomeConfig } from '@kuruwic/db-audit-core';
 import {
   AuditAtomicityError,
   AuditContextMissingError,
@@ -45,7 +47,7 @@ import { createRecordProducer } from './pipeline/produce-records.js';
 import { type AuditPipelineDependencies, runAuditedOperation } from './pipeline/run-audited-operation.js';
 import { createSingleExecutor } from './pipeline/single-executor.js';
 import type { RecipeConfig } from './runtime/operation-recipe.js';
-import { operationBinding, withinAudit, withScope } from './runtime/scope.js';
+import { type ActiveTransaction, operationBinding, withinAudit, withScope } from './runtime/scope.js';
 import { createTransactionProxy } from './runtime/transaction-proxy.js';
 import type { PrismaAuditExtensionOptions } from './types.js';
 import { type ClientShape, injectAuditedSelection, projectToRequestedShape } from './utils/audited-selection.js';
@@ -104,7 +106,17 @@ const recipeConfigOf = (audit: AuditOptions): RecipeConfig => {
       audit.provider.getContext() !== undefined &&
       isAuditableAction(action) &&
       policy(audit.auditedModelsOf(modelName, args), policyConfig) === 'atomic',
+    atomicIsolationLevel: audit.atomicIsolationLevel,
   };
+};
+
+const isolationOf = (transaction: ActiveTransaction | undefined): AuditIsolation => {
+  if (transaction === undefined) {
+    return { kind: 'no-transaction' };
+  }
+  return transaction.isolationLevel === undefined
+    ? { kind: 'undeclared' }
+    : { kind: 'declared', level: transaction.isolationLevel };
 };
 
 interface AuditedCall {
@@ -203,11 +215,16 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     if (gate.kind === 'reentrant') {
       throw new AuditReentrantWriteError({ modelName: gate.modelName, operationModelName: model, operation });
     }
+    const transaction = operationBinding()?.transaction;
     const outcome = createOperationOutcome(
-      { model, operation, ...(gate.kind === 'unaudited' ? { unaudited: gate.reason } : {}) },
+      {
+        model,
+        operation,
+        isolation: isolationOf(transaction),
+        ...(gate.kind === 'unaudited' ? { unaudited: gate.reason } : {}),
+      },
       outcomeConfig,
     );
-    const transaction = operationBinding()?.transaction;
     switch (gate.kind) {
       case 'reject':
         return settledIn(transaction?.audit, outcome, () => {

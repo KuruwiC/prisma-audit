@@ -39,8 +39,8 @@ import { type ActiveTransaction, currentOperations, withScope } from './scope.js
 
 /**
  * Runs `body` in an interactive transaction of `client`, opened with `options`: nested in `parent`
- * when `client` is a client of `parent`, as a savepoint of `parent`'s transaction. `bind` makes the
- * transaction's `boundClient`.
+ * when `client` is a client of `parent`, as a savepoint of `parent`'s transaction, whose isolation
+ * level it keeps. `bind` makes the transaction's `boundClient`.
  */
 export type OpenTransaction = (
   client: object,
@@ -62,6 +62,12 @@ const withAuditContext = <T>(
   auditContext: AuditContext | undefined,
   fn: () => Promise<T>,
 ): Promise<T> => (auditContext ? provider.runAsync(auditContext, fn) : fn());
+
+const declaredIsolationLevelOf = (options: readonly unknown[]): string | undefined => {
+  const [first] = options;
+  const level: unknown = typeof first === 'object' && first !== null ? Reflect.get(first, 'isolationLevel') : undefined;
+  return typeof level === 'string' ? level : undefined;
+};
 
 /**
  * Fails with the database's error when the database aborted the transaction of `txClient` on an
@@ -146,6 +152,7 @@ const levelsOf = new WeakMap<ActiveTransaction, TransactionLevel[]>();
  */
 const transactionOn = (
   client: PrismaHandle,
+  isolationLevel: string | undefined,
   own: TransactionLevel,
   levels: TransactionLevel[],
   bind: (transaction: ActiveTransaction) => PrismaHandle,
@@ -158,6 +165,7 @@ const transactionOn = (
       boundClient ??= bind(transaction);
       return boundClient;
     },
+    isolationLevel,
     get audit() {
       return innermost().audit;
     },
@@ -209,6 +217,7 @@ export const createOpenTransaction =
     if (levels === undefined) {
       throw new Error('[@prisma-audit] A nested transaction was opened in a transaction the audit did not open');
     }
+    const isolationLevel = parent === undefined ? declaredIsolationLevelOf(options) : parent.isolationLevel;
     const enclosing = levels.at(-1);
     const opened = enclosing === undefined ? () => {} : markOpening(enclosing);
     if (enclosing !== undefined) {
@@ -233,7 +242,7 @@ export const createOpenTransaction =
       levels.push(level);
       opened();
       const result = await withAuditContext(provider, auditContext, () =>
-        body(transactionOn(txClient, level, levels, bind)),
+        body(transactionOn(txClient, isolationLevel, level, levels, bind)),
       ).finally(async () => {
         await operationsSettled(level, own);
         level.state = 'closing';

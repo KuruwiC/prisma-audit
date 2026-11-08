@@ -15,7 +15,7 @@ The package is not published to npm. Each GitHub release attaches its tarball (`
 - **Audit gate**: `auditGate`, `AuditGateInput`, `AuditGateConfig` (`requireContext`), `AuditGate`, and the errors of a rejected write, `AuditContextMissingError` and `AuditReentrantWriteError` (`modelName`, `operationModelName`, `operation`), both `RejectedWriteError`s.
 - **Write policy**: `policy`, `PolicyConfig` (`mode`, `entity`), `WriteMode`, `planFor`, `WritePlanKind`, `AuditAtomicityError` (`modelName`, `operation`).
 - **Pipeline**: `resolve`, `compose`, `dispatch`, their configs `ResolveConfig`, `ComposeConfig`, `DispatchConfig` and `ActorContextConfig`, and the types `MutationEvent`, `BeforeState`, `AuditRecord`, `TransactionRuntime`, `WriteExecutor`, `WriteFn`, `WriteContext`.
-- **Outcomes**: `createOperationOutcome`, `logIncompleteOutcome`, `OutcomeConfig`, `OperationOutcome`, `AuditObserver`, `AuditOutcome`, `AuditOutcomeStatus`, `AuditFailure`, `AuditFailurePhase`, `UnrecordedWrite`, `AuditIncompleteError` (`modelName`, `operation`, `failures`, `unrecordedWrites`).
+- **Outcomes**: `createOperationOutcome`, `logIncompleteOutcome`, `OutcomeConfig`, `OperationOutcome`, `AuditObserver`, `AuditOutcome`, `AuditOutcomeStatus`, `AuditFailure`, `AuditFailurePhase`, `AuditIsolation`, `UnrecordedWrite`, `AuditIncompleteError` (`modelName`, `operation`, `failures`, `unrecordedWrites`).
 - **Transactions**: `createTransactionAudit`, `TransactionAudit`, `settledIn`, `assertRecordsComplete`, `AuditRollbackError`.
 - **Utilities**: `createActorId`, `createEntityId`, `createAggregateId`, `unwrapId`, `IdValidationError`, `createAuditLogData`, `UNHANDLED` (for value serializers).
 - **Debug output**: logs through [`debug`](https://www.npmjs.com/package/debug) under the `db-audit-core` namespace (`DEBUG=db-audit-core`).
@@ -50,13 +50,15 @@ The adapter owns everything that touches the database: intercepting writes, read
 - **A `TransactionAudit` per transaction it owns** (`createTransactionAudit()`). Its `outcomes` collect the outcomes of the transaction's writes, and `poison(error)` records an audit failure that failed a write after the write ran (`dispatch` and `assertRecordsComplete` record their own; the adapter records any other). The adapter calls `assertCommittable()` between the transaction's body and its commit: it throws `AuditRollbackError` (`cause`: the first failure), and the transaction rolls back, even when the body caught the error. On a database that aborts a transaction on a failed statement (PostgreSQL), the adapter also checks before the commit that a transaction with a failed statement is still usable. It then ends the audit: `end(committed)` for an outermost transaction settles the outcomes, and `mergeInto(parent, committed)` for a nested one hands them to the parent. A nested transaction's audit failures stay its own.
 - **The handle thunk** passed to `resolve`, reading the adapter's own record of the active transaction. That record stays out of the `AuditContext`, which carries only the actor and request context.
 - **The re-entrancy flag** passed to `auditGate` as `withinAudit`, raised in the async flow of `dispatch` and of the observer, so that a write a callback issues through the handle it receives, or through the adapter's own client, reaches the gate as `reentrant`.
-- **One `OperationOutcome` per write of an audited model**, from `createOperationOutcome({ model, operation, unaudited? }, { observer })`, including writes the gate let run unaudited or rejected for a missing context; a write the gate finds `reentrant` has none. The adapter reports to it:
+- **One `OperationOutcome` per write of an audited model**, from `createOperationOutcome({ model, operation, isolation, unaudited? }, { observer })`, including writes the gate let run unaudited or rejected for a missing context; a write the gate finds `reentrant` has none. The adapter reports to it:
   - `fail(failure)`: `pre-fetch` (a read before the write failed), `diff-generation` (other work building the records failed before the write) and `row-identification` (`unidentified` rows the adapter could not identify). What each does to the operation is the adapter's choice, documented by it. `dispatch` reports a failure of `buildRecords` itself.
   - `reportResolveFailure(failure)`: one `id-resolver-call` or `enrichment` failure per `ResolveFailure`, the `sink` the adapter passes to `resolve`.
   - `reportUnrecordedWrite(write)`: a write left without a record because a read it depends on failed.
   - `settle(fate)` through `settledIn(audit, outcome, run)`: outside a transaction, once the write returns or throws; inside one, the outcome joins the audit's `outcomes` and is settled when the audit ends, `committed` only when both the write and the transaction were. An outcome added after the transaction settled is settled at once.
 
-  The observer is called once per write after it settles, with an `AuditOutcome` (`complete`, `incomplete`, `not-committed` or `unaudited`), the number of records a writer took, the `AuditFailure`s and the `UnrecordedWrite`s; a detached write reports once its write has finished. An observer that throws is logged. Without an observer, the failures of an `incomplete` outcome are logged to the console, except an `enrichment` failure, which lost no record.
+  `isolation` (`AuditIsolation`) is what the adapter knows of the transaction the write's reads and the write run in, the premise of accuracy that `complete` does not cover: `{ kind: 'no-transaction' }` when they share none, `{ kind: 'undeclared' }` in a transaction opened at a level not declared to the adapter, `{ kind: 'declared', level }` in one opened at a declared level, `level` being the adapter's name for it. The core compares no level. An adapter without isolation levels reports the first two only.
+
+  The observer is called once per write after it settles, with an `AuditOutcome` (`complete`, `incomplete`, `not-committed` or `unaudited`), the number of records a writer took, the `AuditFailure`s, the `UnrecordedWrite`s and the `isolation`; a detached write reports once its write has finished. An observer that throws is logged. Without an observer, the failures of an `incomplete` outcome are logged to the console, except an `enrichment` failure, which lost no record.
 
 ### Reference adapter
 
@@ -78,12 +80,19 @@ if (gate.kind === 'skip') {
 if (gate.kind === 'reentrant') {
   throw new AuditReentrantWriteError({ modelName: gate.modelName, operationModelName: model, operation: op });
 }
-const outcome = createOperationOutcome(
-  { model, operation: op, ...(gate.kind === 'unaudited' ? { unaudited: gate.reason } : {}) },
-  { observer: observe },
-);
+const outcomeIn = (scope: TransactionScope<TModelName> | undefined): OperationOutcome =>
+  createOperationOutcome(
+    {
+      model,
+      operation: op,
+      isolation: { kind: scope === undefined ? 'no-transaction' : 'undeclared' },
+      ...(gate.kind === 'unaudited' ? { unaudited: gate.reason } : {}),
+    },
+    { observer: observe },
+  );
 if (gate.kind !== 'audit') {
-  await settledIn(activeScope.getStore()?.audit, outcome, async () => {
+  const scope = activeScope.getStore();
+  await settledIn(scope?.audit, outcomeIn(scope), async () => {
     if (gate.kind === 'reject') {
       throw new AuditContextMissingError({ modelName: gate.modelName, operationModelName: model, operation: op });
     }
@@ -94,8 +103,9 @@ if (gate.kind !== 'audit') {
 const auditContext = gate.context;
 const mode = policy([model], policyConfig);
 
-await inScope(mode, (scope) =>
-  settledIn(scope?.audit, outcome, async () => {
+await inScope(mode, (scope) => {
+  const outcome = outcomeIn(scope);
+  return settledIn(scope?.audit, outcome, async () => {
     const plan = planFor(mode, scope !== undefined);
     if (plan === 'reject') {
       throw new AuditAtomicityError({ modelName: model, operation: op });
@@ -115,11 +125,11 @@ await inScope(mode, (scope) =>
       dispatch({ buildRecords, plan, auditContext, outcome }, dispatchConfig, runtimeOf(scope)),
     );
     assertRecordsComplete({ modelName: model, operation: op, mode }, outcome, scope?.audit);
-  }),
-);
+  });
+});
 ```
 
-Its writes have no nested writes, so the audited models of a write are its own model when the entity map declares it. `inScope` runs the write in the active transaction or opens one for an atomic write, so `planFor` never rejects there. `currentHandle` reads the active transaction from the adapter's own `AsyncLocalStorage`. The callbacks receive `auditedHandle`, whose reads go to `currentHandle()` and whose writes go through the adapter's own `create`, `update` and `delete`, so they reach the gate. `auditing` is a second `AsyncLocalStorage`, raised around `dispatch` and around the observer, which `withinAudit()` reads; `runtimeOf(scope)` gives the store as `baseHandle`, the scope's handle and audit as `transaction`, and a `detach` that adds the write to the set `flush()` waits for. `src/write-executor.ts` appends records to the handle's audit-log rows.
+Its writes have no nested writes, so the audited models of a write are its own model when the entity map declares it. `inScope` runs the write in the active transaction or opens one for an atomic write, so `planFor` never rejects there, and the outcome is created from the scope the write runs in, so its `isolation` follows the transaction that ran it. `currentHandle` reads the active transaction from the adapter's own `AsyncLocalStorage`. The callbacks receive `auditedHandle`, whose reads go to `currentHandle()` and whose writes go through the adapter's own `create`, `update` and `delete`, so they reach the gate. `auditing` is a second `AsyncLocalStorage`, raised around `dispatch` and around the observer, which `withinAudit()` reads; `runtimeOf(scope)` gives the store as `baseHandle`, the scope's handle and audit as `transaction`, and a `detach` that adds the write to the set `flush()` waits for. `src/write-executor.ts` appends records to the handle's audit-log rows.
 
 ### Mapping another ORM: Drizzle
 

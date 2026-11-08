@@ -97,6 +97,35 @@ describe('the write option', () => {
     expect(policy(['User'], policyConfig)).toBe('deferred');
     expect(policy(['Post'], policyConfig)).toBe('awaited');
   });
+
+  describe('write.isolationLevel', () => {
+    /** The levels a generated client for SQLite declares */
+    const sqlitePrisma = { ...Prisma, TransactionIsolationLevel: { Serializable: 'Serializable' } };
+    const withLevel = (isolationLevel: string | undefined, prisma: object = sqlitePrisma) => ({
+      ...withWrite({ mode: 'atomic', isolationLevel }),
+      Prisma: prisma as PrismaAuditExtensionOptions['Prisma'],
+    });
+
+    it('opens the transaction of an atomic write at a level of the generated client, and at its default when unset', () => {
+      expect(normalizeAuditOptions(withLevel('Serializable')).atomicIsolationLevel).toBe('Serializable');
+      expect(normalizeAuditOptions(withLevel(undefined)).atomicIsolationLevel).toBeUndefined();
+      expect(normalizeAuditOptions(withLevel(undefined, Prisma)).atomicIsolationLevel).toBeUndefined();
+    });
+
+    it("rejects a level the generated client's TransactionIsolationLevel does not hold, naming the levels it does", () => {
+      expect(() => normalizeAuditOptions(withLevel('RepeatableRead'))).toThrow(
+        "Configuration error: write.isolationLevel 'RepeatableRead' is not a level of the generated client's " +
+          'Prisma.TransactionIsolationLevel (Serializable).',
+      );
+    });
+
+    it('rejects a level when the Prisma namespace has no TransactionIsolationLevel', () => {
+      expect(() => normalizeAuditOptions(withLevel('Serializable', Prisma))).toThrow(
+        "Configuration error: write.isolationLevel 'Serializable' is not a level of the generated client's " +
+          'Prisma.TransactionIsolationLevel (none).',
+      );
+    });
+  });
 });
 
 describe('the models the audit rows are written to', () => {

@@ -16,7 +16,8 @@
  * rolls back with `AuditRollbackError` even when its callback caught the error. Every other write of
  * a model in the entity map, audited, run unaudited or rejected, has an outcome, settled once the
  * outermost transaction it runs in commits or rolls back, or, outside any, once the write returns
- * or throws.
+ * or throws. Its `isolation` is `undeclared` for a write in a transaction, explicit or implicit,
+ * which declares no isolation level, and `no-transaction` for one outside any.
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -32,6 +33,7 @@ import type {
   EntityMap,
   MutationAction,
   MutationEvent,
+  OperationOutcome,
   PolicyConfig,
   ResolveConfig,
   TransactionAudit,
@@ -262,12 +264,19 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
     if (gate.kind === 'reentrant') {
       throw new AuditReentrantWriteError({ modelName: gate.modelName, operationModelName: model, operation: op });
     }
-    const outcome = createOperationOutcome(
-      { model, operation: op, ...(gate.kind === 'unaudited' ? { unaudited: gate.reason } : {}) },
-      { observer: observe },
-    );
+    const outcomeIn = (scope: TransactionScope<TModelName> | undefined): OperationOutcome =>
+      createOperationOutcome(
+        {
+          model,
+          operation: op,
+          isolation: { kind: scope === undefined ? 'no-transaction' : 'undeclared' },
+          ...(gate.kind === 'unaudited' ? { unaudited: gate.reason } : {}),
+        },
+        { observer: observe },
+      );
     if (gate.kind !== 'audit') {
-      await settledIn(activeScope.getStore()?.audit, outcome, async () => {
+      const scope = activeScope.getStore();
+      await settledIn(scope?.audit, outcomeIn(scope), async () => {
         if (gate.kind === 'reject') {
           throw new AuditContextMissingError({ modelName: gate.modelName, operationModelName: model, operation: op });
         }
@@ -278,8 +287,9 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
     const auditContext = gate.context;
     const mode = policy([model], policyConfig);
 
-    await inScope(mode, (scope) =>
-      settledIn(scope?.audit, outcome, async () => {
+    await inScope(mode, (scope) => {
+      const outcome = outcomeIn(scope);
+      return settledIn(scope?.audit, outcome, async () => {
         const plan = planFor(mode, scope !== undefined);
         if (plan === 'reject') {
           throw new AuditAtomicityError({ modelName: model, operation: op });
@@ -299,8 +309,8 @@ export const createMemoryAuditAdapter = <TModelName extends string>(
           dispatch({ buildRecords, plan, auditContext, outcome }, dispatchConfig, runtimeOf(scope)),
         );
         assertRecordsComplete({ modelName: model, operation: op, mode }, outcome, scope?.audit);
-      }),
-    );
+      });
+    });
   };
 
   const requireRow = (handle: MemoryHandle<TModelName>, model: TModelName, identity: string): MemoryRow => {

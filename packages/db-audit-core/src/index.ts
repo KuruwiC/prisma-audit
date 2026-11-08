@@ -52,6 +52,7 @@ export { getGlobalSingleton } from './global-singleton.js';
 export type {
   AuditFailure,
   AuditFailurePhase,
+  AuditIsolation,
   AuditObserver,
   AuditOutcome,
   AuditOutcomeStatus,

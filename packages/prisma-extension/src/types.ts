@@ -91,16 +91,33 @@ export interface WriteConfig<TClient = unknown> {
    * `ROLLBACK`) while an audited operation of the same transaction is still running; awaiting the
    * operation is enough, since it resolves once its audit rows are written.
    *
-   * Atomicity only: the transaction runs at the client's default isolation level, so a write
-   * another transaction commits between the audit's read of the before state and the operation can
-   * still make the recorded before state or upsert action differ from what happened (at READ
-   * COMMITTED and at InnoDB's REPEATABLE READ). For a stronger isolation level, run the operation in
-   * your own `$transaction(fn, { isolationLevel })`, retrying on conflicts yourself. The transaction
+   * The audit's read of the before state and the write share the transaction the client opens,
+   * at `isolationLevel`, else at the client's default. At the default, a write another transaction
+   * commits between the read and the operation can still make the recorded before state or upsert
+   * action differ from what happened (at READ COMMITTED and at InnoDB's REPEATABLE READ). For a
+   * stronger isolation level, set `isolationLevel`, or run the operation in your own
+   * `$transaction(fn, { isolationLevel })`, retrying on conflicts yourself. The outcome's
+   * `isolation` reports the level the operation's transaction was declared with. The transaction
    * the client opens is bound by the client's interactive transaction limits. See the README.
    *
    * @default 'atomic'
    */
   mode?: WriteMode;
+  /**
+   * The isolation level the client opens the interactive transaction of an atomic write issued
+   * outside any transaction with: a value of the generated client's
+   * `Prisma.TransactionIsolationLevel`; `createAuditClient` throws for any other. Unset,
+   * the transaction runs at the client's default (`new PrismaClient({ transactionOptions })`, else
+   * the database's), which the audit does not see: the outcome's `isolation` is then `undeclared`;
+   * set, it is `declared` with this level. It does not apply to your own `$transaction`, whose
+   * `isolationLevel` option is the one reported for the writes in it, nor to a write outside any
+   * transaction the client opens none for (`no-transaction`): an `awaited` or `deferred` write,
+   * and one without an audit context, rejected or run unaudited.
+   *
+   * The library does not retry a transaction that fails on a serialization conflict or a deadlock
+   * (Prisma's `P2034`): whether running the operation again is safe depends on the caller.
+   */
+  isolationLevel?: string;
   /**
    * Custom audit log writer, replacing the default persistence step. It receives the records
    * and a context with the audit context, the client the write runs on (`handle`) and
@@ -138,6 +155,7 @@ export interface WriteConfig<TClient = unknown> {
 export type {
   AuditFailure,
   AuditFailurePhase,
+  AuditIsolation,
   AuditObserver,
   AuditOutcome,
   AuditOutcomeStatus,

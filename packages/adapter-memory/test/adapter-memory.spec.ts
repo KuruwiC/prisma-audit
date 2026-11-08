@@ -1,4 +1,4 @@
-import type { AuditActor, AuditObserver, AuditRecord, WriteMode } from '@kuruwic/db-audit-core';
+import type { AuditActor, AuditIsolation, AuditObserver, AuditRecord, WriteMode } from '@kuruwic/db-audit-core';
 import {
   AuditContextMissingError,
   AuditIncompleteError,
@@ -683,13 +683,14 @@ describe('transaction membership', () => {
       });
       return { adapter, observer };
     };
-    const outcomeWith = (status: 'incomplete' | 'not-committed') => ({
+    const outcomeWith = (status: 'incomplete' | 'not-committed', isolation: AuditIsolation) => ({
       model: 'User',
       operation: 'create',
       status,
       records: 0,
       failures: [{ phase: 'diff-generation', error: failure }],
       unrecordedWrites: [],
+      isolation,
     });
 
     it('deferred outside a transaction: keeps the write, reports it incomplete with the diff-generation failure to the observer, which takes the log, and writes no record', async () => {
@@ -700,7 +701,7 @@ describe('transaction membership', () => {
         await expect(withContext(() => adapter.create('User', { id: 'u1', name: 'Alice' }))).resolves.toBeUndefined();
         await adapter.flush();
 
-        expect(observer.mock.calls).toEqual([[outcomeWith('incomplete')]]);
+        expect(observer.mock.calls).toEqual([[outcomeWith('incomplete', { kind: 'no-transaction' })]]);
         expect(consoleError).not.toHaveBeenCalled();
       } finally {
         consoleError.mockRestore();
@@ -714,7 +715,7 @@ describe('transaction membership', () => {
 
       await expect(withContext(() => adapter.create('User', { id: 'u1', name: 'Alice' }))).rejects.toBe(failure);
 
-      expect(observer.mock.calls).toEqual([[outcomeWith('not-committed')]]);
+      expect(observer.mock.calls).toEqual([[outcomeWith('not-committed', { kind: 'undeclared' })]]);
       expect(adapter.store.find('User', 'u1')).toBeUndefined();
       expect(adapter.store.auditLogs()).toEqual([]);
     });
@@ -835,6 +836,7 @@ describe('a write a callback issues while the audit processes a write', () => {
             records: 0,
             failures: [{ phase: 'diff-generation', error: rejections[0] }],
             unrecordedWrites: [],
+            isolation: { kind: mode === 'atomic' || explicit ? 'undeclared' : 'no-transaction' },
           },
         ],
       ]);
@@ -1038,7 +1040,17 @@ describe('the outcome of each write', () => {
     await withContext(() => adapter.create('User', { id: 'u1', name: 'Alice' }));
 
     expect(observer.mock.calls).toEqual([
-      [{ model: 'User', operation: 'create', status: 'complete', records: 1, failures: [], unrecordedWrites: [] }],
+      [
+        {
+          model: 'User',
+          operation: 'create',
+          status: 'complete',
+          records: 1,
+          failures: [],
+          unrecordedWrites: [],
+          isolation: { kind: 'undeclared' },
+        },
+      ],
     ]);
   });
 
@@ -1085,6 +1097,7 @@ describe('the outcome of each write', () => {
               { phase: 'enrichment', enricher: 'aggregate', error: aggregateError },
             ],
             unrecordedWrites: [],
+            isolation: { kind: 'undeclared' },
           },
         ],
       ]);
@@ -1093,6 +1106,43 @@ describe('the outcome of each write', () => {
       ]);
     },
   );
+
+  describe('isolation', () => {
+    const isolationsOf = (observer: ReturnType<typeof vi.fn<AuditObserver>>) =>
+      observer.mock.calls.map(([{ isolation }]) => isolation);
+
+    it.each(['awaited', 'deferred'] as const)(
+      'is no-transaction for a %s write outside any transaction, whose read and write share none',
+      async (mode) => {
+        const observer = vi.fn<AuditObserver>();
+        const adapter = createAdapter({ observer, write: { mode } });
+
+        await withContext(() => adapter.create('User', { id: 'u1', name: 'Alice' }));
+        await adapter.flush();
+
+        expect(isolationsOf(observer)).toEqual([{ kind: 'no-transaction' }]);
+      },
+    );
+
+    it.each(['atomic', 'awaited', 'deferred'] as const)(
+      'is undeclared for a %s write in a transaction and in one nested in it',
+      async (mode) => {
+        const observer = vi.fn<AuditObserver>();
+        const adapter = createAdapter({ observer, write: { mode } });
+
+        await withContext(() =>
+          adapter.transaction(async () => {
+            await adapter.create('User', { id: 'u1', name: 'Alice' });
+            await adapter.transaction(async () => {
+              await adapter.create('User', { id: 'u2', name: 'Bob' });
+            });
+          }),
+        );
+
+        expect(isolationsOf(observer)).toEqual([{ kind: 'undeclared' }, { kind: 'undeclared' }]);
+      },
+    );
+  });
 
   it('is reported for each write of a transaction once the outermost one has committed, a nested one included', async () => {
     const observer = vi.fn<AuditObserver>();
@@ -1177,6 +1227,7 @@ describe('the outcome of each write', () => {
           records: 0,
           failures: [],
           unrecordedWrites: [],
+          isolation: { kind: 'no-transaction' },
         },
       ],
     ]);

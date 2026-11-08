@@ -85,6 +85,24 @@ export type AuditFailure =
 
 export type AuditFailurePhase = AuditFailure['phase'];
 
+/**
+ * What the adapter knows of the transaction an operation's reads and its write ran in, the premise
+ * the accuracy of its records rests on. The audit cannot observe whether a record is accurate:
+ * only whether the before state it read and the write it records ran in one transaction, and at
+ * which isolation level that transaction was declared to run.
+ *
+ * - `no-transaction`: the reads and the write ran in no common transaction. A write another
+ *   transaction commits between them can make a record differ from what happened.
+ * - `undeclared`: they ran in one transaction, at a level not declared to the adapter (the
+ *   database's or the client's default).
+ * - `declared`: they ran in one transaction opened at `level`, the adapter's name for the level, as
+ *   it was declared. What the level guarantees depends on the database.
+ */
+export type AuditIsolation =
+  | { readonly kind: 'no-transaction' }
+  | { readonly kind: 'undeclared' }
+  | { readonly kind: 'declared'; readonly level: string };
+
 interface AuditOutcomeFields {
   readonly model: string;
   readonly operation: string;
@@ -92,6 +110,7 @@ interface AuditOutcomeFields {
   readonly records: number;
   readonly failures: readonly AuditFailure[];
   readonly unrecordedWrites: readonly UnrecordedWrite[];
+  readonly isolation: AuditIsolation;
 }
 
 /**
@@ -99,7 +118,9 @@ interface AuditOutcomeFields {
  *
  * - `complete`: the operation committed and every record it produced was passed to a writer that
  *   resolved. Its failures, if any, dropped no record: a before state that could not be read, or an
- *   enricher that fell back.
+ *   enricher that fell back. It does not say the records are accurate: a write another transaction
+ *   commits between the audit's reads and the operation's write can make a record differ from what
+ *   happened. The premise of accuracy is `isolation`.
  * - `incomplete`: the operation committed without some of its records: a failure dropped them, or
  *   left a write without a record, or the write of the records failed, in which case how many the
  *   writer persisted is not known.
@@ -137,6 +158,7 @@ export interface OutcomeConfig {
 export interface OutcomeTarget {
   readonly model: string;
   readonly operation: string;
+  readonly isolation: AuditIsolation;
   /** Present for an operation that runs without going through the audit, and why */
   readonly unaudited?: 'no-context';
 }
@@ -223,7 +245,7 @@ export const logIncompleteOutcome: AuditObserver = (outcome) => {
 };
 
 export const createOperationOutcome = (target: OutcomeTarget, config: OutcomeConfig): OperationOutcome => {
-  const { model, operation, unaudited } = target;
+  const { model, operation, isolation, unaudited } = target;
   const observer = config.observer ?? logIncompleteOutcome;
   const failures: AuditFailure[] = [];
   const unrecordedWrites: UnrecordedWrite[] = [];
@@ -241,6 +263,7 @@ export const createOperationOutcome = (target: OutcomeTarget, config: OutcomeCon
       records: written ?? 0,
       failures: [...failures],
       unrecordedWrites: [...unrecordedWrites],
+      isolation,
     };
     if (settled === 'not-committed') {
       return { ...fields, status: 'not-committed' };

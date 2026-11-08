@@ -120,3 +120,24 @@ export const validateRecordOmittedFields = (
     }
   }
 };
+
+/**
+ * Throws when `isolationLevel`, `write.isolationLevel`, is not one of `levels`, the generated
+ * client's `Prisma.TransactionIsolationLevel`: Prisma would reject it when it opens the transaction
+ * of every atomic write, before the write reaches the audit
+ */
+export const validateIsolationLevel = (
+  isolationLevel: string | undefined,
+  levels: Readonly<Record<string, string>> | undefined,
+): void => {
+  if (isolationLevel === undefined) {
+    return;
+  }
+  const declared = Object.values(levels ?? {});
+  if (!declared.includes(isolationLevel)) {
+    throw new Error(
+      `Configuration error: write.isolationLevel '${isolationLevel}' is not a level of the generated client's ` +
+        `Prisma.TransactionIsolationLevel (${declared.length > 0 ? declared.join(', ') : 'none'}).`,
+    );
+  }
+};

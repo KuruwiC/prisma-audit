@@ -131,7 +131,14 @@ const failuresOf = (deps: AuditPipelineDependencies): AuditFailure[] => {
 
 /** Runs the operation with an outcome of its own, whose failures `failuresOf(deps)` lists */
 const runOperation = (input: Omit<AuditedOperationInput, 'outcome'>, deps: AuditPipelineDependencies) => {
-  const outcome = createOperationOutcome({ model: input.operation.model, operation: input.operation.action }, {});
+  const outcome = createOperationOutcome(
+    {
+      model: input.operation.model,
+      operation: input.operation.action,
+      isolation: { kind: input.transaction === undefined ? 'no-transaction' : 'undeclared' },
+    },
+    {},
+  );
   const failures = failuresOf(deps);
   return runAuditedOperation(
     {

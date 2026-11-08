@@ -17,6 +17,7 @@ export const activeTransactionOf = (
       boundClient ??= bind(transaction);
       return boundClient;
     },
+    isolationLevel: undefined,
     audit,
     runOperation: (run) => run(audit),
     noteStatementFailed: () => {},

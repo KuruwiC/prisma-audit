@@ -82,6 +82,8 @@ export interface RecipeConfig {
    * decides the write mode again from the arguments that reach it.
    */
   readonly isAtomicWrite: (model: string, action: string, args: unknown) => boolean;
+  /** The isolation level of the transaction of an atomic write; undefined for the client's default */
+  readonly atomicIsolationLevel: string | undefined;
 }
 
 interface RecipeCall {
@@ -199,13 +201,18 @@ type OpenTransactionOn = (
 ) => Promise<unknown>;
 
 const createRecipeFactory = (config: RecipeConfig, openTransactionOn: OpenTransactionOn) => {
+  const atomicTransactionOptions =
+    config.atomicIsolationLevel === undefined ? [] : [{ isolationLevel: config.atomicIsolationLevel }];
+
   const run = async (recipe: Recipe): Promise<unknown> => {
     const rejection = rejectionOf(recipe);
     if (rejection !== undefined) {
       throw rejection;
     }
     return recipe.transaction === undefined && isAtomicWriteRecipe(recipe, config)
-      ? await openTransactionOn(recipe, [], (transaction) => startOn(recipe, transaction.client, transaction))
+      ? await openTransactionOn(recipe, atomicTransactionOptions, (transaction) =>
+          startOn(recipe, transaction.client, transaction),
+        )
       : await startOn(recipe, recipe.target, recipe.transaction);
   };
 

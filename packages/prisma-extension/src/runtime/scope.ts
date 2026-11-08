@@ -24,6 +24,12 @@ export interface ActiveTransaction {
    */
   readonly boundClient: PrismaHandle;
   /**
+   * The isolation level the outermost transaction of the connection was opened with, as its
+   * options declared it; undefined when they declared none, so that it runs at the database's or
+   * the client's default. A transaction nested in it has the same.
+   */
+  readonly isolationLevel: string | undefined;
+  /**
    * The core audit of the innermost level open now on the transaction's connection, the transaction
    * or one nested in it, which its owner ends; an operation that writes no audit rows settles its
    * outcome on it
