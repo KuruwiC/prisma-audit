@@ -58,7 +58,10 @@ export interface TransactionRuntime<TDbHandle = unknown> {
  * @template TDbHandle - Database handle type the adapter passes
  */
 export interface WriteContext<TDbHandle = unknown> {
-  /** Audit context of the operation the records belong to */
+  /**
+   * Audit context of the operation the records belong to, as it was set: its `request` is not
+   * redacted, unlike each record's `requestContext`
+   */
   readonly auditContext: AuditContext;
   /**
    * Database handle the write runs on: the handle of the operation's transaction when the

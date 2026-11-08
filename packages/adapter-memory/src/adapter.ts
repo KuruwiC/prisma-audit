@@ -77,7 +77,7 @@ export interface MemoryAuditOptions<TModelName extends string> {
   };
   /** Fields left out of an update's change set, for every entity without its own `diffExcludeFields` */
   readonly diffExcludeFields?: readonly string[];
-  /** Fields masked in the stored states and changes, on top of the built-in sensitive fields */
+  /** Fields masked in the stored states, changes and contexts, on top of the built-in sensitive fields */
   readonly redactFields?: readonly string[];
   /** Serializers applied before the built-in conversions (BigInt, Date) */
   readonly serializers?: readonly ValueSerializer[];

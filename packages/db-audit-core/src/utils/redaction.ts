@@ -118,6 +118,10 @@ const processObjectEntry = (
 
 /**
  * Create a redactor of the built-in sensitive fields and `fields`
+ *
+ * @remarks
+ * Plain objects and arrays, the shape of serialized (JSON-safe) data, are walked and come back as
+ * new containers; the input is never changed. Any other object is neither traversed nor copied.
  */
 export const createRedactor = (fields: readonly string[] = []): Redactor => {
   const sensitiveFields = new Set([...DEFAULT_SENSITIVE_FIELDS, ...fields]);
@@ -162,13 +166,3 @@ export const createRedactor = (fields: readonly string[] = []): Redactor => {
 
   return redactData;
 };
-
-/**
- * Redact the built-in sensitive fields and `fields` of a state or a change set
- *
- * @remarks
- * Plain objects and arrays, the shape of serialized (JSON-safe) data, are walked and come back as
- * new containers; the input is never changed. Any other object is neither traversed nor copied.
- */
-export const redactSensitiveData = (data: unknown, fields: readonly string[] = []): unknown =>
-  createRedactor(fields)(data);

@@ -191,7 +191,7 @@ writer?(records: AuditRecord[], context: WriteContext<TClient>): Promise<void>
 // WriteContext: { auditContext, handle, inTransaction, defaultWrite }
 ```
 
-Replaces the default write. `defaultWrite(records)` is the default write on `handle`.
+Replaces the default write. `defaultWrite(records)` is the default write on `handle`. The records hold the contexts redacted; `auditContext` is the audit context as it was set, its `request` unredacted.
 
 - Inside a transaction (yours, a batch's, or the one the client opens for an atomic write), under every mode, `handle` is the transaction's client (typed as the client), `inTransaction` is `true`, and the writer runs before the operation returns. A rollback undoes what the writer wrote through `handle` or `defaultWrite`, and nothing else.
 - Outside any transaction, `handle` is the audited client and `inTransaction` is `false`. Under `awaited` the writer runs after the operation has committed; under `deferred` it runs detached. A writer that needs several statements to be atomic wraps them in `handle.$transaction(...)` exactly when `inTransaction` is `false`.
@@ -356,7 +356,7 @@ When the Prisma version cannot be determined, the audit reads a query's `select`
 
 ### `redactFields`
 
-Fields masked on top of the built-in sensitive fields (`password`, `passwordHash`, `hashedPassword`, `salt`, `token`, `accessToken`, `refreshToken`, `apiKey`, `secret`, `secretKey`, `privateKey`, `ssn`, `socialSecurityNumber`, `creditCard`, `cardNumber`, `cvv`, `pin`). A field matches by exact, case-sensitive name at any depth of `before`, `after` and `changes`, after the serializers ran. A field cannot be in both `redactFields` and `diffExcludeFields`. The enriched contexts and the request context are not redacted.
+Fields masked on top of the built-in sensitive fields (`password`, `passwordHash`, `hashedPassword`, `salt`, `token`, `accessToken`, `refreshToken`, `apiKey`, `secret`, `secretKey`, `privateKey`, `ssn`, `socialSecurityNumber`, `creditCard`, `cardNumber`, `cvv`, `pin`). A field matches by exact, case-sensitive name at any depth of `before`, `after`, `changes`, the enriched contexts (`actorContext`, `entityContext`, `aggregateContext`) and the request context, after the serializers ran. Only the keys of the structure the serializers output are matched: a serializer that turns an object into a string hides the keys inside it, which are stored in clear. A field cannot be in both `redactFields` and `diffExcludeFields`.
 
 ```json
 { "password": { "redacted": true, "hadValue": true } }

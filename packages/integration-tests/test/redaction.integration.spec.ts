@@ -1,13 +1,17 @@
 /**
  * Integration Tests: PII Redaction
  *
- * The client configures no `redactFields`: the built-in sensitive fields, `password` among them,
- * are masked without it.
+ * The shared client configures no `redactFields`: the built-in sensitive fields, `password` among
+ * them, are masked without it. The tests of the contexts open their own client with `redactFields`.
  */
 
-import type { AuditContext } from '@kuruwic/db-audit-core';
-import { describe, expect, it } from 'vitest';
-import { setupTestContext } from './helpers/setup.js';
+import type { AuditContext, ValueSerializer } from '@kuruwic/db-audit-core';
+import { createAsyncLocalStorageProvider, UNHANDLED } from '@kuruwic/db-audit-core';
+import { createAuditClient, defineEntity } from '@kuruwic/prisma-audit';
+import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
+import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
+import { afterEach, describe, expect, it } from 'vitest';
+import { createBasePrisma, setupTestContext } from './helpers/setup.js';
 
 describe('PII Redaction Integration: built-in sensitive fields with no redactFields configured', () => {
   const context = setupTestContext();
@@ -186,6 +190,113 @@ describe('PII Redaction Integration: built-in sensitive fields with no redactFie
     expect(passwordOf(clearedPassword?.changes)).toEqual({
       old: { redacted: true, hadValue: true },
       new: null,
+    });
+  });
+});
+
+describe('PII Redaction Integration: the enriched contexts and the request context', () => {
+  setupTestContext();
+  const openedBaseClients: PrismaClient[] = [];
+
+  afterEach(async () => {
+    await Promise.all(openedBaseClients.splice(0).map((client) => client.$disconnect()));
+  });
+
+  /**
+   * An audited client on a fresh Prisma client whose actor, entity, aggregate and request contexts
+   * are each `contextOf` their label, under `redactFields: ['nickname']`
+   */
+  const openClient = (contextOf: (label: string) => unknown, serializers?: readonly ValueSerializer[]) => {
+    const basePrisma = createBasePrisma();
+    openedBaseClients.push(basePrisma);
+    const provider = createAsyncLocalStorageProvider();
+    const prisma = createAuditClient(basePrisma, {
+      Prisma,
+      schema: auditSchema,
+      contextProvider: provider,
+      write: { mode: 'awaited' },
+      redactFields: ['nickname'],
+      serializers,
+      entities: {
+        User: defineEntity({
+          type: 'User',
+          entityContext: { enricher: async (rows) => rows.map(() => contextOf('entity')) },
+          selfAggregate: { aggregateContext: { enricher: async (rows) => rows.map(() => contextOf('aggregate')) } },
+        }),
+      },
+      actorContext: { enricher: async () => contextOf('actor') },
+    });
+
+    const createUser = (request: Record<string, unknown>) =>
+      provider.runAsync({ actor: { category: 'model', type: 'User', id: 'admin-1' }, request }, () =>
+        prisma.user.create({ data: { email: 'contexts@example.com', name: 'Contexts' } }),
+      );
+
+    const storedContexts = async (userId: string) => {
+      const log = await basePrisma.auditLog.findFirstOrThrow({ where: { entityType: 'User', entityId: userId } });
+      return {
+        actor: log.actorContext,
+        entity: log.entityContext,
+        aggregate: log.aggregateContext,
+        request: log.requestContext,
+      };
+    };
+
+    return { createUser, storedContexts };
+  };
+
+  it('masks the built-in sensitive fields and redactFields at any depth of each context after the serializers ran, keeping the serialized BigInt and Date values', async () => {
+    class Device {
+      constructor(
+        readonly secret: string,
+        readonly balance: bigint,
+      ) {}
+    }
+    const contextOf = (label: string) => ({
+      label,
+      token: `${label}-token`,
+      seenAt: new Date('2025-06-01T00:00:00.000Z'),
+      session: { apiKey: `${label}-key`, nickname: 'kuro', devices: [new Device(`${label}-secret`, 7n)] },
+    });
+    const { createUser, storedContexts } = openClient(contextOf);
+
+    const user = await createUser(contextOf('request'));
+
+    const redacted = { redacted: true, hadValue: true };
+    const stored = (label: string) => ({
+      label,
+      token: redacted,
+      seenAt: '2025-06-01T00:00:00.000Z',
+      session: { apiKey: redacted, nickname: redacted, devices: [{ secret: redacted, balance: '7' }] },
+    });
+    expect(await storedContexts(user.id)).toEqual({
+      actor: stored('actor'),
+      entity: stored('entity'),
+      aggregate: stored('aggregate'),
+      request: stored('request'),
+    });
+  });
+
+  it('stores in clear the keys inside a context value a serializer turns into a string', async () => {
+    class Session {
+      constructor(readonly token: string) {}
+    }
+    const contextOf = (label: string) => ({ token: `${label}-token`, session: new Session(`${label}-session`) });
+    const { createUser, storedContexts } = openClient(contextOf, [
+      (value) => (value instanceof Session ? JSON.stringify(value) : UNHANDLED),
+    ]);
+
+    const user = await createUser(contextOf('request'));
+
+    const stored = (label: string) => ({
+      token: { redacted: true, hadValue: true },
+      session: `{"token":"${label}-session"}`,
+    });
+    expect(await storedContexts(user.id)).toEqual({
+      actor: stored('actor'),
+      entity: stored('entity'),
+      aggregate: stored('aggregate'),
+      request: stored('request'),
     });
   });
 });

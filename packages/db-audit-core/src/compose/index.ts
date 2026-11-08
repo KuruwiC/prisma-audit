@@ -4,7 +4,7 @@ import { createActorId, createAggregateId, createEntityId } from '../domain/bran
 import { type AuditRecord, aggregateRootKey, type ResolvedEvent } from '../domain/mutation-event.js';
 import type { AuditContext } from '../types.js';
 import { createDiffCalculator, type DiffResult } from '../utils/diff-calculator.js';
-import { maskChanges, maskColumns, redactSensitiveData } from '../utils/redaction.js';
+import { createRedactor, maskChanges, maskColumns } from '../utils/redaction.js';
 import { removeRelations } from '../utils/remove-relations.js';
 import { serializeForAuditJson, type ValueSerializer } from '../utils/serialization.js';
 
@@ -25,7 +25,7 @@ export interface ComposeConfig<TModelName extends string = string> {
   readonly entity: (model: TModelName) => EntityComposeConfig | undefined;
   /** Fields excluded from change tracking for every entity without its own list. */
   readonly diffExcludeFields: readonly string[];
-  /** Fields masked in every stored state and change set, on top of the built-in sensitive fields. */
+  /** Fields masked in every stored state, change set and context, on top of the built-in sensitive fields. */
   readonly redactFields: readonly string[];
   /** Serializers applied before the built-in conversions (BigInt, Date) to every stored value. */
   readonly serializers?: readonly ValueSerializer[];
@@ -50,7 +50,7 @@ interface RecordStates {
   readonly changes: DiffResult;
 }
 
-/** The states as stored: JSON-safe plain data, the output of the serializer */
+/** The states as stored: JSON-safe plain data, serialized and redacted */
 interface StoredStates {
   readonly before: unknown;
   readonly after: unknown;
@@ -61,24 +61,27 @@ const isRecordOrNullish = (value: unknown): value is Record<string, unknown> | n
   return value === null || value === undefined || (typeof value === 'object' && !Array.isArray(value));
 };
 
-/**
- * Serialize the states with the custom serializers first, so a class instance among the column
- * values reaches the redactor as the plain data stored for it.
- */
-const serializeStates = (states: RecordStates, serializers?: readonly ValueSerializer[]): StoredStates => ({
-  before: serializeForAuditJson(states.before, serializers),
-  after: serializeForAuditJson(states.after, serializers),
-  changes: serializeForAuditJson(states.changes, serializers),
-});
+type ToStored = (value: unknown) => unknown;
 
 /**
- * Redact the stored states. `redactSensitiveData` preserves the structure of its input; the guards
- * turn a state that is not a record, which the redactor cannot match by key, into an error instead
- * of storing it.
+ * Serializes with the custom serializers first, so a class instance reaches the redactor as the
+ * plain data stored for it, then redacts the built-in sensitive fields and `redactFields` by key.
  */
-const redactStates = (states: StoredStates, redactFields: readonly string[]): StoredStates => {
-  const before = redactSensitiveData(states.before, redactFields);
-  const after = redactSensitiveData(states.after, redactFields);
+const createToStored = ({
+  redactFields,
+  serializers,
+}: Pick<ComposeConfig, 'redactFields' | 'serializers'>): ToStored => {
+  const redact = createRedactor(redactFields);
+  return (value) => redact(serializeForAuditJson(value, serializers));
+};
+
+/**
+ * The guards turn a state that is not a record, which the redactor cannot match by key, into an
+ * error instead of storing it.
+ */
+const toStoredStates = (states: RecordStates, toStored: ToStored): StoredStates => {
+  const before = toStored(states.before);
+  const after = toStored(states.after);
 
   if (!isRecordOrNullish(before) || !isRecordOrNullish(after)) {
     throw new Error('[db-audit-core] Redaction produced unexpected type');
@@ -86,7 +89,7 @@ const redactStates = (states: StoredStates, redactFields: readonly string[]): St
 
   let changes: unknown = null;
   if (states.changes) {
-    changes = redactSensitiveData(states.changes, redactFields);
+    changes = toStored(states.changes);
     if (!isRecordOrNullish(changes)) {
       throw new Error('[db-audit-core] Redaction of changes produced unexpected type');
     }
@@ -94,6 +97,18 @@ const redactStates = (states: StoredStates, redactFields: readonly string[]): St
 
   return { before: before ?? null, after: after ?? null, changes };
 };
+
+/**
+ * Only the contexts go through `toStored`: the states arrive stored, `createdAt` is a DateTime
+ * column, and the ids and categories are plain strings.
+ */
+const withStoredContexts = (record: AuditRecord, toStored: ToStored): AuditRecord => ({
+  ...record,
+  actorContext: toStored(record.actorContext),
+  entityContext: toStored(record.entityContext),
+  aggregateContext: toStored(record.aggregateContext),
+  requestContext: toStored(record.requestContext),
+});
 
 /** A copy of the stored states that shares no object with them, for one more record of the same event */
 const copyStates = (states: StoredStates): StoredStates => structuredClone(states);
@@ -112,19 +127,6 @@ const changedOnlyExcludedFields = (changes: DiffResult, before: State): boolean 
 
   return !changes || Object.keys(changes).length === 0;
 };
-
-/**
- * Serialize the contexts and request metadata so BigInt and Date values in them never reach the
- * database driver; the states arrive serialized. `createdAt` is a DateTime column and the ids and
- * categories are plain strings, so they pass through.
- */
-const serializeContexts = (record: AuditRecord, serializers?: readonly ValueSerializer[]): AuditRecord => ({
-  ...record,
-  actorContext: serializeForAuditJson(record.actorContext, serializers),
-  entityContext: serializeForAuditJson(record.entityContext, serializers),
-  aggregateContext: serializeForAuditJson(record.aggregateContext, serializers),
-  requestContext: serializeForAuditJson(record.requestContext, serializers),
-});
 
 const resolveStates = <TModelName extends string>(
   event: ResolvedEvent<TModelName>,
@@ -155,6 +157,7 @@ const resolveStates = <TModelName extends string>(
 const composeEvent = <TModelName extends string>(
   event: ResolvedEvent<TModelName>,
   ambient: ComposeAmbient<TModelName>,
+  toStored: ToStored,
   now: Date,
 ): AuditRecord[] => {
   const { auditContext, config } = ambient;
@@ -169,14 +172,13 @@ const composeEvent = <TModelName extends string>(
     return [];
   }
 
-  const serialized = serializeStates(states, config.serializers);
-  const stored = redactStates(serialized, config.redactFields);
+  const stored = toStoredStates(states, toStored);
   const requestContext = auditContext.request || null;
 
   // Each root's record holds its own states, so a writer that changes one record leaves the others as composed
   return event.roots.map((root, index) => {
     const recordStates = index === 0 ? stored : copyStates(stored);
-    return serializeContexts(
+    return withStoredContexts(
       {
         actorCategory: auditContext.actor.category,
         actorType: auditContext.actor.type,
@@ -202,7 +204,7 @@ const composeEvent = <TModelName extends string>(
         requestContext,
         createdAt: now,
       },
-      config.serializers,
+      toStored,
     );
   });
 };
@@ -220,4 +222,7 @@ export const compose = <TModelName extends string>(
   events: readonly ResolvedEvent<TModelName>[],
   ambient: ComposeAmbient<TModelName>,
   now: Date,
-): AuditRecord[] => events.flatMap((event) => composeEvent(event, ambient, now));
+): AuditRecord[] => {
+  const toStored = createToStored(ambient.config);
+  return events.flatMap((event) => composeEvent(event, ambient, toStored, now));
+};

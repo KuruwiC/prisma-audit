@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createRedactor, type RedactedFieldInfo, redactSensitiveData } from '../../src/utils/redaction.js';
+import { createRedactor, type RedactedFieldInfo } from '../../src/utils/redaction.js';
 
 const deepFreeze = <T>(value: T): T => {
   if (value !== null && typeof value === 'object') {
@@ -213,25 +213,6 @@ describe('non-plain objects', () => {
   });
 });
 
-describe('redactSensitiveData', () => {
-  it('should redact the given fields on top of the built-in ones', () => {
-    const data = { password: 'secret', customField: 'sensitive' };
-
-    const redacted = redactSensitiveData(data, ['customField']) as Record<string, unknown>;
-
-    expect(redacted).toEqual({
-      password: {
-        redacted: true,
-        hadValue: true,
-      } satisfies RedactedFieldInfo,
-      customField: {
-        redacted: true,
-        hadValue: true,
-      } satisfies RedactedFieldInfo,
-    });
-  });
-});
-
 describe('edge cases', () => {
   it('should handle empty objects', () => {
     const redactor = createRedactor();
@@ -417,7 +398,7 @@ describe('redaction metadata', () => {
   });
 });
 
-describe('redactSensitiveData with values JSON cannot hold', () => {
+describe('createRedactor with values JSON cannot hold', () => {
   it('should keep BigInt values and redact beside them', () => {
     const data = {
       id: 123n,
@@ -425,7 +406,7 @@ describe('redactSensitiveData with values JSON cannot hold', () => {
       password: 'secret',
     };
 
-    const redacted = redactSensitiveData(data) as Record<string, unknown>;
+    const redacted = createRedactor()(data) as Record<string, unknown>;
 
     expect(redacted.id).toBe(123n);
     expect(redacted.largeNumber).toBe(9007199254740991n);

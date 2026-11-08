@@ -235,9 +235,10 @@ export interface PrismaAuditExtensionOptions<TModelName extends string = string,
    */
   diffExcludeFields?: readonly string[];
   /**
-   * Fields masked in every stored state and change set, on top of the built-in sensitive fields
-   * (`password`, `token`, `apiKey` and the like), which are always masked. The enrichment contexts
-   * and the request context are stored as they are, unmasked.
+   * Fields masked in every stored state, change set and context (the enriched contexts and the
+   * request context), on top of the built-in sensitive fields (`password`, `token`, `apiKey` and the
+   * like), which are always masked. A field matches by name at any depth of the structure the
+   * serializers output: the keys inside a value a serializer turns into a string are not masked.
    *
    * @default []
    */

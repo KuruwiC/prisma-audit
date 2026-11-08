@@ -362,14 +362,14 @@ An enricher reads through the client it receives. A write of an audited model fr
 
 ## Redaction
 
-The stored `before`, `after` and `changes` always redact these fields: `password`, `passwordHash`, `hashedPassword`, `salt`, `token`, `accessToken`, `refreshToken`, `apiKey`, `secret`, `secretKey`, `privateKey`, `ssn`, `socialSecurityNumber`, `creditCard`, `cardNumber`, `cvv`, `pin`. Add others with `redactFields`.
+The stored `before`, `after` and `changes`, the enriched contexts and the request context always redact these fields: `password`, `passwordHash`, `hashedPassword`, `salt`, `token`, `accessToken`, `refreshToken`, `apiKey`, `secret`, `secretKey`, `privateKey`, `ssn`, `socialSecurityNumber`, `creditCard`, `cardNumber`, `cvv`, `pin`. Add others with `redactFields`.
 
 ```typescript
 // Stored
 { password: { redacted: true, hadValue: true }, email: "user@example.com" }
 ```
 
-The enriched contexts and the request context are stored as your enrichers and context provider return them, without redaction.
+A field matches by name at any depth of the structure the [serializers](packages/prisma-extension/README.md#serializers) output. A serializer that turns an object into a string hides its keys from redaction: `{ session: { token: "t" } }` stores the token masked, but a serializer that returns `JSON.stringify(session)` stores it in clear.
 
 A field a client-level `omit` hides (`new PrismaClient({ omit: { user: { password: true } } })`) is left out of the audit logs. To record it masked, list it on the entity: `defineEntity({ type: "User", recordOmittedFields: ["password"] })`. See [`recordOmittedFields`](packages/prisma-extension/README.md#recordomittedfields).
 

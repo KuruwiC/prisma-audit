@@ -50,6 +50,29 @@ const composeOne = (resolved: ResolvedEvent, config?: Partial<ComposeConfig>) =>
   return records[0] as NonNullable<(typeof records)[0]>;
 };
 
+const contextFields = ['actorContext', 'entityContext', 'aggregateContext', 'requestContext'] as const;
+
+/** Composes the record of a create whose context `field` is `context`, every other context null */
+const composeWithContext = (
+  field: (typeof contextFields)[number],
+  context: Record<string, unknown>,
+  config?: Partial<ComposeConfig>,
+) => {
+  const resolved = event({
+    actorContext: field === 'actorContext' ? context : null,
+    entityContext: field === 'entityContext' ? context : null,
+    aggregateContexts: new Map(field === 'aggregateContext' ? [['model:Post:post-1', context]] : []),
+  });
+  const withRequest: ComposeAmbient = {
+    ...ambient(config),
+    auditContext: { actor: auditContext.actor, ...(field === 'requestContext' ? { request: context } : {}) },
+  };
+
+  const records = compose([resolved], withRequest, now);
+  expect(records).toHaveLength(1);
+  return records[0] as NonNullable<(typeof records)[0]>;
+};
+
 describe('compose', () => {
   describe('records per event', () => {
     it('yields no record for a model without entity configuration', () => {
@@ -421,6 +444,59 @@ describe('compose', () => {
       });
     });
 
+    describe.each(contextFields)('in the %s', (field) => {
+      it('redacts the built-in sensitive fields and redactFields at any depth', () => {
+        const context = {
+          token: 'top',
+          plan: 'pro',
+          session: { apiKey: 'nested', nickname: 'kuro', devices: [{ secret: 'in-array', model: 'phone' }] },
+        };
+
+        const record = composeWithContext(field, context, { redactFields: ['nickname'] });
+
+        const redacted = { redacted: true, hadValue: true };
+        expect(record[field]).toEqual({
+          token: redacted,
+          plan: 'pro',
+          session: { apiKey: redacted, nickname: redacted, devices: [{ secret: redacted, model: 'phone' }] },
+        });
+      });
+
+      it('redacts after serializing: a sensitive key of a class instance is masked, and BigInt and Date values are kept as strings', () => {
+        class Session {
+          constructor(readonly token: string) {}
+        }
+        const context = {
+          seenAt: new Date('2025-06-01T00:00:00.000Z'),
+          session: new Session('plain'),
+          wallet: { balance: 999n, pin: 1234n, secret: new Date('2025-07-01T00:00:00.000Z') },
+        };
+
+        const record = composeWithContext(field, context);
+
+        const redacted = { redacted: true, hadValue: true };
+        expect(record[field]).toEqual({
+          seenAt: '2025-06-01T00:00:00.000Z',
+          session: { token: redacted },
+          wallet: { balance: '999', pin: redacted, secret: redacted },
+        });
+      });
+
+      it('leaves the keys inside a value a custom serializer turns into a string unredacted', () => {
+        class Session {
+          constructor(readonly token: string) {}
+        }
+
+        const record = composeWithContext(
+          field,
+          { session: new Session('plain') },
+          { serializers: [(value) => (value instanceof Session ? JSON.stringify(value) : UNHANDLED)] },
+        );
+
+        expect(record[field]).toEqual({ session: '{"token":"plain"}' });
+      });
+    });
+
     it('throws when a custom serializer turns a whole state into a value that is not a record', () => {
       const isState = (value: unknown) => typeof value === 'object' && value !== null && 'password' in value;
       const config: Partial<ComposeConfig> = {
@@ -572,34 +648,6 @@ describe('compose', () => {
       expect(record.before).toEqual({ id: 'tx-1', amount: '50' });
       expect(record.after).toEqual({ id: 'tx-1', amount: '100' });
       expect(record.changes).toEqual({ amount: { old: '50', new: '100' } });
-    });
-
-    it('serializes BigInt and Date values in every context field', () => {
-      const lastLogin = new Date('2025-06-01T00:00:00.000Z');
-      const resolved = event({
-        actorContext: { walletId: 999n, lastLogin },
-        entityContext: { blockNumber: 12345n },
-        aggregateContexts: new Map([['model:Post:post-1', { total: 7n }]]),
-      });
-      const withBigIntRequest: ComposeAmbient = {
-        ...ambient(),
-        auditContext: { actor: auditContext.actor, request: { traceId: 42n } },
-      };
-
-      const record = compose([resolved], withBigIntRequest, now)[0];
-
-      expect(record?.actorContext).toEqual({ walletId: '999', lastLogin: '2025-06-01T00:00:00.000Z' });
-      expect(record?.entityContext).toEqual({ blockNumber: '12345' });
-      expect(record?.aggregateContext).toEqual({ total: '7' });
-      expect(record?.requestContext).toEqual({ traceId: '42' });
-    });
-
-    it('applies the serializers to the contexts', () => {
-      const record = composeOne(event({ actorContext: { data: new Uint8Array([1, 2, 3]) } }), {
-        serializers: [(value) => (value instanceof Uint8Array ? `bytes:${value.length}` : UNHANDLED)],
-      });
-
-      expect(record.actorContext).toEqual({ data: 'bytes:3' });
     });
 
     it('applies the custom serializers to the column values of the states and changes', () => {
