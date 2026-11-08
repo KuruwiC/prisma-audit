@@ -1,12 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ENRICHMENT_TIMEOUTS } from '../../src/constants.js';
 import { runBatchEnricher, runEnricher } from '../../src/enrichment/run-enricher.js';
+import type { EnricherOnError } from '../../src/enrichment/types.js';
 import { AuditReentrantWriteError, RejectedWriteError } from '../../src/policy/audit-gate.js';
 
 afterEach(() => {
   vi.restoreAllMocks();
   vi.useRealTimers();
 });
+
+const noReport = (): void => {};
 
 const neverSettles = () => new Promise<never>(() => {});
 
@@ -15,24 +18,24 @@ describe('runEnricher', () => {
     const config = {
       enricher: async (input: { id: string }) => ({ enriched: input.id }),
     };
-    const result = await runEnricher(config, { id: 'user-1' }, null, 5000);
+    const result = await runEnricher(config, { id: 'user-1' }, null, noReport, 5000);
     expect(result).toEqual({ enriched: 'user-1' });
   });
 
   it('should return null when config is undefined', async () => {
-    const result = await runEnricher(undefined, { id: 'user-1' }, null, 5000);
+    const result = await runEnricher(undefined, { id: 'user-1' }, null, noReport, 5000);
     expect(result).toBeNull();
   });
 
   it('should return null when enricher is undefined', async () => {
-    const result = await runEnricher({} as never, { id: 'user-1' }, null, 5000);
+    const result = await runEnricher({} as never, { id: 'user-1' }, null, noReport, 5000);
     expect(result).toBeNull();
   });
 
   it('should pass projection-style meta through to the enricher', async () => {
     const meta = { aggregateType: 'User', aggregateCategory: 'model', aggregateIds: ['user-1'] };
     const enricher = vi.fn().mockResolvedValue({ enriched: true });
-    const result = await runEnricher({ enricher }, { id: 'user-1' }, 'prisma-client', 5000, meta);
+    const result = await runEnricher({ enricher }, { id: 'user-1' }, 'prisma-client', noReport, 5000, meta);
     expect(result).toEqual({ enriched: true });
     expect(enricher).toHaveBeenCalledWith({ id: 'user-1' }, 'prisma-client', meta);
   });
@@ -44,7 +47,7 @@ describe('runEnricher', () => {
           throw new Error('enricher failed');
         },
       };
-      await expect(runEnricher(config, {}, null, 5000)).rejects.toThrow('enricher failed');
+      await expect(runEnricher(config, {}, null, noReport, 5000)).rejects.toThrow('enricher failed');
     });
 
     it("should re-throw enricher error when onError is 'throw', even with a fallback", async () => {
@@ -55,7 +58,7 @@ describe('runEnricher', () => {
         onError: 'throw' as const,
         fallback: { default: true },
       };
-      await expect(runEnricher(config, {}, null, 5000)).rejects.toThrow('enricher failed');
+      await expect(runEnricher(config, {}, null, noReport, 5000)).rejects.toThrow('enricher failed');
     });
   });
 
@@ -69,7 +72,7 @@ describe('runEnricher', () => {
         onError: 'log' as const,
         fallback: { default: true },
       };
-      const result = await runEnricher(config, {}, null, 5000);
+      const result = await runEnricher(config, {}, null, noReport, 5000);
       expect(result).toEqual({ default: true });
       expect(warnSpy).toHaveBeenCalledWith('[db-audit-core] Enricher failed:', expect.any(Error));
     });
@@ -82,7 +85,7 @@ describe('runEnricher', () => {
         },
         onError: 'log' as const,
       };
-      const result = await runEnricher(config, {}, null, 5000);
+      const result = await runEnricher(config, {}, null, noReport, 5000);
       expect(result).toBeNull();
     });
 
@@ -96,7 +99,7 @@ describe('runEnricher', () => {
         onError: 'log' as const,
         fallback: { default: true },
       };
-      const result = await runEnricher(config, {}, null, 5000);
+      const result = await runEnricher(config, {}, null, noReport, 5000);
       expect(result).toEqual({ default: true });
       expect(warnSpy).toHaveBeenCalledWith(
         '[db-audit-core] Enricher failed:',
@@ -115,7 +118,7 @@ describe('runEnricher', () => {
         onError: 'ignore' as const,
         fallback: { default: true },
       };
-      const result = await runEnricher(config, {}, null, 5000);
+      const result = await runEnricher(config, {}, null, noReport, 5000);
       expect(result).toEqual({ default: true });
       expect(warnSpy).not.toHaveBeenCalled();
     });
@@ -127,7 +130,7 @@ describe('runEnricher', () => {
         },
         onError: 'ignore' as const,
       };
-      const result = await runEnricher(config, {}, null, 5000);
+      const result = await runEnricher(config, {}, null, noReport, 5000);
       expect(result).toBeNull();
     });
   });
@@ -142,7 +145,7 @@ describe('runEnricher', () => {
         onError: 'fail' as never,
         fallback: { default: true },
       };
-      const result = await runEnricher(config, {}, null, 5000);
+      const result = await runEnricher(config, {}, null, noReport, 5000);
       expect(result).toEqual({ default: true });
       expect(warnSpy).toHaveBeenCalledWith(
         "[db-audit-core] Invalid enricher onError strategy; falling back to 'log':",
@@ -162,7 +165,7 @@ describe('runEnricher', () => {
         onError: onErrorOf(),
         fallback: { default: true },
       };
-      const result = await runEnricher(config, {}, null, 5000);
+      const result = await runEnricher(config, {}, null, noReport, 5000);
       expect(result).toEqual({ default: true });
       expect(warnSpy).toHaveBeenCalledWith(
         "[db-audit-core] Invalid enricher onError strategy; falling back to 'log':",
@@ -181,7 +184,7 @@ describe('runEnricher', () => {
         },
         onError: handler,
       };
-      await runEnricher(config, {}, null, 5000);
+      await runEnricher(config, {}, null, noReport, 5000);
       expect(handler).toHaveBeenCalledWith(expect.objectContaining({ message: 'enricher failed' }));
     });
 
@@ -192,7 +195,7 @@ describe('runEnricher', () => {
         },
         onError: () => 'throw' as const,
       };
-      await expect(runEnricher(config, {}, null, 5000)).rejects.toThrow('enricher failed');
+      await expect(runEnricher(config, {}, null, noReport, 5000)).rejects.toThrow('enricher failed');
     });
 
     it("should log and return the fallback when the function resolves to 'log'", async () => {
@@ -204,7 +207,7 @@ describe('runEnricher', () => {
         onError: async () => 'log' as const,
         fallback: { default: true },
       };
-      const result = await runEnricher(config, {}, null, 5000);
+      const result = await runEnricher(config, {}, null, noReport, 5000);
       expect(result).toEqual({ default: true });
       expect(warnSpy).toHaveBeenCalledWith('[db-audit-core] Enricher failed:', expect.any(Error));
     });
@@ -218,7 +221,7 @@ describe('runEnricher', () => {
         onError: () => 'ignore' as const,
         fallback: { default: true },
       };
-      const result = await runEnricher(config, {}, null, 5000);
+      const result = await runEnricher(config, {}, null, noReport, 5000);
       expect(result).toEqual({ default: true });
       expect(warnSpy).not.toHaveBeenCalled();
     });
@@ -234,7 +237,7 @@ describe('runEnricher', () => {
         },
         fallback: { default: true },
       };
-      const result = await runEnricher(config, {}, null, 5000);
+      const result = await runEnricher(config, {}, null, noReport, 5000);
       expect(result).toEqual({ default: true });
       expect(warnSpy).toHaveBeenCalledWith(
         "[db-audit-core] Error in enricher onError function; falling back to 'log':",
@@ -254,7 +257,7 @@ describe('runEnricher', () => {
         },
         fallback: { default: true },
       };
-      const result = await runEnricher(config, {}, null, 5000);
+      const result = await runEnricher(config, {}, null, noReport, 5000);
       expect(result).toEqual({ default: true });
       expect(warnSpy).toHaveBeenCalledWith(
         "[db-audit-core] Error in enricher onError function; falling back to 'log':",
@@ -272,7 +275,7 @@ describe('runEnricher', () => {
         onError: (() => 'skip') as never,
         fallback: { default: true },
       };
-      const result = await runEnricher(config, {}, null, 5000);
+      const result = await runEnricher(config, {}, null, noReport, 5000);
       expect(result).toEqual({ default: true });
       expect(warnSpy).toHaveBeenCalledWith(
         "[db-audit-core] Invalid enricher onError strategy; falling back to 'log':",
@@ -285,7 +288,9 @@ describe('runEnricher', () => {
   describe('timeout', () => {
     it('should reject when enricher exceeds timeout, leaving no timer pending', async () => {
       vi.useFakeTimers();
-      const outcome = expect(runEnricher({ enricher: neverSettles }, {}, null, 10)).rejects.toThrow('Enricher timeout');
+      const outcome = expect(runEnricher({ enricher: neverSettles }, {}, null, noReport, 10)).rejects.toThrow(
+        'Enricher timeout',
+      );
 
       expect(vi.getTimerCount()).toBe(1);
       await vi.advanceTimersByTimeAsync(10);
@@ -299,7 +304,7 @@ describe('runEnricher', () => {
       const config = {
         enricher: async () => ({ fast: true }),
       };
-      const result = await runEnricher(config, {}, null, 5000);
+      const result = await runEnricher(config, {}, null, noReport, 5000);
       expect(result).toEqual({ fast: true });
       expect(vi.getTimerCount()).toBe(0);
     });
@@ -308,7 +313,7 @@ describe('runEnricher', () => {
       vi.useFakeTimers();
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const config = { enricher: neverSettles, onError: 'log' as const, fallback: { timedOut: true } };
-      const outcome = runEnricher(config, {}, null, 10);
+      const outcome = runEnricher(config, {}, null, noReport, 10);
 
       await vi.advanceTimersByTimeAsync(10);
 
@@ -326,7 +331,7 @@ describe('runBatchEnricher', () => {
     const config = {
       enricher: async (inputs: { id: string }[]) => inputs.map((i) => ({ enriched: i.id })),
     };
-    const result = await runBatchEnricher(config, [{ id: 'a' }, { id: 'b' }], null, 5000);
+    const result = await runBatchEnricher(config, [{ id: 'a' }, { id: 'b' }], null, noReport, 5000);
     expect(result).toEqual([{ enriched: 'a' }, { enriched: 'b' }]);
   });
 
@@ -334,9 +339,9 @@ describe('runBatchEnricher', () => {
     const config = {
       enricher: async (_inputs: { id: string }[]) => [{ enriched: 'a' }],
     };
-    await expect(runBatchEnricher(config, [{ id: 'a' }, { id: 'b' }, { id: 'c' }], null, 5000)).rejects.toThrow(
-      'returned 1 results for 3 inputs',
-    );
+    await expect(
+      runBatchEnricher(config, [{ id: 'a' }, { id: 'b' }, { id: 'c' }], null, noReport, 5000),
+    ).rejects.toThrow('returned 1 results for 3 inputs');
   });
 
   it("should return nulls when enricher returns wrong length with the 'ignore' strategy", async () => {
@@ -344,12 +349,12 @@ describe('runBatchEnricher', () => {
       enricher: async (_inputs: { id: string }[]) => [{ enriched: 'a' }],
       onError: 'ignore' as const,
     };
-    const result = await runBatchEnricher(config, [{ id: 'a' }, { id: 'b' }], null, 5000);
+    const result = await runBatchEnricher(config, [{ id: 'a' }, { id: 'b' }], null, noReport, 5000);
     expect(result).toEqual([null, null]);
   });
 
   it('should return null array when no enricher configured', async () => {
-    const result = await runBatchEnricher(undefined, [{ id: 'a' }], null, 5000);
+    const result = await runBatchEnricher(undefined, [{ id: 'a' }], null, noReport, 5000);
     expect(result).toEqual([null]);
   });
 
@@ -361,7 +366,7 @@ describe('runBatchEnricher', () => {
         inputs.map((input, i) => ({ id: input.id, aggregateId: m.aggregateIds[i] })),
       );
     const inputs = [{ id: 'a' }, { id: 'b' }];
-    const result = await runBatchEnricher({ enricher }, inputs, 'prisma-client', 5000, meta);
+    const result = await runBatchEnricher({ enricher }, inputs, 'prisma-client', noReport, 5000, meta);
     expect(result).toEqual([
       { id: 'a', aggregateId: 'post-1' },
       { id: 'b', aggregateId: 'post-2' },
@@ -379,7 +384,7 @@ describe('runBatchEnricher', () => {
         onError: 'log' as const,
         fallback: [{ ctx: 'a' }, { ctx: 'b' }],
       };
-      const result = await runBatchEnricher(config, [{ id: 'a' }, { id: 'b' }], null, 5000);
+      const result = await runBatchEnricher(config, [{ id: 'a' }, { id: 'b' }], null, noReport, 5000);
       expect(result).toEqual([{ ctx: 'a' }, { ctx: 'b' }]);
       expect(warnSpy).toHaveBeenCalledWith('[db-audit-core] Batch enricher failed:', expect.any(Error));
     });
@@ -394,7 +399,7 @@ describe('runBatchEnricher', () => {
         onError: 'log' as const,
         fallback: [{ ctx: 'a' }],
       };
-      const result = await runBatchEnricher(config, [{ id: 'a' }], null, 5000);
+      const result = await runBatchEnricher(config, [{ id: 'a' }], null, noReport, 5000);
       expect(result).toEqual([{ ctx: 'a' }]);
       expect(warnSpy).toHaveBeenCalledWith(
         '[db-audit-core] Batch enricher failed:',
@@ -410,7 +415,7 @@ describe('runBatchEnricher', () => {
         },
         onError: 'log' as const,
       };
-      const result = await runBatchEnricher(config, [{ id: 'a' }, { id: 'b' }], null, 5000);
+      const result = await runBatchEnricher(config, [{ id: 'a' }, { id: 'b' }], null, noReport, 5000);
       expect(result).toEqual([null, null]);
     });
   });
@@ -425,7 +430,7 @@ describe('runBatchEnricher', () => {
         onError: 'ignore' as const,
         fallback: [{ ctx: 'a' }, { ctx: 'b' }],
       };
-      const result = await runBatchEnricher(config, [{ id: 'a' }, { id: 'b' }], null, 5000);
+      const result = await runBatchEnricher(config, [{ id: 'a' }, { id: 'b' }], null, noReport, 5000);
       expect(result).toEqual([{ ctx: 'a' }, { ctx: 'b' }]);
       expect(warnSpy).not.toHaveBeenCalled();
     });
@@ -439,7 +444,7 @@ describe('runBatchEnricher', () => {
         },
         onError: () => 'throw' as const,
       };
-      await expect(runBatchEnricher(config, [{ id: 'a' }], null, 5000)).rejects.toThrow('batch failed');
+      await expect(runBatchEnricher(config, [{ id: 'a' }], null, noReport, 5000)).rejects.toThrow('batch failed');
     });
 
     it("should return the fallback array silently when the function resolves to 'ignore'", async () => {
@@ -451,7 +456,7 @@ describe('runBatchEnricher', () => {
         onError: async () => 'ignore' as const,
         fallback: [{ ctx: 'a' }, { ctx: 'b' }],
       };
-      const result = await runBatchEnricher(config, [{ id: 'a' }, { id: 'b' }], null, 5000);
+      const result = await runBatchEnricher(config, [{ id: 'a' }, { id: 'b' }], null, noReport, 5000);
       expect(result).toEqual([{ ctx: 'a' }, { ctx: 'b' }]);
       expect(warnSpy).not.toHaveBeenCalled();
     });
@@ -466,7 +471,7 @@ describe('runBatchEnricher', () => {
           throw new Error('handler failed');
         },
       };
-      const result = await runBatchEnricher(config, [{ id: 'a' }, { id: 'b' }], null, 5000);
+      const result = await runBatchEnricher(config, [{ id: 'a' }, { id: 'b' }], null, noReport, 5000);
       expect(result).toEqual([null, null]);
       expect(warnSpy).toHaveBeenCalledWith('[db-audit-core] Batch enricher failed:', expect.any(Error));
     });
@@ -475,9 +480,9 @@ describe('runBatchEnricher', () => {
   describe('timeout', () => {
     it('should reject when batch enricher exceeds timeout, leaving no timer pending', async () => {
       vi.useFakeTimers();
-      const outcome = expect(runBatchEnricher({ enricher: neverSettles }, [{ id: 'a' }], null, 10)).rejects.toThrow(
-        'Enricher timeout',
-      );
+      const outcome = expect(
+        runBatchEnricher({ enricher: neverSettles }, [{ id: 'a' }], null, noReport, 10),
+      ).rejects.toThrow('Enricher timeout');
 
       expect(vi.getTimerCount()).toBe(1);
       await vi.advanceTimersByTimeAsync(10);
@@ -491,7 +496,7 @@ describe('runBatchEnricher', () => {
       const config = {
         enricher: async (inputs: { id: string }[]) => inputs.map((i) => ({ enriched: i.id })),
       };
-      const result = await runBatchEnricher(config, [{ id: 'a' }], null, 5000);
+      const result = await runBatchEnricher(config, [{ id: 'a' }], null, noReport, 5000);
       expect(result).toEqual([{ enriched: 'a' }]);
       expect(vi.getTimerCount()).toBe(0);
     });
@@ -524,10 +529,10 @@ describe.each([
       };
 
       await expect(
-        runEnricher({ enricher: rejected, onError, fallback: { ctx: 'fallback' } }, {}, null, 5000),
+        runEnricher({ enricher: rejected, onError, fallback: { ctx: 'fallback' } }, {}, null, noReport, 5000),
       ).rejects.toBe(error);
       await expect(
-        runBatchEnricher({ enricher: rejected, onError, fallback: [{ ctx: 'fallback' }] }, [{}], null, 5000),
+        runBatchEnricher({ enricher: rejected, onError, fallback: [{ ctx: 'fallback' }] }, [{}], null, noReport, 5000),
       ).rejects.toBe(error);
       expect(warnSpy).not.toHaveBeenCalled();
     },
@@ -544,9 +549,9 @@ describe.each([
     };
 
     await expect(
-      runEnricher({ enricher: failing, onError, fallback: { ctx: 'fallback' } }, {}, null, 5000),
+      runEnricher({ enricher: failing, onError, fallback: { ctx: 'fallback' } }, {}, null, noReport, 5000),
     ).rejects.toBe(error);
-    await expect(runBatchEnricher({ enricher: failing, onError }, [{}], null, 5000)).rejects.toBe(error);
+    await expect(runBatchEnricher({ enricher: failing, onError }, [{}], null, noReport, 5000)).rejects.toBe(error);
     expect(warnSpy).not.toHaveBeenCalled();
   });
 
@@ -554,33 +559,37 @@ describe.each([
     {
       enricherKind: 'single-row',
       timeoutMs: ENRICHMENT_TIMEOUTS.DEFAULT,
-      run: (enricher: () => Promise<never>) => runEnricher({ enricher, onError: 'ignore' }, {}, null),
+      run: (enricher: () => Promise<never>, report: () => void) =>
+        runEnricher({ enricher, onError: 'ignore' }, {}, null, report),
       timedOut: null,
     },
     {
       enricherKind: 'batch',
       timeoutMs: ENRICHMENT_TIMEOUTS.BATCH,
-      run: (enricher: () => Promise<never>) => runBatchEnricher({ enricher, onError: 'ignore' }, [{}], null),
+      run: (enricher: () => Promise<never>, report: () => void) =>
+        runBatchEnricher({ enricher, onError: 'ignore' }, [{}], null, report),
       timedOut: [null],
     },
   ])(
-    "logs to the console the rejection of a write a $enricherKind enricher issues once it has timed out, under onError 'ignore'",
+    "logs to the console the rejection of a write a $enricherKind enricher issues once it has timed out, under onError 'ignore', reporting only the timeout",
     async ({ timeoutMs, run, timedOut }) => {
       vi.useFakeTimers();
       const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const report = vi.fn();
       const error = rejectedWrite();
       const writesAfterTimeout = () =>
         new Promise<never>((_, reject) => {
           setTimeout(() => reject(error), timeoutMs + 100);
         });
 
-      const result = run(writesAfterTimeout);
+      const result = run(writesAfterTimeout, report);
       await vi.advanceTimersByTimeAsync(timeoutMs);
       await expect(result).resolves.toEqual(timedOut);
       expect(consoleError).not.toHaveBeenCalled();
 
       await vi.advanceTimersByTimeAsync(100);
       expect(consoleError).toHaveBeenCalledWith(expect.stringContaining('had timed out'), error);
+      expect(report.mock.calls).toEqual([[expect.objectContaining({ message: 'Enricher timeout' })]]);
     },
   );
 });
@@ -594,10 +603,109 @@ describe('an enricher that has timed out', () => {
         setTimeout(() => reject(new Error('lookup failed')), ENRICHMENT_TIMEOUTS.DEFAULT + 100);
       });
 
-    const result = runEnricher({ enricher: failsAfterTimeout, onError: 'ignore' }, {}, null);
+    const result = runEnricher({ enricher: failsAfterTimeout, onError: 'ignore' }, {}, null, noReport);
     await vi.advanceTimersByTimeAsync(ENRICHMENT_TIMEOUTS.DEFAULT + 100);
 
     await expect(result).resolves.toBeNull();
     expect(consoleError).not.toHaveBeenCalled();
+  });
+});
+
+describe('the report of a fallback', () => {
+  const failing = (error: Error) => async (): Promise<never> => {
+    throw error;
+  };
+
+  it.each<[string, EnricherOnError]>([
+    ["'log'", 'log'],
+    ["'ignore'", 'ignore'],
+    ["a function resolving to 'ignore'", () => 'ignore'],
+    [
+      'a function that throws',
+      () => {
+        throw new Error('handler broken');
+      },
+    ],
+    ['a value that is not a strategy', 'fail' as never],
+  ])('reports the error a single-row and a batch enricher fall back on, onError %s', async (_label, onError) => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const error = new Error('lookup failed');
+    const report = vi.fn();
+
+    await expect(runEnricher({ enricher: failing(error), onError }, {}, null, report, 5000)).resolves.toBeNull();
+    await expect(runBatchEnricher({ enricher: failing(error), onError }, [{}], null, report, 5000)).resolves.toEqual([
+      null,
+    ]);
+
+    expect(report.mock.calls).toEqual([[error], [error]]);
+  });
+
+  it('reports the timeout a single-row and a batch enricher fall back on', async () => {
+    vi.useFakeTimers();
+    const report = vi.fn();
+
+    const single = runEnricher({ enricher: neverSettles, onError: 'ignore' }, {}, null, report, 10);
+    const batch = runBatchEnricher({ enricher: neverSettles, onError: 'ignore' }, [{}], null, report, 10);
+    await vi.advanceTimersByTimeAsync(10);
+
+    await expect(single).resolves.toBeNull();
+    await expect(batch).resolves.toEqual([null]);
+    expect(report.mock.calls).toEqual([
+      [expect.objectContaining({ message: 'Enricher timeout' })],
+      [expect.objectContaining({ message: 'Enricher timeout' })],
+    ]);
+  });
+
+  it('reports the length mismatch a batch enricher falls back on', async () => {
+    const report = vi.fn();
+
+    const result = await runBatchEnricher({ enricher: async () => [], onError: 'ignore' }, [{}], null, report, 5000);
+
+    expect(result).toEqual([null]);
+    expect(report.mock.calls).toEqual([
+      [expect.objectContaining({ message: expect.stringContaining('expected same') })],
+    ]);
+  });
+
+  it('reports nothing for an enricher that succeeds, or whose error is rethrown', async () => {
+    const report = vi.fn();
+    const error = new Error('lookup failed');
+
+    await runEnricher({ enricher: async () => ({ ok: true }) }, {}, null, report, 5000);
+    await runBatchEnricher({ enricher: async () => [{ ok: true }] }, [{}], null, report, 5000);
+    await expect(runEnricher({ enricher: failing(error) }, {}, null, report, 5000)).rejects.toBe(error);
+    await expect(
+      runBatchEnricher({ enricher: failing(error), onError: 'throw' }, [{}], null, report, 5000),
+    ).rejects.toBe(error);
+    await expect(
+      runEnricher(
+        {
+          enricher: failing(
+            new AuditReentrantWriteError({ modelName: 'Post', operationModelName: 'Post', operation: 'create' }),
+          ),
+          onError: 'ignore',
+        },
+        {},
+        null,
+        report,
+        5000,
+      ),
+    ).rejects.toBeInstanceOf(AuditReentrantWriteError);
+    await expect(
+      runBatchEnricher(
+        {
+          enricher: failing(error),
+          onError: () => {
+            throw new AuditReentrantWriteError({ modelName: 'Post', operationModelName: 'Post', operation: 'create' });
+          },
+        },
+        [{}],
+        null,
+        report,
+        5000,
+      ),
+    ).rejects.toBeInstanceOf(AuditReentrantWriteError);
+
+    expect(report).not.toHaveBeenCalled();
   });
 });

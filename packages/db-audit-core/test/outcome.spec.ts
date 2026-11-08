@@ -108,6 +108,21 @@ describe('createOperationOutcome', () => {
       ]);
     });
 
+    it.each(['actor', 'entity', 'aggregate'] as const)(
+      'is complete with the %s enrichment failure an enricher fell back on, which drops no record',
+      async (enricher) => {
+        const observer = vi.fn();
+        const outcome = createOperationOutcome(target, { observer });
+        const failure = { phase: 'enrichment', enricher, error: new Error('lookup failed') } as const;
+
+        outcome.reportResolveFailure(failure);
+        await outcome.writeFinished(1);
+        await outcome.settle('committed');
+
+        expect(observer.mock.calls).toEqual([[outcomeOf({ status: 'complete', records: 1, failures: [failure] })]]);
+      },
+    );
+
     it.each<[string, Parameters<OperationOutcome['fail']>[0]]>([
       ['row-identification', rowIdentificationFailure],
       ['diff-generation', { phase: 'diff-generation', error: new Error('build failed') }],
@@ -158,8 +173,9 @@ describe('createOperationOutcome', () => {
       const entityError = new Error('id resolver failed');
       const aggregateError = new Error('root resolver failed');
       const failures: ResolveFailure[] = [
-        { event, resolver: { kind: 'entity' }, error: entityError },
+        { phase: 'id-resolver-call', event, resolver: { kind: 'entity' }, error: entityError },
         {
+          phase: 'id-resolver-call',
           event,
           resolver: { kind: 'aggregate', aggregateCategory: 'model', aggregateType: 'User' },
           error: aggregateError,
@@ -352,6 +368,24 @@ describe('createOperationOutcome', () => {
       expect(consoleError).toHaveBeenCalledWith(writeError.stack);
     });
 
+    it('does not log the enrichment failure of an incomplete outcome, which lost no record', async () => {
+      const outcome = createOperationOutcome(target, {});
+      const writeError = new Error('insert failed');
+
+      outcome.reportResolveFailure({ phase: 'enrichment', enricher: 'entity', error: new Error('lookup failed') });
+      outcome.fail({ phase: 'log-write', records: [record], error: writeError });
+      await outcome.writeFinished(0);
+      await outcome.settle('committed');
+
+      expect(consoleError.mock.calls).toEqual([
+        [
+          '[db-audit-core] update on Post committed without some of its audit records; log-write failure:',
+          'insert failed',
+        ],
+        [writeError.stack],
+      ]);
+    });
+
     it.each([
       ['complete', 'committed', []],
       ['not-committed', 'not-committed', [rowIdentificationFailure]],
@@ -377,10 +411,11 @@ describe('createOperationOutcome', () => {
   });
 
   describe('droppedRecords', () => {
-    it('is undefined when no record was dropped, a pre-fetch failure that only cost a before state included', () => {
+    it('is undefined when no record was dropped, a pre-fetch failure that only cost a before state and an enrichment failure included', () => {
       const outcome = createOperationOutcome(target, {});
 
       outcome.fail(preFetchFailure);
+      outcome.reportResolveFailure({ phase: 'enrichment', enricher: 'entity', error: new Error('lookup failed') });
 
       expect(outcome.droppedRecords()).toBeUndefined();
     });

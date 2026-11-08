@@ -1042,6 +1042,58 @@ describe('the outcome of each write', () => {
     ]);
   });
 
+  it.each(['log', 'ignore'] as const)(
+    "is complete for an atomic write whose enrichers fall back under onError '%s', listing each as an enrichment failure",
+    async (onError) => {
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const failing = (error: Error) => ({
+        enricher: async (): Promise<never> => {
+          throw error;
+        },
+        onError,
+      });
+      const actorError = new Error('actor lookup failed');
+      const entityError = new Error('entity lookup failed');
+      const aggregateError = new Error('aggregate lookup failed');
+      const observer = vi.fn<AuditObserver>();
+      const adapter = createAdapter({
+        observer,
+        actorContext: failing(actorError),
+        entities: defineMapping({
+          User: defineEntity<UserRow, Db>({ type: 'User' }),
+          Post: defineEntity<PostRow, Db>({
+            type: 'Post',
+            selfAggregate: false,
+            aggregates: [to('User', foreignKey('authorId'), { aggregateContext: failing(aggregateError) })],
+            entityContext: failing(entityError),
+          }),
+        }),
+      });
+
+      await withContext(() => adapter.create('Post', { id: 'p1', authorId: 'u1', title: 'Hello' }));
+
+      expect(observer.mock.calls).toEqual([
+        [
+          {
+            model: 'Post',
+            operation: 'create',
+            status: 'complete',
+            records: 1,
+            failures: [
+              { phase: 'enrichment', enricher: 'actor', error: actorError },
+              { phase: 'enrichment', enricher: 'entity', error: entityError },
+              { phase: 'enrichment', enricher: 'aggregate', error: aggregateError },
+            ],
+            unrecordedWrites: [],
+          },
+        ],
+      ]);
+      expect(adapter.store.auditLogs()).toEqual([
+        expect.objectContaining({ entityId: 'p1', actorContext: null, entityContext: null, aggregateContext: null }),
+      ]);
+    },
+  );
+
   it('is reported for each write of a transaction once the outermost one has committed, a nested one included', async () => {
     const observer = vi.fn<AuditObserver>();
     const adapter = createAdapter({ observer });

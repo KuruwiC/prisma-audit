@@ -12,9 +12,10 @@
  * the write and that carries a row after it, from the row before the write too: a row moved to
  * another parent belongs to the aggregate it left as well as the one it joined, and so does a row
  * the write moved before deleting it. A resolver that throws, or returns an id `normalizeId`
- * rejects, is returned as a failure of its row instead of failing the resolution: the entity's id
+ * rejects, is reported as a failure of its row instead of failing the resolution: the entity's id
  * resolver leaves the row without records, a `to()` resolver leaves it without the record under
- * the root it failed to resolve.
+ * the root it failed to resolve. An enricher that falls back (its `onError` resolving to `'log'` or
+ * `'ignore'`) is reported too, and its fallback stands in for the contexts it was to enrich.
  *
  * Aggregate contexts are composed from two layers: the root entity's `aggregateContext`
  * enricher, called once per (category, type) with the unique aggregate ids of the call, and
@@ -34,7 +35,7 @@ import type {
 import type { ActorContextConfig } from '../config.types.js';
 import { ENRICHMENT_TIMEOUTS } from '../constants.js';
 import { aggregateRootKey, type MutationEvent, type ResolvedEvent } from '../domain/mutation-event.js';
-import { runBatchEnricher, runEnricher } from '../enrichment/run-enricher.js';
+import { type ReportFallback, runBatchEnricher, runEnricher } from '../enrichment/run-enricher.js';
 import type {
   AggregateRootContextConfig,
   EntityContextConfig,
@@ -63,25 +64,36 @@ export interface ResolveConfig<TModelName extends string = string, TDbHandle = u
   readonly actorContext?: ActorContextConfig<unknown, unknown, TDbHandle>;
 }
 
-/** The resolver whose failure a {@link ResolveFailure} reports */
+/** The resolver whose `id-resolver-call` failure a {@link ResolveFailure} reports */
 export type FailedResolver =
   | { readonly kind: 'entity' }
   | { readonly kind: 'aggregate'; readonly aggregateCategory: string; readonly aggregateType: string };
 
-/**
- * A row a resolver failed for: it threw, or returned an id `normalizeId` rejects. An `entity`
- * failure leaves the row without records; an `aggregate` failure leaves it without the record
- * under that root.
- */
-export interface ResolveFailure<TModelName extends string = string> {
-  readonly event: MutationEvent<TModelName>;
-  readonly resolver: FailedResolver;
-  readonly error: Error;
-}
+/** The kind of enricher whose fallback an `enrichment` {@link ResolveFailure} reports */
+export type FailedEnricher = 'actor' | 'entity' | 'aggregate';
 
 /**
- * Where `resolve` reports each resolver failure, as it happens: one per row and failed resolver, a
- * failed batch resolver reporting every row of its call
+ * A failure of a user callback `resolve` runs, by `phase`:
+ *
+ * - `id-resolver-call`: a row a resolver failed for: it threw, or returned an id `normalizeId`
+ *   rejects. An `entity` failure leaves the row without records; an `aggregate` failure leaves it
+ *   without the record under that root.
+ * - `enrichment`: an enricher failed and its `onError` resolved to `'log'` or `'ignore'`, so its
+ *   fallback stands in for the contexts it was to enrich. No record is dropped. `aggregate` covers
+ *   the root-side and the projection-side enrichers.
+ */
+export type ResolveFailure<TModelName extends string = string> =
+  | {
+      readonly phase: 'id-resolver-call';
+      readonly event: MutationEvent<TModelName>;
+      readonly resolver: FailedResolver;
+      readonly error: Error;
+    }
+  | { readonly phase: 'enrichment'; readonly enricher: FailedEnricher; readonly error: Error };
+
+/**
+ * Where `resolve` reports each failure, as it happens: one per row and failed resolver, a failed
+ * batch resolver reporting every row of its call, and one per enricher call that fell back
  */
 export type ResolveFailureSink<TModelName extends string = string> = (failure: ResolveFailure<TModelName>) => void;
 
@@ -195,9 +207,15 @@ const aggregateReporterFor = <TModelName extends string>(
       return;
     }
     reported.add(entry);
-    sink({ event: entry.event, resolver, error });
+    sink({ phase: 'id-resolver-call', event: entry.event, resolver, error });
   };
 };
+
+const fallbackReporterFor =
+  <TModelName extends string>(sink: ResolveFailureSink<TModelName>, enricher: FailedEnricher): ReportFallback =>
+  (error) => {
+    sink({ phase: 'enrichment', enricher, error });
+  };
 
 const reporterFor =
   <TModelName extends string>(
@@ -206,7 +224,7 @@ const reporterFor =
     resolver: FailedResolver,
   ): ReportFailure =>
   (error) => {
-    sink({ event: entry.event, resolver, error });
+    sink({ phase: 'id-resolver-call', event: entry.event, resolver, error });
   };
 
 /** The normalized id, or null for no id; an id `normalizeId` rejects is reported and yields null. */
@@ -437,6 +455,7 @@ const enrichRootContexts = async <TDbHandle>(
   survivors: readonly Survivor[],
   read: ReadHandle<TDbHandle>,
   rootEntity: ResolveConfig<string, TDbHandle>['rootEntity'],
+  reportFallback: ReportFallback,
 ): Promise<Map<string, unknown>> => {
   const groups = new Map<string, { type: string; category: string; ids: string[] }>();
 
@@ -462,7 +481,7 @@ const enrichRootContexts = async <TDbHandle>(
       if (!enricher) {
         return;
       }
-      const enriched = await runBatchEnricher(enricher, group.ids, read(), ENRICHMENT_TIMEOUTS.BATCH);
+      const enriched = await runBatchEnricher(enricher, group.ids, read(), reportFallback, ENRICHMENT_TIMEOUTS.BATCH);
       group.ids.forEach((id, i) => {
         contexts.set(
           aggregateRootKey({ aggregateCategory: group.category, aggregateType: group.type, aggregateId: id }),
@@ -506,6 +525,7 @@ const enrichProjectionContexts = async <TDbHandle>(
   group: ProjectionGroup,
   enricher: ProjectionContextConfig | undefined,
   read: ReadHandle<TDbHandle>,
+  reportFallback: ReportFallback,
 ): Promise<(unknown | null)[]> => {
   const rows = group.entries.map((entry) => entry.row);
   if (!enricher) {
@@ -516,7 +536,7 @@ const enrichProjectionContexts = async <TDbHandle>(
     aggregateCategory: group.aggregateCategory,
     aggregateIds: group.entries.map((entry) => entry.aggregateId),
   };
-  return runBatchEnricher(enricher, rows, read(), ENRICHMENT_TIMEOUTS.BATCH, meta);
+  return runBatchEnricher(enricher, rows, read(), reportFallback, ENRICHMENT_TIMEOUTS.BATCH, meta);
 };
 
 /** Root-side and projection-side contexts merged per root, keyed `${index}:${aggregateRootKey(root)}`. */
@@ -525,12 +545,13 @@ const enrichAggregateContexts = async <TDbHandle>(
   entity: EntityResolveConfig<TDbHandle>,
   read: ReadHandle<TDbHandle>,
   rootEntity: ResolveConfig<string, TDbHandle>['rootEntity'],
+  reportFallback: ReportFallback,
 ): Promise<Map<string, unknown>> => {
   const groups = groupByProjection(survivors);
   const selfAggregateEnricher = entity.selfAggregate ? entity.selfAggregate.aggregateContext : undefined;
 
   const [rootContexts, projectionResults] = await Promise.all([
-    enrichRootContexts(survivors, read, rootEntity),
+    enrichRootContexts(survivors, read, rootEntity, reportFallback),
     Promise.all(
       groups.map(async (group) => ({
         group,
@@ -538,6 +559,7 @@ const enrichAggregateContexts = async <TDbHandle>(
           group,
           group.source ? group.source.aggregateContext : selfAggregateEnricher,
           read,
+          reportFallback,
         ),
       })),
     ),
@@ -564,11 +586,12 @@ const enrichEntityContexts = async <TDbHandle>(
   rows: Row[],
   enricher: EntityContextConfig<TDbHandle>,
   read: ReadHandle<TDbHandle>,
+  reportFallback: ReportFallback,
 ): Promise<(unknown | null)[]> => {
   if (!enricher) {
     return rows.map(() => null);
   }
-  return runBatchEnricher(enricher, rows, read(), ENRICHMENT_TIMEOUTS.BATCH);
+  return runBatchEnricher(enricher, rows, read(), reportFallback, ENRICHMENT_TIMEOUTS.BATCH);
 };
 
 const contextsOfRoots = (
@@ -606,10 +629,19 @@ const resolveModelGroup = async <TModelName extends string, TDbHandle>(
     identified.map((entry) => entry.row),
     entity.entityContext,
     read,
+    fallbackReporterFor(sink, 'entity'),
   );
   const survivors = await resolveSurvivors(identified, entity, read, sink);
   const aggregateContexts =
-    survivors.length > 0 ? await enrichAggregateContexts(survivors, entity, read, config.rootEntity) : new Map();
+    survivors.length > 0
+      ? await enrichAggregateContexts(
+          survivors,
+          entity,
+          read,
+          config.rootEntity,
+          fallbackReporterFor(sink, 'aggregate'),
+        )
+      : new Map();
 
   return survivors.flatMap((survivor) => {
     const entry = identified[survivor.index];
@@ -641,8 +673,8 @@ const resolveModelGroup = async <TModelName extends string, TDbHandle>(
  * entity id resolved; an aggregate resolver also receives the row before the write of each
  * update that carries it. An event yields nothing when its model has no entity configuration,
  * when the entity's id resolver returns no id or fails, or when no aggregate root resolves for
- * its row. A resolver that fails is reported to `sink` as it fails, never thrown: a failure
- * reported before an enricher throws stays reported.
+ * its row. A resolver that fails, and an enricher that falls back, are reported to `sink` as they
+ * fail, never thrown: a failure reported before an enricher throws stays reported.
  *
  * @param read - Returns the database handle for a user callback; evaluated at each call, never ahead of it
  * @throws Whatever an enricher whose `onError` resolves to `'throw'` throws
@@ -654,7 +686,9 @@ export const resolve = async <TModelName extends string, TDbHandle>(
   read: ReadHandle<TDbHandle>,
   sink: ResolveFailureSink<TModelName>,
 ): Promise<ResolvedEvent<TModelName>[]> => {
-  const actorContext = config.actorContext ? await runEnricher(config.actorContext, auditContext.actor, read()) : null;
+  const actorContext = config.actorContext
+    ? await runEnricher(config.actorContext, auditContext.actor, read(), fallbackReporterFor(sink, 'actor'))
+    : null;
 
   const resolved: (ResolvedEvent<TModelName> | undefined)[] = events.map(() => undefined);
   for (const group of groupByModel(events)) {

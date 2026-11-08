@@ -408,7 +408,7 @@ entities: defineEntities<AuditModelName, PrismaClient>()({
 
 ### Context enrichment
 
-Enrichers fill `actorContext`, `entityContext` and `aggregateContext`. Each takes `enricher`, `onError` and `fallback`. `onError` decides what an error or timeout becomes: `'throw'` (default) rethrows, `'log'` warns and stores `fallback ?? null`, `'ignore'` stores `fallback ?? null` silently; a function receives the error and returns one of those, and anything else is handled as `'log'`. The `actorContext` enricher times out after 500 ms, entity and aggregate enrichers after 2,000 ms; the limits are fixed. Enrichers and resolvers receive the client of the scope they run in, so inside a transaction they read its writes.
+Enrichers fill `actorContext`, `entityContext` and `aggregateContext`. Each takes `enricher`, `onError` and `fallback`. `onError` decides what an error or timeout becomes: `'throw'` (default) rethrows, `'log'` warns and stores `fallback ?? null`, `'ignore'` stores `fallback ?? null` without a console warning; a function receives the error and returns one of those, and anything else is handled as `'log'`. Under `'log'` and `'ignore'` the operation's [outcome](#audit-outcomes) lists an `enrichment` failure (`enricher`: `'actor'`, `'entity'` or `'aggregate'`) per enricher call that fell back, and stays `complete`. The `actorContext` enricher times out after 500 ms, entity and aggregate enrichers after 2,000 ms; the limits are fixed. Enrichers and resolvers receive the client of the scope they run in, so inside a transaction they read its writes.
 
 ```typescript
 const config = {
@@ -551,16 +551,16 @@ The audit's own queries and its writes to the audit-log model are not audited. A
 
 | `status` | Meaning |
 | --- | --- |
-| `complete` | Committed, and every audit log was passed to a writer that resolved. A committed atomic operation is always `complete`. A `pre-fetch` failure that only left an entry with `beforeUnavailable: true` may be listed |
+| `complete` | Committed, and every audit log was passed to a writer that resolved. A committed atomic operation is always `complete`. A `pre-fetch` failure that only left an entry with `beforeUnavailable: true`, and an `enrichment` failure, may be listed |
 | `incomplete` | Committed without some of its audit logs (`awaited`, `deferred`). After a failed audit write outside a transaction, how many logs the writer persisted is unknown |
 | `not-committed` | The operation failed (including with an audit error), or its transaction rolled back or failed to commit |
 | `unaudited` | Committed without an audit context (`unauditedReason: 'no-context'`) |
 
-Failure phases: `pre-fetch` (`modelName`, `operation`, `error`), `row-identification` (`modelName`, `operation`, `unidentified` row count, `error`), `id-resolver-call` (`modelName`, `operation`, `identity`, `resolver`, `error`), `diff-generation` (`error`) and `log-write` (`records`, `error`). A failure's `modelName` and `operation` name the rows it concerns, which for a nested write can differ from the operation's.
+Failure phases: `pre-fetch` (`modelName`, `operation`, `error`), `row-identification` (`modelName`, `operation`, `unidentified` row count, `error`), `id-resolver-call` (`modelName`, `operation`, `identity`, `resolver`, `error`), `enrichment` (`enricher`: `'actor'`, `'entity'` or `'aggregate'`, `error`), `diff-generation` (`error`) and `log-write` (`records`, `error`). A failure's `modelName` and `operation` name the rows it concerns, which for a nested write can differ from the operation's.
 
 Timing: outside any transaction, before the operation returns or throws, or under `deferred` once the detached write has run. Inside a transaction, once it commits, before `$transaction` returns, or as `not-committed` once it rolls back; an operation in a transaction that rolls back is never reported `complete`.
 
-The observer runs inside a try/catch: a handler that throws is logged and ignored, and it never affects the operation. Without an observer, the failures of an `incomplete` outcome are logged to the console; no other outcome is.
+The observer runs inside a try/catch: a handler that throws is logged and ignored, and it never affects the operation. Without an observer, the failures of an `incomplete` outcome are logged to the console, except an `enrichment` failure, which lost no entry; no other outcome is.
 
 ```typescript
 observer: (outcome) => {
@@ -581,6 +581,7 @@ observer: (outcome) => {
 | `diff-generation` after the write (enrichment, redaction, a read after the write) | Fails the operation and rolls back | Reported; the operation gets no audit log |
 | `row-identification`, `id-resolver-call`, dropping `pre-fetch` | `atomic`: `AuditIncompleteError`. Otherwise reported | Reported |
 | `pre-fetch` of an update or delete | Recorded with `beforeUnavailable: true`; on PostgreSQL a database error aborts the transaction | Recorded with `beforeUnavailable: true` |
+| `enrichment` (an enricher whose `onError` is `'log'` or `'ignore'` failed) | Recorded with the enricher's `fallback`; an `atomic` operation commits | Same |
 
 A failed audit write inside a transaction always fails the operation, because the library cannot tell whether the transaction survives a failed statement (PostgreSQL aborts it; InnoDB rolls back on a deadlock). Without an observer, a failure after a committed write logs a console line naming the operation and model (`[db-audit-core] update on User committed without some of its audit records; diff-generation failure:` followed by the error message and stack, never record values).
 

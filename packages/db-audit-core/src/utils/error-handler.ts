@@ -9,7 +9,7 @@
  * Error handling strategy
  * - `throw`: Re-throw the error
  * - `log`: Log error and continue
- * - `ignore`: Silent
+ * - `ignore`: Continue without logging to the console
  */
 export type ErrorStrategy = 'throw' | 'log' | 'ignore';
 

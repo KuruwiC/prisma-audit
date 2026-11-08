@@ -75,6 +75,7 @@ export type { PolicyConfig, WriteMode, WritePlanKind } from './policy/index.js';
 export { AuditAtomicityError, planFor, policy } from './policy/index.js';
 export type {
   EntityResolveConfig,
+  FailedEnricher,
   FailedResolver,
   ResolveConfig,
   ResolveFailure,

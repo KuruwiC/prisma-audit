@@ -52,6 +52,15 @@ const resolveCollecting = async (
   return { resolved, failures };
 };
 
+/** The failures of a test whose enrichers do not fall back, each an id-resolver-call failure */
+const resolverFailuresOf = (failures: readonly ResolveFailure[]) =>
+  failures.map((failure) => {
+    if (failure.phase !== 'id-resolver-call') {
+      throw new Error(`Expected only id-resolver-call failures, got ${failure.phase}`);
+    }
+    return failure;
+  });
+
 const rowsOf = (model: string, count: number): MutationEvent[] =>
   Array.from({ length: count }, (_, i) => event(model, { id: `${model.toLowerCase()}-${i}`, authorId: `u${i}` }));
 
@@ -301,7 +310,12 @@ describe('resolve', () => {
 
       expect(resolved[0]?.roots.map((r) => r.aggregateType)).toEqual(['Post']);
       expect(failures).toEqual([
-        { event: events[0], resolver: { kind: 'aggregate', aggregateCategory: 'model', aggregateType: 'User' }, error },
+        {
+          phase: 'id-resolver-call',
+          event: events[0],
+          resolver: { kind: 'aggregate', aggregateCategory: 'model', aggregateType: 'User' },
+          error,
+        },
       ]);
     });
 
@@ -324,6 +338,7 @@ describe('resolve', () => {
       expect(resolved[0]?.roots.map((r) => r.aggregateType)).toEqual(['Post']);
       expect(failures).toEqual([
         {
+          phase: 'id-resolver-call',
           event: events[0],
           resolver: { kind: 'aggregate', aggregateCategory: 'model', aggregateType: 'User' },
           error: new Error('Cannot normalize ID of type: object'),
@@ -350,7 +365,9 @@ describe('resolve', () => {
           ['Comment', 'c1'],
           ['Post', 'p1'],
         ]);
-        expect(failures).toEqual([{ event: events[0], resolver: userRoot, error: new Error(MISSING_AUTHOR_ID) }]);
+        expect(failures).toEqual([
+          { phase: 'id-resolver-call', event: events[0], resolver: userRoot, error: new Error(MISSING_AUTHOR_ID) },
+        ]);
       });
 
       it('reports a row read before a delete that lacks the column', async () => {
@@ -367,7 +384,7 @@ describe('resolve', () => {
 
         const { failures } = await resolveCollecting(events, auditContext, commentConfig(), read);
 
-        expect(failures.map((failure) => [failure.resolver, failure.error.message])).toEqual([
+        expect(resolverFailuresOf(failures).map((failure) => [failure.resolver, failure.error.message])).toEqual([
           [userRoot, MISSING_AUTHOR_ID],
         ]);
       });
@@ -480,8 +497,8 @@ describe('resolve', () => {
         expect(resolved.flatMap((e) => e.roots.map((r) => r.aggregateType))).toEqual(['Post', 'Post']);
         const resolver = { kind: 'aggregate', aggregateCategory: 'model', aggregateType: 'User' };
         expect(failures).toEqual([
-          { event: events[0], resolver, error },
-          { event: events[1], resolver, error },
+          { phase: 'id-resolver-call', event: events[0], resolver, error },
+          { phase: 'id-resolver-call', event: events[1], resolver, error },
         ]);
       });
 
@@ -504,6 +521,7 @@ describe('resolve', () => {
         expect(resolved.map((e) => e.roots.map((r) => r.aggregateType))).toEqual([['Post', 'User'], ['Post']]);
         expect(failures).toEqual([
           {
+            phase: 'id-resolver-call',
             event: events[1],
             resolver: { kind: 'aggregate', aggregateCategory: 'model', aggregateType: 'User' },
             error: new Error('Cannot normalize ID of type: object'),
@@ -528,7 +546,9 @@ describe('resolve', () => {
         const { resolved, failures } = await resolveCollecting(events, auditContext, config, read);
 
         expect(resolved.flatMap((e) => e.roots.map((r) => r.aggregateType))).toEqual(['Post', 'Post', 'Post']);
-        expect(failures.map((failure) => [failure.event, failure.resolver.kind, failure.error.message])).toEqual(
+        expect(
+          resolverFailuresOf(failures).map((failure) => [failure.event, failure.resolver.kind, failure.error.message]),
+        ).toEqual(
           events.map((e) => [e, 'aggregate', 'The batch resolver of aggregate "User" returned 1 ids for 3 rows']),
         );
       });
@@ -695,7 +715,12 @@ describe('resolve', () => {
 
       expect(resolved[0]?.roots).toEqual([root('Post', 'p1'), root('User', 'u-new')]);
       expect(failures).toEqual([
-        { event: events[0], resolver: { kind: 'aggregate', aggregateCategory: 'model', aggregateType: 'User' }, error },
+        {
+          phase: 'id-resolver-call',
+          event: events[0],
+          resolver: { kind: 'aggregate', aggregateCategory: 'model', aggregateType: 'User' },
+          error,
+        },
       ]);
     });
 
@@ -708,7 +733,7 @@ describe('resolve', () => {
       const { resolved, failures } = await resolveCollecting(events, auditContext, postOfAuthor(resolver), read);
 
       expect(resolved[0]?.roots).toEqual([root('Post', 'p1')]);
-      expect(failures.map((failure) => [failure.event, failure.error.message])).toEqual([
+      expect(resolverFailuresOf(failures).map((failure) => [failure.event, failure.error.message])).toEqual([
         [events[0], 'unreadable u-new'],
       ]);
     });
@@ -750,8 +775,8 @@ describe('resolve', () => {
 
         const failed = { kind: 'aggregate', aggregateCategory: 'model', aggregateType: 'User' };
         expect(failures).toEqual([
-          { event: moves[0], resolver: failed, error },
-          { event: moves[1], resolver: failed, error },
+          { phase: 'id-resolver-call', event: moves[0], resolver: failed, error },
+          { phase: 'id-resolver-call', event: moves[1], resolver: failed, error },
         ]);
       });
 
@@ -763,7 +788,7 @@ describe('resolve', () => {
           read,
         );
 
-        expect(failures.map((failure) => [failure.event, failure.error.message])).toEqual(
+        expect(resolverFailuresOf(failures).map((failure) => [failure.event, failure.error.message])).toEqual(
           moves.map((e) => [e, 'The batch resolver of aggregate "User" returned 1 ids for 4 rows']),
         );
       });
@@ -1213,7 +1238,7 @@ describe('resolve', () => {
       const { resolved, failures } = await resolveCollecting(events, auditContext, config, read);
 
       expect(resolved.map((e) => e.identity)).toEqual(['p2']);
-      expect(failures).toEqual([{ event: events[0], resolver: { kind: 'entity' }, error }]);
+      expect(failures).toEqual([{ phase: 'id-resolver-call', event: events[0], resolver: { kind: 'entity' }, error }]);
     });
 
     it('reports a throwing id resolver of a row whose only root is the self root', async () => {
@@ -1231,7 +1256,7 @@ describe('resolve', () => {
       const { resolved, failures } = await resolveCollecting(events, auditContext, config, read);
 
       expect(resolved).toEqual([]);
-      expect(failures).toEqual([{ event: events[0], resolver: { kind: 'entity' }, error }]);
+      expect(failures).toEqual([{ phase: 'id-resolver-call', event: events[0], resolver: { kind: 'entity' }, error }]);
     });
 
     it('reports an id the id resolver returns that cannot be normalized', async () => {
@@ -1241,9 +1266,9 @@ describe('resolve', () => {
       const { resolved, failures } = await resolveCollecting(events, auditContext, config, read);
 
       expect(resolved).toEqual([]);
-      expect(failures.map((failure) => [failure.event, failure.resolver, failure.error.message])).toEqual([
-        [events[0], { kind: 'entity' }, 'Cannot normalize ID of type: object'],
-      ]);
+      expect(
+        resolverFailuresOf(failures).map((failure) => [failure.event, failure.resolver, failure.error.message]),
+      ).toEqual([[events[0], { kind: 'entity' }, 'Cannot normalize ID of type: object']]);
     });
 
     it('hands a row without an entity id to neither the entity enricher nor the to() resolvers', async () => {
@@ -1346,7 +1371,9 @@ describe('resolve', () => {
           failures.push(failure);
         }),
       ).rejects.toThrow('enricher broken');
-      expect(failures).toEqual([{ event: events[0], resolver: { kind: 'entity' }, error: resolverError }]);
+      expect(failures).toEqual([
+        { phase: 'id-resolver-call', event: events[0], resolver: { kind: 'entity' }, error: resolverError },
+      ]);
     });
 
     it('stores the fallback of an enricher with the log strategy', async () => {
@@ -1377,6 +1404,103 @@ describe('resolve', () => {
 
       expect(resolved[0]?.actorContext).toEqual({ role: 'unknown' });
       expect(resolved[0]?.entityContext).toEqual({ title: 'unknown' });
+    });
+
+    describe.each(['log', 'ignore'] as const)("an enricher that falls back under onError '%s'", (onError) => {
+      const failingWith = (error: Error) => ({
+        enricher: async (): Promise<never> => {
+          throw error;
+        },
+        onError,
+      });
+
+      beforeEach(() => {
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+      });
+
+      it('reports an actor enricher failure to the sink as an actor enrichment failure', async () => {
+        const error = new Error('actor broken');
+        const config = configOf({ Post: defineEntity({ type: 'Post' }) }, { ...failingWith(error), fallback: 'none' });
+
+        const { resolved, failures } = await resolveCollecting(rowsOf('Post', 1), auditContext, config, read);
+
+        expect(resolved[0]?.actorContext).toBe('none');
+        expect(failures).toEqual([{ phase: 'enrichment', enricher: 'actor', error }]);
+      });
+
+      it('reports an entity enricher failure to the sink once per model as an entity enrichment failure', async () => {
+        const error = new Error('entity broken');
+        const config = configOf({ Post: defineEntity({ type: 'Post', entityContext: failingWith(error) }) });
+
+        const { resolved, failures } = await resolveCollecting(rowsOf('Post', 2), auditContext, config, read);
+
+        expect(resolved.map((e) => e.entityContext)).toEqual([null, null]);
+        expect(failures).toEqual([{ phase: 'enrichment', enricher: 'entity', error }]);
+      });
+
+      it.each<[string, (enricher: ReturnType<typeof failingWith>) => EntityMap]>([
+        [
+          'a root-side',
+          (enricher) => ({
+            User: defineEntity({ type: 'User', aggregateContext: enricher }),
+            Post: defineEntity({
+              type: 'Post',
+              selfAggregate: false,
+              aggregates: [to('User', foreignKey('authorId'))],
+            }),
+          }),
+        ],
+        [
+          'a to() projection',
+          (enricher) => ({
+            Post: defineEntity({
+              type: 'Post',
+              selfAggregate: false,
+              aggregates: [to('User', foreignKey('authorId'), { aggregateContext: enricher })],
+            }),
+          }),
+        ],
+        [
+          'the selfAggregate',
+          (enricher) => ({
+            Post: defineEntity({ type: 'Post', selfAggregate: { aggregateContext: enricher } }),
+          }),
+        ],
+      ])(
+        'reports %s aggregate enricher failure to the sink as an aggregate enrichment failure',
+        async (_side, entitiesOf) => {
+          const error = new Error('aggregate broken');
+          const config = configOf(entitiesOf(failingWith(error)));
+
+          const { resolved, failures } = await resolveCollecting(rowsOf('Post', 2), auditContext, config, read);
+
+          expect(resolved.map((e) => [...e.aggregateContexts.values()])).toEqual([[null], [null]]);
+          expect(failures).toEqual([{ phase: 'enrichment', enricher: 'aggregate', error }]);
+        },
+      );
+
+      it('reports a root-side and a to() projection aggregate enricher that both fail as one failure each', async () => {
+        const rootError = new Error('root side broken');
+        const projectionError = new Error('projection side broken');
+        const config = configOf({
+          User: defineEntity({ type: 'User', aggregateContext: failingWith(rootError) }),
+          Post: defineEntity({
+            type: 'Post',
+            selfAggregate: false,
+            aggregates: [to('User', foreignKey('authorId'), { aggregateContext: failingWith(projectionError) })],
+          }),
+        });
+
+        const { failures } = await resolveCollecting(rowsOf('Post', 2), auditContext, config, read);
+
+        expect(failures).toHaveLength(2);
+        expect(failures).toEqual(
+          expect.arrayContaining([
+            { phase: 'enrichment', enricher: 'aggregate', error: rootError },
+            { phase: 'enrichment', enricher: 'aggregate', error: projectionError },
+          ]),
+        );
+      });
     });
   });
 });

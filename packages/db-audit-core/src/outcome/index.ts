@@ -12,7 +12,7 @@
  */
 
 import type { AuditRecord } from '../domain/mutation-event.js';
-import type { FailedResolver, ResolveFailureSink } from '../resolve/index.js';
+import type { FailedResolver, ResolveFailure, ResolveFailureSink } from '../resolve/index.js';
 import { toError } from '../utils/to-error.js';
 
 /**
@@ -42,6 +42,10 @@ export interface UnrecordedWrite {
  *   leaves the row without any record, a `to()` resolver failing leaves it without the record under
  *   the root it failed to resolve only. Reported once per affected row and resolver, however many
  *   of the row's states it failed for, with the row's identity.
+ * - `enrichment`: a user-supplied enricher (`enricher`: the actor's, an entity's or an aggregate
+ *   root's or projection's) failed, or timed out, and its `onError` resolved to `'log'` or
+ *   `'ignore'`: its fallback stands in for the contexts it was to enrich, and no record is dropped.
+ *   Reported once per enricher call, whatever `onError` logs to the console.
  * - `diff-generation`: building the records failed. Inside a transaction that has not committed,
  *   the operation fails with the original error; once its write has committed outside any, its
  *   records are dropped.
@@ -50,8 +54,8 @@ export interface UnrecordedWrite {
  *   may not survive a failed statement; once the operation's write has committed it succeeds, and
  *   whether the writer persisted some of the records is not known.
  *
- * `modelName` is the model of the rows the failure concerns, which a nested write can make another
- * than the operation's, and `operation` the keyword that wrote them.
+ * Where a failure carries them, `modelName` is the model of the rows the failure concerns, which a
+ * nested write can make another than the operation's, and `operation` the keyword that wrote them.
  */
 export type AuditFailure =
   | {
@@ -75,6 +79,7 @@ export type AuditFailure =
       readonly resolver: FailedResolver;
       readonly error: Error;
     }
+  | Extract<ResolveFailure, { readonly phase: 'enrichment' }>
   | { readonly phase: 'diff-generation'; readonly error: Error }
   | { readonly phase: 'log-write'; readonly records: readonly AuditRecord[]; readonly error: Error };
 
@@ -93,7 +98,8 @@ interface AuditOutcomeFields {
  * What the audit of one operation came to, by `status`:
  *
  * - `complete`: the operation committed and every record it produced was passed to a writer that
- *   resolved. Its failures, if any, dropped no record: a before state that could not be read.
+ *   resolved. Its failures, if any, dropped no record: a before state that could not be read, or an
+ *   enricher that fell back.
  * - `incomplete`: the operation committed without some of its records: a failure dropped them, or
  *   left a write without a record, or the write of the records failed, in which case how many the
  *   writer persisted is not known.
@@ -121,8 +127,9 @@ export type AuditObserver = (outcome: AuditOutcome) => void | Promise<void>;
 /** What an adapter builds each {@link OperationOutcome} with, from its `observer` option */
 export interface OutcomeConfig {
   /**
-   * Called with every outcome. Without one, the failures of an `incomplete` outcome, whose
-   * records were lost, are logged to the console ({@link logIncompleteOutcome}).
+   * Called with every outcome. Without one, the failures of an `incomplete` outcome that can have
+   * lost its records, every phase but `enrichment`, are logged to the console
+   * ({@link logIncompleteOutcome}).
    */
   readonly observer?: AuditObserver;
 }
@@ -151,8 +158,8 @@ export interface DroppedRecords {
  */
 export interface OperationOutcome {
   /** Keeps a failure of the operation's audit; never throws, and calls no observer */
-  readonly fail: (failure: Exclude<AuditFailure, { readonly phase: 'id-resolver-call' }>) => void;
-  /** The sink an adapter passes to `resolve`: keeps an `id-resolver-call` failure per failure */
+  readonly fail: (failure: Exclude<AuditFailure, { readonly phase: 'id-resolver-call' | 'enrichment' }>) => void;
+  /** The sink an adapter passes to `resolve`: keeps an `id-resolver-call` or `enrichment` failure per failure */
   readonly reportResolveFailure: ResolveFailureSink;
   readonly reportUnrecordedWrite: (write: UnrecordedWrite) => void;
   /**
@@ -183,18 +190,28 @@ const DROPPED_RECORD_CAUSE_PHASES: ReadonlySet<AuditFailurePhase> = new Set([...
 /** The phases whose failure, once the operation committed, means its records were not all written */
 const WRITE_LOSING_PHASES: ReadonlySet<AuditFailurePhase> = new Set(['diff-generation', 'log-write']);
 
+/** The phases whose failure can have lost a record; an `enrichment` failure, which keeps it, is not one */
+const RECORD_LOSING_PHASES: ReadonlySet<AuditFailurePhase> = new Set([
+  ...DROPPED_RECORD_CAUSE_PHASES,
+  ...WRITE_LOSING_PHASES,
+]);
+
 const messageOf = (error: unknown): string => toError(error).message;
 
 /**
- * How an outcome is reported when no observer is given: the failures of an `incomplete` outcome,
- * whose records were lost, are logged to the console. An adapter that observes the outcomes itself
- * calls it in place of the user's observer when the user gives none.
+ * How an outcome is reported when no observer is given: the failures of an `incomplete` outcome
+ * that can have lost its records are logged to the console, an `enrichment` failure not among them.
+ * An adapter that observes the outcomes itself calls it in place of the user's observer when the
+ * user gives none.
  */
 export const logIncompleteOutcome: AuditObserver = (outcome) => {
   if (outcome.status !== 'incomplete') {
     return;
   }
   for (const { phase, error } of outcome.failures) {
+    if (!RECORD_LOSING_PHASES.has(phase)) {
+      continue;
+    }
     console.error(
       `[db-audit-core] ${outcome.operation} on ${outcome.model} committed without some of its audit records; ${phase} failure:`,
       error.message,
@@ -254,7 +271,12 @@ export const createOperationOutcome = (target: OutcomeTarget, config: OutcomeCon
     fail: (failure) => {
       failures.push(failure);
     },
-    reportResolveFailure: ({ event, resolver, error }) => {
+    reportResolveFailure: (failure) => {
+      if (failure.phase === 'enrichment') {
+        failures.push(failure);
+        return;
+      }
+      const { event, resolver, error } = failure;
       failures.push({
         phase: 'id-resolver-call',
         modelName: event.model,

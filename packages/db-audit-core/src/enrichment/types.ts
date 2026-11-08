@@ -2,12 +2,14 @@ import type { ErrorStrategy } from '../utils/error-handler.js';
 
 /**
  * What an enricher failure (an error or a timeout) becomes: 'throw' rethrows it, 'log' warns and
- * yields `fallback ?? null`, and 'ignore' yields `fallback ?? null` silently. A function receives
- * the error and returns one of those strategies; when it throws or returns anything else, the
- * failure is logged and handled as 'log'. The rejection of a write the enricher or the function
- * issued (a `RejectedWriteError`: `AuditReentrantWriteError`, or an adapter's own) is rethrown
- * whatever the strategy, unless the enricher issued the write after it timed out: the strategy has
- * handled the timeout by then, and the rejection is logged to the console.
+ * yields `fallback ?? null`, and 'ignore' yields `fallback ?? null` without a console warning. A
+ * failure that yields the fallback, under either, is reported to the write's outcome as an
+ * `enrichment` failure, which drops no record. A function receives the error and returns one of
+ * those strategies; when it throws or returns anything else, the failure is logged and handled as
+ * 'log'. The rejection of a write the enricher or the function issued (a `RejectedWriteError`:
+ * `AuditReentrantWriteError`, or an adapter's own) is rethrown whatever the strategy, unless the
+ * enricher issued the write after it timed out: the strategy has handled the timeout by then, and
+ * the rejection is logged to the console.
  */
 export type EnricherOnError = ErrorStrategy | ((error: Error) => ErrorStrategy | Promise<ErrorStrategy>);
 

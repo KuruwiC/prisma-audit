@@ -82,14 +82,18 @@ const handleEnricherError = async (error: Error, onError: EnricherOnError, logMe
   }
 };
 
+export type ReportFallback = (error: Error) => void;
+
 /**
  * Runs `config.enricher` under `timeoutMs`; null when no enricher is configured. A failure,
- * including a timeout, is handled per `config.onError`.
+ * including a timeout, is handled per `config.onError`; when it is not rethrown, it is reported
+ * to `reportFallback` and `fallback` or null stands in.
  */
 export const runEnricher = async <TInput, TContext, TMeta = void>(
   config: EnricherConfig<TInput, TContext, unknown, TMeta> | undefined,
   input: TInput,
   db: unknown,
+  reportFallback: ReportFallback,
   timeoutMs: number = ENRICHMENT_TIMEOUTS.DEFAULT,
   meta?: TMeta,
 ): Promise<TContext | null> => {
@@ -100,7 +104,9 @@ export const runEnricher = async <TInput, TContext, TMeta = void>(
   try {
     return await withTimeout(config.enricher(input, db, meta as TMeta), timeoutMs);
   } catch (unknownError) {
-    await handleEnricherError(toError(unknownError), config.onError ?? 'throw', '[db-audit-core] Enricher failed:');
+    const error = toError(unknownError);
+    await handleEnricherError(error, config.onError ?? 'throw', '[db-audit-core] Enricher failed:');
+    reportFallback(error);
     return config.fallback ?? null;
   }
 };
@@ -108,12 +114,14 @@ export const runEnricher = async <TInput, TContext, TMeta = void>(
 /**
  * Runs `config.enricher` over `inputs` under `timeoutMs`; all null when no enricher is configured.
  * A failure, including a timeout or a result of the wrong length, is handled per `config.onError`;
- * when it is not rethrown, `fallback` (an array) or nulls stand in for every input.
+ * when it is not rethrown, it is reported to `reportFallback` and `fallback` (an array) or nulls
+ * stand in for every input.
  */
 export const runBatchEnricher = async <TInput, TContext, TMeta = void>(
   config: EnricherConfig<TInput[], (TContext | null)[], unknown, TMeta> | undefined,
   inputs: TInput[],
   db: unknown,
+  reportFallback: ReportFallback,
   timeoutMs: number = ENRICHMENT_TIMEOUTS.BATCH,
   meta?: TMeta,
 ): Promise<(TContext | null)[]> => {
@@ -130,11 +138,9 @@ export const runBatchEnricher = async <TInput, TContext, TMeta = void>(
     }
     return enrichedContexts;
   } catch (unknownError) {
-    await handleEnricherError(
-      toError(unknownError),
-      config.onError ?? 'throw',
-      '[db-audit-core] Batch enricher failed:',
-    );
+    const error = toError(unknownError);
+    await handleEnricherError(error, config.onError ?? 'throw', '[db-audit-core] Batch enricher failed:');
+    reportFallback(error);
     return config.fallback ?? inputs.map(() => null);
   }
 };

@@ -84,7 +84,8 @@ export interface MemoryAuditOptions<TModelName extends string> {
   readonly actorContext?: ActorContextConfig<AuditActor, unknown, MemoryAuditedHandle<TModelName>>;
   /**
    * Called with the outcome of every write of a model in `entities`, once it is settled. Without
-   * one, the failures of an `incomplete` outcome are logged to the console, as core does.
+   * one, the failures of an `incomplete` outcome that can have lost its records are logged to the
+   * console, as core does.
    */
   readonly observer?: AuditObserver;
 }

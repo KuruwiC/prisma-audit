@@ -271,7 +271,8 @@ export interface PrismaAuditExtensionOptions<TModelName extends string = string,
    * before `$transaction` returns, or, as `not-committed`, once it has rolled back. An operation
    * rejected before it runs (`AuditContextMissingError`, `AuditAtomicityError`,
    * `AuditUnboundWriteError`) is `not-committed`. Without an observer, the failures of an
-   * `incomplete` outcome, whose entries were lost, are logged to the console. A write of a model in
+   * `incomplete` outcome that can have lost its entries, every phase but `enrichment`, are logged
+   * to the console. A write of a model in
    * `entities` the observer makes through the audited client is rejected with
    * `AuditReentrantWriteError` before it runs and has no outcome, like one an id resolver, an
    * enricher or the writer makes; the observer's error is logged and ignored. Every write through a
@@ -336,6 +337,13 @@ export interface PrismaAuditExtensionOptions<TModelName extends string = string,
    *   `recordOmittedFields`. `identity` is the row's serialized row key and `resolver` the failed
    *   resolver.
    *   A failed `batchLookup` resolver is reported once for every row of its call.
+   * - `enrichment`: an enricher (`enricher`: `actor` for `actorContext`, `entity` for an entity's
+   *   `entityContext`, `aggregate` for a root-side or a `to()` or `selfAggregate` projection's
+   *   `aggregateContext`) threw, timed out or, as a batch, returned a different number of contexts
+   *   than inputs, and its `onError` resolved to `'log'` or `'ignore'`. The entries are recorded
+   *   with its `fallback` (else null) in place of the context, so the outcome stays `complete` and
+   *   an `atomic` operation commits. Reported once per enricher call, under `'ignore'` too, which
+   *   only keeps it off the console.
    */
   observer?: AuditObserver;
 }

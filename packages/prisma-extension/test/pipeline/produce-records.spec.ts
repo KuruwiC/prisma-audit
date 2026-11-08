@@ -102,6 +102,7 @@ describe('createRecordProducer', () => {
     expect(records.map((record) => record.entityId)).toEqual(['p1']);
     expect(failureSink.reportResolveFailure).toHaveBeenCalledTimes(1);
     expect(failureSink.reportResolveFailure).toHaveBeenCalledWith({
+      phase: 'id-resolver-call',
       event: failing,
       resolver: { kind: 'entity' },
       error,
