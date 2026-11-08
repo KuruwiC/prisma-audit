@@ -87,7 +87,7 @@ await auditProvider.runAsync({ actor: { category: 'user', type: 'User', id: 'use
 });
 ```
 
-`createAuditClient` returns the type of the client it extends. Audited operations run on the client you pass in, and the audit logs are written with it, outside the audit extension. `defineConfig<PrismaClient>()` only types a configuration object for use in another module.
+`createAuditClient` returns the type of the client it extends. Audited operations run on the client you pass in. The audit logs are written on the audited client, or inside a transaction on the transaction's client (see [`write.writer`](#writewriter)); the audit-log model is not audited. `defineConfig<PrismaClient>()` only types a configuration object for use in another module.
 
 ## Options
 
@@ -107,7 +107,7 @@ await auditProvider.runAsync({ actor: { category: 'user', type: 'User', id: 'use
 
 ### `Prisma` and `schema`
 
-`Prisma` is the namespace exported by the generated client your `PrismaClient` comes from; the extension reads `Prisma.DbNull`, `Prisma.defineExtension` and the client version `Prisma.prismaVersion` from it. `schema` is the `auditSchema` the generator writes, from which the extension reads the models' keys and relations.
+`Prisma` is the namespace exported by the generated client your `PrismaClient` comes from; the extension reads `Prisma.DbNull`, `Prisma.defineExtension`, the client version `Prisma.prismaVersion` and, to check `write.isolationLevel`, `Prisma.TransactionIsolationLevel` from it. `schema` is the `auditSchema` the generator writes, from which the extension reads the models' keys and relations.
 
 ### `contextProvider`
 
@@ -182,7 +182,7 @@ The rows a resolver receives hold every column the client reads by default, plus
 
 #### `write.model`
 
-The PascalCase name of the audit-log model, default `'AuditLog'`. It cannot be in `entities`: `createAuditClient` throws, since the audit's own writes to an audited model are rejected. It needs the columns of the `AuditLog` model in the [main README](../../README.md#1-add-an-auditlog-model). An optional `beforeUnavailable Boolean @default(false)` field stores whether the before state was requested and could not be read; a field of that name that is not a single `Boolean` makes `createAuditClient` throw.
+The PascalCase name of the audit-log model, default `'AuditLog'`. It cannot be in `entities`: `createAuditClient` throws (next to a custom `writer`, only when `write.model` is given), since the audit's own writes to an audited model are rejected. It needs the columns of the `AuditLog` model in the [main README](../../README.md#1-add-an-auditlog-model). An optional `beforeUnavailable Boolean @default(false)` field stores whether the before state was requested and could not be read; a field of that name that is not a single `Boolean` makes `createAuditClient` throw.
 
 #### `write.isolationLevel`
 
@@ -548,7 +548,7 @@ The audit's own queries and its writes to the audit-log model are not audited. A
 
 ## Audit outcomes
 
-`observer` is called once for every operation that writes rows of a model in `entities`, nested writes included, once the operation has settled:
+`observer` is called once for every operation that writes rows of a model in `entities`, nested writes included, once the operation has settled; a write rejected with `AuditReentrantWriteError` or `AuditParentWriteError` has no outcome:
 
 ```typescript
 {
