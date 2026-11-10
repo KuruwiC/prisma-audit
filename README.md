@@ -213,6 +213,16 @@ The transaction the client opens runs at `write.isolationLevel` (for example `Pr
 
 Atomicity does not make the record accurate under concurrent writes; see [Accuracy under concurrent writes](docs/guarantees.md#accuracy-under-concurrent-writes). Details: [Write modes](packages/prisma-extension/README.md#write-modes) and [Transactions](packages/prisma-extension/README.md#transactions).
 
+Settings by how exact the records must be:
+
+| Records | Settings | Under a concurrent write |
+| --- | --- | --- |
+| A change history | The default `atomic` mode | Every committed write has its records. At the database's default isolation level (PostgreSQL READ COMMITTED, MySQL REPEATABLE READ), a before state can lack a change another transaction commits between the audit's read and the write. |
+| Records of chosen writes | A version column every writer advances, in the `where` of the top-level `update` or `delete`; or `SELECT ... FOR UPDATE` through `$queryRaw` in your `$transaction` before the write | The before state of a guarded write is exact; with a version column, a write that advanced it in between makes the operation fail with `P2025`. |
+| A strict audit trail | PostgreSQL: `write.isolationLevel` `RepeatableRead` or `Serializable` (or your `$transaction(fn, { isolationLevel })`); MySQL: `Serializable`. Retry on `P2034` yourself, and check that `outcome.isolation` is `declared` | A change to a row the audit read rejects the operation with `P2034` instead of leaving an inaccurate record. The tests cover PostgreSQL; for MySQL at SERIALIZABLE see the [core table](docs/guarantees.md#accuracy-under-concurrent-writes). |
+
+The cells that differ by operation (`upsert`, `updateMany`, nested creates) are in [Accuracy of Prisma operations under concurrent writes](docs/guarantees.md#accuracy-of-prisma-operations-under-concurrent-writes).
+
 ## Configuration
 
 ```typescript
