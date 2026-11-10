@@ -1,5 +1,25 @@
 # @kuruwic/prisma-audit
 
+## 0.6.0
+
+### Minor Changes
+
+- 77bca47: Reject a write that a query extension applied after the audit changes the structure of or replaces, instead of running writes the audit neither records nor rejects.
+  
+  - Breaking: `$extends` of an audited client (`createAuditClient(prisma).$extends(extension)`, through an extension function or `Prisma.defineExtension` alike) applies an extension with `query` as it is and places a check of the audit's own right after it, innermost on the client it derives. A model write must reach the database through every such check with arguments that, as Prisma sends them, write the same relations as the ones the audit continued it with: the same nested writes at the same places, both branches of every upsert told apart, with as many elements, in the same order within a relation field, the same `true` or `false` of a to-one `delete` or `disconnect`, and as many rows of a top-level `createMany`. Otherwise the write is rejected with `AuditExtensionContinuationError` (new, with `extensionName`, `modelName`, `operation` and `violation`) before it runs. The check reads the arguments that reach the database, so a nested write added as a class instance, behind a `toJSON`, or to the arguments once `query` was called is rejected too. Before, a nested write such an extension added ran, neither recorded nor rejected by `requireContext`. Apply an extension that changes which rows or relations an operation writes to the client passed to `createAuditClient`.
+  - Breaking: the write must run through `query` once, and again only after a failed attempt. An extension that settles without the write having run, replacing the operation (a soft delete) or swallowing a failed attempt to return a result of its own, is rejected with `AuditExtensionContinuationError` once it settles; a call to `query` once the write ran, while it runs, or once it settled is rejected before it runs. In a chain of extensions the error names the extension at fault. Before, the audit recorded the operation that never ran from the extension's result.
+  - Values may change: an extension that transforms the values a write writes and the rows a read returns, as field encryption does, still belongs after the audit, where the after state holds the values the application reads. The values and the fields that pick rows, those of the top-level `where` and of the unique `where` and filters of nested writes, are not compared: an extension that changes them, a tenant filter adding a field to every `where` included, must make the same change to the reads it handles.
+  - A nested write the application passes behind a `toJSON` to the audited client is read as Prisma sends it, and audited.
+  - `AuditUnboundWriteError` is thrown as well for a model write that reaches the check after an extension applied after the audit without the audit continuing it.
+  - `AuditParentWriteError`'s message leads with writing through `Prisma.getExtensionContext(this)` or the audited client.
+- 12f76b2: Run the audit of an operation outside any transaction on the client the operation was issued on, so the extensions applied after the audit see the audit's own queries there as they do inside a transaction.
+  
+  - Outside any transaction, the audit's reads before and after the write, its pre-reads of nested writes, the audit-log write, and the client handed to the resolvers, the enrichers and the writer (`db`, `handle`) are the audited client the operation was issued on: the client `createAuditClient` returned, or a client `$extends` derives from it. Before, they were always the client `createAuditClient` returned, so a query extension applied after the audit that transforms stored values (field encryption) left the stored values in the before state of a record whose after state held the values the application reads. Inside a transaction they already ran on the transaction's client, which carries those extensions. For an operation issued on the client `createAuditClient` returned nothing changes.
+
+### Patch Changes
+
+- @kuruwic/db-audit-core@0.6.0
+
 ## 0.5.0
 
 ### Minor Changes
