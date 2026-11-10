@@ -398,7 +398,7 @@ describe('createBatchExecutor', () => {
       await runWithRecords(
         executor,
         operationOn(transactionClient, 'createMany', { data: [{ id: 'a', email: 'a@1' }] }),
-        { ...transactionScopeOn(transactionClient, failureSink), auditedClient: clientWith({ user: {} }) },
+        transactionScopeOn(transactionClient, failureSink),
         produceRecords,
       );
 

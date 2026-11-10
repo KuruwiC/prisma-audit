@@ -106,7 +106,7 @@ export const createTransactionProxy = <TClient extends object>(
   };
   const proxy = <T extends object>(client: T): T => {
     const wrapper = new Proxy(client, {
-      get(target, prop, receiver: object) {
+      get(target, prop, receiver: PrismaHandle) {
         if (prop === '$extends') {
           const originalExtends = Reflect.get(target, prop) as (...args: unknown[]) => unknown;
           return (...args: unknown[]): unknown => {

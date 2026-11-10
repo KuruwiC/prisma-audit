@@ -159,7 +159,7 @@ const auditedClientOf = (deps: AuditPipelineDependencies) => ({
                   widened: new Map(),
                 },
                 auditContext: baseContext,
-                auditedClient,
+                issuingClient: auditedClient,
                 mode,
                 plan,
                 transaction: inTransaction,
@@ -444,7 +444,7 @@ describe('createTransactionProxy (interactive $transaction)', () => {
     );
 
     expect(ran.map(({ client }) => client)).toEqual(['client', 'transaction']);
-    expect(bindingOf(ran[0])).toEqual({ transaction: undefined });
+    expect(bindingOf(ran[0])).toEqual({ transaction: undefined, client: proxy });
     expect(transactionClientOf(ran[1])).toBe(tx);
   });
 
@@ -468,7 +468,7 @@ describe('createTransactionProxy (interactive $transaction)', () => {
     );
   });
 
-  it('proxies a client derived by $extends, so that its interactive $transaction hands the callback a bound client', async () => {
+  it('proxies a client derived by $extends, so that its interactive $transaction hands the callback a bound client and an operation on it outside any transaction is bound to it', async () => {
     const ran: Probed[] = [];
     const provider = createAsyncLocalStorageProvider();
     const derivedTx = probeClientNamed('derived transaction', ran);
@@ -499,7 +499,8 @@ describe('createTransactionProxy (interactive $transaction)', () => {
     expect(extensions).toEqual([extension]);
     expect(ran.map(({ client }) => client)).toEqual(['derived transaction', 'derived']);
     expect(transactionClientOf(ran[0])).toBe(derivedTx);
-    expect(bindingOf(ran[1])).toEqual({ transaction: undefined });
+    expect(bindingOf(ran[1])).toEqual({ transaction: undefined, client: derived });
+    expect(Reflect.get(Object(bindingOf(ran[1])), 'client')).toBe(derived);
   });
 });
 
@@ -593,7 +594,7 @@ describe('createTransactionProxy ($extends with an extension function)', () => {
     });
 
     expect(received).toBe(proxy);
-    expect(bindingOf(ran[0])).toEqual({ transaction: undefined });
+    expect(bindingOf(ran[0])).toEqual({ transaction: undefined, client: proxy });
   });
 });
 
@@ -660,7 +661,7 @@ describe('createTransactionProxy (operation recipes)', () => {
 
     expect($transaction).not.toHaveBeenCalled();
     expect(ran.map(({ client }) => client)).toEqual(['client']);
-    expect(ran.map(bindingOf)).toEqual([{ transaction: undefined }]);
+    expect(ran.map(bindingOf)).toEqual([{ transaction: undefined, client: proxy }]);
   });
 
   describe('a batch $transaction holding a write', () => {
@@ -788,7 +789,7 @@ describe('createTransactionProxy (operation recipes)', () => {
         });
 
         expect(ran.map(({ client }) => client)).toEqual(['client']);
-        expect(ran[0]?.scope).toEqual({ binding: { transaction: undefined } });
+        expect(ran[0]?.scope).toEqual({ binding: { transaction: undefined, client: proxy } });
       },
     );
   });

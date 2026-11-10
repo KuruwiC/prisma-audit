@@ -47,8 +47,9 @@ describe('runtime scope', () => {
       withScope({ binding }, () => {
         expect(operationBinding()).toBe(binding);
       });
-      withScope({ binding: { transaction: undefined } }, () => {
-        expect(operationBinding()).toEqual({ transaction: undefined });
+      const issuer = client('issuer');
+      withScope({ binding: { transaction: undefined, client: issuer } }, () => {
+        expect(operationBinding()).toEqual({ transaction: undefined, client: issuer });
       });
       expect(operationBinding()).toBeUndefined();
     });

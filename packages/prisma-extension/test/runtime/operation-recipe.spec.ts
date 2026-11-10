@@ -7,6 +7,7 @@
 import { RejectedWriteError } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
 import { AuditParentWriteError } from '../../src/errors.js';
+import type { PrismaHandle } from '../../src/internal-types.js';
 import type { OpenTransaction } from '../../src/runtime/interactive-transaction.js';
 import { createRecipeClient, type RecipeConfig, takeBatchRecipes } from '../../src/runtime/operation-recipe.js';
 import { currentScope, withScope } from '../../src/runtime/scope.js';
@@ -371,13 +372,14 @@ describe('operation recipes', () => {
       ...configAtomic(false),
       relatedModel: (model, field) => (model === 'User' && field === 'posts' ? 'Post' : undefined),
     };
+    const receiver = {};
     const delegate = createRecipeClient(
       config,
       vi.fn<OpenTransaction>(),
       unwrapped,
       everyAudited,
       ownTransaction,
-    ).propertyOf({}, target, 'user')?.value as {
+    ).propertyOf(receiver, target, 'user')?.value as {
       update: (args: unknown) => { posts: (args: unknown) => PromiseLike<unknown> };
     };
 
@@ -387,7 +389,7 @@ describe('operation recipes', () => {
       ['update', { where: { id: 'u1' }, data: {} }],
       ['posts', { take: 1 }],
     ]);
-    expect(posts).toEqual({ posts: { take: 1 }, binding: { transaction: undefined } });
+    expect(posts).toEqual({ posts: { take: 1 }, binding: { transaction: undefined, client: receiver } });
   });
 
   it('rejects when awaited after a batch has taken it, without running it', async () => {
@@ -539,7 +541,7 @@ describe('operation recipes', () => {
       };
     };
     const recipesOn = (
-      receiver: object,
+      receiver: PrismaHandle,
       target: object,
       config: RecipeConfig,
       actions: string[],

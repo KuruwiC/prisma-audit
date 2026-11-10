@@ -6,7 +6,7 @@
 import type { AuditRecord, MutationEvent } from '@kuruwic/db-audit-core';
 import { createActorId, createAggregateId, createEntityId } from '@kuruwic/db-audit-core';
 import { describe, expect, it, vi } from 'vitest';
-import type { PrismaBaseClient, PrismaHandle } from '../../src/internal-types.js';
+import type { PrismaHandle } from '../../src/internal-types.js';
 import type { ExecutionScope } from '../../src/pipeline/execution-scope.js';
 import { type AuditedOperation, createExecutor } from '../../src/pipeline/executor.js';
 import type { AuditLogData } from '../../src/types.js';
@@ -35,19 +35,10 @@ const record: AuditLogData = {
 };
 
 const transactionClient: PrismaHandle = Object.assign(Object.create(null), { name: 'transaction' });
-const auditedClient: PrismaBaseClient = {
-  $transaction: async () => {
-    throw new Error('not used');
-  },
-  $extends: () => {
-    throw new Error('not used');
-  },
-};
 
 const scope: ExecutionScope = {
   auditContext: { actor: { category: 'model', type: 'User', id: 'user-1' } },
   handle: transactionClient,
-  auditedClient,
   failureSink: stubOperationFailureSink(),
 };
 

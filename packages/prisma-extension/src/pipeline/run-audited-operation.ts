@@ -43,8 +43,8 @@ export interface InterceptedOperation {
 export interface AuditedOperationInput {
   readonly operation: InterceptedOperation;
   readonly auditContext: AuditContext;
-  /** The audited client: the audit and the user callbacks run on it outside any transaction */
-  readonly auditedClient: PrismaHandle;
+  /** The audited client the operation was issued on: the audit and the user callbacks run on it outside any transaction */
+  readonly issuingClient: PrismaHandle;
   /** The operation's write mode, from the audited models its arguments write rows of */
   readonly mode: WriteMode;
   /** How and when its records are written: `planFor` of the mode, which did not reject it */
@@ -131,8 +131,8 @@ export const runAuditedOperation = async (
   input: AuditedOperationInput,
   deps: AuditPipelineDependencies,
 ): Promise<unknown> => {
-  const { operation: intercepted, auditContext, auditedClient, mode, plan, transaction, outcome } = input;
-  const scope = executionScopeOf({ auditContext, auditedClient, transaction, failureSink: outcome });
+  const { operation: intercepted, auditContext, issuingClient, mode, plan, transaction, outcome } = input;
+  const scope = executionScopeOf({ auditContext, issuingClient, transaction, failureSink: outcome });
   const { model, action, args, widened } = intercepted;
   let written = false;
   const execute = operationContinuation(intercepted, () => {

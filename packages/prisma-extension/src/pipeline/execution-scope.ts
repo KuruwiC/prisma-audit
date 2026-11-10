@@ -36,11 +36,10 @@ export interface ExecutionScope {
   readonly auditContext: AuditContext;
   /**
    * Client every audit read and write, and every user callback, run on: the client bound to the
-   * transaction inside a transaction, else the audited client.
+   * transaction inside a transaction, else the audited client the operation was issued on, which
+   * the writes after commit run on too.
    */
   readonly handle: PrismaHandle;
-  /** The audited client; the writes after commit run on it */
-  readonly auditedClient: PrismaHandle;
   /** The audit of the transaction level the operation runs on, if any */
   readonly transaction?: TransactionAudit;
   readonly failureSink: OperationFailureSink;
@@ -48,7 +47,11 @@ export interface ExecutionScope {
 
 export interface ExecutionScopeInput {
   readonly auditContext: AuditContext;
-  readonly auditedClient: PrismaHandle;
+  /**
+   * The audited client the operation was issued on, outside any transaction the client `handle` is:
+   * the client `createAuditClient` returned or a client `$extends` derives from it
+   */
+  readonly issuingClient: PrismaHandle;
   /** The transaction the operation's binding names, that of the client it was issued on, if any */
   readonly transaction: OperationTransaction | undefined;
   readonly failureSink: OperationFailureSink;
@@ -56,11 +59,10 @@ export interface ExecutionScopeInput {
 
 /** The scope of an operation that runs now, inside the transaction its binding names, if any */
 export const executionScopeOf = (input: ExecutionScopeInput): ExecutionScope => {
-  const { auditContext, auditedClient, transaction, failureSink } = input;
+  const { auditContext, issuingClient, transaction, failureSink } = input;
   return {
     auditContext,
-    handle: transaction?.client ?? auditedClient,
-    auditedClient,
+    handle: transaction?.client ?? issuingClient,
     transaction: transaction?.audit,
     failureSink,
   };
@@ -70,7 +72,7 @@ export const executionScopeOf = (input: ExecutionScopeInput): ExecutionScope => 
 export const transactionRuntimeOf = (scope: ExecutionScope): TransactionRuntime<PrismaHandle> => {
   const { transaction } = scope;
   return {
-    baseHandle: scope.auditedClient,
+    baseHandle: scope.handle,
     transaction: transaction && { handle: scope.handle, audit: transaction },
     detach: trackPendingWrite,
   };

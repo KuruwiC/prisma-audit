@@ -18,6 +18,7 @@
  */
 
 import { AuditParentWriteError } from '../errors.js';
+import type { PrismaHandle } from '../internal-types.js';
 import { isAuditableAction } from '../utils/extension-utils.js';
 import { invokeMethod } from '../utils/invoke-method.js';
 import type { OpenTransaction } from './interactive-transaction.js';
@@ -94,7 +95,7 @@ interface RecipeCall {
 /** A wrapped client the calls of a recipe are made on */
 export interface IssuingClient {
   /** The audited client the call was made on, the one a batch `$transaction([...])` takes it for */
-  readonly receiver: object;
+  readonly receiver: PrismaHandle;
   /** The client behind `receiver`, the one Prisma runs the call on, and opens a transaction on */
   readonly target: object;
   /** The interactive transaction `target` is the client of; undefined for a client outside any */
@@ -178,7 +179,9 @@ const startOn = async (
   client: object,
   transaction: ActiveTransaction | undefined,
 ): Promise<unknown> => {
-  const scope: RuntimeScope = { binding: { transaction } };
+  const scope: RuntimeScope = {
+    binding: transaction ? { transaction } : { transaction: undefined, client: recipe.receiver },
+  };
   return await withScope(scope, () => startingIn(scope, replay(recipe, client)));
 };
 
@@ -424,7 +427,7 @@ export const createRecipeClient = (
   };
 
   /** The value the audited client `receiver`, outside any transaction, returns for `prop`, when it is wrapped */
-  const propertyOf = (receiver: object, target: object, prop: string | symbol) =>
+  const propertyOf = (receiver: PrismaHandle, target: object, prop: string | symbol) =>
     wrappedPropertyOf(
       { receiver, target, transaction: undefined, outerClient: target, belowAudit: !carriesAudit(target) },
       prop,
@@ -437,7 +440,7 @@ export const createRecipeClient = (
   const boundTo = <T extends object>(transaction: ActiveTransaction, client: T, outerClient: object): T => {
     const belowAudit = !carriesAudit(outerClient);
     return new Proxy(client, {
-      get(target, prop, receiver: object) {
+      get(target, prop, receiver: PrismaHandle) {
         const wrapped = wrappedPropertyOf({ receiver, target, transaction, outerClient, belowAudit }, prop);
         return wrapped ? wrapped.value : Reflect.get(target, prop);
       },

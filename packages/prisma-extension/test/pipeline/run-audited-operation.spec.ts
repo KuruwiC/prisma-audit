@@ -179,7 +179,7 @@ describe('runAuditedOperation', () => {
         {
           operation: interceptedOf(),
           auditContext,
-          auditedClient,
+          issuingClient: auditedClient,
           mode: 'awaited',
           plan: 'awaited-after-commit',
           transaction: undefined,
@@ -190,7 +190,6 @@ describe('runAuditedOperation', () => {
       expect(auditedClient.transactionsOpened.count).toBe(0);
       const scope = scopeSeenBy(deps.singleExecutor);
       expect(scope.handle).toBe(auditedClient);
-      expect(scope.auditedClient).toBe(auditedClient);
       expect(scope.transaction).toBeUndefined();
       expect(getPendingWriteCount()).toBe(0);
       expect(auditWriteOf(deps)).toHaveBeenCalledWith(auditedClient, [record]);
@@ -202,7 +201,14 @@ describe('runAuditedOperation', () => {
       const transaction = activeTransactionOf(transactionClient);
 
       await runOperation(
-        { operation: interceptedOf(), auditContext, auditedClient, mode: 'atomic', plan: 'immediate', transaction },
+        {
+          operation: interceptedOf(),
+          auditContext,
+          issuingClient: auditedClient,
+          mode: 'atomic',
+          plan: 'immediate',
+          transaction,
+        },
         deps,
       );
 
@@ -226,7 +232,7 @@ describe('runAuditedOperation', () => {
         {
           operation: interceptedOf(),
           auditContext,
-          auditedClient,
+          issuingClient: auditedClient,
           mode: 'deferred',
           plan: 'detached',
           transaction: undefined,
@@ -250,7 +256,14 @@ describe('runAuditedOperation', () => {
       const transaction = activeTransactionOf(transactionClient);
 
       await runOperation(
-        { operation: interceptedOf(), auditContext, auditedClient, mode: 'deferred', plan: 'immediate', transaction },
+        {
+          operation: interceptedOf(),
+          auditContext,
+          issuingClient: auditedClient,
+          mode: 'deferred',
+          plan: 'immediate',
+          transaction,
+        },
         deps,
       );
 
@@ -274,7 +287,14 @@ describe('runAuditedOperation', () => {
 
         await withScope({ binding: { transaction: surrounding } }, () =>
           runOperation(
-            { operation: interceptedOf(), auditContext, auditedClient, mode, plan, transaction: undefined },
+            {
+              operation: interceptedOf(),
+              auditContext,
+              issuingClient: auditedClient,
+              mode,
+              plan,
+              transaction: undefined,
+            },
             deps,
           ),
         );
@@ -298,7 +318,7 @@ describe('runAuditedOperation', () => {
           {
             operation: interceptedOf(),
             auditContext,
-            auditedClient,
+            issuingClient: auditedClient,
             mode: 'atomic',
             plan: 'immediate',
             transaction: named,
@@ -346,7 +366,7 @@ describe('runAuditedOperation', () => {
         const operation = interceptedOf();
 
         await run(update, (auditedClient, transaction) =>
-          runOperation({ operation, auditContext, auditedClient, mode, plan, transaction }, deps),
+          runOperation({ operation, auditContext, issuingClient: auditedClient, mode, plan, transaction }, deps),
         );
 
         expect(operation.query).toHaveBeenCalledWith(args);
@@ -375,7 +395,7 @@ describe('runAuditedOperation', () => {
           {
             operation,
             auditContext,
-            auditedClient: createAuditedClient(),
+            issuingClient: createAuditedClient(),
             mode: 'awaited',
             plan: 'awaited-after-commit',
             transaction: undefined,
@@ -408,7 +428,7 @@ describe('runAuditedOperation', () => {
 
         await expect(
           runOperation(
-            { operation, auditContext, auditedClient: createAuditedClient(), mode, plan, transaction: undefined },
+            { operation, auditContext, issuingClient: createAuditedClient(), mode, plan, transaction: undefined },
             deps,
           ),
         ).rejects.toBe(callerError);
@@ -437,7 +457,7 @@ describe('runAuditedOperation', () => {
           {
             operation,
             auditContext,
-            auditedClient: createAuditedClient(),
+            issuingClient: createAuditedClient(),
             mode: 'deferred',
             plan: 'detached',
             transaction: undefined,
@@ -460,7 +480,7 @@ describe('runAuditedOperation', () => {
         {
           operation: interceptedOf('updateMany'),
           auditContext,
-          auditedClient,
+          issuingClient: auditedClient,
           mode: 'awaited',
           plan: 'awaited-after-commit',
           transaction: undefined,
@@ -471,7 +491,7 @@ describe('runAuditedOperation', () => {
         {
           operation: interceptedOf('upsert'),
           auditContext,
-          auditedClient,
+          issuingClient: auditedClient,
           mode: 'awaited',
           plan: 'awaited-after-commit',
           transaction: undefined,
@@ -500,7 +520,7 @@ describe('runAuditedOperation', () => {
         {
           operation: interceptedOf(),
           auditContext,
-          auditedClient: createAuditedClient(),
+          issuingClient: createAuditedClient(),
           mode: 'awaited',
           plan: 'awaited-after-commit',
           transaction: undefined,
@@ -532,7 +552,7 @@ describe('runAuditedOperation', () => {
             {
               operation,
               auditContext,
-              auditedClient: createAuditedClient(),
+              issuingClient: createAuditedClient(),
               mode: 'awaited',
               plan: 'awaited-after-commit',
               transaction: undefined,
@@ -572,7 +592,7 @@ describe('runAuditedOperation', () => {
               {
                 operation: interceptedOf(),
                 auditContext,
-                auditedClient: createAuditedClient(),
+                issuingClient: createAuditedClient(),
                 mode,
                 plan,
                 transaction,
@@ -602,7 +622,7 @@ describe('runAuditedOperation', () => {
                 {
                   operation: interceptedOf(),
                   auditContext,
-                  auditedClient: createAuditedClient(),
+                  issuingClient: createAuditedClient(),
                   mode,
                   plan,
                   transaction: undefined,
@@ -642,7 +662,7 @@ describe('runAuditedOperation', () => {
             {
               operation: interceptedOf(),
               auditContext,
-              auditedClient: createAuditedClient(),
+              issuingClient: createAuditedClient(),
               mode: 'atomic',
               plan: 'immediate',
               transaction,
@@ -665,7 +685,7 @@ describe('runAuditedOperation', () => {
               {
                 operation: interceptedOf(),
                 auditContext,
-                auditedClient: createAuditedClient(),
+                issuingClient: createAuditedClient(),
                 mode: 'awaited',
                 plan: 'awaited-after-commit',
                 transaction: undefined,
@@ -701,7 +721,7 @@ describe('runAuditedOperation', () => {
             {
               operation: interceptedOf('update', failingQuery()),
               auditContext,
-              auditedClient: createAuditedClient(),
+              issuingClient: createAuditedClient(),
               mode: 'atomic',
               plan: 'immediate',
               transaction,
@@ -731,7 +751,7 @@ describe('runAuditedOperation', () => {
             {
               operation: interceptedOf('updateMany', query),
               auditContext,
-              auditedClient: createAuditedClient(),
+              issuingClient: createAuditedClient(),
               mode: 'atomic',
               plan: 'immediate',
               transaction,
@@ -758,7 +778,7 @@ describe('runAuditedOperation', () => {
             {
               operation: interceptedOf('update', query),
               auditContext,
-              auditedClient: createAuditedClient(),
+              issuingClient: createAuditedClient(),
               mode: 'atomic',
               plan: 'immediate',
               transaction,
@@ -785,7 +805,7 @@ describe('runAuditedOperation', () => {
             {
               operation: interceptedOf('update', query),
               auditContext,
-              auditedClient: createAuditedClient(),
+              issuingClient: createAuditedClient(),
               mode: 'atomic',
               plan: 'immediate',
               transaction,
@@ -816,7 +836,7 @@ describe('runAuditedOperation', () => {
                   vi.fn(async () => 'written'),
                 ),
                 auditContext,
-                auditedClient: createAuditedClient(),
+                issuingClient: createAuditedClient(),
                 mode: 'awaited',
                 plan: 'awaited-after-commit',
                 transaction: undefined,
@@ -858,7 +878,7 @@ describe('runAuditedOperation', () => {
               vi.fn(async () => 'written'),
             ),
             auditContext,
-            auditedClient: createAuditedClient(),
+            issuingClient: createAuditedClient(),
             mode: 'atomic',
             plan: 'immediate',
             transaction,
@@ -885,7 +905,7 @@ describe('runAuditedOperation', () => {
           vi.fn(async () => 'written'),
         ),
         auditContext,
-        auditedClient: createAuditedClient(),
+        issuingClient: createAuditedClient(),
         mode: 'atomic',
         plan: 'immediate',
         transaction,

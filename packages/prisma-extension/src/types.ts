@@ -129,14 +129,16 @@ export interface WriteConfig<TClient = unknown> {
    * operation), under every mode, `handle` is the client of that transaction, `inTransaction` is
    * true and the writer runs before the operation returns, so a later rollback undoes rows it
    * wrote through `handle` or `defaultWrite`. Outside any transaction `handle` is the audited client
-   * and `inTransaction` is false: under `awaited` the writer runs, awaited, once the operation has
-   * committed, and under `deferred` it runs detached after the operation returns. For a write
-   * inside a transaction the handle is typed as the client although it is a transaction's client.
+   * the operation was issued on (the client `createAuditClient` returned or a client `$extends`
+   * derives from it) and `inTransaction` is false: under `awaited` the writer runs, awaited, once
+   * the operation has committed, and under `deferred` it runs detached after the operation returns.
+   * For a write inside a transaction the handle is typed as the client although it is a
+   * transaction's client.
    * A write of a model in `entities` the writer makes through `handle` or the audited client is
    * rejected with `AuditReentrantWriteError`, and every write through a client below the audit with
    * `AuditParentWriteError`: the audited client's `$parent` is one, and so is `handle`'s, unless
-   * `handle` is the client of a transaction opened on a client `$extends` derives from the audited
-   * client. Either fails the audit write as `log-write`.
+   * `handle` is a client `$extends` derives from the audited client or the client of a transaction
+   * opened on one. Either fails the audit write as `log-write`.
    *
    * Either way, side effects the writer performs outside the database transaction (an HTTP
    * call, a queue publish, a write through another client) are never rolled back — they have
@@ -168,11 +170,12 @@ export type {
  * @template TModelName - Model names of `schema`, as `schema.prisma` declares them. They are inferred
  *   from `schema` alone and key `entities`; defaults to any string
  * @template TClient - The audited client type, passed to every resolver and enricher as `db`. The
- *   value is the audited client, or, inside a transaction, the transaction's client, typed as the
- *   client. A write of a model in `entities` through it is rejected with `AuditReentrantWriteError`,
- *   and every write through a client below the audit with `AuditParentWriteError`: its `$parent` is
- *   one, unless it is the client of a transaction opened on a client `$extends` derives from the
- *   audited client.
+ *   value is the audited client the operation was issued on (the client `createAuditClient`
+ *   returned or a client `$extends` derives from it), or, inside a transaction, the transaction's
+ *   client, typed as the client. A write of a model in `entities` through it is rejected with
+ *   `AuditReentrantWriteError`, and every write through a client below the audit with
+ *   `AuditParentWriteError`: its `$parent` is one, unless it is a client `$extends` derives from the
+ *   audited client or the client of a transaction opened on one.
  */
 export interface PrismaAuditExtensionOptions<TModelName extends string = string, TClient = unknown> {
   contextProvider: AuditContextProvider;

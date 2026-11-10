@@ -49,14 +49,16 @@ export interface ActiveTransaction {
   readonly noteStatementFailed: () => void;
 }
 
-/** What the client an operation was issued on tells the audit about it */
-export interface OperationBinding {
-  /**
-   * The interactive transaction whose client the operation was issued on; undefined for a client
-   * outside any
-   */
-  readonly transaction: ActiveTransaction | undefined;
-}
+/**
+ * What the client an operation was issued on tells the audit about it: the interactive transaction
+ * whose client the operation was issued on or runs in, else the audited client it was issued on
+ * outside any transaction (the client `createAuditClient` returned or a client `$extends` derives
+ * from it), on which the audit's own queries and the callbacks it runs then run, through the
+ * extensions applied to it
+ */
+export type OperationBinding =
+  | { readonly transaction: ActiveTransaction }
+  | { readonly transaction: undefined; readonly client: PrismaHandle };
 
 export interface RuntimeScope {
   /**

@@ -7,9 +7,9 @@
  * to the scope's failure sink as the resolver fails, leave each row to the columns a record stores
  * (`audited-columns.ts`), then compose the records. The database handle those callbacks receive
  * is the scope's: the client bound to the transaction the operation runs in when there is one,
- * else the audited client, so a callback inside a transaction reads that transaction's writes. The
- * resolvers see the omitted fields an entity records, so a foreign key the client hides resolves
- * once its entity lists it.
+ * else the audited client the operation was issued on, so a callback inside a transaction reads that
+ * transaction's writes. The resolvers see the omitted fields an entity records, so a foreign key the
+ * client hides resolves once its entity lists it.
  */
 
 import type { AuditRecord, ComposeConfig, MutationEvent, ResolveConfig } from '@kuruwic/db-audit-core';

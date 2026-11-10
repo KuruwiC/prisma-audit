@@ -25,7 +25,6 @@ const scopeOn = (
 ): ExecutionScope => ({
   auditContext,
   handle,
-  auditedClient,
   transaction: handle === auditedClient ? undefined : createTransactionAudit(),
   failureSink,
 });
@@ -145,11 +144,7 @@ describe('createRecordProducer', () => {
   });
 
   it('reads the omitted fields an entity records on the handle of the scope, completing the stored after state', async () => {
-    const baseFindMany = vi.fn(async () => [{ id: 'p1', memo: 'read-on-base' }]);
     const transactionFindMany = vi.fn(async () => [{ id: 'p1', memo: 'read-after-write' }]);
-    const base: PrismaBaseClient = Object.assign(Object.create(null), {
-      post: { findMany: baseFindMany },
-    });
     const transaction: PrismaHandle = Object.assign(Object.create(null), {
       post: { findMany: transactionFindMany },
     });
@@ -166,13 +161,12 @@ describe('createRecordProducer', () => {
       before: { kind: 'captured', row: { id: 'p1', title: 'old', memo: 'old-memo' } },
     };
 
-    const [record] = await produce([written], { ...scopeOn(transaction), auditedClient: base }, new Map());
+    const [record] = await produce([written], scopeOn(transaction), new Map());
 
     expect(transactionFindMany).toHaveBeenCalledWith({
       where: { id: { in: ['p1'] } },
       select: { id: true, memo: true },
     });
-    expect(baseFindMany).not.toHaveBeenCalled();
     expect(record?.after).toEqual({ id: 'p1', title: 'new', memo: 'read-after-write' });
   });
 });
