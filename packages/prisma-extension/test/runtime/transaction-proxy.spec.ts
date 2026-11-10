@@ -41,11 +41,14 @@ import type { PrismaBaseClient, PrismaHandle } from '../../src/internal-types.js
 import type { OperationTransaction } from '../../src/pipeline/execution-scope.js';
 import type { OperationExecutor } from '../../src/pipeline/executor.js';
 import { type AuditPipelineDependencies, runAuditedOperation } from '../../src/pipeline/run-audited-operation.js';
+import { createExtensionCheckpoints } from '../../src/runtime/extension-checkpoint.js';
 import type { RecipeConfig } from '../../src/runtime/operation-recipe.js';
 import { flushAllPendingWrites, getPendingWriteCount } from '../../src/runtime/pending-writes.js';
 import { currentScope, operationBinding, type RuntimeScope } from '../../src/runtime/scope.js';
 import { createTransactionProxy } from '../../src/runtime/transaction-proxy.js';
+import { loadSchemaMetadata } from '../../src/schema/schema-metadata.js';
 import type { AuditLogData } from '../../src/types.js';
+import { auditSchema, column, model } from '../support/audit-schema.js';
 import { lazyOperation } from '../support/lazy-operation.js';
 
 const actor1: AuditActor = { category: 'model', type: 'User', id: 'user-1' };
@@ -230,6 +233,10 @@ const recipeConfigAtomic = (atomic: boolean): RecipeConfig => ({
 
 const recipeConfig = recipeConfigAtomic(false);
 
+const checkpoints = createExtensionCheckpoints(
+  loadSchemaMetadata(auditSchema(model('User', [column('id', { isId: true })]))),
+);
+
 describe('createTransactionProxy (property access)', () => {
   /** A client with methods on its prototype, as a Prisma client has */
   class FakeClient {
@@ -258,6 +265,7 @@ describe('createTransactionProxy (property access)', () => {
     const proxy = createTransactionProxy(target, {
       provider: createAsyncLocalStorageProvider(),
       recipeConfig: noModels,
+      checkpoints,
     });
 
     expect(proxy.user).toBe(target.user);
@@ -270,6 +278,7 @@ describe('createTransactionProxy (property access)', () => {
     const proxy = createTransactionProxy(target, {
       provider: createAsyncLocalStorageProvider(),
       recipeConfig: noModels,
+      checkpoints,
     });
 
     expect('user' in proxy).toBe(true);
@@ -288,6 +297,7 @@ describe('createTransactionProxy (property access)', () => {
     const proxy = createTransactionProxy(target, {
       provider: createAsyncLocalStorageProvider(),
       recipeConfig,
+      checkpoints,
     });
     const options = { isolationLevel: 'Serializable' };
 
@@ -309,7 +319,13 @@ describe('createTransactionProxy (interactive $transaction)', () => {
     const tx = probeClientNamed('transaction', ran);
     const $transaction = transactionOf<ProbeClient>(tx, settle);
     const target = { ...probeClientNamed('client', ran), $transaction };
-    return { provider, proxy: createTransactionProxy(target, { provider, recipeConfig }), tx, ran, $transaction };
+    return {
+      provider,
+      proxy: createTransactionProxy(target, { provider, recipeConfig, checkpoints }),
+      tx,
+      ran,
+      $transaction,
+    };
   };
 
   describe('the client the callback receives', () => {
@@ -486,7 +502,7 @@ describe('createTransactionProxy (interactive $transaction)', () => {
       },
     };
     const extension = { name: 'derived' };
-    const proxy = createTransactionProxy(target, { provider, recipeConfig });
+    const proxy = createTransactionProxy(target, { provider, recipeConfig, checkpoints });
 
     const derived = proxy.$extends(extension);
     await provider.runAsync(baseContext, async () => {
@@ -512,7 +528,13 @@ describe('createTransactionProxy (a transaction nested in the one a callback run
     const nestedTx = probeClientNamed('nested transaction', ran);
     const tx = { ...probeClientNamed('transaction', ran), $transaction: transactionOf<ProbeClient>(nestedTx) };
     const target = { ...probeClientNamed('client', ran), $transaction: transactionOf(tx) };
-    return { provider, proxy: createTransactionProxy(target, { provider, recipeConfig }), tx, nestedTx, ran };
+    return {
+      provider,
+      proxy: createTransactionProxy(target, { provider, recipeConfig, checkpoints }),
+      tx,
+      nestedTx,
+      ran,
+    };
   };
 
   it('opens it on the transaction client and hands its callback a client bound to it', async () => {
@@ -561,7 +583,7 @@ describe('createTransactionProxy (a transaction nested in the one a callback run
     const tx = probeClientNamed('transaction', ran);
     const proxy = createTransactionProxy(
       { ...probeClientNamed('client', ran), $transaction: transactionOf<ProbeClient>(tx) },
-      { provider, recipeConfig },
+      { provider, recipeConfig, checkpoints },
     );
     let nestedTransaction: unknown = 'unread';
 
@@ -582,7 +604,7 @@ describe('createTransactionProxy ($extends with an extension function)', () => {
       $transaction: transactionOf<ProbeClient>(probeClientNamed('transaction', ran)),
       $extends: (extension: unknown) => (typeof extension === 'function' ? extension(target) : target),
     };
-    const proxy = createTransactionProxy(target, { provider, recipeConfig });
+    const proxy = createTransactionProxy(target, { provider, recipeConfig, checkpoints });
     let received: unknown;
 
     proxy.$extends((client: ProbeClient) => {
@@ -598,6 +620,109 @@ describe('createTransactionProxy ($extends with an extension function)', () => {
   });
 });
 
+describe('createTransactionProxy ($extends with an extension object)', () => {
+  const levelOf = (name: string, parent: object | undefined, applied: unknown[], ran: Probed[]): object => {
+    const level: object = {
+      ...probeClientNamed(name, ran),
+      $parent: parent,
+      $extends: (extension: unknown) => {
+        if (typeof extension === 'function') {
+          return extension(level);
+        }
+        applied.push(extension);
+        return levelOf(`${name}+`, level, applied, ran);
+      },
+    };
+    return level;
+  };
+  type Extendable = ProbeClient & { $extends: (extension: unknown) => Extendable; $parent: unknown };
+  const isExtendable = (value: unknown): value is Extendable =>
+    typeof value === 'object' && value !== null && typeof Reflect.get(value, '$extends') === 'function';
+  const extendable = (value: unknown): Extendable => {
+    if (!isExtendable(value)) {
+      throw new Error('the client has no $extends');
+    }
+    return value;
+  };
+
+  const withQuery = (name: string) => ({ name, query: { $allOperations: () => undefined } });
+
+  const auditedLevels = () => {
+    const applied: unknown[] = [];
+    const ran: Probed[] = [];
+    const provider = createAsyncLocalStorageProvider();
+    const below = levelOf('below', undefined, applied, ran);
+    const proxy = extendable(
+      createTransactionProxy(levelOf('audited', below, applied, ran), { provider, recipeConfig, checkpoints }),
+    );
+    const checkpointOn = async (client: Extendable) => {
+      ran.length = 0;
+      await provider.runAsync(baseContext, async () => {
+        await client.user.create({});
+      });
+      return bindingOf(ran[0])?.checkpoint;
+    };
+    return { applied, proxy, checkpointOn };
+  };
+
+  it('applies an extension with query as it is, then its checkpoint on the client it derives, which is the client returned and has the client the extension was applied to as $parent', () => {
+    const { applied, proxy } = auditedLevels();
+    const extension = withQuery('encoding');
+
+    const derived = proxy.$extends(extension);
+
+    expect(applied).toHaveLength(2);
+    expect(applied[0]).toBe(extension);
+    expect(applied[1]).toMatchObject({ name: 'prisma-audit-checkpoint' });
+    expect(derived.marker).toBe('the audited++ client');
+    expect(derived.$parent).toBe(proxy);
+  });
+
+  it('binds an operation of a client an extension with query derives with the checkpoint after that extension, which leads to the checkpoints before it', async () => {
+    const { proxy, checkpointOn } = auditedLevels();
+
+    const derived = proxy.$extends(withQuery('first')).$extends(withQuery('second'));
+
+    expect(await checkpointOn(proxy)).toBeUndefined();
+    expect(await checkpointOn(derived)).toEqual({
+      extensionName: 'second',
+      previous: { extensionName: 'first', previous: undefined },
+    });
+  });
+
+  it('places a checkpoint after an extension with query an extension function applies', async () => {
+    const { proxy, checkpointOn } = auditedLevels();
+
+    const derived = proxy.$extends((client: Extendable) => client.$extends(withQuery('through-a-function')));
+
+    expect(await checkpointOn(extendable(derived))).toEqual({
+      extensionName: 'through-a-function',
+      previous: undefined,
+    });
+  });
+
+  it('places no checkpoint after an extension without query, whose client keeps the checkpoint of the client it was derived from', async () => {
+    const { applied, proxy, checkpointOn } = auditedLevels();
+    const checked = proxy.$extends(withQuery('first'));
+
+    const derived = checked.$extends({ name: 'methods', model: { user: { greet: () => 'hello' } } });
+
+    expect(applied).toHaveLength(3);
+    expect(await checkpointOn(derived)).toEqual({ extensionName: 'first', previous: undefined });
+    expect(derived.$parent).toBe(checked);
+  });
+
+  it('places no checkpoint after an extension with query applied to a client below the audit', () => {
+    const { applied, proxy } = auditedLevels();
+    const below = extendable(proxy.$parent);
+    const extension = withQuery('below-the-audit');
+
+    below.$extends(extension);
+
+    expect(applied).toEqual([extension]);
+  });
+});
+
 describe('createTransactionProxy (operation recipes)', () => {
   /** A client whose `user` operations record the client they ran on and whether Prisma's own batch ran them */
   const createRecipeProxy = (recipe: RecipeConfig) => {
@@ -608,7 +733,7 @@ describe('createTransactionProxy (operation recipes)', () => {
     const target = { ...probeClientNamed('client', ran), $transaction };
     return {
       provider,
-      proxy: createTransactionProxy(target, { provider, recipeConfig: recipe }),
+      proxy: createTransactionProxy(target, { provider, recipeConfig: recipe, checkpoints }),
       tx,
       ran,
       $transaction,
@@ -801,7 +926,7 @@ describe('createTransactionProxy (deferred audit writes inside a transaction)', 
     const tx = auditedClientOf(deps);
     const provider = createAsyncLocalStorageProvider();
     const target = { ...auditedClientOf(deps), $transaction: transactionOf(tx, settle) };
-    return { provider, proxy: createTransactionProxy(target, { provider, recipeConfig }), tx };
+    return { provider, proxy: createTransactionProxy(target, { provider, recipeConfig, checkpoints }), tx };
   };
 
   it('writes the audit of a deferred operation run under an actor override in the transaction, before the operation returns and before the transaction commits', async () => {
@@ -879,7 +1004,7 @@ describe('createTransactionProxy (audit failures recorded on the transaction)', 
     const tx = auditedClientOf(deps);
     const provider = createAsyncLocalStorageProvider();
     const target = { ...auditedClientOf(deps), $transaction: transactionOf(tx) };
-    return { provider, proxy: createTransactionProxy(target, { provider, recipeConfig }), tx };
+    return { provider, proxy: createTransactionProxy(target, { provider, recipeConfig, checkpoints }), tx };
   };
 
   it('rejects $transaction with an AuditRollbackError when the callback resolves after an operation failed on its audit', async () => {
@@ -996,7 +1121,7 @@ describe('createTransactionProxy (audit of a batch holding a write)', () => {
         return result;
       }),
     };
-    return { provider, proxy: createTransactionProxy(target, { provider, recipeConfig }), tx };
+    return { provider, proxy: createTransactionProxy(target, { provider, recipeConfig, checkpoints }), tx };
   };
 
   const create = (id: string, atomic: boolean): CreateArgs => ({ id, atomic });

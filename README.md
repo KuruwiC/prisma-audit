@@ -181,6 +181,8 @@ export const prisma = createAuditClient(basePrisma, {
 });
 ```
 
+A query extension applied to the audited client (`prisma.$extends(...)`) runs between the audit and the database: it may change the values a write writes and must continue the write through `query` once (again only after a failed attempt), and a write it adds or removes nested writes of, or replaces, is rejected with `AuditExtensionContinuationError`. Apply such an extension to `basePrisma` instead; see [Other query extensions](packages/prisma-extension/README.md#other-query-extensions).
+
 ### 3. Set the audit context
 
 ```typescript

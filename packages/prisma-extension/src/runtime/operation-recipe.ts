@@ -13,14 +13,17 @@
  * batch `$transaction([...])` takes the client's recipes and runs them. A recipe is not a
  * PrismaPromise: Prisma's own `$transaction` rejects it. The `$parent` of such a client, and of
  * its model delegates, is Prisma's, wrapped as the client is, so a call on it is bound the same
- * way. Each wrapper stands for a client outside any transaction, its outer client; a model write
- * of a wrapper whose outer client carries no audit hook is rejected (`AuditParentWriteError`).
+ * way (a client a query extension derives, before its checkpoint is placed on it, is passed over).
+ * Each wrapper stands for a client outside any transaction, its outer client; a model write of a
+ * wrapper whose outer client carries no audit hook is rejected (`AuditParentWriteError`), and an
+ * operation is bound with the checkpoint innermost on its outer client.
  */
 
 import { AuditParentWriteError } from '../errors.js';
 import type { PrismaHandle } from '../internal-types.js';
 import { isAuditableAction } from '../utils/extension-utils.js';
 import { invokeMethod } from '../utils/invoke-method.js';
+import type { ExtensionCheckpoint } from './extension-checkpoint.js';
 import type { OpenTransaction } from './interactive-transaction.js';
 import { type ActiveTransaction, type RuntimeScope, withinAudit, withScope } from './scope.js';
 
@@ -110,6 +113,8 @@ export interface IssuingClient {
    * when it starts
    */
   readonly belowAudit: boolean;
+  /** The checkpoint innermost on `outerClient` */
+  readonly checkpoint: ExtensionCheckpoint | undefined;
 }
 
 interface Recipe extends IssuingClient {
@@ -179,8 +184,11 @@ const startOn = async (
   client: object,
   transaction: ActiveTransaction | undefined,
 ): Promise<unknown> => {
+  const { checkpoint } = recipe;
   const scope: RuntimeScope = {
-    binding: transaction ? { transaction } : { transaction: undefined, client: recipe.receiver },
+    binding: transaction
+      ? { transaction, checkpoint }
+      : { transaction: undefined, client: recipe.receiver, checkpoint },
   };
   return await withScope(scope, () => startingIn(scope, replay(recipe, client)));
 };
@@ -291,20 +299,34 @@ const createRecipeFactory = (config: RecipeConfig, openTransactionOn: OpenTransa
   return { create };
 };
 
+/** What the client proxy tells of a client outside any transaction */
+export interface ClientLevels {
+  /** The one wrapper of the client, wrapped as the audited client is */
+  readonly wrapperOf: (client: object) => object;
+  /**
+   * Whether the audit hook applies to the client: the client it was applied to, extended with it,
+   * or a client derived from that one
+   */
+  readonly carriesAudit: (client: object) => boolean;
+  readonly checkpointOf: (client: object) => ExtensionCheckpoint | undefined;
+  /**
+   * Whether the client is one a query extension applied after the audit derives, which runs that
+   * extension without its checkpoint: `$parent` passes over it
+   */
+  readonly isUncheckedLevel: (client: object) => boolean;
+}
+
 /**
  * Wraps the model delegates, raw-query methods, `$parent` and `$transaction` of the clients
  * `config` is used for, caching each wrapper per client so that a property read twice returns the
  * same value. `openTransaction` opens every interactive transaction such a client runs in;
- * `clientOf` returns the one wrapper of a client outside any transaction, wrapped as the audited
- * client is; `carriesAudit` tells whether a client outside any transaction is one the audit hook
- * applies to: the client it was applied to, extended with it, or a client derived from that one;
- * `transactionMethodOf` makes the `$transaction` of a client from the client's own.
+ * `levels` tells what each client outside any transaction is; `transactionMethodOf` makes the
+ * `$transaction` of a client from the client's own.
  */
 export const createRecipeClient = (
   config: RecipeConfig,
   openTransaction: OpenTransaction,
-  clientOf: (client: object) => object,
-  carriesAudit: (client: object) => boolean,
+  levels: ClientLevels,
   transactionMethodOf: (issuer: IssuingClient, original: (...args: unknown[]) => unknown) => unknown,
 ) => {
   const openTransactionOn: OpenTransactionOn = (issuer, options, body) =>
@@ -330,22 +352,34 @@ export const createRecipeClient = (
     return byKey.get(key);
   };
 
+  /** `parent`, Prisma's `$parent` of a client, and the client below `outerClient`, each one level further down when that client is an unchecked level */
+  const levelBelow = (outerClient: object, parent: object): { readonly outer: unknown; readonly parent: unknown } => {
+    const outer: unknown = Reflect.get(outerClient, '$parent');
+    return isObject(outer) && levels.isUncheckedLevel(outer)
+      ? { outer: Reflect.get(outer, '$parent'), parent: Reflect.get(parent, '$parent') }
+      : { outer, parent };
+  };
+
   /**
-   * The `$parent` of `issuer`, or of one of its model delegates, from Prisma's own, `parent`: outside
-   * any transaction the one wrapper of `parent`, whichever client or delegate it was read from;
-   * inside one, where Prisma returns a new transaction client on every read, `parent` bound to the
-   * transaction with the client below `issuer`'s outer client as its outer client, or `parent`
-   * itself, which carries no audit hook, when Prisma names none below.
+   * The `$parent` of `issuer`, or of one of its model delegates, from Prisma's own, `prismaParent`,
+   * past an unchecked level: outside any transaction the one wrapper of that parent, whichever
+   * client or delegate it was read from; inside one, where Prisma returns a new transaction client
+   * on every read, that parent bound to the transaction with the client below `issuer`'s outer
+   * client as its outer client, or the parent itself, which carries no audit hook, when Prisma
+   * names none below.
    */
-  const parentOf = (issuer: IssuingClient, parent: unknown): unknown => {
+  const parentOf = (issuer: IssuingClient, prismaParent: unknown): unknown => {
+    if (!isObject(prismaParent)) {
+      return prismaParent;
+    }
+    const { outer, parent } = levelBelow(issuer.outerClient, prismaParent);
     if (!isObject(parent)) {
       return parent;
     }
     if (issuer.transaction === undefined) {
-      return clientOf(parent);
+      return levels.wrapperOf(parent);
     }
-    const outerParent: unknown = Reflect.get(issuer.outerClient, '$parent');
-    return boundTo(issuer.transaction, parent, isObject(outerParent) ? outerParent : parent);
+    return boundTo(issuer.transaction, parent, isObject(outer) ? outer : parent);
   };
 
   const delegateOf = (issuer: IssuingClient, accessor: string, model: string): unknown => {
@@ -429,7 +463,14 @@ export const createRecipeClient = (
   /** The value the audited client `receiver`, outside any transaction, returns for `prop`, when it is wrapped */
   const propertyOf = (receiver: PrismaHandle, target: object, prop: string | symbol) =>
     wrappedPropertyOf(
-      { receiver, target, transaction: undefined, outerClient: target, belowAudit: !carriesAudit(target) },
+      {
+        receiver,
+        target,
+        transaction: undefined,
+        outerClient: target,
+        belowAudit: !levels.carriesAudit(target),
+        checkpoint: levels.checkpointOf(target),
+      },
       prop,
     );
 
@@ -438,10 +479,11 @@ export const createRecipeClient = (
    * bound to `transaction`. Every other property is the transaction client's own.
    */
   const boundTo = <T extends object>(transaction: ActiveTransaction, client: T, outerClient: object): T => {
-    const belowAudit = !carriesAudit(outerClient);
+    const belowAudit = !levels.carriesAudit(outerClient);
+    const checkpoint = levels.checkpointOf(outerClient);
     return new Proxy(client, {
       get(target, prop, receiver: PrismaHandle) {
-        const wrapped = wrappedPropertyOf({ receiver, target, transaction, outerClient, belowAudit }, prop);
+        const wrapped = wrappedPropertyOf({ receiver, target, transaction, outerClient, belowAudit, checkpoint }, prop);
         return wrapped ? wrapped.value : Reflect.get(target, prop);
       },
     });

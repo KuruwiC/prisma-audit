@@ -417,6 +417,27 @@ describe('the $parent of the audited client and of the clients reachable from it
       },
     );
 
+    it.each(scopes)(
+      'is the client a query extension applied after the audit was applied to, and audits a write through it, %s',
+      async (_scope, inTransaction) => {
+        const prisma = auditedClient('awaited');
+        const derived = prisma.$extends({
+          name: 'passing-on',
+          query: { $allModels: { $allOperations: ({ args, query }) => query(args) } },
+        });
+
+        expect(parentOf(derived)).toBe(prisma);
+        expect(parentOf(derived, derived.user)).toBe(prisma);
+        await provider.runAsync(testActor, async () => {
+          await (inTransaction
+            ? derived.$transaction((tx) => parentOf(tx).user.create({ data: userData('parent@example.com') }))
+            : parentOf(derived).user.create({ data: userData('parent@example.com') }));
+        });
+
+        expect(await auditedEmails()).toEqual(['parent@example.com']);
+      },
+    );
+
     it('is, outside any transaction, one client per client below, wherever it is read', () => {
       const prisma = auditedClient('awaited');
       const derived = prisma.$extends({ name: 'derived' });

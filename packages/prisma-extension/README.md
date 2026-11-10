@@ -342,7 +342,7 @@ model AuditAggregate {
 
 ### `requireContext`
 
-`boolean | ((modelName: string) => boolean)`, default `true`. A write without an audit context is rejected with `AuditContextMissingError` before Prisma runs any of it when `requireContext` holds for one of the audited models it writes rows of, nested writes included (a `connect`, `set` or `disconnect` writes the related rows when they hold the foreign key). Otherwise it runs unaudited, and its outcome is `unaudited`. It does not reach writes the audit extension does not see: raw queries, writes on a client without the extension, and writes an extension applied after the audit adds to an operation's arguments.
+`boolean | ((modelName: string) => boolean)`, default `true`. A write without an audit context is rejected with `AuditContextMissingError` before Prisma runs any of it when `requireContext` holds for one of the audited models it writes rows of, nested writes included (a `connect`, `set` or `disconnect` writes the related rows when they hold the foreign key). Otherwise it runs unaudited, and its outcome is `unaudited`. It does not reach writes the audit extension does not see: raw queries and writes on a client without the extension. A query extension applied after the audit cannot add writes to an operation's arguments (see [Other query extensions](#other-query-extensions)).
 
 Recommended: leave it unset, and give every write an audit context. A seed, a migration script or a batch job runs under a system actor:
 
@@ -544,6 +544,20 @@ A model-delegate call (`prisma.user.update(...)`) or raw-query method (`$queryRa
 
 The extension continues an operation through Prisma's `query`, so a query extension applied before it (on the client passed to `createAuditClient`) and one applied after it (`createAuditClient(...).$extends(...)`) each see the caller's operation once, in every execution scope. An `updateMany` or `deleteMany` with a `limit` reaches the later extensions narrowed and without its `limit`, once per round (see [`updateMany` and `deleteMany`](#updatemany-and-deletemany)). The audit's own queries (the reads before and after the write, the audit-log insert) run on the operation's client and pass through its extensions too. A query an extension issues of its own through an audited client is audited as a call of its own; a write of a model in `entities` it issues while handling one of the audit's queries is rejected with `AuditReentrantWriteError`. `packages/integration-tests/test/extension-chain.integration.spec.ts` checks these counts.
 
+A query extension applied after the audit runs between the audit and the database, and the audit records a write from the arguments it received. So such an extension must continue a model write through the `query` it receives, once, and again only after a failed attempt (a retry), with arguments that, as Prisma sends them (a plain object holding a `toJSON` counts as what `toJSON` returns), write the same relations as the ones it received: the same nested writes at the same places, both branches of every upsert told apart, with as many elements, in the same order within a relation field, the same `true` or `false` of a to-one `delete` or `disconnect`, and as many rows of a top-level `createMany`. `$extends` applies the extension as it is, and the audit checks the arguments that reach the database, after every extension applied after it, so a nested write added as a class instance, behind a `toJSON`, or to the arguments once `query` was called is caught too. Otherwise the write is rejected with `AuditExtensionContinuationError` (with `extensionName`, `modelName`, `operation` and `violation`, which names the locations in the arguments that differ, or tells that the write settled without having run, that `query` was called again once the write ran or while it ran, or once the write had settled) before it runs, or, when the write did not run, once the extension settles. In a chain of extensions, `extensionName` names the one at fault. It may change the values a write writes, as field encryption does; `query` returns Prisma's own operation, so the extension can place it in a batch `$transaction([...])` of the client passed to `createAuditClient`. An extension that adds or removes a nested write, adds a `connect` target or replaces an operation (a soft delete turning `delete` into `update`) belongs on the client passed to `createAuditClient`.
+
+The values and the fields that pick rows are not compared: those of the top-level `where`, and those of the unique `where` and filters of nested writes. An extension after the audit that changes them (deterministic encryption of a unique field, a tenant filter adding a field to every `where`) must make the same change to the reads it handles, as the audit's own reads pass through it, or the before state may hold rows the write does not touch.
+
+A second call to `query` is rejected before it runs, but the first write has run by then; an extension that settles without waiting for its write is rejected, but the write may still land. Outside a transaction such a write stays unrecorded; inside a transaction the rejection rolls the transaction back.
+
+```typescript
+// Changes values only: applied after the audit, the after state holds the values the application reads
+const encrypted = createAuditClient(basePrisma, options).$extends(fieldEncryption);
+
+// Adds writes or replaces operations: applied before the audit
+const audited = createAuditClient(basePrisma.$extends(softDelete), options);
+```
+
 The audit's own queries and its writes to the audit-log model are not audited. A write of a model in `entities` issued while the audit processes an operation, by the writer, the observer, a resolver, an enricher or its `onError`, or by an extension handling one of the audit's queries, is rejected with `AuditReentrantWriteError` before it runs, and has no outcome. A write through the `$parent` of the client a callback receives is rejected with `AuditParentWriteError`, whatever model it writes. A write meant to run unaudited goes through a client your application holds itself: the client passed to `createAuditClient`, or another `PrismaClient`.
 
 ## Audit outcomes
@@ -631,7 +645,8 @@ Every record carries `beforeUnavailable`. The default write stores it when the a
 | `AuditParentWriteError` | A write, of a model in `entities` or not, was issued through a client below the audit, such as the audited client's `$parent` (`modelName`, `operationModelName`, `operation`) |
 | `AuditAtomicityError` | An atomic operation reached the audit outside any transaction the client owns (`modelName`, `operation`) |
 | `AuditRollbackError` | A `$transaction` callback resolved after an audit failure failed one of its operations (`cause`) |
-| `AuditUnboundWriteError` | An audited write reached the audit without the binding of its client, as inside Prisma's own batch (`modelName`, `operation`) |
+| `AuditUnboundWriteError` | An audited write reached the audit without the binding of its client, as inside Prisma's own batch, or a model write reached a query extension applied after the audit without the audit continuing it (`modelName`, `operation`) |
+| `AuditExtensionContinuationError` | A query extension applied after the audit changed which relations a model write writes, or did not run it through `query` once (`extensionName`, `modelName`, `operation`, `change`) |
 | `IdValidationError` | A branded id constructor received an invalid id |
 
 ## Operations

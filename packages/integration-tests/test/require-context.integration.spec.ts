@@ -11,7 +11,14 @@
 import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import type { EntityMap, PrismaAuditExtensionOptions, WriteMode } from '@kuruwic/prisma-audit';
-import { AuditContextMissingError, createAuditClient, defineEntity, foreignKey, to } from '@kuruwic/prisma-audit';
+import {
+  AuditContextMissingError,
+  AuditExtensionContinuationError,
+  createAuditClient,
+  defineEntity,
+  foreignKey,
+  to,
+} from '@kuruwic/prisma-audit';
 import { auditSchema } from '@kuruwic/prisma-audit-database/generated/audit';
 import { Prisma, type PrismaClient } from '@kuruwic/prisma-audit-database/generated/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -87,6 +94,8 @@ describe('audit coverage by the audited models a write writes', () => {
     const withContext = <T>(fn: () => Promise<T>): Promise<T> => provider.runAsync(testActor, fn);
     return { client, withContext };
   };
+
+  const updateOf = (id: string) => ({ where: { id }, data: { name: 'Changed' } });
 
   const seedUser = (email = 'owner@example.com') => raw.user.create({ data: { email, name: 'Owner' } });
 
@@ -379,22 +388,30 @@ describe('audit coverage by the audited models a write writes', () => {
       expect(await raw.auditLog.count()).toBe(0);
     });
 
-    describe('documented limitation: the audit sees only the arguments that reach it', () => {
-      it('runs without an audit context a user.update to which an extension applied after the audit adds a nested Post create, requireContext holding for Post', async () => {
-        const user = await seedUser();
-        const { client } = createClient({
-          entities: userAndPost,
-          requireContext: (modelName) => modelName === 'Post',
-          addsNestedPost: 'after the audit',
-        });
-
-        await client.user.update({ where: { id: user.id }, data: { name: 'Changed' } });
-
-        expect(await raw.post.findMany({ where: { authorId: user.id } })).toEqual([
-          expect.objectContaining({ title: 'added by after' }),
-        ]);
-        expect(await raw.auditLog.count()).toBe(0);
+    it('rejects with AuditExtensionContinuationError, before it writes, a user.update to which an extension applied after the audit adds a nested Post create', async () => {
+      const user = await seedUser();
+      const { client, withContext } = createClient({
+        entities: userAndPost,
+        requireContext: (modelName) => modelName === 'Post',
+        addsNestedPost: 'after the audit',
       });
+      const unchanged = await databaseState();
+
+      for (const run of [
+        () => client.user.update(updateOf(user.id)),
+        () => withContext(() => client.user.update(updateOf(user.id))),
+      ]) {
+        const error: unknown = await run().catch((reason: unknown) => reason);
+
+        expect(error).toBeInstanceOf(AuditExtensionContinuationError);
+        expect(error).toMatchObject({
+          extensionName: 'after',
+          modelName: 'User',
+          operation: 'update',
+          violation: { kind: 'structure', added: ['posts.create'], removed: [], changed: [] },
+        });
+      }
+      expect(await databaseState()).toEqual(unchanged);
     });
   });
 });

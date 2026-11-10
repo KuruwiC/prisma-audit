@@ -33,7 +33,7 @@ describe('runtime scope', () => {
   });
 
   it('does not leak the frame after withScope returns', () => {
-    withScope({ binding: { transaction: activeTransactionOf(client('tx')) } }, () => {
+    withScope({ binding: { transaction: activeTransactionOf(client('tx')), checkpoint: undefined } }, () => {
       expect(currentScope()?.binding?.transaction?.client).toBeDefined();
     });
 
@@ -42,20 +42,20 @@ describe('runtime scope', () => {
 
   describe('operationBinding', () => {
     it('returns the binding the scope holds, and undefined without one', () => {
-      const binding = { transaction: activeTransactionOf(client('tx')) };
+      const binding = { transaction: activeTransactionOf(client('tx')), checkpoint: undefined };
 
       withScope({ binding }, () => {
         expect(operationBinding()).toBe(binding);
       });
       const issuer = client('issuer');
-      withScope({ binding: { transaction: undefined, client: issuer } }, () => {
+      withScope({ binding: { transaction: undefined, client: issuer, checkpoint: undefined } }, () => {
         expect(operationBinding()).toEqual({ transaction: undefined, client: issuer });
       });
       expect(operationBinding()).toBeUndefined();
     });
 
     it('drops the binding of the enclosing scope when a patch sets none', () => {
-      withScope({ binding: { transaction: activeTransactionOf(client('outer')) } }, () => {
+      withScope({ binding: { transaction: activeTransactionOf(client('outer')), checkpoint: undefined } }, () => {
         withScope({ binding: undefined }, () => {
           expect(operationBinding()).toBeUndefined();
         });
@@ -67,7 +67,7 @@ describe('runtime scope', () => {
     it('merges the patch over the current frame', () => {
       const txClient = client('tx');
 
-      withScope({ binding: { transaction: activeTransactionOf(txClient) } }, () => {
+      withScope({ binding: { transaction: activeTransactionOf(txClient), checkpoint: undefined } }, () => {
         withScope({ withinAudit: true }, () => {
           const scope = currentScope();
           expect(scope?.binding?.transaction?.client).toBe(txClient);
@@ -80,8 +80,8 @@ describe('runtime scope', () => {
       const outerClient = client('outer');
       const innerClient = client('inner');
 
-      withScope({ binding: { transaction: activeTransactionOf(outerClient) } }, () => {
-        withScope({ binding: { transaction: activeTransactionOf(innerClient) } }, () => {
+      withScope({ binding: { transaction: activeTransactionOf(outerClient), checkpoint: undefined } }, () => {
+        withScope({ binding: { transaction: activeTransactionOf(innerClient), checkpoint: undefined } }, () => {
           expect(currentScope()?.binding?.transaction?.client).toBe(innerClient);
         });
       });
@@ -92,7 +92,7 @@ describe('runtime scope', () => {
     it('restores the outer frame after a nested withScope returns', () => {
       const outerClient = client('outer');
 
-      withScope({ binding: { transaction: activeTransactionOf(outerClient) } }, () => {
+      withScope({ binding: { transaction: activeTransactionOf(outerClient), checkpoint: undefined } }, () => {
         withScope({ withinAudit: true }, () => {
           expect(currentScope()?.withinAudit).toBe(true);
         });
@@ -109,14 +109,20 @@ describe('runtime scope', () => {
       const gateA = gate();
       const gateB = gate();
 
-      const flowA = withScope({ binding: { transaction: activeTransactionOf(clientA) } }, async () => {
-        await gateA.opened;
-        return currentScope()?.binding?.transaction?.client;
-      });
-      const flowB = withScope({ binding: { transaction: activeTransactionOf(clientB) } }, async () => {
-        await gateB.opened;
-        return currentScope()?.binding?.transaction?.client;
-      });
+      const flowA = withScope(
+        { binding: { transaction: activeTransactionOf(clientA), checkpoint: undefined } },
+        async () => {
+          await gateA.opened;
+          return currentScope()?.binding?.transaction?.client;
+        },
+      );
+      const flowB = withScope(
+        { binding: { transaction: activeTransactionOf(clientB), checkpoint: undefined } },
+        async () => {
+          await gateB.opened;
+          return currentScope()?.binding?.transaction?.client;
+        },
+      );
       gateB.open();
       const b = await flowB;
       gateA.open();
@@ -156,7 +162,7 @@ describe('runtime scope', () => {
       const txClient = client('tx');
 
       provider.run(context, () => {
-        withScope({ binding: { transaction: activeTransactionOf(txClient) } }, () => {
+        withScope({ binding: { transaction: activeTransactionOf(txClient), checkpoint: undefined } }, () => {
           provider.withActor(otherActor, () => {
             expect(provider.getContext()?.actor).toEqual(otherActor);
             expect(currentScope()?.binding?.transaction?.client).toBe(txClient);
@@ -170,13 +176,16 @@ describe('runtime scope', () => {
       const txClient = client('tx');
 
       await provider.runAsync(context, async () => {
-        await withScope({ binding: { transaction: activeTransactionOf(txClient) } }, async () => {
-          await provider.runAsync({ actor: otherActor }, async () => {
-            expect(provider.getContext()?.actor).toEqual(otherActor);
-            expect(provider.getContext()?.request).toBeUndefined();
-            expect(currentScope()?.binding?.transaction?.client).toBe(txClient);
-          });
-        });
+        await withScope(
+          { binding: { transaction: activeTransactionOf(txClient), checkpoint: undefined } },
+          async () => {
+            await provider.runAsync({ actor: otherActor }, async () => {
+              expect(provider.getContext()?.actor).toEqual(otherActor);
+              expect(provider.getContext()?.request).toBeUndefined();
+              expect(currentScope()?.binding?.transaction?.client).toBe(txClient);
+            });
+          },
+        );
       });
     });
   });

@@ -50,7 +50,8 @@ export {
 // ============================================================================
 export type { PrismaClientWithAudit } from './client-factory.js';
 export { createAuditClient, defineConfig } from './client-factory.js';
-export { AuditParentWriteError, AuditUnboundWriteError } from './errors.js';
+export type { AuditContinuationViolation } from './errors.js';
+export { AuditExtensionContinuationError, AuditParentWriteError, AuditUnboundWriteError } from './errors.js';
 export type { PrismaModelType } from './prisma-types.js';
 export { flushAllPendingWrites, getPendingWriteCount } from './runtime/pending-writes.js';
 export type { AuditSchema } from './schema/audit-schema.js';

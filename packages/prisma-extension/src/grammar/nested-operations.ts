@@ -11,7 +11,7 @@
 
 import type { SchemaMetadata, UniqueConstraint } from '../schema/types.js';
 import { type EntityIdentityKey, UNRESOLVED_ENTITY_ID } from '../utils/identity-key.js';
-import { isRecord } from '../utils/is-record.js';
+import { isPlainObject, isRecord } from '../utils/is-record.js';
 import type { NestedPreFetchResult } from './nested-state.js';
 
 export const NESTED_OPERATION_KEYWORDS = [
@@ -49,9 +49,7 @@ export const linksNamedRows = (keyword: NestedOperationKeyword): boolean => keyw
  * so neither is a write.
  */
 const isNestedWriteValue = (value: unknown): boolean =>
-  typeof value === 'boolean' ||
-  Array.isArray(value) ||
-  (isRecord(value) && [Object.prototype, null].includes(Object.getPrototypeOf(value)));
+  typeof value === 'boolean' || Array.isArray(value) || isPlainObject(value);
 
 /**
  * Whether the value a nested keyword holds writes any row. `false` (`delete: false`,
@@ -122,6 +120,8 @@ export interface NestedOperationParent {
   readonly operation: NestedOperationInfo;
   /** Index of the element in the operation's data; 0 when the data is not a list */
   readonly element: number;
+  /** The branch of the element the operation was found in, when the parent is an upsert */
+  readonly branch?: UpsertBranch;
 }
 
 /** What the pre-fetch learned of the rows at one nested path */
@@ -185,9 +185,11 @@ type RelationField = { name: string; relatedModel: string; isList: boolean };
 interface ScannedElement {
   readonly element: number;
   readonly data: Record<string, unknown>;
+  /** The branch `data` is, for an element of an upsert */
+  readonly branch?: UpsertBranch;
 }
 
-const elementsOf = (data: unknown): unknown[] => (Array.isArray(data) ? data : [data]);
+export const elementsOf = (data: unknown): unknown[] => (Array.isArray(data) ? data : [data]);
 
 const elementBranches = (
   pass: NestedDetectionPass,
@@ -209,10 +211,10 @@ const elementBranches = (
 const upsertBranchData = (pass: NestedDetectionPass, operation: NestedOperationInfo): ScannedElement[] =>
   elementsOf(operation.data).flatMap((element, index) =>
     isRecord(element)
-      ? elementBranches(pass, operation, element)
-          .map((branch) => element[branch])
-          .filter(isRecord)
-          .map((data) => ({ element: index, data }))
+      ? elementBranches(pass, operation, element).flatMap((branch) => {
+          const data = element[branch];
+          return isRecord(data) ? [{ element: index, data, branch }] : [];
+        })
       : [],
   );
 
@@ -288,8 +290,8 @@ const detectOperationAndNested = (
     precedingWrites: precedingWritesOf(fieldValue, keyword),
   };
 
-  const nested = scannedElementsOf(operation, pass).flatMap(({ element, data }) =>
-    detectOperationsIn(schemaMetadata, relationField.relatedModel, data, { operation, element }, pass),
+  const nested = scannedElementsOf(operation, pass).flatMap(({ element, data, branch }) =>
+    detectOperationsIn(schemaMetadata, relationField.relatedModel, data, { operation, element, branch }, pass),
   );
   return [operation, ...nested];
 };

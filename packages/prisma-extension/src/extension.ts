@@ -16,9 +16,11 @@
  * (`AuditReentrantWriteError`) and one the client rejects below the audit before it reaches the
  * hook (`AuditParentWriteError`). The outcome's `isolation` is that of the transaction its
  * binding names: the level its outermost transaction was declared with, if any. The hook
- * continues the caller's operation through `query` unless it rejects it; the client proxy binds
- * the operation, and for an atomic write opens the interactive transaction, before the operation
- * enters the extension chain.
+ * continues the caller's operation through `query` unless it rejects it, a model write with its
+ * arguments read as Prisma sends them and, on a client a query extension was applied to after the
+ * audit, checked by the checkpoints of that client; the client proxy binds the operation, and for
+ * an atomic write opens the interactive transaction, before the operation enters the extension
+ * chain.
  *
  * @module extension
  * @see {@link createAuditLogExtension}
@@ -46,10 +48,12 @@ import type { OperationTransaction } from './pipeline/execution-scope.js';
 import { createRecordProducer } from './pipeline/produce-records.js';
 import { type AuditPipelineDependencies, runAuditedOperation } from './pipeline/run-audited-operation.js';
 import { createSingleExecutor } from './pipeline/single-executor.js';
+import { createExtensionCheckpoints } from './runtime/extension-checkpoint.js';
 import type { RecipeConfig } from './runtime/operation-recipe.js';
 import { type ActiveTransaction, operationBinding, withinAudit, withScope } from './runtime/scope.js';
 import { createTransactionProxy } from './runtime/transaction-proxy.js';
 import type { PrismaAuditExtensionOptions } from './types.js';
+import { argumentsAsSent } from './utils/arguments-as-sent.js';
 import { type ClientShape, injectAuditedSelection, projectToRequestedShape } from './utils/audited-selection.js';
 import { isAuditableAction } from './utils/extension-utils.js';
 import { getModelAccessor } from './utils/model-accessor.js';
@@ -150,6 +154,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
   const deps = createPipelineDependencies(audit);
   const shape: ClientShape = { schemaMetadata: audit.schemaMetadata, queryOmitSupported: audit.queryOmitSupported };
   const outcomeConfig = guardedOutcomeConfig(audit.outcomeConfig);
+  const checkpoints = createExtensionCheckpoints(audit.schemaMetadata);
 
   /** `transaction` keeps the audit of the level the operation started on; the binding's follows the innermost level */
   const runAudited = async (
@@ -250,6 +255,19 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     }
   };
 
+  /** A model write with its arguments as Prisma sends them and a `query` checked by the checkpoints of the client it was issued on */
+  const asContinued = (params: ExtensionParams): ExtensionParams => {
+    const { model, operation, query } = params;
+    if (!model || !isAuditableAction(operation)) {
+      return params;
+    }
+    return {
+      ...params,
+      args: argumentsAsSent(params.args),
+      query: checkpoints.checkedQuery({ model, operation, query }, operationBinding()?.checkpoint),
+    };
+  };
+
   /**
    * Every operation that reaches the extension, audited or not, the audit's own queries included.
    * The failure of one bound to a transaction is recorded on the transaction: the database may
@@ -258,7 +276,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
   const interceptOperation = async (params: ExtensionParams) => {
     const transaction = operationBinding()?.transaction;
     try {
-      return await auditOperation(params);
+      return await auditOperation(asContinued(params));
     } catch (error) {
       transaction?.noteStatementFailed();
       throw error;
@@ -276,6 +294,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     const auditedClient: PrismaHandle = createTransactionProxy(extendedClient, {
       provider: audit.provider,
       recipeConfig,
+      checkpoints,
     });
     return auditedClient;
   };

@@ -9,7 +9,12 @@ import { describe, expect, it, vi } from 'vitest';
 import { AuditParentWriteError } from '../../src/errors.js';
 import type { PrismaHandle } from '../../src/internal-types.js';
 import type { OpenTransaction } from '../../src/runtime/interactive-transaction.js';
-import { createRecipeClient, type RecipeConfig, takeBatchRecipes } from '../../src/runtime/operation-recipe.js';
+import {
+  type ClientLevels,
+  createRecipeClient,
+  type RecipeConfig,
+  takeBatchRecipes,
+} from '../../src/runtime/operation-recipe.js';
 import { currentScope, withScope } from '../../src/runtime/scope.js';
 import { activeTransactionOf } from '../support/active-transaction.js';
 import { lazyOperation } from '../support/lazy-operation.js';
@@ -19,6 +24,7 @@ interface Ran {
   /** Whether the client the call was made on bound the operation when it started */
   readonly bound: boolean;
   readonly transactionClient: unknown;
+  readonly checkpoint?: unknown;
 }
 
 /**
@@ -37,6 +43,7 @@ const createClients = () => {
             client: name,
             bound: binding !== undefined,
             transactionClient: binding?.transaction?.client,
+            checkpoint: binding?.checkpoint,
           });
           return { created: args };
         }),
@@ -67,6 +74,14 @@ const everyAudited = (): boolean => true;
 
 const noneAudited = (): boolean => false;
 
+const levelsOf = (levels: Partial<ClientLevels> = {}): ClientLevels => ({
+  wrapperOf: unwrapped,
+  carriesAudit: everyAudited,
+  checkpointOf: () => undefined,
+  isUncheckedLevel: () => false,
+  ...levels,
+});
+
 /** Leaves the `$transaction` of a client as it is: these tests never call it */
 const ownTransaction = (_issuer: unknown, original: (...args: unknown[]) => unknown) => original;
 
@@ -77,15 +92,13 @@ const createUserOn = (
   config: RecipeConfig,
   clients: ReturnType<typeof createClients>,
   args: unknown,
-  carriesAudit: (client: object) => boolean = everyAudited,
+  levels: ClientLevels = levelsOf(),
 ) => {
-  const delegate = createRecipeClient(
-    config,
-    clients.openTransaction,
-    unwrapped,
-    carriesAudit,
-    ownTransaction,
-  ).propertyOf(clients.receiver, clients.target, 'user')?.value as UserDelegate;
+  const delegate = createRecipeClient(config, clients.openTransaction, levels, ownTransaction).propertyOf(
+    clients.receiver,
+    clients.target,
+    'user',
+  )?.value as UserDelegate;
   return delegate.create(args);
 };
 
@@ -94,7 +107,7 @@ describe('operation recipes', () => {
     const clients = createClients();
     const callerTransaction = activeTransactionOf({ _caller: true });
 
-    await withScope({ binding: { transaction: callerTransaction } }, async () => {
+    await withScope({ binding: { transaction: callerTransaction, checkpoint: undefined } }, async () => {
       await createUserOn(configAtomic(true), clients, { email: 'a' });
     });
 
@@ -107,12 +120,28 @@ describe('operation recipes', () => {
     const clients = createClients();
     const callerTransaction = activeTransactionOf({ _caller: true });
 
-    await withScope({ binding: { transaction: callerTransaction } }, async () => {
+    await withScope({ binding: { transaction: callerTransaction, checkpoint: undefined } }, async () => {
       await createUserOn(configAtomic(false), clients, { email: 'a' });
     });
 
     expect(clients.openTransaction).not.toHaveBeenCalled();
     expect(clients.ran).toEqual([{ client: 'client', bound: true, transactionClient: undefined }]);
+  });
+
+  it('binds an operation with the checkpoint innermost on the client it was issued on, outside any transaction and in the transaction of an atomic write', async () => {
+    const checkpoint = { extensionName: 'encoding', previous: undefined };
+    for (const atomic of [false, true]) {
+      const clients = createClients();
+
+      await createUserOn(
+        configAtomic(atomic),
+        clients,
+        { email: 'a' },
+        levelsOf({ checkpointOf: (client) => (client === clients.target ? checkpoint : undefined) }),
+      );
+
+      expect(clients.ran).toEqual([expect.objectContaining({ bound: true, checkpoint })]);
+    }
   });
 
   describe('the client bound to a transaction the client opens', () => {
@@ -121,13 +150,14 @@ describe('operation recipes', () => {
       config: RecipeConfig,
       body: (bound: Record<string, unknown>) => Promise<unknown>,
     ) =>
-      createRecipeClient(config, clients.openTransaction, unwrapped, everyAudited, ownTransaction).openTransactionOn(
+      createRecipeClient(config, clients.openTransaction, levelsOf(), ownTransaction).openTransactionOn(
         {
           receiver: clients.receiver,
           target: clients.target,
           transaction: undefined,
           outerClient: clients.target,
           belowAudit: false,
+          checkpoint: undefined,
         },
         [],
         (transaction) => body(transaction.boundClient),
@@ -194,8 +224,10 @@ describe('operation recipes', () => {
       const recipeClient = createRecipeClient(
         configAtomic(false),
         clients.openTransaction,
-        clientOf,
-        (client) => client === clients.target || (belowAudited && client === below),
+        levelsOf({
+          wrapperOf: clientOf,
+          carriesAudit: (client: object) => client === clients.target || (belowAudited && client === below),
+        }),
         ownTransaction,
       );
       const parentsOf = (client: object, delegate: unknown) => [
@@ -217,6 +249,7 @@ describe('operation recipes', () => {
             transaction: undefined,
             outerClient: clients.target,
             belowAudit: false,
+            checkpoint: undefined,
           },
           [],
           (transaction) => body(transaction.boundClient),
@@ -261,11 +294,90 @@ describe('operation recipes', () => {
     });
   });
 
+  describe('the $parent of a client a query extension applied after the audit derives', () => {
+    /** Prisma names the derived client (`unchecked`) as `$parent` of the extension's `target`, and the client it was applied to (`audited`) as the `$parent` of that one; likewise for transaction clients */
+    const checkedClients = () => {
+      const clients = createClients();
+      const audited = { audited: true };
+      const auditedTransaction = {
+        user: {
+          create: (args: unknown) =>
+            lazyOperation(() => {
+              clients.ran.push({
+                client: 'transaction of the audited client',
+                bound: currentScope()?.binding !== undefined,
+                transactionClient: currentScope()?.binding?.transaction?.client,
+              });
+              return { created: args };
+            }),
+        },
+      };
+      const unchecked = { $parent: audited };
+      const uncheckedTransaction = { $parent: auditedTransaction };
+      Reflect.set(clients.target, '$parent', unchecked);
+      Reflect.set(clients.target.user, '$parent', unchecked);
+      Reflect.set(clients.tx, '$parent', uncheckedTransaction);
+      Reflect.set(clients.tx.user, '$parent', uncheckedTransaction);
+      const wrappedAudited = { wrapped: true };
+      const wrapperOf = vi.fn((_client: object): object => wrappedAudited);
+      const recipeClient = createRecipeClient(
+        configAtomic(false),
+        clients.openTransaction,
+        levelsOf({
+          wrapperOf,
+          carriesAudit: (client) => client === clients.target || client === audited,
+          isUncheckedLevel: (client) => client === unchecked,
+        }),
+        ownTransaction,
+      );
+      return { clients, audited, wrappedAudited, wrapperOf, recipeClient };
+    };
+
+    it('is, outside any transaction, the one wrapper of the client the extension was applied to, read from the client or from one of its model delegates', () => {
+      const { clients, audited, wrappedAudited, wrapperOf, recipeClient } = checkedClients();
+
+      const user = recipeClient.propertyOf(clients.receiver, clients.target, 'user')?.value;
+
+      expect(recipeClient.propertyOf(clients.receiver, clients.target, '$parent')?.value).toBe(wrappedAudited);
+      expect(Reflect.get(user as object, '$parent')).toBe(wrappedAudited);
+      expect(wrapperOf.mock.calls).toEqual([[audited], [audited]]);
+    });
+
+    it('is, inside a transaction, the transaction client of the client the extension was applied to, bound to it, through which a write runs bound', async () => {
+      const { clients, recipeClient } = checkedClients();
+
+      await recipeClient.openTransactionOn(
+        {
+          receiver: clients.receiver,
+          target: clients.target,
+          transaction: undefined,
+          outerClient: clients.target,
+          belowAudit: false,
+          checkpoint: undefined,
+        },
+        [],
+        async (transaction) => {
+          const parent = Reflect.get(transaction.boundClient, '$parent') as { user: UserDelegate };
+          await parent.user.create({ email: 'a' });
+        },
+      );
+
+      expect(clients.ran).toEqual([
+        { client: 'transaction of the audited client', bound: true, transactionClient: clients.tx },
+      ]);
+    });
+  });
+
   describe('a call of a client below the audit', () => {
     it('rejects a model write with AuditParentWriteError before it runs, naming the model and action of the call, opening no transaction for it', async () => {
       const clients = createClients();
 
-      const created = createUserOn(configAtomic(true), clients, { email: 'a' }, noneAudited);
+      const created = createUserOn(
+        configAtomic(true),
+        clients,
+        { email: 'a' },
+        levelsOf({ carriesAudit: noneAudited }),
+      );
 
       await expect(created).rejects.toThrow(AuditParentWriteError);
       await expect(created).rejects.toBeInstanceOf(RejectedWriteError);
@@ -282,7 +394,12 @@ describe('operation recipes', () => {
       const clients = createClients();
 
       await withScope({ withinAudit: true }, async () => {
-        const created = createUserOn(configAtomic(false), clients, { email: 'a' }, noneAudited);
+        const created = createUserOn(
+          configAtomic(false),
+          clients,
+          { email: 'a' },
+          levelsOf({ carriesAudit: noneAudited }),
+        );
         await expect(created).rejects.toThrow(AuditParentWriteError);
       });
 
@@ -299,17 +416,19 @@ describe('operation recipes', () => {
       const recipeClient = createRecipeClient(
         configAtomic(false),
         vi.fn<OpenTransaction>(),
-        unwrapped,
-        noneAudited,
+        levelsOf({ wrapperOf: unwrapped, carriesAudit: noneAudited }),
         ownTransaction,
       );
       const user = recipeClient.propertyOf({}, target, 'user')?.value as { findMany: () => PromiseLike<unknown> };
       const queryRaw = recipeClient.propertyOf({}, target, '$queryRaw')?.value as () => PromiseLike<unknown>;
 
-      await withScope({ binding: { transaction: activeTransactionOf({ _caller: true }) } }, async () => {
-        await user.findMany();
-        await queryRaw();
-      });
+      await withScope(
+        { binding: { transaction: activeTransactionOf({ _caller: true }), checkpoint: undefined } },
+        async () => {
+          await user.findMany();
+          await queryRaw();
+        },
+      );
 
       expect(seen).toEqual([
         { call: 'findMany', transaction: undefined },
@@ -373,13 +492,11 @@ describe('operation recipes', () => {
       relatedModel: (model, field) => (model === 'User' && field === 'posts' ? 'Post' : undefined),
     };
     const receiver = {};
-    const delegate = createRecipeClient(
-      config,
-      vi.fn<OpenTransaction>(),
-      unwrapped,
-      everyAudited,
-      ownTransaction,
-    ).propertyOf(receiver, target, 'user')?.value as {
+    const delegate = createRecipeClient(config, vi.fn<OpenTransaction>(), levelsOf(), ownTransaction).propertyOf(
+      receiver,
+      target,
+      'user',
+    )?.value as {
       update: (args: unknown) => { posts: (args: unknown) => PromiseLike<unknown> };
     };
 
@@ -449,7 +566,7 @@ describe('operation recipes', () => {
       };
     };
     const rawMethodOf = (clients: ReturnType<typeof rawClient>, name: string, config = configAtomic(true)) =>
-      createRecipeClient(config, clients.openTransaction, unwrapped, everyAudited, ownTransaction).propertyOf(
+      createRecipeClient(config, clients.openTransaction, levelsOf(), ownTransaction).propertyOf(
         clients.receiver,
         clients.target,
         name,
@@ -492,13 +609,7 @@ describe('operation recipes', () => {
 
     it('is not wrapped when the client behind it has no such method, nor are other client methods', () => {
       const clients = rawClient();
-      const recipeClient = createRecipeClient(
-        configAtomic(true),
-        clients.openTransaction,
-        unwrapped,
-        everyAudited,
-        ownTransaction,
-      );
+      const recipeClient = createRecipeClient(configAtomic(true), clients.openTransaction, levelsOf(), ownTransaction);
 
       expect(recipeClient.propertyOf(clients.receiver, clients.target, '$executeRaw')).toBeUndefined();
       expect(recipeClient.propertyOf(clients.receiver, clients.target, '$connect')).toBeUndefined();
@@ -550,8 +661,7 @@ describe('operation recipes', () => {
       const user = createRecipeClient(
         config,
         vi.fn<OpenTransaction>(),
-        unwrapped,
-        carriesAudit,
+        levelsOf({ wrapperOf: unwrapped, carriesAudit: carriesAudit }),
         ownTransaction,
       ).propertyOf(receiver, target, 'user')?.value as Record<string, () => PromiseLike<unknown>>;
       return actions.map((name) => user[name]?.() as PromiseLike<unknown>);
@@ -594,7 +704,7 @@ describe('operation recipes', () => {
       const seen: Seen[] = [];
 
       const operations = takeBatchRecipes(items, receiver).operationsOn(userClient(seen));
-      await withScope({ binding: { transaction: activeTransactionOf({ _caller: true }) } }, () =>
+      await withScope({ binding: { transaction: activeTransactionOf({ _caller: true }), checkpoint: undefined } }, () =>
         Promise.all(operations as PromiseLike<unknown>[]),
       );
 

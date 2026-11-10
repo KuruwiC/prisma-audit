@@ -5,15 +5,17 @@
  * the operation was issued on gives it, which names the interactive transaction of that client if
  * it is one, with the client of that transaction, the audit failures that must keep it from
  * committing and the outcomes of its operations, settled once it commits or rolls back; the audited
- * operations of a transaction the flow runs in; and the re-entrancy guard raised while the audit
- * processes an operation. The state lives on its own async-local store, apart from the app-owned
- * audit context, so re-attributing the actor mid-flow cannot drop it. This module is the only
- * reader and writer of that store.
+ * operations of a transaction the flow runs in; the re-entrancy guard raised while the audit
+ * processes an operation; and the model write the audit continues through the extensions applied
+ * after it, which their checkpoints track. The state lives on its own async-local store, apart
+ * from the app-owned audit context, so re-attributing the actor mid-flow cannot drop it. This
+ * module is the only reader and writer of that store.
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { getGlobalSingleton, type TransactionAudit } from '@kuruwic/db-audit-core';
 import type { PrismaHandle } from '../internal-types.js';
+import type { ExtensionCheckpoint, WriteContinuation } from './extension-checkpoint.js';
 
 export interface ActiveTransaction {
   /** The client of the interactive transaction the operation runs in */
@@ -54,11 +56,15 @@ export interface ActiveTransaction {
  * whose client the operation was issued on or runs in, else the audited client it was issued on
  * outside any transaction (the client `createAuditClient` returned or a client `$extends` derives
  * from it), on which the audit's own queries and the callbacks it runs then run, through the
- * extensions applied to it
+ * extensions applied to it; and, either way, the checkpoint innermost on that client
+ * (`extension-checkpoint.ts`), undefined when no query extension was applied to it after the audit
  */
-export type OperationBinding =
+export type OperationBinding = (
   | { readonly transaction: ActiveTransaction }
-  | { readonly transaction: undefined; readonly client: PrismaHandle };
+  | { readonly transaction: undefined; readonly client: PrismaHandle }
+) & {
+  readonly checkpoint: ExtensionCheckpoint | undefined;
+};
 
 export interface RuntimeScope {
   /**
@@ -83,6 +89,8 @@ export interface RuntimeScope {
    * inside them does not wait for them, since they wait for it
    */
   readonly operations?: readonly Promise<void>[];
+  /** Set around the audit's call to `query` for a model write issued on a client with a checkpoint; each checkpoint the write reaches checks it */
+  readonly continuation?: WriteContinuation;
 }
 
 /** Process-wide, so that every copy of this package loaded in the process shares one scope */

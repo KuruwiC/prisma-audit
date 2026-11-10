@@ -285,7 +285,7 @@ describe('runAuditedOperation', () => {
         const deps = createDeps();
         const surrounding = activeTransactionOf(transactionClientWith());
 
-        await withScope({ binding: { transaction: surrounding } }, () =>
+        await withScope({ binding: { transaction: surrounding, checkpoint: undefined } }, () =>
           runOperation(
             {
               operation: interceptedOf(),
@@ -313,7 +313,7 @@ describe('runAuditedOperation', () => {
       const named = activeTransactionOf(transactionClient);
       const surrounding = activeTransactionOf(transactionClientWith());
 
-      await withScope({ binding: { transaction: surrounding } }, () =>
+      await withScope({ binding: { transaction: surrounding, checkpoint: undefined } }, () =>
         runOperation(
           {
             operation: interceptedOf(),
@@ -617,7 +617,7 @@ describe('runAuditedOperation', () => {
           const surrounding = activeTransactionOf(transactionClientWith());
 
           await expect(
-            withScope({ binding: { transaction: surrounding } }, () =>
+            withScope({ binding: { transaction: surrounding, checkpoint: undefined } }, () =>
               runOperation(
                 {
                   operation: interceptedOf(),
@@ -680,7 +680,7 @@ describe('runAuditedOperation', () => {
         const surrounding = activeTransactionOf(transactionClientWith());
 
         await expect(
-          withScope({ binding: { transaction: surrounding } }, () =>
+          withScope({ binding: { transaction: surrounding, checkpoint: undefined } }, () =>
             runOperation(
               {
                 operation: interceptedOf(),
@@ -828,7 +828,7 @@ describe('runAuditedOperation', () => {
         const surrounding = activeTransactionOf(transactionClientWith());
 
         await expect(
-          withScope({ binding: { transaction: surrounding } }, () =>
+          withScope({ binding: { transaction: surrounding, checkpoint: undefined } }, () =>
             runOperation(
               {
                 operation: interceptedOf(
